@@ -1,6 +1,12 @@
 """Typer CLI entrypoint for Agentworks."""
 
+from __future__ import annotations
+
+from typing import Annotated
+
 import typer
+
+from agentworks.db import Database
 
 app = typer.Typer(
     name="agentworks",
@@ -31,19 +37,57 @@ workspace_app = typer.Typer(
 )
 app.add_typer(workspace_app)
 
-# -- Placeholder commands (replaced in later phases) -----------------------
+
+# -- Helpers ---------------------------------------------------------------
+
+
+def _get_db() -> Database:
+    return Database()
+
+
+# -- VM Host commands ------------------------------------------------------
+
+
+@vm_host_app.command("add")
+def vm_host_add(
+    name: Annotated[str, typer.Argument(help="Name for this VM host")],
+    ssh_host: Annotated[str, typer.Argument(help="SSH address (hostname or IP)")],
+) -> None:
+    """Register a new VM host."""
+    from agentworks.vm_hosts.manager import add_vm_host
+
+    add_vm_host(_get_db(), name, ssh_host)
 
 
 @vm_host_app.command("list")
 def vm_host_list() -> None:
     """List registered VM hosts."""
-    typer.echo("vm-host list: not yet implemented")
+    from agentworks.vm_hosts.manager import list_vm_hosts
+
+    list_vm_hosts(_get_db())
+
+
+@vm_host_app.command("remove")
+def vm_host_remove(
+    name: Annotated[str, typer.Argument(help="Name of the VM host to remove")],
+    force: Annotated[bool, typer.Option("--force", help="Remove even if VMs reference this host")] = False,
+) -> None:
+    """Remove a VM host."""
+    from agentworks.vm_hosts.manager import remove_vm_host
+
+    remove_vm_host(_get_db(), name, force=force)
+
+
+# -- VM commands (placeholders) --------------------------------------------
 
 
 @vm_app.command("list")
 def vm_list() -> None:
     """List VMs."""
     typer.echo("vm list: not yet implemented")
+
+
+# -- Workspace commands (placeholders) -------------------------------------
 
 
 @workspace_app.command("list")
