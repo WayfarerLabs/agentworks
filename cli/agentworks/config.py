@@ -67,7 +67,7 @@ class WorkspaceTemplate:
     name: str
     inherits: list[str] = field(default_factory=list)
     repo: str | None = None
-    tmuxinator: bool = True
+    tmuxinator: bool | None = None  # None = not explicitly set (inherit/default to True)
 
 
 @dataclass(frozen=True)
@@ -201,7 +201,7 @@ def _load_workspace_templates(data: dict[str, object]) -> dict[str, WorkspaceTem
             name=name,
             inherits=list(tdata.get("inherits", [])),
             repo=str(tdata["repo"]) if "repo" in tdata else None,
-            tmuxinator=bool(tdata.get("tmuxinator", True)),
+            tmuxinator=bool(tdata["tmuxinator"]) if "tmuxinator" in tdata else None,
         )
 
     # validate inherits references and cycles

@@ -145,10 +145,52 @@ def vm_delete(
     delete_vm(_get_db(), load_config(), name, force=force)
 
 
-# -- Workspace commands (placeholders) -------------------------------------
+# -- Workspace commands ----------------------------------------------------
+
+
+@workspace_app.command("create")
+def workspace_create(
+    name: Annotated[str | None, typer.Option("--name", help="Workspace name (auto-generated if omitted)")] = None,
+    vm: Annotated[str | None, typer.Option("--vm", help="Target VM")] = None,
+    template: Annotated[str | None, typer.Option("--template", help="Workspace template")] = None,
+    open_vscode: Annotated[bool, typer.Option("--open-vscode", help="Open in VS Code")] = False,
+) -> None:
+    """Create a workspace on a VM."""
+    from agentworks.config import load_config
+    from agentworks.workspaces.manager import create_workspace
+
+    create_workspace(_get_db(), load_config(), name=name, vm_name=vm, template_name=template, open_vscode=open_vscode)
+
+
+@workspace_app.command("shell")
+def workspace_shell(
+    name: Annotated[str, typer.Argument(help="Workspace name")],
+    no_tmuxinator: Annotated[bool, typer.Option("--no-tmuxinator", help="Skip tmuxinator")] = False,
+) -> None:
+    """Open a shell into a workspace."""
+    from agentworks.config import load_config
+    from agentworks.workspaces.manager import shell_workspace
+
+    shell_workspace(_get_db(), load_config(), name, no_tmuxinator=no_tmuxinator)
 
 
 @workspace_app.command("list")
-def workspace_list() -> None:
+def workspace_list(
+    vm: Annotated[str | None, typer.Option("--vm", help="Filter by VM")] = None,
+) -> None:
     """List workspaces."""
-    typer.echo("workspace list: not yet implemented")
+    from agentworks.workspaces.manager import list_workspaces
+
+    list_workspaces(_get_db(), vm_name=vm)
+
+
+@workspace_app.command("delete")
+def workspace_delete(
+    name: Annotated[str, typer.Argument(help="Workspace name")],
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip confirmation")] = False,
+) -> None:
+    """Delete a workspace."""
+    from agentworks.config import load_config
+    from agentworks.workspaces.manager import delete_workspace
+
+    delete_workspace(_get_db(), load_config(), name, yes=yes)

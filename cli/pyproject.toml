@@ -30,6 +30,9 @@ select = [
     "TCH", # flake8-type-checking
 ]
 
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["TCH"]
+
 [tool.mypy]
 python_version = "3.12"
 strict = true
