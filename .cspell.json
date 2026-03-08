@@ -1,0 +1,44 @@
+{
+  "version": "0.2",
+  "language": "en",
+  "words": [
+    "Agentworks",
+    "agentworks",
+    "AUTOINCREMENT",
+    "abstractmethod",
+    "adrs",
+    "agentic",
+    "chsh",
+    "compinit",
+    "cpus",
+    "dataclass",
+    "deallocates",
+    "dedup",
+    "distros",
+    "eastus",
+    "fpath",
+    "Gruntweave",
+    "gruntweave",
+    "keypair",
+    "limactl",
+    "mypy",
+    "NOPASSWD",
+    "pushd",
+    "pyproject",
+    "rootfs",
+    "stdlib",
+    "tailnet",
+    "tmuxinator",
+    "Typer",
+    "usermod",
+    "userspace",
+    "virtiofs",
+    "zfunc"
+  ],
+  "ignoreRegExpList": [
+    "`[^`\\r\\n]+`"
+  ],
+  "ignorePaths": [
+    "node_modules"
+  ]
+}
