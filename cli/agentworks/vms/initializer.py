@@ -122,7 +122,9 @@ def initialize_vm(
     typer.echo("  Installing Tailscale...")
     exec_target.run_as_root("bash -c 'curl -fsSL https://tailscale.com/install.sh | sh'")
 
-    ts_auth_key = typer.prompt("Enter Tailscale auth key")
+    import os
+
+    ts_auth_key = os.environ.get("TAILSCALE_AUTH_KEY") or typer.prompt("Enter Tailscale auth key")
     ts_cmd = f"tailscale up --auth-key {ts_auth_key}"
     if is_wsl2:
         ts_cmd += " --userspace-networking"
