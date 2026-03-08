@@ -135,6 +135,17 @@ class AzureProvisioner(VMProvisioner):
             )
         typer.echo(f"Azure VM '{vm.name}' deleted")
 
+    def exec_target(self, vm: VMRow) -> ExecTarget:
+        assert vm.azure_resource_id is not None
+        rg, name = _parse_resource_id(vm.azure_resource_id)
+        output = _az([
+            "vm", "show", "--resource-group", rg, "--name", name,
+            "--show-details", "--output", "json",
+        ])
+        info = json.loads(output)
+        public_ip = info.get("publicIps", "")
+        return ExecTarget(ssh=SSHTarget(host=public_ip, user=vm.vm_user))
+
     def status(self, vm: VMRow) -> VMStatus:
         if vm.azure_resource_id is None:
             return VMStatus.UNKNOWN

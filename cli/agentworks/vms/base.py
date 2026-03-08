@@ -43,3 +43,7 @@ class VMProvisioner(ABC):
     @abstractmethod
     def status(self, vm: VMRow) -> VMStatus:
         """Query the live runtime status of a VM."""
+
+    @abstractmethod
+    def exec_target(self, vm: VMRow) -> ExecTarget:
+        """Return an ExecTarget for a running VM (provisioning transport)."""

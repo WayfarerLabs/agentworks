@@ -74,6 +74,46 @@ def verify_git_host_auth(providers: dict[str, GitHostProvider]) -> None:
         typer.echo(f"Git host auth verified: {', '.join(providers.keys())}")
 
 
+def rejoin_tailscale(
+    db: Database,
+    vm_name: str,
+    exec_target: ExecTarget,
+    *,
+    is_wsl2: bool = False,
+) -> str:
+    """Re-join Tailscale on a VM that lost its node (e.g. ephemeral key).
+
+    Installs Tailscale if needed, prompts for an auth key, joins the tailnet,
+    and updates the DB with the new Tailscale IP.
+
+    Returns the new Tailscale IP.
+    """
+    import os
+
+    typer.echo("Tailscale node not reachable. Re-joining tailnet...")
+
+    # Ensure Tailscale is installed (idempotent)
+    exec_target.run_as_root(
+        "bash -c 'command -v tailscale >/dev/null || curl -fsSL https://tailscale.com/install.sh | sh'",
+        check=False,
+    )
+
+    ts_auth_key = os.environ.get("TAILSCALE_AUTH_KEY")
+    if not ts_auth_key:
+        typer.echo("  Generate a key at https://login.tailscale.com/admin/settings/keys")
+        ts_auth_key = str(typer.prompt("  Tailscale auth key"))
+    ts_cmd = f"tailscale up --auth-key {ts_auth_key}"
+    if is_wsl2:
+        ts_cmd += " --userspace-networking"
+    exec_target.run_as_root(ts_cmd)
+
+    result = exec_target.run_as_root("tailscale ip -4")
+    tailscale_ip = result.stdout.strip()
+    typer.echo(f"  Tailscale IP: {tailscale_ip}")
+    db.update_vm_tailscale(vm_name, tailscale_ip)
+    return tailscale_ip
+
+
 def initialize_vm(
     db: Database,
     config: Config,

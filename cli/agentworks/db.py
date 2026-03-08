@@ -274,6 +274,10 @@ class Database:
         self._conn.execute("UPDATE vms SET tailscale_host = ? WHERE name = ?", (tailscale_host, name))
         self._conn.commit()
 
+    def clear_vm_tailscale(self, name: str) -> None:
+        self._conn.execute("UPDATE vms SET tailscale_host = NULL WHERE name = ?", (name,))
+        self._conn.commit()
+
     def update_vm_ssh_public_key(self, name: str, ssh_public_key: str) -> None:
         self._conn.execute("UPDATE vms SET ssh_public_key = ? WHERE name = ?", (ssh_public_key, name))
         self._conn.commit()

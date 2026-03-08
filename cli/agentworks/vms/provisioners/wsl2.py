@@ -103,6 +103,9 @@ class WSL2Provisioner(VMProvisioner):
         _powershell(f"Remove-Item -Recurse -Force -Path '{install_path}' -ErrorAction SilentlyContinue", check=False)
         typer.echo(f"WSL2 distro '{vm.name}' deleted")
 
+    def exec_target(self, vm: VMRow) -> ExecTarget:
+        return ExecTarget(wsl2=WSL2Target(distro_name=vm.name, user=vm.vm_user))
+
     def status(self, vm: VMRow) -> VMStatus:
         try:
             output = _wsl(["--list", "--verbose"], check=False)

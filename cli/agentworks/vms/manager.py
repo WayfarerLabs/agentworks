@@ -10,6 +10,7 @@ from agentworks.config import NAME_RE, VALID_PLATFORMS
 from agentworks.db import InitStatus
 from agentworks.vms.initializer import (
     initialize_vm,
+    rejoin_tailscale,
     resolve_git_host_providers,
     verify_git_host_auth,
     verify_tailscale_available,
@@ -223,8 +224,10 @@ def start_vm(db: Database, config: Config, name: str) -> None:
     status = provisioner.status(vm)
     if status.value == "running":
         typer.echo(f"VM '{name}' is already running")
-        return
-    provisioner.start(vm)
+    else:
+        provisioner.start(vm)
+
+    _ensure_tailscale(db, config, vm, provisioner)
 
 
 def stop_vm(db: Database, config: Config, name: str) -> None:
@@ -236,6 +239,11 @@ def stop_vm(db: Database, config: Config, name: str) -> None:
         typer.echo(f"VM '{name}' is already stopped")
         return
     provisioner.stop(vm)
+
+    # Check if the Tailscale node survived the stop (ephemeral nodes disappear)
+    if vm.tailscale_host and not _is_tailscale_reachable(vm.tailscale_host):
+        typer.echo(f"Tailscale node for VM '{name}' is no longer reachable (ephemeral key?)")
+        db.clear_vm_tailscale(name)
 
 
 def delete_vm(db: Database, config: Config, name: str, *, force: bool = False) -> None:
@@ -317,3 +325,44 @@ def _get_provisioner_for_vm(db: Database, vm: VMRow) -> VMProvisioner:
         if host:
             vm_host_ssh = host.ssh_host
     return get_provisioner(vm.platform, vm_host_ssh)
+
+
+def _is_tailscale_reachable(tailscale_host: str) -> bool:
+    """Quick check whether a Tailscale IP is still reachable."""
+    import subprocess
+
+    try:
+        result = subprocess.run(
+            ["tailscale", "ping", "--timeout=5s", "-c=1", tailscale_host],
+            capture_output=True, text=True, timeout=10,
+        )
+        return result.returncode == 0
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return False
+
+
+def _ensure_tailscale(
+    db: Database,
+    config: Config,
+    vm: VMRow,
+    provisioner: VMProvisioner,
+) -> None:
+    """After starting a VM, verify Tailscale connectivity and rejoin if needed."""
+    # Refresh VM row in case tailscale_host was cleared on stop
+    vm = _require_vm(db, vm.name)
+
+    if vm.tailscale_host and _is_tailscale_reachable(vm.tailscale_host):
+        typer.echo(f"Tailscale node reachable at {vm.tailscale_host}")
+        return
+
+    if vm.tailscale_host:
+        typer.echo(f"Tailscale node {vm.tailscale_host} is not reachable")
+        db.clear_vm_tailscale(vm.name)
+
+    # Re-join via the provisioning transport
+    verify_tailscale_available()
+    exec_target = provisioner.exec_target(vm)
+    rejoin_tailscale(
+        db, vm.name, exec_target,
+        is_wsl2=(vm.platform == "wsl2"),
+    )

@@ -134,6 +134,11 @@ class LimaProvisioner(VMProvisioner):
         self._run_lima(f"limactl delete --force {vm.name}", check=False)
         typer.echo(f"Lima VM '{vm.name}' deleted")
 
+    def exec_target(self, vm: VMRow) -> ExecTarget:
+        if self.is_remote:
+            return ExecTarget(ssh=self._get_ssh_target(vm.name))
+        return ExecTarget(lima=LimaTarget(vm_name=vm.name))
+
     def status(self, vm: VMRow) -> VMStatus:
         try:
             output = self._run_lima("limactl list --json", check=False)

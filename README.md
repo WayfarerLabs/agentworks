@@ -115,6 +115,40 @@ VM creation follows a two-phase initialization:
    commands, set shell, generate SSH keypair, register keys with git hosts, sync
    dotfiles
 
+## Tailscale
+
+VMs join a Tailscale tailnet during initialization. All subsequent SSH access
+(workspace shell, VM shell, Phase B setup) goes over Tailscale.
+
+### Auth keys
+
+During `vm create` (and `vm start` when re-joining), you will be prompted for a
+Tailscale auth key unless the `TAILSCALE_AUTH_KEY` environment variable is set.
+Generate keys at the
+[Tailscale admin console](https://login.tailscale.com/admin/settings/keys).
+
+### Ephemeral nodes
+
+If you use an ephemeral auth key (one with `?ephemeral=true` appended), the
+Tailscale node is automatically removed from the tailnet when the VM goes
+offline. Agentworks handles this gracefully:
+
+- **On stop**: checks whether the Tailscale node survived. If not, clears the
+  stored IP so the next start knows to re-join.
+- **On start**: verifies Tailscale connectivity. If the node is gone (ephemeral
+  or otherwise), re-joins the tailnet via the provisioning transport (Lima
+  shell, SSH, or WSL2 exec) and prompts for a new auth key (or uses
+  `TAILSCALE_AUTH_KEY`).
+
+This means ephemeral keys work fine for disposable VMs and are also resilient
+across stop/start cycles. Non-ephemeral keys work without any re-joining.
+
+### Cleanup on delete
+
+`vm delete` performs a best-effort Tailscale logout via SSH before destroying
+the VM. For ephemeral nodes this is a no-op since they auto-remove. For
+non-ephemeral nodes, this deregisters the node from the tailnet.
+
 ## Shell Completion
 
 ```bash
