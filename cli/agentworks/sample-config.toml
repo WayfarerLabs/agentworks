@@ -60,6 +60,10 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # --- Workspace templates ---
 # The "default" template is used when --template is not specified.
 # Templates support inheritance via the "inherits" key.
+#
+# Repo URLs: use SSH format (git@...) for private repos so the VM's
+# registered SSH key provides authentication. Public repos work with
+# either SSH or HTTPS URLs.
 
 # [workspace_templates.default]
 # repo = "git@github.com:org/repo.git"       # git repo to clone into workspace

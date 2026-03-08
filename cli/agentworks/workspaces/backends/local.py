@@ -40,10 +40,20 @@ def create_local_workspace(
     # Git clone or just create directory
     if template.repo:
         typer.echo(f"Cloning {template.repo}...")
-        subprocess.run(
+        result = subprocess.run(
             ["git", "clone", template.repo, workspace_path],
-            check=True,
+            capture_output=True, text=True,
         )
+        if result.returncode != 0:
+            typer.echo(f"Error: git clone failed: {result.stderr.strip()}", err=True)
+            if template.repo.startswith("https://"):
+                typer.echo(
+                    "Hint: HTTPS repo URLs require credentials. "
+                    "For private repos, use an SSH URL (git@...) so "
+                    "your SSH key provides authentication.",
+                    err=True,
+                )
+            raise typer.Exit(1)
     else:
         workspace_dir.mkdir(parents=True)
 

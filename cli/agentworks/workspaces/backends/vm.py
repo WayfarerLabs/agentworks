@@ -49,7 +49,17 @@ def create_vm_workspace(
     # Git clone if repo is set
     if template.repo:
         typer.echo(f"Cloning {template.repo}...")
-        ssh_run(target, f"git clone {template.repo} {workspace_path}")
+        try:
+            ssh_run(target, f"git clone {template.repo} {workspace_path}")
+        except Exception:
+            if template.repo.startswith("https://"):
+                typer.echo(
+                    "Hint: HTTPS repo URLs require credentials on the VM. "
+                    "For private repos, use an SSH URL (git@...) so the "
+                    "VM's registered SSH key provides authentication.",
+                    err=True,
+                )
+            raise
 
     # Tmuxinator config
     if template.tmuxinator:
