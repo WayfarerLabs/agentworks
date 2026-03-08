@@ -22,6 +22,10 @@ uv.lock
 *.swo
 *~
 
+# Rulesync
+rulesync.local.jsonc
+rulesync.lock
+
 # OS
 .DS_Store
 Thumbs.db

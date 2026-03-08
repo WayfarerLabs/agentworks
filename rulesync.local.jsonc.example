@@ -1,0 +1,6 @@
+{
+  // Personal rulesync target configuration (gitignored).
+  // Copy this to rulesync.local.jsonc and adjust targets to your AI tool(s).
+  // Full target list: npx rulesync generate --help
+  "targets": ["claudecode"]
+}
