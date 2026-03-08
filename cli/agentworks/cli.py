@@ -61,6 +61,21 @@ def _prompt_name(label: str, name: str | None) -> str:
 # -- Top-level commands ----------------------------------------------------
 
 
+@app.command("completion")
+def completion(
+    shell: Annotated[str, typer.Argument(help="Shell type: zsh")] = "zsh",
+) -> None:
+    """Output shell completion script."""
+    from importlib.resources import files
+
+    if shell != "zsh":
+        typer.echo(f"Error: unsupported shell '{shell}'. Supported: zsh", err=True)
+        raise typer.Exit(1)
+
+    script = files("agentworks").joinpath("completion.zsh").read_text()
+    typer.echo(script, nl=False)
+
+
 @app.command("init")
 def init_config() -> None:
     """Create a sample config file at ~/.config/agentworks/config.toml."""
