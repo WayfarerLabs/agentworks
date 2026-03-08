@@ -346,6 +346,88 @@ The nerfed commands layer adds to the existing topology:
 | Nerf config      | nerf  | nerf      | 0700 | Nerf-only (SUID binaries read)   |
 | Nerf credentials | nerf  | nerf      | 0700 | Nerf-only                        |
 
+## Rulesync Skills
+
+### Overview
+
+Nerfed tools ship with rulesync skills grouped by domain. A single skill covers
+a family of related tools (e.g. `nerf-git` covers `nerf-git-push-origin`,
+`nerf-git-push-non-origin`, etc.). This keeps the number of skills manageable
+and provides cohesive documentation for related operations.
+
+### Skill packaging
+
+Skills are distributed alongside the tool binaries, organized by domain group:
+
+```text
+/opt/agentworks/nerf/
+  skills/                             # 0755 nerf:nerf-exec
+    nerf-git/
+      SKILL.md                        # covers all nerf-git-* tools
+    nerf-az/
+      SKILL.md                        # covers all nerf-az-* tools
+    nerf-wcid/
+      SKILL.md                        # discovery tool
+    ...
+```
+
+Skills are readable by agent users (via the `nerf-exec` group) so that rulesync
+can read and copy them during generation.
+
+### Automatic workspace configuration
+
+When Agentworks provisions a workspace that uses rulesync, it configures the
+workspace's rulesync setup to import the relevant skill groups based on the
+agent's authorized nerfed tools. The flow:
+
+1. Operator grants RBAC access to nerfed tools for an agent
+2. Agentworks reads the agent's RBAC rules to determine authorized tools
+3. Agentworks maps authorized tools to their skill groups (e.g.
+   `nerf-git-push-origin` maps to the `nerf-git` skill group)
+4. Agentworks configures rulesync in the workspace to import the matching skill
+   groups from `/opt/agentworks/nerf/skills/`
+5. When rulesync generates output (e.g. `.claude/`, `.cursor/`), the skills are
+   included automatically
+6. The AI coding tool picks up the skills and knows how to use the tools
+
+When RBAC rules change (tools granted or revoked), Agentworks updates the
+rulesync configuration and regenerates. This keeps the agent's knowledge in sync
+with its actual permissions.
+
+### Tool-to-skill mapping
+
+The mapping from tool name to skill group uses the tool name prefix:
+
+| Tool name prefix | Skill group |
+| ---------------- | ----------- |
+| `nerf-git-*`     | `nerf-git`  |
+| `nerf-az-*`      | `nerf-az`   |
+| `nerf-gh-*`      | `nerf-gh`   |
+| `nerf-wcid`      | `nerf-wcid` |
+
+Standalone tools (like `nerf-wcid`) map to their own skill. Tools that share a
+domain prefix map to the same group skill. New tool families follow the same
+convention.
+
+### Skill content
+
+Each domain skill describes:
+
+- The family of tools it covers and what each one does
+- When to use each tool (the specific scenarios)
+- How to invoke each tool (command, arguments if any)
+- Expected output on success
+- How to handle denials (constructive -- ask the operator)
+- Relationship to other tools (e.g. "use `nerf-wcid` to check your permissions
+  first")
+
+### Non-rulesync workspaces
+
+For workspaces that do not use rulesync, the skills directory is still available
+on the filesystem. Operators can manually configure their AI tool of choice to
+read from `/opt/agentworks/nerf/skills/`, or agents can read the skill files
+directly.
+
 ## Emergency Shutdown (bigred)
 
 ### Mechanism: lockfile

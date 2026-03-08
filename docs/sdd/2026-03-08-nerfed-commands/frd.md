@@ -143,7 +143,28 @@ All nerfed tool executions are logged with: calling user, tool name, timestamp,
 and outcome (success/failure/denied). This leverages the per-agent Linux user
 model -- every execution is attributable to a specific agent.
 
-### R8: Emergency shutdown (bigred)
+### R8: Rulesync skills for AI agents
+
+Nerfed tools ship with rulesync skills that teach AI coding assistants how to
+use them. Skills are grouped by domain (e.g. a single `nerf-git` skill covers
+all nerfed git tools) rather than one skill per tool.
+
+When Agentworks provisions a workspace that uses both rulesync and nerfed tools,
+it automatically configures the workspace's rulesync setup to include the
+relevant skill groups based on the agent's authorized tools. This means an
+agent's AI coding tool automatically knows about the nerfed tools it can use,
+without manual configuration.
+
+This creates a complete chain:
+
+1. Operator grants RBAC access to nerfed tools
+2. Agentworks determines which skill groups are relevant and includes them in
+   the workspace's rulesync configuration
+3. The AI coding tool learns about the tools via rulesync-generated config
+4. The agent uses the tools with full context on behavior and error handling
+5. Future: auto-approval bridges the last gap (no human prompt needed)
+
+### R9: Emergency shutdown (bigred)
 
 A "big red button" that immediately disables all nerfed tool operations across
 one or more VMs. This is the operator's panic button for security incidents,
