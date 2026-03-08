@@ -191,6 +191,17 @@ def vm_delete(
     delete_vm(_get_db(), load_config(), name, force=force)
 
 
+@vm_app.command("shell")
+def vm_shell(
+    name: Annotated[str, typer.Argument(help="VM name")],
+) -> None:
+    """Open a shell on a VM (home directory)."""
+    from agentworks.config import load_config
+    from agentworks.vms.manager import shell_vm
+
+    shell_vm(_get_db(), load_config(), name)
+
+
 # -- Workspace commands ----------------------------------------------------
 
 

@@ -199,6 +199,23 @@ def list_vms(db: Database) -> None:
         )
 
 
+def shell_vm(db: Database, config: Config, name: str) -> None:
+    """Open a shell on a VM's home directory."""
+    import os
+
+    vm = _require_vm(db, name)
+    if vm.tailscale_host is None:
+        typer.echo(f"Error: VM '{name}' has no Tailscale IP (init may not be complete)", err=True)
+        raise typer.Exit(1)
+
+    ssh_cmd = ["ssh"]
+    if config.user.ssh_private_key:
+        ssh_cmd.extend(["-i", str(config.user.ssh_private_key)])
+    ssh_cmd.append(f"{vm.vm_user}@{vm.tailscale_host}")
+
+    os.execvp("ssh", ssh_cmd)
+
+
 def start_vm(db: Database, config: Config, name: str) -> None:
     """Start a stopped VM."""
     vm = _require_vm(db, name)
