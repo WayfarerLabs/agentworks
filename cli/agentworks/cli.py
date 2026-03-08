@@ -113,6 +113,12 @@ def vm_create(
         list[str] | None, typer.Option("--extra-packages", help="Additional apt packages")
     ] = None,
     git_hosts: Annotated[list[str] | None, typer.Option("--git-hosts", help="Git hosts to register")] = None,
+    cpus: Annotated[int | None, typer.Option("--cpus", help="Number of CPUs")] = None,
+    memory: Annotated[int | None, typer.Option("--memory", help="Memory in GiB")] = None,
+    disk: Annotated[int | None, typer.Option("--disk", help="Disk size in GiB")] = None,
+    azure_vm_size: Annotated[
+        str | None, typer.Option("--azure-vm-size", help="Azure VM size")
+    ] = None,
 ) -> None:
     """Create a new VM (provision + initialize)."""
     from agentworks.config import load_config
@@ -123,6 +129,8 @@ def vm_create(
         _get_db(), config,
         name=name, platform=platform, vm_host=vm_host,
         extra_packages=extra_packages, git_hosts=git_hosts,
+        cpus=cpus, memory=memory, disk=disk,
+        azure_vm_size=azure_vm_size,
     )
 
 

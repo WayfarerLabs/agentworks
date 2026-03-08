@@ -43,11 +43,18 @@ def _az(args: list[str], *, check: bool = True) -> str:
 class AzureProvisioner(VMProvisioner):
     """Provisions Azure VMs via az cli with cloud-init."""
 
-    def create(self, vm_name: str, config: Config, extra_packages: list[str] | None = None) -> ProvisionResult:
+    def create(
+        self,
+        vm_name: str,
+        config: Config,
+        extra_packages: list[str] | None = None,
+        *,
+        azure_vm_size: str = "Standard_D4s_v5",
+    ) -> ProvisionResult:
         assert config.azure is not None, "Azure config is required"
         az = config.azure
 
-        typer.echo(f"Creating Azure VM '{vm_name}' in {az.region}...")
+        typer.echo(f"Creating Azure VM '{vm_name}' in {az.region} (size: {azure_vm_size})...")
 
         # Read user's SSH public key
         ssh_pub_key = config.user.ssh_public_key.read_text().strip()
@@ -64,7 +71,7 @@ class AzureProvisioner(VMProvisioner):
                 "--resource-group", az.resource_group,
                 "--name", vm_name,
                 "--image", "Debian:debian-12:12-gen2:latest",
-                "--size", "Standard_D4s_v5",
+                "--size", azure_vm_size,
                 "--admin-username", "agentworks",
                 "--ssh-key-values", ssh_pub_key,
                 "--custom-data", cloud_init_path,

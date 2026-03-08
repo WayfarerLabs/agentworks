@@ -34,12 +34,18 @@ def test_roundtrip_vm(tmp_path: Path) -> None:
             platform="lima",
             vm_host_name="mac-studio",
             extra_packages=["nodejs", "python3"],
+            cpus=4,
+            memory_gib=8,
+            disk_gib=50,
         )
         vm = db.get_vm("dev-vm")
         assert vm is not None
         assert vm.platform == "lima"
         assert vm.extra_packages == ["nodejs", "python3"]
         assert vm.init_status == "pending"
+        assert vm.cpus == 4
+        assert vm.memory_gib == 8
+        assert vm.disk_gib == 50
 
         db.update_vm_init_status("dev-vm", InitStatus.COMPLETE)
         vm = db.get_vm("dev-vm")
@@ -50,6 +56,20 @@ def test_roundtrip_vm(tmp_path: Path) -> None:
         vm = db.get_vm("dev-vm")
         assert vm is not None
         assert vm.tailscale_host == "100.64.0.1"
+    finally:
+        db.close()
+
+
+def test_vm_resources_nullable(tmp_path: Path) -> None:
+    """Resource columns are nullable for VMs created before v2 migration."""
+    db = Database(tmp_path / "test.db")
+    try:
+        db.insert_vm("wsl-vm", platform="wsl2")
+        vm = db.get_vm("wsl-vm")
+        assert vm is not None
+        assert vm.cpus is None
+        assert vm.memory_gib is None
+        assert vm.disk_gib is None
     finally:
         db.close()
 

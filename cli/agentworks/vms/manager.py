@@ -54,6 +54,10 @@ def create_vm(
     vm_host: str | None = None,
     extra_packages: list[str] | None = None,
     git_hosts: list[str] | None = None,
+    cpus: int | None = None,
+    memory: int | None = None,
+    disk: int | None = None,
+    azure_vm_size: str | None = None,
 ) -> None:
     """Create a new VM: provision + initialize."""
     # Resolve defaults
@@ -88,23 +92,51 @@ def create_vm(
         typer.echo("Error: [azure] config section required for azure platform", err=True)
         raise typer.Exit(1)
 
+    # Resolve resource settings: CLI flag > config > built-in default
+    resolved_cpus = cpus or config.vm.cpus
+    resolved_memory = memory or config.vm.memory
+    resolved_disk = disk or config.vm.disk
+    resolved_azure_size = azure_vm_size or config.vm.azure_vm_size
+
     # Pre-flight checks
     verify_tailscale_available()
     providers = resolve_git_host_providers(config, git_hosts)
     verify_git_host_auth(providers)
 
-    # Create DB record
+    # Create DB record with as-provisioned resource values
     db.insert_vm(
         vm_name,
         platform=platform,
         vm_host_name=vm_host_name,
         extra_packages=extra_packages,
+        cpus=resolved_cpus,
+        memory_gib=resolved_memory,
+        disk_gib=resolved_disk,
     )
 
     try:
-        # Platform provisioning
-        provisioner = get_provisioner(platform, vm_host_ssh)
-        result = provisioner.create(vm_name, config, extra_packages)
+        # Platform provisioning (use concrete types for resource kwargs)
+        if platform == "lima":
+            from agentworks.vms.provisioners.lima import LimaProvisioner
+
+            lima = LimaProvisioner(vm_host_ssh=vm_host_ssh)
+            result = lima.create(
+                vm_name, config, extra_packages,
+                cpus=resolved_cpus,
+                memory=resolved_memory,
+                disk=resolved_disk,
+            )
+        elif platform == "azure":
+            from agentworks.vms.provisioners.azure import AzureProvisioner
+
+            azure = AzureProvisioner()
+            result = azure.create(
+                vm_name, config, extra_packages,
+                azure_vm_size=resolved_azure_size,
+            )
+        else:
+            provisioner = get_provisioner(platform, vm_host_ssh)
+            result = provisioner.create(vm_name, config, extra_packages)
 
         # Update DB with platform-specific metadata
         if result.azure_resource_id:
@@ -142,12 +174,20 @@ def list_vms(db: Database) -> None:
         typer.echo("No VMs registered.")
         return
 
-    typer.echo(f"{'NAME':<20} {'PLATFORM':<10} {'HOST':<15} {'INIT STATUS':<15} {'TAILSCALE':<20} {'CREATED'}")
-    typer.echo("-" * 100)
+    header = (
+        f"{'NAME':<20} {'PLATFORM':<10} {'HOST':<15} {'INIT STATUS':<15} "
+        f"{'RESOURCES':<15} {'TAILSCALE':<20} {'CREATED'}"
+    )
+    typer.echo(header)
+    typer.echo("-" * 115)
     for vm in vms:
+        resources = "-"
+        if vm.cpus is not None:
+            resources = f"{vm.cpus}c/{vm.memory_gib}G/{vm.disk_gib}G"
         typer.echo(
             f"{vm.name:<20} {vm.platform:<10} {vm.vm_host_name or '-':<15} "
-            f"{vm.init_status:<15} {vm.tailscale_host or '-':<20} {vm.created_at}"
+            f"{vm.init_status:<15} {resources:<15} "
+            f"{vm.tailscale_host or '-':<20} {vm.created_at}"
         )
 
 

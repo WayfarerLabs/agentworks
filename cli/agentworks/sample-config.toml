@@ -33,6 +33,10 @@ install_cmd = "./install.sh"                 # command to run after copying dotf
 # sudo, ca-certificates) regardless of this config.
 
 [vm.config]
+cpus = 4                                     # number of CPUs (Lima)
+memory = 8                                   # memory in GiB (Lima)
+disk = 50                                    # disk size in GiB (Lima)
+# azure_vm_size = "Standard_D4s_v5"         # Azure VM size
 apt = [
     "zsh",
     "tmux",

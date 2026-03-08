@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import VMRow
 
-# Lima template for Debian cloud VMs
+# Lima template for Debian cloud VMs (values substituted at create time)
 LIMA_TEMPLATE = """\
 # Agentworks Debian VM template for Lima
 arch: default
@@ -27,9 +27,9 @@ images:
     arch: x86_64
   - location: https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-arm64.qcow2
     arch: aarch64
-cpus: 4
-memory: 8GiB
-disk: 50GiB
+cpus: {cpus}
+memory: {memory}GiB
+disk: {disk}GiB
 ssh:
   localPort: 0
 mountType: virtiofs
@@ -71,15 +71,27 @@ class LimaProvisioner(VMProvisioner):
                 raise SSHError(f"limactl failed: {proc.stderr.strip()}")
             return proc.stdout
 
-    def create(self, vm_name: str, config: Config, extra_packages: list[str] | None = None) -> ProvisionResult:
+    def create(
+        self,
+        vm_name: str,
+        config: Config,
+        extra_packages: list[str] | None = None,
+        *,
+        cpus: int = 4,
+        memory: int = 8,
+        disk: int = 50,
+    ) -> ProvisionResult:
         typer.echo(f"Creating Lima VM '{vm_name}' ({'remote' if self.is_remote else 'local'})...")
+        typer.echo(f"  Resources: {cpus} CPUs, {memory} GiB memory, {disk} GiB disk")
+
+        rendered = LIMA_TEMPLATE.format(cpus=cpus, memory=memory, disk=disk)
 
         if self.is_remote:
             assert self._vm_host_ssh is not None
             target = SSHTarget(host=self._vm_host_ssh, user="")
             # Write template to a temp file and copy to VM Host
             with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
-                f.write(LIMA_TEMPLATE)
+                f.write(rendered)
                 local_template = f.name
             remote_template = f"/tmp/agentworks-{vm_name}.yaml"
             copy_to(target, local_template, remote_template)
@@ -90,7 +102,7 @@ class LimaProvisioner(VMProvisioner):
         else:
             # Write template locally
             with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
-                f.write(LIMA_TEMPLATE)
+                f.write(rendered)
                 template_path = f.name
 
             self._run_lima(f"limactl create --name {vm_name} --tty=false {template_path}")

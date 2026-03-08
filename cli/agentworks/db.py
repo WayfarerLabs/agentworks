@@ -60,6 +60,9 @@ class VMRow:
     tailscale_host: str | None
     azure_resource_id: str | None
     wsl_distro_name: str | None
+    cpus: int | None
+    memory_gib: int | None
+    disk_gib: int | None
     created_at: str
     last_seen_at: str | None
 
@@ -132,6 +135,11 @@ MIGRATIONS: dict[int, str] = {
             FOREIGN KEY (vm_name) REFERENCES vms(name),
             UNIQUE (vm_name, git_host_name)
         );
+    """,
+    2: """
+        ALTER TABLE vms ADD COLUMN cpus INTEGER;
+        ALTER TABLE vms ADD COLUMN memory_gib INTEGER;
+        ALTER TABLE vms ADD COLUMN disk_gib INTEGER;
     """,
 }
 
@@ -220,10 +228,15 @@ class Database:
         extra_packages: list[str] | None = None,
         azure_resource_id: str | None = None,
         wsl_distro_name: str | None = None,
+        cpus: int | None = None,
+        memory_gib: int | None = None,
+        disk_gib: int | None = None,
     ) -> VMRow:
         self._conn.execute(
-            "INSERT INTO vms (name, platform, vm_host_name, extra_packages, azure_resource_id, wsl_distro_name) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT INTO vms "
+            "(name, platform, vm_host_name, extra_packages, azure_resource_id, wsl_distro_name, "
+            "cpus, memory_gib, disk_gib) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 name,
                 platform,
@@ -231,6 +244,9 @@ class Database:
                 json.dumps(extra_packages) if extra_packages else None,
                 azure_resource_id,
                 wsl_distro_name,
+                cpus,
+                memory_gib,
+                disk_gib,
             ),
         )
         self._conn.commit()
@@ -378,6 +394,9 @@ def _to_vm(row: sqlite3.Row) -> VMRow:
         tailscale_host=row["tailscale_host"],
         azure_resource_id=row["azure_resource_id"],
         wsl_distro_name=row["wsl_distro_name"],
+        cpus=row["cpus"],
+        memory_gib=row["memory_gib"],
+        disk_gib=row["disk_gib"],
         created_at=row["created_at"],
         last_seen_at=row["last_seen_at"],
     )

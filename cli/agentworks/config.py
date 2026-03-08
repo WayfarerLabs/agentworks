@@ -60,6 +60,10 @@ class VMConfig:
     apt: list[str] = field(default_factory=list)
     snap: list[str] = field(default_factory=list)
     install_commands: list[str] = field(default_factory=list)
+    cpus: int = 4
+    memory: int = 8  # GiB
+    disk: int = 50  # GiB
+    azure_vm_size: str = "Standard_D4s_v5"
 
 
 @dataclass(frozen=True)
@@ -185,6 +189,10 @@ def _load_vm_config(data: dict[str, object]) -> VMConfig:
         apt=list(raw.get("apt", [])),
         snap=list(raw.get("snap", [])),
         install_commands=list(raw.get("install_commands", [])),
+        cpus=int(raw.get("cpus", 4)),
+        memory=int(raw.get("memory", 8)),
+        disk=int(raw.get("disk", 50)),
+        azure_vm_size=str(raw.get("azure_vm_size", "Standard_D4s_v5")),
     )
 
 
