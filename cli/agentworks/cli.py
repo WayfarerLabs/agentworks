@@ -209,17 +209,23 @@ def vm_shell(
 def workspace_create(
     name: Annotated[str | None, typer.Option("--name", help="Workspace name (prompted if omitted)")] = None,
     vm: Annotated[str | None, typer.Option("--vm", help="Target VM")] = None,
+    local: Annotated[bool, typer.Option("--local", help="Create a local workspace (no VM)")] = False,
     template: Annotated[str | None, typer.Option("--template", help="Workspace template")] = None,
     open_vscode: Annotated[bool, typer.Option("--open-vscode", help="Open in VS Code")] = False,
 ) -> None:
-    """Create a workspace on a VM."""
+    """Create a workspace on a VM or locally."""
     from agentworks.config import load_config
     from agentworks.workspaces.manager import create_workspace
+
+    if local and vm:
+        typer.echo("Error: --local and --vm are mutually exclusive", err=True)
+        raise typer.Exit(1)
 
     resolved_name = _prompt_name("Workspace", name)
     create_workspace(
         _get_db(), load_config(),
-        name=resolved_name, vm_name=vm, template_name=template, open_vscode=open_vscode,
+        name=resolved_name, vm_name=vm, local=local,
+        template_name=template, open_vscode=open_vscode,
     )
 
 

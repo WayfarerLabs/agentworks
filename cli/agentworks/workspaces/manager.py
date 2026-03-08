@@ -21,10 +21,11 @@ def create_workspace(
     *,
     name: str,
     vm_name: str | None = None,
+    local: bool = False,
     template_name: str | None = None,
     open_vscode: bool = False,
 ) -> None:
-    """Create a workspace on a VM."""
+    """Create a workspace on a VM or locally."""
     ws_name = name
     if not NAME_RE.match(ws_name):
         typer.echo(f"Error: invalid name '{ws_name}'. Must match [a-z0-9\\-_.]", err=True)
@@ -34,10 +35,61 @@ def create_workspace(
         typer.echo(f"Error: workspace '{ws_name}' already exists", err=True)
         raise typer.Exit(1)
 
-    # Resolve VM
+    # Resolve template
+    template = resolve_template(config, template_name)
+
+    if local:
+        _create_local(db, config, ws_name, template_name=template.name, template=template, open_vscode=open_vscode)
+    else:
+        _create_vm(
+            db, config, ws_name,
+            vm_name=vm_name, template_name=template.name,
+            template=template, open_vscode=open_vscode,
+        )
+
+
+def _create_local(
+    db: Database,
+    config: Config,
+    ws_name: str,
+    *,
+    template_name: str,
+    template: object,
+    open_vscode: bool,
+) -> None:
+    from agentworks.workspaces.backends.local import create_local_workspace
+    from agentworks.workspaces.templates import ResolvedTemplate
+
+    assert isinstance(template, ResolvedTemplate)
+
+    typer.echo(f"Creating local workspace '{ws_name}' (template: {template_name})...")
+    workspace_path = create_local_workspace(config, ws_name, template)
+
+    db.insert_workspace(ws_name, ws_type="local", workspace_path=workspace_path, template=template_name)
+
+    if open_vscode:
+        subprocess.run(["code", workspace_path], check=False)
+
+    typer.echo(f"Workspace '{ws_name}' created at {workspace_path}")
+
+
+def _create_vm(
+    db: Database,
+    config: Config,
+    ws_name: str,
+    *,
+    vm_name: str | None,
+    template_name: str,
+    template: object,
+    open_vscode: bool,
+) -> None:
+    from agentworks.workspaces.backends.vm import create_vm_workspace, generate_code_workspace
+    from agentworks.workspaces.templates import ResolvedTemplate
+
+    assert isinstance(template, ResolvedTemplate)
+
     vm = _resolve_vm(db, vm_name)
 
-    # Check VM is ready
     if vm.init_status != "complete":
         typer.echo(
             f"Error: VM '{vm.name}' initialization is not complete (status: {vm.init_status}). "
@@ -46,26 +98,19 @@ def create_workspace(
         )
         raise typer.Exit(1)
 
-    # Auto-start if needed
     _ensure_vm_running(db, config, vm)
 
-    # Resolve template
-    template = resolve_template(config, template_name)
-    typer.echo(f"Creating workspace '{ws_name}' on VM '{vm.name}' (template: {template.name})...")
-
-    # Create on VM
-    from agentworks.workspaces.backends.vm import create_vm_workspace, generate_code_workspace
-
+    typer.echo(f"Creating workspace '{ws_name}' on VM '{vm.name}' (template: {template_name})...")
     workspace_path = create_vm_workspace(vm, config, ws_name, template)
 
-    # Generate .code-workspace
     code_ws_path = generate_code_workspace(vm, config, ws_name, workspace_path)
     typer.echo(f"VS Code workspace: {code_ws_path}")
 
-    # Record in DB
-    db.insert_workspace(ws_name, ws_type="vm", workspace_path=workspace_path, vm_name=vm.name, template=template.name)
+    db.insert_workspace(
+        ws_name, ws_type="vm", workspace_path=workspace_path,
+        vm_name=vm.name, template=template_name,
+    )
 
-    # Open VS Code if requested
     if open_vscode:
         subprocess.run(["code", code_ws_path], check=False)
 
@@ -85,7 +130,19 @@ def shell_workspace(
         typer.echo(f"Error: workspace '{name}' not found", err=True)
         raise typer.Exit(1)
 
-    if ws.type == "vm":
+    template = resolve_template(config, ws.template)
+    use_tmux = template.tmuxinator and not no_tmuxinator
+
+    if ws.type == "local":
+        from agentworks.workspaces.backends.local import shell_local_workspace
+
+        db.update_workspace_last_seen(name)
+        shell_local_workspace(
+            name, ws.workspace_path,
+            use_tmuxinator=use_tmux,
+            tmuxinator_enabled=template.tmuxinator,
+        )
+    elif ws.type == "vm":
         vm = db.get_vm(ws.vm_name)  # type: ignore[arg-type]
         if vm is None:
             typer.echo(f"Error: VM '{ws.vm_name}' not found", err=True)
@@ -98,10 +155,6 @@ def shell_workspace(
         _ensure_vm_running(db, config, vm)
         db.update_workspace_last_seen(name)
 
-        # Check if template had tmuxinator enabled
-        template = resolve_template(config, ws.template)
-        use_tmux = template.tmuxinator and not no_tmuxinator
-
         from agentworks.workspaces.backends.vm import shell_vm_workspace
 
         shell_vm_workspace(
@@ -110,7 +163,7 @@ def shell_workspace(
             tmuxinator_enabled=template.tmuxinator,
         )
     else:
-        typer.echo("Error: local workspaces not yet implemented", err=True)
+        typer.echo(f"Error: unknown workspace type '{ws.type}'", err=True)
         raise typer.Exit(1)
 
 
@@ -151,7 +204,11 @@ def delete_workspace(
     if not yes:
         typer.confirm(f"Delete workspace '{name}'?", abort=True)
 
-    if ws.type == "vm" and ws.vm_name:
+    if ws.type == "local":
+        from agentworks.workspaces.backends.local import delete_local_workspace
+
+        delete_local_workspace(name, ws.workspace_path)
+    elif ws.type == "vm" and ws.vm_name:
         vm = db.get_vm(ws.vm_name)
         if vm is not None:
             from agentworks.workspaces.backends.vm import delete_vm_workspace
