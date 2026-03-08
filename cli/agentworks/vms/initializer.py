@@ -93,7 +93,7 @@ def initialize_vm(
     # Step 1: Ensure agentworks user exists
     typer.echo("  Ensuring agentworks user...")
     exec_target.run_as_root(
-        "id agentworks || useradd -m -s /bin/bash agentworks",
+        "bash -c 'id agentworks >/dev/null 2>&1 || useradd -m -s /bin/bash agentworks'",
         check=False,
     )
     exec_target.run_as_root(
