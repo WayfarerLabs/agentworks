@@ -265,6 +265,10 @@ def delete_vm(db: Database, config: Config, name: str, *, force: bool = False) -
                 except Exception as e:
                     typer.echo(f"Warning: failed to remove key from {key.git_host_name}: {e}", err=True)
 
+    # Tailscale logout (best-effort before destroying the VM)
+    if vm.tailscale_host:
+        _tailscale_logout(config, vm)
+
     # Platform-specific cleanup
     try:
         provisioner = _get_provisioner_for_vm(db, vm)
@@ -275,6 +279,27 @@ def delete_vm(db: Database, config: Config, name: str, *, force: bool = False) -
     # Remove from DB (cascades workspaces and keys)
     db.delete_vm(name)
     typer.echo(f"VM '{name}' deleted")
+
+
+def _tailscale_logout(config: Config, vm: VMRow) -> None:
+    """Best-effort: SSH to the VM and deregister from Tailscale before deletion."""
+    from agentworks.ssh import SSHTarget
+    from agentworks.ssh import run_as_root as ssh_run_as_root
+
+    assert vm.tailscale_host is not None
+    target = SSHTarget(
+        host=vm.tailscale_host,
+        user=vm.vm_user,
+        identity_file=config.user.ssh_private_key,
+    )
+
+    typer.echo("Deregistering from Tailscale...")
+    try:
+        ssh_run_as_root(target, "tailscale down", timeout=15)
+        ssh_run_as_root(target, "tailscale logout", timeout=15)
+        typer.echo("Tailscale node deregistered")
+    except Exception as e:
+        typer.echo(f"Warning: Tailscale logout failed (node may remain in admin console): {e}", err=True)
 
 
 def _require_vm(db: Database, name: str) -> VMRow:
