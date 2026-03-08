@@ -9,6 +9,8 @@
     "adrs",
     "agentic",
     "aiignore",
+    "bigred",
+    "BIGRED",
     "auditd",
     "chgrp",
     "chsh",
@@ -24,8 +26,11 @@
     "frontmatter",
     "Gruntweave",
     "gruntweave",
+    "IMDS",
     "keypair",
     "limactl",
+    "nerfed",
+    "Nerfed",
     "myproject",
     "mypy",
     "NOPASSWD",
@@ -46,6 +51,7 @@
     "usermod",
     "userspace",
     "virtiofs",
+    "wcid",
     "zfunc"
   ],
   "ignoreRegExpList": [

@@ -91,6 +91,10 @@ tooling.
 
 ## Out of Scope
 
+- **Scoped privileged operations**: fine-grained control over which agents can
+  perform which privileged operations (git push, cloud CLI, etc.) is handled by
+  the [nerfed commands](../2026-03-08-nerfed-commands/) layer, which builds on
+  top of this model.
 - **Network isolation**: restricting agent network access (e.g., per-user
   iptables, network namespaces) is a future enhancement, not part of this
   initial model.
