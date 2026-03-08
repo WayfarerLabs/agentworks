@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from agentworks.db import Database
     from agentworks.git_hosts.base import GitHostProvider
 
-SYSTEM_PACKAGES = ["openssh-server", "curl", "git", "sudo", "ca-certificates"]
+SYSTEM_PACKAGES = ["openssh-server", "curl", "git", "sudo", "ca-certificates", "tmux", "tmuxinator"]
 
 
 def verify_tailscale_available() -> None:
