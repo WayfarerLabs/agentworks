@@ -153,6 +153,35 @@ def rsync_to(
 
 
 @dataclass
+class LimaTarget:
+    """Execution target for local Lima VMs (used pre-Tailscale)."""
+
+    vm_name: str
+
+
+def lima_run(
+    target: LimaTarget,
+    command: str,
+    *,
+    check: bool = True,
+) -> SSHResult:
+    """Execute a command inside a local Lima VM via limactl shell."""
+    args = ["limactl", "shell", target.vm_name, "bash", "-lc", command]
+    result = subprocess.run(args, capture_output=True, text=True)
+    ssh_result = SSHResult(
+        returncode=result.returncode,
+        stdout=result.stdout,
+        stderr=result.stderr,
+    )
+    if check and not ssh_result.ok:
+        raise SSHError(
+            f"Lima command failed (exit {result.returncode}): {command}\n"
+            f"stderr: {result.stderr.strip()}"
+        )
+    return ssh_result
+
+
+@dataclass
 class WSL2Target:
     """Execution target for WSL2 distros (used pre-Tailscale)."""
 
@@ -188,23 +217,29 @@ def wsl2_run(
 
 @dataclass(frozen=True)
 class ExecTarget:
-    """Union-like wrapper for SSH or WSL2 execution targets."""
+    """Union-like wrapper for SSH, Lima, or WSL2 execution targets."""
 
     ssh: SSHTarget | None = None
+    lima: LimaTarget | None = None
     wsl2: WSL2Target | None = None
 
     def run(self, command: str, *, check: bool = True, timeout: int | None = None) -> SSHResult:
         if self.ssh is not None:
             return run(self.ssh, command, check=check, timeout=timeout)
+        if self.lima is not None:
+            return lima_run(self.lima, command, check=check)
         if self.wsl2 is not None:
             return wsl2_run(self.wsl2, command, check=check)
-        msg = "ExecTarget has no SSH or WSL2 target configured"
+        msg = "ExecTarget has no target configured"
         raise SSHError(msg)
 
     def run_as_root(self, command: str, *, check: bool = True, timeout: int | None = None) -> SSHResult:
         if self.ssh is not None:
             return run_as_root(self.ssh, command, check=check, timeout=timeout)
+        if self.lima is not None:
+            # Lima shell runs as the host user who has passwordless sudo
+            return lima_run(self.lima, f"sudo -n {command}", check=check)
         if self.wsl2 is not None:
             return wsl2_run(WSL2Target(self.wsl2.distro_name, user="root"), command, check=check)
-        msg = "ExecTarget has no SSH or WSL2 target configured"
+        msg = "ExecTarget has no target configured"
         raise SSHError(msg)

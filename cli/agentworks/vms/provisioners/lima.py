@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 import typer
 
 from agentworks.db import VMStatus
-from agentworks.ssh import ExecTarget, SSHError, SSHTarget, copy_to
+from agentworks.ssh import ExecTarget, LimaTarget, SSHError, SSHTarget, copy_to
 from agentworks.ssh import run as ssh_run
 from agentworks.vms.base import ProvisionResult, VMProvisioner
 
@@ -97,10 +97,15 @@ class LimaProvisioner(VMProvisioner):
             self._run_lima(f"limactl start {vm_name}")
             Path(template_path).unlink()
 
-        # Get SSH connection info
-        ssh_info = self._get_ssh_target(vm_name)
         typer.echo(f"Lima VM '{vm_name}' created and running")
-        return ProvisionResult(exec_target=ExecTarget(ssh=ssh_info))
+
+        if self.is_remote:
+            # Remote: need SSH via VM Host proxy
+            ssh_info = self._get_ssh_target(vm_name)
+            return ProvisionResult(exec_target=ExecTarget(ssh=ssh_info))
+        else:
+            # Local: use limactl shell as provisioning transport
+            return ProvisionResult(exec_target=ExecTarget(lima=LimaTarget(vm_name=vm_name)))
 
     def start(self, vm: VMRow) -> None:
         typer.echo(f"Starting Lima VM '{vm.name}'...")
