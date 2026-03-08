@@ -124,7 +124,10 @@ def initialize_vm(
 
     import os
 
-    ts_auth_key = os.environ.get("TAILSCALE_AUTH_KEY") or typer.prompt("Enter Tailscale auth key")
+    ts_auth_key = os.environ.get("TAILSCALE_AUTH_KEY")
+    if not ts_auth_key:
+        typer.echo("  Generate a key at https://login.tailscale.com/admin/settings/keys")
+        ts_auth_key = typer.prompt("  Tailscale auth key")
     ts_cmd = f"tailscale up --auth-key {ts_auth_key}"
     if is_wsl2:
         ts_cmd += " --userspace-networking"
