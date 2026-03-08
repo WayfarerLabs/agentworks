@@ -1,0 +1,77 @@
+# Agentworks sample configuration
+# Copy to ~/.config/agentworks/config.toml and edit to match your setup.
+
+# --- User identity and preferences ---
+
+[user]
+ssh_public_key = "~/.ssh/id_ed25519.pub"    # used to authorize access to VMs
+ssh_private_key = "~/.ssh/id_ed25519"        # used for SSH connections to VMs
+shell = "zsh"                                # default shell on VMs
+
+# --- Paths ---
+
+[paths]
+local_workspaces = "~/workspaces"            # local workspace directory
+code_workspaces = "~/agentworks-workspaces"  # .code-workspace file directory
+
+# --- Default values for CLI flags ---
+
+[defaults]
+platform = "lima"                            # lima, azure, or wsl2
+# vm_host = "mac-studio"                     # default VM host for remote Lima
+# git_hosts = ["github"]                     # git hosts to register on vm create
+
+# --- Dotfiles ---
+
+[dotfiles]
+enabled = true
+source = "~/.dotfiles"                       # path to your dotfiles repo
+install_cmd = "./install.sh"                 # command to run after copying dotfiles
+
+# --- VM configuration ---
+# Agentworks always installs system dependencies (openssh-server, curl, git,
+# sudo, ca-certificates) regardless of this config.
+
+[vm.config]
+apt = [
+    "zsh",
+    "tmux",
+    "tmuxinator",
+    "curl",
+    "unzip",
+    "build-essential",
+    "ripgrep",
+    "fzf",
+    "fd-find",
+]
+snap = []
+install_commands = [
+    # "curl -fsSL https://bun.sh/install | bash",
+]
+
+# --- Workspace templates ---
+# The "default" template is used when --template is not specified.
+
+[workspace_templates.default]
+# No repo, tmuxinator enabled by default
+
+# [workspace_templates.myproject]
+# repo = "git@github.com:org/repo.git"
+# tmuxinator = false
+
+# --- Git host providers ---
+
+# [git_hosts.github]
+# type = "github"
+# Authentication via: gh auth token or GITHUB_TOKEN env var
+
+# [git_hosts.azdo]
+# type = "azdo"
+# org = "my-org"
+
+# --- Azure settings (only needed for --platform azure) ---
+
+# [azure]
+# subscription_id = "..."
+# resource_group = "agentworks-vms"
+# region = "eastus2"
