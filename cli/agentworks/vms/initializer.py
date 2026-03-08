@@ -22,6 +22,29 @@ if TYPE_CHECKING:
 SYSTEM_PACKAGES = ["openssh-server", "curl", "git", "sudo", "ca-certificates"]
 
 
+def verify_tailscale_available() -> None:
+    """Pre-flight: verify the local machine is on Tailscale."""
+    import subprocess
+
+    try:
+        result = subprocess.run(["tailscale", "status"], capture_output=True, text=True, timeout=10)
+    except FileNotFoundError:
+        typer.echo("Error: 'tailscale' command not found. Install Tailscale on this machine.", err=True)
+        raise typer.Exit(1) from None
+    except subprocess.TimeoutExpired:
+        typer.echo("Error: 'tailscale status' timed out. Is Tailscale running?", err=True)
+        raise typer.Exit(1) from None
+
+    if result.returncode != 0:
+        typer.echo(
+            "Error: This machine is not connected to Tailscale. "
+            "VM initialization requires Tailscale to switch from the provisioning "
+            "transport to direct SSH. Run 'tailscale up' first.",
+            err=True,
+        )
+        raise typer.Exit(1)
+
+
 def resolve_git_host_providers(config: Config, git_host_names: list[str] | None = None) -> dict[str, GitHostProvider]:
     """Resolve git host provider instances from config."""
     from agentworks.git_hosts.azdo import AzDOProvider

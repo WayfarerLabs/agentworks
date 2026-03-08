@@ -9,7 +9,12 @@ import typer
 
 from agentworks.config import NAME_RE, VALID_PLATFORMS
 from agentworks.db import InitStatus
-from agentworks.vms.initializer import initialize_vm, resolve_git_host_providers, verify_git_host_auth
+from agentworks.vms.initializer import (
+    initialize_vm,
+    resolve_git_host_providers,
+    verify_git_host_auth,
+    verify_tailscale_available,
+)
 
 if TYPE_CHECKING:
     from agentworks.config import Config
@@ -83,7 +88,8 @@ def create_vm(
         typer.echo("Error: [azure] config section required for azure platform", err=True)
         raise typer.Exit(1)
 
-    # Pre-flight: verify git host auth
+    # Pre-flight checks
+    verify_tailscale_available()
     providers = resolve_git_host_providers(config, git_hosts)
     verify_git_host_auth(providers)
 
