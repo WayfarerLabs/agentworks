@@ -1,69 +1,77 @@
-# Agentworks sample configuration
+# Agentworks configuration
 # Copy to ~/.config/agentworks/config.toml and edit to match your setup.
+#
+# Required fields are uncommented. Everything else shows the default value
+# commented out -- uncomment and change only what you need.
 
 # --- User identity and preferences ---
 
 [user]
-ssh_public_key = "~/.ssh/id_ed25519.pub"    # used to authorize access to VMs
-ssh_private_key = "~/.ssh/id_ed25519"        # used for SSH connections to VMs
-shell = "zsh"                                # default shell on VMs
+ssh_public_key = "~/.ssh/id_ed25519.pub"    # required: used to authorize access to VMs
+ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connections to VMs
+# shell = "zsh"                              # default shell set on VMs
 
 # --- Paths ---
 
-[paths]
-local_workspaces = "~/workspaces"            # local workspace directory
-code_workspaces = "~/agentworks-workspaces"  # .code-workspace file directory
+# [paths]
+# local_workspaces = "~/workspaces"            # local workspace directory
+# code_workspaces = "~/agentworks-workspaces"  # .code-workspace file directory
 
 # --- Default values for CLI flags ---
 
-[defaults]
-platform = "lima"                            # lima, azure, or wsl2
+# [defaults]
+# platform = "lima"                          # lima, azure, or wsl2
 # vm_host = "mac-studio"                     # default VM host for remote Lima
 # git_hosts = ["github"]                     # git hosts to register on vm create
 
 # --- Dotfiles ---
 
-[dotfiles]
-enabled = true
-source = "~/.dotfiles"                       # path to your dotfiles repo
-install_cmd = "./install.sh"                 # command to run after copying dotfiles
+# [dotfiles]
+# enabled = true                             # copy dotfiles to VMs during init
+# source = "~/.dotfiles"                     # path to your dotfiles repo
+# install_cmd = "./install.sh"               # command to run after copying dotfiles
 
 # --- VM configuration ---
 # Agentworks always installs system dependencies (openssh-server, curl, git,
 # sudo, ca-certificates) regardless of this config.
 
-[vm.config]
-cpus = 4                                     # number of CPUs (Lima)
-memory = 8                                   # memory in GiB (Lima)
-disk = 50                                    # disk size in GiB (Lima)
-# azure_vm_size = "Standard_D4s_v5"         # Azure VM size
-apt = [
-    "zsh",
-    "tmux",
-    "tmuxinator",
-    "curl",
-    "unzip",
-    "build-essential",
-    "ripgrep",
-    "fzf",
-    "fd-find",
-]
-snap = []
-install_commands = [
-    # "curl -fsSL https://bun.sh/install | bash",
-]
+# [vm.config]
+# cpus = 4                                   # number of CPUs (Lima)
+# memory = 8                                 # memory in GiB (Lima)
+# disk = 50                                  # disk size in GiB (Lima)
+# azure_vm_size = "Standard_D4s_v5"          # Azure VM size
+# apt = [
+#     "zsh",
+#     "tmux",
+#     "tmuxinator",
+#     "curl",
+#     "unzip",
+#     "build-essential",
+#     "ripgrep",
+#     "fzf",
+#     "fd-find",
+# ]
+# snap = []
+# install_commands = [
+#     "curl -fsSL https://bun.sh/install | bash",
+# ]
 
 # --- Workspace templates ---
 # The "default" template is used when --template is not specified.
+# Templates support inheritance via the "inherits" key.
 
-[workspace_templates.default]
-# No repo, tmuxinator enabled by default
+# [workspace_templates.default]
+# repo = "git@github.com:org/repo.git"       # git repo to clone into workspace
+# tmuxinator = true                          # generate tmuxinator config
+# inherits = []                              # list of parent template names
 
 # [workspace_templates.myproject]
-# repo = "git@github.com:org/repo.git"
+# repo = "git@github.com:org/myproject.git"
 # tmuxinator = false
+# inherits = ["default"]
 
 # --- Git host providers ---
+# SSH keys generated on VMs are registered with these providers.
 
 # [git_hosts.github]
 # type = "github"
@@ -72,10 +80,12 @@ install_commands = [
 # [git_hosts.azdo]
 # type = "azdo"
 # org = "my-org"
+# Authentication via: az account get-access-token
 
 # --- Azure settings (only needed for --platform azure) ---
 
 # [azure]
-# subscription_id = "..."
-# resource_group = "agentworks-vms"
-# region = "eastus2"
+# subscription_id = "..."                    # required for azure platform
+# resource_group = "agentworks-vms"          # required for azure platform
+# region = "eastus2"                         # required for azure platform
+# idle_timeout_hours = 2                     # auto-stop idle VMs after this many hours
