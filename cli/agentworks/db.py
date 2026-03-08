@@ -168,6 +168,25 @@ class Database:
     def close(self) -> None:
         self._conn.close()
 
+    @staticmethod
+    def check_schema(path: Path | None = None) -> tuple[bool, int, int]:
+        """Check DB schema version without migrating.
+
+        Returns (exists, current_version, latest_version).
+        """
+        db_path = path or DB_PATH
+        if not db_path.exists():
+            return (False, 0, LATEST_VERSION)
+        conn = sqlite3.connect(str(db_path))
+        try:
+            row = conn.execute("SELECT MAX(version) FROM schema_version").fetchone()
+            current = row[0] or 0
+        except sqlite3.OperationalError:
+            current = 0
+        finally:
+            conn.close()
+        return (True, current, LATEST_VERSION)
+
     def _migrate(self) -> None:
         self._conn.execute(
             "CREATE TABLE IF NOT EXISTS schema_version ("

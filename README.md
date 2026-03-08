@@ -42,6 +42,7 @@ agentworks workspace shell my-workspace
 
 | Command                     | Description                  |
 | --------------------------- | ---------------------------- |
+| `agentworks doctor`         | Check environment and config |
 | `agentworks init`           | Create a sample config file  |
 | `agentworks completion zsh` | Output zsh completion script |
 

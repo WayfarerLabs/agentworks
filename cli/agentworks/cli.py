@@ -76,6 +76,14 @@ def completion(
     typer.echo(script, nl=False)
 
 
+@app.command("doctor")
+def doctor() -> None:
+    """Check environment, config, and dependencies."""
+    from agentworks.doctor import run_doctor
+
+    run_doctor()
+
+
 @app.command("init")
 def init_config() -> None:
     """Create a sample config file at ~/.config/agentworks/config.toml."""

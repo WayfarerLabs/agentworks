@@ -34,6 +34,7 @@ _agentworks() {
     case $state in
         command)
             commands=(
+                'doctor:Check environment and dependencies'
                 'init:Create a sample config file'
                 'vm:Manage virtual machines'
                 'vm-host:Manage VM hosts'
