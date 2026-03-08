@@ -63,6 +63,7 @@ class VMRow:
     cpus: int | None
     memory_gib: int | None
     disk_gib: int | None
+    vm_user: str
     created_at: str
     last_seen_at: str | None
 
@@ -140,6 +141,9 @@ MIGRATIONS: dict[int, str] = {
         ALTER TABLE vms ADD COLUMN cpus INTEGER;
         ALTER TABLE vms ADD COLUMN memory_gib INTEGER;
         ALTER TABLE vms ADD COLUMN disk_gib INTEGER;
+    """,
+    3: """
+        ALTER TABLE vms ADD COLUMN vm_user TEXT NOT NULL DEFAULT 'agentworks';
     """,
 }
 
@@ -231,12 +235,13 @@ class Database:
         cpus: int | None = None,
         memory_gib: int | None = None,
         disk_gib: int | None = None,
+        vm_user: str = "agentworks",
     ) -> VMRow:
         self._conn.execute(
             "INSERT INTO vms "
             "(name, platform, vm_host_name, extra_packages, azure_resource_id, wsl_distro_name, "
-            "cpus, memory_gib, disk_gib) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "cpus, memory_gib, disk_gib, vm_user) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 name,
                 platform,
@@ -247,6 +252,7 @@ class Database:
                 cpus,
                 memory_gib,
                 disk_gib,
+                vm_user,
             ),
         )
         self._conn.commit()
@@ -397,6 +403,7 @@ def _to_vm(row: sqlite3.Row) -> VMRow:
         cpus=row["cpus"],
         memory_gib=row["memory_gib"],
         disk_gib=row["disk_gib"],
+        vm_user=row["vm_user"],
         created_at=row["created_at"],
         last_seen_at=row["last_seen_at"],
     )

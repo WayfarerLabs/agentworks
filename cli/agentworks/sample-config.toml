@@ -36,6 +36,7 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # sudo, ca-certificates) regardless of this config.
 
 # [vm.config]
+# vm_user = "agentworks"                     # username created on VMs
 # cpus = 4                                   # number of CPUs (Lima)
 # memory = 8                                 # memory in GiB (Lima)
 # disk = 50                                  # disk size in GiB (Lima)

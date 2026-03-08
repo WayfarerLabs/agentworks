@@ -37,11 +37,11 @@ def create_vm_workspace(
     assert vm.tailscale_host is not None
     target = SSHTarget(
         host=vm.tailscale_host,
-        user="agentworks",
+        user=vm.vm_user,
         identity_file=config.user.ssh_private_key,
     )
 
-    workspace_path = f"/home/agentworks/workspaces/{ws_name}"
+    workspace_path = f"/home/{vm.vm_user}/workspaces/{ws_name}"
 
     # Create directory
     ssh_run(target, f"mkdir -p {workspace_path}")
@@ -84,7 +84,7 @@ def shell_vm_workspace(
     ssh_cmd = ["ssh"]
     if config.user.ssh_private_key:
         ssh_cmd.extend(["-i", str(config.user.ssh_private_key)])
-    ssh_cmd.append(f"agentworks@{vm.tailscale_host}")
+    ssh_cmd.append(f"{vm.vm_user}@{vm.tailscale_host}")
 
     if use_tmuxinator and tmuxinator_enabled:
         ssh_cmd.extend(["-t", f"tmuxinator start {ws_name}"])
@@ -107,7 +107,7 @@ def delete_vm_workspace(
     assert vm.tailscale_host is not None
     target = SSHTarget(
         host=vm.tailscale_host,
-        user="agentworks",
+        user=vm.vm_user,
         identity_file=config.user.ssh_private_key,
     )
 
@@ -130,7 +130,7 @@ def generate_code_workspace(
     ws_file = {
         "folders": [
             {
-                "uri": f"vscode-remote://ssh-remote+agentworks@{vm.tailscale_host}{workspace_path}",
+                "uri": f"vscode-remote://ssh-remote+{vm.vm_user}@{vm.tailscale_host}{workspace_path}",
                 "name": ws_name,
             }
         ],

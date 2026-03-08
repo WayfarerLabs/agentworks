@@ -53,6 +53,7 @@ def create_vm(
     memory: int | None = None,
     disk: int | None = None,
     azure_vm_size: str | None = None,
+    vm_user: str | None = None,
 ) -> None:
     """Create a new VM: provision + initialize."""
     # Resolve defaults
@@ -92,6 +93,7 @@ def create_vm(
     resolved_memory = memory or config.vm.memory
     resolved_disk = disk or config.vm.disk
     resolved_azure_size = azure_vm_size or config.vm.azure_vm_size
+    resolved_vm_user = vm_user or config.vm.vm_user
 
     # Pre-flight checks
     verify_tailscale_available()
@@ -107,6 +109,7 @@ def create_vm(
         cpus=resolved_cpus,
         memory_gib=resolved_memory,
         disk_gib=resolved_disk,
+        vm_user=resolved_vm_user,
     )
 
     try:
@@ -128,6 +131,15 @@ def create_vm(
             result = azure.create(
                 vm_name, config, extra_packages,
                 azure_vm_size=resolved_azure_size,
+                vm_user=resolved_vm_user,
+            )
+        elif platform == "wsl2":
+            from agentworks.vms.provisioners.wsl2 import WSL2Provisioner
+
+            wsl2 = WSL2Provisioner()
+            result = wsl2.create(
+                vm_name, config, extra_packages,
+                vm_user=resolved_vm_user,
             )
         else:
             provisioner = get_provisioner(platform, vm_host_ssh)
@@ -154,6 +166,7 @@ def create_vm(
             providers=providers,
             extra_packages=extra_packages,
             is_wsl2=(platform == "wsl2"),
+            vm_user=resolved_vm_user,
         )
     except Exception:
         db.update_vm_init_status(vm_name, InitStatus.FAILED)

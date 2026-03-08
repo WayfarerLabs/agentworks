@@ -42,7 +42,10 @@ def _powershell(script: str, *, check: bool = True) -> str:
 class WSL2Provisioner(VMProvisioner):
     """Provisions WSL2 Debian distributions on Windows."""
 
-    def create(self, vm_name: str, config: Config, extra_packages: list[str] | None = None) -> ProvisionResult:
+    def create(
+        self, vm_name: str, config: Config, extra_packages: list[str] | None = None,
+        *, vm_user: str = "agentworks",
+    ) -> ProvisionResult:
         typer.echo(f"Creating WSL2 distro '{vm_name}'...")
 
         install_path = f"{WSL_BASE_PATH}\\{vm_name}"
@@ -63,22 +66,22 @@ class WSL2Provisioner(VMProvisioner):
         # Import the distro
         _wsl(["--import", vm_name, install_path, tarball])
 
-        # Create agentworks user
+        # Create VM user
         _wsl(["--distribution", vm_name, "--user", "root", "--",
-              "useradd", "-m", "-s", "/bin/bash", "agentworks"])
+              "useradd", "-m", "-s", "/bin/bash", vm_user])
         _wsl(["--distribution", vm_name, "--user", "root", "--",
-              "usermod", "-aG", "sudo", "agentworks"])
+              "usermod", "-aG", "sudo", vm_user])
         _wsl(["--distribution", vm_name, "--user", "root", "--",
-              "bash", "-c", "echo 'agentworks ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/agentworks"])
+              "bash", "-c", f"echo '{vm_user} ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/{vm_user}"])
 
         # Set default user in wsl.conf
         _wsl(["--distribution", vm_name, "--user", "root", "--",
               "bash", "-c",
-              "printf '[user]\\ndefault=agentworks\\n' > /etc/wsl.conf"])
+              f"printf '[user]\\ndefault={vm_user}\\n' > /etc/wsl.conf"])
 
         typer.echo(f"WSL2 distro '{vm_name}' created")
         return ProvisionResult(
-            exec_target=ExecTarget(wsl2=WSL2Target(distro_name=vm_name)),
+            exec_target=ExecTarget(wsl2=WSL2Target(distro_name=vm_name, user=vm_user)),
             wsl_distro_name=vm_name,
         )
 

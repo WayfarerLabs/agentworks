@@ -83,24 +83,26 @@ def initialize_vm(
     *,
     extra_packages: list[str] | None = None,
     is_wsl2: bool = False,
+    vm_user: str = "agentworks",
 ) -> None:
     """Run the full initialization sequence on a newly provisioned VM."""
+    home = f"/home/{vm_user}"
 
     # -- Phase A: Bootstrap (over provisioning transport) ------------------
     typer.echo("Phase A: Bootstrap...")
     db.update_vm_init_status(vm_name, InitStatus.BOOTSTRAPPING)
 
-    # Step 1: Ensure agentworks user exists
-    typer.echo("  Ensuring agentworks user...")
+    # Step 1: Ensure user exists
+    typer.echo(f"  Ensuring user '{vm_user}'...")
     exec_target.run_as_root(
-        "bash -c 'id agentworks >/dev/null 2>&1 || useradd -m -s /bin/bash agentworks'",
+        f"bash -c 'id {vm_user} >/dev/null 2>&1 || useradd -m -s /bin/bash {vm_user}'",
         check=False,
     )
     exec_target.run_as_root(
-        "usermod -aG sudo agentworks",
+        f"usermod -aG sudo {vm_user}",
     )
     exec_target.run_as_root(
-        "bash -c \"echo 'agentworks ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/agentworks\"",
+        f"bash -c \"echo '{vm_user} ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/{vm_user}\"",
     )
 
     # Step 2: System packages
@@ -112,11 +114,11 @@ def initialize_vm(
     # Step 3: Add user's SSH public key
     typer.echo("  Adding SSH public key...")
     pub_key = config.user.ssh_public_key.read_text().strip()
-    exec_target.run_as_root("mkdir -p /home/agentworks/.ssh")
-    exec_target.run_as_root(f"bash -c \"echo '{pub_key}' >> /home/agentworks/.ssh/authorized_keys\"")
-    exec_target.run_as_root("chown -R agentworks:agentworks /home/agentworks/.ssh")
-    exec_target.run_as_root("chmod 700 /home/agentworks/.ssh")
-    exec_target.run_as_root("chmod 600 /home/agentworks/.ssh/authorized_keys")
+    exec_target.run_as_root(f"mkdir -p {home}/.ssh")
+    exec_target.run_as_root(f"bash -c \"echo '{pub_key}' >> {home}/.ssh/authorized_keys\"")
+    exec_target.run_as_root(f"chown -R {vm_user}:{vm_user} {home}/.ssh")
+    exec_target.run_as_root(f"chmod 700 {home}/.ssh")
+    exec_target.run_as_root(f"chmod 600 {home}/.ssh/authorized_keys")
 
     # Step 4: Install and join Tailscale
     typer.echo("  Installing Tailscale...")
@@ -144,7 +146,7 @@ def initialize_vm(
     ts_target = ExecTarget(
         ssh=SSHTarget(
             host=tailscale_ip,
-            user="agentworks",
+            user=vm_user,
             identity_file=config.user.ssh_private_key,
         )
     )
@@ -181,7 +183,7 @@ def initialize_vm(
     # Step 9: Set default shell
     shell = config.user.shell
     typer.echo(f"  Setting shell to {shell}...")
-    ts_target.run_as_root(f"chsh -s $(which {shell}) agentworks")
+    ts_target.run_as_root(f"chsh -s $(which {shell}) {vm_user}")
 
     # Step 10: Generate SSH keypair
     typer.echo("  Generating SSH keypair...")
@@ -200,7 +202,7 @@ def initialize_vm(
     if config.dotfiles.enabled and config.dotfiles.source.exists():
         typer.echo("  Copying dotfiles...")
         assert ts_target.ssh is not None
-        rsync_to(ts_target.ssh, config.dotfiles.source, "/home/agentworks/.dotfiles")
+        rsync_to(ts_target.ssh, config.dotfiles.source, f"{home}/.dotfiles")
         typer.echo(f"  Running dotfiles install: {config.dotfiles.install_cmd}")
         try:
             ts_target.run(f"cd ~/.dotfiles && {config.dotfiles.install_cmd}")

@@ -24,7 +24,7 @@ package_update: true
 packages:
   - openssh-server
 users:
-  - name: agentworks
+  - name: {vm_user}
     ssh_authorized_keys:
       - {ssh_public_key}
     sudo: ALL=(ALL) NOPASSWD:ALL
@@ -50,6 +50,7 @@ class AzureProvisioner(VMProvisioner):
         extra_packages: list[str] | None = None,
         *,
         azure_vm_size: str = "Standard_D4s_v5",
+        vm_user: str = "agentworks",
     ) -> ProvisionResult:
         assert config.azure is not None, "Azure config is required"
         az = config.azure
@@ -60,7 +61,7 @@ class AzureProvisioner(VMProvisioner):
         ssh_pub_key = config.user.ssh_public_key.read_text().strip()
 
         # Write cloud-init userdata
-        cloud_init = CLOUD_INIT_TEMPLATE.format(ssh_public_key=ssh_pub_key)
+        cloud_init = CLOUD_INIT_TEMPLATE.format(ssh_public_key=ssh_pub_key, vm_user=vm_user)
         with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
             f.write(cloud_init)
             cloud_init_path = f.name
@@ -72,7 +73,7 @@ class AzureProvisioner(VMProvisioner):
                 "--name", vm_name,
                 "--image", "Debian:debian-12:12-gen2:latest",
                 "--size", azure_vm_size,
-                "--admin-username", "agentworks",
+                "--admin-username", vm_user,
                 "--ssh-key-values", ssh_pub_key,
                 "--custom-data", cloud_init_path,
                 "--public-ip-sku", "Standard",
@@ -93,7 +94,7 @@ class AzureProvisioner(VMProvisioner):
             exec_target=ExecTarget(
                 ssh=SSHTarget(
                     host=public_ip,
-                    user="agentworks",
+                    user=vm_user,
                     identity_file=config.user.ssh_private_key,
                 )
             ),
