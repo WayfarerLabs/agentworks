@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import secrets
 from typing import Annotated
 
 import typer
@@ -43,6 +44,18 @@ app.add_typer(workspace_app)
 
 def _get_db() -> Database:
     return Database()
+
+
+def _generate_name() -> str:
+    return secrets.token_hex(4)[:7]
+
+
+def _prompt_name(label: str, name: str | None) -> str:
+    """Prompt for a name if not provided via --name, showing a random default."""
+    if name is not None:
+        return name
+    default = _generate_name()
+    return str(typer.prompt(f"{label} name", default=default))
 
 
 # -- Top-level commands ----------------------------------------------------
@@ -106,7 +119,7 @@ def vm_host_remove(
 
 @vm_app.command("create")
 def vm_create(
-    name: Annotated[str | None, typer.Option("--name", help="VM name (auto-generated if omitted)")] = None,
+    name: Annotated[str | None, typer.Option("--name", help="VM name (prompted if omitted)")] = None,
     platform: Annotated[str | None, typer.Option("--platform", help="Platform: lima, azure, wsl2")] = None,
     vm_host: Annotated[str | None, typer.Option("--vm-host", help="VM host for Lima")] = None,
     extra_packages: Annotated[
@@ -124,10 +137,11 @@ def vm_create(
     from agentworks.config import load_config
     from agentworks.vms.manager import create_vm
 
+    resolved_name = _prompt_name("VM", name)
     config = load_config()
     create_vm(
         _get_db(), config,
-        name=name, platform=platform, vm_host=vm_host,
+        name=resolved_name, platform=platform, vm_host=vm_host,
         extra_packages=extra_packages, git_hosts=git_hosts,
         cpus=cpus, memory=memory, disk=disk,
         azure_vm_size=azure_vm_size,
@@ -181,7 +195,7 @@ def vm_delete(
 
 @workspace_app.command("create")
 def workspace_create(
-    name: Annotated[str | None, typer.Option("--name", help="Workspace name (auto-generated if omitted)")] = None,
+    name: Annotated[str | None, typer.Option("--name", help="Workspace name (prompted if omitted)")] = None,
     vm: Annotated[str | None, typer.Option("--vm", help="Target VM")] = None,
     template: Annotated[str | None, typer.Option("--template", help="Workspace template")] = None,
     open_vscode: Annotated[bool, typer.Option("--open-vscode", help="Open in VS Code")] = False,
@@ -190,7 +204,11 @@ def workspace_create(
     from agentworks.config import load_config
     from agentworks.workspaces.manager import create_workspace
 
-    create_workspace(_get_db(), load_config(), name=name, vm_name=vm, template_name=template, open_vscode=open_vscode)
+    resolved_name = _prompt_name("Workspace", name)
+    create_workspace(
+        _get_db(), load_config(),
+        name=resolved_name, vm_name=vm, template_name=template, open_vscode=open_vscode,
+    )
 
 
 @workspace_app.command("shell")

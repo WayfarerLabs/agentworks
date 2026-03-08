@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import secrets
 import subprocess
 from typing import TYPE_CHECKING
 
@@ -16,21 +15,17 @@ if TYPE_CHECKING:
     from agentworks.db import Database, VMRow
 
 
-def _generate_name() -> str:
-    return secrets.token_hex(4)[:7]
-
-
 def create_workspace(
     db: Database,
     config: Config,
     *,
-    name: str | None = None,
+    name: str,
     vm_name: str | None = None,
     template_name: str | None = None,
     open_vscode: bool = False,
 ) -> None:
     """Create a workspace on a VM."""
-    ws_name = name or _generate_name()
+    ws_name = name
     if not NAME_RE.match(ws_name):
         typer.echo(f"Error: invalid name '{ws_name}'. Must match [a-z0-9\\-_.]", err=True)
         raise typer.Exit(1)

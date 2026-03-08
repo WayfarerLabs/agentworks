@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import secrets
 from typing import TYPE_CHECKING
 
 import typer
@@ -41,15 +40,11 @@ def get_provisioner(platform: str, vm_host_ssh: str | None = None) -> VMProvisio
         raise ValueError(msg)
 
 
-def _generate_name() -> str:
-    return secrets.token_hex(4)[:7]
-
-
 def create_vm(
     db: Database,
     config: Config,
     *,
-    name: str | None = None,
+    name: str,
     platform: str | None = None,
     vm_host: str | None = None,
     extra_packages: list[str] | None = None,
@@ -66,7 +61,7 @@ def create_vm(
         typer.echo(f"Error: invalid platform '{platform}'", err=True)
         raise typer.Exit(1)
 
-    vm_name = name or _generate_name()
+    vm_name = name
     if not NAME_RE.match(vm_name):
         typer.echo(f"Error: invalid name '{vm_name}'. Must match [a-z0-9\\-_.]", err=True)
         raise typer.Exit(1)
