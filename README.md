@@ -90,7 +90,8 @@ Manage workspaces on VMs or locally.
 ## Configuration
 
 Config lives at `~/.config/agentworks/config.toml`. Run `agentworks init` to
-generate a sample with all options documented.
+generate a sample with all options documented. See
+[sample-config.toml](cli/agentworks/sample-config.toml) for the full reference.
 
 Key sections:
 
