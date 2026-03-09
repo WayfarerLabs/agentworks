@@ -260,7 +260,8 @@ CREATE TABLE vm_git_host_keys (
 
 - Names are globally unique within each table -- vm_hosts, vms, and workspaces are separate
   namespaces (PRIMARY KEY)
-- Names must match `[a-z0-9\-_.]` (validated at the application level before insert)
+- Names must match `^[a-z0-9]([a-z0-9_-]*[a-z0-9])?$` with no consecutive hyphens (validated at the
+  application level before insert)
 - `vm_git_host_keys` enforces one key per provider per VM (UNIQUE constraint)
 - `vms.init_status` must be one of: `pending`, `bootstrapping`, `tailscale_up`, `initializing`,
   `complete`, `failed`

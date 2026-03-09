@@ -11,8 +11,7 @@ all users without exposing key material.
 ```text
 Users:
   agentworks          (admin, uid 1000, sudo)
-  agent-<workspace>-1 (agent, no sudo)
-  agent-<workspace>-2 (agent, no sudo)
+  <workspace>--<agent>    (agent, no sudo)
   ...
 
 Groups:
@@ -29,10 +28,10 @@ Groups:
 - Runs the SSH agent systemd service
 - Member of: `agentworks-ssh`
 
-### Agent users (`agent-<workspace>-<n>`)
+### Agent users (`<workspace>--<agent>`)
 
 - Created when an agent is provisioned on a workspace
-- Home directory: `/home/agent-<workspace>-<n>/`
+- Home directory: `/home/<workspace>--<agent>/`
 - No sudo, no password
 - Shell set to the configured default (e.g., zsh)
 - Member of: `ws-<workspace>`, `agentworks-ssh`, `aw-tools`
@@ -74,7 +73,7 @@ Groups:
 /run/agentworks/
   ssh-agent.sock                   # 0660 agentworks:agentworks-ssh
 
-/home/agent-myproject-1/           # agent home
+/home/myproject--coder/            # agent home
   .config/                         # agent-specific config
 ```
 
@@ -141,8 +140,8 @@ When a workspace is created on a VM:
 
 When an agent is created for a workspace:
 
-1. Create the agent user: `useradd -m -s /bin/zsh agent-<workspace>-<n>`
-2. Add to groups: `usermod -aG ws-<workspace>,agentworks-ssh,aw-tools agent-<workspace>-<n>`
+1. Create the agent user: `useradd -m -s /bin/zsh <workspace>--<agent>`
+2. Add to groups: `usermod -aG ws-<workspace>,agentworks-ssh,aw-tools <workspace>--<agent>`
 3. Set `SSH_AUTH_SOCK` in the agent's environment
 4. Record the agent user in the DB
 

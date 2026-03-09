@@ -81,7 +81,7 @@ tools they are allowed to run. Rules support:
 - **Agent user**: the Linux username of the agent (no globs)
 - **Tool**: the specific nerfed tool name (no globs)
 - **Expiration**: an optional UTC timestamp after which the rule is no longer valid. This enables
-  time-boxed access (e.g. "agent-ws1-1 can push until 2026-03-09T00:00:00Z").
+  time-boxed access (e.g. "ws1--coder can push until 2026-03-09T00:00:00Z").
 
 If no matching rule exists, the tool refuses to execute. Expired rules are treated as nonexistent.
 

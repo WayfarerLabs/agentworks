@@ -30,7 +30,7 @@ socket, no IPC -- just the filesystem and standard Unix SUID semantics.
 |    - owns config dir (read-only for nerf, no access for others)   |
 |    - holds brokered credentials                                   |
 |                                                                   |
-|  agent-ws1-1, agent-ws1-2, ...                                    |
+|  ws1--coder, ws1--reviewer, ...                                    |
 |    - no sudo, no login shell (except via coding tool)             |
 |    - workspace access via group                                   |
 |    - tools access via aw-tools group (read/execute)               |
@@ -103,20 +103,20 @@ Groups (new):
 # /opt/agentworks/nerf/etc/rbac.toml
 
 [[rules]]
-user = "agent-myproject-1"
+user = "myproject--coder"
 tool = "nerf-git-push-origin"
 
 [[rules]]
-user = "agent-myproject-1"
+user = "myproject--coder"
 tool = "nerf-git-push-non-origin"
 expires = "2026-03-09T00:00:00Z"
 
 [[rules]]
-user = "agent-myproject-2"
+user = "myproject--reviewer"
 tool = "nerf-wcid"
 
 [[rules]]
-user = "agent-myproject-2"
+user = "myproject--reviewer"
 tool = "nerf-az-account-show"
 ```
 
@@ -141,21 +141,21 @@ the security model simple and auditable. The admin explicitly grants each agent 
 ## SUID Execution Flow
 
 ```text
-Agent (agent-ws1-1) runs: nerf-git-push-origin
+Agent (ws1--coder) runs: nerf-git-push-origin
 
 1. Kernel sets effective UID to nerf (SUID bit)
-   Real UID remains agent-ws1-1
+   Real UID remains ws1--coder
 2. Tool checks for /opt/agentworks/nerf/etc/bigred.lock
    - If present: log BIGRED, print constructive message, exit 1
-3. Tool reads real UID -> "agent-ws1-1"
+3. Tool reads real UID -> "ws1--coder"
 4. Tool reads /opt/agentworks/nerf/etc/rbac.toml
-5. Checks: does agent-ws1-1 have access to nerf-git-push-origin?
+5. Checks: does ws1--coder have access to nerf-git-push-origin?
    - If no: log DENIED, print constructive message, exit 1
    - If expired: log EXPIRED, print constructive message, exit 1
 6. Tool performs the scoped git push operation
    - Uses SSH_AUTH_SOCK for git credentials (from user-based security model)
    - Or uses brokered credentials from etc/credentials/
-7. Log "OK agent-ws1-1 nerf-git-push-origin", exit with operation result
+7. Log "OK ws1--coder nerf-git-push-origin", exit with operation result
 ```
 
 ## Discovery (nerf-wcid)
@@ -225,10 +225,10 @@ All nerfed tool invocations are logged to syslog (or a dedicated log file at
 Example:
 
 ```text
-2026-03-08T14:32:01Z OK agent-ws1-1 nerf-git-push-origin
-2026-03-08T14:32:15Z DENIED agent-ws1-2 nerf-git-push-origin
-2026-03-08T14:33:00Z EXPIRED agent-ws1-1 nerf-az-account-show
-2026-03-08T15:01:00Z BIGRED agent-ws1-1 nerf-git-push-origin
+2026-03-08T14:32:01Z OK ws1--coder nerf-git-push-origin
+2026-03-08T14:32:15Z DENIED ws1--reviewer nerf-git-push-origin
+2026-03-08T14:33:00Z EXPIRED ws1--coder nerf-az-account-show
+2026-03-08T15:01:00Z BIGRED ws1--coder nerf-git-push-origin
 ```
 
 ## Tool Implementation
@@ -267,16 +267,16 @@ agent that will read the output and can act on clear instructions.
 Example stderr output for each denial type:
 
 ```text
-DENIED: agent-ws1-1 is not authorized to run nerf-git-push-origin.
+DENIED: ws1--coder is not authorized to run nerf-git-push-origin.
 Ask your operator to grant access. They can run:
-  agentworks nerf grant agent-ws1-1 nerf-git-push-origin
+  agentworks nerf grant ws1--coder nerf-git-push-origin
 ```
 
 ```text
-EXPIRED: agent-ws1-1 had access to nerf-git-push-origin but it
+EXPIRED: ws1--coder had access to nerf-git-push-origin but it
 expired at 2026-03-09T00:00:00Z.
 Ask your operator to renew access. They can run:
-  agentworks nerf grant agent-ws1-1 nerf-git-push-origin
+  agentworks nerf grant ws1--coder nerf-git-push-origin
 ```
 
 ```text

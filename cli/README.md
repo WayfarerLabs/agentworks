@@ -28,11 +28,11 @@ agents (see below).
 An agent defines a **task-specific identity** with scoped permissions. Each agent is an isolated
 Linux user within a workspace. The agent's effective capability is the intersection of all three
 layers: it can only use tools present on the VM, configured at the workspace level, and granted to
-the agent via RBAC (nerfed commands). An agent cannot bypass a workspace-level permission
+the agent via per-agent permission grants. An agent cannot bypass a workspace-level permission
 restriction or use a tool that is not installed on the VM.
 
 Agents are only supported on VM workspaces because the isolation model requires Linux user
-management (useradd, group membership, SUID executables).
+management (useradd, group membership).
 
 ### Ephemerality
 
@@ -125,12 +125,12 @@ Manage workspaces on VMs or locally.
 
 Manage agents (isolated Linux users) within VM workspaces.
 
-| Command                                          | Description         |
-| ------------------------------------------------ | ------------------- |
-| `agentworks agent create <name> -w <workspace>`  | Create an agent     |
-| `agentworks agent list [-w <workspace>]`         | List agents         |
-| `agentworks agent shell <name> [-w <workspace>]` | Shell into an agent |
-| `agentworks agent delete <name> -w <workspace>`  | Delete an agent     |
+| Command                                            | Description         |
+| -------------------------------------------------- | ------------------- |
+| `agentworks agent create <name> --workspace <ws>`  | Create an agent     |
+| `agentworks agent list [--workspace <ws>]`         | List agents         |
+| `agentworks agent shell <name> [--workspace <ws>]` | Shell into an agent |
+| `agentworks agent delete <name> --workspace <ws>`  | Delete an agent     |
 
 ## Configuration
 
