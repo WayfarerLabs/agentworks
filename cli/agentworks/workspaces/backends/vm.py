@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 import typer
 
 from agentworks.ssh import SSHTarget, ssh_target_for_vm
-from agentworks.workspaces import TMUXINATOR_TEMPLATE
+from agentworks.workspaces.tmuxinator import generate_config
 
 if TYPE_CHECKING:
     from agentworks.config import Config
@@ -49,10 +49,9 @@ def create_vm_workspace(
                 )
             raise
 
-    # Tmuxinator config
+    # Tmuxinator config (no agents yet at workspace creation time)
     if template.tmuxinator:
-        tmux_config = TMUXINATOR_TEMPLATE.format(name=ws_name, workspace_path=workspace_path)
-        ssh_run(target, f"mkdir -p {workspace_path}/.tmuxinator")
+        tmux_config = generate_config(ws_name, workspace_path)
         ssh_run(
             target,
             f"cat > {workspace_path}/.tmuxinator.yml << 'TMUX_EOF'\n{tmux_config}TMUX_EOF",

@@ -245,12 +245,13 @@ provisioned with workspace group membership. Workspace deletion cascades to agen
 
 ### 4.4 Tmuxinator Integration
 
-- [ ] Implement tmuxinator config regeneration: user window + one window per agent
-- [ ] Agent windows configured with `su - <agent-linux-user>` and workspace root as working
+- [x] Implement tmuxinator config regeneration: user window + one window per agent
+- [x] Agent windows configured with `su - <agent-linux-user>` and workspace root as working
       directory
-- [ ] Regenerate on agent create and agent delete
-- [ ] Existing workspace creation continues to generate initial tmuxinator config (user window
+- [x] Regenerate on agent create and agent delete
+- [x] Existing workspace creation continues to generate initial tmuxinator config (user window
       only, no agents yet)
+- [x] Live session updates: add/remove windows in running tmux sessions (best-effort)
 
 **Definition of done:** `workspace shell` opens a tmux session with a user window and one window
 per agent. Adding or removing agents updates the tmuxinator config.

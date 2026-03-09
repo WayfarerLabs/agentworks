@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 
 import typer
 
-from agentworks.workspaces import TMUXINATOR_TEMPLATE
+from agentworks.workspaces.tmuxinator import generate_config
 
 if TYPE_CHECKING:
     from agentworks.config import Config
@@ -50,9 +50,9 @@ def create_local_workspace(
     else:
         workspace_dir.mkdir(parents=True)
 
-    # Tmuxinator config
+    # Tmuxinator config (no agents on local workspaces)
     if template.tmuxinator:
-        tmux_config = TMUXINATOR_TEMPLATE.format(name=ws_name, workspace_path=workspace_path)
+        tmux_config = generate_config(ws_name, workspace_path)
         tmux_file = workspace_dir / ".tmuxinator.yml"
         tmux_file.write_text(tmux_config)
 
