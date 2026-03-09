@@ -272,8 +272,9 @@ workspace tmuxinator session, shell into it, list agents, and delete it.
 
 ### 4.6 Agent Testing
 
-- [ ] Unit tests for name validation (double-hyphen rejection, Linux username derivation)
-- [ ] Unit tests for agent DB operations (CRUD, cascade delete)
+- [x] Unit tests for name validation (double-hyphen rejection, Linux username derivation)
+- [x] Unit tests for agent DB operations (CRUD, cascade delete)
+- [x] Unit tests for tmuxinator config generation
 - [ ] Manual end-to-end test: create workspace, add agents, verify tmuxinator windows, shell into
       agent, delete agent, delete workspace (verify cascade)
 
