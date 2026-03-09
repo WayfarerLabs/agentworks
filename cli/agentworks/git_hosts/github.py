@@ -1,103 +1,72 @@
-"""GitHub git host provider -- SSH key management via REST API."""
+"""GitHub git host provider -- SSH key management via gh CLI."""
 
 from __future__ import annotations
 
 import json
-import os
+import shutil
 import subprocess
-import urllib.error
-import urllib.request
 
 from agentworks.git_hosts.base import GitHostProvider
 
-GITHUB_API = "https://api.github.com"
-
 
 class GitHubProvider(GitHostProvider):
-    """Manages SSH keys on GitHub using gh cli or GITHUB_TOKEN."""
+    """Manages SSH keys on GitHub using the gh CLI."""
 
     def verify_auth(self) -> bool:
-        token = self._get_token()
-        return token is not None
+        if not shutil.which("gh"):
+            return False
+        result = subprocess.run(
+            ["gh", "auth", "status"],
+            capture_output=True,
+            text=True,
+        )
+        return result.returncode == 0
 
     def auth_hint(self) -> str:
-        return "Run 'gh auth login' or set the GITHUB_TOKEN environment variable"
+        if not shutil.which("gh"):
+            return "Install the GitHub CLI (gh) from https://cli.github.com"
+        return (
+            "Run 'gh auth login' and then "
+            "'gh auth refresh -s admin:public_key' for SSH key management"
+        )
 
     def register_key(self, vm_name: str, public_key: str) -> str:
-        token = self._require_token()
-        body = json.dumps({
-            "title": f"agentworks-{vm_name}",
-            "key": public_key,
-        }).encode()
-
-        req = urllib.request.Request(
-            f"{GITHUB_API}/user/keys",
-            data=body,
-            method="POST",
-            headers={
-                "Authorization": f"token {token}",
-                "Content-Type": "application/json",
-                "Accept": "application/vnd.github+json",
-            },
+        result = subprocess.run(
+            [
+                "gh", "api", "user/keys",
+                "-f", f"title=agentworks-{vm_name}",
+                "-f", f"key={public_key}",
+            ],
+            capture_output=True,
+            text=True,
         )
-        with urllib.request.urlopen(req) as resp:
-            data = json.loads(resp.read())
-            return str(data["id"])
+        if result.returncode != 0:
+            stderr = result.stderr.strip()
+            if "422" in stderr or "already" in stderr.lower():
+                raise RuntimeError(
+                    f"GitHub rejected the SSH key (may already exist): {stderr}"
+                )
+            raise RuntimeError(f"Failed to register SSH key with GitHub: {stderr}")
+
+        data = json.loads(result.stdout)
+        return str(data["id"])
 
     def test_key_present(self, remote_key_id: str) -> bool:
-        token = self._require_token()
-        req = urllib.request.Request(
-            f"{GITHUB_API}/user/keys/{remote_key_id}",
-            headers={
-                "Authorization": f"token {token}",
-                "Accept": "application/vnd.github+json",
-            },
+        result = subprocess.run(
+            ["gh", "api", f"user/keys/{remote_key_id}"],
+            capture_output=True,
+            text=True,
         )
-        try:
-            with urllib.request.urlopen(req):
-                return True
-        except urllib.error.HTTPError as e:
-            if e.code == 404:
-                return False
-            raise
+        return result.returncode == 0
 
     def remove_key(self, remote_key_id: str) -> None:
-        token = self._require_token()
-        req = urllib.request.Request(
-            f"{GITHUB_API}/user/keys/{remote_key_id}",
-            method="DELETE",
-            headers={
-                "Authorization": f"token {token}",
-                "Accept": "application/vnd.github+json",
-            },
+        result = subprocess.run(
+            ["gh", "api", "-X", "DELETE", f"user/keys/{remote_key_id}"],
+            capture_output=True,
+            text=True,
         )
-        try:
-            with urllib.request.urlopen(req):
-                pass
-        except urllib.error.HTTPError as e:
-            if e.code != 404:
-                raise
-
-    def _get_token(self) -> str | None:
-        # Try GITHUB_TOKEN env var first
-        env_token = os.environ.get("GITHUB_TOKEN")
-        if env_token:
-            return env_token
-        # Try gh cli
-        try:
-            result = subprocess.run(
-                ["gh", "auth", "token"],
-                capture_output=True,
-                text=True,
+        # Ignore 404 (already deleted)
+        if result.returncode != 0 and "404" not in result.stderr:
+            raise RuntimeError(
+                f"Failed to remove SSH key from GitHub: {result.stderr.strip()}"
             )
-            if result.returncode == 0 and result.stdout.strip():
-                return result.stdout.strip()
-        except FileNotFoundError:
-            pass
-        return None
-
-    def _require_token(self) -> str:
-        token = self._get_token()
-        if token is None:
-            raise RuntimeError("GitHub authentication not available. " + self.auth_hint())
-        return token
