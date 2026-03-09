@@ -14,15 +14,24 @@ from pathlib import Path
 CONFIG_DIR = Path.home() / ".config" / "agentworks"
 CONFIG_PATH = CONFIG_DIR / "config.toml"
 
-NAME_RE = re.compile(r"^[a-z0-9\-_.]+$")
+NAME_RE = re.compile(r"^[a-z0-9]([a-z0-9_-]*[a-z0-9])?$")
 
 
 def validate_name(name: str) -> None:
-    """Validate a resource name, raising typer.Exit(1) on failure."""
+    """Validate a resource name, raising typer.Exit(1) on failure.
+
+    Rules: lowercase alphanumeric, hyphens, underscores. Must start and end with
+    alphanumeric. No consecutive hyphens (reserved for agent username separator).
+    """
     import typer
 
-    if not NAME_RE.match(name):
-        typer.echo(f"Error: invalid name '{name}'. Must match [a-z0-9\\-_.]", err=True)
+    if not NAME_RE.match(name) or "--" in name:
+        typer.echo(
+            f"Error: invalid name '{name}'. Names must be lowercase alphanumeric "
+            "with hyphens or underscores, must start and end with a letter or digit, "
+            "and cannot contain consecutive hyphens (--).",
+            err=True,
+        )
         raise typer.Exit(1)
 
 

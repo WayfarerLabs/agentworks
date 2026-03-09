@@ -209,12 +209,12 @@ representing AI coding agents.
 
 ### 4.1 Name Validation Tightening
 
-- [ ] Update `NAME_RE` in `config.py`: pattern `^[a-z0-9]([a-z0-9_-]*[a-z0-9])?$` with no
+- [x] Update `NAME_RE` in `config.py`: pattern `^[a-z0-9]([a-z0-9_-]*[a-z0-9])?$` with no
       consecutive hyphens (`--`)
-- [ ] Remove dots from allowed characters (breaking change to existing names containing dots, if
+- [x] Remove dots from allowed characters (breaking change to existing names containing dots, if
       any)
-- [ ] Apply validation uniformly to VM hosts, VMs, workspaces, and agents
-- [ ] Add unit tests for name validation (valid names, rejected names, edge cases)
+- [x] Apply validation uniformly to VM hosts, VMs, workspaces, and agents
+- [x] Add unit tests for name validation (valid names, rejected names, edge cases)
 
 **Definition of done:** Names containing dots, double hyphens, or starting/ending with special
 characters are rejected at creation time for all entity types. Existing entities with non-conforming
