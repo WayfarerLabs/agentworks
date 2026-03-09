@@ -6,8 +6,8 @@ from typing import TYPE_CHECKING
 
 import typer
 
-from agentworks.config import NAME_RE, VALID_PLATFORMS
-from agentworks.db import InitStatus
+from agentworks.config import VALID_PLATFORMS, validate_name
+from agentworks.db import InitStatus, VMStatus
 from agentworks.vms.initializer import (
     initialize_vm,
     rejoin_tailscale,
@@ -64,9 +64,7 @@ def create_vm(
         raise typer.Exit(1)
 
     vm_name = name
-    if not NAME_RE.match(vm_name):
-        typer.echo(f"Error: invalid name '{vm_name}'. Must match [a-z0-9\\-_.]", err=True)
-        raise typer.Exit(1)
+    validate_name(vm_name)
 
     if db.get_vm(vm_name) is not None:
         typer.echo(f"Error: VM '{vm_name}' already exists", err=True)
@@ -148,17 +146,9 @@ def create_vm(
 
         # Update DB with platform-specific metadata
         if result.azure_resource_id:
-            db._conn.execute(
-                "UPDATE vms SET azure_resource_id = ? WHERE name = ?",
-                (result.azure_resource_id, vm_name),
-            )
-            db._conn.commit()
+            db.update_vm_azure_resource_id(vm_name, result.azure_resource_id)
         if result.wsl_distro_name:
-            db._conn.execute(
-                "UPDATE vms SET wsl_distro_name = ? WHERE name = ?",
-                (result.wsl_distro_name, vm_name),
-            )
-            db._conn.commit()
+            db.update_vm_wsl_distro_name(vm_name, result.wsl_distro_name)
 
         # VM initialization
         initialize_vm(
@@ -222,7 +212,7 @@ def start_vm(db: Database, config: Config, name: str) -> None:
     vm = _require_vm(db, name)
     provisioner = _get_provisioner_for_vm(db, vm)
     status = provisioner.status(vm)
-    if status.value == "running":
+    if status == VMStatus.RUNNING:
         typer.echo(f"VM '{name}' is already running")
     else:
         provisioner.start(vm)
@@ -235,7 +225,7 @@ def stop_vm(db: Database, config: Config, name: str) -> None:
     vm = _require_vm(db, name)
     provisioner = _get_provisioner_for_vm(db, vm)
     status = provisioner.status(vm)
-    if status.value in ("stopped", "deallocated"):
+    if status in (VMStatus.STOPPED, VMStatus.DEALLOCATED):
         typer.echo(f"VM '{name}' is already stopped")
         return
     provisioner.stop(vm)
@@ -291,15 +281,11 @@ def delete_vm(db: Database, config: Config, name: str, *, force: bool = False) -
 
 def _tailscale_logout(config: Config, vm: VMRow) -> None:
     """Best-effort: SSH to the VM and deregister from Tailscale before deletion."""
-    from agentworks.ssh import SSHTarget
     from agentworks.ssh import run_as_root as ssh_run_as_root
+    from agentworks.ssh import ssh_target_for_vm
 
     assert vm.tailscale_host is not None
-    target = SSHTarget(
-        host=vm.tailscale_host,
-        user=vm.vm_user,
-        identity_file=config.user.ssh_private_key,
-    )
+    target = ssh_target_for_vm(vm, config)
 
     typer.echo("Deregistering from Tailscale...")
     try:

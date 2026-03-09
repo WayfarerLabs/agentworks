@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 import typer
 
-from agentworks.config import NAME_RE
+from agentworks.config import validate_name
 from agentworks.ssh import SSHError, SSHTarget, run
 
 if TYPE_CHECKING:
@@ -15,11 +15,9 @@ if TYPE_CHECKING:
 
 def detect_os(ssh_host: str) -> str | None:
     """Detect the OS of a remote host via SSH."""
-    target = SSHTarget(host=ssh_host, user="")  # uses default SSH user from config
     try:
-        # Use uname to detect OS -- works on macOS and Linux
         result = run(
-            SSHTarget(host=ssh_host, user=target.user or ""),
+            SSHTarget(host=ssh_host, user=""),
             "uname -s",
             timeout=15,
         )
@@ -35,9 +33,7 @@ def detect_os(ssh_host: str) -> str | None:
 
 def add_vm_host(db: Database, name: str, ssh_host: str, platform: str = "lima") -> None:
     """Register a new VM host."""
-    if not NAME_RE.match(name):
-        typer.echo(f"Error: invalid name '{name}'. Must match [a-z0-9\\-_.]", err=True)
-        raise typer.Exit(1)
+    validate_name(name)
 
     if platform != "lima":
         typer.echo(f"Error: only 'lima' platform is supported for VM hosts, got: {platform}", err=True)

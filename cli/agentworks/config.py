@@ -16,6 +16,16 @@ CONFIG_PATH = CONFIG_DIR / "config.toml"
 
 NAME_RE = re.compile(r"^[a-z0-9\-_.]+$")
 
+
+def validate_name(name: str) -> None:
+    """Validate a resource name, raising typer.Exit(1) on failure."""
+    import typer
+
+    if not NAME_RE.match(name):
+        typer.echo(f"Error: invalid name '{name}'. Must match [a-z0-9\\-_.]", err=True)
+        raise typer.Exit(1)
+
+
 # Valid values for enum-like fields
 VALID_PLATFORMS = ("lima", "azure", "wsl2")
 VALID_GIT_HOST_TYPES = ("azdo", "github")

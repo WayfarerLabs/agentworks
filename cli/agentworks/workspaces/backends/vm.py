@@ -8,21 +8,13 @@ from typing import TYPE_CHECKING
 
 import typer
 
-from agentworks.ssh import SSHTarget
+from agentworks.ssh import SSHTarget, ssh_target_for_vm
+from agentworks.workspaces import TMUXINATOR_TEMPLATE
 
 if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import VMRow
     from agentworks.workspaces.templates import ResolvedTemplate
-
-TMUXINATOR_TEMPLATE = """\
-name: {name}
-root: {workspace_path}
-windows:
-  - main:
-      panes:
-        - ""
-"""
 
 
 def create_vm_workspace(
@@ -35,11 +27,7 @@ def create_vm_workspace(
     from agentworks.ssh import run as ssh_run
 
     assert vm.tailscale_host is not None
-    target = SSHTarget(
-        host=vm.tailscale_host,
-        user=vm.vm_user,
-        identity_file=config.user.ssh_private_key,
-    )
+    target = ssh_target_for_vm(vm, config)
 
     workspace_path = f"/home/{vm.vm_user}/workspaces/{ws_name}"
 
@@ -115,11 +103,7 @@ def delete_vm_workspace(
     from agentworks.ssh import run as ssh_run
 
     assert vm.tailscale_host is not None
-    target = SSHTarget(
-        host=vm.tailscale_host,
-        user=vm.vm_user,
-        identity_file=config.user.ssh_private_key,
-    )
+    target = ssh_target_for_vm(vm, config)
 
     try:
         ssh_run(target, f"rm -rf {workspace_path}")

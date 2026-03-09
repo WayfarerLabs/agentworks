@@ -7,8 +7,9 @@ from typing import TYPE_CHECKING
 
 import typer
 
-from agentworks.config import NAME_RE
-from agentworks.workspaces.templates import resolve_template
+from agentworks.config import validate_name
+from agentworks.db import InitStatus, VMStatus
+from agentworks.workspaces.templates import ResolvedTemplate, resolve_template
 
 if TYPE_CHECKING:
     from agentworks.config import Config
@@ -27,9 +28,7 @@ def create_workspace(
 ) -> None:
     """Create a workspace on a VM or locally."""
     ws_name = name
-    if not NAME_RE.match(ws_name):
-        typer.echo(f"Error: invalid name '{ws_name}'. Must match [a-z0-9\\-_.]", err=True)
-        raise typer.Exit(1)
+    validate_name(ws_name)
 
     if db.get_workspace(ws_name) is not None:
         typer.echo(f"Error: workspace '{ws_name}' already exists", err=True)
@@ -54,13 +53,10 @@ def _create_local(
     ws_name: str,
     *,
     template_name: str,
-    template: object,
+    template: ResolvedTemplate,
     open_vscode: bool,
 ) -> None:
     from agentworks.workspaces.backends.local import create_local_workspace
-    from agentworks.workspaces.templates import ResolvedTemplate
-
-    assert isinstance(template, ResolvedTemplate)
 
     typer.echo(f"Creating local workspace '{ws_name}' (template: {template_name})...")
     workspace_path = create_local_workspace(config, ws_name, template)
@@ -80,17 +76,14 @@ def _create_vm(
     *,
     vm_name: str | None,
     template_name: str,
-    template: object,
+    template: ResolvedTemplate,
     open_vscode: bool,
 ) -> None:
     from agentworks.workspaces.backends.vm import create_vm_workspace, generate_code_workspace
-    from agentworks.workspaces.templates import ResolvedTemplate
-
-    assert isinstance(template, ResolvedTemplate)
 
     vm = _resolve_vm(db, vm_name)
 
-    if vm.init_status != "complete":
+    if vm.init_status != InitStatus.COMPLETE.value:
         typer.echo(
             f"Error: VM '{vm.name}' initialization is not complete (status: {vm.init_status}). "
             "Run 'vm delete' and recreate, or SSH in manually to debug.",
@@ -148,7 +141,7 @@ def shell_workspace(
             typer.echo(f"Error: VM '{ws.vm_name}' not found", err=True)
             raise typer.Exit(1)
 
-        if vm.init_status != "complete":
+        if vm.init_status != InitStatus.COMPLETE.value:
             typer.echo(f"Error: VM '{vm.name}' initialization is not complete", err=True)
             raise typer.Exit(1)
 
@@ -233,7 +226,7 @@ def _resolve_vm(db: Database, vm_name: str | None) -> VMRow:
         return vm
 
     vms = db.list_vms()
-    complete_vms = [v for v in vms if v.init_status == "complete"]
+    complete_vms = [v for v in vms if v.init_status == InitStatus.COMPLETE.value]
 
     if len(complete_vms) == 0:
         typer.echo("Error: no VMs available. Create one with 'agentworks vm create'.", err=True)
@@ -250,18 +243,12 @@ def _resolve_vm(db: Database, vm_name: str | None) -> VMRow:
 
 def _ensure_vm_running(db: Database, config: Config, vm: VMRow) -> None:
     """Auto-start a stopped/deallocated VM."""
-    from agentworks.vms.manager import get_provisioner
+    from agentworks.vms.manager import _get_provisioner_for_vm
 
-    vm_host_ssh: str | None = None
-    if vm.vm_host_name:
-        host = db.get_vm_host(vm.vm_host_name)
-        if host:
-            vm_host_ssh = host.ssh_host
-
-    provisioner = get_provisioner(vm.platform, vm_host_ssh)
+    provisioner = _get_provisioner_for_vm(db, vm)
     status = provisioner.status(vm)
 
-    if status.value in ("stopped", "deallocated"):
+    if status in (VMStatus.STOPPED, VMStatus.DEALLOCATED):
         typer.echo(f"VM '{vm.name}' is {status.value}. Starting...")
         provisioner.start(vm)
         typer.echo(f"VM '{vm.name}' started")

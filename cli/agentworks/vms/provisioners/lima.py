@@ -141,7 +141,7 @@ class LimaProvisioner(VMProvisioner):
 
     def status(self, vm: VMRow) -> VMStatus:
         try:
-            output = self._run_lima("limactl list --json", check=False)
+            output = self._run_lima(f"limactl list --json {vm.name}", check=False)
         except SSHError:
             return VMStatus.UNKNOWN
 
@@ -150,13 +150,12 @@ class LimaProvisioner(VMProvisioner):
                 entry = json.loads(line)
             except json.JSONDecodeError:
                 continue
-            if entry.get("name") == vm.name:
-                raw_status = entry.get("status", "").lower()
-                if raw_status == "running":
-                    return VMStatus.RUNNING
-                if raw_status == "stopped":
-                    return VMStatus.STOPPED
-                return VMStatus.UNKNOWN
+            raw_status = entry.get("status", "").lower()
+            if raw_status == "running":
+                return VMStatus.RUNNING
+            if raw_status == "stopped":
+                return VMStatus.STOPPED
+            return VMStatus.UNKNOWN
         return VMStatus.UNKNOWN
 
     def _get_ssh_target(self, vm_name: str) -> SSHTarget:

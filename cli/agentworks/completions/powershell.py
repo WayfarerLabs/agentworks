@@ -85,7 +85,7 @@ def _emit_dispatch(lines: list[str], spec: CommandSpec) -> None:
         if sub.subcommands:
             _emit_group_completions(lines, sub, depth=2)
         else:
-            _emit_leaf_completions(lines, sub, depth=2)
+            _emit_leaf_completions(lines, sub)
         lines.append("        }")
 
     lines.append("    }")
@@ -125,7 +125,7 @@ def _emit_group_completions(
 
 
 def _emit_leaf_completions(
-    lines: list[str], spec: CommandSpec, depth: int
+    lines: list[str], spec: CommandSpec
 ) -> None:
     """Emit completions for a leaf command (no subcommands)."""
     _emit_param_completions(lines, spec, token_offset=2)

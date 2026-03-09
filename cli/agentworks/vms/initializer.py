@@ -88,8 +88,6 @@ def rejoin_tailscale(
 
     Returns the new Tailscale IP.
     """
-    import os
-
     typer.echo("Tailscale node not reachable. Re-joining tailnet...")
 
     # Ensure Tailscale is installed (idempotent)
@@ -97,6 +95,19 @@ def rejoin_tailscale(
         "bash -c 'command -v tailscale >/dev/null || curl -fsSL https://tailscale.com/install.sh | sh'",
         check=False,
     )
+
+    return _join_tailscale(db, vm_name, exec_target, is_wsl2=is_wsl2)
+
+
+def _join_tailscale(
+    db: Database,
+    vm_name: str,
+    exec_target: ExecTarget,
+    *,
+    is_wsl2: bool = False,
+) -> str:
+    """Prompt for auth key, join Tailscale, update DB. Returns the Tailscale IP."""
+    import os
 
     ts_auth_key = os.environ.get("TAILSCALE_AUTH_KEY")
     if not ts_auth_key:
@@ -164,22 +175,7 @@ def initialize_vm(
     typer.echo("  Installing Tailscale...")
     exec_target.run_as_root("bash -c 'curl -fsSL https://tailscale.com/install.sh | sh'")
 
-    import os
-
-    ts_auth_key = os.environ.get("TAILSCALE_AUTH_KEY")
-    if not ts_auth_key:
-        typer.echo("  Generate a key at https://login.tailscale.com/admin/settings/keys")
-        ts_auth_key = typer.prompt("  Tailscale auth key")
-    ts_cmd = f"tailscale up --auth-key {ts_auth_key}"
-    if is_wsl2:
-        ts_cmd += " --userspace-networking"
-    exec_target.run_as_root(ts_cmd)
-
-    # Step 5: Read Tailscale IP and update DB
-    result = exec_target.run_as_root("tailscale ip -4")
-    tailscale_ip = result.stdout.strip()
-    typer.echo(f"  Tailscale IP: {tailscale_ip}")
-    db.update_vm_tailscale(vm_name, tailscale_ip)
+    tailscale_ip = _join_tailscale(db, vm_name, exec_target, is_wsl2=is_wsl2)
     db.update_vm_init_status(vm_name, InitStatus.TAILSCALE_UP)
 
     # -- Switch to Tailscale SSH -------------------------------------------

@@ -25,6 +25,18 @@ class SSHTarget:
     proxy_jump: str | None = None
 
 
+def ssh_target_for_vm(vm: object, config: object) -> SSHTarget:
+    """Build an SSHTarget from a VMRow and Config.
+
+    Accepts object types to avoid circular imports with db/config modules.
+    """
+    return SSHTarget(
+        host=vm.tailscale_host,  # type: ignore[attr-defined]
+        user=vm.vm_user,  # type: ignore[attr-defined]
+        identity_file=config.user.ssh_private_key,  # type: ignore[attr-defined]
+    )
+
+
 @dataclass
 class SSHResult:
     """Result of a remote command execution."""

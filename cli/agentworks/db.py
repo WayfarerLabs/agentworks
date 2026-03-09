@@ -301,6 +301,14 @@ class Database:
         self._conn.execute("UPDATE vms SET ssh_public_key = ? WHERE name = ?", (ssh_public_key, name))
         self._conn.commit()
 
+    def update_vm_azure_resource_id(self, name: str, azure_resource_id: str) -> None:
+        self._conn.execute("UPDATE vms SET azure_resource_id = ? WHERE name = ?", (azure_resource_id, name))
+        self._conn.commit()
+
+    def update_vm_wsl_distro_name(self, name: str, wsl_distro_name: str) -> None:
+        self._conn.execute("UPDATE vms SET wsl_distro_name = ? WHERE name = ?", (wsl_distro_name, name))
+        self._conn.commit()
+
     def update_vm_last_seen(self, name: str) -> None:
         self._conn.execute(
             "UPDATE vms SET last_seen_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE name = ?",

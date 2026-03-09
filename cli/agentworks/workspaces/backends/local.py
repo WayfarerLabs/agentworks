@@ -10,18 +10,11 @@ from typing import TYPE_CHECKING
 
 import typer
 
+from agentworks.workspaces import TMUXINATOR_TEMPLATE
+
 if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.workspaces.templates import ResolvedTemplate
-
-TMUXINATOR_TEMPLATE = """\
-name: {name}
-root: {workspace_path}
-windows:
-  - main:
-      panes:
-        - ""
-"""
 
 
 def create_local_workspace(

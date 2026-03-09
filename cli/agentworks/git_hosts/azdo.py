@@ -13,6 +13,7 @@ class AzDOProvider(GitHostProvider):
 
     def __init__(self, org: str) -> None:
         self._org = org
+        self._cached_token: str | None = None
 
     def verify_auth(self) -> bool:
         try:
@@ -86,6 +87,8 @@ class AzDOProvider(GitHostProvider):
                 raise
 
     def _get_token(self) -> str:
+        if self._cached_token is not None:
+            return self._cached_token
         result = subprocess.run(
             ["az", "account", "get-access-token", "--resource", "499b84ac-1321-427f-aa17-267ca6975798", "--query",
              "accessToken", "-o", "tsv"],
@@ -94,4 +97,5 @@ class AzDOProvider(GitHostProvider):
         )
         if result.returncode != 0:
             raise RuntimeError(f"Failed to get Azure AD token: {result.stderr.strip()}")
-        return result.stdout.strip()
+        self._cached_token = result.stdout.strip()
+        return self._cached_token
