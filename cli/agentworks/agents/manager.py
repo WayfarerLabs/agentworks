@@ -40,12 +40,19 @@ def create_agent(
 
     linux_user = derive_linux_user(workspace_name, name)
 
-    if ws.type == "vm":
-        vm = _require_vm_for_workspace(db, ws)
-        _create_agent_on_vm(vm, config, linux_user, workspace_name)
-    elif ws.type == "local":
+    if ws.type == "local":
         typer.echo("Error: agents are not supported on local workspaces", err=True)
         raise typer.Exit(1)
+
+    if ws.type == "vm":
+        vm = _require_vm_for_workspace(db, ws)
+        try:
+            _create_agent_on_vm(vm, config, linux_user, workspace_name)
+        except Exception as e:
+            typer.echo(f"Error creating agent: {e}", err=True)
+            typer.echo(f"  Cleaning up user '{linux_user}'...", err=True)
+            _delete_agent_on_vm(vm, config, linux_user)
+            raise typer.Exit(1) from None
 
     agent = db.insert_agent(name, workspace_name, linux_user)
 
@@ -247,20 +254,13 @@ def _create_agent_on_vm(
     typer.echo(f"  Creating user '{linux_user}' on VM '{vm.name}'...")
     home = f"/home/{linux_user}"
     groups = f"ws-{workspace_name},aw-tools"
-    run_as_root(
-        target,
-        f"useradd -m -s {AGENT_SHELL} {linux_user}"
-        f" && usermod -aG {groups} {linux_user}",
-    )
+    run_as_root(target, f"useradd -m -s {AGENT_SHELL} {linux_user}")
+    run_as_root(target, f"usermod -aG {groups} {linux_user}")
 
     # Write a minimal .bashrc with a clear agent prompt
-    run_as_root(
-        target,
-        f"cat > {home}/.bashrc << 'BASHRC_EOF'\n"
-        f"export PS1='[agent:{linux_user}] \\w\\$ '\n"
-        f"BASHRC_EOF\n"
-        f"chown {linux_user}:{linux_user} {home}/.bashrc",
-    )
+    bashrc = f"export PS1='[agent:{linux_user}] \\w\\$ '"
+    run_as_root(target, f"printf '%s\\n' '{bashrc}' > {home}/.bashrc")
+    run_as_root(target, f"chown {linux_user}:{linux_user} {home}/.bashrc")
 
 
 def _delete_agent_on_vm(

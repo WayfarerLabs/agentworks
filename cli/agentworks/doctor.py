@@ -138,16 +138,12 @@ def run_doctor() -> None:
         elif current == latest:
             ok(f"Schema up to date (version {current})")
             db = Database()
-            vm_count = len(db.list_vms())
-            ws_count = len(db.list_workspaces())
-            ok(f"{vm_count} VMs, {ws_count} workspaces")
+            _report_db_contents(db, ok, warn)
         elif current < latest:
             warn(f"Schema at version {current}, latest is {latest}. Migrating...")
             db = Database()  # auto-migrates
             ok(f"Migrated to version {latest}")
-            vm_count = len(db.list_vms())
-            ws_count = len(db.list_workspaces())
-            ok(f"{vm_count} VMs, {ws_count} workspaces")
+            _report_db_contents(db, ok, warn)
         else:
             fail(f"Schema version {current} is newer than latest {latest} (downgrade?)")
     except Exception as e:
@@ -168,6 +164,35 @@ def run_doctor() -> None:
     typer.echo(f"\nResults: {ok_count} ok, {warn_count} warnings, {fail_count} failures")
     if fail_count > 0:
         raise typer.Exit(1)
+
+
+def _report_db_contents(
+    db: object,
+    ok: object,
+    warn: object,
+) -> None:
+    """Report DB contents and flag VMs in non-complete states."""
+    from agentworks.db import Database, InitStatus
+    from agentworks.vms.init_log import find_init_logs
+
+    assert isinstance(db, Database)
+    assert callable(ok) and callable(warn)
+
+    vms = db.list_vms()
+    ws_count = len(db.list_workspaces())
+    ok(f"{len(vms)} VMs, {ws_count} workspaces")
+
+    for vm in vms:
+        if vm.init_status == InitStatus.FAILED.value:
+            logs = find_init_logs(vm.name)
+            log_hint = f" Log: {logs[0]}" if logs else ""
+            warn(f"VM '{vm.name}' is in 'failed' state (only delete supported).{log_hint}")
+        elif vm.init_status == InitStatus.PARTIAL.value:
+            logs = find_init_logs(vm.name)
+            log_hint = f" Log: {logs[0]}" if logs else ""
+            warn(f"VM '{vm.name}' initialized with warnings.{log_hint}")
+        elif vm.init_status not in (InitStatus.COMPLETE.value, InitStatus.PENDING.value):
+            warn(f"VM '{vm.name}' has unexpected init status: {vm.init_status}")
 
 
 def _check_ssh_key(

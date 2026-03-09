@@ -26,6 +26,7 @@ class InitStatus(Enum):
     TAILSCALE_UP = "tailscale_up"
     INITIALIZING = "initializing"
     COMPLETE = "complete"
+    PARTIAL = "partial"
     FAILED = "failed"
 
 

@@ -3,6 +3,9 @@
 Two phases:
   A. Bootstrap (over provisioning transport): user, system packages, SSH key, Tailscale
   B. Setup (over Tailscale SSH): user packages, install commands, dotfiles, git host keys
+
+Phase A steps are fatal -- if they fail, the VM is unreachable and useless.
+Phase B steps are non-fatal -- failures produce warnings and a 'partial' status.
 """
 
 from __future__ import annotations
@@ -13,13 +16,36 @@ import typer
 
 from agentworks.db import InitStatus
 from agentworks.ssh import ExecTarget, SSHError, SSHTarget, rsync_to
+from agentworks.vms.init_log import InitLogger
 
 if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database
     from agentworks.git_hosts.base import GitHostProvider
+    from agentworks.ssh import SSHResult
 
 SYSTEM_PACKAGES = ["openssh-server", "curl", "git", "sudo", "ca-certificates", "tmux", "tmuxinator"]
+
+
+def _run_logged(
+    target: ExecTarget,
+    command: str,
+    logger: InitLogger,
+    *,
+    as_root: bool = False,
+    check: bool = True,
+    timeout: int | None = None,
+) -> SSHResult:
+    """Run a command on the target and log the command + full output."""
+    logger.output(f"$ {command}")
+    result = target.run_as_root(command, check=check, timeout=timeout) if as_root else target.run(
+        command, check=check, timeout=timeout,
+    )
+    if result.stdout:
+        logger.output(result.stdout)
+    if result.stderr:
+        logger.output(result.stderr)
+    return result
 
 
 def verify_tailscale_available() -> None:
@@ -105,6 +131,7 @@ def _join_tailscale(
     exec_target: ExecTarget,
     *,
     is_wsl2: bool = False,
+    logger: InitLogger | None = None,
 ) -> str:
     """Prompt for auth key, join Tailscale, update DB. Returns the Tailscale IP."""
     import os
@@ -116,9 +143,14 @@ def _join_tailscale(
     ts_cmd = f"tailscale up --auth-key {ts_auth_key}"
     if is_wsl2:
         ts_cmd += " --userspace-networking"
-    exec_target.run_as_root(ts_cmd)
 
-    result = exec_target.run_as_root("tailscale ip -4")
+    if logger:
+        _run_logged(exec_target, ts_cmd, logger, as_root=True)
+        result = _run_logged(exec_target, "tailscale ip -4", logger, as_root=True)
+    else:
+        exec_target.run_as_root(ts_cmd)
+        result = exec_target.run_as_root("tailscale ip -4")
+
     tailscale_ip = result.stdout.strip()
     typer.echo(f"  Tailscale IP: {tailscale_ip}")
     db.update_vm_tailscale(vm_name, tailscale_ip)
@@ -136,49 +168,102 @@ def initialize_vm(
     is_wsl2: bool = False,
     vm_user: str = "agentworks",
 ) -> None:
-    """Run the full initialization sequence on a newly provisioned VM."""
-    home = f"/home/{vm_user}"
+    """Run the full initialization sequence on a newly provisioned VM.
 
-    # -- Phase A: Bootstrap (over provisioning transport) ------------------
+    Phase A (bootstrap) steps are fatal -- any failure aborts initialization.
+    Phase B (setup) steps are non-fatal -- failures are logged as warnings
+    and the VM gets 'partial' status instead of 'complete'.
+    """
+    home = f"/home/{vm_user}"
+    logger = InitLogger(vm_name)
+
+    try:
+        ts_target = _phase_a_bootstrap(db, config, vm_name, exec_target, home, vm_user, is_wsl2, logger)
+        _phase_b_setup(db, config, vm_name, ts_target, providers, home, vm_user, extra_packages, logger)
+    except Exception:
+        logger.close()
+        raise
+
+    # Determine final status
+    if logger.has_warnings:
+        db.update_vm_init_status(vm_name, InitStatus.PARTIAL)
+        logger.close()
+        typer.echo(f"\nVM '{vm_name}' initialization completed with {len(logger.warnings)} warning(s):")
+        for w in logger.warnings:
+            typer.echo(f"  - {w}")
+        typer.echo(f"Init log: {logger.path}")
+    else:
+        db.update_vm_init_status(vm_name, InitStatus.COMPLETE)
+        logger.close()
+        typer.echo(f"VM '{vm_name}' initialization complete")
+
+
+def _phase_a_bootstrap(
+    db: Database,
+    config: Config,
+    vm_name: str,
+    exec_target: ExecTarget,
+    home: str,
+    vm_user: str,
+    is_wsl2: bool,
+    logger: InitLogger,
+) -> ExecTarget:
+    """Phase A: Bootstrap (over provisioning transport). All steps are fatal.
+
+    Returns the Tailscale ExecTarget for Phase B.
+    """
     typer.echo("Phase A: Bootstrap...")
     db.update_vm_init_status(vm_name, InitStatus.BOOTSTRAPPING)
 
     # Step 1: Ensure user exists
+    logger.step("Ensure user")
     typer.echo(f"  Ensuring user '{vm_user}'...")
-    exec_target.run_as_root(
+    _run_logged(
+        exec_target,
         f"bash -c 'id {vm_user} >/dev/null 2>&1 || useradd -m -s /bin/bash {vm_user}'",
-        check=False,
+        logger, as_root=True, check=False,
     )
-    exec_target.run_as_root(
-        f"usermod -aG sudo {vm_user}",
-    )
-    exec_target.run_as_root(
+    _run_logged(exec_target, f"usermod -aG sudo {vm_user}", logger, as_root=True)
+    _run_logged(
+        exec_target,
         f"bash -c \"echo '{vm_user} ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/{vm_user}\"",
+        logger, as_root=True,
     )
 
     # Step 2: System packages
+    logger.step("System packages")
     typer.echo("  Installing system packages...")
     pkg_str = " ".join(SYSTEM_PACKAGES)
-    exec_target.run_as_root("apt-get update -qq")
-    exec_target.run_as_root(f"apt-get install -y -qq {pkg_str}")
+    _run_logged(exec_target, "apt-get update -qq", logger, as_root=True)
+    _run_logged(exec_target, f"apt-get install -y -qq {pkg_str}", logger, as_root=True)
 
     # Step 3: Add user's SSH public key
+    logger.step("SSH public key")
     typer.echo("  Adding SSH public key...")
     pub_key = config.user.ssh_public_key.read_text().strip()
-    exec_target.run_as_root(f"mkdir -p {home}/.ssh")
-    exec_target.run_as_root(f"bash -c \"echo '{pub_key}' >> {home}/.ssh/authorized_keys\"")
-    exec_target.run_as_root(f"chown -R {vm_user}:{vm_user} {home}/.ssh")
-    exec_target.run_as_root(f"chmod 700 {home}/.ssh")
-    exec_target.run_as_root(f"chmod 600 {home}/.ssh/authorized_keys")
+    _run_logged(exec_target, f"mkdir -p {home}/.ssh", logger, as_root=True)
+    _run_logged(
+        exec_target,
+        f"bash -c \"echo '{pub_key}' >> {home}/.ssh/authorized_keys\"",
+        logger, as_root=True,
+    )
+    _run_logged(exec_target, f"chown -R {vm_user}:{vm_user} {home}/.ssh", logger, as_root=True)
+    _run_logged(exec_target, f"chmod 700 {home}/.ssh", logger, as_root=True)
+    _run_logged(exec_target, f"chmod 600 {home}/.ssh/authorized_keys", logger, as_root=True)
 
     # Step 4: Install and join Tailscale
+    logger.step("Tailscale")
     typer.echo("  Installing Tailscale...")
-    exec_target.run_as_root("bash -c 'curl -fsSL https://tailscale.com/install.sh | sh'")
+    _run_logged(
+        exec_target,
+        "bash -c 'curl -fsSL https://tailscale.com/install.sh | sh'",
+        logger, as_root=True,
+    )
 
-    tailscale_ip = _join_tailscale(db, vm_name, exec_target, is_wsl2=is_wsl2)
+    tailscale_ip = _join_tailscale(db, vm_name, exec_target, is_wsl2=is_wsl2, logger=logger)
     db.update_vm_init_status(vm_name, InitStatus.TAILSCALE_UP)
 
-    # -- Switch to Tailscale SSH -------------------------------------------
+    # Switch to Tailscale SSH
     ts_target = ExecTarget(
         ssh=SSHTarget(
             host=tailscale_ip,
@@ -188,63 +273,116 @@ def initialize_vm(
     )
 
     # Verify Tailscale SSH works
+    logger.step("Verify Tailscale SSH")
     typer.echo("  Verifying Tailscale SSH...")
-    ts_target.run("echo ok", timeout=30)
+    _run_logged(ts_target, "echo ok", logger, timeout=30)
 
-    # -- Phase B: Setup (over Tailscale SSH) -------------------------------
+    return ts_target
+
+
+def _phase_b_setup(
+    db: Database,
+    config: Config,
+    vm_name: str,
+    ts_target: ExecTarget,
+    providers: dict[str, GitHostProvider],
+    home: str,
+    vm_user: str,
+    extra_packages: list[str] | None,
+    logger: InitLogger,
+) -> None:
+    """Phase B: Setup (over Tailscale SSH). Non-fatal steps warn and continue."""
     typer.echo("Phase B: Setup...")
     db.update_vm_init_status(vm_name, InitStatus.INITIALIZING)
 
-    # Step 6: User apt packages
+    # Non-fatal: apt packages
     all_apt = config.vm.apt + (extra_packages or [])
     if all_apt:
+        logger.step("User apt packages")
         typer.echo(f"  Installing {len(all_apt)} apt packages...")
         apt_str = " ".join(all_apt)
-        ts_target.run_as_root(f"apt-get install -y -qq {apt_str}")
+        try:
+            _run_logged(ts_target, f"apt-get install -y -qq {apt_str}", logger, as_root=True)
+        except SSHError as e:
+            msg = f"apt packages failed: {e}"
+            logger.warning(msg)
+            typer.echo(f"  Warning: {msg}", err=True)
 
-    # Step 7: Snap packages
+    # Non-fatal: snap packages
     if config.vm.snap:
+        logger.step("Snap packages")
         typer.echo(f"  Installing {len(config.vm.snap)} snap packages...")
         for pkg in config.vm.snap:
-            ts_target.run_as_root(f"snap install {pkg}")
+            try:
+                _run_logged(ts_target, f"snap install {pkg}", logger, as_root=True)
+            except SSHError as e:
+                msg = f"snap install '{pkg}' failed: {e}"
+                logger.warning(msg)
+                typer.echo(f"  Warning: {msg}", err=True)
 
-    # Step 8: Install commands (continue on failure)
+    # Non-fatal: install commands
     for i, cmd in enumerate(config.vm.install_commands, 1):
+        logger.step(f"Install command {i}/{len(config.vm.install_commands)}")
         typer.echo(f"  Install command {i}/{len(config.vm.install_commands)}: {cmd[:60]}...")
         try:
-            ts_target.run(f"bash -lc '{cmd}'")
+            _run_logged(ts_target, f"bash -lc '{cmd}'", logger)
         except SSHError as e:
-            typer.echo(f"  Warning: install command failed: {e}", err=True)
+            msg = f"install command failed: {cmd[:60]}... ({e})"
+            logger.warning(msg)
+            typer.echo(f"  Warning: {msg}", err=True)
 
-    # Step 9: Set default shell
+    # Non-fatal: set default shell
+    logger.step("Shell configuration")
     shell = config.user.shell
     typer.echo(f"  Setting shell to {shell}...")
-    ts_target.run_as_root(f"chsh -s $(which {shell}) {vm_user}")
+    try:
+        _run_logged(ts_target, f"chsh -s $(which {shell}) {vm_user}", logger, as_root=True)
+    except SSHError as e:
+        msg = f"shell configuration failed: {e}"
+        logger.warning(msg)
+        typer.echo(f"  Warning: {msg}", err=True)
 
-    # Step 10: Generate SSH keypair
+    # Non-fatal: generate SSH keypair
+    logger.step("SSH keypair generation")
     typer.echo("  Generating SSH keypair...")
-    ts_target.run("ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -N ''")
-    result = ts_target.run("cat ~/.ssh/id_ed25519.pub")
-    vm_pub_key = result.stdout.strip()
-    db.update_vm_ssh_public_key(vm_name, vm_pub_key)
+    try:
+        _run_logged(ts_target, "ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -N ''", logger)
+        result = _run_logged(ts_target, "cat ~/.ssh/id_ed25519.pub", logger)
+        vm_pub_key = result.stdout.strip()
+        db.update_vm_ssh_public_key(vm_name, vm_pub_key)
+    except SSHError as e:
+        msg = f"SSH keypair generation failed: {e}"
+        logger.warning(msg)
+        typer.echo(f"  Warning: {msg}", err=True)
+        vm_pub_key = None
 
-    # Step 11: Register SSH key with git hosts
-    for gh_name, provider in providers.items():
-        typer.echo(f"  Registering SSH key with {gh_name}...")
-        remote_key_id = provider.register_key(vm_name, vm_pub_key)
-        db.insert_vm_git_host_key(vm_name, gh_name, remote_key_id)
+    # Non-fatal: register SSH key with git hosts (skip if no keypair)
+    if vm_pub_key:
+        for gh_name, provider in providers.items():
+            logger.step(f"Git host key: {gh_name}")
+            typer.echo(f"  Registering SSH key with {gh_name}...")
+            try:
+                remote_key_id = provider.register_key(vm_name, vm_pub_key)
+                db.insert_vm_git_host_key(vm_name, gh_name, remote_key_id)
+            except Exception as e:
+                msg = f"git host key registration failed for {gh_name}: {e}"
+                logger.warning(msg)
+                typer.echo(f"  Warning: {msg}", err=True)
+    elif providers:
+        msg = "skipped git host key registration (no SSH keypair)"
+        logger.warning(msg)
+        typer.echo(f"  Warning: {msg}", err=True)
 
-    # Step 12: Dotfiles
+    # Non-fatal: dotfiles
     if config.dotfiles.enabled and config.dotfiles.source.exists():
+        logger.step("Dotfiles")
         typer.echo("  Copying dotfiles...")
-        assert ts_target.ssh is not None
-        rsync_to(ts_target.ssh, config.dotfiles.source, f"{home}/.dotfiles")
-        typer.echo(f"  Running dotfiles install: {config.dotfiles.install_cmd}")
         try:
-            ts_target.run(f"cd ~/.dotfiles && {config.dotfiles.install_cmd}")
-        except SSHError as e:
-            typer.echo(f"  Warning: dotfiles install failed: {e}", err=True)
-
-    # -- Done --------------------------------------------------------------
-    db.update_vm_init_status(vm_name, InitStatus.COMPLETE)
-    typer.echo(f"VM '{vm_name}' initialization complete")
+            assert ts_target.ssh is not None
+            rsync_to(ts_target.ssh, config.dotfiles.source, f"{home}/.dotfiles")
+            typer.echo(f"  Running dotfiles install: {config.dotfiles.install_cmd}")
+            _run_logged(ts_target, f"cd ~/.dotfiles && {config.dotfiles.install_cmd}", logger)
+        except (SSHError, Exception) as e:
+            msg = f"dotfiles install failed: {e}"
+            logger.warning(msg)
+            typer.echo(f"  Warning: {msg}", err=True)

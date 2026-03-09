@@ -192,16 +192,16 @@ status serves as a reminder that something was skipped during init. `vm list` sh
 
 #### Tasks
 
-- [ ] Add `partial` to `init_status` enum (currently: `not_started`, `in_progress`, `completed`,
+- [x] Add `partial` to `init_status` enum (currently: `not_started`, `in_progress`, `completed`,
       `failed`)
-- [ ] Classify init steps as fatal vs non-fatal in `initializer.py`
-- [ ] Wrap non-fatal steps in try/except, collect warnings, continue on failure
-- [ ] Implement init log writer (structured output with step headers and timestamps)
-- [ ] On fatal failure: prompt to delete or keep, block subsequent operations on `failed` VMs
-- [ ] On partial completion: set `partial` status, print warnings summary and log path
-- [ ] Update `vm list` to show init status for non-`completed` VMs
-- [ ] Update `doctor` to report VMs in `partial` or `failed` state with log paths
-- [ ] Guard agentworks commands (workspace/agent ops) against `failed` VMs
+- [x] Classify init steps as fatal vs non-fatal in `initializer.py`
+- [x] Wrap non-fatal steps in try/except, collect warnings, continue on failure
+- [x] Implement init log writer (structured output with step headers and timestamps)
+- [x] On fatal failure: prompt to delete or keep, block subsequent operations on `failed` VMs
+- [x] On partial completion: set `partial` status, print warnings summary and log path
+- [x] Update `vm list` to show init status for non-`completed` VMs
+- [x] Update `doctor` to report VMs in `partial` or `failed` state with log paths
+- [x] Guard agentworks commands (workspace/agent ops) against `failed` VMs
 
 **Definition of done:** Non-fatal init failures produce warnings and a `partial` status rather than
 aborting. Fatal failures prompt for deletion. Init logs are captured and accessible for

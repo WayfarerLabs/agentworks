@@ -161,9 +161,21 @@ def create_vm(
         )
     except Exception:
         db.update_vm_init_status(vm_name, InitStatus.FAILED)
-        raise
+        from agentworks.vms.init_log import find_init_logs
 
-    typer.echo(f"\nVM '{vm_name}' is ready!")
+        logs = find_init_logs(vm_name)
+        if logs:
+            typer.echo(f"Init log: {logs[0]}", err=True)
+        _prompt_delete_failed_vm(db, config, vm_name)
+        return
+
+    # Final status is set by initialize_vm (COMPLETE or PARTIAL)
+    vm = db.get_vm(vm_name)
+    assert vm is not None
+    if vm.init_status == InitStatus.PARTIAL.value:
+        typer.echo(f"\nVM '{vm_name}' is ready (with warnings -- see above)")
+    else:
+        typer.echo(f"\nVM '{vm_name}' is ready!")
 
 
 def list_vms(db: Database) -> None:
@@ -195,6 +207,7 @@ def shell_vm(db: Database, config: Config, name: str) -> None:
     import os
 
     vm = _require_vm(db, name)
+    _guard_failed_vm(vm)
     if vm.tailscale_host is None:
         typer.echo(f"Error: VM '{name}' has no Tailscale IP (init may not be complete)", err=True)
         raise typer.Exit(1)
@@ -210,6 +223,7 @@ def shell_vm(db: Database, config: Config, name: str) -> None:
 def start_vm(db: Database, config: Config, name: str) -> None:
     """Start a stopped VM."""
     vm = _require_vm(db, name)
+    _guard_failed_vm(vm)
     provisioner = _get_provisioner_for_vm(db, vm)
     status = provisioner.status(vm)
     if status == VMStatus.RUNNING:
@@ -223,6 +237,7 @@ def start_vm(db: Database, config: Config, name: str) -> None:
 def stop_vm(db: Database, config: Config, name: str) -> None:
     """Stop a running VM."""
     vm = _require_vm(db, name)
+    _guard_failed_vm(vm)
     provisioner = _get_provisioner_for_vm(db, vm)
     status = provisioner.status(vm)
     if status in (VMStatus.STOPPED, VMStatus.DEALLOCATED):
@@ -274,9 +289,32 @@ def delete_vm(db: Database, config: Config, name: str, *, force: bool = False) -
     except Exception as e:
         typer.echo(f"Warning: platform cleanup failed: {e}", err=True)
 
+    # Clean up init logs
+    from agentworks.vms.init_log import delete_init_logs
+
+    log_count = delete_init_logs(name)
+    if log_count:
+        typer.echo(f"Cleaned up {log_count} init log(s)")
+
     # Remove from DB (cascades workspaces and keys)
     db.delete_vm(name)
     typer.echo(f"VM '{name}' deleted")
+
+
+def _prompt_delete_failed_vm(db: Database, config: Config, vm_name: str) -> None:
+    """After a fatal init failure, prompt user to delete or keep the VM."""
+    typer.echo(
+        "\nInit failed. Delete VM? (You can keep it for manual troubleshooting, "
+        "but agentworks cannot manage it.)",
+        err=True,
+    )
+    if typer.confirm("Delete VM?", default=True):
+        delete_vm(db, config, vm_name, force=True)
+    else:
+        typer.echo(
+            f"VM '{vm_name}' kept in 'failed' state. Only 'vm delete' is supported.",
+            err=True,
+        )
 
 
 def _tailscale_logout(config: Config, vm: VMRow) -> None:
@@ -294,6 +332,21 @@ def _tailscale_logout(config: Config, vm: VMRow) -> None:
         typer.echo("Tailscale node deregistered")
     except Exception as e:
         typer.echo(f"Warning: Tailscale logout failed (node may remain in admin console): {e}", err=True)
+
+
+def _guard_failed_vm(vm: VMRow) -> None:
+    """Block operations on VMs in 'failed' state."""
+    if vm.init_status == InitStatus.FAILED.value:
+        from agentworks.vms.init_log import find_init_logs
+
+        logs = find_init_logs(vm.name)
+        log_hint = f" See init log: {logs[0]}" if logs else ""
+        typer.echo(
+            f"Error: VM '{vm.name}' is in 'failed' state. "
+            f"Only 'vm delete' is supported.{log_hint}",
+            err=True,
+        )
+        raise typer.Exit(1)
 
 
 def _require_vm(db: Database, name: str) -> VMRow:

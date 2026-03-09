@@ -56,12 +56,24 @@ def _create_local(
     template: ResolvedTemplate,
     open_vscode: bool,
 ) -> None:
-    from agentworks.workspaces.backends.local import create_local_workspace
+    from agentworks.workspaces.backends.local import create_local_workspace, delete_local_workspace
 
-    typer.echo(f"Creating local workspace '{ws_name}' (template: {template_name})...")
-    workspace_path = create_local_workspace(config, ws_name, template)
+    workspace_path: str | None = None
+    try:
+        typer.echo(f"Creating local workspace '{ws_name}' (template: {template_name})...")
+        workspace_path = create_local_workspace(config, ws_name, template)
 
-    db.insert_workspace(ws_name, ws_type="local", workspace_path=workspace_path, template=template_name)
+        db.insert_workspace(ws_name, ws_type="local", workspace_path=workspace_path, template=template_name)
+    except SystemExit:
+        # typer.Exit -- already reported, just clean up
+        if workspace_path:
+            delete_local_workspace(ws_name, workspace_path)
+        raise
+    except Exception as e:
+        typer.echo(f"Error creating workspace: {e}", err=True)
+        if workspace_path:
+            delete_local_workspace(ws_name, workspace_path)
+        raise typer.Exit(1) from None
 
     if open_vscode:
         subprocess.run(["code", workspace_path], check=False)
@@ -79,30 +91,47 @@ def _create_vm(
     template: ResolvedTemplate,
     open_vscode: bool,
 ) -> None:
-    from agentworks.workspaces.backends.vm import create_vm_workspace, generate_code_workspace
+    from agentworks.workspaces.backends.vm import (
+        create_vm_workspace,
+        delete_vm_workspace,
+        generate_code_workspace,
+    )
 
     vm = _resolve_vm(db, vm_name)
 
-    if vm.init_status != InitStatus.COMPLETE.value:
-        typer.echo(
-            f"Error: VM '{vm.name}' initialization is not complete (status: {vm.init_status}). "
-            "Run 'vm delete' and recreate, or SSH in manually to debug.",
-            err=True,
-        )
-        raise typer.Exit(1)
+    _guard_vm_status(vm)
 
     _ensure_vm_running(db, config, vm)
 
-    typer.echo(f"Creating workspace '{ws_name}' on VM '{vm.name}' (template: {template_name})...")
-    workspace_path = create_vm_workspace(vm, config, ws_name, template)
+    workspace_path: str | None = None
+    code_ws_path: str | None = None
 
-    code_ws_path = generate_code_workspace(vm, config, ws_name, workspace_path)
-    typer.echo(f"VS Code workspace: {code_ws_path}")
+    def _cleanup() -> None:
+        if workspace_path:
+            delete_vm_workspace(vm, config, ws_name, workspace_path)
+        if code_ws_path:
+            from pathlib import Path
 
-    db.insert_workspace(
-        ws_name, ws_type="vm", workspace_path=workspace_path,
-        vm_name=vm.name, template=template_name,
-    )
+            Path(code_ws_path).unlink(missing_ok=True)
+
+    try:
+        typer.echo(f"Creating workspace '{ws_name}' on VM '{vm.name}' (template: {template_name})...")
+        workspace_path = create_vm_workspace(vm, config, ws_name, template)
+
+        code_ws_path = generate_code_workspace(vm, config, ws_name, workspace_path)
+        typer.echo(f"VS Code workspace: {code_ws_path}")
+
+        db.insert_workspace(
+            ws_name, ws_type="vm", workspace_path=workspace_path,
+            vm_name=vm.name, template=template_name,
+        )
+    except SystemExit:
+        _cleanup()
+        raise
+    except Exception as e:
+        typer.echo(f"Error creating workspace: {e}", err=True)
+        _cleanup()
+        raise typer.Exit(1) from None
 
     if open_vscode:
         subprocess.run(["code", code_ws_path], check=False)
@@ -141,9 +170,7 @@ def shell_workspace(
             typer.echo(f"Error: VM '{ws.vm_name}' not found", err=True)
             raise typer.Exit(1)
 
-        if vm.init_status != InitStatus.COMPLETE.value:
-            typer.echo(f"Error: VM '{vm.name}' initialization is not complete", err=True)
-            raise typer.Exit(1)
+        _guard_vm_status(vm)
 
         _ensure_vm_running(db, config, vm)
         db.update_workspace_last_seen(name)
@@ -221,6 +248,25 @@ def delete_workspace(
     typer.echo(f"Workspace '{name}' deleted")
 
 
+def _guard_vm_status(vm: VMRow) -> None:
+    """Block operations on VMs that are not usable (failed or in-progress)."""
+    usable = {InitStatus.COMPLETE.value, InitStatus.PARTIAL.value}
+    if vm.init_status not in usable:
+        if vm.init_status == InitStatus.FAILED.value:
+            typer.echo(
+                f"Error: VM '{vm.name}' is in 'failed' state. "
+                "Run 'vm delete' and recreate.",
+                err=True,
+            )
+        else:
+            typer.echo(
+                f"Error: VM '{vm.name}' initialization is not complete "
+                f"(status: {vm.init_status}).",
+                err=True,
+            )
+        raise typer.Exit(1)
+
+
 def _resolve_vm(db: Database, vm_name: str | None) -> VMRow:
     """Resolve which VM to use: explicit, auto-select if 1, or error."""
     if vm_name is not None:
@@ -231,17 +277,18 @@ def _resolve_vm(db: Database, vm_name: str | None) -> VMRow:
         return vm
 
     vms = db.list_vms()
-    complete_vms = [v for v in vms if v.init_status == InitStatus.COMPLETE.value]
+    usable_statuses = {InitStatus.COMPLETE.value, InitStatus.PARTIAL.value}
+    usable_vms = [v for v in vms if v.init_status in usable_statuses]
 
-    if len(complete_vms) == 0:
+    if len(usable_vms) == 0:
         typer.echo("Error: no VMs available. Create one with 'agentworks vm create'.", err=True)
         raise typer.Exit(1)
 
-    if len(complete_vms) == 1:
-        return complete_vms[0]
+    if len(usable_vms) == 1:
+        return usable_vms[0]
 
     typer.echo("Error: multiple VMs available. Specify --vm:", err=True)
-    for v in complete_vms:
+    for v in usable_vms:
         typer.echo(f"  {v.name}", err=True)
     raise typer.Exit(1)
 
