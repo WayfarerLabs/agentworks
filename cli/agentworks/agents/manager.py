@@ -73,15 +73,13 @@ def delete_agent(
 
     if ws.type == "vm":
         vm = _require_vm_for_workspace(db, ws)
-        # Remove live window before killing the user
         _remove_live_window(config, vm, ws.name, name)
         _delete_agent_on_vm(vm, config, agent.linux_user)
-
-    db.delete_agent(workspace_name, name)
-
-    # Regenerate tmuxinator config (after DB delete so agent is excluded)
-    if ws.type == "vm":
+        db.delete_agent(workspace_name, name)
+        # Regenerate after DB delete so the agent is excluded
         _regenerate_tmuxinator(db, config, vm, ws)
+    else:
+        db.delete_agent(workspace_name, name)
 
     typer.echo(f"Agent '{name}' deleted from workspace '{workspace_name}'")
 
@@ -150,7 +148,14 @@ def shell_agent(
         raise typer.Exit(1)
 
     vm = _require_vm_for_workspace(db, ws)
-    assert vm.tailscale_host is not None
+
+    from agentworks.workspaces.manager import _ensure_vm_running
+
+    _ensure_vm_running(db, config, vm)
+
+    if vm.tailscale_host is None:
+        typer.echo(f"Error: VM '{vm.name}' has no Tailscale address", err=True)
+        raise typer.Exit(1)
 
     # SSH as user account, then su to the agent user in the workspace directory
     ssh_cmd = ["ssh"]
@@ -241,25 +246,16 @@ def _create_agent_on_vm(
     shell = config.user.shell
 
     typer.echo(f"  Creating user '{linux_user}' on VM '{vm.name}'...")
-    run_as_root(target, f"useradd -m -s $(which {shell}) {linux_user}")
+    home = f"/home/{linux_user}"
+    groups = f"ws-{workspace_name},agentworks-ssh,aw-tools"
     run_as_root(
         target,
-        f"usermod -aG ws-{workspace_name},agentworks-ssh,aw-tools {linux_user}",
-    )
-
-    # Set SSH_AUTH_SOCK so agent can use shared git credentials
-    run_as_root(
-        target,
-        f"mkdir -p /home/{linux_user}/.config/environment.d",
-    )
-    run_as_root(
-        target,
-        f"bash -c \"echo 'SSH_AUTH_SOCK={SSH_AUTH_SOCK_PATH}' "
-        f"> /home/{linux_user}/.config/environment.d/ssh-agent.conf\"",
-    )
-    run_as_root(
-        target,
-        f"chown -R {linux_user}:{linux_user} /home/{linux_user}/.config",
+        f"useradd -m -s $(which {shell}) {linux_user}"
+        f" && usermod -aG {groups} {linux_user}"
+        f" && mkdir -p {home}/.config/environment.d"
+        f" && printf 'SSH_AUTH_SOCK={SSH_AUTH_SOCK_PATH}\\n'"
+        f" > {home}/.config/environment.d/ssh-agent.conf"
+        f" && chown -R {linux_user}:{linux_user} {home}/.config",
     )
 
 
