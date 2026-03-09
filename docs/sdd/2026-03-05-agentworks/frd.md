@@ -618,12 +618,12 @@ filters to a specific workspace.
 ### Relationship to Other SDDs
 
 The user-based security SDD (2026-03-08) defines the full Linux security model for agents:
-group-based workspace access, SSH agent socket sharing via the `agentworks-ssh` group, and tools
-access via the `aw-tools` group. The nerfed commands SDD (2026-03-08) defines RBAC-controlled
-operations that agents can perform through SUID executables, with rulesync skills that are
-auto-configured in agent workspaces. This SDD focuses on agent lifecycle management within
-Agentworks -- the provisioning and teardown of the Linux users and group memberships that those SDDs
-depend on.
+group-based workspace access, tools access via the `aw-tools` group, and credential isolation
+(agents access credentials only via nerfed commands, not directly). The nerfed commands SDD
+(2026-03-08) defines RBAC-controlled operations that agents can perform through SUID executables,
+with rulesync skills that are auto-configured in agent workspaces. This SDD focuses on agent
+lifecycle management within Agentworks -- the provisioning and teardown of the Linux users and group
+memberships that those SDDs depend on.
 
 ---
 

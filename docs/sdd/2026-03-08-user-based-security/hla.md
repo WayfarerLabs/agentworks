@@ -3,8 +3,8 @@
 ## Overview
 
 This design uses standard Linux users, groups, and file permissions to isolate agent workspaces and
-protect tools from modification. A systemd-managed SSH agent daemon shares git credentials across
-all users without exposing key material.
+protect tools from modification. The user account holds all credentials (SSH keys, az login, gh
+auth); agents access them only through [nerfed commands](../2026-03-08-nerfed-commands/) via SUID.
 
 ## User and Group Topology
 
@@ -15,7 +15,6 @@ Users:
   ...
 
 Groups:
-  agentworks-ssh      (SSH agent socket access)
   ws-<workspace>      (workspace file access)
   aw-tools            (tools read/execute access)
 ```
@@ -30,15 +29,15 @@ It has admin privileges (unrestricted sudo) because the operator needs full cont
 - Owns `/opt/agentworks/tools/` (the tools directory)
 - Runs the SSH agent systemd service
 - Holds all authenticated sessions (az login, gh auth login, SSH keys, etc.)
-- Member of: `agentworks-ssh`
 
 ### Agent users (`<workspace>--<agent>`)
 
 - Created when an agent is provisioned on a workspace
 - Home directory: `/home/<workspace>--<agent>/`
 - No sudo, no password
-- Shell set to the configured default (e.g., zsh)
-- Member of: `ws-<workspace>`, `agentworks-ssh`, `aw-tools`
+- Shell: `/bin/bash` (no dotfiles, no customization)
+- Member of: `ws-<workspace>`, `aw-tools`
+- No direct access to credentials -- agents use nerfed commands (SUID) for privileged operations
 
 ### Workspace group (`ws-<workspace>`)
 
@@ -75,18 +74,19 @@ It has admin privileges (unrestricted sudo) because the operator needs full cont
     cli-tools/
 
 /run/agentworks/
-  ssh-agent.sock                   # 0660 agentworks:agentworks-ssh
+  ssh-agent.sock                   # 0600 agentworks:agentworks
 
 /home/myproject--coder/            # agent home
-  .config/                         # agent-specific config
+  .bashrc                          # agent prompt, no credentials
 ```
 
 ## SSH Agent Daemon
 
 ### Purpose
 
-Provides all users on the VM with the ability to perform git operations (clone, fetch, push) using
-the VM's registered SSH key, without exposing the private key to agent users.
+Provides the user account with SSH key access for git operations (clone, fetch, push). The socket is
+owned by the user account with mode `0600` -- only the user account (and processes running as the
+user account via SUID) can access it. Agents cannot access the socket directly.
 
 ### Implementation
 
@@ -105,30 +105,20 @@ Environment=SSH_AUTH_SOCK=/run/agentworks/ssh-agent.sock
 ExecStartPre=/bin/mkdir -p /run/agentworks
 ExecStart=/usr/bin/ssh-agent -a /run/agentworks/ssh-agent.sock
 ExecStartPost=/usr/bin/ssh-add /home/agentworks/.ssh/id_ed25519
+ExecStartPost=/bin/chmod 0600 /run/agentworks/ssh-agent.sock
 RuntimeDirectory=agentworks
-RuntimeDirectoryMode=0750
+RuntimeDirectoryMode=0700
 
 [Install]
 WantedBy=multi-user.target
 ```
 
-Post-start, the socket permissions are set:
+### Credential access model
 
-```bash
-chgrp agentworks-ssh /run/agentworks/ssh-agent.sock
-chmod 0660 /run/agentworks/ssh-agent.sock
-```
-
-### Client configuration
-
-Agent users have `SSH_AUTH_SOCK` set in their environment (via `/etc/environment.d/` or profile
-script):
-
-```bash
-export SSH_AUTH_SOCK=/run/agentworks/ssh-agent.sock
-```
-
-Git operations then use the agent socket transparently.
+The user account has `SSH_AUTH_SOCK` set in its environment. Agent users have no access to the
+socket. Git operations (and other credential-gated operations) are performed through
+[nerfed commands](../2026-03-08-nerfed-commands/), which run as the user account via SUID and set
+`SSH_AUTH_SOCK` in their constructed environment.
 
 ## Workspace Creation Flow
 
@@ -144,26 +134,26 @@ When a workspace is created on a VM:
 
 When an agent is created for a workspace:
 
-1. Create the agent user: `useradd -m -s /bin/zsh <workspace>--<agent>`
-2. Add to groups: `usermod -aG ws-<workspace>,agentworks-ssh,aw-tools <workspace>--<agent>`
-3. Set `SSH_AUTH_SOCK` in the agent's environment
+1. Create the agent user: `useradd -m -s /bin/bash <workspace>--<agent>`
+2. Add to groups: `usermod -aG ws-<workspace>,aw-tools <workspace>--<agent>`
+3. Write minimal `.bashrc` (agent prompt, no credentials)
 4. Record the agent user in the DB
 
 ## Permissions Summary
 
-| Path             | Owner      | Group          | Mode | Effect                    |
-| ---------------- | ---------- | -------------- | ---- | ------------------------- |
-| Workspace dir    | agentworks | ws-NAME        | 2775 | Agents read/write, setgid |
-| Tools dir        | agentworks | aw-tools       | 0750 | Agents read/execute       |
-| SSH agent socket | agentworks | agentworks-ssh | 0660 | Agents use, not read key  |
-| SSH key          | agentworks | agentworks     | 0600 | User account only         |
-| Agent home       | agent-X    | agent-X        | 0750 | Agent-private             |
+| Path             | Owner      | Group      | Mode | Effect                    |
+| ---------------- | ---------- | ---------- | ---- | ------------------------- |
+| Workspace dir    | agentworks | ws-NAME    | 2775 | Agents read/write, setgid |
+| Tools dir        | agentworks | aw-tools   | 0750 | Agents read/execute       |
+| SSH agent socket | agentworks | agentworks | 0600 | User account only         |
+| SSH key          | agentworks | agentworks | 0600 | User account only         |
+| Agent home       | agent-X    | agent-X    | 0750 | Agent-private             |
 
 ## Impact on Existing Code
 
 ### VM initialization (Phase A/B)
 
-- Create `agentworks-ssh` and `aw-tools` groups
+- Create `aw-tools` group
 - Set up `/opt/agentworks/tools/` directory
 - Install and enable the SSH agent systemd service
 - Load the generated SSH key into the agent after Phase A generates the keypair
@@ -194,19 +184,17 @@ When an agent is created for a workspace:
 - Agents accessing other workspaces' files
 - Agents killing other agents' processes
 - Agents escalating to root
+- Agents accessing credentials directly (SSH keys, az/gh sessions)
 
 ### What this model does not prevent
 
 - Agents reading system-wide readable files (`/etc/passwd`, installed packages, etc.)
 - Agents making arbitrary network requests
-- Agents using the SSH agent to access any repo the VM key is registered with (by design, since git
-  access is shared per-VM)
 - Agents consuming resources (mitigated by optional cgroups/ulimits, not enforced by default)
 
 ### Trust boundary
 
-The VM is the trust boundary. All agents on a VM share the same git credentials and network. If
-repo-level or network-level isolation is needed, use separate VMs.
+The VM is the trust boundary. If repo-level or network-level isolation is needed, use separate VMs.
 
 ## Relationship to Nerfed Commands
 

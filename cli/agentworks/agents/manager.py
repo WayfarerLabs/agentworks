@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     from agentworks.db import AgentRow, Database, VMRow, WorkspaceRow
 
 AGENT_SEPARATOR = "--"
-SSH_AUTH_SOCK_PATH = "/run/agentworks/ssh-agent.sock"
+AGENT_SHELL = "/bin/bash"
 
 
 def derive_linux_user(workspace_name: str, agent_name: str) -> str:
@@ -243,19 +243,23 @@ def _create_agent_on_vm(
     from agentworks.ssh import run_as_root
 
     target = ssh_target_for_vm(vm, config)
-    shell = config.user.shell
 
     typer.echo(f"  Creating user '{linux_user}' on VM '{vm.name}'...")
     home = f"/home/{linux_user}"
-    groups = f"ws-{workspace_name},agentworks-ssh,aw-tools"
+    groups = f"ws-{workspace_name},aw-tools"
     run_as_root(
         target,
-        f"useradd -m -s $(which {shell}) {linux_user}"
-        f" && usermod -aG {groups} {linux_user}"
-        f" && mkdir -p {home}/.config/environment.d"
-        f" && printf 'SSH_AUTH_SOCK={SSH_AUTH_SOCK_PATH}\\n'"
-        f" > {home}/.config/environment.d/ssh-agent.conf"
-        f" && chown -R {linux_user}:{linux_user} {home}/.config",
+        f"useradd -m -s {AGENT_SHELL} {linux_user}"
+        f" && usermod -aG {groups} {linux_user}",
+    )
+
+    # Write a minimal .bashrc with a clear agent prompt
+    run_as_root(
+        target,
+        f"cat > {home}/.bashrc << 'BASHRC_EOF'\n"
+        f"export PS1='[agent:{linux_user}] \\w\\$ '\n"
+        f"BASHRC_EOF\n"
+        f"chown {linux_user}:{linux_user} {home}/.bashrc",
     )
 
 
