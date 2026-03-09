@@ -134,10 +134,36 @@ def _require(data: dict[str, object], key: str, context: str) -> object:
     return data[key]
 
 
+def _warn_unexpected_keys(
+    raw: dict[str, object], known: set[str], section: str,
+) -> None:
+    """Warn about unexpected keys in a config section.
+
+    This catches the common TOML pitfall where a [section] header is
+    commented out and its keys land in the previous section.
+    """
+    unexpected = set(raw.keys()) - known
+    if unexpected:
+        import warnings
+
+        keys = ", ".join(sorted(unexpected))
+        warnings.warn(
+            f"Unexpected keys in [{section}]: {keys}. "
+            "This usually means a [section] header is commented out "
+            "but keys beneath it are not.",
+            stacklevel=3,
+        )
+
+
+_USER_KEYS = {"ssh_public_key", "ssh_private_key", "shell"}
+
+
 def _load_user(data: dict[str, object]) -> UserConfig:
     raw = data.get("user")
     if not isinstance(raw, dict):
         raise ConfigError("[user] section is required")
+
+    _warn_unexpected_keys(raw, _USER_KEYS, "user")
 
     pub = _expand(str(_require(raw, "ssh_public_key", "user")))
     priv = _expand(str(_require(raw, "ssh_private_key", "user")))
@@ -164,10 +190,15 @@ def _load_paths(data: dict[str, object]) -> PathsConfig:
     return PathsConfig(local_workspaces=local_ws, code_workspaces=code_ws)
 
 
+_DEFAULTS_KEYS = {"platform", "vm_host", "git_hosts"}
+
+
 def _load_defaults(data: dict[str, object], git_host_names: set[str]) -> DefaultsConfig:
     raw = data.get("defaults", {})
     if not isinstance(raw, dict):
         raise ConfigError("[defaults] must be a table")
+
+    _warn_unexpected_keys(raw, _DEFAULTS_KEYS, "defaults")
 
     platform = raw.get("platform")
     if platform is not None and platform not in VALID_PLATFORMS:
@@ -187,10 +218,15 @@ def _load_defaults(data: dict[str, object], git_host_names: set[str]) -> Default
     )
 
 
+_DOTFILES_KEYS = {"enabled", "source", "install_cmd"}
+
+
 def _load_dotfiles(data: dict[str, object]) -> DotfilesConfig:
     raw = data.get("dotfiles", {})
     if not isinstance(raw, dict):
         raise ConfigError("[dotfiles] must be a table")
+
+    _warn_unexpected_keys(raw, _DOTFILES_KEYS, "dotfiles")
     return DotfilesConfig(
         enabled=bool(raw.get("enabled", True)),
         source=_expand(str(raw["source"])) if "source" in raw else DotfilesConfig().source,
@@ -298,6 +334,31 @@ def _load_azure(data: dict[str, object]) -> AzureConfig | None:
     )
 
 
+EXPECTED_TOP_LEVEL_KEYS = {
+    "user", "paths", "defaults", "dotfiles", "vm",
+    "workspace_templates", "git_hosts", "azure",
+}
+
+
+def _warn_unexpected_top_level_keys(data: dict[str, object]) -> None:
+    """Warn about unexpected top-level keys.
+
+    This catches a common TOML pitfall: uncommenting a key without its section
+    header causes the key to land in the wrong (or top-level) section.
+    """
+    unexpected = set(data.keys()) - EXPECTED_TOP_LEVEL_KEYS
+    if unexpected:
+        import warnings
+
+        keys = ", ".join(sorted(unexpected))
+        warnings.warn(
+            f"Unexpected top-level keys in config: {keys}. "
+            "This usually means a [section] header is commented out "
+            "but keys beneath it are not.",
+            stacklevel=2,
+        )
+
+
 def load_config(path: Path | None = None) -> Config:
     """Load and validate the user configuration.
 
@@ -319,6 +380,8 @@ def load_config(path: Path | None = None) -> Config:
 
     with open(config_path, "rb") as f:
         data = tomllib.load(f)
+
+    _warn_unexpected_top_level_keys(data)
 
     git_hosts = _load_git_hosts(data)
 

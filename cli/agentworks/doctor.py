@@ -95,9 +95,15 @@ def run_doctor() -> None:
     else:
         ok(f"Config exists: {CONFIG_PATH}")
         try:
+            import warnings as _warnings
+
             from agentworks.config import load_config
 
-            config = load_config()
+            with _warnings.catch_warnings(record=True) as config_warnings:
+                _warnings.simplefilter("always")
+                config = load_config()
+            for cw in config_warnings:
+                warn(str(cw.message))
             ok("Config is valid")
 
             # SSH keys
@@ -270,10 +276,28 @@ def _check_completions(
 
 
 def _get_unix_completion_paths() -> list[tuple[str, list[Path]]]:
-    """Return (shell_name, candidate_paths) for Unix shells."""
+    """Return (shell_name, candidate_paths) for Unix shells.
+
+    Checks multiple common zsh completion directories in priority order:
+    - ~/.zfunc (manual fpath setup)
+    - Oh My Zsh custom completions ($ZSH_CUSTOM or default)
+    - Homebrew zsh completions (macOS)
+    """
     home = Path.home()
+    zsh_paths: list[Path] = [
+        home / ".zfunc" / "_agentworks",
+    ]
+
+    # Oh My Zsh: $ZSH_CUSTOM/completions/ or ~/.oh-my-zsh/custom/completions/
+    zsh_custom = os.environ.get("ZSH_CUSTOM")
+    if zsh_custom:
+        zsh_paths.append(Path(zsh_custom) / "completions" / "_agentworks")
+    omz_default = home / ".oh-my-zsh" / "custom" / "completions" / "_agentworks"
+    if omz_default not in zsh_paths:
+        zsh_paths.append(omz_default)
+
     return [
-        ("zsh", [home / ".zfunc" / "_agentworks"]),
+        ("zsh", zsh_paths),
     ]
 
 
@@ -293,11 +317,30 @@ def _get_windows_completion_paths() -> list[tuple[str, list[Path]]]:
 
 def _completion_install_hint(shell_name: str) -> str:
     """Return a shell-specific install command hint."""
-    hints: dict[str, str] = {
-        "zsh": "agentworks completion zsh > ~/.zfunc/_agentworks",
-        "powershell": "agentworks completion powershell >> $PROFILE",
-    }
-    return hints.get(shell_name, f"agentworks completion {shell_name}")
+    if shell_name == "zsh":
+        target = _best_zsh_completion_dir()
+        return f"mkdir -p {target} && agentworks completion zsh > {target}/_agentworks"
+    if shell_name == "powershell":
+        return "agentworks completion powershell >> $PROFILE"
+    return f"agentworks completion {shell_name}"
+
+
+def _best_zsh_completion_dir() -> str:
+    """Pick the best zsh completion directory for installation.
+
+    Prefers Oh My Zsh custom completions if present, otherwise ~/.zfunc.
+    """
+    home = Path.home()
+
+    # Oh My Zsh custom completions (auto-loaded, no fpath setup needed)
+    zsh_custom = os.environ.get("ZSH_CUSTOM")
+    if zsh_custom:
+        return str(Path(zsh_custom) / "completions")
+    omz_default = home / ".oh-my-zsh" / "custom"
+    if omz_default.is_dir():
+        return str(omz_default / "completions")
+
+    return "~/.zfunc"
 
 
 def _read_completion_version(path: Path) -> str | None:

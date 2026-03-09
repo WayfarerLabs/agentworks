@@ -13,20 +13,20 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 
 # --- Paths ---
 
-# [paths]
+[paths]
 # local_workspaces = "~/workspaces"            # local workspace directory
 # code_workspaces = "~/agentworks-workspaces"  # .code-workspace file directory
 
 # --- Default values for CLI flags ---
 
-# [defaults]
+[defaults]
 # platform = "lima"                          # lima, azure, or wsl2
 # vm_host = "mac-studio"                     # default VM host for remote Lima
 # git_hosts = ["github"]                     # git hosts to register on vm create
 
 # --- Dotfiles ---
 
-# [dotfiles]
+[dotfiles]
 # enabled = true                             # copy dotfiles to VMs during init
 # source = "~/.dotfiles"                     # path to your dotfiles repo
 # install_cmd = "./install.sh"               # command to run after copying dotfiles
@@ -35,7 +35,7 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # Agentworks always installs system dependencies (openssh-server, curl, git,
 # sudo, ca-certificates) regardless of this config.
 
-# [vm.config]
+[vm.config]
 # vm_user = "agentworks"                     # username created on VMs
 # cpus = 4                                   # number of CPUs (Lima)
 # memory = 8                                 # memory in GiB (Lima)
