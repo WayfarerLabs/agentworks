@@ -48,6 +48,8 @@
     "Typer",
     "ulimits",
     "upgen",
+    "useradd",
+    "userdel",
     "usermod",
     "userspace",
     "virtiofs",

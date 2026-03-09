@@ -221,6 +221,98 @@ process files into new workspaces with variable substitution.
 
 ---
 
+## Phase 4: Agents
+
+Adds agent management to Agentworks. Agents are isolated Linux users within a
+workspace, representing AI coding agents.
+
+### 4.1 Name Validation Tightening
+
+- [ ] Update `NAME_RE` in `config.py`: pattern
+      `^[a-z0-9]([a-z0-9_-]*[a-z0-9])?$` with no consecutive hyphens (`--`)
+- [ ] Remove dots from allowed characters (breaking change to existing names
+      containing dots, if any)
+- [ ] Apply validation uniformly to VM hosts, VMs, workspaces, and agents
+- [ ] Add unit tests for name validation (valid names, rejected names, edge
+      cases)
+
+**Definition of done:** Names containing dots, double hyphens, or
+starting/ending with special characters are rejected at creation time for all
+entity types. Existing entities with non-conforming names still work (validation
+is at creation time only).
+
+### 4.2 Agent Database Schema
+
+- [ ] Add `agents` table: name, workspace_name, linux_user, created_at
+- [ ] Primary key: `(workspace_name, name)`
+- [ ] Foreign key to `workspaces(name)` with cascade delete
+- [ ] Add migration from current schema version
+- [ ] Add CRUD operations to `db.py`: `create_agent`, `list_agents`,
+      `get_agent`, `delete_agent`
+
+**Definition of done:** Agent records can be created, listed, queried, and
+deleted. Deleting a workspace cascades to its agents in the database.
+
+### 4.3 Agent Lifecycle Manager
+
+- [ ] Create `agents/manager.py` with `create_agent`, `delete_agent`,
+      `list_agents` functions
+- [ ] Agent creation: validate name, derive Linux username
+      (`<workspace>--<agent>`), SSH to VM to create Linux user and add to
+      workspace group, insert DB record
+- [ ] Agent deletion: SSH to VM to kill processes and remove Linux user, remove
+      DB record
+- [ ] Workspace delete integration: delete all agents before removing workspace
+      directory
+
+**Definition of done:** Agents can be created and deleted on a VM. Linux users
+are properly provisioned with workspace group membership. Workspace deletion
+cascades to agents.
+
+### 4.4 Tmuxinator Integration
+
+- [ ] Implement tmuxinator config regeneration: admin window + one window per
+      agent
+- [ ] Agent windows configured with `su - <agent-linux-user>` and workspace root
+      as working directory
+- [ ] Regenerate on agent create and agent delete
+- [ ] Existing workspace creation continues to generate initial tmuxinator
+      config (admin window only, no agents yet)
+
+**Definition of done:** `workspace shell` opens a tmux session with an admin
+window and one window per agent. Adding or removing agents updates the
+tmuxinator config.
+
+### 4.5 Agent CLI Commands
+
+- [ ] Implement `agent create <name> --workspace <workspace-name>`: orchestrates
+      Linux user creation + DB
+- [ ] Implement `agent list [--workspace <workspace-name>]`: list agents,
+      optionally filtered
+- [ ] Implement `agent shell <name> [--workspace <workspace-name>]`: SSH as
+      admin, su to agent user
+- [ ] Implement `agent delete <name> --workspace <workspace-name>`: orchestrates
+      Linux user removal + DB
+- [ ] Add shell completions for agent commands (dynamic completers for agent
+      names, workspace names)
+
+**Definition of done:** Full agent lifecycle works end-to-end. Can create an
+agent, see it in the workspace tmuxinator session, shell into it, list agents,
+and delete it.
+
+### 4.6 Agent Testing
+
+- [ ] Unit tests for name validation (double-hyphen rejection, Linux username
+      derivation)
+- [ ] Unit tests for agent DB operations (CRUD, cascade delete)
+- [ ] Manual end-to-end test: create workspace, add agents, verify tmuxinator
+      windows, shell into agent, delete agent, delete workspace (verify cascade)
+
+**Definition of done:** Agent lifecycle works correctly on at least one
+platform. Cascading deletion verified.
+
+---
+
 ## Future (Not Planned)
 
 These items have architectural room in the current design but are not scheduled

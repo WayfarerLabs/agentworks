@@ -3,6 +3,42 @@
 CLI for orchestrating workspace lifecycle across multiple compute targets (VMs
 and local host).
 
+## Core Concepts
+
+Agentworks organizes work into three layers. Each layer narrows the scope of the
+one above it -- permissions compose downward and can only constrain, never
+expand.
+
+### VMs -- the environment
+
+A VM defines the **capability ceiling**: the tools, runtimes, packages, and
+system configuration available to everything running inside it. This is the
+maximum set of possibility. Nothing below the VM layer can use a tool or
+capability that the VM does not provide.
+
+### Workspaces -- the project
+
+A workspace defines the **project scope**: the repo(s) being worked on, plus the
+behavioral configuration that shapes how tools operate within this project. This
+includes rulesync artifacts (rules, skills), workspace-level code assistant
+permissions (Claude Code, Copilot, etc.), and editor configs. A workspace
+narrows the VM's raw capability into a project-specific context.
+
+Workspaces can live on a VM or locally on the User Workstation. Local workspaces
+do not support agents (see below).
+
+### Agents -- the actor
+
+An agent defines a **task-specific identity** with scoped permissions. Each
+agent is an isolated Linux user within a workspace. The agent's effective
+capability is the intersection of all three layers: it can only use tools
+present on the VM, configured at the workspace level, and granted to the agent
+via RBAC (nerfed commands). An agent cannot bypass a workspace-level permission
+restriction or use a tool that is not installed on the VM.
+
+Agents are only supported on VM workspaces because the isolation model requires
+Linux user management (useradd, group membership, SUID executables).
+
 ## Getting Started
 
 ```bash
@@ -77,6 +113,17 @@ Manage workspaces on VMs or locally.
 
 `workspace create` accepts `--name`, `--vm`, `--local`, `--template`, and
 `--open-vscode`.
+
+### Agents
+
+Manage agents (isolated Linux users) within VM workspaces.
+
+| Command                                          | Description         |
+| ------------------------------------------------ | ------------------- |
+| `agentworks agent create <name> -w <workspace>`  | Create an agent     |
+| `agentworks agent list [-w <workspace>]`         | List agents         |
+| `agentworks agent shell <name> [-w <workspace>]` | Shell into an agent |
+| `agentworks agent delete <name> -w <workspace>`  | Delete an agent     |
 
 ## Configuration
 

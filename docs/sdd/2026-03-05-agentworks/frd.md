@@ -38,20 +38,30 @@ environment already in place.
 - **Workspace Template**: a named configuration that defines what a workspace
   looks like at creation time -- which repo to clone (if any), which files to
   copy/template, and which settings to inject
+- **Agent**: an isolated Linux user within a workspace, representing a single AI
+  coding agent. Agents belong strictly to a workspace, have their own home
+  directory, and access the workspace through Linux group membership. See the
+  user-based security SDD (2026-03-08) for the full security model.
 - **Git Host Provider**: a service where SSH keys can be registered for git
   access (AzDO, GitHub, etc.)
 
 ### Naming Conventions
 
-All user-provided names (VM hosts, VMs, workspaces) follow the same rules:
+All user-provided names (VM hosts, VMs, workspaces, agents) follow the same
+rules:
 
-- **Character set**: lowercase alphanumeric, hyphens, underscores, and dots:
-  `[a-z0-9\-_.]`
+- **Character set**: lowercase alphanumeric, hyphens, and underscores:
+  `[a-z0-9_-]`
+- **Structure**: must start and end with `[a-z0-9]`. Interior characters may
+  include hyphens and underscores. Single-character names (`[a-z0-9]`) are
+  allowed.
+- **No double hyphens**: consecutive hyphens (`--`) are reserved as the agent
+  username separator (see Agents below) and are not allowed in any name.
 - **Uniqueness**: globally unique within each entity type (vm_hosts, vms,
   workspaces are separate namespaces). Workspace names are globally unique, not
   per-VM -- this simplifies the CLI (no need to qualify
   `workspace shell ws-123 --vm dev-vm`) and avoids ambiguity in
-  `.code-workspace` file naming.
+  `.code-workspace` file naming. Agent names are unique within their workspace.
 - **`--name` flag**: all create commands accept an optional `--name` flag. If
   not specified, the user is prompted with a random 7-character default
   (lowercase alphanumeric only: `[a-z0-9]`). The user can accept the default or
@@ -116,6 +126,10 @@ the state database.
 Local workspaces are only supported on Unix-like hosts (macOS, Linux). The
 workspace directory lives under a configurable local path (default:
 `~/workspaces/`).
+
+Local workspaces do not support agents. The agent model requires Linux user
+management and process isolation that is only available on Agentworks-managed
+VMs. Local workspaces remain useful for non-agentic developer work.
 
 ### Containerized Workspaces (Future)
 
@@ -548,6 +562,12 @@ an existing one. If tmuxinator is not enabled, opens a plain SSH shell. A
 `--no-tmuxinator` flag overrides the template setting and opens a plain shell
 regardless.
 
+The tmuxinator session includes an "admin" window (the default, running as the
+admin user) plus one window per agent configured to `su - <agent-linux-user>`
+with the working directory set to the workspace root. This gives the operator a
+single entry point to observe and interact with all agents in the workspace.
+Windows are regenerated when agents are added or removed.
+
 For local workspaces: opens a new shell in the workspace directory. Same
 tmuxinator behavior applies -- if enabled, `tmuxinator start <workspace-name>`
 is run; `--no-tmuxinator` overrides.
@@ -582,6 +602,95 @@ Package up the entire workspace directory (using `tar`) and move it to a new
 location, deleting the old one once it is securely in place. This is a future
 enhancement -- the CLI surface should accommodate it, but implementation is
 deferred.
+
+---
+
+## Agents
+
+Agents are isolated Linux users within a workspace, each representing a single
+AI coding agent. They are the mechanism by which AI tools operate within a
+workspace with controlled, auditable access.
+
+**Agents are only supported on VM workspaces.** The agent model requires Linux
+user management (useradd, group membership, SUID executables) which is only
+possible on a VM that Agentworks controls. Local workspaces do not support
+agents -- `agent create` on a local workspace errors with guidance. See "Why VMs
+and Not Just Containers?" for related rationale.
+
+### Agent Identity
+
+Each agent has a unique name within its workspace. The agent's Linux username is
+derived from the workspace name using the double-hyphen separator:
+`<workspace-name>--<agent-name>`. Because workspace names are globally unique
+and agent names are unique within a workspace, the Linux username is guaranteed
+unique on the VM.
+
+Examples:
+
+- Workspace `my-project`, agent `coder`: Linux user `my-project--coder`
+- Workspace `ws-task-123`, agent `reviewer`: Linux user `ws-task-123--reviewer`
+
+### Agent Provisioning
+
+When an agent is created, Agentworks:
+
+1. Creates a Linux user with the derived username
+2. Adds the user to the workspace's Linux group (grants access to the workspace
+   directory)
+3. Creates the agent's home directory
+4. Regenerates the workspace's tmuxinator config to include a window for the new
+   agent
+
+The agent's home directory is separate from the workspace directory. The agent
+accesses the workspace through group membership, not by living inside it. This
+means the agent has a place for its own config, history, and scratch files while
+still being able to read and write the shared workspace.
+
+### Agent Shell Access
+
+`agentworks agent shell <agent-name> --workspace <workspace-name>`
+
+A convenience command that SSHs to the VM as the admin user, then runs
+`su - <agent-linux-user>` with the working directory set to the workspace root.
+This gives operators a quick way to inspect what an agent is doing or debug
+issues from the agent's perspective. No separate tmuxinator config is needed --
+for a multi-pane agent experience, use `workspace shell` which already includes
+agent windows.
+
+If the agent name is globally unique (common when there are few workspaces),
+`--workspace` can be omitted and the agent is resolved by scanning all
+workspaces.
+
+### Agent Lifecycle
+
+- Agents are scoped to a workspace. Deleting a workspace cascades to all its
+  agents (Linux users and home directories are removed).
+- Agents can be individually deleted without affecting the workspace or other
+  agents.
+- Agent creation and deletion regenerate the workspace's tmuxinator config.
+
+### CLI
+
+```shell
+agentworks agent create <name> --workspace <workspace-name>
+agentworks agent list [--workspace <workspace-name>]
+agentworks agent shell <name> [--workspace <workspace-name>]
+agentworks agent delete <name> --workspace <workspace-name>
+```
+
+`agent list` without `--workspace` lists all agents across all workspaces. With
+`--workspace`, it filters to a specific workspace.
+
+### Relationship to Other SDDs
+
+The user-based security SDD (2026-03-08) defines the full Linux security model
+for agents: group-based workspace access, SSH agent socket sharing via the
+`agentworks-ssh` group, and tools access via the `aw-tools` group. The nerfed
+commands SDD (2026-03-08) defines RBAC-controlled operations that agents can
+perform through SUID executables, with rulesync skills that are auto-configured
+in agent workspaces. This SDD focuses on agent lifecycle management within
+Agentworks -- the provisioning and teardown of the Linux users and group
+memberships that those SDDs depend on.
 
 ---
 
@@ -736,6 +845,15 @@ Public repos work with either SSH or HTTPS URLs.
 - Workspace template `files` section with variable substitution
 - Bootstrap files for agentic tooling (Claude Code permissions, etc.)
 
+### Phase 4: Agents
+
+- Agent create/list/shell/delete on VM workspaces
+- Linux user provisioning with workspace group membership
+- Tmuxinator integration (admin + per-agent windows)
+- Name validation tightening (no dots, no double hyphens) across all entity
+  types
+- Cascading agent cleanup on workspace delete
+
 ### Future: Azure Auto-Suspend
 
 Azure VMs will support auto-suspend after a configurable idle timeout
@@ -778,3 +896,12 @@ New Workspace Host types beyond VMs:
 
 When non-VM Workspace Host types ship, the `vm` CLI command group may be
 generalized to `host` or similar. The database schema and config would follow.
+
+**Agent model on K8s/containers**: the current agent model (Linux users within a
+VM) does not translate to containers, which typically run as a single user and
+lack the capabilities needed for multi-user isolation (useradd, SUID, etc.). On
+K8s, the agent model would likely use **one pod per agent** instead of one user
+per agent, with shared workspace data via a PersistentVolumeClaim and fsGroup
+settings. Nerfed command gating would use network policies or a sidecar proxy
+rather than SUID executables. This is a fundamentally different isolation
+primitive and would require its own design work when K8s support is pursued.

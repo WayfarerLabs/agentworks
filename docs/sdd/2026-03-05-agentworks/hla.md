@@ -22,6 +22,37 @@ layer. When non-VM types ship, the `vm` command group may be generalized.
 
 ---
 
+## Core Concepts
+
+Agentworks organizes work into three layers. Each layer narrows the scope of the
+one above it -- permissions compose downward and can only constrain, never
+expand.
+
+- **VM -- the environment**: defines the capability ceiling. The tools,
+  runtimes, packages, and system configuration available to everything running
+  inside it. This is the maximum set of possibility. Nothing below the VM layer
+  can use a tool or capability that the VM does not provide.
+- **Workspace -- the project**: defines the project scope. The repo(s) being
+  worked on, plus the behavioral configuration that shapes how tools operate
+  within this project (rulesync artifacts, workspace-level code assistant
+  permissions, editor configs). A workspace narrows the VM's raw capability into
+  a project-specific context. Workspaces can also live locally on the User
+  Workstation, but local workspaces do not support agents.
+- **Agent -- the actor**: defines a task-specific identity with scoped
+  permissions. Each agent is an isolated Linux user within a VM workspace. The
+  agent's effective capability is the intersection of all three layers: it can
+  only use tools present on the VM, configured at the workspace level, and
+  granted to the agent via RBAC (nerfed commands). Agents are VM-only because
+  the isolation model requires Linux user management.
+
+This layering means the VM is provisioned once with all the tools anyone might
+need, workspaces configure how those tools behave for a specific project, and
+agents operate within the intersection of both. The architecture ensures that
+each layer can be reasoned about independently while the security model
+guarantees that lower layers cannot exceed the constraints of higher ones.
+
+---
+
 ## Topology
 
 Agentworks's execution model uses two primitives:
@@ -81,12 +112,15 @@ Tables:
   always queried live from the platform, never cached.
 - `workspaces`: name, type (vm/local), vm_name (nullable), template,
   workspace_path, created_at
+- `agents`: name, workspace_name, linux_user (derived: `<workspace>--<agent>`),
+  created_at
 - `vm_git_host_keys`: id (auto), vm_name, git_host_name, remote_key_id
 
 Names are globally unique within each table (vm_hosts, vms, and workspaces are
-separate namespaces -- a VM and a workspace can share the same name). The
-`vm_git_host_keys` table tracks which SSH keys have been registered with which
-providers, enabling clean removal on `vm delete`.
+separate namespaces -- a VM and a workspace can share the same name). Agent
+names are unique within their workspace; the `(workspace_name, name)` pair forms
+the primary key. The `vm_git_host_keys` table tracks which SSH keys have been
+registered with which providers, enabling clean removal on `vm delete`.
 
 ---
 
@@ -164,6 +198,73 @@ After resolution, workspace creation applies the resolved workspace template:
 File templating (Phase 3) will add a `files` section to workspace templates for
 injecting per-workspace files (VS Code settings, Claude Code permissions, editor
 configs, etc.).
+
+---
+
+## Agent Management
+
+Agents are managed as Linux users on the VM that hosts their workspace. The
+agent manager handles user provisioning, group membership, and tmuxinator config
+regeneration.
+
+### Agent Creation Flow
+
+```text
+User runs: agentworks agent create coder --workspace ws-task-123
+
+1. Validate agent name (naming conventions, no double hyphens)
+2. Look up workspace in state database, resolve VM
+3. SSH to VM:
+   a. Create Linux user: useradd ws-task-123--coder
+   b. Add user to workspace group: usermod -aG ws-task-123 ws-task-123--coder
+   c. Create home directory with appropriate permissions
+4. Regenerate workspace tmuxinator config (add agent window)
+5. Insert agent record in state database
+```
+
+### Agent Shell Flow
+
+```text
+User runs: agentworks agent shell coder --workspace ws-task-123
+
+1. Look up agent in state database, resolve workspace and VM
+2. SSH to VM as admin user
+3. su - ws-task-123--coder
+4. cd to workspace root (~/workspaces/ws-task-123)
+```
+
+### Agent Deletion Flow
+
+```text
+User runs: agentworks agent delete coder --workspace ws-task-123
+
+1. Look up agent in state database
+2. SSH to VM:
+   a. Kill any processes owned by the agent user
+   b. Remove Linux user and home directory: userdel -r ws-task-123--coder
+3. Regenerate workspace tmuxinator config (remove agent window)
+4. Remove agent record from state database
+```
+
+### Tmuxinator Integration
+
+The workspace tmuxinator config is regenerated whenever agents are added or
+removed. The generated config includes:
+
+- An "admin" window (the default) running as the admin user in the workspace
+  root
+- One window per agent, each running `su - <agent-linux-user>` with the working
+  directory set to the workspace root
+
+This gives operators a single `workspace shell` entry point with visibility into
+all active agents.
+
+### Cascading Deletion
+
+When a workspace is deleted, all its agents are deleted first (Linux users
+removed, home directories cleaned up, agent records removed from the database).
+This happens automatically as part of `workspace delete` -- no separate agent
+deletion step is needed.
 
 ---
 
@@ -282,7 +383,13 @@ agentworks/                          # repo root (upstreams/agentworks)
 │   │   ├── doctor.py                # environment/config health checks
 │   │   ├── ssh.py                   # SSH execution primitive
 │   │   ├── sample-config.toml       # sample config (used by init command)
-│   │   ├── completion.zsh           # zsh completion script
+│   │   ├── agents/
+│   │   │   └── manager.py          # agent lifecycle (create/delete/list)
+│   │   ├── completions/
+│   │   │   ├── __init__.py          # public API: generate(shell)
+│   │   │   ├── spec.py              # Typer introspection, CommandSpec tree
+│   │   │   ├── zsh.py               # zsh completion generator
+│   │   │   └── powershell.py        # PowerShell completion generator
 │   │   ├── vm_hosts/
 │   │   │   └── manager.py
 │   │   ├── vms/
