@@ -145,7 +145,69 @@ Code workspace file is generated and opens correctly.
 **Definition of done:** `init` creates a valid sample config. `doctor` reports environment health.
 `completion zsh` outputs a working completion script.
 
-### 1.12 End-to-End Testing
+### 1.12 Init Resilience and Logging
+
+Improve VM initialization to handle non-fatal failures gracefully, capture init logs for
+troubleshooting, and enforce clear states for failed VMs.
+
+#### Init step classification
+
+- **Fatal steps** (abort on failure): user creation, SSH key setup, Tailscale join. If these fail,
+  the VM is unreachable and useless.
+- **Non-fatal steps** (warn and continue): apt packages, snap packages, install commands, shell
+  configuration, git host key registration, dotfiles. These can fail without making the VM unusable.
+
+#### Init statuses
+
+- `not_started` -- provisioned, not yet initialized
+- `in_progress` -- currently running
+- `completed` -- clean run, everything succeeded
+- `partial` -- core succeeded, one or more non-fatal steps had warnings
+- `failed` -- fatal step failed
+
+#### Failed VM handling
+
+VMs in `failed` state are unusable from an agentworks perspective. The only supported operation is
+`vm delete`. On fatal init failure, prompt the user:
+
+> Init failed. Delete VM? (You can keep it for manual troubleshooting, but agentworks cannot manage
+> it.) [Y/n]
+
+Default is yes (delete). If the user keeps it, all agentworks commands except `vm delete` refuse to
+operate on it with a clear message pointing at the init log.
+
+#### Partial VM handling
+
+VMs in `partial` state are fully usable. Workspace and agent operations work normally. The `partial`
+status serves as a reminder that something was skipped during init. `vm list` shows the status, and
+`doctor` reports VMs in non-`completed` states.
+
+#### Init logging
+
+- Write init output to `~/.local/share/agentworks/logs/vm-init-<name>-<timestamp>.log`
+- Capture both stdout and stderr from each init step, with step headers for readability
+- On `completed`: keep the log (cheap, useful for debugging future issues)
+- On `partial` or `failed`: print the log path so the user knows where to look
+- `vm delete` cleans up associated log files
+
+#### Tasks
+
+- [ ] Add `partial` to `init_status` enum (currently: `not_started`, `in_progress`, `completed`,
+      `failed`)
+- [ ] Classify init steps as fatal vs non-fatal in `initializer.py`
+- [ ] Wrap non-fatal steps in try/except, collect warnings, continue on failure
+- [ ] Implement init log writer (structured output with step headers and timestamps)
+- [ ] On fatal failure: prompt to delete or keep, block subsequent operations on `failed` VMs
+- [ ] On partial completion: set `partial` status, print warnings summary and log path
+- [ ] Update `vm list` to show init status for non-`completed` VMs
+- [ ] Update `doctor` to report VMs in `partial` or `failed` state with log paths
+- [ ] Guard agentworks commands (workspace/agent ops) against `failed` VMs
+
+**Definition of done:** Non-fatal init failures produce warnings and a `partial` status rather than
+aborting. Fatal failures prompt for deletion. Init logs are captured and accessible for
+troubleshooting.
+
+### 1.13 End-to-End Testing
 
 - [ ] Manual end-to-end test on Lima (local)
 - [ ] Manual end-to-end test on Azure
@@ -153,7 +215,8 @@ Code workspace file is generated and opens correctly.
 - [ ] Document known issues and gaps
 
 **Definition of done:** Full workflow (vm create, workspace create, workspace shell, workspace
-delete, vm delete) works on at least two platforms.
+delete, vm delete) works on at least two platforms. Init resilience verified: non-fatal failures
+produce `partial` status with log output.
 
 ---
 
@@ -249,20 +312,20 @@ provisioned with workspace group membership. Workspace deletion cascades to agen
 - [x] Agent windows configured with `su - <agent-linux-user>` and workspace root as working
       directory
 - [x] Regenerate on agent create and agent delete
-- [x] Existing workspace creation continues to generate initial tmuxinator config (user window
-      only, no agents yet)
+- [x] Existing workspace creation continues to generate initial tmuxinator config (user window only,
+      no agents yet)
 - [x] Live session updates: add/remove windows in running tmux sessions (best-effort)
 
-**Definition of done:** `workspace shell` opens a tmux session with a user window and one window
-per agent. Adding or removing agents updates the tmuxinator config.
+**Definition of done:** `workspace shell` opens a tmux session with a user window and one window per
+agent. Adding or removing agents updates the tmuxinator config.
 
 ### 4.5 Agent CLI Commands
 
 - [x] Implement `agent create <name> --workspace <workspace-name>`: orchestrates Linux user
       creation + DB
 - [x] Implement `agent list [--workspace <workspace-name>]`: list agents, optionally filtered
-- [x] Implement `agent shell <name> --workspace <workspace-name>`: SSH as user account, su to
-      agent user
+- [x] Implement `agent shell <name> --workspace <workspace-name>`: SSH as user account, su to agent
+      user
 - [x] Implement `agent delete <name> --workspace <workspace-name>`: orchestrates Linux user
       removal + DB
 - [x] Add shell completions for agent commands (workspace name completers for --workspace)
