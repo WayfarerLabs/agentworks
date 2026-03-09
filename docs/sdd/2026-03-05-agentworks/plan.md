@@ -177,8 +177,8 @@ alongside VM workspaces in `workspace list`.
 ### 2.2 Unified Workspace Listing
 
 - [x] `workspace list` shows both VM and local workspaces with type indicator
-- [ ] `workspace list --local` filters to local only
-- [ ] `workspace list --vm <name>` filters to specific VM
+- [x] `workspace list --local` filters to local only
+- [x] `workspace list --vm <name>` filters to specific VM
 
 **Definition of done:** `workspace list` shows all workspaces regardless of type.
 

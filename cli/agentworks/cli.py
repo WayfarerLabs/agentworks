@@ -266,11 +266,17 @@ def workspace_shell(
 @workspace_app.command("list")
 def workspace_list(
     vm: Annotated[str | None, typer.Option("--vm", help="Filter by VM")] = None,
+    local: Annotated[bool, typer.Option("--local", help="Show only local workspaces")] = False,
 ) -> None:
     """List workspaces."""
     from agentworks.workspaces.manager import list_workspaces
 
-    list_workspaces(_get_db(), vm_name=vm)
+    if local and vm:
+        typer.echo("Error: --local and --vm are mutually exclusive", err=True)
+        raise typer.Exit(1)
+
+    ws_type = "local" if local else None
+    list_workspaces(_get_db(), vm_name=vm, ws_type=ws_type)
 
 
 @workspace_app.command("delete")

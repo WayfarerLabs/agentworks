@@ -71,7 +71,7 @@ def build_spec(app: typer.Typer) -> CommandSpec:
     return _build_command_spec(click_app, path="")
 
 
-def _build_command_spec(cmd: click.BaseCommand, path: str) -> CommandSpec:
+def _build_command_spec(cmd: click.Command, path: str) -> CommandSpec:
     """Recursively build a CommandSpec from a Click command."""
     help_text = (cmd.help or "").split("\n")[0].strip()
     name = cmd.name or ""
@@ -81,7 +81,7 @@ def _build_command_spec(cmd: click.BaseCommand, path: str) -> CommandSpec:
     # Build params
     current_path = f"{path}.{name}" if path else name
     for param in cmd.params:
-        if param.name == "help" or param.hidden:
+        if param.name == "help" or getattr(param, "hidden", False):
             continue
         spec.params.append(_build_param_spec(param, current_path))
 
