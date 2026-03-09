@@ -45,6 +45,18 @@ expand.
   granted to the agent via RBAC (nerfed commands). Agents are VM-only because
   the isolation model requires Linux user management.
 
+The layers also differ in **ephemerality**. VMs are long-lived -- provisioned
+once, used across many projects. Workspaces are more ephemeral -- created per
+task or project, destroyed when done. Agents are completely ephemeral -- spun up
+for a specific task within a workspace and discarded when the task is complete.
+
+Each layer has (or will have) a **templating mechanism** so that patterns can be
+defined once and stamped many times. VM templates define what is installed and
+how the environment is configured. Workspace templates define which repos are
+cloned and how tools are configured for the project. Agent templates (future,
+dependent on nerfed commands) will define the permission model for different
+agent roles.
+
 This layering means the VM is provisioned once with all the tools anyone might
 need, workspaces configure how those tools behave for a specific project, and
 agents operate within the intersection of both. The architecture ensures that
