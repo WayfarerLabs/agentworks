@@ -228,7 +228,9 @@ class Database:
             (name, ssh_host, platform, os),
         )
         self._conn.commit()
-        return self.get_vm_host(name)  # type: ignore[return-value]
+        result = self.get_vm_host(name)
+        assert result is not None
+        return result
 
     def get_vm_host(self, name: str) -> VMHostRow | None:
         row = self._conn.execute("SELECT * FROM vm_hosts WHERE name = ?", (name,)).fetchone()
@@ -293,7 +295,9 @@ class Database:
             ),
         )
         self._conn.commit()
-        return self.get_vm(name)  # type: ignore[return-value]
+        result = self.get_vm(name)
+        assert result is not None
+        return result
 
     def get_vm(self, name: str) -> VMRow | None:
         row = self._conn.execute("SELECT * FROM vms WHERE name = ?", (name,)).fetchone()
@@ -359,7 +363,9 @@ class Database:
             (name, ws_type, vm_name, template, workspace_path),
         )
         self._conn.commit()
-        return self.get_workspace(name)  # type: ignore[return-value]
+        result = self.get_workspace(name)
+        assert result is not None
+        return result
 
     def get_workspace(self, name: str) -> WorkspaceRow | None:
         row = self._conn.execute("SELECT * FROM workspaces WHERE name = ?", (name,)).fetchone()
@@ -414,6 +420,7 @@ class Database:
             "SELECT * FROM vm_git_host_keys WHERE vm_name = ? AND git_host_name = ?",
             (vm_name, git_host_name),
         ).fetchone()
+        assert row is not None
         return _to_git_host_key(row)
 
     def list_vm_git_host_keys(self, vm_name: str) -> list[VMGitHostKeyRow]:
@@ -435,7 +442,9 @@ class Database:
             (name, workspace_name, linux_user),
         )
         self._conn.commit()
-        return self.get_agent(workspace_name, name)  # type: ignore[return-value]
+        result = self.get_agent(workspace_name, name)
+        assert result is not None
+        return result
 
     def get_agent(self, workspace_name: str, name: str) -> AgentRow | None:
         row = self._conn.execute(
