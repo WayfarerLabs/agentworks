@@ -102,8 +102,8 @@ No new users are added. The user account (`agentworks`) owns all nerf infrastruc
 - `packages/` is `0700 agentworks:agentworks`: only the user account (and therefore `nerfrun`) can
   read manifests and custom scripts. Agent users access package content indirectly through
   `nerfrun`.
-- The user manages `etc/` and `packages/` contents directly -- no sudo needed since the user
-  account owns them.
+- The user manages `etc/` and `packages/` contents directly -- no sudo needed since the user account
+  owns them.
 
 ## Nerf Packages and Manifests
 
@@ -111,8 +111,8 @@ No new users are added. The user account (`agentworks`) owns all nerf infrastruc
 
 A nerf package is a directory that bundles everything needed for a family of related nerfed tools:
 tool definitions, descriptions, optional custom scripts, and rulesync skills. Installing a package
-means copying it into `/opt/agentworks/nerf/packages/` and creating symlinks in `bin/` for each
-tool it defines.
+means copying it into `/opt/agentworks/nerf/packages/` and creating symlinks in `bin/` for each tool
+it defines.
 
 ### Manifest format
 
@@ -161,8 +161,8 @@ env = { AZURE_DEFAULTS_GROUP = "my-resource-group" }
 
 Custom scripts can be written in any language (bash, Python, etc.). They do not need to be compiled
 because `nerfrun` is the SUID entry point -- by the time it execs the script, the effective UID is
-already set. The scripts themselves are not SUID and are not directly executable by agents (they live
-in `packages/` which is `0700`).
+already set. The scripts themselves are not SUID and are not directly executable by agents (they
+live in `packages/` which is `0700`).
 
 #### The `run_as_user` flag
 
@@ -275,10 +275,11 @@ Agent (ws1--coder) runs: nerf-git-push-origin
 7. nerfrun loads manifest for nerf-git package
 8. Resolves command template: ["git", "push", "origin", "HEAD"]
 9. Checks run_as_user flag:
-   - true: keep effective UID as agentworks
-   - false: drop effective UID to ws1--coder
-10. exec() the resolved command (no shell, direct exec)
-11. Log "OK ws1--coder nerf-git-push-origin", exit with command result
+   - true: keep effective UID as agentworks, build user-account environment
+   - false: drop effective UID to ws1--coder, keep caller's environment
+10. Merge manifest env entries (if any)
+11. exec() the resolved command (no shell, direct exec)
+12. Log "OK ws1--coder nerf-git-push-origin", exit with command result
 ```
 
 ## Discovery (nerf-wcid)
@@ -302,34 +303,92 @@ nerf-az-account-show         Show the current Azure account
 nerf-wcid                    List available nerfed tools
 ```
 
+## Environment Construction
+
+### The problem
+
+SUID changes the effective UID but does not change the process environment. When `nerfrun` exec's a
+tool as the user account, the inherited environment still has the agent user's values (`HOME`,
+`USER`, etc.). This means:
+
+- `HOME` points to the agent's home directory, not the user account's
+- SSH looks for keys in `$HOME/.ssh/` -- the wrong directory
+- `az` CLI looks for sessions in `$HOME/.azure/` -- also wrong
+- `gh` CLI looks for sessions in `$HOME/.config/gh/` -- also wrong
+
+Relying on environment inheritance from the agent process is fragile and incorrect for
+`run_as_user = true` tools. `nerfrun` must construct a clean environment.
+
+### Approach
+
+`nerfrun` follows the same pattern as `su -` and `sudo -i`: look up the target user's passwd entry
+and build a deterministic environment from it. Since `nerfrun` is a compiled binary with the
+effective UID already set, it can call `getpwuid(geteuid())` directly without requiring root.
+
+### Environment for `run_as_user = true`
+
+`nerfrun` constructs a clean environment from scratch (not inherited):
+
+| Variable        | Source                                          |
+| --------------- | ----------------------------------------------- |
+| `HOME`          | passwd entry for user account                   |
+| `USER`          | passwd entry for user account                   |
+| `LOGNAME`       | passwd entry for user account                   |
+| `SHELL`         | passwd entry for user account                   |
+| `PATH`          | System default (`/usr/local/bin:/usr/bin:/bin`) |
+| `SSH_AUTH_SOCK` | Hardcoded: `/run/agentworks/ssh-agent.sock`     |
+| `TERM`          | Inherited from caller (for terminal output)     |
+
+Manifest `env` entries are merged on top, allowing tool-specific overrides (e.g.
+`AZURE_DEFAULTS_GROUP`).
+
+This is a small, deterministic set. No profile scripts need to be sourced, no `/etc/environment.d/`
+needs to be parsed. The result is equivalent to a login as the user account for the purposes of
+credential discovery.
+
+### Environment for `run_as_user = false`
+
+When `nerfrun` drops privileges back to the agent user, it keeps the caller's inherited environment
+(the agent's normal environment). Manifest `env` entries are still merged on top.
+
+### Why not source profile scripts?
+
+Sourcing `.profile`, `.bashrc`, etc. would require spawning a shell, which adds complexity and
+attack surface. The environment `nerfrun` needs is predictable and small -- the six variables above
+cover all credential discovery paths. If a future tool needs additional environment setup, the
+manifest `env` field handles it declaratively.
+
 ## Credential Inheritance
 
 ### Pattern
 
-`nerfrun` executes as the user account via SUID, so tools with `run_as_user = true` inherit the
-user's existing credentials directly. There is no credential brokering, no separate credential
-store, and no service principal management. The user authenticates once (as they already do for
-interactive work), and nerfed tools piggyback on that authentication.
+`nerfrun` executes as the user account via SUID, and for `run_as_user = true` tools it constructs a
+clean login-equivalent environment (see [Environment Construction](#environment-construction)
+above). This means tools naturally find the user's existing credentials. There is no credential
+brokering, no separate credential store, and no service principal management. The user authenticates
+once (as they already do for interactive work), and nerfed tools piggyback on that authentication.
 
 ### Azure
 
-The user's `az login` session is stored in `~/.azure/` in the user account's home directory. Since
-`nerfrun` executes as the user account, `az` CLI calls within a nerf tool see this session
-automatically.
+The user's `az login` session is stored in `~/.azure/` in the user account's home directory. With
+`HOME` set correctly by `nerfrun`, `az` CLI calls within a nerf tool see this session automatically.
 
 On Azure VMs, managed identity is also available and works without any login step.
 
 ### GitHub
 
 The user's `gh auth login` session is stored in `~/.config/gh/` in the user account's home
-directory. `nerf-gh-*` tools see this session automatically.
+directory. With `HOME` set correctly, `nerf-gh-*` tools see this session automatically.
 
 ### SSH (git operations)
 
-Git push/pull operations use the existing SSH agent socket from the user-based security model. The
-calling agent user is already in the `agentworks-ssh` group and has `SSH_AUTH_SOCK` set. No
-additional credential handling is needed for git-over-SSH -- the nerfed tool's role is purely RBAC
-enforcement.
+Git push/pull over SSH uses the SSH agent socket at `/run/agentworks/ssh-agent.sock`. `nerfrun` sets
+`SSH_AUTH_SOCK` to this path in the constructed environment, so `ssh` (invoked by git) finds the
+agent automatically. The SSH agent daemon (from the user-based security model) has the VM's private
+key loaded -- `ssh` never needs to read the key file directly.
+
+With `HOME` set to the user account's home, `ssh` also finds the correct `~/.ssh/known_hosts` and
+`~/.ssh/config` files.
 
 ## Audit Logging
 
@@ -370,9 +429,9 @@ Go is the likely default for simplicity.
 ### Multicall binary pattern
 
 `nerfrun` uses the multicall binary pattern (like busybox). Each nerfed tool is a symlink to
-`nerfrun`. When invoked, `nerfrun` reads `argv[0]` to determine which tool was requested, then
-loads the corresponding manifest entry. When invoked as `nerfrun` directly (no symlink), it prints
-usage information.
+`nerfrun`. When invoked, `nerfrun` reads `argv[0]` to determine which tool was requested, then loads
+the corresponding manifest entry. When invoked as `nerfrun` directly (no symlink), it prints usage
+information.
 
 ### Core logic
 
@@ -383,6 +442,7 @@ The `nerfrun` binary contains:
 - RBAC evaluation (parse `rbac.toml`, match user + tool, check expiration)
 - Manifest loading and validation
 - Parameter parsing and validation
+- Environment construction (clean environment for `run_as_user = true`, inherited for `false`)
 - Privilege management (`run_as_user` flag handling)
 - Audit logging
 - `nerf-wcid` implementation (built-in)
@@ -428,14 +488,18 @@ resolve it, rather than just reporting "permission denied."
 - **No shell expansion**: `nerfrun` never passes arguments through a shell. All command execution
   uses exec directly with explicit argument arrays constructed from the manifest template and
   validated parameters.
-- **Parameter validation**: all parameters are validated against their manifest spec (pattern, allow,
-  deny) before substitution into the command template. Invalid parameters are rejected with a
+- **Parameter validation**: all parameters are validated against their manifest spec (pattern,
+  allow, deny) before substitution into the command template. Invalid parameters are rejected with a
   constructive error message.
 - **Privilege management**: `nerfrun` respects the `run_as_user` flag. When `false`, it drops the
   effective UID back to the real UID before executing. When `true`, the command runs as the user
   account.
 - **Manifest integrity**: manifests and custom scripts live in `packages/` which is `0700` to the
   user account. Agents cannot modify them. `nerfrun` reads them as the user account via SUID.
+- **Environment sanitization**: for `run_as_user = true`, `nerfrun` builds a clean environment from
+  scratch rather than inheriting the caller's environment. This prevents environment variable
+  injection (e.g. `LD_PRELOAD`, `LD_LIBRARY_PATH`, `PATH` manipulation). See
+  [Environment Construction](#environment-construction).
 - **Minimal attack surface**: one compiled binary, statically linked, no dynamic loading. Custom
   scripts are exec'd (not sourced or interpreted by `nerfrun`).
 
@@ -467,8 +531,7 @@ The nerfed commands layer adds to the existing topology:
 ### VM initialization
 
 - Create the `nerf-exec` group
-- Create `/opt/agentworks/nerf/bin/`, `/opt/agentworks/nerf/etc/`,
-  `/opt/agentworks/nerf/packages/`
+- Create `/opt/agentworks/nerf/bin/`, `/opt/agentworks/nerf/etc/`, `/opt/agentworks/nerf/packages/`
 - Set permissions as described above
 - Install `nerfrun` binary and nerf packages
 
@@ -547,12 +610,12 @@ regenerates. This keeps the agent's knowledge in sync with its actual permission
 The mapping from tool name to package uses the manifest. Each package declares which tools it
 provides. The Agentworks CLI reads all manifests to build the mapping:
 
-| Tool name                | Package    |
-| ------------------------ | ---------- |
-| `nerf-git-push-origin`   | `nerf-git` |
-| `nerf-git-push-non-main` | `nerf-git` |
-| `nerf-az-account-show`   | `nerf-az`  |
-| `nerf-wcid`              | `nerf-wcid`|
+| Tool name                | Package     |
+| ------------------------ | ----------- |
+| `nerf-git-push-origin`   | `nerf-git`  |
+| `nerf-git-push-non-main` | `nerf-git`  |
+| `nerf-az-account-show`   | `nerf-az`   |
+| `nerf-wcid`              | `nerf-wcid` |
 
 ### Skill content
 
