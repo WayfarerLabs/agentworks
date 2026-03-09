@@ -278,13 +278,14 @@ def delete_vm(db: Database, config: Config, name: str, *, force: bool = False) -
                 except Exception as e:
                     typer.echo(f"Warning: failed to remove key from {key.git_host_name}: {e}", err=True)
 
-    # Tailscale logout (best-effort before destroying the VM)
-    if vm.tailscale_host:
-        _tailscale_logout(config, vm)
-
-    # Platform-specific cleanup
+    # Platform-specific cleanup (also handles Tailscale logout)
     try:
         provisioner = _get_provisioner_for_vm(db, vm)
+
+        # Tailscale logout (best-effort, via provisioning transport)
+        if vm.tailscale_host:
+            _tailscale_logout(provisioner, vm)
+
         provisioner.delete(vm)
     except Exception as e:
         typer.echo(f"Warning: platform cleanup failed: {e}", err=True)
@@ -317,18 +318,17 @@ def _prompt_delete_failed_vm(db: Database, config: Config, vm_name: str) -> None
         )
 
 
-def _tailscale_logout(config: Config, vm: VMRow) -> None:
-    """Best-effort: SSH to the VM and deregister from Tailscale before deletion."""
-    from agentworks.ssh import run_as_root as ssh_run_as_root
-    from agentworks.ssh import ssh_target_for_vm
+def _tailscale_logout(provisioner: VMProvisioner, vm: VMRow) -> None:
+    """Best-effort: deregister from Tailscale via the provisioning transport.
 
-    assert vm.tailscale_host is not None
-    target = ssh_target_for_vm(vm, config)
-
+    Uses the provisioner's exec_target (not Tailscale SSH) because we can't
+    ask Tailscale to tear itself down over the connection it provides.
+    """
     typer.echo("Deregistering from Tailscale...")
     try:
-        ssh_run_as_root(target, "tailscale down", timeout=15)
-        ssh_run_as_root(target, "tailscale logout", timeout=15)
+        exec_target = provisioner.exec_target(vm)
+        exec_target.run_as_root("tailscale down", timeout=15)
+        exec_target.run_as_root("tailscale logout", timeout=15)
         typer.echo("Tailscale node deregistered")
     except Exception as e:
         typer.echo(f"Warning: Tailscale logout failed (node may remain in admin console): {e}", err=True)
