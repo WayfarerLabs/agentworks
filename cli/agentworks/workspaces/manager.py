@@ -197,6 +197,11 @@ def delete_workspace(
     if not yes:
         typer.confirm(f"Delete workspace '{name}'?", abort=True)
 
+    # Delete agents first (remote cleanup + DB)
+    from agentworks.agents.manager import delete_agents_for_workspace
+
+    delete_agents_for_workspace(db, config, ws)
+
     if ws.type == "local":
         from agentworks.workspaces.backends.local import delete_local_workspace
 

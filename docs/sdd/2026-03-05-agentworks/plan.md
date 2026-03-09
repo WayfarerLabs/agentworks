@@ -234,11 +234,11 @@ workspace cascades to its agents in the database.
 
 ### 4.3 Agent Lifecycle Manager
 
-- [ ] Create `agents/manager.py` with `create_agent`, `delete_agent`, `list_agents` functions
-- [ ] Agent creation: validate name, derive Linux username (`<workspace>--<agent>`), SSH to VM to
+- [x] Create `agents/manager.py` with `create_agent`, `delete_agent`, `list_agents` functions
+- [x] Agent creation: validate name, derive Linux username (`<workspace>--<agent>`), SSH to VM to
       create Linux user and add to workspace group, insert DB record
-- [ ] Agent deletion: SSH to VM to kill processes and remove Linux user, remove DB record
-- [ ] Workspace delete integration: delete all agents before removing workspace directory
+- [x] Agent deletion: SSH to VM to kill processes and remove Linux user, remove DB record
+- [x] Workspace delete integration: delete all agents before removing workspace directory
 
 **Definition of done:** Agents can be created and deleted on a VM. Linux users are properly
 provisioned with workspace group membership. Workspace deletion cascades to agents.
