@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from agentworks.db import Database, InitStatus
 
 
@@ -154,5 +156,136 @@ def test_count_helpers(tmp_path: Path) -> None:
 
         assert db.count_vms_on_host("mac-studio") == 1
         assert db.count_workspaces_on_vm("vm1") == 1
+    finally:
+        db.close()
+
+
+def test_roundtrip_agent(tmp_path: Path) -> None:
+    db = Database(tmp_path / "test.db")
+    try:
+        db.insert_vm("dev-vm", platform="lima")
+        db.insert_workspace("ws-1", ws_type="vm", workspace_path="/tmp/ws-1", vm_name="dev-vm")
+
+        agent = db.insert_agent("coder", "ws-1", "ws-1--coder")
+        assert agent.name == "coder"
+        assert agent.workspace_name == "ws-1"
+        assert agent.linux_user == "ws-1--coder"
+
+        fetched = db.get_agent("ws-1", "coder")
+        assert fetched is not None
+        assert fetched.linux_user == "ws-1--coder"
+
+        assert db.get_agent("ws-1", "nonexistent") is None
+    finally:
+        db.close()
+
+
+def test_list_agents(tmp_path: Path) -> None:
+    db = Database(tmp_path / "test.db")
+    try:
+        db.insert_vm("dev-vm", platform="lima")
+        db.insert_workspace("ws-1", ws_type="vm", workspace_path="/tmp/ws-1", vm_name="dev-vm")
+        db.insert_workspace("ws-2", ws_type="vm", workspace_path="/tmp/ws-2", vm_name="dev-vm")
+
+        db.insert_agent("coder", "ws-1", "ws-1--coder")
+        db.insert_agent("reviewer", "ws-1", "ws-1--reviewer")
+        db.insert_agent("coder", "ws-2", "ws-2--coder")
+
+        # filter by workspace
+        ws1_agents = db.list_agents(workspace_name="ws-1")
+        assert len(ws1_agents) == 2
+        assert [a.name for a in ws1_agents] == ["coder", "reviewer"]
+
+        ws2_agents = db.list_agents(workspace_name="ws-2")
+        assert len(ws2_agents) == 1
+
+        # list all
+        all_agents = db.list_agents()
+        assert len(all_agents) == 3
+    finally:
+        db.close()
+
+
+def test_delete_agent(tmp_path: Path) -> None:
+    db = Database(tmp_path / "test.db")
+    try:
+        db.insert_vm("dev-vm", platform="lima")
+        db.insert_workspace("ws-1", ws_type="vm", workspace_path="/tmp/ws-1", vm_name="dev-vm")
+        db.insert_agent("coder", "ws-1", "ws-1--coder")
+
+        db.delete_agent("ws-1", "coder")
+        assert db.get_agent("ws-1", "coder") is None
+    finally:
+        db.close()
+
+
+def test_workspace_delete_cascades_agents(tmp_path: Path) -> None:
+    db = Database(tmp_path / "test.db")
+    try:
+        db.insert_vm("dev-vm", platform="lima")
+        db.insert_workspace("ws-1", ws_type="vm", workspace_path="/tmp/ws-1", vm_name="dev-vm")
+        db.insert_agent("coder", "ws-1", "ws-1--coder")
+        db.insert_agent("reviewer", "ws-1", "ws-1--reviewer")
+
+        db.delete_workspace("ws-1")
+        assert len(db.list_agents(workspace_name="ws-1")) == 0
+    finally:
+        db.close()
+
+
+def test_vm_delete_cascades_agents(tmp_path: Path) -> None:
+    db = Database(tmp_path / "test.db")
+    try:
+        db.insert_vm("dev-vm", platform="lima")
+        db.insert_workspace("ws-1", ws_type="vm", workspace_path="/tmp/ws-1", vm_name="dev-vm")
+        db.insert_agent("coder", "ws-1", "ws-1--coder")
+
+        db.delete_vm("dev-vm")
+        assert len(db.list_agents(workspace_name="ws-1")) == 0
+    finally:
+        db.close()
+
+
+def test_agent_linux_user_unique(tmp_path: Path) -> None:
+    db = Database(tmp_path / "test.db")
+    try:
+        db.insert_vm("dev-vm", platform="lima")
+        db.insert_workspace("ws-1", ws_type="vm", workspace_path="/tmp/ws-1", vm_name="dev-vm")
+        db.insert_agent("coder", "ws-1", "ws-1--coder")
+
+        with pytest.raises(Exception):
+            db.insert_agent("coder2", "ws-1", "ws-1--coder")  # duplicate linux_user
+    finally:
+        db.close()
+
+
+def test_agent_composite_pk(tmp_path: Path) -> None:
+    """Same agent name in different workspaces is allowed."""
+    db = Database(tmp_path / "test.db")
+    try:
+        db.insert_vm("dev-vm", platform="lima")
+        db.insert_workspace("ws-1", ws_type="vm", workspace_path="/tmp/ws-1", vm_name="dev-vm")
+        db.insert_workspace("ws-2", ws_type="vm", workspace_path="/tmp/ws-2", vm_name="dev-vm")
+
+        db.insert_agent("coder", "ws-1", "ws-1--coder")
+        db.insert_agent("coder", "ws-2", "ws-2--coder")
+
+        assert db.get_agent("ws-1", "coder") is not None
+        assert db.get_agent("ws-2", "coder") is not None
+    finally:
+        db.close()
+
+
+def test_delete_agents_for_workspace(tmp_path: Path) -> None:
+    db = Database(tmp_path / "test.db")
+    try:
+        db.insert_vm("dev-vm", platform="lima")
+        db.insert_workspace("ws-1", ws_type="vm", workspace_path="/tmp/ws-1", vm_name="dev-vm")
+        db.insert_agent("coder", "ws-1", "ws-1--coder")
+        db.insert_agent("reviewer", "ws-1", "ws-1--reviewer")
+
+        deleted = db.delete_agents_for_workspace("ws-1")
+        assert len(deleted) == 2
+        assert len(db.list_agents(workspace_name="ws-1")) == 0
     finally:
         db.close()

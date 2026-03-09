@@ -222,11 +222,12 @@ names still work (validation is at creation time only).
 
 ### 4.2 Agent Database Schema
 
-- [ ] Add `agents` table: name, workspace_name, linux_user, created_at
-- [ ] Primary key: `(workspace_name, name)`
-- [ ] Foreign key to `workspaces(name)` with cascade delete
-- [ ] Add migration from current schema version
-- [ ] Add CRUD operations to `db.py`: `create_agent`, `list_agents`, `get_agent`, `delete_agent`
+- [x] Add `agents` table: name, workspace_name, linux_user, created_at
+- [x] Primary key: `(workspace_name, name)`
+- [x] Foreign key to `workspaces(name)` with cascade delete
+- [x] Add migration from current schema version
+- [x] Add CRUD operations to `db.py`: `insert_agent`, `list_agents`, `get_agent`, `delete_agent`,
+      `delete_agents_for_workspace`
 
 **Definition of done:** Agent records can be created, listed, queried, and deleted. Deleting a
 workspace cascades to its agents in the database.

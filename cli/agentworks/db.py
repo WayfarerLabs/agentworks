@@ -80,6 +80,14 @@ class WorkspaceRow:
 
 
 @dataclass
+class AgentRow:
+    name: str
+    workspace_name: str
+    linux_user: str
+    created_at: str
+
+
+@dataclass
 class VMGitHostKeyRow:
     id: int
     vm_name: str
@@ -144,6 +152,16 @@ MIGRATIONS: dict[int, str] = {
     """,
     3: """
         ALTER TABLE vms ADD COLUMN vm_user TEXT NOT NULL DEFAULT 'agentworks';
+    """,
+    4: """
+        CREATE TABLE agents (
+            name           TEXT NOT NULL,
+            workspace_name TEXT NOT NULL,
+            linux_user     TEXT NOT NULL UNIQUE,
+            created_at     TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+            PRIMARY KEY (workspace_name, name),
+            FOREIGN KEY (workspace_name) REFERENCES workspaces(name)
+        );
     """,
 }
 
@@ -318,6 +336,10 @@ class Database:
 
     def delete_vm(self, name: str) -> None:
         self._conn.execute("DELETE FROM vm_git_host_keys WHERE vm_name = ?", (name,))
+        self._conn.execute(
+            "DELETE FROM agents WHERE workspace_name IN (SELECT name FROM workspaces WHERE vm_name = ?)",
+            (name,),
+        )
         self._conn.execute("DELETE FROM workspaces WHERE vm_name = ?", (name,))
         self._conn.execute("DELETE FROM vms WHERE name = ?", (name,))
         self._conn.commit()
@@ -370,6 +392,7 @@ class Database:
         self._conn.commit()
 
     def delete_workspace(self, name: str) -> None:
+        self._conn.execute("DELETE FROM agents WHERE workspace_name = ?", (name,))
         self._conn.execute("DELETE FROM workspaces WHERE name = ?", (name,))
         self._conn.commit()
 
@@ -403,6 +426,51 @@ class Database:
     def delete_vm_git_host_key(self, key_id: int) -> None:
         self._conn.execute("DELETE FROM vm_git_host_keys WHERE id = ?", (key_id,))
         self._conn.commit()
+
+    # -- Agents ------------------------------------------------------------
+
+    def insert_agent(self, name: str, workspace_name: str, linux_user: str) -> AgentRow:
+        self._conn.execute(
+            "INSERT INTO agents (name, workspace_name, linux_user) VALUES (?, ?, ?)",
+            (name, workspace_name, linux_user),
+        )
+        self._conn.commit()
+        return self.get_agent(workspace_name, name)  # type: ignore[return-value]
+
+    def get_agent(self, workspace_name: str, name: str) -> AgentRow | None:
+        row = self._conn.execute(
+            "SELECT * FROM agents WHERE workspace_name = ? AND name = ?",
+            (workspace_name, name),
+        ).fetchone()
+        return _to_agent(row) if row else None
+
+    def list_agents(self, workspace_name: str | None = None) -> list[AgentRow]:
+        if workspace_name is not None:
+            rows = self._conn.execute(
+                "SELECT * FROM agents WHERE workspace_name = ? ORDER BY name",
+                (workspace_name,),
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                "SELECT * FROM agents ORDER BY workspace_name, name",
+            ).fetchall()
+        return [_to_agent(r) for r in rows]
+
+    def delete_agent(self, workspace_name: str, name: str) -> None:
+        self._conn.execute(
+            "DELETE FROM agents WHERE workspace_name = ? AND name = ?",
+            (workspace_name, name),
+        )
+        self._conn.commit()
+
+    def delete_agents_for_workspace(self, workspace_name: str) -> list[AgentRow]:
+        """Delete all agents for a workspace, returning the deleted agents."""
+        agents = self.list_agents(workspace_name=workspace_name)
+        self._conn.execute(
+            "DELETE FROM agents WHERE workspace_name = ?", (workspace_name,),
+        )
+        self._conn.commit()
+        return agents
 
 
 # -- Row converters --------------------------------------------------------
@@ -449,6 +517,15 @@ def _to_workspace(row: sqlite3.Row) -> WorkspaceRow:
         workspace_path=row["workspace_path"],
         created_at=row["created_at"],
         last_seen_at=row["last_seen_at"],
+    )
+
+
+def _to_agent(row: sqlite3.Row) -> AgentRow:
+    return AgentRow(
+        name=row["name"],
+        workspace_name=row["workspace_name"],
+        linux_user=row["linux_user"],
+        created_at=row["created_at"],
     )
 
 
