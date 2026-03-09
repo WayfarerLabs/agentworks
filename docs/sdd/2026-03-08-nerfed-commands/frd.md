@@ -17,17 +17,19 @@ The nerfed commands layer sits on top of the user-based security model and provi
 
 - Specific, scoped operations (not entire tools)
 - Per-agent permissions with time-boxing
-- Credential brokering (agents never see credentials directly)
+- Credential inheritance (tools run as the user account, which already holds credentials)
 - Full auditability (who ran what, when)
 - Tool-agnostic (works with any AI coding tool)
 - No daemon required (SUID + config files)
 
 ## Personas
 
-### Platform operator
+### Operator
 
-Manages VMs and agent permissions via the admin user. Configures which agents can run which nerfed
-tools and for how long. Installs and updates nerfed tools.
+The human who owns the VM. Logs in as the user account (`agentworks`), manages agent permissions,
+configures which agents can run which nerfed tools and for how long, and installs and updates nerfed
+tools. This is the same identity used for all non-agent work on the VM -- it is the user's account,
+not a special service account.
 
 ### AI agent
 
@@ -45,38 +47,43 @@ human for every operation.
 
 ### R1: Nerfed tool executables
 
-Nerfed tools are purpose-built executables that each perform a single scoped operation. They live in
-a system-wide directory and are SUID to the nerf user. Examples:
+Each nerfed tool performs a single scoped operation. From the agent's perspective, each tool is a
+standalone executable in a system-wide directory. Under the hood, all tools are implemented via
+`nerfrun` -- a single SUID binary that reads declarative manifest files to determine what each tool
+does. See the HLA for the nerfrun architecture and manifest format.
+
+Examples:
 
 - `nerf-git-push-non-origin` -- push to a non-origin remote
 - `nerf-git-push-origin` -- push to the origin remote
 - `nerf-az-account-show` -- run `az account show`
 - `nerf-calendar-today` -- query today's calendar events
 
-Each tool is a minimal wrapper that:
+When an agent invokes a nerfed tool, `nerfrun`:
 
 1. Records the real (calling) user identity
-2. Assumes the nerf user identity (via SUID)
+2. Assumes the user account identity (via SUID)
 3. Checks RBAC rules to verify the caller is authorized
-4. Performs the scoped operation
-5. Returns the result to the caller
+4. Validates parameters against the manifest spec
+5. Performs the scoped operation using the user account's existing credentials
+6. Returns the result to the caller
 
-### R2: Nerf user
+### R2: SUID identity -- the user account
 
-A dedicated Linux user (`nerf`) that:
+Nerfed tools are SUID to the user account (`agentworks`) rather than a dedicated service user. The
+user account is the human operator's identity on the VM -- it holds all authenticated sessions
+(`az login`, `gh auth login`, SSH keys, etc.) and has unrestricted sudo. When a nerfed tool executes
+via SUID, it inherits these credentials naturally.
 
-- Is a normal unprivileged user (not the admin, no sudo)
-- Owns the nerfed tool executables
-- Owns the nerf config directory (read-only to nerf, no access for others)
-- Holds credentials for external services (Azure SP, git tokens, etc.)
-
-The nerf user never logs in or runs interactively. It exists solely as the identity for SUID
-execution and credential storage.
+This eliminates the need for credential brokering, service principal management, or duplicated
+authentication state. The user logs in once (as they already do), and nerfed tools piggyback on that
+identity. There is no separate "nerf user" -- the SUID target is the same account the human uses
+interactively.
 
 ### R3: RBAC rules
 
-A configuration file (readable only by the nerf user) that maps agent users to the specific nerfed
-tools they are allowed to run. Rules support:
+A configuration file (readable only by the user account) that maps agent users to the specific
+nerfed tools they are allowed to run. Rules support:
 
 - **Agent user**: the Linux username of the agent (no globs)
 - **Tool**: the specific nerfed tool name (no globs)
@@ -100,33 +107,37 @@ two purposes:
 - Agents (and their driving AI tools) can discover available capabilities
 - Future: coding platforms can use this to auto-approve tool use
 
-### R5: Credential brokering
+### R5: Credential inheritance
 
-Nerfed tools that require external credentials (Azure, GitHub, etc.) access those credentials from
-the nerf config directory. Agent users never see the credentials directly. The nerf tool
-authenticates on behalf of the agent using the stored credentials.
+Nerfed tools inherit the user account's existing credentials via SUID. When a tool runs as the user
+account, it has access to:
 
-This pattern generalizes to any tool with an identity component:
+- **Azure**: the user's `az login` session (token cache in the user's home directory). `nerf-az-*`
+  tools call `az` directly and it just works.
+- **GitHub**: the user's `gh auth login` session. `nerf-gh-*` tools call `gh` directly.
+- **SSH (git operations)**: the SSH agent socket from the user-based security model. The agent user
+  already has `SSH_AUTH_SOCK` set, and the nerfed tool's role is purely RBAC enforcement.
+- **Calendars, APIs, etc.**: any credentials the user has configured in their account.
 
-- **Azure**: service principal credentials or managed identity token cache stored in nerf config.
-  `nerf-az-*` tools authenticate using these.
-- **GitHub**: PAT or gh cli token stored in nerf config. `nerf-gh-*` tools authenticate using these.
-- **Calendars, APIs, etc.**: API keys or OAuth tokens stored in nerf config.
+This is a significant simplification over a credential brokering model. There are no service
+principal files to manage, no token caches to synchronize, no separate credential stores. The user
+authenticates once as they normally would, and agents inherit that authentication through the SUID
+mechanism, gated by RBAC.
 
-On Azure VMs, managed identity is preferred (no secrets to manage). On non-Azure VMs, service
-principal credentials in nerf config are the fallback.
+On Azure VMs, managed identity is also available and works automatically since the SUID process runs
+as a normal user on the VM.
 
-### R6: Admin management
+### R6: Configuration management
 
-The admin user manages all nerf configuration:
+The user account owns and manages all nerf configuration directly:
 
 - Creates and updates RBAC rules
-- Installs and updates nerfed tool executables
-- Manages credentials in the nerf config directory
-- The admin user has write access to the nerf config directory
+- Installs and updates nerf packages (the installable unit for nerfed tools -- each package bundles
+  manifests, optional scripts, and rulesync skills for a family of related tools)
+- Manages the nerf config directory (no sudo needed -- it is the user's own files)
 
-Agent users have no access to the nerf config directory. They interact with the system solely
-through the SUID executables.
+Agent users have no access to the nerf config directory or package contents. They interact with the
+system solely through the nerfed tool executables.
 
 ### R7: Audit trail
 
@@ -205,6 +216,22 @@ The CLI surfaces bigred status in:
 - `agentworks vm status` -- includes bigred details
 - Top-level commands -- a warning line when any VMs are in bigred state
 
+## Impact on Existing Implementation
+
+The shift from a dedicated nerf user to the user account as the SUID identity, and the reframing
+from "admin user" to "user account", requires changes to both the user-based security model and the
+existing Agentworks CLI:
+
+- **User-based security model**: the `agentworks` account should be documented as the user's
+  identity (not a special admin account). The user-based security HLA references to "admin user"
+  should be updated to reflect this framing.
+- **Agentworks CLI**: code and documentation that refer to the "admin user" should shift to "user
+  account" or simply "the user" where appropriate. The `vm_user` config field and `--vm-user` flag
+  remain as-is (they control the Linux username), but surrounding documentation and messages should
+  reflect the new mental model.
+- **Nerfed commands HLA**: the architecture eliminates the `nerf` user entirely and uses the user
+  account as the SUID identity. See the HLA for the updated topology.
+
 ## Future
 
 ### Auto-approval in coding platforms
@@ -225,4 +252,4 @@ rules.
 - **Network-level controls**: restricting agent network access is orthogonal and handled separately
   (if at all).
 - **Container isolation**: nerfed commands work at the Linux user level, not the container level.
-- **Dynamic tool installation**: agents cannot install new nerfed tools. Only the admin can.
+- **Dynamic tool installation**: agents cannot install new nerfed tools. Only the operator can.

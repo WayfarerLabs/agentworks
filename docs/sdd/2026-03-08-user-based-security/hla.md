@@ -207,7 +207,8 @@ repo-level or network-level isolation is needed, use separate VMs.
 ## Relationship to Nerfed Commands
 
 This model provides the foundation for the [nerfed commands](../2026-03-08-nerfed-commands/) layer.
-Where this model isolates agents from each other and from the admin/tools layers, nerfed commands
-add controlled, auditable, time-boxed access to specific privileged operations (git push, cloud CLI
-commands, etc.) via SUID executables owned by a dedicated `nerf` user. The nerfed commands layer
-adds a `nerf` user and `nerf-exec` group to the topology defined here.
+Where this model isolates agents from each other and from the user's account, nerfed commands add
+controlled, auditable, time-boxed access to specific privileged operations (git push, cloud CLI
+commands, etc.) via SUID executables owned by the user account. The nerfed commands layer adds a
+`nerf-exec` group to the topology defined here and uses the user account as the SUID identity,
+inheriting the user's existing credentials.

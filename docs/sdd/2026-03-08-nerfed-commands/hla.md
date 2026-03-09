@@ -5,12 +5,19 @@
 ## Overview
 
 Nerfed commands add a controlled privilege layer on top of the user-based security model. Where that
-model isolates agents from each other and from the admin layer, nerfed commands give agents a
+model isolates agents from each other and from the user's account, nerfed commands give agents a
 narrow, auditable, time-boxed path to perform specific privileged operations.
 
-The mechanism is SUID executables owned by a dedicated `nerf` user. Each executable performs one
-scoped operation, checks RBAC rules before executing, and logs every invocation. No daemon, no
-socket, no IPC -- just the filesystem and standard Unix SUID semantics.
+The core mechanism is `nerfrun` -- a single compiled SUID binary owned by the user account
+(`agentworks`). Tools are defined declaratively in manifest files. When an agent runs a nerfed tool,
+`nerfrun` checks RBAC, then either executes a command template from the manifest (for wrapper tools)
+or delegates to a custom script (for more complex tools). No daemon, no socket, no IPC -- just the
+filesystem and standard Unix SUID semantics.
+
+Because `nerfrun` is SUID to the user account, it inherits the user's existing credentials
+(`az login`, `gh auth login`, SSH keys, etc.) naturally. There is no separate service user or
+credential brokering -- the user authenticates once as they normally would, and agents access those
+credentials through the SUID gate.
 
 ## Security Layer Diagram
 
@@ -18,23 +25,17 @@ socket, no IPC -- just the filesystem and standard Unix SUID semantics.
 +------------------------------------------------------------------+
 |                        VM (trust boundary)                        |
 |                                                                   |
-|  admin (agentworks)                                               |
+|  user account (agentworks)                                        |
 |    - sudo, full control                                           |
-|    - manages nerf config (write)                                  |
-|    - installs nerf tools                                          |
+|    - owns nerfrun and nerf config                                 |
+|    - holds all credentials (az, gh, ssh, etc.)                    |
 |    - manages agent lifecycle                                      |
 |                                                                   |
-|  nerf                                                             |
-|    - no sudo, no login                                            |
-|    - owns SUID executables                                        |
-|    - owns config dir (read-only for nerf, no access for others)   |
-|    - holds brokered credentials                                   |
-|                                                                   |
-|  ws1--coder, ws1--reviewer, ...                                    |
+|  ws1--coder, ws1--reviewer, ...                                   |
 |    - no sudo, no login shell (except via coding tool)             |
 |    - workspace access via group                                   |
 |    - tools access via aw-tools group (read/execute)               |
-|    - nerfed operations via SUID executables only                  |
+|    - nerfed operations via nerfrun symlinks only                  |
 +------------------------------------------------------------------+
 ```
 
@@ -43,57 +44,175 @@ socket, no IPC -- just the filesystem and standard Unix SUID semantics.
 Building on the user-based security model topology:
 
 ```text
-Users (new):
-  nerf                (no sudo, no login, SUID identity)
-
 Groups (new):
-  nerf-exec           (execute access to nerf tool binaries)
+  nerf-exec           (execute access to nerfrun and its symlinks)
 ```
 
-### Nerf user
-
-- Created during VM initialization alongside the admin user
-- No sudo, no password, no login shell (`/usr/sbin/nologin`)
-- Home directory: `/home/nerf/` (exists but unused)
-- Not a member of any workspace or tools group
-- Owns `/opt/agentworks/nerf/bin/` and `/opt/agentworks/nerf/etc/`
+No new users are added. The user account (`agentworks`) owns all nerf infrastructure. The dedicated
+`nerf` user from the earlier design has been eliminated -- see
+[Design Decision: No Dedicated Nerf User](#design-decision-no-dedicated-nerf-user) below.
 
 ### Nerf-exec group
 
 - Agent users are added to this group during agent provisioning
-- Grants execute (but not read) access to nerfed tool binaries
+- Grants execute (but not read) access to `nerfrun` and its symlinks
 - This prevents agents from reading the binary contents while still allowing SUID execution
 
 ## Directory Layout
 
 ```text
 /opt/agentworks/nerf/
-  bin/                              # 0710 nerf:nerf-exec
-    nerf-git-push-origin            # 4711 nerf:nerf-exec (SUID)
-    nerf-git-push-non-origin        # 4711 nerf:nerf-exec (SUID)
-    nerf-wcid                       # 4711 nerf:nerf-exec (SUID)
-    nerf-az-account-show            # 4711 nerf:nerf-exec (SUID)
+  bin/                                # 0710 agentworks:nerf-exec
+    nerfrun                           # 4710 agentworks:nerf-exec (SUID, the only compiled binary)
+    nerf-git-push-origin -> nerfrun   # symlink
+    nerf-git-push-non-origin -> nerfrun
+    nerf-az-account-show -> nerfrun
+    nerf-wcid -> nerfrun
     ...
-  etc/                              # 0700 nerf:nerf (nerf-only)
-    bigred.lock                     # if present, all tools deny (bigred)
-    rbac.toml                       # RBAC rules
-    credentials/                    # brokered credentials
-      azure.json                    # service principal or managed identity
-      github-token                  # GitHub PAT
-      ...
+  etc/                                # 0700 agentworks:agentworks
+    bigred.lock                       # if present, all tools deny (bigred)
+    rbac.toml                         # RBAC rules
+  packages/                           # 0700 agentworks:agentworks
+    nerf-git/                         # a nerf package
+      manifest.toml                   # tool definitions, descriptions, skills metadata
+      skills/
+        SKILL.md                      # rulesync skill for this package
+    nerf-az/
+      manifest.toml
+      scripts/
+        nerf-az-resource-list.sh      # custom script for a complex tool
+      skills/
+        SKILL.md
+    nerf-wcid/
+      manifest.toml
+      skills/
+        SKILL.md
 ```
 
 ### Permission rationale
 
-- `bin/` is `0710 nerf:nerf-exec`: the group can enter and execute files, but cannot list the
-  directory. This means agents can run a tool by name but cannot enumerate all available tools (they
-  use `nerf-wcid` for that).
-- Each binary is `4711 nerf:nerf-exec`: the SUID bit (4) causes execution as the nerf user. Owner
-  can read/write/execute, group and others can execute.
-- `etc/` is `0700 nerf:nerf`: only the nerf user can read. Since the SUID binaries execute as nerf,
-  they can read RBAC rules and credentials. The calling agent user cannot.
-- The admin user manages `etc/` contents via sudo (e.g.
-  `sudo -u nerf vim /opt/agentworks/nerf/etc/rbac.toml`).
+- `bin/` is `0710 agentworks:nerf-exec`: the group can enter and execute files, but cannot list the
+  directory. Agents can run a tool by name but cannot enumerate all available tools (they use
+  `nerf-wcid` for that).
+- `nerfrun` is `4710 agentworks:nerf-exec`: the SUID bit (4) causes execution as the user account.
+  Owner can read/write/execute, group can execute only, others have no access. All tool-name
+  symlinks point to this single binary.
+- `etc/` is `0700 agentworks:agentworks`: only the user account can read. Since `nerfrun` executes
+  as the user account, it can read RBAC rules. The calling agent user cannot.
+- `packages/` is `0700 agentworks:agentworks`: only the user account (and therefore `nerfrun`) can
+  read manifests and custom scripts. Agent users access package content indirectly through
+  `nerfrun`.
+- The user manages `etc/` and `packages/` contents directly -- no sudo needed since the user
+  account owns them.
+
+## Nerf Packages and Manifests
+
+### Package concept
+
+A nerf package is a directory that bundles everything needed for a family of related nerfed tools:
+tool definitions, descriptions, optional custom scripts, and rulesync skills. Installing a package
+means copying it into `/opt/agentworks/nerf/packages/` and creating symlinks in `bin/` for each
+tool it defines.
+
+### Manifest format
+
+Each package contains a `manifest.toml` that declaratively defines its tools.
+
+#### Wrapper tools
+
+Most tools are simple wrappers around an existing command. The manifest defines the command template
+and parameter validation. No code is needed -- `nerfrun` executes the command directly.
+
+```toml
+[package]
+name = "nerf-git"
+skill_group = "nerf-git"
+
+[tools.nerf-git-push-origin]
+description = "Push the current branch to the origin remote"
+command = ["git", "push", "origin", "HEAD"]
+run_as_user = true
+
+[tools.nerf-git-push-non-origin]
+description = "Push the current branch to a non-origin remote"
+command = ["git", "push", "{remote}", "HEAD"]
+run_as_user = true
+
+[tools.nerf-git-push-non-origin.params.remote]
+required = true
+description = "Remote name to push to"
+deny = ["origin"]
+pattern = "^[a-z0-9_-]+$"
+```
+
+#### Custom tools
+
+When the logic is more complex than "run this command with these args" (e.g. a tool that needs to
+parse API responses, combine multiple calls, or format output), a package includes a custom script
+and the manifest points to it.
+
+```toml
+[tools.nerf-az-resource-list]
+description = "List Azure resources in the configured subscription"
+script = "scripts/nerf-az-resource-list.sh"
+run_as_user = true
+env = { AZURE_DEFAULTS_GROUP = "my-resource-group" }
+```
+
+Custom scripts can be written in any language (bash, Python, etc.). They do not need to be compiled
+because `nerfrun` is the SUID entry point -- by the time it execs the script, the effective UID is
+already set. The scripts themselves are not SUID and are not directly executable by agents (they live
+in `packages/` which is `0700`).
+
+#### The `run_as_user` flag
+
+Each tool declares whether it should run as the user account or drop privileges back to the calling
+agent user before executing.
+
+- `run_as_user = true`: the command/script runs as the user account. Required for tools that need
+  the user's credentials (`az`, `gh`, git push, etc.). This is the common case.
+- `run_as_user = false`: `nerfrun` drops the effective UID back to the real UID (the agent user)
+  before executing. Useful for tools that only need RBAC gating but should not run with the user's
+  full privileges (e.g. a tool that formats workspace output or runs a linter).
+
+#### Parameter validation
+
+Parameters in command templates use `{name}` substitution. Each parameter has a validation spec:
+
+- **`required`**: whether the parameter must be provided
+- **`description`**: human-readable description (used by `nerf-wcid`)
+- **`pattern`**: regex the value must match (e.g. `^[a-z0-9_-]+$`)
+- **`allow`**: explicit allow-list of valid values
+- **`deny`**: explicit deny-list of forbidden values (e.g. `["origin"]`)
+- **`default`**: default value if not provided (only valid when `required = false`)
+
+Parameters are always passed as discrete exec arguments -- never shell-interpolated. `nerfrun`
+validates all parameters before constructing the exec argument array. If validation fails, the tool
+exits with a constructive error message.
+
+#### Environment variables
+
+Tools can declare environment variables via the `env` map. These are set before executing the
+command or script. This is useful for tools that need specific configuration (e.g.
+`AZURE_CONFIG_DIR`, `AZURE_DEFAULTS_GROUP`).
+
+### Built-in tools
+
+`nerf-wcid` is a built-in tool implemented directly in the `nerfrun` binary rather than via a
+manifest wrapper. It reads all installed manifests and cross-references with RBAC to produce the
+discovery output. It still has a manifest entry (for description and skill metadata) but does not
+use the `command` or `script` fields.
+
+### Package installation
+
+Installing a nerf package:
+
+1. Copy the package directory to `/opt/agentworks/nerf/packages/<name>/`
+2. For each tool defined in the manifest, create a symlink in `bin/`:
+   `ln -s nerfrun /opt/agentworks/nerf/bin/<tool-name>`
+3. Validate the manifest (required fields, parameter specs, script paths)
+
+The Agentworks CLI provides `agentworks nerf install <package-path>` to automate this.
 
 ## RBAC Configuration
 
@@ -122,98 +241,99 @@ tool = "nerf-az-account-show"
 
 ### Evaluation
 
-When a nerfed tool is invoked:
+When `nerfrun` is invoked (via a tool-name symlink):
 
-1. Tool reads the real UID of the calling process (`getuid()` before SUID takes effect, or the saved
-   real UID)
-2. Resolves the real UID to a username
-3. Reads `rbac.toml`
-4. Searches for a rule matching both the username and the tool name
+1. Reads `argv[0]` to determine the tool name
+2. Checks for `bigred.lock` -- if present, deny unconditionally
+3. Reads the real UID of the calling process and resolves to a username
+4. Reads `rbac.toml` and searches for a matching rule (user + tool name)
 5. If a matching rule has an `expires` field, checks against current UTC time
 6. If no valid rule is found: log denial, exit non-zero
-7. If a valid rule is found: proceed with the operation
+7. If a valid rule is found: load the manifest, validate parameters, execute
 
 ### No globs
 
 RBAC rules use exact matches for both user and tool. No wildcards, no patterns, no regex. This keeps
-the security model simple and auditable. The admin explicitly grants each agent access to each tool.
+the security model simple and auditable. The operator explicitly grants each agent access to each
+tool.
 
 ## SUID Execution Flow
 
 ```text
 Agent (ws1--coder) runs: nerf-git-push-origin
 
-1. Kernel sets effective UID to nerf (SUID bit)
+1. Kernel executes nerfrun (via symlink) with effective UID = agentworks
    Real UID remains ws1--coder
-2. Tool checks for /opt/agentworks/nerf/etc/bigred.lock
+2. nerfrun reads argv[0] -> "nerf-git-push-origin"
+3. nerfrun checks for /opt/agentworks/nerf/etc/bigred.lock
    - If present: log BIGRED, print constructive message, exit 1
-3. Tool reads real UID -> "ws1--coder"
-4. Tool reads /opt/agentworks/nerf/etc/rbac.toml
-5. Checks: does ws1--coder have access to nerf-git-push-origin?
+4. nerfrun reads real UID -> "ws1--coder"
+5. nerfrun reads /opt/agentworks/nerf/etc/rbac.toml
+6. Checks: does ws1--coder have access to nerf-git-push-origin?
    - If no: log DENIED, print constructive message, exit 1
    - If expired: log EXPIRED, print constructive message, exit 1
-6. Tool performs the scoped git push operation
-   - Uses SSH_AUTH_SOCK for git credentials (from user-based security model)
-   - Or uses brokered credentials from etc/credentials/
-7. Log "OK ws1--coder nerf-git-push-origin", exit with operation result
+7. nerfrun loads manifest for nerf-git package
+8. Resolves command template: ["git", "push", "origin", "HEAD"]
+9. Checks run_as_user flag:
+   - true: keep effective UID as agentworks
+   - false: drop effective UID to ws1--coder
+10. exec() the resolved command (no shell, direct exec)
+11. Log "OK ws1--coder nerf-git-push-origin", exit with command result
 ```
 
 ## Discovery (nerf-wcid)
 
-`nerf-wcid` is itself a SUID nerfed tool. Every agent user should have access to it (the admin adds
-a rule for each agent). When run:
+`nerf-wcid` is a built-in `nerfrun` command (not a manifest wrapper). Every agent user should have
+RBAC access to it. When run:
 
 1. Reads real UID, resolves to username
 2. Checks RBAC for access to `nerf-wcid` itself
-3. Reads all rules for the calling user
-4. Outputs a list of authorized tools with expiration info
+3. Reads all installed manifests to get tool names and descriptions
+4. Cross-references with RBAC rules for the calling user
+5. Outputs authorized tools with descriptions and expiration info
 
 Example output:
 
 ```text
-nerf-git-push-origin
-nerf-git-push-non-origin  expires: 2026-03-09T00:00:00Z
-nerf-az-account-show
-nerf-wcid
+nerf-git-push-origin         Push the current branch to the origin remote
+nerf-git-push-non-origin     Push the current branch to a non-origin remote
+                             expires: 2026-03-09T00:00:00Z
+nerf-az-account-show         Show the current Azure account
+nerf-wcid                    List available nerfed tools
 ```
 
-## Credential Brokering
+## Credential Inheritance
 
 ### Pattern
 
-Nerfed tools that need external credentials read them from `/opt/agentworks/nerf/etc/credentials/`.
-This directory is only readable by the nerf user, so credentials are inaccessible to agents. The
-SUID binary reads the credential, authenticates, performs the operation, and returns the result.
+`nerfrun` executes as the user account via SUID, so tools with `run_as_user = true` inherit the
+user's existing credentials directly. There is no credential brokering, no separate credential
+store, and no service principal management. The user authenticates once (as they already do for
+interactive work), and nerfed tools piggyback on that authentication.
 
 ### Azure
 
-On Azure VMs, managed identity is preferred:
+The user's `az login` session is stored in `~/.azure/` in the user account's home directory. Since
+`nerfrun` executes as the user account, `az` CLI calls within a nerf tool see this session
+automatically.
 
-- No secrets to store or rotate
-- The nerf tool calls the Azure Instance Metadata Service (IMDS) endpoint to obtain a token
-- Works automatically for any Azure operation the VM's managed identity is authorized for
-
-On non-Azure VMs (or when managed identity is insufficient):
-
-- A service principal credential (`azure.json`) is stored in `etc/credentials/`
-- Contains `tenant_id`, `client_id`, and `client_secret`
-- Nerf tools use this to obtain Azure AD tokens
+On Azure VMs, managed identity is also available and works without any login step.
 
 ### GitHub
 
-- A PAT or `gh auth` token stored in `etc/credentials/github-token`
-- Nerf tools pass this as a bearer token for GitHub API calls
+The user's `gh auth login` session is stored in `~/.config/gh/` in the user account's home
+directory. `nerf-gh-*` tools see this session automatically.
 
 ### SSH (git operations)
 
 Git push/pull operations use the existing SSH agent socket from the user-based security model. The
 calling agent user is already in the `agentworks-ssh` group and has `SSH_AUTH_SOCK` set. No
-additional credential brokering is needed for git-over-SSH -- the nerfed tool's role is purely RBAC
+additional credential handling is needed for git-over-SSH -- the nerfed tool's role is purely RBAC
 enforcement.
 
 ## Audit Logging
 
-All nerfed tool invocations are logged to syslog (or a dedicated log file at
+All `nerfrun` invocations are logged to syslog (or a dedicated log file at
 `/var/log/agentworks/nerf.log`). Each entry includes:
 
 - Timestamp (UTC)
@@ -231,38 +351,47 @@ Example:
 2026-03-08T15:01:00Z BIGRED ws1--coder nerf-git-push-origin
 ```
 
-## Tool Implementation
+## nerfrun Implementation
 
-### Language choice
+### The only compiled binary
 
-Nerfed tools should be compiled, statically linked binaries. SUID scripts are disabled by most Linux
-kernels (the kernel ignores SUID on interpreted files). Reasonable options:
+`nerfrun` is a single compiled, statically linked binary. It is the only artifact that requires
+compilation in the entire nerfed commands system. Everything else -- tool definitions, custom
+scripts, skills, RBAC rules -- is declarative content.
+
+SUID scripts are disabled by most Linux kernels (the kernel ignores SUID on interpreted files), so
+the entry point must be compiled. Reasonable language options:
 
 - **Go**: good stdlib, static linking by default, minimal attack surface
 - **Rust**: same benefits, stricter memory safety
-- **C**: works but higher risk of memory safety issues in security-critical code
 
-Go is the likely default for simplicity. Each tool is a small, self-contained binary.
+Go is the likely default for simplicity.
 
-### Shared library
+### Multicall binary pattern
 
-All nerfed tools share common logic:
+`nerfrun` uses the multicall binary pattern (like busybox). Each nerfed tool is a symlink to
+`nerfrun`. When invoked, `nerfrun` reads `argv[0]` to determine which tool was requested, then
+loads the corresponding manifest entry. When invoked as `nerfrun` directly (no symlink), it prints
+usage information.
 
-- Check for `bigred.lock` (deny all if present)
-- Read real UID and resolve to username
-- Parse `rbac.toml`
-- Evaluate RBAC rules (match user + tool, check expiration)
-- Log the invocation
-- Load credentials from `etc/credentials/`
+### Core logic
 
-This is a shared Go package (or similar), compiled into each binary. No shared `.so` files -- each
-binary is fully self-contained.
+The `nerfrun` binary contains:
+
+- Bigred lockfile check
+- Real UID resolution
+- RBAC evaluation (parse `rbac.toml`, match user + tool, check expiration)
+- Manifest loading and validation
+- Parameter parsing and validation
+- Privilege management (`run_as_user` flag handling)
+- Audit logging
+- `nerf-wcid` implementation (built-in)
 
 ### Constructive denial messages
 
-When a nerfed tool denies an operation, it prints a constructive message to stderr that tells the
-caller what happened and what to do about it. This is critical because the caller is often an AI
-agent that will read the output and can act on clear instructions.
+When `nerfrun` denies an operation, it prints a constructive message to stderr that tells the caller
+what happened and what to do about it. This is critical because the caller is often an AI agent that
+will read the output and can act on clear instructions.
 
 Example stderr output for each denial type:
 
@@ -296,14 +425,40 @@ resolve it, rather than just reporting "permission denied."
 
 ### Security hardening
 
-- **No shell expansion**: tools never pass arguments through a shell. All subprocess calls use exec
-  directly with explicit argument arrays.
-- **Input validation**: all arguments are validated before use. Tools that accept no arguments (most
-  of them) reject any arguments.
-- **Drop privileges**: after reading RBAC and credentials, tools drop the effective UID back to the
-  real UID where possible before executing the underlying operation.
-- **Minimal scope**: each tool does exactly one thing. No flags to change behavior, no configuration
-  beyond what is in `etc/`.
+- **No shell expansion**: `nerfrun` never passes arguments through a shell. All command execution
+  uses exec directly with explicit argument arrays constructed from the manifest template and
+  validated parameters.
+- **Parameter validation**: all parameters are validated against their manifest spec (pattern, allow,
+  deny) before substitution into the command template. Invalid parameters are rejected with a
+  constructive error message.
+- **Privilege management**: `nerfrun` respects the `run_as_user` flag. When `false`, it drops the
+  effective UID back to the real UID before executing. When `true`, the command runs as the user
+  account.
+- **Manifest integrity**: manifests and custom scripts live in `packages/` which is `0700` to the
+  user account. Agents cannot modify them. `nerfrun` reads them as the user account via SUID.
+- **Minimal attack surface**: one compiled binary, statically linked, no dynamic loading. Custom
+  scripts are exec'd (not sourced or interpreted by `nerfrun`).
+
+## Design Decision: No Dedicated Nerf User
+
+An earlier design introduced a dedicated `nerf` Linux user as the SUID identity for nerfed tools.
+That user would hold brokered credentials (service principal files, PATs, etc.) and the SUID
+binaries would run as `nerf` to access them.
+
+This design eliminates the `nerf` user entirely. The rationale:
+
+- **Credential duplication is the core problem.** The user account already holds all credentials
+  (`az login`, `gh auth login`, SSH keys). A separate nerf user requires duplicating or forwarding
+  those credentials, adding operational complexity (service principal management, token rotation,
+  separate auth flows) for no functional benefit.
+- **The user account IS the user's identity.** The `agentworks` account is not a special admin
+  service account -- it is the human operator's identity on the VM. Treating it as the SUID target
+  is natural: "when an agent runs a nerfed tool, it acts as the user, gated by RBAC."
+- **The security trade-off is minimal.** If an agent exploited a bug in `nerfrun`, they would land
+  as the user account (which has sudo) rather than as an unprivileged nerf user. But `nerfrun` is a
+  single compiled, statically linked binary. The RBAC and bigred checks execute before any real
+  work. The attack surface is tiny, and the operational simplification far outweighs the theoretical
+  privilege escalation risk.
 
 ## Impact on User-Based Security Model
 
@@ -311,10 +466,11 @@ The nerfed commands layer adds to the existing topology:
 
 ### VM initialization
 
-- Create the `nerf` user and `nerf-exec` group
-- Create `/opt/agentworks/nerf/bin/` and `/opt/agentworks/nerf/etc/`
+- Create the `nerf-exec` group
+- Create `/opt/agentworks/nerf/bin/`, `/opt/agentworks/nerf/etc/`,
+  `/opt/agentworks/nerf/packages/`
 - Set permissions as described above
-- Install nerfed tool binaries
+- Install `nerfrun` binary and nerf packages
 
 ### Agent provisioning
 
@@ -327,51 +483,58 @@ The nerfed commands layer adds to the existing topology:
 
 ### Permissions summary (additions)
 
-| Path             | Owner | Group     | Mode | Effect                           |
-| ---------------- | ----- | --------- | ---- | -------------------------------- |
-| Nerf bin dir     | nerf  | nerf-exec | 0710 | Agents execute, cannot list      |
-| Nerf binaries    | nerf  | nerf-exec | 4711 | SUID to nerf, agents can execute |
-| Nerf config      | nerf  | nerf      | 0700 | Nerf-only (SUID binaries read)   |
-| Nerf credentials | nerf  | nerf      | 0700 | Nerf-only                        |
+| Path          | Owner      | Group      | Mode | Effect                                |
+| ------------- | ---------- | ---------- | ---- | ------------------------------------- |
+| Nerf bin dir  | agentworks | nerf-exec  | 0710 | Agents execute, cannot list           |
+| nerfrun       | agentworks | nerf-exec  | 4710 | SUID to user account, agents execute  |
+| Tool symlinks | agentworks | nerf-exec  | -    | Point to nerfrun                      |
+| Nerf config   | agentworks | agentworks | 0700 | User account only (nerfrun reads too) |
+| Packages      | agentworks | agentworks | 0700 | User account only (nerfrun reads too) |
 
 ## Rulesync Skills
 
 ### Overview
 
-Nerfed tools ship with rulesync skills grouped by domain. A single skill covers a family of related
-tools (e.g. `nerf-git` covers `nerf-git-push-origin`, `nerf-git-push-non-origin`, etc.). This keeps
-the number of skills manageable and provides cohesive documentation for related operations.
+Nerfed tools ship with rulesync skills as part of their nerf packages. A single skill covers a
+family of related tools (e.g. the `nerf-git` package skill covers `nerf-git-push-origin`,
+`nerf-git-push-non-origin`, etc.). This keeps the number of skills manageable and provides cohesive
+documentation for related operations.
 
 ### Skill packaging
 
-Skills are distributed alongside the tool binaries, organized by domain group:
+Skills live inside their nerf package directory:
 
 ```text
-/opt/agentworks/nerf/
-  skills/                             # 0755 nerf:nerf-exec
-    nerf-git/
+/opt/agentworks/nerf/packages/
+  nerf-git/
+    manifest.toml
+    skills/
       SKILL.md                        # covers all nerf-git-* tools
-    nerf-az/
+  nerf-az/
+    manifest.toml
+    skills/
       SKILL.md                        # covers all nerf-az-* tools
-    nerf-wcid/
+  nerf-wcid/
+    manifest.toml
+    skills/
       SKILL.md                        # discovery tool
-    ...
 ```
 
-Skills are readable by agent users (via the `nerf-exec` group) so that rulesync can read and copy
-them during generation.
+Skills are not directly readable by agent users (packages are `0700`). Rulesync reads them via the
+user account during workspace provisioning and copies the content into the workspace's rulesync
+output.
 
 ### Automatic workspace configuration
 
 When Agentworks provisions a workspace that uses rulesync, it configures the workspace's rulesync
-setup to import the relevant skill groups based on the agent's authorized nerfed tools. The flow:
+setup to import the relevant skills based on the agent's authorized nerfed tools. The flow:
 
 1. Operator grants RBAC access to nerfed tools for an agent
 2. Agentworks reads the agent's RBAC rules to determine authorized tools
-3. Agentworks maps authorized tools to their skill groups (e.g. `nerf-git-push-origin` maps to the
-   `nerf-git` skill group)
-4. Agentworks configures rulesync in the workspace to import the matching skill groups from
-   `/opt/agentworks/nerf/skills/`
+3. Agentworks maps authorized tools to their packages (via the manifest `skill_group` or package
+   name)
+4. Agentworks copies the matching skills from `packages/<name>/skills/` into the workspace's
+   rulesync configuration
 5. When rulesync generates output (e.g. `.claude/`, `.cursor/`), the skills are included
    automatically
 6. The AI coding tool picks up the skills and knows how to use the tools
@@ -379,23 +542,21 @@ setup to import the relevant skill groups based on the agent's authorized nerfed
 When RBAC rules change (tools granted or revoked), Agentworks updates the rulesync configuration and
 regenerates. This keeps the agent's knowledge in sync with its actual permissions.
 
-### Tool-to-skill mapping
+### Tool-to-package mapping
 
-The mapping from tool name to skill group uses the tool name prefix:
+The mapping from tool name to package uses the manifest. Each package declares which tools it
+provides. The Agentworks CLI reads all manifests to build the mapping:
 
-| Tool name prefix | Skill group |
-| ---------------- | ----------- |
-| `nerf-git-*`     | `nerf-git`  |
-| `nerf-az-*`      | `nerf-az`   |
-| `nerf-gh-*`      | `nerf-gh`   |
-| `nerf-wcid`      | `nerf-wcid` |
-
-Standalone tools (like `nerf-wcid`) map to their own skill. Tools that share a domain prefix map to
-the same group skill. New tool families follow the same convention.
+| Tool name                | Package    |
+| ------------------------ | ---------- |
+| `nerf-git-push-origin`   | `nerf-git` |
+| `nerf-git-push-non-main` | `nerf-git` |
+| `nerf-az-account-show`   | `nerf-az`  |
+| `nerf-wcid`              | `nerf-wcid`|
 
 ### Skill content
 
-Each domain skill describes:
+Each package skill describes:
 
 - The family of tools it covers and what each one does
 - When to use each tool (the specific scenarios)
@@ -406,25 +567,23 @@ Each domain skill describes:
 
 ### Non-rulesync workspaces
 
-For workspaces that do not use rulesync, the skills directory is still available on the filesystem.
-Operators can manually configure their AI tool of choice to read from
-`/opt/agentworks/nerf/skills/`, or agents can read the skill files directly.
+For workspaces that do not use rulesync, the operator can manually extract skills from packages and
+configure their AI tool of choice, or agents can request the information via `nerf-wcid`.
 
 ## Emergency Shutdown (bigred)
 
 ### Mechanism: lockfile
 
 The bigred mechanism uses a lockfile at `/opt/agentworks/nerf/etc/bigred.lock`. When this file
-exists, every nerfed tool checks for it before RBAC evaluation and denies unconditionally. This
-design has several properties:
+exists, `nerfrun` checks for it before RBAC evaluation and denies unconditionally. This design has
+several properties:
 
 - **Atomic**: creating or deleting a single file is an atomic operation
 - **Non-destructive**: RBAC rules, credentials, and agent users are untouched
 - **Trivially verifiable**: `test -f bigred.lock` confirms the state
 - **Resume is deletion**: removing the lockfile restores normal operations
 
-The lockfile is owned by `nerf:nerf` with mode `0600`. The admin user creates and deletes it via
-sudo.
+The lockfile is owned by `agentworks:agentworks` with mode `0600`.
 
 The lockfile contains metadata for forensics:
 
@@ -436,8 +595,8 @@ reason=manual
 
 ### Bigred check ordering
 
-The bigred lockfile check is the very first thing every nerfed tool does, before reading the real
-UID, before parsing RBAC, before anything else. This ensures the shortest possible code path between
+The bigred lockfile check is the very first thing `nerfrun` does, before reading the real UID,
+before parsing RBAC, before anything else. This ensures the shortest possible code path between
 invocation and denial.
 
 ### Known limitation: in-flight operations
@@ -568,5 +727,5 @@ use. A Claude Code hook (or equivalent) could:
 3. Otherwise, prompt the human operator
 
 This turns nerfed tool access into a declarative permission system that bridges the gap between
-VM-level security and coding platform UX. The admin grants permissions via RBAC rules, and the
+VM-level security and coding platform UX. The operator grants permissions via RBAC rules, and the
 coding platform respects them automatically.
