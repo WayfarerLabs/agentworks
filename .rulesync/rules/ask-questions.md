@@ -5,8 +5,8 @@ globs: ["**/*"]
 
 # Ask Questions
 
-When something is ambiguous, unclear, or could reasonably go multiple ways, ask before proceeding. Do not guess at
-intent or make assumptions about what the user wants.
+When something is ambiguous, unclear, or could reasonably go multiple ways, ask before proceeding.
+Do not guess at intent or make assumptions about what the user wants.
 
 This applies to:
 

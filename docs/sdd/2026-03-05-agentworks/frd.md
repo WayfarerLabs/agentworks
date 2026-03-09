@@ -6,162 +6,141 @@
 
 ## Overview
 
-Agentworks is a CLI tool for provisioning and managing ephemeral agent
-workspaces. It abstracts over platform-specific primitives (Lima VMs, Azure VMs,
-WSL2, local directories) to provide a uniform workspace lifecycle -- create,
-use, destroy -- regardless of where the underlying compute lives.
+Agentworks is a CLI tool for provisioning and managing ephemeral agent workspaces. It abstracts over
+platform-specific primitives (Lima VMs, Azure VMs, WSL2, local directories) to provide a uniform
+workspace lifecycle -- create, use, destroy -- regardless of where the underlying compute lives.
 
-The primary use case is a developer spinning up a fresh, isolated workspace for
-a single task or agentic session, with their full toolchain and personal
-environment already in place.
+The primary use case is a developer spinning up a fresh, isolated workspace for a single task or
+agentic session, with their full toolchain and personal environment already in place.
 
 ---
 
 ## Terminology
 
-- **User Workstation**: the developer's personal working machine -- where VS
-  Code and the Agentworks CLI run
-- **Workspace Host**: the abstract concept of an environment that can host
-  workspaces. In the current implementation, this is always a VM, but the
-  concept generalizes to K8s pods, containers, or the local machine. The CLI and
-  database use `vm` terminology today; this may be generalized when non-VM
-  Workspace Host types are implemented.
-- **VM Host**: a machine capable of running VMs (e.g. a Mac Studio running
-  Lima). May or may not exist depending on platform -- Azure and WSL2 have no
-  separate VM Host layer
-- **VM**: a long-lived personal Linux VM (Debian), provisioned by Agentworks and
-  accessed directly by the User Workstation over Tailscale after provisioning.
-  The initial (and currently only) Workspace Host type.
-- **Workspace**: an ephemeral working context -- created per task or agentic
-  session. May live on a Workspace Host (VM, future K8s pod) or directly on the
-  User Workstation (local workspace)
-- **Workspace Template**: a named configuration that defines what a workspace
-  looks like at creation time -- which repo to clone (if any), which files to
-  copy/template, and which settings to inject
-- **Agent**: an isolated Linux user within a workspace, representing a single AI
-  coding agent. Agents belong strictly to a workspace, have their own home
-  directory, and access the workspace through Linux group membership. See the
-  user-based security SDD (2026-03-08) for the full security model.
-- **Git Host Provider**: a service where SSH keys can be registered for git
-  access (AzDO, GitHub, etc.)
+- **User Workstation**: the developer's personal working machine -- where VS Code and the Agentworks
+  CLI run
+- **Workspace Host**: the abstract concept of an environment that can host workspaces. In the
+  current implementation, this is always a VM, but the concept generalizes to K8s pods, containers,
+  or the local machine. The CLI and database use `vm` terminology today; this may be generalized
+  when non-VM Workspace Host types are implemented.
+- **VM Host**: a machine capable of running VMs (e.g. a Mac Studio running Lima). May or may not
+  exist depending on platform -- Azure and WSL2 have no separate VM Host layer
+- **VM**: a long-lived personal Linux VM (Debian), provisioned by Agentworks and accessed directly
+  by the User Workstation over Tailscale after provisioning. The initial (and currently only)
+  Workspace Host type.
+- **Workspace**: an ephemeral working context -- created per task or agentic session. May live on a
+  Workspace Host (VM, future K8s pod) or directly on the User Workstation (local workspace)
+- **Workspace Template**: a named configuration that defines what a workspace looks like at creation
+  time -- which repo to clone (if any), which files to copy/template, and which settings to inject
+- **Agent**: an isolated Linux user within a workspace, representing a single AI coding agent.
+  Agents belong strictly to a workspace, have their own home directory, and access the workspace
+  through Linux group membership. See the user-based security SDD (2026-03-08) for the full security
+  model.
+- **Git Host Provider**: a service where SSH keys can be registered for git access (AzDO, GitHub,
+  etc.)
 
 ### Naming Conventions
 
-All user-provided names (VM hosts, VMs, workspaces, agents) follow the same
-rules:
+All user-provided names (VM hosts, VMs, workspaces, agents) follow the same rules:
 
-- **Character set**: lowercase alphanumeric, hyphens, and underscores:
-  `[a-z0-9_-]`
-- **Structure**: must start and end with `[a-z0-9]`. Interior characters may
-  include hyphens and underscores. Single-character names (`[a-z0-9]`) are
-  allowed.
-- **No double hyphens**: consecutive hyphens (`--`) are reserved as the agent
-  username separator (see Agents below) and are not allowed in any name.
-- **Uniqueness**: globally unique within each entity type (vm_hosts, vms,
-  workspaces are separate namespaces). Workspace names are globally unique, not
-  per-VM -- this simplifies the CLI (no need to qualify
-  `workspace shell ws-123 --vm dev-vm`) and avoids ambiguity in
-  `.code-workspace` file naming. Agent names are unique within their workspace.
-- **`--name` flag**: all create commands accept an optional `--name` flag. If
-  not specified, the user is prompted with a random 7-character default
-  (lowercase alphanumeric only: `[a-z0-9]`). The user can accept the default or
-  type a custom name. If the generated random name collides with an existing
-  entity, a new random name is generated (retry up to 5 times before failing).
-- **Positional references**: subsequent commands reference entities by name as a
-  positional argument (e.g. `vm start dev-vm`, `workspace shell ws-123`)
+- **Character set**: lowercase alphanumeric, hyphens, and underscores: `[a-z0-9_-]`
+- **Structure**: must start and end with `[a-z0-9]`. Interior characters may include hyphens and
+  underscores. Single-character names (`[a-z0-9]`) are allowed.
+- **No double hyphens**: consecutive hyphens (`--`) are reserved as the agent username separator
+  (see Agents below) and are not allowed in any name.
+- **Uniqueness**: globally unique within each entity type (vm_hosts, vms, workspaces are separate
+  namespaces). Workspace names are globally unique, not per-VM -- this simplifies the CLI (no need
+  to qualify `workspace shell ws-123 --vm dev-vm`) and avoids ambiguity in `.code-workspace` file
+  naming. Agent names are unique within their workspace.
+- **`--name` flag**: all create commands accept an optional `--name` flag. If not specified, the
+  user is prompted with a random 7-character default (lowercase alphanumeric only: `[a-z0-9]`). The
+  user can accept the default or type a custom name. If the generated random name collides with an
+  existing entity, a new random name is generated (retry up to 5 times before failing).
+- **Positional references**: subsequent commands reference entities by name as a positional argument
+  (e.g. `vm start dev-vm`, `workspace shell ws-123`)
 
 ---
 
 ## Goals
 
-- Uniform workspace lifecycle across all supported platforms (VM-based and
-  local)
+- Uniform workspace lifecycle across all supported platforms (VM-based and local)
 - Simple VM provisioning and initialization per platform
-- Personal environment (dotfiles, shell, packages) stamped into VMs once at init
-  time -- inherited by all workspaces naturally
-- Workspaces are lightweight: a directory, an optional repo clone, a tmuxinator
-  config, and a local `.code-workspace` file on the User Workstation
-- VMs join a user-managed Tailscale network so the User Workstation can reach
-  them directly regardless of where they live. Ephemeral Tailscale nodes are
-  supported -- Agentworks detects node loss on stop and re-joins on start
-- Azure VMs will support auto-suspend after idle to minimize cost (future
-  enhancement -- see Phasing)
-- Git host provider agnostic -- SSH keys can be registered with AzDO, GitHub, or
-  other providers
+- Personal environment (dotfiles, shell, packages) stamped into VMs once at init time -- inherited
+  by all workspaces naturally
+- Workspaces are lightweight: a directory, an optional repo clone, a tmuxinator config, and a local
+  `.code-workspace` file on the User Workstation
+- VMs join a user-managed Tailscale network so the User Workstation can reach them directly
+  regardless of where they live. Ephemeral Tailscale nodes are supported -- Agentworks detects node
+  loss on stop and re-joins on start
+- Azure VMs will support auto-suspend after idle to minimize cost (future enhancement -- see
+  Phasing)
+- Git host provider agnostic -- SSH keys can be registered with AzDO, GitHub, or other providers
 - Designed for a single developer first; extensible to a team
 
 ## Non-Goals
 
 - Not a general-purpose VM manager (no snapshots, migration, etc.)
 - Not a CI/CD runner (see Gruntweave)
-- Not responsible for project-level setup -- that is handled by
-  `workspace-initialize.sh` or equivalent
+- Not responsible for project-level setup -- that is handled by `workspace-initialize.sh` or
+  equivalent
 - No GUI
-- Does not own or manage VM Host connectivity -- Agentworks only requires a
-  reachable SSH host
+- Does not own or manage VM Host connectivity -- Agentworks only requires a reachable SSH host
 
 ---
 
 ## Workspace Types
 
-Agentworks supports multiple workspace types that share the same lifecycle
-commands and workspace identity model. The workspace type determines where the
-workspace lives and how Agentworks reaches it.
+Agentworks supports multiple workspace types that share the same lifecycle commands and workspace
+identity model. The workspace type determines where the workspace lives and how Agentworks reaches
+it.
 
 ### VM Workspaces (Phase 1)
 
-Workspaces that live on a provisioned VM. All operations (create, ssh, delete)
-go over SSH to the VM. This is the primary workspace type and the initial
-implementation target.
+Workspaces that live on a provisioned VM. All operations (create, ssh, delete) go over SSH to the
+VM. This is the primary workspace type and the initial implementation target.
 
 ### Local Workspaces (Phase 2)
 
-Workspaces that live directly on the User Workstation. These bypass the VM Host
-and VM layers entirely. The user is responsible for ensuring the right tools are
-available on their machine. Local workspaces are first-class citizens -- they
-appear in `workspace list`, support `workspace shell` (which opens a shell in
-the workspace directory), generate `.code-workspace` files, and are tracked in
-the state database.
+Workspaces that live directly on the User Workstation. These bypass the VM Host and VM layers
+entirely. The user is responsible for ensuring the right tools are available on their machine. Local
+workspaces are first-class citizens -- they appear in `workspace list`, support `workspace shell`
+(which opens a shell in the workspace directory), generate `.code-workspace` files, and are tracked
+in the state database.
 
-Local workspaces are only supported on Unix-like hosts (macOS, Linux). The
-workspace directory lives under a configurable local path (default:
-`~/workspaces/`).
+Local workspaces are only supported on Unix-like hosts (macOS, Linux). The workspace directory lives
+under a configurable local path (default: `~/workspaces/`).
 
-Local workspaces do not support agents. The agent model requires Linux user
-management and process isolation that is only available on Agentworks-managed
-VMs. Local workspaces remain useful for non-agentic developer work.
+Local workspaces do not support agents. The agent model requires Linux user management and process
+isolation that is only available on Agentworks-managed VMs. Local workspaces remain useful for
+non-agentic developer work.
 
 ### Containerized Workspaces (Future)
 
-Workspaces that run inside a container on a VM or locally. The container
-provides isolation and reproducibility without requiring a full VM. This is a
-future extension -- the CLI surface and workspace identity model should
-accommodate it, but implementation is deferred.
+Workspaces that run inside a container on a VM or locally. The container provides isolation and
+reproducibility without requiring a full VM. This is a future extension -- the CLI surface and
+workspace identity model should accommodate it, but implementation is deferred.
 
 ---
 
 ## Why VMs and Not Just Containers?
 
-Agentworks starts with VMs because agentic workloads frequently need to run
-containers themselves -- including full Kubernetes clusters via Kind for local
-dev and testing. This requires a real kernel, real networking stack, and access
-to container runtimes (Podman). Containers-in-containers (DinD) requires
-`--privileged` mode and involves significant complexity and security exposure.
-VMs provide clean isolation with none of those tradeoffs, making them the right
-default for heavy workloads.
+Agentworks starts with VMs because agentic workloads frequently need to run containers themselves --
+including full Kubernetes clusters via Kind for local dev and testing. This requires a real kernel,
+real networking stack, and access to container runtimes (Podman). Containers-in-containers (DinD)
+requires `--privileged` mode and involves significant complexity and security exposure. VMs provide
+clean isolation with none of those tradeoffs, making them the right default for heavy workloads.
 
-That said, not every workspace needs a full VM. Containerized workspaces are on
-the roadmap (see Phasing) to provide a lighter-weight option for tasks that do
-not need nested container support. The goal is full flexibility: VMs when you
-need a complete environment, containers when you need something faster and more
-disposable, local workspaces when you just need a directory.
+That said, not every workspace needs a full VM. Containerized workspaces are on the roadmap (see
+Phasing) to provide a lighter-weight option for tasks that do not need nested container support. The
+goal is full flexibility: VMs when you need a complete environment, containers when you need
+something faster and more disposable, local workspaces when you just need a directory.
 
 ---
 
 ## Workspace Templates
 
-A workspace template defines the initial contents and configuration of a new
-workspace. Templates are referenced by name at workspace creation time.
+A workspace template defines the initial contents and configuration of a new workspace. Templates
+are referenced by name at workspace creation time.
 
 ### Template Configuration
 
@@ -182,56 +161,47 @@ tmuxinator = false
 
 ### Template Fields
 
-- **`repo`**: optional git URL. If set, the repo is cloned directly into the
-  workspace directory (i.e. `git clone <repo> <workspace-dir>` -- the repo
-  contents are at the root, not in a subdirectory). If omitted, an empty
-  directory is created.
-- **`tmuxinator`**: optional boolean (default: `true`). If true, a tmuxinator
-  session config is generated and tmux is expected to be available. If false, no
-  tmuxinator config is created.
-- **`inherits`**: optional list of parent template names. See Template
-  Inheritance below.
-- **File templating (future)**: templates will support a `files` section that
-  copies files into the workspace with variable substitution. This is the
-  mechanism for injecting any per-workspace files -- VS Code settings, Claude
-  Code permissions, editor configs, etc. The templating language is TBD -- this
-  is architectural room, not a Phase 1 requirement.
+- **`repo`**: optional git URL. If set, the repo is cloned directly into the workspace directory
+  (i.e. `git clone <repo> <workspace-dir>` -- the repo contents are at the root, not in a
+  subdirectory). If omitted, an empty directory is created.
+- **`tmuxinator`**: optional boolean (default: `true`). If true, a tmuxinator session config is
+  generated and tmux is expected to be available. If false, no tmuxinator config is created.
+- **`inherits`**: optional list of parent template names. See Template Inheritance below.
+- **File templating (future)**: templates will support a `files` section that copies files into the
+  workspace with variable substitution. This is the mechanism for injecting any per-workspace files
+  -- VS Code settings, Claude Code permissions, editor configs, etc. The templating language is TBD
+  -- this is architectural room, not a Phase 1 requirement.
 
 ### Template Inheritance
 
-A template can inherit from one or more parent templates via the `inherits`
-field. Resolution walks parents in order (left to right), then applies the
-child. The merge rules are:
+A template can inherit from one or more parent templates via the `inherits` field. Resolution walks
+parents in order (left to right), then applies the child. The merge rules are:
 
-- **Booleans** (`tmuxinator`): last-one-wins. The child's value overrides all
-  parents. If the child does not set the field, the last parent to set it wins.
+- **Booleans** (`tmuxinator`): last-one-wins. The child's value overrides all parents. If the child
+  does not set the field, the last parent to set it wins.
 - **Strings** (`repo`): last-one-wins. Same semantics as booleans.
-- **Lists** (future `files`): appended in order with deduplication. Parents
-  first, then child. If a value already appeared in an earlier parent, it is
-  skipped.
+- **Lists** (future `files`): appended in order with deduplication. Parents first, then child. If a
+  value already appeared in an earlier parent, it is skipped.
 
-Inheritance is resolved at workspace creation time. Cycles are detected and
-rejected at config load time (not deferred to workspace creation). The
-resolution is depth-first -- if a parent itself inherits, those ancestors are
-resolved first.
+Inheritance is resolved at workspace creation time. Cycles are detected and rejected at config load
+time (not deferred to workspace creation). The resolution is depth-first -- if a parent itself
+inherits, those ancestors are resolved first.
 
-Example: if `agentic` inherits from `gruntweave`, and `gruntweave` has
-`tmuxinator = true`, but `agentic` sets `tmuxinator = false`, the resolved value
-for `agentic` is `false`.
+Example: if `agentic` inherits from `gruntweave`, and `gruntweave` has `tmuxinator = true`, but
+`agentic` sets `tmuxinator = false`, the resolved value for `agentic` is `false`.
 
 ### Default Template
 
-If `--template` is not specified at workspace creation, the `default` workspace
-template is used. If no `default` workspace template is configured, an empty
-workspace is created with `tmuxinator = true`.
+If `--template` is not specified at workspace creation, the `default` workspace template is used. If
+no `default` workspace template is configured, an empty workspace is created with
+`tmuxinator = true`.
 
 ---
 
 ## Configuration
 
-User-editable config lives in `~/.config/agentworks/config.toml`. Runtime state
-(VMs, workspaces) is stored in a SQLite database at
-`~/.config/agentworks/agentworks.db`.
+User-editable config lives in `~/.config/agentworks/config.toml`. Runtime state (VMs, workspaces) is
+stored in a SQLite database at `~/.config/agentworks/agentworks.db`.
 
 ### User Config
 
@@ -303,24 +273,21 @@ region = "eastus2"
 idle_timeout_hours = 2
 ```
 
-The `[vm.config]` nesting under `vm` is intentional -- it leaves room for future
-`[vm.*]` sections (e.g. named VM templates). See "Future: VM Templates" in
-Phasing.
+The `[vm.config]` nesting under `vm` is intentional -- it leaves room for future `[vm.*]` sections
+(e.g. named VM templates). See "Future: VM Templates" in Phasing.
 
-Per-VM package additions are specified at VM creation time via
-`--extra-packages`. The configured package list is the floor -- it cannot be
-reduced per-VM, only extended. The extra packages and other creation arguments
-are persisted in the state database for reference and potential
+Per-VM package additions are specified at VM creation time via `--extra-packages`. The configured
+package list is the floor -- it cannot be reduced per-VM, only extended. The extra packages and
+other creation arguments are persisted in the state database for reference and potential
 re-initialization.
 
 ---
 
 ## VM Hosts
 
-Agentworks does not provision or manage VM Hosts. It only requires a reachable
-SSH address and the VM platform. The platform is currently always Lima (the only
-platform that uses VM Hosts) -- `vm-host add` rejects other platform values. OS
-is auto-detected on first connect if not specified.
+Agentworks does not provision or manage VM Hosts. It only requires a reachable SSH address and the
+VM platform. The platform is currently always Lima (the only platform that uses VM Hosts) --
+`vm-host add` rejects other platform values. OS is auto-detected on first connect if not specified.
 
 ```shell
 agentworks vm-host add --name mac-studio --ssh-host 192.168.1.10 [--platform lima]
@@ -328,21 +295,19 @@ agentworks vm-host list
 agentworks vm-host remove <name>
 ```
 
-`vm-host remove` refuses to remove a host that has VMs referencing it. The user
-must delete those VMs first (or use `--force` to skip the check and remove the
-host record, leaving the VMs orphaned).
+`vm-host remove` refuses to remove a host that has VMs referencing it. The user must delete those
+VMs first (or use `--force` to skip the check and remove the host record, leaving the VMs orphaned).
 
 ### Platform and VM Host Interaction
 
-VM hosts are only used by the Lima platform. Azure and WSL2 provision directly
-from the User Workstation and have no VM host layer.
+VM hosts are only used by the Lima platform. Azure and WSL2 provision directly from the User
+Workstation and have no VM host layer.
 
-- **Lima**: VM host is optional. If a VM host is provided (via `--vm-host` or
-  `defaults.vm_host`), Lima runs remotely on that host. If no VM host is
-  resolved, Lima runs locally on the User Workstation.
-- **Azure, WSL2**: VM host is not supported. If `--vm-host` is explicitly passed
-  on the CLI, Agentworks errors. A configured `defaults.vm_host` is silently
-  ignored for these platforms.
+- **Lima**: VM host is optional. If a VM host is provided (via `--vm-host` or `defaults.vm_host`),
+  Lima runs remotely on that host. If no VM host is resolved, Lima runs locally on the User
+  Workstation.
+- **Azure, WSL2**: VM host is not supported. If `--vm-host` is explicitly passed on the CLI,
+  Agentworks errors. A configured `defaults.vm_host` is silently ignored for these platforms.
 
 VM host resolution order for Lima:
 
@@ -354,14 +319,13 @@ VM host resolution order for Lima:
 
 ## VM Provisioning
 
-For Agentworks-managed VMs, the provisioning process occurs in two phases:
-**platform provisioning** (platform-specific) and **VM initialization**
-(uniform).
+For Agentworks-managed VMs, the provisioning process occurs in two phases: **platform provisioning**
+(platform-specific) and **VM initialization** (uniform).
 
 ### Phase 1: Platform Provisioning
 
-During this phase, Agentworks creates a new VM on the specified platform. This
-varies based on the platform:
+During this phase, Agentworks creates a new VM on the specified platform. This varies based on the
+platform:
 
 #### Lima (remote VM Host)
 
@@ -378,65 +342,55 @@ varies based on the platform:
 
 #### WSL2
 
-Agentworks runs natively on Windows (not from within WSL2) for this platform, so
-this is simply:
+Agentworks runs natively on Windows (not from within WSL2) for this platform, so this is simply:
 
 - Create a new Debian distro named after the VM name
 
 ### Phase 2: VM Initialization
 
-After provisioning, Agentworks pulls a shell on the new VM and runs uniform
-initialization steps to prepare it for workspaces. All Agentworks-managed VMs
-use a configurable user account (default: `agentworks`, configurable via
-`vm.config.username`). All VMs are Debian-based, so initialization is a uniform
-process regardless of platform. Only the architecture (amd64 vs arm64) may
-differ, which should be handled automatically by the underlying tools.
+After provisioning, Agentworks pulls a shell on the new VM and runs uniform initialization steps to
+prepare it for workspaces. All Agentworks-managed VMs use a configurable user account (default:
+`agentworks`, configurable via `vm.config.username`). All VMs are Debian-based, so initialization is
+a uniform process regardless of platform. Only the architecture (amd64 vs arm64) may differ, which
+should be handled automatically by the underlying tools.
 
-Initialization uses a **Tailscale-first** approach: the minimum system bootstrap
-happens over the provisioning transport (which may be indirect -- e.g. proxied
-through a VM Host for Lima remote, or `wsl` exec for WSL2), then Tailscale is
-set up to provide direct SSH access from the User Workstation for the remainder
-of initialization. This ensures that operations requiring file transfer
-(dotfiles rsync) work uniformly across all platforms.
+Initialization uses a **Tailscale-first** approach: the minimum system bootstrap happens over the
+provisioning transport (which may be indirect -- e.g. proxied through a VM Host for Lima remote, or
+`wsl` exec for WSL2), then Tailscale is set up to provide direct SSH access from the User
+Workstation for the remainder of initialization. This ensures that operations requiring file
+transfer (dotfiles rsync) work uniformly across all platforms.
 
 The steps are:
 
 **Bootstrap (over provisioning transport):**
 
-1. Ensure `agentworks` user exists (idempotent -- Azure cloud-init and WSL2
-   handle this during provisioning, Lima does not)
-2. Install Agentworks's own system dependencies via apt (`openssh-server`,
-   `curl`, `git`, `sudo`, `ca-certificates`, etc.) -- these are always installed
-   regardless of user config
-3. Add user's SSH public key to `~/.ssh/authorized_keys` (enables Tailscale SSH
-   in the next step)
+1. Ensure `agentworks` user exists (idempotent -- Azure cloud-init and WSL2 handle this during
+   provisioning, Lima does not)
+2. Install Agentworks's own system dependencies via apt (`openssh-server`, `curl`, `git`, `sudo`,
+   `ca-certificates`, etc.) -- these are always installed regardless of user config
+3. Add user's SSH public key to `~/.ssh/authorized_keys` (enables Tailscale SSH in the next step)
 4. Prompt for Tailscale auth key, install Tailscale, join user's tailnet
-   - Note that this requires an interactive prompt. We can look at ways to avoid
-     this in the future.
-5. Read Tailscale IP, update VM record (`tailscale_host`,
-   `init_status = "tailscale_up"`) -- switch to Tailscale SSH for remaining
-   steps
+   - Note that this requires an interactive prompt. We can look at ways to avoid this in the future.
+5. Read Tailscale IP, update VM record (`tailscale_host`, `init_status = "tailscale_up"`) -- switch
+   to Tailscale SSH for remaining steps
 
 **Remaining setup (over Tailscale SSH):**
 
-1. Install user-configured apt packages from `[vm.config]`, merged with any
-   per-VM additions specified at create time
+1. Install user-configured apt packages from `[vm.config]`, merged with any per-VM additions
+   specified at create time
 2. Install snap packages (if any)
-3. Run install commands in order -- shell commands executed on the VM for tools
-   not available via apt or snap (e.g. bun, Claude Code, Oh My Zsh)
+3. Run install commands in order -- shell commands executed on the VM for tools not available via
+   apt or snap (e.g. bun, Claude Code, Oh My Zsh)
 4. Set default shell to user's configured shell (default: `zsh`)
 5. Generate SSH keypair (`ed25519`)
-6. Register the public key with configured git host providers (see Git Host
-   Providers below)
-7. If dotfiles enabled and `dotfiles.source` (default: `~/.dotfiles`) exists on
-   the User Workstation: rsync to VM, run `install_cmd` if present or
-   auto-detect `install.sh`
+6. Register the public key with configured git host providers (see Git Host Providers below)
+7. If dotfiles enabled and `dotfiles.source` (default: `~/.dotfiles`) exists on the User
+   Workstation: rsync to VM, run `install_cmd` if present or auto-detect `install.sh`
 8. Mark VM `init_status = "complete"`
 
-Agentworks verifies required authentication for the **selected** git host
-providers (e.g. `az cli` for AzDO, `gh cli` for GitHub) before beginning
-provisioning, failing fast with a clear error if any is missing. Providers that
-are configured but not selected for this VM creation are not checked.
+Agentworks verifies required authentication for the **selected** git host providers (e.g. `az cli`
+for AzDO, `gh cli` for GitHub) before beginning provisioning, failing fast with a clear error if any
+is missing. Providers that are configured but not selected for this VM creation are not checked.
 
 #### Future VM Initialization Enhancements
 
@@ -457,51 +411,45 @@ agentworks vm stop <name>
 agentworks vm delete <name>
 ```
 
-`vm shell` opens an SSH session to the VM's home directory as the VM user. This
-is a convenience command for debugging and inspection -- not for workspace-level
-work.
+`vm shell` opens an SSH session to the VM's home directory as the VM user. This is a convenience
+command for debugging and inspection -- not for workspace-level work.
 
 ### VM Status Model
 
 VMs have two independent status dimensions:
 
-- **`init_status`** (persisted in DB): tracks the initialization lifecycle --
-  `pending`, `bootstrapping`, `tailscale_up`, `initializing`, `complete`,
-  `failed`. Only VMs with `init_status = "complete"` are eligible for workspace
-  operations. The `tailscale_up` state indicates the VM is directly reachable
-  but not yet fully configured.
-- **Runtime status** (queried live from the platform): the current power state
-  -- `running`, `stopped`, `deallocated`, `unknown`. This is **never cached** in
-  the database because it can change outside of Agentworks (manual stops, Azure
-  auto-deallocate, host reboots).
+- **`init_status`** (persisted in DB): tracks the initialization lifecycle -- `pending`,
+  `bootstrapping`, `tailscale_up`, `initializing`, `complete`, `failed`. Only VMs with
+  `init_status = "complete"` are eligible for workspace operations. The `tailscale_up` state
+  indicates the VM is directly reachable but not yet fully configured.
+- **Runtime status** (queried live from the platform): the current power state -- `running`,
+  `stopped`, `deallocated`, `unknown`. This is **never cached** in the database because it can
+  change outside of Agentworks (manual stops, Azure auto-deallocate, host reboots).
 
 Commands check both dimensions:
 
-- `workspace create` and `workspace shell` require `init_status = "complete"`.
-  If the VM is stopped, they auto-start and wait. If init is incomplete, they
-  error with guidance.
+- `workspace create` and `workspace shell` require `init_status = "complete"`. If the VM is stopped,
+  they auto-start and wait. If init is incomplete, they error with guidance.
 - `vm start`, `vm stop`, and `vm delete` work regardless of `init_status`.
 - `vm list` shows both `init_status` and live runtime status.
 
-`vm delete` refuses to delete a VM that still has workspaces. The user must
-delete the workspaces first (or use `--force` to cascade-delete all workspaces
-on the VM). `vm delete` also removes the VM's SSH keys from all configured git
-host providers. If the VM is unreachable (e.g. VM Host is down), git host key
-removal and database cleanup still proceed -- only the platform-specific VM
+`vm delete` refuses to delete a VM that still has workspaces. The user must delete the workspaces
+first (or use `--force` to cascade-delete all workspaces on the VM). `vm delete` also removes the
+VM's SSH keys from all configured git host providers. If the VM is unreachable (e.g. VM Host is
+down), git host key removal and database cleanup still proceed -- only the platform-specific VM
 cleanup is skipped with a warning.
 
 ---
 
 ## Workspaces
 
-All workspace operations on VM workspaces run over SSH directly to the VM over
-Tailscale. The VM Host is not involved. Local workspace operations run directly
-on the User Workstation.
+All workspace operations on VM workspaces run over SSH directly to the VM over Tailscale. The VM
+Host is not involved. Local workspace operations run directly on the User Workstation.
 
 ### Workspace Identity
 
-Each workspace has a unique name following the naming conventions above.
-Uniqueness is enforced at create time against the state database.
+Each workspace has a unique name following the naming conventions above. Uniqueness is enforced at
+create time against the state database.
 
 ### Workspace Creation
 
@@ -509,11 +457,10 @@ Uniqueness is enforced at create time against the state database.
 agentworks workspace create [--vm <name>] [--local] [--name <name>] [--template <name>] [--open-vscode]
 ```
 
-If `--local` is specified, a local workspace is created. Otherwise, a VM
-workspace is created. VM selection when `--vm` is not specified: if exactly one
-VM exists, it is auto-selected; if multiple VMs exist, the user is prompted to
-select one interactively; if no VMs exist, the command errors with a message to
-create one first.
+If `--local` is specified, a local workspace is created. Otherwise, a VM workspace is created. VM
+selection when `--vm` is not specified: if exactly one VM exists, it is auto-selected; if multiple
+VMs exist, the user is prompted to select one interactively; if no VMs exist, the command errors
+with a message to create one first.
 
 **For VM workspaces -- remote steps** (executed over SSH on the VM):
 
@@ -526,8 +473,8 @@ create one first.
 
 **For VM workspaces -- local steps** (executed on the User Workstation):
 
-1. Generate `<workspace-name>.code-workspace` in a configurable local directory
-   (default: `~/agentworks-workspaces/`), pointing at the VM via SSH remote
+1. Generate `<workspace-name>.code-workspace` in a configurable local directory (default:
+   `~/agentworks-workspaces/`), pointing at the VM via SSH remote
 2. Register workspace in state database
 3. Print workspace name, SSH connection string, and workspace path
 4. If `--open-vscode`: open the `.code-workspace` file in VS Code
@@ -545,39 +492,35 @@ create one first.
 8. Print workspace name and workspace path
 9. If `--open-vscode`: open the `.code-workspace` file in VS Code
 
-The user then completes the workspace setup via shell (e.g. runs
-`workspace-initialize.sh` for Gruntweave, etc.). Agentworks's responsibility is
-only to create the workspace and provide access to it.
+The user then completes the workspace setup via shell (e.g. runs `workspace-initialize.sh` for
+Gruntweave, etc.). Agentworks's responsibility is only to create the workspace and provide access to
+it.
 
 ### Workspace Shell Access
 
 `agentworks workspace shell <name> [--no-tmuxinator]`
 
-For VM workspaces: checks both `init_status` (must be `complete`) and runtime
-status (see VM Status Model). If the VM is stopped or deallocated, starts it
-first and polls SSH connectivity until reachable (timeout: 5 minutes). If
-tmuxinator is enabled for the workspace, runs
-`tmuxinator start <workspace-name>` which creates a new session or attaches to
-an existing one. If tmuxinator is not enabled, opens a plain SSH shell. A
-`--no-tmuxinator` flag overrides the template setting and opens a plain shell
-regardless.
+For VM workspaces: checks both `init_status` (must be `complete`) and runtime status (see VM Status
+Model). If the VM is stopped or deallocated, starts it first and polls SSH connectivity until
+reachable (timeout: 5 minutes). If tmuxinator is enabled for the workspace, runs
+`tmuxinator start <workspace-name>` which creates a new session or attaches to an existing one. If
+tmuxinator is not enabled, opens a plain SSH shell. A `--no-tmuxinator` flag overrides the template
+setting and opens a plain shell regardless.
 
-The tmuxinator session includes an "admin" window (the default, running as the
-admin user) plus one window per agent configured to `su - <agent-linux-user>`
-with the working directory set to the workspace root. This gives the operator a
-single entry point to observe and interact with all agents in the workspace.
-Windows are regenerated when agents are added or removed.
+The tmuxinator session includes an "admin" window (the default, running as the admin user) plus one
+window per agent configured to `su - <agent-linux-user>` with the working directory set to the
+workspace root. This gives the operator a single entry point to observe and interact with all agents
+in the workspace. Windows are regenerated when agents are added or removed.
 
-For local workspaces: opens a new shell in the workspace directory. Same
-tmuxinator behavior applies -- if enabled, `tmuxinator start <workspace-name>`
-is run; `--no-tmuxinator` overrides.
+For local workspaces: opens a new shell in the workspace directory. Same tmuxinator behavior applies
+-- if enabled, `tmuxinator start <workspace-name>` is run; `--no-tmuxinator` overrides.
 
 ### Workspace Listing
 
 `agentworks workspace list [--vm <name>] [--local]`
 
-Lists all live workspaces with: name, type (vm/local), VM (if applicable),
-template, created timestamp.
+Lists all live workspaces with: name, type (vm/local), VM (if applicable), template, created
+timestamp.
 
 ### Workspace Deletion
 
@@ -598,32 +541,28 @@ template, created timestamp.
 
 `agentworks workspace move <name> --to <vm-name|local>`
 
-Package up the entire workspace directory (using `tar`) and move it to a new
-location, deleting the old one once it is securely in place. This is a future
-enhancement -- the CLI surface should accommodate it, but implementation is
-deferred.
+Package up the entire workspace directory (using `tar`) and move it to a new location, deleting the
+old one once it is securely in place. This is a future enhancement -- the CLI surface should
+accommodate it, but implementation is deferred.
 
 ---
 
 ## Agents
 
-Agents are isolated Linux users within a workspace, each representing a single
-AI coding agent. They are the mechanism by which AI tools operate within a
-workspace with controlled, auditable access.
+Agents are isolated Linux users within a workspace, each representing a single AI coding agent. They
+are the mechanism by which AI tools operate within a workspace with controlled, auditable access.
 
-**Agents are only supported on VM workspaces.** The agent model requires Linux
-user management (useradd, group membership, SUID executables) which is only
-possible on a VM that Agentworks controls. Local workspaces do not support
-agents -- `agent create` on a local workspace errors with guidance. See "Why VMs
-and Not Just Containers?" for related rationale.
+**Agents are only supported on VM workspaces.** The agent model requires Linux user management
+(useradd, group membership, SUID executables) which is only possible on a VM that Agentworks
+controls. Local workspaces do not support agents -- `agent create` on a local workspace errors with
+guidance. See "Why VMs and Not Just Containers?" for related rationale.
 
 ### Agent Identity
 
-Each agent has a unique name within its workspace. The agent's Linux username is
-derived from the workspace name using the double-hyphen separator:
-`<workspace-name>--<agent-name>`. Because workspace names are globally unique
-and agent names are unique within a workspace, the Linux username is guaranteed
-unique on the VM.
+Each agent has a unique name within its workspace. The agent's Linux username is derived from the
+workspace name using the double-hyphen separator: `<workspace-name>--<agent-name>`. Because
+workspace names are globally unique and agent names are unique within a workspace, the Linux
+username is guaranteed unique on the VM.
 
 Examples:
 
@@ -635,38 +574,33 @@ Examples:
 When an agent is created, Agentworks:
 
 1. Creates a Linux user with the derived username
-2. Adds the user to the workspace's Linux group (grants access to the workspace
-   directory)
+2. Adds the user to the workspace's Linux group (grants access to the workspace directory)
 3. Creates the agent's home directory
-4. Regenerates the workspace's tmuxinator config to include a window for the new
-   agent
+4. Regenerates the workspace's tmuxinator config to include a window for the new agent
 
-The agent's home directory is separate from the workspace directory. The agent
-accesses the workspace through group membership, not by living inside it. This
-means the agent has a place for its own config, history, and scratch files while
-still being able to read and write the shared workspace.
+The agent's home directory is separate from the workspace directory. The agent accesses the
+workspace through group membership, not by living inside it. This means the agent has a place for
+its own config, history, and scratch files while still being able to read and write the shared
+workspace.
 
 ### Agent Shell Access
 
 `agentworks agent shell <agent-name> --workspace <workspace-name>`
 
-A convenience command that SSHs to the VM as the admin user, then runs
-`su - <agent-linux-user>` with the working directory set to the workspace root.
-This gives operators a quick way to inspect what an agent is doing or debug
-issues from the agent's perspective. No separate tmuxinator config is needed --
-for a multi-pane agent experience, use `workspace shell` which already includes
-agent windows.
+A convenience command that SSHs to the VM as the admin user, then runs `su - <agent-linux-user>`
+with the working directory set to the workspace root. This gives operators a quick way to inspect
+what an agent is doing or debug issues from the agent's perspective. No separate tmuxinator config
+is needed -- for a multi-pane agent experience, use `workspace shell` which already includes agent
+windows.
 
-If the agent name is globally unique (common when there are few workspaces),
-`--workspace` can be omitted and the agent is resolved by scanning all
-workspaces.
+If the agent name is globally unique (common when there are few workspaces), `--workspace` can be
+omitted and the agent is resolved by scanning all workspaces.
 
 ### Agent Lifecycle
 
-- Agents are scoped to a workspace. Deleting a workspace cascades to all its
-  agents (Linux users and home directories are removed).
-- Agents can be individually deleted without affecting the workspace or other
-  agents.
+- Agents are scoped to a workspace. Deleting a workspace cascades to all its agents (Linux users and
+  home directories are removed).
+- Agents can be individually deleted without affecting the workspace or other agents.
 - Agent creation and deletion regenerate the workspace's tmuxinator config.
 
 ### CLI
@@ -678,49 +612,47 @@ agentworks agent shell <name> [--workspace <workspace-name>]
 agentworks agent delete <name> --workspace <workspace-name>
 ```
 
-`agent list` without `--workspace` lists all agents across all workspaces. With
-`--workspace`, it filters to a specific workspace.
+`agent list` without `--workspace` lists all agents across all workspaces. With `--workspace`, it
+filters to a specific workspace.
 
 ### Relationship to Other SDDs
 
-The user-based security SDD (2026-03-08) defines the full Linux security model
-for agents: group-based workspace access, SSH agent socket sharing via the
-`agentworks-ssh` group, and tools access via the `aw-tools` group. The nerfed
-commands SDD (2026-03-08) defines RBAC-controlled operations that agents can
-perform through SUID executables, with rulesync skills that are auto-configured
-in agent workspaces. This SDD focuses on agent lifecycle management within
-Agentworks -- the provisioning and teardown of the Linux users and group
-memberships that those SDDs depend on.
+The user-based security SDD (2026-03-08) defines the full Linux security model for agents:
+group-based workspace access, SSH agent socket sharing via the `agentworks-ssh` group, and tools
+access via the `aw-tools` group. The nerfed commands SDD (2026-03-08) defines RBAC-controlled
+operations that agents can perform through SUID executables, with rulesync skills that are
+auto-configured in agent workspaces. This SDD focuses on agent lifecycle management within
+Agentworks -- the provisioning and teardown of the Linux users and group memberships that those SDDs
+depend on.
 
 ---
 
 ## Git Host Providers
 
-Agentworks supports registering VM-generated SSH keys with multiple git hosting
-providers. Providers are configured in the user config under
-`[git_hosts.<name>]` and can be selectively enabled per VM at creation time.
+Agentworks supports registering VM-generated SSH keys with multiple git hosting providers. Providers
+are configured in the user config under `[git_hosts.<name>]` and can be selectively enabled per VM
+at creation time.
 
 ### Supported Providers
 
 #### AzDO
 
-Registers the SSH public key via the AzDO REST API using an Azure AD token
-obtained via `az account get-access-token`. No separate PAT is required. AzDO
-and Azure are assumed to share the same AAD tenant.
+Registers the SSH public key via the AzDO REST API using an Azure AD token obtained via
+`az account get-access-token`. No separate PAT is required. AzDO and Azure are assumed to share the
+same AAD tenant.
 
 ```text
 POST https://vssps.dev.azure.com/{org}/_apis/ssh/keys?api-version=7.1
 ```
 
-Key description is set to the VM name for traceability. On VM deletion, the key
-is removed via the DELETE endpoint.
+Key description is set to the VM name for traceability. On VM deletion, the key is removed via the
+DELETE endpoint.
 
 #### GitHub
 
-Registers the SSH public key via the GitHub REST API. Authentication is via
-`gh auth token` (preferred) or the `GITHUB_TOKEN` environment variable. There is
-no config field for a PAT -- token management is delegated to `gh cli` or the
-environment.
+Registers the SSH public key via the GitHub REST API. Authentication is via `gh auth token`
+(preferred) or the `GITHUB_TOKEN` environment variable. There is no config field for a PAT -- token
+management is delegated to `gh cli` or the environment.
 
 ```text
 POST https://api.github.com/user/keys
@@ -730,9 +662,9 @@ Key title is set to the VM name. On VM deletion, the key is removed.
 
 ### CLI
 
-New VMs register with the git hosts listed in `defaults.git_hosts`. If that key
-is not set, all configured providers are used. The `--git-hosts` flag on
-`vm create` overrides the default for that VM:
+New VMs register with the git hosts listed in `defaults.git_hosts`. If that key is not set, all
+configured providers are used. The `--git-hosts` flag on `vm create` overrides the default for that
+VM:
 
 ```shell
 agentworks vm create --git-hosts azdo,github
@@ -742,81 +674,72 @@ agentworks vm create --git-hosts azdo,github
 
 ## Dotfiles
 
-Agentworks handles dotfiles during VM initialization only. If `dotfiles.enabled`
-is `true` (the default) and the dotfiles source directory exists on the User
-Workstation (configurable via `dotfiles.source`, default: `~/.dotfiles`), it is
-copied to the VM and `install_cmd` is run (auto-detected as `./install.sh` if
-not configured). If the source directory does not exist, the step is skipped
-silently. Set `dotfiles.enabled = false` to skip dotfiles entirely.
+Agentworks handles dotfiles during VM initialization only. If `dotfiles.enabled` is `true` (the
+default) and the dotfiles source directory exists on the User Workstation (configurable via
+`dotfiles.source`, default: `~/.dotfiles`), it is copied to the VM and `install_cmd` is run
+(auto-detected as `./install.sh` if not configured). If the source directory does not exist, the
+step is skipped silently. Set `dotfiles.enabled = false` to skip dotfiles entirely.
 
-Agentworks does not know or care where the User Workstation's dotfiles came
-from. All workspaces on a VM inherit the dotfiles environment naturally -- this
-is a VM-level concern, not a workspace-level concern.
+Agentworks does not know or care where the User Workstation's dotfiles came from. All workspaces on
+a VM inherit the dotfiles environment naturally -- this is a VM-level concern, not a workspace-level
+concern.
 
-Local workspaces inherit the User Workstation's environment directly -- no
-dotfiles step is needed.
+Local workspaces inherit the User Workstation's environment directly -- no dotfiles step is needed.
 
 ---
 
 ## VS Code Integration
 
-Agentworks generates a `<workspace-name>.code-workspace` file on the User
-Workstation at workspace creation time. For VM workspaces, this points at the VM
-workspace directory via SSH Remote. For local workspaces, it points at the local
-directory directly. The `--open-vscode` flag opens this file in VS Code.
+Agentworks generates a `<workspace-name>.code-workspace` file on the User Workstation at workspace
+creation time. For VM workspaces, this points at the VM workspace directory via SSH Remote. For
+local workspaces, it points at the local directory directly. The `--open-vscode` flag opens this
+file in VS Code.
 
-Other VS Code artifacts (`.vscode/settings.json`, `extensions.json`, etc.) are
-either checked into the workspace repo or will be injected via template file
-processing (see Workspace Templates). Agentworks does not manage these directly.
+Other VS Code artifacts (`.vscode/settings.json`, `extensions.json`, etc.) are either checked into
+the workspace repo or will be injected via template file processing (see Workspace Templates).
+Agentworks does not manage these directly.
 
 ---
 
 ## Top-Level Commands
 
-In addition to the entity-specific command groups (`vm-host`, `vm`,
-`workspace`), Agentworks provides:
+In addition to the entity-specific command groups (`vm-host`, `vm`, `workspace`), Agentworks
+provides:
 
-- **`agentworks init`**: generates a sample `config.toml` at the config path.
-  The sample config is shipped in the repo at
-  `cli/agentworks/sample-config.toml` and documents all options with inline
+- **`agentworks init`**: generates a sample `config.toml` at the config path. The sample config is
+  shipped in the repo at `cli/agentworks/sample-config.toml` and documents all options with inline
   comments.
-- **`agentworks doctor`**: checks environment health -- Python version,
-  required/optional tools, Tailscale connectivity, config validation, SSH key
-  accessibility, database schema status (with automatic migration), and git host
-  authentication.
-- **`agentworks completion zsh`**: outputs a zsh completion script for shell
-  integration.
+- **`agentworks doctor`**: checks environment health -- Python version, required/optional tools,
+  Tailscale connectivity, config validation, SSH key accessibility, database schema status (with
+  automatic migration), and git host authentication.
+- **`agentworks completion zsh`**: outputs a zsh completion script for shell integration.
 
 ---
 
 ## Ephemeral Tailscale Nodes
 
-Agentworks supports ephemeral Tailscale auth keys (keys with `?ephemeral=true`).
-Ephemeral nodes are automatically removed from the tailnet when the VM goes
-offline, so Agentworks handles this gracefully:
+Agentworks supports ephemeral Tailscale auth keys (keys with `?ephemeral=true`). Ephemeral nodes are
+automatically removed from the tailnet when the VM goes offline, so Agentworks handles this
+gracefully:
 
-- **On stop**: after stopping the VM, Agentworks checks whether the Tailscale
-  node is still reachable. If not (ephemeral key), the stored Tailscale host is
-  cleared from the database.
-- **On start**: after starting the VM, Agentworks verifies Tailscale
-  connectivity. If the node is gone, it re-joins the tailnet via the
-  provisioning transport and prompts for a new auth key (or uses
-  `TAILSCALE_AUTH_KEY`).
-- **Resilience**: even if the database says the Tailscale host is present, start
-  checks reachability before proceeding.
+- **On stop**: after stopping the VM, Agentworks checks whether the Tailscale node is still
+  reachable. If not (ephemeral key), the stored Tailscale host is cleared from the database.
+- **On start**: after starting the VM, Agentworks verifies Tailscale connectivity. If the node is
+  gone, it re-joins the tailnet via the provisioning transport and prompts for a new auth key (or
+  uses `TAILSCALE_AUTH_KEY`).
+- **Resilience**: even if the database says the Tailscale host is present, start checks reachability
+  before proceeding.
 
-This means ephemeral keys work for disposable VMs and are also resilient across
-stop/start cycles.
+This means ephemeral keys work for disposable VMs and are also resilient across stop/start cycles.
 
 ---
 
 ## HTTPS Clone Hints
 
-When a workspace repo clone fails and the repo URL uses HTTPS, Agentworks
-provides a hint suggesting the user switch to an SSH URL (`git@...`). This is
-because VMs authenticate to git hosts via their registered SSH key -- HTTPS URLs
-for private repos require separate credential management that Agentworks does
-not handle.
+When a workspace repo clone fails and the repo URL uses HTTPS, Agentworks provides a hint suggesting
+the user switch to an SSH URL (`git@...`). This is because VMs authenticate to git hosts via their
+registered SSH key -- HTTPS URLs for private repos require separate credential management that
+Agentworks does not handle.
 
 Public repos work with either SSH or HTTPS URLs.
 
@@ -829,11 +752,10 @@ Public repos work with either SSH or HTTPS URLs.
 - VM provisioning (Lima, Azure, WSL2)
 - VM initialization with git host provider registration (AzDO + GitHub)
 - Workspace create/list/shell/delete on VMs
-- Local workspace create/list/shell/delete (originally planned for Phase 2,
-  delivered early)
+- Local workspace create/list/shell/delete (originally planned for Phase 2, delivered early)
 - Unified workspace listing across VM and local workspaces
-- Workspace templates (`[workspace_templates.*]`) with optional repo, tmuxinator
-  toggle, and inheritance
+- Workspace templates (`[workspace_templates.*]`) with optional repo, tmuxinator toggle, and
+  inheritance
 - VS Code integration
 - State database and user config
 - Top-level commands: init, doctor, completion
@@ -850,58 +772,52 @@ Public repos work with either SSH or HTTPS URLs.
 - Agent create/list/shell/delete on VM workspaces
 - Linux user provisioning with workspace group membership
 - Tmuxinator integration (admin + per-agent windows)
-- Name validation tightening (no dots, no double hyphens) across all entity
-  types
+- Name validation tightening (no dots, no double hyphens) across all entity types
 - Cascading agent cleanup on workspace delete
 
 ### Future: Azure Auto-Suspend
 
-Azure VMs will support auto-suspend after a configurable idle timeout
-(`idle_timeout_hours`). The mechanism is a systemd timer on the VM that monitors
-for active SSH sessions (`who`/`ss`) and deallocates the VM via `az cli` when
-idle. This requires `az cli` installed and authenticated on the VM itself, which
-adds complexity to the initialization flow. The design is documented in the VM
+Azure VMs will support auto-suspend after a configurable idle timeout (`idle_timeout_hours`). The
+mechanism is a systemd timer on the VM that monitors for active SSH sessions (`who`/`ss`) and
+deallocates the VM via `az cli` when idle. This requires `az cli` installed and authenticated on the
+VM itself, which adds complexity to the initialization flow. The design is documented in the VM
 provisioning LLD but implementation is deferred to a future phase.
 
 ### Future: VM Templates
 
-The current `[vm.config]` section (apt, snap, install_commands) is effectively a
-single implicit VM template. In the future, this could be formalized into named
-VM templates with the same inheritance model as workspace templates, allowing
-different VMs to be provisioned with different toolchains.
+The current `[vm.config]` section (apt, snap, install_commands) is effectively a single implicit VM
+template. In the future, this could be formalized into named VM templates with the same inheritance
+model as workspace templates, allowing different VMs to be provisioned with different toolchains.
 
 ### Future: VM Initialization Plugins
 
-The current `install_commands` are raw shell commands -- effective but opaque.
-VM initialization plugins would provide structured, reusable initialization
-steps (both built-in and user-provided). A plugin like `install.bun` could
-install bun, write a `.bun-version` file with the latest stable (or a specified
-version), and verify the installation -- all as a single declarative step. This
-would replace fragile one-liners with composable, version-aware building blocks.
+The current `install_commands` are raw shell commands -- effective but opaque. VM initialization
+plugins would provide structured, reusable initialization steps (both built-in and user-provided). A
+plugin like `install.bun` could install bun, write a `.bun-version` file with the latest stable (or
+a specified version), and verify the installation -- all as a single declarative step. This would
+replace fragile one-liners with composable, version-aware building blocks.
 
 ### Future: Non-VM Workspace Hosts
 
 New Workspace Host types beyond VMs:
 
-- **Kubernetes**: a StatefulSet pod as a Workspace Host (`--platform k8s`). The
-  pod is initialized like a VM (packages, dotfiles, SSH keys, git host
-  registration) and hosts workspaces on its persistent volume. The K8s cluster
-  serves a similar role to a VM Host (provisioning target). Tailscale
-  connectivity via the Tailscale Kubernetes operator (sidecar or per-pod
-  annotation). This maps cleanly to the existing `vm` command group -- the pod
-  is a long-lived Workspace Host that happens to be a container instead of a VM.
-- **Containers on VMs**: lighter-weight workspace isolation using containers
-  running on an existing VM. The container provides isolation without a full VM.
-  Same CLI surface: create, shell (exec into container), list, delete.
+- **Kubernetes**: a StatefulSet pod as a Workspace Host (`--platform k8s`). The pod is initialized
+  like a VM (packages, dotfiles, SSH keys, git host registration) and hosts workspaces on its
+  persistent volume. The K8s cluster serves a similar role to a VM Host (provisioning target).
+  Tailscale connectivity via the Tailscale Kubernetes operator (sidecar or per-pod annotation). This
+  maps cleanly to the existing `vm` command group -- the pod is a long-lived Workspace Host that
+  happens to be a container instead of a VM.
+- **Containers on VMs**: lighter-weight workspace isolation using containers running on an existing
+  VM. The container provides isolation without a full VM. Same CLI surface: create, shell (exec into
+  container), list, delete.
 
-When non-VM Workspace Host types ship, the `vm` CLI command group may be
-generalized to `host` or similar. The database schema and config would follow.
+When non-VM Workspace Host types ship, the `vm` CLI command group may be generalized to `host` or
+similar. The database schema and config would follow.
 
-**Agent model on K8s/containers**: the current agent model (Linux users within a
-VM) does not translate to containers, which typically run as a single user and
-lack the capabilities needed for multi-user isolation (useradd, SUID, etc.). On
-K8s, the agent model would likely use **one pod per agent** instead of one user
-per agent, with shared workspace data via a PersistentVolumeClaim and fsGroup
-settings. Nerfed command gating would use network policies or a sidecar proxy
-rather than SUID executables. This is a fundamentally different isolation
-primitive and would require its own design work when K8s support is pursued.
+**Agent model on K8s/containers**: the current agent model (Linux users within a VM) does not
+translate to containers, which typically run as a single user and lack the capabilities needed for
+multi-user isolation (useradd, SUID, etc.). On K8s, the agent model would likely use **one pod per
+agent** instead of one user per agent, with shared workspace data via a PersistentVolumeClaim and
+fsGroup settings. Nerfed command gating would use network policies or a sidecar proxy rather than
+SUID executables. This is a fundamentally different isolation primitive and would require its own
+design work when K8s support is pursued.

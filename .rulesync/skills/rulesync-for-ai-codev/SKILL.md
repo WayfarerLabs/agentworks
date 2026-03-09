@@ -6,8 +6,8 @@ targets: ["*"]
 
 # Rulesync
 
-This project uses [Rulesync](https://rulesync.dyoshikawa.com/) to maintain a
-single source of truth for AI coding assistant configuration.
+This project uses [Rulesync](https://rulesync.dyoshikawa.com/) to maintain a single source of truth
+for AI coding assistant configuration.
 
 ## Structure
 
@@ -19,8 +19,8 @@ single source of truth for AI coding assistant configuration.
 
 ## Generated Output
 
-Tool-specific files (`.claude/`, `.cursor/`, `CLAUDE.md`) are generated output.
-Never edit them directly. They are overwritten on regenerate.
+Tool-specific files (`.claude/`, `.cursor/`, `CLAUDE.md`) are generated output. Never edit them
+directly. They are overwritten on regenerate.
 
 ## Making Changes
 
@@ -31,5 +31,5 @@ Never edit them directly. They are overwritten on regenerate.
 ## Reference
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for setup instructions and the
-[Rulesync documentation](https://rulesync.dyoshikawa.com/) for full details on
-rules, skills, targets, sources, and other features.
+[Rulesync documentation](https://rulesync.dyoshikawa.com/) for full details on rules, skills,
+targets, sources, and other features.

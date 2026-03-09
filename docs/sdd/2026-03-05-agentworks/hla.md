@@ -6,62 +6,54 @@
 
 ## Overview
 
-Agentworks is a Python CLI that orchestrates workspace lifecycle across multiple
-compute targets (VMs and local host). Its execution model is built on two
-primitives -- local subprocess and remote subprocess over SSH -- with a SQLite
-database tracking all state. The architecture is designed around a uniform
-workspace abstraction that works regardless of where the workspace physically
+Agentworks is a Python CLI that orchestrates workspace lifecycle across multiple compute targets
+(VMs and local host). Its execution model is built on two primitives -- local subprocess and remote
+subprocess over SSH -- with a SQLite database tracking all state. The architecture is designed
+around a uniform workspace abstraction that works regardless of where the workspace physically
 lives.
 
-The core abstraction is the **Workspace Host** -- an environment that can host
-workspaces. In the current implementation, Workspace Hosts are always VMs, and
-the CLI/database/config use `vm` terminology throughout. The architecture is
-designed so that non-VM Workspace Host types (K8s StatefulSet pods, containers
-on VMs) can be added as new platform provisioners without changing the workspace
-layer. When non-VM types ship, the `vm` command group may be generalized.
+The core abstraction is the **Workspace Host** -- an environment that can host workspaces. In the
+current implementation, Workspace Hosts are always VMs, and the CLI/database/config use `vm`
+terminology throughout. The architecture is designed so that non-VM Workspace Host types (K8s
+StatefulSet pods, containers on VMs) can be added as new platform provisioners without changing the
+workspace layer. When non-VM types ship, the `vm` command group may be generalized.
 
 ---
 
 ## Core Concepts
 
-Agentworks organizes work into three layers. Each layer narrows the scope of the
-one above it -- permissions compose downward and can only constrain, never
-expand.
+Agentworks organizes work into three layers. Each layer narrows the scope of the one above it --
+permissions compose downward and can only constrain, never expand.
 
-- **VM -- the environment**: defines the capability ceiling. The tools,
-  runtimes, packages, and system configuration available to everything running
-  inside it. This is the maximum set of possibility. Nothing below the VM layer
-  can use a tool or capability that the VM does not provide.
-- **Workspace -- the project**: defines the project scope. The repo(s) being
-  worked on, plus the behavioral configuration that shapes how tools operate
-  within this project (rulesync artifacts, workspace-level code assistant
-  permissions, editor configs). A workspace narrows the VM's raw capability into
-  a project-specific context. Workspaces can also live locally on the User
+- **VM -- the environment**: defines the capability ceiling. The tools, runtimes, packages, and
+  system configuration available to everything running inside it. This is the maximum set of
+  possibility. Nothing below the VM layer can use a tool or capability that the VM does not provide.
+- **Workspace -- the project**: defines the project scope. The repo(s) being worked on, plus the
+  behavioral configuration that shapes how tools operate within this project (rulesync artifacts,
+  workspace-level code assistant permissions, editor configs). A workspace narrows the VM's raw
+  capability into a project-specific context. Workspaces can also live locally on the User
   Workstation, but local workspaces do not support agents.
-- **Agent -- the actor**: defines a task-specific identity with scoped
-  permissions. Each agent is an isolated Linux user within a VM workspace. The
-  agent's effective capability is the intersection of all three layers: it can
-  only use tools present on the VM, configured at the workspace level, and
-  granted to the agent via RBAC (nerfed commands). Agents are VM-only because
-  the isolation model requires Linux user management.
+- **Agent -- the actor**: defines a task-specific identity with scoped permissions. Each agent is an
+  isolated Linux user within a VM workspace. The agent's effective capability is the intersection of
+  all three layers: it can only use tools present on the VM, configured at the workspace level, and
+  granted to the agent via RBAC (nerfed commands). Agents are VM-only because the isolation model
+  requires Linux user management.
 
-The layers also differ in **ephemerality**. VMs are long-lived -- provisioned
-once, used across many projects. Workspaces are more ephemeral -- created per
-task or project, destroyed when done. Agents are completely ephemeral -- spun up
-for a specific task within a workspace and discarded when the task is complete.
+The layers also differ in **ephemerality**. VMs are long-lived -- provisioned once, used across many
+projects. Workspaces are more ephemeral -- created per task or project, destroyed when done. Agents
+are completely ephemeral -- spun up for a specific task within a workspace and discarded when the
+task is complete.
 
-Each layer has (or will have) a **templating mechanism** so that patterns can be
-defined once and stamped many times. VM templates define what is installed and
-how the environment is configured. Workspace templates define which repos are
-cloned and how tools are configured for the project. Agent templates (future,
-dependent on nerfed commands) will define the permission model for different
-agent roles.
+Each layer has (or will have) a **templating mechanism** so that patterns can be defined once and
+stamped many times. VM templates define what is installed and how the environment is configured.
+Workspace templates define which repos are cloned and how tools are configured for the project.
+Agent templates (future, dependent on nerfed commands) will define the permission model for
+different agent roles.
 
-This layering means the VM is provisioned once with all the tools anyone might
-need, workspaces configure how those tools behave for a specific project, and
-agents operate within the intersection of both. The architecture ensures that
-each layer can be reasoned about independently while the security model
-guarantees that lower layers cannot exceed the constraints of higher ones.
+This layering means the VM is provisioned once with all the tools anyone might need, workspaces
+configure how those tools behave for a specific project, and agents operate within the intersection
+of both. The architecture ensures that each layer can be reasoned about independently while the
+security model guarantees that lower layers cannot exceed the constraints of higher ones.
 
 ---
 
@@ -69,15 +61,13 @@ guarantees that lower layers cannot exceed the constraints of higher ones.
 
 Agentworks's execution model uses two primitives:
 
-- **Local subprocess**: provisioning operations that run on the User Workstation
-  (Azure via `az cli`, WSL2 via PowerShell), and all local workspace operations
-- **Remote subprocess over SSH**: provisioning operations that run on a VM Host
-  (Lima via `limactl`), and all VM workspace operations which target the VM
-  directly
+- **Local subprocess**: provisioning operations that run on the User Workstation (Azure via
+  `az cli`, WSL2 via PowerShell), and all local workspace operations
+- **Remote subprocess over SSH**: provisioning operations that run on a VM Host (Lima via
+  `limactl`), and all VM workspace operations which target the VM directly
 
-After provisioning, the VM Host is only involved for VM lifecycle operations
-(start, stop, delete). All workspace operations go directly from User
-Workstation to VM over Tailscale.
+After provisioning, the VM Host is only involved for VM lifecycle operations (start, stop, delete).
+All workspace operations go directly from User Workstation to VM over Tailscale.
 
 ### Platform Matrix
 
@@ -93,9 +83,8 @@ Workstation to VM over Tailscale.
 
 ## Workspace Abstraction
 
-All workspace types share a common identity model and lifecycle, but differ in
-how operations are executed. The workspace manager dispatches to the appropriate
-backend based on workspace type.
+All workspace types share a common identity model and lifecycle, but differ in how operations are
+executed. The workspace manager dispatches to the appropriate backend based on workspace type.
 
 ```text
 WorkspaceManager
@@ -104,10 +93,9 @@ WorkspaceManager
   └── (future) ContainerWorkspaceBackend
 ```
 
-Each backend implements the same interface: create directory, apply workspace
-template, inject config, open shell, delete. The workspace manager handles state
-database operations, VS Code workspace file generation, and identity management
-uniformly.
+Each backend implements the same interface: create directory, apply workspace template, inject
+config, open shell, delete. The workspace manager handles state database operations, VS Code
+workspace file generation, and identity management uniformly.
 
 ---
 
@@ -118,21 +106,17 @@ uniformly.
 Tables:
 
 - `vm_hosts`: name, ssh_host, platform, os
-- `vms`: name, platform, vm_host_name, vm_user, cpus, memory, disk,
-  extra_packages, init_status (lifecycle), ssh_public_key, tailscale_host,
-  azure_resource_id, created_at. Runtime status (running/stopped/deallocated) is
-  always queried live from the platform, never cached.
-- `workspaces`: name, type (vm/local), vm_name (nullable), template,
-  workspace_path, created_at
-- `agents`: name, workspace_name, linux_user (derived: `<workspace>--<agent>`),
-  created_at
+- `vms`: name, platform, vm_host_name, vm_user, cpus, memory, disk, extra_packages, init_status
+  (lifecycle), ssh_public_key, tailscale_host, azure_resource_id, created_at. Runtime status
+  (running/stopped/deallocated) is always queried live from the platform, never cached.
+- `workspaces`: name, type (vm/local), vm_name (nullable), template, workspace_path, created_at
+- `agents`: name, workspace_name, linux_user (derived: `<workspace>--<agent>`), created_at
 - `vm_git_host_keys`: id (auto), vm_name, git_host_name, remote_key_id
 
-Names are globally unique within each table (vm_hosts, vms, and workspaces are
-separate namespaces -- a VM and a workspace can share the same name). Agent
-names are unique within their workspace; the `(workspace_name, name)` pair forms
-the primary key. The `vm_git_host_keys` table tracks which SSH keys have been
-registered with which providers, enabling clean removal on `vm delete`.
+Names are globally unique within each table (vm_hosts, vms, and workspaces are separate namespaces
+-- a VM and a workspace can share the same name). Agent names are unique within their workspace; the
+`(workspace_name, name)` pair forms the primary key. The `vm_git_host_keys` table tracks which SSH
+keys have been registered with which providers, enabling clean removal on `vm delete`.
 
 ---
 
@@ -149,21 +133,18 @@ GitHostProvider
   remove_key(remote_key_id) -> void
 ```
 
-Providers are registered by type in the user config. The system verifies
-authentication for all selected providers before starting VM provisioning
-(fail-fast).
+Providers are registered by type in the user config. The system verifies authentication for all
+selected providers before starting VM provisioning (fail-fast).
 
 ### Provider Implementations
 
-**AzDO**: uses `az account get-access-token` to obtain an Azure AD bearer token,
-then calls the AzDO SSH Keys REST API. No PAT required -- assumes AzDO and Azure
-share the same AAD tenant.
+**AzDO**: uses `az account get-access-token` to obtain an Azure AD bearer token, then calls the AzDO
+SSH Keys REST API. No PAT required -- assumes AzDO and Azure share the same AAD tenant.
 
-**GitHub**: uses `gh auth token` or the `GITHUB_TOKEN` environment variable to
-authenticate against the GitHub User Keys API.
+**GitHub**: uses `gh auth token` or the `GITHUB_TOKEN` environment variable to authenticate against
+the GitHub User Keys API.
 
-Additional providers can be added by implementing the interface and registering
-a new type.
+Additional providers can be added by implementing the interface and registering a new type.
 
 ---
 
@@ -177,8 +158,7 @@ a new type.
 
 ### Inheritance Resolution
 
-Workspace templates can inherit from multiple parents. Resolution is
-depth-first, left-to-right:
+Workspace templates can inherit from multiple parents. Resolution is depth-first, left-to-right:
 
 ```text
 resolve(template):
@@ -204,20 +184,17 @@ After resolution, workspace creation applies the resolved workspace template:
 1. Create workspace directory
 2. If `repo` is set: `git clone <repo> <workspace-dir>`
 3. If `tmuxinator` is enabled: write `.tmuxinator.yml` and symlink
-4. (Future) Apply template file processing -- copy files with variable
-   substitution
+4. (Future) Apply template file processing -- copy files with variable substitution
 
-File templating (Phase 3) will add a `files` section to workspace templates for
-injecting per-workspace files (VS Code settings, Claude Code permissions, editor
-configs, etc.).
+File templating (Phase 3) will add a `files` section to workspace templates for injecting
+per-workspace files (VS Code settings, Claude Code permissions, editor configs, etc.).
 
 ---
 
 ## Agent Management
 
-Agents are managed as Linux users on the VM that hosts their workspace. The
-agent manager handles user provisioning, group membership, and tmuxinator config
-regeneration.
+Agents are managed as Linux users on the VM that hosts their workspace. The agent manager handles
+user provisioning, group membership, and tmuxinator config regeneration.
 
 ### Agent Creation Flow
 
@@ -260,23 +237,20 @@ User runs: agentworks agent delete coder --workspace ws-task-123
 
 ### Tmuxinator Integration
 
-The workspace tmuxinator config is regenerated whenever agents are added or
-removed. The generated config includes:
+The workspace tmuxinator config is regenerated whenever agents are added or removed. The generated
+config includes:
 
-- An "admin" window (the default) running as the admin user in the workspace
-  root
-- One window per agent, each running `su - <agent-linux-user>` with the working
-  directory set to the workspace root
+- An "admin" window (the default) running as the admin user in the workspace root
+- One window per agent, each running `su - <agent-linux-user>` with the working directory set to the
+  workspace root
 
-This gives operators a single `workspace shell` entry point with visibility into
-all active agents.
+This gives operators a single `workspace shell` entry point with visibility into all active agents.
 
 ### Cascading Deletion
 
-When a workspace is deleted, all its agents are deleted first (Linux users
-removed, home directories cleaned up, agent records removed from the database).
-This happens automatically as part of `workspace delete` -- no separate agent
-deletion step is needed.
+When a workspace is deleted, all its agents are deleted first (Linux users removed, home directories
+cleaned up, agent records removed from the database). This happens automatically as part of
+`workspace delete` -- no separate agent deletion step is needed.
 
 ---
 
@@ -375,11 +349,10 @@ Local (User Workstation):
 | Runtime state        | SQLite (`sqlite3` stdlib)                                      |
 | Language             | Python 3.12+                                                   |
 
-Agentworks runs natively on macOS, Linux, and Windows\*. WSL2 is not required or
-assumed on Windows.
+Agentworks runs natively on macOS, Linux, and Windows\*. WSL2 is not required or assumed on Windows.
 
-\* Local workspaces are only supported on Unix-like hosts (macOS, Linux).
-Windows users must use WSL or other remote VM solutions.
+\* Local workspaces are only supported on Unix-like hosts (macOS, Linux). Windows users must use WSL
+or other remote VM solutions.
 
 ---
 
@@ -429,9 +402,9 @@ agentworks/                          # repo root (upstreams/agentworks)
 └── README.md
 ```
 
-The repo is a monorepo where each component (`cli/`, `tools/`, `proxy/`) is
-self-contained with its own language, toolchain, and dependencies. No shared
-build orchestrator -- each component manages itself independently.
+The repo is a monorepo where each component (`cli/`, `tools/`, `proxy/`) is self-contained with its
+own language, toolchain, and dependencies. No shared build orchestrator -- each component manages
+itself independently.
 
 ---
 
@@ -439,38 +412,33 @@ build orchestrator -- each component manages itself independently.
 
 ### SQLite for State
 
-Runtime state is SQLite rather than flat files. This gives atomic operations,
-enforced uniqueness constraints, and simple querying without introducing a
-server dependency. The database is local to the User Workstation -- there is no
-shared state.
+Runtime state is SQLite rather than flat files. This gives atomic operations, enforced uniqueness
+constraints, and simple querying without introducing a server dependency. The database is local to
+the User Workstation -- there is no shared state.
 
 ### SSH as the Universal Remote Primitive
 
-All remote operations use native `ssh` subprocess calls rather than a Python SSH
-library. This respects the user's SSH config, agent forwarding, and key
-management. It also means Agentworks works with any SSH-accessible host without
-additional setup.
+All remote operations use native `ssh` subprocess calls rather than a Python SSH library. This
+respects the user's SSH config, agent forwarding, and key management. It also means Agentworks works
+with any SSH-accessible host without additional setup.
 
 ### Workspace Backends over Inheritance
 
-Workspace types are implemented as backend strategies rather than subclasses.
-The workspace manager owns lifecycle orchestration and state management;
-backends only handle the platform-specific operations (create directory, clone
-repo, open shell, delete). This keeps the workspace identity model and state
-management in one place.
+Workspace types are implemented as backend strategies rather than subclasses. The workspace manager
+owns lifecycle orchestration and state management; backends only handle the platform-specific
+operations (create directory, clone repo, open shell, delete). This keeps the workspace identity
+model and state management in one place.
 
 ### Provider-Agnostic Git Host Registration
 
-Git host providers are decoupled from VM provisioning. The initializer calls a
-uniform interface; providers handle their own authentication and API details
-using the single SSH key generated during VM initialization. This allows adding
-new providers (provided they support SSH key-based authentication) without
-modifying the provisioning flow.
+Git host providers are decoupled from VM provisioning. The initializer calls a uniform interface;
+providers handle their own authentication and API details using the single SSH key generated during
+VM initialization. This allows adding new providers (provided they support SSH key-based
+authentication) without modifying the provisioning flow.
 
 ### Provisioning Transport Reuse
 
-Each platform provisioner exposes an `exec_target()` method that returns the
-provisioning transport for an existing VM. This is used by the Tailscale rejoin
-flow to re-establish connectivity when a Tailscale node is lost (e.g. ephemeral
-keys). The same transport used during initial provisioning is reused, keeping
-the rejoin logic platform-agnostic.
+Each platform provisioner exposes an `exec_target()` method that returns the provisioning transport
+for an existing VM. This is used by the Tailscale rejoin flow to re-establish connectivity when a
+Tailscale node is lost (e.g. ephemeral keys). The same transport used during initial provisioning is
+reused, keeping the rejoin logic platform-agnostic.

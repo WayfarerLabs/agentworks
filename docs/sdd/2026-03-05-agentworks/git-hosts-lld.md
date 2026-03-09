@@ -6,11 +6,10 @@
 
 ## Overview
 
-Git host providers are a pluggable abstraction for registering and removing SSH
-keys with git hosting services. During VM initialization, Agentworks generates
-an SSH keypair on the VM and registers the public key with the user's configured
-git hosts so the VM can clone repositories. On VM deletion, the keys are
-removed.
+Git host providers are a pluggable abstraction for registering and removing SSH keys with git
+hosting services. During VM initialization, Agentworks generates an SSH keypair on the VM and
+registers the public key with the user's configured git hosts so the VM can clone repositories. On
+VM deletion, the keys are removed.
 
 ---
 
@@ -73,9 +72,8 @@ class GitHostProvider(ABC):
 
 ## Provider Resolution
 
-Providers are instantiated on demand only when needed by a command. That said,
-all providers must initialize cleanly prior to the command executing, so any
-auth failures are atomic.
+Providers are instantiated on demand only when needed by a command. That said, all providers must
+initialize cleanly prior to the command executing, so any auth failures are atomic.
 
 When a command needs git host providers, resolution works as follows:
 
@@ -90,8 +88,8 @@ When a command needs git host providers, resolution works as follows:
      "github" -> GitHubProvider()
 ```
 
-This keeps startup fast and avoids instantiating providers that are not needed
-for the current command.
+This keeps startup fast and avoids instantiating providers that are not needed for the current
+command.
 
 ---
 
@@ -99,15 +97,14 @@ for the current command.
 
 ### Authentication
 
-AzDO uses Azure AD tokens obtained via `az cli`. No PAT is required -- this
-assumes AzDO and Azure share the same AAD tenant.
+AzDO uses Azure AD tokens obtained via `az cli`. No PAT is required -- this assumes AzDO and Azure
+share the same AAD tenant.
 
 ```text
 az account get-access-token --resource 499b84ac-1321-427f-aa17-267ca6975798
 ```
 
-The resource ID `499b84ac-1321-427f-aa17-267ca6975798` is the well-known AzDO
-resource identifier.
+The resource ID `499b84ac-1321-427f-aa17-267ca6975798` is the well-known AzDO resource identifier.
 
 ### verify_auth
 
@@ -166,8 +163,7 @@ resource identifier.
 ### Error Handling
 
 - Token acquisition failure: raise with auth_hint
-- HTTP errors (non-2xx, non-404 on delete): raise with status code and response
-  body
+- HTTP errors (non-2xx, non-404 on delete): raise with status code and response body
 - Network errors: raise with connection details
 
 ---
@@ -176,8 +172,8 @@ resource identifier.
 
 ### Authentication
 
-GitHub uses a token obtained from `gh cli` or a configured PAT. The `gh cli`
-approach is preferred as it avoids storing tokens in the Agentworks config.
+GitHub uses a token obtained from `gh cli` or a configured PAT. The `gh cli` approach is preferred
+as it avoids storing tokens in the Agentworks config.
 
 Token resolution order:
 
@@ -245,8 +241,8 @@ Token resolution order:
 
 ### Error Handling
 
-Same pattern as AzDO: token failure raises with auth_hint, HTTP errors raise
-with details, 404 on delete is accepted.
+Same pattern as AzDO: token failure raises with auth_hint, HTTP errors raise with details, 404 on
+delete is accepted.
 
 ---
 
@@ -280,25 +276,23 @@ with details, 404 on delete is accepted.
 
 ### Key Naming Convention
 
-All registered keys use the title/description format `agentworks-<vm_name>`.
-This provides traceability in the git host provider's UI (e.g. AzDO SSH keys
-page, GitHub SSH keys settings).
+All registered keys use the title/description format `agentworks-<vm_name>`. This provides
+traceability in the git host provider's UI (e.g. AzDO SSH keys page, GitHub SSH keys settings).
 
 ---
 
 ## HTTP Client
 
-Both providers make REST API calls. Rather than pulling in a heavy HTTP library,
-use `urllib.request` (stdlib) for these simple JSON requests. Each provider
-method:
+Both providers make REST API calls. Rather than pulling in a heavy HTTP library, use
+`urllib.request` (stdlib) for these simple JSON requests. Each provider method:
 
 1. Builds the request (URL, headers, JSON body)
 2. Executes via `urllib.request.urlopen`
 3. Parses the JSON response
 4. Handles errors (HTTP status, network)
 
-If the stdlib approach becomes unwieldy, `httpx` is a reasonable upgrade path --
-but for the handful of API calls involved, stdlib is sufficient.
+If the stdlib approach becomes unwieldy, `httpx` is a reasonable upgrade path -- but for the handful
+of API calls involved, stdlib is sufficient.
 
 ---
 
