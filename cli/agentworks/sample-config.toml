@@ -33,7 +33,7 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 
 # --- VM configuration ---
 # Agentworks always installs system dependencies (openssh-server, curl, git,
-# sudo, ca-certificates) regardless of this config.
+# sudo, ca-certificates, tmux, tmuxinator) regardless of this config.
 
 [vm.config]
 # vm_user = "agentworks"                     # username created on VMs
@@ -43,9 +43,6 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # azure_vm_size = "Standard_D4s_v5"          # Azure VM size
 # apt = [
 #     "zsh",
-#     "tmux",
-#     "tmuxinator",
-#     "curl",
 #     "unzip",
 #     "build-essential",
 #     "ripgrep",
