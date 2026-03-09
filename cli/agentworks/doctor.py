@@ -6,6 +6,7 @@ import os
 import shutil
 import subprocess
 import sys
+from pathlib import Path
 
 import typer
 
@@ -153,6 +154,10 @@ def run_doctor() -> None:
     else:
         warn("TAILSCALE_AUTH_KEY not set (will prompt during VM create/start)")
 
+    # -- Shell completions ---------------------------------------------
+    typer.echo("\nShell completions:")
+    _check_completions(ok, warn, fail)
+
     # -- Summary -------------------------------------------------------
     typer.echo(f"\nResults: {ok_count} ok, {warn_count} warnings, {fail_count} failures")
     if fail_count > 0:
@@ -219,3 +224,92 @@ def _check_git_hosts(
                 warn(f"{name}: auth failed ({provider.auth_hint()})")
         except Exception as e:
             warn(f"{name}: auth check error: {e}")
+
+
+def _check_completions(
+    ok: object,
+    warn: object,
+    fail: object,
+) -> None:
+    """Check shell completion file freshness."""
+    assert callable(ok) and callable(warn) and callable(fail)
+
+    from agentworks.cli import app
+    from agentworks.completions.spec import build_spec, completion_version
+
+    current_version = completion_version(build_spec(app))
+
+    # Determine which shells to check based on platform
+    if sys.platform == "win32":
+        shells = _get_windows_completion_paths()
+    else:
+        shells = _get_unix_completion_paths()
+
+    for shell_name, candidate_paths in shells:
+        found = False
+        for path in candidate_paths:
+            if not path.exists():
+                continue
+            found = True
+            installed_version = _read_completion_version(path)
+            if installed_version == current_version:
+                ok(f"{shell_name}: up to date ({path})")
+            elif installed_version is None:
+                warn(
+                    f"{shell_name}: no version stamp ({path})."
+                    f" Regenerate: agentworks completion {shell_name} > {path}"
+                )
+            else:
+                warn(
+                    f"{shell_name}: stale ({path})."
+                    f" Regenerate: agentworks completion {shell_name} > {path}"
+                )
+        if not found:
+            install_hint = _completion_install_hint(shell_name)
+            warn(f"{shell_name}: completions not installed. Install with: {install_hint}")
+
+
+def _get_unix_completion_paths() -> list[tuple[str, list[Path]]]:
+    """Return (shell_name, candidate_paths) for Unix shells."""
+    home = Path.home()
+    return [
+        ("zsh", [home / ".zfunc" / "_agentworks"]),
+    ]
+
+
+def _get_windows_completion_paths() -> list[tuple[str, list[Path]]]:
+    """Return (shell_name, candidate_paths) for Windows shells."""
+    home = Path.home()
+    return [
+        (
+            "powershell",
+            [
+                home / "Documents" / "PowerShell" / "Completions" / "agentworks.ps1",
+                home / "Documents" / "WindowsPowerShell" / "Completions" / "agentworks.ps1",
+            ],
+        ),
+    ]
+
+
+def _completion_install_hint(shell_name: str) -> str:
+    """Return a shell-specific install command hint."""
+    hints: dict[str, str] = {
+        "zsh": "agentworks completion zsh > ~/.zfunc/_agentworks",
+        "powershell": "agentworks completion powershell >> $PROFILE",
+    }
+    return hints.get(shell_name, f"agentworks completion {shell_name}")
+
+
+def _read_completion_version(path: Path) -> str | None:
+    """Read the version stamp from a completion file."""
+    try:
+        with path.open() as f:
+            for line in f:
+                if line.startswith("# agentworks-completion-version:"):
+                    return line.split(":", 1)[1].strip()
+                # Only check the first few lines
+                if not line.startswith("#"):
+                    break
+    except OSError:
+        pass
+    return None

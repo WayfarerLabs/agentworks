@@ -63,17 +63,16 @@ def _prompt_name(label: str, name: str | None) -> str:
 
 @app.command("completion")
 def completion(
-    shell: Annotated[str, typer.Argument(help="Shell type: zsh")] = "zsh",
+    shell: Annotated[str, typer.Argument(help="Shell type: zsh, powershell")] = "zsh",
 ) -> None:
     """Output shell completion script."""
-    from importlib.resources import files
+    from agentworks.completions import SUPPORTED_SHELLS, generate
 
-    if shell != "zsh":
-        typer.echo(f"Error: unsupported shell '{shell}'. Supported: zsh", err=True)
+    if shell not in SUPPORTED_SHELLS:
+        typer.echo(f"Error: unsupported shell '{shell}'. Supported: {', '.join(SUPPORTED_SHELLS)}", err=True)
         raise typer.Exit(1)
 
-    script = files("agentworks").joinpath("completion.zsh").read_text()
-    typer.echo(script, nl=False)
+    typer.echo(generate(shell), nl=False)
 
 
 @app.command("doctor")
