@@ -38,6 +38,13 @@ workspace_app = typer.Typer(
 )
 app.add_typer(workspace_app)
 
+agent_app = typer.Typer(
+    name="agent",
+    help="Manage agents (isolated users within workspaces).",
+    no_args_is_help=True,
+)
+app.add_typer(agent_app)
+
 
 # -- Helpers ---------------------------------------------------------------
 
@@ -289,3 +296,52 @@ def workspace_delete(
     from agentworks.workspaces.manager import delete_workspace
 
     delete_workspace(_get_db(), load_config(), name, yes=yes)
+
+
+# -- Agent commands --------------------------------------------------------
+
+
+@agent_app.command("create")
+def agent_create(
+    name: Annotated[str, typer.Argument(help="Agent name")],
+    workspace: Annotated[str, typer.Option("--workspace", help="Workspace name")] = ...,  # type: ignore[assignment]
+) -> None:
+    """Create an agent (isolated Linux user) on a workspace."""
+    from agentworks.agents.manager import create_agent
+    from agentworks.config import load_config
+
+    create_agent(_get_db(), load_config(), name=name, workspace_name=workspace)
+
+
+@agent_app.command("list")
+def agent_list(
+    workspace: Annotated[str | None, typer.Option("--workspace", help="Filter by workspace")] = None,
+) -> None:
+    """List agents."""
+    from agentworks.agents.manager import list_agents
+
+    list_agents(_get_db(), workspace_name=workspace)
+
+
+@agent_app.command("shell")
+def agent_shell(
+    name: Annotated[str, typer.Argument(help="Agent name")],
+    workspace: Annotated[str, typer.Option("--workspace", help="Workspace name")] = ...,  # type: ignore[assignment]
+) -> None:
+    """Open a shell as an agent user."""
+    from agentworks.agents.manager import shell_agent
+    from agentworks.config import load_config
+
+    shell_agent(_get_db(), load_config(), name=name, workspace_name=workspace)
+
+
+@agent_app.command("delete")
+def agent_delete(
+    name: Annotated[str, typer.Argument(help="Agent name")],
+    workspace: Annotated[str, typer.Option("--workspace", help="Workspace name")] = ...,  # type: ignore[assignment]
+) -> None:
+    """Delete an agent from a workspace."""
+    from agentworks.agents.manager import delete_agent
+    from agentworks.config import load_config
+
+    delete_agent(_get_db(), load_config(), name=name, workspace_name=workspace)

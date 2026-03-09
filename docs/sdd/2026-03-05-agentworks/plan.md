@@ -258,14 +258,14 @@ per agent. Adding or removing agents updates the tmuxinator config.
 
 ### 4.5 Agent CLI Commands
 
-- [ ] Implement `agent create <name> --workspace <workspace-name>`: orchestrates Linux user
+- [x] Implement `agent create <name> --workspace <workspace-name>`: orchestrates Linux user
       creation + DB
-- [ ] Implement `agent list [--workspace <workspace-name>]`: list agents, optionally filtered
-- [ ] Implement `agent shell <name> [--workspace <workspace-name>]`: SSH as user account, su to
+- [x] Implement `agent list [--workspace <workspace-name>]`: list agents, optionally filtered
+- [x] Implement `agent shell <name> --workspace <workspace-name>`: SSH as user account, su to
       agent user
-- [ ] Implement `agent delete <name> --workspace <workspace-name>`: orchestrates Linux user
+- [x] Implement `agent delete <name> --workspace <workspace-name>`: orchestrates Linux user
       removal + DB
-- [ ] Add shell completions for agent commands (dynamic completers for agent names, workspace names)
+- [x] Add shell completions for agent commands (workspace name completers for --workspace)
 
 **Definition of done:** Full agent lifecycle works end-to-end. Can create an agent, see it in the
 workspace tmuxinator session, shell into it, list agents, and delete it.

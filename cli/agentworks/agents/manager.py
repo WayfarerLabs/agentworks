@@ -129,6 +129,39 @@ def list_agents(
         )
 
 
+def shell_agent(
+    db: Database,
+    config: Config,
+    *,
+    name: str,
+    workspace_name: str,
+) -> None:
+    """Open a shell as an agent user on a VM."""
+    import os
+
+    ws = _require_workspace(db, workspace_name)
+    agent = db.get_agent(workspace_name, name)
+    if agent is None:
+        typer.echo(f"Error: agent '{name}' not found in workspace '{workspace_name}'", err=True)
+        raise typer.Exit(1)
+
+    if ws.type != "vm":
+        typer.echo("Error: agents are only supported on VM workspaces", err=True)
+        raise typer.Exit(1)
+
+    vm = _require_vm_for_workspace(db, ws)
+    assert vm.tailscale_host is not None
+
+    # SSH as user account, then su to the agent user in the workspace directory
+    ssh_cmd = ["ssh"]
+    if config.user.ssh_private_key:
+        ssh_cmd.extend(["-i", str(config.user.ssh_private_key)])
+    ssh_cmd.append(f"{vm.vm_user}@{vm.tailscale_host}")
+    ssh_cmd.extend(["-t", f"cd {ws.workspace_path} && exec su - {agent.linux_user}"])
+
+    os.execvp("ssh", ssh_cmd)
+
+
 # -- Tmuxinator ------------------------------------------------------------
 
 

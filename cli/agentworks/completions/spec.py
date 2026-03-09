@@ -59,6 +59,10 @@ DYNAMIC_COMPLETIONS: dict[tuple[str, str], str] = {
     ("workspace.delete", "name"): "workspaces",
     ("workspace.create", "vm"): "vms",
     ("workspace.list", "vm"): "vms",
+    ("agent.create", "workspace"): "workspaces",
+    ("agent.shell", "workspace"): "workspaces",
+    ("agent.delete", "workspace"): "workspaces",
+    ("agent.list", "workspace"): "workspaces",
 }
 
 
