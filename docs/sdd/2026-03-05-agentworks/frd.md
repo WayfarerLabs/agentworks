@@ -507,7 +507,7 @@ reachable (timeout: 5 minutes). If tmuxinator is enabled for the workspace, runs
 tmuxinator is not enabled, opens a plain SSH shell. A `--no-tmuxinator` flag overrides the template
 setting and opens a plain shell regardless.
 
-The tmuxinator session includes an "admin" window (the default, running as the admin user) plus one
+The tmuxinator session includes a "user" window (the default, running as the user account) plus one
 window per agent configured to `su - <agent-linux-user>` with the working directory set to the
 workspace root. This gives the operator a single entry point to observe and interact with all agents
 in the workspace. Windows are regenerated when agents are added or removed.
@@ -587,7 +587,7 @@ workspace.
 
 `agentworks agent shell <agent-name> --workspace <workspace-name>`
 
-A convenience command that SSHs to the VM as the admin user, then runs `su - <agent-linux-user>`
+A convenience command that SSHs to the VM as the user account, then runs `su - <agent-linux-user>`
 with the working directory set to the workspace root. This gives operators a quick way to inspect
 what an agent is doing or debug issues from the agent's perspective. No separate tmuxinator config
 is needed -- for a multi-pane agent experience, use `workspace shell` which already includes agent
@@ -771,7 +771,7 @@ Public repos work with either SSH or HTTPS URLs.
 
 - Agent create/list/shell/delete on VM workspaces
 - Linux user provisioning with workspace group membership
-- Tmuxinator integration (admin + per-agent windows)
+- Tmuxinator integration (user + per-agent windows)
 - Name validation tightening (no dots, no double hyphens) across all entity types
 - Cascading agent cleanup on workspace delete
 

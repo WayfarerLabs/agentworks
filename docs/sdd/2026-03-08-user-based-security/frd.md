@@ -18,10 +18,11 @@ that:
 
 ## Personas
 
-### Platform operator
+### Operator
 
-Manages VMs and workspaces via the `agentworks` CLI. Installs and updates agent tools. Needs full
-control over the VM.
+The human who owns the VM. Logs in as the user account (`agentworks`), manages VMs and workspaces
+via the `agentworks` CLI, installs and updates agent tools. This is the user's own account on the
+VM -- it has admin privileges (unrestricted sudo) but is not a special service account.
 
 ### AI agent
 
@@ -32,18 +33,20 @@ tools, access other workspaces, or interfere with other agents.
 ### Human developer
 
 May SSH into a VM to debug or inspect agent work. Needs the same access as agents within a
-workspace, plus the ability to escalate to admin when needed.
+workspace, plus the ability to escalate to the user account when needed.
 
 ## Requirements
 
-### R1: Admin user
+### R1: User account
 
-The VM has a privileged admin user (currently `agentworks`) with unrestricted sudo. This user:
+The VM has a user account (`agentworks`) that is the operator's identity on the VM. This account
+has admin privileges (unrestricted sudo) and:
 
 - Owns the tools directory and all agent tooling
 - Manages VM-level configuration (Tailscale, packages, systemd services)
 - Runs the SSH agent daemon that provides git credentials
-- Is the user the `agentworks` CLI connects as
+- Is the account the `agentworks` CLI connects as
+- Holds all authenticated sessions (az login, gh auth login, SSH keys, etc.)
 
 ### R2: Workspace groups
 
@@ -64,7 +67,7 @@ Each agent is a Linux user assigned to one workspace's group. Multiple agents ca
 ### R4: Git credential sharing
 
 A single SSH keypair per VM (generated during VM init and registered with git hosts) provides git
-access. The private key is managed by an SSH agent daemon running as the admin user. The agent
+access. The private key is managed by an SSH agent daemon running as the user account. The agent
 socket is group-readable, allowing all agent users to perform git operations without direct access
 to the key material.
 
@@ -80,9 +83,9 @@ mechanisms (process accounting, auditd, log correlation) to track what each agen
 
 ### R7: Tool integrity
 
-The tools directory is owned by the admin user and is read-only to agent users. Agents can execute
-tools but cannot modify, delete, or replace them. Tool updates are performed by the admin user via
-the `agentworks` CLI or management tooling.
+The tools directory is owned by the user account and is read-only to agent users. Agents can execute
+tools but cannot modify, delete, or replace them. Tool updates are performed by the user via the
+`agentworks` CLI or management tooling.
 
 ## Out of Scope
 

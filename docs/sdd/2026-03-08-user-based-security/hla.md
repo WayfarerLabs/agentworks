@@ -10,7 +10,7 @@ all users without exposing key material.
 
 ```text
 Users:
-  agentworks          (admin, uid 1000, sudo)
+  agentworks          (user account, uid 1000, sudo)
   <workspace>--<agent>    (agent, no sudo)
   ...
 
@@ -20,12 +20,16 @@ Groups:
   aw-tools            (tools read/execute access)
 ```
 
-### Admin user (`agentworks`)
+### User account (`agentworks`)
+
+The operator's identity on the VM. This is the human's own account, not a special service account.
+It has admin privileges (unrestricted sudo) because the operator needs full control over the VM.
 
 - Created during Phase A of VM init (unchanged)
 - Unrestricted sudo via `/etc/sudoers.d/agentworks`
 - Owns `/opt/agentworks/tools/` (the tools directory)
 - Runs the SSH agent systemd service
+- Holds all authenticated sessions (az login, gh auth login, SSH keys, etc.)
 - Member of: `agentworks-ssh`
 
 ### Agent users (`<workspace>--<agent>`)
@@ -48,14 +52,14 @@ Groups:
 - The tools directory `/opt/agentworks/tools/` has ownership `agentworks:aw-tools` with mode `0750`
 - Executables inside are `0755` (world-executable) or `0750` (group-only)
 - Agent users are in `aw-tools`, giving them read/execute access
-- Only the admin user can write to the tools directory
+- Only the user account can write to the tools directory
 
 ## Directory Layout
 
 ```text
-/home/agentworks/                  # admin home
+/home/agentworks/                  # user account home
   .ssh/
-    id_ed25519                     # VM keypair (600, admin-only)
+    id_ed25519                     # VM keypair (600, user account only)
     id_ed25519.pub
 /home/agentworks/workspaces/       # workspace roots
   myproject/                       # 2775 agentworks:ws-myproject
@@ -86,7 +90,7 @@ the VM's registered SSH key, without exposing the private key to agent users.
 
 ### Implementation
 
-A systemd service runs `ssh-agent` as the admin user and loads the VM's key on startup.
+A systemd service runs `ssh-agent` as the user account and loads the VM's key on startup.
 
 ```ini
 # /etc/systemd/system/agentworks-ssh-agent.service
@@ -152,7 +156,7 @@ When an agent is created for a workspace:
 | Workspace dir    | agentworks | ws-NAME        | 2775 | Agents read/write, setgid |
 | Tools dir        | agentworks | aw-tools       | 0750 | Agents read/execute       |
 | SSH agent socket | agentworks | agentworks-ssh | 0660 | Agents use, not read key  |
-| Admin SSH key    | agentworks | agentworks     | 0600 | Admin only                |
+| SSH key          | agentworks | agentworks     | 0600 | User account only         |
 | Agent home       | agent-X    | agent-X        | 0750 | Agent-private             |
 
 ## Impact on Existing Code
@@ -176,10 +180,10 @@ When an agent is created for a workspace:
 - New DB table for agents (name, workspace, Linux user)
 - Agent user creation/deletion with group membership
 
-### Existing admin operations
+### Existing user account operations
 
-- `vm shell` continues to SSH as the admin user
-- `workspace shell` continues to SSH as the admin user (admin is in all groups and has sudo)
+- `vm shell` continues to SSH as the user account
+- `workspace shell` continues to SSH as the user account (the user is in all groups and has sudo)
 - Tool installation targets `/opt/agentworks/tools/`
 
 ## Security Considerations

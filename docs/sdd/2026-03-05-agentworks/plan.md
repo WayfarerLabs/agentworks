@@ -244,14 +244,14 @@ provisioned with workspace group membership. Workspace deletion cascades to agen
 
 ### 4.4 Tmuxinator Integration
 
-- [ ] Implement tmuxinator config regeneration: admin window + one window per agent
+- [ ] Implement tmuxinator config regeneration: user window + one window per agent
 - [ ] Agent windows configured with `su - <agent-linux-user>` and workspace root as working
       directory
 - [ ] Regenerate on agent create and agent delete
-- [ ] Existing workspace creation continues to generate initial tmuxinator config (admin window
+- [ ] Existing workspace creation continues to generate initial tmuxinator config (user window
       only, no agents yet)
 
-**Definition of done:** `workspace shell` opens a tmux session with an admin window and one window
+**Definition of done:** `workspace shell` opens a tmux session with a user window and one window
 per agent. Adding or removing agents updates the tmuxinator config.
 
 ### 4.5 Agent CLI Commands
@@ -259,7 +259,8 @@ per agent. Adding or removing agents updates the tmuxinator config.
 - [ ] Implement `agent create <name> --workspace <workspace-name>`: orchestrates Linux user
       creation + DB
 - [ ] Implement `agent list [--workspace <workspace-name>]`: list agents, optionally filtered
-- [ ] Implement `agent shell <name> [--workspace <workspace-name>]`: SSH as admin, su to agent user
+- [ ] Implement `agent shell <name> [--workspace <workspace-name>]`: SSH as user account, su to
+      agent user
 - [ ] Implement `agent delete <name> --workspace <workspace-name>`: orchestrates Linux user
       removal + DB
 - [ ] Add shell completions for agent commands (dynamic completers for agent names, workspace names)

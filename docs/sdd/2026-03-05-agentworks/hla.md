@@ -217,7 +217,7 @@ User runs: agentworks agent create coder --workspace ws-task-123
 User runs: agentworks agent shell coder --workspace ws-task-123
 
 1. Look up agent in state database, resolve workspace and VM
-2. SSH to VM as admin user
+2. SSH to VM as user account
 3. su - ws-task-123--coder
 4. cd to workspace root (~/workspaces/ws-task-123)
 ```
@@ -240,7 +240,7 @@ User runs: agentworks agent delete coder --workspace ws-task-123
 The workspace tmuxinator config is regenerated whenever agents are added or removed. The generated
 config includes:
 
-- An "admin" window (the default) running as the admin user in the workspace root
+- A "user" window (the default) running as the user account in the workspace root
 - One window per agent, each running `su - <agent-linux-user>` with the working directory set to the
   workspace root
 

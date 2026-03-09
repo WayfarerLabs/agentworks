@@ -216,22 +216,6 @@ The CLI surfaces bigred status in:
 - `agentworks vm status` -- includes bigred details
 - Top-level commands -- a warning line when any VMs are in bigred state
 
-## Impact on Existing Implementation
-
-The shift from a dedicated nerf user to the user account as the SUID identity, and the reframing
-from "admin user" to "user account", requires changes to both the user-based security model and the
-existing Agentworks CLI:
-
-- **User-based security model**: the `agentworks` account should be documented as the user's
-  identity (not a special admin account). The user-based security HLA references to "admin user"
-  should be updated to reflect this framing.
-- **Agentworks CLI**: code and documentation that refer to the "admin user" should shift to "user
-  account" or simply "the user" where appropriate. The `vm_user` config field and `--vm-user` flag
-  remain as-is (they control the Linux username), but surrounding documentation and messages should
-  reflect the new mental model.
-- **Nerfed commands HLA**: the architecture eliminates the `nerf` user entirely and uses the user
-  account as the SUID identity. See the HLA for the updated topology.
-
 ## Future
 
 ### Auto-approval in coding platforms
