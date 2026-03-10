@@ -24,6 +24,20 @@ DYNAMIC_SNIPPETS: dict[str, str] = {
         " ForEach-Object { ($_ -split '\\s+')[0] } |"
         " Where-Object { $_ -like \"$wordToComplete*\" })"
     ),
+    "ws_templates": (
+        "($configFile = Join-Path $env:USERPROFILE '.config/agentworks/config.toml';"
+        " if (Test-Path $configFile) {"
+        " Get-Content $configFile | Select-String '^\\[workspace_templates\\.([^\\]]+)\\]'"
+        " | ForEach-Object { $_.Matches[0].Groups[1].Value }"
+        " | Where-Object { $_ -like \"$wordToComplete*\" } })"
+    ),
+    "git_credentials": (
+        "($configFile = Join-Path $env:USERPROFILE '.config/agentworks/config.toml';"
+        " if (Test-Path $configFile) {"
+        " Get-Content $configFile | Select-String '^\\[git_credentials\\.([^\\]]+)\\]'"
+        " | ForEach-Object { $_.Matches[0].Groups[1].Value }"
+        " | Where-Object { $_ -like \"$wordToComplete*\" } })"
+    ),
 }
 
 

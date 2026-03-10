@@ -28,6 +28,22 @@ _agentworks_workspaces() {
     workspaces=(${(f)"$(agentworks workspace list 2>/dev/null | tail -n +3 | awk '{print $1}')"})
     _describe 'workspace' workspaces
 }""",
+    "ws_templates": """\
+_agentworks_templates() {
+    local -a templates config_file
+    config_file="${HOME}/.config/agentworks/config.toml"
+    [[ -f "$config_file" ]] || return
+    templates=(${(f)"$(sed -n 's/^\\[workspace_templates\\.\\([^]]*\\)\\]/\\1/p' "$config_file" 2>/dev/null)"})
+    _describe 'template' templates
+}""",
+    "git_credentials": """\
+_agentworks_git_credentials() {
+    local -a creds config_file
+    config_file="${HOME}/.config/agentworks/config.toml"
+    [[ -f "$config_file" ]] || return
+    creds=(${(f)"$(sed -n 's/^\\[git_credentials\\.\\([^]]*\\)\\]/\\1/p' "$config_file" 2>/dev/null)"})
+    _describe 'git-credential' creds
+}""",
 }
 
 # Maps completer identifiers to their zsh function names.
@@ -35,6 +51,8 @@ COMPLETER_FUNC_NAMES: dict[str, str] = {
     "vms": "_agentworks_vms",
     "vm_hosts": "_agentworks_vm_hosts",
     "workspaces": "_agentworks_workspaces",
+    "ws_templates": "_agentworks_templates",
+    "git_credentials": "_agentworks_git_credentials",
 }
 
 

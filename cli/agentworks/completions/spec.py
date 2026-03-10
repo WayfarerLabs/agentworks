@@ -44,21 +44,26 @@ class CommandSpec:
 # knows how to render into shell-specific completion functions.
 #
 # The completer identifiers and their corresponding CLI commands:
-#   "vms"        -> agentworks vm list
-#   "vm_hosts"   -> agentworks vm-host list
-#   "workspaces" -> agentworks workspace list
+#   "vms"             -> agentworks vm list
+#   "vm_hosts"        -> agentworks vm-host list
+#   "workspaces"      -> agentworks workspace list
+#   "ws_templates"    -> [workspace_templates.*] sections in config.toml
+#   "git_credentials" -> [git_credentials.*] sections in config.toml
 
 DYNAMIC_COMPLETIONS: dict[tuple[str, str], str] = {
     ("vm.start", "name"): "vms",
     ("vm.stop", "name"): "vms",
     ("vm.delete", "name"): "vms",
     ("vm.shell", "name"): "vms",
+    ("vm.add-git-credential", "name"): "vms",
     ("vm.create", "vm_host"): "vm_hosts",
     ("vm-host.remove", "name"): "vm_hosts",
     ("workspace.shell", "name"): "workspaces",
     ("workspace.delete", "name"): "workspaces",
     ("workspace.create", "vm"): "vms",
+    ("workspace.create", "template"): "ws_templates",
     ("workspace.list", "vm"): "vms",
+    ("vm.add-git-credential", "credential"): "git_credentials",
     ("agent.create", "workspace"): "workspaces",
     ("agent.shell", "workspace"): "workspaces",
     ("agent.delete", "workspace"): "workspaces",

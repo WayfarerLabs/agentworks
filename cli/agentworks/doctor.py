@@ -77,7 +77,10 @@ def run_doctor() -> None:
                 capture_output=True, text=True, timeout=10,
             )
             if result.returncode == 0:
-                ok("Connected to tailnet")
+                if os.environ.get("TAILSCALE_AUTH_KEY"):
+                    ok("Connected to tailnet (TAILSCALE_AUTH_KEY env var set)")
+                else:
+                    ok("Connected to tailnet (will prompt for auth key during VM init)")
             else:
                 fail("Not connected (run 'tailscale up')")
         except subprocess.TimeoutExpired:
@@ -149,23 +152,6 @@ def run_doctor() -> None:
             fail(f"Schema version {current} is newer than latest {latest} (downgrade?)")
     except Exception as e:
         fail(f"Database error: {e}")
-
-    # -- Environment variables -----------------------------------------
-    typer.echo("\nEnvironment variables:")
-    if os.environ.get("TAILSCALE_AUTH_KEY"):
-        ok("TAILSCALE_AUTH_KEY is set")
-    else:
-        warn("TAILSCALE_AUTH_KEY not set (will prompt during VM create/start)")
-
-    if config is not None and config.git_credentials:
-        from agentworks.git_credentials.base import env_var_for_credential
-
-        for cred_name in config.git_credentials:
-            env_name = env_var_for_credential(cred_name)
-            if os.environ.get(env_name):
-                ok(f"{env_name} is set")
-            else:
-                warn(f"{env_name} not set (will prompt during VM init)")
 
     # -- Shell completions ---------------------------------------------
     typer.echo("\nShell completions:")
@@ -258,12 +244,17 @@ def _check_git_credentials(
         warn(f"Could not resolve git credential providers: {e}")
         return
 
+    from agentworks.git_credentials.base import env_var_for_credential
+
     for name, provider in providers.items():
         try:
-            if provider.verify_auth():
-                ok(f"{name}: ready (will prompt for token during VM init)")
-            else:
+            if not provider.verify_auth():
                 warn(f"{name}: auth check failed ({provider.auth_hint()})")
+                continue
+            if os.environ.get(env_var_for_credential(name)):
+                ok(f"{name}: ready (token set via environment)")
+            else:
+                ok(f"{name}: ready (will prompt for token during VM init)")
         except Exception as e:
             warn(f"{name}: auth check error: {e}")
 
@@ -386,8 +377,8 @@ def _read_completion_version(path: Path) -> str | None:
             for line in f:
                 if line.startswith("# agentworks-completion-version:"):
                     return line.split(":", 1)[1].strip()
-                # Only check the first few lines
-                if not line.startswith("#"):
+                # Only check the first few lines (skip blank lines)
+                if not line.startswith("#") and line.strip():
                     break
     except OSError:
         pass
