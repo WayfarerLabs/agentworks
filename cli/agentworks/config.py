@@ -52,6 +52,7 @@ class UserConfig:
     ssh_public_key: Path
     ssh_private_key: Path
     shell: str = "zsh"
+    ssh_config: Path = field(default_factory=lambda: Path.home() / ".ssh" / "config")
 
 
 @dataclass(frozen=True)
@@ -82,7 +83,7 @@ class VMConfig:
     cpus: int = 4
     memory: int = 8  # GiB
     disk: int = 50  # GiB
-    azure_vm_size: str = "Standard_D4s_v5"
+    azure_vm_size: str = "Standard_B2s"
     vm_user: str = "agentworks"
 
 
@@ -170,7 +171,7 @@ def _warn_unexpected_keys(
         )
 
 
-_USER_KEYS = {"ssh_public_key", "ssh_private_key", "shell"}
+_USER_KEYS = {"ssh_public_key", "ssh_private_key", "shell", "ssh_config"}
 
 
 def _load_user(data: dict[str, object]) -> UserConfig:
@@ -188,10 +189,15 @@ def _load_user(data: dict[str, object]) -> UserConfig:
     if not priv.exists():
         raise ConfigError(f"user.ssh_private_key does not exist: {priv}")
 
+    ssh_config = Path.home() / ".ssh" / "config"
+    if "ssh_config" in raw:
+        ssh_config = _expand(str(raw["ssh_config"]))
+
     return UserConfig(
         ssh_public_key=pub,
         ssh_private_key=priv,
         shell=str(raw.get("shell", "zsh")),
+        ssh_config=ssh_config,
     )
 
 
@@ -263,7 +269,7 @@ def _load_vm_config(data: dict[str, object]) -> VMConfig:
         cpus=int(raw.get("cpus", 4)),
         memory=int(raw.get("memory", 8)),
         disk=int(raw.get("disk", 50)),
-        azure_vm_size=str(raw.get("azure_vm_size", "Standard_D4s_v5")),
+        azure_vm_size=str(raw.get("azure_vm_size", "Standard_B2s")),
         vm_user=str(raw.get("vm_user", "agentworks")),
     )
 

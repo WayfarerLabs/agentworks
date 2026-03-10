@@ -10,6 +10,7 @@
 ssh_public_key = "~/.ssh/id_ed25519.pub"    # required: used to authorize access to VMs
 ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connections to VMs
 # shell = "zsh"                              # default shell set on VMs
+# ssh_config = "~/.ssh/config"               # SSH config file for VM host entries
 
 # --- Paths ---
 
@@ -40,7 +41,7 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # cpus = 4                                   # number of CPUs (Lima)
 # memory = 8                                 # memory in GiB (Lima)
 # disk = 50                                  # disk size in GiB (Lima)
-# azure_vm_size = "Standard_D4s_v5"          # Azure VM size
+# azure_vm_size = "Standard_B2s"          # Azure VM size
 # apt = [
 #     "zsh",
 #     "unzip",

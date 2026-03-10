@@ -165,12 +165,16 @@ def create_vm(
             git_tokens=git_tokens,
         )
 
-        # Remove the public IP now that Tailscale is up
-        if platform == "azure":
-            from agentworks.vms.provisioners.azure import AzureProvisioner as _AP
+        # Post-init: SSH config entry + Azure public IP cleanup
+        vm_row = db.get_vm(vm_name)
+        if vm_row is not None:
+            from agentworks.ssh_config import upsert_vm_entry
 
-            vm_row = db.get_vm(vm_name)
-            if vm_row is not None:
+            upsert_vm_entry(config, vm_row)
+
+            if platform == "azure":
+                from agentworks.vms.provisioners.azure import AzureProvisioner as _AP
+
                 _AP().detach_public_ip(vm_row)
 
     except Exception as e:
@@ -359,6 +363,11 @@ def delete_vm(db: Database, config: Config, name: str, *, force: bool = False) -
     if log_count:
         typer.echo(f"Cleaned up {log_count} init log(s)")
 
+    # Remove SSH config entry
+    from agentworks.ssh_config import remove_vm_entry
+
+    remove_vm_entry(config, name)
+
     # Remove from DB (cascades workspaces and agents)
     db.delete_vm(name)
     typer.echo(f"VM '{name}' deleted")
@@ -516,3 +525,9 @@ def _ensure_tailscale(
     finally:
         if is_azure:
             provisioner.detach_public_ip(vm)
+
+    # Update SSH config in case the Tailscale IP changed
+    from agentworks.ssh_config import upsert_vm_entry
+
+    vm = _require_vm(db, vm.name)
+    upsert_vm_entry(config, vm)

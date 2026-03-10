@@ -123,12 +123,15 @@ def generate_code_workspace(
     workspace_path: str,
 ) -> str:
     """Generate a .code-workspace file for VS Code SSH Remote."""
-    assert vm.tailscale_host is not None
+    from agentworks.ssh_config import ssh_host_alias
+
+    # Use the SSH config alias so VS Code picks up the right host/user/key
+    ssh_host = ssh_host_alias(vm.name)
 
     ws_file = {
         "folders": [
             {
-                "uri": f"vscode-remote://ssh-remote+{vm.vm_user}@{vm.tailscale_host}{workspace_path}",
+                "uri": f"vscode-remote://ssh-remote+{ssh_host}{workspace_path}",
                 "name": ws_name,
             }
         ],
