@@ -225,9 +225,18 @@ def remote_lima_run(
     check: bool = True,
     timeout: int | None = None,
 ) -> SSHResult:
-    """Execute a command inside a remote Lima VM via the VM host."""
+    """Execute a command inside a remote Lima VM via the VM host.
+
+    SSH sends argv as a single concatenated string to the remote shell,
+    so we can pass multiple args after the host and they become one
+    command line. This avoids nested single-quote escaping while still
+    letting the VM host's login shell find limactl on PATH.
+    """
     host_target = SSHTarget(host=target.vm_host_ssh, user=None, login_shell=True)
-    lima_cmd = f"limactl shell {target.vm_name} bash -lc '{command}'"
+    # The inner command is passed as a bare arg to limactl shell.
+    # SSH concatenates all args into one string for the remote shell,
+    # so the login shell wrapper ($SHELL -lc '...') covers the whole thing.
+    lima_cmd = f"limactl shell {target.vm_name} -- {command}"
     return run(host_target, lima_cmd, check=check, timeout=timeout)
 
 
