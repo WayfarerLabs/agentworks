@@ -36,8 +36,8 @@ agentic session, with their full toolchain and personal environment already in p
   Agents belong strictly to a workspace, have their own home directory, and access the workspace
   through Linux group membership. See the user-based security SDD (2026-03-08) for the full security
   model.
-- **Git Host Provider**: a service where SSH keys can be registered for git access (AzDO, GitHub,
-  etc.)
+- **Git Credential Provider**: a service where personal access tokens can be configured for git
+  access over HTTPS (AzDO, GitHub, etc.)
 
 ### Naming Conventions
 
@@ -74,7 +74,8 @@ All user-provided names (VM hosts, VMs, workspaces, agents) follow the same rule
   loss on stop and re-joins on start
 - Azure VMs will support auto-suspend after idle to minimize cost (future enhancement -- see
   Phasing)
-- Git host provider agnostic -- SSH keys can be registered with AzDO, GitHub, or other providers
+- Git credential provider agnostic -- PATs can be configured for AzDO, GitHub, or other providers
+  via `git credential-store`
 - Designed for a single developer first; extensible to a team
 
 ## Non-Goals
@@ -151,11 +152,11 @@ Templates are defined in the user config under `[workspace_templates.<name>]`:
 # No repo -- just an empty directory with tmuxinator config
 
 [workspace_templates.gruntweave]
-repo = "git@ssh.dev.azure.com:v3/org/project/root-workspace"
+repo = "https://dev.azure.com/org/project/_git/root-workspace"
 
 [workspace_templates.agentic]
 inherits = ["gruntweave"]
-repo = "git@github.com:org/agentic-workspace.git"
+repo = "https://github.com/org/agentic-workspace.git"
 tmuxinator = false
 ```
 
@@ -220,7 +221,7 @@ code_workspaces = "~/agentworks-workspaces"      # .code-workspace file director
 [defaults]
 platform = "lima"
 vm_host = "mac-studio"           # optional -- default VM host for Lima (omit for local Lima)
-git_hosts = ["azdo", "github"]   # which git hosts to register with on vm create
+git_credentials = ["azdo", "github"]   # which git credentials to configure on vm create
 
 [dotfiles]
 enabled = true                 # set to false to skip dotfiles entirely
@@ -245,26 +246,32 @@ apt = [
     "fd-find",
 ]
 snap = []
-install_commands = [
-    "sh -c \"$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)\"",
-    "curl -fsSL https://bun.sh/install | bash",
-    "curl -fsSL https://claude.ai/install.sh | bash",
-]
+install_commands = ["ohmyzsh", "bun", "claude-code"]
+
+[install_commands.ohmyzsh]
+command = "sh -c \"$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)\""
+
+[install_commands.bun]
+command = "curl -fsSL https://bun.sh/install | bash"
+path = "~/.bun/bin"
+
+[install_commands.claude-code]
+command = "npm install -g @anthropic-ai/claude-code"
 
 [workspace_templates.default]
 # Empty workspace with tmuxinator config
 
 [workspace_templates.gruntweave]
-repo = "git@ssh.dev.azure.com:v3/org/project/root-workspace"
+repo = "https://dev.azure.com/org/project/_git/root-workspace"
 
-[git_hosts.azdo]
+[git_credentials.azdo]
 type = "azdo"
 org = "my-org"
-# Authentication via az cli (same AAD tenant) -- no PAT required
+# Token prompted or read from GIT_CREDENTIALS_AZDO env var
 
-[git_hosts.github]
+[git_credentials.github]
 type = "github"
-# Authentication via gh cli or PAT
+# Token prompted or read from GIT_CREDENTIALS_GITHUB env var
 
 [azure]
 subscription_id = "..."
@@ -354,6 +361,10 @@ prepare it for workspaces. All Agentworks-managed VMs use a configurable user ac
 a uniform process regardless of platform. Only the architecture (amd64 vs arm64) may differ, which
 should be handled automatically by the underlying tools.
 
+**Secrets are collected upfront** before provisioning begins. The Tailscale auth key and git
+credential tokens are prompted (or read from `TAILSCALE_AUTH_KEY` and `GIT_CREDENTIALS_<NAME>` env
+vars, with a console message when env vars are used). This avoids mid-process prompts.
+
 Initialization uses a **Tailscale-first** approach: the minimum system bootstrap happens over the
 provisioning transport (which may be indirect -- e.g. proxied through a VM Host for Lima remote, or
 `wsl` exec for WSL2), then Tailscale is set up to provide direct SSH access from the User
@@ -369,8 +380,7 @@ The steps are:
 2. Install Agentworks's own system dependencies via apt (`openssh-server`, `curl`, `git`, `sudo`,
    `ca-certificates`, etc.) -- these are always installed regardless of user config
 3. Add user's SSH public key to `~/.ssh/authorized_keys` (enables Tailscale SSH in the next step)
-4. Prompt for Tailscale auth key, install Tailscale, join user's tailnet
-   - Note that this requires an interactive prompt. We can look at ways to avoid this in the future.
+4. Install Tailscale, join user's tailnet (using pre-collected auth key)
 5. Read Tailscale IP, update VM record (`tailscale_host`, `init_status = "tailscale_up"`) -- switch
    to Tailscale SSH for remaining steps
 
@@ -379,18 +389,22 @@ The steps are:
 1. Install user-configured apt packages from `[vm.config]`, merged with any per-VM additions
    specified at create time
 2. Install snap packages (if any)
-3. Run install commands in order -- shell commands executed on the VM for tools not available via
-   apt or snap (e.g. bun, Claude Code, Oh My Zsh)
-4. Set default shell to user's configured shell (default: `zsh`)
-5. Generate SSH keypair (`ed25519`)
-6. Register the public key with configured git host providers (see Git Host Providers below)
+3. Set default shell to user's configured shell (default: `zsh`)
+4. Run named install commands under the user's shell (e.g. `zsh -lc '...'`) -- this ensures
+   installers write to the correct rc file. Install commands are defined as named sections
+   (`[install_commands.*]`) with `command` and `path` fields. `vm.config.install_commands`
+   references them by name.
+5. Configure PATH: accumulate `path` values from install commands into
+   `~/.agentworks-path.sh`, sourced from `~/.profile`
+6. Write git credentials to `~/.git-credentials` and configure `git credential-store` globally
+   (see Git Credentials below)
 7. If dotfiles enabled and `dotfiles.source` (default: `~/.dotfiles`) exists on the User
    Workstation: rsync to VM, run `install_cmd` if present or auto-detect `install.sh`
 8. Mark VM `init_status = "complete"`
 
-Agentworks verifies required authentication for the **selected** git host providers (e.g. `az cli`
-for AzDO, `gh cli` for GitHub) before beginning provisioning, failing fast with a clear error if any
-is missing. Providers that are configured but not selected for this VM creation are not checked.
+Agentworks verifies required authentication for the **selected** git credential providers before
+beginning provisioning, failing fast with a clear error if any is missing. Providers that are
+configured but not selected for this VM creation are not checked.
 
 #### Future VM Initialization Enhancements
 
@@ -402,13 +416,14 @@ In the future we may want to add support for things like:
 
 ```shell
 agentworks vm create [--platform lima|azure|wsl2] [--vm-host <name>] [--name <name>] \
-  [--extra-packages pkg1,pkg2] [--git-hosts azdo,github] \
+  [--extra-packages pkg1,pkg2] [--git-credentials azdo,github] \
   [--cpus N] [--memory SIZE] [--disk SIZE] [--vm-user USER]
 agentworks vm list
 agentworks vm shell <name>
 agentworks vm start <name>
 agentworks vm stop <name>
 agentworks vm delete <name>
+agentworks vm add-git-credential <vm-name> <credential-name>
 ```
 
 `vm shell` opens an SSH session to the VM's home directory as the VM user. This is a convenience
@@ -434,10 +449,9 @@ Commands check both dimensions:
 - `vm list` shows both `init_status` and live runtime status.
 
 `vm delete` refuses to delete a VM that still has workspaces. The user must delete the workspaces
-first (or use `--force` to cascade-delete all workspaces on the VM). `vm delete` also removes the
-VM's SSH keys from all configured git host providers. If the VM is unreachable (e.g. VM Host is
-down), git host key removal and database cleanup still proceed -- only the platform-specific VM
-cleanup is skipped with a warning.
+first (or use `--force` to cascade-delete all workspaces on the VM). If the VM is unreachable (e.g.
+VM Host is down), database cleanup still proceeds -- only the platform-specific VM cleanup is skipped
+with a warning.
 
 ---
 
@@ -627,47 +641,43 @@ memberships that those SDDs depend on.
 
 ---
 
-## Git Host Providers
+## Git Credentials
 
-Agentworks supports registering VM-generated SSH keys with multiple git hosting providers. Providers
-are configured in the user config under `[git_hosts.<name>]` and can be selectively enabled per VM
-at creation time.
+Agentworks configures git authentication on VMs using `git credential-store` with personal access
+tokens (PATs). No SSH keys are generated or registered -- all git access uses HTTPS URLs.
+
+Tokens are collected upfront before provisioning begins. Each configured provider is either prompted
+interactively or read from a `GIT_CREDENTIALS_<NAME>` environment variable (e.g.
+`GIT_CREDENTIALS_AZDO`, `GIT_CREDENTIALS_GITHUB`). When an env var is present, the prompt is
+skipped with a console message.
+
+Providers are configured in the user config under `[git_credentials.<name>]`.
 
 ### Supported Providers
 
 #### AzDO
 
-Registers the SSH public key via the AzDO REST API using an Azure AD token obtained via
-`az account get-access-token`. No separate PAT is required. AzDO and Azure are assumed to share the
-same AAD tenant.
-
-```text
-POST https://vssps.dev.azure.com/{org}/_apis/ssh/keys?api-version=7.1
-```
-
-Key description is set to the VM name for traceability. On VM deletion, the key is removed via the
-DELETE endpoint.
+Writes credential lines for `dev.azure.com` and `ssh.dev.azure.com` HTTPS endpoints using the
+provided PAT.
 
 #### GitHub
 
-Registers the SSH public key via the GitHub REST API. Authentication is via `gh auth token`
-(preferred) or the `GITHUB_TOKEN` environment variable. There is no config field for a PAT -- token
-management is delegated to `gh cli` or the environment.
-
-```text
-POST https://api.github.com/user/keys
-```
-
-Key title is set to the VM name. On VM deletion, the key is removed.
+Writes a credential line for `github.com` using the provided PAT.
 
 ### CLI
 
-New VMs register with the git hosts listed in `defaults.git_hosts`. If that key is not set, all
-configured providers are used. The `--git-hosts` flag on `vm create` overrides the default for that
-VM:
+New VMs configure the git credentials listed in `defaults.git_credentials`. If that key is not set,
+all configured providers are used. The `--git-credentials` flag on `vm create` overrides the default
+for that VM:
 
 ```shell
-agentworks vm create --git-hosts azdo,github
+agentworks vm create --git-credentials azdo,github
+```
+
+To add or rotate a credential on an existing VM:
+
+```shell
+agentworks vm add-git-credential <vm-name> <credential-name>
 ```
 
 ---
@@ -711,7 +721,7 @@ provides:
   comments.
 - **`agentworks doctor`**: checks environment health -- Python version, required/optional tools,
   Tailscale connectivity, config validation, SSH key accessibility, database schema status (with
-  automatic migration), and git host authentication.
+  automatic migration), and git credential authentication.
 - **`agentworks completion zsh`**: outputs a zsh completion script for shell integration.
 
 ---
@@ -734,14 +744,11 @@ This means ephemeral keys work for disposable VMs and are also resilient across 
 
 ---
 
-## HTTPS Clone Hints
+## Clone URL Convention
 
-When a workspace repo clone fails and the repo URL uses HTTPS, Agentworks provides a hint suggesting
-the user switch to an SSH URL (`git@...`). This is because VMs authenticate to git hosts via their
-registered SSH key -- HTTPS URLs for private repos require separate credential management that
-Agentworks does not handle.
-
-Public repos work with either SSH or HTTPS URLs.
+VMs authenticate to git hosts via `git credential-store` with HTTPS tokens. Workspace template repos
+should use HTTPS URLs (e.g. `https://dev.azure.com/...`, `https://github.com/...`). SSH URLs will
+not work unless the user has separately configured SSH keys on the VM.
 
 ---
 
@@ -750,7 +757,9 @@ Public repos work with either SSH or HTTPS URLs.
 ### Phase 1: VM Workspaces + Core CLI + Local Workspaces
 
 - VM provisioning (Lima, Azure, WSL2)
-- VM initialization with git host provider registration (AzDO + GitHub)
+- VM initialization with git credential configuration (AzDO + GitHub)
+- Named install commands with PATH management
+- Secrets collected upfront (Tailscale auth key, git credential tokens)
 - Workspace create/list/shell/delete on VMs
 - Local workspace create/list/shell/delete (originally planned for Phase 2, delivered early)
 - Unified workspace listing across VM and local workspaces
@@ -760,7 +769,7 @@ Public repos work with either SSH or HTTPS URLs.
 - State database and user config
 - Top-level commands: init, doctor, completion
 - Ephemeral Tailscale node handling
-- HTTPS clone failure hints
+- `vm add-git-credential` command
 
 ### Phase 3: File Templating
 
@@ -791,18 +800,27 @@ model as workspace templates, allowing different VMs to be provisioned with diff
 
 ### Future: VM Initialization Plugins
 
-The current `install_commands` are raw shell commands -- effective but opaque. VM initialization
-plugins would provide structured, reusable initialization steps (both built-in and user-provided). A
-plugin like `install.bun` could install bun, write a `.bun-version` file with the latest stable (or
-a specified version), and verify the installation -- all as a single declarative step. This would
-replace fragile one-liners with composable, version-aware building blocks.
+Named install commands (`[install_commands.*]`) partially address the original "VM initialization
+plugins" concept by making install steps reusable and named. Full plugins would go further --
+providing structured, version-aware building blocks (e.g. `install.bun` installs bun, writes a
+`.bun-version` file, and verifies the installation as a single declarative step). Named install
+commands are a pragmatic middle ground.
+
+### Future: Agent Install Commands
+
+Agent templates (dependent on nerfed commands) will reference install commands from the same
+`[install_commands.*]` pool. This allows defining per-agent tooling requirements declaratively.
+
+**Open question:** should agent templates be constrained by the VM they run on? For example, if an
+agent template requires `bun`, should it only be usable on VMs that have `bun` in their install
+commands? Should there be explicit compatibility declarations, or is this left to the user?
 
 ### Future: Non-VM Workspace Hosts
 
 New Workspace Host types beyond VMs:
 
 - **Kubernetes**: a StatefulSet pod as a Workspace Host (`--platform k8s`). The pod is initialized
-  like a VM (packages, dotfiles, SSH keys, git host registration) and hosts workspaces on its
+  like a VM (packages, dotfiles, git credentials) and hosts workspaces on its
   persistent volume. The K8s cluster serves a similar role to a VM Host (provisioning target).
   Tailscale connectivity via the Tailscale Kubernetes operator (sidecar or per-pod annotation). This
   maps cleanly to the existing `vm` command group -- the pod is a long-lived Workspace Host that

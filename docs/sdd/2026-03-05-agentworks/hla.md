@@ -107,44 +107,51 @@ Tables:
 
 - `vm_hosts`: name, ssh_host, platform, os
 - `vms`: name, platform, vm_host_name, vm_user, cpus, memory, disk, extra_packages, init_status
-  (lifecycle), ssh_public_key, tailscale_host, azure_resource_id, created_at. Runtime status
+  (lifecycle), tailscale_host, azure_resource_id, created_at. Runtime status
   (running/stopped/deallocated) is always queried live from the platform, never cached.
 - `workspaces`: name, type (vm/local), vm_name (nullable), template, workspace_path, created_at
 - `agents`: name, workspace_name, linux_user (derived: `<workspace>--<agent>`), created_at
-- `vm_git_host_keys`: id (auto), vm_name, git_host_name, remote_key_id
 
 Names are globally unique within each table (vm_hosts, vms, and workspaces are separate namespaces
 -- a VM and a workspace can share the same name). Agent names are unique within their workspace; the
-`(workspace_name, name)` pair forms the primary key. The `vm_git_host_keys` table tracks which SSH
-keys have been registered with which providers, enabling clean removal on `vm delete`.
+`(workspace_name, name)` pair forms the primary key.
 
 ---
 
-## Git Host Provider Architecture
+## Git Credential Architecture
 
-Git host providers are pluggable. Each provider implements a simple interface:
+Git authentication uses `git credential-store` with personal access tokens (PATs) written to
+`~/.git-credentials` on the VM. No SSH keys are generated during VM init.
+
+Git credential providers are pluggable. Each provider implements:
 
 ```text
-GitHostProvider
+GitCredentialProvider
   verify_auth() -> bool
   auth_hint() -> str
-  register_key(vm_name, public_key) -> remote_key_id
-  test_key_present(remote_key_id) -> bool
-  remove_key(remote_key_id) -> void
+  obtain_token() -> str
+  credential_lines() -> list[str]
 ```
 
-Providers are registered by type in the user config. The system verifies authentication for all
-selected providers before starting VM provisioning (fail-fast).
+Providers are registered by type in the user config. During VM provisioning, tokens are collected
+upfront -- either prompted interactively or read from `GIT_CREDENTIALS_<NAME>` environment variables
+(with a console message when env vars are used). Tokens are written to `~/.git-credentials` and
+`git credential-store` is configured globally.
 
 ### Provider Implementations
 
-**AzDO**: uses `az account get-access-token` to obtain an Azure AD bearer token, then calls the AzDO
-SSH Keys REST API. No PAT required -- assumes AzDO and Azure share the same AAD tenant.
+**AzDO**: uses a PAT (prompted or via `GIT_CREDENTIALS_AZDO`). Writes credential lines for
+`dev.azure.com` and `ssh.dev.azure.com` HTTPS endpoints.
 
-**GitHub**: uses `gh auth token` or the `GITHUB_TOKEN` environment variable to authenticate against
-the GitHub User Keys API.
+**GitHub**: uses a PAT (prompted or via `GIT_CREDENTIALS_GITHUB`). Writes a credential line for
+`github.com`.
 
 Additional providers can be added by implementing the interface and registering a new type.
+
+### `vm add-git-credential`
+
+Adds or rotates a git credential on an existing VM. Prompts for the token (or reads from env var),
+updates `~/.git-credentials` on the VM.
 
 ---
 
@@ -259,7 +266,9 @@ cleaned up, agent records removed from the database). This happens automatically
 ```text
 User runs: agentworks vm create --platform lima --vm-host mac-studio
 
-1. Verify auth for selected git host providers (fail-fast)
+0. Collect secrets upfront: Tailscale auth key and git credential tokens
+   (prompted, or read from TAILSCALE_AUTH_KEY / GIT_CREDENTIALS_* env vars)
+1. Verify auth for selected git credential providers (fail-fast)
 2. Platform provisioning (platform-specific):
    Lima: SSH to VM Host -> limactl create
    Azure: az vm create with cloud-init
@@ -268,15 +277,15 @@ User runs: agentworks vm create --platform lima --vm-host mac-studio
    a. Ensure agentworks user exists
    b. apt install system dependencies
    c. Add user's public key to authorized_keys
-   d. Tailscale join (prompted for auth key)
+   d. Tailscale join (using pre-collected auth key)
    e. Switch to Tailscale SSH for remaining steps
 4. VM initialization -- setup (over Tailscale SSH):
    a. apt install (user packages + extra packages)
    b. snap install (if any)
-   c. Run install commands in order
-   d. Set default shell
-   e. Generate SSH keypair (ed25519)
-   f. Register public key with selected git host providers
+   c. Set default shell
+   d. Run named install commands under the user's shell (e.g. zsh -lc '...')
+   e. Configure PATH (~/.agentworks-path.sh sourced from ~/.profile)
+   f. Write git credentials to ~/.git-credentials, configure git credential-store
    g. Copy and install dotfiles (if enabled and present)
 5. Mark VM init complete in state database
 ```
@@ -391,10 +400,11 @@ agentworks/                          # repo root (upstreams/agentworks)
 │   │   │   │   ├── vm.py           # VM workspace backend (SSH operations)
 │   │   │   │   └── local.py        # local workspace backend
 │   │   │   └── templates.py        # workspace template resolution and processing
-│   │   └── git_hosts/
-│   │       ├── base.py             # GitHostProvider interface
+│   │   └── git_credentials/
+│   │       ├── base.py             # GitCredentialProvider interface
 │   │       ├── azdo.py             # AzDO provider
-│   │       └── github.py           # GitHub provider
+│   │       ├── github.py           # GitHub provider
+│   │       └── prompt.py           # token prompting / env var resolution
 │   ├── pyproject.toml
 │   └── README.md
 ├── tools/                           # future: agent tools (MCP servers, etc.)
@@ -429,12 +439,28 @@ owns lifecycle orchestration and state management; backends only handle the plat
 operations (create directory, clone repo, open shell, delete). This keeps the workspace identity
 model and state management in one place.
 
-### Provider-Agnostic Git Host Registration
+### Git Credential Store over SSH Keys
 
-Git host providers are decoupled from VM provisioning. The initializer calls a uniform interface;
-providers handle their own authentication and API details using the single SSH key generated during
-VM initialization. This allows adding new providers (provided they support SSH key-based
-authentication) without modifying the provisioning flow.
+Git authentication uses `git credential-store` with PATs rather than VM-generated SSH keypairs
+registered with each provider. This eliminates SSH key lifecycle management (generation, registration,
+tracking, removal on delete) and works with any git host that supports HTTPS token auth. Credentials
+are written once during VM init and can be added/rotated via `vm add-git-credential`.
+
+### Named Install Commands
+
+Install commands are defined as named top-level config sections (`[install_commands.*]`) with
+`command` and `path` fields, rather than bare command strings. `vm.config.install_commands` references
+these by name. This makes install commands reusable across VM templates (future) and agent templates
+(future). PATH additions from `path` fields are accumulated and written to `~/.agentworks-path.sh`,
+which is sourced from `~/.profile`. Install commands run under the user's configured shell (e.g.
+`zsh -lc '...'`) so that installers write to the correct rc file.
+
+### Open Questions
+
+**Agent template compatibility with VM/workspace templates.** Agent templates (future) will reference
+install commands from the same `[install_commands.*]` pool. Should an agent template only be usable
+on VMs that have its required install commands already run? Should there be explicit compatibility
+declarations between agent templates and VM templates, or is this left to the user to manage?
 
 ### Provisioning Transport Reuse
 

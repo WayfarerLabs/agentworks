@@ -24,7 +24,7 @@ manage workspaces on those VMs.
 - [x] Implement config loader (`config.py`): parse `~/.config/agentworks/config.toml`, validate
       structure, expand paths
 - [x] Implement state database (`db.py`): SQLite schema creation, migrations, CRUD for `vm_hosts`,
-      `vms`, `workspaces`, `vm_git_host_keys`
+      `vms`, `workspaces`
 - [x] Write LLD: [config-db-lld.md](config-db-lld.md)
 - [x] Ship sample config file (`sample-config.toml`) in repo, used by `init` command
 
@@ -69,29 +69,46 @@ SSH-accessible.
 
 - [x] Implement `initializer.py`: uniform post-provisioning setup over SSH (tracks `init_status` in
       DB)
+- [x] Collect secrets upfront: Tailscale auth key and git credential tokens (prompted or from env
+      vars `TAILSCALE_AUTH_KEY`, `GIT_CREDENTIALS_*`)
 - [x] Steps (Tailscale-first approach):
   - [x] Bootstrap (over provisioning transport): ensure user, apt system packages, add SSH key,
         Tailscale join
-  - [x] Setup (over Tailscale SSH): apt user packages, snap, install commands, shell, SSH keypair,
-        git host keys, dotfiles
-- [x] Pre-flight auth verification for selected git host providers (fail-fast)
+  - [x] Setup (over Tailscale SSH): apt user packages, snap, set shell, run named install commands
+        under user's shell, configure PATH (`~/.agentworks-path.sh`), write git credentials
+        (`~/.git-credentials`), dotfiles
+- [x] Pre-flight auth verification for selected git credential providers (fail-fast)
 - [x] Implement `rejoin_tailscale()` for ephemeral Tailscale node recovery
 
 **Definition of done:** A freshly provisioned VM is fully initialized and reachable over Tailscale.
-SSH keys are registered with configured git hosts.
+Git credentials are configured via credential-store.
 
-### 1.7 Git Host Providers
+### 1.7 Git Credentials
 
-- [x] Write LLD: [git-hosts-lld.md](git-hosts-lld.md)
-- [x] Implement `GitHostProvider` base interface (`git_hosts/base.py`)
-- [x] Implement AzDO provider (`git_hosts/azdo.py`): register/remove key via REST API with Azure AD
-      token
-- [x] Implement GitHub provider (`git_hosts/github.py`): register/remove key via REST API with
-      `gh cli` or PAT
-- [x] Track registered keys in `vm_git_host_keys` table for clean removal on `vm delete`
+- [x] Implement `GitCredentialProvider` base interface (`git_credentials/base.py`)
+- [x] Implement AzDO provider (`git_credentials/azdo.py`): write credential lines for
+      `dev.azure.com` HTTPS endpoints
+- [x] Implement GitHub provider (`git_credentials/github.py`): write credential line for
+      `github.com`
+- [x] Implement token prompting with env var support (`git_credentials/prompt.py`)
+- [x] Write credentials to `~/.git-credentials`, configure `git credential-store` globally
+- [x] Implement `vm add-git-credential` command for adding/rotating credentials on existing VMs
 
-**Definition of done:** SSH keys are registered with AzDO and GitHub during VM init. Keys are
-removed on `vm delete`.
+**Definition of done:** Git credentials are configured on VMs during init. Credentials can be
+added/rotated on existing VMs.
+
+### 1.7a Named Install Commands and PATH Configuration
+
+- [x] Define install commands as named top-level config sections (`[install_commands.*]`) with
+      `command` and `path` fields
+- [x] `vm.config.install_commands` references install commands by name (not bare strings)
+- [x] Set user's shell before running install commands
+- [x] Run install commands under the user's configured shell (e.g. `zsh -lc '...'`)
+- [x] Accumulate `path` values into `~/.agentworks-path.sh`, sourced from `~/.profile`
+- [x] Shell completions for install command names and git credential names
+
+**Definition of done:** Install commands are named, reusable config sections. PATH additions are
+managed automatically. Install commands run under the user's shell.
 
 ### 1.8 VM Lifecycle Commands
 
@@ -99,8 +116,7 @@ removed on `vm delete`.
 - [x] Implement `vm list`: query state database
 - [x] Implement `vm shell`: SSH into VM home directory
 - [x] Implement `vm start`, `vm stop`: platform-specific with ephemeral Tailscale handling
-- [x] Implement `vm delete`: stop VM, remove git host keys, platform-specific cleanup, remove from
-      state database
+- [x] Implement `vm delete`: stop VM, platform-specific cleanup, remove from state database
 
 **Definition of done:** Full VM lifecycle works end-to-end on at least one platform. Can create,
 list, start, stop, delete.
@@ -130,7 +146,7 @@ Inheritance resolves correctly. Tmuxinator config is generated only when enabled
 - [x] Implement `workspace delete`: confirmation prompt, remote cleanup, local cleanup, state
       database removal
 - [x] Implement `--open-vscode` flag on create
-- [x] HTTPS clone failure hints for private repos (suggest SSH URL)
+- [x] Clone URL convention: HTTPS URLs expected (git credential-store provides auth)
 
 **Definition of done:** Can create a workspace on a VM, shell into it, list it, and delete it. VS
 Code workspace file is generated and opens correctly.
@@ -139,7 +155,7 @@ Code workspace file is generated and opens correctly.
 
 - [x] Implement `init` command: generates sample config from shipped `sample-config.toml`
 - [x] Implement `doctor` command: environment health checks (Python, tools, Tailscale, config, SSH
-      keys, DB schema, git host auth)
+      keys, DB schema, git credential auth)
 - [x] Implement `completion zsh` command: outputs zsh completion script
 
 **Definition of done:** `init` creates a valid sample config. `doctor` reports environment health.
@@ -155,7 +171,7 @@ troubleshooting, and enforce clear states for failed VMs.
 - **Fatal steps** (abort on failure): user creation, SSH key setup, Tailscale join. If these fail,
   the VM is unreachable and useless.
 - **Non-fatal steps** (warn and continue): apt packages, snap packages, install commands, shell
-  configuration, git host key registration, dotfiles. These can fail without making the VM unusable.
+  configuration, git credential setup, dotfiles. These can fail without making the VM unusable.
 
 #### Init statuses
 
@@ -352,9 +368,12 @@ These items have architectural room in the current design but are not scheduled 
 
 - **VM templates**: named VM configurations (packages, install commands, shell) that can be selected
   at `vm create` time, replacing the current single implicit default in `[vm.config]`
-- **VM initialization plugins**: structured, reusable initialization steps (built-in and
-  user-provided) that replace raw `install_commands` with declarative, version-aware building blocks
-  (e.g. `install.bun` installs bun and writes `.bun-version`)
+- **VM initialization plugins**: named install commands (`[install_commands.*]`) partially replace
+  this concept. Full plugins would go further with structured, version-aware building blocks (e.g.
+  `install.bun` installs bun, writes `.bun-version`, and verifies the installation)
+- **Agent install commands**: agent templates will reference install commands from the same
+  `[install_commands.*]` pool. Open question: should agent templates declare compatibility with
+  VM templates?
 - **Non-VM Workspace Hosts**: Kubernetes StatefulSet pods as Workspace Hosts (`--platform k8s`),
   and/or container-based workspaces on existing VMs. When non-VM types ship, the `vm` CLI command
   group may be generalized to `host` or similar.
@@ -364,4 +383,3 @@ These items have architectural room in the current design but are not scheduled 
   `az cli` auth on the VM -- authentication mechanism TBD)
 - **Auto-authentication**: auto-authenticate tools (az cli, Claude Code, etc.) during VM
   initialization
-- **Non-interactive Tailscale join**: avoid interactive prompt for Tailscale auth key
