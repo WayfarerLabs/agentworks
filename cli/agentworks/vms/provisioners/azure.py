@@ -119,7 +119,7 @@ class AzureProvisioner(VMProvisioner):
         config: Config,
         extra_packages: list[str] | None = None,
         *,
-        azure_vm_size: str = "Standard_D4s_v5",
+        azure_vm_size: str = "Standard_B2s",
         vm_user: str = "agentworks",
     ) -> ProvisionResult:
         assert config.azure is not None, "Azure config is required"
