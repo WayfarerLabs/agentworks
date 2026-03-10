@@ -44,11 +44,15 @@ def run_doctor() -> None:
 
     # -- Required CLI tools -------------------------------------------
     typer.echo("\nRequired tools:")
-    for tool in ("ssh", "scp", "rsync", "tailscale"):
+    for tool in ("ssh", "scp", "tailscale"):
         if shutil.which(tool):
             ok(tool)
         else:
             fail(f"{tool} not found")
+    if shutil.which("rsync"):
+        ok("rsync")
+    else:
+        warn("rsync not found (needed for dotfiles sync)")
 
     # -- VM platforms --------------------------------------------------
     typer.echo("\nVM platforms:")
@@ -288,102 +292,57 @@ def _check_completions(
 
     current_version = completion_version(build_spec(app))
 
-    # Determine which shells to check based on platform
-    if sys.platform == "win32":
-        shells = _get_windows_completion_paths()
-    else:
-        shells = _get_unix_completion_paths()
+    # Check all shells that have completions installed
+    shells = _get_completion_paths()
 
+    any_found = False
     for shell_name, candidate_paths in shells:
-        found = False
         for path in candidate_paths:
             if not path.exists():
                 continue
-            found = True
+            any_found = True
             installed_version = _read_completion_version(path)
             if installed_version == current_version:
-                ok(f"{shell_name}: up to date ({path})")
+                ok(f"{shell_name}: up to date")
             elif installed_version is None:
-                warn(
-                    f"{shell_name}: no version stamp ({path})."
-                    f" Regenerate: agentworks completion {shell_name} > {path}"
-                )
+                warn(f"{shell_name}: no version stamp. See: agentworks completion {shell_name} --help")
             else:
-                warn(
-                    f"{shell_name}: stale ({path})."
-                    f" Regenerate: agentworks completion {shell_name} > {path}"
-                )
-        if not found:
-            install_hint = _completion_install_hint(shell_name)
-            warn(f"{shell_name}: completions not installed. Install with: {install_hint}")
+                warn(f"{shell_name}: stale. See: agentworks completion {shell_name} --help")
+    if not any_found:
+        ok("No completions installed (install with: agentworks completion <shell> --install)")
 
 
-def _get_unix_completion_paths() -> list[tuple[str, list[Path]]]:
-    """Return (shell_name, candidate_paths) for Unix shells.
+def _get_completion_paths() -> list[tuple[str, list[Path]]]:
+    """Return (shell_name, candidate_paths) for all shells.
 
-    Checks multiple common zsh completion directories in priority order:
-    - ~/.zfunc (manual fpath setup)
-    - Oh My Zsh custom completions ($ZSH_CUSTOM or default)
-    - Homebrew zsh completions (macOS)
+    Only includes shells where completions are actually installed,
+    so we don't warn about shells the user doesn't use.
     """
     home = Path.home()
+    shells: list[tuple[str, list[Path]]] = []
+
+    # Zsh
     zsh_paths: list[Path] = [
         home / ".zfunc" / "_agentworks",
     ]
-
-    # Oh My Zsh: $ZSH_CUSTOM/completions/ or ~/.oh-my-zsh/custom/completions/
     zsh_custom = os.environ.get("ZSH_CUSTOM")
     if zsh_custom:
         zsh_paths.append(Path(zsh_custom) / "completions" / "_agentworks")
     omz_default = home / ".oh-my-zsh" / "custom" / "completions" / "_agentworks"
     if omz_default not in zsh_paths:
         zsh_paths.append(omz_default)
+    shells.append(("zsh", zsh_paths))
 
-    return [
-        ("zsh", zsh_paths),
-    ]
+    # PowerShell: derive path from $PROFILE (handles OneDrive redirection etc.)
+    from agentworks.completions.install import _query_powershell_profile
 
+    profile = _query_powershell_profile()
+    if profile is not None:
+        shells.append(("powershell", [
+            profile.parent / "Completions" / "agentworks.ps1",
+        ]))
 
-def _get_windows_completion_paths() -> list[tuple[str, list[Path]]]:
-    """Return (shell_name, candidate_paths) for Windows shells."""
-    home = Path.home()
-    return [
-        (
-            "powershell",
-            [
-                home / "Documents" / "PowerShell" / "Completions" / "agentworks.ps1",
-                home / "Documents" / "WindowsPowerShell" / "Completions" / "agentworks.ps1",
-            ],
-        ),
-    ]
-
-
-def _completion_install_hint(shell_name: str) -> str:
-    """Return a shell-specific install command hint."""
-    if shell_name == "zsh":
-        target = _best_zsh_completion_dir()
-        return f"mkdir -p {target} && agentworks completion zsh > {target}/_agentworks"
-    if shell_name == "powershell":
-        return "agentworks completion powershell >> $PROFILE"
-    return f"agentworks completion {shell_name}"
-
-
-def _best_zsh_completion_dir() -> str:
-    """Pick the best zsh completion directory for installation.
-
-    Prefers Oh My Zsh custom completions if present, otherwise ~/.zfunc.
-    """
-    home = Path.home()
-
-    # Oh My Zsh custom completions (auto-loaded, no fpath setup needed)
-    zsh_custom = os.environ.get("ZSH_CUSTOM")
-    if zsh_custom:
-        return str(Path(zsh_custom) / "completions")
-    omz_default = home / ".oh-my-zsh" / "custom"
-    if omz_default.is_dir():
-        return str(omz_default / "completions")
-
-    return "~/.zfunc"
+    return shells
 
 
 def _read_completion_version(path: Path) -> str | None:

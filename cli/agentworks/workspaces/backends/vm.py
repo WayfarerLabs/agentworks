@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import json
-import os
+import subprocess
+import sys
 from typing import TYPE_CHECKING
 
 import typer
@@ -56,11 +57,10 @@ def create_vm_workspace(
 
     # Tmuxinator config (no agents yet at workspace creation time)
     if template.tmuxinator:
+        from agentworks.ssh import write_file
+
         tmux_config = generate_config(ws_name, workspace_path)
-        ssh_run(
-            target,
-            f"cat > {workspace_path}/.tmuxinator.yml << 'TMUX_EOF'\n{tmux_config}TMUX_EOF",
-        )
+        write_file(target, f"{workspace_path}/.tmuxinator.yml", tmux_config)
         # Symlink for tmuxinator to find it
         ssh_run(target, "mkdir -p ~/.config/tmuxinator")
         ssh_run(
@@ -93,7 +93,7 @@ def shell_vm_workspace(
     else:
         ssh_cmd.extend(["-t", f"cd {workspace_path} && exec $SHELL -l"])
 
-    os.execvp("ssh", ssh_cmd)
+    sys.exit(subprocess.call(ssh_cmd))
 
 
 def delete_vm_workspace(

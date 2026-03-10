@@ -171,7 +171,10 @@ def shell_agent(
     ssh_cmd.append(f"{vm.vm_user}@{vm.tailscale_host}")
     ssh_cmd.extend(["-t", f"cd {ws.workspace_path} && exec su - {agent.linux_user}"])
 
-    os.execvp("ssh", ssh_cmd)
+    import subprocess
+    import sys
+
+    sys.exit(subprocess.call(ssh_cmd))
 
 
 # -- Tmuxinator ------------------------------------------------------------
@@ -191,10 +194,9 @@ def _regenerate_tmuxinator(
     tmux_config = generate_config(ws.name, ws.workspace_path, agents=agents)
     target = ssh_target_for_vm(vm, config)
 
-    ssh_run(
-        target,
-        f"cat > {ws.workspace_path}/.tmuxinator.yml << 'TMUX_EOF'\n{tmux_config}TMUX_EOF",
-    )
+    from agentworks.ssh import write_file
+
+    write_file(target, f"{ws.workspace_path}/.tmuxinator.yml", tmux_config)
 
 
 def _add_live_window(

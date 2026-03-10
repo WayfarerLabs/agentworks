@@ -210,7 +210,8 @@ def list_vms(db: Database) -> None:
 
 def shell_vm(db: Database, config: Config, name: str) -> None:
     """Open a shell on a VM's home directory."""
-    import os
+    import subprocess
+    import sys
 
     vm = _require_vm(db, name)
     _guard_failed_vm(vm)
@@ -218,12 +219,12 @@ def shell_vm(db: Database, config: Config, name: str) -> None:
         typer.echo(f"Error: VM '{name}' has no Tailscale IP (init may not be complete)", err=True)
         raise typer.Exit(1)
 
-    ssh_cmd = ["ssh"]
+    ssh_cmd = ["ssh", "-t"]
     if config.user.ssh_private_key:
         ssh_cmd.extend(["-i", str(config.user.ssh_private_key)])
     ssh_cmd.append(f"{vm.vm_user}@{vm.tailscale_host}")
 
-    os.execvp("ssh", ssh_cmd)
+    sys.exit(subprocess.call(ssh_cmd))
 
 
 def add_git_credential(db: Database, config: Config, name: str, credential_name: str) -> None:
@@ -264,10 +265,11 @@ def add_git_credential(db: Database, config: Config, name: str, credential_name:
     ]
 
     # Write back filtered + new
+    from agentworks.ssh import write_file
+
     all_lines = filtered + new_lines
-    cred_content = "\n".join(all_lines)
-    ssh_run(target, f"printf '%s\\n' '{cred_content}' > ~/.git-credentials")
-    ssh_run(target, "chmod 600 ~/.git-credentials")
+    cred_content = "\n".join(all_lines) + "\n"
+    write_file(target, "~/.git-credentials", cred_content, mode="600")
     ssh_run(target, "git config --global credential.helper store")
 
     typer.echo(f"Git credential '{credential_name}' configured on VM '{name}'")

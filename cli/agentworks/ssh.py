@@ -7,6 +7,7 @@ the user's SSH config and agent.
 from __future__ import annotations
 
 import subprocess
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -96,12 +97,15 @@ def run(
     else:
         args.append(command)
 
-    result = subprocess.run(
-        args,
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-    )
+    try:
+        result = subprocess.run(
+            args,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        raise SSHError(f"SSH command timed out after {timeout}s: {command}")
     ssh_result = SSHResult(
         returncode=result.returncode,
         stdout=result.stdout,
@@ -148,6 +152,31 @@ def copy_to(
         raise SSHError(f"scp failed: {result.stderr.strip()}")
 
 
+def write_file(
+    target: SSHTarget,
+    remote_path: str,
+    content: str,
+    *,
+    mode: str | None = None,
+) -> None:
+    """Write string content to a remote file safely.
+
+    Writes to a local temp file in binary mode (preserving Unix line endings
+    even on Windows) and copies via scp. This avoids embedding multi-line
+    content in SSH command strings, which breaks on Windows due to \\r\\n
+    conversion.
+    """
+    with tempfile.NamedTemporaryFile(mode="wb", suffix=".tmp", delete=False) as f:
+        f.write(content.encode("utf-8"))
+        tmp_path = f.name
+    try:
+        copy_to(target, tmp_path, remote_path)
+    finally:
+        Path(tmp_path).unlink(missing_ok=True)
+    if mode:
+        run(target, f"chmod {mode} {remote_path}")
+
+
 def rsync_to(
     target: SSHTarget,
     local_path: str | Path,
@@ -186,10 +215,14 @@ def lima_run(
     command: str,
     *,
     check: bool = True,
+    timeout: int | None = None,
 ) -> SSHResult:
     """Execute a command inside a local Lima VM via limactl shell."""
     args = ["limactl", "shell", target.vm_name, "bash", "-lc", command]
-    result = subprocess.run(args, capture_output=True, text=True)
+    try:
+        result = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        raise SSHError(f"Lima command timed out after {timeout}s: {command}")
     ssh_result = SSHResult(
         returncode=result.returncode,
         stdout=result.stdout,
@@ -250,6 +283,7 @@ def wsl2_run(
     command: str,
     *,
     check: bool = True,
+    timeout: int | None = None,
 ) -> SSHResult:
     """Execute a command inside a WSL2 distro."""
     args = [
@@ -257,7 +291,10 @@ def wsl2_run(
         "--user", target.user,
         "--", "bash", "-lc", command,
     ]
-    result = subprocess.run(args, capture_output=True, text=True)
+    try:
+        result = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        raise SSHError(f"WSL2 command timed out after {timeout}s: {command}")
     ssh_result = SSHResult(
         returncode=result.returncode,
         stdout=result.stdout,
@@ -305,34 +342,44 @@ def _wsl2_copy_to(target: WSL2Target, local_path: str | Path, remote_path: str) 
 
 @dataclass(frozen=True)
 class ExecTarget:
-    """Union-like wrapper for SSH, Lima, RemoteLima, or WSL2 execution targets."""
+    """Union-like wrapper for SSH, Lima, RemoteLima, or WSL2 execution targets.
+
+    Set default_timeout (seconds) to apply a timeout to all run/run_as_root
+    calls automatically. Individual calls can override with their own timeout.
+    """
 
     ssh: SSHTarget | None = None
     lima: LimaTarget | None = None
     remote_lima: RemoteLimaTarget | None = None
     wsl2: WSL2Target | None = None
+    default_timeout: int | None = None
+
+    def _timeout(self, override: int | None) -> int | None:
+        return override if override is not None else self.default_timeout
 
     def run(self, command: str, *, check: bool = True, timeout: int | None = None) -> SSHResult:
+        t = self._timeout(timeout)
         if self.ssh is not None:
-            return run(self.ssh, command, check=check, timeout=timeout)
+            return run(self.ssh, command, check=check, timeout=t)
         if self.lima is not None:
-            return lima_run(self.lima, command, check=check)
+            return lima_run(self.lima, command, check=check, timeout=t)
         if self.remote_lima is not None:
-            return remote_lima_run(self.remote_lima, command, check=check, timeout=timeout)
+            return remote_lima_run(self.remote_lima, command, check=check, timeout=t)
         if self.wsl2 is not None:
-            return wsl2_run(self.wsl2, command, check=check)
+            return wsl2_run(self.wsl2, command, check=check, timeout=t)
         msg = "ExecTarget has no target configured"
         raise SSHError(msg)
 
     def run_as_root(self, command: str, *, check: bool = True, timeout: int | None = None) -> SSHResult:
+        t = self._timeout(timeout)
         if self.ssh is not None:
-            return run_as_root(self.ssh, command, check=check, timeout=timeout)
+            return run_as_root(self.ssh, command, check=check, timeout=t)
         if self.lima is not None:
-            return lima_run(self.lima, f"sudo -n {command}", check=check)
+            return lima_run(self.lima, f"sudo -n {command}", check=check, timeout=t)
         if self.remote_lima is not None:
-            return remote_lima_run(self.remote_lima, f"sudo -n {command}", check=check, timeout=timeout)
+            return remote_lima_run(self.remote_lima, f"sudo -n {command}", check=check, timeout=t)
         if self.wsl2 is not None:
-            return wsl2_run(WSL2Target(self.wsl2.distro_name, user="root"), command, check=check)
+            return wsl2_run(WSL2Target(self.wsl2.distro_name, user="root"), command, check=check, timeout=t)
         msg = "ExecTarget has no target configured"
         raise SSHError(msg)
 
@@ -349,3 +396,19 @@ class ExecTarget:
         else:
             msg = "ExecTarget has no target configured"
             raise SSHError(msg)
+
+    def write_file(self, remote_path: str, content: str, *, mode: str | None = None) -> None:
+        """Write string content to a remote file safely.
+
+        Uses copy_to under the hood to avoid embedding multi-line content
+        in command strings (which breaks on Windows due to line endings).
+        """
+        with tempfile.NamedTemporaryFile(mode="wb", suffix=".tmp", delete=False) as f:
+            f.write(content.encode("utf-8"))
+            tmp_path = f.name
+        try:
+            self.copy_to(tmp_path, remote_path)
+        finally:
+            Path(tmp_path).unlink(missing_ok=True)
+        if mode:
+            self.run(f"chmod {mode} {remote_path}")

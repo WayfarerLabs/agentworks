@@ -71,7 +71,7 @@ def _run_install_commands(
         truncated = cmd_config.command[:60]
         typer.echo(f"  Install command {i}/{total} ({name}): {truncated}...")
         try:
-            _run_logged(target, f"{shell} -lc '{cmd_config.command}'", logger)
+            _run_logged(target, f"{shell} -lc '{cmd_config.command}'", logger, timeout=120)
         except SSHError as e:
             msg = f"install command '{name}' failed: {truncated}... ({e})"
             logger.warning(msg)
@@ -98,25 +98,26 @@ def _write_path_additions(
     logger.step("PATH configuration")
     typer.echo(f"  Adding {len(path_additions)} PATH entries...")
 
-    # Build the path file -- use $HOME, not ~, for reliable expansion
-    lines = ["# Managed by agentworks -- do not edit"]
-    for p in path_additions:
-        expanded = p.replace("~", "$HOME", 1) if p.startswith("~") else p
-        lines.append(f'export PATH="{expanded}:$PATH"')
-    content = "\n".join(lines)
-
     try:
+        # Write path file line by line to avoid embedded newlines in SSH commands
         _run_logged(
             target,
-            f"printf '%s\\n' '{content}' > $HOME/.agentworks-path.sh",
+            "echo '# Managed by agentworks -- do not edit' > $HOME/.agentworks-path.sh",
             logger,
         )
+        for p in path_additions:
+            expanded = p.replace("~", "$HOME", 1) if p.startswith("~") else p
+            _run_logged(
+                target,
+                f"echo 'export PATH=\"{expanded}:$PATH\"' >> $HOME/.agentworks-path.sh",
+                logger,
+            )
         # Source from ~/.profile (bash/sh) and ~/.zprofile (zsh)
         for rc in ("$HOME/.profile", "$HOME/.zprofile"):
             _run_logged(
                 target,
                 f"grep -q agentworks-path.sh {rc} 2>/dev/null"
-                f" || printf '\\n. $HOME/.agentworks-path.sh\\n' >> {rc}",
+                f" || echo '. $HOME/.agentworks-path.sh' >> {rc}",
                 logger,
             )
     except SSHError as e:
@@ -336,8 +337,8 @@ def _phase_a_bootstrap(
 
     # Copy script to VM and execute
     remote_script = "/tmp/agentworks-bootstrap.sh"
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".sh", delete=False) as f:
-        f.write(script)
+    with tempfile.NamedTemporaryFile(mode="wb", suffix=".sh", delete=False) as f:
+        f.write(script.encode("utf-8"))
         local_script = f.name
 
     try:
@@ -391,7 +392,8 @@ def _phase_a_bootstrap(
             host=tailscale_ip,
             user=vm_user,
             identity_file=config.user.ssh_private_key,
-        )
+        ),
+        default_timeout=60,
     )
 
     # Verify Tailscale SSH works
@@ -441,7 +443,7 @@ def _phase_b_setup(
         typer.echo(f"  Installing {len(all_apt)} apt packages...")
         apt_str = " ".join(all_apt)
         try:
-            _run_logged(ts_target, f"apt-get install -y -qq {apt_str}", logger, as_root=True)
+            _run_logged(ts_target, f"apt-get install -y -qq {apt_str}", logger, as_root=True, timeout=300)
         except SSHError as e:
             msg = f"apt packages failed: {e}"
             logger.warning(msg)
@@ -453,7 +455,7 @@ def _phase_b_setup(
         typer.echo(f"  Installing {len(config.vm.snap)} snap packages...")
         for pkg in config.vm.snap:
             try:
-                _run_logged(ts_target, f"snap install {pkg}", logger, as_root=True)
+                _run_logged(ts_target, f"snap install {pkg}", logger, as_root=True, timeout=120)
             except SSHError as e:
                 msg = f"snap install '{pkg}' failed: {e}"
                 logger.warning(msg)
@@ -465,6 +467,10 @@ def _phase_b_setup(
     shell = config.user.shell
     typer.echo(f"  Setting shell to {shell}...")
     try:
+        # Touch .zshrc before chsh to prevent zsh's first-run wizard
+        # (zsh-newuser-install) from prompting interactively on next login
+        if shell == "zsh":
+            _run_logged(ts_target, f"touch {home}/.zshrc", logger, check=False)
         _run_logged(ts_target, f"chsh -s $(which {shell}) {vm_user}", logger, as_root=True)
     except SSHError as e:
         msg = f"shell configuration failed: {e}"
@@ -491,7 +497,7 @@ def _phase_b_setup(
             assert ts_target.ssh is not None
             rsync_to(ts_target.ssh, config.dotfiles.source, f"{home}/.dotfiles")
             typer.echo(f"  Running dotfiles install: {config.dotfiles.install_cmd}")
-            _run_logged(ts_target, f"cd ~/.dotfiles && {config.dotfiles.install_cmd}", logger)
+            _run_logged(ts_target, f"cd ~/.dotfiles && {config.dotfiles.install_cmd}", logger, timeout=120)
         except (SSHError, Exception) as e:
             msg = f"dotfiles install failed: {e}"
             logger.warning(msg)
@@ -527,13 +533,8 @@ def _configure_git_credentials(
 
     # Write credentials and configure git on the VM
     try:
-        cred_content = "\n".join(credential_lines)
-        _run_logged(
-            ts_target,
-            f"printf '%s\\n' '{cred_content}' > ~/.git-credentials",
-            logger,
-        )
-        _run_logged(ts_target, "chmod 600 ~/.git-credentials", logger)
+        cred_content = "\n".join(credential_lines) + "\n"
+        ts_target.write_file("~/.git-credentials", cred_content, mode="600")
         _run_logged(
             ts_target,
             "git config --global credential.helper store",
