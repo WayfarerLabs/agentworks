@@ -28,7 +28,11 @@ def config_dir(tmp_path: Path) -> Path:
 
         [vm.config]
         apt = ["zsh", "tmux"]
-        install_commands = ["echo hello"]
+        install_commands = ["hello"]
+
+        [install_commands.hello]
+        command = "echo hello"
+        path = ["~/.local/bin"]
 
         [workspace_templates.default]
 
@@ -56,7 +60,10 @@ def test_load_valid_config(config_dir: Path) -> None:
     cfg = load_config(config_dir)
     assert cfg.user.shell == "zsh"
     assert cfg.vm.apt == ["zsh", "tmux"]
-    assert cfg.vm.install_commands == ["echo hello"]
+    assert cfg.vm.install_commands == ["hello"]
+    assert "hello" in cfg.install_commands
+    assert cfg.install_commands["hello"].command == "echo hello"
+    assert cfg.install_commands["hello"].path == ["~/.local/bin"]
     assert "default" in cfg.workspace_templates
     assert "gruntweave" in cfg.workspace_templates
     assert cfg.workspace_templates["child"].inherits == ["gruntweave"]

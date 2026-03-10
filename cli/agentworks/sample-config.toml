@@ -50,9 +50,21 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 #     "fd-find",
 # ]
 # snap = []
-# install_commands = [
-#     "curl -fsSL https://bun.sh/install | bash",
-# ]
+# install_commands = ["bun", "claude"]       # references to [install_commands.*] sections
+
+# --- Install commands ---
+# Named install commands that can be referenced from vm.config.install_commands
+# (and later from VM/agent templates). Commands run under the user's configured
+# shell. PATH additions are written to ~/.agentworks-path.sh (sourced from
+# ~/.profile) so they are available to all login shells.
+
+# [install_commands.bun]
+# command = "curl -fsSL https://bun.sh/install | bash"
+# path = ["~/.bun/bin"]
+
+# [install_commands.claude]
+# command = "npm install -g @anthropic-ai/claude-code"
+# path = ["~/.npm-global/bin"]
 
 # --- Workspace templates ---
 # The "default" template is used when --template is not specified.

@@ -48,6 +48,83 @@ def _run_logged(
     return result
 
 
+def _run_install_commands(
+    target: ExecTarget,
+    command_names: list[str],
+    config: Config,
+    logger: InitLogger,
+) -> list[str]:
+    """Run install commands under the user's configured shell.
+
+    Returns accumulated PATH additions from all commands.
+    """
+    if not command_names:
+        return []
+
+    shell = config.user.shell
+    path_additions: list[str] = []
+    total = len(command_names)
+
+    for i, name in enumerate(command_names, 1):
+        cmd_config = config.install_commands[name]
+        logger.step(f"Install command {i}/{total}: {name}")
+        truncated = cmd_config.command[:60]
+        typer.echo(f"  Install command {i}/{total} ({name}): {truncated}...")
+        try:
+            _run_logged(target, f"{shell} -lc '{cmd_config.command}'", logger)
+        except SSHError as e:
+            msg = f"install command '{name}' failed: {truncated}... ({e})"
+            logger.warning(msg)
+            typer.echo(f"  Warning: {msg}", err=True)
+        path_additions.extend(cmd_config.path)
+
+    return path_additions
+
+
+def _write_path_additions(
+    target: ExecTarget,
+    path_additions: list[str],
+    logger: InitLogger,
+) -> None:
+    """Write accumulated PATH additions to $HOME/.agentworks-path.sh.
+
+    Sources the file from ~/.profile (bash/sh) and ~/.zprofile (zsh).
+    Uses $HOME instead of ~ throughout because tilde expansion is not
+    reliable in all SSH/shell contexts.
+    """
+    if not path_additions:
+        return
+
+    logger.step("PATH configuration")
+    typer.echo(f"  Adding {len(path_additions)} PATH entries...")
+
+    # Build the path file -- use $HOME, not ~, for reliable expansion
+    lines = ["# Managed by agentworks -- do not edit"]
+    for p in path_additions:
+        expanded = p.replace("~", "$HOME", 1) if p.startswith("~") else p
+        lines.append(f'export PATH="{expanded}:$PATH"')
+    content = "\n".join(lines)
+
+    try:
+        _run_logged(
+            target,
+            f"printf '%s\\n' '{content}' > $HOME/.agentworks-path.sh",
+            logger,
+        )
+        # Source from ~/.profile (bash/sh) and ~/.zprofile (zsh)
+        for rc in ("$HOME/.profile", "$HOME/.zprofile"):
+            _run_logged(
+                target,
+                f"grep -q agentworks-path.sh {rc} 2>/dev/null"
+                f" || printf '\\n. $HOME/.agentworks-path.sh\\n' >> {rc}",
+                logger,
+            )
+    except SSHError as e:
+        msg = f"PATH configuration failed: {e}"
+        logger.warning(msg)
+        typer.echo(f"  Warning: {msg}", err=True)
+
+
 def verify_tailscale_available() -> None:
     """Pre-flight: verify the local machine is on Tailscale."""
     import subprocess
@@ -346,18 +423,8 @@ def _phase_b_setup(
                 logger.warning(msg)
                 typer.echo(f"  Warning: {msg}", err=True)
 
-    # Non-fatal: install commands
-    for i, cmd in enumerate(config.vm.install_commands, 1):
-        logger.step(f"Install command {i}/{len(config.vm.install_commands)}")
-        typer.echo(f"  Install command {i}/{len(config.vm.install_commands)}: {cmd[:60]}...")
-        try:
-            _run_logged(ts_target, f"bash -lc '{cmd}'", logger)
-        except SSHError as e:
-            msg = f"install command failed: {cmd[:60]}... ({e})"
-            logger.warning(msg)
-            typer.echo(f"  Warning: {msg}", err=True)
-
-    # Non-fatal: set default shell
+    # Non-fatal: set default shell (before install commands so installers
+    # write to the correct rc file)
     logger.step("Shell configuration")
     shell = config.user.shell
     typer.echo(f"  Setting shell to {shell}...")
@@ -367,6 +434,14 @@ def _phase_b_setup(
         msg = f"shell configuration failed: {e}"
         logger.warning(msg)
         typer.echo(f"  Warning: {msg}", err=True)
+
+    # Non-fatal: install commands (run under user's shell)
+    path_additions = _run_install_commands(
+        ts_target, config.vm.install_commands, config, logger,
+    )
+
+    # Non-fatal: PATH additions from install commands
+    _write_path_additions(ts_target, path_additions, logger)
 
     # Non-fatal: git credentials
     if providers:

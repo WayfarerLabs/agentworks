@@ -95,6 +95,13 @@ class WorkspaceTemplate:
 
 
 @dataclass(frozen=True)
+class InstallCommandConfig:
+    name: str
+    command: str
+    path: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
 class GitCredentialConfig:
     name: str
     type: str
@@ -116,6 +123,7 @@ class Config:
     defaults: DefaultsConfig
     dotfiles: DotfilesConfig
     vm: VMConfig
+    install_commands: dict[str, InstallCommandConfig]
     workspace_templates: dict[str, WorkspaceTemplate]
     git_credentials: dict[str, GitCredentialConfig]
     azure: AzureConfig | None = None
@@ -253,6 +261,27 @@ def _load_vm_config(data: dict[str, object]) -> VMConfig:
     )
 
 
+def _load_install_commands(data: dict[str, object]) -> dict[str, InstallCommandConfig]:
+    raw = data.get("install_commands", {})
+    if not isinstance(raw, dict):
+        raise ConfigError("[install_commands] must be a table")
+
+    commands: dict[str, InstallCommandConfig] = {}
+    for name, cdata in raw.items():
+        if not isinstance(cdata, dict):
+            raise ConfigError(f"install_commands.{name} must be a table")
+        command = str(_require(cdata, "command", f"install_commands.{name}"))
+        path_val = cdata.get("path", [])
+        if not isinstance(path_val, list):
+            raise ConfigError(f"install_commands.{name}.path must be a list")
+        commands[name] = InstallCommandConfig(
+            name=name,
+            command=command,
+            path=[str(p) for p in path_val],
+        )
+    return commands
+
+
 def _load_workspace_templates(data: dict[str, object]) -> dict[str, WorkspaceTemplate]:
     raw = data.get("workspace_templates", {})
     if not isinstance(raw, dict):
@@ -338,7 +367,7 @@ def _load_azure(data: dict[str, object]) -> AzureConfig | None:
 
 EXPECTED_TOP_LEVEL_KEYS = {
     "user", "paths", "defaults", "dotfiles", "vm",
-    "workspace_templates", "git_credentials", "azure",
+    "install_commands", "workspace_templates", "git_credentials", "azure",
 }
 
 
@@ -385,14 +414,22 @@ def load_config(path: Path | None = None) -> Config:
 
     _warn_unexpected_top_level_keys(data)
 
+    install_commands = _load_install_commands(data)
     git_credentials = _load_git_credentials(data)
+    vm = _load_vm_config(data)
+
+    # Validate vm.config.install_commands references
+    for ref in vm.install_commands:
+        if ref not in install_commands:
+            raise ConfigError(f"vm.config.install_commands references unknown install command: {ref}")
 
     return Config(
         user=_load_user(data),
         paths=_load_paths(data),
         defaults=_load_defaults(data, set(git_credentials.keys())),
         dotfiles=_load_dotfiles(data),
-        vm=_load_vm_config(data),
+        vm=vm,
+        install_commands=install_commands,
         workspace_templates=_load_workspace_templates(data),
         git_credentials=git_credentials,
         azure=_load_azure(data),
