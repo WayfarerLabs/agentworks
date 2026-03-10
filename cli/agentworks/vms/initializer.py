@@ -99,25 +99,21 @@ def _write_path_additions(
     typer.echo(f"  Adding {len(path_additions)} PATH entries...")
 
     try:
-        # Write path file line by line to avoid embedded newlines in SSH commands
-        _run_logged(
-            target,
-            "echo '# Managed by agentworks -- do not edit' > $HOME/.agentworks-path.sh",
-            logger,
-        )
+        # Build the path file content locally and copy it over
+        # (avoids quoting issues with nested quotes over SSH on Windows)
+        lines = ["# Managed by agentworks -- do not edit"]
         for p in path_additions:
             expanded = p.replace("~", "$HOME", 1) if p.startswith("~") else p
-            _run_logged(
-                target,
-                f"echo 'export PATH=\"{expanded}:$PATH\"' >> $HOME/.agentworks-path.sh",
-                logger,
-            )
+            lines.append(f'export PATH="{expanded}:$PATH"')
+        target.write_file("$HOME/.agentworks-path.sh", "\n".join(lines) + "\n")
+
         # Source from ~/.profile (bash/sh) and ~/.zprofile (zsh)
+        source_line = ". $HOME/.agentworks-path.sh"
         for rc in ("$HOME/.profile", "$HOME/.zprofile"):
             _run_logged(
                 target,
                 f"grep -q agentworks-path.sh {rc} 2>/dev/null"
-                f" || echo '. $HOME/.agentworks-path.sh' >> {rc}",
+                f" || printf '%s\\n' '{source_line}' >> {rc}",
                 logger,
             )
     except SSHError as e:
