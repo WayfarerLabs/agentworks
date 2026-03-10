@@ -105,7 +105,7 @@ def _write_path_additions(
         for p in path_additions:
             expanded = p.replace("~", "$HOME", 1) if p.startswith("~") else p
             lines.append(f'export PATH="{expanded}:$PATH"')
-        target.write_file("$HOME/.agentworks-path.sh", "\n".join(lines) + "\n")
+        target.write_file("~/.agentworks-path.sh", "\n".join(lines) + "\n")
 
         # Source from ~/.profile (bash/sh) and ~/.zprofile (zsh)
         source_line = ". $HOME/.agentworks-path.sh"
