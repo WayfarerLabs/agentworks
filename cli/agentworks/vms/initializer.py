@@ -347,7 +347,7 @@ def _phase_a_bootstrap(
         os.unlink(local_script)
 
     typer.echo("  Running bootstrap script...")
-    result = exec_target.run_as_root(f"bash {remote_script}", check=False, timeout=300)
+    result = exec_target.run_as_root(f"/bin/bash {remote_script}", check=False, timeout=300)
     exec_target.run_as_root(f"rm -f {remote_script}", check=False)
 
     # Parse structured output
