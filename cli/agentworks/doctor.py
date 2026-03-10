@@ -94,7 +94,7 @@ def run_doctor() -> None:
             )
             if result.returncode == 0:
                 if os.environ.get("TAILSCALE_AUTH_KEY"):
-                    ok("Connected to tailnet (TAILSCALE_AUTH_KEY env var set)")
+                    ok("Connected to tailnet (auth key env var set)")
                 else:
                     ok("Connected to tailnet (will prompt for auth key during VM init)")
             else:

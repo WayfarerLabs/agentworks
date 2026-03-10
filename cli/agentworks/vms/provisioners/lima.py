@@ -55,7 +55,7 @@ class LimaProvisioner(VMProvisioner):
         """Run a limactl command, locally or on the VM Host."""
         if self.is_remote:
             assert self._vm_host_ssh is not None
-            target = SSHTarget(host=self._vm_host_ssh, user="")
+            target = SSHTarget(host=self._vm_host_ssh, user="", login_shell=True)
             result = ssh_run(target, command, check=check)
             return result.stdout
         else:

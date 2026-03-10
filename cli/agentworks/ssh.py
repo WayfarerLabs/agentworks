@@ -23,6 +23,7 @@ class SSHTarget:
     port: int | None = None
     identity_file: Path | None = None
     proxy_jump: str | None = None
+    login_shell: bool = False
 
 
 def ssh_target_for_vm(vm: object, config: object) -> SSHTarget:
@@ -88,7 +89,10 @@ def run(
         SSHResult with exit code, stdout, and stderr.
     """
     args = _ssh_base_args(target)
-    args.append(command)
+    if target.login_shell:
+        args.append(f"$SHELL -lc '{command}'")
+    else:
+        args.append(command)
 
     result = subprocess.run(
         args,
