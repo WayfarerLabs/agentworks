@@ -345,8 +345,8 @@ def delete_vm(db: Database, config: Config, name: str, *, force: bool = False) -
 def _prompt_delete_failed_vm(db: Database, config: Config, vm_name: str) -> None:
     """After a fatal init failure, prompt user to delete or keep the VM."""
     typer.echo(
-        "\nInit failed. Delete VM? (You can keep it for manual troubleshooting, "
-        "but agentworks cannot use or manage it.)",
+        "\nInit failed. Delete VM? You can keep it for manual troubleshooting, "
+        "but agentworks cannot use or manage it.",
         err=True,
     )
     if typer.confirm("Delete VM?", default=True):

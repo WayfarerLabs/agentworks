@@ -186,8 +186,8 @@ troubleshooting, and enforce clear states for failed VMs.
 VMs in `failed` state are unusable from an agentworks perspective. The only supported operation is
 `vm delete`. On fatal init failure, prompt the user:
 
-> Init failed. Delete VM? (You can keep it for manual troubleshooting, but agentworks cannot manage
-> it.) [Y/n]
+> Init failed. Delete VM? You can keep it for manual troubleshooting, but agentworks cannot manage
+> it. [Y/n]
 
 Default is yes (delete). If the user keeps it, all agentworks commands except `vm delete` refuse to
 operate on it with a clear message pointing at the init log.
