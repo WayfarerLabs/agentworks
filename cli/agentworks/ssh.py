@@ -16,10 +16,15 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class SSHTarget:
-    """Connection info for reaching a remote host via SSH."""
+    """Connection info for reaching a remote host via SSH.
+
+    Set user=None to defer to SSH config (used for VM host connections
+    where the host is defined in ~/.ssh/config). Explicit user is set
+    for VM connections where we control the username.
+    """
 
     host: str
-    user: str = "agentworks"
+    user: str | None = None
     port: int | None = None
     identity_file: Path | None = None
     proxy_jump: str | None = None

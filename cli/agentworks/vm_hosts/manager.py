@@ -17,7 +17,7 @@ def detect_os(ssh_host: str) -> str | None:
     """Detect the OS of a remote host via SSH."""
     try:
         result = run(
-            SSHTarget(host=ssh_host, user="", login_shell=True),
+            SSHTarget(host=ssh_host, user=None, login_shell=True),
             "uname -s",
             timeout=15,
         )
