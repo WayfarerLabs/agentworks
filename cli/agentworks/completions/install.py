@@ -12,13 +12,34 @@ import typer
 
 def install_completions(shell: str, script: str) -> None:
     """Write the completion script to the appropriate location."""
-    if shell == "zsh":
+    if shell == "bash":
+        _install_bash(script)
+    elif shell == "zsh":
         _install_zsh(script)
     elif shell == "powershell":
         _install_powershell(script)
     else:
         typer.echo(f"Error: --install not supported for '{shell}'", err=True)
         raise typer.Exit(1)
+
+
+def _install_bash(script: str) -> None:
+    """Install bash completions to the standard user directory."""
+    target_dir = Path.home() / ".local" / "share" / "bash-completion" / "completions"
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target = target_dir / "agentworks"
+    target.write_text(script)
+    typer.echo(f"Installed to {target}")
+
+    # Check if bash-completion is likely available
+    bashrc = Path.home() / ".bashrc"
+    if bashrc.exists():
+        content = bashrc.read_text()
+        if "bash-completion" in content or "bash_completion" in content:
+            return
+    typer.echo(
+        "Note: ensure bash-completion is installed and loaded in your .bashrc"
+    )
 
 
 def _install_zsh(script: str) -> None:

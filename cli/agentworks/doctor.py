@@ -321,6 +321,11 @@ def _get_completion_paths() -> list[tuple[str, list[Path]]]:
     home = Path.home()
     shells: list[tuple[str, list[Path]]] = []
 
+    # Bash
+    shells.append(("bash", [
+        home / ".local" / "share" / "bash-completion" / "completions" / "agentworks",
+    ]))
+
     # Zsh
     zsh_paths: list[Path] = [
         home / ".zfunc" / "_agentworks",

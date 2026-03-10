@@ -8,6 +8,7 @@ from agentworks.completions.spec import build_spec, completion_version
 def generate(shell: str) -> str:
     """Generate a completion script for the given shell."""
     from agentworks.cli import app
+    from agentworks.completions.bash import generate_bash
     from agentworks.completions.powershell import generate_powershell
     from agentworks.completions.zsh import generate_zsh
 
@@ -15,6 +16,7 @@ def generate(shell: str) -> str:
     version = completion_version(spec)
 
     generators = {
+        "bash": generate_bash,
         "zsh": generate_zsh,
         "powershell": generate_powershell,
     }
@@ -28,4 +30,4 @@ def generate(shell: str) -> str:
     return generator(spec, version)
 
 
-SUPPORTED_SHELLS = ("zsh", "powershell")
+SUPPORTED_SHELLS = ("bash", "zsh", "powershell")

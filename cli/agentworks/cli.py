@@ -70,7 +70,7 @@ def _prompt_name(label: str, name: str | None) -> str:
 
 @app.command("completion")
 def completion(
-    shell: Annotated[str, typer.Argument(help="Shell type: zsh, powershell")] = "zsh",
+    shell: Annotated[str, typer.Argument(help="Shell type: bash, zsh, powershell")] = "zsh",
     install: Annotated[bool, typer.Option("--install", help="Install completions to the default location")] = False,
 ) -> None:
     """Output shell completion script (or install it with --install)."""
