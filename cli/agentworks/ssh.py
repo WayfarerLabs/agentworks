@@ -62,7 +62,10 @@ def _ssh_base_args(target: SSHTarget) -> list[str]:
         args.extend(["-i", str(target.identity_file)])
     if target.proxy_jump is not None:
         args.extend(["-J", target.proxy_jump])
-    args.append(f"{target.user}@{target.host}")
+    if target.user:
+        args.append(f"{target.user}@{target.host}")
+    else:
+        args.append(target.host)
     return args
 
 
@@ -131,7 +134,8 @@ def copy_to(
     if target.identity_file is not None:
         args.extend(["-i", str(target.identity_file)])
     args.append(str(local_path))
-    args.append(f"{target.user}@{target.host}:{remote_path}")
+    dest = f"{target.user}@{target.host}:{remote_path}" if target.user else f"{target.host}:{remote_path}"
+    args.append(dest)
 
     result = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
     if result.returncode != 0:
@@ -156,7 +160,7 @@ def rsync_to(
         "rsync", "-az", "--delete",
         "-e", ssh_cmd,
         f"{local_path}/",
-        f"{target.user}@{target.host}:{remote_path}/",
+        f"{target.user}@{target.host}:{remote_path}/" if target.user else f"{target.host}:{remote_path}/",
     ]
 
     result = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
