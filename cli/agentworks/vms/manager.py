@@ -164,14 +164,34 @@ def create_vm(
             tailscale_auth_key=tailscale_auth_key,
             git_tokens=git_tokens,
         )
+
+        # Remove the public IP now that Tailscale is up
+        if platform == "azure":
+            from agentworks.vms.provisioners.azure import AzureProvisioner as _AP
+
+            vm_row = db.get_vm(vm_name)
+            if vm_row is not None:
+                _AP().detach_public_ip(vm_row)
+
     except Exception as e:
         db.update_vm_init_status(vm_name, InitStatus.FAILED)
-        typer.echo(f"\nError: {e}", err=True)
-        from agentworks.vms.init_log import find_init_logs
 
+        # Write full details to init log, show only summary on console
+        from agentworks.vms.init_log import InitLogger, find_init_logs
+
+        logger = InitLogger(vm_name)
+        logger.step("Error")
+        detail = getattr(e, "detail", None)
+        if detail:
+            logger.output(detail)
+        else:
+            logger.output(str(e))
+        logger.close()
+
+        typer.echo(f"\nError: {e}", err=True)
         logs = find_init_logs(vm_name)
         if logs:
-            typer.echo(f"Init log: {logs[0]}", err=True)
+            typer.echo(f"Details: {logs[0]}", err=True)
         _prompt_delete_failed_vm(db, config, vm_name)
         return
 
@@ -365,9 +385,14 @@ def _tailscale_logout(provisioner: VMProvisioner, vm: VMRow) -> None:
 
     Uses the provisioner's exec_target (not Tailscale SSH) because we can't
     ask Tailscale to tear itself down over the connection it provides.
+    For Azure VMs, temporarily attaches a public IP for SSH access.
     """
+    from agentworks.vms.provisioners.azure import AzureProvisioner
+
     typer.echo("Deregistering from Tailscale...")
     try:
+        if isinstance(provisioner, AzureProvisioner):
+            provisioner.attach_public_ip(vm)
         exec_target = provisioner.exec_target(vm)
         exec_target.run_as_root("tailscale down", timeout=15)
         exec_target.run_as_root("tailscale logout", timeout=15)
@@ -474,10 +499,20 @@ def _ensure_tailscale(
         typer.echo(f"Tailscale node {vm.tailscale_host} is not reachable")
         db.clear_vm_tailscale(vm.name)
 
-    # Re-join via the provisioning transport
-    verify_tailscale_available()
-    exec_target = provisioner.exec_target(vm)
-    rejoin_tailscale(
-        db, vm.name, exec_target,
-        is_wsl2=(vm.platform == "wsl2"),
-    )
+    # For Azure, attach a temporary public IP for the rejoin
+    from agentworks.vms.provisioners.azure import AzureProvisioner
+
+    is_azure = isinstance(provisioner, AzureProvisioner)
+    if is_azure:
+        provisioner.attach_public_ip(vm)
+
+    try:
+        verify_tailscale_available()
+        exec_target = provisioner.exec_target(vm)
+        rejoin_tailscale(
+            db, vm.name, exec_target,
+            is_wsl2=(vm.platform == "wsl2"),
+        )
+    finally:
+        if is_azure:
+            provisioner.detach_public_ip(vm)

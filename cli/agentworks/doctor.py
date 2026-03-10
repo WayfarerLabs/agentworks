@@ -79,7 +79,6 @@ def run_doctor() -> None:
     # Local platform tools
     for tool, label in [
         ("limactl", "Local Lima (limactl)"),
-        ("az", "Azure CLI (az)"),
         ("wsl", "WSL2 (wsl)"),
     ]:
         if shutil.which(tool):
