@@ -207,6 +207,31 @@ def lima_run(
 
 
 @dataclass
+class RemoteLimaTarget:
+    """Execution target for Lima VMs on a remote VM host.
+
+    Commands are run by SSHing to the VM host and invoking limactl shell
+    there. This avoids needing the Lima SSH key on the local machine.
+    """
+
+    vm_name: str
+    vm_host_ssh: str
+
+
+def remote_lima_run(
+    target: RemoteLimaTarget,
+    command: str,
+    *,
+    check: bool = True,
+    timeout: int | None = None,
+) -> SSHResult:
+    """Execute a command inside a remote Lima VM via the VM host."""
+    host_target = SSHTarget(host=target.vm_host_ssh, user=None, login_shell=True)
+    lima_cmd = f"limactl shell {target.vm_name} bash -lc '{command}'"
+    return run(host_target, lima_cmd, check=check, timeout=timeout)
+
+
+@dataclass
 class WSL2Target:
     """Execution target for WSL2 distros (used pre-Tailscale)."""
 
@@ -242,10 +267,11 @@ def wsl2_run(
 
 @dataclass(frozen=True)
 class ExecTarget:
-    """Union-like wrapper for SSH, Lima, or WSL2 execution targets."""
+    """Union-like wrapper for SSH, Lima, RemoteLima, or WSL2 execution targets."""
 
     ssh: SSHTarget | None = None
     lima: LimaTarget | None = None
+    remote_lima: RemoteLimaTarget | None = None
     wsl2: WSL2Target | None = None
 
     def run(self, command: str, *, check: bool = True, timeout: int | None = None) -> SSHResult:
@@ -253,6 +279,8 @@ class ExecTarget:
             return run(self.ssh, command, check=check, timeout=timeout)
         if self.lima is not None:
             return lima_run(self.lima, command, check=check)
+        if self.remote_lima is not None:
+            return remote_lima_run(self.remote_lima, command, check=check, timeout=timeout)
         if self.wsl2 is not None:
             return wsl2_run(self.wsl2, command, check=check)
         msg = "ExecTarget has no target configured"
@@ -262,8 +290,9 @@ class ExecTarget:
         if self.ssh is not None:
             return run_as_root(self.ssh, command, check=check, timeout=timeout)
         if self.lima is not None:
-            # Lima shell runs as the host user who has passwordless sudo
             return lima_run(self.lima, f"sudo -n {command}", check=check)
+        if self.remote_lima is not None:
+            return remote_lima_run(self.remote_lima, f"sudo -n {command}", check=check, timeout=timeout)
         if self.wsl2 is not None:
             return wsl2_run(WSL2Target(self.wsl2.distro_name, user="root"), command, check=check)
         msg = "ExecTarget has no target configured"

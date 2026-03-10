@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 import typer
 
 from agentworks.db import VMStatus
-from agentworks.ssh import ExecTarget, LimaTarget, SSHError, SSHTarget, copy_to
+from agentworks.ssh import ExecTarget, LimaTarget, RemoteLimaTarget, SSHError, SSHTarget, copy_to
 from agentworks.ssh import run as ssh_run
 from agentworks.vms.base import ProvisionResult, VMProvisioner
 
@@ -112,11 +112,11 @@ class LimaProvisioner(VMProvisioner):
         typer.echo(f"Lima VM '{vm_name}' created and running")
 
         if self.is_remote:
-            # Remote: need SSH via VM Host proxy
-            ssh_info = self._get_ssh_target(vm_name)
-            return ProvisionResult(exec_target=ExecTarget(ssh=ssh_info))
+            assert self._vm_host_ssh is not None
+            return ProvisionResult(exec_target=ExecTarget(
+                remote_lima=RemoteLimaTarget(vm_name=vm_name, vm_host_ssh=self._vm_host_ssh),
+            ))
         else:
-            # Local: use limactl shell as provisioning transport
             return ProvisionResult(exec_target=ExecTarget(lima=LimaTarget(vm_name=vm_name)))
 
     def start(self, vm: VMRow) -> None:
@@ -136,7 +136,10 @@ class LimaProvisioner(VMProvisioner):
 
     def exec_target(self, vm: VMRow) -> ExecTarget:
         if self.is_remote:
-            return ExecTarget(ssh=self._get_ssh_target(vm.name))
+            assert self._vm_host_ssh is not None
+            return ExecTarget(
+                remote_lima=RemoteLimaTarget(vm_name=vm.name, vm_host_ssh=self._vm_host_ssh),
+            )
         return ExecTarget(lima=LimaTarget(vm_name=vm.name))
 
     def status(self, vm: VMRow) -> VMStatus:
@@ -157,37 +160,3 @@ class LimaProvisioner(VMProvisioner):
                 return VMStatus.STOPPED
             return VMStatus.UNKNOWN
         return VMStatus.UNKNOWN
-
-    def _get_ssh_target(self, vm_name: str) -> SSHTarget:
-        """Parse SSH connection info from limactl."""
-        output = self._run_lima(f"limactl show-ssh --format=options {vm_name}")
-        # Parse SSH options like: -o IdentityFile="/path" -o Port=12345 -o Hostname=127.0.0.1 -o User=user
-        host = "127.0.0.1"
-        user = "agentworks"
-        port = None
-        identity_file = None
-        proxy_jump = None
-
-        parts = output.split("-o ")
-        for part in parts:
-            part = part.strip().rstrip()
-            if part.startswith("Hostname="):
-                host = part.split("=", 1)[1].strip('"')
-            elif part.startswith("Port="):
-                port = int(part.split("=", 1)[1].strip('"'))
-            elif part.startswith("User="):
-                user = part.split("=", 1)[1].strip('"')
-            elif part.startswith("IdentityFile="):
-                identity_file = Path(part.split("=", 1)[1].strip('"'))
-
-        if self.is_remote:
-            # Remote mode: proxy through VM Host
-            proxy_jump = self._vm_host_ssh
-
-        return SSHTarget(
-            host=host,
-            user=user,
-            port=port,
-            identity_file=identity_file,
-            proxy_jump=proxy_jump,
-        )
