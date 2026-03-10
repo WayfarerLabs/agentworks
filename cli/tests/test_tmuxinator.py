@@ -38,6 +38,6 @@ def test_generate_config_user_window_first() -> None:
     config = generate_config("ws", "/tmp/ws", agents=agents)
     lines = config.splitlines()
 
-    user_idx = next(i for i, l in enumerate(lines) if "- user:" in l)
-    agent_idx = next(i for i, l in enumerate(lines) if "- alpha:" in l)
+    user_idx = next(i for i, line in enumerate(lines) if "- user:" in line)
+    agent_idx = next(i for i, line in enumerate(lines) if "- alpha:" in line)
     assert user_idx < agent_idx

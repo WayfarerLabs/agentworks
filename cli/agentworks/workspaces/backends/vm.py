@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 
 import typer
 
-from agentworks.ssh import SSHTarget, ssh_target_for_vm
+from agentworks.ssh import ssh_target_for_vm
 from agentworks.workspaces.tmuxinator import generate_config
 
 if TYPE_CHECKING:

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import sqlite3
+
 import pytest
 
 from agentworks.db import Database, InitStatus
@@ -185,7 +187,7 @@ def test_agent_linux_user_unique(db: Database) -> None:
     db.insert_workspace("ws-1", ws_type="vm", workspace_path="/tmp/ws-1", vm_name="dev-vm")
     db.insert_agent("coder", "ws-1", "ws-1--coder")
 
-    with pytest.raises(Exception):
+    with pytest.raises(sqlite3.IntegrityError):
         db.insert_agent("coder2", "ws-1", "ws-1--coder")  # duplicate linux_user
 
 
