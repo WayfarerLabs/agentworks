@@ -50,22 +50,38 @@ def run_doctor() -> None:
         else:
             fail(f"{tool} not found")
 
-    # -- Optional CLI tools -------------------------------------------
-    typer.echo("\nOptional tools (at least one VM platform needed):")
-    platforms_found = 0
+    # -- VM platforms --------------------------------------------------
+    typer.echo("\nVM platforms:")
+
+    # VM hosts (remote Lima)
+    try:
+        from agentworks.db import Database
+
+        db_exists, _, _ = Database.check_schema()
+        if db_exists:
+            _db = Database()
+            hosts = _db.list_vm_hosts()
+            if hosts:
+                for h in hosts:
+                    os_info = f", {h.os}" if h.os else ""
+                    ok(f"VM host: {h.name} ({h.ssh_host}{os_info})")
+            else:
+                warn("No VM hosts configured (add with 'agentworks vm-host add')")
+        else:
+            warn("No VM hosts configured (database not yet created)")
+    except Exception:
+        warn("Could not check VM hosts")
+
+    # Local platform tools
     for tool, label in [
-        ("limactl", "Lima (limactl)"),
+        ("limactl", "Local Lima (limactl)"),
         ("az", "Azure CLI (az)"),
         ("wsl", "WSL2 (wsl)"),
     ]:
         if shutil.which(tool):
             ok(label)
-            platforms_found += 1
         else:
             warn(f"{label} not found")
-
-    if platforms_found == 0:
-        fail("No VM platform tools found (need limactl, az, or wsl)")
 
     # -- Tailscale connectivity ----------------------------------------
     typer.echo("\nTailscale:")

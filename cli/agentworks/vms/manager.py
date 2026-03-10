@@ -164,8 +164,9 @@ def create_vm(
             tailscale_auth_key=tailscale_auth_key,
             git_tokens=git_tokens,
         )
-    except Exception:
+    except Exception as e:
         db.update_vm_init_status(vm_name, InitStatus.FAILED)
+        typer.echo(f"\nError: {e}", err=True)
         from agentworks.vms.init_log import find_init_logs
 
         logs = find_init_logs(vm_name)
@@ -345,7 +346,7 @@ def _prompt_delete_failed_vm(db: Database, config: Config, vm_name: str) -> None
     """After a fatal init failure, prompt user to delete or keep the VM."""
     typer.echo(
         "\nInit failed. Delete VM? (You can keep it for manual troubleshooting, "
-        "but agentworks cannot manage it.)",
+        "but agentworks cannot use or manage it.)",
         err=True,
     )
     if typer.confirm("Delete VM?", default=True):
