@@ -52,11 +52,20 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # snap = []
 # install_commands = ["bun", "claude"]       # references to [install_commands.*] sections
 
+# --- Agent configuration ---
+# Defaults for agent creation. Agents run install commands under their own
+# shell, separate from the user's VM shell.
+
+# [agent.config]
+# install_commands = ["claude"]             # references to [install_commands.*] sections
+# shell = "bash"                            # agent shell (default: bash)
+
 # --- Install commands ---
-# Named install commands that can be referenced from vm.config.install_commands
-# (and later from VM/agent templates). Commands run under the user's configured
-# shell. PATH additions are written to ~/.agentworks-path.sh (sourced from
-# ~/.profile) so they are available to all login shells.
+# Named install commands referenced from vm.config.install_commands and
+# agent.config.install_commands. VM commands run under the user's shell;
+# agent commands run under the agent's shell. PATH additions are written
+# to ~/.agentworks-path.sh (sourced from ~/.profile and ~/.zprofile) so
+# they are available to all login shells.
 
 # [install_commands.bun]
 # command = "curl -fsSL https://bun.sh/install | bash"

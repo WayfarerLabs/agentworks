@@ -87,6 +87,12 @@ class VMConfig:
 
 
 @dataclass(frozen=True)
+class AgentConfig:
+    install_commands: list[str] = field(default_factory=list)
+    shell: str = "bash"
+
+
+@dataclass(frozen=True)
 class WorkspaceTemplate:
     name: str
     inherits: list[str] = field(default_factory=list)
@@ -123,6 +129,7 @@ class Config:
     defaults: DefaultsConfig
     dotfiles: DotfilesConfig
     vm: VMConfig
+    agent: AgentConfig
     install_commands: dict[str, InstallCommandConfig]
     workspace_templates: dict[str, WorkspaceTemplate]
     git_credentials: dict[str, GitCredentialConfig]
@@ -261,6 +268,19 @@ def _load_vm_config(data: dict[str, object]) -> VMConfig:
     )
 
 
+def _load_agent_config(data: dict[str, object]) -> AgentConfig:
+    agent_section = data.get("agent", {})
+    if not isinstance(agent_section, dict):
+        raise ConfigError("[agent] must be a table")
+    raw = agent_section.get("config", {})
+    if not isinstance(raw, dict):
+        raise ConfigError("[agent.config] must be a table")
+    return AgentConfig(
+        install_commands=list(raw.get("install_commands", [])),
+        shell=str(raw.get("shell", "bash")),
+    )
+
+
 def _load_install_commands(data: dict[str, object]) -> dict[str, InstallCommandConfig]:
     raw = data.get("install_commands", {})
     if not isinstance(raw, dict):
@@ -366,7 +386,7 @@ def _load_azure(data: dict[str, object]) -> AzureConfig | None:
 
 
 EXPECTED_TOP_LEVEL_KEYS = {
-    "user", "paths", "defaults", "dotfiles", "vm",
+    "user", "paths", "defaults", "dotfiles", "vm", "agent",
     "install_commands", "workspace_templates", "git_credentials", "azure",
 }
 
@@ -417,11 +437,15 @@ def load_config(path: Path | None = None) -> Config:
     install_commands = _load_install_commands(data)
     git_credentials = _load_git_credentials(data)
     vm = _load_vm_config(data)
+    agent = _load_agent_config(data)
 
-    # Validate vm.config.install_commands references
+    # Validate install_commands references
     for ref in vm.install_commands:
         if ref not in install_commands:
             raise ConfigError(f"vm.config.install_commands references unknown install command: {ref}")
+    for ref in agent.install_commands:
+        if ref not in install_commands:
+            raise ConfigError(f"agent.config.install_commands references unknown install command: {ref}")
 
     return Config(
         user=_load_user(data),
@@ -429,6 +453,7 @@ def load_config(path: Path | None = None) -> Config:
         defaults=_load_defaults(data, set(git_credentials.keys())),
         dotfiles=_load_dotfiles(data),
         vm=vm,
+        agent=agent,
         install_commands=install_commands,
         workspace_templates=_load_workspace_templates(data),
         git_credentials=git_credentials,
