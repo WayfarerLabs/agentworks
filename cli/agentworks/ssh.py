@@ -8,10 +8,7 @@ from __future__ import annotations
 
 import subprocess
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from pathlib import Path
+from pathlib import Path
 
 
 @dataclass(frozen=True)
@@ -274,6 +271,38 @@ def wsl2_run(
     return ssh_result
 
 
+def _lima_copy_to(target: LimaTarget, local_path: str | Path, remote_path: str) -> None:
+    """Copy a file into a local Lima VM via limactl copy."""
+    result = subprocess.run(
+        ["limactl", "copy", str(local_path), f"{target.vm_name}:{remote_path}"],
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        raise SSHError(f"limactl copy failed: {result.stderr.strip()}")
+
+
+def _remote_lima_copy_to(target: RemoteLimaTarget, local_path: str | Path, remote_path: str) -> None:
+    """Copy a file into a remote Lima VM (two-hop: scp to host, then limactl copy)."""
+    host_target = SSHTarget(host=target.vm_host_ssh, user=None)
+    host_tmp = f"/tmp/agentworks-{Path(local_path).name}"
+    copy_to(host_target, local_path, host_tmp)
+    host_login = SSHTarget(host=target.vm_host_ssh, user=None, login_shell=True)
+    run(host_login, f"limactl copy {host_tmp} {target.vm_name}:{remote_path}")
+    run(host_login, f"rm -f {host_tmp}", check=False)
+
+
+def _wsl2_copy_to(target: WSL2Target, local_path: str | Path, remote_path: str) -> None:
+    """Copy a file into a WSL2 distro via stdin to avoid path translation issues."""
+    content = Path(local_path).read_bytes()
+    result = subprocess.run(
+        ["wsl", "--distribution", target.distro_name, "--user", "root",
+         "--", "bash", "-c", f"cat > {remote_path}"],
+        input=content, capture_output=True,
+    )
+    if result.returncode != 0:
+        raise SSHError(f"WSL2 copy failed: {result.stderr.decode().strip()}")
+
+
 @dataclass(frozen=True)
 class ExecTarget:
     """Union-like wrapper for SSH, Lima, RemoteLima, or WSL2 execution targets."""
@@ -306,3 +335,17 @@ class ExecTarget:
             return wsl2_run(WSL2Target(self.wsl2.distro_name, user="root"), command, check=check)
         msg = "ExecTarget has no target configured"
         raise SSHError(msg)
+
+    def copy_to(self, local_path: str | Path, remote_path: str) -> None:
+        """Copy a local file to the target."""
+        if self.ssh is not None:
+            copy_to(self.ssh, local_path, remote_path)
+        elif self.lima is not None:
+            _lima_copy_to(self.lima, local_path, remote_path)
+        elif self.remote_lima is not None:
+            _remote_lima_copy_to(self.remote_lima, local_path, remote_path)
+        elif self.wsl2 is not None:
+            _wsl2_copy_to(self.wsl2, local_path, remote_path)
+        else:
+            msg = "ExecTarget has no target configured"
+            raise SSHError(msg)

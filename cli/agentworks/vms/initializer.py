@@ -308,60 +308,81 @@ def _phase_a_bootstrap(
 ) -> ExecTarget:
     """Phase A: Bootstrap (over provisioning transport). All steps are fatal.
 
+    Generates a self-contained bash script, copies it to the VM, and
+    executes it as a single command. This avoids shell quoting issues
+    across the various provisioning transports.
+
     Returns the Tailscale ExecTarget for Phase B.
     """
+    import tempfile
+
+    from agentworks.vms.bootstrap_script import generate_bootstrap_script, parse_bootstrap_output
+
     typer.echo("Phase A: Bootstrap...")
     db.update_vm_init_status(vm_name, InitStatus.BOOTSTRAPPING)
 
-    # Step 1: Ensure user exists
-    logger.step("Ensure user")
-    typer.echo(f"  Ensuring user '{vm_user}'...")
-    _run_logged(
-        exec_target,
-        f"bash -c 'id {vm_user} >/dev/null 2>&1 || useradd -m -s /bin/bash {vm_user}'",
-        logger, as_root=True, check=False,
-    )
-    _run_logged(exec_target, f"usermod -aG sudo {vm_user}", logger, as_root=True)
-    _run_logged(
-        exec_target,
-        f"bash -c \"echo '{vm_user} ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/{vm_user}\"",
-        logger, as_root=True,
+    # Resolve Tailscale auth key
+    ts_auth_key = _resolve_tailscale_auth_key(tailscale_auth_key)
+
+    # Generate the bootstrap script
+    ssh_public_key = config.user.ssh_public_key.read_text().strip()
+    script = generate_bootstrap_script(
+        vm_user=vm_user,
+        ssh_public_key=ssh_public_key,
+        system_packages=SYSTEM_PACKAGES,
+        tailscale_auth_key=ts_auth_key,
+        is_wsl2=is_wsl2,
     )
 
-    # Step 2: System packages
-    logger.step("System packages")
-    typer.echo("  Installing system packages...")
-    pkg_str = " ".join(SYSTEM_PACKAGES)
-    _run_logged(exec_target, "apt-get update -qq", logger, as_root=True)
-    _run_logged(exec_target, f"apt-get install -y -qq {pkg_str}", logger, as_root=True)
+    # Copy script to VM and execute
+    remote_script = "/tmp/agentworks-bootstrap.sh"
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".sh", delete=False) as f:
+        f.write(script)
+        local_script = f.name
 
-    # Step 3: Add user's SSH public key
-    logger.step("SSH public key")
-    typer.echo("  Adding SSH public key...")
-    pub_key = config.user.ssh_public_key.read_text().strip()
-    _run_logged(exec_target, f"mkdir -p {home}/.ssh", logger, as_root=True)
-    _run_logged(
-        exec_target,
-        f"bash -c \"echo '{pub_key}' >> {home}/.ssh/authorized_keys\"",
-        logger, as_root=True,
-    )
-    _run_logged(exec_target, f"chown -R {vm_user}:{vm_user} {home}/.ssh", logger, as_root=True)
-    _run_logged(exec_target, f"chmod 700 {home}/.ssh", logger, as_root=True)
-    _run_logged(exec_target, f"chmod 600 {home}/.ssh/authorized_keys", logger, as_root=True)
+    try:
+        exec_target.copy_to(local_script, remote_script)
+    finally:
+        import os
+        os.unlink(local_script)
 
-    # Step 4: Install and join Tailscale
-    logger.step("Tailscale")
-    typer.echo("  Installing Tailscale...")
-    _run_logged(
-        exec_target,
-        "bash -c 'curl -fsSL https://tailscale.com/install.sh | sh'",
-        logger, as_root=True,
-    )
+    typer.echo("  Running bootstrap script...")
+    result = exec_target.run_as_root(f"bash {remote_script}", check=False, timeout=300)
+    exec_target.run_as_root(f"rm -f {remote_script}", check=False)
 
-    tailscale_ip = _join_tailscale(
-        db, vm_name, exec_target,
-        is_wsl2=is_wsl2, logger=logger, tailscale_auth_key=tailscale_auth_key,
-    )
+    # Parse structured output
+    bootstrap = parse_bootstrap_output(result.stdout, result.returncode)
+
+    # Feed results into logger and console
+    for step in bootstrap.steps:
+        logger.step(step.name)
+        if step.success_msg:
+            typer.echo(f"  {step.name}: {step.success_msg}")
+            logger.output(step.success_msg)
+        for warning in step.warnings:
+            typer.echo(f"  Warning: {warning}", err=True)
+            logger.warning(warning)
+        if step.error:
+            typer.echo(f"  Error: {step.error}", err=True)
+            logger.error(step.error)
+
+    # Log full output for troubleshooting
+    if result.stdout:
+        logger.output(result.stdout)
+    if result.stderr:
+        logger.output(result.stderr)
+
+    if not bootstrap.ok:
+        msg = f"Bootstrap script failed (exit {result.returncode})"
+        if result.stderr:
+            msg += f": {result.stderr.strip()[:200]}"
+        raise SSHError(msg)
+
+    # Update DB with Tailscale info
+    assert bootstrap.tailscale_ip is not None
+    tailscale_ip = bootstrap.tailscale_ip
+    typer.echo(f"  Tailscale IP: {tailscale_ip}")
+    db.update_vm_tailscale(vm_name, tailscale_ip)
     db.update_vm_init_status(vm_name, InitStatus.TAILSCALE_UP)
 
     # Switch to Tailscale SSH
@@ -379,6 +400,21 @@ def _phase_a_bootstrap(
     _run_logged(ts_target, "echo ok", logger, timeout=30)
 
     return ts_target
+
+
+def _resolve_tailscale_auth_key(tailscale_auth_key: str | None = None) -> str:
+    """Resolve Tailscale auth key from argument, env var, or prompt."""
+    import os
+
+    key = tailscale_auth_key or os.environ.get("TAILSCALE_AUTH_KEY")
+    if key:
+        return key
+    from agentworks.prompt import prompt_secret
+
+    return prompt_secret(
+        "  Tailscale auth key",
+        hint="Generate a key at https://login.tailscale.com/admin/settings/keys",
+    )
 
 
 def _phase_b_setup(
