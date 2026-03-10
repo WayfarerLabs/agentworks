@@ -40,11 +40,16 @@ def create_vm_workspace(
         try:
             ssh_run(target, f"git clone {template.repo} {workspace_path}")
         except Exception:
-            if template.repo.startswith("https://"):
+            if template.repo.startswith("git@"):
                 typer.echo(
-                    "Hint: HTTPS repo URLs require credentials on the VM. "
-                    "For private repos, use an SSH URL (git@...) so the "
-                    "VM's registered SSH key provides authentication.",
+                    "Hint: SSH repo URLs are not supported. Use HTTPS URLs "
+                    "and configure git credentials with 'vm add-git-credential'.",
+                    err=True,
+                )
+            else:
+                typer.echo(
+                    "Hint: for private repos, ensure git credentials are "
+                    "configured on the VM (see 'vm add-git-credential').",
                     err=True,
                 )
             raise

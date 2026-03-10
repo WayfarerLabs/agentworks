@@ -22,7 +22,7 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 [defaults]
 # platform = "lima"                          # lima, azure, or wsl2
 # vm_host = "mac-studio"                     # default VM host for remote Lima
-# git_hosts = ["github"]                     # git hosts to register on vm create
+# git_credentials = ["github"]                # git credentials to configure on vm create
 
 # --- Dotfiles ---
 
@@ -58,31 +58,32 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # The "default" template is used when --template is not specified.
 # Templates support inheritance via the "inherits" key.
 #
-# Repo URLs: use SSH format (git@...) for private repos so the VM's
-# registered SSH key provides authentication. Public repos work with
-# either SSH or HTTPS URLs.
+# Repo URLs: use HTTPS format for repos. The VM's git credential store
+# provides authentication via personal access tokens configured during
+# VM init. Public repos work without credentials.
 
 # [workspace_templates.default]
-# repo = "git@github.com:org/repo.git"       # git repo to clone into workspace
+# repo = "https://github.com/org/repo.git"  # git repo to clone into workspace
 # tmuxinator = true                          # generate tmuxinator config
 # inherits = []                              # list of parent template names
 
 # [workspace_templates.myproject]
-# repo = "git@github.com:org/myproject.git"
+# repo = "https://github.com/org/myproject.git"
 # tmuxinator = false
 # inherits = ["default"]
 
-# --- Git host providers ---
-# SSH keys generated on VMs are registered with these providers.
+# --- Git credentials ---
+# Personal access tokens are prompted during VM init and stored via
+# git credential-store on the VM.
 
-# [git_hosts.github]
+# [git_credentials.github]
 # type = "github"
-# Authentication via: gh auth token or GITHUB_TOKEN env var
+# Token: create at https://github.com/settings/tokens (repo scope)
 
-# [git_hosts.azdo]
+# [git_credentials.azdo]
 # type = "azdo"
 # org = "my-org"
-# Authentication via: az account get-access-token
+# Token: create at https://dev.azure.com/{org}/_usersSettings/tokens
 
 # --- Azure settings (only needed for --platform azure) ---
 

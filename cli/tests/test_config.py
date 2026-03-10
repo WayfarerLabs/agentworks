@@ -33,21 +33,21 @@ def config_dir(tmp_path: Path) -> Path:
         [workspace_templates.default]
 
         [workspace_templates.gruntweave]
-        repo = "git@example.com:org/repo.git"
+        repo = "https://example.com/org/repo.git"
 
         [workspace_templates.child]
         inherits = ["gruntweave"]
         tmuxinator = false
 
-        [git_hosts.github]
+        [git_credentials.github]
         type = "github"
 
-        [git_hosts.azdo]
+        [git_credentials.azdo]
         type = "azdo"
         org = "my-org"
 
         [defaults]
-        git_hosts = ["github"]
+        git_credentials = ["github"]
     """))
     return config_file
 
@@ -61,9 +61,9 @@ def test_load_valid_config(config_dir: Path) -> None:
     assert "gruntweave" in cfg.workspace_templates
     assert cfg.workspace_templates["child"].inherits == ["gruntweave"]
     assert cfg.workspace_templates["child"].tmuxinator is False
-    assert cfg.git_hosts["github"].type == "github"
-    assert cfg.git_hosts["azdo"].org == "my-org"
-    assert cfg.defaults.git_hosts == ["github"]
+    assert cfg.git_credentials["github"].type == "github"
+    assert cfg.git_credentials["azdo"].org == "my-org"
+    assert cfg.defaults.git_credentials == ["github"]
 
 
 def test_missing_config_file(tmp_path: Path) -> None:
@@ -93,7 +93,7 @@ def test_cycle_detection(tmp_path: Path) -> None:
         load_config(config_file)
 
 
-def test_invalid_git_host_type(tmp_path: Path) -> None:
+def test_invalid_git_credential_type(tmp_path: Path) -> None:
     pub = tmp_path / "id.pub"
     priv = tmp_path / "id"
     pub.write_text("key")
@@ -105,10 +105,10 @@ def test_invalid_git_host_type(tmp_path: Path) -> None:
         ssh_public_key = "{pub}"
         ssh_private_key = "{priv}"
 
-        [git_hosts.bad]
+        [git_credentials.bad]
         type = "gitlab"
     """))
-    with pytest.raises(ConfigError, match="git_hosts.bad.type"):
+    with pytest.raises(ConfigError, match="git_credentials.bad.type"):
         load_config(config_file)
 
 

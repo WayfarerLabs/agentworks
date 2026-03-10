@@ -57,7 +57,6 @@ class VMRow:
     vm_host_name: str | None
     extra_packages: list[str]
     init_status: str
-    ssh_public_key: str | None
     tailscale_host: str | None
     azure_resource_id: str | None
     wsl_distro_name: str | None
@@ -85,15 +84,6 @@ class AgentRow:
     name: str
     workspace_name: str
     linux_user: str
-    created_at: str
-
-
-@dataclass
-class VMGitHostKeyRow:
-    id: int
-    vm_name: str
-    git_host_name: str
-    remote_key_id: str
     created_at: str
 
 
@@ -163,6 +153,9 @@ MIGRATIONS: dict[int, str] = {
             PRIMARY KEY (workspace_name, name),
             FOREIGN KEY (workspace_name) REFERENCES workspaces(name)
         );
+    """,
+    5: """
+        DROP TABLE IF EXISTS vm_git_host_keys;
     """,
 }
 
@@ -320,10 +313,6 @@ class Database:
         self._conn.execute("UPDATE vms SET tailscale_host = NULL WHERE name = ?", (name,))
         self._conn.commit()
 
-    def update_vm_ssh_public_key(self, name: str, ssh_public_key: str) -> None:
-        self._conn.execute("UPDATE vms SET ssh_public_key = ? WHERE name = ?", (ssh_public_key, name))
-        self._conn.commit()
-
     def update_vm_azure_resource_id(self, name: str, azure_resource_id: str) -> None:
         self._conn.execute("UPDATE vms SET azure_resource_id = ? WHERE name = ?", (azure_resource_id, name))
         self._conn.commit()
@@ -340,7 +329,6 @@ class Database:
         self._conn.commit()
 
     def delete_vm(self, name: str) -> None:
-        self._conn.execute("DELETE FROM vm_git_host_keys WHERE vm_name = ?", (name,))
         self._conn.execute(
             "DELETE FROM agents WHERE workspace_name IN (SELECT name FROM workspaces WHERE vm_name = ?)",
             (name,),
@@ -408,32 +396,6 @@ class Database:
             "SELECT COUNT(*) FROM workspaces WHERE vm_name = ?", (vm_name,)
         ).fetchone()
         return int(row[0])
-
-    # -- Git Host Keys -----------------------------------------------------
-
-    def insert_vm_git_host_key(self, vm_name: str, git_host_name: str, remote_key_id: str) -> VMGitHostKeyRow:
-        self._conn.execute(
-            "INSERT INTO vm_git_host_keys (vm_name, git_host_name, remote_key_id) VALUES (?, ?, ?)",
-            (vm_name, git_host_name, remote_key_id),
-        )
-        self._conn.commit()
-        row = self._conn.execute(
-            "SELECT * FROM vm_git_host_keys WHERE vm_name = ? AND git_host_name = ?",
-            (vm_name, git_host_name),
-        ).fetchone()
-        assert row is not None
-        return _to_git_host_key(row)
-
-    def list_vm_git_host_keys(self, vm_name: str) -> list[VMGitHostKeyRow]:
-        rows = self._conn.execute(
-            "SELECT * FROM vm_git_host_keys WHERE vm_name = ? ORDER BY git_host_name",
-            (vm_name,),
-        ).fetchall()
-        return [_to_git_host_key(r) for r in rows]
-
-    def delete_vm_git_host_key(self, key_id: int) -> None:
-        self._conn.execute("DELETE FROM vm_git_host_keys WHERE id = ?", (key_id,))
-        self._conn.commit()
 
     # -- Agents ------------------------------------------------------------
 
@@ -505,7 +467,6 @@ def _to_vm(row: sqlite3.Row) -> VMRow:
         vm_host_name=row["vm_host_name"],
         extra_packages=json.loads(extra) if extra else [],
         init_status=row["init_status"],
-        ssh_public_key=row["ssh_public_key"],
         tailscale_host=row["tailscale_host"],
         azure_resource_id=row["azure_resource_id"],
         wsl_distro_name=row["wsl_distro_name"],
@@ -535,15 +496,5 @@ def _to_agent(row: sqlite3.Row) -> AgentRow:
         name=row["name"],
         workspace_name=row["workspace_name"],
         linux_user=row["linux_user"],
-        created_at=row["created_at"],
-    )
-
-
-def _to_git_host_key(row: sqlite3.Row) -> VMGitHostKeyRow:
-    return VMGitHostKeyRow(
-        id=row["id"],
-        vm_name=row["vm_name"],
-        git_host_name=row["git_host_name"],
-        remote_key_id=row["remote_key_id"],
         created_at=row["created_at"],
     )

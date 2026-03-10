@@ -89,6 +89,7 @@ def run_doctor() -> None:
     typer.echo("\nConfiguration:")
     from agentworks.config import CONFIG_PATH, ConfigError
 
+    config = None
     if not CONFIG_PATH.exists():
         fail(f"Config not found: {CONFIG_PATH}")
         fail("Run 'agentworks init' to create one")
@@ -117,10 +118,10 @@ def run_doctor() -> None:
                 else:
                     warn(f"Dotfiles enabled but source missing: {config.dotfiles.source}")
 
-            # Git hosts
-            if config.git_hosts:
-                typer.echo("\nGit hosts:")
-                _check_git_hosts(config, ok, warn, fail)
+            # Git credentials
+            if config.git_credentials:
+                typer.echo("\nGit credentials:")
+                _check_git_credentials(config, ok, warn, fail)
 
         except ConfigError as e:
             fail(f"Config error: {e}")
@@ -149,12 +150,22 @@ def run_doctor() -> None:
     except Exception as e:
         fail(f"Database error: {e}")
 
-    # -- TAILSCALE_AUTH_KEY env var ------------------------------------
+    # -- Environment variables -----------------------------------------
     typer.echo("\nEnvironment variables:")
     if os.environ.get("TAILSCALE_AUTH_KEY"):
         ok("TAILSCALE_AUTH_KEY is set")
     else:
         warn("TAILSCALE_AUTH_KEY not set (will prompt during VM create/start)")
+
+    if config is not None and config.git_credentials:
+        from agentworks.git_credentials.base import env_var_for_credential
+
+        for cred_name in config.git_credentials:
+            env_name = env_var_for_credential(cred_name)
+            if os.environ.get(env_name):
+                ok(f"{env_name} is set")
+            else:
+                warn(f"{env_name} not set (will prompt during VM init)")
 
     # -- Shell completions ---------------------------------------------
     typer.echo("\nShell completions:")
@@ -228,31 +239,31 @@ def _check_ssh_key(
             warn(f"SSH private key has broad permissions ({oct(mode)}), recommend 600")
 
 
-def _check_git_hosts(
+def _check_git_credentials(
     config: object,
     ok: object,
     warn: object,
     fail: object,
 ) -> None:
-    """Check git host authentication."""
+    """Check git credential providers."""
     from agentworks.config import Config
-    from agentworks.vms.initializer import resolve_git_host_providers
+    from agentworks.vms.initializer import resolve_git_credential_providers
 
     assert isinstance(config, Config)
     assert callable(ok) and callable(warn) and callable(fail)
 
     try:
-        providers = resolve_git_host_providers(config)
+        providers = resolve_git_credential_providers(config)
     except Exception as e:
-        warn(f"Could not resolve git host providers: {e}")
+        warn(f"Could not resolve git credential providers: {e}")
         return
 
     for name, provider in providers.items():
         try:
             if provider.verify_auth():
-                ok(f"{name}: authenticated")
+                ok(f"{name}: ready (will prompt for token during VM init)")
             else:
-                warn(f"{name}: auth failed ({provider.auth_hint()})")
+                warn(f"{name}: auth check failed ({provider.auth_hint()})")
         except Exception as e:
             warn(f"{name}: auth check error: {e}")
 

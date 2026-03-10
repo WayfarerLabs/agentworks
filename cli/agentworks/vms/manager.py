@@ -11,8 +11,8 @@ from agentworks.db import InitStatus, VMStatus
 from agentworks.vms.initializer import (
     initialize_vm,
     rejoin_tailscale,
-    resolve_git_host_providers,
-    verify_git_host_auth,
+    resolve_git_credential_providers,
+    verify_git_credential_auth,
     verify_tailscale_available,
 )
 
@@ -49,7 +49,7 @@ def create_vm(
     platform: str | None = None,
     vm_host: str | None = None,
     extra_packages: list[str] | None = None,
-    git_hosts: list[str] | None = None,
+    git_credentials: list[str] | None = None,
     cpus: int | None = None,
     memory: int | None = None,
     disk: int | None = None,
@@ -96,8 +96,11 @@ def create_vm(
 
     # Pre-flight checks
     verify_tailscale_available()
-    providers = resolve_git_host_providers(config, git_hosts)
-    verify_git_host_auth(providers)
+    providers = resolve_git_credential_providers(config, git_credentials)
+    verify_git_credential_auth(providers)
+
+    # Collect secrets upfront so the user isn't interrupted mid-provisioning
+    tailscale_auth_key, git_tokens = _collect_secrets(providers, vm_name)
 
     # Create DB record with as-provisioned resource values
     db.insert_vm(
@@ -158,6 +161,8 @@ def create_vm(
             extra_packages=extra_packages,
             is_wsl2=(platform == "wsl2"),
             vm_user=resolved_vm_user,
+            tailscale_auth_key=tailscale_auth_key,
+            git_tokens=git_tokens,
         )
     except Exception:
         db.update_vm_init_status(vm_name, InitStatus.FAILED)
@@ -220,6 +225,53 @@ def shell_vm(db: Database, config: Config, name: str) -> None:
     os.execvp("ssh", ssh_cmd)
 
 
+def add_git_credential(db: Database, config: Config, name: str, credential_name: str) -> None:
+    """Add or update a git credential on a VM."""
+    from agentworks.ssh import run as ssh_run
+    from agentworks.ssh import ssh_target_for_vm
+
+    vm = _require_vm(db, name)
+    _guard_failed_vm(vm)
+    if vm.tailscale_host is None:
+        typer.echo(f"Error: VM '{name}' has no Tailscale IP (init may not be complete)", err=True)
+        raise typer.Exit(1)
+
+    cred_config = config.git_credentials.get(credential_name)
+    if cred_config is None:
+        typer.echo(f"Error: git credential '{credential_name}' not found in config", err=True)
+        raise typer.Exit(1)
+
+    providers = resolve_git_credential_providers(config, [credential_name])
+    provider = providers[credential_name]
+
+    token = provider.obtain_token(name)
+    new_lines = provider.credential_lines(token)
+
+    target = ssh_target_for_vm(vm, config)
+
+    # Read existing credentials, filter out entries for the same host/path
+    result = ssh_run(target, "cat ~/.git-credentials 2>/dev/null || true")
+    existing = result.stdout.strip().splitlines() if result.stdout.strip() else []
+
+    # Extract host/path from new lines for matching: "https://user:tok@host/path" -> "host/path"
+    new_hostpaths = {line.split("@", 1)[1] for line in new_lines if "@" in line}
+
+    # Filter out old entries whose host/path matches any new entry
+    filtered = [
+        e for e in existing
+        if "@" not in e or e.split("@", 1)[1] not in new_hostpaths
+    ]
+
+    # Write back filtered + new
+    all_lines = filtered + new_lines
+    cred_content = "\n".join(all_lines)
+    ssh_run(target, f"printf '%s\\n' '{cred_content}' > ~/.git-credentials")
+    ssh_run(target, "chmod 600 ~/.git-credentials")
+    ssh_run(target, "git config --global credential.helper store")
+
+    typer.echo(f"Git credential '{credential_name}' configured on VM '{name}'")
+
+
 def start_vm(db: Database, config: Config, name: str) -> None:
     """Start a stopped VM."""
     vm = _require_vm(db, name)
@@ -265,19 +317,6 @@ def delete_vm(db: Database, config: Config, name: str, *, force: bool = False) -
         )
         raise typer.Exit(1)
 
-    # Remove git host keys
-    keys = db.list_vm_git_host_keys(name)
-    if keys:
-        providers = resolve_git_host_providers(config)
-        for key in keys:
-            provider = providers.get(key.git_host_name)
-            if provider:
-                typer.echo(f"Removing SSH key from {key.git_host_name}...")
-                try:
-                    provider.remove_key(key.remote_key_id)
-                except Exception as e:
-                    typer.echo(f"Warning: failed to remove key from {key.git_host_name}: {e}", err=True)
-
     # Platform-specific cleanup (also handles Tailscale logout)
     try:
         provisioner = _get_provisioner_for_vm(db, vm)
@@ -297,7 +336,7 @@ def delete_vm(db: Database, config: Config, name: str, *, force: bool = False) -
     if log_count:
         typer.echo(f"Cleaned up {log_count} init log(s)")
 
-    # Remove from DB (cascades workspaces and keys)
+    # Remove from DB (cascades workspaces and agents)
     db.delete_vm(name)
     typer.echo(f"VM '{name}' deleted")
 
@@ -347,6 +386,40 @@ def _guard_failed_vm(vm: VMRow) -> None:
             err=True,
         )
         raise typer.Exit(1)
+
+
+def _collect_secrets(
+    providers: dict,
+    vm_name: str,
+) -> tuple[str | None, dict[str, str]]:
+    """Collect all secrets upfront before provisioning starts.
+
+    Returns (tailscale_auth_key, git_tokens).
+    """
+    import os
+
+    from agentworks.prompt import prompt_secret
+
+    typer.echo("\nCollecting credentials...")
+
+    # Tailscale
+    ts_auth_key = os.environ.get("TAILSCALE_AUTH_KEY")
+    if ts_auth_key:
+        typer.echo("  Tailscale auth key found in environment")
+    else:
+        ts_auth_key = prompt_secret(
+            "  Tailscale auth key",
+            hint="Generate a key at https://login.tailscale.com/admin/settings/keys",
+        )
+
+    # Git credentials
+    git_tokens: dict[str, str] = {}
+    for name, provider in providers.items():
+        token = provider.obtain_token(vm_name)
+        git_tokens[name] = token
+
+    typer.echo("")
+    return ts_auth_key, git_tokens
 
 
 def _require_vm(db: Database, name: str) -> VMRow:

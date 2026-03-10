@@ -94,31 +94,15 @@ def test_roundtrip_workspace(db: Database) -> None:
     assert len(local_ws) == 1
 
 
-def test_roundtrip_git_host_keys(db: Database) -> None:
-    db.insert_vm_host("mac-studio", "192.168.1.10")
-    db.insert_vm("dev-vm", platform="lima", vm_host_name="mac-studio")
-
-    key = db.insert_vm_git_host_key("dev-vm", "github", "key-123")
-    assert key.remote_key_id == "key-123"
-
-    keys = db.list_vm_git_host_keys("dev-vm")
-    assert len(keys) == 1
-
-    db.delete_vm_git_host_key(key.id)
-    assert len(db.list_vm_git_host_keys("dev-vm")) == 0
-
-
 def test_vm_delete_cascades(db: Database) -> None:
     db.insert_vm_host("mac-studio", "192.168.1.10")
     db.insert_vm("dev-vm", platform="lima", vm_host_name="mac-studio")
     db.insert_workspace("ws-1", ws_type="vm", workspace_path="/tmp/ws-1", vm_name="dev-vm")
-    db.insert_vm_git_host_key("dev-vm", "github", "key-123")
 
     db.delete_vm("dev-vm")
 
     assert db.get_vm("dev-vm") is None
     assert len(db.list_workspaces(vm_name="dev-vm")) == 0
-    assert len(db.list_vm_git_host_keys("dev-vm")) == 0
 
 
 def test_count_helpers(db: Database) -> None:

@@ -2,7 +2,7 @@
 
 Two phases:
   A. Bootstrap (over provisioning transport): user, system packages, SSH key, Tailscale
-  B. Setup (over Tailscale SSH): user packages, install commands, dotfiles, git host keys
+  B. Setup (over Tailscale SSH): user packages, install commands, git credentials, dotfiles
 
 Phase A steps are fatal -- if they fail, the VM is unreachable and useless.
 Phase B steps are non-fatal -- failures produce warnings and a 'partial' status.
@@ -21,7 +21,7 @@ from agentworks.vms.init_log import InitLogger
 if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database
-    from agentworks.git_hosts.base import GitHostProvider
+    from agentworks.git_credentials.base import GitCredentialProvider
     from agentworks.ssh import SSHResult
 
 SYSTEM_PACKAGES = ["openssh-server", "curl", "git", "sudo", "ca-certificates", "tmux", "tmuxinator"]
@@ -71,33 +71,39 @@ def verify_tailscale_available() -> None:
         raise typer.Exit(1)
 
 
-def resolve_git_host_providers(config: Config, git_host_names: list[str] | None = None) -> dict[str, GitHostProvider]:
-    """Resolve git host provider instances from config."""
-    from agentworks.git_hosts.azdo import AzDOProvider
-    from agentworks.git_hosts.github import GitHubProvider
+def resolve_git_credential_providers(
+    config: Config, credential_names: list[str] | None = None,
+) -> dict[str, GitCredentialProvider]:
+    """Resolve git credential provider instances from config."""
+    from agentworks.git_credentials.azdo import AzDOCredentialProvider
+    from agentworks.git_credentials.github import GitHubCredentialProvider
 
-    names = git_host_names or config.defaults.git_hosts or list(config.git_hosts.keys())
-    providers: dict[str, GitHostProvider] = {}
+    names = credential_names or config.defaults.git_credentials or []
+    providers: dict[str, GitCredentialProvider] = {}
+    if not names:
+        typer.echo("Warning: no git credentials configured (set defaults.git_credentials in config)", err=True)
+        return providers
     for name in names:
-        gh_config = config.git_hosts.get(name)
-        if gh_config is None:
+        cred_config = config.git_credentials.get(name)
+        if cred_config is None:
+            typer.echo(f"Error: git credential '{name}' not found in config", err=True)
             raise typer.Exit(1)
-        if gh_config.type == "azdo":
-            assert gh_config.org is not None
-            providers[name] = AzDOProvider(org=gh_config.org)
-        elif gh_config.type == "github":
-            providers[name] = GitHubProvider()
+        if cred_config.type == "azdo":
+            assert cred_config.org is not None
+            providers[name] = AzDOCredentialProvider(config_name=name, org=cred_config.org)
+        elif cred_config.type == "github":
+            providers[name] = GitHubCredentialProvider(config_name=name)
     return providers
 
 
-def verify_git_host_auth(providers: dict[str, GitHostProvider]) -> None:
-    """Pre-flight: verify auth for all selected git host providers."""
+def verify_git_credential_auth(providers: dict[str, GitCredentialProvider]) -> None:
+    """Pre-flight: verify auth for all selected git credential providers."""
     for name, provider in providers.items():
         if not provider.verify_auth():
-            typer.echo(f"Error: Authentication failed for git host '{name}'. {provider.auth_hint()}", err=True)
+            typer.echo(f"Error: Authentication check failed for '{name}'. {provider.auth_hint()}", err=True)
             raise typer.Exit(1)
     if providers:
-        typer.echo(f"Git host auth verified: {', '.join(providers.keys())}")
+        typer.echo(f"Git credentials configured: {', '.join(providers.keys())}")
 
 
 def rejoin_tailscale(
@@ -132,14 +138,19 @@ def _join_tailscale(
     *,
     is_wsl2: bool = False,
     logger: InitLogger | None = None,
+    tailscale_auth_key: str | None = None,
 ) -> str:
-    """Prompt for auth key, join Tailscale, update DB. Returns the Tailscale IP."""
+    """Join Tailscale, update DB. Returns the Tailscale IP."""
     import os
 
-    ts_auth_key = os.environ.get("TAILSCALE_AUTH_KEY")
+    ts_auth_key = tailscale_auth_key or os.environ.get("TAILSCALE_AUTH_KEY")
     if not ts_auth_key:
-        typer.echo("  Generate a key at https://login.tailscale.com/admin/settings/keys")
-        ts_auth_key = str(typer.prompt("  Tailscale auth key"))
+        from agentworks.prompt import prompt_secret
+
+        ts_auth_key = prompt_secret(
+            "  Tailscale auth key",
+            hint="Generate a key at https://login.tailscale.com/admin/settings/keys",
+        )
     ts_cmd = f"tailscale up --auth-key {ts_auth_key}"
     if is_wsl2:
         ts_cmd += " --userspace-networking"
@@ -162,11 +173,13 @@ def initialize_vm(
     config: Config,
     vm_name: str,
     exec_target: ExecTarget,
-    providers: dict[str, GitHostProvider],
+    providers: dict[str, GitCredentialProvider],
     *,
     extra_packages: list[str] | None = None,
     is_wsl2: bool = False,
     vm_user: str = "agentworks",
+    tailscale_auth_key: str | None = None,
+    git_tokens: dict[str, str] | None = None,
 ) -> None:
     """Run the full initialization sequence on a newly provisioned VM.
 
@@ -178,8 +191,14 @@ def initialize_vm(
     logger = InitLogger(vm_name)
 
     try:
-        ts_target = _phase_a_bootstrap(db, config, vm_name, exec_target, home, vm_user, is_wsl2, logger)
-        _phase_b_setup(db, config, vm_name, ts_target, providers, home, vm_user, extra_packages, logger)
+        ts_target = _phase_a_bootstrap(
+            db, config, vm_name, exec_target, home, vm_user, is_wsl2, logger,
+            tailscale_auth_key=tailscale_auth_key,
+        )
+        _phase_b_setup(
+            db, config, vm_name, ts_target, providers, home, vm_user, extra_packages, logger,
+            git_tokens=git_tokens,
+        )
     except Exception:
         logger.close()
         raise
@@ -207,6 +226,8 @@ def _phase_a_bootstrap(
     vm_user: str,
     is_wsl2: bool,
     logger: InitLogger,
+    *,
+    tailscale_auth_key: str | None = None,
 ) -> ExecTarget:
     """Phase A: Bootstrap (over provisioning transport). All steps are fatal.
 
@@ -260,7 +281,10 @@ def _phase_a_bootstrap(
         logger, as_root=True,
     )
 
-    tailscale_ip = _join_tailscale(db, vm_name, exec_target, is_wsl2=is_wsl2, logger=logger)
+    tailscale_ip = _join_tailscale(
+        db, vm_name, exec_target,
+        is_wsl2=is_wsl2, logger=logger, tailscale_auth_key=tailscale_auth_key,
+    )
     db.update_vm_init_status(vm_name, InitStatus.TAILSCALE_UP)
 
     # Switch to Tailscale SSH
@@ -285,11 +309,13 @@ def _phase_b_setup(
     config: Config,
     vm_name: str,
     ts_target: ExecTarget,
-    providers: dict[str, GitHostProvider],
+    providers: dict[str, GitCredentialProvider],
     home: str,
     vm_user: str,
     extra_packages: list[str] | None,
     logger: InitLogger,
+    *,
+    git_tokens: dict[str, str] | None = None,
 ) -> None:
     """Phase B: Setup (over Tailscale SSH). Non-fatal steps warn and continue."""
     typer.echo("Phase B: Setup...")
@@ -342,36 +368,9 @@ def _phase_b_setup(
         logger.warning(msg)
         typer.echo(f"  Warning: {msg}", err=True)
 
-    # Non-fatal: generate SSH keypair
-    logger.step("SSH keypair generation")
-    typer.echo("  Generating SSH keypair...")
-    try:
-        _run_logged(ts_target, "ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -N ''", logger)
-        result = _run_logged(ts_target, "cat ~/.ssh/id_ed25519.pub", logger)
-        vm_pub_key = result.stdout.strip()
-        db.update_vm_ssh_public_key(vm_name, vm_pub_key)
-    except SSHError as e:
-        msg = f"SSH keypair generation failed: {e}"
-        logger.warning(msg)
-        typer.echo(f"  Warning: {msg}", err=True)
-        vm_pub_key = None
-
-    # Non-fatal: register SSH key with git hosts (skip if no keypair)
-    if vm_pub_key:
-        for gh_name, provider in providers.items():
-            logger.step(f"Git host key: {gh_name}")
-            typer.echo(f"  Registering SSH key with {gh_name}...")
-            try:
-                remote_key_id = provider.register_key(vm_name, vm_pub_key)
-                db.insert_vm_git_host_key(vm_name, gh_name, remote_key_id)
-            except Exception as e:
-                msg = f"git host key registration failed for {gh_name}: {e}"
-                logger.warning(msg)
-                typer.echo(f"  Warning: {msg}", err=True)
-    elif providers:
-        msg = "skipped git host key registration (no SSH keypair)"
-        logger.warning(msg)
-        typer.echo(f"  Warning: {msg}", err=True)
+    # Non-fatal: git credentials
+    if providers:
+        _configure_git_credentials(vm_name, ts_target, providers, logger, git_tokens=git_tokens)
 
     # Non-fatal: dotfiles
     if config.dotfiles.enabled and config.dotfiles.source.exists():
@@ -386,3 +385,51 @@ def _phase_b_setup(
             msg = f"dotfiles install failed: {e}"
             logger.warning(msg)
             typer.echo(f"  Warning: {msg}", err=True)
+
+
+def _configure_git_credentials(
+    vm_name: str,
+    ts_target: ExecTarget,
+    providers: dict[str, GitCredentialProvider],
+    logger: InitLogger,
+    git_tokens: dict[str, str] | None = None,
+) -> None:
+    """Configure git credential store on the VM with pre-collected or prompted tokens."""
+    logger.step("Git credentials")
+    typer.echo("  Configuring git credentials...")
+
+    tokens = git_tokens or {}
+
+    # Collect credential lines from all providers
+    credential_lines: list[str] = []
+    for name, provider in providers.items():
+        try:
+            token = tokens.get(name) or provider.obtain_token(vm_name)
+            credential_lines.extend(provider.credential_lines(token))
+        except Exception as e:
+            msg = f"git credential setup failed for {name}: {e}"
+            logger.warning(msg)
+            typer.echo(f"  Warning: {msg}", err=True)
+
+    if not credential_lines:
+        return
+
+    # Write credentials and configure git on the VM
+    try:
+        cred_content = "\n".join(credential_lines)
+        _run_logged(
+            ts_target,
+            f"printf '%s\\n' '{cred_content}' > ~/.git-credentials",
+            logger,
+        )
+        _run_logged(ts_target, "chmod 600 ~/.git-credentials", logger)
+        _run_logged(
+            ts_target,
+            "git config --global credential.helper store",
+            logger,
+        )
+        typer.echo(f"  Git credentials configured for {len(providers)} provider(s)")
+    except SSHError as e:
+        msg = f"git credential store setup failed: {e}"
+        logger.warning(msg)
+        typer.echo(f"  Warning: {msg}", err=True)

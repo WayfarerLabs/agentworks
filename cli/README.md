@@ -103,10 +103,11 @@ Manage virtual machines across Lima (local or remote), Azure, and WSL2.
 | `agentworks vm start <name>`  | Start a stopped VM                       |
 | `agentworks vm stop <name>`   | Stop a running VM                        |
 | `agentworks vm delete <name>` | Delete a VM and clean up all resources   |
+| `agentworks vm add-git-credential <name> <cred>` | Add or update a git credential |
 
 `vm create` accepts `--name`, `--platform`, `--vm-host`, `--vm-user`, `--cpus`, `--memory`,
-`--disk`, `--azure-vm-size`, `--extra-packages`, and `--git-hosts`. All have sensible defaults from
-config or built-in values.
+`--disk`, `--azure-vm-size`, `--extra-packages`, and `--git-credentials`. All have sensible defaults
+from config or built-in values.
 
 ### Workspaces
 
@@ -142,11 +143,11 @@ Key sections:
 
 - `[user]` -- SSH keys (required) and default shell
 - `[paths]` -- local workspace and `.code-workspace` file directories
-- `[defaults]` -- default platform, VM host, git hosts
+- `[defaults]` -- default platform, VM host, git credentials
 - `[dotfiles]` -- dotfiles sync to VMs
 - `[vm.config]` -- VM resources (cpus, memory, disk), packages, install commands, username
 - `[workspace_templates.*]` -- workspace templates with inheritance
-- `[git_hosts.*]` -- git host providers (GitHub, Azure DevOps)
+- `[git_credentials.*]` -- git credential providers (GitHub, Azure DevOps)
 - `[azure]` -- Azure-specific settings
 
 ## VM Initialization
@@ -157,7 +158,7 @@ VM creation follows a two-phase initialization:
    create user, install system packages, add SSH key, install and join Tailscale
 
 2. **Phase B (Setup)** -- over Tailscale SSH: install user packages, run install commands, set
-   shell, generate SSH keypair, register keys with git hosts, sync dotfiles
+   shell, configure git credentials, sync dotfiles
 
 ## Tailscale
 

@@ -37,7 +37,7 @@ def validate_name(name: str) -> None:
 
 # Valid values for enum-like fields
 VALID_PLATFORMS = ("lima", "azure", "wsl2")
-VALID_GIT_HOST_TYPES = ("azdo", "github")
+VALID_GIT_CREDENTIAL_TYPES = ("azdo", "github")
 
 
 class ConfigError(Exception):
@@ -64,7 +64,7 @@ class PathsConfig:
 class DefaultsConfig:
     platform: str | None = None
     vm_host: str | None = None
-    git_hosts: list[str] = field(default_factory=list)
+    git_credentials: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -95,7 +95,7 @@ class WorkspaceTemplate:
 
 
 @dataclass(frozen=True)
-class GitHostConfig:
+class GitCredentialConfig:
     name: str
     type: str
     org: str | None = None
@@ -117,7 +117,7 @@ class Config:
     dotfiles: DotfilesConfig
     vm: VMConfig
     workspace_templates: dict[str, WorkspaceTemplate]
-    git_hosts: dict[str, GitHostConfig]
+    git_credentials: dict[str, GitCredentialConfig]
     azure: AzureConfig | None = None
 
 
@@ -190,10 +190,10 @@ def _load_paths(data: dict[str, object]) -> PathsConfig:
     return PathsConfig(local_workspaces=local_ws, code_workspaces=code_ws)
 
 
-_DEFAULTS_KEYS = {"platform", "vm_host", "git_hosts"}
+_DEFAULTS_KEYS = {"platform", "vm_host", "git_credentials"}
 
 
-def _load_defaults(data: dict[str, object], git_host_names: set[str]) -> DefaultsConfig:
+def _load_defaults(data: dict[str, object], git_credential_names: set[str]) -> DefaultsConfig:
     raw = data.get("defaults", {})
     if not isinstance(raw, dict):
         raise ConfigError("[defaults] must be a table")
@@ -204,17 +204,17 @@ def _load_defaults(data: dict[str, object], git_host_names: set[str]) -> Default
     if platform is not None and platform not in VALID_PLATFORMS:
         raise ConfigError(f"defaults.platform must be one of {VALID_PLATFORMS}, got: {platform}")
 
-    git_hosts_val = raw.get("git_hosts", [])
-    if not isinstance(git_hosts_val, list):
-        raise ConfigError("defaults.git_hosts must be a list")
-    for gh in git_hosts_val:
-        if gh not in git_host_names:
-            raise ConfigError(f"defaults.git_hosts references unknown git host: {gh}")
+    git_creds_val = raw.get("git_credentials", [])
+    if not isinstance(git_creds_val, list):
+        raise ConfigError("defaults.git_credentials must be a list")
+    for gc in git_creds_val:
+        if gc not in git_credential_names:
+            raise ConfigError(f"defaults.git_credentials references unknown git credential: {gc}")
 
     return DefaultsConfig(
         platform=str(platform) if platform is not None else None,
         vm_host=str(raw["vm_host"]) if "vm_host" in raw else None,
-        git_hosts=list(git_hosts_val),
+        git_credentials=list(git_creds_val),
     )
 
 
@@ -298,26 +298,28 @@ def _detect_cycles(templates: dict[str, WorkspaceTemplate]) -> None:
         visit(name)
 
 
-def _load_git_hosts(data: dict[str, object]) -> dict[str, GitHostConfig]:
-    raw = data.get("git_hosts", {})
+def _load_git_credentials(data: dict[str, object]) -> dict[str, GitCredentialConfig]:
+    raw = data.get("git_credentials", {})
     if not isinstance(raw, dict):
-        raise ConfigError("[git_hosts] must be a table")
+        raise ConfigError("[git_credentials] must be a table")
 
-    hosts: dict[str, GitHostConfig] = {}
-    for name, hdata in raw.items():
-        if not isinstance(hdata, dict):
-            raise ConfigError(f"git_hosts.{name} must be a table")
-        host_type = str(_require(hdata, "type", f"git_hosts.{name}"))
-        if host_type not in VALID_GIT_HOST_TYPES:
-            raise ConfigError(f"git_hosts.{name}.type must be one of {VALID_GIT_HOST_TYPES}, got: {host_type}")
-        if host_type == "azdo" and "org" not in hdata:
-            raise ConfigError(f"git_hosts.{name}.org is required for azdo type")
-        hosts[name] = GitHostConfig(
+    creds: dict[str, GitCredentialConfig] = {}
+    for name, cdata in raw.items():
+        if not isinstance(cdata, dict):
+            raise ConfigError(f"git_credentials.{name} must be a table")
+        cred_type = str(_require(cdata, "type", f"git_credentials.{name}"))
+        if cred_type not in VALID_GIT_CREDENTIAL_TYPES:
+            raise ConfigError(
+                f"git_credentials.{name}.type must be one of {VALID_GIT_CREDENTIAL_TYPES}, got: {cred_type}"
+            )
+        if cred_type == "azdo" and "org" not in cdata:
+            raise ConfigError(f"git_credentials.{name}.org is required for azdo type")
+        creds[name] = GitCredentialConfig(
             name=name,
-            type=host_type,
-            org=str(hdata["org"]) if "org" in hdata else None,
+            type=cred_type,
+            org=str(cdata["org"]) if "org" in cdata else None,
         )
-    return hosts
+    return creds
 
 
 def _load_azure(data: dict[str, object]) -> AzureConfig | None:
@@ -336,7 +338,7 @@ def _load_azure(data: dict[str, object]) -> AzureConfig | None:
 
 EXPECTED_TOP_LEVEL_KEYS = {
     "user", "paths", "defaults", "dotfiles", "vm",
-    "workspace_templates", "git_hosts", "azure",
+    "workspace_templates", "git_credentials", "azure",
 }
 
 
@@ -383,15 +385,15 @@ def load_config(path: Path | None = None) -> Config:
 
     _warn_unexpected_top_level_keys(data)
 
-    git_hosts = _load_git_hosts(data)
+    git_credentials = _load_git_credentials(data)
 
     return Config(
         user=_load_user(data),
         paths=_load_paths(data),
-        defaults=_load_defaults(data, set(git_hosts.keys())),
+        defaults=_load_defaults(data, set(git_credentials.keys())),
         dotfiles=_load_dotfiles(data),
         vm=_load_vm_config(data),
         workspace_templates=_load_workspace_templates(data),
-        git_hosts=git_hosts,
+        git_credentials=git_credentials,
         azure=_load_azure(data),
     )
