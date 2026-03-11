@@ -79,8 +79,8 @@ SSH-accessible.
         (`~/.git-credentials`), dotfiles -- tracked by `init_status`
 - [x] Pre-flight auth verification for selected git credential providers (fail-fast)
 - [x] Implement `rejoin_tailscale()` for ephemeral Tailscale node recovery
-- [ ] Initialization must be idempotent -- safe to re-run via `vm reinit`
-- [ ] Write lifecycle events to `vm_events` table for diagnostics
+- [x] Initialization must be idempotent -- safe to re-run via `vm reinit`
+- [x] Write lifecycle events to `vm_events` table for diagnostics
 
 **Definition of done:** A freshly provisioned VM is fully initialized and reachable over Tailscale.
 Git credentials are configured via credential-store. `vm reinit` successfully re-runs initialization
@@ -116,7 +116,8 @@ managed automatically. Install commands run under the user's shell.
 ### 1.8 VM Lifecycle Commands
 
 - [x] Implement `vm create`: orchestrates platform provisioning + initialization
-- [ ] Implement `vm reinit`: re-run initialization on an already-provisioned VM
+- [x] Implement `vm reinit`: re-run initialization on an already-provisioned VM
+- [x] Implement `vm describe`: show VM details, workspaces, and event log
 - [x] Implement `vm list`: query state database, show provisioning_status, init_status, and runtime
       status
 - [x] Implement `vm shell`: SSH into VM home directory
@@ -227,9 +228,9 @@ status serves as a reminder that something was skipped during init. `vm list` sh
 - [x] Update `vm list` to show init status for non-`completed` VMs
 - [x] Update `doctor` to report VMs in `partial` or `failed` state with log paths
 - [x] Guard agentworks commands (workspace/agent ops) against `failed` VMs
-- [ ] Add `vm_events` table for append-only lifecycle event logging
-- [ ] Write events for provisioning and init transitions (start, complete, fail, step completions)
-- [ ] Implement `vm reinit` command: re-run initialization on an already-provisioned VM
+- [x] Add `vm_events` table for append-only lifecycle event logging
+- [x] Write events for provisioning and init transitions (start, complete, fail, step completions)
+- [x] Implement `vm reinit` command: re-run initialization on an already-provisioned VM
 
 **Definition of done:** Non-fatal init failures produce warnings and a `partial` status rather than
 aborting. Fatal failures prompt for deletion or reinit. Init logs are captured and accessible for
