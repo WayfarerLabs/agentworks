@@ -24,7 +24,11 @@ def create_vm_workspace(
     ws_name: str,
     template: ResolvedTemplate,
 ) -> str:
-    """Create a workspace on a VM. Returns the remote workspace path."""
+    """Create a workspace on a VM. Returns the remote workspace path.
+
+    Idempotent: if the workspace directory already exists (e.g. from a
+    previous interrupted attempt), it is removed and recreated.
+    """
     from agentworks.ssh import run as ssh_run
 
     assert vm.tailscale_host is not None
@@ -32,14 +36,20 @@ def create_vm_workspace(
 
     workspace_path = f"/home/{vm.vm_user}/workspaces/{ws_name}"
 
+    # Remove stale directory from a previous interrupted attempt
+    exists = ssh_run(target, f"test -d {workspace_path}", check=False, timeout=10)
+    if exists.ok:
+        typer.echo(f"  Removing stale workspace directory from previous attempt...")
+        ssh_run(target, f"rm -rf {workspace_path}", timeout=30)
+
     # Create directory
-    ssh_run(target, f"mkdir -p {workspace_path}")
+    ssh_run(target, f"mkdir -p {workspace_path}", timeout=10)
 
     # Git clone if repo is set
     if template.repo:
         typer.echo(f"Cloning {template.repo}...")
         try:
-            ssh_run(target, f"git clone {template.repo} {workspace_path}")
+            ssh_run(target, f"git clone {template.repo} {workspace_path}", timeout=300)
         except Exception:
             if template.repo.startswith("git@"):
                 typer.echo(
@@ -62,10 +72,11 @@ def create_vm_workspace(
         tmux_config = generate_config(ws_name, workspace_path)
         write_file(target, f"{workspace_path}/.tmuxinator.yml", tmux_config)
         # Symlink for tmuxinator to find it
-        ssh_run(target, "mkdir -p ~/.config/tmuxinator")
+        ssh_run(target, "mkdir -p ~/.config/tmuxinator", timeout=10)
         ssh_run(
             target,
             f"ln -sf {workspace_path}/.tmuxinator.yml ~/.config/tmuxinator/{ws_name}.yml",
+            timeout=10,
         )
 
     return workspace_path
@@ -110,8 +121,8 @@ def delete_vm_workspace(
     target = ssh_target_for_vm(vm, config)
 
     try:
-        ssh_run(target, f"rm -rf {workspace_path}")
-        ssh_run(target, f"rm -f ~/.config/tmuxinator/{ws_name}.yml", check=False)
+        ssh_run(target, f"rm -rf {workspace_path}", timeout=30)
+        ssh_run(target, f"rm -f ~/.config/tmuxinator/{ws_name}.yml", check=False, timeout=10)
     except SSHError as e:
         typer.echo(f"Warning: remote cleanup failed: {e}", err=True)
 

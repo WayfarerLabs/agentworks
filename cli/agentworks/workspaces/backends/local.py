@@ -22,21 +22,29 @@ def create_local_workspace(
     ws_name: str,
     template: ResolvedTemplate,
 ) -> str:
-    """Create a local workspace. Returns the workspace path."""
+    """Create a local workspace. Returns the workspace path.
+
+    Idempotent: if the workspace directory already exists (e.g. from a
+    previous interrupted attempt), it is removed and recreated.
+    """
     workspace_dir = config.paths.local_workspaces / ws_name
     workspace_path = str(workspace_dir)
 
     if workspace_dir.exists():
-        typer.echo(f"Error: directory already exists: {workspace_path}", err=True)
-        raise typer.Exit(1)
+        typer.echo(f"  Removing stale workspace directory from previous attempt...")
+        shutil.rmtree(workspace_dir)
 
     # Git clone or just create directory
     if template.repo:
         typer.echo(f"Cloning {template.repo}...")
-        result = subprocess.run(
-            ["git", "clone", template.repo, workspace_path],
-            capture_output=True, text=True,
-        )
+        try:
+            result = subprocess.run(
+                ["git", "clone", template.repo, workspace_path],
+                capture_output=True, text=True, timeout=300,
+            )
+        except subprocess.TimeoutExpired:
+            typer.echo("Error: git clone timed out after 5 minutes", err=True)
+            raise typer.Exit(1) from None
         if result.returncode != 0:
             typer.echo(f"Error: git clone failed: {result.stderr.strip()}", err=True)
             if template.repo.startswith("https://"):

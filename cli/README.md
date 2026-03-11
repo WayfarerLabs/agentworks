@@ -99,15 +99,21 @@ Manage virtual machines across Lima (local or remote), Azure, and WSL2.
 | ----------------------------- | ---------------------------------------- |
 | `agentworks vm create`        | Create a new VM (provision + initialize) |
 | `agentworks vm list`          | List VMs with status and resources       |
+| `agentworks vm describe <name>` | Show VM details, workspaces, and event log |
 | `agentworks vm shell <name>`  | SSH into a VM's home directory           |
 | `agentworks vm start <name>`  | Start a stopped VM                       |
 | `agentworks vm stop <name>`   | Stop a running VM                        |
+| `agentworks vm reinit <name>` | Re-run initialization on a provisioned VM |
 | `agentworks vm delete <name>` | Delete a VM and clean up all resources   |
 | `agentworks vm add-git-credential <name> <cred>` | Add or update a git credential |
 
 `vm create` accepts `--name`, `--platform`, `--vm-host`, `--vm-user`, `--cpus`, `--memory`,
 `--disk`, `--azure-vm-size`, `--extra-packages`, and `--git-credentials`. All have sensible defaults
 from config or built-in values.
+
+`vm reinit` re-runs the initialization phase (packages, install commands, shell, git credentials,
+dotfiles) without reprovisioning the VM. Accepts `--git-credentials` to configure credentials during
+reinit.
 
 ### Workspaces
 
@@ -152,13 +158,17 @@ Key sections:
 
 ## VM Initialization
 
-VM creation follows a two-phase initialization:
+VM creation follows a two-phase lifecycle tracked by separate status columns:
 
-1. **Phase A (Bootstrap)** -- over the provisioning transport (Lima shell, SSH, or WSL2 exec):
-   create user, install system packages, add SSH key, install and join Tailscale
+1. **Provisioning** (`provisioning_status`) -- one-time, platform-specific, over the provisioning
+   transport (Lima shell, SSH, or WSL2 exec): create user, install system packages, add SSH key,
+   install and join Tailscale
 
-2. **Phase B (Setup)** -- over Tailscale SSH: install user packages, run install commands, set
-   shell, configure git credentials, sync dotfiles
+2. **Initialization** (`init_status`) -- repeatable via `vm reinit`, over Tailscale SSH: install
+   user packages, run install commands, set shell, configure git credentials, sync dotfiles
+
+Non-fatal initialization failures (packages, dotfiles) produce a `partial` status rather than
+aborting. Fatal failures prompt for deletion or reinit. Use `vm describe` to view the full event log.
 
 ## Tailscale
 
