@@ -206,7 +206,23 @@ def _emit_param_completions(
     # Positional argument completions
     if positional_args:
         param = positional_args[0]
-        if param.dynamic_completer and param.dynamic_completer in DYNAMIC_SNIPPETS:
+        if param.choices:
+            lines.append(f"{indent}# Positional: {param.name}")
+            lines.append(
+                f"{indent}if ($wordToComplete -notlike '-*'"
+                f" -and $tokenCount -eq {token_offset + 1}) {{"
+            )
+            _open_result_array(lines, f"{indent}    ")
+            for choice in param.choices:
+                lines.append(
+                    f"{indent}        [System.Management.Automation.CompletionResult]::new('{choice}',"
+                    f" '{choice}', 'ParameterValue', '{choice}')"
+                )
+            _close_result_array_with_filter(lines, f"{indent}    ")
+            lines.append(f"{indent}    return")
+            lines.append(f"{indent}}}")
+            lines.append("")
+        elif param.dynamic_completer and param.dynamic_completer in DYNAMIC_SNIPPETS:
             snippet = DYNAMIC_SNIPPETS[param.dynamic_completer]
             lines.append(f"{indent}# Positional: {param.name}")
             lines.append(

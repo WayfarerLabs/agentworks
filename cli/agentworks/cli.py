@@ -71,7 +71,7 @@ def _prompt_name(label: str, name: str | None) -> str:
 
 @app.command("completion")
 def completion(
-    shell: Annotated[str, typer.Argument(help="Shell type: bash, zsh, powershell")] = "zsh",
+    shell: Annotated[str, typer.Argument(help="Shell type", click_type=click.Choice(["bash", "zsh", "powershell"]))] = "zsh",
     install: Annotated[bool, typer.Option("--install", help="Install completions to the default location")] = False,
 ) -> None:
     """Output shell completion script (or install it with --install)."""
@@ -234,12 +234,13 @@ def vm_stop(
 def vm_delete(
     name: Annotated[str, typer.Argument(help="VM name")],
     force: Annotated[bool, typer.Option("--force", help="Force delete even with workspaces")] = False,
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip confirmation")] = False,
 ) -> None:
     """Delete a VM and clean up all resources."""
     from agentworks.config import load_config
     from agentworks.vms.manager import delete_vm
 
-    delete_vm(_get_db(), load_config(), name, force=force)
+    delete_vm(_get_db(), load_config(), name, force=force, yes=yes)
 
 
 @vm_app.command("reinit")

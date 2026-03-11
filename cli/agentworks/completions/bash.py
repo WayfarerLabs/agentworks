@@ -168,17 +168,21 @@ def _emit_leaf_completions(
     # Positional argument completions
     if positional_args:
         param = positional_args[0]
-        if (
+        words: str | None = None
+        if param.choices:
+            words = " ".join(param.choices)
+        elif (
             param.dynamic_completer
             and param.dynamic_completer in DYNAMIC_SNIPPETS
         ):
-            snippet = DYNAMIC_SNIPPETS[param.dynamic_completer]
+            words = DYNAMIC_SNIPPETS[param.dynamic_completer]
+        if words:
             lines.append(
                 f'{indent}if [[ $cword -eq {token_offset}'
                 f' && "$cur" != -* ]]; then'
             )
             lines.append(
-                f'{indent}    COMPREPLY=($(compgen -W "{snippet}" -- "$cur"))'
+                f'{indent}    COMPREPLY=($(compgen -W "{words}" -- "$cur"))'
             )
             lines.append(f"{indent}    return")
             lines.append(f"{indent}fi")

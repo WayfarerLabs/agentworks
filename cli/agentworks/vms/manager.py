@@ -218,17 +218,19 @@ def list_vms(db: Database) -> None:
 
     header = (
         f"{'NAME':<20} {'PLATFORM':<10} {'HOST':<15} {'PROV':<12} {'INIT':<12} "
-        f"{'RESOURCES':<15} {'TAILSCALE':<20} {'CREATED'}"
+        f"{'WS':<4} {'RESOURCES':<15} {'TAILSCALE':<20} {'CREATED'}"
     )
     typer.echo(header)
-    typer.echo("-" * 125)
+    typer.echo("-" * 130)
     for vm in vms:
         resources = "-"
         if vm.cpus is not None:
             resources = f"{vm.cpus}c/{vm.memory_gib}G/{vm.disk_gib}G"
+        ws_count = db.count_workspaces_on_vm(vm.name)
         typer.echo(
             f"{vm.name:<20} {vm.platform:<10} {vm.vm_host_name or '-':<15} "
-            f"{vm.provisioning_status:<12} {vm.init_status:<12} {resources:<15} "
+            f"{vm.provisioning_status:<12} {vm.init_status:<12} "
+            f"{ws_count:<4} {resources:<15} "
             f"{vm.tailscale_host or '-':<20} {vm.created_at}"
         )
 
@@ -377,7 +379,9 @@ def stop_vm(db: Database, config: Config, name: str) -> None:
         db.clear_vm_tailscale(name)
 
 
-def delete_vm(db: Database, config: Config, name: str, *, force: bool = False) -> None:
+def delete_vm(
+    db: Database, config: Config, name: str, *, force: bool = False, yes: bool = False,
+) -> None:
     """Delete a VM, cleaning up all associated resources."""
     vm = _require_vm(db, name)
 
@@ -390,6 +394,12 @@ def delete_vm(db: Database, config: Config, name: str, *, force: bool = False) -
             err=True,
         )
         raise typer.Exit(1)
+
+    if not yes and not force:
+        msg = f"Delete VM '{name}'?"
+        if ws_count > 0:
+            msg += f" ({ws_count} workspace(s) will also be deleted)"
+        typer.confirm(msg, abort=True)
 
     # Platform-specific cleanup (also handles Tailscale logout)
     try:
