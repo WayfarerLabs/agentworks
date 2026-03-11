@@ -315,7 +315,7 @@ def _phase_a_bootstrap(
 
     from agentworks.vms.bootstrap_script import generate_bootstrap_script, parse_bootstrap_output
 
-    typer.echo("Phase A: Bootstrap...")
+    typer.echo("Provisioning: bootstrap and Tailscale...")
     db.update_vm_init_status(vm_name, InitStatus.BOOTSTRAPPING)
 
     # Resolve Tailscale auth key
@@ -429,7 +429,7 @@ def _phase_b_setup(
     git_tokens: dict[str, str] | None = None,
 ) -> None:
     """Phase B: Setup (over Tailscale SSH). Non-fatal steps warn and continue."""
-    typer.echo("Phase B: Setup...")
+    typer.echo("Initializing VM...")
     db.update_vm_init_status(vm_name, InitStatus.INITIALIZING)
 
     # Non-fatal: apt packages

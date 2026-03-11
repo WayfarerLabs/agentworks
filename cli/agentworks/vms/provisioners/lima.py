@@ -83,7 +83,7 @@ class LimaProvisioner(VMProvisioner):
     ) -> ProvisionResult:
         if self.is_remote:
             typer.echo(f"Connecting to VM host '{self._vm_host_ssh}'...")
-        typer.echo(f"Creating Lima VM '{vm_name}' ({'remote' if self.is_remote else 'local'})...")
+        typer.echo(f"Provisioning Lima VM '{vm_name}' ({'remote' if self.is_remote else 'local'})...")
         typer.echo(f"  Resources: {cpus} CPUs, {memory} GiB memory, {disk} GiB disk")
 
         rendered = LIMA_TEMPLATE.format(cpus=cpus, memory=memory, disk=disk)
@@ -111,7 +111,7 @@ class LimaProvisioner(VMProvisioner):
             self._run_lima(f"limactl start {vm_name}")
             Path(template_path).unlink()
 
-        typer.echo(f"Lima VM '{vm_name}' created and running")
+        typer.echo(f"  Lima VM '{vm_name}' provisioned.")
 
         if self.is_remote:
             assert self._vm_host_ssh is not None

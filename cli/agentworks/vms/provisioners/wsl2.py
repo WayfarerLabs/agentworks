@@ -177,11 +177,9 @@ class WSL2Provisioner(VMProvisioner):
         self, vm_name: str, config: Config, extra_packages: list[str] | None = None,
         *, vm_user: str = "agentworks",
     ) -> ProvisionResult:
-        typer.echo(f"Creating WSL2 distro '{vm_name}'...")
+        typer.echo(f"Provisioning WSL2 VM '{vm_name}'...")
 
         install_path = f"{WSL_BASE_PATH}\\{vm_name}"
-
-        # Ensure install directory exists
         _powershell(f"New-Item -ItemType Directory -Force -Path '{install_path}'")
 
         # Download Debian rootfs if not cached
@@ -189,20 +187,18 @@ class WSL2Provisioner(VMProvisioner):
         tarball = f"{cache_dir}\\debian-bookworm-{_oci_arch()}-rootfs.tar.gz"
         _powershell(f"New-Item -ItemType Directory -Force -Path '{cache_dir}'")
 
-        # Check cache and download if needed
         check = _powershell(f"Test-Path '{tarball}'").strip()
         if check.lower() != "true":
             _download_debian_rootfs(tarball)
         else:
             typer.echo("  Using cached Debian rootfs.")
 
-        # Import the distro
-        typer.echo("  Importing rootfs into WSL2 (this may take a moment)...")
+        # Import and configure the distro
+        typer.echo("  Importing rootfs into WSL2...")
         _wsl(["--import", vm_name, install_path, tarball])
 
         # The Docker rootfs is minimal. Install packages to bring it up to
-        # parity with the Lima/Azure cloud images so the user experience is
-        # consistent across platforms.
+        # parity with the Lima/Azure cloud images.
         typer.echo("  Installing base packages...")
         _wsl(["--distribution", vm_name, "--user", "root", "--",
               "bash", "-c",
@@ -215,7 +211,7 @@ class WSL2Provisioner(VMProvisioner):
               " less vim-tiny man-db"
               " > /dev/null"])
 
-        # Configure user account
+        # Create user account
         typer.echo(f"  Creating user '{vm_user}'...")
         _wsl(["--distribution", vm_name, "--user", "root", "--",
               "useradd", "-m", "-s", "/bin/bash", vm_user])
@@ -224,13 +220,20 @@ class WSL2Provisioner(VMProvisioner):
         _wsl(["--distribution", vm_name, "--user", "root", "--",
               "bash", "-c", f"echo '{vm_user} ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/{vm_user}"])
 
-        # Set default user in wsl.conf
-        typer.echo(f"  Setting default user to '{vm_user}'...")
+        # Configure wsl.conf: default user + systemd
+        typer.echo("  Enabling systemd...")
         _wsl(["--distribution", vm_name, "--user", "root", "--",
               "bash", "-c",
-              f"printf '[user]\\ndefault={vm_user}\\n' > /etc/wsl.conf"])
+              f"printf '[user]\\ndefault={vm_user}\\n\\n[boot]\\nsystemd=true\\n' > /etc/wsl.conf"])
 
-        typer.echo(f"WSL2 distro '{vm_name}' created")
+        # Restart the distro so systemd takes effect
+        typer.echo("  Restarting distro...")
+        _wsl(["--terminate", vm_name])
+        # Run a command to trigger the distro to start with systemd
+        _wsl(["--distribution", vm_name, "--user", "root", "--",
+              "bash", "-c", "echo ok"])
+
+        typer.echo(f"  WSL2 VM '{vm_name}' provisioned.")
         return ProvisionResult(
             exec_target=ExecTarget(wsl2=WSL2Target(distro_name=vm_name, user=vm_user)),
             wsl_distro_name=vm_name,

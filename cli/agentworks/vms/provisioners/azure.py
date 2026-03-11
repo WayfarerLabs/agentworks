@@ -126,7 +126,7 @@ class AzureProvisioner(VMProvisioner):
         az = config.azure
 
         typer.echo("Connecting to Azure...")
-        typer.echo(f"Creating VM '{vm_name}' in {az.region} (size: {azure_vm_size})...")
+        typer.echo(f"Provisioning Azure VM '{vm_name}' in {az.region} (size: {azure_vm_size})...")
 
         ssh_pub_key = config.user.ssh_public_key.read_text().strip()
         cloud_init = CLOUD_INIT_TEMPLATE.format(
@@ -270,7 +270,7 @@ class AzureProvisioner(VMProvisioner):
             _cleanup_vm_resources(compute, network, az.resource_group, vm_name)
             raise _wrap_azure_error(exc) from exc
 
-        typer.echo(f"Azure VM '{vm_name}' created (IP: {public_ip})")
+        typer.echo(f"  Azure VM '{vm_name}' provisioned (IP: {public_ip}).")
 
         return ProvisionResult(
             exec_target=ExecTarget(
