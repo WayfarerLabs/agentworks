@@ -200,6 +200,12 @@ class WSL2Provisioner(VMProvisioner):
         typer.echo("  Importing rootfs into WSL2 (this may take a moment)...")
         _wsl(["--import", vm_name, install_path, tarball])
 
+        # The Docker rootfs is minimal -- install sudo and passwd before
+        # creating the user account
+        typer.echo("  Installing base packages (sudo, passwd)...")
+        _wsl(["--distribution", vm_name, "--user", "root", "--",
+              "bash", "-c", "apt-get update -qq && apt-get install -y -qq sudo passwd > /dev/null"])
+
         # Configure user account
         typer.echo(f"  Creating user '{vm_user}'...")
         _wsl(["--distribution", vm_name, "--user", "root", "--",
