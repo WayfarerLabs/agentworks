@@ -5,6 +5,7 @@ from __future__ import annotations
 import secrets
 from typing import Annotated
 
+import click
 import typer
 
 from agentworks.db import Database
@@ -156,7 +157,9 @@ def vm_host_remove(
 @vm_app.command("create")
 def vm_create(
     name: Annotated[str | None, typer.Option("--name", help="VM name (prompted if omitted)")] = None,
-    platform: Annotated[str | None, typer.Option("--platform", help="Platform: lima, azure, wsl2")] = None,
+    platform: Annotated[
+        str | None, typer.Option("--platform", help="Platform", click_type=click.Choice(["lima", "azure", "wsl2"]))
+    ] = None,
     vm_host: Annotated[str | None, typer.Option("--vm-host", help="VM host for Lima")] = None,
     extra_packages: Annotated[
         list[str] | None, typer.Option("--extra-packages", help="Additional apt packages")
