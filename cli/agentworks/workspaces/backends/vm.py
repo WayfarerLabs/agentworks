@@ -132,10 +132,9 @@ def generate_code_workspace(
         "folders": [
             {
                 "uri": f"vscode-remote://ssh-remote+{ssh_host}{workspace_path}",
-                "name": ws_name,
             }
         ],
-        "settings": {},
+        "remoteAuthority": f"ssh-remote+{ssh_host}",
     }
 
     code_ws_dir = config.paths.code_workspaces
