@@ -67,25 +67,53 @@ def _download_debian_rootfs(tarball_path: str) -> None:
     with urllib.request.urlopen(_DOCKER_AUTH_URL) as resp:
         token = json.loads(resp.read())["token"]
 
-    # 2. Fetch image manifest to find the rootfs layer digest
+    # 2. Fetch image manifest to find the rootfs layer digest.
+    #    debian:bookworm is multi-arch, so we first get the manifest list
+    #    and resolve the amd64 platform manifest.
     typer.echo("  Fetching Debian bookworm image manifest...")
+    auth_header = {"Authorization": f"Bearer {token}"}
+
     req = urllib.request.Request(
         _DOCKER_MANIFESTS_URL,
         headers={
-            "Authorization": f"Bearer {token}",
-            "Accept": "application/vnd.docker.distribution.manifest.v2+json",
+            **auth_header,
+            "Accept": (
+                "application/vnd.docker.distribution.manifest.list.v2+json, "
+                "application/vnd.docker.distribution.manifest.v2+json"
+            ),
         },
     )
     with urllib.request.urlopen(req) as resp:
         manifest = json.loads(resp.read())
+
+    # If it's a manifest list, resolve the amd64 entry
+    if "manifests" in manifest:
+        amd64 = next(
+            (m for m in manifest["manifests"]
+             if m.get("platform", {}).get("architecture") == "amd64"
+             and m.get("platform", {}).get("os") == "linux"),
+            None,
+        )
+        if amd64 is None:
+            raise RuntimeError("No amd64/linux manifest found for debian:bookworm")
+        platform_digest = amd64["digest"]
+        manifest_url = f"https://registry-1.docker.io/v2/library/debian/manifests/{platform_digest}"
+        req = urllib.request.Request(
+            manifest_url,
+            headers={
+                **auth_header,
+                "Accept": "application/vnd.docker.distribution.manifest.v2+json",
+            },
+        )
+        with urllib.request.urlopen(req) as resp:
+            manifest = json.loads(resp.read())
+
     digest = manifest["layers"][0]["digest"]
     total_bytes = manifest["layers"][0].get("size", 0)
 
     # 3. Download the rootfs layer with progress
     blob_url = f"{_DOCKER_BLOBS_URL}/{digest}"
-    req = urllib.request.Request(
-        blob_url, headers={"Authorization": f"Bearer {token}"},
-    )
+    req = urllib.request.Request(blob_url, headers=auth_header)
     size_mb = f" (~{total_bytes // 1024 // 1024} MB)" if total_bytes else ""
     typer.echo(f"  Downloading Debian rootfs{size_mb}...")
 
