@@ -353,6 +353,10 @@ class Database:
         rows = self._conn.execute("SELECT * FROM vms ORDER BY name").fetchall()
         return [_to_vm(r) for r in rows]
 
+    def update_vm_host_ref(self, name: str, vm_host_name: str | None) -> None:
+        self._conn.execute("UPDATE vms SET vm_host_name = ? WHERE name = ?", (vm_host_name, name))
+        self._conn.commit()
+
     def update_vm_provisioning_status(self, name: str, status: ProvisioningStatus) -> None:
         self._conn.execute("UPDATE vms SET provisioning_status = ? WHERE name = ?", (status.value, name))
         self._conn.commit()

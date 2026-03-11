@@ -52,6 +52,7 @@ class InitLogger:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._buf = io.StringIO()
         self._warnings: list[str] = []
+        self._redact: list[str] = []
         self._write_header()
 
     def _write_header(self) -> None:
@@ -64,9 +65,21 @@ class InitLogger:
         ts = datetime.now(tz=UTC).strftime("%H:%M:%S")
         self._buf.write(f"--- [{ts}] {name} ---\n")
 
+    def add_redaction(self, secret: str) -> None:
+        """Register a secret value to be redacted from all log output."""
+        if secret:
+            self._redact.append(secret)
+
+    def _sanitize(self, text: str) -> str:
+        """Replace any registered secrets with [REDACTED]."""
+        for secret in self._redact:
+            text = text.replace(secret, "[REDACTED]")
+        return text
+
     def output(self, text: str) -> None:
-        """Log command output."""
+        """Log command output (with secrets redacted)."""
         if text:
+            text = self._sanitize(text)
             self._buf.write(text)
             if not text.endswith("\n"):
                 self._buf.write("\n")

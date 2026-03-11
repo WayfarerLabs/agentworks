@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 import typer
 
-from agentworks.config import VALID_PLATFORMS, validate_name
+from agentworks.config import VALID_PLATFORMS, validate_name, validate_vm_user
 from agentworks.db import InitStatus, ProvisioningStatus, VMStatus
 from agentworks.vms.initializer import (
     initialize_vm,
@@ -89,11 +89,12 @@ def create_vm(
         raise typer.Exit(1)
 
     # Resolve resource settings: CLI flag > config > built-in default
-    resolved_cpus = cpus or config.vm.cpus
-    resolved_memory = memory or config.vm.memory
-    resolved_disk = disk or config.vm.disk
+    resolved_cpus = cpus if cpus is not None else config.vm.cpus
+    resolved_memory = memory if memory is not None else config.vm.memory
+    resolved_disk = disk if disk is not None else config.vm.disk
     resolved_azure_size = azure_vm_size or config.vm.azure_vm_size
     resolved_vm_user = vm_user or config.vm.vm_user
+    validate_vm_user(resolved_vm_user)
 
     # Pre-flight checks
     verify_tailscale_available()
@@ -145,8 +146,9 @@ def create_vm(
                 vm_user=resolved_vm_user,
             )
         else:
-            provisioner = get_provisioner(platform, vm_host_ssh)
-            result = provisioner.create(vm_name, config, extra_packages)
+            # Unreachable: platform is validated against VALID_PLATFORMS above
+            msg = f"Unknown platform: {platform}"
+            raise ValueError(msg)
 
         # Update DB with platform-specific metadata
         if result.azure_resource_id:
@@ -496,23 +498,37 @@ def _prompt_failed_vm(db: Database, config: Config, vm_name: str) -> None:
                 err=True,
             )
     elif vm.init_status == InitStatus.FAILED.value:
-        # Init failed but provisioning succeeded -- reinit is an option
-        typer.echo(
-            "\nInitialization failed. You can re-run initialization with 'vm reinit', "
-            "delete the VM, or keep it for troubleshooting.",
-            err=True,
-        )
-        typer.echo("  [r] Reinit  [d] Delete  [k] Keep", err=True)
-        choice = typer.prompt("Choice", default="r").lower()
-        if choice == "d":
-            delete_vm(db, config, vm_name, force=True)
-        elif choice == "r":
-            reinit_vm(db, config, vm_name)
-        else:
+        # Init failed but provisioning succeeded -- reinit may be an option
+        can_reinit = vm.tailscale_host is not None
+        if can_reinit:
             typer.echo(
-                f"VM '{vm_name}' kept. Use 'vm reinit' to retry initialization.",
+                "\nInitialization failed. You can re-run initialization with 'vm reinit', "
+                "delete the VM, or keep it for troubleshooting.",
                 err=True,
             )
+            typer.echo("  [r] Reinit  [d] Delete  [k] Keep", err=True)
+            choice = typer.prompt("Choice", default="r").lower()
+            if choice == "d":
+                delete_vm(db, config, vm_name, force=True)
+            elif choice == "r":
+                reinit_vm(db, config, vm_name)
+            else:
+                typer.echo(
+                    f"VM '{vm_name}' kept. Use 'vm reinit' to retry initialization.",
+                    err=True,
+                )
+        else:
+            typer.echo(
+                "\nInitialization failed and VM has no Tailscale IP (reinit not possible).",
+                err=True,
+            )
+            if typer.confirm("Delete VM?", default=True):
+                delete_vm(db, config, vm_name, force=True)
+            else:
+                typer.echo(
+                    f"VM '{vm_name}' kept in failed state. Only 'vm delete' is supported.",
+                    err=True,
+                )
     else:
         # Post-init failure (e.g. SSH config, IP cleanup) -- VM may be usable
         typer.echo(

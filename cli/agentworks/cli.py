@@ -55,7 +55,7 @@ def _get_db() -> Database:
 
 
 def _generate_name() -> str:
-    return secrets.token_hex(4)[:7]
+    return secrets.token_hex(4)
 
 
 def _prompt_name(label: str, name: str | None) -> str:

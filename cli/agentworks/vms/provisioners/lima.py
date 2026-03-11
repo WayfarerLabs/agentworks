@@ -59,11 +59,11 @@ class LimaProvisioner(VMProvisioner):
             result = ssh_run(target, command, check=check)
             return result.stdout
         else:
+            import shlex
             import subprocess
 
             proc = subprocess.run(
-                command,
-                shell=True,
+                shlex.split(command),
                 capture_output=True,
                 text=True,
             )

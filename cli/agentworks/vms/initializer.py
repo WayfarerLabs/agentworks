@@ -16,6 +16,8 @@ from typing import TYPE_CHECKING
 
 import typer
 
+import shlex
+
 from agentworks.db import InitStatus, ProvisioningStatus
 from agentworks.ssh import ExecTarget, SSHError, SSHTarget, rsync_to
 from agentworks.vms.init_log import InitLogger
@@ -73,7 +75,7 @@ def _run_install_commands(
         truncated = cmd_config.command[:60]
         typer.echo(f"  Install command {i}/{total} ({name}): {truncated}...")
         try:
-            _run_logged(target, f"{shell} -lc '{cmd_config.command}'", logger, timeout=120)
+            _run_logged(target, f"{shlex.quote(shell)} -lc {shlex.quote(cmd_config.command)}", logger, timeout=120)
         except SSHError as e:
             msg = f"install command '{name}' failed: {truncated}... ({e})"
             logger.warning(msg)
@@ -278,6 +280,11 @@ def initialize_vm(
     """
     home = f"/home/{vm_user}"
     logger = InitLogger(vm_name)
+    if tailscale_auth_key:
+        logger.add_redaction(tailscale_auth_key)
+    if git_tokens:
+        for token in git_tokens.values():
+            logger.add_redaction(token)
 
     transport = _describe_transport(exec_target)
 
@@ -487,7 +494,7 @@ def _phase_b_setup(
     if all_apt:
         logger.step("User apt packages")
         typer.echo(f"  Installing {len(all_apt)} apt packages...")
-        apt_str = " ".join(all_apt)
+        apt_str = " ".join(shlex.quote(p) for p in all_apt)
         try:
             _run_logged(ts_target, f"apt-get install -y -qq {apt_str}", logger, as_root=True, timeout=300)
         except SSHError as e:
@@ -501,7 +508,7 @@ def _phase_b_setup(
         typer.echo(f"  Installing {len(config.vm.snap)} snap packages...")
         for pkg in config.vm.snap:
             try:
-                _run_logged(ts_target, f"snap install {pkg}", logger, as_root=True, timeout=120)
+                _run_logged(ts_target, f"snap install {shlex.quote(pkg)}", logger, as_root=True, timeout=120)
             except SSHError as e:
                 msg = f"snap install '{pkg}' failed: {e}"
                 logger.warning(msg)
@@ -517,7 +524,11 @@ def _phase_b_setup(
         # (zsh-newuser-install) from prompting interactively on next login
         if shell == "zsh":
             _run_logged(ts_target, f"touch {home}/.zshrc", logger, check=False)
-        _run_logged(ts_target, f"chsh -s $(which {shell}) {vm_user}", logger, as_root=True)
+        _run_logged(
+            ts_target,
+            f"chsh -s $(which {shlex.quote(shell)}) {shlex.quote(vm_user)}",
+            logger, as_root=True,
+        )
     except SSHError as e:
         msg = f"shell configuration failed: {e}"
         logger.warning(msg)
@@ -544,7 +555,7 @@ def _phase_b_setup(
             rsync_to(ts_target.ssh, config.dotfiles.source, f"{home}/.dotfiles")
             typer.echo(f"  Running dotfiles install: {config.dotfiles.install_cmd}")
             _run_logged(ts_target, f"cd ~/.dotfiles && {config.dotfiles.install_cmd}", logger, timeout=120)
-        except (SSHError, Exception) as e:
+        except Exception as e:
             msg = f"dotfiles install failed: {e}"
             logger.warning(msg)
             typer.echo(f"  Warning: {msg}", err=True)

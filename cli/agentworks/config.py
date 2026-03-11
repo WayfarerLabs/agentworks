@@ -15,6 +15,10 @@ CONFIG_DIR = Path.home() / ".config" / "agentworks"
 CONFIG_PATH = CONFIG_DIR / "config.toml"
 
 NAME_RE = re.compile(r"^[a-z0-9]([a-z0-9_-]*[a-z0-9])?$")
+# Linux username: alphanumeric, hyphens, underscores; 1-32 chars
+VM_USER_RE = re.compile(r"^[a-z_][a-z0-9_-]{0,31}$")
+
+MAX_NAME_LENGTH = 30
 
 
 def validate_name(name: str) -> None:
@@ -22,14 +26,35 @@ def validate_name(name: str) -> None:
 
     Rules: lowercase alphanumeric, hyphens, underscores. Must start and end with
     alphanumeric. No consecutive hyphens (reserved for agent username separator).
+    Max 30 characters (leaves room for agent username derivation within the
+    32-character Linux username limit).
     """
     import typer
 
+    if len(name) > MAX_NAME_LENGTH:
+        typer.echo(
+            f"Error: name '{name}' is too long ({len(name)} chars, max {MAX_NAME_LENGTH}).",
+            err=True,
+        )
+        raise typer.Exit(1)
     if not NAME_RE.match(name) or "--" in name:
         typer.echo(
             f"Error: invalid name '{name}'. Names must be lowercase alphanumeric "
             "with hyphens or underscores, must start and end with a letter or digit, "
             "and cannot contain consecutive hyphens (--).",
+            err=True,
+        )
+        raise typer.Exit(1)
+
+
+def validate_vm_user(vm_user: str) -> None:
+    """Validate a VM username for shell and OS safety."""
+    import typer
+
+    if not VM_USER_RE.match(vm_user):
+        typer.echo(
+            f"Error: invalid vm_user '{vm_user}'. Must be a valid Linux username "
+            "(lowercase, alphanumeric/hyphens/underscores, max 32 chars).",
             err=True,
         )
         raise typer.Exit(1)

@@ -18,14 +18,13 @@ def prompt_secret(label: str, *, hint: str | None = None) -> str:
         click.echo(f"  {hint}", err=True)
 
     while True:
-        value = str(click.prompt(label, err=True, default=""))
+        value = str(click.prompt(label, err=True, default="", hide_input=True))
         if value.strip():
             break
-        # Overwrite the empty prompt and retry
         sys.stderr.write(f"\x1b[1A\r\x1b[2K{label}: (empty, try again)\n")
         sys.stderr.flush()
 
-    # Overwrite the prompt line to mask the value
+    # Confirm entry with masked placeholder
     mask = "*" * min(len(value), 20)
     sys.stderr.write(f"\x1b[1A\r\x1b[2K{label}: {mask}\n")
     sys.stderr.flush()

@@ -85,5 +85,12 @@ def remove_vm_host(db: Database, name: str, *, force: bool = False) -> None:
         )
         raise typer.Exit(1)
 
+    if vm_count > 0:
+        # Nullify vm_host_name on VMs referencing this host to prevent dangling FK
+        for vm in db.list_vms():
+            if vm.vm_host_name == name:
+                db.update_vm_host_ref(vm.name, None)
+        typer.echo(f"Warning: cleared VM host reference on {vm_count} VM(s)", err=True)
+
     db.delete_vm_host(name)
     typer.echo(f"VM host '{name}' removed")

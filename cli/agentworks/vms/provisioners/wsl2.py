@@ -65,20 +65,21 @@ class _StripAuthRedirectHandler(urllib.request.HTTPRedirectHandler):
 _blob_opener = urllib.request.build_opener(_StripAuthRedirectHandler)
 
 
-def _wsl(args: list[str], *, check: bool = True) -> str:
+def _wsl(args: list[str], *, check: bool = True, timeout: int = 300) -> str:
     """Run a wsl.exe command and return stdout."""
-    result = subprocess.run(["wsl", *args], capture_output=True, text=True)
+    result = subprocess.run(["wsl", *args], capture_output=True, text=True, timeout=timeout)
     if check and result.returncode != 0:
         raise RuntimeError(f"wsl command failed: {result.stderr.strip()}")
     return result.stdout
 
 
-def _powershell(script: str, *, check: bool = True) -> str:
+def _powershell(script: str, *, check: bool = True, timeout: int = 120) -> str:
     """Run a PowerShell command and return stdout."""
     result = subprocess.run(
         ["powershell", "-NoProfile", "-Command", script],
         capture_output=True,
         text=True,
+        timeout=timeout,
     )
     if check and result.returncode != 0:
         raise RuntimeError(f"PowerShell failed: {result.stderr.strip()}")
@@ -217,14 +218,18 @@ class WSL2Provisioner(VMProvisioner):
               "useradd", "-m", "-s", "/bin/bash", vm_user])
         _wsl(["--distribution", vm_name, "--user", "root", "--",
               "usermod", "-aG", "sudo", vm_user])
+        import shlex
+
         _wsl(["--distribution", vm_name, "--user", "root", "--",
-              "bash", "-c", f"echo '{vm_user} ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/{vm_user}"])
+              "bash", "-c",
+              f"echo {shlex.quote(f'{vm_user} ALL=(ALL) NOPASSWD:ALL')}"
+              f" > /etc/sudoers.d/{shlex.quote(vm_user)}"])
 
         # Configure wsl.conf: default user + systemd
         typer.echo("  Enabling systemd...")
         _wsl(["--distribution", vm_name, "--user", "root", "--",
               "bash", "-c",
-              f"printf '[user]\\ndefault={vm_user}\\n\\n[boot]\\nsystemd=true\\n' > /etc/wsl.conf"])
+              f"printf '[user]\\ndefault={shlex.quote(vm_user)}\\n\\n[boot]\\nsystemd=true\\n' > /etc/wsl.conf"])
 
         # Restart the distro so systemd takes effect
         typer.echo("  Restarting distro...")
