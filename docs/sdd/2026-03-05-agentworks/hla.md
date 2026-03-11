@@ -76,7 +76,7 @@ All workspace operations go directly from User Workstation to VM over Tailscale.
 | Lima (remote) | Remote SSH Host  | SSH into VM Host, run `limactl` | Direct to VM over Tailscale |
 | Lima (local)  | User Workstation | Local `limactl`                 | Direct to VM over Tailscale |
 | Azure         | _(none)_         | Local `az cli`                  | Direct to VM over Tailscale |
-| WSL2          | _(none)_         | Local PowerShell                | Direct to VM over Tailscale |
+| WSL2          | _(none)_         | Local `wsl` + OCI rootfs import | Direct to VM over Tailscale |
 | Local         | _(none)_         | _(none)_                        | Local filesystem/pushd      |
 
 ---
@@ -106,11 +106,12 @@ workspace file generation, and identity management uniformly.
 Tables:
 
 - `vm_hosts`: name, ssh_host, platform, os
-- `vms`: name, platform, vm_host_name, vm_user, cpus, memory, disk, extra_packages, init_status
-  (lifecycle), tailscale_host, azure_resource_id, created_at. Runtime status
+- `vms`: name, platform, vm_host_name, vm_user, cpus, memory, disk, extra_packages,
+  provisioning_status, init_status, tailscale_host, azure_resource_id, created_at. Runtime status
   (running/stopped/deallocated) is always queried live from the platform, never cached.
 - `workspaces`: name, type (vm/local), vm_name (nullable), template, workspace_path, created_at
 - `agents`: name, workspace_name, linux_user (derived: `<workspace>--<agent>`), created_at
+- `vm_events`: append-only lifecycle event log per VM (provisioning, initialization, errors)
 
 Names are globally unique within each table (vm_hosts, vms, and workspaces are separate namespaces
 -- a VM and a workspace can share the same name). Agent names are unique within their workspace; the
@@ -261,7 +262,23 @@ cleaned up, agent records removed from the database). This happens automatically
 
 ---
 
-## VM Provisioning Flow
+## VM Lifecycle Model
+
+VM creation has two distinct phases with different characteristics:
+
+- **Provisioning** -- platform-specific, one-time, pass/fail. Creates the VM, configures it for
+  basic access, and gets it on Tailscale. If provisioning fails, the VM must be deleted and
+  recreated.
+- **Initialization** -- platform-agnostic, repeatable over Tailscale SSH. Installs user packages,
+  configures dotfiles, writes git credentials, registers install commands, etc. Initialization can
+  be re-run via `vm reinit` without reprovisioning.
+
+This separation means a user who wants to change their dotfiles, add packages, or rotate git
+credentials does not need to destroy and recreate the VM -- they can just reinitialize it. It also
+means provisioning failures (platform-specific and harder to debug) are cleanly separated from
+initialization failures (generic and easier to retry).
+
+### Provisioning Flow
 
 ```text
 User runs: agentworks vm create --platform lima --vm-host mac-studio
@@ -272,23 +289,45 @@ User runs: agentworks vm create --platform lima --vm-host mac-studio
 2. Platform provisioning (platform-specific):
    Lima: SSH to VM Host -> limactl create
    Azure: az vm create with cloud-init
-   WSL2: PowerShell -> import Debian distro
-3. VM initialization -- bootstrap (over provisioning transport):
+   WSL2: import Debian rootfs, configure systemd, install base packages
+3. Bootstrap (over provisioning transport):
    a. Ensure agentworks user exists
    b. apt install system dependencies
    c. Add user's public key to authorized_keys
    d. Tailscale join (using pre-collected auth key)
-   e. Switch to Tailscale SSH for remaining steps
-4. VM initialization -- setup (over Tailscale SSH):
-   a. apt install (user packages + extra packages)
-   b. snap install (if any)
-   c. Set default shell
-   d. Run named install commands under the user's shell (e.g. zsh -lc '...')
-   e. Configure PATH (~/.agentworks-path.sh sourced from ~/.profile)
-   f. Write git credentials to ~/.git-credentials, configure git credential-store
-   g. Copy and install dotfiles (if enabled and present)
-5. Mark VM init complete in state database
+4. Mark provisioning complete, record Tailscale address
+5. Automatically proceed to initialization
 ```
+
+Provisioning is one-time and irreversible. If it fails, the only recovery is `vm delete` and
+recreate.
+
+### Initialization Flow
+
+```text
+Runs automatically after provisioning, or manually via: agentworks vm reinit <name>
+
+All steps run over Tailscale SSH (platform-agnostic):
+  1. apt install (user packages + extra packages)
+  2. snap install (if any)
+  3. Set default shell
+  4. Run named install commands under the user's shell (e.g. zsh -lc '...')
+  5. Configure PATH (~/.agentworks-path.sh sourced from ~/.profile)
+  6. Write git credentials to ~/.git-credentials, configure git credential-store
+  7. Copy and install dotfiles (if enabled and present)
+  8. Mark initialization complete in state database
+```
+
+Initialization is designed to be idempotent and repeatable. `vm reinit` re-runs the full
+initialization sequence on an already-provisioned VM. This is useful for applying config changes,
+recovering from partial failures, or refreshing dotfiles and git credentials.
+
+### Event Log
+
+All lifecycle events are recorded in an append-only `vm_events` table. This provides a full audit
+trail for debugging and diagnostics without cluttering the main status columns. Events include
+provisioning start/complete/fail, initialization start/complete/fail, and individual step
+completions. See [config-db-lld.md](config-db-lld.md) for the schema.
 
 ### Tailscale Rejoin (on vm start)
 
@@ -352,7 +391,7 @@ Local (User Workstation):
 | SSH execution        | Native `ssh` subprocess (respects user's SSH config and agent) |
 | Azure provisioning   | `az cli` subprocess                                            |
 | Lima provisioning    | `limactl` subprocess (local or over SSH)                       |
-| WSL2 provisioning    | PowerShell subprocess                                          |
+| WSL2 provisioning    | `wsl` subprocess + Python OCI registry client                  |
 | GitHub integration   | `gh cli` subprocess or REST API                                |
 | User config format   | TOML (`tomllib` / `tomli-w`)                                   |
 | Runtime state        | SQLite (`sqlite3` stdlib)                                      |
@@ -442,25 +481,27 @@ model and state management in one place.
 ### Git Credential Store over SSH Keys
 
 Git authentication uses `git credential-store` with PATs rather than VM-generated SSH keypairs
-registered with each provider. This eliminates SSH key lifecycle management (generation, registration,
-tracking, removal on delete) and works with any git host that supports HTTPS token auth. Credentials
-are written once during VM init and can be added/rotated via `vm add-git-credential`.
+registered with each provider. This eliminates SSH key lifecycle management (generation,
+registration, tracking, removal on delete) and works with any git host that supports HTTPS token
+auth. Credentials are written once during VM init and can be added/rotated via
+`vm add-git-credential`.
 
 ### Named Install Commands
 
 Install commands are defined as named top-level config sections (`[install_commands.*]`) with
-`command` and `path` fields, rather than bare command strings. `vm.config.install_commands` references
-these by name. This makes install commands reusable across VM templates (future) and agent templates
-(future). PATH additions from `path` fields are accumulated and written to `~/.agentworks-path.sh`,
-which is sourced from `~/.profile`. Install commands run under the user's configured shell (e.g.
-`zsh -lc '...'`) so that installers write to the correct rc file.
+`command` and `path` fields, rather than bare command strings. `vm.config.install_commands`
+references these by name. This makes install commands reusable across VM templates (future) and
+agent templates (future). PATH additions from `path` fields are accumulated and written to
+`~/.agentworks-path.sh`, which is sourced from `~/.profile`. Install commands run under the user's
+configured shell (e.g. `zsh -lc '...'`) so that installers write to the correct rc file.
 
 ### Open Questions
 
-**Agent template compatibility with VM/workspace templates.** Agent templates (future) will reference
-install commands from the same `[install_commands.*]` pool. Should an agent template only be usable
-on VMs that have its required install commands already run? Should there be explicit compatibility
-declarations between agent templates and VM templates, or is this left to the user to manage?
+**Agent template compatibility with VM/workspace templates.** Agent templates (future) will
+reference install commands from the same `[install_commands.*]` pool. Should an agent template only
+be usable on VMs that have its required install commands already run? Should there be explicit
+compatibility declarations between agent templates and VM templates, or is this left to the user to
+manage?
 
 ### Provisioning Transport Reuse
 

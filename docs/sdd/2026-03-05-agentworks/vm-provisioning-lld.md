@@ -43,7 +43,8 @@ Tailscale address after init completes.
 
 `VMStatus` is an enum: `running`, `stopped`, `deallocated` (Azure-specific), `unknown`. This
 represents the live runtime status queried from the platform -- it is never cached in the database.
-See the VM Status Model in config-db-lld.md for how this interacts with the persisted `init_status`.
+See the VM Status Model in config-db-lld.md for how this interacts with the persisted
+`provisioning_status` and `init_status`.
 
 ---
 
@@ -243,6 +244,15 @@ After platform provisioning returns an SSH target (or WSL2 exec target), the ini
 uniform setup sequence. This is platform-agnostic -- the initializer does not know or care which
 provisioner created the VM.
 
+VM creation has two distinct phases tracked by separate DB columns:
+
+- **Provisioning** (`provisioning_status`): platform-specific, one-time, pass/fail. Covers platform
+  provisioning + bootstrap (steps through Tailscale join). Irreversible -- if it fails, the VM must
+  be deleted and recreated.
+- **Initialization** (`init_status`): platform-agnostic, repeatable. Covers the setup phase (user
+  packages, install commands, git credentials, dotfiles). Can be re-run via `vm reinit` without
+  reprovisioning.
+
 ### Provisioning Transport
 
 The provisioning transport is the mechanism used to reach the VM before Tailscale is available:
@@ -285,12 +295,13 @@ This happens before any VM is created, so the user does not end up with a half-p
 Initialization is split into two phases: bootstrap (over provisioning transport) and setup (over
 Tailscale SSH).
 
-#### Phase A: Bootstrap (over provisioning transport)
+#### Phase A: Bootstrap / Provisioning (over provisioning transport)
 
-Sets `init_status = "bootstrapping"` at start.
+Sets `provisioning_status = "in_progress"` at start. On completion, sets
+`provisioning_status = "complete"`. On failure, sets `provisioning_status = "failed"`.
 
 ```text
- 1. Set init_status = "bootstrapping"
+ 1. Set provisioning_status = "in_progress"
  2. Ensure the agentworks user exists:
       id agentworks || useradd -m -s /bin/bash agentworks
       usermod -aG sudo agentworks
@@ -306,48 +317,50 @@ Sets `init_status = "bootstrapping"` at start.
  7. tailscale up --auth-key <key>
     (WSL2: add --userspace-networking to avoid conflict with host Tailscale.)
  8. Read Tailscale IP: tailscale ip -4
- 9. Update VM record: tailscale_host, init_status = "tailscale_up"
+ 9. Update VM record: tailscale_host, provisioning_status = "complete"
 ```
 
-#### Phase B: Setup (over Tailscale SSH as agentworks user)
+#### Phase B: Initialization (over Tailscale SSH as agentworks user)
 
 The initializer switches to the Tailscale SSH target for all remaining steps. This provides direct
 access from the User Workstation and enables file transfer (rsync) that may not be available over
 the provisioning transport.
 
-Sets `init_status = "initializing"` at start.
+This phase runs automatically after provisioning, or manually via `vm reinit`. It is designed to be
+idempotent and repeatable. Sets `init_status = "in_progress"` at start.
 
 ```text
-10. Set init_status = "initializing"
+10. Set init_status = "in_progress"
 11. apt-get install -y <user_apt_packages + extra_packages>
 12. snap install <snap_packages>  (if any)
-13. For each command in install_commands:
-      Execute command as the agentworks user via: su - agentworks -c '<command>'
-14. chsh -s $(which <shell>) agentworks
-15. su - agentworks -c 'ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -N ""'
-16. Read /home/agentworks/.ssh/id_ed25519.pub
-17. For each provider in selected_git_hosts:
-      remote_key_id = provider.register_key(vm_name, public_key)
-      db.insert_vm_git_host_key(vm_name, provider_name, remote_key_id)
-18. If dotfiles.enabled and dotfiles.source (default: ~/.dotfiles) exists on User Workstation:
+13. chsh -s $(which <shell>) agentworks
+14. For each command in install_commands:
+      Execute command as the agentworks user under their shell (e.g. zsh -lc '...')
+15. Configure PATH (~/.agentworks-path.sh sourced from ~/.profile)
+16. Write git credentials to ~/.git-credentials, configure git credential-store
+17. If dotfiles.enabled and dotfiles.source (default: ~/.dotfiles) exists on User Workstation:
       a. rsync <dotfiles.source> to /home/agentworks/.dotfiles on VM
       b. cd /home/agentworks/.dotfiles && <install_cmd> (as agentworks user)
-19. Set init_status = "complete"
+18. Set init_status = "complete" (or "partial" if non-fatal steps had warnings)
 ```
 
 ### Error Handling
 
-Error handling depends on the step type:
+Error handling depends on the phase and step type:
 
-- **Install commands** (step 13): if a command fails, the initializer logs the error and
-  **continues** to the next install command. This is intentional -- install commands are often
-  independent, and a failure in one should not block the rest of initialization.
-- **All other steps**: if a step fails, the initializer **stops** immediately. It prints a clear
-  error message identifying the failed step and leaves the VM in its current state (no rollback).
+**Provisioning phase (Phase A)**: all steps are fatal. If any step fails, the provisioner sets
+`provisioning_status = "failed"` and stops. The only recovery is `vm delete` and recreate.
 
-In both cases, the VM is recorded in the state database with `init_status = "failed"`. The user can
-then SSH into the VM manually to debug, or delete it and try again. Partial initialization is better
-than silent cleanup that hides the failure.
+**Initialization phase (Phase B)**: steps are classified as fatal or non-fatal:
+
+- **Fatal steps** (abort on failure): apt system packages, shell configuration. If these fail, the
+  VM is not usable and `init_status` is set to `failed`. The user can retry via `vm reinit`.
+- **Non-fatal steps** (warn and continue): install commands, snap packages, git credential setup,
+  dotfiles. If these fail, the initializer logs the error and continues. On completion with
+  warnings, `init_status` is set to `partial` rather than `complete`.
+
+VMs in `failed` init state can be retried via `vm reinit` (since provisioning succeeded). VMs in
+`partial` state are fully usable -- the status serves as a reminder that something was skipped.
 
 ### Install Command Execution
 

@@ -157,7 +157,8 @@ automatically on first use. Schema migrations are handled via a simple version t
 ```text
 vm_hosts 1──* vms 1──* workspaces
                 |
-                └──* vm_git_host_keys
+                ├──* vm_git_host_keys
+                └──* vm_events
 
 (workspaces with vm_name = NULL are local workspaces)
 ```
@@ -197,21 +198,21 @@ Agentworks-managed virtual machines.
 
 ```sql
 CREATE TABLE vms (
-    name              TEXT PRIMARY KEY,              -- user-provided or auto-generated name
-    platform          TEXT NOT NULL,                 -- "lima", "azure", "wsl2"
-    vm_host_name      TEXT,                          -- FK to vm_hosts (NULL for azure, wsl2)
-    vm_user           TEXT NOT NULL DEFAULT 'agentworks', -- VM user account name
-    cpus              INTEGER,                       -- number of vCPUs (from config or --cpus)
-    memory            TEXT,                          -- memory size (from config or --memory)
-    disk              TEXT,                          -- disk size (from config or --disk)
-    extra_packages    TEXT,                          -- JSON array of extra apt packages from --extra-packages
-    init_status       TEXT NOT NULL DEFAULT 'pending', -- see VM Status Model below
-    ssh_public_key    TEXT,                          -- generated ed25519 public key (set after init)
-    tailscale_host    TEXT,                          -- Tailscale hostname/IP (set after init, nullable for rejoin)
-    azure_resource_id TEXT,                          -- Azure resource ID (azure platform only)
-    wsl_distro_name   TEXT,                          -- WSL2 distro name (wsl2 platform only)
-    created_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
-    last_seen_at      TEXT,                          -- updated on successful SSH connection
+    name                TEXT PRIMARY KEY,              -- user-provided or auto-generated name
+    platform            TEXT NOT NULL,                 -- "lima", "azure", "wsl2"
+    vm_host_name        TEXT,                          -- FK to vm_hosts (NULL for azure, wsl2)
+    vm_user             TEXT NOT NULL DEFAULT 'agentworks', -- VM user account name
+    cpus                INTEGER,                       -- number of vCPUs (from config or --cpus)
+    memory              TEXT,                          -- memory size (from config or --memory)
+    disk                TEXT,                          -- disk size (from config or --disk)
+    extra_packages      TEXT,                          -- JSON array of extra apt packages from --extra-packages
+    provisioning_status TEXT NOT NULL DEFAULT 'pending', -- see VM Status Model below
+    init_status         TEXT NOT NULL DEFAULT 'pending', -- see VM Status Model below
+    tailscale_host      TEXT,                          -- Tailscale hostname/IP (set after provisioning, nullable for rejoin)
+    azure_resource_id   TEXT,                          -- Azure resource ID (azure platform only)
+    wsl_distro_name     TEXT,                          -- WSL2 distro name (wsl2 platform only)
+    created_at          TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    last_seen_at        TEXT,                          -- updated on successful SSH connection
 
     FOREIGN KEY (vm_host_name) REFERENCES vm_hosts(name)
 );
@@ -256,6 +257,43 @@ CREATE TABLE vm_git_host_keys (
 );
 ```
 
+#### vm_events
+
+Append-only lifecycle event log. Records every significant state transition and operation for
+diagnostics and debugging. Events are never updated or deleted -- the table is insert-only. This
+provides a full audit trail without cluttering the main status columns on the `vms` table.
+
+```sql
+CREATE TABLE vm_events (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    vm_name    TEXT NOT NULL,                  -- FK to vms
+    event      TEXT NOT NULL,                  -- event type (see below)
+    detail     TEXT,                           -- optional human-readable detail or error message
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+
+    FOREIGN KEY (vm_name) REFERENCES vms(name)
+);
+
+CREATE INDEX idx_vm_events_vm_name ON vm_events(vm_name);
+```
+
+Event types:
+
+| Event                   | Detail                                              |
+| ----------------------- | --------------------------------------------------- |
+| `provisioning_started`  | Platform name                                       |
+| `provisioning_complete` | Tailscale address                                   |
+| `provisioning_failed`   | Error message                                       |
+| `init_started`          | "auto" (after provisioning) or "reinit" (manual)    |
+| `init_step_complete`    | Step name (e.g. "apt_install", "dotfiles", "shell") |
+| `init_complete`         | _(none)_                                            |
+| `init_partial`          | Summary of warnings from non-fatal step failures    |
+| `init_failed`           | Error message and step name                         |
+
+The event log is purely diagnostic. No business logic depends on it -- the `provisioning_status` and
+`init_status` columns on `vms` are the source of truth for current state. The event log answers
+"what happened and when?" for debugging failed or slow operations.
+
 ### Constraints and Invariants
 
 - Names are globally unique within each table -- vm_hosts, vms, and workspaces are separate
@@ -263,8 +301,8 @@ CREATE TABLE vm_git_host_keys (
 - Names must match `^[a-z0-9]([a-z0-9_-]*[a-z0-9])?$` with no consecutive hyphens (validated at the
   application level before insert)
 - `vm_git_host_keys` enforces one key per provider per VM (UNIQUE constraint)
-- `vms.init_status` must be one of: `pending`, `bootstrapping`, `tailscale_up`, `initializing`,
-  `complete`, `failed`
+- `vms.provisioning_status` must be one of: `pending`, `in_progress`, `complete`, `failed`
+- `vms.init_status` must be one of: `pending`, `in_progress`, `complete`, `partial`, `failed`
 - `workspaces.vm_name` is NULL for local workspaces, NOT NULL for VM workspaces
 - `workspaces.type` must be consistent with `vm_name`: type "local" requires vm_name NULL, type "vm"
   requires vm_name NOT NULL
@@ -285,23 +323,39 @@ this?" to help users identify stale resources.
 
 ### VM Status Model
 
-VMs have two independent status dimensions:
+VMs have three independent status dimensions:
 
-**`init_status` (persisted in DB)** -- tracks the initialization lifecycle. This is set by the
-initializer and never goes backwards:
+**`provisioning_status` (persisted in DB)** -- tracks whether the VM has been successfully
+provisioned. This is a one-time pass/fail gate:
 
-| Status          | Meaning                                                                     |
-| --------------- | --------------------------------------------------------------------------- |
-| `pending`       | VM record created, platform provisioning in progress or not yet started     |
-| `bootstrapping` | Phase A of init: user creation, system packages, SSH key setup              |
-| `tailscale_up`  | Tailscale is connected, VM is directly reachable, but setup is not complete |
-| `initializing`  | Phase B of init: user packages, install commands, dotfiles, git host keys   |
-| `complete`      | Fully initialized and ready for workspaces                                  |
-| `failed`        | Initialization failed at some step (check logs for details)                 |
+| Status        | Meaning                                                       |
+| ------------- | ------------------------------------------------------------- |
+| `pending`     | VM record created, provisioning not yet started               |
+| `in_progress` | Platform provisioning and bootstrap are running               |
+| `complete`    | VM is provisioned, on Tailscale, and ready for initialization |
+| `failed`      | Provisioning failed -- VM must be deleted and recreated       |
 
-The `tailscale_up` state is particularly important -- it means the VM has a working Tailscale
-address and can be reached directly, but user packages, dotfiles, and git host keys are not yet
-configured. Commands should not create workspaces on a VM that is not `complete`.
+Provisioning is irreversible. Once `complete`, it never changes. If `failed`, the only recovery is
+`vm delete` and recreate.
+
+**`init_status` (persisted in DB)** -- tracks the most recent initialization attempt. Unlike
+provisioning, this can be re-run:
+
+| Status        | Meaning                                                                |
+| ------------- | ---------------------------------------------------------------------- |
+| `pending`     | Not yet initialized (provisioning just completed, or reinit requested) |
+| `in_progress` | Initialization is running                                              |
+| `complete`    | Fully initialized and ready for workspaces                             |
+| `partial`     | Core succeeded but one or more non-fatal steps had warnings            |
+| `failed`      | Fatal initialization step failed                                       |
+
+On `vm reinit`, the `init_status` is reset to `pending` and the full initialization sequence runs
+again. This means `init_status` reflects the state of the _last_ attempt, not a cumulative history.
+The `vm_events` table provides the full history.
+
+VMs in `partial` state are fully usable -- workspace and agent operations work normally. The status
+serves as a reminder that something was skipped during init. VMs in `failed` state are unusable from
+an Agentworks perspective -- only `vm delete` and `vm reinit` are supported.
 
 **Runtime status (queried live from platform)** -- the current power state of the VM. This is
 **never cached** in the database because it can change outside of Agentworks (manual stops, Azure
@@ -317,17 +371,20 @@ which returns one of:
 
 **Command behavior based on status:**
 
-Commands check both dimensions before proceeding:
+Commands check all three dimensions as appropriate:
 
-- `workspace create`: requires `init_status = "complete"` and runtime `running`. If
-  stopped/deallocated, auto-starts and waits. If init incomplete, errors with guidance (e.g. "VM
-  initialization is not complete. Run `vm delete` and recreate, or SSH in manually to debug.").
+- `workspace create`: requires `provisioning_status = "complete"`, `init_status` in (`complete`,
+  `partial`), and runtime `running`. If stopped/deallocated, auto-starts and waits. If provisioning
+  incomplete, errors with guidance. If init incomplete, suggests `vm reinit`.
 - `workspace shell`: same checks as `workspace create`. Auto-starts stopped VMs.
-- `vm start`: queries platform status, starts if not already running. Works regardless of
-  `init_status`.
-- `vm stop`: queries platform status, stops if running. Works regardless of `init_status`.
-- `vm delete`: works regardless of both statuses. Cleans up what it can.
-- `vm list`: shows both `init_status` (from DB) and runtime status (live query) in output.
+- `vm reinit`: requires `provisioning_status = "complete"`. Re-runs initialization regardless of
+  current `init_status`.
+- `vm start`: queries platform status, starts if not already running. Works regardless of other
+  statuses.
+- `vm stop`: queries platform status, stops if running. Works regardless of other statuses.
+- `vm delete`: works regardless of all statuses. Cleans up what it can.
+- `vm list`: shows `provisioning_status`, `init_status` (from DB), and runtime status (live query)
+  in output.
 
 ### Migration Strategy
 

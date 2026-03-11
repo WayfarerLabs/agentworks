@@ -67,21 +67,24 @@ SSH-accessible.
 
 ### 1.6 VM Initialization
 
-- [x] Implement `initializer.py`: uniform post-provisioning setup over SSH (tracks `init_status` in
-      DB)
+- [x] Implement `initializer.py`: uniform post-provisioning setup over Tailscale SSH (tracks
+      `provisioning_status` and `init_status` in DB)
 - [x] Collect secrets upfront: Tailscale auth key and git credential tokens (prompted or from env
       vars `TAILSCALE_AUTH_KEY`, `GIT_CREDENTIALS_*`)
 - [x] Steps (Tailscale-first approach):
-  - [x] Bootstrap (over provisioning transport): ensure user, apt system packages, add SSH key,
-        Tailscale join
-  - [x] Setup (over Tailscale SSH): apt user packages, snap, set shell, run named install commands
-        under user's shell, configure PATH (`~/.agentworks-path.sh`), write git credentials
-        (`~/.git-credentials`), dotfiles
+  - [x] Bootstrap/provisioning (over provisioning transport): ensure user, apt system packages, add
+        SSH key, Tailscale join -- tracked by `provisioning_status`
+  - [x] Initialization (over Tailscale SSH): apt user packages, snap, set shell, run named install
+        commands under user's shell, configure PATH (`~/.agentworks-path.sh`), write git credentials
+        (`~/.git-credentials`), dotfiles -- tracked by `init_status`
 - [x] Pre-flight auth verification for selected git credential providers (fail-fast)
 - [x] Implement `rejoin_tailscale()` for ephemeral Tailscale node recovery
+- [ ] Initialization must be idempotent -- safe to re-run via `vm reinit`
+- [ ] Write lifecycle events to `vm_events` table for diagnostics
 
 **Definition of done:** A freshly provisioned VM is fully initialized and reachable over Tailscale.
-Git credentials are configured via credential-store.
+Git credentials are configured via credential-store. `vm reinit` successfully re-runs initialization
+on an already-initialized VM.
 
 ### 1.7 Git Credentials
 
@@ -113,13 +116,15 @@ managed automatically. Install commands run under the user's shell.
 ### 1.8 VM Lifecycle Commands
 
 - [x] Implement `vm create`: orchestrates platform provisioning + initialization
-- [x] Implement `vm list`: query state database
+- [ ] Implement `vm reinit`: re-run initialization on an already-provisioned VM
+- [x] Implement `vm list`: query state database, show provisioning_status, init_status, and runtime
+      status
 - [x] Implement `vm shell`: SSH into VM home directory
 - [x] Implement `vm start`, `vm stop`: platform-specific with ephemeral Tailscale handling
 - [x] Implement `vm delete`: stop VM, platform-specific cleanup, remove from state database
 
 **Definition of done:** Full VM lifecycle works end-to-end on at least one platform. Can create,
-list, start, stop, delete.
+list, start, stop, reinit, delete.
 
 ### 1.9 Workspace Templates
 
@@ -173,24 +178,28 @@ troubleshooting, and enforce clear states for failed VMs.
 - **Non-fatal steps** (warn and continue): apt packages, snap packages, install commands, shell
   configuration, git credential setup, dotfiles. These can fail without making the VM unusable.
 
-#### Init statuses
+#### Status columns
 
-- `not_started` -- provisioned, not yet initialized
-- `in_progress` -- currently running
-- `completed` -- clean run, everything succeeded
-- `partial` -- core succeeded, one or more non-fatal steps had warnings
-- `failed` -- fatal step failed
+VM lifecycle is tracked by two separate DB columns:
+
+- `provisioning_status`: `pending`, `in_progress`, `complete`, `failed` -- one-time pass/fail for
+  platform provisioning and bootstrap
+- `init_status`: `pending`, `in_progress`, `complete`, `partial`, `failed` -- tracks the most recent
+  initialization attempt, repeatable via `vm reinit`
 
 #### Failed VM handling
 
-VMs in `failed` state are unusable from an agentworks perspective. The only supported operation is
-`vm delete`. On fatal init failure, prompt the user:
+VMs with `provisioning_status = "failed"` are unusable. The only supported operation is `vm delete`.
+On fatal provisioning failure, prompt the user:
 
-> Init failed. Delete VM? You can keep it for manual troubleshooting, but agentworks cannot manage
-> it. [Y/n]
+> Provisioning failed. Delete VM? You can keep it for manual troubleshooting, but agentworks cannot
+> manage it. [Y/n]
 
 Default is yes (delete). If the user keeps it, all agentworks commands except `vm delete` refuse to
 operate on it with a clear message pointing at the init log.
+
+VMs with `init_status = "failed"` can be retried via `vm reinit` (since provisioning succeeded). On
+fatal init failure, prompt the user to either reinit or delete.
 
 #### Partial VM handling
 
@@ -208,8 +217,8 @@ status serves as a reminder that something was skipped during init. `vm list` sh
 
 #### Tasks
 
-- [x] Add `partial` to `init_status` enum (currently: `not_started`, `in_progress`, `completed`,
-      `failed`)
+- [x] Split single `init_status` into `provisioning_status` and `init_status` columns
+- [x] Add `partial` to `init_status` enum
 - [x] Classify init steps as fatal vs non-fatal in `initializer.py`
 - [x] Wrap non-fatal steps in try/except, collect warnings, continue on failure
 - [x] Implement init log writer (structured output with step headers and timestamps)
@@ -218,10 +227,14 @@ status serves as a reminder that something was skipped during init. `vm list` sh
 - [x] Update `vm list` to show init status for non-`completed` VMs
 - [x] Update `doctor` to report VMs in `partial` or `failed` state with log paths
 - [x] Guard agentworks commands (workspace/agent ops) against `failed` VMs
+- [ ] Add `vm_events` table for append-only lifecycle event logging
+- [ ] Write events for provisioning and init transitions (start, complete, fail, step completions)
+- [ ] Implement `vm reinit` command: re-run initialization on an already-provisioned VM
 
 **Definition of done:** Non-fatal init failures produce warnings and a `partial` status rather than
-aborting. Fatal failures prompt for deletion. Init logs are captured and accessible for
-troubleshooting.
+aborting. Fatal failures prompt for deletion or reinit. Init logs are captured and accessible for
+troubleshooting. `vm reinit` re-runs initialization on already-provisioned VMs. Lifecycle events are
+recorded in the `vm_events` table.
 
 ### 1.13 End-to-End Testing
 
@@ -372,8 +385,8 @@ These items have architectural room in the current design but are not scheduled 
   this concept. Full plugins would go further with structured, version-aware building blocks (e.g.
   `install.bun` installs bun, writes `.bun-version`, and verifies the installation)
 - **Agent install commands**: agent templates will reference install commands from the same
-  `[install_commands.*]` pool. Open question: should agent templates declare compatibility with
-  VM templates?
+  `[install_commands.*]` pool. Open question: should agent templates declare compatibility with VM
+  templates?
 - **Non-VM Workspace Hosts**: Kubernetes StatefulSet pods as Workspace Hosts (`--platform k8s`),
   and/or container-based workspaces on existing VMs. When non-VM types ship, the `vm` CLI command
   group may be generalized to `host` or similar.

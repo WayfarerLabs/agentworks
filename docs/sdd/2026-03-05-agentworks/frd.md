@@ -394,10 +394,10 @@ The steps are:
    installers write to the correct rc file. Install commands are defined as named sections
    (`[install_commands.*]`) with `command` and `path` fields. `vm.config.install_commands`
    references them by name.
-5. Configure PATH: accumulate `path` values from install commands into
-   `~/.agentworks-path.sh`, sourced from `~/.profile`
-6. Write git credentials to `~/.git-credentials` and configure `git credential-store` globally
-   (see Git Credentials below)
+5. Configure PATH: accumulate `path` values from install commands into `~/.agentworks-path.sh`,
+   sourced from `~/.profile`
+6. Write git credentials to `~/.git-credentials` and configure `git credential-store` globally (see
+   Git Credentials below)
 7. If dotfiles enabled and `dotfiles.source` (default: `~/.dotfiles`) exists on the User
    Workstation: rsync to VM, run `install_cmd` if present or auto-detect `install.sh`
 8. Mark VM `init_status = "complete"`
@@ -418,6 +418,7 @@ In the future we may want to add support for things like:
 agentworks vm create [--platform lima|azure|wsl2] [--vm-host <name>] [--name <name>] \
   [--extra-packages pkg1,pkg2] [--git-credentials azdo,github] \
   [--cpus N] [--memory SIZE] [--disk SIZE] [--vm-user USER]
+agentworks vm reinit <name>
 agentworks vm list
 agentworks vm shell <name>
 agentworks vm start <name>
@@ -431,27 +432,34 @@ command for debugging and inspection -- not for workspace-level work.
 
 ### VM Status Model
 
-VMs have two independent status dimensions:
+VMs have three independent status dimensions:
 
-- **`init_status`** (persisted in DB): tracks the initialization lifecycle -- `pending`,
-  `bootstrapping`, `tailscale_up`, `initializing`, `complete`, `failed`. Only VMs with
-  `init_status = "complete"` are eligible for workspace operations. The `tailscale_up` state
-  indicates the VM is directly reachable but not yet fully configured.
+- **`provisioning_status`** (persisted in DB): tracks whether the VM has been successfully
+  provisioned -- `pending`, `in_progress`, `complete`, `failed`. Provisioning is one-time and
+  irreversible. If `failed`, the only recovery is `vm delete` and recreate.
+- **`init_status`** (persisted in DB): tracks the most recent initialization attempt -- `pending`,
+  `in_progress`, `complete`, `partial`, `failed`. Unlike provisioning, initialization can be re-run
+  via `vm reinit`. VMs in `partial` state are fully usable (non-fatal steps had warnings). VMs in
+  `failed` state can be retried via `vm reinit`.
 - **Runtime status** (queried live from the platform): the current power state -- `running`,
   `stopped`, `deallocated`, `unknown`. This is **never cached** in the database because it can
   change outside of Agentworks (manual stops, Azure auto-deallocate, host reboots).
 
-Commands check both dimensions:
+Commands check all three dimensions:
 
-- `workspace create` and `workspace shell` require `init_status = "complete"`. If the VM is stopped,
-  they auto-start and wait. If init is incomplete, they error with guidance.
-- `vm start`, `vm stop`, and `vm delete` work regardless of `init_status`.
-- `vm list` shows both `init_status` and live runtime status.
+- `workspace create` and `workspace shell` require `provisioning_status = "complete"` and
+  `init_status` in (`complete`, `partial`). If the VM is stopped, they auto-start and wait. If
+  provisioning is incomplete, they error with guidance. If init is incomplete, they suggest
+  `vm reinit`.
+- `vm reinit` requires `provisioning_status = "complete"`. Re-runs initialization regardless of
+  current `init_status`.
+- `vm start`, `vm stop`, and `vm delete` work regardless of other statuses.
+- `vm list` shows `provisioning_status`, `init_status`, and live runtime status.
 
 `vm delete` refuses to delete a VM that still has workspaces. The user must delete the workspaces
 first (or use `--force` to cascade-delete all workspaces on the VM). If the VM is unreachable (e.g.
-VM Host is down), database cleanup still proceeds -- only the platform-specific VM cleanup is skipped
-with a warning.
+VM Host is down), database cleanup still proceeds -- only the platform-specific VM cleanup is
+skipped with a warning.
 
 ---
 
@@ -648,8 +656,8 @@ tokens (PATs). No SSH keys are generated or registered -- all git access uses HT
 
 Tokens are collected upfront before provisioning begins. Each configured provider is either prompted
 interactively or read from a `GIT_CREDENTIALS_<NAME>` environment variable (e.g.
-`GIT_CREDENTIALS_AZDO`, `GIT_CREDENTIALS_GITHUB`). When an env var is present, the prompt is
-skipped with a console message.
+`GIT_CREDENTIALS_AZDO`, `GIT_CREDENTIALS_GITHUB`). When an env var is present, the prompt is skipped
+with a console message.
 
 Providers are configured in the user config under `[git_credentials.<name>]`.
 
@@ -820,11 +828,11 @@ commands? Should there be explicit compatibility declarations, or is this left t
 New Workspace Host types beyond VMs:
 
 - **Kubernetes**: a StatefulSet pod as a Workspace Host (`--platform k8s`). The pod is initialized
-  like a VM (packages, dotfiles, git credentials) and hosts workspaces on its
-  persistent volume. The K8s cluster serves a similar role to a VM Host (provisioning target).
-  Tailscale connectivity via the Tailscale Kubernetes operator (sidecar or per-pod annotation). This
-  maps cleanly to the existing `vm` command group -- the pod is a long-lived Workspace Host that
-  happens to be a container instead of a VM.
+  like a VM (packages, dotfiles, git credentials) and hosts workspaces on its persistent volume. The
+  K8s cluster serves a similar role to a VM Host (provisioning target). Tailscale connectivity via
+  the Tailscale Kubernetes operator (sidecar or per-pod annotation). This maps cleanly to the
+  existing `vm` command group -- the pod is a long-lived Workspace Host that happens to be a
+  container instead of a VM.
 - **Containers on VMs**: lighter-weight workspace isolation using containers running on an existing
   VM. The container provides isolation without a full VM. Same CLI surface: create, shell (exec into
   container), list, delete.
