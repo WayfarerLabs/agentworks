@@ -26,6 +26,29 @@ uv.lock
 rulesync.local.jsonc
 rulesync.lock
 
+# Rulesync - generated output (regenerate with: npx rulesync generate)
+# Note that we only use Github for Coplot, so we can ignore the entire .github directory for now.
+CLAUDE.md
+.claude
+.claudeignore
+.mcp.json
+.cursor/
+.cursorrules
+.cursorignore
+.github
+.copilotignore
+AGENTS.md
+GEMINI.md
+.gemini/
+.geminiignore
+.windsurfrules
+.clinerules/
+.roo/
+.codex/
+
+# Tmux
+.tmuxinator.yml
+
 # OS
 .DS_Store
 Thumbs.db
