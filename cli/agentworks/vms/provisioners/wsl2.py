@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
+import sys
+import urllib.request
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import typer
@@ -58,26 +62,53 @@ def _download_debian_rootfs(tarball_path: str) -> None:
     requiring Docker to be installed. The layer is a tar.gz that works
     directly with ``wsl --import``.
     """
-    # This PowerShell script:
-    # 1. Gets an anonymous auth token from Docker Hub
-    # 2. Fetches the image manifest for debian:bookworm (amd64)
-    # 3. Downloads the rootfs layer (first layer in the manifest)
-    script = f"""\
-$ProgressPreference = 'SilentlyContinue'
-$ErrorActionPreference = 'Stop'
-$token = (Invoke-RestMethod '{_DOCKER_AUTH_URL}').token
-$headers = @{{
-    Authorization = "Bearer $token"
-    Accept = 'application/vnd.docker.distribution.manifest.v2+json'
-}}
-$manifest = Invoke-RestMethod -Headers $headers '{_DOCKER_MANIFESTS_URL}'
-$digest = $manifest.layers[0].digest
-$dlHeaders = @{{ Authorization = "Bearer $token" }}
-Invoke-WebRequest -Headers $dlHeaders `
-    -Uri "{_DOCKER_BLOBS_URL}/$digest" `
-    -OutFile '{tarball_path}'
-"""
-    _powershell(script)
+    # 1. Get anonymous pull token
+    typer.echo("  Authenticating with Docker Hub...")
+    with urllib.request.urlopen(_DOCKER_AUTH_URL) as resp:
+        token = json.loads(resp.read())["token"]
+
+    # 2. Fetch image manifest to find the rootfs layer digest
+    typer.echo("  Fetching Debian bookworm image manifest...")
+    req = urllib.request.Request(
+        _DOCKER_MANIFESTS_URL,
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/vnd.docker.distribution.manifest.v2+json",
+        },
+    )
+    with urllib.request.urlopen(req) as resp:
+        manifest = json.loads(resp.read())
+    digest = manifest["layers"][0]["digest"]
+    total_bytes = manifest["layers"][0].get("size", 0)
+
+    # 3. Download the rootfs layer with progress
+    blob_url = f"{_DOCKER_BLOBS_URL}/{digest}"
+    req = urllib.request.Request(
+        blob_url, headers={"Authorization": f"Bearer {token}"},
+    )
+    size_mb = f" (~{total_bytes // 1024 // 1024} MB)" if total_bytes else ""
+    typer.echo(f"  Downloading Debian rootfs{size_mb}...")
+
+    dest = Path(tarball_path)
+    with urllib.request.urlopen(req) as resp, dest.open("wb") as f:
+        downloaded = 0
+        chunk_size = 256 * 1024
+        while True:
+            chunk = resp.read(chunk_size)
+            if not chunk:
+                break
+            f.write(chunk)
+            downloaded += len(chunk)
+            if total_bytes:
+                pct = downloaded * 100 // total_bytes
+                mb = downloaded // 1024 // 1024
+                total_mb = total_bytes // 1024 // 1024
+                sys.stderr.write(f"\r  Progress: {mb}/{total_mb} MB ({pct}%)")
+                sys.stderr.flush()
+        if total_bytes:
+            sys.stderr.write("\n")
+
+    typer.echo("  Download complete.")
 
 
 class WSL2Provisioner(VMProvisioner):
@@ -102,14 +133,16 @@ class WSL2Provisioner(VMProvisioner):
         # Check cache and download if needed
         check = _powershell(f"Test-Path '{tarball}'").strip()
         if check.lower() != "true":
-            typer.echo("  Downloading Debian rootfs from Docker Hub...")
             _download_debian_rootfs(tarball)
+        else:
+            typer.echo("  Using cached Debian rootfs.")
 
         # Import the distro
-        typer.echo("  Importing WSL2 distro...")
+        typer.echo("  Importing rootfs into WSL2 (this may take a moment)...")
         _wsl(["--import", vm_name, install_path, tarball])
 
-        # Create VM user
+        # Configure user account
+        typer.echo(f"  Creating user '{vm_user}'...")
         _wsl(["--distribution", vm_name, "--user", "root", "--",
               "useradd", "-m", "-s", "/bin/bash", vm_user])
         _wsl(["--distribution", vm_name, "--user", "root", "--",
@@ -118,6 +151,7 @@ class WSL2Provisioner(VMProvisioner):
               "bash", "-c", f"echo '{vm_user} ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/{vm_user}"])
 
         # Set default user in wsl.conf
+        typer.echo(f"  Setting default user to '{vm_user}'...")
         _wsl(["--distribution", vm_name, "--user", "root", "--",
               "bash", "-c",
               f"printf '[user]\\ndefault={vm_user}\\n' > /etc/wsl.conf"])
