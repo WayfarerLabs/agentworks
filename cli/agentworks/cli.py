@@ -198,6 +198,16 @@ def vm_list() -> None:
     list_vms(_get_db())
 
 
+@vm_app.command("describe")
+def vm_describe(
+    name: Annotated[str, typer.Argument(help="VM name")],
+) -> None:
+    """Show detailed information about a VM."""
+    from agentworks.vms.manager import describe_vm
+
+    describe_vm(_get_db(), name)
+
+
 @vm_app.command("start")
 def vm_start(
     name: Annotated[str, typer.Argument(help="VM name")],

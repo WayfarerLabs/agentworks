@@ -231,6 +231,52 @@ def list_vms(db: Database) -> None:
         )
 
 
+def describe_vm(db: Database, name: str) -> None:
+    """Show detailed information about a VM."""
+    vm = _require_vm(db, name)
+
+    # VM details
+    typer.echo(f"Name:           {vm.name}")
+    typer.echo(f"Platform:       {vm.platform}")
+    typer.echo(f"VM Host:        {vm.vm_host_name or '-'}")
+    typer.echo(f"VM User:        {vm.vm_user}")
+    typer.echo(f"Provisioning:   {vm.provisioning_status}")
+    typer.echo(f"Initialization: {vm.init_status}")
+    typer.echo(f"Tailscale:      {vm.tailscale_host or '-'}")
+
+    if vm.cpus is not None:
+        typer.echo(f"Resources:      {vm.cpus} CPUs, {vm.memory_gib} GiB RAM, {vm.disk_gib} GiB disk")
+    if vm.azure_resource_id:
+        typer.echo(f"Azure ID:       {vm.azure_resource_id}")
+    if vm.wsl_distro_name:
+        typer.echo(f"WSL Distro:     {vm.wsl_distro_name}")
+    if vm.extra_packages:
+        typer.echo(f"Extra Packages: {', '.join(vm.extra_packages)}")
+
+    typer.echo(f"Created:        {vm.created_at}")
+    if vm.last_seen_at:
+        typer.echo(f"Last Seen:      {vm.last_seen_at}")
+
+    # Workspaces
+    workspaces = db.list_workspaces(vm_name=name)
+    typer.echo(f"\nWorkspaces ({len(workspaces)}):")
+    if workspaces:
+        for ws in workspaces:
+            typer.echo(f"  {ws.name:<20} {ws.type:<10} {ws.workspace_path}")
+    else:
+        typer.echo("  (none)")
+
+    # Events
+    events = db.list_vm_events(name)
+    typer.echo(f"\nEvents ({len(events)}):")
+    if events:
+        for event in events:
+            detail = f"  {event.detail}" if event.detail else ""
+            typer.echo(f"  {event.created_at}  {event.event}{detail}")
+    else:
+        typer.echo("  (none)")
+
+
 def shell_vm(db: Database, config: Config, name: str) -> None:
     """Open a shell on a VM's home directory."""
     import subprocess
