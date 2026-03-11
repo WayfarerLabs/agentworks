@@ -48,6 +48,23 @@ def _oci_arch() -> str:
     return arch
 
 
+class _StripAuthRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Strip Authorization header when following redirects to a different host.
+
+    Docker Hub blob requests return a 302 to a CDN. The CDN rejects the
+    Bearer token with 400 Bad Request, so we must drop it on redirect.
+    """
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        new_req = super().redirect_request(req, fp, code, msg, headers, newurl)
+        if new_req is not None:
+            new_req.remove_header("Authorization")
+        return new_req
+
+
+_blob_opener = urllib.request.build_opener(_StripAuthRedirectHandler)
+
+
 def _wsl(args: list[str], *, check: bool = True) -> str:
     """Run a wsl.exe command and return stdout."""
     result = subprocess.run(["wsl", *args], capture_output=True, text=True)
@@ -132,7 +149,7 @@ def _download_debian_rootfs(tarball_path: str) -> None:
     typer.echo(f"  Downloading Debian rootfs{size_mb}...")
 
     dest = Path(tarball_path)
-    with urllib.request.urlopen(req) as resp, dest.open("wb") as f:
+    with _blob_opener.open(req) as resp, dest.open("wb") as f:
         downloaded = 0
         chunk_size = 256 * 1024
         while True:
@@ -168,7 +185,7 @@ class WSL2Provisioner(VMProvisioner):
         _powershell(f"New-Item -ItemType Directory -Force -Path '{install_path}'")
 
         # Download Debian rootfs if not cached
-        cache_dir = f"{WSL_BASE_PATH}\\.cache"
+        cache_dir = "%LOCALAPPDATA%\\agentworks\\cache"
         tarball = f"{cache_dir}\\debian-bookworm-{_oci_arch()}-rootfs.tar.gz"
         _powershell(f"New-Item -ItemType Directory -Force -Path '{cache_dir}'")
 
