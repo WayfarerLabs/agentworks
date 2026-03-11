@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import platform
 import subprocess
 import sys
 import urllib.request
@@ -33,6 +34,18 @@ _DOCKER_MANIFESTS_URL = (
 _DOCKER_BLOBS_URL = (
     "https://registry-1.docker.io/v2/library/debian/blobs"
 )
+
+# Map Python's platform.machine() to OCI architecture names
+_ARCH_MAP = {"x86_64": "amd64", "amd64": "amd64", "aarch64": "arm64", "arm64": "arm64"}
+
+
+def _oci_arch() -> str:
+    """Return the OCI architecture name for the host machine."""
+    machine = platform.machine().lower()
+    arch = _ARCH_MAP.get(machine)
+    if arch is None:
+        raise RuntimeError(f"Unsupported architecture: {machine}")
+    return arch
 
 
 def _wsl(args: list[str], *, check: bool = True) -> str:
@@ -69,7 +82,7 @@ def _download_debian_rootfs(tarball_path: str) -> None:
 
     # 2. Fetch image manifest to find the rootfs layer digest.
     #    debian:bookworm is multi-arch, so we first get the manifest list
-    #    and resolve the amd64 platform manifest.
+    #    and resolve the platform-specific manifest for the host architecture.
     typer.echo("  Fetching Debian bookworm image manifest...")
     auth_header = {"Authorization": f"Bearer {token}"}
 
@@ -86,17 +99,18 @@ def _download_debian_rootfs(tarball_path: str) -> None:
     with urllib.request.urlopen(req) as resp:
         manifest = json.loads(resp.read())
 
-    # If it's a manifest list, resolve the amd64 entry
+    # If it's a manifest list, resolve the entry for the host architecture
     if "manifests" in manifest:
-        amd64 = next(
+        arch = _oci_arch()
+        match = next(
             (m for m in manifest["manifests"]
-             if m.get("platform", {}).get("architecture") == "amd64"
+             if m.get("platform", {}).get("architecture") == arch
              and m.get("platform", {}).get("os") == "linux"),
             None,
         )
-        if amd64 is None:
-            raise RuntimeError("No amd64/linux manifest found for debian:bookworm")
-        platform_digest = amd64["digest"]
+        if match is None:
+            raise RuntimeError(f"No {arch}/linux manifest found for debian:bookworm")
+        platform_digest = match["digest"]
         manifest_url = f"https://registry-1.docker.io/v2/library/debian/manifests/{platform_digest}"
         req = urllib.request.Request(
             manifest_url,
@@ -155,7 +169,7 @@ class WSL2Provisioner(VMProvisioner):
 
         # Download Debian rootfs if not cached
         cache_dir = f"{WSL_BASE_PATH}\\.cache"
-        tarball = f"{cache_dir}\\debian-bookworm-rootfs.tar.gz"
+        tarball = f"{cache_dir}\\debian-bookworm-{_oci_arch()}-rootfs.tar.gz"
         _powershell(f"New-Item -ItemType Directory -Force -Path '{cache_dir}'")
 
         # Check cache and download if needed
