@@ -125,7 +125,8 @@ class AzureProvisioner(VMProvisioner):
         assert config.azure is not None, "Azure config is required"
         az = config.azure
 
-        typer.echo(f"Creating Azure VM '{vm_name}' in {az.region} (size: {azure_vm_size})...")
+        typer.echo("Connecting to Azure...")
+        typer.echo(f"Creating VM '{vm_name}' in {az.region} (size: {azure_vm_size})...")
 
         ssh_pub_key = config.user.ssh_public_key.read_text().strip()
         cloud_init = CLOUD_INIT_TEMPLATE.format(

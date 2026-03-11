@@ -81,6 +81,8 @@ class LimaProvisioner(VMProvisioner):
         memory: int = 8,
         disk: int = 50,
     ) -> ProvisionResult:
+        if self.is_remote:
+            typer.echo(f"Connecting to VM host '{self._vm_host_ssh}'...")
         typer.echo(f"Creating Lima VM '{vm_name}' ({'remote' if self.is_remote else 'local'})...")
         typer.echo(f"  Resources: {cpus} CPUs, {memory} GiB memory, {disk} GiB disk")
 
