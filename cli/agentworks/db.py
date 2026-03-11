@@ -20,11 +20,16 @@ if TYPE_CHECKING:
 DB_PATH = CONFIG_DIR / "agentworks.db"
 
 
+class ProvisioningStatus(Enum):
+    PENDING = "pending"
+    IN_PROGRESS = "in_progress"
+    COMPLETE = "complete"
+    FAILED = "failed"
+
+
 class InitStatus(Enum):
     PENDING = "pending"
-    BOOTSTRAPPING = "bootstrapping"
-    TAILSCALE_UP = "tailscale_up"
-    INITIALIZING = "initializing"
+    IN_PROGRESS = "in_progress"
     COMPLETE = "complete"
     PARTIAL = "partial"
     FAILED = "failed"
@@ -56,6 +61,7 @@ class VMRow:
     platform: str
     vm_host_name: str | None
     extra_packages: list[str]
+    provisioning_status: str
     init_status: str
     tailscale_host: str | None
     azure_resource_id: str | None
@@ -66,6 +72,15 @@ class VMRow:
     vm_user: str
     created_at: str
     last_seen_at: str | None
+
+
+@dataclass
+class VMEventRow:
+    id: int
+    vm_name: str
+    event: str
+    detail: str | None
+    created_at: str
 
 
 @dataclass
@@ -156,6 +171,43 @@ MIGRATIONS: dict[int, str] = {
     """,
     5: """
         DROP TABLE IF EXISTS vm_git_host_keys;
+    """,
+    6: """
+        ALTER TABLE vms ADD COLUMN provisioning_status TEXT NOT NULL DEFAULT 'pending';
+
+        -- Migrate existing init_status values to the two-column model.
+        -- Use tailscale_host presence to distinguish provisioning vs init failures.
+        UPDATE vms SET provisioning_status = CASE
+            WHEN init_status = 'pending' THEN 'pending'
+            WHEN init_status = 'bootstrapping' THEN 'in_progress'
+            WHEN init_status IN ('tailscale_up', 'initializing', 'complete', 'partial') THEN 'complete'
+            WHEN init_status = 'failed' AND tailscale_host IS NOT NULL THEN 'complete'
+            WHEN init_status = 'failed' AND tailscale_host IS NULL THEN 'failed'
+            ELSE 'pending'
+        END;
+
+        UPDATE vms SET init_status = CASE
+            WHEN init_status = 'pending' THEN 'pending'
+            WHEN init_status = 'bootstrapping' THEN 'pending'
+            WHEN init_status = 'tailscale_up' THEN 'pending'
+            WHEN init_status = 'initializing' THEN 'in_progress'
+            WHEN init_status = 'complete' THEN 'complete'
+            WHEN init_status = 'partial' THEN 'partial'
+            WHEN init_status = 'failed' AND tailscale_host IS NOT NULL THEN 'failed'
+            WHEN init_status = 'failed' AND tailscale_host IS NULL THEN 'pending'
+            ELSE 'pending'
+        END;
+
+        CREATE TABLE vm_events (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            vm_name    TEXT NOT NULL,
+            event      TEXT NOT NULL,
+            detail     TEXT,
+            created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+            FOREIGN KEY (vm_name) REFERENCES vms(name)
+        );
+
+        CREATE INDEX idx_vm_events_vm_name ON vm_events(vm_name);
     """,
 }
 
@@ -301,6 +353,10 @@ class Database:
         rows = self._conn.execute("SELECT * FROM vms ORDER BY name").fetchall()
         return [_to_vm(r) for r in rows]
 
+    def update_vm_provisioning_status(self, name: str, status: ProvisioningStatus) -> None:
+        self._conn.execute("UPDATE vms SET provisioning_status = ? WHERE name = ?", (status.value, name))
+        self._conn.commit()
+
     def update_vm_init_status(self, name: str, status: InitStatus) -> None:
         self._conn.execute("UPDATE vms SET init_status = ? WHERE name = ?", (status.value, name))
         self._conn.commit()
@@ -334,6 +390,7 @@ class Database:
             (name,),
         )
         self._conn.execute("DELETE FROM workspaces WHERE vm_name = ?", (name,))
+        self._conn.execute("DELETE FROM vm_events WHERE vm_name = ?", (name,))
         self._conn.execute("DELETE FROM vms WHERE name = ?", (name,))
         self._conn.commit()
 
@@ -444,6 +501,22 @@ class Database:
         self._conn.commit()
         return agents
 
+    # -- VM Events ---------------------------------------------------------
+
+    def insert_vm_event(self, vm_name: str, event: str, detail: str | None = None) -> None:
+        self._conn.execute(
+            "INSERT INTO vm_events (vm_name, event, detail) VALUES (?, ?, ?)",
+            (vm_name, event, detail),
+        )
+        self._conn.commit()
+
+    def list_vm_events(self, vm_name: str) -> list[VMEventRow]:
+        rows = self._conn.execute(
+            "SELECT * FROM vm_events WHERE vm_name = ? ORDER BY id",
+            (vm_name,),
+        ).fetchall()
+        return [_to_vm_event(r) for r in rows]
+
 
 # -- Row converters --------------------------------------------------------
 
@@ -466,6 +539,7 @@ def _to_vm(row: sqlite3.Row) -> VMRow:
         platform=row["platform"],
         vm_host_name=row["vm_host_name"],
         extra_packages=json.loads(extra) if extra else [],
+        provisioning_status=row["provisioning_status"],
         init_status=row["init_status"],
         tailscale_host=row["tailscale_host"],
         azure_resource_id=row["azure_resource_id"],
@@ -496,5 +570,15 @@ def _to_agent(row: sqlite3.Row) -> AgentRow:
         name=row["name"],
         workspace_name=row["workspace_name"],
         linux_user=row["linux_user"],
+        created_at=row["created_at"],
+    )
+
+
+def _to_vm_event(row: sqlite3.Row) -> VMEventRow:
+    return VMEventRow(
+        id=row["id"],
+        vm_name=row["vm_name"],
+        event=row["event"],
+        detail=row["detail"],
         created_at=row["created_at"],
     )

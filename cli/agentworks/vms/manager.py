@@ -7,11 +7,12 @@ from typing import TYPE_CHECKING
 import typer
 
 from agentworks.config import VALID_PLATFORMS, validate_name
-from agentworks.db import InitStatus, VMStatus
+from agentworks.db import InitStatus, ProvisioningStatus, VMStatus
 from agentworks.vms.initializer import (
     initialize_vm,
     rejoin_tailscale,
     resolve_git_credential_providers,
+    run_initialization,
     verify_git_credential_auth,
     verify_tailscale_available,
 )
@@ -178,8 +179,6 @@ def create_vm(
                 _AP().detach_public_ip(vm_row)
 
     except Exception as e:
-        db.update_vm_init_status(vm_name, InitStatus.FAILED)
-
         # Write full details to init log, show only summary on console
         from agentworks.vms.init_log import InitLogger, find_init_logs
 
@@ -196,7 +195,7 @@ def create_vm(
         logs = find_init_logs(vm_name)
         if logs:
             typer.echo(f"Details: {logs[0]}", err=True)
-        _prompt_delete_failed_vm(db, config, vm_name)
+        _prompt_failed_vm(db, config, vm_name)
         return
 
     # Final status is set by initialize_vm (COMPLETE or PARTIAL)
@@ -216,18 +215,18 @@ def list_vms(db: Database) -> None:
         return
 
     header = (
-        f"{'NAME':<20} {'PLATFORM':<10} {'HOST':<15} {'INIT STATUS':<15} "
+        f"{'NAME':<20} {'PLATFORM':<10} {'HOST':<15} {'PROV':<12} {'INIT':<12} "
         f"{'RESOURCES':<15} {'TAILSCALE':<20} {'CREATED'}"
     )
     typer.echo(header)
-    typer.echo("-" * 115)
+    typer.echo("-" * 125)
     for vm in vms:
         resources = "-"
         if vm.cpus is not None:
             resources = f"{vm.cpus}c/{vm.memory_gib}G/{vm.disk_gib}G"
         typer.echo(
             f"{vm.name:<20} {vm.platform:<10} {vm.vm_host_name or '-':<15} "
-            f"{vm.init_status:<15} {resources:<15} "
+            f"{vm.provisioning_status:<12} {vm.init_status:<12} {resources:<15} "
             f"{vm.tailscale_host or '-':<20} {vm.created_at}"
         )
 
@@ -373,18 +372,105 @@ def delete_vm(db: Database, config: Config, name: str, *, force: bool = False) -
     typer.echo(f"VM '{name}' deleted")
 
 
-def _prompt_delete_failed_vm(db: Database, config: Config, vm_name: str) -> None:
-    """After a fatal init failure, prompt user to delete or keep the VM."""
-    typer.echo(
-        "\nInit failed. Delete VM? You can keep it for manual troubleshooting, "
-        "but agentworks cannot use or manage it.",
-        err=True,
-    )
-    if typer.confirm("Delete VM?", default=True):
-        delete_vm(db, config, vm_name, force=True)
-    else:
+def reinit_vm(
+    db: Database,
+    config: Config,
+    name: str,
+    *,
+    git_credentials: list[str] | None = None,
+) -> None:
+    """Re-run initialization on a VM that has already been provisioned.
+
+    Requires provisioning_status == complete and a valid Tailscale connection.
+    """
+    from agentworks.ssh import ExecTarget, ssh_target_for_vm
+    from agentworks.vms.init_log import InitLogger
+
+    vm = _require_vm(db, name)
+
+    if vm.provisioning_status != ProvisioningStatus.COMPLETE.value:
         typer.echo(
-            f"VM '{vm_name}' kept in 'failed' state. Only 'vm delete' is supported.",
+            f"Error: VM '{name}' provisioning is '{vm.provisioning_status}', not 'complete'. "
+            f"Cannot reinitialize.",
+            err=True,
+        )
+        raise typer.Exit(1)
+
+    if vm.tailscale_host is None:
+        typer.echo(f"Error: VM '{name}' has no Tailscale IP", err=True)
+        raise typer.Exit(1)
+
+    # Pre-flight checks
+    verify_tailscale_available()
+    providers = resolve_git_credential_providers(config, git_credentials)
+    verify_git_credential_auth(providers)
+
+    # Collect git tokens upfront
+    git_tokens: dict[str, str] = {}
+    for cred_name, provider in providers.items():
+        git_tokens[cred_name] = provider.obtain_token(name)
+
+    # Build Tailscale SSH target
+    ts_target = ExecTarget(ssh=ssh_target_for_vm(vm, config), default_timeout=60)
+
+    home = f"/home/{vm.vm_user}"
+    logger = InitLogger(name)
+
+    run_initialization(
+        db, config, name, ts_target, providers, home, vm.vm_user,
+        vm.extra_packages or None, logger, git_tokens=git_tokens,
+    )
+
+    vm = db.get_vm(name)
+    assert vm is not None
+    if vm.init_status == InitStatus.PARTIAL.value:
+        typer.echo(f"\nVM '{name}' reinitialized (with warnings -- see above)")
+    else:
+        typer.echo(f"\nVM '{name}' reinitialized successfully!")
+
+
+def _prompt_failed_vm(db: Database, config: Config, vm_name: str) -> None:
+    """After a failure, prompt user based on whether provisioning or init failed."""
+    vm = db.get_vm(vm_name)
+    if vm is None:
+        return
+
+    if vm.provisioning_status == ProvisioningStatus.FAILED.value:
+        # Provisioning failed -- VM is unreachable, only delete makes sense
+        typer.echo(
+            "\nProvisioning failed. Delete VM? You can keep it for manual troubleshooting, "
+            "but agentworks cannot use or manage it.",
+            err=True,
+        )
+        if typer.confirm("Delete VM?", default=True):
+            delete_vm(db, config, vm_name, force=True)
+        else:
+            typer.echo(
+                f"VM '{vm_name}' kept in failed state. Only 'vm delete' is supported.",
+                err=True,
+            )
+    elif vm.init_status == InitStatus.FAILED.value:
+        # Init failed but provisioning succeeded -- reinit is an option
+        typer.echo(
+            "\nInitialization failed. You can re-run initialization with 'vm reinit', "
+            "delete the VM, or keep it for troubleshooting.",
+            err=True,
+        )
+        typer.echo("  [r] Reinit  [d] Delete  [k] Keep", err=True)
+        choice = typer.prompt("Choice", default="r").lower()
+        if choice == "d":
+            delete_vm(db, config, vm_name, force=True)
+        elif choice == "r":
+            reinit_vm(db, config, vm_name)
+        else:
+            typer.echo(
+                f"VM '{vm_name}' kept. Use 'vm reinit' to retry initialization.",
+                err=True,
+            )
+    else:
+        # Post-init failure (e.g. SSH config, IP cleanup) -- VM may be usable
+        typer.echo(
+            f"\nVM '{vm_name}' encountered a post-initialization error but may still be usable.",
             err=True,
         )
 
@@ -410,16 +496,27 @@ def _tailscale_logout(provisioner: VMProvisioner, vm: VMRow) -> None:
         typer.echo(f"Warning: Tailscale logout failed (node may remain in admin console): {e}", err=True)
 
 
-def _guard_failed_vm(vm: VMRow) -> None:
-    """Block operations on VMs in 'failed' state."""
-    if vm.init_status == InitStatus.FAILED.value:
-        from agentworks.vms.init_log import find_init_logs
+def _init_log_hint(vm_name: str) -> str:
+    """Return a log hint suffix like ' See init log: <path>' or empty string."""
+    from agentworks.vms.init_log import find_init_logs
 
-        logs = find_init_logs(vm.name)
-        log_hint = f" See init log: {logs[0]}" if logs else ""
+    logs = find_init_logs(vm_name)
+    return f" See init log: {logs[0]}" if logs else ""
+
+
+def _guard_failed_vm(vm: VMRow) -> None:
+    """Block operations on VMs with failed provisioning or initialization."""
+    if vm.provisioning_status == ProvisioningStatus.FAILED.value:
         typer.echo(
-            f"Error: VM '{vm.name}' is in 'failed' state. "
-            f"Only 'vm delete' is supported.{log_hint}",
+            f"Error: VM '{vm.name}' has failed provisioning. "
+            f"Only 'vm delete' is supported.{_init_log_hint(vm.name)}",
+            err=True,
+        )
+        raise typer.Exit(1)
+    if vm.init_status == InitStatus.FAILED.value:
+        typer.echo(
+            f"Error: VM '{vm.name}' has failed initialization. "
+            f"Use 'vm reinit' to retry or 'vm delete' to remove.{_init_log_hint(vm.name)}",
             err=True,
         )
         raise typer.Exit(1)

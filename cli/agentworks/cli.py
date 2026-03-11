@@ -232,6 +232,20 @@ def vm_delete(
     delete_vm(_get_db(), load_config(), name, force=force)
 
 
+@vm_app.command("reinit")
+def vm_reinit(
+    name: Annotated[str, typer.Argument(help="VM name")],
+    git_credentials: Annotated[
+        list[str] | None, typer.Option("--git-credentials", help="Git credential providers to configure")
+    ] = None,
+) -> None:
+    """Re-run initialization on a provisioned VM."""
+    from agentworks.config import load_config
+    from agentworks.vms.manager import reinit_vm
+
+    reinit_vm(_get_db(), load_config(), name, git_credentials=git_credentials)
+
+
 @vm_app.command("shell")
 def vm_shell(
     name: Annotated[str, typer.Argument(help="VM name")],

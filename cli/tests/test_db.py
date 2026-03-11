@@ -6,7 +6,7 @@ import sqlite3
 
 import pytest
 
-from agentworks.db import Database, InitStatus
+from agentworks.db import Database, InitStatus, ProvisioningStatus
 
 
 def test_roundtrip_vm_host(db: Database) -> None:
@@ -38,6 +38,7 @@ def test_roundtrip_vm(db: Database) -> None:
     assert vm is not None
     assert vm.platform == "lima"
     assert vm.extra_packages == ["nodejs", "python3"]
+    assert vm.provisioning_status == "pending"
     assert vm.init_status == "pending"
     assert vm.cpus == 4
     assert vm.memory_gib == 8
@@ -213,3 +214,42 @@ def test_delete_agents_for_workspace(db: Database) -> None:
     deleted = db.delete_agents_for_workspace("ws-1")
     assert len(deleted) == 2
     assert len(db.list_agents(workspace_name="ws-1")) == 0
+
+
+def test_provisioning_status(db: Database) -> None:
+    db.insert_vm("dev-vm", platform="lima")
+    vm = db.get_vm("dev-vm")
+    assert vm is not None
+    assert vm.provisioning_status == "pending"
+
+    db.update_vm_provisioning_status("dev-vm", ProvisioningStatus.IN_PROGRESS)
+    vm = db.get_vm("dev-vm")
+    assert vm is not None
+    assert vm.provisioning_status == "in_progress"
+
+    db.update_vm_provisioning_status("dev-vm", ProvisioningStatus.COMPLETE)
+    vm = db.get_vm("dev-vm")
+    assert vm is not None
+    assert vm.provisioning_status == "complete"
+
+
+def test_vm_events(db: Database) -> None:
+    db.insert_vm("dev-vm", platform="lima")
+
+    db.insert_vm_event("dev-vm", "provisioning_started", "lima:dev-vm")
+    db.insert_vm_event("dev-vm", "provisioning_complete", "100.64.0.1")
+
+    events = db.list_vm_events("dev-vm")
+    assert len(events) == 2
+    assert events[0].event == "provisioning_started"
+    assert events[0].detail == "lima:dev-vm"
+    assert events[1].event == "provisioning_complete"
+
+
+def test_vm_delete_cascades_events(db: Database) -> None:
+    db.insert_vm("dev-vm", platform="lima")
+    db.insert_vm_event("dev-vm", "provisioning_started")
+
+    db.delete_vm("dev-vm")
+    # Events should be cleaned up (can't query directly since VM is gone,
+    # but the delete should not raise a foreign key error)

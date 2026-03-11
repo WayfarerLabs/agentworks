@@ -1,8 +1,10 @@
-"""Uniform VM initialization -- platform-agnostic, Tailscale-first.
+"""VM lifecycle: provisioning (one-time) and initialization (repeatable).
 
 Two phases:
-  A. Bootstrap (over provisioning transport): user, system packages, SSH key, Tailscale
-  B. Setup (over Tailscale SSH): user packages, install commands, git credentials, dotfiles
+  A. Provisioning (over provisioning transport): bootstrap, SSH key, Tailscale join.
+     One-time, platform-specific, pass/fail. Tracked via provisioning_status.
+  B. Initialization (over Tailscale SSH): packages, install commands, git credentials,
+     dotfiles. Repeatable via `vm reinit`. Tracked via init_status.
 
 Phase A steps are fatal -- if they fail, the VM is unreachable and useless.
 Phase B steps are non-fatal -- failures produce warnings and a 'partial' status.
@@ -14,7 +16,7 @@ from typing import TYPE_CHECKING
 
 import typer
 
-from agentworks.db import InitStatus
+from agentworks.db import InitStatus, ProvisioningStatus
 from agentworks.ssh import ExecTarget, SSHError, SSHTarget, rsync_to
 from agentworks.vms.init_log import InitLogger
 
@@ -242,6 +244,19 @@ def _join_tailscale(
     return tailscale_ip
 
 
+def _describe_transport(exec_target: ExecTarget) -> str:
+    """Return a short description of the transport used by an ExecTarget."""
+    if exec_target.ssh is not None:
+        return f"ssh:{exec_target.ssh.host}"
+    if exec_target.lima is not None:
+        return f"lima:{exec_target.lima.vm_name}"
+    if exec_target.remote_lima is not None:
+        return f"remote-lima:{exec_target.remote_lima.vm_name}"
+    if exec_target.wsl2 is not None:
+        return f"wsl2:{exec_target.wsl2.distro_name}"
+    return "unknown"
+
+
 def initialize_vm(
     db: Database,
     config: Config,
@@ -264,31 +279,66 @@ def initialize_vm(
     home = f"/home/{vm_user}"
     logger = InitLogger(vm_name)
 
+    transport = _describe_transport(exec_target)
+
     try:
+        db.insert_vm_event(vm_name, "provisioning_started", transport)
         ts_target = _phase_a_bootstrap(
             db, config, vm_name, exec_target, home, vm_user, is_wsl2, logger,
             tailscale_auth_key=tailscale_auth_key,
         )
-        _phase_b_setup(
-            db, config, vm_name, ts_target, providers, home, vm_user, extra_packages, logger,
-            git_tokens=git_tokens,
-        )
-    except Exception:
+        db.insert_vm_event(vm_name, "provisioning_complete", ts_target.ssh.host if ts_target.ssh else None)
+    except Exception as e:
+        db.update_vm_provisioning_status(vm_name, ProvisioningStatus.FAILED)
+        db.insert_vm_event(vm_name, "provisioning_failed", str(e))
         logger.close()
         raise
 
-    # Determine final status
+    run_initialization(
+        db, config, vm_name, ts_target, providers, home, vm_user,
+        extra_packages, logger, git_tokens=git_tokens,
+    )
+
+
+def run_initialization(
+    db: Database,
+    config: Config,
+    vm_name: str,
+    ts_target: ExecTarget,
+    providers: dict[str, GitCredentialProvider],
+    home: str,
+    vm_user: str,
+    extra_packages: list[str] | None,
+    logger: InitLogger,
+    *,
+    git_tokens: dict[str, str] | None = None,
+) -> None:
+    """Run Phase B (initialization) with status tracking and event logging.
+
+    This is called both from initialize_vm() after provisioning and
+    from reinit_vm() for repeatable re-initialization.
+    """
+    db.insert_vm_event(vm_name, "init_started")
+
+    try:
+        _phase_b_setup(
+            db, config, vm_name, ts_target, providers, home, vm_user,
+            extra_packages, logger, git_tokens=git_tokens,
+        )
+    except Exception as e:
+        db.update_vm_init_status(vm_name, InitStatus.FAILED)
+        db.insert_vm_event(vm_name, "init_failed", str(e))
+        logger.close()
+        raise
+
     if logger.has_warnings:
         db.update_vm_init_status(vm_name, InitStatus.PARTIAL)
-        logger.close()
-        typer.echo(f"\nVM '{vm_name}' initialization completed with {len(logger.warnings)} warning(s):")
-        for w in logger.warnings:
-            typer.echo(f"  - {w}")
-        typer.echo(f"Init log: {logger.path}")
+        db.insert_vm_event(vm_name, "init_partial", f"{len(logger.warnings)} warning(s)")
     else:
         db.update_vm_init_status(vm_name, InitStatus.COMPLETE)
-        logger.close()
-        typer.echo(f"VM '{vm_name}' initialization complete")
+        db.insert_vm_event(vm_name, "init_complete")
+
+    logger.close()
 
 
 def _phase_a_bootstrap(
@@ -316,7 +366,7 @@ def _phase_a_bootstrap(
     from agentworks.vms.bootstrap_script import generate_bootstrap_script, parse_bootstrap_output
 
     typer.echo("Provisioning: bootstrap and Tailscale...")
-    db.update_vm_init_status(vm_name, InitStatus.BOOTSTRAPPING)
+    db.update_vm_provisioning_status(vm_name, ProvisioningStatus.IN_PROGRESS)
 
     # Resolve Tailscale auth key
     ts_auth_key = _resolve_tailscale_auth_key(tailscale_auth_key)
@@ -380,7 +430,7 @@ def _phase_a_bootstrap(
     tailscale_ip = bootstrap.tailscale_ip
     typer.echo(f"  Tailscale IP: {tailscale_ip}")
     db.update_vm_tailscale(vm_name, tailscale_ip)
-    db.update_vm_init_status(vm_name, InitStatus.TAILSCALE_UP)
+    db.update_vm_provisioning_status(vm_name, ProvisioningStatus.COMPLETE)
 
     # Switch to Tailscale SSH
     ts_target = ExecTarget(
@@ -430,7 +480,7 @@ def _phase_b_setup(
 ) -> None:
     """Phase B: Setup (over Tailscale SSH). Non-fatal steps warn and continue."""
     typer.echo("Initializing VM...")
-    db.update_vm_init_status(vm_name, InitStatus.INITIALIZING)
+    db.update_vm_init_status(vm_name, InitStatus.IN_PROGRESS)
 
     # Non-fatal: apt packages
     all_apt = config.vm.apt + (extra_packages or [])
