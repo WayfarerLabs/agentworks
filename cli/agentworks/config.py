@@ -461,7 +461,11 @@ def load_config(path: Path | None = None) -> Config:
         raise SystemExit(1)
 
     with open(config_path, "rb") as f:
-        data = tomllib.load(f)
+        try:
+            data = tomllib.load(f)
+        except tomllib.TOMLDecodeError as e:
+            print(f"Error: invalid config file {config_path}: {e}", file=sys.stderr)
+            raise SystemExit(1) from None
 
     _warn_unexpected_top_level_keys(data)
 
