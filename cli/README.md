@@ -147,7 +147,7 @@ reference.
 
 Key sections:
 
-- `[user]` -- SSH keys (required) and default shell
+- `[user]` -- SSH keys (required), additional authorized keys, and default shell
 - `[paths]` -- local workspace and `.code-workspace` file directories
 - `[defaults]` -- default platform, VM host, git credentials
 - `[dotfiles]` -- dotfiles sync to VMs
@@ -164,8 +164,9 @@ VM creation follows a two-phase lifecycle tracked by separate status columns:
    transport (Lima shell, SSH, or WSL2 exec): create user, install system packages, add SSH key,
    install and join Tailscale
 
-2. **Initialization** (`init_status`) -- repeatable via `vm reinit`, over Tailscale SSH: install
-   user packages, run install commands, set shell, configure git credentials, sync dotfiles
+2. **Initialization** (`init_status`) -- repeatable via `vm reinit`, over Tailscale SSH: reconcile
+   SSH authorized keys, install user packages, run install commands, set shell, configure git
+   credentials, sync dotfiles
 
 Non-fatal initialization failures (packages, dotfiles) produce a `partial` status rather than
 aborting. Fatal failures prompt for deletion or reinit. Use `vm describe` to view the full event log.

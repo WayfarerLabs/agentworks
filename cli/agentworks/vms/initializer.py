@@ -126,6 +126,43 @@ def _write_path_additions(
         typer.echo(f"  Warning: {msg}", err=True)
 
 
+AUTHORIZED_KEYS_HEADER = """\
+# Managed by agentworks -- manual edits will be overwritten on reinit.
+# To add keys, use user.extra_ssh_public_keys in your agentworks config.
+"""
+
+
+def _reconcile_authorized_keys(
+    target: ExecTarget,
+    config: Config,
+    home: str,
+    logger: InitLogger,
+) -> None:
+    """Reconcile ~/.ssh/authorized_keys with the configured key set.
+
+    Writes the primary ssh_public_key plus any extra_ssh_public_keys from
+    config. This is a full overwrite so that removed keys are cleaned up
+    on reinit.
+    """
+    logger.step("SSH authorized keys")
+
+    keys: list[str] = [config.user.ssh_public_key.read_text().strip()]
+    for path in config.user.extra_ssh_public_keys:
+        keys.append(path.read_text().strip())
+
+    extra_count = len(keys) - 1
+    label = f"1 primary + {extra_count} extra" if extra_count else "1 primary"
+    typer.echo(f"  Reconciling authorized_keys ({label})...")
+
+    content = AUTHORIZED_KEYS_HEADER + "\n".join(keys) + "\n"
+    try:
+        target.write_file(f"{home}/.ssh/authorized_keys", content, mode="600")
+    except SSHError as e:
+        msg = f"authorized_keys reconciliation failed: {e}"
+        logger.warning(msg)
+        typer.echo(f"  Warning: {msg}", err=True)
+
+
 def verify_tailscale_available() -> None:
     """Pre-flight: verify the local machine is on Tailscale."""
     import subprocess
@@ -533,6 +570,9 @@ def _phase_b_setup(
         msg = f"shell configuration failed: {e}"
         logger.warning(msg)
         typer.echo(f"  Warning: {msg}", err=True)
+
+    # Non-fatal: reconcile authorized_keys
+    _reconcile_authorized_keys(ts_target, config, home, logger)
 
     # Non-fatal: install commands (run under user's shell)
     path_additions = _run_install_commands(
