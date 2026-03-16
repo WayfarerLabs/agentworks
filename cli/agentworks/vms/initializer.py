@@ -162,8 +162,7 @@ def _configure_apt_sources(
             source_path = f"/etc/apt/sources.list.d/{src.source_file}"
             _run_logged(
                 target,
-                f"printf '%s\\n' {shlex.quote(resolved_source)}"
-                f" | tee {shlex.quote(source_path)} > /dev/null",
+                f"bash -c {shlex.quote(f'printf \"%s\\n\" {shlex.quote(resolved_source)} > {source_path}')}",
                 logger, as_root=True,
             )
             newly_configured = True

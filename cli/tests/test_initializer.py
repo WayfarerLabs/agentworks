@@ -161,9 +161,9 @@ def test_configure_apt_sources_resolves_arch() -> None:
     _configure_apt_sources(target, config, catalog, logger)
 
     # The source line written should have arm64, not {arch}
-    tee_calls = [str(c) for c in target.run_as_root.call_args_list if "tee" in str(c)]
-    assert any("arm64" in c for c in tee_calls)
-    assert not any("{arch}" in c for c in tee_calls)
+    write_calls = [str(c) for c in target.run_as_root.call_args_list if "sources.list.d" in str(c)]
+    assert any("arm64" in c for c in write_calls)
+    assert not any("{arch}" in c for c in write_calls)
 
 
 # -- Apt package tests --
