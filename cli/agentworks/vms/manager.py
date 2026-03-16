@@ -169,7 +169,7 @@ def create_vm(
         if vm_row is not None:
             from agentworks.ssh_config import upsert_vm_entry
 
-            upsert_vm_entry(config, vm_row)
+            upsert_vm_entry(config, vm_row, db)
 
             if platform == "azure":
                 from agentworks.vms.provisioners.azure import AzureProvisioner as _AP
@@ -416,7 +416,7 @@ def delete_vm(
     # Remove SSH config entry
     from agentworks.ssh_config import remove_vm_entry
 
-    remove_vm_entry(config, name)
+    remove_vm_entry(config, name, db)
 
     # Remove from DB (cascades workspaces and agents)
     db.delete_vm(name)
@@ -690,4 +690,4 @@ def _ensure_tailscale(
     from agentworks.ssh_config import upsert_vm_entry
 
     vm = _require_vm(db, vm.name)
-    upsert_vm_entry(config, vm)
+    upsert_vm_entry(config, vm, db)

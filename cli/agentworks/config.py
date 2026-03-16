@@ -78,6 +78,8 @@ class UserConfig:
     ssh_private_key: Path
     shell: str = "zsh"
     ssh_config: Path = field(default_factory=lambda: Path.home() / ".ssh" / "config")
+    ssh_config_dir: bool = True
+    ssh_host_prefix: str = "awvm--"
     extra_ssh_public_keys: list[Path] = field(default_factory=list)
 
 
@@ -195,7 +197,10 @@ def _warn_unexpected_keys(
         )
 
 
-_USER_KEYS = {"ssh_public_key", "ssh_private_key", "shell", "ssh_config", "extra_ssh_public_keys"}
+_USER_KEYS = {
+    "ssh_public_key", "ssh_private_key", "shell", "ssh_config",
+    "ssh_config_dir", "ssh_host_prefix", "extra_ssh_public_keys",
+}
 
 
 def _load_user(data: dict[str, object]) -> UserConfig:
@@ -229,6 +234,8 @@ def _load_user(data: dict[str, object]) -> UserConfig:
         ssh_private_key=priv,
         shell=str(raw.get("shell", "zsh")),
         ssh_config=ssh_config,
+        ssh_config_dir=bool(raw.get("ssh_config_dir", True)),
+        ssh_host_prefix=str(raw.get("ssh_host_prefix", "awvm--")),
         extra_ssh_public_keys=extra_keys,
     )
 

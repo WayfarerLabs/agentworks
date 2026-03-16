@@ -158,7 +158,7 @@ reference.
 
 Key sections:
 
-- `[user]` -- SSH keys (required), additional authorized keys, and default shell
+- `[user]` -- SSH keys (required), additional authorized keys, SSH config management, default shell
 - `[paths]` -- local workspace and `.code-workspace` file directories
 - `[defaults]` -- default platform, VM host, git credentials
 - `[dotfiles]` -- dotfiles sync to VMs

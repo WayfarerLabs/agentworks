@@ -137,7 +137,7 @@ def generate_code_workspace(
     from agentworks.ssh_config import ssh_host_alias
 
     # Use the SSH config alias so VS Code picks up the right host/user/key
-    ssh_host = ssh_host_alias(vm.name)
+    ssh_host = ssh_host_alias(vm.name, config.user.ssh_host_prefix)
 
     ws_file = {
         "folders": [
