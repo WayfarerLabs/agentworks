@@ -73,7 +73,8 @@ def run_detached(
 
     # Check for an existing running process (resume scenario)
     if _is_running(target, pid_file):
-        typer.echo(f"  {label}: detected in-progress operation, resuming...")
+        if not quiet:
+            typer.echo(f"  {label}: resuming in-progress operation...")
     else:
         # Write and start the wrapper script
         wrapper = _WRAPPER_TEMPLATE.format(
@@ -95,7 +96,8 @@ def run_detached(
         # Brief pause for PID file to be written
         time.sleep(0.5)
 
-        typer.echo(f"  {label}: started (detached)")
+        if not quiet:
+            typer.echo(f"  {label}: started (detached)")
 
     # Poll for completion
     output = _poll_until_done(

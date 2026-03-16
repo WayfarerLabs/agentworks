@@ -533,7 +533,7 @@ def _phase_a_bootstrap(
 
     from agentworks.vms.bootstrap_script import generate_bootstrap_script, parse_bootstrap_output
 
-    typer.echo("Provisioning: bootstrap and Tailscale...")
+    typer.echo("Bootstrapping VM (detached)...")
     db.update_vm_provisioning_status(vm_name, ProvisioningStatus.IN_PROGRESS)
 
     # Resolve Tailscale auth key
@@ -563,7 +563,7 @@ def _phase_a_bootstrap(
 
     from agentworks.remote_exec import run_detached
 
-    typer.echo("  Running bootstrap script (detached)...")
+    typer.echo("  Running bootstrap script...")
     detached = run_detached(
         exec_target,
         f"sudo -n /bin/bash {remote_script}",

@@ -93,7 +93,7 @@ class LimaProvisioner(VMProvisioner):
 
         if self.is_remote:
             typer.echo(f"Connecting to VM host '{self._vm_host_ssh}'...")
-        typer.echo(f"Provisioning Lima VM '{vm_name}' ({'remote' if self.is_remote else 'local'})...")
+        typer.echo(f"Creating Lima VM '{vm_name}' ({'remote' if self.is_remote else 'local'})...")
         typer.echo(f"  Resources: {cpus} CPUs, {memory} GiB memory, {disk} GiB disk")
 
         rendered = LIMA_TEMPLATE.format(cpus=cpus, memory=memory, disk=disk)
@@ -120,13 +120,18 @@ class LimaProvisioner(VMProvisioner):
                 f"limactl create --name {vm_name} --tty=false {remote_template}"
                 f" && limactl start {vm_name}"
             )
+            typer.echo("  Creating and starting VM (detached, this may take a few minutes)...")
             result = run_detached(
                 host_target, lima_cmd,
-                label=f"Lima create+start ({vm_name})",
+                label=f"Lima ({vm_name})",
                 base_path=f"/tmp/agentworks-lima-{vm_name}",
+                quiet=True,
             )
             if result.exit_code != 0:
-                raise SSHError(f"limactl create/start failed (exit {result.exit_code})")
+                raise SSHError(
+                    f"limactl create/start failed (exit {result.exit_code})\n"
+                    f"{result.output[-500:]}"
+                )
             # Clean up the template
             ssh_run(target, f"rm -f {remote_template}", check=False)
         else:
@@ -139,7 +144,7 @@ class LimaProvisioner(VMProvisioner):
             self._run_lima(f"limactl start {vm_name}")
             Path(template_path).unlink()
 
-        typer.echo(f"  Lima VM '{vm_name}' provisioned.")
+        typer.echo(f"  Lima VM '{vm_name}' created.")
 
         if self.is_remote:
             assert self._vm_host_ssh is not None
