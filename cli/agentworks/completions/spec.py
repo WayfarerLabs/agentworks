@@ -71,7 +71,7 @@ DYNAMIC_COMPLETIONS: dict[tuple[str, str], str] = {
     ("agent.shell", "workspace"): "workspaces",
     ("agent.delete", "workspace"): "workspaces",
     ("agent.list", "workspace"): "workspaces",
-    ("install-command.describe", "name"): "catalog_entries",
+    ("installer.describe", "name"): "catalog_entries",
 }
 
 

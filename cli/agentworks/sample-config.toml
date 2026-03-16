@@ -6,7 +6,7 @@
 #
 # Agentworks ships a built-in catalog of common tools (apt sources, apt
 # packages, system install commands, user install commands). Run
-# `agentworks install-command list` to see what is available. You can
+# `agentworks installer list` to see what is available. You can
 # reference catalog entries by name in vm.config and agent.config, and
 # define your own entries below to extend or override the catalog.
 

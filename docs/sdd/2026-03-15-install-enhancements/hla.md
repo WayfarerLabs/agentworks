@@ -309,11 +309,11 @@ This value is cached for the duration of the init run.
 
 ## CLI Commands
 
-A new `install-command` command group:
+A new `installer` command group:
 
 ```
-agentworks install-command list [--type apt-source|apt-package|system-install-cmd|user-install-cmd] [--source builtin|user|all]
-agentworks install-command describe <name>
+agentworks installer list [--type apt-source|apt-package|system-install-cmd|user-install-cmd] [--source builtin|user|all]
+agentworks installer describe <name>
 ```
 
 ### list
@@ -340,7 +340,7 @@ Filterable by `--type` and `--source`.
 Shows the full definition of a single entry:
 
 ```
-$ agentworks install-command describe gh
+$ agentworks installer describe gh
 
 Name:        gh
 Type:        apt-package
@@ -361,10 +361,10 @@ Apt:         gh
 | `cli/agentworks/config.py` | Add `apt_sources`, `apt_packages`, `system_install_commands`, `user_install_commands` sections; rename `vm.config.install_commands` to `admin_user_install_commands`; rename `agent.config.install_commands` to `user_install_commands` |
 | `cli/agentworks/vms/initializer.py` | Restructure Phase B to use resolved catalog; add apt source setup step |
 | `cli/agentworks/agents/manager.py` | Wire up agent install commands using catalog |
-| `cli/agentworks/cli.py` | Add `install-command` command group; remove `--extra-packages` and `--git-credentials` from `vm create`; remove `--git-credentials` from `vm reinit` |
+| `cli/agentworks/cli.py` | Add `installer` command group; remove `--extra-packages` and `--git-credentials` from `vm create`; remove `--git-credentials` from `vm reinit` |
 | `cli/agentworks/vms/manager.py` | Remove `extra_packages` and `git_credentials` params from create/reinit; read from config directly |
 | `cli/agentworks/sample-config.toml` | Update to reflect new structure |
-| `cli/agentworks/completions/` | Add `install-command` group completions |
+| `cli/agentworks/completions/` | Add `installer` group completions |
 | `cli/README.md` | Document new config structure, commands, and catalog |
 | `cli/tests/test_catalog.py` | New: catalog loading, merging, resolution tests |
 | `cli/tests/test_config.py` | Update for new config sections |

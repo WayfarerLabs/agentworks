@@ -46,12 +46,12 @@ agent_app = typer.Typer(
 )
 app.add_typer(agent_app)
 
-install_cmd_app = typer.Typer(
-    name="install-command",
-    help="List and inspect available install commands from the catalog.",
+installer_app = typer.Typer(
+    name="installer",
+    help="List and inspect available installers from the catalog.",
     no_args_is_help=True,
 )
-app.add_typer(install_cmd_app)
+app.add_typer(installer_app)
 
 
 # -- Helpers ---------------------------------------------------------------
@@ -393,13 +393,13 @@ def agent_delete(
     delete_agent(_get_db(), load_config(), name=name, workspace_name=workspace)
 
 
-# -- Install command catalog commands --------------------------------------
+# -- Installer catalog commands --------------------------------------------
 
 _TYPE_CHOICES = click.Choice(["apt-source", "apt-package", "system-install-cmd", "user-install-cmd"])
 
 
-@install_cmd_app.command("list")
-def install_command_list(
+@installer_app.command("list")
+def installer_list(
     type_filter: Annotated[
         str | None, typer.Option("--type", help="Filter by type", click_type=_TYPE_CHOICES)
     ] = None,
@@ -407,7 +407,7 @@ def install_command_list(
         str | None, typer.Option("--source", help="Filter by source", click_type=click.Choice(["builtin", "user"]))
     ] = None,
 ) -> None:
-    """List available install commands from the built-in and user catalog."""
+    """List available installers from the built-in and user catalog."""
     from agentworks.catalog import load_builtin_catalog, load_catalog
     from agentworks.config import load_config
 
@@ -471,8 +471,8 @@ _CONFIG_ATTR = {
 }
 
 
-@install_cmd_app.command("describe")
-def install_command_describe(
+@installer_app.command("describe")
+def installer_describe(
     name: Annotated[str, typer.Argument(help="Entry name")],
 ) -> None:
     """Show details of a catalog entry."""

@@ -138,17 +138,17 @@ Manage agents (isolated Linux users) within VM workspaces.
 | `agentworks agent shell <name> [--workspace <ws>]` | Shell into an agent |
 | `agentworks agent delete <name> --workspace <ws>`  | Delete an agent     |
 
-### Install Commands
+### Installers
 
 Browse and inspect the built-in catalog of installable tools.
 
-| Command                                        | Description                     |
-| ---------------------------------------------- | ------------------------------- |
-| `agentworks install-command list`              | List all available catalog entries |
-| `agentworks install-command describe <name>`   | Show details of a catalog entry |
+| Command                                     | Description                     |
+| ------------------------------------------- | ------------------------------- |
+| `agentworks installer list`                | List all available catalog entries |
+| `agentworks installer describe <name>`     | Show details of a catalog entry |
 
-`install-command list` accepts `--type` (apt-source, apt-package, system-install-cmd,
-user-install-cmd) and `--source` (builtin, user) filters.
+`installer list` accepts `--type` (apt-source, apt-package, system-install-cmd, user-install-cmd)
+and `--source` (builtin, user) filters.
 
 ## Configuration
 
@@ -175,7 +175,7 @@ Key sections:
 ### Built-in Catalog
 
 Agentworks ships a built-in catalog of common tools (apt sources, apt packages, system install
-commands, and user install commands). Run `agentworks install-command list` to see what is available.
+commands, and user install commands). Run `agentworks installer list` to see what is available.
 Reference catalog entries by name in `vm.config` and `agent.config`. User-defined entries in your
 config override built-in entries with the same name.
 

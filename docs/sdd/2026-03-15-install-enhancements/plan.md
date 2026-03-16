@@ -162,21 +162,21 @@ configured. Failures warn but do not abort.
 
 ## Phase 5: CLI Discoverability
 
-### 5.1 install-command Command Group
+### 5.1 installer Command Group
 
-- [x] Add `install-command` Typer group to `cli.py`
-- [x] Implement `install-command list` with `--type` and `--source` filters
+- [x] Add `installer` Typer group to `cli.py`
+- [x] Implement `installer list` with `--type` and `--source` filters
   - Table output: TYPE, NAME, SOURCE, DESCRIPTION
   - Types: `apt-source`, `apt-package`, `system-install-cmd`, `user-install-cmd`
   - Sources: `built-in`, `user`
-- [x] Implement `install-command describe <name>`
+- [x] Implement `installer describe <name>`
   - Show full entry details
   - Indicate source (built-in or user, and whether user is overriding built-in)
 - [x] Update shell completions for new command group
-  - Add `install-command` group with `list` and `describe` subcommands
+  - Add `installer` group with `list` and `describe` subcommands
   - Dynamic completions for `describe` argument (catalog_entries completer)
 
-**Definition of done:** `agentworks install-command list` shows all entries. `describe` shows full
+**Definition of done:** `agentworks installer list` shows all entries. `describe` shows full
 details. Completions work.
 
 ---
@@ -188,7 +188,7 @@ details. Completions work.
 - [x] Update `cli/README.md`:
   - Document new config structure (apt_sources, apt_packages, system_install_commands,
     user_install_commands)
-  - Document `install-command` CLI commands
+  - Document `installer` CLI commands
   - Update VM initialization section to describe new step order
   - Document built-in catalog and override behavior
 - [x] Update sample config comments for clarity
@@ -203,5 +203,5 @@ details. Completions work.
 - [x] Full test suite passes (100 tests)
 - [ ] Manual test: create a VM with `apt_packages = ["gh"]` and verify gh is installed
 - [ ] Manual test: `vm reinit` skips already-configured apt sources
-- [ ] Manual test: `install-command list` shows expected output
+- [ ] Manual test: `installer list` shows expected output
 - [ ] Spell check documentation with cspell
