@@ -101,6 +101,7 @@ class LimaProvisioner(VMProvisioner):
         if self.is_remote:
             assert self._vm_host_ssh is not None
             target = SSHTarget(host=self._vm_host_ssh, user=None)
+
             # Write template to a temp file and copy to VM Host
             with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
                 f.write(rendered)
@@ -109,8 +110,25 @@ class LimaProvisioner(VMProvisioner):
             copy_to(target, local_template, remote_template)
             Path(local_template).unlink()
 
-            self._run_lima(f"limactl create --name {vm_name} --tty=false {remote_template}")
-            self._run_lima(f"limactl start {vm_name}")
+            # Run limactl create + start as a single detached operation
+            from agentworks.remote_exec import run_detached
+
+            host_target = ExecTarget(
+                ssh=SSHTarget(host=self._vm_host_ssh, user=None, login_shell=True),
+            )
+            lima_cmd = (
+                f"limactl create --name {vm_name} --tty=false {remote_template}"
+                f" && limactl start {vm_name}"
+            )
+            result = run_detached(
+                host_target, lima_cmd,
+                label=f"Lima create+start ({vm_name})",
+                base_path=f"/tmp/agentworks-lima-{vm_name}",
+            )
+            if result.exit_code != 0:
+                raise SSHError(f"limactl create/start failed (exit {result.exit_code})")
+            # Clean up the template
+            ssh_run(target, f"rm -f {remote_template}", check=False)
         else:
             # Write template locally
             with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:

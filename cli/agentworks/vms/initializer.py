@@ -549,7 +549,7 @@ def _phase_a_bootstrap(
         is_wsl2=is_wsl2,
     )
 
-    # Copy script to VM and execute
+    # Copy script to VM and execute via detached nohup
     remote_script = "/tmp/agentworks-bootstrap.sh"
     with tempfile.NamedTemporaryFile(mode="wb", suffix=".sh", delete=False) as f:
         f.write(script.encode("utf-8"))
@@ -561,12 +561,20 @@ def _phase_a_bootstrap(
         import os
         os.unlink(local_script)
 
-    typer.echo("  Running bootstrap script...")
-    result = exec_target.run_as_root(f"/bin/bash {remote_script}", check=False, timeout=300)
+    from agentworks.remote_exec import run_detached
+
+    typer.echo("  Running bootstrap script (detached)...")
+    detached = run_detached(
+        exec_target,
+        f"sudo -n /bin/bash {remote_script}",
+        label="Bootstrap",
+        base_path=f"/tmp/agentworks-bootstrap-{vm_name}",
+        quiet=True,  # we parse the structured output ourselves
+    )
     exec_target.run_as_root(f"rm -f {remote_script}", check=False)
 
     # Parse structured output
-    bootstrap = parse_bootstrap_output(result.stdout, result.returncode)
+    bootstrap = parse_bootstrap_output(detached.output, detached.exit_code)
 
     # Feed results into logger and console
     for step in bootstrap.steps:
@@ -582,15 +590,11 @@ def _phase_a_bootstrap(
             logger.error(step.error)
 
     # Log full output for troubleshooting
-    if result.stdout:
-        logger.output(result.stdout)
-    if result.stderr:
-        logger.output(result.stderr)
+    if detached.output:
+        logger.output(detached.output)
 
     if not bootstrap.ok:
-        msg = f"Bootstrap script failed (exit {result.returncode})"
-        if result.stderr:
-            msg += f": {result.stderr.strip()[:200]}"
+        msg = f"Bootstrap script failed (exit {detached.exit_code})"
         raise SSHError(msg)
 
     # Update DB with Tailscale info

@@ -63,41 +63,41 @@ Make limactl create and start resilient to workstation -> VM host connection dro
 
 ### 1.1 Detached Execution Helper
 
-- [ ] Create `cli/agentworks/remote_exec.py` with `run_detached()` function
+- [x] Create `cli/agentworks/remote_exec.py` with `run_detached()` function
   - Start command via nohup with output and PID files
   - Poll loop: check PID alive, tail new output, print to console
   - Resume: detect existing PID file, skip start if process still running
   - Return: final output, exit code (from status file written by wrapper script)
   - Handle cleanup of remote temp files on completion
-- [ ] Write a wrapper shell script template that:
+  - Supports `quiet` mode for callers that parse output themselves
+- [x] Write a wrapper shell script template that:
   - Writes PID to pid_file
   - Runs the command
   - Writes exit code to a status file on completion
-- [ ] Write tests with mock ExecTarget
+- [x] Write tests with mock ExecTarget (9 tests)
 
 **Definition of done:** `run_detached()` launches a command, polls for output, and returns results.
 Simulated SSH drop (stop polling, resume) picks up where it left off.
 
 ### 1.2 Wire into Lima Provisioner
 
-- [ ] Update `_run_lima()` for remote mode to use `run_detached()` instead of `ssh_run()`
-  - Output file: `/tmp/agentworks-lima-<vm_name>.out`
-  - PID file: `/tmp/agentworks-lima-<vm_name>.pid`
-- [ ] Handle resume: if `vm create` is re-run and the limactl process is still running, resume
-  polling instead of starting a new create
-- [ ] Handle stale state: if the process finished but we never saw the result, read the output
-  file and status file to determine success/failure
-- [ ] Local mode unchanged (local subprocess doesn't have the SSH drop problem)
+- [x] Update Lima provisioner remote create to use `run_detached()` for combined
+  `limactl create && limactl start` as a single detached operation
+  - Base path: `/tmp/agentworks-lima-<vm_name>`
+- [x] Resume handled by `run_detached()` (detects existing PID, resumes polling)
+- [x] Stale state handled by `run_detached()` (reads status file if process finished)
+- [x] Local mode unchanged
 
 **Definition of done:** `limactl create` and `limactl start` survive workstation SSH drops. Re-running
 `vm create` while limactl is still running resumes instead of failing.
 
 ### 1.3 Update vm create Flow
 
-- [ ] Update `create_vm()` in `manager.py` to handle resume scenario
+- [ ] (Future) Update `create_vm()` in `manager.py` to handle resume scenario
   - If DB record exists with provisioning_status "in_progress", attempt resume
-  - If DB record exists with provisioning_status "pending", check for stale detached process
-- [ ] Update error messages for detached execution context
+  - Currently: `run_detached()` handles resume at the nohup level within a single
+    `vm create` invocation. A full CLI-level resume (re-running `vm create` after a crash)
+    is deferred.
 
 **Definition of done:** Interrupted `vm create` can be re-run to resume. Clear messaging about
 what is happening.
@@ -111,13 +111,11 @@ connection drops.
 
 ### 2.1 Detached Bootstrap Execution
 
-- [ ] Update `_phase_a_bootstrap()` to use `run_detached()` for the bootstrap script
-  - The bootstrap script already runs as a single bash script on the VM
-  - Wrap in nohup so it survives SSH drops from VM host to VM
-  - Output file: `/tmp/agentworks-bootstrap-<vm_name>.out`
-  - PID file: `/tmp/agentworks-bootstrap-<vm_name>.pid`
-- [ ] Parse bootstrap output from the output file (same `##STEP##` markers)
-- [ ] Handle resume: if bootstrap is still running, resume polling
+- [x] Update `_phase_a_bootstrap()` to use `run_detached()` with `quiet=True`
+  - Bootstrap runs `sudo -n /bin/bash <script>` detached
+  - Base path: `/tmp/agentworks-bootstrap-<vm_name>`
+- [x] Parse bootstrap output from detached result (same `##STEP##` markers)
+- [x] Resume handled by `run_detached()`
 
 **Definition of done:** Bootstrap script survives SSH drops. Output is captured and parsed the
 same way.
