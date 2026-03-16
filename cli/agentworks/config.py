@@ -78,6 +78,7 @@ class UserConfig:
     ssh_private_key: Path
     shell: str = "zsh"
     ssh_config: Path = field(default_factory=lambda: Path.home() / ".ssh" / "config")
+    extra_ssh_public_keys: list[Path] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -196,7 +197,7 @@ def _warn_unexpected_keys(
         )
 
 
-_USER_KEYS = {"ssh_public_key", "ssh_private_key", "shell", "ssh_config"}
+_USER_KEYS = {"ssh_public_key", "ssh_private_key", "shell", "ssh_config", "extra_ssh_public_keys"}
 
 
 def _load_user(data: dict[str, object]) -> UserConfig:
@@ -218,11 +219,19 @@ def _load_user(data: dict[str, object]) -> UserConfig:
     if "ssh_config" in raw:
         ssh_config = _expand(str(raw["ssh_config"]))
 
+    extra_keys: list[Path] = []
+    for entry in raw.get("extra_ssh_public_keys", []):
+        p = _expand(str(entry))
+        if not p.exists():
+            raise ConfigError(f"user.extra_ssh_public_keys: file does not exist: {p}")
+        extra_keys.append(p)
+
     return UserConfig(
         ssh_public_key=pub,
         ssh_private_key=priv,
         shell=str(raw.get("shell", "zsh")),
         ssh_config=ssh_config,
+        extra_ssh_public_keys=extra_keys,
     )
 
 

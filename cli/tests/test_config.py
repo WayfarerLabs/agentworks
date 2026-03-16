@@ -166,3 +166,48 @@ def test_orphaned_key_under_commented_section(tmp_path: Path) -> None:
         assert "user" in str(w[0].message).lower()
     # The orphaned key means dotfiles.enabled stays at default (True)
     assert cfg.dotfiles.enabled is True
+
+
+def test_extra_ssh_public_keys(tmp_path: Path) -> None:
+    pub = tmp_path / "id.pub"
+    priv = tmp_path / "id"
+    extra1 = tmp_path / "extra1.pub"
+    extra2 = tmp_path / "extra2.pub"
+    pub.write_text("ssh-ed25519 AAAA-primary")
+    priv.write_text("key")
+    extra1.write_text("ssh-ed25519 AAAA-extra1")
+    extra2.write_text("ssh-rsa BBBB-extra2")
+
+    config_file = tmp_path / "config.toml"
+    config_file.write_text(dedent(f"""\
+        [user]
+        ssh_public_key = "{pub}"
+        ssh_private_key = "{priv}"
+        extra_ssh_public_keys = ["{extra1}", "{extra2}"]
+    """))
+    cfg = load_config(config_file)
+    assert len(cfg.user.extra_ssh_public_keys) == 2
+    assert cfg.user.extra_ssh_public_keys[0] == extra1
+    assert cfg.user.extra_ssh_public_keys[1] == extra2
+
+
+def test_extra_ssh_public_keys_missing_file(tmp_path: Path) -> None:
+    pub = tmp_path / "id.pub"
+    priv = tmp_path / "id"
+    pub.write_text("key")
+    priv.write_text("key")
+
+    config_file = tmp_path / "config.toml"
+    config_file.write_text(dedent(f"""\
+        [user]
+        ssh_public_key = "{pub}"
+        ssh_private_key = "{priv}"
+        extra_ssh_public_keys = ["/nonexistent/key.pub"]
+    """))
+    with pytest.raises(ConfigError, match="extra_ssh_public_keys.*does not exist"):
+        load_config(config_file)
+
+
+def test_extra_ssh_public_keys_defaults_empty(config_dir: Path) -> None:
+    cfg = load_config(config_dir)
+    assert cfg.user.extra_ssh_public_keys == []
