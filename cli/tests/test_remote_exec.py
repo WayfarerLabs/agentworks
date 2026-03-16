@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, call, patch
-
-import pytest
+from unittest.mock import MagicMock, patch
 
 from agentworks.remote_exec import DetachedResult, _is_running, _read_exit_code, run_detached
 
@@ -33,7 +31,7 @@ def _mock_target(
         elif cmd.startswith("test -f") and ".status" in cmd:
             poll_count += 1
             result.returncode = 0 if poll_count > status_exists_after else 1
-        elif cmd.startswith("kill -0"):
+        elif cmd.startswith("ps -p"):
             result.returncode = 0 if process_alive else 1
         elif cmd.startswith("tail -c"):
             result.stdout = output_content
@@ -65,7 +63,7 @@ def test_is_running_dead_process() -> None:
         nonlocal call_count
         call_count += 1
         result = MagicMock()
-        result.returncode = 0 if call_count == 1 else 1  # pid exists, but kill -0 fails
+        result.returncode = 0 if call_count == 1 else 1  # pid exists, but ps -p fails
         return result
 
     target.run.side_effect = run_side_effect

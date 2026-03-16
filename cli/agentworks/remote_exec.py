@@ -71,8 +71,14 @@ def run_detached(
     status_file = f"{base_path}.status"
     wrapper_file = f"{base_path}.sh"
 
+    run_fn = target.run_as_root if as_root else target.run
+
+    # Check for a completed previous run (reconnect after process finished)
+    if _status_file_exists(target, status_file):
+        if not quiet:
+            typer.echo(f"  {label}: found completed result from previous run")
     # Check for an existing running process (resume scenario)
-    if _is_running(target, pid_file):
+    elif _is_running(target, pid_file):
         if not quiet:
             typer.echo(f"  {label}: resuming in-progress operation...")
     else:
@@ -86,7 +92,6 @@ def run_detached(
         target.write_file(wrapper_file, wrapper)
 
         # Clear any stale files from a previous run
-        run_fn = target.run_as_root if as_root else target.run
         run_fn(f"rm -f {output_file} {pid_file} {status_file}", check=False)
 
         # Launch detached
@@ -112,8 +117,7 @@ def run_detached(
     exit_code = _read_exit_code(target, status_file)
 
     # Cleanup remote files
-    run_fn = target.run_as_root if as_root else target.run
-    run_fn(f"rm -f {wrapper_file} {pid_file} {status_file}", check=False)
+    run_fn(f"rm -f {wrapper_file} {pid_file} {status_file} {output_file}", check=False)
 
     return DetachedResult(exit_code=exit_code, output=output)
 
@@ -124,8 +128,14 @@ def _is_running(target: ExecTarget, pid_file: str) -> bool:
     result = target.run(f"test -f {pid_file}", check=False)
     if result.returncode != 0:
         return False
-    # Read PID and check if process is alive
-    result = target.run(f"kill -0 $(cat {pid_file}) 2>/dev/null", check=False)
+    # Read PID and check if process is alive (ps -p works regardless of user)
+    result = target.run(f"ps -p $(cat {pid_file}) > /dev/null 2>&1", check=False)
+    return result.returncode == 0
+
+
+def _status_file_exists(target: ExecTarget, status_file: str) -> bool:
+    """Check if a status file exists (process completed)."""
+    result = target.run(f"test -f {status_file}", check=False)
     return result.returncode == 0
 
 

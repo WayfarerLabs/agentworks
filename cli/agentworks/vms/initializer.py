@@ -595,6 +595,8 @@ def _phase_a_bootstrap(
 
     if not bootstrap.ok:
         msg = f"Bootstrap script failed (exit {detached.exit_code})"
+        if detached.output:
+            msg += f"\n{detached.output[-500:]}"
         raise SSHError(msg)
 
     # Update DB with Tailscale info
