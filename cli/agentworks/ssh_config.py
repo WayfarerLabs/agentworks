@@ -51,29 +51,33 @@ def ssh_host_alias(vm_name: str, prefix: str = "awvm--") -> str:
     return f"{prefix}{vm_name}"
 
 
-def upsert_vm_entry(config: Config, vm: VMRow, db: Database) -> None:
-    """Add or update an SSH config entry for a VM, then rebuild."""
-    if not vm.tailscale_host:
-        return
-
+def sync_ssh_config(config: Config, db: Database) -> None:
+    """Rebuild SSH config from current DB state."""
     if config.user.ssh_config_dir:
         _rebuild_config_dir(config, db)
     else:
-        _legacy_upsert(config, vm)
-
-    alias = ssh_host_alias(vm.name, config.user.ssh_host_prefix)
-    typer.echo(f"  SSH config: {alias} -> {vm.tailscale_host}")
+        _legacy_rebuild(config, db)
+    typer.echo("  SSH config synced")
 
 
-def remove_vm_entry(config: Config, vm_name: str, db: Database) -> None:
-    """Remove an SSH config entry for a VM, then rebuild."""
-    if config.user.ssh_config_dir:
-        _rebuild_config_dir(config, db)
-    else:
-        _legacy_remove(config, vm_name)
+def _legacy_rebuild(config: Config, db: Database) -> None:
+    """Legacy: rebuild the managed section from all VMs in DB."""
+    ssh_config = config.user.ssh_config
+    user_section, _old_entries = _read_managed(ssh_config)
+    prefix = config.user.ssh_host_prefix
 
-    alias = ssh_host_alias(vm_name, config.user.ssh_host_prefix)
-    typer.echo(f"  SSH config: removed {alias}")
+    entries: dict[str, str] = {}
+    for vm in db.list_vms():
+        if not vm.tailscale_host:
+            continue
+        alias = ssh_host_alias(vm.name, prefix)
+        entries[alias] = _format_entry(
+            alias=alias,
+            hostname=vm.tailscale_host,
+            user=vm.vm_user,
+            identity_file=config.user.ssh_private_key,
+        )
+    _write_legacy(ssh_config, user_section, entries)
 
 
 # -- config.d approach -----------------------------------------------------
@@ -157,40 +161,6 @@ def _remove_legacy_section(ssh_config: Path) -> None:
 
 # -- Legacy approach (managed section in ssh_config) -----------------------
 
-
-def _legacy_upsert(config: Config, vm: VMRow) -> None:
-    """Legacy: add/update entry in managed section of ssh_config."""
-    if not vm.tailscale_host:
-        return
-
-    ssh_config = config.user.ssh_config
-    user_section, entries = _read_managed(ssh_config)
-    prefix = config.user.ssh_host_prefix
-
-    alias = ssh_host_alias(vm.name, prefix)
-    entries[alias] = _format_entry(
-        alias=alias,
-        hostname=vm.tailscale_host,
-        user=vm.vm_user,
-        identity_file=config.user.ssh_private_key,
-    )
-
-    _write_legacy(ssh_config, user_section, entries)
-
-
-def _legacy_remove(config: Config, vm_name: str) -> None:
-    """Legacy: remove entry from managed section of ssh_config."""
-    ssh_config = config.user.ssh_config
-    if not ssh_config.exists():
-        return
-
-    user_section, entries = _read_managed(ssh_config)
-    alias = ssh_host_alias(vm_name, config.user.ssh_host_prefix)
-    if alias not in entries:
-        return
-
-    del entries[alias]
-    _write_legacy(ssh_config, user_section, entries)
 
 
 # -- Shared helpers --------------------------------------------------------

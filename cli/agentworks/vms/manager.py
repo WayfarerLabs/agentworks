@@ -167,9 +167,9 @@ def create_vm(
         # Post-init: SSH config entry + Azure public IP cleanup
         vm_row = db.get_vm(vm_name)
         if vm_row is not None:
-            from agentworks.ssh_config import upsert_vm_entry
+            from agentworks.ssh_config import sync_ssh_config
 
-            upsert_vm_entry(config, vm_row, db)
+            sync_ssh_config(config, db)
 
             if platform == "azure":
                 from agentworks.vms.provisioners.azure import AzureProvisioner as _AP
@@ -414,9 +414,9 @@ def delete_vm(
     # Remove from DB (cascades workspaces and agents), then rebuild SSH config
     db.delete_vm(name)
 
-    from agentworks.ssh_config import remove_vm_entry
+    from agentworks.ssh_config import sync_ssh_config
 
-    remove_vm_entry(config, name, db)
+    sync_ssh_config(config, db)
     typer.echo(f"VM '{name}' deleted")
 
 
@@ -684,7 +684,6 @@ def _ensure_tailscale(
             provisioner.detach_public_ip(vm)
 
     # Update SSH config in case the Tailscale IP changed
-    from agentworks.ssh_config import upsert_vm_entry
+    from agentworks.ssh_config import sync_ssh_config
 
-    vm = _require_vm(db, vm.name)
-    upsert_vm_entry(config, vm, db)
+    sync_ssh_config(config, db)

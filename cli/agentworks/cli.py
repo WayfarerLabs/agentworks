@@ -547,18 +547,6 @@ def installer_describe(
 def config_sync_ssh_config() -> None:
     """Rebuild SSH config entries for all VMs from current state."""
     from agentworks.config import load_config
-    from agentworks.ssh_config import _rebuild_config_dir, _legacy_upsert
+    from agentworks.ssh_config import sync_ssh_config
 
-    config = load_config()
-    db = _get_db()
-
-    if config.user.ssh_config_dir:
-        _rebuild_config_dir(config, db)
-        typer.echo("SSH config rebuilt: ~/.ssh/config.d/agentworks.conf")
-    else:
-        # Legacy mode: rebuild by upserting all VMs
-        vms = db.list_vms()
-        for vm in vms:
-            if vm.tailscale_host:
-                _legacy_upsert(config, vm)
-        typer.echo(f"SSH config rebuilt: {len([v for v in vms if v.tailscale_host])} VM(s)")
+    sync_ssh_config(load_config(), _get_db())
