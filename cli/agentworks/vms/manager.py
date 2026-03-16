@@ -413,13 +413,12 @@ def delete_vm(
     if log_count:
         typer.echo(f"Cleaned up {log_count} init log(s)")
 
-    # Remove SSH config entry
+    # Remove from DB (cascades workspaces and agents), then rebuild SSH config
+    db.delete_vm(name)
+
     from agentworks.ssh_config import remove_vm_entry
 
     remove_vm_entry(config, name, db)
-
-    # Remove from DB (cascades workspaces and agents)
-    db.delete_vm(name)
     typer.echo(f"VM '{name}' deleted")
 
 
