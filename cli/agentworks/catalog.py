@@ -7,6 +7,7 @@ the package; user config entries override built-in entries on name collision.
 
 from __future__ import annotations
 
+import re
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -70,19 +71,39 @@ class ResolvedCatalog:
 
 _BUILTIN_CATALOG_PATH = Path(__file__).parent / "catalog.toml"
 
+# source_file must be a simple filename (no slashes, no shell metacharacters)
+_SAFE_FILENAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]*$")
+
+
+def _require_field(data: dict[str, object], key: str, context: str) -> object:
+    if key not in data:
+        raise CatalogError(f"{context}.{key} is required")
+    return data[key]
+
+
+def _require_list(data: dict[str, object], key: str, context: str) -> list[str]:
+    val = data.get(key, [])
+    if not isinstance(val, list):
+        raise CatalogError(f"{context}.{key} must be a list")
+    return [str(item) for item in val]
+
 
 def _load_apt_sources(raw: dict[str, object]) -> dict[str, AptSourceEntry]:
     entries: dict[str, AptSourceEntry] = {}
     for name, data in raw.items():
         if not isinstance(data, dict):
             raise CatalogError(f"apt_sources.{name} must be a table")
+        ctx = f"apt_sources.{name}"
+        source_file = str(_require_field(data, "source_file", ctx))
+        if not _SAFE_FILENAME_RE.match(source_file):
+            raise CatalogError(f"{ctx}.source_file must be a simple filename, got: {source_file}")
         entries[name] = AptSourceEntry(
             name=name,
             description=str(data.get("description", "")),
-            key_url=str(data["key_url"]),
-            key_path=str(data["key_path"]),
-            source=str(data["source"]),
-            source_file=str(data["source_file"]),
+            key_url=str(_require_field(data, "key_url", ctx)),
+            key_path=str(_require_field(data, "key_path", ctx)),
+            source=str(_require_field(data, "source", ctx)),
+            source_file=source_file,
             key_dearmor=bool(data.get("key_dearmor", False)),
         )
     return entries
@@ -93,11 +114,12 @@ def _load_apt_packages(raw: dict[str, object]) -> dict[str, AptPackageEntry]:
     for name, data in raw.items():
         if not isinstance(data, dict):
             raise CatalogError(f"apt_packages.{name} must be a table")
+        ctx = f"apt_packages.{name}"
         entries[name] = AptPackageEntry(
             name=name,
             description=str(data.get("description", "")),
-            apt=list(data.get("apt", [])),
-            apt_sources=list(data.get("apt_sources", [])),
+            apt=_require_list(data, "apt", ctx),
+            apt_sources=_require_list(data, "apt_sources", ctx) if "apt_sources" in data else [],
         )
     return entries
 
@@ -107,11 +129,12 @@ def _load_system_commands(raw: dict[str, object]) -> dict[str, SystemInstallComm
     for name, data in raw.items():
         if not isinstance(data, dict):
             raise CatalogError(f"system_install_commands.{name} must be a table")
+        ctx = f"system_install_commands.{name}"
         entries[name] = SystemInstallCommandEntry(
             name=name,
             description=str(data.get("description", "")),
-            command=str(data["command"]),
-            path=list(data.get("path", [])),
+            command=str(_require_field(data, "command", ctx)),
+            path=_require_list(data, "path", ctx) if "path" in data else [],
         )
     return entries
 
@@ -121,11 +144,12 @@ def _load_user_commands(raw: dict[str, object]) -> dict[str, UserInstallCommandE
     for name, data in raw.items():
         if not isinstance(data, dict):
             raise CatalogError(f"user_install_commands.{name} must be a table")
+        ctx = f"user_install_commands.{name}"
         entries[name] = UserInstallCommandEntry(
             name=name,
             description=str(data.get("description", "")),
-            command=str(data["command"]),
-            path=list(data.get("path", [])),
+            command=str(_require_field(data, "command", ctx)),
+            path=_require_list(data, "path", ctx) if "path" in data else [],
         )
     return entries
 

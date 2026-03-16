@@ -27,7 +27,7 @@ DYNAMIC_SNIPPETS: dict[str, str] = {
         ' "$HOME/.config/agentworks/config.toml" 2>/dev/null)'
     ),
     "catalog_entries": (
-        "$(agentworks installer list 2>/dev/null | tail -n +2 | awk '{print $2}')"
+        "$(agentworks installer list 2>/dev/null | tail -n +3 | awk '{print $2}')"
     ),
 }
 

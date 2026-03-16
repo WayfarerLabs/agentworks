@@ -62,7 +62,7 @@ command = "curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash"
 
 [user_install_commands.oh-my-zsh]
 description = "Oh My Zsh"
-command = "sh -c \"$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)\""
+command = "sh -c \"$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)\" -- --unattended"
 
 [user_install_commands.bun]
 description = "Bun JavaScript runtime"

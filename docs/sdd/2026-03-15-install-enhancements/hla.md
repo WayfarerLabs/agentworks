@@ -312,7 +312,7 @@ This value is cached for the duration of the init run.
 A new `installer` command group:
 
 ```
-agentworks installer list [--type apt-source|apt-package|system-install-cmd|user-install-cmd] [--source builtin|user|all]
+agentworks installer list [--type apt-source|apt-package|system-install-cmd|user-install-cmd] [--source builtin|user]
 agentworks installer describe <name>
 ```
 

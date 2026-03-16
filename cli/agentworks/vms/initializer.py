@@ -28,7 +28,7 @@ if TYPE_CHECKING:
     from agentworks.git_credentials.base import GitCredentialProvider
     from agentworks.ssh import SSHResult
 
-SYSTEM_PACKAGES = ["openssh-server", "curl", "git", "sudo", "ca-certificates", "tmux", "tmuxinator"]
+SYSTEM_PACKAGES = ["openssh-server", "curl", "git", "sudo", "ca-certificates", "gnupg", "tmux", "tmuxinator"]
 
 
 def _run_logged(
@@ -174,8 +174,10 @@ def _configure_apt_sources(
 
         typer.echo(f"  Configuring apt source '{name}'...")
         try:
-            # Ensure keyrings directory exists
-            _run_logged(target, "install -m 0755 -d /etc/apt/keyrings", logger, as_root=True)
+            # Ensure parent directory for key_path exists
+            from pathlib import PurePosixPath
+            key_dir = str(PurePosixPath(src.key_path).parent)
+            _run_logged(target, f"install -m 0755 -d {shlex.quote(key_dir)}", logger, as_root=True)
 
             # Download GPG key
             if src.key_dearmor:
@@ -644,11 +646,12 @@ def _phase_b_setup(
     git_tokens: dict[str, str] | None = None,
 ) -> None:
     """Phase B: Setup (over Tailscale SSH). Non-fatal steps warn and continue."""
-    from agentworks.catalog import load_catalog
+    from agentworks.catalog import load_catalog, validate_selections
 
     typer.echo("Initializing VM...")
     db.update_vm_init_status(vm_name, InitStatus.IN_PROGRESS)
     catalog = load_catalog(config)
+    validate_selections(config, catalog)
 
     # Non-fatal: apt sources required by selected apt_packages
     _configure_apt_sources(ts_target, config, catalog, logger)

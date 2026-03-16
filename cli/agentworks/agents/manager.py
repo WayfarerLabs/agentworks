@@ -342,9 +342,12 @@ def _run_agent_install_commands(
                 f"printf '%s' {shlex.quote(content)} > {shlex.quote(path_file)}",
             )
             run_as_root(target, f"chown {shlex.quote(linux_user)} {shlex.quote(path_file)}")
-            # Source from .profile and .bashrc
+            # Source from shell profiles
             source_line = f". {path_file}"
-            for rc in (f"{home}/.profile", f"{home}/.bashrc"):
+            rc_files = [f"{home}/.profile", f"{home}/.bashrc"]
+            if shell == "zsh":
+                rc_files.append(f"{home}/.zprofile")
+            for rc in rc_files:
                 run_as_root(
                     target,
                     f"grep -q agentworks-path.sh {shlex.quote(rc)} 2>/dev/null"
