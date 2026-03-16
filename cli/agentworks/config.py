@@ -17,7 +17,7 @@ CONFIG_PATH = CONFIG_DIR / "config.toml"
 NAME_RE = re.compile(r"^[a-z0-9]([a-z0-9_-]*[a-z0-9])?$")
 # Linux username: alphanumeric, hyphens, underscores; 1-32 chars
 VM_USER_RE = re.compile(r"^[a-z_][a-z0-9_-]{0,31}$")
-# SSH host prefix: alphanumeric, hyphens, underscores, dots; must end with a separator
+# SSH host prefix: alphanumeric, hyphens, underscores, dots
 SSH_HOST_PREFIX_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]*$")
 
 MAX_NAME_LENGTH = 30

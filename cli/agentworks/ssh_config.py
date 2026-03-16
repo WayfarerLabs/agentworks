@@ -33,9 +33,11 @@ def _to_ssh_path(path: Path) -> str:
     Uses ~ for the home directory prefix and forward slashes on all platforms
     since OpenSSH expects POSIX-style paths even on Windows.
     """
-    posix = path.as_posix()
-    home = Path.home().as_posix()
-    if posix.startswith(home):
+    resolved = path.resolve()
+    posix = resolved.as_posix()
+    home = Path.home().resolve().as_posix()
+    # Check with trailing slash to avoid false matches (e.g. /home/user2)
+    if posix == home or posix.startswith(home + "/"):
         posix = "~" + posix[len(home):]
     return posix
 
@@ -122,7 +124,11 @@ def _rebuild_config_dir(config: Config, db: Database) -> None:
 
 
 def _ensure_include(ssh_config: Path) -> None:
-    """Ensure the Include directive is the first non-empty line in ssh_config."""
+    """Ensure the Include directive is present in ssh_config.
+
+    Adds it at the top if not present. If the user has moved it elsewhere
+    in the file, their placement is respected.
+    """
     ssh_config.parent.mkdir(parents=True, exist_ok=True)
     directive = _include_directive(ssh_config)
 

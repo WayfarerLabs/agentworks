@@ -24,11 +24,14 @@ def test_ssh_host_alias_custom_prefix() -> None:
     assert ssh_host_alias("dev-vm", "myprefix-") == "myprefix-dev-vm"
 
 
-def test_include_directive_uses_absolute_path(tmp_path: Path) -> None:
+def test_include_directive_uses_resolved_path(tmp_path: Path) -> None:
     ssh_config = tmp_path / ".ssh" / "config"
     directive = _include_directive(ssh_config)
-    assert str(tmp_path / ".ssh" / "config.d") in directive
-    assert directive.startswith("Include /")
+    assert directive.startswith("Include ")
+    assert "config.d/*" in directive
+    # Should use forward slashes even on Windows
+    path_part = directive[len("Include "):]
+    assert "\\" not in path_part
 
 
 def test_ensure_include_creates_file(tmp_path: Path) -> None:
