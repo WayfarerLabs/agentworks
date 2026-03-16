@@ -150,6 +150,12 @@ Browse and inspect the built-in catalog of installable tools.
 `installer list` accepts `--type` (apt-source, apt-package, system-install-cmd, user-install-cmd)
 and `--source` (builtin, user) filters.
 
+### Config
+
+| Command                                | Description                                |
+| -------------------------------------- | ------------------------------------------ |
+| `agentworks config sync-ssh-config`   | Rebuild SSH config entries for all VMs     |
+
 ## Configuration
 
 Config lives at `~/.config/agentworks/config.toml`. Run `agentworks init` to generate a sample with
@@ -158,7 +164,7 @@ reference.
 
 Key sections:
 
-- `[user]` -- SSH keys (required), additional authorized keys, and default shell
+- `[user]` -- SSH keys (required), additional authorized keys, SSH config management, default shell
 - `[paths]` -- local workspace and `.code-workspace` file directories
 - `[defaults]` -- default platform, VM host, git credentials
 - `[dotfiles]` -- dotfiles sync to VMs

@@ -17,6 +17,8 @@ CONFIG_PATH = CONFIG_DIR / "config.toml"
 NAME_RE = re.compile(r"^[a-z0-9]([a-z0-9_-]*[a-z0-9])?$")
 # Linux username: alphanumeric, hyphens, underscores; 1-32 chars
 VM_USER_RE = re.compile(r"^[a-z_][a-z0-9_-]{0,31}$")
+# SSH host prefix: alphanumeric, hyphens, underscores, dots
+SSH_HOST_PREFIX_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]*$")
 
 MAX_NAME_LENGTH = 30
 
@@ -78,6 +80,8 @@ class UserConfig:
     ssh_private_key: Path
     shell: str = "zsh"
     ssh_config: Path = field(default_factory=lambda: Path.home() / ".ssh" / "config")
+    ssh_config_dir: bool = True
+    ssh_host_prefix: str = "awvm--"
     extra_ssh_public_keys: list[Path] = field(default_factory=list)
 
 
@@ -195,7 +199,10 @@ def _warn_unexpected_keys(
         )
 
 
-_USER_KEYS = {"ssh_public_key", "ssh_private_key", "shell", "ssh_config", "extra_ssh_public_keys"}
+_USER_KEYS = {
+    "ssh_public_key", "ssh_private_key", "shell", "ssh_config",
+    "ssh_config_dir", "ssh_host_prefix", "extra_ssh_public_keys",
+}
 
 
 def _load_user(data: dict[str, object]) -> UserConfig:
@@ -224,11 +231,20 @@ def _load_user(data: dict[str, object]) -> UserConfig:
             raise ConfigError(f"user.extra_ssh_public_keys: file does not exist: {p}")
         extra_keys.append(p)
 
+    host_prefix = str(raw.get("ssh_host_prefix", "awvm--"))
+    if not SSH_HOST_PREFIX_RE.match(host_prefix):
+        raise ConfigError(
+            f"user.ssh_host_prefix must be alphanumeric with hyphens, underscores, "
+            f"or dots (no whitespace or special characters), got: {host_prefix!r}"
+        )
+
     return UserConfig(
         ssh_public_key=pub,
         ssh_private_key=priv,
         shell=str(raw.get("shell", "zsh")),
         ssh_config=ssh_config,
+        ssh_config_dir=bool(raw.get("ssh_config_dir", True)),
+        ssh_host_prefix=host_prefix,
         extra_ssh_public_keys=extra_keys,
     )
 

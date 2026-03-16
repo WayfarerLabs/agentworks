@@ -80,6 +80,17 @@ class LimaProvisioner(VMProvisioner):
         memory: int = 8,
         disk: int = 50,
     ) -> ProvisionResult:
+        if not self.is_remote:
+            import shutil
+
+            if not shutil.which("limactl"):
+                typer.echo(
+                    "Error: 'limactl' not found. Lima is not installed on this machine.\n"
+                    "For remote Lima VMs, set defaults.vm_host in your config or pass --vm-host.",
+                    err=True,
+                )
+                raise typer.Exit(1)
+
         if self.is_remote:
             typer.echo(f"Connecting to VM host '{self._vm_host_ssh}'...")
         typer.echo(f"Provisioning Lima VM '{vm_name}' ({'remote' if self.is_remote else 'local'})...")

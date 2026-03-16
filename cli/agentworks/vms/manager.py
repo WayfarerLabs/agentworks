@@ -113,8 +113,10 @@ def create_vm(
         vm_user=resolved_vm_user,
     )
 
+    # -- Provisioning --
+    # If this fails, nothing was created on the remote host (or the remote
+    # couldn't be reached), so we clean up the DB record.
     try:
-        # Platform provisioning (use concrete types for resource kwargs)
         if platform == "lima":
             from agentworks.vms.provisioners.lima import LimaProvisioner
 
@@ -143,17 +145,23 @@ def create_vm(
                 vm_user=resolved_vm_user,
             )
         else:
-            # Unreachable: platform is validated against VALID_PLATFORMS above
             msg = f"Unknown platform: {platform}"
             raise ValueError(msg)
+    except Exception as e:
+        typer.echo(f"\nError: provisioning failed: {e}", err=True)
+        db.delete_vm(vm_name)
+        return
 
-        # Update DB with platform-specific metadata
-        if result.azure_resource_id:
-            db.update_vm_azure_resource_id(vm_name, result.azure_resource_id)
-        if result.wsl_distro_name:
-            db.update_vm_wsl_distro_name(vm_name, result.wsl_distro_name)
+    # Update DB with platform-specific metadata
+    if result.azure_resource_id:
+        db.update_vm_azure_resource_id(vm_name, result.azure_resource_id)
+    if result.wsl_distro_name:
+        db.update_vm_wsl_distro_name(vm_name, result.wsl_distro_name)
 
-        # VM initialization
+    # -- Initialization --
+    # If this fails, the VM exists on the remote host and may be debuggable.
+    # Keep the DB record so the user can reinit or delete.
+    try:
         initialize_vm(
             db, config, vm_name,
             exec_target=result.exec_target,
@@ -163,30 +171,14 @@ def create_vm(
             tailscale_auth_key=tailscale_auth_key,
             git_tokens=git_tokens,
         )
-
-        # Post-init: SSH config entry + Azure public IP cleanup
-        vm_row = db.get_vm(vm_name)
-        if vm_row is not None:
-            from agentworks.ssh_config import upsert_vm_entry
-
-            upsert_vm_entry(config, vm_row)
-
-            if platform == "azure":
-                from agentworks.vms.provisioners.azure import AzureProvisioner as _AP
-
-                _AP().detach_public_ip(vm_row)
-
     except Exception as e:
-        # Write full details to init log, show only summary on console
+        import traceback
+
         from agentworks.vms.init_log import InitLogger, find_init_logs
 
         logger = InitLogger(vm_name)
         logger.step("Error")
-        detail = getattr(e, "detail", None)
-        if detail:
-            logger.output(detail)
-        else:
-            logger.output(str(e))
+        logger.output(traceback.format_exc())
         logger.close()
 
         typer.echo(f"\nError: {e}", err=True)
@@ -195,6 +187,20 @@ def create_vm(
             typer.echo(f"Details: {logs[0]}", err=True)
         _prompt_failed_vm(db, config, vm_name)
         return
+
+    # -- Post-init: SSH config + cleanup --
+    try:
+        from agentworks.ssh_config import sync_ssh_config
+
+        sync_ssh_config(config, db)
+
+        if platform == "azure":
+            from agentworks.vms.provisioners.azure import AzureProvisioner as _AP
+
+            _AP().detach_public_ip(db.get_vm(vm_name))
+    except Exception as e:
+        typer.echo(f"\nWarning: post-init step failed: {e}", err=True)
+        typer.echo("VM is likely still usable.", err=True)
 
     # Final status is set by initialize_vm (COMPLETE or PARTIAL)
     vm = db.get_vm(vm_name)
@@ -413,13 +419,12 @@ def delete_vm(
     if log_count:
         typer.echo(f"Cleaned up {log_count} init log(s)")
 
-    # Remove SSH config entry
-    from agentworks.ssh_config import remove_vm_entry
-
-    remove_vm_entry(config, name)
-
-    # Remove from DB (cascades workspaces and agents)
+    # Remove from DB (cascades workspaces and agents), then rebuild SSH config
     db.delete_vm(name)
+
+    from agentworks.ssh_config import sync_ssh_config
+
+    sync_ssh_config(config, db)
     typer.echo(f"VM '{name}' deleted")
 
 
@@ -687,7 +692,6 @@ def _ensure_tailscale(
             provisioner.detach_public_ip(vm)
 
     # Update SSH config in case the Tailscale IP changed
-    from agentworks.ssh_config import upsert_vm_entry
+    from agentworks.ssh_config import sync_ssh_config
 
-    vm = _require_vm(db, vm.name)
-    upsert_vm_entry(config, vm)
+    sync_ssh_config(config, db)

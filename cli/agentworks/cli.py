@@ -53,6 +53,13 @@ installer_app = typer.Typer(
 )
 app.add_typer(installer_app)
 
+config_app = typer.Typer(
+    name="config",
+    help="Configuration utilities.",
+    no_args_is_help=True,
+)
+app.add_typer(config_app)
+
 
 # -- Helpers ---------------------------------------------------------------
 
@@ -531,3 +538,15 @@ def installer_describe(
 
     typer.echo(f"Error: '{name}' not found in catalog", err=True)
     raise typer.Exit(1)
+
+
+# -- Config commands -------------------------------------------------------
+
+
+@config_app.command("sync-ssh-config")
+def config_sync_ssh_config() -> None:
+    """Rebuild SSH config entries for all VMs from current state."""
+    from agentworks.config import load_config
+    from agentworks.ssh_config import sync_ssh_config
+
+    sync_ssh_config(load_config(), _get_db())
