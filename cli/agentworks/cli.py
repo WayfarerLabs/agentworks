@@ -161,12 +161,6 @@ def vm_create(
         str | None, typer.Option("--platform", help="Platform", click_type=click.Choice(["lima", "azure", "wsl2"]))
     ] = None,
     vm_host: Annotated[str | None, typer.Option("--vm-host", help="VM host for Lima")] = None,
-    extra_packages: Annotated[
-        list[str] | None, typer.Option("--extra-packages", help="Additional apt packages")
-    ] = None,
-    git_credentials: Annotated[
-        list[str] | None, typer.Option("--git-credentials", help="Git credential providers to configure")
-    ] = None,
     cpus: Annotated[int | None, typer.Option("--cpus", help="Number of CPUs")] = None,
     memory: Annotated[int | None, typer.Option("--memory", help="Memory in GiB")] = None,
     disk: Annotated[int | None, typer.Option("--disk", help="Disk size in GiB")] = None,
@@ -184,7 +178,6 @@ def vm_create(
     create_vm(
         _get_db(), config,
         name=resolved_name, platform=platform, vm_host=vm_host,
-        extra_packages=extra_packages, git_credentials=git_credentials,
         cpus=cpus, memory=memory, disk=disk,
         azure_vm_size=azure_vm_size, vm_user=vm_user,
     )
@@ -246,15 +239,12 @@ def vm_delete(
 @vm_app.command("reinit")
 def vm_reinit(
     name: Annotated[str, typer.Argument(help="VM name")],
-    git_credentials: Annotated[
-        list[str] | None, typer.Option("--git-credentials", help="Git credential providers to configure")
-    ] = None,
 ) -> None:
     """Re-run initialization on a provisioned VM."""
     from agentworks.config import load_config
     from agentworks.vms.manager import reinit_vm
 
-    reinit_vm(_get_db(), load_config(), name, git_credentials=git_credentials)
+    reinit_vm(_get_db(), load_config(), name)
 
 
 @vm_app.command("shell")

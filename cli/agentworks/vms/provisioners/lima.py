@@ -75,7 +75,6 @@ class LimaProvisioner(VMProvisioner):
         self,
         vm_name: str,
         config: Config,
-        extra_packages: list[str] | None = None,
         *,
         cpus: int = 4,
         memory: int = 8,

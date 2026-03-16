@@ -117,7 +117,6 @@ class AzureProvisioner(VMProvisioner):
         self,
         vm_name: str,
         config: Config,
-        extra_packages: list[str] | None = None,
         *,
         azure_vm_size: str = "Standard_B2s",
         vm_user: str = "agentworks",

@@ -49,8 +49,6 @@ def create_vm(
     name: str,
     platform: str | None = None,
     vm_host: str | None = None,
-    extra_packages: list[str] | None = None,
-    git_credentials: list[str] | None = None,
     cpus: int | None = None,
     memory: int | None = None,
     disk: int | None = None,
@@ -98,7 +96,7 @@ def create_vm(
 
     # Pre-flight checks
     verify_tailscale_available()
-    providers = resolve_git_credential_providers(config, git_credentials)
+    providers = resolve_git_credential_providers(config)
     verify_git_credential_auth(providers)
 
     # Collect secrets upfront so the user isn't interrupted mid-provisioning
@@ -109,7 +107,6 @@ def create_vm(
         vm_name,
         platform=platform,
         vm_host_name=vm_host_name,
-        extra_packages=extra_packages,
         cpus=resolved_cpus,
         memory_gib=resolved_memory,
         disk_gib=resolved_disk,
@@ -123,7 +120,7 @@ def create_vm(
 
             lima = LimaProvisioner(vm_host_ssh=vm_host_ssh)
             result = lima.create(
-                vm_name, config, extra_packages,
+                vm_name, config,
                 cpus=resolved_cpus,
                 memory=resolved_memory,
                 disk=resolved_disk,
@@ -133,7 +130,7 @@ def create_vm(
 
             azure = AzureProvisioner()
             result = azure.create(
-                vm_name, config, extra_packages,
+                vm_name, config,
                 azure_vm_size=resolved_azure_size,
                 vm_user=resolved_vm_user,
             )
@@ -142,7 +139,7 @@ def create_vm(
 
             wsl2 = WSL2Provisioner()
             result = wsl2.create(
-                vm_name, config, extra_packages,
+                vm_name, config,
                 vm_user=resolved_vm_user,
             )
         else:
@@ -161,7 +158,6 @@ def create_vm(
             db, config, vm_name,
             exec_target=result.exec_target,
             providers=providers,
-            extra_packages=extra_packages,
             is_wsl2=(platform == "wsl2"),
             vm_user=resolved_vm_user,
             tailscale_auth_key=tailscale_auth_key,
@@ -254,9 +250,6 @@ def describe_vm(db: Database, name: str) -> None:
         typer.echo(f"Azure ID:       {vm.azure_resource_id}")
     if vm.wsl_distro_name:
         typer.echo(f"WSL Distro:     {vm.wsl_distro_name}")
-    if vm.extra_packages:
-        typer.echo(f"Extra Packages: {', '.join(vm.extra_packages)}")
-
     typer.echo(f"Created:        {vm.created_at}")
     if vm.last_seen_at:
         typer.echo(f"Last Seen:      {vm.last_seen_at}")
@@ -434,8 +427,6 @@ def reinit_vm(
     db: Database,
     config: Config,
     name: str,
-    *,
-    git_credentials: list[str] | None = None,
 ) -> None:
     """Re-run initialization on a VM that has already been provisioned.
 
@@ -460,7 +451,7 @@ def reinit_vm(
 
     # Pre-flight checks
     verify_tailscale_available()
-    providers = resolve_git_credential_providers(config, git_credentials)
+    providers = resolve_git_credential_providers(config)
     verify_git_credential_auth(providers)
 
     # Collect git tokens upfront
@@ -476,7 +467,7 @@ def reinit_vm(
 
     run_initialization(
         db, config, name, ts_target, providers, home, vm.vm_user,
-        vm.extra_packages or None, logger, git_tokens=git_tokens,
+        logger, git_tokens=git_tokens,
     )
 
     vm = db.get_vm(name)
