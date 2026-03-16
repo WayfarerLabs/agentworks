@@ -49,7 +49,8 @@ def test_ensure_include_adds_to_top(tmp_path: Path) -> None:
     content = ssh_config.read_text()
     lines = content.splitlines()
     directive = _include_directive(ssh_config)
-    assert lines[0] == directive
+    assert lines[0] == "# Added by agentworks"
+    assert lines[1] == directive
     assert "ServerAliveInterval" in content
 
 
@@ -64,17 +65,16 @@ def test_ensure_include_idempotent(tmp_path: Path) -> None:
     assert content.count(directive) == 1
 
 
-def test_ensure_include_moves_to_top(tmp_path: Path) -> None:
+def test_ensure_include_noop_if_present_elsewhere(tmp_path: Path) -> None:
+    """If the directive already exists anywhere, don't add it again."""
     ssh_config = tmp_path / "config"
     directive = _include_directive(ssh_config)
-    ssh_config.write_text(f"Host *\n    Foo bar\n\n{directive}\n")
+    original = f"Host *\n    Foo bar\n\n{directive}\n"
+    ssh_config.write_text(original)
 
     _ensure_include(ssh_config)
 
-    lines = ssh_config.read_text().splitlines()
-    assert lines[0] == directive
-    # Should only appear once
-    assert sum(1 for l in lines if l.strip() == directive) == 1
+    assert ssh_config.read_text() == original
 
 
 def test_remove_legacy_section(tmp_path: Path) -> None:

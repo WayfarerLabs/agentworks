@@ -22,6 +22,7 @@ if TYPE_CHECKING:
     from agentworks.db import Database, VMRow
 
 _LEGACY_MARKER = "# --- Managed by agentworks. Do not edit below this line. ---"
+_INCLUDE_COMMENT = "# Added by agentworks"
 _CONFIG_DIR_NAME = "config.d"
 _MANAGED_CONF = "agentworks.conf"
 
@@ -108,28 +109,18 @@ def _ensure_include(ssh_config: Path) -> None:
     ssh_config.parent.mkdir(parents=True, exist_ok=True)
     directive = _include_directive(ssh_config)
 
+    include_block = f"{_INCLUDE_COMMENT}\n{directive}"
+
     if not ssh_config.exists():
-        ssh_config.write_text(f"{directive}\n")
+        ssh_config.write_text(f"{include_block}\n")
         return
 
     content = ssh_config.read_text()
-    lines = content.splitlines()
+    if directive in content:
+        return  # already present (with or without comment)
 
-    # Check if the directive is already the first non-empty, non-comment line
-    for line in lines:
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
-            continue
-        if stripped == directive:
-            return  # already at top
-        break  # first real line is something else
-
-    # Remove the directive if it exists elsewhere in the file
-    filtered = [line for line in lines if line.strip() != directive]
-    new_content = directive + "\n\n" + "\n".join(filtered)
-    if not new_content.endswith("\n"):
-        new_content += "\n"
-    ssh_config.write_text(new_content)
+    # Insert at top
+    ssh_config.write_text(f"{include_block}\n\n{content}")
 
 
 def _remove_legacy_section(ssh_config: Path) -> None:
