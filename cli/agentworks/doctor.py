@@ -114,7 +114,7 @@ def run_doctor() -> None:
     config = None
     if not CONFIG_PATH.exists():
         fail(f"Config not found: {CONFIG_PATH}")
-        fail("Run 'agentworks init' to create one")
+        fail("Run 'agentworks config init' to create one")
     else:
         ok(f"Config exists: {CONFIG_PATH}")
         try:

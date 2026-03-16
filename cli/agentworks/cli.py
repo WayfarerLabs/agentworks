@@ -112,8 +112,8 @@ def doctor() -> None:
     run_doctor()
 
 
-@app.command("init")
-def init_config() -> None:
+@config_app.command("init")
+def config_init() -> None:
     """Create a sample config file at ~/.config/agentworks/config.toml."""
     import shutil
     from importlib.resources import files
@@ -122,7 +122,7 @@ def init_config() -> None:
 
     if CONFIG_PATH.exists():
         typer.echo(f"Config already exists: {CONFIG_PATH}")
-        typer.echo("Edit it directly, or remove it and run 'agentworks init' again.")
+        typer.echo("Edit it directly, or remove it and run 'agentworks config init' again.")
         return
 
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
@@ -130,6 +130,15 @@ def init_config() -> None:
     shutil.copy2(str(sample), CONFIG_PATH)
     typer.echo(f"Sample config written to {CONFIG_PATH}")
     typer.echo("Edit it to match your setup, then run 'agentworks vm create' to get started.")
+
+
+@config_app.command("sample")
+def config_sample() -> None:
+    """Print the sample config to stdout."""
+    from importlib.resources import files
+
+    sample = files("agentworks").joinpath("sample-config.toml")
+    typer.echo(sample.read_text())
 
 
 # -- VM Host commands ------------------------------------------------------
