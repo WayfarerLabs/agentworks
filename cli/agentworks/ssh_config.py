@@ -59,15 +59,16 @@ def remove_vm_entry(config: Config, vm_name: str, db: Database) -> None:
 # -- config.d approach -----------------------------------------------------
 
 
-def _rebuild_config_dir(config: Config, db: Database) -> None:
-    """Declaratively rebuild ~/.ssh/config.d/ from current DB state.
+_MANAGED_CONF = "agentworks.conf"
 
-    Creates one file per VM with a Tailscale host. Removes stale files.
-    Ensures the Include directive is present in ~/.ssh/config.
+
+def _rebuild_config_dir(config: Config, db: Database) -> None:
+    """Declaratively rebuild ~/.ssh/config.d/agentworks.conf from DB state.
+
+    Writes a single file containing Host blocks for all VMs with Tailscale
+    hosts. Ensures the Include directive is present in ~/.ssh/config.
     Also cleans up any legacy managed section on first encounter.
     """
-    from pathlib import Path
-
     ssh_dir = config.user.ssh_config.parent
     config_d = ssh_dir / _CONFIG_DIR_NAME
     config_d.mkdir(parents=True, exist_ok=True)
@@ -79,28 +80,24 @@ def _rebuild_config_dir(config: Config, db: Database) -> None:
     # Clean up legacy managed section if present
     _remove_legacy_section(config.user.ssh_config)
 
-    # Build desired state from DB
-    desired_files: set[str] = set()
+    # Build all Host blocks from DB
+    blocks: list[str] = ["# Managed by agentworks -- do not edit.\n"]
     for vm in db.list_vms():
         if not vm.tailscale_host:
             continue
         alias = ssh_host_alias(vm.name, prefix)
-        filename = f"{alias}.conf"
-        desired_files.add(filename)
-        content = _format_entry(
+        blocks.append(_format_entry(
             alias=alias,
             hostname=vm.tailscale_host,
             user=vm.vm_user,
             identity_file=config.user.ssh_private_key,
-        )
-        file_path = config_d / filename
-        file_path.write_text(content)
+        ))
 
-    # Remove stale files (only those matching our prefix)
-    for existing in config_d.iterdir():
-        if existing.name.startswith(prefix) and existing.name.endswith(".conf"):
-            if existing.name not in desired_files:
-                existing.unlink()
+    conf_path = config_d / _MANAGED_CONF
+    if len(blocks) > 1:
+        conf_path.write_text("\n".join(blocks))
+    elif conf_path.exists():
+        conf_path.unlink()
 
 
 def _ensure_include(ssh_config: Path) -> None:
