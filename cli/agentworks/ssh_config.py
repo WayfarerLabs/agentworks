@@ -1,9 +1,9 @@
 """Manage SSH config entries for agentworks VMs.
 
-When ssh_config_dir is enabled (default), entries are written as individual
-files in ~/.ssh/config.d/ and an Include directive is added to the top of
-~/.ssh/config. When disabled, entries are kept in a managed section at the
-end of ~/.ssh/config (legacy behavior).
+When ssh_config_dir is enabled (default), all VM Host blocks are written to
+a single ~/.ssh/config.d/agentworks.conf file and an Include directive is
+added to the top of ~/.ssh/config. When disabled, entries are kept in a
+managed section at the end of ~/.ssh/config (legacy behavior).
 
 On first run with ssh_config_dir enabled, any legacy managed section is
 cleaned up automatically.
@@ -11,19 +11,25 @@ cleaned up automatically.
 
 from __future__ import annotations
 
+import tempfile
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import typer
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from agentworks.config import Config
     from agentworks.db import Database, VMRow
 
 _LEGACY_MARKER = "# --- Managed by agentworks. Do not edit below this line. ---"
-_INCLUDE_DIRECTIVE = "Include config.d/*"
 _CONFIG_DIR_NAME = "config.d"
+_MANAGED_CONF = "agentworks.conf"
+
+
+def _include_directive(ssh_config: Path) -> str:
+    """Build the Include directive using the absolute path to config.d."""
+    config_d = ssh_config.parent / _CONFIG_DIR_NAME
+    return f"Include {config_d}/*"
 
 
 def ssh_host_alias(vm_name: str, prefix: str = "awvm--") -> str:
@@ -59,9 +65,6 @@ def remove_vm_entry(config: Config, vm_name: str, db: Database) -> None:
 # -- config.d approach -----------------------------------------------------
 
 
-_MANAGED_CONF = "agentworks.conf"
-
-
 def _rebuild_config_dir(config: Config, db: Database) -> None:
     """Declaratively rebuild ~/.ssh/config.d/agentworks.conf from DB state.
 
@@ -69,16 +72,16 @@ def _rebuild_config_dir(config: Config, db: Database) -> None:
     hosts. Ensures the Include directive is present in ~/.ssh/config.
     Also cleans up any legacy managed section on first encounter.
     """
-    ssh_dir = config.user.ssh_config.parent
-    config_d = ssh_dir / _CONFIG_DIR_NAME
+    ssh_config = config.user.ssh_config
+    config_d = ssh_config.parent / _CONFIG_DIR_NAME
     config_d.mkdir(parents=True, exist_ok=True)
     prefix = config.user.ssh_host_prefix
 
     # Ensure Include directive at top of ssh_config
-    _ensure_include(config.user.ssh_config)
+    _ensure_include(ssh_config)
 
     # Clean up legacy managed section if present
-    _remove_legacy_section(config.user.ssh_config)
+    _remove_legacy_section(ssh_config)
 
     # Build all Host blocks from DB
     blocks: list[str] = ["# Managed by agentworks -- do not edit.\n"]
@@ -95,25 +98,38 @@ def _rebuild_config_dir(config: Config, db: Database) -> None:
 
     conf_path = config_d / _MANAGED_CONF
     if len(blocks) > 1:
-        conf_path.write_text("\n".join(blocks))
+        _atomic_write(conf_path, "\n".join(blocks))
     elif conf_path.exists():
         conf_path.unlink()
 
 
 def _ensure_include(ssh_config: Path) -> None:
-    """Ensure Include config.d/* is at the top of ssh_config (idempotent)."""
+    """Ensure the Include directive is the first non-empty line in ssh_config."""
     ssh_config.parent.mkdir(parents=True, exist_ok=True)
+    directive = _include_directive(ssh_config)
 
     if not ssh_config.exists():
-        ssh_config.write_text(f"{_INCLUDE_DIRECTIVE}\n")
+        ssh_config.write_text(f"{directive}\n")
         return
 
     content = ssh_config.read_text()
-    if _INCLUDE_DIRECTIVE in content:
-        return
+    lines = content.splitlines()
 
-    # Insert at top (SSH uses first-match, so our entries must come first)
-    ssh_config.write_text(f"{_INCLUDE_DIRECTIVE}\n\n{content}")
+    # Check if the directive is already the first non-empty, non-comment line
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if stripped == directive:
+            return  # already at top
+        break  # first real line is something else
+
+    # Remove the directive if it exists elsewhere in the file
+    filtered = [line for line in lines if line.strip() != directive]
+    new_content = directive + "\n\n" + "\n".join(filtered)
+    if not new_content.endswith("\n"):
+        new_content += "\n"
+    ssh_config.write_text(new_content)
 
 
 def _remove_legacy_section(ssh_config: Path) -> None:
@@ -128,10 +144,11 @@ def _remove_legacy_section(ssh_config: Path) -> None:
 
     # Keep everything before the marker
     user_section = content[:marker_idx].rstrip("\n")
+    directive = _include_directive(ssh_config)
     if user_section:
         ssh_config.write_text(user_section + "\n")
     else:
-        ssh_config.write_text(f"{_INCLUDE_DIRECTIVE}\n")
+        ssh_config.write_text(f"{directive}\n")
 
 
 # -- Legacy approach (managed section in ssh_config) -----------------------
@@ -182,12 +199,28 @@ def _format_entry(
     identity_file: Path,
 ) -> str:
     """Format a single SSH config Host block."""
+    # Quote identity file path in case it contains spaces
+    id_str = str(identity_file)
+    if " " in id_str:
+        id_str = f'"{id_str}"'
     return (
         f"Host {alias}\n"
         f"    HostName {hostname}\n"
         f"    User {user}\n"
-        f"    IdentityFile {identity_file}\n"
+        f"    IdentityFile {id_str}\n"
     )
+
+
+def _atomic_write(path: Path, content: str) -> None:
+    """Write content to a file atomically via temp file + rename."""
+    fd, tmp = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
+    try:
+        with open(fd, "w") as f:
+            f.write(content)
+        Path(tmp).replace(path)
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
+        raise
 
 
 def _read_managed(ssh_config: Path) -> tuple[str, dict[str, str]]:
