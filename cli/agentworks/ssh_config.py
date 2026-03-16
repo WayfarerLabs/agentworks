@@ -214,6 +214,7 @@ def _format_entry(
     )
 
 
+
 def _atomic_write(path: Path, content: str) -> None:
     """Write content to a file atomically via temp file + rename."""
     fd, tmp = tempfile.mkstemp(dir=path.parent, suffix=".tmp")

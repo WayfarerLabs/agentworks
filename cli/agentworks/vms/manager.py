@@ -177,16 +177,14 @@ def create_vm(
                 _AP().detach_public_ip(vm_row)
 
     except Exception as e:
-        # Write full details to init log, show only summary on console
+        # Write full details (including traceback) to init log
+        import traceback
+
         from agentworks.vms.init_log import InitLogger, find_init_logs
 
         logger = InitLogger(vm_name)
         logger.step("Error")
-        detail = getattr(e, "detail", None)
-        if detail:
-            logger.output(detail)
-        else:
-            logger.output(str(e))
+        logger.output(traceback.format_exc())
         logger.close()
 
         typer.echo(f"\nError: {e}", err=True)
