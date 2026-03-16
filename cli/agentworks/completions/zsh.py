@@ -44,6 +44,12 @@ _agentworks_git_credentials() {
     creds=(${(f)"$(sed -n 's/^\\[git_credentials\\.\\([^]]*\\)\\]/\\1/p' "$config_file" 2>/dev/null)"})
     _describe 'git-credential' creds
 }""",
+    "catalog_entries": """\
+_agentworks_catalog_entries() {
+    local -a entries
+    entries=(${(f)"$(agentworks install-command list 2>/dev/null | tail -n +2 | awk '{print $2}')"})
+    _describe 'catalog-entry' entries
+}""",
 }
 
 # Maps completer identifiers to their zsh function names.
@@ -53,6 +59,7 @@ COMPLETER_FUNC_NAMES: dict[str, str] = {
     "workspaces": "_agentworks_workspaces",
     "ws_templates": "_agentworks_templates",
     "git_credentials": "_agentworks_git_credentials",
+    "catalog_entries": "_agentworks_catalog_entries",
 }
 
 

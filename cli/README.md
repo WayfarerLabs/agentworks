@@ -108,12 +108,11 @@ Manage virtual machines across Lima (local or remote), Azure, and WSL2.
 | `agentworks vm add-git-credential <name> <cred>` | Add or update a git credential |
 
 `vm create` accepts `--name`, `--platform`, `--vm-host`, `--vm-user`, `--cpus`, `--memory`,
-`--disk`, `--azure-vm-size`, `--extra-packages`, and `--git-credentials`. All have sensible defaults
-from config or built-in values.
+`--disk`, and `--azure-vm-size`. These are immutable provisioning parameters stored in the database.
+All initialization behavior (packages, install commands, etc.) is driven by config.
 
-`vm reinit` re-runs the initialization phase (packages, install commands, shell, git credentials,
-dotfiles) without reprovisioning the VM. Accepts `--git-credentials` to configure credentials during
-reinit.
+`vm reinit` re-runs the initialization phase using the current config without reprovisioning the VM.
+Changes to config (new packages, different install commands, etc.) are picked up automatically.
 
 ### Workspaces
 
@@ -139,6 +138,18 @@ Manage agents (isolated Linux users) within VM workspaces.
 | `agentworks agent shell <name> [--workspace <ws>]` | Shell into an agent |
 | `agentworks agent delete <name> --workspace <ws>`  | Delete an agent     |
 
+### Install Commands
+
+Browse and inspect the built-in catalog of installable tools.
+
+| Command                                        | Description                     |
+| ---------------------------------------------- | ------------------------------- |
+| `agentworks install-command list`              | List all available catalog entries |
+| `agentworks install-command describe <name>`   | Show details of a catalog entry |
+
+`install-command list` accepts `--type` (apt-source, apt-package, system-install-cmd,
+user-install-cmd) and `--source` (builtin, user) filters.
+
 ## Configuration
 
 Config lives at `~/.config/agentworks/config.toml`. Run `agentworks init` to generate a sample with
@@ -151,10 +162,22 @@ Key sections:
 - `[paths]` -- local workspace and `.code-workspace` file directories
 - `[defaults]` -- default platform, VM host, git credentials
 - `[dotfiles]` -- dotfiles sync to VMs
-- `[vm.config]` -- VM resources (cpus, memory, disk), packages, install commands, username
+- `[vm.config]` -- VM resources, apt packages, system/user install commands, username
+- `[agent.config]` -- user install commands and shell for agents
+- `[apt_sources.*]` -- user-defined third-party apt repositories
+- `[apt_packages.*]` -- user-defined named apt package sets
+- `[system_install_commands.*]` -- user-defined system-level install commands
+- `[user_install_commands.*]` -- user-defined per-user install commands
 - `[workspace_templates.*]` -- workspace templates with inheritance
 - `[git_credentials.*]` -- git credential providers (GitHub, Azure DevOps)
 - `[azure]` -- Azure-specific settings
+
+### Built-in Catalog
+
+Agentworks ships a built-in catalog of common tools (apt sources, apt packages, system install
+commands, and user install commands). Run `agentworks install-command list` to see what is available.
+Reference catalog entries by name in `vm.config` and `agent.config`. User-defined entries in your
+config override built-in entries with the same name.
 
 ## VM Initialization
 
@@ -164,8 +187,14 @@ VM creation follows a two-phase lifecycle tracked by separate status columns:
    transport (Lima shell, SSH, or WSL2 exec): create user, install system packages, add SSH key,
    install and join Tailscale
 
-2. **Initialization** (`init_status`) -- repeatable via `vm reinit`, over Tailscale SSH: install
-   user packages, run install commands, set shell, configure git credentials, sync dotfiles
+2. **Initialization** (`init_status`) -- repeatable via `vm reinit`, over Tailscale SSH: configure
+   apt sources, install apt packages, install snap packages, set shell, run system install commands,
+   run user install commands for the admin user, configure PATH, configure git credentials, sync
+   dotfiles
+
+Initialization is fully declarative -- driven entirely by config. `vm create` only accepts immutable
+provisioning parameters (name, platform, resources). `vm reinit` takes only the VM name and re-runs
+initialization using the current config.
 
 Non-fatal initialization failures (packages, dotfiles) produce a `partial` status rather than
 aborting. Fatal failures prompt for deletion or reinit. Use `vm describe` to view the full event log.

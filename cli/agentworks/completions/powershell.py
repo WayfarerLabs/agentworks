@@ -38,6 +38,12 @@ DYNAMIC_SNIPPETS: dict[str, str] = {
         " | ForEach-Object { $_.Matches[0].Groups[1].Value }"
         " | Where-Object { $_ -like \"$wordToComplete*\" } } }"
     ),
+    "catalog_entries": (
+        "& { agentworks install-command list 2>$null"
+        " | Select-Object -Skip 1"
+        " | ForEach-Object { ($_ -split '\\s+')[1] }"
+        " | Where-Object { $_ -like \"$wordToComplete*\" } }"
+    ),
 }
 
 

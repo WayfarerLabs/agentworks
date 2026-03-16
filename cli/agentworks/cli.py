@@ -46,6 +46,13 @@ agent_app = typer.Typer(
 )
 app.add_typer(agent_app)
 
+install_cmd_app = typer.Typer(
+    name="install-command",
+    help="List and inspect available install commands from the catalog.",
+    no_args_is_help=True,
+)
+app.add_typer(install_cmd_app)
+
 
 # -- Helpers ---------------------------------------------------------------
 
@@ -384,3 +391,143 @@ def agent_delete(
     from agentworks.config import load_config
 
     delete_agent(_get_db(), load_config(), name=name, workspace_name=workspace)
+
+
+# -- Install command catalog commands --------------------------------------
+
+_TYPE_CHOICES = click.Choice(["apt-source", "apt-package", "system-install-cmd", "user-install-cmd"])
+
+
+@install_cmd_app.command("list")
+def install_command_list(
+    type_filter: Annotated[
+        str | None, typer.Option("--type", help="Filter by type", click_type=_TYPE_CHOICES)
+    ] = None,
+    source_filter: Annotated[
+        str | None, typer.Option("--source", help="Filter by source", click_type=click.Choice(["builtin", "user"]))
+    ] = None,
+) -> None:
+    """List available install commands from the built-in and user catalog."""
+    from agentworks.catalog import load_builtin_catalog, load_catalog
+    from agentworks.config import load_config
+
+    config = load_config()
+    builtin = load_builtin_catalog()
+    merged = load_catalog(config)
+
+    rows: list[tuple[str, str, str, str]] = []  # (type, name, source, description)
+
+    def _add_entries(
+        type_label: str,
+        merged_entries: dict[str, object],
+        builtin_entries: dict[str, object],
+    ) -> None:
+        for name, entry in sorted(merged_entries.items()):
+            is_builtin = name in builtin_entries
+            is_user = name in getattr(config, _CONFIG_ATTR[type_label], {})
+            if is_user:
+                source = "user"
+            elif is_builtin:
+                source = "built-in"
+            else:
+                source = "built-in"
+            if source_filter == "builtin" and source != "built-in":
+                continue
+            if source_filter == "user" and source != "user":
+                continue
+            rows.append((type_label, name, source, entry.description))
+
+    if type_filter is None or type_filter == "apt-source":
+        _add_entries("apt-source", merged.apt_sources, builtin.apt_sources)
+    if type_filter is None or type_filter == "apt-package":
+        _add_entries("apt-package", merged.apt_packages, builtin.apt_packages)
+    if type_filter is None or type_filter == "system-install-cmd":
+        _add_entries("system-install-cmd", merged.system_install_commands, builtin.system_install_commands)
+    if type_filter is None or type_filter == "user-install-cmd":
+        _add_entries("user-install-cmd", merged.user_install_commands, builtin.user_install_commands)
+
+    if not rows:
+        typer.echo("No entries found.")
+        return
+
+    # Calculate column widths
+    type_w = max(len(r[0]) for r in rows)
+    name_w = max(len(r[1]) for r in rows)
+    src_w = max(len(r[2]) for r in rows)
+
+    header = f"{'TYPE':<{type_w}}  {'NAME':<{name_w}}  {'SOURCE':<{src_w}}  DESCRIPTION"
+    typer.echo(header)
+    typer.echo("-" * len(header))
+    for type_label, name, source, desc in rows:
+        typer.echo(f"{type_label:<{type_w}}  {name:<{name_w}}  {source:<{src_w}}  {desc}")
+
+
+# Maps type labels to config attributes for source detection
+_CONFIG_ATTR = {
+    "apt-source": "apt_sources",
+    "apt-package": "apt_packages",
+    "system-install-cmd": "system_install_commands",
+    "user-install-cmd": "user_install_commands",
+}
+
+
+@install_cmd_app.command("describe")
+def install_command_describe(
+    name: Annotated[str, typer.Argument(help="Entry name")],
+) -> None:
+    """Show details of a catalog entry."""
+    from agentworks.catalog import (
+        AptPackageEntry,
+        AptSourceEntry,
+        SystemInstallCommandEntry,
+        UserInstallCommandEntry,
+        load_builtin_catalog,
+        load_catalog,
+    )
+    from agentworks.config import load_config
+
+    config = load_config()
+    builtin = load_builtin_catalog()
+    merged = load_catalog(config)
+
+    # Search all four pools
+    for type_label, merged_entries, builtin_entries, config_attr in [
+        ("apt-source", merged.apt_sources, builtin.apt_sources, "apt_sources"),
+        ("apt-package", merged.apt_packages, builtin.apt_packages, "apt_packages"),
+        ("system-install-cmd", merged.system_install_commands, builtin.system_install_commands, "system_install_commands"),
+        ("user-install-cmd", merged.user_install_commands, builtin.user_install_commands, "user_install_commands"),
+    ]:
+        if name not in merged_entries:
+            continue
+
+        entry = merged_entries[name]
+        is_user = name in getattr(config, config_attr, {})
+        source = "user" if is_user else "built-in"
+        overrides = name in builtin_entries and is_user
+
+        typer.echo(f"Name:        {name}")
+        typer.echo(f"Type:        {type_label}")
+        typer.echo(f"Source:      {source}")
+        if overrides:
+            typer.echo("             (overrides built-in)")
+        typer.echo(f"Description: {entry.description}")
+
+        if isinstance(entry, AptSourceEntry):
+            typer.echo(f"Key URL:     {entry.key_url}")
+            typer.echo(f"Key path:    {entry.key_path}")
+            typer.echo(f"Source:      {entry.source}")
+            typer.echo(f"Source file: {entry.source_file}")
+            if entry.key_dearmor:
+                typer.echo("Key dearmor: yes")
+        elif isinstance(entry, AptPackageEntry):
+            if entry.apt_sources:
+                typer.echo(f"Apt sources: {', '.join(entry.apt_sources)}")
+            typer.echo(f"Apt:         {', '.join(entry.apt)}")
+        elif isinstance(entry, (SystemInstallCommandEntry, UserInstallCommandEntry)):
+            typer.echo(f"Command:     {entry.command}")
+            if entry.path:
+                typer.echo(f"PATH:        {', '.join(entry.path)}")
+        return
+
+    typer.echo(f"Error: '{name}' not found in catalog", err=True)
+    raise typer.Exit(1)

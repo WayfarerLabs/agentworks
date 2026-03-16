@@ -149,11 +149,11 @@ Wire per-user install commands into agent creation.
 
 ### 4.1 Agent Install Command Execution
 
-- [ ] In `agents/manager.py`, after creating the agent Linux user, run install commands from
-  `agent.config.user_install_commands` in the agent's login shell
-- [ ] Write PATH additions to agent's `~/.agentworks-path.sh`
-- [ ] Source from agent's shell profiles (same pattern as VM admin user)
-- [ ] Handle failures as non-fatal warnings (agent still usable, just missing a tool)
+- [x] In `agents/manager.py`, after creating the agent Linux user, run install commands from
+  `agent.config.user_install_commands` in the agent's login shell (via `su`)
+- [x] Write PATH additions to agent's `~/.agentworks-path.sh`
+- [x] Source from agent's shell profiles (.profile and .bashrc)
+- [x] Handle failures as non-fatal warnings (agent still usable, just missing a tool)
 
 **Definition of done:** Agent creation runs per-user install commands for the agent. PATH is
 configured. Failures warn but do not abort.
@@ -164,17 +164,17 @@ configured. Failures warn but do not abort.
 
 ### 5.1 install-command Command Group
 
-- [ ] Add `install-command` Typer group to `cli.py`
-- [ ] Implement `install-command list` with `--type` and `--source` filters
+- [x] Add `install-command` Typer group to `cli.py`
+- [x] Implement `install-command list` with `--type` and `--source` filters
   - Table output: TYPE, NAME, SOURCE, DESCRIPTION
   - Types: `apt-source`, `apt-package`, `system-install-cmd`, `user-install-cmd`
   - Sources: `built-in`, `user`
-- [ ] Implement `install-command describe <name>`
+- [x] Implement `install-command describe <name>`
   - Show full entry details
   - Indicate source (built-in or user, and whether user is overriding built-in)
-- [ ] Update shell completions for new command group
+- [x] Update shell completions for new command group
   - Add `install-command` group with `list` and `describe` subcommands
-  - Dynamic completions for `describe` argument (entry names)
+  - Dynamic completions for `describe` argument (catalog_entries completer)
 
 **Definition of done:** `agentworks install-command list` shows all entries. `describe` shows full
 details. Completions work.
@@ -185,22 +185,22 @@ details. Completions work.
 
 ### 6.1 Documentation
 
-- [ ] Update `cli/README.md`:
+- [x] Update `cli/README.md`:
   - Document new config structure (apt_sources, apt_packages, system_install_commands,
     user_install_commands)
   - Document `install-command` CLI commands
   - Update VM initialization section to describe new step order
   - Document built-in catalog and override behavior
-- [ ] Update sample config comments for clarity
+- [x] Update sample config comments for clarity
 
 ### 6.2 Completions
 
-- [ ] Verify all new commands appear in shell completions
-- [ ] Run completions tests
+- [x] Verify all new commands appear in shell completions
+- [x] Run completions tests
 
 ### 6.3 Final Validation
 
-- [ ] Full test suite passes
+- [x] Full test suite passes (100 tests)
 - [ ] Manual test: create a VM with `apt_packages = ["gh"]` and verify gh is installed
 - [ ] Manual test: `vm reinit` skips already-configured apt sources
 - [ ] Manual test: `install-command list` shows expected output

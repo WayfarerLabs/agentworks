@@ -49,6 +49,7 @@ class CommandSpec:
 #   "workspaces"      -> agentworks workspace list
 #   "ws_templates"    -> [workspace_templates.*] sections in config.toml
 #   "git_credentials" -> [git_credentials.*] sections in config.toml
+#   "catalog_entries" -> all entry names from built-in + user catalog
 
 DYNAMIC_COMPLETIONS: dict[tuple[str, str], str] = {
     ("vm.start", "name"): "vms",
@@ -70,6 +71,7 @@ DYNAMIC_COMPLETIONS: dict[tuple[str, str], str] = {
     ("agent.shell", "workspace"): "workspaces",
     ("agent.delete", "workspace"): "workspaces",
     ("agent.list", "workspace"): "workspaces",
+    ("install-command.describe", "name"): "catalog_entries",
 }
 
 
