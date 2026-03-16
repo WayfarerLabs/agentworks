@@ -175,7 +175,7 @@ class WSL2Provisioner(VMProvisioner):
     """Provisions WSL2 Debian distributions on Windows."""
 
     def create(
-        self, vm_name: str, config: Config, extra_packages: list[str] | None = None,
+        self, vm_name: str, config: Config,
         *, vm_user: str = "agentworks",
     ) -> ProvisionResult:
         typer.echo(f"Provisioning WSL2 VM '{vm_name}'...")

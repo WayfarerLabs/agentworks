@@ -314,7 +314,6 @@ class Database:
         name: str,
         platform: str,
         vm_host_name: str | None = None,
-        extra_packages: list[str] | None = None,
         azure_resource_id: str | None = None,
         wsl_distro_name: str | None = None,
         cpus: int | None = None,
@@ -324,14 +323,13 @@ class Database:
     ) -> VMRow:
         self._conn.execute(
             "INSERT INTO vms "
-            "(name, platform, vm_host_name, extra_packages, azure_resource_id, wsl_distro_name, "
+            "(name, platform, vm_host_name, azure_resource_id, wsl_distro_name, "
             "cpus, memory_gib, disk_gib, vm_user) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 name,
                 platform,
                 vm_host_name,
-                json.dumps(extra_packages) if extra_packages else None,
                 azure_resource_id,
                 wsl_distro_name,
                 cpus,

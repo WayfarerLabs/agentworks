@@ -248,7 +248,7 @@ def _create_agent_on_vm(
     linux_user: str,
     workspace_name: str,
 ) -> None:
-    """Create an agent Linux user on a VM."""
+    """Create an agent Linux user on a VM and run user install commands."""
     from agentworks.ssh import run_as_root
 
     target = ssh_target_for_vm(vm, config)
@@ -263,6 +263,9 @@ def _create_agent_on_vm(
     bashrc = f"export PS1='[agent:{linux_user}] \\w\\$ '"
     run_as_root(target, f"printf '%s\\n' '{bashrc}' > {home}/.bashrc")
     run_as_root(target, f"chown {linux_user}:{linux_user} {home}/.bashrc")
+
+    # Run user install commands for this agent
+    _run_agent_install_commands(vm, config, linux_user, home)
 
 
 def _delete_agent_on_vm(
@@ -282,6 +285,76 @@ def _delete_agent_on_vm(
         run_as_root(target, f"userdel -r {linux_user}")
     except SSHError as e:
         typer.echo(f"Warning: remote cleanup for '{linux_user}' failed: {e}", err=True)
+
+
+def _run_agent_install_commands(
+    vm: VMRow,
+    config: Config,
+    linux_user: str,
+    home: str,
+) -> None:
+    """Run user install commands for an agent. Failures warn but do not abort."""
+    command_names = config.agent.user_install_commands
+    if not command_names:
+        return
+
+    import shlex
+
+    from agentworks.catalog import load_catalog
+    from agentworks.ssh import SSHError, run_as_root
+
+    catalog = load_catalog(config)
+    target = ssh_target_for_vm(vm, config)
+    shell = config.agent.shell
+    path_additions: list[str] = []
+    total = len(command_names)
+
+    for i, name in enumerate(command_names, 1):
+        entry = catalog.user_install_commands.get(name)
+        if entry is None:
+            typer.echo(f"  Warning: install command '{name}' not found in catalog", err=True)
+            continue
+        truncated = entry.command[:60]
+        typer.echo(f"  Agent install command {i}/{total} ({name}): {truncated}...")
+        try:
+            # Run as the agent user via su, in their login shell
+            run_as_root(
+                target,
+                f"su - {shlex.quote(linux_user)} -c {shlex.quote(f'{shell} -lc {shlex.quote(entry.command)}')}",
+                timeout=120,
+            )
+        except SSHError as e:
+            typer.echo(f"  Warning: agent install command '{name}' failed: {e}", err=True)
+        path_additions.extend(entry.path)
+
+    # Write PATH additions for the agent
+    if path_additions:
+        typer.echo(f"  Adding {len(path_additions)} PATH entries for agent...")
+        lines = ["# Managed by agentworks -- do not edit"]
+        for p in path_additions:
+            expanded = p.replace("~", "$HOME", 1) if p.startswith("~") else p
+            lines.append(f'export PATH="{expanded}:$PATH"')
+        content = "\n".join(lines) + "\n"
+        try:
+            path_file = f"{home}/.agentworks-path.sh"
+            run_as_root(
+                target,
+                f"printf '%s' {shlex.quote(content)} > {shlex.quote(path_file)}",
+            )
+            run_as_root(target, f"chown {shlex.quote(linux_user)} {shlex.quote(path_file)}")
+            # Source from shell profiles
+            source_line = f". {path_file}"
+            rc_files = [f"{home}/.profile", f"{home}/.bashrc"]
+            if shell == "zsh":
+                rc_files.append(f"{home}/.zprofile")
+            for rc in rc_files:
+                run_as_root(
+                    target,
+                    f"grep -q agentworks-path.sh {shlex.quote(rc)} 2>/dev/null"
+                    f" || printf '%s\\n' '{source_line}' >> {shlex.quote(rc)}",
+                )
+        except SSHError as e:
+            typer.echo(f"  Warning: agent PATH configuration failed: {e}", err=True)
 
 
 # -- Helpers ---------------------------------------------------------------

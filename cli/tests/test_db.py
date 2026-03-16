@@ -29,7 +29,6 @@ def test_roundtrip_vm(db: Database) -> None:
         "dev-vm",
         platform="lima",
         vm_host_name="mac-studio",
-        extra_packages=["nodejs", "python3"],
         cpus=4,
         memory_gib=8,
         disk_gib=50,
@@ -37,7 +36,6 @@ def test_roundtrip_vm(db: Database) -> None:
     vm = db.get_vm("dev-vm")
     assert vm is not None
     assert vm.platform == "lima"
-    assert vm.extra_packages == ["nodejs", "python3"]
     assert vm.provisioning_status == "pending"
     assert vm.init_status == "pending"
     assert vm.cpus == 4

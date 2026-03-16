@@ -25,7 +25,7 @@ class VMProvisioner(ABC):
     """Interface that each platform provisioner must implement."""
 
     @abstractmethod
-    def create(self, vm_name: str, config: Config, extra_packages: list[str] | None = None) -> ProvisionResult:
+    def create(self, vm_name: str, config: Config) -> ProvisionResult:
         """Create a raw VM and return provisioning result for the initializer."""
 
     @abstractmethod

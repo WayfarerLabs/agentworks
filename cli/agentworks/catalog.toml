@@ -1,0 +1,78 @@
+# Built-in catalog of apt sources, apt packages, system install commands, and
+# user install commands. This file is read-only at runtime and ships with the
+# agentworks package. Users can override entries by defining entries with the
+# same name in their config.toml.
+
+# -- Apt sources ---------------------------------------------------------------
+# Third-party apt repositories. The {arch} placeholder is resolved at install
+# time via `dpkg --print-architecture` (amd64 or arm64).
+
+[apt_sources.github-cli]
+description = "GitHub CLI official apt repository"
+key_url = "https://cli.github.com/packages/githubcli-archive-keyring.gpg"
+key_path = "/etc/apt/keyrings/githubcli-archive-keyring.gpg"
+source = "deb [arch={arch} signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main"
+source_file = "github-cli.list"
+
+[apt_sources.hashicorp]
+description = "HashiCorp official apt repository"
+key_url = "https://apt.releases.hashicorp.com/gpg"
+key_path = "/etc/apt/keyrings/hashicorp-archive-keyring.gpg"
+key_dearmor = true
+source = "deb [arch={arch} signed-by=/etc/apt/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com bookworm main"
+source_file = "hashicorp.list"
+
+[apt_sources.nodesource-v22]
+description = "NodeSource Node.js 22.x apt repository"
+key_url = "https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key"
+key_path = "/etc/apt/keyrings/nodesource.gpg"
+key_dearmor = true
+source = "deb [arch={arch} signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main"
+source_file = "nodesource.list"
+
+# -- Apt packages --------------------------------------------------------------
+# Named sets of apt packages with optional apt source dependencies.
+
+[apt_packages.gh]
+description = "GitHub CLI"
+apt_sources = ["github-cli"]
+apt = ["gh"]
+
+[apt_packages.terraform]
+description = "HashiCorp Terraform"
+apt_sources = ["hashicorp"]
+apt = ["terraform"]
+
+[apt_packages.nodejs]
+description = "Node.js 22.x via NodeSource"
+apt_sources = ["nodesource-v22"]
+apt = ["nodejs"]
+
+# -- System install commands ---------------------------------------------------
+# Shell commands that install system-wide tooling (run once per VM).
+
+[system_install_commands.az-cli]
+description = "Azure CLI"
+command = "curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash"
+
+# -- User install commands -----------------------------------------------------
+# Shell commands that install per-user tooling (run for each user).
+# path is an optional list of directories to add to the user's PATH after running the command.
+# This is only necessary if the installer does not automatically add the installed tool to the PATH.
+
+[user_install_commands.oh-my-zsh]
+description = "Oh My Zsh"
+command = "sh -c \"$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)\" -- --unattended"
+
+[user_install_commands.bun]
+description = "Bun JavaScript runtime"
+command = "curl -fsSL https://bun.sh/install | bash"
+
+[user_install_commands.nvm]
+description = "Node Version Manager"
+command = "curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.4/install.sh | bash"
+
+[user_install_commands.claude]
+description = "Claude Code CLI"
+command = "curl -fsSL https://claude.ai/install.sh | bash"
+path = ["~/.local/bin"]

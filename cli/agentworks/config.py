@@ -104,8 +104,10 @@ class DotfilesConfig:
 @dataclass(frozen=True)
 class VMConfig:
     apt: list[str] = field(default_factory=list)
+    apt_packages: list[str] = field(default_factory=list)
     snap: list[str] = field(default_factory=list)
-    install_commands: list[str] = field(default_factory=list)
+    system_install_commands: list[str] = field(default_factory=list)
+    admin_user_install_commands: list[str] = field(default_factory=list)
     cpus: int = 4
     memory: int = 8  # GiB
     disk: int = 50  # GiB
@@ -115,7 +117,7 @@ class VMConfig:
 
 @dataclass(frozen=True)
 class AgentConfig:
-    install_commands: list[str] = field(default_factory=list)
+    user_install_commands: list[str] = field(default_factory=list)
     shell: str = "bash"
 
 
@@ -125,13 +127,6 @@ class WorkspaceTemplate:
     inherits: list[str] = field(default_factory=list)
     repo: str | None = None
     tmuxinator: bool | None = None  # None = not explicitly set (inherit/default to True)
-
-
-@dataclass(frozen=True)
-class InstallCommandConfig:
-    name: str
-    command: str
-    path: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -157,9 +152,12 @@ class Config:
     dotfiles: DotfilesConfig
     vm: VMConfig
     agent: AgentConfig
-    install_commands: dict[str, InstallCommandConfig]
     workspace_templates: dict[str, WorkspaceTemplate]
     git_credentials: dict[str, GitCredentialConfig]
+    apt_sources: dict[str, object] = field(default_factory=dict)
+    apt_packages: dict[str, object] = field(default_factory=dict)
+    system_install_commands: dict[str, object] = field(default_factory=dict)
+    user_install_commands: dict[str, object] = field(default_factory=dict)
     azure: AzureConfig | None = None
 
 
@@ -298,8 +296,10 @@ def _load_vm_config(data: dict[str, object]) -> VMConfig:
         raise ConfigError("[vm.config] must be a table")
     return VMConfig(
         apt=list(raw.get("apt", [])),
+        apt_packages=list(raw.get("apt_packages", [])),
         snap=list(raw.get("snap", [])),
-        install_commands=list(raw.get("install_commands", [])),
+        system_install_commands=list(raw.get("system_install_commands", [])),
+        admin_user_install_commands=list(raw.get("admin_user_install_commands", [])),
         cpus=int(raw.get("cpus", 4)),
         memory=int(raw.get("memory", 8)),
         disk=int(raw.get("disk", 50)),
@@ -316,30 +316,34 @@ def _load_agent_config(data: dict[str, object]) -> AgentConfig:
     if not isinstance(raw, dict):
         raise ConfigError("[agent.config] must be a table")
     return AgentConfig(
-        install_commands=list(raw.get("install_commands", [])),
+        user_install_commands=list(raw.get("user_install_commands", [])),
         shell=str(raw.get("shell", "bash")),
     )
 
 
-def _load_install_commands(data: dict[str, object]) -> dict[str, InstallCommandConfig]:
-    raw = data.get("install_commands", {})
-    if not isinstance(raw, dict):
-        raise ConfigError("[install_commands] must be a table")
+def _load_catalog_sections(data: dict[str, object]) -> tuple[
+    dict[str, object], dict[str, object], dict[str, object], dict[str, object],
+]:
+    """Load the four user-defined catalog sections as raw dicts.
 
-    commands: dict[str, InstallCommandConfig] = {}
-    for name, cdata in raw.items():
-        if not isinstance(cdata, dict):
-            raise ConfigError(f"install_commands.{name} must be a table")
-        command = str(_require(cdata, "command", f"install_commands.{name}"))
-        path_val = cdata.get("path", [])
-        if not isinstance(path_val, list):
-            raise ConfigError(f"install_commands.{name}.path must be a list")
-        commands[name] = InstallCommandConfig(
-            name=name,
-            command=command,
-            path=[str(p) for p in path_val],
-        )
-    return commands
+    Actual parsing into typed entries happens in catalog.py during merge.
+    Here we just validate that each section is a table of tables.
+    """
+    sections = {}
+    for section_name in ("apt_sources", "apt_packages", "system_install_commands", "user_install_commands"):
+        raw = data.get(section_name, {})
+        if not isinstance(raw, dict):
+            raise ConfigError(f"[{section_name}] must be a table")
+        for name, entry in raw.items():
+            if not isinstance(entry, dict):
+                raise ConfigError(f"{section_name}.{name} must be a table")
+        sections[section_name] = raw
+    return (
+        sections["apt_sources"],
+        sections["apt_packages"],
+        sections["system_install_commands"],
+        sections["user_install_commands"],
+    )
 
 
 def _load_workspace_templates(data: dict[str, object]) -> dict[str, WorkspaceTemplate]:
@@ -427,7 +431,8 @@ def _load_azure(data: dict[str, object]) -> AzureConfig | None:
 
 EXPECTED_TOP_LEVEL_KEYS = {
     "user", "paths", "defaults", "dotfiles", "vm", "agent",
-    "install_commands", "workspace_templates", "git_credentials", "azure",
+    "apt_sources", "apt_packages", "system_install_commands", "user_install_commands",
+    "workspace_templates", "git_credentials", "azure",
 }
 
 
@@ -478,28 +483,21 @@ def load_config(path: Path | None = None) -> Config:
 
     _warn_unexpected_top_level_keys(data)
 
-    install_commands = _load_install_commands(data)
     git_credentials = _load_git_credentials(data)
-    vm = _load_vm_config(data)
-    agent = _load_agent_config(data)
-
-    # Validate install_commands references
-    for ref in vm.install_commands:
-        if ref not in install_commands:
-            raise ConfigError(f"vm.config.install_commands references unknown install command: {ref}")
-    for ref in agent.install_commands:
-        if ref not in install_commands:
-            raise ConfigError(f"agent.config.install_commands references unknown install command: {ref}")
+    apt_sources, apt_packages, system_cmds, user_cmds = _load_catalog_sections(data)
 
     return Config(
         user=_load_user(data),
         paths=_load_paths(data),
         defaults=_load_defaults(data, set(git_credentials.keys())),
         dotfiles=_load_dotfiles(data),
-        vm=vm,
-        agent=agent,
-        install_commands=install_commands,
+        vm=_load_vm_config(data),
+        agent=_load_agent_config(data),
         workspace_templates=_load_workspace_templates(data),
         git_credentials=git_credentials,
+        apt_sources=apt_sources,
+        apt_packages=apt_packages,
+        system_install_commands=system_cmds,
+        user_install_commands=user_cmds,
         azure=_load_azure(data),
     )

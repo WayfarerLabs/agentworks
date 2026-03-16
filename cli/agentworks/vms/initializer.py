@@ -28,7 +28,7 @@ if TYPE_CHECKING:
     from agentworks.git_credentials.base import GitCredentialProvider
     from agentworks.ssh import SSHResult
 
-SYSTEM_PACKAGES = ["openssh-server", "curl", "git", "sudo", "ca-certificates", "tmux", "tmuxinator"]
+SYSTEM_PACKAGES = ["openssh-server", "curl", "git", "sudo", "ca-certificates", "gnupg", "tmux", "tmuxinator"]
 
 
 def _run_logged(
@@ -51,38 +51,6 @@ def _run_logged(
         logger.output(result.stderr)
     return result
 
-
-def _run_install_commands(
-    target: ExecTarget,
-    command_names: list[str],
-    config: Config,
-    logger: InitLogger,
-) -> list[str]:
-    """Run install commands under the user's configured shell.
-
-    Returns accumulated PATH additions from all commands.
-    """
-    if not command_names:
-        return []
-
-    shell = config.user.shell
-    path_additions: list[str] = []
-    total = len(command_names)
-
-    for i, name in enumerate(command_names, 1):
-        cmd_config = config.install_commands[name]
-        logger.step(f"Install command {i}/{total}: {name}")
-        truncated = cmd_config.command[:60]
-        typer.echo(f"  Install command {i}/{total} ({name}): {truncated}...")
-        try:
-            _run_logged(target, f"{shlex.quote(shell)} -lc {shlex.quote(cmd_config.command)}", logger, timeout=120)
-        except SSHError as e:
-            msg = f"install command '{name}' failed: {truncated}... ({e})"
-            logger.warning(msg)
-            typer.echo(f"  Warning: {msg}", err=True)
-        path_additions.extend(cmd_config.path)
-
-    return path_additions
 
 
 def _write_path_additions(
@@ -163,6 +131,164 @@ def _reconcile_authorized_keys(
         typer.echo(f"  Warning: {msg}", err=True)
 
 
+def _configure_apt_sources(
+    target: ExecTarget,
+    config: Config,
+    catalog: object,
+    logger: InitLogger,
+) -> None:
+    """Configure apt sources required by selected apt_packages. Idempotent."""
+    from agentworks.catalog import ResolvedCatalog
+
+    assert isinstance(catalog, ResolvedCatalog)
+
+    # Collect all apt sources needed by selected apt_packages
+    required_sources: dict[str, object] = {}
+    for pkg_name in config.vm.apt_packages:
+        pkg = catalog.apt_packages.get(pkg_name)
+        if pkg is None:
+            continue
+        for src_name in pkg.apt_sources:
+            if src_name not in required_sources:
+                src = catalog.apt_sources.get(src_name)
+                if src is not None:
+                    required_sources[src_name] = src
+
+    if not required_sources:
+        return
+
+    logger.step("Apt sources")
+
+    # Detect architecture
+    arch_result = target.run("dpkg --print-architecture", check=False)
+    arch = arch_result.stdout.strip() if arch_result.returncode == 0 else "amd64"
+
+    newly_configured = False
+    for name, src in required_sources.items():
+        # Idempotent: skip if key already exists
+        check = target.run(f"test -f {shlex.quote(src.key_path)}", check=False)
+        if check.returncode == 0:
+            typer.echo(f"  Apt source '{name}': already configured, skipping")
+            logger.output(f"apt source {name}: key exists at {src.key_path}, skipping")
+            continue
+
+        typer.echo(f"  Configuring apt source '{name}'...")
+        try:
+            # Ensure parent directory for key_path exists
+            from pathlib import PurePosixPath
+            key_dir = str(PurePosixPath(src.key_path).parent)
+            _run_logged(target, f"install -m 0755 -d {shlex.quote(key_dir)}", logger, as_root=True)
+
+            # Download GPG key
+            if src.key_dearmor:
+                _run_logged(
+                    target,
+                    f"curl -fsSL {shlex.quote(src.key_url)}"
+                    f" | gpg --dearmor -o {shlex.quote(src.key_path)}",
+                    logger, as_root=True, timeout=60,
+                )
+            else:
+                _run_logged(
+                    target,
+                    f"curl -fsSL {shlex.quote(src.key_url)}"
+                    f" -o {shlex.quote(src.key_path)}",
+                    logger, as_root=True, timeout=60,
+                )
+            _run_logged(target, f"chmod a+r {shlex.quote(src.key_path)}", logger, as_root=True)
+
+            # Write source list
+            resolved_source = src.source.replace("{arch}", arch)
+            source_path = f"/etc/apt/sources.list.d/{src.source_file}"
+            _run_logged(
+                target,
+                f"bash -c {shlex.quote(f'printf \"%s\\n\" {shlex.quote(resolved_source)} > {source_path}')}",
+                logger, as_root=True,
+            )
+            newly_configured = True
+        except SSHError as e:
+            msg = f"apt source '{name}' failed: {e}"
+            logger.warning(msg)
+            typer.echo(f"  Warning: {msg}", err=True)
+
+    if newly_configured:
+        typer.echo("  Running apt-get update...")
+        try:
+            _run_logged(target, "apt-get update -qq", logger, as_root=True, timeout=120)
+        except SSHError as e:
+            msg = f"apt-get update failed after adding sources: {e}"
+            logger.warning(msg)
+            typer.echo(f"  Warning: {msg}", err=True)
+
+
+def _install_apt_packages(
+    target: ExecTarget,
+    config: Config,
+    catalog: object,
+    logger: InitLogger,
+) -> None:
+    """Install apt packages from both direct list and catalog entries."""
+    from agentworks.catalog import ResolvedCatalog
+
+    assert isinstance(catalog, ResolvedCatalog)
+
+    # Collect all apt packages: direct list + catalog entries
+    all_apt: list[str] = list(config.vm.apt)
+    for pkg_name in config.vm.apt_packages:
+        pkg = catalog.apt_packages.get(pkg_name)
+        if pkg is not None:
+            all_apt.extend(pkg.apt)
+
+    if not all_apt:
+        return
+
+    logger.step("Apt packages")
+    typer.echo(f"  Installing {len(all_apt)} apt packages...")
+    apt_str = " ".join(shlex.quote(p) for p in all_apt)
+    try:
+        _run_logged(target, f"apt-get install -y -qq {apt_str}", logger, as_root=True, timeout=300)
+    except SSHError as e:
+        msg = f"apt packages failed: {e}"
+        logger.warning(msg)
+        typer.echo(f"  Warning: {msg}", err=True)
+
+
+def _run_catalog_commands(
+    target: ExecTarget,
+    command_names: list[str],
+    entries: dict[str, object],
+    shell: str,
+    logger: InitLogger,
+    *,
+    label: str = "Install command",
+) -> list[str]:
+    """Run install commands from a catalog entry dict. Returns PATH additions."""
+    if not command_names:
+        return []
+
+    path_additions: list[str] = []
+    total = len(command_names)
+
+    for i, name in enumerate(command_names, 1):
+        entry = entries.get(name)
+        if entry is None:
+            msg = f"{label.lower()} '{name}' not found in catalog"
+            logger.warning(msg)
+            typer.echo(f"  Warning: {msg}", err=True)
+            continue
+        logger.step(f"{label} {i}/{total}: {name}")
+        truncated = entry.command[:60]
+        typer.echo(f"  {label} {i}/{total} ({name}): {truncated}...")
+        try:
+            _run_logged(target, f"{shlex.quote(shell)} -lc {shlex.quote(entry.command)}", logger, timeout=120)
+        except SSHError as e:
+            msg = f"{label.lower()} '{name}' failed: {truncated}... ({e})"
+            logger.warning(msg)
+            typer.echo(f"  Warning: {msg}", err=True)
+        path_additions.extend(entry.path)
+
+    return path_additions
+
+
 def verify_tailscale_available() -> None:
     """Pre-flight: verify the local machine is on Tailscale."""
     import subprocess
@@ -187,13 +313,13 @@ def verify_tailscale_available() -> None:
 
 
 def resolve_git_credential_providers(
-    config: Config, credential_names: list[str] | None = None,
+    config: Config,
 ) -> dict[str, GitCredentialProvider]:
     """Resolve git credential provider instances from config."""
     from agentworks.git_credentials.azdo import AzDOCredentialProvider
     from agentworks.git_credentials.github import GitHubCredentialProvider
 
-    names = credential_names or config.defaults.git_credentials or []
+    names = config.defaults.git_credentials or []
     providers: dict[str, GitCredentialProvider] = {}
     if not names:
         typer.echo("Warning: no git credentials configured (set defaults.git_credentials in config)", err=True)
@@ -303,7 +429,6 @@ def initialize_vm(
     exec_target: ExecTarget,
     providers: dict[str, GitCredentialProvider],
     *,
-    extra_packages: list[str] | None = None,
     is_wsl2: bool = False,
     vm_user: str = "agentworks",
     tailscale_auth_key: str | None = None,
@@ -340,7 +465,7 @@ def initialize_vm(
 
     run_initialization(
         db, config, vm_name, ts_target, providers, home, vm_user,
-        extra_packages, logger, git_tokens=git_tokens,
+        logger, git_tokens=git_tokens,
     )
 
 
@@ -352,7 +477,6 @@ def run_initialization(
     providers: dict[str, GitCredentialProvider],
     home: str,
     vm_user: str,
-    extra_packages: list[str] | None,
     logger: InitLogger,
     *,
     git_tokens: dict[str, str] | None = None,
@@ -367,7 +491,7 @@ def run_initialization(
     try:
         _phase_b_setup(
             db, config, vm_name, ts_target, providers, home, vm_user,
-            extra_packages, logger, git_tokens=git_tokens,
+            logger, git_tokens=git_tokens,
         )
     except Exception as e:
         db.update_vm_init_status(vm_name, InitStatus.FAILED)
@@ -517,27 +641,23 @@ def _phase_b_setup(
     providers: dict[str, GitCredentialProvider],
     home: str,
     vm_user: str,
-    extra_packages: list[str] | None,
     logger: InitLogger,
     *,
     git_tokens: dict[str, str] | None = None,
 ) -> None:
     """Phase B: Setup (over Tailscale SSH). Non-fatal steps warn and continue."""
+    from agentworks.catalog import load_catalog, validate_selections
+
     typer.echo("Initializing VM...")
     db.update_vm_init_status(vm_name, InitStatus.IN_PROGRESS)
+    catalog = load_catalog(config)
+    validate_selections(config, catalog)
 
-    # Non-fatal: apt packages
-    all_apt = config.vm.apt + (extra_packages or [])
-    if all_apt:
-        logger.step("User apt packages")
-        typer.echo(f"  Installing {len(all_apt)} apt packages...")
-        apt_str = " ".join(shlex.quote(p) for p in all_apt)
-        try:
-            _run_logged(ts_target, f"apt-get install -y -qq {apt_str}", logger, as_root=True, timeout=300)
-        except SSHError as e:
-            msg = f"apt packages failed: {e}"
-            logger.warning(msg)
-            typer.echo(f"  Warning: {msg}", err=True)
+    # Non-fatal: apt sources required by selected apt_packages
+    _configure_apt_sources(ts_target, config, catalog, logger)
+
+    # Non-fatal: apt packages (direct list + catalog entries)
+    _install_apt_packages(ts_target, config, catalog, logger)
 
     # Non-fatal: snap packages
     if config.vm.snap:
@@ -574,13 +694,22 @@ def _phase_b_setup(
     # Non-fatal: reconcile authorized_keys
     _reconcile_authorized_keys(ts_target, config, home, logger)
 
-    # Non-fatal: install commands (run under user's shell)
-    path_additions = _run_install_commands(
-        ts_target, config.vm.install_commands, config, logger,
+    # Non-fatal: system install commands
+    system_path = _run_catalog_commands(
+        ts_target, config.vm.system_install_commands,
+        catalog.system_install_commands, config.user.shell, logger,
+        label="System install command",
     )
 
-    # Non-fatal: PATH additions from install commands
-    _write_path_additions(ts_target, path_additions, logger)
+    # Non-fatal: user install commands for admin user
+    user_path = _run_catalog_commands(
+        ts_target, config.vm.admin_user_install_commands,
+        catalog.user_install_commands, config.user.shell, logger,
+        label="User install command",
+    )
+
+    # Non-fatal: PATH additions from both system + user install commands
+    _write_path_additions(ts_target, system_path + user_path, logger)
 
     # Non-fatal: git credentials
     if providers:
