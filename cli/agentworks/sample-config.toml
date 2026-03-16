@@ -17,6 +17,9 @@ ssh_public_key = "~/.ssh/id_ed25519.pub"    # required: used to authorize access
 ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connections to VMs
 # shell = "zsh"                              # default shell set on VMs
 # ssh_config = "~/.ssh/config"               # SSH config file for VM host entries
+# extra_ssh_public_keys = [                  # additional public keys for VM authorized_keys
+#     "~/.ssh/other_key.pub",
+# ]
 
 # --- Paths ---
 
