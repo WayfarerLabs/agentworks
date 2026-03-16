@@ -89,7 +89,7 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # apt = ["my-tool"]
 
 # --- User-defined system install commands ---
-# Shell commands that install system-wide tooling (run once per VM).
+# Shell commands that install system-wide tooling (run during vm initialization/re-initialization).
 
 # [system_install_commands.my-system-tool]
 # description = "Custom system-wide tool"

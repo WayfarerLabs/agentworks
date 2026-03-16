@@ -14,13 +14,6 @@ key_path = "/etc/apt/keyrings/githubcli-archive-keyring.gpg"
 source = "deb [arch={arch} signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main"
 source_file = "github-cli.list"
 
-[apt_sources.docker]
-description = "Docker official apt repository"
-key_url = "https://download.docker.com/linux/debian/gpg"
-key_path = "/etc/apt/keyrings/docker.asc"
-source = "deb [arch={arch} signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian bookworm stable"
-source_file = "docker.list"
-
 [apt_sources.hashicorp]
 description = "HashiCorp official apt repository"
 key_url = "https://apt.releases.hashicorp.com/gpg"
@@ -29,7 +22,7 @@ key_dearmor = true
 source = "deb [arch={arch} signed-by=/etc/apt/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com bookworm main"
 source_file = "hashicorp.list"
 
-[apt_sources.nodesource]
+[apt_sources.nodesource-v22]
 description = "NodeSource Node.js 22.x apt repository"
 key_url = "https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key"
 key_path = "/etc/apt/keyrings/nodesource.gpg"
@@ -45,11 +38,6 @@ description = "GitHub CLI"
 apt_sources = ["github-cli"]
 apt = ["gh"]
 
-[apt_packages.docker]
-description = "Docker Engine (CE)"
-apt_sources = ["docker"]
-apt = ["docker-ce", "docker-ce-cli", "containerd.io", "docker-buildx-plugin"]
-
 [apt_packages.terraform]
 description = "HashiCorp Terraform"
 apt_sources = ["hashicorp"]
@@ -57,7 +45,7 @@ apt = ["terraform"]
 
 [apt_packages.nodejs]
 description = "Node.js 22.x via NodeSource"
-apt_sources = ["nodesource"]
+apt_sources = ["nodesource-v22"]
 apt = ["nodejs"]
 
 # -- System install commands ---------------------------------------------------
@@ -69,18 +57,22 @@ command = "curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash"
 
 # -- User install commands -----------------------------------------------------
 # Shell commands that install per-user tooling (run for each user).
+# path is an optional list of directories to add to the user's PATH after running the command.
+# This is only necessary if the installer does not automatically add the installed tool to the PATH.
+
+[user_install_commands.oh-my-zsh]
+description = "Oh My Zsh"
+command = "sh -c \"$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)\""
 
 [user_install_commands.bun]
 description = "Bun JavaScript runtime"
 command = "curl -fsSL https://bun.sh/install | bash"
-path = ["~/.bun/bin"]
 
 [user_install_commands.nvm]
 description = "Node Version Manager"
-command = "curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash"
-path = []
+command = "curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.4/install.sh | bash"
 
 [user_install_commands.claude]
 description = "Claude Code CLI"
-command = "npm install -g @anthropic-ai/claude-code"
-path = ["~/.npm-global/bin"]
+command = "curl -fsSL https://claude.ai/install.sh | bash"
+path = ["~/.local/bin"]
