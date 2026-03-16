@@ -28,9 +28,13 @@ _MANAGED_CONF = "agentworks.conf"
 
 
 def _include_directive(ssh_config: Path) -> str:
-    """Build the Include directive using the absolute path to config.d."""
+    """Build the Include directive using the absolute path to config.d.
+
+    Uses forward slashes on all platforms since OpenSSH expects POSIX-style
+    paths even on Windows.
+    """
     config_d = ssh_config.parent / _CONFIG_DIR_NAME
-    return f"Include {config_d}/*"
+    return f"Include {config_d.as_posix()}/*"
 
 
 def ssh_host_alias(vm_name: str, prefix: str = "awvm--") -> str:
@@ -190,8 +194,8 @@ def _format_entry(
     identity_file: Path,
 ) -> str:
     """Format a single SSH config Host block."""
-    # Quote identity file path in case it contains spaces
-    id_str = str(identity_file)
+    # Use forward slashes (POSIX-style) and quote if path contains spaces
+    id_str = identity_file.as_posix()
     if " " in id_str:
         id_str = f'"{id_str}"'
     return (
