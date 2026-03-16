@@ -53,6 +53,13 @@ installer_app = typer.Typer(
 )
 app.add_typer(installer_app)
 
+config_app = typer.Typer(
+    name="config",
+    help="Configuration utilities.",
+    no_args_is_help=True,
+)
+app.add_typer(config_app)
+
 
 # -- Helpers ---------------------------------------------------------------
 
@@ -531,3 +538,27 @@ def installer_describe(
 
     typer.echo(f"Error: '{name}' not found in catalog", err=True)
     raise typer.Exit(1)
+
+
+# -- Config commands -------------------------------------------------------
+
+
+@config_app.command("sync-ssh-config")
+def config_sync_ssh_config() -> None:
+    """Rebuild SSH config entries for all VMs from current state."""
+    from agentworks.config import load_config
+    from agentworks.ssh_config import _rebuild_config_dir, _legacy_upsert
+
+    config = load_config()
+    db = _get_db()
+
+    if config.user.ssh_config_dir:
+        _rebuild_config_dir(config, db)
+        typer.echo("SSH config rebuilt: ~/.ssh/config.d/agentworks.conf")
+    else:
+        # Legacy mode: rebuild by upserting all VMs
+        vms = db.list_vms()
+        for vm in vms:
+            if vm.tailscale_host:
+                _legacy_upsert(config, vm)
+        typer.echo(f"SSH config rebuilt: {len([v for v in vms if v.tailscale_host])} VM(s)")

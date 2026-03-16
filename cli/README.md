@@ -150,6 +150,12 @@ Browse and inspect the built-in catalog of installable tools.
 `installer list` accepts `--type` (apt-source, apt-package, system-install-cmd, user-install-cmd)
 and `--source` (builtin, user) filters.
 
+### Config
+
+| Command                                | Description                                |
+| -------------------------------------- | ------------------------------------------ |
+| `agentworks config sync-ssh-config`   | Rebuild SSH config entries for all VMs     |
+
 ## Configuration
 
 Config lives at `~/.config/agentworks/config.toml`. Run `agentworks init` to generate a sample with
