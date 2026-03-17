@@ -78,7 +78,6 @@ class ConfigError(Exception):
 class UserConfig:
     ssh_public_key: Path
     ssh_private_key: Path
-    shell: str = "zsh"
     ssh_config: Path = field(default_factory=lambda: Path.home() / ".ssh" / "config")
     ssh_config_dir: bool = True
     ssh_host_prefix: str = "awvm--"
@@ -107,16 +106,19 @@ class DotfilesConfig:
 
 @dataclass(frozen=True)
 class VMConfig:
-    apt: list[str] = field(default_factory=list)
-    apt_packages: list[str] = field(default_factory=list)
-    snap: list[str] = field(default_factory=list)
-    system_install_commands: list[str] = field(default_factory=list)
-    admin_user_install_commands: list[str] = field(default_factory=list)
+    # Provisioning (immutable after vm create)
     cpus: int = 4
     memory: int = 8  # GiB
     disk: int = 50  # GiB
     azure_vm_size: str = "Standard_B2s"
     vm_user: str = "agentworks"
+    # Initialization (applied on create and reinit)
+    admin_shell: str = "zsh"
+    apt: list[str] = field(default_factory=list)
+    apt_packages: list[str] = field(default_factory=list)
+    snap: list[str] = field(default_factory=list)
+    system_install_commands: list[str] = field(default_factory=list)
+    admin_install_commands: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -200,7 +202,7 @@ def _warn_unexpected_keys(
 
 
 _USER_KEYS = {
-    "ssh_public_key", "ssh_private_key", "shell", "ssh_config",
+    "ssh_public_key", "ssh_private_key", "ssh_config",
     "ssh_config_dir", "ssh_host_prefix", "extra_ssh_public_keys",
 }
 
@@ -241,7 +243,6 @@ def _load_user(data: dict[str, object]) -> UserConfig:
     return UserConfig(
         ssh_public_key=pub,
         ssh_private_key=priv,
-        shell=str(raw.get("shell", "zsh")),
         ssh_config=ssh_config,
         ssh_config_dir=bool(raw.get("ssh_config_dir", True)),
         ssh_host_prefix=host_prefix,
@@ -311,16 +312,17 @@ def _load_vm_config(data: dict[str, object]) -> VMConfig:
     if not isinstance(raw, dict):
         raise ConfigError("[vm.config] must be a table")
     return VMConfig(
-        apt=list(raw.get("apt", [])),
-        apt_packages=list(raw.get("apt_packages", [])),
-        snap=list(raw.get("snap", [])),
-        system_install_commands=list(raw.get("system_install_commands", [])),
-        admin_user_install_commands=list(raw.get("admin_user_install_commands", [])),
         cpus=int(raw.get("cpus", 4)),
         memory=int(raw.get("memory", 8)),
         disk=int(raw.get("disk", 50)),
         azure_vm_size=str(raw.get("azure_vm_size", "Standard_B2s")),
         vm_user=str(raw.get("vm_user", "agentworks")),
+        admin_shell=str(raw.get("admin_shell", "zsh")),
+        apt=list(raw.get("apt", [])),
+        apt_packages=list(raw.get("apt_packages", [])),
+        snap=list(raw.get("snap", [])),
+        system_install_commands=list(raw.get("system_install_commands", [])),
+        admin_install_commands=list(raw.get("admin_install_commands", [])),
     )
 
 

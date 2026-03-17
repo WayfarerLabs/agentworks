@@ -690,16 +690,16 @@ def _phase_b_setup(
     # Non-fatal: set default shell (before install commands so installers
     # write to the correct rc file)
     logger.step("Shell configuration")
-    shell = config.user.shell
-    typer.echo(f"  Setting shell to {shell}...")
+    admin_shell = config.vm.admin_shell
+    typer.echo(f"  Setting shell to {admin_shell}...")
     try:
         # Touch .zshrc before chsh to prevent zsh's first-run wizard
         # (zsh-newuser-install) from prompting interactively on next login
-        if shell == "zsh":
+        if admin_shell == "zsh":
             _run_logged(ts_target, f"touch {home}/.zshrc", logger, check=False)
         _run_logged(
             ts_target,
-            f"chsh -s $(which {shlex.quote(shell)}) {shlex.quote(vm_user)}",
+            f"chsh -s $(which {shlex.quote(admin_shell)}) {shlex.quote(vm_user)}",
             logger, as_root=True,
         )
     except SSHError as e:
@@ -713,14 +713,14 @@ def _phase_b_setup(
     # Non-fatal: system install commands
     system_path = _run_catalog_commands(
         ts_target, config.vm.system_install_commands,
-        catalog.system_install_commands, config.user.shell, logger,
+        catalog.system_install_commands, admin_shell, logger,
         label="System install command",
     )
 
     # Non-fatal: user install commands for admin user
     user_path = _run_catalog_commands(
-        ts_target, config.vm.admin_user_install_commands,
-        catalog.user_install_commands, config.user.shell, logger,
+        ts_target, config.vm.admin_install_commands,
+        catalog.user_install_commands, admin_shell, logger,
         label="User install command",
     )
 
