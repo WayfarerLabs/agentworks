@@ -176,7 +176,7 @@ class WSL2Provisioner(VMProvisioner):
 
     def create(
         self, vm_name: str, config: Config,
-        *, vm_user: str = "agentworks",
+        *, admin_username: str = "agentworks",
     ) -> ProvisionResult:
         typer.echo(f"Provisioning WSL2 VM '{vm_name}'...")
 
@@ -213,23 +213,23 @@ class WSL2Provisioner(VMProvisioner):
               " > /dev/null"])
 
         # Create user account
-        typer.echo(f"  Creating user '{vm_user}'...")
+        typer.echo(f"  Creating user '{admin_username}'...")
         _wsl(["--distribution", vm_name, "--user", "root", "--",
-              "useradd", "-m", "-s", "/bin/bash", vm_user])
+              "useradd", "-m", "-s", "/bin/bash", admin_username])
         _wsl(["--distribution", vm_name, "--user", "root", "--",
-              "usermod", "-aG", "sudo", vm_user])
+              "usermod", "-aG", "sudo", admin_username])
         import shlex
 
         _wsl(["--distribution", vm_name, "--user", "root", "--",
               "bash", "-c",
-              f"echo {shlex.quote(f'{vm_user} ALL=(ALL) NOPASSWD:ALL')}"
-              f" > /etc/sudoers.d/{shlex.quote(vm_user)}"])
+              f"echo {shlex.quote(f'{admin_username} ALL=(ALL) NOPASSWD:ALL')}"
+              f" > /etc/sudoers.d/{shlex.quote(admin_username)}"])
 
         # Configure wsl.conf: default user + systemd
         typer.echo("  Enabling systemd...")
         _wsl(["--distribution", vm_name, "--user", "root", "--",
               "bash", "-c",
-              f"printf '[user]\\ndefault={shlex.quote(vm_user)}\\n\\n[boot]\\nsystemd=true\\n' > /etc/wsl.conf"])
+              f"printf '[user]\\ndefault={shlex.quote(admin_username)}\\n\\n[boot]\\nsystemd=true\\n' > /etc/wsl.conf"])
 
         # Restart the distro so systemd takes effect
         typer.echo("  Restarting distro...")
@@ -240,7 +240,7 @@ class WSL2Provisioner(VMProvisioner):
 
         typer.echo(f"  WSL2 VM '{vm_name}' provisioned.")
         return ProvisionResult(
-            exec_target=ExecTarget(wsl2=WSL2Target(distro_name=vm_name, user=vm_user)),
+            exec_target=ExecTarget(wsl2=WSL2Target(distro_name=vm_name, user=admin_username)),
             wsl_distro_name=vm_name,
         )
 
@@ -267,7 +267,7 @@ class WSL2Provisioner(VMProvisioner):
         typer.echo(f"WSL2 distro '{vm.name}' deleted")
 
     def exec_target(self, vm: VMRow) -> ExecTarget:
-        return ExecTarget(wsl2=WSL2Target(distro_name=vm.name, user=vm.vm_user))
+        return ExecTarget(wsl2=WSL2Target(distro_name=vm.name, user=vm.admin_username))
 
     def status(self, vm: VMRow) -> VMStatus:
         try:

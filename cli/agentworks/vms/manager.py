@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 import typer
 
-from agentworks.config import VALID_PLATFORMS, validate_name, validate_vm_user
+from agentworks.config import VALID_PLATFORMS, validate_admin_username, validate_name
 from agentworks.db import InitStatus, ProvisioningStatus, VMStatus
 from agentworks.vms.initializer import (
     initialize_vm,
@@ -53,7 +53,7 @@ def create_vm(
     memory: int | None = None,
     disk: int | None = None,
     azure_vm_size: str | None = None,
-    vm_user: str | None = None,
+    admin_username: str | None = None,
 ) -> None:
     """Create a new VM: provision + initialize."""
     # Resolve defaults
@@ -91,8 +91,8 @@ def create_vm(
     resolved_memory = memory if memory is not None else config.vm.memory
     resolved_disk = disk if disk is not None else config.vm.disk
     resolved_azure_size = azure_vm_size or config.vm.azure_vm_size
-    resolved_vm_user = vm_user or config.vm.vm_user
-    validate_vm_user(resolved_vm_user)
+    resolved_admin_username = admin_username or config.vm.admin_username
+    validate_admin_username(resolved_admin_username)
 
     # Pre-flight checks
     verify_tailscale_available()
@@ -110,7 +110,7 @@ def create_vm(
         cpus=resolved_cpus,
         memory_gib=resolved_memory,
         disk_gib=resolved_disk,
-        vm_user=resolved_vm_user,
+        admin_username=resolved_admin_username,
     )
 
     # -- Provisioning --
@@ -134,7 +134,7 @@ def create_vm(
             result = azure.create(
                 vm_name, config,
                 azure_vm_size=resolved_azure_size,
-                vm_user=resolved_vm_user,
+                admin_username=resolved_admin_username,
             )
         elif platform == "wsl2":
             from agentworks.vms.provisioners.wsl2 import WSL2Provisioner
@@ -142,7 +142,7 @@ def create_vm(
             wsl2 = WSL2Provisioner()
             result = wsl2.create(
                 vm_name, config,
-                vm_user=resolved_vm_user,
+                admin_username=resolved_admin_username,
             )
         else:
             msg = f"Unknown platform: {platform}"
@@ -167,7 +167,7 @@ def create_vm(
             exec_target=result.exec_target,
             providers=providers,
             is_wsl2=(platform == "wsl2"),
-            vm_user=resolved_vm_user,
+            admin_username=resolved_admin_username,
             tailscale_auth_key=tailscale_auth_key,
             git_tokens=git_tokens,
         )
@@ -245,7 +245,7 @@ def describe_vm(db: Database, name: str) -> None:
     typer.echo(f"Name:           {vm.name}")
     typer.echo(f"Platform:       {vm.platform}")
     typer.echo(f"VM Host:        {vm.vm_host_name or '-'}")
-    typer.echo(f"VM User:        {vm.vm_user}")
+    typer.echo(f"Admin User:     {vm.admin_username}")
     typer.echo(f"Provisioning:   {vm.provisioning_status}")
     typer.echo(f"Initialization: {vm.init_status}")
     typer.echo(f"Tailscale:      {vm.tailscale_host or '-'}")
@@ -294,7 +294,7 @@ def shell_vm(db: Database, config: Config, name: str) -> None:
     ssh_cmd = ["ssh", "-t"]
     if config.user.ssh_private_key:
         ssh_cmd.extend(["-i", str(config.user.ssh_private_key)])
-    ssh_cmd.append(f"{vm.vm_user}@{vm.tailscale_host}")
+    ssh_cmd.append(f"{vm.admin_username}@{vm.tailscale_host}")
 
     sys.exit(subprocess.call(ssh_cmd))
 
@@ -467,11 +467,11 @@ def reinit_vm(
     # Build Tailscale SSH target
     ts_target = ExecTarget(ssh=ssh_target_for_vm(vm, config), default_timeout=60)
 
-    home = f"/home/{vm.vm_user}"
+    home = f"/home/{vm.admin_username}"
     logger = InitLogger(name)
 
     run_initialization(
-        db, config, name, ts_target, providers, home, vm.vm_user,
+        db, config, name, ts_target, providers, home, vm.admin_username,
         logger, git_tokens=git_tokens,
     )
 

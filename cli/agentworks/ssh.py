@@ -36,7 +36,7 @@ def ssh_target_for_vm(vm: object, config: object) -> SSHTarget:
     """
     return SSHTarget(
         host=vm.tailscale_host,  # type: ignore[attr-defined]
-        user=vm.vm_user,  # type: ignore[attr-defined]
+        user=vm.admin_username,  # type: ignore[attr-defined]
         identity_file=config.user.ssh_private_key,  # type: ignore[attr-defined]
     )
 

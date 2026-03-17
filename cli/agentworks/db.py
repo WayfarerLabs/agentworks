@@ -69,7 +69,7 @@ class VMRow:
     cpus: int | None
     memory_gib: int | None
     disk_gib: int | None
-    vm_user: str
+    admin_username: str
     created_at: str
     last_seen_at: str | None
 
@@ -209,6 +209,9 @@ MIGRATIONS: dict[int, str] = {
 
         CREATE INDEX idx_vm_events_vm_name ON vm_events(vm_name);
     """,
+    7: """
+        ALTER TABLE vms RENAME COLUMN vm_user TO admin_username;
+    """,
 }
 
 LATEST_VERSION = max(MIGRATIONS)
@@ -319,12 +322,12 @@ class Database:
         cpus: int | None = None,
         memory_gib: int | None = None,
         disk_gib: int | None = None,
-        vm_user: str = "agentworks",
+        admin_username: str = "agentworks",
     ) -> VMRow:
         self._conn.execute(
             "INSERT INTO vms "
             "(name, platform, vm_host_name, azure_resource_id, wsl_distro_name, "
-            "cpus, memory_gib, disk_gib, vm_user) "
+            "cpus, memory_gib, disk_gib, admin_username) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 name,
@@ -335,7 +338,7 @@ class Database:
                 cpus,
                 memory_gib,
                 disk_gib,
-                vm_user,
+                admin_username,
             ),
         )
         self._conn.commit()
@@ -549,7 +552,7 @@ def _to_vm(row: sqlite3.Row) -> VMRow:
         cpus=row["cpus"],
         memory_gib=row["memory_gib"],
         disk_gib=row["disk_gib"],
-        vm_user=row["vm_user"],
+        admin_username=row["admin_username"],
         created_at=row["created_at"],
         last_seen_at=row["last_seen_at"],
     )

@@ -126,7 +126,7 @@ def _mock_vm(name: str, host: str) -> MagicMock:
     vm = MagicMock()
     vm.name = name
     vm.tailscale_host = host
-    vm.vm_user = "agentworks"
+    vm.admin_username = "agentworks"
     return vm
 
 

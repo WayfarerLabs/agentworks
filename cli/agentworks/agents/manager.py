@@ -168,7 +168,7 @@ def shell_agent(
     ssh_cmd = ["ssh"]
     if config.user.ssh_private_key:
         ssh_cmd.extend(["-i", str(config.user.ssh_private_key)])
-    ssh_cmd.append(f"{vm.vm_user}@{vm.tailscale_host}")
+    ssh_cmd.append(f"{vm.admin_username}@{vm.tailscale_host}")
     ssh_cmd.extend(["-t", f"cd {ws.workspace_path} && exec su - {agent.linux_user}"])
 
     import subprocess

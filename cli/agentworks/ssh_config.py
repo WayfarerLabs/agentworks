@@ -76,7 +76,7 @@ def _legacy_rebuild(config: Config, db: Database) -> None:
         entries[alias] = _format_entry(
             alias=alias,
             hostname=vm.tailscale_host,
-            user=vm.vm_user,
+            user=vm.admin_username,
             identity_file=config.user.ssh_private_key,
         )
     _write_legacy(ssh_config, user_section, entries)
@@ -112,7 +112,7 @@ def _rebuild_config_dir(config: Config, db: Database) -> None:
         blocks.append(_format_entry(
             alias=alias,
             hostname=vm.tailscale_host,
-            user=vm.vm_user,
+            user=vm.admin_username,
             identity_file=config.user.ssh_private_key,
         ))
 

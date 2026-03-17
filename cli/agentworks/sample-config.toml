@@ -10,12 +10,12 @@
 # reference catalog entries by name in vm.config and agent.config, and
 # define your own entries below to extend or override the catalog.
 
-# --- User identity and preferences ---
+# --- Operator identity ---
+# These settings identify you (the operator) to agentworks and your VMs.
 
 [user]
 ssh_public_key = "~/.ssh/id_ed25519.pub"    # required: used to authorize access to VMs
 ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connections to VMs
-# shell = "zsh"                              # default shell set on VMs
 # ssh_config = "~/.ssh/config"               # SSH config file for VM host entries
 # ssh_config_dir = true                      # manage VM entries in ~/.ssh/config.d/
 # ssh_host_prefix = "awvm--"                 # prefix for SSH host aliases (e.g. awvm--myvm)
@@ -37,6 +37,7 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # git_credentials = ["github"]               # git credentials to configure on vm create
 
 # --- Dotfiles ---
+# Synced to VMs for the admin user during init. Not applied to agent users.
 
 [dotfiles]
 # enabled = true                             # copy dotfiles to VMs during init
@@ -44,15 +45,21 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # install_cmd = "./install.sh"               # command to run after copying dotfiles
 
 # --- VM configuration ---
+# Settings that control VM provisioning (immutable after create) and
+# initialization (applied on create and reinit).
+#
 # Agentworks always installs system dependencies (openssh-server, curl, git,
-# sudo, ca-certificates, tmux, tmuxinator) regardless of this config.
+# sudo, ca-certificates, gnupg, tmux, tmuxinator) regardless of this config.
 
 [vm.config]
-# vm_user = "agentworks"                     # username created on VMs
+# -- Provisioning (set once at create time) --
+# admin_username = "agentworks"               # admin username created on VMs
 # cpus = 4                                   # number of CPUs (Lima)
 # memory = 8                                 # memory in GiB (Lima)
 # disk = 50                                  # disk size in GiB (Lima)
 # azure_vm_size = "Standard_B2s"             # Azure VM size
+# -- Initialization (applied on create and reinit) --
+# admin_shell = "zsh"                        # shell for the admin user
 # apt = [                                    # direct apt packages
 #     "zsh",
 #     "unzip",
@@ -64,11 +71,11 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # apt_packages = ["gh", "docker"]            # named apt package sets from catalog
 # snap = []                                  # direct snap packages
 # system_install_commands = ["az-cli"]       # system-level commands from catalog
-# admin_user_install_commands = ["bun", "claude"]  # per-user commands for admin user
+# admin_install_commands = ["bun", "claude"] # per-user commands for admin user
 
 # --- Agent configuration ---
-# Defaults for agent creation. Agents run user install commands under their
-# own shell, separate from the VM admin user's shell.
+# Settings for agent users created within workspaces. Agents get their own
+# shell and user install commands, separate from the VM admin user.
 
 # [agent.config]
 # user_install_commands = ["claude"]         # per-user commands from catalog
@@ -94,7 +101,7 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # apt = ["my-tool"]
 
 # --- User-defined system install commands ---
-# Shell commands that install system-wide tooling (run during vm initialization/re-initialization).
+# Shell commands that install system-wide tooling (run during vm init/reinit).
 
 # [system_install_commands.my-system-tool]
 # description = "Custom system-wide tool"
@@ -102,8 +109,7 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # test = "/usr/local/bin/my-system-tool"   # skip if this file/dir exists
 
 # --- User-defined user install commands ---
-# Shell commands that install per-user tooling (run for each user).
-# PATH additions are written to ~/.agentworks-path.sh.
+# Shell commands that install per-user tooling (run for admin user and agents).
 # test: skip if this file/dir exists (~ resolves to the target user's home).
 
 # [user_install_commands.my-tool]

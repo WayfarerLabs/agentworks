@@ -34,7 +34,7 @@ def create_vm_workspace(
     assert vm.tailscale_host is not None
     target = ssh_target_for_vm(vm, config)
 
-    workspace_path = f"/home/{vm.vm_user}/workspaces/{ws_name}"
+    workspace_path = f"/home/{vm.admin_username}/workspaces/{ws_name}"
 
     # Remove stale directory from a previous interrupted attempt
     exists = ssh_run(target, f"test -d {workspace_path}", check=False, timeout=10)
@@ -97,7 +97,7 @@ def shell_vm_workspace(
     ssh_cmd = ["ssh"]
     if config.user.ssh_private_key:
         ssh_cmd.extend(["-i", str(config.user.ssh_private_key)])
-    ssh_cmd.append(f"{vm.vm_user}@{vm.tailscale_host}")
+    ssh_cmd.append(f"{vm.admin_username}@{vm.tailscale_host}")
 
     if use_tmuxinator and tmuxinator_enabled:
         ssh_cmd.extend(["-t", f"tmuxinator start {ws_name}"])

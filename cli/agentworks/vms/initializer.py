@@ -440,7 +440,7 @@ def initialize_vm(
     providers: dict[str, GitCredentialProvider],
     *,
     is_wsl2: bool = False,
-    vm_user: str = "agentworks",
+    admin_username: str = "agentworks",
     tailscale_auth_key: str | None = None,
     git_tokens: dict[str, str] | None = None,
 ) -> None:
@@ -450,7 +450,7 @@ def initialize_vm(
     Phase B (setup) steps are non-fatal -- failures are logged as warnings
     and the VM gets 'partial' status instead of 'complete'.
     """
-    home = f"/home/{vm_user}"
+    home = f"/home/{admin_username}"
     logger = InitLogger(vm_name)
     if tailscale_auth_key:
         logger.add_redaction(tailscale_auth_key)
@@ -463,7 +463,7 @@ def initialize_vm(
     try:
         db.insert_vm_event(vm_name, "provisioning_started", transport)
         ts_target = _phase_a_bootstrap(
-            db, config, vm_name, exec_target, home, vm_user, is_wsl2, logger,
+            db, config, vm_name, exec_target, home, admin_username, is_wsl2, logger,
             tailscale_auth_key=tailscale_auth_key,
         )
         db.insert_vm_event(vm_name, "provisioning_complete", ts_target.ssh.host if ts_target.ssh else None)
@@ -474,7 +474,7 @@ def initialize_vm(
         raise
 
     run_initialization(
-        db, config, vm_name, ts_target, providers, home, vm_user,
+        db, config, vm_name, ts_target, providers, home, admin_username,
         logger, git_tokens=git_tokens,
     )
 
@@ -486,7 +486,7 @@ def run_initialization(
     ts_target: ExecTarget,
     providers: dict[str, GitCredentialProvider],
     home: str,
-    vm_user: str,
+    admin_username: str,
     logger: InitLogger,
     *,
     git_tokens: dict[str, str] | None = None,
@@ -500,7 +500,7 @@ def run_initialization(
 
     try:
         _phase_b_setup(
-            db, config, vm_name, ts_target, providers, home, vm_user,
+            db, config, vm_name, ts_target, providers, home, admin_username,
             logger, git_tokens=git_tokens,
         )
     except Exception as e:
@@ -525,7 +525,7 @@ def _phase_a_bootstrap(
     vm_name: str,
     exec_target: ExecTarget,
     home: str,
-    vm_user: str,
+    admin_username: str,
     is_wsl2: bool,
     logger: InitLogger,
     *,
@@ -552,7 +552,7 @@ def _phase_a_bootstrap(
     # Generate the bootstrap script
     ssh_public_key = config.user.ssh_public_key.read_text().strip()
     script = generate_bootstrap_script(
-        vm_user=vm_user,
+        admin_username=admin_username,
         ssh_public_key=ssh_public_key,
         system_packages=SYSTEM_PACKAGES,
         tailscale_auth_key=ts_auth_key,
@@ -620,7 +620,7 @@ def _phase_a_bootstrap(
     ts_target = ExecTarget(
         ssh=SSHTarget(
             host=tailscale_ip,
-            user=vm_user,
+            user=admin_username,
             identity_file=config.user.ssh_private_key,
         ),
         default_timeout=60,
@@ -656,7 +656,7 @@ def _phase_b_setup(
     ts_target: ExecTarget,
     providers: dict[str, GitCredentialProvider],
     home: str,
-    vm_user: str,
+    admin_username: str,
     logger: InitLogger,
     *,
     git_tokens: dict[str, str] | None = None,
@@ -690,16 +690,16 @@ def _phase_b_setup(
     # Non-fatal: set default shell (before install commands so installers
     # write to the correct rc file)
     logger.step("Shell configuration")
-    shell = config.user.shell
-    typer.echo(f"  Setting shell to {shell}...")
+    admin_shell = config.vm.admin_shell
+    typer.echo(f"  Setting shell to {admin_shell}...")
     try:
         # Touch .zshrc before chsh to prevent zsh's first-run wizard
         # (zsh-newuser-install) from prompting interactively on next login
-        if shell == "zsh":
+        if admin_shell == "zsh":
             _run_logged(ts_target, f"touch {home}/.zshrc", logger, check=False)
         _run_logged(
             ts_target,
-            f"chsh -s $(which {shlex.quote(shell)}) {shlex.quote(vm_user)}",
+            f"chsh -s $(which {shlex.quote(admin_shell)}) {shlex.quote(admin_username)}",
             logger, as_root=True,
         )
     except SSHError as e:
@@ -713,14 +713,14 @@ def _phase_b_setup(
     # Non-fatal: system install commands
     system_path = _run_catalog_commands(
         ts_target, config.vm.system_install_commands,
-        catalog.system_install_commands, config.user.shell, logger,
+        catalog.system_install_commands, admin_shell, logger,
         label="System install command",
     )
 
     # Non-fatal: user install commands for admin user
     user_path = _run_catalog_commands(
-        ts_target, config.vm.admin_user_install_commands,
-        catalog.user_install_commands, config.user.shell, logger,
+        ts_target, config.vm.admin_install_commands,
+        catalog.user_install_commands, admin_shell, logger,
         label="User install command",
     )
 
