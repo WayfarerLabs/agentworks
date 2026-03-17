@@ -292,15 +292,19 @@ def _run_catalog_commands(
             continue
         logger.step(f"{label} {i}/{total}: {name}")
 
-        # Skip if already installed
+        # Skip if already installed (short timeout -- this should be instant)
         test_cmd = _build_test_command(entry)
         if test_cmd:
-            check = target.run(test_cmd, check=False)
-            if check.returncode == 0:
-                typer.echo(f"  {label} {i}/{total} ({name}): already installed, skipping")
-                logger.output(f"{name}: test check passed, skipping")
-                path_additions.extend(entry.path)
-                continue
+            try:
+                check = target.run(test_cmd, check=False, timeout=10)
+                if check.returncode == 0:
+                    typer.echo(f"  {label} {i}/{total} ({name}): already installed, skipping")
+                    logger.output(f"{name}: test check passed, skipping")
+                    path_additions.extend(entry.path)
+                    continue
+            except SSHError:
+                # Timeout or connection issue -- assume not installed, proceed
+                pass
 
         truncated = entry.command[:60]
         typer.echo(f"  {label} {i}/{total} ({name}): {truncated}...")
