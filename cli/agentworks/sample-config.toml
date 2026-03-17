@@ -53,7 +53,7 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 
 [vm.config]
 # -- Provisioning (set once at create time) --
-# vm_user = "agentworks"                     # admin username created on VMs
+# admin_username = "agentworks"               # admin username created on VMs
 # cpus = 4                                   # number of CPUs (Lima)
 # memory = 8                                 # memory in GiB (Lima)
 # disk = 50                                  # disk size in GiB (Lima)

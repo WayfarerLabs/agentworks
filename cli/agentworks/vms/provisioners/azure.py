@@ -25,7 +25,7 @@ package_update: true
 packages:
   - openssh-server
 users:
-  - name: {vm_user}
+  - name: {admin_username}
     ssh_authorized_keys:
       - {ssh_public_key}
     sudo: ALL=(ALL) NOPASSWD:ALL
@@ -119,7 +119,7 @@ class AzureProvisioner(VMProvisioner):
         config: Config,
         *,
         azure_vm_size: str = "Standard_B2s",
-        vm_user: str = "agentworks",
+        admin_username: str = "agentworks",
     ) -> ProvisionResult:
         assert config.azure is not None, "Azure config is required"
         az = config.azure
@@ -129,7 +129,7 @@ class AzureProvisioner(VMProvisioner):
 
         ssh_pub_key = config.user.ssh_public_key.read_text().strip()
         cloud_init = CLOUD_INIT_TEMPLATE.format(
-            ssh_public_key=ssh_pub_key, vm_user=vm_user,
+            ssh_public_key=ssh_pub_key, admin_username=admin_username,
         )
         cloud_init_b64 = base64.b64encode(cloud_init.encode()).decode()
 
@@ -241,14 +241,14 @@ class AzureProvisioner(VMProvisioner):
                     },
                     "os_profile": {
                         "computer_name": vm_name,
-                        "admin_username": vm_user,
+                        "admin_username": admin_username,
                         "custom_data": cloud_init_b64,
                         "linux_configuration": {
                             "disable_password_authentication": True,
                             "ssh": {
                                 "public_keys": [
                                     {
-                                        "path": f"/home/{vm_user}/.ssh/authorized_keys",
+                                        "path": f"/home/{admin_username}/.ssh/authorized_keys",
                                         "key_data": ssh_pub_key,
                                     }
                                 ]
@@ -275,7 +275,7 @@ class AzureProvisioner(VMProvisioner):
             exec_target=ExecTarget(
                 ssh=SSHTarget(
                     host=public_ip,
-                    user=vm_user,
+                    user=admin_username,
                     identity_file=config.user.ssh_private_key,
                 )
             ),
@@ -388,7 +388,7 @@ class AzureProvisioner(VMProvisioner):
 
         # Walk NICs to find the public IP (may not exist if detached)
         public_ip = _get_vm_public_ip(vm_info, az_cfg)
-        return ExecTarget(ssh=SSHTarget(host=public_ip, user=vm.vm_user))
+        return ExecTarget(ssh=SSHTarget(host=public_ip, user=vm.admin_username))
 
     def status(self, vm: VMRow) -> VMStatus:
         if vm.azure_resource_id is None:

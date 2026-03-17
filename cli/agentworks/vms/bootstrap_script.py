@@ -20,7 +20,7 @@ SCRIPT_TEMPLATE = """\
 #!/bin/bash
 set -euo pipefail
 
-VM_USER={vm_user}
+VM_USER={admin_username}
 SSH_PUBLIC_KEY={ssh_public_key}
 SYSTEM_PACKAGES={system_packages}
 TAILSCALE_AUTH_KEY={tailscale_auth_key}
@@ -74,7 +74,7 @@ echo "##SUCCESS## tailscale-ip=$TS_IP"
 
 def generate_bootstrap_script(
     *,
-    vm_user: str,
+    admin_username: str,
     ssh_public_key: str,
     system_packages: list[str],
     tailscale_auth_key: str,
@@ -84,7 +84,7 @@ def generate_bootstrap_script(
     ts_extra_flags = "--userspace-networking" if is_wsl2 else ""
 
     return SCRIPT_TEMPLATE.format(
-        vm_user=shlex.quote(vm_user),
+        admin_username=shlex.quote(admin_username),
         ssh_public_key=shlex.quote(ssh_public_key),
         system_packages=shlex.quote(" ".join(system_packages)),
         tailscale_auth_key=shlex.quote(tailscale_auth_key),

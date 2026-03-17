@@ -161,7 +161,7 @@ def vm_create(
     azure_vm_size: Annotated[
         str | None, typer.Option("--azure-vm-size", help="Azure VM size")
     ] = None,
-    vm_user: Annotated[str | None, typer.Option("--vm-user", help="Username on the VM")] = None,
+    admin_username: Annotated[str | None, typer.Option("--admin-username", help="Admin username on the VM")] = None,
 ) -> None:
     """Create a new VM (provision + initialize)."""
     from agentworks.config import load_config
@@ -173,7 +173,7 @@ def vm_create(
         _get_db(), config,
         name=resolved_name, platform=platform, vm_host=vm_host,
         cpus=cpus, memory=memory, disk=disk,
-        azure_vm_size=azure_vm_size, vm_user=vm_user,
+        azure_vm_size=azure_vm_size, admin_username=admin_username,
     )
 
 

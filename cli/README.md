@@ -106,7 +106,7 @@ Manage virtual machines across Lima (local or remote), Azure, and WSL2.
 | `agentworks vm delete <name>` | Delete a VM (prompts for confirmation)   |
 | `agentworks vm add-git-credential <name> <cred>` | Add or update a git credential |
 
-`vm create` accepts `--name`, `--platform`, `--vm-host`, `--vm-user`, `--cpus`, `--memory`,
+`vm create` accepts `--name`, `--platform`, `--vm-host`, `--admin-username`, `--cpus`, `--memory`,
 `--disk`, and `--azure-vm-size`. These are immutable provisioning parameters stored in the database.
 All initialization behavior (packages, install commands, etc.) is driven by config.
 

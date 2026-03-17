@@ -49,13 +49,13 @@ def validate_name(name: str) -> None:
         raise typer.Exit(1)
 
 
-def validate_vm_user(vm_user: str) -> None:
-    """Validate a VM username for shell and OS safety."""
+def validate_admin_username(admin_username: str) -> None:
+    """Validate an admin username for shell and OS safety."""
     import typer
 
-    if not VM_USER_RE.match(vm_user):
+    if not VM_USER_RE.match(admin_username):
         typer.echo(
-            f"Error: invalid vm_user '{vm_user}'. Must be a valid Linux username "
+            f"Error: invalid admin_username '{admin_username}'. Must be a valid Linux username "
             "(lowercase, alphanumeric/hyphens/underscores, max 32 chars).",
             err=True,
         )
@@ -111,7 +111,7 @@ class VMConfig:
     memory: int = 8  # GiB
     disk: int = 50  # GiB
     azure_vm_size: str = "Standard_B2s"
-    vm_user: str = "agentworks"
+    admin_username: str = "agentworks"
     # Initialization (applied on create and reinit)
     admin_shell: str = "zsh"
     apt: list[str] = field(default_factory=list)
@@ -316,7 +316,7 @@ def _load_vm_config(data: dict[str, object]) -> VMConfig:
         memory=int(raw.get("memory", 8)),
         disk=int(raw.get("disk", 50)),
         azure_vm_size=str(raw.get("azure_vm_size", "Standard_B2s")),
-        vm_user=str(raw.get("vm_user", "agentworks")),
+        admin_username=str(raw.get("admin_username", "agentworks")),
         admin_shell=str(raw.get("admin_shell", "zsh")),
         apt=list(raw.get("apt", [])),
         apt_packages=list(raw.get("apt_packages", [])),
