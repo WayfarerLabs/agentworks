@@ -109,7 +109,7 @@ def _emit_dispatch(lines: list[str], spec: CommandSpec) -> None:
         escaped = sub.help.replace("'", "''")
         lines.append(
             f"            [System.Management.Automation.CompletionResult]::new('{name}', '{name}',"
-            f" 'ParameterValue', '{escaped}')"
+            f" 'Command', '{escaped}')"
         )
 
     _close_result_array_with_filter(lines, "        ")
@@ -145,7 +145,7 @@ def _emit_group_completions(
         escaped = sub.help.replace("'", "''")
         lines.append(
             f"{indent}        [System.Management.Automation.CompletionResult]::new('{name}', '{name}',"
-            f" 'ParameterValue', '{escaped}')"
+            f" 'Command', '{escaped}')"
         )
 
     _close_result_array_with_filter(lines, f"{indent}    ")

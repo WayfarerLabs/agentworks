@@ -53,7 +53,7 @@ different agent roles.
 
 ```bash
 uv sync
-uv run agentworks init       # creates ~/.config/agentworks/config.toml
+uv run agentworks config init    # creates ~/.config/agentworks/config.toml
 ```
 
 Edit the config file (at minimum, set your SSH key paths), then:
@@ -78,7 +78,6 @@ agentworks workspace shell my-workspace
 | Command                     | Description                  |
 | --------------------------- | ---------------------------- |
 | `agentworks doctor`         | Check environment and config |
-| `agentworks init`           | Create a sample config file  |
 | `agentworks completion zsh` | Output zsh completion script |
 
 ### VM Hosts
@@ -154,11 +153,13 @@ and `--source` (builtin, user) filters.
 
 | Command                                | Description                                |
 | -------------------------------------- | ------------------------------------------ |
+| `agentworks config init`              | Create a sample config file                |
+| `agentworks config sample`            | Print the sample config to stdout          |
 | `agentworks config sync-ssh-config`   | Rebuild SSH config entries for all VMs     |
 
 ## Configuration
 
-Config lives at `~/.config/agentworks/config.toml`. Run `agentworks init` to generate a sample with
+Config lives at `~/.config/agentworks/config.toml`. Run `agentworks config init` to generate a sample with
 all options documented. See [sample-config.toml](agentworks/sample-config.toml) for the full
 reference.
 
