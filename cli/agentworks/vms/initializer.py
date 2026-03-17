@@ -257,12 +257,11 @@ def _install_apt_packages(
 def _build_test_command(entry: object, shell: str) -> str | None:
     """Build a shell command to check if an install command's tool is present.
 
-    test_exec runs in a login shell so PATH additions from install commands
-    are available (e.g. ~/.bun/bin added via ~/.agentworks-path.sh).
+    test_exec uses a login shell (-l) with interactive flag (-i) to ensure
+    all profile/rc files are sourced, matching a real login session.
     """
     if getattr(entry, "test_exec", None):
-        inner = f"command -v {shlex.quote(entry.test_exec)} > /dev/null 2>&1"
-        return f"{shlex.quote(shell)} -lc {shlex.quote(inner)}"
+        return f"{shell} -lic 'command -v {entry.test_exec}' > /dev/null 2>&1"
     if getattr(entry, "test_file", None):
         path = entry.test_file.replace("~", "$HOME", 1) if entry.test_file.startswith("~") else entry.test_file
         return f"test -f {path}"
