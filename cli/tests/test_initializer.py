@@ -240,3 +240,101 @@ def test_run_catalog_commands_empty() -> None:
 
     assert result == []
     target.run.assert_not_called()
+
+
+def test_run_catalog_commands_skips_when_test_exists() -> None:
+    """When test path exists, command is skipped but PATH additions are kept."""
+    target = MagicMock()
+    # test -e returns 0 (file exists)
+    target.run.return_value = MagicMock(stdout="", stderr="", returncode=0)
+
+    entries = {
+        "my-tool": UserInstallCommandEntry(
+            name="my-tool",
+            description="My tool",
+            command="curl install.sh | bash",
+            path=["~/.my-tool/bin"],
+            test="~/.my-tool/bin/my-tool",
+        ),
+    }
+    logger = MagicMock()
+    logger.has_warnings = False
+
+    result = _run_catalog_commands(
+        target, ["my-tool"], entries, "zsh", logger,
+    )
+
+    # PATH additions should still be returned
+    assert result == ["~/.my-tool/bin"]
+    # The install command itself should NOT have been run (only test -e was run)
+    run_calls = [str(c) for c in target.run.call_args_list]
+    assert any("test -e" in c for c in run_calls)
+    assert not any("curl" in c for c in run_calls)
+
+
+def test_run_catalog_commands_runs_when_test_missing() -> None:
+    """When test path does not exist, command runs normally."""
+    target = MagicMock()
+    call_count = 0
+
+    def run_side_effect(cmd, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        result = MagicMock()
+        result.stdout = ""
+        result.stderr = ""
+        # First call is test -e (not found), rest succeed
+        result.returncode = 1 if "test -e" in cmd else 0
+        return result
+
+    target.run.side_effect = run_side_effect
+
+    entries = {
+        "my-tool": UserInstallCommandEntry(
+            name="my-tool",
+            description="My tool",
+            command="curl install.sh | bash",
+            path=["~/.my-tool/bin"],
+            test="~/.my-tool/bin/my-tool",
+        ),
+    }
+    logger = MagicMock()
+    logger.has_warnings = False
+
+    result = _run_catalog_commands(
+        target, ["my-tool"], entries, "zsh", logger,
+    )
+
+    assert result == ["~/.my-tool/bin"]
+    # The install command should have been run
+    run_calls = [str(c) for c in target.run.call_args_list]
+    assert any("curl" in c for c in run_calls)
+
+
+def test_run_catalog_commands_no_test_always_runs() -> None:
+    """When no test is set, command always runs."""
+    target = MagicMock()
+    target.run.return_value = MagicMock(stdout="", stderr="", returncode=0)
+
+    entries = {
+        "my-tool": UserInstallCommandEntry(
+            name="my-tool",
+            description="My tool",
+            command="curl install.sh | bash",
+            path=["~/.my-tool/bin"],
+            # no test field
+        ),
+    }
+    logger = MagicMock()
+    logger.has_warnings = False
+
+    result = _run_catalog_commands(
+        target, ["my-tool"], entries, "zsh", logger,
+    )
+
+    assert result == ["~/.my-tool/bin"]
+    # Should NOT have run test -e
+    run_calls = [str(c) for c in target.run.call_args_list]
+    assert not any("test -e" in c for c in run_calls)
+    # Should have run the command
+    assert any("curl" in c for c in run_calls)

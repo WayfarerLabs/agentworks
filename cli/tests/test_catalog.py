@@ -45,6 +45,44 @@ def test_builtin_apt_package_fields() -> None:
     assert "github-cli" in gh_pkg.apt_sources
 
 
+def test_builtin_system_command_test_fields() -> None:
+    catalog = load_builtin_catalog()
+    az = catalog.system_install_commands["az-cli"]
+    assert az.test == "/usr/bin/az"
+
+
+def test_builtin_user_command_test_fields() -> None:
+    catalog = load_builtin_catalog()
+    assert catalog.user_install_commands["bun"].test == "~/.bun/bin/bun"
+    assert catalog.user_install_commands["oh-my-zsh"].test == "~/.oh-my-zsh"
+    assert catalog.user_install_commands["nvm"].test == "~/.nvm/nvm.sh"
+    assert catalog.user_install_commands["claude"].test == "~/.local/bin/claude"
+
+
+def test_user_override_preserves_test() -> None:
+    config = _make_config_with_overrides(
+        user_install_commands={
+            "my-tool": {
+                "command": "echo install",
+                "description": "My tool",
+                "test": "~/.my-tool/bin/my-tool",
+            },
+        },
+    )
+    catalog = load_catalog(config)
+    assert catalog.user_install_commands["my-tool"].test == "~/.my-tool/bin/my-tool"
+
+
+def test_user_override_test_defaults_none() -> None:
+    config = _make_config_with_overrides(
+        user_install_commands={
+            "my-tool": {"command": "echo install", "description": "My tool"},
+        },
+    )
+    catalog = load_catalog(config)
+    assert catalog.user_install_commands["my-tool"].test is None
+
+
 def test_builtin_cross_references_valid() -> None:
     """All apt_sources referenced by apt_packages exist."""
     catalog = load_builtin_catalog()
