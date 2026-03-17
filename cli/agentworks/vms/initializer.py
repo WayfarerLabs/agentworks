@@ -254,10 +254,15 @@ def _install_apt_packages(
         typer.echo(f"  Warning: {msg}", err=True)
 
 
-def _build_test_command(entry: object) -> str | None:
-    """Build a shell command to check if an install command's tool is present."""
+def _build_test_command(entry: object, shell: str) -> str | None:
+    """Build a shell command to check if an install command's tool is present.
+
+    test_exec runs in a login shell so PATH additions from install commands
+    are available (e.g. ~/.bun/bin added via ~/.agentworks-path.sh).
+    """
     if getattr(entry, "test_exec", None):
-        return f"command -v {shlex.quote(entry.test_exec)} > /dev/null 2>&1"
+        inner = f"command -v {shlex.quote(entry.test_exec)} > /dev/null 2>&1"
+        return f"{shlex.quote(shell)} -lc {shlex.quote(inner)}"
     if getattr(entry, "test_file", None):
         path = entry.test_file.replace("~", "$HOME", 1) if entry.test_file.startswith("~") else entry.test_file
         return f"test -f {path}"
@@ -293,7 +298,7 @@ def _run_catalog_commands(
         logger.step(f"{label} {i}/{total}: {name}")
 
         # Skip if already installed (short timeout -- this should be instant)
-        test_cmd = _build_test_command(entry)
+        test_cmd = _build_test_command(entry, shell)
         if test_cmd:
             try:
                 check = target.run(test_cmd, check=False, timeout=10)
