@@ -50,29 +50,38 @@ apt = ["nodejs"]
 
 # -- System install commands ---------------------------------------------------
 # Shell commands that install system-wide tooling (run once per VM).
+# test: if this file/directory exists, the command is considered already installed
+# and will be skipped on reinit.
 
 [system_install_commands.az-cli]
 description = "Azure CLI"
 command = "curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash"
+test = "/usr/bin/az"
 
 # -- User install commands -----------------------------------------------------
 # Shell commands that install per-user tooling (run for each user).
-# path is an optional list of directories to add to the user's PATH after running the command.
-# This is only necessary if the installer does not automatically add the installed tool to the PATH.
+# test: if this file/directory exists, the command is considered already installed.
+#   Use ~ for the user's home directory (resolves to the correct home for both
+#   the admin user and agent users).
+# path: optional list of directories to add to the user's PATH.
 
 [user_install_commands.oh-my-zsh]
 description = "Oh My Zsh"
 command = "sh -c \"$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)\" -- --unattended"
+test = "~/.oh-my-zsh"
 
 [user_install_commands.bun]
 description = "Bun JavaScript runtime"
 command = "curl -fsSL https://bun.sh/install | bash"
+test = "~/.bun/bin/bun"
 
 [user_install_commands.nvm]
 description = "Node Version Manager"
 command = "curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.4/install.sh | bash"
+test = "~/.nvm/nvm.sh"
 
 [user_install_commands.claude]
 description = "Claude Code CLI"
 command = "curl -fsSL https://claude.ai/install.sh | bash"
 path = ["~/.local/bin"]
+test = "~/.local/bin/claude"
