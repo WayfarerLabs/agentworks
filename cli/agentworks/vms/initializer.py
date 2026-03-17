@@ -278,7 +278,8 @@ def _run_catalog_commands(
 
         # Skip if test path exists (already installed)
         if entry.test:
-            check = target.run(f"test -e {shlex.quote(entry.test)}", check=False)
+            test_path = entry.test.replace("~", "$HOME", 1) if entry.test.startswith("~") else entry.test
+            check = target.run(f'test -e {test_path}', check=False)
             if check.returncode == 0:
                 typer.echo(f"  {label} {i}/{total} ({name}): already installed, skipping")
                 logger.output(f"{name}: test path exists ({entry.test}), skipping")
