@@ -304,6 +304,13 @@ def _load_dotfiles(data: dict[str, object]) -> DotfilesConfig:
     )
 
 
+_VM_CONFIG_KEYS = {
+    "cpus", "memory", "disk", "azure_vm_size", "admin_username",
+    "admin_shell", "apt", "apt_packages", "snap",
+    "system_install_commands", "admin_install_commands",
+}
+
+
 def _load_vm_config(data: dict[str, object]) -> VMConfig:
     vm_section = data.get("vm", {})
     if not isinstance(vm_section, dict):
@@ -311,6 +318,9 @@ def _load_vm_config(data: dict[str, object]) -> VMConfig:
     raw = vm_section.get("config", {})
     if not isinstance(raw, dict):
         raise ConfigError("[vm.config] must be a table")
+
+    _warn_unexpected_keys(raw, _VM_CONFIG_KEYS, "vm.config")
+
     return VMConfig(
         cpus=int(raw.get("cpus", 4)),
         memory=int(raw.get("memory", 8)),
@@ -326,6 +336,9 @@ def _load_vm_config(data: dict[str, object]) -> VMConfig:
     )
 
 
+_AGENT_CONFIG_KEYS = {"user_install_commands", "shell"}
+
+
 def _load_agent_config(data: dict[str, object]) -> AgentConfig:
     agent_section = data.get("agent", {})
     if not isinstance(agent_section, dict):
@@ -333,6 +346,9 @@ def _load_agent_config(data: dict[str, object]) -> AgentConfig:
     raw = agent_section.get("config", {})
     if not isinstance(raw, dict):
         raise ConfigError("[agent.config] must be a table")
+
+    _warn_unexpected_keys(raw, _AGENT_CONFIG_KEYS, "agent.config")
+
     return AgentConfig(
         user_install_commands=list(raw.get("user_install_commands", [])),
         shell=str(raw.get("shell", "bash")),
