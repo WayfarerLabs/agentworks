@@ -314,6 +314,15 @@ def _run_agent_install_commands(
         if entry is None:
             typer.echo(f"  Warning: install command '{name}' not found in catalog", err=True)
             continue
+        # Skip if test path exists (already installed for this user)
+        if entry.test:
+            test_path = entry.test.replace("~", home, 1) if entry.test.startswith("~") else entry.test
+            check = run_as_root(target, f"test -e {shlex.quote(test_path)}", check=False)
+            if check.returncode == 0:
+                typer.echo(f"  Agent install command {i}/{total} ({name}): already installed, skipping")
+                path_additions.extend(entry.path)
+                continue
+
         truncated = entry.command[:60]
         typer.echo(f"  Agent install command {i}/{total} ({name}): {truncated}...")
         try:

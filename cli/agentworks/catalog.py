@@ -49,6 +49,7 @@ class SystemInstallCommandEntry:
     description: str
     command: str
     path: list[str] = field(default_factory=list)
+    test: str | None = None
 
 
 @dataclass(frozen=True)
@@ -57,6 +58,7 @@ class UserInstallCommandEntry:
     description: str
     command: str
     path: list[str] = field(default_factory=list)
+    test: str | None = None
 
 
 @dataclass(frozen=True)
@@ -135,6 +137,7 @@ def _load_system_commands(raw: dict[str, object]) -> dict[str, SystemInstallComm
             description=str(data.get("description", "")),
             command=str(_require_field(data, "command", ctx)),
             path=_require_list(data, "path", ctx) if "path" in data else [],
+            test=str(data["test"]) if "test" in data else None,
         )
     return entries
 
@@ -150,6 +153,7 @@ def _load_user_commands(raw: dict[str, object]) -> dict[str, UserInstallCommandE
             description=str(data.get("description", "")),
             command=str(_require_field(data, "command", ctx)),
             path=_require_list(data, "path", ctx) if "path" in data else [],
+            test=str(data["test"]) if "test" in data else None,
         )
     return entries
 

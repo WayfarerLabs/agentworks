@@ -12,11 +12,10 @@ Phase B steps are non-fatal -- failures produce warnings and a 'partial' status.
 
 from __future__ import annotations
 
+import shlex
 from typing import TYPE_CHECKING
 
 import typer
-
-import shlex
 
 from agentworks.db import InitStatus, ProvisioningStatus
 from agentworks.ssh import ExecTarget, SSHError, SSHTarget, rsync_to
@@ -276,6 +275,17 @@ def _run_catalog_commands(
             typer.echo(f"  Warning: {msg}", err=True)
             continue
         logger.step(f"{label} {i}/{total}: {name}")
+
+        # Skip if test path exists (already installed)
+        if entry.test:
+            test_path = entry.test.replace("~", "$HOME", 1) if entry.test.startswith("~") else entry.test
+            check = target.run(f'test -e {test_path}', check=False)
+            if check.returncode == 0:
+                typer.echo(f"  {label} {i}/{total} ({name}): already installed, skipping")
+                logger.output(f"{name}: test path exists ({entry.test}), skipping")
+                path_additions.extend(entry.path)
+                continue
+
         truncated = entry.command[:60]
         typer.echo(f"  {label} {i}/{total} ({name}): {truncated}...")
         try:
