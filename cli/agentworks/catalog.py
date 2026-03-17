@@ -49,7 +49,9 @@ class SystemInstallCommandEntry:
     description: str
     command: str
     path: list[str] = field(default_factory=list)
-    test: str | None = None
+    test_exec: str | None = None
+    test_file: str | None = None
+    test_dir: str | None = None
 
 
 @dataclass(frozen=True)
@@ -58,7 +60,9 @@ class UserInstallCommandEntry:
     description: str
     command: str
     path: list[str] = field(default_factory=list)
-    test: str | None = None
+    test_exec: str | None = None
+    test_file: str | None = None
+    test_dir: str | None = None
 
 
 @dataclass(frozen=True)
@@ -126,18 +130,30 @@ def _load_apt_packages(raw: dict[str, object]) -> dict[str, AptPackageEntry]:
     return entries
 
 
+def _load_test_fields(data: dict[str, object], ctx: str) -> dict[str, str | None]:
+    """Load and validate test_exec/test_file/test_dir fields. At most one may be set."""
+    fields = {}
+    for key in ("test_exec", "test_file", "test_dir"):
+        fields[key] = str(data[key]) if key in data else None
+    set_count = sum(1 for v in fields.values() if v is not None)
+    if set_count > 1:
+        raise CatalogError(f"{ctx}: at most one of test_exec, test_file, test_dir may be set")
+    return fields
+
+
 def _load_system_commands(raw: dict[str, object]) -> dict[str, SystemInstallCommandEntry]:
     entries: dict[str, SystemInstallCommandEntry] = {}
     for name, data in raw.items():
         if not isinstance(data, dict):
             raise CatalogError(f"system_install_commands.{name} must be a table")
         ctx = f"system_install_commands.{name}"
+        tests = _load_test_fields(data, ctx)
         entries[name] = SystemInstallCommandEntry(
             name=name,
             description=str(data.get("description", "")),
             command=str(_require_field(data, "command", ctx)),
             path=_require_list(data, "path", ctx) if "path" in data else [],
-            test=str(data["test"]) if "test" in data else None,
+            **tests,
         )
     return entries
 
@@ -148,12 +164,13 @@ def _load_user_commands(raw: dict[str, object]) -> dict[str, UserInstallCommandE
         if not isinstance(data, dict):
             raise CatalogError(f"user_install_commands.{name} must be a table")
         ctx = f"user_install_commands.{name}"
+        tests = _load_test_fields(data, ctx)
         entries[name] = UserInstallCommandEntry(
             name=name,
             description=str(data.get("description", "")),
             command=str(_require_field(data, "command", ctx)),
             path=_require_list(data, "path", ctx) if "path" in data else [],
-            test=str(data["test"]) if "test" in data else None,
+            **tests,
         )
     return entries
 

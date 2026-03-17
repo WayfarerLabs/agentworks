@@ -27,7 +27,10 @@ if TYPE_CHECKING:
     from agentworks.git_credentials.base import GitCredentialProvider
     from agentworks.ssh import SSHResult
 
-SYSTEM_PACKAGES = ["openssh-server", "curl", "git", "sudo", "ca-certificates", "gnupg", "tmux", "tmuxinator"]
+SYSTEM_PACKAGES = [
+    "openssh-server", "curl", "git", "sudo", "ca-certificates", "gnupg",
+    "unzip", "tmux", "tmuxinator",
+]
 
 
 def _run_logged(
@@ -251,6 +254,19 @@ def _install_apt_packages(
         typer.echo(f"  Warning: {msg}", err=True)
 
 
+def _build_test_command(entry: object) -> str | None:
+    """Build a shell command to check if an install command's tool is present."""
+    if getattr(entry, "test_exec", None):
+        return f"command -v {shlex.quote(entry.test_exec)} > /dev/null 2>&1"
+    if getattr(entry, "test_file", None):
+        path = entry.test_file.replace("~", "$HOME", 1) if entry.test_file.startswith("~") else entry.test_file
+        return f"test -f {path}"
+    if getattr(entry, "test_dir", None):
+        path = entry.test_dir.replace("~", "$HOME", 1) if entry.test_dir.startswith("~") else entry.test_dir
+        return f"test -d {path}"
+    return None
+
+
 def _run_catalog_commands(
     target: ExecTarget,
     command_names: list[str],
@@ -276,13 +292,13 @@ def _run_catalog_commands(
             continue
         logger.step(f"{label} {i}/{total}: {name}")
 
-        # Skip if test path exists (already installed)
-        if entry.test:
-            test_path = entry.test.replace("~", "$HOME", 1) if entry.test.startswith("~") else entry.test
-            check = target.run(f'test -e {test_path}', check=False)
+        # Skip if already installed
+        test_cmd = _build_test_command(entry)
+        if test_cmd:
+            check = target.run(test_cmd, check=False)
             if check.returncode == 0:
                 typer.echo(f"  {label} {i}/{total} ({name}): already installed, skipping")
-                logger.output(f"{name}: test path exists ({entry.test}), skipping")
+                logger.output(f"{name}: test check passed, skipping")
                 path_additions.extend(entry.path)
                 continue
 

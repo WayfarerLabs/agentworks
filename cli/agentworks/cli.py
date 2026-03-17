@@ -512,8 +512,12 @@ def installer_describe(
             typer.echo(f"Apt:         {', '.join(entry.apt)}")
         elif isinstance(entry, (SystemInstallCommandEntry, UserInstallCommandEntry)):
             typer.echo(f"Command:     {entry.command}")
-            if entry.test:
-                typer.echo(f"Test:        {entry.test}")
+            if entry.test_exec:
+                typer.echo(f"Test exec:   {entry.test_exec}")
+            if entry.test_file:
+                typer.echo(f"Test file:   {entry.test_file}")
+            if entry.test_dir:
+                typer.echo(f"Test dir:    {entry.test_dir}")
             if entry.path:
                 typer.echo(f"PATH:        {', '.join(entry.path)}")
         return

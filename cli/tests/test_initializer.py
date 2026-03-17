@@ -242,10 +242,10 @@ def test_run_catalog_commands_empty() -> None:
     target.run.assert_not_called()
 
 
-def test_run_catalog_commands_skips_when_test_exists() -> None:
-    """When test path exists, command is skipped but PATH additions are kept."""
+def test_run_catalog_commands_skips_when_test_exec_found() -> None:
+    """When test_exec command exists, install is skipped but PATH additions are kept."""
     target = MagicMock()
-    # test -e returns 0 (file exists)
+    # command -v returns 0 (command found)
     target.run.return_value = MagicMock(stdout="", stderr="", returncode=0)
 
     entries = {
@@ -254,7 +254,7 @@ def test_run_catalog_commands_skips_when_test_exists() -> None:
             description="My tool",
             command="curl install.sh | bash",
             path=["~/.my-tool/bin"],
-            test="~/.my-tool/bin/my-tool",
+            test_exec="my-tool",
         ),
     }
     logger = MagicMock()
@@ -266,25 +266,22 @@ def test_run_catalog_commands_skips_when_test_exists() -> None:
 
     # PATH additions should still be returned
     assert result == ["~/.my-tool/bin"]
-    # The install command itself should NOT have been run (only test -e was run)
+    # The install command itself should NOT have been run (only command -v was run)
     run_calls = [str(c) for c in target.run.call_args_list]
-    assert any("test -e" in c for c in run_calls)
+    assert any("command -v" in c for c in run_calls)
     assert not any("curl" in c for c in run_calls)
 
 
-def test_run_catalog_commands_runs_when_test_missing() -> None:
-    """When test path does not exist, command runs normally."""
+def test_run_catalog_commands_runs_when_test_exec_missing() -> None:
+    """When test_exec command is not found, install runs normally."""
     target = MagicMock()
-    call_count = 0
 
     def run_side_effect(cmd, **kwargs):
-        nonlocal call_count
-        call_count += 1
         result = MagicMock()
         result.stdout = ""
         result.stderr = ""
-        # First call is test -e (not found), rest succeed
-        result.returncode = 1 if "test -e" in cmd else 0
+        # command -v fails (not found), everything else succeeds
+        result.returncode = 1 if "command -v" in cmd else 0
         return result
 
     target.run.side_effect = run_side_effect
@@ -295,7 +292,7 @@ def test_run_catalog_commands_runs_when_test_missing() -> None:
             description="My tool",
             command="curl install.sh | bash",
             path=["~/.my-tool/bin"],
-            test="~/.my-tool/bin/my-tool",
+            test_exec="my-tool",
         ),
     }
     logger = MagicMock()
@@ -333,8 +330,10 @@ def test_run_catalog_commands_no_test_always_runs() -> None:
     )
 
     assert result == ["~/.my-tool/bin"]
-    # Should NOT have run test -e
+    # Should NOT have run any test check
     run_calls = [str(c) for c in target.run.call_args_list]
-    assert not any("test -e" in c for c in run_calls)
+    assert not any("command -v" in c for c in run_calls)
+    assert not any("test -f" in c for c in run_calls)
+    assert not any("test -d" in c for c in run_calls)
     # Should have run the command
     assert any("curl" in c for c in run_calls)

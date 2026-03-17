@@ -314,10 +314,10 @@ def _run_agent_install_commands(
         if entry is None:
             typer.echo(f"  Warning: install command '{name}' not found in catalog", err=True)
             continue
-        # Skip if test path exists (already installed for this user)
-        if entry.test:
-            test_path = entry.test.replace("~", home, 1) if entry.test.startswith("~") else entry.test
-            check = run_as_root(target, f"test -e {shlex.quote(test_path)}", check=False)
+        # Skip if already installed for this user
+        test_cmd = _build_agent_test_command(entry, linux_user, home)
+        if test_cmd:
+            check = run_as_root(target, test_cmd, check=False)
             if check.returncode == 0:
                 typer.echo(f"  Agent install command {i}/{total} ({name}): already installed, skipping")
                 path_additions.extend(entry.path)
@@ -364,6 +364,28 @@ def _run_agent_install_commands(
                 )
         except SSHError as e:
             typer.echo(f"  Warning: agent PATH configuration failed: {e}", err=True)
+
+
+def _build_agent_test_command(
+    entry: object, linux_user: str, home: str,
+) -> str | None:
+    """Build a test command that runs as the agent user."""
+    import shlex as _shlex
+
+    if getattr(entry, "test_exec", None):
+        # Run command -v as the agent user via su
+        inner = f"command -v {_shlex.quote(entry.test_exec)}"
+        return (
+            f"su - {_shlex.quote(linux_user)} -c {_shlex.quote(inner)}"
+            " > /dev/null 2>&1"
+        )
+    if getattr(entry, "test_file", None):
+        path = entry.test_file.replace("~", home, 1) if entry.test_file.startswith("~") else entry.test_file
+        return f"test -f {_shlex.quote(path)}"
+    if getattr(entry, "test_dir", None):
+        path = entry.test_dir.replace("~", home, 1) if entry.test_dir.startswith("~") else entry.test_dir
+        return f"test -d {_shlex.quote(path)}"
+    return None
 
 
 # -- Helpers ---------------------------------------------------------------
