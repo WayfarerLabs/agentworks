@@ -50,38 +50,55 @@ apt = ["nodejs"]
 
 # -- System install commands ---------------------------------------------------
 # Shell commands that install system-wide tooling (run once per VM).
-# test: if this file/directory exists, the command is considered already installed
-# and will be skipped on reinit.
+#
+# These may be re-run (e.g. during reinit) so they really should be idempotent.
+#
+# Optional checks can be defined to short-circuit installation if the tool is already present.
+# Installed-check fields (at most one per entry):
+#   test_exec: skip if this command is on PATH (uses `command -v`)
+#   test_file: skip if this file exists
+#   test_dir:  skip if this directory exists
 
 [system_install_commands.az-cli]
 description = "Azure CLI"
 command = "curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash"
-test = "/usr/bin/az"
+test_exec = "az"
 
 # -- User install commands -----------------------------------------------------
 # Shell commands that install per-user tooling (run for each user).
-# test: if this file/directory exists, the command is considered already installed.
-#   Use ~ for the user's home directory (resolves to the correct home for both
-#   the admin user and agent users).
+#
+# These may be re-run (e.g. during reinit) so they really should be idempotent.
+#
+# Optional checks can be defined to short-circuit installation if the tool is already present.
+# Installed-check fields (at most one per entry):
+#   test_exec: skip if this command is on PATH (uses `command -v`)
+#   test_file: skip if this file exists (~ resolves to the user's home)
+#   test_dir:  skip if this directory exists (~ resolves to the user's home)
+#
 # path: optional list of directories to add to the user's PATH.
 
 [user_install_commands.oh-my-zsh]
 description = "Oh My Zsh"
 command = "sh -c \"$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)\" -- --unattended"
-test = "~/.oh-my-zsh"
+test_dir = "~/.oh-my-zsh"
 
 [user_install_commands.bun]
 description = "Bun JavaScript runtime"
 command = "curl -fsSL https://bun.sh/install | bash"
-test = "~/.bun/bin/bun"
+test_exec = "bun"
+
+[user_install_commands.fnm]
+description = "Fast Node Manager"
+command = "curl -fsSL https://fnm.vercel.app/install | bash"
+test_exec = "fnm"
 
 [user_install_commands.nvm]
 description = "Node Version Manager"
 command = "curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.4/install.sh | bash"
-test = "~/.nvm/nvm.sh"
+test_file = "~/.nvm/nvm.sh"
 
 [user_install_commands.claude]
 description = "Claude Code CLI"
 command = "curl -fsSL https://claude.ai/install.sh | bash"
 path = ["~/.local/bin"]
-test = "~/.local/bin/claude"
+test_exec = "claude"

@@ -102,21 +102,27 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 
 # --- User-defined system install commands ---
 # Shell commands that install system-wide tooling (run during vm init/reinit).
+# These may be re-run (e.g. during reinit) so they really should be idempotent.
+# Optional checks can be defined to short-circuit installation if the tool is already present.
+# Please use only one of: test_exec, test_file, or test_dir.
 
 # [system_install_commands.my-system-tool]
 # description = "Custom system-wide tool"
 # command = "curl -fsSL https://example.com/install.sh | sudo bash"
-# test = "/usr/local/bin/my-system-tool"   # skip if this file/dir exists
+# test_exec = "my-system-tool"            # skip if command is on PATH
 
 # --- User-defined user install commands ---
 # Shell commands that install per-user tooling (run for admin user and agents).
-# test: skip if this file/dir exists (~ resolves to the target user's home).
+# These may be re-run so they really should be idempotent.
+# Optional checks can be defined to short-circuit installation if the tool is already present.
+# Please use only one of: test_exec, test_file, or test_dir.
+# For test_file/test_dir, ~ resolves to the target user's home.
 
 # [user_install_commands.my-tool]
 # description = "Custom per-user tool"
 # command = "curl -fsSL https://example.com/install.sh | bash"
 # path = ["~/.my-tool/bin"]
-# test = "~/.my-tool/bin/my-tool"
+# test_exec = "my-tool"                   # skip if command is on PATH
 
 # --- Workspace templates ---
 # The "default" template is used when --template is not specified.

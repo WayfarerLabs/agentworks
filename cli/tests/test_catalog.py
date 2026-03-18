@@ -48,29 +48,30 @@ def test_builtin_apt_package_fields() -> None:
 def test_builtin_system_command_test_fields() -> None:
     catalog = load_builtin_catalog()
     az = catalog.system_install_commands["az-cli"]
-    assert az.test == "/usr/bin/az"
+    assert az.test_exec == "az"
 
 
 def test_builtin_user_command_test_fields() -> None:
     catalog = load_builtin_catalog()
-    assert catalog.user_install_commands["bun"].test == "~/.bun/bin/bun"
-    assert catalog.user_install_commands["oh-my-zsh"].test == "~/.oh-my-zsh"
-    assert catalog.user_install_commands["nvm"].test == "~/.nvm/nvm.sh"
-    assert catalog.user_install_commands["claude"].test == "~/.local/bin/claude"
+    assert catalog.user_install_commands["bun"].test_exec == "bun"
+    assert catalog.user_install_commands["fnm"].test_exec == "fnm"
+    assert catalog.user_install_commands["claude"].test_exec == "claude"
+    assert catalog.user_install_commands["oh-my-zsh"].test_dir == "~/.oh-my-zsh"
+    assert catalog.user_install_commands["nvm"].test_file == "~/.nvm/nvm.sh"
 
 
-def test_user_override_preserves_test() -> None:
+def test_user_override_preserves_test_exec() -> None:
     config = _make_config_with_overrides(
         user_install_commands={
             "my-tool": {
                 "command": "echo install",
                 "description": "My tool",
-                "test": "~/.my-tool/bin/my-tool",
+                "test_exec": "my-tool",
             },
         },
     )
     catalog = load_catalog(config)
-    assert catalog.user_install_commands["my-tool"].test == "~/.my-tool/bin/my-tool"
+    assert catalog.user_install_commands["my-tool"].test_exec == "my-tool"
 
 
 def test_user_override_test_defaults_none() -> None:
@@ -80,7 +81,38 @@ def test_user_override_test_defaults_none() -> None:
         },
     )
     catalog = load_catalog(config)
-    assert catalog.user_install_commands["my-tool"].test is None
+    assert catalog.user_install_commands["my-tool"].test_exec is None
+    assert catalog.user_install_commands["my-tool"].test_file is None
+    assert catalog.user_install_commands["my-tool"].test_dir is None
+
+
+def test_legacy_test_field_rejected() -> None:
+    config = _make_config_with_overrides(
+        user_install_commands={
+            "old-tool": {
+                "command": "echo install",
+                "description": "Old tool",
+                "test": "old-tool",
+            },
+        },
+    )
+    with pytest.raises(CatalogError, match="'test' is not a valid field"):
+        load_catalog(config)
+
+
+def test_multiple_test_fields_rejected() -> None:
+    config = _make_config_with_overrides(
+        user_install_commands={
+            "bad": {
+                "command": "echo install",
+                "description": "Bad",
+                "test_exec": "bad",
+                "test_file": "~/.bad",
+            },
+        },
+    )
+    with pytest.raises(CatalogError, match="at most one"):
+        load_catalog(config)
 
 
 def test_builtin_cross_references_valid() -> None:

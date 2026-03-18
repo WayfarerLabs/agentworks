@@ -209,7 +209,7 @@ def test_run_catalog_commands_returns_path() -> None:
     logger.has_warnings = False
 
     result = _run_catalog_commands(
-        target, ["user-tool"], catalog.user_install_commands, "zsh", logger,
+        target, ["user-tool"], catalog.user_install_commands, "zsh", "/home/agentworks", logger,
     )
 
     assert result == ["~/.user-tool/bin"]
@@ -222,7 +222,7 @@ def test_run_catalog_commands_missing_entry() -> None:
     logger.has_warnings = False
 
     result = _run_catalog_commands(
-        target, ["nonexistent"], catalog.user_install_commands, "zsh", logger,
+        target, ["nonexistent"], catalog.user_install_commands, "zsh", "/home/agentworks", logger,
     )
 
     assert result == []
@@ -235,17 +235,17 @@ def test_run_catalog_commands_empty() -> None:
     logger = MagicMock()
 
     result = _run_catalog_commands(
-        target, [], catalog.user_install_commands, "zsh", logger,
+        target, [], catalog.user_install_commands, "zsh", "/home/agentworks", logger,
     )
 
     assert result == []
     target.run.assert_not_called()
 
 
-def test_run_catalog_commands_skips_when_test_exists() -> None:
-    """When test path exists, command is skipped but PATH additions are kept."""
+def test_run_catalog_commands_skips_when_test_exec_found() -> None:
+    """When test_exec command exists, install is skipped but PATH additions are kept."""
     target = MagicMock()
-    # test -e returns 0 (file exists)
+    # command -v returns 0 (command found)
     target.run.return_value = MagicMock(stdout="", stderr="", returncode=0)
 
     entries = {
@@ -254,37 +254,34 @@ def test_run_catalog_commands_skips_when_test_exists() -> None:
             description="My tool",
             command="curl install.sh | bash",
             path=["~/.my-tool/bin"],
-            test="~/.my-tool/bin/my-tool",
+            test_exec="my-tool",
         ),
     }
     logger = MagicMock()
     logger.has_warnings = False
 
     result = _run_catalog_commands(
-        target, ["my-tool"], entries, "zsh", logger,
+        target, ["my-tool"], entries, "zsh", "/home/agentworks", logger,
     )
 
     # PATH additions should still be returned
     assert result == ["~/.my-tool/bin"]
-    # The install command itself should NOT have been run (only test -e was run)
+    # The install command itself should NOT have been run (only command -v was run)
     run_calls = [str(c) for c in target.run.call_args_list]
-    assert any("test -e" in c for c in run_calls)
+    assert any("command -v" in c for c in run_calls)
     assert not any("curl" in c for c in run_calls)
 
 
-def test_run_catalog_commands_runs_when_test_missing() -> None:
-    """When test path does not exist, command runs normally."""
+def test_run_catalog_commands_runs_when_test_exec_missing() -> None:
+    """When test_exec command is not found, install runs normally."""
     target = MagicMock()
-    call_count = 0
 
     def run_side_effect(cmd, **kwargs):
-        nonlocal call_count
-        call_count += 1
         result = MagicMock()
         result.stdout = ""
         result.stderr = ""
-        # First call is test -e (not found), rest succeed
-        result.returncode = 1 if "test -e" in cmd else 0
+        # command -v fails (not found), everything else succeeds
+        result.returncode = 1 if "command -v" in cmd else 0
         return result
 
     target.run.side_effect = run_side_effect
@@ -295,14 +292,14 @@ def test_run_catalog_commands_runs_when_test_missing() -> None:
             description="My tool",
             command="curl install.sh | bash",
             path=["~/.my-tool/bin"],
-            test="~/.my-tool/bin/my-tool",
+            test_exec="my-tool",
         ),
     }
     logger = MagicMock()
     logger.has_warnings = False
 
     result = _run_catalog_commands(
-        target, ["my-tool"], entries, "zsh", logger,
+        target, ["my-tool"], entries, "zsh", "/home/agentworks", logger,
     )
 
     assert result == ["~/.my-tool/bin"]
@@ -329,12 +326,138 @@ def test_run_catalog_commands_no_test_always_runs() -> None:
     logger.has_warnings = False
 
     result = _run_catalog_commands(
-        target, ["my-tool"], entries, "zsh", logger,
+        target, ["my-tool"], entries, "zsh", "/home/agentworks", logger,
     )
 
     assert result == ["~/.my-tool/bin"]
-    # Should NOT have run test -e
+    # Should NOT have run any test check
     run_calls = [str(c) for c in target.run.call_args_list]
-    assert not any("test -e" in c for c in run_calls)
+    assert not any("command -v" in c for c in run_calls)
+    assert not any("test -f" in c for c in run_calls)
+    assert not any("test -d" in c for c in run_calls)
     # Should have run the command
     assert any("curl" in c for c in run_calls)
+
+
+def test_run_catalog_commands_skips_when_test_file_found() -> None:
+    """When test_file path exists, install is skipped but PATH additions are kept."""
+    target = MagicMock()
+    target.run.return_value = MagicMock(stdout="", stderr="", returncode=0)
+
+    entries = {
+        "nvm": UserInstallCommandEntry(
+            name="nvm",
+            description="NVM",
+            command="curl install.sh | bash",
+            path=["~/.nvm/bin"],
+            test_file="~/.nvm/nvm.sh",
+        ),
+    }
+    logger = MagicMock()
+    logger.has_warnings = False
+
+    result = _run_catalog_commands(
+        target, ["nvm"], entries, "zsh", "/home/agentworks", logger,
+    )
+
+    assert result == ["~/.nvm/bin"]
+    run_calls = [str(c) for c in target.run.call_args_list]
+    assert any("test -f" in c for c in run_calls)
+    assert any("/home/agentworks/.nvm/nvm.sh" in c for c in run_calls)
+    assert not any("curl" in c for c in run_calls)
+
+
+def test_run_catalog_commands_runs_when_test_file_missing() -> None:
+    """When test_file path does not exist, install runs normally."""
+    target = MagicMock()
+
+    def run_side_effect(cmd, **kwargs):
+        result = MagicMock()
+        result.stdout = ""
+        result.stderr = ""
+        result.returncode = 1 if "test -f" in cmd else 0
+        return result
+
+    target.run.side_effect = run_side_effect
+
+    entries = {
+        "nvm": UserInstallCommandEntry(
+            name="nvm",
+            description="NVM",
+            command="curl install.sh | bash",
+            path=["~/.nvm/bin"],
+            test_file="~/.nvm/nvm.sh",
+        ),
+    }
+    logger = MagicMock()
+    logger.has_warnings = False
+
+    result = _run_catalog_commands(
+        target, ["nvm"], entries, "zsh", "/home/agentworks", logger,
+    )
+
+    assert result == ["~/.nvm/bin"]
+    run_calls = [str(c) for c in target.run.call_args_list]
+    assert any("curl" in c for c in run_calls)
+
+
+def test_run_catalog_commands_skips_when_test_dir_found() -> None:
+    """When test_dir path exists, install is skipped but PATH additions are kept."""
+    target = MagicMock()
+    target.run.return_value = MagicMock(stdout="", stderr="", returncode=0)
+
+    entries = {
+        "oh-my-zsh": UserInstallCommandEntry(
+            name="oh-my-zsh",
+            description="Oh My Zsh",
+            command="sh -c install.sh",
+            path=[],
+            test_dir="~/.oh-my-zsh",
+        ),
+    }
+    logger = MagicMock()
+    logger.has_warnings = False
+
+    result = _run_catalog_commands(
+        target, ["oh-my-zsh"], entries, "zsh", "/home/agentworks", logger,
+    )
+
+    assert result == []
+    run_calls = [str(c) for c in target.run.call_args_list]
+    assert any("test -d" in c for c in run_calls)
+    assert any("/home/agentworks/.oh-my-zsh" in c for c in run_calls)
+    assert not any("sh -c" in c for c in run_calls)
+
+
+def test_run_catalog_commands_runs_when_test_dir_missing() -> None:
+    """When test_dir path does not exist, install runs normally."""
+    target = MagicMock()
+
+    def run_side_effect(cmd, **kwargs):
+        result = MagicMock()
+        result.stdout = ""
+        result.stderr = ""
+        result.returncode = 1 if "test -d" in cmd else 0
+        return result
+
+    target.run.side_effect = run_side_effect
+
+    entries = {
+        "oh-my-zsh": UserInstallCommandEntry(
+            name="oh-my-zsh",
+            description="Oh My Zsh",
+            command="sh -c install.sh",
+            path=[],
+            test_dir="~/.oh-my-zsh",
+        ),
+    }
+    logger = MagicMock()
+    logger.has_warnings = False
+
+    result = _run_catalog_commands(
+        target, ["oh-my-zsh"], entries, "zsh", "/home/agentworks", logger,
+    )
+
+    assert result == []
+    run_calls = [str(c) for c in target.run.call_args_list]
+    assert any("sh -c" in c for c in run_calls)
