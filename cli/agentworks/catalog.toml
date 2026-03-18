@@ -51,7 +51,7 @@ apt = ["nodejs"]
 # -- System install commands ---------------------------------------------------
 # Shell commands that install system-wide tooling (run once per VM).
 #
-# These may be re-run (e.g. during reinit)so they really should be idempotent.
+# These may be re-run (e.g. during reinit) so they really should be idempotent.
 #
 # Optional checks can be defined to short-circuit installation if the tool is already present.
 # Installed-check fields (at most one per entry):
