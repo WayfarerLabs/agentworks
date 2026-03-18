@@ -132,9 +132,14 @@ def _load_apt_packages(raw: dict[str, object]) -> dict[str, AptPackageEntry]:
 
 def _load_test_fields(data: dict[str, object], ctx: str) -> dict[str, str | None]:
     """Load and validate test_exec/test_file/test_dir fields. At most one may be set."""
-    fields = {}
+    if "test" in data:
+        raise CatalogError(
+            f"{ctx}: 'test' is not a valid field. Use 'test_exec', 'test_file', or 'test_dir'."
+        )
+    fields: dict[str, str | None] = {}
     for key in ("test_exec", "test_file", "test_dir"):
-        fields[key] = str(data[key]) if key in data else None
+        raw = str(data[key]).strip() if key in data else None
+        fields[key] = raw if raw else None
     set_count = sum(1 for v in fields.values() if v is not None)
     if set_count > 1:
         raise CatalogError(f"{ctx}: at most one of test_exec, test_file, test_dir may be set")

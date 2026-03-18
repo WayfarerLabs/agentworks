@@ -10,6 +10,7 @@ from agentworks.config import validate_name
 from agentworks.ssh import ssh_target_for_vm
 
 if TYPE_CHECKING:
+    from agentworks.catalog import UserInstallCommandEntry
     from agentworks.config import Config
     from agentworks.db import AgentRow, Database, VMRow, WorkspaceRow
 
@@ -323,8 +324,8 @@ def _run_agent_install_commands(
                     typer.echo(f"  Agent install command {i}/{total} ({name}): already installed, skipping")
                     path_additions.extend(entry.path)
                     continue
-            except SSHError:
-                pass
+            except SSHError as e:
+                typer.echo(f"  Warning: install check for '{name}' failed ({e}), assuming not installed", err=True)
 
         truncated = entry.command[:60]
         typer.echo(f"  Agent install command {i}/{total} ({name}): {truncated}...")
@@ -370,7 +371,7 @@ def _run_agent_install_commands(
 
 
 def _build_agent_test_command(
-    entry: object, linux_user: str, home: str,
+    entry: UserInstallCommandEntry, linux_user: str, home: str,
 ) -> str | None:
     """Build a test command that runs as the agent user."""
     import shlex as _shlex

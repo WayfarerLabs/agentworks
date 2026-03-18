@@ -86,6 +86,20 @@ def test_user_override_test_defaults_none() -> None:
     assert catalog.user_install_commands["my-tool"].test_dir is None
 
 
+def test_legacy_test_field_rejected() -> None:
+    config = _make_config_with_overrides(
+        user_install_commands={
+            "old-tool": {
+                "command": "echo install",
+                "description": "Old tool",
+                "test": "old-tool",
+            },
+        },
+    )
+    with pytest.raises(CatalogError, match="'test' is not a valid field"):
+        load_catalog(config)
+
+
 def test_multiple_test_fields_rejected() -> None:
     config = _make_config_with_overrides(
         user_install_commands={

@@ -22,6 +22,7 @@ from agentworks.ssh import ExecTarget, SSHError, SSHTarget, rsync_to
 from agentworks.vms.init_log import InitLogger
 
 if TYPE_CHECKING:
+    from agentworks.catalog import SystemInstallCommandEntry, UserInstallCommandEntry
     from agentworks.config import Config
     from agentworks.db import Database
     from agentworks.git_credentials.base import GitCredentialProvider
@@ -254,28 +255,33 @@ def _install_apt_packages(
         typer.echo(f"  Warning: {msg}", err=True)
 
 
-def _build_test_command(entry: object, shell: str) -> str | None:
+def _build_test_command(
+    entry: SystemInstallCommandEntry | UserInstallCommandEntry,
+    shell: str,
+    home: str,
+) -> str | None:
     """Build a shell command to check if an install command's tool is present.
 
     test_exec uses a login shell (-l) with interactive flag (-i) to ensure
     all profile/rc files are sourced, matching a real login session.
     """
-    if getattr(entry, "test_exec", None):
-        return f"{shell} -lic 'command -v {entry.test_exec}' > /dev/null 2>&1"
-    if getattr(entry, "test_file", None):
-        path = entry.test_file.replace("~", "$HOME", 1) if entry.test_file.startswith("~") else entry.test_file
-        return f"test -f {path}"
-    if getattr(entry, "test_dir", None):
-        path = entry.test_dir.replace("~", "$HOME", 1) if entry.test_dir.startswith("~") else entry.test_dir
-        return f"test -d {path}"
+    if entry.test_exec:
+        return f"{shell} -lic {shlex.quote(f'command -v {shlex.quote(entry.test_exec)}')} > /dev/null 2>&1"
+    if entry.test_file:
+        path = entry.test_file.replace("~", home, 1) if entry.test_file.startswith("~") else entry.test_file
+        return f"test -f {shlex.quote(path)}"
+    if entry.test_dir:
+        path = entry.test_dir.replace("~", home, 1) if entry.test_dir.startswith("~") else entry.test_dir
+        return f"test -d {shlex.quote(path)}"
     return None
 
 
 def _run_catalog_commands(
     target: ExecTarget,
     command_names: list[str],
-    entries: dict[str, object],
+    entries: dict[str, SystemInstallCommandEntry | UserInstallCommandEntry],
     shell: str,
+    home: str,
     logger: InitLogger,
     *,
     label: str = "Install command",
@@ -297,18 +303,18 @@ def _run_catalog_commands(
         logger.step(f"{label} {i}/{total}: {name}")
 
         # Skip if already installed (short timeout -- this should be instant)
-        test_cmd = _build_test_command(entry, shell)
+        test_cmd = _build_test_command(entry, shell, home)
         if test_cmd:
             try:
                 check = target.run(test_cmd, check=False, timeout=10)
                 if check.returncode == 0:
                     typer.echo(f"  {label} {i}/{total} ({name}): already installed, skipping")
-                    logger.output(f"{name}: test check passed, skipping")
+                    logger.output(f"{name}: already installed ({test_cmd}), skipping")
                     path_additions.extend(entry.path)
                     continue
-            except SSHError:
+            except SSHError as e:
                 # Timeout or connection issue -- assume not installed, proceed
-                pass
+                logger.output(f"{name}: install check failed ({e}), assuming not installed")
 
         truncated = entry.command[:60]
         typer.echo(f"  {label} {i}/{total} ({name}): {truncated}...")
@@ -737,14 +743,14 @@ def _phase_b_setup(
     # Non-fatal: system install commands
     system_path = _run_catalog_commands(
         ts_target, config.vm.system_install_commands,
-        catalog.system_install_commands, admin_shell, logger,
+        catalog.system_install_commands, admin_shell, home, logger,
         label="System install command",
     )
 
     # Non-fatal: user install commands for admin user
     user_path = _run_catalog_commands(
         ts_target, config.vm.admin_install_commands,
-        catalog.user_install_commands, admin_shell, logger,
+        catalog.user_install_commands, admin_shell, home, logger,
         label="User install command",
     )
 
