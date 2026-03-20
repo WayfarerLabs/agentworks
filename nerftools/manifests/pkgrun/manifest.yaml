@@ -1,0 +1,37 @@
+package:
+  name: pkgrun
+  description: Package runner tools for cspell, markdownlint, and prettier at locked versions
+  skill_group: pkgrun
+  skill_intro: |
+    These tools run npm packages at locked versions via npx. Pass arguments
+    directly -- they are forwarded to the underlying tool unchanged. Use
+    pkgrun-cspell for spell checking, pkgrun-markdownlint for
+    Markdown linting, and pkgrun-prettier for code formatting.
+
+tools:
+  pkgrun-cspell:
+    description: Run cspell v8.19.4 with the given arguments (e.g. '**/*.md')
+    command: [npx, "cspell@8.19.4", "{{args}}"]
+    args:
+      args:
+        description: Arguments to pass to cspell (e.g. '**/*.md' or --words-only '**/*.md')
+        required: true
+        variadic: true
+
+  pkgrun-markdownlint:
+    description: Run markdownlint-cli2 v0.21.0 with the given arguments (e.g. '**/*.md')
+    command: [npx, "markdownlint-cli2@0.21.0", "{{args}}"]
+    args:
+      args:
+        description: Arguments to pass to markdownlint-cli2 (e.g. '**/*.md')
+        required: true
+        variadic: true
+
+  pkgrun-prettier:
+    description: Run prettier v3.8.1 with the given arguments (e.g. --write '**/*.ts')
+    command: [npx, "prettier@3.8.1", "{{args}}"]
+    args:
+      args:
+        description: Arguments to pass to prettier (e.g. --write '**/*.ts' or --check .)
+        required: true
+        variadic: true

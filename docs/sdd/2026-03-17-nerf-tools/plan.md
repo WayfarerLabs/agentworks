@@ -132,3 +132,64 @@ Notes:
     (covers all users including agent users; user-level profile mechanism is not sufficient here)
 - [x] Update `sample-config.toml` with commented nerf fields in `[vm.config]`
 - [x] Update completions (removed stale `nerf.install` -> `vms` entry)
+
+## Phase 7: Enhanced Manifest Format and Additional Manifests
+
+Notes:
+- Unified `ParamSpec` was replaced with separate `FlagSpec` (named flags) and `ArgSpec` (positional
+  args) for cleaner semantics: flags are required by default, args are optional by default.
+- Boolean flags (`boolean: true`) take no value, are always optional, and expand to the flag string
+  itself in the command (e.g. `${DRAFT:+"--draft"}`).
+- Short flag aliases (`short: -r`) are supported and rendered in usage and case statements.
+- Flag injection prevention: positional args are checked against `== -*` before pattern validation.
+- Template placeholder syntax uses `{{param}}` (double braces) to avoid YAML flow mapping conflicts
+  with single-brace `{param}` syntax.
+- Script guards allow inline bash snippets as pre-flight checks, enabling inverted logic (e.g.
+  `! git diff --cached --quiet` to fail when nothing is staged). Both command and script guards use
+  `check || { echo 'error: ...'; exit 1; }` pattern.
+- Manifests are stored without prefix; a `--prefix` option (default `nerf-`) is applied at build
+  time to all tool names, script filenames, and skill group names.
+- `--all` variants for terragrunt require separate tools because they restructure the command
+  (`terragrunt X` vs `terragrunt run --all X`).
+- Nx tools use `npx` as a hardcoded runner; `find_pkg_runner` dynamic selection cannot be modeled.
+
+- [x] Replace `ParamSpec` with `FlagSpec` and `ArgSpec` in `manifest.py`
+  - `FlagSpec`: required by default, auto-derived flag name from key (`--flag-name`), `short` for
+    single-char aliases, `boolean` for value-less flags
+  - `ArgSpec`: optional by default, `variadic` to collect `"$@"` into array
+  - `GuardSpec`: pre-flight check with `command` or `script` (mutually exclusive); fires (exit 1)
+    on non-zero exit; `{{param}}` placeholders substituted in both forms
+- [x] Update `builder.py` for new dataclasses and features
+  - Boolean flags use `shift 1` and expand as `${VAR:+"--flag-string"}`
+  - Short flags included in `case "$1" in` pattern: `--remote|-r)`
+  - Flag injection prevention: `[[ "${VAR}" == -* ]]` check on all positional args and variadics
+  - Script guards: single-line wrapped in `( ... )`, multi-line in indented subshell block
+  - `prefix` parameter (default `"nerf-"`) prepended to all generated script filenames and names
+- [x] Update `skill.py` for new dataclasses and prefix support
+  - Boolean flags shown as `[--flag]` in usage line
+  - Boolean flags labeled `(boolean)` in arguments section
+  - `prefix` parameter applied to skill group directory, frontmatter name, H1, and all tool names
+- [x] Update `cli.py` with `--prefix` option on `build` and `skill` commands (default `nerf-`)
+- [x] Update all tests for new dataclass structure, `{{param}}` syntax, and prefix behavior
+- [x] Write `nerftools/manifests/git/manifest.yaml` (merged nerf-git + gwat-git, no prefix)
+  - 8 tools: git-add, git-commit, git-fetch, git-pull, git-push-main, git-push-branch, git-log,
+    git-tag
+  - Script guards: nothing-staged and co-authored-by on commit; not-on-main on push-branch;
+    tag-already-exists on tag
+- [x] Write `nerftools/manifests/az-pipelines/manifest.yaml`
+  - 3 tools: az-pipelines-list, az-pipelines-runs, az-pipelines-check
+- [x] Write `nerftools/manifests/az-wi/manifest.yaml`
+  - 4 tools: az-boards-wi-show, az-boards-wi-comment, az-boards-mywi-show, az-boards-mywi-comment
+  - Note: ownership verification (require_wi_owned_by_me) cannot be expressed as a guard
+- [x] Write `nerftools/manifests/az-repos/manifest.yaml`
+  - 3 tools: az-repos-pr-list, az-repos-pr-show, az-repos-pr-create
+  - pr-create: --draft boolean flag, guards for detached HEAD and not-on-main
+- [x] Write `nerftools/manifests/nx/manifest.yaml`
+  - 6 tools: nx-show-projects, nx-show-project, nx-run, nx-affected, nx-graph, nx-reset
+  - All tools guard with `test -f nx.json` (Nx workspace root check)
+- [x] Write `nerftools/manifests/tg/manifest.yaml`
+  - 10 tools: paired with/without --all variants for validate, init, plan, output, fmt
+  - init and init-all: --upgrade boolean flag (flag: -upgrade)
+  - fmt and fmt-all: --check boolean flag
+- [x] Write `nerftools/manifests/pkgrun/manifest.yaml`
+  - 3 tools: pkgrun-cspell v8.19.4, pkgrun-markdownlint v0.21.0, pkgrun-prettier v3.8.1

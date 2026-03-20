@@ -85,7 +85,7 @@ def test_tool_with_flag(tmp_path: Path) -> None:
         tools={
             "my-tool": {
                 "description": "Tool with flag",
-                "command": ["git", "push", "{remote}", "HEAD"],
+                "command": ["git", "push", "{{remote}}", "HEAD"],
                 "flags": {
                     "remote": {
                         "description": "Remote name",
@@ -111,7 +111,7 @@ def test_flag_auto_derived_name(tmp_path: Path) -> None:
         tools={
             "my-tool": {
                 "description": "Tool",
-                "command": ["git", "push", "{my_remote}"],
+                "command": ["git", "push", "{{my_remote}}"],
                 "flags": {
                     "my_remote": {"description": "Remote"},
                 },
@@ -128,7 +128,7 @@ def test_flag_explicit_name(tmp_path: Path) -> None:
         tools={
             "my-tool": {
                 "description": "Tool",
-                "command": ["git", "push", "{remote}"],
+                "command": ["git", "push", "{{remote}}"],
                 "flags": {
                     "remote": {"flag": "-r", "description": "Remote"},
                 },
@@ -145,7 +145,7 @@ def test_flag_with_short(tmp_path: Path) -> None:
         tools={
             "my-tool": {
                 "description": "Tool",
-                "command": ["git", "push", "{remote}"],
+                "command": ["git", "push", "{{remote}}"],
                 "flags": {
                     "remote": {"description": "Remote", "short": "-r"},
                 },
@@ -162,7 +162,7 @@ def test_invalid_short_flag_raises(tmp_path: Path) -> None:
         tools={
             "my-tool": {
                 "description": "Tool",
-                "command": ["git", "push", "{remote}"],
+                "command": ["git", "push", "{{remote}}"],
                 "flags": {
                     "remote": {"description": "Remote", "short": "--r"},
                 },
@@ -174,12 +174,32 @@ def test_invalid_short_flag_raises(tmp_path: Path) -> None:
         load_manifest(p)
 
 
+def test_boolean_flag(tmp_path: Path) -> None:
+    raw = _minimal_manifest(
+        tools={
+            "my-tool": {
+                "description": "Tool",
+                "command": ["gh", "pr", "create", "{{draft}}"],
+                "flags": {
+                    "draft": {"description": "Create as draft", "boolean": True},
+                },
+            },
+        }
+    )
+    p = _write_manifest(tmp_path, raw)
+    m = load_manifest(p)
+    flag = m.tools["my-tool"].flags["draft"]
+    assert flag.boolean is True
+    assert flag.optional is True  # boolean flags are always optional
+    assert flag.required is False
+
+
 def test_optional_flag(tmp_path: Path) -> None:
     raw = _minimal_manifest(
         tools={
             "my-tool": {
                 "description": "Tool",
-                "command": ["git", "fetch", "{remote}"],
+                "command": ["git", "fetch", "{{remote}}"],
                 "flags": {
                     "remote": {"description": "Remote", "optional": True},
                 },
@@ -198,7 +218,7 @@ def test_tool_with_positional_arg(tmp_path: Path) -> None:
         tools={
             "my-tool": {
                 "description": "Tool with positional",
-                "command": ["git", "fetch", "{remote}"],
+                "command": ["git", "fetch", "{{remote}}"],
                 "args": {
                     "remote": {
                         "description": "Remote name",
@@ -220,7 +240,7 @@ def test_variadic_arg(tmp_path: Path) -> None:
         tools={
             "my-tool": {
                 "description": "Tool with variadic",
-                "command": ["git", "add", "{files}"],
+                "command": ["git", "add", "{{files}}"],
                 "args": {
                     "files": {
                         "description": "Files to add",
@@ -257,13 +277,13 @@ def test_tool_with_guard(tmp_path: Path) -> None:
         tools={
             "my-tool": {
                 "description": "Tool with guard",
-                "command": ["git", "push", "{remote}", "HEAD"],
+                "command": ["git", "push", "{{remote}}", "HEAD"],
                 "flags": {
                     "remote": {"description": "Remote"},
                 },
                 "guards": [
                     {
-                        "command": ["git", "remote", "get-url", "{remote}"],
+                        "command": ["git", "remote", "get-url", "{{remote}}"],
                         "fail_message": "Remote does not exist",
                     }
                 ],
@@ -274,7 +294,7 @@ def test_tool_with_guard(tmp_path: Path) -> None:
     m = load_manifest(p)
     tool = m.tools["my-tool"]
     assert len(tool.guards) == 1
-    assert tool.guards[0].command == ("git", "remote", "get-url", "{remote}")
+    assert tool.guards[0].command == ("git", "remote", "get-url", "{{remote}}")
     assert tool.guards[0].fail_message == "Remote does not exist"
 
 
@@ -286,7 +306,7 @@ def test_flag_and_arg_name_collision(tmp_path: Path) -> None:
         tools={
             "my-tool": {
                 "description": "Bad tool",
-                "command": ["echo", "{x}"],
+                "command": ["echo", "{{x}}"],
                 "flags": {"x": {"description": "x"}},
                 "args": {"x": {"description": "x"}},
             },
@@ -302,7 +322,7 @@ def test_allow_and_deny_conflict_in_flag(tmp_path: Path) -> None:
         tools={
             "my-tool": {
                 "description": "Bad tool",
-                "command": ["echo", "{x}"],
+                "command": ["echo", "{{x}}"],
                 "flags": {"x": {"description": "x", "allow": ["a"], "deny": ["b"]}},
             },
         }
@@ -317,7 +337,7 @@ def test_allow_and_deny_conflict_in_arg(tmp_path: Path) -> None:
         tools={
             "my-tool": {
                 "description": "Bad tool",
-                "command": ["echo", "{x}"],
+                "command": ["echo", "{{x}}"],
                 "args": {"x": {"description": "x", "allow": ["a"], "deny": ["b"]}},
             },
         }
@@ -332,7 +352,7 @@ def test_invalid_pattern_in_flag_raises(tmp_path: Path) -> None:
         tools={
             "my-tool": {
                 "description": "Bad tool",
-                "command": ["echo", "{x}"],
+                "command": ["echo", "{{x}}"],
                 "flags": {"x": {"description": "x", "pattern": "[invalid"}},
             },
         }
@@ -347,7 +367,7 @@ def test_invalid_pattern_in_arg_raises(tmp_path: Path) -> None:
         tools={
             "my-tool": {
                 "description": "Bad tool",
-                "command": ["echo", "{x}"],
+                "command": ["echo", "{{x}}"],
                 "args": {"x": {"description": "x", "pattern": "[invalid"}},
             },
         }
@@ -362,7 +382,7 @@ def test_undefined_placeholder_raises(tmp_path: Path) -> None:
         tools={
             "my-tool": {
                 "description": "Bad tool",
-                "command": ["echo", "{x}"],
+                "command": ["echo", "{{x}}"],
             },
         }
     )
@@ -412,7 +432,7 @@ def test_variadic_not_last_raises(tmp_path: Path) -> None:
         "tools:\n"
         "  my-tool:\n"
         "    description: Bad tool\n"
-        "    command: [echo, '{files}', '{extra}']\n"
+        "    command: [echo, '{{files}}', '{{extra}}']\n"
         "    args:\n"
         "      files:\n"
         "        description: Files\n"
@@ -429,9 +449,9 @@ def test_guard_undefined_placeholder_raises(tmp_path: Path) -> None:
         tools={
             "my-tool": {
                 "description": "Bad tool",
-                "command": ["echo", "{x}"],
+                "command": ["echo", "{{x}}"],
                 "flags": {"x": {"description": "x"}},
-                "guards": [{"command": ["check", "{y}"], "fail_message": "fail"}],
+                "guards": [{"command": ["check", "{{y}}"], "fail_message": "fail"}],
             },
         }
     )
@@ -499,14 +519,16 @@ def test_merge_different_packages(tmp_path: Path) -> None:
 # -- Built-in manifest ---------------------------------------------------------
 
 
-def test_builtin_nerf_git_loads() -> None:
+def test_builtin_git_loads() -> None:
     from nerftools.cli import _BUILTIN_MANIFESTS_DIR
 
-    manifest_path = _BUILTIN_MANIFESTS_DIR / "nerf-git" / "manifest.yaml"
+    manifest_path = _BUILTIN_MANIFESTS_DIR / "git" / "manifest.yaml"
     assert manifest_path.exists(), f"Built-in manifest not found: {manifest_path}"
     m = load_manifest(manifest_path)
-    assert m.package.name == "nerf-git"
-    assert "nerf-git-push-origin" in m.tools
-    assert "nerf-git-push-remote" in m.tools
-    assert "nerf-git-fetch" in m.tools
-    assert "nerf-git-log" in m.tools
+    assert m.package.name == "git"
+    assert "git-add" in m.tools
+    assert "git-commit" in m.tools
+    assert "git-fetch" in m.tools
+    assert "git-push-main" in m.tools
+    assert "git-push-branch" in m.tools
+    assert "git-tag" in m.tools

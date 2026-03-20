@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 
     from nerftools.manifest import ArgSpec, FlagSpec, NerfManifest, ToolSpec
 
-_PLACEHOLDER_RE = re.compile(r"\{(\w+)\}")
+_PLACEHOLDER_RE = re.compile(r"\{\{(\w+)\}\}")
 
 
 # -- Public API ----------------------------------------------------------------
@@ -26,11 +26,15 @@ def build_scripts(
     output_dir: Path,
     *,
     keep_existing: bool = False,
+    prefix: str = "nerf-",
 ) -> list[Path]:
     """Generate shell scripts for all tools in all manifests.
 
     By default, all files in output_dir are removed before writing so stale
     tools do not linger. Pass keep_existing=True to preserve unmanaged files.
+
+    The prefix is prepended to every generated script filename and tool name
+    within the script (usage, header comment). Defaults to "nerf-".
 
     Returns the list of files written.
     """
@@ -45,8 +49,9 @@ def build_scripts(
 
     for manifest in manifests:
         for tool_name, tool_spec in manifest.tools.items():
-            script = _build_script(tool_name, manifest.package.name, tool_spec)
-            out = output_dir / tool_name
+            full_name = prefix + tool_name
+            script = _build_script(full_name, manifest.package.name, tool_spec)
+            out = output_dir / full_name
             out.write_bytes(script.encode("utf-8"))
             out.chmod(0o755)
             written.append(out)
@@ -115,8 +120,11 @@ def _usage_function(tool_name: str, tool_spec: ToolSpec) -> str:
     usage_parts = [tool_name]
     for name, p in tool_spec.flags.items():
         flag_display = f"{p.flag}|{p.short}" if p.short else p.flag
-        flag_str = f"{flag_display} <{name}>"
-        usage_parts.append(flag_str if p.required else f"[{flag_str}]")
+        if p.boolean:
+            usage_parts.append(f"[{flag_display}]")
+        else:
+            flag_str = f"{flag_display} <{name}>"
+            usage_parts.append(flag_str if p.required else f"[{flag_str}]")
     for name, spec in tool_spec.args.items():
         token = f"<{name}...>" if spec.variadic else f"<{name}>"
         usage_parts.append(token if spec.required else f"[{token}]")
@@ -128,7 +136,10 @@ def _usage_function(tool_name: str, tool_spec: ToolSpec) -> str:
         for name, p in tool_spec.flags.items():
             required_marker = " (required)" if p.required else ""
             flag_display = f"{p.flag}|{p.short}" if p.short else p.flag
-            lines.append(f"  {flag_display} <{name}>{required_marker}")
+            if p.boolean:
+                lines.append(f"  {flag_display}")
+            else:
+                lines.append(f"  {flag_display} <{name}>{required_marker}")
             lines.append(f"      {p.description}")
             _append_constraints(lines, p.pattern, p.allow, p.deny, indent="      ")
         lines.append("")
@@ -176,7 +187,10 @@ def _flag_parser(flags: dict[str, FlagSpec], *, has_positional: bool) -> str:
     for name, p in flags.items():
         var = _var_name(name)
         pattern = f"{p.flag}|{p.short}" if p.short else p.flag
-        cases.append(f'    {pattern}) {var}="$2"; shift 2 ;;')
+        if p.boolean:
+            cases.append(f'    {pattern}) {var}="true"; shift 1 ;;')
+        else:
+            cases.append(f'    {pattern}) {var}="$2"; shift 2 ;;')
     cases.append("    -h|--help) usage ;;")
     if has_positional:
         cases.append("    *) break ;;")
@@ -326,12 +340,13 @@ def _substitute_command(
     flags: dict[str, FlagSpec],
     args: dict[str, ArgSpec],
 ) -> list[str]:
-    """Substitute {param} placeholders in a command array.
+    """Substitute {{param}} placeholders in a command word list.
 
     Required flags/args use "$VAR" (always present).
     Optional flags/single-args use ${VAR:+"$VAR"} (omitted when empty).
     Required variadic args use "${VAR[@]}".
     Optional variadic args use ${VAR[@]+"${VAR[@]}"}.
+    Boolean flags use ${VAR:+"--flag"}.
     """
     result: list[str] = []
     for part in command:
@@ -341,7 +356,9 @@ def _substitute_command(
             var = _var_name(name)
             if name in flags:
                 p = flags[name]
-                if p.required:
+                if p.boolean:
+                    result.append("${" + var + ':+"' + p.flag + '"' + "}")
+                elif p.required:
                     result.append(f'"${{{var}}}"')
                 else:
                     result.append("${" + var + ':+"$' + var + '"}')
@@ -364,22 +381,58 @@ def _substitute_command(
     return result
 
 
+def _substitute_script(
+    script: str,
+    flags: dict[str, FlagSpec],
+    args: dict[str, ArgSpec],
+) -> str:
+    """Substitute {{param}} placeholders inline within a bash script string.
+
+    Each {{name}} becomes ${VAR} without extra quoting -- the script author
+    is responsible for quoting around the placeholder as needed.
+    """
+
+    def replace(m: re.Match) -> str:  # type: ignore[type-arg]
+        name = m.group(1)
+        return "${" + _var_name(name) + "}"
+
+    return _PLACEHOLDER_RE.sub(replace, script)
+
+
 def _exec_line(tool_spec: ToolSpec) -> str:
     args = _substitute_command(tool_spec.command, tool_spec.flags, tool_spec.args)
     return "exec " + " ".join(args)
 
 
 def _guard_checks(tool_spec: ToolSpec) -> str:
-    """Generate pre-flight guard checks that run before exec."""
+    """Generate pre-flight guard checks that run before exec.
+
+    Both command and script guards use the same pattern:
+      <check> || { echo 'error: <message>' >&2; exit 1; }
+
+    Command guards suppress output. Script guards run as-is (the script is
+    responsible for its own redirection if silence is desired).
+    Multi-line scripts are wrapped in a subshell.
+    """
     lines: list[str] = []
     for guard in tool_spec.guards:
-        cmd_args = _substitute_command(guard.command, tool_spec.flags, tool_spec.args)
-        cmd_str = " ".join(cmd_args)
         safe_msg = guard.fail_message.replace("'", "'\"'\"'")
-        lines.append(f"if ! {cmd_str} > /dev/null 2>&1; then")
-        lines.append(f"  echo 'error: {safe_msg}' >&2")
-        lines.append("  exit 1")
-        lines.append("fi")
+
+        if guard.command is not None:
+            cmd_args = _substitute_command(guard.command, tool_spec.flags, tool_spec.args)
+            check = " ".join(cmd_args) + " > /dev/null 2>&1"
+            lines.append(f"{check} || {{ echo 'error: {safe_msg}' >&2; exit 1; }}")
+        else:
+            script_text = _substitute_script(guard.script or "", tool_spec.flags, tool_spec.args)
+            script_lines = script_text.strip().splitlines()
+            if len(script_lines) == 1:
+                lines.append(f"( {script_lines[0]} ) || {{ echo 'error: {safe_msg}' >&2; exit 1; }}")
+            else:
+                lines.append("(")
+                for sl in script_lines:
+                    lines.append(f"  {sl}")
+                lines.append(f") || {{ echo 'error: {safe_msg}' >&2; exit 1; }}")
+
     return "\n".join(lines)
 
 

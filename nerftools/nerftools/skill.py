@@ -21,13 +21,17 @@ def build_skills(
     output_dir: Path,
     *,
     keep_existing: bool = False,
+    prefix: str = "nerf-",
 ) -> list[Path]:
     """Generate rulesync skill files for all manifests.
 
-    Each package gets a <skill_group>/SKILL.md directory+file.
+    Each package gets a <prefix><skill_group>/SKILL.md directory+file.
 
     By default, all subdirectories in output_dir are removed before writing so
     stale skill groups do not linger. Pass keep_existing=True to preserve them.
+
+    The prefix is prepended to the skill group directory name and all tool names
+    within the skill file. Defaults to "nerf-".
 
     Returns written paths.
     """
@@ -43,8 +47,8 @@ def build_skills(
     written: list[Path] = []
 
     for manifest in manifests:
-        text = build_skill_text(manifest)
-        skill_dir = output_dir / manifest.package.skill_group
+        text = build_skill_text(manifest, prefix=prefix)
+        skill_dir = output_dir / (prefix + manifest.package.skill_group)
         skill_dir.mkdir(exist_ok=True)
         out = skill_dir / "SKILL.md"
         out.write_text(text)
@@ -53,19 +57,25 @@ def build_skills(
     return written
 
 
-def build_skill_text(manifest: NerfManifest) -> str:
-    """Return the generated SKILL.md content for a manifest (for testing)."""
+def build_skill_text(manifest: NerfManifest, prefix: str = "") -> str:
+    """Return the generated SKILL.md content for a manifest (for testing).
+
+    The prefix is prepended to the skill group name and all tool names.
+    Pass prefix="" (default) to get unprefixed output, as used in tests.
+    """
     parts: list[str] = []
+
+    skill_group = prefix + manifest.package.skill_group
 
     # Rulesync frontmatter
     parts.append("---")
-    parts.append(f"name: {manifest.package.skill_group}")
+    parts.append(f"name: {skill_group}")
     parts.append(f'description: "{manifest.package.description}"')
     parts.append('targets: ["*"]')
     parts.append("---")
     parts.append("")
 
-    parts.append(f"# {manifest.package.skill_group}")
+    parts.append(f"# {skill_group}")
     parts.append("")
 
     if manifest.package.skill_intro:
@@ -73,7 +83,7 @@ def build_skill_text(manifest: NerfManifest) -> str:
         parts.append("")
 
     for tool_name, tool_spec in manifest.tools.items():
-        parts.append(_tool_section(tool_name, tool_spec))
+        parts.append(_tool_section(prefix + tool_name, tool_spec))
 
     return "\n".join(parts).rstrip() + "\n"
 
@@ -117,8 +127,11 @@ def _usage_line(tool_name: str, tool_spec: ToolSpec) -> str:
     parts = [tool_name]
     for name, p in tool_spec.flags.items():
         flag_display = f"{p.flag}|{p.short}" if p.short else p.flag
-        token = f"{flag_display} <{name}>"
-        parts.append(token if p.required else f"[{token}]")
+        if p.boolean:
+            parts.append(f"[{flag_display}]")
+        else:
+            token = f"{flag_display} <{name}>"
+            parts.append(token if p.required else f"[{token}]")
     for name, spec in tool_spec.args.items():
         token = f"<{name}...>" if spec.variadic else f"<{name}>"
         parts.append(token if spec.required else f"[{token}]")
@@ -126,9 +139,13 @@ def _usage_line(tool_name: str, tool_spec: ToolSpec) -> str:
 
 
 def _flag_line(name: str, p: FlagSpec) -> str:
-    required = "required" if p.required else "optional"
     flag_display = f"{p.flag}|{p.short}" if p.short else p.flag
     desc = p.description
+
+    if p.boolean:
+        return f"- `{flag_display}` (boolean): {desc}"
+
+    required = "required" if p.required else "optional"
 
     constraints: list[str] = []
     if p.pattern:

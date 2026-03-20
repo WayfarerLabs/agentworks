@@ -1,0 +1,103 @@
+package:
+  name: git
+  description: Git workflow tools for safe, scoped git operations
+  skill_group: git
+  skill_intro: |
+    These tools wrap git operations with safety guardrails. Always stage changes
+    with git-add before committing. Commit messages must follow the
+    Conventional Commits specification. All remote operations take the remote
+    name as the first positional argument (typically origin).
+
+tools:
+  git-add:
+    description: Stage files or directories for commit
+    command: [git, add, "{{files}}"]
+    args:
+      files:
+        description: Files or directories to stage
+        required: true
+        variadic: true
+
+  git-commit:
+    description: >-
+      Create a git commit with a Conventional Commits message (changes must already be staged).
+      Format: type[(scope)][!]: description.
+      Allowed types: feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert.
+      Must not contain Co-Authored-By trailers.
+    command: [git, commit, -m, "{{message}}"]
+    args:
+      message:
+        description: "Commit message: type[(scope)][!]: description"
+        required: true
+        pattern: "^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\\([a-zA-Z0-9._-]+\\))?!?: .+"
+    guards:
+      - script: "! git diff --cached --quiet"
+        fail_message: No staged changes. Use git-add to stage changes first.
+      - script: |
+          ! echo "{{message}}" | grep -qi 'co-authored-by:'
+        fail_message: Commit message must not contain Co-Authored-By trailers.
+
+  git-fetch:
+    description: Fetch all branches and tags from a remote
+    command: [git, fetch, "{{remote}}", --tags]
+    args:
+      remote:
+        description: Remote name (e.g. origin)
+        required: true
+        pattern: "^[a-z0-9_-]+$"
+
+  git-pull:
+    description: Pull the current branch from a remote
+    command: [git, pull, "{{remote}}"]
+    args:
+      remote:
+        description: Remote name (e.g. origin)
+        required: true
+        pattern: "^[a-z0-9_-]+$"
+
+  git-push-main:
+    description: >-
+      Push the local main branch to a remote including annotated tags (no force push).
+      Use only when the local main branch is ready to publish.
+    command: [git, push, --follow-tags, "{{remote}}", main]
+    args:
+      remote:
+        description: Remote name (e.g. origin)
+        required: true
+        pattern: "^[a-z0-9_-]+$"
+
+  git-push-branch:
+    description: >-
+      Push the current branch to a remote including annotated tags (no force push).
+      Fails if in detached HEAD state or on main. Do not use on main -- use git-push-main instead.
+    command: [git, push, --follow-tags, "{{remote}}", HEAD]
+    args:
+      remote:
+        description: Remote name (e.g. origin)
+        required: true
+        pattern: "^[a-z0-9_-]+$"
+    guards:
+      - command: [git, symbolic-ref, --quiet, HEAD]
+        fail_message: Cannot push from detached HEAD state. Check out a branch first.
+      - script: |
+          [ "$(git symbolic-ref --short HEAD 2>/dev/null)" != "main" ]
+        fail_message: Current branch is main. Use git-push-main to push the main branch.
+
+  git-log:
+    description: Show a short one-line log of recent commits
+    command: [git, log, --oneline, --no-decorate, -20]
+
+  git-tag:
+    description: >-
+      Create a new annotated git tag at HEAD. Fails if the tag already exists.
+      No force, delete, or other destructive operations.
+    command: [git, tag, -a, "{{tag}}", -m, "{{tag}}"]
+    args:
+      tag:
+        description: Tag name to create (e.g. v1.2.3)
+        required: true
+        pattern: "^[a-zA-Z0-9._/-]+$"
+    guards:
+      - script: |
+          ! git rev-parse "refs/tags/{{tag}}" > /dev/null 2>&1
+        fail_message: Tag already exists. Use a different version.

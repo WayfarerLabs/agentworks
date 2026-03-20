@@ -37,11 +37,15 @@ class FlagSpec:
     The flag string is auto-derived from the param name if not set explicitly
     (e.g. name 'remote' -> '--remote'). Flags are required by default; set
     optional=True to make them optional.
+
+    Boolean flags (boolean=True) take no value -- they are either present or
+    absent (e.g. --draft, --check). Boolean flags are always optional.
     """
 
     flag: str
     description: str
     optional: bool = False
+    boolean: bool = False
     short: str | None = None
     pattern: str | None = None
     allow: tuple[str, ...] = field(default_factory=tuple)
@@ -74,12 +78,20 @@ class ArgSpec:
 class GuardSpec:
     """A pre-flight check run before the main command.
 
-    The guard command is run with the same param substitution as the main
-    command. If it exits non-zero, the script prints fail_message and exits.
+    Exactly one of command or script must be set:
+      - command: a list of args run as a subprocess (output suppressed).
+      - script: an inline bash snippet (single or multi-line).
+
+    The check passes when it exits zero. Exits non-zero causes the wrapper
+    script to print fail_message and exit 1.
+
+    {{param}} placeholders in command parts and script text are substituted
+    with the tool's flag/arg values, the same as in the main command.
     """
 
-    command: tuple[str, ...]
     fail_message: str
+    command: tuple[str, ...] | None = None
+    script: str | None = None
 
 
 @dataclass(frozen=True)
@@ -101,7 +113,7 @@ class NerfManifest:
 
 # -- Loading -------------------------------------------------------------------
 
-_PLACEHOLDER_RE = re.compile(r"\{(\w+)\}")
+_PLACEHOLDER_RE = re.compile(r"\{\{(\w+)\}\}")
 
 
 def load_manifest(path: Path) -> NerfManifest:
@@ -204,7 +216,9 @@ def _load_flag(raw: Any, path: Path, tool_name: str, flag_name: str) -> FlagSpec
     # Auto-derive --flag-name from the dict key if not specified explicitly
     flag = str(raw["flag"]) if "flag" in raw else f"--{flag_name.replace('_', '-')}"
     description = _require_str(raw, "description", ctx)
-    optional = bool(raw.get("optional", False))
+    boolean = bool(raw.get("boolean", False))
+    # Boolean flags are always optional (they are either present or absent)
+    optional = True if boolean else bool(raw.get("optional", False))
     short = str(raw["short"]) if "short" in raw else None
     pattern = str(raw["pattern"]) if "pattern" in raw else None
     allow = tuple(str(v) for v in raw.get("allow", []))
@@ -224,6 +238,7 @@ def _load_flag(raw: Any, path: Path, tool_name: str, flag_name: str) -> FlagSpec
         flag=flag,
         description=description,
         optional=optional,
+        boolean=boolean,
         short=short,
         pattern=pattern,
         allow=allow,
@@ -265,11 +280,26 @@ def _load_guard(raw: Any, path: Path, tool_name: str, index: int) -> GuardSpec:
     ctx = f"{path}:tools.{tool_name}.guards[{index}]"
     if not isinstance(raw, dict):
         raise ManifestError(f"{ctx}: must be a mapping")
-    command_raw = raw.get("command")
-    if not isinstance(command_raw, list) or not command_raw:
-        raise ManifestError(f"{ctx}: 'command' must be a non-empty list")
+
     fail_message = _require_str(raw, "fail_message", ctx)
-    return GuardSpec(command=tuple(str(c) for c in command_raw), fail_message=fail_message)
+    has_command = "command" in raw
+    has_script = "script" in raw
+
+    if has_command and has_script:
+        raise ManifestError(f"{ctx}: 'command' and 'script' cannot both be set")
+    if not has_command and not has_script:
+        raise ManifestError(f"{ctx}: one of 'command' or 'script' is required")
+
+    if has_command:
+        command_raw = raw["command"]
+        if not isinstance(command_raw, list) or not command_raw:
+            raise ManifestError(f"{ctx}: 'command' must be a non-empty list")
+        return GuardSpec(fail_message=fail_message, command=tuple(str(c) for c in command_raw))
+
+    script = str(raw["script"]).strip()
+    if not script:
+        raise ManifestError(f"{ctx}: 'script' must not be empty")
+    return GuardSpec(fail_message=fail_message, script=script)
 
 
 def _validate_tool(
@@ -288,7 +318,7 @@ def _validate_tool(
 
     all_params = set(flags.keys()) | set(args.keys())
 
-    # All {param} in command must be defined
+    # All {{param}} in command must be defined
     referenced: set[str] = set()
     for part in command:
         for match in _PLACEHOLDER_RE.finditer(part):
@@ -297,12 +327,13 @@ def _validate_tool(
     for name in referenced:
         if name not in all_params:
             raise ManifestError(
-                f"{ctx}: command references '{{{name}}}' but '{name}' is not defined in flags or args"
+                f"{ctx}: command references '{{{{name}}}}' but '{name}' is not defined in flags or args"
             )
 
     # All flags and args must be referenced in command
     for name in all_params:
-        if not any(f"{{{name}}}" in part for part in command):
+        placeholder = "{{" + name + "}}"
+        if not any(placeholder in part for part in command):
             raise ManifestError(f"{ctx}: '{name}' is defined but not referenced in command")
 
     # Variadic arg must be last
@@ -311,14 +342,15 @@ def _validate_tool(
         if args[name].variadic:
             raise ManifestError(f"{ctx}: arg '{name}' is variadic but is not the last arg")
 
-    # Guard command placeholders must reference defined params
+    # Guard placeholders must reference defined params
     for i, guard in enumerate(guards):
-        for part in guard.command:
+        parts: list[str] = list(guard.command) if guard.command else [guard.script or ""]
+        for part in parts:
             for match in _PLACEHOLDER_RE.finditer(part):
                 name = match.group(1)
                 if name not in all_params:
                     raise ManifestError(
-                        f"{ctx}: guards[{i}] references '{{{name}}}' but '{name}' is not defined in flags or args"
+                        f"{ctx}: guards[{i}] references '{{{{name}}}}' but '{name}' is not defined in flags or args"
                     )
 
 
