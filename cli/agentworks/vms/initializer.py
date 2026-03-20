@@ -842,8 +842,6 @@ def _install_nerf_tools(
     logger.step("Nerf tools")
     typer.echo("  Building nerf tools...")
 
-    assert ts_target.ssh is not None
-
     bin_dir = config.vm.nerf_bin_dir
     skills_dir = config.vm.nerf_skills_dir
     keep = config.vm.nerf_keep_existing
@@ -886,17 +884,38 @@ def _install_nerf_tools(
             build_scripts(manifests, bin_out, keep_existing=keep)
             build_skills(manifests, skills_out, keep_existing=keep)
 
-            # Create remote dirs (root-owned parent, then accessible subdirs)
+            # Create/clear remote dirs as root, then chown to the current SSH user
+            # so copy_dir_to can write without sudo. $(id -un) expands on the remote
+            # shell before sudo runs, giving the SSH user's name.
+            if not keep:
+                _run_logged(
+                    ts_target,
+                    f"rm -rf {shlex.quote(bin_dir)} && mkdir -p {shlex.quote(bin_dir)}",
+                    logger,
+                    as_root=True,
+                )
+                _run_logged(
+                    ts_target,
+                    f"rm -rf {shlex.quote(skills_dir)} && mkdir -p {shlex.quote(skills_dir)}",
+                    logger,
+                    as_root=True,
+                )
+            else:
+                _run_logged(
+                    ts_target,
+                    f"mkdir -p {shlex.quote(bin_dir)} {shlex.quote(skills_dir)}",
+                    logger,
+                    as_root=True,
+                )
             _run_logged(
                 ts_target,
-                f"sudo mkdir -p {shlex.quote(bin_dir)} {shlex.quote(skills_dir)}",
+                f"sudo chown $(id -un):$(id -un) {shlex.quote(bin_dir)} {shlex.quote(skills_dir)}",
                 logger,
-                as_root=True,
             )
 
-            # Copy artifacts to VM; delete=True by default so stale tools don't linger
-            ts_target.copy_dir_to(bin_out, bin_dir, delete=not keep, timeout=60)
-            ts_target.copy_dir_to(skills_out, skills_dir, delete=not keep, timeout=60)
+            # Copy artifacts (dirs already cleared above; delete=False to avoid re-rm)
+            ts_target.copy_dir_to(bin_out, bin_dir, delete=False, timeout=60)
+            ts_target.copy_dir_to(skills_out, skills_dir, delete=False, timeout=60)
 
         typer.echo(f"  Nerf tools installed to {bin_dir}")
 
