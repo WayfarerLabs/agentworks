@@ -47,7 +47,7 @@ def build_scripts(
         for tool_name, tool_spec in manifest.tools.items():
             script = _build_script(tool_name, manifest.package.name, tool_spec)
             out = output_dir / tool_name
-            out.write_text(script)
+            out.write_bytes(script.encode("utf-8"))
             out.chmod(0o755)
             written.append(out)
 
