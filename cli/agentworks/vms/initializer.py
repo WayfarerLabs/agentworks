@@ -351,8 +351,6 @@ def _run_catalog_commands(
 
 def verify_tailscale_available() -> None:
     """Pre-flight: verify the local machine is on Tailscale."""
-    import subprocess
-
     try:
         result = subprocess.run(["tailscale", "status"], capture_output=True, text=True, timeout=10)
     except FileNotFoundError:
@@ -858,20 +856,35 @@ def _install_nerf_tools(
             bin_out.mkdir()
             skills_out.mkdir()
 
-            # Build scripts and skills locally
-            extra: list[str] = []
-            if config.vm.skip_nerf_defaults:
-                extra.append("--no-default")
-            for manifest in config.vm.nerf_addl_manifests:
-                extra.append(str(manifest))
+            # Build scripts and skills locally via Python API (no subprocess --
+            # avoids Windows PATH issues with .cmd script wrappers)
+            try:
+                from nerftools import BUILTIN_MANIFESTS_DIR  # type: ignore[import-not-found]
+                from nerftools.builder import build_scripts  # type: ignore[import-not-found]
+                from nerftools.manifest import (  # type: ignore[import-not-found]
+                    ManifestError,
+                    load_manifest,
+                    merge_manifests,
+                )
+                from nerftools.skill import build_skills  # type: ignore[import-not-found]
+            except ImportError as e:
+                raise RuntimeError(f"nerftools is not installed: {e}") from e
 
-            for subcmd, outdir in (("build", bin_out), ("skill", skills_out)):
-                cmd = ["nerf", subcmd, "--outdir", str(outdir), *extra]
-                result = subprocess.run(cmd, capture_output=True, text=True)
-                if result.returncode != 0:
-                    raise RuntimeError(
-                        f"nerf {subcmd} failed: {result.stderr.strip()}"
-                    )
+            manifest_paths: list[Path] = []
+            if not config.vm.skip_nerf_defaults and BUILTIN_MANIFESTS_DIR.exists():
+                for pkg_dir in sorted(BUILTIN_MANIFESTS_DIR.iterdir()):
+                    mf = pkg_dir / "manifest.yaml"
+                    if mf.exists():
+                        manifest_paths.append(mf)
+            manifest_paths.extend(config.vm.nerf_addl_manifests)
+
+            try:
+                manifests = merge_manifests([load_manifest(p) for p in manifest_paths])
+            except ManifestError as e:
+                raise RuntimeError(f"nerf manifest error: {e}") from e
+
+            build_scripts(manifests, bin_out, keep_existing=keep)
+            build_skills(manifests, skills_out, keep_existing=keep)
 
             # Create remote dirs (root-owned parent, then accessible subdirs)
             _run_logged(
