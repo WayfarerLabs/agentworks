@@ -80,17 +80,15 @@ def test_missing_required_package_field_raises(tmp_path: Path) -> None:
 # -- Tool loading --------------------------------------------------------------
 
 
-def test_tool_with_flag_param(tmp_path: Path) -> None:
+def test_tool_with_flag(tmp_path: Path) -> None:
     raw = _minimal_manifest(
         tools={
             "my-tool": {
                 "description": "Tool with flag",
                 "command": ["git", "push", "{remote}", "HEAD"],
-                "params": {
+                "flags": {
                     "remote": {
-                        "flag": "--remote",
                         "description": "Remote name",
-                        "required": True,
                         "pattern": "^[a-z]+$",
                         "deny": ["origin"],
                     },
@@ -101,22 +99,74 @@ def test_tool_with_flag_param(tmp_path: Path) -> None:
     p = _write_manifest(tmp_path, raw)
     m = load_manifest(p)
     tool = m.tools["my-tool"]
-    param = tool.params["remote"]
-    assert param.flag == "--remote"
-    assert param.required is True
-    assert param.pattern == "^[a-z]+$"
-    assert param.deny == ("origin",)
+    flag = tool.flags["remote"]
+    assert flag.flag == "--remote"
+    assert flag.required is True  # optional=False by default
+    assert flag.pattern == "^[a-z]+$"
+    assert flag.deny == ("origin",)
 
 
-def test_tool_with_positional_param(tmp_path: Path) -> None:
+def test_flag_auto_derived_name(tmp_path: Path) -> None:
+    raw = _minimal_manifest(
+        tools={
+            "my-tool": {
+                "description": "Tool",
+                "command": ["git", "push", "{my_remote}"],
+                "flags": {
+                    "my_remote": {"description": "Remote"},
+                },
+            },
+        }
+    )
+    p = _write_manifest(tmp_path, raw)
+    m = load_manifest(p)
+    assert m.tools["my-tool"].flags["my_remote"].flag == "--my-remote"
+
+
+def test_flag_explicit_name(tmp_path: Path) -> None:
+    raw = _minimal_manifest(
+        tools={
+            "my-tool": {
+                "description": "Tool",
+                "command": ["git", "push", "{remote}"],
+                "flags": {
+                    "remote": {"flag": "-r", "description": "Remote"},
+                },
+            },
+        }
+    )
+    p = _write_manifest(tmp_path, raw)
+    m = load_manifest(p)
+    assert m.tools["my-tool"].flags["remote"].flag == "-r"
+
+
+def test_optional_flag(tmp_path: Path) -> None:
+    raw = _minimal_manifest(
+        tools={
+            "my-tool": {
+                "description": "Tool",
+                "command": ["git", "fetch", "{remote}"],
+                "flags": {
+                    "remote": {"description": "Remote", "optional": True},
+                },
+            },
+        }
+    )
+    p = _write_manifest(tmp_path, raw)
+    m = load_manifest(p)
+    flag = m.tools["my-tool"].flags["remote"]
+    assert flag.optional is True
+    assert flag.required is False
+
+
+def test_tool_with_positional_arg(tmp_path: Path) -> None:
     raw = _minimal_manifest(
         tools={
             "my-tool": {
                 "description": "Tool with positional",
                 "command": ["git", "fetch", "{remote}"],
-                "params": {
+                "args": {
                     "remote": {
-                        "positional": True,
                         "description": "Remote name",
                         "required": True,
                     },
@@ -126,9 +176,31 @@ def test_tool_with_positional_param(tmp_path: Path) -> None:
     )
     p = _write_manifest(tmp_path, raw)
     m = load_manifest(p)
-    param = m.tools["my-tool"].params["remote"]
-    assert param.positional is True
-    assert param.flag is None
+    arg = m.tools["my-tool"].args["remote"]
+    assert arg.required is True
+    assert arg.variadic is False
+
+
+def test_variadic_arg(tmp_path: Path) -> None:
+    raw = _minimal_manifest(
+        tools={
+            "my-tool": {
+                "description": "Tool with variadic",
+                "command": ["git", "add", "{files}"],
+                "args": {
+                    "files": {
+                        "description": "Files to add",
+                        "variadic": True,
+                    },
+                },
+            },
+        }
+    )
+    p = _write_manifest(tmp_path, raw)
+    m = load_manifest(p)
+    arg = m.tools["my-tool"].args["files"]
+    assert arg.variadic is True
+    assert arg.required is False
 
 
 def test_tool_with_env(tmp_path: Path) -> None:
@@ -146,46 +218,58 @@ def test_tool_with_env(tmp_path: Path) -> None:
     assert m.tools["my-tool"].env == {"AZURE_CONFIG_DIR": "/home/user/.azure"}
 
 
-def test_tool_with_example(tmp_path: Path) -> None:
+def test_tool_with_guard(tmp_path: Path) -> None:
     raw = _minimal_manifest(
         tools={
             "my-tool": {
-                "description": "Tool with example",
-                "command": ["echo", "hi"],
-                "example": "my-tool --foo bar",
+                "description": "Tool with guard",
+                "command": ["git", "push", "{remote}", "HEAD"],
+                "flags": {
+                    "remote": {"description": "Remote"},
+                },
+                "guards": [
+                    {
+                        "command": ["git", "remote", "get-url", "{remote}"],
+                        "fail_message": "Remote does not exist",
+                    }
+                ],
             },
         }
     )
     p = _write_manifest(tmp_path, raw)
     m = load_manifest(p)
-    assert m.tools["my-tool"].example == "my-tool --foo bar"
+    tool = m.tools["my-tool"]
+    assert len(tool.guards) == 1
+    assert tool.guards[0].command == ("git", "remote", "get-url", "{remote}")
+    assert tool.guards[0].fail_message == "Remote does not exist"
 
 
 # -- Validation errors ---------------------------------------------------------
 
 
-def test_flag_and_positional_conflict(tmp_path: Path) -> None:
+def test_flag_and_arg_name_collision(tmp_path: Path) -> None:
     raw = _minimal_manifest(
         tools={
             "my-tool": {
                 "description": "Bad tool",
                 "command": ["echo", "{x}"],
-                "params": {"x": {"flag": "--x", "positional": True, "description": "x"}},
+                "flags": {"x": {"description": "x"}},
+                "args": {"x": {"description": "x"}},
             },
         }
     )
     p = _write_manifest(tmp_path, raw)
-    with pytest.raises(ManifestError, match="mutually exclusive"):
+    with pytest.raises(ManifestError, match="names defined in both flags and args"):
         load_manifest(p)
 
 
-def test_allow_and_deny_conflict(tmp_path: Path) -> None:
+def test_allow_and_deny_conflict_in_flag(tmp_path: Path) -> None:
     raw = _minimal_manifest(
         tools={
             "my-tool": {
                 "description": "Bad tool",
                 "command": ["echo", "{x}"],
-                "params": {"x": {"flag": "--x", "description": "x", "allow": ["a"], "deny": ["b"]}},
+                "flags": {"x": {"description": "x", "allow": ["a"], "deny": ["b"]}},
             },
         }
     )
@@ -194,28 +278,28 @@ def test_allow_and_deny_conflict(tmp_path: Path) -> None:
         load_manifest(p)
 
 
-def test_default_with_required_conflict(tmp_path: Path) -> None:
+def test_allow_and_deny_conflict_in_arg(tmp_path: Path) -> None:
     raw = _minimal_manifest(
         tools={
             "my-tool": {
                 "description": "Bad tool",
                 "command": ["echo", "{x}"],
-                "params": {"x": {"flag": "--x", "description": "x", "required": True, "default": "val"}},
+                "args": {"x": {"description": "x", "allow": ["a"], "deny": ["b"]}},
             },
         }
     )
     p = _write_manifest(tmp_path, raw)
-    with pytest.raises(ManifestError, match="'default' cannot be set when 'required' is true"):
+    with pytest.raises(ManifestError, match="cannot both be set"):
         load_manifest(p)
 
 
-def test_invalid_pattern_raises(tmp_path: Path) -> None:
+def test_invalid_pattern_in_flag_raises(tmp_path: Path) -> None:
     raw = _minimal_manifest(
         tools={
             "my-tool": {
                 "description": "Bad tool",
                 "command": ["echo", "{x}"],
-                "params": {"x": {"flag": "--x", "description": "x", "pattern": "[invalid"}},
+                "flags": {"x": {"description": "x", "pattern": "[invalid"}},
             },
         }
     )
@@ -224,28 +308,42 @@ def test_invalid_pattern_raises(tmp_path: Path) -> None:
         load_manifest(p)
 
 
-def test_unreferenced_placeholder_raises(tmp_path: Path) -> None:
+def test_invalid_pattern_in_arg_raises(tmp_path: Path) -> None:
     raw = _minimal_manifest(
         tools={
             "my-tool": {
                 "description": "Bad tool",
                 "command": ["echo", "{x}"],
-                "params": {},
+                "args": {"x": {"description": "x", "pattern": "[invalid"}},
             },
         }
     )
     p = _write_manifest(tmp_path, raw)
-    with pytest.raises(ManifestError, match="no param 'x' is defined"):
+    with pytest.raises(ManifestError, match="invalid 'pattern' regex"):
         load_manifest(p)
 
 
-def test_unused_param_raises(tmp_path: Path) -> None:
+def test_undefined_placeholder_raises(tmp_path: Path) -> None:
+    raw = _minimal_manifest(
+        tools={
+            "my-tool": {
+                "description": "Bad tool",
+                "command": ["echo", "{x}"],
+            },
+        }
+    )
+    p = _write_manifest(tmp_path, raw)
+    with pytest.raises(ManifestError, match="'x' is not defined in flags or args"):
+        load_manifest(p)
+
+
+def test_unused_flag_raises(tmp_path: Path) -> None:
     raw = _minimal_manifest(
         tools={
             "my-tool": {
                 "description": "Bad tool",
                 "command": ["echo", "hello"],
-                "params": {"x": {"flag": "--x", "description": "x"}},
+                "flags": {"x": {"description": "x"}},
             },
         }
     )
@@ -254,18 +352,57 @@ def test_unused_param_raises(tmp_path: Path) -> None:
         load_manifest(p)
 
 
-def test_neither_flag_nor_positional_raises(tmp_path: Path) -> None:
+def test_unused_arg_raises(tmp_path: Path) -> None:
+    raw = _minimal_manifest(
+        tools={
+            "my-tool": {
+                "description": "Bad tool",
+                "command": ["echo", "hello"],
+                "args": {"x": {"description": "x"}},
+            },
+        }
+    )
+    p = _write_manifest(tmp_path, raw)
+    with pytest.raises(ManifestError, match="not referenced in command"):
+        load_manifest(p)
+
+
+def test_variadic_not_last_raises(tmp_path: Path) -> None:
+    # Write YAML directly to control key ordering (yaml.dump sorts keys)
+    p = tmp_path / "manifest.yaml"
+    p.write_text(
+        "package:\n"
+        "  name: test-pkg\n"
+        "  description: Test package\n"
+        "  skill_group: test-pkg\n"
+        "tools:\n"
+        "  my-tool:\n"
+        "    description: Bad tool\n"
+        "    command: [echo, '{files}', '{extra}']\n"
+        "    args:\n"
+        "      files:\n"
+        "        description: Files\n"
+        "        variadic: true\n"
+        "      extra:\n"
+        "        description: Extra\n"
+    )
+    with pytest.raises(ManifestError, match="variadic but is not the last arg"):
+        load_manifest(p)
+
+
+def test_guard_undefined_placeholder_raises(tmp_path: Path) -> None:
     raw = _minimal_manifest(
         tools={
             "my-tool": {
                 "description": "Bad tool",
                 "command": ["echo", "{x}"],
-                "params": {"x": {"description": "x"}},
+                "flags": {"x": {"description": "x"}},
+                "guards": [{"command": ["check", "{y}"], "fail_message": "fail"}],
             },
         }
     )
     p = _write_manifest(tmp_path, raw)
-    with pytest.raises(ManifestError, match="one of 'flag' or 'positional' must be set"):
+    with pytest.raises(ManifestError, match="'y' is not defined in flags or args"):
         load_manifest(p)
 
 

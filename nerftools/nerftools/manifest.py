@@ -31,24 +31,64 @@ class PackageMeta:
 
 
 @dataclass(frozen=True)
-class ParamSpec:
+class FlagSpec:
+    """Specification for a named flag argument (e.g. --remote <value>).
+
+    The flag string is auto-derived from the param name if not set explicitly
+    (e.g. name 'remote' -> '--remote'). Flags are required by default; set
+    optional=True to make them optional.
+    """
+
+    flag: str
     description: str
-    flag: str | None = None
-    positional: bool = False
-    required: bool = False
+    optional: bool = False
     pattern: str | None = None
     allow: tuple[str, ...] = field(default_factory=tuple)
     deny: tuple[str, ...] = field(default_factory=tuple)
-    default: str | None = None
+
+    @property
+    def required(self) -> bool:
+        return not self.optional
+
+
+@dataclass(frozen=True)
+class ArgSpec:
+    """Specification for a positional argument.
+
+    Positional args are optional by default. Set required=True to require them.
+    Set variadic=True to collect all remaining arguments into a bash array;
+    variadic must be the last arg and is mutually exclusive with other args
+    that come after it.
+    """
+
+    description: str
+    required: bool = False
+    variadic: bool = False
+    pattern: str | None = None
+    allow: tuple[str, ...] = field(default_factory=tuple)
+    deny: tuple[str, ...] = field(default_factory=tuple)
+
+
+@dataclass(frozen=True)
+class GuardSpec:
+    """A pre-flight check run before the main command.
+
+    The guard command is run with the same param substitution as the main
+    command. If it exits non-zero, the script prints fail_message and exits.
+    """
+
+    command: tuple[str, ...]
+    fail_message: str
 
 
 @dataclass(frozen=True)
 class ToolSpec:
     description: str
     command: tuple[str, ...]
-    params: dict[str, ParamSpec] = field(default_factory=dict)
+    flags: dict[str, FlagSpec] = field(default_factory=dict)
+    args: dict[str, ArgSpec] = field(default_factory=dict)
     env: dict[str, str] = field(default_factory=dict)
-    example: str | None = None
+    guards: tuple[GuardSpec, ...] = field(default_factory=tuple)
 
 
 @dataclass(frozen=True)
@@ -123,82 +163,158 @@ def _load_tool(raw: dict[str, Any], path: Path, tool_name: str) -> ToolSpec:
         raise ManifestError(f"{ctx}: 'command' must be a non-empty list")
     command = tuple(str(c) for c in command_raw)
 
-    example = str(raw["example"]) if "example" in raw else None
-
     env_raw = raw.get("env", {})
     if not isinstance(env_raw, dict):
         raise ManifestError(f"{ctx}: 'env' must be a mapping")
     env = {str(k): str(v) for k, v in env_raw.items()}
 
-    params_raw = raw.get("params", {})
-    if not isinstance(params_raw, dict):
-        raise ManifestError(f"{ctx}: 'params' must be a mapping")
-    params = {k: _load_param(v, path, tool_name, k) for k, v in params_raw.items()}
+    flags_raw = raw.get("flags", {})
+    if not isinstance(flags_raw, dict):
+        raise ManifestError(f"{ctx}: 'flags' must be a mapping")
+    flags = {k: _load_flag(v, path, tool_name, k) for k, v in flags_raw.items()}
 
-    _validate_tool(command, params, ctx)
+    args_raw = raw.get("args", {})
+    if not isinstance(args_raw, dict):
+        raise ManifestError(f"{ctx}: 'args' must be a mapping")
+    args = {k: _load_arg(v, path, tool_name, k) for k, v in args_raw.items()}
+
+    guards_raw = raw.get("guards", [])
+    if not isinstance(guards_raw, list):
+        raise ManifestError(f"{ctx}: 'guards' must be a list")
+    guards = tuple(_load_guard(g, path, tool_name, i) for i, g in enumerate(guards_raw))
+
+    _validate_tool(command, guards, flags, args, ctx)
 
     return ToolSpec(
         description=description,
         command=command,
-        params=params,
+        flags=flags,
+        args=args,
         env=env,
-        example=example,
+        guards=guards,
     )
 
 
-def _load_param(raw: Any, path: Path, tool_name: str, param_name: str) -> ParamSpec:
-    ctx = f"{path}:tools.{tool_name}.params.{param_name}"
+def _load_flag(raw: Any, path: Path, tool_name: str, flag_name: str) -> FlagSpec:
+    ctx = f"{path}:tools.{tool_name}.flags.{flag_name}"
     if not isinstance(raw, dict):
         raise ManifestError(f"{ctx}: must be a mapping")
 
-    flag = str(raw["flag"]) if "flag" in raw else None
-    positional = bool(raw.get("positional", False))
+    # Auto-derive --flag-name from the dict key if not specified explicitly
+    flag = str(raw["flag"]) if "flag" in raw else f"--{flag_name.replace('_', '-')}"
     description = _require_str(raw, "description", ctx)
-    required = bool(raw.get("required", False))
+    optional = bool(raw.get("optional", False))
     pattern = str(raw["pattern"]) if "pattern" in raw else None
     allow = tuple(str(v) for v in raw.get("allow", []))
     deny = tuple(str(v) for v in raw.get("deny", []))
-    default = str(raw["default"]) if "default" in raw else None
 
-    if flag and positional:
-        raise ManifestError(f"{ctx}: 'flag' and 'positional' are mutually exclusive")
-    if not flag and not positional:
-        raise ManifestError(f"{ctx}: one of 'flag' or 'positional' must be set")
     if allow and deny:
         raise ManifestError(f"{ctx}: 'allow' and 'deny' cannot both be set")
-    if default is not None and required:
-        raise ManifestError(f"{ctx}: 'default' cannot be set when 'required' is true")
     if pattern is not None:
         try:
             re.compile(pattern)
         except re.error as e:
             raise ManifestError(f"{ctx}: invalid 'pattern' regex: {e}") from e
 
-    return ParamSpec(
+    return FlagSpec(
         flag=flag,
-        positional=positional,
         description=description,
-        required=required,
+        optional=optional,
         pattern=pattern,
         allow=allow,
         deny=deny,
-        default=default,
     )
 
 
-def _validate_tool(command: tuple[str, ...], params: dict[str, ParamSpec], ctx: str) -> None:
+def _load_arg(raw: Any, path: Path, tool_name: str, arg_name: str) -> ArgSpec:
+    ctx = f"{path}:tools.{tool_name}.args.{arg_name}"
+    if not isinstance(raw, dict):
+        raise ManifestError(f"{ctx}: must be a mapping")
+
+    description = _require_str(raw, "description", ctx)
+    required = bool(raw.get("required", False))
+    variadic = bool(raw.get("variadic", False))
+    pattern = str(raw["pattern"]) if "pattern" in raw else None
+    allow = tuple(str(v) for v in raw.get("allow", []))
+    deny = tuple(str(v) for v in raw.get("deny", []))
+
+    if allow and deny:
+        raise ManifestError(f"{ctx}: 'allow' and 'deny' cannot both be set")
+    if pattern is not None:
+        try:
+            re.compile(pattern)
+        except re.error as e:
+            raise ManifestError(f"{ctx}: invalid 'pattern' regex: {e}") from e
+
+    return ArgSpec(
+        description=description,
+        required=required,
+        variadic=variadic,
+        pattern=pattern,
+        allow=allow,
+        deny=deny,
+    )
+
+
+def _load_guard(raw: Any, path: Path, tool_name: str, index: int) -> GuardSpec:
+    ctx = f"{path}:tools.{tool_name}.guards[{index}]"
+    if not isinstance(raw, dict):
+        raise ManifestError(f"{ctx}: must be a mapping")
+    command_raw = raw.get("command")
+    if not isinstance(command_raw, list) or not command_raw:
+        raise ManifestError(f"{ctx}: 'command' must be a non-empty list")
+    fail_message = _require_str(raw, "fail_message", ctx)
+    return GuardSpec(command=tuple(str(c) for c in command_raw), fail_message=fail_message)
+
+
+def _validate_tool(
+    command: tuple[str, ...],
+    guards: tuple[GuardSpec, ...],
+    flags: dict[str, FlagSpec],
+    args: dict[str, ArgSpec],
+    ctx: str,
+) -> None:
+    # Check for name collision between flags and args
+    overlap = set(flags.keys()) & set(args.keys())
+    if overlap:
+        raise ManifestError(
+            f"{ctx}: names defined in both flags and args: {', '.join(sorted(overlap))}"
+        )
+
+    all_params = set(flags.keys()) | set(args.keys())
+
+    # All {param} in command must be defined
     referenced: set[str] = set()
     for part in command:
         for match in _PLACEHOLDER_RE.finditer(part):
             referenced.add(match.group(1))
 
     for name in referenced:
-        if name not in params:
-            raise ManifestError(f"{ctx}: command references '{{{{ {name} }}}}' but no param '{name}' is defined")
+        if name not in all_params:
+            raise ManifestError(
+                f"{ctx}: command references '{{{name}}}' but '{name}' is not defined in flags or args"
+            )
 
-    for name in params:
+    # All flags and args must be referenced in command
+    for name in all_params:
         if not any(f"{{{name}}}" in part for part in command):
-            raise ManifestError(f"{ctx}: param '{name}' is defined but not referenced in command")
+            raise ManifestError(f"{ctx}: '{name}' is defined but not referenced in command")
+
+    # Variadic arg must be last
+    arg_names = list(args.keys())
+    for name in arg_names[:-1]:
+        if args[name].variadic:
+            raise ManifestError(f"{ctx}: arg '{name}' is variadic but is not the last arg")
+
+    # Guard command placeholders must reference defined params
+    for i, guard in enumerate(guards):
+        for part in guard.command:
+            for match in _PLACEHOLDER_RE.finditer(part):
+                name = match.group(1)
+                if name not in all_params:
+                    raise ManifestError(
+                        f"{ctx}: guards[{i}] references '{{{name}}}' but '{name}' is not defined in flags or args"
+                    )
 
 
 # -- Merging -------------------------------------------------------------------

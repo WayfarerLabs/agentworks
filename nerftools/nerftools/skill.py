@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from nerftools.manifest import NerfManifest, ParamSpec, ToolSpec
+    from nerftools.manifest import ArgSpec, FlagSpec, NerfManifest, ToolSpec
 
 # -- Public API ----------------------------------------------------------------
 
@@ -93,24 +93,18 @@ def _tool_section(tool_name: str, tool_spec: ToolSpec) -> str:
     parts.append(f"**Usage:** `{usage}`")
     parts.append("")
 
-    flag_params = {n: p for n, p in tool_spec.params.items() if p.flag}
-    positional_params = {n: p for n, p in tool_spec.params.items() if p.positional}
+    has_params = bool(tool_spec.flags) or bool(tool_spec.args)
 
-    if flag_params or positional_params:
+    if has_params:
         parts.append("**Arguments:**")
         parts.append("")
-        for name, p in flag_params.items():
-            parts.append(_param_line(name, p))
-        for name, p in positional_params.items():
-            parts.append(_param_line(name, p))
+        for name, p in tool_spec.flags.items():
+            parts.append(_flag_line(name, p))
+        for name, spec in tool_spec.args.items():
+            parts.append(_arg_line(name, spec))
         parts.append("")
-
-    if not tool_spec.params:
+    else:
         parts.append("No arguments.")
-        parts.append("")
-
-    if tool_spec.example:
-        parts.append(f"**Example:** `{tool_spec.example}`")
         parts.append("")
 
     parts.append("---")
@@ -121,17 +115,16 @@ def _tool_section(tool_name: str, tool_spec: ToolSpec) -> str:
 
 def _usage_line(tool_name: str, tool_spec: ToolSpec) -> str:
     parts = [tool_name]
-    for name, p in tool_spec.params.items():
-        if p.flag:
-            token = f"{p.flag} <{name}>"
-            parts.append(token if p.required else f"[{token}]")
-        else:
-            parts.append(f"<{name}>" if p.required else f"[<{name}>]")
+    for name, p in tool_spec.flags.items():
+        token = f"{p.flag} <{name}>"
+        parts.append(token if p.required else f"[{token}]")
+    for name, spec in tool_spec.args.items():
+        token = f"<{name}...>" if spec.variadic else f"<{name}>"
+        parts.append(token if spec.required else f"[{token}]")
     return " ".join(parts)
 
 
-def _param_line(name: str, p: ParamSpec) -> str:
-    label = p.flag if p.flag else f"<{name}>"
+def _flag_line(name: str, p: FlagSpec) -> str:
     required = "required" if p.required else "optional"
     desc = p.description
 
@@ -144,8 +137,25 @@ def _param_line(name: str, p: ParamSpec) -> str:
     if p.deny:
         vals = ", ".join(f"`{v}`" for v in p.deny)
         constraints.append(f"not {vals}")
-    if p.default is not None:
-        constraints.append(f"default: `{p.default}`")
+
+    suffix = ". " + "; ".join(constraints) if constraints else ""
+    return f"- `{p.flag}` ({required}): {desc}{suffix}"
+
+
+def _arg_line(name: str, spec: ArgSpec) -> str:
+    required = "required" if spec.required else "optional"
+    label = f"<{name}...>" if spec.variadic else f"<{name}>"
+    desc = spec.description
+
+    constraints: list[str] = []
+    if spec.pattern:
+        constraints.append(f"must match `{spec.pattern}`")
+    if spec.allow:
+        vals = ", ".join(f"`{v}`" for v in spec.allow)
+        constraints.append(f"one of {vals}")
+    if spec.deny:
+        vals = ", ".join(f"`{v}`" for v in spec.deny)
+        constraints.append(f"not {vals}")
 
     suffix = ". " + "; ".join(constraints) if constraints else ""
     return f"- `{label}` ({required}): {desc}{suffix}"

@@ -6,14 +6,14 @@ from pathlib import Path
 
 import pytest
 
-from nerftools.manifest import NerfManifest, PackageMeta, ParamSpec, ToolSpec
+from nerftools.manifest import ArgSpec, FlagSpec, NerfManifest, PackageMeta, ToolSpec
 from nerftools.skill import build_skill_text, build_skills
 
 
 def _manifest(
     name: str = "test-pkg",
     skill_group: str = "test-pkg",
-    skill_intro: str | None = None,
+    skill_intro: str = "",
     tools: dict[str, ToolSpec] | None = None,
 ) -> NerfManifest:
     return NerfManifest(
@@ -29,17 +29,15 @@ def _manifest(
 
 def _tool(
     command: list[str],
-    params: dict[str, ParamSpec] | None = None,
-    env: dict[str, str] | None = None,
+    flags: dict[str, FlagSpec] | None = None,
+    args: dict[str, ArgSpec] | None = None,
     description: str = "A test tool",
-    example: str | None = None,
 ) -> ToolSpec:
     return ToolSpec(
         description=description,
         command=tuple(command),
-        params=params or {},
-        env=env or {},
-        example=example,
+        flags=flags or {},
+        args=args or {},
     )
 
 
@@ -47,19 +45,21 @@ def _flag(
     flag: str,
     description: str = "A param",
     *,
-    required: bool = False,
+    optional: bool = False,
     pattern: str | None = None,
     allow: tuple[str, ...] = (),
     deny: tuple[str, ...] = (),
-    default: str | None = None,
-) -> ParamSpec:
-    return ParamSpec(
-        flag=flag, description=description, required=required, pattern=pattern, allow=allow, deny=deny, default=default
-    )
+) -> FlagSpec:
+    return FlagSpec(flag=flag, description=description, optional=optional, pattern=pattern, allow=allow, deny=deny)
 
 
-def _positional(description: str = "A param", *, required: bool = False) -> ParamSpec:
-    return ParamSpec(positional=True, description=description, required=required)
+def _arg(
+    description: str = "A param",
+    *,
+    required: bool = False,
+    variadic: bool = False,
+) -> ArgSpec:
+    return ArgSpec(description=description, required=required, variadic=variadic)
 
 
 # -- Skill structure -----------------------------------------------------------
@@ -92,9 +92,8 @@ def test_skill_includes_intro() -> None:
 
 
 def test_skill_no_intro_section_when_absent() -> None:
-    m = _manifest(skill_intro=None, tools={"t": _tool(["echo"])})
+    m = _manifest(skill_intro="", tools={"t": _tool(["echo"])})
     skill = build_skill_text(m)
-    # Should have h1, then immediately tool h2
     lines = skill.splitlines()
     h1_idx = next(i for i, line in enumerate(lines) if line.startswith("# "))
     h2_idx = next(i for i, line in enumerate(lines) if line.startswith("## "))
@@ -135,84 +134,79 @@ def test_usage_line_simple_tool() -> None:
 
 
 def test_usage_line_required_flag() -> None:
-    m = _manifest(tools={"t": _tool(["echo", "{remote}"], {"remote": _flag("--remote", required=True)})})
+    m = _manifest(tools={"t": _tool(["echo", "{remote}"], flags={"remote": _flag("--remote")})})
     skill = build_skill_text(m)
     assert "--remote <remote>" in skill
 
 
 def test_usage_line_optional_flag_bracketed() -> None:
-    m = _manifest(tools={"t": _tool(["echo", "{branch}"], {"branch": _flag("--branch")})})
+    m = _manifest(tools={"t": _tool(["echo", "{branch}"], flags={"branch": _flag("--branch", optional=True)})})
     skill = build_skill_text(m)
     assert "[--branch <branch>]" in skill
 
 
 def test_usage_line_positional_required() -> None:
-    m = _manifest(tools={"t": _tool(["git", "fetch", "{remote}"], {"remote": _positional(required=True)})})
+    m = _manifest(tools={"t": _tool(["git", "fetch", "{remote}"], args={"remote": _arg(required=True)})})
     skill = build_skill_text(m)
     assert "<remote>" in skill
+
+
+def test_usage_line_variadic_arg() -> None:
+    m = _manifest(tools={"t": _tool(["git", "add", "{files}"], args={"files": _arg(variadic=True)})})
+    skill = build_skill_text(m)
+    assert "<files...>" in skill
 
 
 # -- Argument section ----------------------------------------------------------
 
 
-def test_flag_param_listed_in_arguments() -> None:
-    m = _manifest(tools={"t": _tool(["echo", "{x}"], {"x": _flag("--x", "The x value")})})
+def test_flag_listed_in_arguments() -> None:
+    m = _manifest(tools={"t": _tool(["echo", "{x}"], flags={"x": _flag("--x", "The x value")})})
     skill = build_skill_text(m)
     assert "**Arguments:**" in skill
     assert "--x" in skill
     assert "The x value" in skill
 
 
-def test_required_param_labeled() -> None:
-    m = _manifest(tools={"t": _tool(["echo", "{x}"], {"x": _flag("--x", required=True)})})
+def test_required_flag_labeled() -> None:
+    m = _manifest(tools={"t": _tool(["echo", "{x}"], flags={"x": _flag("--x")})})
     skill = build_skill_text(m)
     assert "(required)" in skill
 
 
-def test_optional_param_labeled() -> None:
-    m = _manifest(tools={"t": _tool(["echo", "{x}"], {"x": _flag("--x", required=False)})})
+def test_optional_flag_labeled() -> None:
+    m = _manifest(tools={"t": _tool(["echo", "{x}"], flags={"x": _flag("--x", optional=True)})})
     skill = build_skill_text(m)
     assert "(optional)" in skill
 
 
 def test_pattern_constraint_shown() -> None:
-    m = _manifest(tools={"t": _tool(["echo", "{x}"], {"x": _flag("--x", pattern="^[a-z]+$")})})
+    m = _manifest(tools={"t": _tool(["echo", "{x}"], flags={"x": _flag("--x", pattern="^[a-z]+$")})})
     skill = build_skill_text(m)
     assert "^[a-z]+$" in skill
 
 
 def test_deny_constraint_shown() -> None:
-    m = _manifest(tools={"t": _tool(["echo", "{x}"], {"x": _flag("--x", deny=("origin",))})})
+    m = _manifest(tools={"t": _tool(["echo", "{x}"], flags={"x": _flag("--x", deny=("origin",))})})
     skill = build_skill_text(m)
     assert "origin" in skill
 
 
 def test_allow_constraint_shown() -> None:
-    m = _manifest(tools={"t": _tool(["echo", "{x}"], {"x": _flag("--x", allow=("prod", "staging"))})})
+    m = _manifest(
+        tools={"t": _tool(["echo", "{x}"], flags={"x": _flag("--x", allow=("prod", "staging"))})}
+    )
     skill = build_skill_text(m)
     assert "prod" in skill
     assert "staging" in skill
 
 
-def test_default_shown_in_constraints() -> None:
-    m = _manifest(tools={"t": _tool(["echo", "{x}"], {"x": _flag("--x", default="main")})})
+def test_arg_listed_in_arguments() -> None:
+    m = _manifest(tools={"t": _tool(["cmd", "{target}"], args={"target": _arg("The target", required=True)})})
     skill = build_skill_text(m)
-    assert "main" in skill
-
-
-# -- Example -------------------------------------------------------------------
-
-
-def test_example_shown_when_present() -> None:
-    m = _manifest(tools={"t": _tool(["echo"], example="my-tool --remote upstream")})
-    skill = build_skill_text(m)
-    assert "**Example:** `my-tool --remote upstream`" in skill
-
-
-def test_no_example_section_when_absent() -> None:
-    m = _manifest(tools={"t": _tool(["echo"])})
-    skill = build_skill_text(m)
-    assert "**Example:**" not in skill
+    assert "**Arguments:**" in skill
+    assert "<target>" in skill
+    assert "The target" in skill
 
 
 # -- keep_existing / clean behavior -------------------------------------------

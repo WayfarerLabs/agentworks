@@ -17,25 +17,20 @@ tools:
 
   nerf-git-push-remote:
     description: Push the current branch to a non-origin remote
-    example: nerf-git-push-remote --remote upstream
     command: [git, push, "{remote}", HEAD]
-    params:
+    flags:
       remote:
-        flag: --remote
         description: Name of the remote to push to (not origin)
-        required: true
         pattern: "^[a-z0-9_-]+$"
         deny: [origin]
 
   nerf-git-fetch:
-    description: Fetch from a specific remote
-    example: nerf-git-fetch --remote upstream
+    description: Fetch from a remote (defaults to all tracked remotes if not specified)
     command: [git, fetch, "{remote}"]
-    params:
+    flags:
       remote:
-        flag: --remote
         description: Name of the remote to fetch from
-        required: true
+        optional: true
         pattern: "^[a-z0-9_-]+$"
 
   nerf-git-log:
