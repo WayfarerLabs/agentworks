@@ -888,18 +888,10 @@ def _install_nerf_tools(
             # so copy_dir_to can write without sudo. $(id -un) expands on the remote
             # shell before sudo runs, giving the SSH user's name.
             if not keep:
-                _run_logged(
-                    ts_target,
-                    f"rm -rf {shlex.quote(bin_dir)} && mkdir -p {shlex.quote(bin_dir)}",
-                    logger,
-                    as_root=True,
-                )
-                _run_logged(
-                    ts_target,
-                    f"rm -rf {shlex.quote(skills_dir)} && mkdir -p {shlex.quote(skills_dir)}",
-                    logger,
-                    as_root=True,
-                )
+                _run_logged(ts_target, f"rm -rf {shlex.quote(bin_dir)}", logger, as_root=True)
+                _run_logged(ts_target, f"mkdir -p {shlex.quote(bin_dir)}", logger, as_root=True)
+                _run_logged(ts_target, f"rm -rf {shlex.quote(skills_dir)}", logger, as_root=True)
+                _run_logged(ts_target, f"mkdir -p {shlex.quote(skills_dir)}", logger, as_root=True)
             else:
                 _run_logged(
                     ts_target,
@@ -925,7 +917,6 @@ def _install_nerf_tools(
             ts_target,
             f"echo {shlex.quote(profile_line)} | sudo tee /etc/profile.d/agentworks-nerf.sh > /dev/null",
             logger,
-            as_root=True,
         )
 
     except (SSHError, RuntimeError) as e:
