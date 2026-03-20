@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import base64
 import contextlib
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 import typer
 
@@ -16,8 +16,16 @@ if TYPE_CHECKING:
     from azure.mgmt.compute import ComputeManagementClient
     from azure.mgmt.network import NetworkManagementClient
 
-    from agentworks.config import AzureConfig, Config
+    from agentworks.config import Config
     from agentworks.db import VMRow
+
+
+class _HasSubscriptionId(Protocol):
+    """Structural protocol for anything with subscription_id (AzureConfig or _MinimalAzureConfig)."""
+
+    @property
+    def subscription_id(self) -> str: ...
+
 
 CLOUD_INIT_TEMPLATE = """\
 #cloud-config
@@ -61,7 +69,7 @@ def _wrap_azure_error(exc: Exception) -> AzureError:
             code = inner.code or code
             message = inner.message or message
 
-        summary = f"{code}: {_trim_message(message)}" if code else _trim_message(message)
+        summary = f"{code}: {_trim_message(str(message))}" if code else _trim_message(str(message))
         return AzureError(summary, detail=str(exc))
 
     return AzureError(str(exc), detail=str(exc))
@@ -73,7 +81,7 @@ def _trim_message(message: str) -> str:
     for marker in [". Setup Alerts", ". Learn more", ". Submit a request", " https://"]:
         idx = message.find(marker)
         if idx != -1:
-            return message[:idx + 1] if marker.startswith(".") else message[:idx]
+            return message[: idx + 1] if marker.startswith(".") else message[:idx]
     return message
 
 
@@ -83,6 +91,9 @@ def _get_credential() -> object:
     Tries DefaultAzureCredential first (picks up az login, env vars,
     managed identity, etc.). Falls back to interactive browser login
     if nothing else works.
+
+    Returns object to avoid a hard import of azure.core at module load time.
+    Callers cast to the appropriate type when constructing SDK clients.
     """
     from azure.core.exceptions import ClientAuthenticationError
     from azure.identity import DefaultAzureCredential, InteractiveBrowserCredential
@@ -96,18 +107,21 @@ def _get_credential() -> object:
         return InteractiveBrowserCredential()
 
 
-def _compute_client(az: AzureConfig) -> ComputeManagementClient:
+def _compute_client(az: _HasSubscriptionId) -> ComputeManagementClient:
     """Create a ComputeManagementClient."""
     from azure.mgmt.compute import ComputeManagementClient
 
-    return ComputeManagementClient(_get_credential(), az.subscription_id)
+    # _get_credential() returns a TokenCredential-compatible object; the cast
+    # avoids a hard azure.core import at module load time.
+    return ComputeManagementClient(_get_credential(), az.subscription_id)  # type: ignore[arg-type]
 
 
-def _network_client(az: AzureConfig) -> NetworkManagementClient:
+def _network_client(az: _HasSubscriptionId) -> NetworkManagementClient:
     """Create a NetworkManagementClient."""
     from azure.mgmt.network import NetworkManagementClient
 
-    return NetworkManagementClient(_get_credential(), az.subscription_id)
+    # Same as _compute_client: credential is TokenCredential-compatible at runtime.
+    return NetworkManagementClient(_get_credential(), az.subscription_id)  # type: ignore[arg-type]
 
 
 class AzureProvisioner(VMProvisioner):
@@ -129,7 +143,8 @@ class AzureProvisioner(VMProvisioner):
 
         ssh_pub_key = config.user.ssh_public_key.read_text().strip()
         cloud_init = CLOUD_INIT_TEMPLATE.format(
-            ssh_public_key=ssh_pub_key, admin_username=admin_username,
+            ssh_public_key=ssh_pub_key,
+            admin_username=admin_username,
         )
         cloud_init_b64 = base64.b64encode(cloud_init.encode()).decode()
 
@@ -139,7 +154,7 @@ class AzureProvisioner(VMProvisioner):
         try:
             # Create public IP
             typer.echo("  Creating public IP...")
-            ip_poller = network.public_ip_addresses.begin_create_or_update(
+            ip_poller = network.public_ip_addresses.begin_create_or_update(  # type: ignore[call-overload]
                 az.resource_group,
                 f"{vm_name}-ip",
                 {
@@ -154,7 +169,7 @@ class AzureProvisioner(VMProvisioner):
 
             # Create NSG with SSH rule
             typer.echo("  Creating network security group...")
-            nsg_poller = network.network_security_groups.begin_create_or_update(
+            nsg_poller = network.network_security_groups.begin_create_or_update(  # type: ignore[call-overload]
                 az.resource_group,
                 f"{vm_name}-nsg",
                 {
@@ -183,7 +198,7 @@ class AzureProvisioner(VMProvisioner):
             # Need a subnet -- use default VNet or create one
             vnet_name = f"{vm_name}-vnet"
             subnet_name = "default"
-            vnet_poller = network.virtual_networks.begin_create_or_update(
+            vnet_poller = network.virtual_networks.begin_create_or_update(  # type: ignore[call-overload]
                 az.resource_group,
                 vnet_name,
                 {
@@ -201,7 +216,7 @@ class AzureProvisioner(VMProvisioner):
             vnet_result = vnet_poller.result()
             subnet_id = vnet_result.subnets[0].id
 
-            nic_poller = network.network_interfaces.begin_create_or_update(
+            nic_poller = network.network_interfaces.begin_create_or_update(  # type: ignore[call-overload]
                 az.resource_group,
                 f"{vm_name}-nic",
                 {
@@ -221,7 +236,7 @@ class AzureProvisioner(VMProvisioner):
 
             # Create VM
             typer.echo("  Creating VM...")
-            vm_poller = compute.virtual_machines.begin_create_or_update(
+            vm_poller = compute.virtual_machines.begin_create_or_update(  # type: ignore[call-overload]
                 az.resource_group,
                 vm_name,
                 {
@@ -331,8 +346,9 @@ class AzureProvisioner(VMProvisioner):
         try:
             # Create (or re-create) the public IP
             typer.echo("  Attaching temporary public IP...")
-            ip_poller = network.public_ip_addresses.begin_create_or_update(
-                rg, f"{name}-ip",
+            ip_poller = network.public_ip_addresses.begin_create_or_update(  # type: ignore[call-overload]
+                rg,
+                f"{name}-ip",
                 {
                     "location": _get_vm_location(vm),
                     "sku": {"name": "Standard"},
@@ -345,9 +361,12 @@ class AzureProvisioner(VMProvisioner):
             # Attach to NIC
             nic = network.network_interfaces.get(rg, f"{name}-nic")
             if nic.ip_configurations:
-                nic.ip_configurations[0].public_ip_address = {"id": ip_result.id}
+                # Azure SDK accepts dict for PublicIPAddress at runtime despite type stubs
+                nic.ip_configurations[0].public_ip_address = {"id": ip_result.id}  # type: ignore[assignment]
             network.network_interfaces.begin_create_or_update(
-                rg, f"{name}-nic", nic,
+                rg,
+                f"{name}-nic",
+                nic,
             ).result()
 
         except Exception as exc:
@@ -368,7 +387,9 @@ class AzureProvisioner(VMProvisioner):
             if nic.ip_configurations:
                 nic.ip_configurations[0].public_ip_address = None
             network.network_interfaces.begin_create_or_update(
-                rg, f"{name}-nic", nic,
+                rg,
+                f"{name}-nic",
+                nic,
             ).result()
 
         # Delete the public IP resource
@@ -381,7 +402,9 @@ class AzureProvisioner(VMProvisioner):
         try:
             compute = _compute_client(az_cfg)
             vm_info = compute.virtual_machines.get(
-                rg, name, expand="instanceView",
+                rg,
+                name,
+                expand="instanceView",
             )
         except Exception as exc:
             raise _wrap_azure_error(exc) from exc
@@ -411,14 +434,18 @@ class AzureProvisioner(VMProvisioner):
         return VMStatus.UNKNOWN
 
 
-def _get_vm_public_ip(vm_info: object, az_cfg: AzureConfig) -> str:
+def _get_vm_public_ip(vm_info: object, az_cfg: _HasSubscriptionId) -> str:
     """Resolve the public IP address for a VM from its NIC."""
     network = _network_client(az_cfg)
 
-    nic_refs = getattr(
-        getattr(vm_info, "network_profile", None),
-        "network_interfaces", [],
-    ) or []
+    nic_refs = (
+        getattr(
+            getattr(vm_info, "network_profile", None),
+            "network_interfaces",
+            [],
+        )
+        or []
+    )
     for nic_ref in nic_refs:
         nic_id = nic_ref.id
         if not nic_id:
@@ -434,10 +461,7 @@ def _get_vm_public_ip(vm_info: object, az_cfg: AzureConfig) -> str:
             pip_ref = ip_config.public_ip_address
             if pip_ref and pip_ref.id:
                 pip_parts = pip_ref.id.split("/")
-                pip_rg_idx = next(
-                    i for i, p in enumerate(pip_parts)
-                    if p.lower() == "resourcegroups"
-                )
+                pip_rg_idx = next(i for i, p in enumerate(pip_parts) if p.lower() == "resourcegroups")
                 pip_rg = pip_parts[pip_rg_idx + 1]
                 pip_name = pip_parts[-1]
                 pip = network.public_ip_addresses.get(pip_rg, pip_name)
@@ -460,13 +484,14 @@ def _cleanup_vm_resources(
         lambda: network.virtual_networks.begin_delete(rg, f"{name}-vnet").result(),
     ]:
         with contextlib.suppress(Exception):
-            cleanup()
+            cleanup()  # type: ignore[no-untyped-call]
 
     # OS disk name is generated by Azure, find by tag
     with contextlib.suppress(Exception):
         for disk in compute.disks.list_by_resource_group(rg):
-            if disk.tags and disk.tags.get("owner") == "agentworks" and name in (disk.name or ""):
-                compute.disks.begin_delete(rg, disk.name).result()
+            disk_name = disk.name or ""
+            if disk.tags and disk.tags.get("owner") == "agentworks" and name in disk_name and disk_name:
+                compute.disks.begin_delete(rg, disk_name).result()
 
 
 def _get_vm_location(vm: VMRow) -> str:

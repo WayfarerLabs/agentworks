@@ -19,7 +19,7 @@ import typer
 
 if TYPE_CHECKING:
     from agentworks.config import Config
-    from agentworks.db import Database, VMRow
+    from agentworks.db import Database
 
 _LEGACY_MARKER = "# --- Managed by agentworks. Do not edit below this line. ---"
 _INCLUDE_COMMENT = "# Added by agentworks"
@@ -38,7 +38,7 @@ def _to_ssh_path(path: Path) -> str:
     home = Path.home().resolve().as_posix()
     # Check with trailing slash to avoid false matches (e.g. /home/user2)
     if posix == home or posix.startswith(home + "/"):
-        posix = "~" + posix[len(home):]
+        posix = "~" + posix[len(home) :]
     return posix
 
 
@@ -109,12 +109,14 @@ def _rebuild_config_dir(config: Config, db: Database) -> None:
         if not vm.tailscale_host:
             continue
         alias = ssh_host_alias(vm.name, prefix)
-        blocks.append(_format_entry(
-            alias=alias,
-            hostname=vm.tailscale_host,
-            user=vm.admin_username,
-            identity_file=config.user.ssh_private_key,
-        ))
+        blocks.append(
+            _format_entry(
+                alias=alias,
+                hostname=vm.tailscale_host,
+                user=vm.admin_username,
+                identity_file=config.user.ssh_private_key,
+            )
+        )
 
     conf_path = config_d / _MANAGED_CONF
     if len(blocks) > 1:
@@ -168,7 +170,6 @@ def _remove_legacy_section(ssh_config: Path) -> None:
 # -- Legacy approach (managed section in ssh_config) -----------------------
 
 
-
 # -- Shared helpers --------------------------------------------------------
 
 
@@ -182,13 +183,7 @@ def _format_entry(
     id_str = _to_ssh_path(identity_file)
     if " " in id_str:
         id_str = f'"{id_str}"'
-    return (
-        f"Host {alias}\n"
-        f"    HostName {hostname}\n"
-        f"    User {user}\n"
-        f"    IdentityFile {id_str}\n"
-    )
-
+    return f"Host {alias}\n    HostName {hostname}\n    User {user}\n    IdentityFile {id_str}\n"
 
 
 def _atomic_write(path: Path, content: str) -> None:

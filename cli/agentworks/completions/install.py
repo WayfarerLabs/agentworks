@@ -37,9 +37,7 @@ def _install_bash(script: str) -> None:
         content = bashrc.read_text()
         if "bash-completion" in content or "bash_completion" in content:
             return
-    typer.echo(
-        "Note: ensure bash-completion is installed and loaded in your .bashrc"
-    )
+    typer.echo("Note: ensure bash-completion is installed and loaded in your .bashrc")
 
 
 def _install_zsh(script: str) -> None:
@@ -110,7 +108,9 @@ def _query_powershell_profile() -> Path | None:
         try:
             result = subprocess.run(
                 [cmd, "-NoProfile", "-Command", "$PROFILE"],
-                capture_output=True, text=True, timeout=10,
+                capture_output=True,
+                text=True,
+                timeout=10,
             )
             path = result.stdout.strip()
             if result.returncode == 0 and path:

@@ -24,16 +24,9 @@ if TYPE_CHECKING:
 WSL_BASE_PATH = "%LOCALAPPDATA%\\agentworks\\wsl"
 
 # Docker Hub OCI registry endpoints for the official Debian image
-_DOCKER_AUTH_URL = (
-    "https://auth.docker.io/token"
-    "?service=registry.docker.io&scope=repository:library/debian:pull"
-)
-_DOCKER_MANIFESTS_URL = (
-    "https://registry-1.docker.io/v2/library/debian/manifests/bookworm"
-)
-_DOCKER_BLOBS_URL = (
-    "https://registry-1.docker.io/v2/library/debian/blobs"
-)
+_DOCKER_AUTH_URL = "https://auth.docker.io/token?service=registry.docker.io&scope=repository:library/debian:pull"
+_DOCKER_MANIFESTS_URL = "https://registry-1.docker.io/v2/library/debian/manifests/bookworm"
+_DOCKER_BLOBS_URL = "https://registry-1.docker.io/v2/library/debian/blobs"
 
 # Map Python's platform.machine() to OCI architecture names
 _ARCH_MAP = {"x86_64": "amd64", "amd64": "amd64", "aarch64": "arm64", "arm64": "arm64"}
@@ -55,8 +48,16 @@ class _StripAuthRedirectHandler(urllib.request.HTTPRedirectHandler):
     Bearer token with 400 Bad Request, so we must drop it on redirect.
     """
 
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
-        new_req = super().redirect_request(req, fp, code, msg, headers, newurl)
+    def redirect_request(
+        self,
+        req: urllib.request.Request,
+        fp: object,
+        code: int,
+        msg: str,
+        headers: object,
+        newurl: str,
+    ) -> urllib.request.Request | None:
+        new_req = super().redirect_request(req, fp, code, msg, headers, newurl)  # type: ignore[arg-type]
         if new_req is not None:
             new_req.remove_header("Authorization")
         return new_req
@@ -121,9 +122,11 @@ def _download_debian_rootfs(tarball_path: str) -> None:
     if "manifests" in manifest:
         arch = _oci_arch()
         match = next(
-            (m for m in manifest["manifests"]
-             if m.get("platform", {}).get("architecture") == arch
-             and m.get("platform", {}).get("os") == "linux"),
+            (
+                m
+                for m in manifest["manifests"]
+                if m.get("platform", {}).get("architecture") == arch and m.get("platform", {}).get("os") == "linux"
+            ),
             None,
         )
         if match is None:
@@ -175,8 +178,11 @@ class WSL2Provisioner(VMProvisioner):
     """Provisions WSL2 Debian distributions on Windows."""
 
     def create(
-        self, vm_name: str, config: Config,
-        *, admin_username: str = "agentworks",
+        self,
+        vm_name: str,
+        config: Config,
+        *,
+        admin_username: str = "agentworks",
     ) -> ProvisionResult:
         typer.echo(f"Provisioning WSL2 VM '{vm_name}'...")
 
@@ -201,42 +207,67 @@ class WSL2Provisioner(VMProvisioner):
         # The Docker rootfs is minimal. Install packages to bring it up to
         # parity with the Lima/Azure cloud images.
         typer.echo("  Installing base packages...")
-        _wsl(["--distribution", vm_name, "--user", "root", "--",
-              "bash", "-c",
-              "apt-get update -qq"
-              " && apt-get install -y -qq"
-              " bash bash-completion sudo passwd"
-              " openssh-server curl git ca-certificates"
-              " tmux tmuxinator"
-              " locales procps iproute2 iputils-ping"
-              " less vim-tiny man-db"
-              " > /dev/null"])
+        _wsl(
+            [
+                "--distribution",
+                vm_name,
+                "--user",
+                "root",
+                "--",
+                "bash",
+                "-c",
+                "apt-get update -qq"
+                " && apt-get install -y -qq"
+                " bash bash-completion sudo passwd"
+                " openssh-server curl git ca-certificates"
+                " tmux tmuxinator"
+                " locales procps iproute2 iputils-ping"
+                " less vim-tiny man-db"
+                " > /dev/null",
+            ]
+        )
 
         # Create user account
         typer.echo(f"  Creating user '{admin_username}'...")
-        _wsl(["--distribution", vm_name, "--user", "root", "--",
-              "useradd", "-m", "-s", "/bin/bash", admin_username])
-        _wsl(["--distribution", vm_name, "--user", "root", "--",
-              "usermod", "-aG", "sudo", admin_username])
+        _wsl(["--distribution", vm_name, "--user", "root", "--", "useradd", "-m", "-s", "/bin/bash", admin_username])
+        _wsl(["--distribution", vm_name, "--user", "root", "--", "usermod", "-aG", "sudo", admin_username])
         import shlex
 
-        _wsl(["--distribution", vm_name, "--user", "root", "--",
-              "bash", "-c",
-              f"echo {shlex.quote(f'{admin_username} ALL=(ALL) NOPASSWD:ALL')}"
-              f" > /etc/sudoers.d/{shlex.quote(admin_username)}"])
+        _wsl(
+            [
+                "--distribution",
+                vm_name,
+                "--user",
+                "root",
+                "--",
+                "bash",
+                "-c",
+                f"echo {shlex.quote(f'{admin_username} ALL=(ALL) NOPASSWD:ALL')}"
+                f" > /etc/sudoers.d/{shlex.quote(admin_username)}",
+            ]
+        )
 
         # Configure wsl.conf: default user + systemd
         typer.echo("  Enabling systemd...")
-        _wsl(["--distribution", vm_name, "--user", "root", "--",
-              "bash", "-c",
-              f"printf '[user]\\ndefault={shlex.quote(admin_username)}\\n\\n[boot]\\nsystemd=true\\n' > /etc/wsl.conf"])
+        _wsl(
+            [
+                "--distribution",
+                vm_name,
+                "--user",
+                "root",
+                "--",
+                "bash",
+                "-c",
+                f"printf '[user]\\ndefault={shlex.quote(admin_username)}"
+                f"\\n\\n[boot]\\nsystemd=true\\n' > /etc/wsl.conf",
+            ]
+        )
 
         # Restart the distro so systemd takes effect
         typer.echo("  Restarting distro...")
         _wsl(["--terminate", vm_name])
         # Run a command to trigger the distro to start with systemd
-        _wsl(["--distribution", vm_name, "--user", "root", "--",
-              "bash", "-c", "echo ok"])
+        _wsl(["--distribution", vm_name, "--user", "root", "--", "bash", "-c", "echo ok"])
 
         typer.echo(f"  WSL2 VM '{vm_name}' provisioned.")
         return ProvisionResult(
@@ -260,8 +291,7 @@ class WSL2Provisioner(VMProvisioner):
         # Clean up install directory
         install_path = f"{WSL_BASE_PATH}\\{vm.name}"
         _powershell(
-            f"Remove-Item -Recurse -Force -Path '{install_path}'"
-            " -ErrorAction SilentlyContinue",
+            f"Remove-Item -Recurse -Force -Path '{install_path}' -ErrorAction SilentlyContinue",
             check=False,
         )
         typer.echo(f"WSL2 distro '{vm.name}' deleted")

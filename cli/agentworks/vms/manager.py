@@ -20,6 +20,7 @@ from agentworks.vms.initializer import (
 if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database, VMRow
+    from agentworks.git_credentials.base import GitCredentialProvider
     from agentworks.vms.base import VMProvisioner
 
 
@@ -122,7 +123,8 @@ def create_vm(
 
             lima = LimaProvisioner(vm_host_ssh=vm_host_ssh)
             result = lima.create(
-                vm_name, config,
+                vm_name,
+                config,
                 cpus=resolved_cpus,
                 memory=resolved_memory,
                 disk=resolved_disk,
@@ -132,7 +134,8 @@ def create_vm(
 
             azure = AzureProvisioner()
             result = azure.create(
-                vm_name, config,
+                vm_name,
+                config,
                 azure_vm_size=resolved_azure_size,
                 admin_username=resolved_admin_username,
             )
@@ -141,7 +144,8 @@ def create_vm(
 
             wsl2 = WSL2Provisioner()
             result = wsl2.create(
-                vm_name, config,
+                vm_name,
+                config,
                 admin_username=resolved_admin_username,
             )
         else:
@@ -163,7 +167,9 @@ def create_vm(
     # Keep the DB record so the user can reinit or delete.
     try:
         initialize_vm(
-            db, config, vm_name,
+            db,
+            config,
+            vm_name,
             exec_target=result.exec_target,
             providers=providers,
             is_wsl2=(platform == "wsl2"),
@@ -197,7 +203,9 @@ def create_vm(
         if platform == "azure":
             from agentworks.vms.provisioners.azure import AzureProvisioner as _AP
 
-            _AP().detach_public_ip(db.get_vm(vm_name))
+            _created_vm = db.get_vm(vm_name)
+            assert _created_vm is not None
+            _AP().detach_public_ip(_created_vm)
     except Exception as e:
         typer.echo(f"\nWarning: post-init step failed: {e}", err=True)
         typer.echo("VM is likely still usable.", err=True)
@@ -331,10 +339,7 @@ def add_git_credential(db: Database, config: Config, name: str, credential_name:
     new_hostpaths = {line.split("@", 1)[1] for line in new_lines if "@" in line}
 
     # Filter out old entries whose host/path matches any new entry
-    filtered = [
-        e for e in existing
-        if "@" not in e or e.split("@", 1)[1] not in new_hostpaths
-    ]
+    filtered = [e for e in existing if "@" not in e or e.split("@", 1)[1] not in new_hostpaths]
 
     # Write back filtered + new
     from agentworks.ssh import write_file
@@ -379,7 +384,12 @@ def stop_vm(db: Database, config: Config, name: str) -> None:
 
 
 def delete_vm(
-    db: Database, config: Config, name: str, *, force: bool = False, yes: bool = False,
+    db: Database,
+    config: Config,
+    name: str,
+    *,
+    force: bool = False,
+    yes: bool = False,
 ) -> None:
     """Delete a VM, cleaning up all associated resources."""
     vm = _require_vm(db, name)
@@ -388,8 +398,7 @@ def delete_vm(
     ws_count = db.count_workspaces_on_vm(name)
     if ws_count > 0 and not force:
         typer.echo(
-            f"Error: VM '{name}' has {ws_count} workspace(s). "
-            f"Delete them first, or use --force.",
+            f"Error: VM '{name}' has {ws_count} workspace(s). Delete them first, or use --force.",
             err=True,
         )
         raise typer.Exit(1)
@@ -444,8 +453,7 @@ def reinit_vm(
 
     if vm.provisioning_status != ProvisioningStatus.COMPLETE.value:
         typer.echo(
-            f"Error: VM '{name}' provisioning is '{vm.provisioning_status}', not 'complete'. "
-            f"Cannot reinitialize.",
+            f"Error: VM '{name}' provisioning is '{vm.provisioning_status}', not 'complete'. Cannot reinitialize.",
             err=True,
         )
         raise typer.Exit(1)
@@ -471,13 +479,20 @@ def reinit_vm(
     logger = InitLogger(name)
 
     run_initialization(
-        db, config, name, ts_target, providers, home, vm.admin_username,
-        logger, git_tokens=git_tokens,
+        db,
+        config,
+        name,
+        ts_target,
+        providers,
+        home,
+        vm.admin_username,
+        logger,
+        git_tokens=git_tokens,
     )
 
-    vm = db.get_vm(name)
-    assert vm is not None
-    if vm.init_status == InitStatus.PARTIAL.value:
+    refreshed_vm = db.get_vm(name)
+    assert refreshed_vm is not None
+    if refreshed_vm.init_status == InitStatus.PARTIAL.value:
         typer.echo(f"\nVM '{name}' reinitialized (with warnings -- see above)")
     else:
         typer.echo(f"\nVM '{name}' reinitialized successfully!")
@@ -554,8 +569,9 @@ def _tailscale_logout(provisioner: VMProvisioner, vm: VMRow) -> None:
 
     typer.echo("Deregistering from Tailscale...")
     try:
-        if isinstance(provisioner, AzureProvisioner):
-            provisioner.attach_public_ip(vm)
+        azure_provisioner = provisioner if isinstance(provisioner, AzureProvisioner) else None
+        if azure_provisioner is not None:
+            azure_provisioner.attach_public_ip(vm)
         exec_target = provisioner.exec_target(vm)
         exec_target.run_as_root("tailscale down", timeout=15)
         exec_target.run_as_root("tailscale logout", timeout=15)
@@ -576,8 +592,7 @@ def _guard_failed_vm(vm: VMRow) -> None:
     """Block operations on VMs with failed provisioning or initialization."""
     if vm.provisioning_status == ProvisioningStatus.FAILED.value:
         typer.echo(
-            f"Error: VM '{vm.name}' has failed provisioning. "
-            f"Only 'vm delete' is supported.{_init_log_hint(vm.name)}",
+            f"Error: VM '{vm.name}' has failed provisioning. Only 'vm delete' is supported.{_init_log_hint(vm.name)}",
             err=True,
         )
         raise typer.Exit(1)
@@ -591,7 +606,7 @@ def _guard_failed_vm(vm: VMRow) -> None:
 
 
 def _collect_secrets(
-    providers: dict,
+    providers: dict[str, GitCredentialProvider],
     vm_name: str,
 ) -> tuple[str | None, dict[str, str]]:
     """Collect all secrets upfront before provisioning starts.
@@ -648,7 +663,9 @@ def _is_tailscale_reachable(tailscale_host: str) -> bool:
     try:
         result = subprocess.run(
             ["tailscale", "ping", "--timeout=5s", "-c=1", tailscale_host],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         return result.returncode == 0
     except (subprocess.TimeoutExpired, FileNotFoundError):
@@ -676,22 +693,25 @@ def _ensure_tailscale(
     # For Azure, attach a temporary public IP for the rejoin
     from agentworks.vms.provisioners.azure import AzureProvisioner
 
-    is_azure = isinstance(provisioner, AzureProvisioner)
-    if is_azure:
-        provisioner.attach_public_ip(vm)
+    azure_provisioner = provisioner if isinstance(provisioner, AzureProvisioner) else None
+    if azure_provisioner is not None:
+        azure_provisioner.attach_public_ip(vm)
 
     try:
         verify_tailscale_available()
         exec_target = provisioner.exec_target(vm)
         rejoin_tailscale(
-            db, vm.name, exec_target,
+            db,
+            vm.name,
+            exec_target,
             is_wsl2=(vm.platform == "wsl2"),
         )
     finally:
-        if is_azure:
-            provisioner.detach_public_ip(vm)
+        if azure_provisioner is not None:
+            azure_provisioner.detach_public_ip(vm)
 
     # Update SSH config in case the Tailscale IP changed
     from agentworks.ssh_config import sync_ssh_config
 
     sync_ssh_config(config, db)
+

@@ -104,9 +104,7 @@ def _build_command_spec(cmd: click.Command, path: str) -> CommandSpec:
         for sub_name in cmd.list_commands(ctx):
             sub_cmd = cmd.get_command(ctx, sub_name)
             if sub_cmd is not None:
-                spec.subcommands[sub_name] = _build_command_spec(
-                    sub_cmd, path=current_path
-                )
+                spec.subcommands[sub_name] = _build_command_spec(sub_cmd, path=current_path)
 
     return spec
 
@@ -168,7 +166,5 @@ def _spec_to_dict(spec: CommandSpec) -> dict:  # type: ignore[type-arg]
             }
             for p in spec.params
         ],
-        "subcommands": {
-            k: _spec_to_dict(v) for k, v in sorted(spec.subcommands.items())
-        },
+        "subcommands": {k: _spec_to_dict(v) for k, v in sorted(spec.subcommands.items())},
     }

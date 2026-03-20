@@ -93,7 +93,9 @@ def run_doctor() -> None:
         try:
             result = subprocess.run(
                 ["tailscale", "status"],
-                capture_output=True, text=True, timeout=10,
+                capture_output=True,
+                text=True,
+                timeout=10,
             )
             if result.returncode == 0:
                 if os.environ.get("TAILSCALE_AUTH_KEY"):
@@ -321,9 +323,14 @@ def _get_completion_paths() -> list[tuple[str, list[Path]]]:
     shells: list[tuple[str, list[Path]]] = []
 
     # Bash
-    shells.append(("bash", [
-        home / ".local" / "share" / "bash-completion" / "completions" / "agentworks",
-    ]))
+    shells.append(
+        (
+            "bash",
+            [
+                home / ".local" / "share" / "bash-completion" / "completions" / "agentworks",
+            ],
+        )
+    )
 
     # Zsh
     zsh_paths: list[Path] = [
@@ -342,9 +349,14 @@ def _get_completion_paths() -> list[tuple[str, list[Path]]]:
 
     profile = _query_powershell_profile()
     if profile is not None:
-        shells.append(("powershell", [
-            profile.parent / "Completions" / "agentworks.ps1",
-        ]))
+        shells.append(
+            (
+                "powershell",
+                [
+                    profile.parent / "Completions" / "agentworks.ps1",
+                ],
+            )
+        )
 
     return shells
 

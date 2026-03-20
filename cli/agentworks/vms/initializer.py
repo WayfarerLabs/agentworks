@@ -13,24 +13,36 @@ Phase B steps are non-fatal -- failures produce warnings and a 'partial' status.
 from __future__ import annotations
 
 import shlex
+import subprocess
+import tempfile
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import typer
 
 from agentworks.db import InitStatus, ProvisioningStatus
-from agentworks.ssh import ExecTarget, SSHError, SSHTarget, rsync_to
+from agentworks.ssh import ExecTarget, SSHError, SSHTarget
 from agentworks.vms.init_log import InitLogger
 
 if TYPE_CHECKING:
-    from agentworks.catalog import SystemInstallCommandEntry, UserInstallCommandEntry
+    from collections.abc import Mapping
+
+    from agentworks.catalog import AptSourceEntry, SystemInstallCommandEntry, UserInstallCommandEntry
     from agentworks.config import Config
     from agentworks.db import Database
     from agentworks.git_credentials.base import GitCredentialProvider
     from agentworks.ssh import SSHResult
 
 SYSTEM_PACKAGES = [
-    "openssh-server", "curl", "git", "sudo", "ca-certificates", "gnupg",
-    "unzip", "tmux", "tmuxinator",
+    "openssh-server",
+    "curl",
+    "git",
+    "sudo",
+    "ca-certificates",
+    "gnupg",
+    "unzip",
+    "tmux",
+    "tmuxinator",
 ]
 
 
@@ -45,15 +57,20 @@ def _run_logged(
 ) -> SSHResult:
     """Run a command on the target and log the command + full output."""
     logger.output(f"$ {command}")
-    result = target.run_as_root(command, check=check, timeout=timeout) if as_root else target.run(
-        command, check=check, timeout=timeout,
+    result = (
+        target.run_as_root(command, check=check, timeout=timeout)
+        if as_root
+        else target.run(
+            command,
+            check=check,
+            timeout=timeout,
+        )
     )
     if result.stdout:
         logger.output(result.stdout)
     if result.stderr:
         logger.output(result.stderr)
     return result
-
 
 
 def _write_path_additions(
@@ -87,8 +104,7 @@ def _write_path_additions(
         for rc in ("$HOME/.profile", "$HOME/.zprofile"):
             _run_logged(
                 target,
-                f"grep -q agentworks-path.sh {rc} 2>/dev/null"
-                f" || printf '%s\\n' '{source_line}' >> {rc}",
+                f"grep -q agentworks-path.sh {rc} 2>/dev/null || printf '%s\\n' '{source_line}' >> {rc}",
                 logger,
             )
     except SSHError as e:
@@ -146,7 +162,7 @@ def _configure_apt_sources(
     assert isinstance(catalog, ResolvedCatalog)
 
     # Collect all apt sources needed by selected apt_packages
-    required_sources: dict[str, object] = {}
+    required_sources: dict[str, AptSourceEntry] = {}
     for pkg_name in config.vm.apt_packages:
         pkg = catalog.apt_packages.get(pkg_name)
         if pkg is None:
@@ -179,6 +195,7 @@ def _configure_apt_sources(
         try:
             # Ensure parent directory for key_path exists
             from pathlib import PurePosixPath
+
             key_dir = str(PurePosixPath(src.key_path).parent)
             _run_logged(target, f"install -m 0755 -d {shlex.quote(key_dir)}", logger, as_root=True)
 
@@ -186,16 +203,18 @@ def _configure_apt_sources(
             if src.key_dearmor:
                 _run_logged(
                     target,
-                    f"curl -fsSL {shlex.quote(src.key_url)}"
-                    f" | gpg --dearmor -o {shlex.quote(src.key_path)}",
-                    logger, as_root=True, timeout=60,
+                    f"curl -fsSL {shlex.quote(src.key_url)} | gpg --dearmor -o {shlex.quote(src.key_path)}",
+                    logger,
+                    as_root=True,
+                    timeout=60,
                 )
             else:
                 _run_logged(
                     target,
-                    f"curl -fsSL {shlex.quote(src.key_url)}"
-                    f" -o {shlex.quote(src.key_path)}",
-                    logger, as_root=True, timeout=60,
+                    f"curl -fsSL {shlex.quote(src.key_url)} -o {shlex.quote(src.key_path)}",
+                    logger,
+                    as_root=True,
+                    timeout=60,
                 )
             _run_logged(target, f"chmod a+r {shlex.quote(src.key_path)}", logger, as_root=True)
 
@@ -204,8 +223,9 @@ def _configure_apt_sources(
             source_path = f"/etc/apt/sources.list.d/{src.source_file}"
             _run_logged(
                 target,
-                f"bash -c {shlex.quote(f'printf \"%s\\n\" {shlex.quote(resolved_source)} > {source_path}')}",
-                logger, as_root=True,
+                f"bash -c {shlex.quote(f'printf "%s\\n" {shlex.quote(resolved_source)} > {source_path}')}",
+                logger,
+                as_root=True,
             )
             newly_configured = True
         except SSHError as e:
@@ -279,7 +299,7 @@ def _build_test_command(
 def _run_catalog_commands(
     target: ExecTarget,
     command_names: list[str],
-    entries: dict[str, SystemInstallCommandEntry | UserInstallCommandEntry],
+    entries: Mapping[str, SystemInstallCommandEntry | UserInstallCommandEntry],
     shell: str,
     home: str,
     logger: InitLogger,
@@ -354,12 +374,17 @@ def verify_tailscale_available() -> None:
 
 def resolve_git_credential_providers(
     config: Config,
+    names: list[str] | None = None,
 ) -> dict[str, GitCredentialProvider]:
-    """Resolve git credential provider instances from config."""
+    """Resolve git credential provider instances from config.
+
+    If names is provided, only those credential names are resolved.
+    Otherwise, all names from config.defaults.git_credentials are used.
+    """
     from agentworks.git_credentials.azdo import AzDOCredentialProvider
     from agentworks.git_credentials.github import GitHubCredentialProvider
 
-    names = config.defaults.git_credentials or []
+    names = names if names is not None else (config.defaults.git_credentials or [])
     providers: dict[str, GitCredentialProvider] = {}
     if not names:
         typer.echo("Warning: no git credentials configured (set defaults.git_credentials in config)", err=True)
@@ -493,7 +518,14 @@ def initialize_vm(
     try:
         db.insert_vm_event(vm_name, "provisioning_started", transport)
         ts_target = _phase_a_bootstrap(
-            db, config, vm_name, exec_target, home, admin_username, is_wsl2, logger,
+            db,
+            config,
+            vm_name,
+            exec_target,
+            home,
+            admin_username,
+            is_wsl2,
+            logger,
             tailscale_auth_key=tailscale_auth_key,
         )
         db.insert_vm_event(vm_name, "provisioning_complete", ts_target.ssh.host if ts_target.ssh else None)
@@ -504,8 +536,15 @@ def initialize_vm(
         raise
 
     run_initialization(
-        db, config, vm_name, ts_target, providers, home, admin_username,
-        logger, git_tokens=git_tokens,
+        db,
+        config,
+        vm_name,
+        ts_target,
+        providers,
+        home,
+        admin_username,
+        logger,
+        git_tokens=git_tokens,
     )
 
 
@@ -530,8 +569,15 @@ def run_initialization(
 
     try:
         _phase_b_setup(
-            db, config, vm_name, ts_target, providers, home, admin_username,
-            logger, git_tokens=git_tokens,
+            db,
+            config,
+            vm_name,
+            ts_target,
+            providers,
+            home,
+            admin_username,
+            logger,
+            git_tokens=git_tokens,
         )
     except Exception as e:
         db.update_vm_init_status(vm_name, InitStatus.FAILED)
@@ -599,6 +645,7 @@ def _phase_a_bootstrap(
         exec_target.copy_to(local_script, remote_script)
     finally:
         import os
+
         os.unlink(local_script)
 
     from agentworks.remote_exec import run_detached
@@ -730,7 +777,8 @@ def _phase_b_setup(
         _run_logged(
             ts_target,
             f"chsh -s $(which {shlex.quote(admin_shell)}) {shlex.quote(admin_username)}",
-            logger, as_root=True,
+            logger,
+            as_root=True,
         )
     except SSHError as e:
         msg = f"shell configuration failed: {e}"
@@ -742,20 +790,32 @@ def _phase_b_setup(
 
     # Non-fatal: system install commands
     system_path = _run_catalog_commands(
-        ts_target, config.vm.system_install_commands,
-        catalog.system_install_commands, admin_shell, home, logger,
+        ts_target,
+        config.vm.system_install_commands,
+        catalog.system_install_commands,
+        admin_shell,
+        home,
+        logger,
         label="System install command",
     )
 
     # Non-fatal: user install commands for admin user
     user_path = _run_catalog_commands(
-        ts_target, config.vm.admin_install_commands,
-        catalog.user_install_commands, admin_shell, home, logger,
+        ts_target,
+        config.vm.admin_install_commands,
+        catalog.user_install_commands,
+        admin_shell,
+        home,
+        logger,
         label="User install command",
     )
 
     # Non-fatal: PATH additions from both system + user install commands
     _write_path_additions(ts_target, system_path + user_path, logger)
+
+    # Non-fatal: nerf tools
+    if config.vm.install_nerf_tools:
+        _install_nerf_tools(ts_target, config, logger)
 
     # Non-fatal: git credentials
     if providers:
@@ -766,14 +826,80 @@ def _phase_b_setup(
         logger.step("Dotfiles")
         typer.echo("  Copying dotfiles...")
         try:
-            assert ts_target.ssh is not None
-            rsync_to(ts_target.ssh, config.dotfiles.source, f"{home}/.dotfiles")
+            ts_target.copy_dir_to(config.dotfiles.source, f"{home}/.dotfiles")
             typer.echo(f"  Running dotfiles install: {config.dotfiles.install_cmd}")
             _run_logged(ts_target, f"cd ~/.dotfiles && {config.dotfiles.install_cmd}", logger, timeout=120)
         except Exception as e:
             msg = f"dotfiles install failed: {e}"
             logger.warning(msg)
             typer.echo(f"  Warning: {msg}", err=True)
+
+
+def _install_nerf_tools(
+    ts_target: ExecTarget,
+    config: Config,
+    logger: InitLogger,
+) -> None:
+    """Build nerf tools locally and rsync artifacts to the VM. Non-fatal."""
+    logger.step("Nerf tools")
+    typer.echo("  Building nerf tools...")
+
+    assert ts_target.ssh is not None
+
+    bin_dir = config.vm.nerf_bin_dir
+    skills_dir = config.vm.nerf_skills_dir
+    keep = config.vm.nerf_keep_existing
+
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            bin_out = tmp_path / "bin"
+            skills_out = tmp_path / "skills"
+            bin_out.mkdir()
+            skills_out.mkdir()
+
+            # Build scripts and skills locally
+            extra: list[str] = []
+            if config.vm.skip_nerf_defaults:
+                extra.append("--no-default")
+            for manifest in config.vm.nerf_addl_manifests:
+                extra.append(str(manifest))
+
+            for subcmd, outdir in (("build", bin_out), ("skill", skills_out)):
+                cmd = ["nerf", subcmd, "--outdir", str(outdir), *extra]
+                result = subprocess.run(cmd, capture_output=True, text=True)
+                if result.returncode != 0:
+                    raise RuntimeError(
+                        f"nerf {subcmd} failed: {result.stderr.strip()}"
+                    )
+
+            # Create remote dirs (root-owned parent, then accessible subdirs)
+            _run_logged(
+                ts_target,
+                f"sudo mkdir -p {shlex.quote(bin_dir)} {shlex.quote(skills_dir)}",
+                logger,
+                as_root=True,
+            )
+
+            # Copy artifacts to VM; delete=True by default so stale tools don't linger
+            ts_target.copy_dir_to(bin_out, bin_dir, delete=not keep, timeout=60)
+            ts_target.copy_dir_to(skills_out, skills_dir, delete=not keep, timeout=60)
+
+        typer.echo(f"  Nerf tools installed to {bin_dir}")
+
+        # System-wide PATH so all users (including agent users) can find the tools
+        profile_line = f'export PATH="{bin_dir}:$PATH"'
+        _run_logged(
+            ts_target,
+            f"echo {shlex.quote(profile_line)} | sudo tee /etc/profile.d/agentworks-nerf.sh > /dev/null",
+            logger,
+            as_root=True,
+        )
+
+    except (SSHError, RuntimeError) as e:
+        msg = f"nerf tools installation failed: {e}"
+        logger.warning(msg)
+        typer.echo(f"  Warning: {msg}", err=True)
 
 
 def _configure_git_credentials(

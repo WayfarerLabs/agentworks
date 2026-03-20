@@ -99,5 +99,5 @@ def test_full_overwrite_semantics(tmp_path: Path) -> None:
 
     content = target.write_file.call_args.args[1]
     # Should have exactly the header + 2 keys (primary + 1 extra), each on its own line
-    lines = [l for l in content.splitlines() if not l.startswith("#") and l.strip()]
+    lines = [ln for ln in content.splitlines() if not ln.startswith("#") and ln.strip()]
     assert len(lines) == 2

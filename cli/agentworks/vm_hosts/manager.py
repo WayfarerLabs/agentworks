@@ -64,9 +64,7 @@ def list_vm_hosts(db: Database) -> None:
     typer.echo(f"{'NAME':<20} {'SSH HOST':<30} {'PLATFORM':<10} {'OS':<10} {'LAST SEEN'}")
     typer.echo("-" * 90)
     for h in hosts:
-        typer.echo(
-            f"{h.name:<20} {h.ssh_host:<30} {h.platform:<10} {h.os or '-':<10} {h.last_seen_at or 'never'}"
-        )
+        typer.echo(f"{h.name:<20} {h.ssh_host:<30} {h.platform:<10} {h.os or '-':<10} {h.last_seen_at or 'never'}")
 
 
 def remove_vm_host(db: Database, name: str, *, force: bool = False) -> None:
@@ -79,8 +77,7 @@ def remove_vm_host(db: Database, name: str, *, force: bool = False) -> None:
     vm_count = db.count_vms_on_host(name)
     if vm_count > 0 and not force:
         typer.echo(
-            f"Error: VM host '{name}' has {vm_count} VM(s). "
-            f"Delete them first, or use --force.",
+            f"Error: VM host '{name}' has {vm_count} VM(s). Delete them first, or use --force.",
             err=True,
         )
         raise typer.Exit(1)
