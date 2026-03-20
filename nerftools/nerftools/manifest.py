@@ -42,6 +42,7 @@ class FlagSpec:
     flag: str
     description: str
     optional: bool = False
+    short: str | None = None
     pattern: str | None = None
     allow: tuple[str, ...] = field(default_factory=tuple)
     deny: tuple[str, ...] = field(default_factory=tuple)
@@ -204,10 +205,13 @@ def _load_flag(raw: Any, path: Path, tool_name: str, flag_name: str) -> FlagSpec
     flag = str(raw["flag"]) if "flag" in raw else f"--{flag_name.replace('_', '-')}"
     description = _require_str(raw, "description", ctx)
     optional = bool(raw.get("optional", False))
+    short = str(raw["short"]) if "short" in raw else None
     pattern = str(raw["pattern"]) if "pattern" in raw else None
     allow = tuple(str(v) for v in raw.get("allow", []))
     deny = tuple(str(v) for v in raw.get("deny", []))
 
+    if short is not None and not re.fullmatch(r"-[a-zA-Z]", short):
+        raise ManifestError(f"{ctx}: 'short' must be a single-character flag like -r, got {short!r}")
     if allow and deny:
         raise ManifestError(f"{ctx}: 'allow' and 'deny' cannot both be set")
     if pattern is not None:
@@ -220,6 +224,7 @@ def _load_flag(raw: Any, path: Path, tool_name: str, flag_name: str) -> FlagSpec
         flag=flag,
         description=description,
         optional=optional,
+        short=short,
         pattern=pattern,
         allow=allow,
         deny=deny,

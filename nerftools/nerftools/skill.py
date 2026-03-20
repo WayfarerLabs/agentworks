@@ -116,7 +116,8 @@ def _tool_section(tool_name: str, tool_spec: ToolSpec) -> str:
 def _usage_line(tool_name: str, tool_spec: ToolSpec) -> str:
     parts = [tool_name]
     for name, p in tool_spec.flags.items():
-        token = f"{p.flag} <{name}>"
+        flag_display = f"{p.flag}|{p.short}" if p.short else p.flag
+        token = f"{flag_display} <{name}>"
         parts.append(token if p.required else f"[{token}]")
     for name, spec in tool_spec.args.items():
         token = f"<{name}...>" if spec.variadic else f"<{name}>"
@@ -126,6 +127,7 @@ def _usage_line(tool_name: str, tool_spec: ToolSpec) -> str:
 
 def _flag_line(name: str, p: FlagSpec) -> str:
     required = "required" if p.required else "optional"
+    flag_display = f"{p.flag}|{p.short}" if p.short else p.flag
     desc = p.description
 
     constraints: list[str] = []
@@ -139,7 +141,7 @@ def _flag_line(name: str, p: FlagSpec) -> str:
         constraints.append(f"not {vals}")
 
     suffix = ". " + "; ".join(constraints) if constraints else ""
-    return f"- `{p.flag}` ({required}): {desc}{suffix}"
+    return f"- `{flag_display}` ({required}): {desc}{suffix}"
 
 
 def _arg_line(name: str, spec: ArgSpec) -> str:

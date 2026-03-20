@@ -92,6 +92,18 @@ def test_flag_in_case_statement() -> None:
     assert "--remote) REMOTE=" in script
 
 
+def test_short_flag_in_case_statement() -> None:
+    flags = {"remote": FlagSpec(flag="--remote", description="Remote", short="-r")}
+    script = build_script_text("t", "p", _tool(["git", "push", "{remote}"], flags=flags))
+    assert "--remote|-r) REMOTE=" in script
+
+
+def test_short_flag_in_usage() -> None:
+    flags = {"remote": FlagSpec(flag="--remote", description="Remote", short="-r")}
+    script = build_script_text("t", "p", _tool(["git", "push", "{remote}"], flags=flags))
+    assert "--remote|-r <remote>" in script
+
+
 def test_flag_exec_substitution() -> None:
     flags = {"remote": _flag("--remote")}
     script = build_script_text("t", "p", _tool(["git", "push", "{remote}", "HEAD"], flags=flags))
@@ -198,6 +210,29 @@ def test_optional_variadic_uses_conditional_expansion() -> None:
     args = {"files": _arg(variadic=True)}
     script = build_script_text("t", "p", _tool(["git", "add", "{files}"], args=args))
     assert '${FILES[@]+"${FILES[@]}"}' in script
+
+
+# -- Flag injection prevention -------------------------------------------------
+
+
+def test_positional_arg_rejects_flag_like_value() -> None:
+    args = {"target": _arg(required=True)}
+    script = build_script_text("t", "p", _tool(["cmd", "{target}"], args=args))
+    assert '"${TARGET}" == -*' in script
+    assert "cannot start with '-'" in script
+
+
+def test_optional_positional_arg_also_checks_injection() -> None:
+    args = {"target": _arg(required=False)}
+    script = build_script_text("t", "p", _tool(["cmd", "{target}"], args=args))
+    assert '"${TARGET}" == -*' in script
+
+
+def test_variadic_arg_rejects_flag_like_values() -> None:
+    args = {"files": _arg(variadic=True)}
+    script = build_script_text("t", "p", _tool(["git", "add", "{files}"], args=args))
+    assert '"$_v" == -*' in script
+    assert "cannot start with '-'" in script
 
 
 # -- Env vars ------------------------------------------------------------------

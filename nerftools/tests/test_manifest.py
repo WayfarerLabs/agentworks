@@ -140,6 +140,40 @@ def test_flag_explicit_name(tmp_path: Path) -> None:
     assert m.tools["my-tool"].flags["remote"].flag == "-r"
 
 
+def test_flag_with_short(tmp_path: Path) -> None:
+    raw = _minimal_manifest(
+        tools={
+            "my-tool": {
+                "description": "Tool",
+                "command": ["git", "push", "{remote}"],
+                "flags": {
+                    "remote": {"description": "Remote", "short": "-r"},
+                },
+            },
+        }
+    )
+    p = _write_manifest(tmp_path, raw)
+    m = load_manifest(p)
+    assert m.tools["my-tool"].flags["remote"].short == "-r"
+
+
+def test_invalid_short_flag_raises(tmp_path: Path) -> None:
+    raw = _minimal_manifest(
+        tools={
+            "my-tool": {
+                "description": "Tool",
+                "command": ["git", "push", "{remote}"],
+                "flags": {
+                    "remote": {"description": "Remote", "short": "--r"},
+                },
+            },
+        }
+    )
+    p = _write_manifest(tmp_path, raw)
+    with pytest.raises(ManifestError, match="single-character flag"):
+        load_manifest(p)
+
+
 def test_optional_flag(tmp_path: Path) -> None:
     raw = _minimal_manifest(
         tools={

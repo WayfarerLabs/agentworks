@@ -114,7 +114,8 @@ def _build_script(tool_name: str, package_name: str, tool_spec: ToolSpec) -> str
 def _usage_function(tool_name: str, tool_spec: ToolSpec) -> str:
     usage_parts = [tool_name]
     for name, p in tool_spec.flags.items():
-        flag_str = f"{p.flag} <{name}>"
+        flag_display = f"{p.flag}|{p.short}" if p.short else p.flag
+        flag_str = f"{flag_display} <{name}>"
         usage_parts.append(flag_str if p.required else f"[{flag_str}]")
     for name, spec in tool_spec.args.items():
         token = f"<{name}...>" if spec.variadic else f"<{name}>"
@@ -126,7 +127,8 @@ def _usage_function(tool_name: str, tool_spec: ToolSpec) -> str:
     if tool_spec.flags:
         for name, p in tool_spec.flags.items():
             required_marker = " (required)" if p.required else ""
-            lines.append(f"  {p.flag} <{name}>{required_marker}")
+            flag_display = f"{p.flag}|{p.short}" if p.short else p.flag
+            lines.append(f"  {flag_display} <{name}>{required_marker}")
             lines.append(f"      {p.description}")
             _append_constraints(lines, p.pattern, p.allow, p.deny, indent="      ")
         lines.append("")
@@ -173,7 +175,8 @@ def _flag_parser(flags: dict[str, FlagSpec], *, has_positional: bool) -> str:
     cases = []
     for name, p in flags.items():
         var = _var_name(name)
-        cases.append(f'    {p.flag}) {var}="$2"; shift 2 ;;')
+        pattern = f"{p.flag}|{p.short}" if p.short else p.flag
+        cases.append(f'    {pattern}) {var}="$2"; shift 2 ;;')
     cases.append("    -h|--help) usage ;;")
     if has_positional:
         cases.append("    *) break ;;")
@@ -245,6 +248,12 @@ def _arg_validations(args: dict[str, ArgSpec]) -> str:
         var = _var_name(name)
 
         if spec.variadic:
+            lines.append(f'for _v in "${{{var}[@]}}"; do')
+            lines.append('  if [[ "$_v" == -* ]]; then')
+            lines.append(f'    echo "error: <{name}> values cannot start with \'-\'" >&2; exit 1')
+            lines.append("  fi")
+            lines.append("done")
+            lines.append("")
             if spec.required:
                 lines.append(f'if [[ ${{#{var}[@]}} -eq 0 ]]; then')
                 lines.append(f'  echo "error: <{name}> is required" >&2; usage')
@@ -276,6 +285,10 @@ def _arg_validations(args: dict[str, ArgSpec]) -> str:
                 lines.append("done")
                 lines.append("")
         else:
+            lines.append(f'if [[ -n "${{{var}}}" ]] && [[ "${{{var}}}" == -* ]]; then')
+            lines.append(f'  echo "error: <{name}> cannot start with \'-\'" >&2; exit 1')
+            lines.append("fi")
+            lines.append("")
             if spec.required:
                 lines.append(f'if [[ -z "${{{var}}}" ]]; then')
                 lines.append(f'  echo "error: <{name}> is required" >&2; usage')

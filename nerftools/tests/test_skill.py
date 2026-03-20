@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from nerftools.manifest import ArgSpec, FlagSpec, NerfManifest, PackageMeta, ToolSpec
+from nerftools.manifest import ArgSpec, FlagSpec, GuardSpec, NerfManifest, PackageMeta, ToolSpec
 from nerftools.skill import build_skill_text, build_skills
 
 
@@ -137,6 +137,20 @@ def test_usage_line_required_flag() -> None:
     m = _manifest(tools={"t": _tool(["echo", "{remote}"], flags={"remote": _flag("--remote")})})
     skill = build_skill_text(m)
     assert "--remote <remote>" in skill
+
+
+def test_usage_line_flag_with_short() -> None:
+    flags = {"remote": FlagSpec(flag="--remote", description="Remote", short="-r")}
+    m = _manifest(tools={"t": _tool(["echo", "{remote}"], flags=flags)})
+    skill = build_skill_text(m)
+    assert "--remote|-r <remote>" in skill
+
+
+def test_arg_section_flag_with_short() -> None:
+    flags = {"remote": FlagSpec(flag="--remote", description="Remote name", short="-r")}
+    m = _manifest(tools={"t": _tool(["echo", "{remote}"], flags=flags)})
+    skill = build_skill_text(m)
+    assert "`--remote|-r`" in skill
 
 
 def test_usage_line_optional_flag_bracketed() -> None:
