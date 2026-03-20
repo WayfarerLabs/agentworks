@@ -909,13 +909,27 @@ def _install_nerf_tools(
             ts_target.copy_dir_to(bin_out, bin_dir, delete=False, timeout=60)
             ts_target.copy_dir_to(skills_out, skills_dir, delete=False, timeout=60)
 
+            # Windows tarballs don't preserve Unix execute bits -- set them explicitly
+            _run_logged(
+                ts_target,
+                f"find {shlex.quote(bin_dir)} -type f -exec chmod +x {{}} +",
+                logger,
+            )
+
         typer.echo(f"  Nerf tools installed to {bin_dir}")
 
-        # System-wide PATH so all users (including agent users) can find the tools
+        # System-wide PATH so all users (including agent users) can find the tools.
+        # bash/sh login shells source /etc/profile.d/; zsh uses /etc/zsh/zprofile.
         profile_line = f'export PATH="{bin_dir}:$PATH"'
         _run_logged(
             ts_target,
             f"echo {shlex.quote(profile_line)} | sudo tee /etc/profile.d/agentworks-nerf.sh > /dev/null",
+            logger,
+        )
+        _run_logged(
+            ts_target,
+            f"grep -qF {shlex.quote(bin_dir)} /etc/zsh/zprofile 2>/dev/null"
+            f" || echo {shlex.quote(profile_line)} | sudo tee -a /etc/zsh/zprofile > /dev/null",
             logger,
         )
 
