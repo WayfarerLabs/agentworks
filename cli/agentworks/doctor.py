@@ -49,10 +49,6 @@ def run_doctor() -> None:
             ok(tool)
         else:
             fail(f"{tool} not found")
-    if shutil.which("rsync"):
-        ok("rsync")
-    else:
-        warn("rsync not found (needed for dotfiles sync)")
 
     # -- VM platforms --------------------------------------------------
     typer.echo("\nVM platforms:")

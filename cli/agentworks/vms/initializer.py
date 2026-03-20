@@ -840,7 +840,7 @@ def _install_nerf_tools(
     config: Config,
     logger: InitLogger,
 ) -> None:
-    """Build nerf tools locally and rsync artifacts to the VM. Non-fatal."""
+    """Build nerf tools locally and deploy artifacts to the VM. Non-fatal."""
     logger.step("Nerf tools")
     typer.echo("  Building nerf tools...")
 

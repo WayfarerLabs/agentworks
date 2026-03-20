@@ -1,6 +1,6 @@
 """SSH execution primitive.
 
-All remote operations use native ssh/scp/rsync subprocess calls, respecting
+All remote operations use native ssh/scp subprocess calls, respecting
 the user's SSH config and agent.
 """
 
