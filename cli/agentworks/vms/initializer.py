@@ -901,6 +901,11 @@ def _install_nerf_tools(
             build_scripts(manifests, bin_out, keep_existing=keep)
             build_skills(manifests, skills_out, keep_existing=keep)
 
+            # Install nerfctl scripts (Claude Code permission management)
+            from nerftools import install_nerfctl  # type: ignore[import-not-found]
+
+            install_nerfctl("claude", bin_out)
+
             # Create/clear remote dirs as root, then chown to the current SSH user
             # so copy_dir_to can write without sudo. $(id -un) expands on the remote
             # shell before sudo runs, giving the SSH user's name.

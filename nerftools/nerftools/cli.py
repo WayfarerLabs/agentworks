@@ -18,16 +18,6 @@ app = typer.Typer(
 )
 
 _BUILTIN_MANIFESTS_DIR = Path(__file__).parent.parent / "manifests"
-_NERFCTL_DIR = Path(__file__).parent / "nerfctl"
-
-_NERFCTL_FRAMEWORKS = {
-    "claude": {
-        "grant": _NERFCTL_DIR / "claude" / "grant.sh",
-        "deny": _NERFCTL_DIR / "claude" / "deny.sh",
-        "reset": _NERFCTL_DIR / "claude" / "reset.sh",
-        "list": _NERFCTL_DIR / "claude" / "list.sh",
-    },
-}
 
 
 def _load_manifests(
@@ -114,18 +104,12 @@ def skill(
 
 
 def _do_install_nerfctl(framework: str, output: Path) -> None:
-    scripts = _NERFCTL_FRAMEWORKS.get(framework)
-    if scripts is None:
-        known = ", ".join(_NERFCTL_FRAMEWORKS)
-        typer.echo(f"Error: unknown nerfctl framework '{framework}'. Known: {known}", err=True)
-        sys.exit(1)
+    from nerftools import install_nerfctl
 
-    output.mkdir(parents=True, exist_ok=True)
-    for action, src in scripts.items():
-        if not src.exists():
-            typer.echo(f"Error: nerfctl script not found: {src}", err=True)
-            sys.exit(1)
-        dest = output / f"nerfctl-{framework}-{action}"
-        dest.write_bytes(src.read_bytes())
-        dest.chmod(0o755)
-        typer.echo(f"  {dest}")
+    try:
+        written = install_nerfctl(framework, output)
+    except (ValueError, FileNotFoundError) as e:
+        typer.echo(f"Error: {e}", err=True)
+        sys.exit(1)
+    for path in written:
+        typer.echo(f"  {path}")
