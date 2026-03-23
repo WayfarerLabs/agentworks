@@ -86,6 +86,19 @@ def _make_target(*, key_exists: bool = False) -> MagicMock:
             return arch_result
         if cmd.startswith("test -f"):
             return key_result
+        if cmd.startswith("cat ") and key_exists:
+            # Simulate existing source list file with correct content.
+            # Determine which source file is being read and return matching content.
+            result = MagicMock()
+            result.returncode = 0
+            result.stderr = ""
+            if "test.list" in cmd:
+                result.stdout = "deb [arch=arm64 signed-by=/etc/apt/keyrings/test.gpg] https://example.com stable main\n"
+            elif "dearmor.list" in cmd:
+                result.stdout = "deb [arch=arm64 signed-by=/etc/apt/keyrings/dearmor.gpg] https://example.com stable main\n"
+            else:
+                result.stdout = ""
+            return result
         result = MagicMock()
         result.stdout = ""
         result.stderr = ""

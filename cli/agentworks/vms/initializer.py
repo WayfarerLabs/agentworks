@@ -184,49 +184,63 @@ def _configure_apt_sources(
 
     newly_configured = False
     for name, src in required_sources.items():
-        # Idempotent: skip if key already exists
-        check = target.run(f"test -f {shlex.quote(src.key_path)}", check=False)
-        if check.returncode == 0:
-            typer.echo(f"  Apt source '{name}': already configured, skipping")
-            logger.output(f"apt source {name}: key exists at {src.key_path}, skipping")
+        # Check if GPG key already exists
+        key_exists = target.run(f"test -f {shlex.quote(src.key_path)}", check=False).returncode == 0
+
+        if not key_exists:
+            typer.echo(f"  Configuring apt source '{name}'...")
+            try:
+                # Ensure parent directory for key_path exists
+                from pathlib import PurePosixPath
+
+                key_dir = str(PurePosixPath(src.key_path).parent)
+                _run_logged(target, f"install -m 0755 -d {shlex.quote(key_dir)}", logger, as_root=True)
+
+                # Download GPG key
+                if src.key_dearmor:
+                    # Wrap in sh -c so sudo applies to the entire pipeline,
+                    # not just the curl on the left side of the pipe.
+                    inner = f"curl -fsSL {shlex.quote(src.key_url)} | gpg --dearmor -o {shlex.quote(src.key_path)}"
+                    _run_logged(
+                        target,
+                        f"sh -c {shlex.quote(inner)}",
+                        logger,
+                        as_root=True,
+                        timeout=60,
+                    )
+                else:
+                    _run_logged(
+                        target,
+                        f"curl -fsSL {shlex.quote(src.key_url)} -o {shlex.quote(src.key_path)}",
+                        logger,
+                        as_root=True,
+                        timeout=60,
+                    )
+                _run_logged(target, f"chmod a+r {shlex.quote(src.key_path)}", logger, as_root=True)
+            except SSHError as exc:
+                _warn(f"apt source '{name}' failed: {exc}", logger)
+                continue
+
+        # Always ensure the source list file has the correct content,
+        # even when the key already existed (the source URL may have changed).
+        resolved_source = src.source.replace("{arch}", arch)
+        source_path = f"/etc/apt/sources.list.d/{src.source_file}"
+        expected = resolved_source + "\n"
+        current = target.run(f"cat {shlex.quote(source_path)}", check=False)
+        if current.returncode == 0 and current.stdout == expected:
+            if key_exists:
+                typer.echo(f"  Apt source '{name}': already configured, skipping")
+                logger.output(f"apt source {name}: key and source list up to date, skipping")
             continue
 
-        typer.echo(f"  Configuring apt source '{name}'...")
+        if key_exists:
+            typer.echo(f"  Apt source '{name}': updating source list...")
+            logger.output(f"apt source {name}: key exists but source list needs update")
+
         try:
-            # Ensure parent directory for key_path exists
-            from pathlib import PurePosixPath
-
-            key_dir = str(PurePosixPath(src.key_path).parent)
-            _run_logged(target, f"install -m 0755 -d {shlex.quote(key_dir)}", logger, as_root=True)
-
-            # Download GPG key
-            if src.key_dearmor:
-                # Wrap in sh -c so sudo applies to the entire pipeline,
-                # not just the curl on the left side of the pipe.
-                inner = f"curl -fsSL {shlex.quote(src.key_url)} | gpg --dearmor -o {shlex.quote(src.key_path)}"
-                _run_logged(
-                    target,
-                    f"sh -c {shlex.quote(inner)}",
-                    logger,
-                    as_root=True,
-                    timeout=60,
-                )
-            else:
-                _run_logged(
-                    target,
-                    f"curl -fsSL {shlex.quote(src.key_url)} -o {shlex.quote(src.key_path)}",
-                    logger,
-                    as_root=True,
-                    timeout=60,
-                )
-            _run_logged(target, f"chmod a+r {shlex.quote(src.key_path)}", logger, as_root=True)
-
-            # Write source list
-            resolved_source = src.source.replace("{arch}", arch)
-            source_path = f"/etc/apt/sources.list.d/{src.source_file}"
             _run_logged(
                 target,
-                f"bash -c {shlex.quote(f'printf "%s\\n" {shlex.quote(resolved_source)} > {source_path}')}",
+                f"bash -c {shlex.quote(f'printf \"%s\\n\" {shlex.quote(resolved_source)} > {source_path}')}",
                 logger,
                 as_root=True,
             )
