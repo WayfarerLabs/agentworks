@@ -201,9 +201,12 @@ def _configure_apt_sources(
 
             # Download GPG key
             if src.key_dearmor:
+                # Wrap in sh -c so sudo applies to the entire pipeline,
+                # not just the curl on the left side of the pipe.
+                inner = f"curl -fsSL {shlex.quote(src.key_url)} | gpg --dearmor -o {shlex.quote(src.key_path)}"
                 _run_logged(
                     target,
-                    f"curl -fsSL {shlex.quote(src.key_url)} | gpg --dearmor -o {shlex.quote(src.key_path)}",
+                    f"sh -c {shlex.quote(inner)}",
                     logger,
                     as_root=True,
                     timeout=60,
