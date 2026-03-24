@@ -154,7 +154,8 @@ Manage tasks (named work streams running in workspaces).
 | `agentworks vm console <vm-name>`                | Attach to the VM console    |
 
 `task create` accepts `--name`, `--workspace`, `--template`, and `--agent`. Both name and workspace
-are prompted interactively if omitted.
+are prompted interactively if omitted. Pass `--new-workspace` to create a workspace on the fly
+(with optional `--workspace-name`, `--workspace-template`, and `--vm`).
 
 ### Task tmux Architecture
 

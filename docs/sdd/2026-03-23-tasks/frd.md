@@ -139,9 +139,11 @@ The console is a VM-level tmux session that aggregates tasks.
 
 New command group `agentworks task`:
 
-- `task create --workspace <ws> [--name <name>] [--template <tpl>] [--agent <agent>]` -- create and
-  start a task. Name is prompted if omitted (with a random default). Runs in admin mode by default.
+- `task create [--workspace <ws>] [--name <name>] [--template <tpl>] [--agent <agent>]` -- create
+  and start a task. Name and workspace are prompted if omitted. Runs in admin mode by default.
   Pass `--agent` to run in agent mode as the specified agent user.
+  Pass `--new-workspace` to create a workspace on the fly (with optional `--workspace-name`,
+  `--workspace-template`, and `--vm`). Mutually exclusive with `--workspace`.
 - `task list [--workspace <ws>]` -- list tasks, showing status.
 - `task stop <name> --workspace <ws>` -- stop a running task.
 - `task start <name> --workspace <ws>` -- restart a stopped task.

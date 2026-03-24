@@ -122,6 +122,32 @@ def _prompt_workspace(db: Database, workspace: str | None) -> str:
     return workspaces[choice - 1].name
 
 
+def _prompt_vm(db: Database, vm_name: str | None) -> str:
+    """Prompt for a VM if not provided, listing available VMs."""
+    if vm_name is not None:
+        return vm_name
+
+    vms = db.list_vms()
+    if not vms:
+        typer.echo("Error: no VMs found. Create one with 'agentworks vm create'.", err=True)
+        raise typer.Exit(1)
+
+    if len(vms) == 1:
+        typer.echo(f"Using VM '{vms[0].name}'")
+        return vms[0].name
+
+    typer.echo("Select a VM:")
+    for i, v in enumerate(vms, 1):
+        typer.echo(f"  {i}) {v.name}  ({v.platform})")
+
+    choice = int(typer.prompt("VM number", type=int))
+    if choice < 1 or choice > len(vms):
+        typer.echo(f"Error: invalid choice {choice}", err=True)
+        raise typer.Exit(1)
+
+    return vms[choice - 1].name
+
+
 class _HasDescription(Protocol):
     """Structural protocol for catalog entries that have a description."""
 
@@ -461,20 +487,59 @@ def agent_delete(
 @task_app.command("create")
 def task_create(
     name: Annotated[str | None, typer.Option("--name", help="Task name (prompted if omitted)")] = None,
-    workspace: Annotated[str | None, typer.Option("--workspace", help="Workspace name (prompted if omitted)")] = None,
+    workspace: Annotated[str | None, typer.Option("--workspace", help="Existing workspace")] = None,
     template: Annotated[str | None, typer.Option("--template", help="Task template")] = None,
     agent: Annotated[str | None, typer.Option("--agent", help="Agent name (agent mode)")] = None,
+    new_workspace: Annotated[bool, typer.Option("--new-workspace", help="Create a new workspace")] = False,
+    workspace_name: Annotated[str | None, typer.Option("--workspace-name", help="Name for new workspace")] = None,
+    workspace_template: Annotated[
+        str | None, typer.Option("--workspace-template", help="Template for new workspace")
+    ] = None,
+    vm: Annotated[str | None, typer.Option("--vm", help="VM for new workspace")] = None,
 ) -> None:
     """Create and start a task in a workspace."""
     from agentworks.config import load_config
     from agentworks.tasks.manager import create_task
+    from agentworks.workspaces.manager import create_workspace
+
+    # Validate flag combinations before any prompts
+    if workspace and new_workspace:
+        typer.echo("Error: --workspace and --new-workspace are mutually exclusive", err=True)
+        raise typer.Exit(1)
+    if not new_workspace and (workspace_name or workspace_template or vm):
+        typer.echo(
+            "Error: --workspace-name, --workspace-template, and --vm "
+            "require --new-workspace",
+            err=True,
+        )
+        raise typer.Exit(1)
 
     db = _get_db()
-    resolved_workspace = _prompt_workspace(db, workspace)
-    resolved_name = _prompt_name("Task", name)
+    config = load_config()
+
+    if new_workspace:
+        # Resolve task name first (workspace name may depend on it)
+        resolved_name = _prompt_name("Task", name)
+        resolved_ws_name = workspace_name or f"ws-{resolved_name}"
+
+        # Resolve VM (prompt if needed)
+        resolved_vm = _prompt_vm(db, vm)
+
+        # Create the workspace
+        create_workspace(
+            db, config,
+            name=resolved_ws_name,
+            vm_name=resolved_vm,
+            template_name=workspace_template,
+        )
+        resolved_workspace = resolved_ws_name
+    else:
+        resolved_workspace = _prompt_workspace(db, workspace)
+        resolved_name = _prompt_name("Task", name)
+
     create_task(
         db,
-        load_config(),
+        config,
         name=resolved_name,
         workspace_name=resolved_workspace,
         template_name=template,

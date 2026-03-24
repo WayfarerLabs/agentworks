@@ -77,6 +77,8 @@ DYNAMIC_COMPLETIONS: dict[tuple[str, str], str] = {
     # Task commands
     ("task.create", "workspace"): "workspaces",
     ("task.create", "template"): "task_templates",
+    ("task.create", "workspace_template"): "ws_templates",
+    ("task.create", "vm"): "vms",
     ("task.list", "workspace"): "workspaces",
     ("task.stop", "name"): "tasks",
     ("task.stop", "workspace"): "workspaces",
