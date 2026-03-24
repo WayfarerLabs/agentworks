@@ -705,26 +705,31 @@ def _collect_secrets(
     return ts_auth_key, git_tokens
 
 
+_RESOURCE_QUERY_RETRIES = 3
+_RESOURCE_QUERY_TIMEOUT = 15
+
+
 def _query_live_resources(vm: VMRow, config: Config) -> dict[str, str] | None:
-    """Query live resource usage from a VM over SSH. Returns None on failure."""
+    """Query live resource usage from a VM over SSH. Retries on failure."""
     from agentworks.ssh import run, ssh_target_for_vm
 
     target = ssh_target_for_vm(vm, config)
-    try:
-        # Single SSH call. free outputs: total used free shared buff/cache available
-        result = run(
-            target,
-            "nproc && "
-            "uptime | grep -oP 'load average: \\K[^,]+' && "
-            "free -b | awk '/^Mem:/{print $2,$3} /^Swap:/{print $2,$3}' && "
-            "df -h / | awk 'NR==2{print $2,$3,$5}'",
-            check=False,
-            timeout=10,
-        )
-    except Exception:
-        return None
+    cmd = (
+        "nproc && "
+        "uptime | grep -oP 'load average: \\K[^,]+' && "
+        "free -b | awk '/^Mem:/{print $2,$3} /^Swap:/{print $2,$3}' && "
+        "df -h / | awk 'NR==2{print $2,$3,$5}'"
+    )
 
-    if not result.ok:
+    result = None
+    for attempt in range(_RESOURCE_QUERY_RETRIES):
+        try:
+            result = run(target, cmd, check=False, timeout=_RESOURCE_QUERY_TIMEOUT)
+            if result.ok:
+                break
+        except Exception:
+            pass
+    if result is None or not result.ok:
         return None
 
     lines = result.stdout.strip().splitlines()
