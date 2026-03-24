@@ -17,10 +17,7 @@ class AzDOCredentialProvider(GitCredentialProvider):
         return True
 
     def auth_hint(self) -> str:
-        return (
-            f"Create a PAT at https://dev.azure.com/{self._org}/_usersSettings/tokens "
-            "(Code Read & Write scope)"
-        )
+        return f"Create a PAT at https://dev.azure.com/{self._org}/_usersSettings/tokens (Code Read & Write scope)"
 
     def _prompt_token(self, vm_name: str) -> str:
         return prompt_secret(

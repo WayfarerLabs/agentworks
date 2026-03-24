@@ -8,6 +8,7 @@ dependencies = [
     "azure-identity>=1.25.1",
     "azure-mgmt-compute>=37.0.1",
     "azure-mgmt-network>=29.0.0",
+    "nerftools",
 ]
 
 [project.scripts]
@@ -41,6 +42,9 @@ python_version = "3.12"
 strict = true
 warn_return_any = true
 warn_unused_configs = true
+
+[tool.uv.sources]
+nerftools = { path = "../nerftools", editable = true }
 
 [dependency-groups]
 dev = [

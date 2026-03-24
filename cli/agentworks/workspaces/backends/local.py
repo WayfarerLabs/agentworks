@@ -31,7 +31,7 @@ def create_local_workspace(
     workspace_path = str(workspace_dir)
 
     if workspace_dir.exists():
-        typer.echo(f"  Removing stale workspace directory from previous attempt...")
+        typer.echo("  Removing stale workspace directory from previous attempt...")
         shutil.rmtree(workspace_dir)
 
     # Git clone or just create directory
@@ -40,7 +40,9 @@ def create_local_workspace(
         try:
             result = subprocess.run(
                 ["git", "clone", template.repo, workspace_path],
-                capture_output=True, text=True, timeout=300,
+                capture_output=True,
+                text=True,
+                timeout=300,
             )
         except subprocess.TimeoutExpired:
             typer.echo("Error: git clone timed out after 5 minutes", err=True)

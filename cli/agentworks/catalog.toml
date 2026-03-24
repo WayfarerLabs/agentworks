@@ -30,6 +30,14 @@ key_dearmor = true
 source = "deb [arch={arch} signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main"
 source_file = "nodesource.list"
 
+[apt_sources.tofuutils-tenv]
+description = "tofuutils tenv apt repository (Cloudsmith)"
+key_url = "https://dl.cloudsmith.io/public/tofuutils/tenv/gpg.8ACD4386ADD982F6.key"
+key_path = "/etc/apt/keyrings/tofuutils-tenv-archive-keyring.gpg"
+key_dearmor = true
+source = "deb [signed-by=/etc/apt/keyrings/tofuutils-tenv-archive-keyring.gpg] https://dl.cloudsmith.io/public/tofuutils/tenv/deb/debian bookworm main"
+source_file = "tofuutils-tenv.list"
+
 # -- Apt packages --------------------------------------------------------------
 # Named sets of apt packages with optional apt source dependencies.
 
@@ -47,6 +55,11 @@ apt = ["terraform"]
 description = "Node.js 22.x via NodeSource"
 apt_sources = ["nodesource-v22"]
 apt = ["nodejs"]
+
+[apt_packages.tenv]
+description = "tenv (Terraform/OpenTofu/Terragrunt version manager)"
+apt_sources = ["tofuutils-tenv"]
+apt = ["tenv"]
 
 # -- System install commands ---------------------------------------------------
 # Shell commands that install system-wide tooling (run once per VM).

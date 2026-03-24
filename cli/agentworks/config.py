@@ -119,6 +119,13 @@ class VMConfig:
     snap: list[str] = field(default_factory=list)
     system_install_commands: list[str] = field(default_factory=list)
     admin_install_commands: list[str] = field(default_factory=list)
+    # Nerf tools
+    install_nerf_tools: bool = False
+    skip_nerf_defaults: bool = False
+    nerf_addl_manifests: list[Path] = field(default_factory=list)
+    nerf_keep_existing: bool = False
+    nerf_bin_dir: str = "/opt/agentworks/nerf/bin"
+    nerf_skills_dir: str = "/opt/agentworks/nerf/skills"
 
 
 @dataclass(frozen=True)
@@ -181,7 +188,9 @@ def _require(data: dict[str, object], key: str, context: str) -> object:
 
 
 def _warn_unexpected_keys(
-    raw: dict[str, object], known: set[str], section: str,
+    raw: dict[str, object],
+    known: set[str],
+    section: str,
 ) -> None:
     """Warn about unexpected keys in a config section.
 
@@ -202,8 +211,12 @@ def _warn_unexpected_keys(
 
 
 _USER_KEYS = {
-    "ssh_public_key", "ssh_private_key", "ssh_config",
-    "ssh_config_dir", "ssh_host_prefix", "extra_ssh_public_keys",
+    "ssh_public_key",
+    "ssh_private_key",
+    "ssh_config",
+    "ssh_config_dir",
+    "ssh_host_prefix",
+    "extra_ssh_public_keys",
 }
 
 
@@ -305,9 +318,23 @@ def _load_dotfiles(data: dict[str, object]) -> DotfilesConfig:
 
 
 _VM_CONFIG_KEYS = {
-    "cpus", "memory", "disk", "azure_vm_size", "admin_username",
-    "admin_shell", "apt", "apt_packages", "snap",
-    "system_install_commands", "admin_install_commands",
+    "cpus",
+    "memory",
+    "disk",
+    "azure_vm_size",
+    "admin_username",
+    "admin_shell",
+    "apt",
+    "apt_packages",
+    "snap",
+    "system_install_commands",
+    "admin_install_commands",
+    "install_nerf_tools",
+    "skip_nerf_defaults",
+    "nerf_addl_manifests",
+    "nerf_keep_existing",
+    "nerf_bin_dir",
+    "nerf_skills_dir",
 }
 
 
@@ -321,6 +348,8 @@ def _load_vm_config(data: dict[str, object]) -> VMConfig:
 
     _warn_unexpected_keys(raw, _VM_CONFIG_KEYS, "vm.config")
 
+    nerf_addl_manifests = [_expand(str(m)) for m in raw.get("nerf_addl_manifests", [])]
+
     return VMConfig(
         cpus=int(raw.get("cpus", 4)),
         memory=int(raw.get("memory", 8)),
@@ -333,6 +362,12 @@ def _load_vm_config(data: dict[str, object]) -> VMConfig:
         snap=list(raw.get("snap", [])),
         system_install_commands=list(raw.get("system_install_commands", [])),
         admin_install_commands=list(raw.get("admin_install_commands", [])),
+        install_nerf_tools=bool(raw.get("install_nerf_tools", False)),
+        skip_nerf_defaults=bool(raw.get("skip_nerf_defaults", False)),
+        nerf_addl_manifests=nerf_addl_manifests,
+        nerf_keep_existing=bool(raw.get("nerf_keep_existing", False)),
+        nerf_bin_dir=str(raw.get("nerf_bin_dir", "/opt/agentworks/nerf/bin")),
+        nerf_skills_dir=str(raw.get("nerf_skills_dir", "/opt/agentworks/nerf/skills")),
     )
 
 
@@ -355,8 +390,13 @@ def _load_agent_config(data: dict[str, object]) -> AgentConfig:
     )
 
 
-def _load_catalog_sections(data: dict[str, object]) -> tuple[
-    dict[str, object], dict[str, object], dict[str, object], dict[str, object],
+def _load_catalog_sections(
+    data: dict[str, object],
+) -> tuple[
+    dict[str, object],
+    dict[str, object],
+    dict[str, object],
+    dict[str, object],
 ]:
     """Load the four user-defined catalog sections as raw dicts.
 
@@ -464,9 +504,19 @@ def _load_azure(data: dict[str, object]) -> AzureConfig | None:
 
 
 EXPECTED_TOP_LEVEL_KEYS = {
-    "user", "paths", "defaults", "dotfiles", "vm", "agent",
-    "apt_sources", "apt_packages", "system_install_commands", "user_install_commands",
-    "workspace_templates", "git_credentials", "azure",
+    "user",
+    "paths",
+    "defaults",
+    "dotfiles",
+    "vm",
+    "agent",
+    "apt_sources",
+    "apt_packages",
+    "system_install_commands",
+    "user_install_commands",
+    "workspace_templates",
+    "git_credentials",
+    "azure",
 }
 
 

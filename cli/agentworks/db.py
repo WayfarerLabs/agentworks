@@ -305,9 +305,7 @@ class Database:
         self._conn.commit()
 
     def count_vms_on_host(self, vm_host_name: str) -> int:
-        row = self._conn.execute(
-            "SELECT COUNT(*) FROM vms WHERE vm_host_name = ?", (vm_host_name,)
-        ).fetchone()
+        row = self._conn.execute("SELECT COUNT(*) FROM vms WHERE vm_host_name = ?", (vm_host_name,)).fetchone()
         return int(row[0])
 
     # -- VMs ---------------------------------------------------------------
@@ -454,9 +452,7 @@ class Database:
         self._conn.commit()
 
     def count_workspaces_on_vm(self, vm_name: str) -> int:
-        row = self._conn.execute(
-            "SELECT COUNT(*) FROM workspaces WHERE vm_name = ?", (vm_name,)
-        ).fetchone()
+        row = self._conn.execute("SELECT COUNT(*) FROM workspaces WHERE vm_name = ?", (vm_name,)).fetchone()
         return int(row[0])
 
     # -- Agents ------------------------------------------------------------
@@ -501,7 +497,8 @@ class Database:
         """Delete all agents for a workspace, returning the deleted agents."""
         agents = self.list_agents(workspace_name=workspace_name)
         self._conn.execute(
-            "DELETE FROM agents WHERE workspace_name = ?", (workspace_name,),
+            "DELETE FROM agents WHERE workspace_name = ?",
+            (workspace_name,),
         )
         self._conn.commit()
         return agents

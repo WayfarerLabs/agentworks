@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import secrets
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated, Protocol
 
 import click
 import typer
 
 from agentworks.db import Database
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 app = typer.Typer(
     name="agentworks",
@@ -61,6 +64,7 @@ config_app = typer.Typer(
 app.add_typer(config_app)
 
 
+
 # -- Helpers ---------------------------------------------------------------
 
 
@@ -80,12 +84,22 @@ def _prompt_name(label: str, name: str | None) -> str:
     return str(typer.prompt(f"{label} name", default=default))
 
 
+class _HasDescription(Protocol):
+    """Structural protocol for catalog entries that have a description."""
+
+    @property
+    def description(self) -> str: ...
+
+
 # -- Top-level commands ----------------------------------------------------
+
+
+_SHELL_CHOICES = click.Choice(["bash", "zsh", "powershell"])
 
 
 @app.command("completion")
 def completion(
-    shell: Annotated[str, typer.Argument(help="Shell type", click_type=click.Choice(["bash", "zsh", "powershell"]))] = "zsh",
+    shell: Annotated[str, typer.Argument(help="Shell type", click_type=_SHELL_CHOICES)] = "zsh",
     install: Annotated[bool, typer.Option("--install", help="Install completions to the default location")] = False,
 ) -> None:
     """Output shell completion script (or install it with --install)."""
@@ -158,9 +172,7 @@ def vm_create(
     cpus: Annotated[int | None, typer.Option("--cpus", help="Number of CPUs")] = None,
     memory: Annotated[int | None, typer.Option("--memory", help="Memory in GiB")] = None,
     disk: Annotated[int | None, typer.Option("--disk", help="Disk size in GiB")] = None,
-    azure_vm_size: Annotated[
-        str | None, typer.Option("--azure-vm-size", help="Azure VM size")
-    ] = None,
+    azure_vm_size: Annotated[str | None, typer.Option("--azure-vm-size", help="Azure VM size")] = None,
     admin_username: Annotated[str | None, typer.Option("--admin-username", help="Admin username on the VM")] = None,
 ) -> None:
     """Create a new VM (provision + initialize)."""
@@ -170,10 +182,16 @@ def vm_create(
     resolved_name = _prompt_name("VM", name)
     config = load_config()
     create_vm(
-        _get_db(), config,
-        name=resolved_name, platform=platform, vm_host=vm_host,
-        cpus=cpus, memory=memory, disk=disk,
-        azure_vm_size=azure_vm_size, admin_username=admin_username,
+        _get_db(),
+        config,
+        name=resolved_name,
+        platform=platform,
+        vm_host=vm_host,
+        cpus=cpus,
+        memory=memory,
+        disk=disk,
+        azure_vm_size=azure_vm_size,
+        admin_username=admin_username,
     )
 
 
@@ -285,9 +303,13 @@ def workspace_create(
 
     resolved_name = _prompt_name("Workspace", name)
     create_workspace(
-        _get_db(), load_config(),
-        name=resolved_name, vm_name=vm, local=local,
-        template_name=template, open_vscode=open_vscode,
+        _get_db(),
+        load_config(),
+        name=resolved_name,
+        vm_name=vm,
+        local=local,
+        template_name=template,
+        open_vscode=open_vscode,
     )
 
 
@@ -387,9 +409,7 @@ _TYPE_CHOICES = click.Choice(["apt-source", "apt-package", "system-install-cmd",
 
 @installer_app.command("list")
 def installer_list(
-    type_filter: Annotated[
-        str | None, typer.Option("--type", help="Filter by type", click_type=_TYPE_CHOICES)
-    ] = None,
+    type_filter: Annotated[str | None, typer.Option("--type", help="Filter by type", click_type=_TYPE_CHOICES)] = None,
     source_filter: Annotated[
         str | None, typer.Option("--source", help="Filter by source", click_type=click.Choice(["builtin", "user"]))
     ] = None,
@@ -406,8 +426,8 @@ def installer_list(
 
     def _add_entries(
         type_label: str,
-        merged_entries: dict[str, object],
-        builtin_entries: dict[str, object],
+        merged_entries: Mapping[str, _HasDescription],
+        builtin_entries: Mapping[str, _HasDescription],
     ) -> None:
         for name, entry in sorted(merged_entries.items()):
             is_builtin = name in builtin_entries
@@ -477,13 +497,25 @@ def installer_describe(
     builtin = load_builtin_catalog()
     merged = load_catalog(config)
 
-    # Search all four pools
-    for type_label, merged_entries, builtin_entries, config_attr in [
+    # Search all four pools; Mapping[str, _HasDescription] covers all catalog entry types
+    # (all have description: str) and allows covariant use of the concrete dict types.
+    pools: list[tuple[str, Mapping[str, _HasDescription], Mapping[str, _HasDescription], str]] = [
         ("apt-source", merged.apt_sources, builtin.apt_sources, "apt_sources"),
         ("apt-package", merged.apt_packages, builtin.apt_packages, "apt_packages"),
-        ("system-install-cmd", merged.system_install_commands, builtin.system_install_commands, "system_install_commands"),
-        ("user-install-cmd", merged.user_install_commands, builtin.user_install_commands, "user_install_commands"),
-    ]:
+        (
+            "system-install-cmd",
+            merged.system_install_commands,
+            builtin.system_install_commands,
+            "system_install_commands",
+        ),
+        (
+            "user-install-cmd",
+            merged.user_install_commands,
+            builtin.user_install_commands,
+            "user_install_commands",
+        ),
+    ]
+    for type_label, merged_entries, builtin_entries, config_attr in pools:
         if name not in merged_entries:
             continue
 
@@ -565,3 +597,4 @@ def config_sync_ssh_config() -> None:
     from agentworks.ssh_config import sync_ssh_config
 
     sync_ssh_config(load_config(), _get_db())
+

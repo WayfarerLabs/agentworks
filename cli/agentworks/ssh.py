@@ -1,6 +1,6 @@
 """SSH execution primitive.
 
-All remote operations use native ssh/scp/rsync subprocess calls, respecting
+All remote operations use native ssh/scp subprocess calls, respecting
 the user's SSH config and agent.
 """
 
@@ -104,18 +104,15 @@ def run(
             text=True,
             timeout=timeout,
         )
-    except subprocess.TimeoutExpired:
-        raise SSHError(f"SSH command timed out after {timeout}s: {command}")
+    except subprocess.TimeoutExpired as err:
+        raise SSHError(f"SSH command timed out after {timeout}s: {command}") from err
     ssh_result = SSHResult(
         returncode=result.returncode,
         stdout=result.stdout,
         stderr=result.stderr,
     )
     if check and not ssh_result.ok:
-        raise SSHError(
-            f"SSH command failed (exit {result.returncode}): {command}\n"
-            f"stderr: {result.stderr.strip()}"
-        )
+        raise SSHError(f"SSH command failed (exit {result.returncode}): {command}\nstderr: {result.stderr.strip()}")
     return ssh_result
 
 
@@ -177,30 +174,6 @@ def write_file(
         run(target, f"chmod {mode} {remote_path}")
 
 
-def rsync_to(
-    target: SSHTarget,
-    local_path: str | Path,
-    remote_path: str,
-    *,
-    timeout: int | None = None,
-) -> None:
-    """Rsync a directory to a remote host."""
-    ssh_cmd = "ssh -o StrictHostKeyChecking=accept-new -o BatchMode=yes"
-    if target.port is not None:
-        ssh_cmd += f" -p {target.port}"
-    if target.identity_file is not None:
-        ssh_cmd += f" -i {target.identity_file}"
-
-    args = [
-        "rsync", "-az", "--delete",
-        "-e", ssh_cmd,
-        f"{local_path}/",
-        f"{target.user}@{target.host}:{remote_path}/" if target.user else f"{target.host}:{remote_path}/",
-    ]
-
-    result = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
-    if result.returncode != 0:
-        raise SSHError(f"rsync failed: {result.stderr.strip()}")
 
 
 @dataclass
@@ -221,18 +194,15 @@ def lima_run(
     args = ["limactl", "shell", target.vm_name, "bash", "-lc", command]
     try:
         result = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
-    except subprocess.TimeoutExpired:
-        raise SSHError(f"Lima command timed out after {timeout}s: {command}")
+    except subprocess.TimeoutExpired as err:
+        raise SSHError(f"Lima command timed out after {timeout}s: {command}") from err
     ssh_result = SSHResult(
         returncode=result.returncode,
         stdout=result.stdout,
         stderr=result.stderr,
     )
     if check and not ssh_result.ok:
-        raise SSHError(
-            f"Lima command failed (exit {result.returncode}): {command}\n"
-            f"stderr: {result.stderr.strip()}"
-        )
+        raise SSHError(f"Lima command failed (exit {result.returncode}): {command}\nstderr: {result.stderr.strip()}")
     return ssh_result
 
 
@@ -287,24 +257,27 @@ def wsl2_run(
 ) -> SSHResult:
     """Execute a command inside a WSL2 distro."""
     args = [
-        "wsl", "--distribution", target.distro_name,
-        "--user", target.user,
-        "--", "bash", "-lc", command,
+        "wsl",
+        "--distribution",
+        target.distro_name,
+        "--user",
+        target.user,
+        "--",
+        "bash",
+        "-lc",
+        command,
     ]
     try:
         result = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
-    except subprocess.TimeoutExpired:
-        raise SSHError(f"WSL2 command timed out after {timeout}s: {command}")
+    except subprocess.TimeoutExpired as err:
+        raise SSHError(f"WSL2 command timed out after {timeout}s: {command}") from err
     ssh_result = SSHResult(
         returncode=result.returncode,
         stdout=result.stdout,
         stderr=result.stderr,
     )
     if check and not ssh_result.ok:
-        raise SSHError(
-            f"WSL2 command failed (exit {result.returncode}): {command}\n"
-            f"stderr: {result.stderr.strip()}"
-        )
+        raise SSHError(f"WSL2 command failed (exit {result.returncode}): {command}\nstderr: {result.stderr.strip()}")
     return ssh_result
 
 
@@ -312,7 +285,8 @@ def _lima_copy_to(target: LimaTarget, local_path: str | Path, remote_path: str) 
     """Copy a file into a local Lima VM via limactl copy."""
     result = subprocess.run(
         ["limactl", "copy", str(local_path), f"{target.vm_name}:{remote_path}"],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     if result.returncode != 0:
         raise SSHError(f"limactl copy failed: {result.stderr.strip()}")
@@ -332,9 +306,9 @@ def _wsl2_copy_to(target: WSL2Target, local_path: str | Path, remote_path: str) 
     """Copy a file into a WSL2 distro via stdin to avoid path translation issues."""
     content = Path(local_path).read_bytes()
     result = subprocess.run(
-        ["wsl", "--distribution", target.distro_name, "--user", "root",
-         "--", "bash", "-c", f"cat > {remote_path}"],
-        input=content, capture_output=True,
+        ["wsl", "--distribution", target.distro_name, "--user", "root", "--", "bash", "-c", f"cat > {remote_path}"],
+        input=content,
+        capture_output=True,
     )
     if result.returncode != 0:
         raise SSHError(f"WSL2 copy failed: {result.stderr.decode().strip()}")
@@ -383,10 +357,10 @@ class ExecTarget:
         msg = "ExecTarget has no target configured"
         raise SSHError(msg)
 
-    def copy_to(self, local_path: str | Path, remote_path: str) -> None:
+    def copy_to(self, local_path: str | Path, remote_path: str, *, timeout: int | None = None) -> None:
         """Copy a local file to the target."""
         if self.ssh is not None:
-            copy_to(self.ssh, local_path, remote_path)
+            copy_to(self.ssh, local_path, remote_path, timeout=timeout)
         elif self.lima is not None:
             _lima_copy_to(self.lima, local_path, remote_path)
         elif self.remote_lima is not None:
@@ -396,6 +370,46 @@ class ExecTarget:
         else:
             msg = "ExecTarget has no target configured"
             raise SSHError(msg)
+
+    def copy_dir_to(
+        self,
+        local_path: str | Path,
+        remote_path: str,
+        *,
+        delete: bool = True,
+        timeout: int | None = None,
+    ) -> None:
+        """Copy a local directory to the target via tar + scp.
+
+        Creates a gzip tarball with Python's stdlib tarfile (no client-side tar
+        binary required -- works on Windows), scps it to the remote, and
+        extracts it there.
+
+        With delete=True (default), the remote directory is cleared before
+        extraction so stale files do not linger. Pass delete=False to extract
+        on top of existing contents, preserving unmanaged files.
+        """
+        import tarfile as tarfile_mod
+
+        local_path = Path(local_path)
+        with tempfile.NamedTemporaryFile(suffix=".tar.gz", delete=False) as f:
+            tmp_path = Path(f.name)
+
+        try:
+            with tarfile_mod.open(tmp_path, "w:gz") as tar:
+                tar.add(local_path, arcname=".")
+
+            remote_tmp = f"/tmp/agentworks-copy-{tmp_path.name}"
+            self.copy_to(tmp_path, remote_tmp, timeout=timeout)
+        finally:
+            tmp_path.unlink(missing_ok=True)
+
+        if delete:
+            self.run(f"rm -rf {remote_path} && mkdir -p {remote_path}", timeout=timeout)
+        else:
+            self.run(f"mkdir -p {remote_path}", timeout=timeout)
+
+        self.run(f"tar -xzf {remote_tmp} -C {remote_path} && rm -f {remote_tmp}", timeout=timeout)
 
     def write_file(self, remote_path: str, content: str, *, mode: str | None = None) -> None:
         """Write string content to a remote file safely.

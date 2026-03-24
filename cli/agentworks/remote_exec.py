@@ -106,7 +106,10 @@ def run_detached(
 
     # Poll for completion
     output = _poll_until_done(
-        target, output_file, pid_file, status_file,
+        target,
+        output_file,
+        pid_file,
+        status_file,
         label=label,
         poll_interval=poll_interval,
         quiet_timeout=quiet_timeout,

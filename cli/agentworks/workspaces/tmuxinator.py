@@ -42,12 +42,14 @@ def generate_config(
     ]
 
     for agent in agents or []:
-        lines.extend([
-            f"  - {agent.name}:",
-            f"      root: {workspace_path}",
-            "      panes:",
-            f'        - su - {agent.linux_user}',
-        ])
+        lines.extend(
+            [
+                f"  - {agent.name}:",
+                f"      root: {workspace_path}",
+                "      panes:",
+                f"        - su - {agent.linux_user}",
+            ]
+        )
 
     lines.append("")  # trailing newline
     return "\n".join(lines)
@@ -67,8 +69,7 @@ def add_window_to_session(
         return
 
     run_command(
-        f"tmux new-window -t {ws_name} -n {agent_name} "
-        f"-c {workspace_path} 'su - {linux_user}'",
+        f"tmux new-window -t {ws_name} -n {agent_name} -c {workspace_path} 'su - {linux_user}'",
         check=False,
     )
 

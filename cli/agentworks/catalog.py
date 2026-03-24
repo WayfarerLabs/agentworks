@@ -133,9 +133,7 @@ def _load_apt_packages(raw: dict[str, object]) -> dict[str, AptPackageEntry]:
 def _load_test_fields(data: dict[str, object], ctx: str) -> dict[str, str | None]:
     """Load and validate test_exec/test_file/test_dir fields. At most one may be set."""
     if "test" in data:
-        raise CatalogError(
-            f"{ctx}: 'test' is not a valid field. Use 'test_exec', 'test_file', or 'test_dir'."
-        )
+        raise CatalogError(f"{ctx}: 'test' is not a valid field. Use 'test_exec', 'test_file', or 'test_dir'.")
     fields: dict[str, str | None] = {}
     for key in ("test_exec", "test_file", "test_dir"):
         raw = str(data[key]).strip() if key in data else None
@@ -194,12 +192,20 @@ def load_builtin_catalog() -> ResolvedCatalog:
     return _parse_catalog(data)
 
 
+def _get_section(data: dict[str, object], key: str) -> dict[str, object]:
+    """Extract a TOML table section, returning an empty dict if missing or wrong type."""
+    val = data.get(key, {})
+    if not isinstance(val, dict):
+        raise CatalogError(f"Catalog section '{key}' must be a table, got {type(val).__name__}")
+    return val
+
+
 def _parse_catalog(data: dict[str, object]) -> ResolvedCatalog:
     return ResolvedCatalog(
-        apt_sources=_load_apt_sources(data.get("apt_sources", {})),
-        apt_packages=_load_apt_packages(data.get("apt_packages", {})),
-        system_install_commands=_load_system_commands(data.get("system_install_commands", {})),
-        user_install_commands=_load_user_commands(data.get("user_install_commands", {})),
+        apt_sources=_load_apt_sources(_get_section(data, "apt_sources")),
+        apt_packages=_load_apt_packages(_get_section(data, "apt_packages")),
+        system_install_commands=_load_system_commands(_get_section(data, "system_install_commands")),
+        user_install_commands=_load_user_commands(_get_section(data, "user_install_commands")),
     )
 
 
@@ -239,30 +245,20 @@ def _validate_references(catalog: ResolvedCatalog) -> None:
     for name, pkg in catalog.apt_packages.items():
         for src_name in pkg.apt_sources:
             if src_name not in catalog.apt_sources:
-                raise CatalogError(
-                    f"apt_packages.{name} references unknown apt source: {src_name}"
-                )
+                raise CatalogError(f"apt_packages.{name} references unknown apt source: {src_name}")
 
 
 def validate_selections(config: Config, catalog: ResolvedCatalog) -> None:
     """Validate that vm.config and agent.config selections resolve in the catalog."""
     for ref in config.vm.apt_packages:
         if ref not in catalog.apt_packages:
-            raise CatalogError(
-                f"vm.config.apt_packages references unknown entry: {ref}"
-            )
+            raise CatalogError(f"vm.config.apt_packages references unknown entry: {ref}")
     for ref in config.vm.system_install_commands:
         if ref not in catalog.system_install_commands:
-            raise CatalogError(
-                f"vm.config.system_install_commands references unknown entry: {ref}"
-            )
+            raise CatalogError(f"vm.config.system_install_commands references unknown entry: {ref}")
     for ref in config.vm.admin_install_commands:
         if ref not in catalog.user_install_commands:
-            raise CatalogError(
-                f"vm.config.admin_install_commands references unknown entry: {ref}"
-            )
+            raise CatalogError(f"vm.config.admin_install_commands references unknown entry: {ref}")
     for ref in config.agent.user_install_commands:
         if ref not in catalog.user_install_commands:
-            raise CatalogError(
-                f"agent.config.user_install_commands references unknown entry: {ref}"
-            )
+            raise CatalogError(f"agent.config.user_install_commands references unknown entry: {ref}")

@@ -12,37 +12,37 @@ DYNAMIC_SNIPPETS: dict[str, str] = {
     "vms": (
         "(agentworks vm list 2>$null | Select-Object -Skip 2 |"
         " ForEach-Object { ($_ -split '\\s+')[0] } |"
-        " Where-Object { $_ -like \"$wordToComplete*\" })"
+        ' Where-Object { $_ -like "$wordToComplete*" })'
     ),
     "vm_hosts": (
         "(agentworks vm-host list 2>$null | Select-Object -Skip 2 |"
         " ForEach-Object { ($_ -split '\\s+')[0] } |"
-        " Where-Object { $_ -like \"$wordToComplete*\" })"
+        ' Where-Object { $_ -like "$wordToComplete*" })'
     ),
     "workspaces": (
         "(agentworks workspace list 2>$null | Select-Object -Skip 2 |"
         " ForEach-Object { ($_ -split '\\s+')[0] } |"
-        " Where-Object { $_ -like \"$wordToComplete*\" })"
+        ' Where-Object { $_ -like "$wordToComplete*" })'
     ),
     "ws_templates": (
         "& { $f = Join-Path $env:USERPROFILE '.config/agentworks/config.toml';"
         " if (Test-Path $f) {"
         " Get-Content $f | Select-String '^\\[workspace_templates\\.([^\\]]+)\\]'"
         " | ForEach-Object { $_.Matches[0].Groups[1].Value }"
-        " | Where-Object { $_ -like \"$wordToComplete*\" } } }"
+        ' | Where-Object { $_ -like "$wordToComplete*" } } }'
     ),
     "git_credentials": (
         "& { $f = Join-Path $env:USERPROFILE '.config/agentworks/config.toml';"
         " if (Test-Path $f) {"
         " Get-Content $f | Select-String '^\\[git_credentials\\.([^\\]]+)\\]'"
         " | ForEach-Object { $_.Matches[0].Groups[1].Value }"
-        " | Where-Object { $_ -like \"$wordToComplete*\" } } }"
+        ' | Where-Object { $_ -like "$wordToComplete*" } } }'
     ),
     "catalog_entries": (
         "& { agentworks installer list 2>$null"
         " | Select-Object -Skip 2"
         " | ForEach-Object { ($_ -split '\\s+')[1] }"
-        " | Where-Object { $_ -like \"$wordToComplete*\" } }"
+        ' | Where-Object { $_ -like "$wordToComplete*" } }'
     ),
 }
 
@@ -54,9 +54,7 @@ def _open_result_array(lines: list[str], indent: str) -> None:
 
 def _close_result_array_with_filter(lines: list[str], indent: str) -> None:
     """Close the @(...) array and pipe through Where-Object."""
-    lines.append(
-        f"{indent}) | Where-Object {{ $_.CompletionText -like \"$wordToComplete*\" }}"
-    )
+    lines.append(f'{indent}) | Where-Object {{ $_.CompletionText -like "$wordToComplete*" }}')
 
 
 def generate_powershell(spec: CommandSpec, version: str) -> str:
@@ -68,22 +66,15 @@ def generate_powershell(spec: CommandSpec, version: str) -> str:
     lines.append("#")
     lines.append("# Install:")
     lines.append('#   $dir = "$HOME\\Documents\\PowerShell\\Completions"')
-    lines.append('#   New-Item -ItemType Directory -Force -Path $dir')
+    lines.append("#   New-Item -ItemType Directory -Force -Path $dir")
     lines.append('#   agentworks completion powershell > "$dir\\agentworks.ps1"')
     lines.append('#   then add to $PROFILE: . "$dir\\agentworks.ps1"')
     lines.append("")
-    lines.append(
-        "Register-ArgumentCompleter -Native -CommandName agentworks -ScriptBlock {"
-    )
-    lines.append(
-        "    param($wordToComplete, $commandAst, $cursorPosition)"
-    )
+    lines.append("Register-ArgumentCompleter -Native -CommandName agentworks -ScriptBlock {")
+    lines.append("    param($wordToComplete, $commandAst, $cursorPosition)")
     lines.append("")
     lines.append("    $tokens = $commandAst.ToString().Trim() -split '\\s+'")
-    lines.append(
-        "    $tokenCount = if ($wordToComplete -eq '') { $tokens.Count + 1 }"
-        " else { $tokens.Count }"
-    )
+    lines.append("    $tokenCount = if ($wordToComplete -eq '') { $tokens.Count + 1 } else { $tokens.Count }")
     lines.append("")
     lines.append("    # Determine command context")
     lines.append("    $cmd1 = if ($tokenCount -gt 1) { $tokens[1] } else { $null }")
@@ -131,9 +122,7 @@ def _emit_dispatch(lines: list[str], spec: CommandSpec) -> None:
     lines.append("    }")
 
 
-def _emit_group_completions(
-    lines: list[str], spec: CommandSpec, depth: int
-) -> None:
+def _emit_group_completions(lines: list[str], spec: CommandSpec, depth: int) -> None:
     """Emit completions for a command group (has subcommands)."""
     indent = "    " * 3
 
@@ -162,23 +151,17 @@ def _emit_group_completions(
     lines.append(f"{indent}}}")
 
 
-def _emit_leaf_completions(
-    lines: list[str], spec: CommandSpec
-) -> None:
+def _emit_leaf_completions(lines: list[str], spec: CommandSpec) -> None:
     """Emit completions for a leaf command (no subcommands)."""
     _emit_param_completions(lines, spec, token_offset=2)
 
 
-def _emit_param_completions(
-    lines: list[str], spec: CommandSpec, token_offset: int
-) -> None:
+def _emit_param_completions(lines: list[str], spec: CommandSpec, token_offset: int) -> None:
     """Emit parameter completions for a leaf command."""
     indent = "    " * 4
 
     # Check if the previous token is an option expecting a value
-    options_with_values = [
-        p for p in spec.params if not p.is_argument and not p.is_flag
-    ]
+    options_with_values = [p for p in spec.params if not p.is_argument and not p.is_flag]
     positional_args = [p for p in spec.params if p.is_argument]
 
     if options_with_values:
@@ -214,10 +197,7 @@ def _emit_param_completions(
         param = positional_args[0]
         if param.choices:
             lines.append(f"{indent}# Positional: {param.name}")
-            lines.append(
-                f"{indent}if ($wordToComplete -notlike '-*'"
-                f" -and $tokenCount -eq {token_offset + 1}) {{"
-            )
+            lines.append(f"{indent}if ($wordToComplete -notlike '-*' -and $tokenCount -eq {token_offset + 1}) {{")
             _open_result_array(lines, f"{indent}    ")
             for choice in param.choices:
                 lines.append(
@@ -231,10 +211,7 @@ def _emit_param_completions(
         elif param.dynamic_completer and param.dynamic_completer in DYNAMIC_SNIPPETS:
             snippet = DYNAMIC_SNIPPETS[param.dynamic_completer]
             lines.append(f"{indent}# Positional: {param.name}")
-            lines.append(
-                f"{indent}if ($wordToComplete -notlike '-*'"
-                f" -and $tokenCount -eq {token_offset + 1}) {{"
-            )
+            lines.append(f"{indent}if ($wordToComplete -notlike '-*' -and $tokenCount -eq {token_offset + 1}) {{")
             lines.append(f"{indent}    {snippet}")
             lines.append(f"{indent}    return")
             lines.append(f"{indent}}}")

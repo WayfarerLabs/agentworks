@@ -9,26 +9,17 @@ if TYPE_CHECKING:
 
 # Shell snippets that provide dynamic completions.
 DYNAMIC_SNIPPETS: dict[str, str] = {
-    "vms": (
-        "$(agentworks vm list 2>/dev/null | tail -n +3 | awk '{print $1}')"
-    ),
-    "vm_hosts": (
-        "$(agentworks vm-host list 2>/dev/null | tail -n +3 | awk '{print $1}')"
-    ),
-    "workspaces": (
-        "$(agentworks workspace list 2>/dev/null | tail -n +3 | awk '{print $1}')"
-    ),
+    "vms": ("$(agentworks vm list 2>/dev/null | tail -n +3 | awk '{print $1}')"),
+    "vm_hosts": ("$(agentworks vm-host list 2>/dev/null | tail -n +3 | awk '{print $1}')"),
+    "workspaces": ("$(agentworks workspace list 2>/dev/null | tail -n +3 | awk '{print $1}')"),
     "ws_templates": (
         "$(sed -n 's/^\\[workspace_templates\\.\\([^]]*\\)\\]/\\1/p'"
         ' "$HOME/.config/agentworks/config.toml" 2>/dev/null)'
     ),
     "git_credentials": (
-        "$(sed -n 's/^\\[git_credentials\\.\\([^]]*\\)\\]/\\1/p'"
-        ' "$HOME/.config/agentworks/config.toml" 2>/dev/null)'
+        "$(sed -n 's/^\\[git_credentials\\.\\([^]]*\\)\\]/\\1/p' \"$HOME/.config/agentworks/config.toml\" 2>/dev/null)"
     ),
-    "catalog_entries": (
-        "$(agentworks installer list 2>/dev/null | tail -n +3 | awk '{print $2}')"
-    ),
+    "catalog_entries": ("$(agentworks installer list 2>/dev/null | tail -n +3 | awk '{print $2}')"),
 }
 
 
@@ -41,27 +32,22 @@ def generate_bash(spec: CommandSpec, version: str) -> str:
     lines.append("#")
     lines.append("# Install:")
     lines.append("#   mkdir -p ~/.local/share/bash-completion/completions")
-    lines.append(
-        "#   agentworks completion bash"
-        " > ~/.local/share/bash-completion/completions/agentworks"
-    )
+    lines.append("#   agentworks completion bash > ~/.local/share/bash-completion/completions/agentworks")
     lines.append("#")
     lines.append("# Or source directly in ~/.bashrc:")
     lines.append('#   eval "$(agentworks completion bash)"')
     lines.append("")
 
     lines.append("_agentworks() {")
-    lines.append('    local cur prev words cword')
-    lines.append(
-        '    if type _init_completion &>/dev/null; then'
-    )
-    lines.append('        _init_completion || return')
-    lines.append('    else')
+    lines.append("    local cur prev words cword")
+    lines.append("    if type _init_completion &>/dev/null; then")
+    lines.append("        _init_completion || return")
+    lines.append("    else")
     lines.append('        cur="${COMP_WORDS[COMP_CWORD]}"')
     lines.append('        prev="${COMP_WORDS[COMP_CWORD-1]}"')
     lines.append('        words=("${COMP_WORDS[@]}")')
-    lines.append('        cword=$COMP_CWORD')
-    lines.append('    fi')
+    lines.append("        cword=$COMP_CWORD")
+    lines.append("    fi")
     lines.append("")
 
     _emit_dispatch(lines, spec)
@@ -88,9 +74,7 @@ def _emit_dispatch(lines: list[str], spec: CommandSpec) -> None:
     # Level 1: completing the top-level command name
     lines.append("    # Top-level commands")
     lines.append("    if [[ $cword -eq 1 ]]; then")
-    lines.append(
-        f'        COMPREPLY=($(compgen -W "{sub_names_str}" -- "$cur"))'
-    )
+    lines.append(f'        COMPREPLY=($(compgen -W "{sub_names_str}" -- "$cur"))')
     lines.append("        return")
     lines.append("    fi")
     lines.append("")
@@ -117,9 +101,7 @@ def _emit_group_completions(lines: list[str], spec: CommandSpec) -> None:
 
     # If we're completing the subcommand name
     lines.append("            if [[ $cword -eq 2 ]]; then")
-    lines.append(
-        f'                COMPREPLY=($(compgen -W "{sub_names_str}" -- "$cur"))'
-    )
+    lines.append(f'                COMPREPLY=($(compgen -W "{sub_names_str}" -- "$cur"))')
     lines.append("                return")
     lines.append("            fi")
 
@@ -133,15 +115,11 @@ def _emit_group_completions(lines: list[str], spec: CommandSpec) -> None:
     lines.append("            esac")
 
 
-def _emit_leaf_completions(
-    lines: list[str], spec: CommandSpec, token_offset: int
-) -> None:
+def _emit_leaf_completions(lines: list[str], spec: CommandSpec, token_offset: int) -> None:
     """Emit completions for a leaf command."""
     indent = "            " if token_offset == 2 else "                    "
 
-    options_with_values = [
-        p for p in spec.params if not p.is_argument and not p.is_flag
-    ]
+    options_with_values = [p for p in spec.params if not p.is_argument and not p.is_flag]
     positional_args = [p for p in spec.params if p.is_argument]
     all_options = [p for p in spec.params if not p.is_argument]
 
@@ -153,17 +131,10 @@ def _emit_leaf_completions(
             lines.append(f"{indent}    {opt})")
             if param.choices:
                 choices_str = " ".join(param.choices)
-                lines.append(
-                    f'{indent}        COMPREPLY=($(compgen -W "{choices_str}" -- "$cur"))'
-                )
-            elif (
-                param.dynamic_completer
-                and param.dynamic_completer in DYNAMIC_SNIPPETS
-            ):
+                lines.append(f'{indent}        COMPREPLY=($(compgen -W "{choices_str}" -- "$cur"))')
+            elif param.dynamic_completer and param.dynamic_completer in DYNAMIC_SNIPPETS:
                 snippet = DYNAMIC_SNIPPETS[param.dynamic_completer]
-                lines.append(
-                    f'{indent}        COMPREPLY=($(compgen -W "{snippet}" -- "$cur"))'
-                )
+                lines.append(f'{indent}        COMPREPLY=($(compgen -W "{snippet}" -- "$cur"))')
             lines.append(f"{indent}        return")
             lines.append(f"{indent}        ;;")
         lines.append(f"{indent}esac")
@@ -174,19 +145,11 @@ def _emit_leaf_completions(
         words: str | None = None
         if param.choices:
             words = " ".join(param.choices)
-        elif (
-            param.dynamic_completer
-            and param.dynamic_completer in DYNAMIC_SNIPPETS
-        ):
+        elif param.dynamic_completer and param.dynamic_completer in DYNAMIC_SNIPPETS:
             words = DYNAMIC_SNIPPETS[param.dynamic_completer]
         if words:
-            lines.append(
-                f'{indent}if [[ $cword -eq {token_offset}'
-                f' && "$cur" != -* ]]; then'
-            )
-            lines.append(
-                f'{indent}    COMPREPLY=($(compgen -W "{words}" -- "$cur"))'
-            )
+            lines.append(f'{indent}if [[ $cword -eq {token_offset} && "$cur" != -* ]]; then')
+            lines.append(f'{indent}    COMPREPLY=($(compgen -W "{words}" -- "$cur"))')
             lines.append(f"{indent}    return")
             lines.append(f"{indent}fi")
 
@@ -199,8 +162,6 @@ def _emit_leaf_completions(
         opts.append("--help")
         opts_str = " ".join(opts)
         lines.append(f'{indent}if [[ "$cur" == -* ]]; then')
-        lines.append(
-            f'{indent}    COMPREPLY=($(compgen -W "{opts_str}" -- "$cur"))'
-        )
+        lines.append(f'{indent}    COMPREPLY=($(compgen -W "{opts_str}" -- "$cur"))')
         lines.append(f"{indent}    return")
         lines.append(f"{indent}fi")

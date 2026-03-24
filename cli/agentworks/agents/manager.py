@@ -129,10 +129,7 @@ def list_agents(
     typer.echo(f"{'NAME':<20} {'WORKSPACE':<20} {'LINUX USER':<30} {'CREATED'}")
     typer.echo("-" * 95)
     for agent in agents:
-        typer.echo(
-            f"{agent.name:<20} {agent.workspace_name:<20} "
-            f"{agent.linux_user:<30} {agent.created_at}"
-        )
+        typer.echo(f"{agent.name:<20} {agent.workspace_name:<20} {agent.linux_user:<30} {agent.created_at}")
 
 
 def shell_agent(
@@ -143,8 +140,6 @@ def shell_agent(
     workspace_name: str,
 ) -> None:
     """Open a shell as an agent user on a VM."""
-    import os
-
     ws = _require_workspace(db, workspace_name)
     agent = db.get_agent(workspace_name, name)
     if agent is None:
@@ -188,7 +183,6 @@ def _regenerate_tmuxinator(
     ws: WorkspaceRow,
 ) -> None:
     """Regenerate the tmuxinator config from current DB state."""
-    from agentworks.ssh import run as ssh_run
     from agentworks.workspaces.tmuxinator import generate_config
 
     agents = db.list_agents(workspace_name=ws.name)
@@ -217,7 +211,10 @@ def _add_live_window(
     run_cmd = partial(ssh_run, target)
 
     add_window_to_session(
-        ws_name, agent.name, agent.linux_user, workspace_path,
+        ws_name,
+        agent.name,
+        agent.linux_user,
+        workspace_path,
         run_command=run_cmd,
     )
 
@@ -371,23 +368,25 @@ def _run_agent_install_commands(
 
 
 def _build_agent_test_command(
-    entry: UserInstallCommandEntry, linux_user: str, home: str,
+    entry: UserInstallCommandEntry,
+    linux_user: str,
+    home: str,
 ) -> str | None:
     """Build a test command that runs as the agent user."""
     import shlex as _shlex
 
-    if getattr(entry, "test_exec", None):
+    test_exec: str | None = getattr(entry, "test_exec", None)
+    test_file: str | None = getattr(entry, "test_file", None)
+    test_dir: str | None = getattr(entry, "test_dir", None)
+    if test_exec:
         # Run command -v as the agent user via su
-        inner = f"command -v {_shlex.quote(entry.test_exec)}"
-        return (
-            f"su - {_shlex.quote(linux_user)} -c {_shlex.quote(inner)}"
-            " > /dev/null 2>&1"
-        )
-    if getattr(entry, "test_file", None):
-        path = entry.test_file.replace("~", home, 1) if entry.test_file.startswith("~") else entry.test_file
+        inner = f"command -v {_shlex.quote(test_exec)}"
+        return f"su - {_shlex.quote(linux_user)} -c {_shlex.quote(inner)} > /dev/null 2>&1"
+    if test_file:
+        path = test_file.replace("~", home, 1) if test_file.startswith("~") else test_file
         return f"test -f {_shlex.quote(path)}"
-    if getattr(entry, "test_dir", None):
-        path = entry.test_dir.replace("~", home, 1) if entry.test_dir.startswith("~") else entry.test_dir
+    if test_dir:
+        path = test_dir.replace("~", home, 1) if test_dir.startswith("~") else test_dir
         return f"test -d {_shlex.quote(path)}"
     return None
 

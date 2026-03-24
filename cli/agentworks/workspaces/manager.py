@@ -41,9 +41,13 @@ def create_workspace(
         _create_local(db, config, ws_name, template_name=template.name, template=template, open_vscode=open_vscode)
     else:
         _create_vm(
-            db, config, ws_name,
-            vm_name=vm_name, template_name=template.name,
-            template=template, open_vscode=open_vscode,
+            db,
+            config,
+            ws_name,
+            vm_name=vm_name,
+            template_name=template.name,
+            template=template,
+            open_vscode=open_vscode,
         )
 
 
@@ -122,8 +126,11 @@ def _create_vm(
         typer.echo(f"VS Code workspace: {code_ws_path}")
 
         db.insert_workspace(
-            ws_name, ws_type="vm", workspace_path=workspace_path,
-            vm_name=vm.name, template=template_name,
+            ws_name,
+            ws_type="vm",
+            workspace_path=workspace_path,
+            vm_name=vm.name,
+            template=template_name,
         )
     except SystemExit:
         _cleanup()
@@ -160,7 +167,8 @@ def shell_workspace(
 
         db.update_workspace_last_seen(name)
         shell_local_workspace(
-            name, ws.workspace_path,
+            name,
+            ws.workspace_path,
             use_tmuxinator=use_tmux,
             tmuxinator_enabled=template.tmuxinator,
         )
@@ -178,7 +186,10 @@ def shell_workspace(
         from agentworks.workspaces.backends.vm import shell_vm_workspace
 
         shell_vm_workspace(
-            vm, config, name, ws.workspace_path,
+            vm,
+            config,
+            name,
+            ws.workspace_path,
             use_tmuxinator=use_tmux,
             tmuxinator_enabled=template.tmuxinator,
         )
@@ -202,10 +213,7 @@ def list_workspaces(
     typer.echo(f"{'NAME':<20} {'TYPE':<8} {'VM':<15} {'TEMPLATE':<15} {'CREATED'}")
     typer.echo("-" * 80)
     for ws in workspaces:
-        typer.echo(
-            f"{ws.name:<20} {ws.type:<8} {ws.vm_name or '-':<15} "
-            f"{ws.template or '-':<15} {ws.created_at}"
-        )
+        typer.echo(f"{ws.name:<20} {ws.type:<8} {ws.vm_name or '-':<15} {ws.template or '-':<15} {ws.created_at}")
 
 
 def delete_workspace(
@@ -254,14 +262,12 @@ def _guard_vm_status(vm: VMRow) -> None:
     if vm.init_status not in usable:
         if vm.init_status == InitStatus.FAILED.value:
             typer.echo(
-                f"Error: VM '{vm.name}' is in 'failed' state. "
-                "Run 'vm delete' and recreate.",
+                f"Error: VM '{vm.name}' is in 'failed' state. Run 'vm delete' and recreate.",
                 err=True,
             )
         else:
             typer.echo(
-                f"Error: VM '{vm.name}' initialization is not complete "
-                f"(status: {vm.init_status}).",
+                f"Error: VM '{vm.name}' initialization is not complete (status: {vm.init_status}).",
                 err=True,
             )
         raise typer.Exit(1)

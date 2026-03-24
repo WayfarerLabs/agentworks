@@ -116,22 +116,17 @@ class LimaProvisioner(VMProvisioner):
             host_target = ExecTarget(
                 ssh=SSHTarget(host=self._vm_host_ssh, user=None, login_shell=True),
             )
-            lima_cmd = (
-                f"limactl create --name {vm_name} --tty=false {remote_template}"
-                f" && limactl start {vm_name}"
-            )
+            lima_cmd = f"limactl create --name {vm_name} --tty=false {remote_template} && limactl start {vm_name}"
             typer.echo("  Creating and starting VM (detached, this may take a few minutes)...")
             result = run_detached(
-                host_target, lima_cmd,
+                host_target,
+                lima_cmd,
                 label=f"Lima ({vm_name})",
                 base_path=f"/tmp/agentworks-lima-{vm_name}",
                 quiet=True,
             )
             if result.exit_code != 0:
-                raise SSHError(
-                    f"limactl create/start failed (exit {result.exit_code})\n"
-                    f"{result.output[-500:]}"
-                )
+                raise SSHError(f"limactl create/start failed (exit {result.exit_code})\n{result.output[-500:]}")
             # Clean up the template
             ssh_run(target, f"rm -f {remote_template}", check=False)
         else:
@@ -148,9 +143,11 @@ class LimaProvisioner(VMProvisioner):
 
         if self.is_remote:
             assert self._vm_host_ssh is not None
-            return ProvisionResult(exec_target=ExecTarget(
-                remote_lima=RemoteLimaTarget(vm_name=vm_name, vm_host_ssh=self._vm_host_ssh),
-            ))
+            return ProvisionResult(
+                exec_target=ExecTarget(
+                    remote_lima=RemoteLimaTarget(vm_name=vm_name, vm_host_ssh=self._vm_host_ssh),
+                )
+            )
         else:
             return ProvisionResult(exec_target=ExecTarget(lima=LimaTarget(vm_name=vm_name)))
 

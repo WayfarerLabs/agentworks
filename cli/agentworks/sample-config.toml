@@ -72,6 +72,15 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # snap = []                                  # direct snap packages
 # system_install_commands = ["az-cli"]       # system-level commands from catalog
 # admin_install_commands = ["bun", "claude"] # per-user commands for admin user
+# -- Nerf tools --
+# install_nerf_tools = false                 # set to true to build and deploy nerf tools during init
+# skip_nerf_defaults = false                 # skip built-in nerf catalog (nerf build --no-default)
+# nerf_addl_manifests = [                    # additional manifest files to merge in
+#     "~/.config/agentworks/nerf/my-tools/manifest.yaml",
+# ]
+# nerf_keep_existing = false                 # preserve unmanaged files in bin/skills dirs on reinit
+# nerf_bin_dir = "/opt/agentworks/nerf/bin"  # where to deploy generated tool scripts
+# nerf_skills_dir = "/opt/agentworks/nerf/skills"  # where to deploy generated skill files
 
 # --- Agent configuration ---
 # Settings for agent users created within workspaces. Agents get their own

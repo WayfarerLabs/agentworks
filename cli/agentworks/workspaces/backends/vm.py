@@ -39,7 +39,7 @@ def create_vm_workspace(
     # Remove stale directory from a previous interrupted attempt
     exists = ssh_run(target, f"test -d {workspace_path}", check=False, timeout=10)
     if exists.ok:
-        typer.echo(f"  Removing stale workspace directory from previous attempt...")
+        typer.echo("  Removing stale workspace directory from previous attempt...")
         ssh_run(target, f"rm -rf {workspace_path}", timeout=30)
 
     # Create directory

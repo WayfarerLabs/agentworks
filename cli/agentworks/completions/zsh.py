@@ -108,13 +108,11 @@ def _collect_completers(spec: CommandSpec) -> set[str]:
     return completers
 
 
-def _emit_group(
-    lines: list[str], spec: CommandSpec, func_name: str
-) -> None:
+def _emit_group(lines: list[str], spec: CommandSpec, func_name: str) -> None:
     """Emit a zsh function for a command group."""
     lines.append(f"{func_name}() {{")
     lines.append("    local -a subcommands")
-    lines.append('    _arguments -C \\')
+    lines.append("    _arguments -C \\")
     lines.append("        '--help[Show help]' \\")
     lines.append("        '1:command:->command' \\")
     lines.append("        '*::arg:->args'")
@@ -136,7 +134,7 @@ def _emit_group(
     for name, _sub in sorted(spec.subcommands.items()):
         sub_func = f"{func_name}_{name.replace('-', '_')}"
         lines.append(f"                {name})")
-        lines.append(f"                    {sub_func} \"$@\"")
+        lines.append(f'                    {sub_func} "$@"')
         lines.append("                    ;;")
 
     lines.append("            esac")
@@ -154,9 +152,7 @@ def _emit_group(
             _emit_leaf(lines, sub, func_name=sub_func)
 
 
-def _emit_leaf(
-    lines: list[str], spec: CommandSpec, func_name: str
-) -> None:
+def _emit_leaf(lines: list[str], spec: CommandSpec, func_name: str) -> None:
     """Emit a zsh function for a leaf command."""
     args = _build_arguments(spec.params)
     if not args:
@@ -203,14 +199,10 @@ def _build_arguments(params: list[ParamSpec]) -> list[str]:
 
             if param.choices:
                 choices_str = " ".join(param.choices)
-                args.append(
-                    f"'{multiple}{opt}[{escaped_help}]:{param.name}:({choices_str})'"
-                )
+                args.append(f"'{multiple}{opt}[{escaped_help}]:{param.name}:({choices_str})'")
             elif param.dynamic_completer and param.dynamic_completer in COMPLETER_FUNC_NAMES:
                 func = COMPLETER_FUNC_NAMES[param.dynamic_completer]
-                args.append(
-                    f"'{multiple}{opt}[{escaped_help}]:{param.name}:{func}'"
-                )
+                args.append(f"'{multiple}{opt}[{escaped_help}]:{param.name}:{func}'")
             else:
                 args.append(f"'{multiple}{opt}[{escaped_help}]:{param.name}:'")
 
