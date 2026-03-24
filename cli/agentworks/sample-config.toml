@@ -94,27 +94,22 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # Settings for task lifecycle and defaults.
 
 # [task.config]
-# default_template = "claude"               # template used when --template is not specified
 # history_limit = 50000                     # tmux scrollback buffer lines per task session
 
 # --- Task templates ---
-# Define commands that tasks can run. Built-in templates "claude" and "shell"
-# are always available and can be overridden here.
-
+# Define commands that tasks can run. The built-in "default" template runs a
+# login shell ($SHELL --login). Override it or add new templates.
+#
 # Template commands support {{task_name}} and {{workspace_name}} variables,
 # using double-brace syntax consistent with nerftools manifests.
+
+# [task_templates.default]                  # override the built-in default
+# command = "claude --name {{task_name}}"
+# description = "Claude Code interactive session"
 
 # [task_templates.claude]
 # command = "claude --name {{task_name}}"
 # description = "Claude Code interactive session"
-
-# [task_templates.claude-resume]
-# command = "claude --resume --name {{task_name}}"
-# description = "Claude Code resume last conversation"
-
-# [task_templates.shell]
-# command = "bash"
-# description = "Plain shell session"
 
 # [task_templates.custom-tool]
 # command = "my-tool --flag"

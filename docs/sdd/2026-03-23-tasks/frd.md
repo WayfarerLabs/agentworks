@@ -116,10 +116,10 @@ config file.
 
 - Each template has a name and a command (string or list).
 - The command is run in the workspace directory as the task's user.
-- A built-in "claude" template ships by default.
-- Operators can define custom templates (e.g., "claude-resume", "aider", "cursor-agent").
+- A built-in "default" template (bash) is used when --template is not specified.
+- Operators can define custom templates (e.g., "claude", "aider", "cursor-agent").
 - Templates may include environment variables to set.
-- The default template is configurable.
+- The "default" template can be overridden in config (same pattern as workspace templates).
 
 ### R4: Console
 
@@ -139,9 +139,9 @@ The console is a VM-level tmux session that aggregates tasks.
 
 New command group `agentworks task`:
 
-- `task create <name> --workspace <ws> [--template <tpl>] [--agent <agent>]` -- create and start a
-  task. Runs in admin mode by default. Pass `--agent` to run in agent mode as the specified agent
-  user.
+- `task create --workspace <ws> [--name <name>] [--template <tpl>] [--agent <agent>]` -- create and
+  start a task. Name is prompted if omitted (with a random default). Runs in admin mode by default.
+  Pass `--agent` to run in agent mode as the specified agent user.
 - `task list [--workspace <ws>]` -- list tasks, showing status.
 - `task stop <name> --workspace <ws>` -- stop a running task.
 - `task start <name> --workspace <ws>` -- restart a stopped task.
@@ -153,9 +153,12 @@ New command group `agentworks task`:
 New commands for the console:
 
 - `vm console <vm-name>` -- attach to the VM console, creating it if it does not exist. Creates
-  one window per currently running task.
+  one window per currently running task. Refuses to run inside an existing tmux session unless
+  `--allow-nesting` is passed.
 - `vm console <vm-name> --recreate` -- kill the existing console (if any), rebuild it from the
   current set of running tasks, and attach.
+- `vm console <vm-name> --allow-nesting` -- allow running inside an existing tmux session
+  (not recommended due to prefix key conflicts).
 
 ### R6: Database
 

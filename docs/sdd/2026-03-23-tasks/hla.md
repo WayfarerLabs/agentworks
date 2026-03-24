@@ -51,8 +51,7 @@ set -g status off
 set -g prefix None
 unbind-key -a
 
-# Re-bind only detach and ctrl-c passthrough
-bind -n C-q detach-client
+# Pass through ctrl-c to the running process
 bind -n C-c send-keys C-c
 ```
 
@@ -65,21 +64,25 @@ config. The default of 50,000 lines provides substantial history for long-runnin
 ### Console Session
 
 The console is a regular tmux session (default config, full controls) at the VM level. Its name
-is simply `console` (one per VM, no collision risk since each VM is its own machine).
+is `vm-console` to avoid collisions with other tmux sessions on the VM.
 
-Each task window in the console runs `tmux attach -t <workspace>--<task>`, which provides a
-live view of the task session. Since the task session has all keybindings stripped, the
-console's prefix key works without conflict -- there is no nested-prefix problem.
+Each task window in the console attaches to the task's tmux session (with `$TMUX` unset to allow
+nesting). Since the task session has all keybindings stripped, the console's prefix key works
+without conflict. Task windows use a wrapper that re-attaches if the connection drops and shows
+a message when the task session ends.
 
 ```text
-Console (full tmux)
-  Window 0: "myproject--claude-1"  ->  tmux attach -t myproject--claude-1  (locked-down)
-  Window 1: "myproject--claude-2"  ->  tmux attach -t myproject--claude-2  (locked-down)
-  Window 2: (operator's own shell, if desired)
+vm-console (full tmux)
+  Window 0: "admin-shell"          ->  login shell for the admin user
+  Window 1: "myproject--claude-1"  ->  attached to task session (locked-down)
+  Window 2: "myproject--claude-2"  ->  attached to task session (locked-down)
 ```
 
-When a task stops, its console window shows the attach command exiting. The window remains
-(the operator can close it or it can be cleaned up on next console refresh).
+The `vm console` command refuses to run inside an existing tmux session to avoid confusing
+prefix key conflicts. Pass `--allow-nesting` to override this check.
+
+When a task stops, its console window shows a message indicating the session has ended
+(`remain-on-exit` is enabled on the console session).
 
 ### Lifecycle Interactions
 
@@ -98,21 +101,15 @@ Templates are defined in the agentworks config under `[task_templates]`:
 [task_templates.claude]
 command = "claude --name {{task_name}}"
 description = "Claude Code interactive session"
-
-[task_templates.claude-resume]
-command = "claude --resume --name {{task_name}}"
-description = "Claude Code resume last conversation"
-
-[task_templates.shell]
-command = "bash"
-description = "Plain shell session"
 ```
 
-Template resolution:
+The built-in "default" template (bash) is used when `--template` is not specified. Users can
+override it by defining `[task_templates.default]` in their config.
+
+Template resolution (same pattern as workspace templates):
 
 1. If `--template` is specified, use that template.
-2. Otherwise, use the default template from `[task.config]` (defaults to "claude").
-3. Built-in templates ("claude", "shell") are always available and can be overridden.
+2. Otherwise, use the "default" template (built-in or user-defined).
 
 ### Template variables
 
@@ -122,8 +119,8 @@ syntax consistent with nerftools manifests. Available variables:
 - `{{task_name}}` -- the task name
 - `{{workspace_name}}` -- the workspace name
 
-For example, the built-in claude template uses `claude --name {{task_name}}` so that the Claude
-session name is tied to the task, giving the operator a consistent name across task restarts.
+For example, a claude template can use `claude --name {{task_name}}` so that the Claude session
+name is tied to the task, giving the operator a consistent name across task restarts.
 
 ### Command execution
 
@@ -206,10 +203,9 @@ New config sections:
 
 ```toml
 [task.config]
-default_template = "claude"       # default template for task create
 history_limit = 50000             # tmux scrollback buffer lines
 
-[task_templates.claude]
+[task_templates.default]          # override the built-in default (bash)
 command = "claude --name {{task_name}}"
 description = "Claude Code interactive session"
 ```

@@ -121,10 +121,18 @@ def interactive(target: SSHTarget, command: str) -> int:
 
     Returns the process exit code. Does not raise on failure.
     """
-    args = _ssh_base_args(target)
-    # Remove BatchMode for interactive use and allocate a TTY
-    args = [a for a in args if a != "BatchMode=yes"]
-    args.insert(1, "-t")
+    # Build args without BatchMode (which rejects interactive prompts/TTY)
+    args = ["ssh", "-t", "-o", "StrictHostKeyChecking=accept-new"]
+    if target.port is not None:
+        args.extend(["-p", str(target.port)])
+    if target.identity_file is not None:
+        args.extend(["-i", str(target.identity_file)])
+    if target.proxy_jump is not None:
+        args.extend(["-J", target.proxy_jump])
+    if target.user:
+        args.append(f"{target.user}@{target.host}")
+    else:
+        args.append(target.host)
     args.append(command)
     return subprocess.call(args)
 

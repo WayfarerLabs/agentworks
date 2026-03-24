@@ -60,7 +60,7 @@ _agentworks_tasks() {
 _agentworks_task_templates() {
     local -a templates config_file
     config_file="${HOME}/.config/agentworks/config.toml"
-    templates=(claude shell)
+    templates=(default)
     if [[ -f "$config_file" ]]; then
         templates+=(${(f)"$(sed -n 's/^\\[task_templates\\.\\([^]]*\\)\\]/\\1/p' "$config_file" 2>/dev/null)"})
     fi

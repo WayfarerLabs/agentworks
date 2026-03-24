@@ -50,7 +50,7 @@ DYNAMIC_SNIPPETS: dict[str, str] = {
         ' Where-Object { $_ -like "$wordToComplete*" })'
     ),
     "task_templates": (
-        "& { $builtins = @('claude', 'shell');"
+        "& { $builtins = @('default');"
         " $f = Join-Path $env:USERPROFILE '.config/agentworks/config.toml';"
         " $user = @(); if (Test-Path $f) {"
         " $user = Get-Content $f | Select-String '^\\[task_templates\\.([^\\]]+)\\]'"

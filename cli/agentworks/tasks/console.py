@@ -23,7 +23,7 @@ if TYPE_CHECKING:
     from agentworks.db import Database, TaskRow, VMRow
     from agentworks.tasks.tmux import RunCommand
 
-CONSOLE_SESSION_NAME = "console"
+CONSOLE_SESSION_NAME = "vm-console"
 
 
 def console_exists(*, run_command: RunCommand) -> bool:
@@ -36,44 +36,55 @@ def create_console(
     running_tasks: list[TaskRow],
     *,
     run_command: RunCommand,
+    admin_username: str,
 ) -> None:
     """Create the VM console session with one window per running task."""
-    if not running_tasks:
-        # Create an empty console with a shell
-        run_command(
-            f"tmux new-session -d -s {CONSOLE_SESSION_NAME}",
-        )
-        # Keep windows open when attached task exits so operator sees the state
-        run_command(
-            f"tmux set -t {CONSOLE_SESSION_NAME} remain-on-exit on",
-            check=False,
-        )
-        return
-
-    # Create the session with the first task as the initial window
-    first = running_tasks[0]
-    first_session = shlex.quote(derive_session_name(first.workspace_name, first.name))
+    # Create the session with a login shell as the initial window
     run_command(
         f"tmux new-session -d -s {CONSOLE_SESSION_NAME} "
-        f"-n {first_session} "
-        f"{shlex.quote('tmux attach -t ' + first_session)}",
+        f"-n admin-shell "
+        f"{shlex.quote('exec sudo su --login ' + shlex.quote(admin_username))}"
     )
 
-    # Keep windows open when attached task exits so operator sees the state
-    run_command(
-        f"tmux set -t {CONSOLE_SESSION_NAME} remain-on-exit on",
+    # Keep windows open when attached task command exits
+    run_command(f"tmux set -t {CONSOLE_SESSION_NAME} remain-on-exit on", check=False)
+
+    # Add a window for each running task
+    typer.echo(f"Adding {len(running_tasks)} task(s) to console...")
+    for task in running_tasks:
+        _add_task_window(task.workspace_name, task.name, run_command=run_command)
+
+
+def _add_task_window(
+    workspace_name: str,
+    task_name: str,
+    *,
+    run_command: RunCommand,
+) -> None:
+    """Add a single task window to the console."""
+    session_name = derive_session_name(workspace_name, task_name)
+    q_session = shlex.quote(session_name)
+    # Unset TMUX to allow nesting (console -> task session), then loop
+    # re-attach while the task session is alive.
+    wrapper = (
+        f"unset TMUX; "
+        f"while tmux has-session -t {q_session} 2>/dev/null; do "
+        f"tmux attach -t {q_session}; "
+        f"sleep 0.5; "
+        f"done; "
+        f"echo 'Task session {q_session} has ended. Press enter to close.'; "
+        f"read"
+    )
+    result = run_command(
+        f"tmux new-window -t {CONSOLE_SESSION_NAME} "
+        f"-n {q_session} "
+        f"{shlex.quote(wrapper)}",
         check=False,
     )
-
-    # Add remaining tasks as additional windows
-    for task in running_tasks[1:]:
-        session = shlex.quote(derive_session_name(task.workspace_name, task.name))
-        run_command(
-            f"tmux new-window -t {CONSOLE_SESSION_NAME} "
-            f"-n {session} "
-            f"{shlex.quote('tmux attach -t ' + session)}",
-            check=False,
-        )
+    ok = getattr(result, "ok", True)
+    stderr = getattr(result, "stderr", "")
+    if not ok:
+        typer.echo(f"  Warning: failed to add window for '{session_name}': {stderr}", err=True)
 
 
 def add_task_to_console(
@@ -86,23 +97,18 @@ def add_task_to_console(
     if not console_exists(run_command=run_command):
         return
 
-    session = shlex.quote(derive_session_name(workspace_name, task_name))
-    run_command(
-        f"tmux new-window -t {CONSOLE_SESSION_NAME} "
-        f"-n {session} "
-        f"{shlex.quote('tmux attach -t ' + session)}",
-        check=False,
-    )
+    _add_task_window(workspace_name, task_name, run_command=run_command)
 
 
 def recreate_console(
     running_tasks: list[TaskRow],
     *,
     run_command: RunCommand,
+    admin_username: str,
 ) -> None:
     """Kill the existing console and rebuild from running tasks."""
     run_command(f"tmux kill-session -t {CONSOLE_SESSION_NAME}", check=False)
-    create_console(running_tasks, run_command=run_command)
+    create_console(running_tasks, run_command=run_command, admin_username=admin_username)
 
 
 def attach_console(
@@ -111,8 +117,21 @@ def attach_console(
     *,
     vm_name: str,
     recreate: bool = False,
+    allow_nesting: bool = False,
 ) -> None:
     """Attach to (or create) the VM console."""
+    import os
+
+    if os.environ.get("TMUX") and not allow_nesting:
+        typer.echo(
+            "Error: already inside a tmux session.\n"
+            "Nesting is not recommended (prefix key conflicts,\n"
+            "confusing detach behavior).\n"
+            "Pass --allow-nesting to override.",
+            err=True,
+        )
+        raise typer.Exit(1)
+
     vm = db.get_vm(vm_name)
     if vm is None:
         typer.echo(f"Error: VM '{vm_name}' not found", err=True)
@@ -136,9 +155,13 @@ def attach_console(
 
     if recreate or not console_exists(run_command=run_command):
         if recreate:
-            recreate_console(running_tasks, run_command=run_command)
+            recreate_console(
+                running_tasks, run_command=run_command, admin_username=vm.admin_username,
+            )
         else:
-            create_console(running_tasks, run_command=run_command)
+            create_console(
+                running_tasks, run_command=run_command, admin_username=vm.admin_username,
+            )
 
     sys.exit(interactive(target, f"tmux attach -t {CONSOLE_SESSION_NAME}"))
 

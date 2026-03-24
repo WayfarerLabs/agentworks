@@ -91,6 +91,37 @@ def _prompt_name(label: str, name: str | None) -> str:
     return str(typer.prompt(f"{label} name", default=default))
 
 
+def _prompt_workspace(db: Database, workspace: str | None) -> str:
+    """Prompt for a workspace if not provided, listing available workspaces."""
+    if workspace is not None:
+        return workspace
+
+    workspaces = db.list_workspaces()
+    if not workspaces:
+        typer.echo("Error: no workspaces found. Create one with 'agentworks workspace create'.", err=True)
+        raise typer.Exit(1)
+
+    if len(workspaces) == 1:
+        typer.echo(f"Using workspace '{workspaces[0].name}'")
+        return workspaces[0].name
+
+    typer.echo("Select a workspace:")
+    for i, ws in enumerate(workspaces, 1):
+        label = f"  {i}) {ws.name}"
+        if ws.vm_name:
+            label += f"  (vm: {ws.vm_name})"
+        elif ws.type == "local":
+            label += "  (local)"
+        typer.echo(label)
+
+    choice = int(typer.prompt("Workspace number", type=int))
+    if choice < 1 or choice > len(workspaces):
+        typer.echo(f"Error: invalid choice {choice}", err=True)
+        raise typer.Exit(1)
+
+    return workspaces[choice - 1].name
+
+
 class _HasDescription(Protocol):
     """Structural protocol for catalog entries that have a description."""
 
@@ -293,12 +324,15 @@ def vm_add_git_credential(
 def vm_console(
     name: Annotated[str, typer.Argument(help="VM name")],
     recreate: Annotated[bool, typer.Option("--recreate", help="Kill and rebuild the console")] = False,
+    allow_nesting: Annotated[bool, typer.Option("--allow-nesting", help="Allow running inside tmux")] = False,
 ) -> None:
     """Attach to the VM console (creates it if needed)."""
     from agentworks.config import load_config
     from agentworks.tasks.console import attach_console
 
-    attach_console(_get_db(), load_config(), vm_name=name, recreate=recreate)
+    attach_console(
+        _get_db(), load_config(), vm_name=name, recreate=recreate, allow_nesting=allow_nesting,
+    )
 
 
 # -- Workspace commands ----------------------------------------------------
@@ -426,8 +460,8 @@ def agent_delete(
 
 @task_app.command("create")
 def task_create(
-    name: Annotated[str, typer.Argument(help="Task name")],
-    workspace: Annotated[str, typer.Option("--workspace", help="Workspace name")] = ...,  # type: ignore[assignment]
+    name: Annotated[str | None, typer.Option("--name", help="Task name (prompted if omitted)")] = None,
+    workspace: Annotated[str | None, typer.Option("--workspace", help="Workspace name (prompted if omitted)")] = None,
     template: Annotated[str | None, typer.Option("--template", help="Task template")] = None,
     agent: Annotated[str | None, typer.Option("--agent", help="Agent name (agent mode)")] = None,
 ) -> None:
@@ -435,11 +469,14 @@ def task_create(
     from agentworks.config import load_config
     from agentworks.tasks.manager import create_task
 
+    db = _get_db()
+    resolved_workspace = _prompt_workspace(db, workspace)
+    resolved_name = _prompt_name("Task", name)
     create_task(
-        _get_db(),
+        db,
         load_config(),
-        name=name,
-        workspace_name=workspace,
+        name=resolved_name,
+        workspace_name=resolved_workspace,
         template_name=template,
         agent_name=agent,
     )
@@ -496,12 +533,13 @@ def task_attach(
 def task_delete(
     name: Annotated[str, typer.Argument(help="Task name")],
     workspace: Annotated[str, typer.Option("--workspace", help="Workspace name")] = ...,  # type: ignore[assignment]
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip confirmation")] = False,
 ) -> None:
     """Stop and delete a task."""
     from agentworks.config import load_config
     from agentworks.tasks.manager import delete_task
 
-    delete_task(_get_db(), load_config(), name=name, workspace_name=workspace)
+    delete_task(_get_db(), load_config(), name=name, workspace_name=workspace, yes=yes)
 
 
 @task_app.command("logs")

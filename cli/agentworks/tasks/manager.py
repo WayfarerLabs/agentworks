@@ -81,10 +81,22 @@ def _require_task(db: Database, workspace_name: str, name: str) -> TaskRow:
 
 
 def _resolve_template(config: Config, template_name: str | None) -> TaskTemplate:
-    name = template_name or config.task.default_template
-    tpl = config.task_templates.get(name)
+    """Resolve a task template by name.
+
+    Selection order:
+    1. Explicit template_name
+    2. "default" template (built-in or user-defined)
+    """
+    if template_name is not None:
+        tpl = config.task_templates.get(template_name)
+        if tpl is None:
+            typer.echo(f"Error: unknown task template '{template_name}'", err=True)
+            raise typer.Exit(1)
+        return tpl
+
+    tpl = config.task_templates.get("default")
     if tpl is None:
-        typer.echo(f"Error: unknown task template '{name}'", err=True)
+        typer.echo("Error: no 'default' task template found", err=True)
         raise typer.Exit(1)
     return tpl
 
@@ -108,7 +120,10 @@ def _build_task_command(
     task_name: str,
     workspace_name: str,
 ) -> str:
-    """Build the shell command string for a task from its template."""
+    """Build the shell command string for a task from its template.
+
+    Returns an empty string if the template has no command (login shell only).
+    """
     variables = {
         "task_name": task_name,
         "workspace_name": workspace_name,
@@ -123,7 +138,10 @@ def _build_task_command(
             raise typer.Exit(1)
         val = _substitute_template_vars(val, variables)
         parts.append(f"export {key}={shlex.quote(val)}")
-    parts.append(f"exec {command}")
+
+    if command:
+        parts.append(f"exec {command}")
+
     return " && ".join(parts)
 
 
@@ -302,12 +320,16 @@ def delete_task(
     *,
     name: str,
     workspace_name: str,
+    yes: bool = False,
 ) -> None:
     """Stop and delete a task."""
-    from agentworks.tasks.tmux import kill_task_session
+    from agentworks.tasks.tmux import kill_task_session, session_exists
 
     _ws, _vm, run_command = _prepare_vm(db, config, workspace_name)
     _require_task(db, workspace_name, name)
+
+    if not yes and session_exists(workspace_name, name, run_command=run_command):
+        typer.confirm(f"Task '{name}' is still running. Delete anyway?", abort=True)
 
     kill_task_session(workspace_name, name, run_command=run_command)
     db.delete_task(workspace_name, name)

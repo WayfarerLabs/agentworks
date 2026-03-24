@@ -159,17 +159,11 @@ class TaskTemplate:
 
 @dataclass(frozen=True)
 class TaskConfig:
-    default_template: str = "claude"
     history_limit: int = 50_000
 
 
 BUILTIN_TASK_TEMPLATES: dict[str, TaskTemplate] = {
-    "claude": TaskTemplate(
-        name="claude",
-        command="claude --name {{task_name}}",
-        description="Claude Code interactive session",
-    ),
-    "shell": TaskTemplate(name="shell", command="bash", description="Plain shell session"),
+    "default": TaskTemplate(name="default", command="", description="Login shell"),
 }
 
 
@@ -515,7 +509,7 @@ def _load_git_credentials(data: dict[str, object]) -> dict[str, GitCredentialCon
     return creds
 
 
-_TASK_CONFIG_KEYS = {"default_template", "history_limit"}
+_TASK_CONFIG_KEYS = {"history_limit"}
 
 
 def _load_task_config(data: dict[str, object]) -> TaskConfig:
@@ -533,7 +527,6 @@ def _load_task_config(data: dict[str, object]) -> TaskConfig:
         raise ConfigError("task.config.history_limit must be a positive integer")
 
     return TaskConfig(
-        default_template=str(raw.get("default_template", "claude")),
         history_limit=history_limit,
     )
 
@@ -653,11 +646,6 @@ def load_config(path: Path | None = None) -> Config:
 
     task_config = _load_task_config(data)
     task_templates = _load_task_templates(data)
-
-    if task_config.default_template not in task_templates:
-        raise ConfigError(
-            f"task.config.default_template references unknown template: {task_config.default_template}"
-        )
 
     return Config(
         user=_load_user(data),
