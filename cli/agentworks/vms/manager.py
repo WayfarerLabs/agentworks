@@ -267,12 +267,42 @@ def describe_vm(db: Database, name: str) -> None:
     if vm.last_seen_at:
         typer.echo(f"Last Seen:      {vm.last_seen_at}")
 
-    # Workspaces
+    # Workspaces with tasks and agents
     workspaces = db.list_workspaces(vm_name=name)
     typer.echo(f"\nWorkspaces ({len(workspaces)}):")
     if workspaces:
         for ws in workspaces:
-            typer.echo(f"  {ws.name:<20} {ws.type:<10} {ws.workspace_path}")
+            typer.echo(f"  {ws.name}  ({ws.workspace_path})")
+
+            tasks = db.list_tasks(workspace_name=ws.name)
+            agents = db.list_agents(workspace_name=ws.name)
+
+            # Track which agents are used by tasks
+            used_agents: set[str] = set()
+            for task in tasks:
+                if task.mode == "agent":
+                    used_agents.add(task.linux_user)
+
+            if tasks:
+                typer.echo(f"    Tasks ({len(tasks)}):")
+                for task in tasks:
+                    if task.mode == "agent":
+                        agent_name = next(
+                            (a.name for a in agents if a.linux_user == task.linux_user), task.linux_user
+                        )
+                        mode_label = f"agent:{agent_name}"
+                    else:
+                        mode_label = "admin"
+                    typer.echo(f"      {task.name}  [{task.template}]  {task.status}  {mode_label}")
+
+            unused_agents = [a for a in agents if a.linux_user not in used_agents]
+            if unused_agents:
+                typer.echo(f"    Unused Agents ({len(unused_agents)}):")
+                for agent in unused_agents:
+                    typer.echo(f"      {agent.name}  (user: {agent.linux_user})")
+
+            if not tasks and not agents:
+                typer.echo("    (empty)")
     else:
         typer.echo("  (none)")
 
