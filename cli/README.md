@@ -103,7 +103,7 @@ Manage virtual machines across Lima (local or remote), Azure, and WSL2.
 | `agentworks vm start <name>`                     | Start a stopped VM                         |
 | `agentworks vm stop <name>`                      | Stop a running VM                          |
 | `agentworks vm reinit <name>`                    | Re-run initialization on a provisioned VM  |
-| `agentworks vm delete <name>`                    | Delete a VM (prompts for confirmation)     |
+| `agentworks vm delete <name>`                    | Delete a VM (with confirmation)            |
 | `agentworks vm console <name>`                   | Attach to the VM console                   |
 | `agentworks vm add-git-credential <name> <cred>` | Add or update a git credential             |
 
@@ -113,6 +113,9 @@ All initialization behavior (packages, install commands, etc.) is driven by conf
 
 `vm reinit` re-runs the initialization phase using the current config without reprovisioning the VM.
 Changes to config (new packages, different install commands, etc.) are picked up automatically.
+
+`vm delete` requires `--force` if the VM has workspaces, agents, or tasks. The confirmation
+message shows what will be deleted. Pass `--yes` to skip the prompt.
 
 ### Workspaces
 
@@ -126,6 +129,9 @@ Manage workspaces on VMs or locally.
 | `agentworks workspace delete <name>` | Delete a workspace                   |
 
 `workspace create` accepts `--name`, `--vm`, `--local`, `--template`, and `--open-vscode`.
+
+`workspace delete` requires `--force` if the workspace has tasks. Running task sessions are
+killed during deletion. Pass `--yes` to skip the confirmation prompt.
 
 ### Agents
 

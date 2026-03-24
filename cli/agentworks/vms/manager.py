@@ -228,20 +228,19 @@ def list_vms(db: Database) -> None:
 
     header = (
         f"{'NAME':<20} {'PLATFORM':<10} {'HOST':<15} {'PROV':<12} {'INIT':<12} "
-        f"{'WS':<4} {'RESOURCES':<15} {'TAILSCALE':<20} {'CREATED'}"
+        f"{'WS/AG/TS':<10} {'TAILSCALE':<20} {'CREATED'}"
     )
     typer.echo(header)
-    typer.echo("-" * 130)
+    typer.echo("-" * len(header))
     for vm in vms:
-        resources = "-"
-        if vm.cpus is not None:
-            resources = f"{vm.cpus}c/{vm.memory_gib}G/{vm.disk_gib}G"
-        ws_count = db.count_workspaces_on_vm(vm.name)
+        ws = db.count_workspaces_on_vm(vm.name)
+        ag = db.count_agents_on_vm(vm.name)
+        ts = db.count_tasks_on_vm(vm.name)
+        counts = f"{ws}/{ag}/{ts}"
         typer.echo(
             f"{vm.name:<20} {vm.platform:<10} {vm.vm_host_name or '-':<15} "
             f"{vm.provisioning_status:<12} {vm.init_status:<12} "
-            f"{ws_count:<4} {resources:<15} "
-            f"{vm.tailscale_host or '-':<20} {vm.created_at}"
+            f"{counts:<10} {vm.tailscale_host or '-':<20} {vm.created_at}"
         )
 
 
@@ -259,7 +258,7 @@ def describe_vm(db: Database, name: str) -> None:
     typer.echo(f"Tailscale:      {vm.tailscale_host or '-'}")
 
     if vm.cpus is not None:
-        typer.echo(f"Resources:      {vm.cpus} CPUs, {vm.memory_gib} GiB RAM, {vm.disk_gib} GiB disk")
+        typer.echo(f"Resources:      {vm.cpus} CPUs, {vm.memory_gib} GiB RAM, {vm.disk_gib} GiB disk (provisioned)")
     if vm.azure_resource_id:
         typer.echo(f"Azure ID:       {vm.azure_resource_id}")
     if vm.wsl_distro_name:
@@ -394,19 +393,34 @@ def delete_vm(
     """Delete a VM, cleaning up all associated resources."""
     vm = _require_vm(db, name)
 
-    # Check for workspaces
+    # Check for workspaces (which contain agents and tasks)
     ws_count = db.count_workspaces_on_vm(name)
-    if ws_count > 0 and not force:
+    ag_count = db.count_agents_on_vm(name)
+    ts_count = db.count_tasks_on_vm(name)
+    has_children = ws_count > 0
+
+    if has_children and not force:
+        parts = [f"{ws_count} workspace(s)"]
+        if ag_count > 0:
+            parts.append(f"{ag_count} agent(s)")
+        if ts_count > 0:
+            parts.append(f"{ts_count} task(s)")
         typer.echo(
-            f"Error: VM '{name}' has {ws_count} workspace(s). Delete them first, or use --force.",
+            f"Error: VM '{name}' has {', '.join(parts)}. "
+            "Delete them first, or use --force.",
             err=True,
         )
         raise typer.Exit(1)
 
     if not yes and not force:
         msg = f"Delete VM '{name}'?"
-        if ws_count > 0:
-            msg += f" ({ws_count} workspace(s) will also be deleted)"
+        if has_children:
+            parts = [f"{ws_count} workspace(s)"]
+            if ag_count > 0:
+                parts.append(f"{ag_count} agent(s)")
+            if ts_count > 0:
+                parts.append(f"{ts_count} task(s)")
+            msg += f" ({', '.join(parts)} will also be deleted)"
         typer.confirm(msg, abort=True)
 
     # Platform-specific cleanup (also handles Tailscale logout)

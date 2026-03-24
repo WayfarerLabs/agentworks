@@ -499,6 +499,22 @@ class Database:
         row = self._conn.execute("SELECT COUNT(*) FROM workspaces WHERE vm_name = ?", (vm_name,)).fetchone()
         return int(row[0])
 
+    def count_agents_on_vm(self, vm_name: str) -> int:
+        row = self._conn.execute(
+            "SELECT COUNT(*) FROM agents WHERE workspace_name IN "
+            "(SELECT name FROM workspaces WHERE vm_name = ?)",
+            (vm_name,),
+        ).fetchone()
+        return int(row[0])
+
+    def count_tasks_on_vm(self, vm_name: str) -> int:
+        row = self._conn.execute(
+            "SELECT COUNT(*) FROM tasks WHERE workspace_name IN "
+            "(SELECT name FROM workspaces WHERE vm_name = ?)",
+            (vm_name,),
+        ).fetchone()
+        return int(row[0])
+
     # -- Agents ------------------------------------------------------------
 
     def insert_agent(self, name: str, workspace_name: str, linux_user: str) -> AgentRow:
