@@ -116,6 +116,19 @@ def run(
     return ssh_result
 
 
+def interactive(target: SSHTarget, command: str) -> int:
+    """Run an interactive SSH command with a TTY (for tmux attach, etc.).
+
+    Returns the process exit code. Does not raise on failure.
+    """
+    args = _ssh_base_args(target)
+    # Remove BatchMode for interactive use and allocate a TTY
+    args = [a for a in args if a != "BatchMode=yes"]
+    args.insert(1, "-t")
+    args.append(command)
+    return subprocess.call(args)
+
+
 def run_as_root(
     target: SSHTarget,
     command: str,

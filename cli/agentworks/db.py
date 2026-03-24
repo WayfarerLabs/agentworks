@@ -42,6 +42,16 @@ class VMStatus(Enum):
     UNKNOWN = "unknown"
 
 
+class TaskMode(Enum):
+    ADMIN = "admin"
+    AGENT = "agent"
+
+
+class TaskStatus(Enum):
+    RUNNING = "running"
+    STOPPED = "stopped"
+
+
 # -- Row types -------------------------------------------------------------
 
 
@@ -100,6 +110,18 @@ class AgentRow:
     workspace_name: str
     linux_user: str
     created_at: str
+
+
+@dataclass
+class TaskRow:
+    name: str
+    workspace_name: str
+    template: str
+    mode: str
+    linux_user: str
+    status: str
+    created_at: str
+    updated_at: str
 
 
 # -- Migrations ------------------------------------------------------------
@@ -211,6 +233,20 @@ MIGRATIONS: dict[int, str] = {
     """,
     7: """
         ALTER TABLE vms RENAME COLUMN vm_user TO admin_username;
+    """,
+    8: """
+        CREATE TABLE tasks (
+            name           TEXT NOT NULL,
+            workspace_name TEXT NOT NULL,
+            template       TEXT NOT NULL,
+            mode           TEXT NOT NULL DEFAULT 'admin',
+            linux_user     TEXT NOT NULL,
+            status         TEXT NOT NULL DEFAULT 'running',
+            created_at     TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+            updated_at     TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+            PRIMARY KEY (workspace_name, name),
+            FOREIGN KEY (workspace_name) REFERENCES workspaces(name)
+        );
     """,
 }
 
@@ -389,6 +425,10 @@ class Database:
 
     def delete_vm(self, name: str) -> None:
         self._conn.execute(
+            "DELETE FROM tasks WHERE workspace_name IN (SELECT name FROM workspaces WHERE vm_name = ?)",
+            (name,),
+        )
+        self._conn.execute(
             "DELETE FROM agents WHERE workspace_name IN (SELECT name FROM workspaces WHERE vm_name = ?)",
             (name,),
         )
@@ -447,6 +487,7 @@ class Database:
         self._conn.commit()
 
     def delete_workspace(self, name: str) -> None:
+        self._conn.execute("DELETE FROM tasks WHERE workspace_name = ?", (name,))
         self._conn.execute("DELETE FROM agents WHERE workspace_name = ?", (name,))
         self._conn.execute("DELETE FROM workspaces WHERE name = ?", (name,))
         self._conn.commit()
@@ -502,6 +543,71 @@ class Database:
         )
         self._conn.commit()
         return agents
+
+    # -- Tasks -------------------------------------------------------------
+
+    def insert_task(
+        self,
+        name: str,
+        workspace_name: str,
+        template: str,
+        mode: TaskMode,
+        linux_user: str,
+    ) -> TaskRow:
+        self._conn.execute(
+            "INSERT INTO tasks (name, workspace_name, template, mode, linux_user) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (name, workspace_name, template, mode.value, linux_user),
+        )
+        self._conn.commit()
+        result = self.get_task(workspace_name, name)
+        assert result is not None
+        return result
+
+    def get_task(self, workspace_name: str, name: str) -> TaskRow | None:
+        row = self._conn.execute(
+            "SELECT * FROM tasks WHERE workspace_name = ? AND name = ?",
+            (workspace_name, name),
+        ).fetchone()
+        return _to_task(row) if row else None
+
+    def list_tasks(self, workspace_name: str | None = None) -> list[TaskRow]:
+        if workspace_name is not None:
+            rows = self._conn.execute(
+                "SELECT * FROM tasks WHERE workspace_name = ? ORDER BY name",
+                (workspace_name,),
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                "SELECT * FROM tasks ORDER BY workspace_name, name",
+            ).fetchall()
+        return [_to_task(r) for r in rows]
+
+    def update_task_status(self, workspace_name: str, name: str, status: TaskStatus) -> None:
+        self._conn.execute(
+            "UPDATE tasks SET status = ?, "
+            "updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') "
+            "WHERE workspace_name = ? AND name = ?",
+            (status.value, workspace_name, name),
+        )
+        self._conn.commit()
+
+    def delete_task(self, workspace_name: str, name: str) -> None:
+        self._conn.execute(
+            "DELETE FROM tasks WHERE workspace_name = ? AND name = ?",
+            (workspace_name, name),
+        )
+        self._conn.commit()
+
+    def delete_tasks_for_workspace(self, workspace_name: str) -> list[TaskRow]:
+        """Delete all tasks for a workspace, returning the deleted tasks."""
+        tasks = self.list_tasks(workspace_name=workspace_name)
+        self._conn.execute(
+            "DELETE FROM tasks WHERE workspace_name = ?",
+            (workspace_name,),
+        )
+        self._conn.commit()
+        return tasks
 
     # -- VM Events ---------------------------------------------------------
 
@@ -573,6 +679,19 @@ def _to_agent(row: sqlite3.Row) -> AgentRow:
         workspace_name=row["workspace_name"],
         linux_user=row["linux_user"],
         created_at=row["created_at"],
+    )
+
+
+def _to_task(row: sqlite3.Row) -> TaskRow:
+    return TaskRow(
+        name=row["name"],
+        workspace_name=row["workspace_name"],
+        template=row["template"],
+        mode=row["mode"],
+        linux_user=row["linux_user"],
+        status=row["status"],
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
     )
 
 

@@ -51,7 +51,8 @@ set -g status off
 set -g prefix None
 unbind-key -a
 
-# Re-bind only what is needed for attach/detach and scrollback
+# Re-bind only detach and ctrl-c passthrough
+bind -n C-q detach-client
 bind -n C-c send-keys C-c
 ```
 
@@ -95,11 +96,11 @@ Templates are defined in the agentworks config under `[task_templates]`:
 
 ```toml
 [task_templates.claude]
-command = "claude"
+command = "claude --name {{task_name}}"
 description = "Claude Code interactive session"
 
 [task_templates.claude-resume]
-command = "claude --resume"
+command = "claude --resume --name {{task_name}}"
 description = "Claude Code resume last conversation"
 
 [task_templates.shell]
@@ -113,6 +114,19 @@ Template resolution:
 2. Otherwise, use the default template from `[task.config]` (defaults to "claude").
 3. Built-in templates ("claude", "shell") are always available and can be overridden.
 
+### Template variables
+
+Template commands (and env values) support `{{var}}` placeholder substitution, using double-brace
+syntax consistent with nerftools manifests. Available variables:
+
+- `{{task_name}}` -- the task name
+- `{{workspace_name}}` -- the workspace name
+
+For example, the built-in claude template uses `claude --name {{task_name}}` so that the Claude
+session name is tied to the task, giving the operator a consistent name across task restarts.
+
+### Command execution
+
 The command is executed via a login shell to pick up the user's profile, PATH, and environment:
 
 - **Admin mode**: the tmux session runs as the admin user (who owns the SSH connection). The
@@ -121,11 +135,11 @@ The command is executed via a login shell to pick up the user's profile, PATH, a
   proper login shell as the agent user, inheriting the agent's home directory, PATH, and
   installed tools.
 
-Templates may also specify environment variables:
+Templates may also specify environment variables (which also support `{{var}}` substitution):
 
 ```toml
 [task_templates.claude-with-key]
-command = "claude"
+command = "claude --name {{task_name}}"
 description = "Claude with custom API key"
 env = { ANTHROPIC_API_KEY = "sk-..." }
 ```
@@ -196,6 +210,6 @@ default_template = "claude"       # default template for task create
 history_limit = 50000             # tmux scrollback buffer lines
 
 [task_templates.claude]
-command = "claude"
+command = "claude --name {{task_name}}"
 description = "Claude Code interactive session"
 ```

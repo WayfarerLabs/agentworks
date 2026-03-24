@@ -16,23 +16,25 @@
 
 ## Phase 1: Database and Domain Model
 
-- [ ] Add `tasks` table to SQLite schema
+- [x] Add `tasks` table to SQLite schema
   - Columns: name, workspace_name, template, mode (admin/agent), linux_user, status, created_at,
     updated_at
   - Primary key: (name, workspace_name)
   - Foreign key: workspace_name references workspaces
   - mode is "admin" or "agent"; linux_user stores the resolved user for both modes
-- [ ] Add `TaskRow` dataclass to `db.py`
-- [ ] Add `TaskStatus` enum (running, stopped)
-- [ ] Add DB methods: insert_task, get_task, list_tasks, update_task_status, delete_task
-- [ ] Add schema migration (bump version, add table)
+- [x] Add `TaskRow` dataclass to `db.py`
+- [x] Add `TaskStatus` and `TaskMode` enums
+- [x] Add DB methods: insert_task, get_task, list_tasks, update_task_status, delete_task,
+  delete_tasks_for_workspace
+- [x] Add schema migration 8 (create tasks table)
+- [x] Add cascade deletes for tasks in delete_vm and delete_workspace
 
 **Done when**: DB operations work and are covered by the existing migration path.
 
 ## Phase 2: tmux Task Session Management
 
-- [ ] Create `cli/agentworks/tasks/` package
-- [ ] Implement `tmux.py` module with functions:
+- [x] Create `cli/agentworks/tasks/` package
+- [x] Implement `tmux.py` module with functions:
   - `generate_restricted_config(history_limit)` -- returns the locked-down tmux config content
   - `deploy_restricted_config(run_command)` -- writes config to `/opt/agentworks/tmux-task.conf`
   - `derive_session_name(workspace_name, task_name)` -- returns `<workspace>--<task>`
@@ -47,17 +49,17 @@
 
 ## Phase 3: Task Templates
 
-- [ ] Add `[task.config]` and `[task_templates.*]` to config parsing in `config.py`
-- [ ] Add built-in templates: "claude", "shell"
-- [ ] Implement template resolution logic (explicit > default > built-in)
-- [ ] Update `sample-config.toml` with task config and template examples
-- [ ] Validate template commands at config load time
+- [x] Add `[task.config]` and `[task_templates.*]` to config parsing in `config.py`
+- [x] Add built-in templates: "claude", "shell"
+- [x] Implement template resolution logic (explicit > default > built-in)
+- [x] Update `sample-config.toml` with task config and template examples
+- [x] Validate template commands at config load time
 
 **Done when**: Templates resolve correctly from config with built-in fallbacks.
 
 ## Phase 4: Task Lifecycle (Manager)
 
-- [ ] Implement `cli/agentworks/tasks/manager.py` with functions:
+- [x] Implement `cli/agentworks/tasks/manager.py` with functions:
   - `create_task(db, config, name, workspace_name, template_name, agent_name)` -- validates inputs,
     inserts DB row, deploys tmux config if needed, creates tmux session, updates console
   - `stop_task(db, config, name, workspace_name)` -- kills tmux session, updates DB
@@ -66,27 +68,29 @@
   - `list_tasks(db, workspace_name)` -- lists tasks with reconciled status
   - `attach_task(db, config, name, workspace_name)` -- interactive SSH attach to tmux session
   - `task_logs(db, config, name, workspace_name, lines)` -- captures and prints scrollback
-- [ ] Implement status reconciliation (check tmux session existence on list/get)
+- [x] Implement status reconciliation (check tmux session existence on list/get)
 
 **Done when**: Full task lifecycle works via manager functions.
 
 ## Phase 5: Console
 
-- [ ] Implement console management in `cli/agentworks/tasks/console.py`:
-  - `create_console(vm, config, running_tasks, run_command)` -- creates the VM console session with
-    one window per running task
-  - `add_task_to_console(vm, task_name, run_command)` -- adds a window to an existing console
-  - `attach_console(vm, config)` -- interactive SSH attach to the console
-  - `console_exists(vm, run_command)` -- checks if console session exists
-- [ ] Console session naming: `console` (one per VM, no collision risk)
-- [ ] Task window naming in console: use `<workspace>--<task>` to match the session name
-- [ ] Auto-add tasks to console on task create (if console exists)
+- [x] Implement console management in `cli/agentworks/tasks/console.py`:
+  - `create_console(running_tasks, run_command)` -- creates the VM console session with one window
+    per running task
+  - `add_task_to_console(task_name, workspace_name, run_command)` -- adds a window to an existing
+    console
+  - `attach_console(db, config, vm_name, recreate)` -- interactive SSH attach to the console
+  - `console_exists(run_command)` -- checks if console session exists
+  - `recreate_console(running_tasks, run_command)` -- kills and rebuilds
+- [x] Console session naming: `console` (one per VM, no collision risk)
+- [x] Task window naming in console: use `<workspace>--<task>` to match the session name
+- [x] Auto-add tasks to console on task create (if console exists)
 
 **Done when**: Console aggregates running tasks and supports full tmux controls.
 
 ## Phase 6: CLI Commands
 
-- [ ] Add `task` command group to `cli.py`
+- [x] Add `task` command group to `cli.py`
   - `task create <name> --workspace <ws> [--template <tpl>] [--agent <agent>]`
   - `task list [--workspace <ws>]`
   - `task stop <name> --workspace <ws>`
@@ -94,18 +98,18 @@
   - `task attach <name> --workspace <ws>`
   - `task delete <name> --workspace <ws>`
   - `task logs <name> --workspace <ws> [--lines <n>]`
-- [ ] Add `vm console <vm-name>` command
-- [ ] Update completions for all new commands and dynamic arguments
-- [ ] Update help text and command descriptions
+- [x] Add `vm console <vm-name> [--recreate]` command
+- [x] Update completions for all new commands and dynamic arguments
+- [x] Update help text and command descriptions
 
 **Done when**: All commands work from the CLI with proper error handling and output.
 
 ## Phase 7: Documentation and Cleanup
 
-- [ ] Update sample-config.toml with `[task.config]` and `[task_templates.*]` sections
+- [x] Update sample-config.toml with `[task.config]` and `[task_templates.*]` sections
 - [ ] Update any relevant existing docs
-- [ ] Spell-check new files with cspell
-- [ ] Verify completions work for new commands
+- [x] Spell-check new files with cspell
+- [x] Verify completions work for new commands
 - [ ] Consider whether tmuxinator code should be deprecated or removed in this phase
 
 **Done when**: Docs are accurate, config is complete, completions work.

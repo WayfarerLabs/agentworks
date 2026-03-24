@@ -49,6 +49,13 @@ agent_app = typer.Typer(
 )
 app.add_typer(agent_app)
 
+task_app = typer.Typer(
+    name="task",
+    help="Manage tasks (named work streams in workspaces).",
+    no_args_is_help=True,
+)
+app.add_typer(task_app)
+
 installer_app = typer.Typer(
     name="installer",
     help="List and inspect available installers from the catalog.",
@@ -282,6 +289,18 @@ def vm_add_git_credential(
     add_git_credential(_get_db(), load_config(), name, credential)
 
 
+@vm_app.command("console")
+def vm_console(
+    name: Annotated[str, typer.Argument(help="VM name")],
+    recreate: Annotated[bool, typer.Option("--recreate", help="Kill and rebuild the console")] = False,
+) -> None:
+    """Attach to the VM console (creates it if needed)."""
+    from agentworks.config import load_config
+    from agentworks.tasks.console import attach_console
+
+    attach_console(_get_db(), load_config(), vm_name=name, recreate=recreate)
+
+
 # -- Workspace commands ----------------------------------------------------
 
 
@@ -400,6 +419,102 @@ def agent_delete(
     from agentworks.config import load_config
 
     delete_agent(_get_db(), load_config(), name=name, workspace_name=workspace)
+
+
+# -- Task commands ---------------------------------------------------------
+
+
+@task_app.command("create")
+def task_create(
+    name: Annotated[str, typer.Argument(help="Task name")],
+    workspace: Annotated[str, typer.Option("--workspace", help="Workspace name")] = ...,  # type: ignore[assignment]
+    template: Annotated[str | None, typer.Option("--template", help="Task template")] = None,
+    agent: Annotated[str | None, typer.Option("--agent", help="Agent name (agent mode)")] = None,
+) -> None:
+    """Create and start a task in a workspace."""
+    from agentworks.config import load_config
+    from agentworks.tasks.manager import create_task
+
+    create_task(
+        _get_db(),
+        load_config(),
+        name=name,
+        workspace_name=workspace,
+        template_name=template,
+        agent_name=agent,
+    )
+
+
+@task_app.command("list")
+def task_list(
+    workspace: Annotated[str | None, typer.Option("--workspace", help="Filter by workspace")] = None,
+) -> None:
+    """List tasks."""
+    from agentworks.config import load_config
+    from agentworks.tasks.manager import list_tasks
+
+    list_tasks(_get_db(), load_config(), workspace_name=workspace)
+
+
+@task_app.command("stop")
+def task_stop(
+    name: Annotated[str, typer.Argument(help="Task name")],
+    workspace: Annotated[str, typer.Option("--workspace", help="Workspace name")] = ...,  # type: ignore[assignment]
+) -> None:
+    """Stop a running task."""
+    from agentworks.config import load_config
+    from agentworks.tasks.manager import stop_task
+
+    stop_task(_get_db(), load_config(), name=name, workspace_name=workspace)
+
+
+@task_app.command("start")
+def task_start(
+    name: Annotated[str, typer.Argument(help="Task name")],
+    workspace: Annotated[str, typer.Option("--workspace", help="Workspace name")] = ...,  # type: ignore[assignment]
+) -> None:
+    """Restart a stopped task."""
+    from agentworks.config import load_config
+    from agentworks.tasks.manager import start_task
+
+    start_task(_get_db(), load_config(), name=name, workspace_name=workspace)
+
+
+@task_app.command("attach")
+def task_attach(
+    name: Annotated[str, typer.Argument(help="Task name")],
+    workspace: Annotated[str, typer.Option("--workspace", help="Workspace name")] = ...,  # type: ignore[assignment]
+) -> None:
+    """Attach to a task's tmux session."""
+    from agentworks.config import load_config
+    from agentworks.tasks.manager import attach_task
+
+    attach_task(_get_db(), load_config(), name=name, workspace_name=workspace)
+
+
+@task_app.command("delete")
+def task_delete(
+    name: Annotated[str, typer.Argument(help="Task name")],
+    workspace: Annotated[str, typer.Option("--workspace", help="Workspace name")] = ...,  # type: ignore[assignment]
+) -> None:
+    """Stop and delete a task."""
+    from agentworks.config import load_config
+    from agentworks.tasks.manager import delete_task
+
+    delete_task(_get_db(), load_config(), name=name, workspace_name=workspace)
+
+
+@task_app.command("logs")
+def task_logs(
+    name: Annotated[str, typer.Argument(help="Task name")],
+    workspace: Annotated[str, typer.Option("--workspace", help="Workspace name")] = ...,  # type: ignore[assignment]
+    lines: Annotated[int | None, typer.Option("--lines", "-n", help="Number of lines")] = None,
+) -> None:
+    """Dump the scrollback buffer for a task."""
+    from agentworks.config import load_config
+    from agentworks.tasks.manager import task_logs as _task_logs
+
+    _task_logs(_get_db(), load_config(), name=name, workspace_name=workspace, lines=lines)
 
 
 # -- Installer catalog commands --------------------------------------------
