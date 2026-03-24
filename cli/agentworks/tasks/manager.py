@@ -119,17 +119,20 @@ def _build_task_command(
     *,
     task_name: str,
     workspace_name: str,
+    restart: bool = False,
 ) -> str:
     """Build the shell command string for a task from its template.
 
     Returns an empty string if the template has no command (login shell only).
+    Uses restart_command (if defined) when restart=True.
     """
     variables = {
         "task_name": task_name,
         "workspace_name": workspace_name,
     }
 
-    command = _substitute_template_vars(template.command, variables)
+    raw_command = (template.restart_command if restart and template.restart_command else template.command)
+    command = _substitute_template_vars(raw_command, variables)
 
     parts = []
     for key, val in template.env.items():
@@ -269,17 +272,19 @@ def stop_task(
     typer.echo(f"Task '{name}' stopped")
 
 
-def start_task(
+def restart_task(
     db: Database,
     config: Config,
     *,
     name: str,
     workspace_name: str,
+    force: bool = False,
 ) -> None:
-    """Restart a stopped task."""
+    """Restart a task. Errors if running unless --force is passed."""
     from agentworks.tasks.tmux import (
         create_task_session,
         deploy_restricted_config,
+        kill_task_session,
         session_exists,
     )
 
@@ -287,13 +292,22 @@ def start_task(
     task = _require_task(db, workspace_name, name)
 
     if session_exists(workspace_name, name, run_command=run_command):
-        typer.echo(f"Task '{name}' is already running", err=True)
-        raise typer.Exit(1)
+        if not force:
+            typer.echo(
+                f"Error: task '{name}' is still running. "
+                "Stop it first, or use --force.",
+                err=True,
+            )
+            raise typer.Exit(1)
+        kill_task_session(workspace_name, name, run_command=run_command)
 
     template = _resolve_template(config, task.template)
     deploy_restricted_config(run_command, history_limit=config.task.history_limit)
 
-    command = _build_task_command(template, task_name=name, workspace_name=workspace_name)
+    # Use restart_command if available, otherwise fall back to command
+    command = _build_task_command(
+        template, task_name=name, workspace_name=workspace_name, restart=True,
+    )
     is_admin = task.mode == TaskMode.ADMIN.value
 
     create_task_session(
@@ -307,7 +321,7 @@ def start_task(
     )
 
     db.update_task_status(workspace_name, name, TaskStatus.RUNNING)
-    typer.echo(f"Task '{name}' started")
+    typer.echo(f"Task '{name}' restarted")
 
     from agentworks.tasks.console import add_task_to_console
 

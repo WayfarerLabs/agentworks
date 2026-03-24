@@ -98,17 +98,23 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 
 # --- Task templates ---
 # Define commands that tasks can run. The built-in "default" template runs a
-# login shell ($SHELL --login). Override it or add new templates.
+# login shell. Override it or add new templates.
 #
 # Template commands support {{task_name}} and {{workspace_name}} variables,
 # using double-brace syntax consistent with nerftools manifests.
+#
+# Templates may define a restart_command for `task restart`. If omitted,
+# the regular command is used. This is useful for tools like Claude Code
+# where --resume picks up the previous conversation.
 
 # [task_templates.default]                  # override the built-in default
 # command = "claude --name {{task_name}}"
+# restart_command = "claude --resume {{task_name}}"
 # description = "Claude Code interactive session"
 
 # [task_templates.claude]
 # command = "claude --name {{task_name}}"
+# restart_command = "claude --resume {{task_name}}"
 # description = "Claude Code interactive session"
 
 # [task_templates.custom-tool]

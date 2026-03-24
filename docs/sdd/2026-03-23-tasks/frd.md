@@ -83,14 +83,16 @@ VM. It is a convenience layer, not a requirement.
 
 ### R1: Task lifecycle
 
-An operator can create, start, stop, and delete tasks.
+An operator can create, restart, stop, and delete tasks.
 
 - **Create** registers the task in the database and starts it (creates the tmux session, runs the
   template command).
 - **Stop** sends a signal to the running command. If the command does not exit within a grace
   period, the tmux session is killed.
-- **Start** restarts a stopped task (new tmux session, re-runs the template command).
-- **Delete** stops the task if running, then removes it from the database.
+- **Restart** re-runs the task. If the template defines a `restart_command`, that is used instead
+  of `command` (e.g., `claude --resume` instead of `claude --name`). Errors if the task is still
+  running unless `--force` is passed, which kills the existing session first.
+- **Delete** stops the task if running (with confirmation), then removes it from the database.
 
 A task's tmux session uses the task name as the session name. When the template command exits, the
 tmux session exits. When the tmux session is killed, the task is considered stopped.
@@ -146,7 +148,8 @@ New command group `agentworks task`:
   `--workspace-template`, and `--vm`). Mutually exclusive with `--workspace`.
 - `task list [--workspace <ws>]` -- list tasks, showing status.
 - `task stop <name> --workspace <ws>` -- stop a running task.
-- `task start <name> --workspace <ws>` -- restart a stopped task.
+- `task restart <name> --workspace <ws> [--force]` -- restart a task. Uses `restart_command` if
+  defined in the template. Errors if still running unless `--force` is passed.
 - `task attach <name> --workspace <ws>` -- attach to the task's tmux session (read-only view of
   output, or interactive if the command accepts input).
 - `task delete <name> --workspace <ws>` -- stop and remove a task.

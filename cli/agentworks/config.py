@@ -154,6 +154,7 @@ class TaskTemplate:
     name: str
     command: str
     description: str = ""
+    restart_command: str = ""
     env: dict[str, str] = field(default_factory=dict)
 
 
@@ -531,7 +532,7 @@ def _load_task_config(data: dict[str, object]) -> TaskConfig:
     )
 
 
-_TASK_TEMPLATE_KEYS = {"command", "description", "env"}
+_TASK_TEMPLATE_KEYS = {"command", "description", "restart_command", "env"}
 
 
 def _load_task_templates(data: dict[str, object]) -> dict[str, TaskTemplate]:
@@ -555,6 +556,7 @@ def _load_task_templates(data: dict[str, object]) -> dict[str, TaskTemplate]:
             name=name,
             command=str(command),
             description=str(tdata.get("description", "")),
+            restart_command=str(tdata.get("restart_command", "")),
             env={str(k): str(v) for k, v in env_raw.items()},
         )
 

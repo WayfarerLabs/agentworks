@@ -148,7 +148,7 @@ Manage tasks (named work streams running in workspaces).
 | `agentworks task list [--workspace <ws>]`        | List tasks with status      |
 | `agentworks task attach <name> --workspace <ws>` | Attach to a running task    |
 | `agentworks task stop <name> --workspace <ws>`   | Stop a running task         |
-| `agentworks task start <name> --workspace <ws>`  | Restart a stopped task      |
+| `agentworks task restart <name> --workspace <ws>` | Restart a task             |
 | `agentworks task delete <name> --workspace <ws>` | Stop and delete a task      |
 | `agentworks task logs <name> --workspace <ws>`   | Dump task scrollback buffer |
 | `agentworks vm console <vm-name>`                | Attach to the VM console    |
@@ -201,11 +201,14 @@ Define custom templates in config:
 ```toml
 [task_templates.default]               # override the built-in default
 command = "claude --name {{task_name}}"
+restart_command = "claude --resume {{task_name}}"
 description = "Claude Code interactive session"
 ```
 
 Template commands support `{{task_name}}` and `{{workspace_name}}` variable substitution
-(double-brace syntax, consistent with nerftools manifests).
+(double-brace syntax, consistent with nerftools manifests). The optional `restart_command` is
+used by `task restart` -- useful for tools like Claude Code where `--resume` picks up the
+previous conversation. If omitted, the regular `command` is used.
 
 ### Installers
 

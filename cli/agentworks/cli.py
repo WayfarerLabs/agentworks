@@ -571,16 +571,17 @@ def task_stop(
     stop_task(_get_db(), load_config(), name=name, workspace_name=workspace)
 
 
-@task_app.command("start")
-def task_start(
+@task_app.command("restart")
+def task_restart(
     name: Annotated[str, typer.Argument(help="Task name")],
     workspace: Annotated[str, typer.Option("--workspace", help="Workspace name")] = ...,  # type: ignore[assignment]
+    force: Annotated[bool, typer.Option("--force", help="Kill if still running")] = False,
 ) -> None:
-    """Restart a stopped task."""
+    """Restart a task (uses restart_command if defined in template)."""
     from agentworks.config import load_config
-    from agentworks.tasks.manager import start_task
+    from agentworks.tasks.manager import restart_task
 
-    start_task(_get_db(), load_config(), name=name, workspace_name=workspace)
+    restart_task(_get_db(), load_config(), name=name, workspace_name=workspace, force=force)
 
 
 @task_app.command("attach")
