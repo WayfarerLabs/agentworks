@@ -272,9 +272,10 @@ def vm_describe(
     name: Annotated[str, typer.Argument(help="VM name")],
 ) -> None:
     """Show detailed information about a VM."""
+    from agentworks.config import load_config
     from agentworks.vms.manager import describe_vm
 
-    describe_vm(_get_db(), name)
+    describe_vm(_get_db(), load_config(), name)
 
 
 @vm_app.command("start")

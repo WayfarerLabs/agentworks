@@ -244,26 +244,48 @@ def list_vms(db: Database) -> None:
         )
 
 
-def describe_vm(db: Database, name: str) -> None:
+def describe_vm(db: Database, config: Config, name: str) -> None:
     """Show detailed information about a VM."""
     vm = _require_vm(db, name)
 
     # VM details
     typer.echo(f"Name:           {vm.name}")
+    typer.echo(f"Created:        {vm.created_at}")
     typer.echo(f"Platform:       {vm.platform}")
     typer.echo(f"VM Host:        {vm.vm_host_name or '-'}")
     typer.echo(f"Admin User:     {vm.admin_username}")
     typer.echo(f"Provisioning:   {vm.provisioning_status}")
     typer.echo(f"Initialization: {vm.init_status}")
-    typer.echo(f"Tailscale:      {vm.tailscale_host or '-'}")
+    typer.echo(f"Tailscale IP:   {vm.tailscale_host or '-'}")
 
-    if vm.cpus is not None:
-        typer.echo(f"Resources:      {vm.cpus} CPUs, {vm.memory_gib} GiB RAM, {vm.disk_gib} GiB disk (provisioned)")
+    # Resources table: Initial / Current / Used (Used%)
+    live = None
+    if vm.tailscale_host is not None:
+        live = _query_live_resources(vm, config)
+
+    if vm.cpus is not None or live is not None:
+        typer.echo(f"\n{'Resources':<16}{'Provisioned':<14}{'Current':<14}{'Used'}")
+        typer.echo(f"  {'CPU':<16}"
+                   f"{str(vm.cpus) if vm.cpus else '-':<14}"
+                   f"{live['cpus'] if live else '-':<14}"
+                   f"{'load ' + live['load_avg'] if live else '-'}")
+        typer.echo(f"  {'Memory':<16}"
+                   f"{str(vm.memory_gib) + 'G' if vm.memory_gib else '-':<14}"
+                   f"{live['mem_total'] if live else '-':<14}"
+                   f"{live['mem_used'] + ' (' + live['mem_pct'] + ')' if live else '-'}")
+        typer.echo(f"  {'Swap':<16}"
+                   f"{'-':<14}"
+                   f"{live['swap_total'] if live else '-':<14}"
+                   f"{live['swap_used'] + ' (' + live['swap_pct'] + ')' if live else '-'}")
+        typer.echo(f"  {'Disk':<16}"
+                   f"{str(vm.disk_gib) + 'G' if vm.disk_gib else '-':<14}"
+                   f"{live['disk_total'] if live else '-':<14}"
+                   f"{live['disk_used'] + ' (' + live['disk_pct'] + ')' if live else '-'}")
+
     if vm.azure_resource_id:
         typer.echo(f"Azure ID:       {vm.azure_resource_id}")
     if vm.wsl_distro_name:
         typer.echo(f"WSL Distro:     {vm.wsl_distro_name}")
-    typer.echo(f"Created:        {vm.created_at}")
     if vm.last_seen_at:
         typer.echo(f"Last Seen:      {vm.last_seen_at}")
 
@@ -681,6 +703,76 @@ def _collect_secrets(
 
     typer.echo("")
     return ts_auth_key, git_tokens
+
+
+def _query_live_resources(vm: VMRow, config: Config) -> dict[str, str] | None:
+    """Query live resource usage from a VM over SSH. Returns None on failure."""
+    from agentworks.ssh import run, ssh_target_for_vm
+
+    target = ssh_target_for_vm(vm, config)
+    try:
+        # Single SSH call. free outputs: total used free shared buff/cache available
+        result = run(
+            target,
+            "nproc && "
+            "uptime | grep -oP 'load average: \\K[^,]+' && "
+            "free -b | awk '/^Mem:/{print $2,$3} /^Swap:/{print $2,$3}' && "
+            "df -h / | awk 'NR==2{print $2,$3,$5}'",
+            check=False,
+            timeout=10,
+        )
+    except Exception:
+        return None
+
+    if not result.ok:
+        return None
+
+    lines = result.stdout.strip().splitlines()
+    if len(lines) < 5:
+        return None
+
+    try:
+        cpus = lines[0].strip()
+        load_avg = lines[1].strip()
+        mem_parts = lines[2].split()
+        swap_parts = lines[3].split()
+        disk_parts = lines[4].split()
+
+        mem_total_b = int(mem_parts[0])
+        mem_used_b = int(mem_parts[1])
+        swap_total_b = int(swap_parts[0])
+        swap_used_b = int(swap_parts[1])
+
+        mem_pct = f"{mem_used_b * 100 // mem_total_b}%" if mem_total_b > 0 else "0%"
+        swap_pct = f"{swap_used_b * 100 // swap_total_b}%" if swap_total_b > 0 else "0%"
+
+        return {
+            "cpus": cpus,
+            "load_avg": load_avg,
+            "mem_total": _human_bytes(mem_total_b),
+            "mem_used": _human_bytes(mem_used_b),
+            "mem_pct": mem_pct,
+            "swap_total": _human_bytes(swap_total_b),
+            "swap_used": _human_bytes(swap_used_b),
+            "swap_pct": swap_pct,
+            "disk_total": disk_parts[0],
+            "disk_used": disk_parts[1],
+            "disk_pct": disk_parts[2],
+        }
+    except (IndexError, ValueError):
+        return None
+
+
+def _human_bytes(b: int) -> str:
+    """Format bytes as a human-readable string (e.g. 494M, 8.0G)."""
+    if b < 1024:
+        return f"{b}B"
+    for unit in ("K", "M", "G", "T"):
+        b_f = b / 1024
+        if b_f < 1024 or unit == "T":
+            return f"{b_f:.1f}{unit}" if b_f >= 10 else f"{b_f:.2f}{unit}"
+        b = int(b_f)
+    return f"{b}T"
 
 
 def _require_vm(db: Database, name: str) -> VMRow:
