@@ -210,10 +210,26 @@ def list_workspaces(
         typer.echo("No workspaces found.")
         return
 
-    typer.echo(f"{'NAME':<20} {'TYPE':<8} {'VM':<15} {'TEMPLATE':<15} {'CREATED'}")
-    typer.echo("-" * 80)
-    for ws in workspaces:
-        typer.echo(f"{ws.name:<20} {ws.type:<8} {ws.vm_name or '-':<15} {ws.template or '-':<15} {ws.created_at}")
+    def _tpl_name(t: str | None) -> str:
+        if t is None or t == "(built-in)":
+            return "default"
+        return t
+
+    rows = [
+        (ws.name, ws.type, ws.vm_name or "-", _tpl_name(ws.template), ws.created_at)
+        for ws in workspaces
+    ]
+
+    name_w = max(len("NAME"), max(len(r[0]) for r in rows))
+    type_w = max(len("TYPE"), max(len(r[1]) for r in rows))
+    vm_w = max(len("VM"), max(len(r[2]) for r in rows))
+    tpl_w = max(len("TEMPLATE"), max(len(r[3]) for r in rows))
+
+    header = f"{'NAME':<{name_w}}  {'TYPE':<{type_w}}  {'VM':<{vm_w}}  {'TEMPLATE':<{tpl_w}}  CREATED"
+    typer.echo(header)
+    typer.echo("-" * len(header))
+    for ws_name, ws_type, vm_name, tpl, created in rows:
+        typer.echo(f"{ws_name:<{name_w}}  {ws_type:<{type_w}}  {vm_name:<{vm_w}}  {tpl:<{tpl_w}}  {created}")
 
 
 def delete_workspace(

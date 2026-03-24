@@ -248,6 +248,9 @@ MIGRATIONS: dict[int, str] = {
             FOREIGN KEY (workspace_name) REFERENCES workspaces(name)
         );
     """,
+    9: """
+        UPDATE workspaces SET template = 'default' WHERE template = '(built-in)';
+    """,
 }
 
 LATEST_VERSION = max(MIGRATIONS)

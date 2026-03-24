@@ -30,7 +30,7 @@ def resolve_template(config: Config, template_name: str | None = None) -> Resolv
     2. "default" template if it exists
     3. Built-in empty template (tmuxinator=True, no repo)
     """
-    if template_name is not None and template_name != "(built-in)":
+    if template_name is not None and template_name != "default":
         if template_name not in config.workspace_templates:
             msg = f"Unknown workspace template: {template_name}"
             raise ValueError(msg)
@@ -39,7 +39,7 @@ def resolve_template(config: Config, template_name: str | None = None) -> Resolv
     if "default" in config.workspace_templates:
         return _resolve(config, "default")
 
-    return ResolvedTemplate(name="(built-in)")
+    return ResolvedTemplate(name="default")
 
 
 def _resolve(config: Config, name: str) -> ResolvedTemplate:

@@ -368,18 +368,20 @@ def list_tasks(
     for task in tasks:
         by_workspace.setdefault(task.workspace_name, []).append(task)
 
-    rows: list[tuple[str, str, str, str, str]] = []
+    rows: list[tuple[str, str, str, str, str, str]] = []
     for ws_name, ws_tasks in sorted(by_workspace.items()):
         ws = db.get_workspace(ws_name)
+        vm_name = ws.vm_name or "-" if ws else "-"
+
         if ws is None or ws.type != "vm":
             for task in ws_tasks:
-                rows.append((task.name, ws_name, task.template, task.mode, task.status))
+                rows.append((task.name, ws_name, vm_name, task.template, task.mode, task.status))
             continue
 
         vm = db.get_vm(ws.vm_name)  # type: ignore[arg-type]
         if vm is None or vm.tailscale_host is None:
             for task in ws_tasks:
-                rows.append((task.name, ws_name, task.template, task.mode, task.status))
+                rows.append((task.name, ws_name, vm_name, task.template, task.mode, task.status))
             continue
 
         from agentworks.ssh import run
@@ -394,22 +396,29 @@ def list_tasks(
                 workspace_name=ws_name,
                 db=db,
             )
-            rows.append((task.name, ws_name, task.template, task.mode, status))
+            rows.append((task.name, ws_name, vm_name, task.template, task.mode, status))
 
     if not rows:
         typer.echo("No tasks found.")
         return
 
-    name_w = max(len(r[0]) for r in rows)
-    ws_w = max(len(r[1]) for r in rows)
-    tpl_w = max(len(r[2]) for r in rows)
-    mode_w = max(len(r[3]) for r in rows)
+    name_w = max(len("NAME"), max(len(r[0]) for r in rows))
+    ws_w = max(len("WORKSPACE"), max(len(r[1]) for r in rows))
+    vm_w = max(len("VM"), max(len(r[2]) for r in rows))
+    tpl_w = max(len("TEMPLATE"), max(len(r[3]) for r in rows))
+    mode_w = max(len("MODE"), max(len(r[4]) for r in rows))
 
-    header = f"{'NAME':<{name_w}}  {'WORKSPACE':<{ws_w}}  {'TEMPLATE':<{tpl_w}}  {'MODE':<{mode_w}}  STATUS"
+    header = (
+        f"{'NAME':<{name_w}}  {'WORKSPACE':<{ws_w}}  {'VM':<{vm_w}}  "
+        f"{'TEMPLATE':<{tpl_w}}  {'MODE':<{mode_w}}  STATUS"
+    )
     typer.echo(header)
     typer.echo("-" * len(header))
-    for name, ws_name, tpl, mode, status in rows:
-        typer.echo(f"{name:<{name_w}}  {ws_name:<{ws_w}}  {tpl:<{tpl_w}}  {mode:<{mode_w}}  {status}")
+    for task_name, ws_name, vm_col, tpl, mode, status in rows:
+        typer.echo(
+            f"{task_name:<{name_w}}  {ws_name:<{ws_w}}  {vm_col:<{vm_w}}  "
+            f"{tpl:<{tpl_w}}  {mode:<{mode_w}}  {status}"
+        )
 
 
 def attach_task(
