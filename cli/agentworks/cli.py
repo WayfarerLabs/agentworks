@@ -423,13 +423,14 @@ def workspace_list(
 @workspace_app.command("delete")
 def workspace_delete(
     name: Annotated[str, typer.Argument(help="Workspace name")],
+    force: Annotated[bool, typer.Option("--force", help="Force delete even with tasks")] = False,
     yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip confirmation")] = False,
 ) -> None:
     """Delete a workspace."""
     from agentworks.config import load_config
     from agentworks.workspaces.manager import delete_workspace
 
-    delete_workspace(_get_db(), load_config(), name, yes=yes)
+    delete_workspace(_get_db(), load_config(), name, force=force, yes=yes)
 
 
 # -- Agent commands --------------------------------------------------------
