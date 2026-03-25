@@ -121,13 +121,14 @@ message shows what will be deleted. Pass `--yes` to skip the prompt.
 
 Manage workspaces on VMs or locally.
 
-| Command                                | Description                          |
-| -------------------------------------- | ------------------------------------ |
-| `agentworks workspace create`          | Create a workspace (VM or `--local`) |
-| `agentworks workspace shell <name>`    | Open a plain shell into a workspace  |
-| `agentworks workspace console <name>`  | Open the workspace console (tmux)    |
-| `agentworks workspace list`            | List workspaces                      |
-| `agentworks workspace delete <name>`   | Delete a workspace                   |
+| Command                                   | Description                          |
+| ----------------------------------------- | ------------------------------------ |
+| `agentworks workspace create`             | Create a workspace (VM or `--local`) |
+| `agentworks workspace shell <name>`       | Open a plain shell into a workspace  |
+| `agentworks workspace console <name>`     | Open the workspace console (tmux)    |
+| `agentworks workspace list`               | List workspaces                      |
+| `agentworks workspace copy <source>`      | Copy a workspace to a new location   |
+| `agentworks workspace delete <name>`      | Delete a workspace                   |
 
 `workspace create` accepts `--name`, `--vm`, `--local`, `--template`, and `--open-vscode`.
 
@@ -135,6 +136,9 @@ Manage workspaces on VMs or locally.
 window plus one window per task in the workspace. Pass `--recreate` to kill and rebuild the
 session. This is the recommended way to interact with tasks from within VS Code or any
 terminal on the VM.
+
+`workspace copy` copies a workspace to a new location. Accepts `--name`, `--vm`, and `--local`
+(same pattern as `workspace create`). Works across VMs, VM to local, and local to VM.
 
 `workspace delete` requires `--force` if the workspace has tasks. Running task sessions are
 killed during deletion. Pass `--yes` to skip the confirmation prompt.

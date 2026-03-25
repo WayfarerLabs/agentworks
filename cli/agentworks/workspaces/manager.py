@@ -332,6 +332,145 @@ def delete_workspace(
     typer.echo(f"Workspace '{name}' deleted")
 
 
+def copy_workspace(
+    db: Database,
+    config: Config,
+    source_name: str,
+    *,
+    dest_name: str,
+    vm_name: str | None = None,
+    local: bool = False,
+) -> None:
+    """Copy a workspace to a new location."""
+    import tempfile
+    from pathlib import Path
+
+    from agentworks.ssh import ssh_target_for_vm
+
+    validate_name(dest_name)
+
+    src_ws = db.get_workspace(source_name)
+    if src_ws is None:
+        typer.echo(f"Error: workspace '{source_name}' not found", err=True)
+        raise typer.Exit(1)
+
+    if db.get_workspace(dest_name) is not None:
+        typer.echo(f"Error: workspace '{dest_name}' already exists", err=True)
+        raise typer.Exit(1)
+
+    # Create a temp file for the archive
+    with tempfile.NamedTemporaryFile(suffix=".tgz", delete=False) as tmp:
+        tmp_path = Path(tmp.name)
+
+    try:
+        # --- Pack from source ---
+        if src_ws.type == "local":
+            typer.echo(f"Packing workspace '{source_name}'...")
+            result = subprocess.run(
+                ["tar", "czf", str(tmp_path), "-C", src_ws.workspace_path, "."],
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode != 0:
+                typer.echo(f"Error: tar failed: {result.stderr.strip()}", err=True)
+                raise typer.Exit(1)
+        elif src_ws.type == "vm":
+            src_vm = db.get_vm(src_ws.vm_name)  # type: ignore[arg-type]
+            if src_vm is None:
+                typer.echo(f"Error: VM '{src_ws.vm_name}' not found", err=True)
+                raise typer.Exit(1)
+            _guard_vm_status(src_vm)
+            _ensure_vm_running(db, config, src_vm)
+            if src_vm.tailscale_host is None:
+                typer.echo(f"Error: VM '{src_vm.name}' has no Tailscale address", err=True)
+                raise typer.Exit(1)
+
+            src_target = ssh_target_for_vm(src_vm, config)
+            typer.echo(f"Packing workspace '{source_name}' from VM '{src_vm.name}'...")
+
+            # Stream tar from VM to local temp file
+            ssh_args = ["ssh", "-o", "StrictHostKeyChecking=accept-new", "-o", "BatchMode=yes"]
+            if src_target.identity_file is not None:
+                ssh_args.extend(["-i", str(src_target.identity_file)])
+            ssh_args.append(f"{src_target.user}@{src_target.host}")
+            ssh_args.append(f"tar czf - -C {src_ws.workspace_path} .")
+
+            with open(tmp_path, "wb") as f:
+                proc = subprocess.run(ssh_args, stdout=f, stderr=subprocess.PIPE)
+            if proc.returncode != 0:
+                stderr = proc.stderr.decode() if proc.stderr else ""
+                typer.echo(f"Error: pack failed: {stderr.strip()}", err=True)
+                raise typer.Exit(1)
+        else:
+            typer.echo(f"Error: unknown workspace type '{src_ws.type}'", err=True)
+            raise typer.Exit(1)
+
+        # --- Unpack to destination ---
+        if local:
+            workspace_path = str(config.paths.local_workspaces / dest_name)
+            Path(workspace_path).mkdir(parents=True, exist_ok=True)
+
+            typer.echo(f"Unpacking to local workspace '{dest_name}'...")
+            result = subprocess.run(
+                ["tar", "xzf", str(tmp_path), "-C", workspace_path],
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode != 0:
+                typer.echo(f"Error: tar failed: {result.stderr.strip()}", err=True)
+                raise typer.Exit(1)
+
+            db.insert_workspace(
+                dest_name, ws_type="local", workspace_path=workspace_path, template="copied",
+            )
+        else:
+            from agentworks.ssh import copy_to, run
+
+            dest_vm = _resolve_vm(db, vm_name)
+            _guard_vm_status(dest_vm)
+            _ensure_vm_running(db, config, dest_vm)
+            if dest_vm.tailscale_host is None:
+                typer.echo(f"Error: VM '{dest_vm.name}' has no Tailscale address", err=True)
+                raise typer.Exit(1)
+
+            dest_target = ssh_target_for_vm(dest_vm, config)
+            workspace_path = f"/home/{dest_vm.admin_username}/workspaces/{dest_name}"
+
+            typer.echo(f"Unpacking to workspace '{dest_name}' on VM '{dest_vm.name}'...")
+            run(dest_target, f"mkdir -p {workspace_path}", timeout=10)
+
+            remote_tmp = f"/tmp/{dest_name}-copy.tgz"
+            copy_to(dest_target, tmp_path, remote_tmp, timeout=300)
+            run(dest_target, f"tar xzf {remote_tmp} -C {workspace_path}", timeout=120)
+            run(dest_target, f"rm -f {remote_tmp}", check=False, timeout=10)
+
+            db.insert_workspace(
+                dest_name, ws_type="vm", vm_name=dest_vm.name,
+                workspace_path=workspace_path, template="copied",
+            )
+
+            # Generate tmuxinator config and VS Code workspace
+            from agentworks.ssh import write_file
+            from agentworks.workspaces.backends.vm import generate_code_workspace
+            from agentworks.workspaces.tmuxinator import console_session_name, generate_config
+
+            tmux_config = generate_config(dest_name, workspace_path)
+            write_file(dest_target, f"{workspace_path}/.tmuxinator.yml", tmux_config)
+            session = console_session_name(dest_name)
+            run(dest_target, "mkdir -p ~/.config/tmuxinator", timeout=10)
+            run(
+                dest_target,
+                f"ln -sf {workspace_path}/.tmuxinator.yml ~/.config/tmuxinator/{session}.yml",
+                timeout=10,
+            )
+            code_ws_path = generate_code_workspace(dest_vm, config, dest_name, workspace_path)
+            typer.echo(f"  VS Code workspace: {code_ws_path}")
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+    typer.echo(f"Workspace '{source_name}' copied to '{dest_name}'")
+
+
 def _guard_vm_status(vm: VMRow) -> None:
     """Block operations on VMs that are not usable (failed or in-progress)."""
     usable = {InitStatus.COMPLETE.value, InitStatus.PARTIAL.value}

@@ -448,6 +448,32 @@ def workspace_delete(
     delete_workspace(_get_db(), load_config(), name, force=force, yes=yes)
 
 
+@workspace_app.command("copy")
+def workspace_copy(
+    source: Annotated[str, typer.Argument(help="Source workspace name")],
+    name: Annotated[str | None, typer.Option("--name", help="New workspace name (prompted if omitted)")] = None,
+    vm: Annotated[str | None, typer.Option("--vm", help="Target VM")] = None,
+    local: Annotated[bool, typer.Option("--local", help="Copy to a local workspace")] = False,
+) -> None:
+    """Copy a workspace to a new location (VM or local)."""
+    from agentworks.config import load_config
+    from agentworks.workspaces.manager import copy_workspace
+
+    if local and vm:
+        typer.echo("Error: --local and --vm are mutually exclusive", err=True)
+        raise typer.Exit(1)
+
+    resolved_name = _prompt_name("Workspace", name)
+    copy_workspace(
+        _get_db(),
+        load_config(),
+        source,
+        dest_name=resolved_name,
+        vm_name=vm,
+        local=local,
+    )
+
+
 # -- Agent commands --------------------------------------------------------
 
 
