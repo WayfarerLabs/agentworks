@@ -112,9 +112,12 @@ class LimaProvisioner(VMProvisioner):
 
             # Run limactl create + start as a single detached operation
             from agentworks.remote_exec import run_detached
+            from agentworks.ssh import SSHLogger
 
+            ssh_logger = SSHLogger(vm_name, "vm-provision")
             host_target = ExecTarget(
                 ssh=SSHTarget(host=self._vm_host_ssh, user=None, login_shell=True),
+                logger=ssh_logger,
             )
             lima_cmd = f"limactl create --name {vm_name} --tty=false {remote_template} && limactl start {vm_name}"
             typer.echo("  Creating and starting VM (detached, this may take a few minutes)...")
@@ -126,7 +129,15 @@ class LimaProvisioner(VMProvisioner):
                 quiet=True,
             )
             if result.exit_code != 0:
-                raise SSHError(f"limactl create/start failed (exit {result.exit_code})\n{result.output[-500:]}")
+                ssh_logger.log_error(f"limactl failed (exit {result.exit_code})")
+                ssh_logger.log_error(result.output)
+                ssh_logger.close()
+                raise SSHError(
+                    f"limactl create/start failed (exit {result.exit_code})\n"
+                    f"SSH log: {ssh_logger.path}\n"
+                    f"Last output:\n{result.output[-1000:]}"
+                )
+            ssh_logger.close()
             # Clean up the template
             ssh_run(target, f"rm -f {remote_template}", check=False)
         else:
