@@ -542,6 +542,8 @@ def reinit_vm(
     from agentworks.ssh import SSHLogger
 
     ssh_logger = SSHLogger(name, "vm-reinit")
+    for token in git_tokens.values():
+        ssh_logger.add_redaction(token)
     ts_target = ExecTarget(ssh=ssh_target_for_vm(vm, config), default_timeout=60, logger=ssh_logger)
 
     home = f"/home/{vm.admin_username}"
