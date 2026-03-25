@@ -104,6 +104,7 @@ Manage virtual machines across Lima (local or remote), Azure, and WSL2.
 | `agentworks vm stop <name>`                      | Stop a running VM                          |
 | `agentworks vm reinit <name>`                    | Re-run initialization on a provisioned VM  |
 | `agentworks vm delete <name>`                    | Delete a VM (with confirmation)            |
+| `agentworks vm logs <name>`                      | Show SSH logs for a VM                     |
 | `agentworks vm console <name>`                   | Attach to the VM console                   |
 | `agentworks vm add-git-credential <name> <cred>` | Add or update a git credential             |
 

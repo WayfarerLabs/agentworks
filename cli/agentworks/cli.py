@@ -347,6 +347,37 @@ def vm_add_git_credential(
     add_git_credential(_get_db(), load_config(), name, credential)
 
 
+@vm_app.command("logs")
+def vm_logs(
+    name: Annotated[str, typer.Argument(help="VM name")],
+    latest: Annotated[bool, typer.Option("--latest", help="Show only the latest log")] = True,
+) -> None:
+    """Show SSH logs for a VM."""
+    from agentworks.ssh import LOG_DIR
+
+    if not LOG_DIR.exists():
+        typer.echo("No logs found.")
+        return
+
+    # Collect all logs for this VM -- filename is <vm>-<timestamp>-<cmd>.log
+    all_logs = sorted(LOG_DIR.glob(f"{name}-*.log"), reverse=True)
+    logs = [(str(p), p.name) for p in all_logs]
+
+    if not logs:
+        typer.echo(f"No SSH logs found for VM '{name}'.")
+        return
+
+    if latest:
+        log_path, log_name = logs[0]
+        typer.echo(f"--- {log_name} ---")
+        typer.echo(open(log_path).read(), nl=False)  # noqa: SIM115
+    else:
+        for log_path, log_name in logs:
+            typer.echo(f"--- {log_name} ---")
+            typer.echo(open(log_path).read(), nl=False)  # noqa: SIM115
+            typer.echo("")
+
+
 @vm_app.command("console")
 def vm_console(
     name: Annotated[str, typer.Argument(help="VM name")],

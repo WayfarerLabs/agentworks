@@ -286,12 +286,15 @@ class AzureProvisioner(VMProvisioner):
 
         typer.echo(f"  Azure VM '{vm_name}' provisioned (IP: {public_ip}).")
 
+        import sys
+
         return ProvisionResult(
             exec_target=ExecTarget(
                 ssh=SSHTarget(
                     host=public_ip,
                     user=admin_username,
                     identity_file=config.user.ssh_private_key,
+                    force_tty=sys.platform == "win32",
                 )
             ),
             azure_resource_id=resource_id or None,
@@ -411,7 +414,11 @@ class AzureProvisioner(VMProvisioner):
 
         # Walk NICs to find the public IP (may not exist if detached)
         public_ip = _get_vm_public_ip(vm_info, az_cfg)
-        return ExecTarget(ssh=SSHTarget(host=public_ip, user=vm.admin_username))
+        import sys
+
+        return ExecTarget(
+            ssh=SSHTarget(host=public_ip, user=vm.admin_username, force_tty=sys.platform == "win32"),
+        )
 
     def status(self, vm: VMRow) -> VMStatus:
         if vm.azure_resource_id is None:

@@ -528,13 +528,23 @@ def initialize_vm(
     Phase B (setup) steps are non-fatal -- failures are logged as warnings
     and the VM gets 'partial' status instead of 'complete'.
     """
+    from dataclasses import replace
+
+    from agentworks.ssh import SSHLogger
+
     home = f"/home/{admin_username}"
     logger = InitLogger(vm_name)
+    ssh_logger = SSHLogger(vm_name, "vm-create")
     if tailscale_auth_key:
         logger.add_redaction(tailscale_auth_key)
+        ssh_logger.add_redaction(tailscale_auth_key)
     if git_tokens:
         for token in git_tokens.values():
             logger.add_redaction(token)
+            ssh_logger.add_redaction(token)
+
+    # Attach SSH logger to the provisioning transport
+    exec_target = replace(exec_target, logger=ssh_logger)
 
     transport = _describe_transport(exec_target)
 
@@ -556,6 +566,8 @@ def initialize_vm(
         db.update_vm_provisioning_status(vm_name, ProvisioningStatus.FAILED)
         db.insert_vm_event(vm_name, "provisioning_failed", str(e))
         logger.close()
+        ssh_logger.close()
+        typer.echo(f"  SSH log: {ssh_logger.path}", err=True)
         raise
 
     run_initialization(
@@ -716,20 +728,35 @@ def _phase_a_bootstrap(
     db.update_vm_tailscale(vm_name, tailscale_ip)
     db.update_vm_provisioning_status(vm_name, ProvisioningStatus.COMPLETE)
 
-    # Switch to Tailscale SSH
+    # Switch to Tailscale SSH, carrying over the SSH logger.
+    # On Windows, force TTY to prevent zsh/login shell pipe hangs.
+    import sys
+
     ts_target = ExecTarget(
         ssh=SSHTarget(
             host=tailscale_ip,
             user=admin_username,
             identity_file=config.user.ssh_private_key,
+            force_tty=sys.platform == "win32",
         ),
         default_timeout=60,
+        logger=exec_target.logger,
     )
 
-    # Verify Tailscale SSH works
+    # Verify Tailscale SSH works (retry -- peer connection may take time)
     logger.step("Verify Tailscale SSH")
     typer.echo("  Verifying Tailscale SSH...")
-    _run_logged(ts_target, "echo ok", logger, timeout=30)
+    import time
+
+    for attempt in range(5):
+        try:
+            _run_logged(ts_target, "echo ok", logger, timeout=15)
+            break
+        except SSHError:
+            if attempt == 4:
+                raise
+            typer.echo(f"  Tailscale SSH not ready, retrying ({attempt + 1}/5)...")
+            time.sleep(3)
 
     return ts_target
 
