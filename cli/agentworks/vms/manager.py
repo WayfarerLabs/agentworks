@@ -538,30 +538,42 @@ def reinit_vm(
     for cred_name, provider in providers.items():
         git_tokens[cred_name] = provider.obtain_token(name)
 
-    # Build Tailscale SSH target
-    ts_target = ExecTarget(ssh=ssh_target_for_vm(vm, config), default_timeout=60)
+    # Build Tailscale SSH target with logging
+    from agentworks.ssh import SSHLogger
+
+    ssh_logger = SSHLogger(name, "vm-reinit")
+    ts_target = ExecTarget(ssh=ssh_target_for_vm(vm, config), default_timeout=60, logger=ssh_logger)
 
     home = f"/home/{vm.admin_username}"
     logger = InitLogger(name)
 
-    run_initialization(
-        db,
-        config,
-        name,
-        ts_target,
-        providers,
-        home,
-        vm.admin_username,
-        logger,
-        git_tokens=git_tokens,
-    )
+    try:
+        run_initialization(
+            db,
+            config,
+            name,
+            ts_target,
+            providers,
+            home,
+            vm.admin_username,
+            logger,
+            git_tokens=git_tokens,
+        )
+    except Exception:
+        ssh_logger.close()
+        typer.echo(f"  SSH log: {ssh_logger.path}", err=True)
+        raise
+
+    ssh_logger.close()
 
     refreshed_vm = db.get_vm(name)
     assert refreshed_vm is not None
     if refreshed_vm.init_status == InitStatus.PARTIAL.value:
         typer.echo(f"\nVM '{name}' reinitialized (with warnings -- see above)")
+        typer.echo(f"  SSH log: {ssh_logger.path}")
     else:
         typer.echo(f"\nVM '{name}' reinitialized successfully!")
+        typer.echo(f"  SSH log: {ssh_logger.path}")
 
 
 def _prompt_failed_vm(db: Database, config: Config, vm_name: str) -> None:

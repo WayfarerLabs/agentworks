@@ -62,6 +62,80 @@ class SSHError(Exception):
     """Raised when an SSH command fails unexpectedly."""
 
 
+LOG_DIR = Path.home() / ".config" / "agentworks" / "logs"
+
+
+class SSHLogger:
+    """Incremental SSH command logger. Writes to disk on every command.
+
+    Usage:
+        logger = SSHLogger("myvm", "vm-create")
+        # pass to ssh.run via logger= or attach to ExecTarget
+        run(target, "ls", logger=logger)
+        logger.close()  # writes footer, optional
+    """
+
+    def __init__(self, vm_name: str, command_stem: str) -> None:
+        from datetime import UTC, datetime
+
+        timestamp = datetime.now(tz=UTC).strftime("%Y%m%dT%H%M%SZ")
+        self.vm_name = vm_name
+        self.path = LOG_DIR / f"{vm_name}-{timestamp}-{command_stem}.log"
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._redact: list[str] = []
+
+        ts = datetime.now(tz=UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
+        self._write(f"# SSH Log: {vm_name} ({command_stem})\n# Started: {ts}\n\n")
+
+    def add_redaction(self, secret: str) -> None:
+        """Register a secret to be redacted from all output."""
+        if secret:
+            self._redact.append(secret)
+
+    def _sanitize(self, text: str) -> str:
+        for secret in self._redact:
+            text = text.replace(secret, "[REDACTED]")
+        return text
+
+    def log_command(self, command: str, result: SSHResult) -> None:
+        """Log a completed command with its output."""
+        from datetime import UTC, datetime
+
+        ts = datetime.now(tz=UTC).strftime("%H:%M:%S")
+        lines = [f"[{ts}] $ {self._sanitize(command)}  (exit {result.returncode})"]
+        if result.stdout:
+            lines.append(self._sanitize(result.stdout.rstrip()))
+        if result.stderr:
+            lines.append(f"STDERR: {self._sanitize(result.stderr.rstrip())}")
+        lines.append("")
+        self._write("\n".join(lines) + "\n")
+
+    def log_timeout(self, command: str, attempt: int, retries: int) -> None:
+        """Log a timeout event."""
+        from datetime import UTC, datetime
+
+        ts = datetime.now(tz=UTC).strftime("%H:%M:%S")
+        self._write(f"[{ts}] TIMEOUT (attempt {attempt}/{retries}): {self._sanitize(command)}\n")
+
+    def log_error(self, msg: str) -> None:
+        """Log an error message."""
+        from datetime import UTC, datetime
+
+        ts = datetime.now(tz=UTC).strftime("%H:%M:%S")
+        self._write(f"[{ts}] ERROR: {self._sanitize(msg)}\n")
+
+    def close(self) -> None:
+        """Write a footer line."""
+        from datetime import UTC, datetime
+
+        ts = datetime.now(tz=UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
+        self._write(f"\n# Finished: {ts}\n")
+
+    def _write(self, text: str) -> None:
+        with open(self.path, "a") as f:
+            f.write(text)
+
+
 SSH_CONNECT_TIMEOUT = 30
 SSH_DEFAULT_RETRIES = 1
 
@@ -95,6 +169,7 @@ def run(
     timeout: int | None = None,
     retries: int = SSH_DEFAULT_RETRIES,
     on_retry: Callable[[int, int], None] | None = None,
+    logger: SSHLogger | None = None,
 ) -> SSHResult:
     """Execute a command on a remote host via SSH.
 
@@ -108,6 +183,7 @@ def run(
         timeout: Timeout in seconds.
         retries: Number of attempts (default: SSH_RETRIES).
         on_retry: Optional callback(attempt, max_retries) called before each retry.
+        logger: Optional SSHLogger to record command output.
 
     Returns:
         SSHResult with exit code, stdout, and stderr.
@@ -120,8 +196,11 @@ def run(
 
     last_err: Exception | None = None
     for attempt in range(retries):
-        if attempt > 0 and on_retry is not None:
-            on_retry(attempt, retries)
+        if attempt > 0:
+            if on_retry is not None:
+                on_retry(attempt, retries)
+            if logger is not None:
+                logger.log_timeout(command, attempt, retries)
         try:
             result = subprocess.run(
                 args,
@@ -134,6 +213,8 @@ def run(
                 stdout=result.stdout,
                 stderr=result.stderr,
             )
+            if logger is not None:
+                logger.log_command(command, ssh_result)
             if check and not ssh_result.ok:
                 raise SSHError(
                     f"SSH command failed (exit {result.returncode}): {command}\n"
@@ -145,7 +226,6 @@ def run(
             continue
 
     raise SSHError(f"SSH command timed out after {retries} attempts ({timeout}s each): {command}") from last_err
-    return ssh_result
 
 
 def interactive(target: SSHTarget, command: str) -> int:
@@ -175,9 +255,10 @@ def run_as_root(
     *,
     check: bool = True,
     timeout: int | None = None,
+    logger: SSHLogger | None = None,
 ) -> SSHResult:
     """Execute a command as root via sudo on a remote host."""
-    return run(target, f"sudo -n {command}", check=check, timeout=timeout)
+    return run(target, f"sudo -n {command}", check=check, timeout=timeout, logger=logger)
 
 
 def copy_to(
@@ -242,6 +323,7 @@ def lima_run(
     *,
     check: bool = True,
     timeout: int | None = None,
+    logger: SSHLogger | None = None,
 ) -> SSHResult:
     """Execute a command inside a local Lima VM via limactl shell."""
     args = ["limactl", "shell", target.vm_name, "bash", "-lc", command]
@@ -254,6 +336,8 @@ def lima_run(
         stdout=result.stdout,
         stderr=result.stderr,
     )
+    if logger is not None:
+        logger.log_command(command, ssh_result)
     if check and not ssh_result.ok:
         raise SSHError(f"Lima command failed (exit {result.returncode}): {command}\nstderr: {result.stderr.strip()}")
     return ssh_result
@@ -277,6 +361,7 @@ def remote_lima_run(
     *,
     check: bool = True,
     timeout: int | None = None,
+    logger: SSHLogger | None = None,
 ) -> SSHResult:
     """Execute a command inside a remote Lima VM via the VM host.
 
@@ -286,11 +371,8 @@ def remote_lima_run(
     letting the VM host's login shell find limactl on PATH.
     """
     host_target = SSHTarget(host=target.vm_host_ssh, user=None, login_shell=True)
-    # The inner command is passed as a bare arg to limactl shell.
-    # SSH concatenates all args into one string for the remote shell,
-    # so the login shell wrapper ($SHELL -lc '...') covers the whole thing.
     lima_cmd = f"limactl shell {target.vm_name} -- {command}"
-    return run(host_target, lima_cmd, check=check, timeout=timeout)
+    return run(host_target, lima_cmd, check=check, timeout=timeout, logger=logger)
 
 
 @dataclass
@@ -307,6 +389,7 @@ def wsl2_run(
     *,
     check: bool = True,
     timeout: int | None = None,
+    logger: SSHLogger | None = None,
 ) -> SSHResult:
     """Execute a command inside a WSL2 distro."""
     args = [
@@ -329,6 +412,8 @@ def wsl2_run(
         stdout=result.stdout,
         stderr=result.stderr,
     )
+    if logger is not None:
+        logger.log_command(command, ssh_result)
     if check and not ssh_result.ok:
         raise SSHError(f"WSL2 command failed (exit {result.returncode}): {command}\nstderr: {result.stderr.strip()}")
     return ssh_result
@@ -380,33 +465,36 @@ class ExecTarget:
     remote_lima: RemoteLimaTarget | None = None
     wsl2: WSL2Target | None = None
     default_timeout: int | None = None
+    logger: SSHLogger | None = None
 
     def _timeout(self, override: int | None) -> int | None:
         return override if override is not None else self.default_timeout
 
     def run(self, command: str, *, check: bool = True, timeout: int | None = None) -> SSHResult:
         t = self._timeout(timeout)
+        lg = self.logger
         if self.ssh is not None:
-            return run(self.ssh, command, check=check, timeout=t)
+            return run(self.ssh, command, check=check, timeout=t, logger=lg)
         if self.lima is not None:
-            return lima_run(self.lima, command, check=check, timeout=t)
+            return lima_run(self.lima, command, check=check, timeout=t, logger=lg)
         if self.remote_lima is not None:
-            return remote_lima_run(self.remote_lima, command, check=check, timeout=t)
+            return remote_lima_run(self.remote_lima, command, check=check, timeout=t, logger=lg)
         if self.wsl2 is not None:
-            return wsl2_run(self.wsl2, command, check=check, timeout=t)
+            return wsl2_run(self.wsl2, command, check=check, timeout=t, logger=lg)
         msg = "ExecTarget has no target configured"
         raise SSHError(msg)
 
     def run_as_root(self, command: str, *, check: bool = True, timeout: int | None = None) -> SSHResult:
         t = self._timeout(timeout)
+        lg = self.logger
         if self.ssh is not None:
-            return run_as_root(self.ssh, command, check=check, timeout=t)
+            return run_as_root(self.ssh, command, check=check, timeout=t, logger=lg)
         if self.lima is not None:
-            return lima_run(self.lima, f"sudo -n {command}", check=check, timeout=t)
+            return lima_run(self.lima, f"sudo -n {command}", check=check, timeout=t, logger=lg)
         if self.remote_lima is not None:
-            return remote_lima_run(self.remote_lima, f"sudo -n {command}", check=check, timeout=t)
+            return remote_lima_run(self.remote_lima, f"sudo -n {command}", check=check, timeout=t, logger=lg)
         if self.wsl2 is not None:
-            return wsl2_run(WSL2Target(self.wsl2.distro_name, user="root"), command, check=check, timeout=t)
+            return wsl2_run(WSL2Target(self.wsl2.distro_name, user="root"), command, check=check, timeout=t, logger=lg)
         msg = "ExecTarget has no target configured"
         raise SSHError(msg)
 

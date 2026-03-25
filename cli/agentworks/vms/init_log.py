@@ -10,7 +10,7 @@ import io
 from datetime import UTC, datetime
 from pathlib import Path
 
-LOG_DIR = Path.home() / ".local" / "share" / "agentworks" / "logs"
+LOG_DIR = Path.home() / ".config" / "agentworks" / "logs"
 
 
 def log_path_for_vm(vm_name: str) -> Path:

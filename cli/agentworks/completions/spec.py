@@ -71,6 +71,7 @@ DYNAMIC_COMPLETIONS: dict[tuple[str, str], str] = {
     ("workspace.create", "vm"): "vms",
     ("workspace.create", "template"): "ws_templates",
     ("workspace.list", "vm"): "vms",
+    ("vm.logs", "name"): "vms",
     ("vm.add-git-credential", "credential"): "git_credentials",
     ("agent.create", "workspace"): "workspaces",
     ("agent.shell", "workspace"): "workspaces",

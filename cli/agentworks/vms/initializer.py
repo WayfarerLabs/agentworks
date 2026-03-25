@@ -528,13 +528,23 @@ def initialize_vm(
     Phase B (setup) steps are non-fatal -- failures are logged as warnings
     and the VM gets 'partial' status instead of 'complete'.
     """
+    from dataclasses import replace
+
+    from agentworks.ssh import SSHLogger
+
     home = f"/home/{admin_username}"
     logger = InitLogger(vm_name)
+    ssh_logger = SSHLogger(vm_name, "vm-create")
     if tailscale_auth_key:
         logger.add_redaction(tailscale_auth_key)
+        ssh_logger.add_redaction(tailscale_auth_key)
     if git_tokens:
         for token in git_tokens.values():
             logger.add_redaction(token)
+            ssh_logger.add_redaction(token)
+
+    # Attach SSH logger to the provisioning transport
+    exec_target = replace(exec_target, logger=ssh_logger)
 
     transport = _describe_transport(exec_target)
 
@@ -556,6 +566,8 @@ def initialize_vm(
         db.update_vm_provisioning_status(vm_name, ProvisioningStatus.FAILED)
         db.insert_vm_event(vm_name, "provisioning_failed", str(e))
         logger.close()
+        ssh_logger.close()
+        typer.echo(f"  SSH log: {ssh_logger.path}", err=True)
         raise
 
     run_initialization(
@@ -716,7 +728,7 @@ def _phase_a_bootstrap(
     db.update_vm_tailscale(vm_name, tailscale_ip)
     db.update_vm_provisioning_status(vm_name, ProvisioningStatus.COMPLETE)
 
-    # Switch to Tailscale SSH
+    # Switch to Tailscale SSH, carrying over the SSH logger
     ts_target = ExecTarget(
         ssh=SSHTarget(
             host=tailscale_ip,
@@ -724,6 +736,7 @@ def _phase_a_bootstrap(
             identity_file=config.user.ssh_private_key,
         ),
         default_timeout=60,
+        logger=exec_target.logger,
     )
 
     # Verify Tailscale SSH works
