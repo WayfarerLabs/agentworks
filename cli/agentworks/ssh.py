@@ -291,6 +291,7 @@ def write_file(
     content: str,
     *,
     mode: str | None = None,
+    logger: SSHLogger | None = None,
 ) -> None:
     """Write string content to a remote file safely.
 
@@ -304,10 +305,19 @@ def write_file(
         tmp_path = f.name
     try:
         copy_to(target, tmp_path, remote_path)
+        if logger is not None:
+            logger.log_command(
+                f"(scp) write {remote_path} ({len(content)} bytes)",
+                SSHResult(returncode=0, stdout="", stderr=""),
+            )
+    except SSHError:
+        if logger is not None:
+            logger.log_error(f"(scp) failed to write {remote_path}")
+        raise
     finally:
         Path(tmp_path).unlink(missing_ok=True)
     if mode:
-        run(target, f"chmod {mode} {remote_path}")
+        run(target, f"chmod {mode} {remote_path}", logger=logger)
 
 
 
@@ -565,6 +575,15 @@ class ExecTarget:
             tmp_path = f.name
         try:
             self.copy_to(tmp_path, remote_path)
+            if self.logger is not None:
+                self.logger.log_command(
+                    f"(scp) write {remote_path} ({len(content)} bytes)",
+                    SSHResult(returncode=0, stdout="", stderr=""),
+                )
+        except SSHError:
+            if self.logger is not None:
+                self.logger.log_error(f"(scp) failed to write {remote_path}")
+            raise
         finally:
             Path(tmp_path).unlink(missing_ok=True)
         if mode:

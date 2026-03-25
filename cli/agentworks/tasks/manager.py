@@ -22,6 +22,7 @@ _KNOWN_TEMPLATE_VARS = {"task_name", "workspace_name"}
 if TYPE_CHECKING:
     from agentworks.config import Config, TaskTemplate
     from agentworks.db import Database, TaskRow, VMRow, WorkspaceRow
+    from agentworks.ssh import SSHLogger
     from agentworks.tasks.tmux import RunCommand
 
 
@@ -51,10 +52,13 @@ def _require_vm_for_workspace(db: Database, ws: WorkspaceRow) -> VMRow:
 
 
 def _prepare_vm(
-    db: Database, config: Config, workspace_name: str
+    db: Database, config: Config, workspace_name: str, *, operation: str | None = None
 ) -> tuple[WorkspaceRow, VMRow, RunCommand]:
-    """Validate workspace/VM, ensure running, and return (ws, vm, run_command)."""
-    from agentworks.ssh import run
+    """Validate workspace/VM, ensure running, and return (ws, vm, run_command).
+
+    If operation is set, creates an SSHLogger and binds it into run_command.
+    """
+    from agentworks.ssh import SSHLogger, run
 
     ws = _require_workspace(db, workspace_name)
     vm = _require_vm_for_workspace(db, ws)
@@ -68,7 +72,8 @@ def _prepare_vm(
         raise typer.Exit(1)
 
     target = ssh_target_for_vm(vm, config)
-    run_command = partial(run, target)
+    logger = SSHLogger(vm.name, operation) if operation else None
+    run_command = partial(run, target, logger=logger)
     return ws, vm, run_command
 
 
@@ -85,6 +90,8 @@ def _regenerate_tmuxinator(
     config: Config,
     vm: VMRow,
     ws: WorkspaceRow,
+    *,
+    logger: SSHLogger | None = None,
 ) -> None:
     """Regenerate the workspace tmuxinator config from current task state."""
     from agentworks.ssh import write_file
@@ -93,7 +100,7 @@ def _regenerate_tmuxinator(
     tasks = db.list_tasks(workspace_name=ws.name)
     config_text = generate_config(ws.name, ws.workspace_path, tasks=tasks)
     target = ssh_target_for_vm(vm, config)
-    write_file(target, f"{ws.workspace_path}/.tmuxinator.yml", config_text)
+    write_file(target, f"{ws.workspace_path}/.tmuxinator.yml", config_text, logger=logger)
 
 
 def _resolve_template(config: Config, template_name: str | None) -> TaskTemplate:
@@ -201,7 +208,7 @@ def create_task(
     )
 
     validate_name(name)
-    ws, vm, run_command = _prepare_vm(db, config, workspace_name)
+    ws, vm, run_command = _prepare_vm(db, config, workspace_name, operation="task-create")
 
     if db.get_task(workspace_name, name) is not None:
         typer.echo(f"Error: task '{name}' already exists in workspace '{workspace_name}'", err=True)
@@ -265,7 +272,7 @@ def stop_task(
 
     from agentworks.tasks.tmux import kill_task_session, session_exists
 
-    _ws, _vm, run_command = _prepare_vm(db, config, workspace_name)
+    _ws, _vm, run_command = _prepare_vm(db, config, workspace_name, operation="task-stop")
     task = _require_task(db, workspace_name, name)
 
     if task.status == TaskStatus.STOPPED.value:
@@ -305,7 +312,7 @@ def restart_task(
         session_exists,
     )
 
-    ws, vm, run_command = _prepare_vm(db, config, workspace_name)
+    ws, vm, run_command = _prepare_vm(db, config, workspace_name, operation="task-restart")
     task = _require_task(db, workspace_name, name)
 
     if session_exists(workspace_name, name, run_command=run_command):
@@ -357,7 +364,7 @@ def delete_task(
     """Stop and delete a task."""
     from agentworks.tasks.tmux import kill_task_session, session_exists
 
-    ws, vm, run_command = _prepare_vm(db, config, workspace_name)
+    ws, vm, run_command = _prepare_vm(db, config, workspace_name, operation="task-delete")
     _require_task(db, workspace_name, name)
 
     if not yes and session_exists(workspace_name, name, run_command=run_command):
@@ -451,7 +458,7 @@ def attach_task(
     from agentworks.ssh import interactive
     from agentworks.tasks.tmux import derive_session_name, session_exists
 
-    _ws, vm, run_command = _prepare_vm(db, config, workspace_name)
+    _ws, vm, run_command = _prepare_vm(db, config, workspace_name, operation="task-attach")
     _require_task(db, workspace_name, name)
 
     if not session_exists(workspace_name, name, run_command=run_command):
@@ -474,7 +481,7 @@ def task_logs(
     """Dump the scrollback buffer for a task."""
     from agentworks.tasks.tmux import capture_output
 
-    _ws, _vm, run_command = _prepare_vm(db, config, workspace_name)
+    _ws, _vm, run_command = _prepare_vm(db, config, workspace_name, operation="task-logs")
     _require_task(db, workspace_name, name)
 
     output = capture_output(

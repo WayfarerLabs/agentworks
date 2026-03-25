@@ -118,9 +118,13 @@ def _create_vm(
 
             Path(code_ws_path).unlink(missing_ok=True)
 
+    from agentworks.ssh import SSHLogger
+
+    ssh_logger = SSHLogger(vm.name, "workspace-create")
+
     try:
         typer.echo(f"Creating workspace '{ws_name}' on VM '{vm.name}' (template: {template_name})...")
-        workspace_path = create_vm_workspace(vm, config, ws_name, template)
+        workspace_path = create_vm_workspace(vm, config, ws_name, template, logger=ssh_logger)
 
         code_ws_path = generate_code_workspace(vm, config, ws_name, workspace_path)
         typer.echo(f"VS Code workspace: {code_ws_path}")
@@ -133,12 +137,17 @@ def _create_vm(
             template=template_name,
         )
     except SystemExit:
+        ssh_logger.close()
         _cleanup()
         raise
     except Exception as e:
+        ssh_logger.close()
         typer.echo(f"Error creating workspace: {e}", err=True)
+        typer.echo(f"  SSH log: {ssh_logger.path}", err=True)
         _cleanup()
         raise typer.Exit(1) from None
+
+    ssh_logger.close()
 
     if open_vscode:
         subprocess.run(["code", code_ws_path], check=False)
@@ -293,6 +302,13 @@ def delete_workspace(
             msg += f" ({task_count} task(s) will also be deleted)"
         typer.confirm(msg, abort=True)
 
+    # Create SSH logger for VM operations
+    ssh_logger = None
+    if ws.type == "vm" and ws.vm_name:
+        from agentworks.ssh import SSHLogger
+
+        ssh_logger = SSHLogger(ws.vm_name, "workspace-delete")
+
     # Kill running task sessions and delete task records
     if ws.type == "vm" and ws.vm_name:
         vm = db.get_vm(ws.vm_name)
@@ -303,7 +319,7 @@ def delete_workspace(
             from agentworks.tasks.tmux import kill_task_session
 
             target = ssh_target_for_vm(vm, config)
-            run_command = partial(run, target)
+            run_command = partial(run, target, logger=ssh_logger)
             for task in db.list_tasks(workspace_name=name):
                 kill_task_session(name, task.name, run_command=run_command)
     db.delete_tasks_for_workspace(name)
@@ -311,7 +327,7 @@ def delete_workspace(
     # Delete agents (remote cleanup + DB)
     from agentworks.agents.manager import delete_agents_for_workspace
 
-    delete_agents_for_workspace(db, config, ws)
+    delete_agents_for_workspace(db, config, ws, logger=ssh_logger)
 
     if ws.type == "local":
         from agentworks.workspaces.backends.local import delete_local_workspace
@@ -322,7 +338,10 @@ def delete_workspace(
         if vm is not None:
             from agentworks.workspaces.backends.vm import delete_vm_workspace
 
-            delete_vm_workspace(vm, config, name, ws.workspace_path)
+            delete_vm_workspace(vm, config, name, ws.workspace_path, logger=ssh_logger)
+
+    if ssh_logger is not None:
+        ssh_logger.close()
 
     # Remove .code-workspace file
     code_ws_path = config.paths.code_workspaces / f"{name}.code-workspace"
@@ -424,7 +443,7 @@ def copy_workspace(
                 dest_name, ws_type="local", workspace_path=workspace_path, template="copied",
             )
         else:
-            from agentworks.ssh import copy_to, run
+            from agentworks.ssh import SSHLogger, copy_to, run
 
             dest_vm = _resolve_vm(db, vm_name)
             _guard_vm_status(dest_vm)
@@ -433,16 +452,17 @@ def copy_workspace(
                 typer.echo(f"Error: VM '{dest_vm.name}' has no Tailscale address", err=True)
                 raise typer.Exit(1)
 
+            lg = SSHLogger(dest_vm.name, "workspace-copy")
             dest_target = ssh_target_for_vm(dest_vm, config)
             workspace_path = f"/home/{dest_vm.admin_username}/workspaces/{dest_name}"
 
             typer.echo(f"Unpacking to workspace '{dest_name}' on VM '{dest_vm.name}'...")
-            run(dest_target, f"mkdir -p {workspace_path}", timeout=10)
+            run(dest_target, f"mkdir -p {workspace_path}", timeout=10, logger=lg)
 
             remote_tmp = f"/tmp/{dest_name}-copy.tgz"
             copy_to(dest_target, tmp_path, remote_tmp, timeout=300)
-            run(dest_target, f"tar xzf {remote_tmp} -C {workspace_path}", timeout=120)
-            run(dest_target, f"rm -f {remote_tmp}", check=False, timeout=10)
+            run(dest_target, f"tar xzf {remote_tmp} -C {workspace_path}", timeout=120, logger=lg)
+            run(dest_target, f"rm -f {remote_tmp}", check=False, timeout=10, logger=lg)
 
             db.insert_workspace(
                 dest_name, ws_type="vm", vm_name=dest_vm.name,
@@ -455,16 +475,18 @@ def copy_workspace(
             from agentworks.workspaces.tmuxinator import console_session_name, generate_config
 
             tmux_config = generate_config(dest_name, workspace_path)
-            write_file(dest_target, f"{workspace_path}/.tmuxinator.yml", tmux_config)
+            write_file(dest_target, f"{workspace_path}/.tmuxinator.yml", tmux_config, logger=lg)
             session = console_session_name(dest_name)
-            run(dest_target, "mkdir -p ~/.config/tmuxinator", timeout=10)
+            run(dest_target, "mkdir -p ~/.config/tmuxinator", timeout=10, logger=lg)
             run(
                 dest_target,
                 f"ln -sf {workspace_path}/.tmuxinator.yml ~/.config/tmuxinator/{session}.yml",
                 timeout=10,
+                logger=lg,
             )
             code_ws_path = generate_code_workspace(dest_vm, config, dest_name, workspace_path)
             typer.echo(f"  VS Code workspace: {code_ws_path}")
+            lg.close()
     finally:
         tmp_path.unlink(missing_ok=True)
 

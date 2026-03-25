@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from agentworks.catalog import UserInstallCommandEntry
     from agentworks.config import Config
     from agentworks.db import Database, VMRow, WorkspaceRow
+    from agentworks.ssh import SSHLogger
 
 AGENT_SEPARATOR = "--"
 AGENT_SHELL = "/bin/bash"
@@ -47,13 +48,19 @@ def create_agent(
 
     if ws.type == "vm":
         vm = _require_vm_for_workspace(db, ws)
+        from agentworks.ssh import SSHLogger
+
+        ssh_logger = SSHLogger(vm.name, "agent-create")
         try:
-            _create_agent_on_vm(vm, config, linux_user, workspace_name)
+            _create_agent_on_vm(vm, config, linux_user, workspace_name, logger=ssh_logger)
         except Exception as e:
+            ssh_logger.close()
             typer.echo(f"Error creating agent: {e}", err=True)
+            typer.echo(f"  SSH log: {ssh_logger.path}", err=True)
             typer.echo(f"  Cleaning up user '{linux_user}'...", err=True)
-            _delete_agent_on_vm(vm, config, linux_user)
+            _delete_agent_on_vm(vm, config, linux_user, logger=ssh_logger)
             raise typer.Exit(1) from None
+        ssh_logger.close()
 
     agent = db.insert_agent(name, workspace_name, linux_user)
 
@@ -76,7 +83,11 @@ def delete_agent(
 
     if ws.type == "vm":
         vm = _require_vm_for_workspace(db, ws)
-        _delete_agent_on_vm(vm, config, agent.linux_user)
+        from agentworks.ssh import SSHLogger
+
+        ssh_logger = SSHLogger(vm.name, "agent-delete")
+        _delete_agent_on_vm(vm, config, agent.linux_user, logger=ssh_logger)
+        ssh_logger.close()
 
     db.delete_agent(workspace_name, name)
 
@@ -87,6 +98,8 @@ def delete_agents_for_workspace(
     db: Database,
     config: Config,
     ws: WorkspaceRow,
+    *,
+    logger: SSHLogger | None = None,
 ) -> None:
     """Delete all agents for a workspace (called during workspace deletion).
 
@@ -100,7 +113,7 @@ def delete_agents_for_workspace(
         vm = db.get_vm(ws.vm_name)
         if vm is not None:
             for agent in agents:
-                _delete_agent_on_vm(vm, config, agent.linux_user)
+                _delete_agent_on_vm(vm, config, agent.linux_user, logger=logger)
 
     names = ", ".join(a.name for a in agents)
     typer.echo(f"  Deleted {len(agents)} agent(s): {names}")
@@ -175,22 +188,25 @@ def _create_agent_on_vm(
     config: Config,
     linux_user: str,
     workspace_name: str,
+    *,
+    logger: SSHLogger | None = None,
 ) -> None:
     """Create an agent Linux user on a VM and run user install commands."""
     from agentworks.ssh import run_as_root
 
     target = ssh_target_for_vm(vm, config)
+    lg = logger
 
     typer.echo(f"  Creating user '{linux_user}' on VM '{vm.name}'...")
     home = f"/home/{linux_user}"
     groups = f"ws-{workspace_name},aw-tools"
-    run_as_root(target, f"useradd -m -s {AGENT_SHELL} {linux_user}")
-    run_as_root(target, f"usermod -aG {groups} {linux_user}")
+    run_as_root(target, f"useradd -m -s {AGENT_SHELL} {linux_user}", logger=lg)
+    run_as_root(target, f"usermod -aG {groups} {linux_user}", logger=lg)
 
     # Write a minimal .bashrc with a clear agent prompt
     bashrc = f"export PS1='[agent:{linux_user}] \\w\\$ '"
-    run_as_root(target, f"printf '%s\\n' '{bashrc}' > {home}/.bashrc")
-    run_as_root(target, f"chown {linux_user}:{linux_user} {home}/.bashrc")
+    run_as_root(target, f"printf '%s\\n' '{bashrc}' > {home}/.bashrc", logger=lg)
+    run_as_root(target, f"chown {linux_user}:{linux_user} {home}/.bashrc", logger=lg)
 
     # Run user install commands for this agent
     _run_agent_install_commands(vm, config, linux_user, home)
@@ -200,17 +216,20 @@ def _delete_agent_on_vm(
     vm: VMRow,
     config: Config,
     linux_user: str,
+    *,
+    logger: SSHLogger | None = None,
 ) -> None:
     """Remove an agent Linux user from a VM."""
     from agentworks.ssh import SSHError, run_as_root
 
     target = ssh_target_for_vm(vm, config)
+    lg = logger
 
     try:
         # Kill any running processes for the user
-        run_as_root(target, f"pkill -u {linux_user}", check=False)
+        run_as_root(target, f"pkill -u {linux_user}", check=False, logger=lg)
         # Remove the user and their home directory
-        run_as_root(target, f"userdel -r {linux_user}")
+        run_as_root(target, f"userdel -r {linux_user}", logger=lg)
     except SSHError as e:
         typer.echo(f"Warning: remote cleanup for '{linux_user}' failed: {e}", err=True)
 

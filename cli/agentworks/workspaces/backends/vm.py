@@ -14,6 +14,7 @@ from agentworks.workspaces.tmuxinator import console_session_name, generate_conf
 if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import VMRow
+    from agentworks.ssh import SSHLogger
     from agentworks.workspaces.templates import ResolvedTemplate
 
 
@@ -22,6 +23,8 @@ def create_vm_workspace(
     config: Config,
     ws_name: str,
     template: ResolvedTemplate,
+    *,
+    logger: SSHLogger | None = None,
 ) -> str:
     """Create a workspace on a VM. Returns the remote workspace path.
 
@@ -32,23 +35,24 @@ def create_vm_workspace(
 
     assert vm.tailscale_host is not None
     target = ssh_target_for_vm(vm, config)
+    lg = logger
 
     workspace_path = f"/home/{vm.admin_username}/workspaces/{ws_name}"
 
     # Remove stale directory from a previous interrupted attempt
-    exists = ssh_run(target, f"test -d {workspace_path}", check=False, timeout=10)
+    exists = ssh_run(target, f"test -d {workspace_path}", check=False, timeout=10, logger=lg)
     if exists.ok:
         typer.echo("  Removing stale workspace directory from previous attempt...")
-        ssh_run(target, f"rm -rf {workspace_path}", timeout=30)
+        ssh_run(target, f"rm -rf {workspace_path}", timeout=30, logger=lg)
 
     # Create directory
-    ssh_run(target, f"mkdir -p {workspace_path}", timeout=10)
+    ssh_run(target, f"mkdir -p {workspace_path}", timeout=10, logger=lg)
 
     # Git clone if repo is set
     if template.repo:
         typer.echo(f"Cloning {template.repo}...")
         try:
-            ssh_run(target, f"git clone {template.repo} {workspace_path}", timeout=300)
+            ssh_run(target, f"git clone {template.repo} {workspace_path}", timeout=300, logger=lg)
         except Exception:
             if template.repo.startswith("git@"):
                 typer.echo(
@@ -69,14 +73,15 @@ def create_vm_workspace(
         from agentworks.ssh import write_file
 
         tmux_config = generate_config(ws_name, workspace_path)
-        write_file(target, f"{workspace_path}/.tmuxinator.yml", tmux_config)
+        write_file(target, f"{workspace_path}/.tmuxinator.yml", tmux_config, logger=lg)
         # Symlink so tmuxinator can find it by console session name
         session = console_session_name(ws_name)
-        ssh_run(target, "mkdir -p ~/.config/tmuxinator", timeout=10)
+        ssh_run(target, "mkdir -p ~/.config/tmuxinator", timeout=10, logger=lg)
         ssh_run(
             target,
             f"ln -sf {workspace_path}/.tmuxinator.yml ~/.config/tmuxinator/{session}.yml",
             timeout=10,
+            logger=lg,
         )
 
     return workspace_path
@@ -118,6 +123,8 @@ def delete_vm_workspace(
     config: Config,
     ws_name: str,
     workspace_path: str,
+    *,
+    logger: SSHLogger | None = None,
 ) -> None:
     """Delete a workspace from a VM."""
     from agentworks.ssh import SSHError
@@ -125,11 +132,12 @@ def delete_vm_workspace(
 
     assert vm.tailscale_host is not None
     target = ssh_target_for_vm(vm, config)
+    lg = logger
 
     try:
-        ssh_run(target, f"rm -rf {workspace_path}", timeout=30)
+        ssh_run(target, f"rm -rf {workspace_path}", timeout=30, logger=lg)
         session = console_session_name(ws_name)
-        ssh_run(target, f"rm -f ~/.config/tmuxinator/{session}.yml", check=False, timeout=10)
+        ssh_run(target, f"rm -f ~/.config/tmuxinator/{session}.yml", check=False, timeout=10, logger=lg)
     except SSHError as e:
         typer.echo(f"Warning: remote cleanup failed: {e}", err=True)
 
