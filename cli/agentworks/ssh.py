@@ -31,17 +31,23 @@ class SSHTarget:
     identity_file: Path | None = None
     proxy_jump: str | None = None
     login_shell: bool = False
+    force_tty: bool = False
 
 
 def ssh_target_for_vm(vm: object, config: object) -> SSHTarget:
     """Build an SSHTarget from a VMRow and Config.
 
     Accepts object types to avoid circular imports with db/config modules.
+    On Windows, forces TTY allocation to prevent zsh from hanging on
+    non-interactive piped SSH commands.
     """
+    import sys
+
     return SSHTarget(
         host=vm.tailscale_host,  # type: ignore[attr-defined]
         user=vm.admin_username,  # type: ignore[attr-defined]
         identity_file=config.user.ssh_private_key,  # type: ignore[attr-defined]
+        force_tty=sys.platform == "win32",
     )
 
 
@@ -141,12 +147,8 @@ SSH_DEFAULT_RETRIES = 1
 
 
 def _ssh_base_args(target: SSHTarget) -> list[str]:
-    import sys
-
     args = ["ssh", "-o", "StrictHostKeyChecking=accept-new", "-o", "BatchMode=yes"]
-    # Windows SSH needs forced PTY allocation to prevent non-interactive
-    # login shells (especially zsh) from hanging on piped stdout.
-    if sys.platform == "win32":
+    if target.force_tty:
         args.insert(1, "-tt")
     if target.port is not None:
         args.extend(["-p", str(target.port)])
