@@ -100,7 +100,9 @@ class DefaultsConfig:
 @dataclass(frozen=True)
 class DotfilesConfig:
     enabled: bool = True
-    source: Path = field(default_factory=lambda: Path.home() / ".dotfiles")
+    source: Path | None = None
+    repo: str | None = None
+    destination: str = "~/.dotfiles"
     install_cmd: str = "./install.sh"
 
 
@@ -322,7 +324,7 @@ def _load_defaults(data: dict[str, object], git_credential_names: set[str]) -> D
     )
 
 
-_DOTFILES_KEYS = {"enabled", "source", "install_cmd"}
+_DOTFILES_KEYS = {"enabled", "source", "repo", "destination", "install_cmd"}
 
 
 def _load_dotfiles(data: dict[str, object]) -> DotfilesConfig:
@@ -331,9 +333,18 @@ def _load_dotfiles(data: dict[str, object]) -> DotfilesConfig:
         raise ConfigError("[dotfiles] must be a table")
 
     _warn_unexpected_keys(raw, _DOTFILES_KEYS, "dotfiles")
+
+    source = _expand(str(raw["source"])) if "source" in raw else None
+    repo = str(raw["repo"]) if "repo" in raw else None
+
+    if source is not None and repo is not None:
+        raise ConfigError("dotfiles.source and dotfiles.repo are mutually exclusive")
+
     return DotfilesConfig(
         enabled=bool(raw.get("enabled", True)),
-        source=_expand(str(raw["source"])) if "source" in raw else DotfilesConfig().source,
+        source=source,
+        repo=repo,
+        destination=str(raw.get("destination", "~/.dotfiles")),
         install_cmd=str(raw.get("install_cmd", "./install.sh")),
     )
 

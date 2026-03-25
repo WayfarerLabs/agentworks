@@ -38,11 +38,16 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 
 # --- Dotfiles ---
 # Synced to VMs for the admin user during init. Not applied to agent users.
+# Use either repo (cloned on the VM) or source (copied from local), not both.
+# On reinit, repo mode does a git pull instead of re-cloning.
+# For private repos, ensure git credentials are configured on the VM.
 
-[dotfiles]
-# enabled = true                             # copy dotfiles to VMs during init
-# source = "~/.dotfiles"                     # path to your dotfiles repo
-# install_cmd = "./install.sh"               # command to run after copying dotfiles
+# [dotfiles]
+# enabled = true                             # enable dotfiles sync during init
+# repo = "https://github.com/user/dotfiles"  # clone from a git repo (recommended)
+# source = "~/.dotfiles"                     # OR copy from a local path
+# destination = "~/.dotfiles"                # where to put them on the VM (~ supported)
+# install_cmd = "./install.sh"               # command to run after clone/copy
 
 # --- VM configuration ---
 # Settings that control VM provisioning (immutable after create) and
