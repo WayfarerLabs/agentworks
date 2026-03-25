@@ -87,14 +87,22 @@ def _write_path_additions(
     if not path_additions:
         return
 
+    # Deduplicate while preserving order
+    seen: set[str] = set()
+    unique_paths: list[str] = []
+    for p in path_additions:
+        if p not in seen:
+            seen.add(p)
+            unique_paths.append(p)
+
     logger.step("PATH configuration")
-    typer.echo(f"  Adding {len(path_additions)} PATH entries...")
+    typer.echo(f"  Adding {len(unique_paths)} PATH entries...")
 
     try:
         # Build the path file content locally and copy it over
         # (avoids quoting issues with nested quotes over SSH on Windows)
         lines = ["# Managed by agentworks -- do not edit"]
-        for p in path_additions:
+        for p in unique_paths:
             expanded = p.replace("~", "$HOME", 1) if p.startswith("~") else p
             lines.append(f'export PATH="{expanded}:$PATH"')
         target.write_file("~/.agentworks-path.sh", "\n".join(lines) + "\n")

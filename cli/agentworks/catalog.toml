@@ -115,3 +115,9 @@ description = "Claude Code CLI"
 command = "curl -fsSL https://claude.ai/install.sh | bash"
 path = ["~/.local/bin"]
 test_exec = "claude"
+
+[user_install_commands.starship]
+description = "Starship cross-shell prompt"
+command = "curl -sS https://starship.rs/install.sh | sh -s -- -y -b ~/.local/bin"
+path = ["~/.local/bin"]
+test_exec = "starship"
