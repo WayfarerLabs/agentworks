@@ -191,7 +191,29 @@ def create_vm(
         logs = find_init_logs(vm_name)
         if logs:
             typer.echo(f"Details: {logs[0]}", err=True)
-        _prompt_failed_vm(db, config, vm_name)
+
+        vm = db.get_vm(vm_name)
+        if vm is not None and vm.provisioning_status == ProvisioningStatus.FAILED.value:
+            # Provisioning failed -- VM is unreachable
+            typer.echo(
+                "\nProvisioning failed. Delete VM? You can keep it for manual "
+                "troubleshooting, but agentworks cannot use or manage it.",
+                err=True,
+            )
+            if typer.confirm("Delete VM?", default=True):
+                delete_vm(db, config, vm_name, force=True)
+            else:
+                typer.echo(
+                    f"VM '{vm_name}' kept in failed state. Only 'vm delete' is supported.",
+                    err=True,
+                )
+        else:
+            # Init failed but VM exists -- reinit can retry
+            typer.echo(
+                f"\nVM '{vm_name}' is in a degraded state but may still be usable.\n"
+                f"Use 'vm reinit {vm_name}' to retry initialization.",
+                err=True,
+            )
         return
 
     # -- Post-init: SSH config + cleanup --
@@ -577,65 +599,6 @@ def reinit_vm(
         typer.echo(f"\nVM '{name}' reinitialized successfully!")
         typer.echo(f"  SSH log: {ssh_logger.path}")
 
-
-def _prompt_failed_vm(db: Database, config: Config, vm_name: str) -> None:
-    """After a failure, prompt user based on whether provisioning or init failed."""
-    vm = db.get_vm(vm_name)
-    if vm is None:
-        return
-
-    if vm.provisioning_status == ProvisioningStatus.FAILED.value:
-        # Provisioning failed -- VM is unreachable, only delete makes sense
-        typer.echo(
-            "\nProvisioning failed. Delete VM? You can keep it for manual troubleshooting, "
-            "but agentworks cannot use or manage it.",
-            err=True,
-        )
-        if typer.confirm("Delete VM?", default=True):
-            delete_vm(db, config, vm_name, force=True)
-        else:
-            typer.echo(
-                f"VM '{vm_name}' kept in failed state. Only 'vm delete' is supported.",
-                err=True,
-            )
-    elif vm.init_status == InitStatus.FAILED.value:
-        # Init failed but provisioning succeeded -- reinit may be an option
-        can_reinit = vm.tailscale_host is not None
-        if can_reinit:
-            typer.echo(
-                "\nInitialization failed. You can re-run initialization with 'vm reinit', "
-                "delete the VM, or keep it for troubleshooting.",
-                err=True,
-            )
-            typer.echo("  [r] Reinit  [d] Delete  [k] Keep", err=True)
-            choice = typer.prompt("Choice", default="r").lower()
-            if choice == "d":
-                delete_vm(db, config, vm_name, force=True)
-            elif choice == "r":
-                reinit_vm(db, config, vm_name)
-            else:
-                typer.echo(
-                    f"VM '{vm_name}' kept. Use 'vm reinit' to retry initialization.",
-                    err=True,
-                )
-        else:
-            typer.echo(
-                "\nInitialization failed and VM has no Tailscale IP (reinit not possible).",
-                err=True,
-            )
-            if typer.confirm("Delete VM?", default=True):
-                delete_vm(db, config, vm_name, force=True)
-            else:
-                typer.echo(
-                    f"VM '{vm_name}' kept in failed state. Only 'vm delete' is supported.",
-                    err=True,
-                )
-    else:
-        # Post-init failure (e.g. SSH config, IP cleanup) -- VM may be usable
-        typer.echo(
-            f"\nVM '{vm_name}' encountered a post-initialization error but may still be usable.",
-            err=True,
-        )
 
 
 def _tailscale_logout(provisioner: VMProvisioner, vm: VMRow) -> None:
