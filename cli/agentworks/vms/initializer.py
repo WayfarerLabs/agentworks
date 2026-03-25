@@ -791,7 +791,7 @@ def _phase_b_setup(
             _run_logged(ts_target, f"touch {home}/.zshrc", logger, check=False)
         _run_logged(
             ts_target,
-            f"chsh -s $(which {shlex.quote(admin_shell)}) {shlex.quote(admin_username)}",
+            f"usermod -s $(which {shlex.quote(admin_shell)}) {shlex.quote(admin_username)}",
             logger,
             as_root=True,
         )
