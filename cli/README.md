@@ -121,14 +121,20 @@ message shows what will be deleted. Pass `--yes` to skip the prompt.
 
 Manage workspaces on VMs or locally.
 
-| Command                              | Description                          |
-| ------------------------------------ | ------------------------------------ |
-| `agentworks workspace create`        | Create a workspace (VM or `--local`) |
-| `agentworks workspace shell <name>`  | Open a shell into a workspace        |
-| `agentworks workspace list`          | List workspaces                      |
-| `agentworks workspace delete <name>` | Delete a workspace                   |
+| Command                                | Description                          |
+| -------------------------------------- | ------------------------------------ |
+| `agentworks workspace create`          | Create a workspace (VM or `--local`) |
+| `agentworks workspace shell <name>`    | Open a plain shell into a workspace  |
+| `agentworks workspace console <name>`  | Open the workspace console (tmux)    |
+| `agentworks workspace list`            | List workspaces                      |
+| `agentworks workspace delete <name>`   | Delete a workspace                   |
 
 `workspace create` accepts `--name`, `--vm`, `--local`, `--template`, and `--open-vscode`.
+
+`workspace console` opens a tmuxinator session (`ws-<name>-console`) with an admin-shell
+window plus one window per task in the workspace. Pass `--recreate` to kill and rebuild the
+session. This is the recommended way to interact with tasks from within VS Code or any
+terminal on the VM.
 
 `workspace delete` requires `--force` if the workspace has tasks. Running task sessions are
 killed during deletion. Pass `--yes` to skip the confirmation prompt.
@@ -163,40 +169,61 @@ Manage tasks (named work streams running in workspaces).
 are prompted interactively if omitted. Pass `--new-workspace` to create a workspace on the fly
 (with optional `--workspace-name`, `--workspace-template`, and `--vm`).
 
-### Task tmux Architecture
+### tmux Architecture
 
-Each task runs in its own locked-down tmux session on the VM. The VM `console` aggregates all tasks
-into a single tmux session for the operator.
+Each task runs in its own locked-down tmux session on the VM. There are three ways to interact
+with tasks, at different scopes:
+
+| Method | Scope | Session name | Entry point |
+| --- | --- | --- | --- |
+| `task attach` | One task | `<workspace>--<task>` | Operator's machine |
+| `workspace console` | One workspace | `ws-<workspace>-console` | On-VM or operator's machine |
+| `vm console` | All workspaces | `vm-console` | Operator's machine |
+
+#### Task sessions
+
+Each task gets a locked-down tmux session (`<workspace>--<task>`). The admin user's
+`~/.tmux.conf` (customizable via dotfiles) is loaded first so that familiar keybindings
+(prefix, detach, copy mode, scroll) work for direct `task attach`. Window/pane creation,
+session management, and the command prompt are selectively unbound.
+
+#### Workspace console
+
+`workspace console` uses tmuxinator to create or attach to a `ws-<name>-console` session.
+The tmuxinator config (`.tmuxinator.yml` in the workspace root) is regenerated whenever tasks
+change, so the session always reflects the current set of tasks. This is the recommended way
+to interact with tasks from within VS Code or any terminal on the VM.
 
 ```text
-vm-console (full tmux, operator controls)
+ws-myproject-console (tmuxinator, full tmux)
   Window 1: admin-shell             login shell for the admin user
   Window 2: myproject--task-a       attached to task session
   Window 3: myproject--task-b       attached to task session
 ```
 
-**Task sessions** are restricted: no window/pane creation, no session management, no command prompt.
-The admin user's `~/.tmux.conf` (which can be customized as part of the dotfiles mechanism) is
-loaded first so that familiar keybindings (prefix, detach, copy mode, scroll) work for direct
-`task attach`. The dangerous bindings (split, new-window, command-prompt, etc.) are then selectively
-unbound.
+#### VM console
 
-**Console sessions** use the full default tmux config (plus the admin user's `~/.tmux.conf`, again
-customizable via dotfiles). The initial window is `admin-shell` (a login shell for the admin user).
-Each running task gets its own window that attaches to the task's locked-down session.
+`vm console` creates or attaches to the `vm-console` session, which spans all workspaces on
+the VM. This is built dynamically (not via tmuxinator) and is managed from the operator's
+machine.
 
-Key behaviors:
+#### Shells
 
-- **Direct attach** (`task attach`): the user's prefix key, detach, copy mode, and scroll all work
-  normally. Status bar is hidden since there is only one pane.
-- **Console** (`vm console`): the console's prefix key eclipses the task session's prefix, so window
-  switching, detach, etc. all operate at the console level. Task windows use a wrapper that
-  re-attaches if the inner session disconnects and shows a message when the task ends.
-- **Nesting protection**: `vm console` refuses to run inside an existing tmux session to avoid
-  potentially-confusing nesting (prefix key conflicts, etc.). Pass `--allow-nesting` to override.
-- **Console lifecycle**: the console is independent of task sessions. Killing or detaching the
-  console does not affect running tasks. `--recreate` rebuilds the console from scratch with all
-  currently running tasks.
+`workspace shell` and `vm shell` open plain login shells with no tmux. Use these when you just
+need a terminal without the console structure.
+
+#### Key behaviors
+
+- **Direct attach** (`task attach`): the user's prefix key, detach, copy mode, and scroll all
+  work normally. Status bar is hidden since there is only one pane.
+- **Consoles** (`workspace console`, `vm console`): the console's prefix key eclipses the task
+  session's prefix, so window switching, detach, etc. all operate at the console level. Task
+  windows use a wrapper that re-attaches if the inner session disconnects and shows a message
+  when the task ends.
+- **Nesting protection**: both console commands refuse to run inside an existing tmux session to
+  avoid prefix key conflicts. Pass `--allow-nesting` to override.
+- **Console lifecycle**: consoles are independent of task sessions. Killing or detaching a
+  console does not affect running tasks. `--recreate` rebuilds from scratch.
 
 ### Task Templates
 

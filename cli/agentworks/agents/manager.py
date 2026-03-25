@@ -12,7 +12,7 @@ from agentworks.ssh import ssh_target_for_vm
 if TYPE_CHECKING:
     from agentworks.catalog import UserInstallCommandEntry
     from agentworks.config import Config
-    from agentworks.db import AgentRow, Database, VMRow, WorkspaceRow
+    from agentworks.db import Database, VMRow, WorkspaceRow
 
 AGENT_SEPARATOR = "--"
 AGENT_SHELL = "/bin/bash"
@@ -57,11 +57,6 @@ def create_agent(
 
     agent = db.insert_agent(name, workspace_name, linux_user)
 
-    # Regenerate tmuxinator config and add live window
-    if ws.type == "vm":
-        _regenerate_tmuxinator(db, config, vm, ws)
-        _add_live_window(config, vm, ws.name, ws.workspace_path, agent)
-
     typer.echo(f"Agent '{name}' created (user: {agent.linux_user})")
 
 
@@ -81,13 +76,9 @@ def delete_agent(
 
     if ws.type == "vm":
         vm = _require_vm_for_workspace(db, ws)
-        _remove_live_window(config, vm, ws.name, name)
         _delete_agent_on_vm(vm, config, agent.linux_user)
-        db.delete_agent(workspace_name, name)
-        # Regenerate after DB delete so the agent is excluded
-        _regenerate_tmuxinator(db, config, vm, ws)
-    else:
-        db.delete_agent(workspace_name, name)
+
+    db.delete_agent(workspace_name, name)
 
     typer.echo(f"Agent '{name}' deleted from workspace '{workspace_name}'")
 
@@ -174,67 +165,6 @@ def shell_agent(
 
 
 # -- Tmuxinator ------------------------------------------------------------
-
-
-def _regenerate_tmuxinator(
-    db: Database,
-    config: Config,
-    vm: VMRow,
-    ws: WorkspaceRow,
-) -> None:
-    """Regenerate the tmuxinator config from current DB state."""
-    from agentworks.workspaces.tmuxinator import generate_config
-
-    agents = db.list_agents(workspace_name=ws.name)
-    tmux_config = generate_config(ws.name, ws.workspace_path, agents=agents)
-    target = ssh_target_for_vm(vm, config)
-
-    from agentworks.ssh import write_file
-
-    write_file(target, f"{ws.workspace_path}/.tmuxinator.yml", tmux_config)
-
-
-def _add_live_window(
-    config: Config,
-    vm: VMRow,
-    ws_name: str,
-    workspace_path: str,
-    agent: AgentRow,
-) -> None:
-    """Add a window to a running tmux session (best-effort)."""
-    from functools import partial
-
-    from agentworks.ssh import run as ssh_run
-    from agentworks.workspaces.tmuxinator import add_window_to_session
-
-    target = ssh_target_for_vm(vm, config)
-    run_cmd = partial(ssh_run, target)
-
-    add_window_to_session(
-        ws_name,
-        agent.name,
-        agent.linux_user,
-        workspace_path,
-        run_command=run_cmd,
-    )
-
-
-def _remove_live_window(
-    config: Config,
-    vm: VMRow,
-    ws_name: str,
-    agent_name: str,
-) -> None:
-    """Remove a window from a running tmux session (best-effort)."""
-    from functools import partial
-
-    from agentworks.ssh import run as ssh_run
-    from agentworks.workspaces.tmuxinator import remove_window_from_session
-
-    target = ssh_target_for_vm(vm, config)
-    run_cmd = partial(ssh_run, target)
-
-    remove_window_from_session(ws_name, agent_name, run_command=run_cmd)
 
 
 # -- VM operations ---------------------------------------------------------

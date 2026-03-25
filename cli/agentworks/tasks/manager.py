@@ -80,6 +80,22 @@ def _require_task(db: Database, workspace_name: str, name: str) -> TaskRow:
     return task
 
 
+def _regenerate_tmuxinator(
+    db: Database,
+    config: Config,
+    vm: VMRow,
+    ws: WorkspaceRow,
+) -> None:
+    """Regenerate the workspace tmuxinator config from current task state."""
+    from agentworks.ssh import write_file
+    from agentworks.workspaces.tmuxinator import generate_config
+
+    tasks = db.list_tasks(workspace_name=ws.name)
+    config_text = generate_config(ws.name, ws.workspace_path, tasks=tasks)
+    target = ssh_target_for_vm(vm, config)
+    write_file(target, f"{ws.workspace_path}/.tmuxinator.yml", config_text)
+
+
 def _resolve_template(config: Config, template_name: str | None) -> TaskTemplate:
     """Resolve a task template by name.
 
@@ -230,7 +246,8 @@ def create_task(
 
     typer.echo(f"Task '{name}' started ({mode.value} mode, template: {template.name})")
 
-    # Add to console if it exists
+    # Update tmuxinator config and add to console if it exists
+    _regenerate_tmuxinator(db, config, vm, ws)
     from agentworks.tasks.console import add_task_to_console
 
     add_task_to_console(name, workspace_name, run_command=run_command)
@@ -288,7 +305,7 @@ def restart_task(
         session_exists,
     )
 
-    ws, _vm, run_command = _prepare_vm(db, config, workspace_name)
+    ws, vm, run_command = _prepare_vm(db, config, workspace_name)
     task = _require_task(db, workspace_name, name)
 
     if session_exists(workspace_name, name, run_command=run_command):
@@ -323,6 +340,7 @@ def restart_task(
     db.update_task_status(workspace_name, name, TaskStatus.RUNNING)
     typer.echo(f"Task '{name}' restarted")
 
+    _regenerate_tmuxinator(db, config, vm, ws)
     from agentworks.tasks.console import add_task_to_console
 
     add_task_to_console(name, workspace_name, run_command=run_command)
@@ -339,7 +357,7 @@ def delete_task(
     """Stop and delete a task."""
     from agentworks.tasks.tmux import kill_task_session, session_exists
 
-    _ws, _vm, run_command = _prepare_vm(db, config, workspace_name)
+    ws, vm, run_command = _prepare_vm(db, config, workspace_name)
     _require_task(db, workspace_name, name)
 
     if not yes and session_exists(workspace_name, name, run_command=run_command):
@@ -348,6 +366,7 @@ def delete_task(
     kill_task_session(workspace_name, name, run_command=run_command)
     db.delete_task(workspace_name, name)
 
+    _regenerate_tmuxinator(db, config, vm, ws)
     typer.echo(f"Task '{name}' deleted")
 
 

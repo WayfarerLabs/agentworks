@@ -396,13 +396,27 @@ def workspace_create(
 @workspace_app.command("shell")
 def workspace_shell(
     name: Annotated[str, typer.Argument(help="Workspace name")],
-    no_tmuxinator: Annotated[bool, typer.Option("--no-tmuxinator", help="Skip tmuxinator")] = False,
 ) -> None:
-    """Open a shell into a workspace."""
+    """Open a plain shell into a workspace."""
     from agentworks.config import load_config
     from agentworks.workspaces.manager import shell_workspace
 
-    shell_workspace(_get_db(), load_config(), name, no_tmuxinator=no_tmuxinator)
+    shell_workspace(_get_db(), load_config(), name)
+
+
+@workspace_app.command("console")
+def workspace_console(
+    name: Annotated[str, typer.Argument(help="Workspace name")],
+    recreate: Annotated[bool, typer.Option("--recreate", help="Kill and rebuild the console")] = False,
+    allow_nesting: Annotated[bool, typer.Option("--allow-nesting", help="Allow running inside tmux")] = False,
+) -> None:
+    """Open the workspace console (tmux session with tasks)."""
+    from agentworks.config import load_config
+    from agentworks.workspaces.manager import console_workspace
+
+    console_workspace(
+        _get_db(), load_config(), name, allow_nesting=allow_nesting, recreate=recreate,
+    )
 
 
 @workspace_app.command("list")

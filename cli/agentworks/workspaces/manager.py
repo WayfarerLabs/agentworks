@@ -150,28 +150,18 @@ def shell_workspace(
     db: Database,
     config: Config,
     name: str,
-    *,
-    no_tmuxinator: bool = False,
 ) -> None:
-    """Open a shell into a workspace."""
+    """Open a plain shell into a workspace."""
     ws = db.get_workspace(name)
     if ws is None:
         typer.echo(f"Error: workspace '{name}' not found", err=True)
         raise typer.Exit(1)
 
-    template = resolve_template(config, ws.template)
-    use_tmux = template.tmuxinator and not no_tmuxinator
-
     if ws.type == "local":
         from agentworks.workspaces.backends.local import shell_local_workspace
 
         db.update_workspace_last_seen(name)
-        shell_local_workspace(
-            name,
-            ws.workspace_path,
-            use_tmuxinator=use_tmux,
-            tmuxinator_enabled=template.tmuxinator,
-        )
+        shell_local_workspace(ws.workspace_path)
     elif ws.type == "vm":
         vm = db.get_vm(ws.vm_name)  # type: ignore[arg-type]
         if vm is None:
@@ -179,20 +169,61 @@ def shell_workspace(
             raise typer.Exit(1)
 
         _guard_vm_status(vm)
-
         _ensure_vm_running(db, config, vm)
         db.update_workspace_last_seen(name)
 
         from agentworks.workspaces.backends.vm import shell_vm_workspace
 
-        shell_vm_workspace(
-            vm,
-            config,
-            name,
-            ws.workspace_path,
-            use_tmuxinator=use_tmux,
-            tmuxinator_enabled=template.tmuxinator,
+        shell_vm_workspace(vm, config, ws.workspace_path)
+    else:
+        typer.echo(f"Error: unknown workspace type '{ws.type}'", err=True)
+        raise typer.Exit(1)
+
+
+def console_workspace(
+    db: Database,
+    config: Config,
+    name: str,
+    *,
+    allow_nesting: bool = False,
+    recreate: bool = False,
+) -> None:
+    """Open the workspace console (tmuxinator session with tasks)."""
+    import os
+
+    if os.environ.get("TMUX") and not allow_nesting:
+        typer.echo(
+            "Error: already inside a tmux session.\n"
+            "Nesting is not recommended (prefix key conflicts,\n"
+            "confusing detach behavior).\n"
+            "Pass --allow-nesting to override.",
+            err=True,
         )
+        raise typer.Exit(1)
+
+    ws = db.get_workspace(name)
+    if ws is None:
+        typer.echo(f"Error: workspace '{name}' not found", err=True)
+        raise typer.Exit(1)
+
+    if ws.type == "local":
+        from agentworks.workspaces.backends.local import console_local_workspace
+
+        db.update_workspace_last_seen(name)
+        console_local_workspace(name, recreate=recreate)
+    elif ws.type == "vm":
+        vm = db.get_vm(ws.vm_name)  # type: ignore[arg-type]
+        if vm is None:
+            typer.echo(f"Error: VM '{ws.vm_name}' not found", err=True)
+            raise typer.Exit(1)
+
+        _guard_vm_status(vm)
+        _ensure_vm_running(db, config, vm)
+        db.update_workspace_last_seen(name)
+
+        from agentworks.workspaces.backends.vm import console_vm_workspace
+
+        console_vm_workspace(vm, config, name, recreate=recreate)
     else:
         typer.echo(f"Error: unknown workspace type '{ws.type}'", err=True)
         raise typer.Exit(1)

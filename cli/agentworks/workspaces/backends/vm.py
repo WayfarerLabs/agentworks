@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import json
-import subprocess
 import sys
 from typing import TYPE_CHECKING
 
 import typer
 
 from agentworks.ssh import ssh_target_for_vm
-from agentworks.workspaces.tmuxinator import generate_config
+from agentworks.workspaces.tmuxinator import console_session_name, generate_config
 
 if TYPE_CHECKING:
     from agentworks.config import Config
@@ -65,17 +64,18 @@ def create_vm_workspace(
                 )
             raise
 
-    # Tmuxinator config (no agents yet at workspace creation time)
+    # Tmuxinator config (no tasks yet at workspace creation time)
     if template.tmuxinator:
         from agentworks.ssh import write_file
 
         tmux_config = generate_config(ws_name, workspace_path)
         write_file(target, f"{workspace_path}/.tmuxinator.yml", tmux_config)
-        # Symlink for tmuxinator to find it
+        # Symlink so tmuxinator can find it by console session name
+        session = console_session_name(ws_name)
         ssh_run(target, "mkdir -p ~/.config/tmuxinator", timeout=10)
         ssh_run(
             target,
-            f"ln -sf {workspace_path}/.tmuxinator.yml ~/.config/tmuxinator/{ws_name}.yml",
+            f"ln -sf {workspace_path}/.tmuxinator.yml ~/.config/tmuxinator/{session}.yml",
             timeout=10,
         )
 
@@ -85,26 +85,32 @@ def create_vm_workspace(
 def shell_vm_workspace(
     vm: VMRow,
     config: Config,
-    ws_name: str,
     workspace_path: str,
-    *,
-    use_tmuxinator: bool = True,
-    tmuxinator_enabled: bool = True,
 ) -> None:
-    """Open a shell into a VM workspace."""
-    assert vm.tailscale_host is not None
+    """Open a plain shell into a VM workspace."""
+    from agentworks.ssh import interactive, ssh_target_for_vm
 
-    ssh_cmd = ["ssh"]
-    if config.user.ssh_private_key:
-        ssh_cmd.extend(["-i", str(config.user.ssh_private_key)])
-    ssh_cmd.append(f"{vm.admin_username}@{vm.tailscale_host}")
+    target = ssh_target_for_vm(vm, config)
+    sys.exit(interactive(target, f"cd {workspace_path} && exec $SHELL -l"))
 
-    if use_tmuxinator and tmuxinator_enabled:
-        ssh_cmd.extend(["-t", f"tmuxinator start {ws_name}"])
-    else:
-        ssh_cmd.extend(["-t", f"cd {workspace_path} && exec $SHELL -l"])
 
-    sys.exit(subprocess.call(ssh_cmd))
+def console_vm_workspace(
+    vm: VMRow,
+    config: Config,
+    ws_name: str,
+    *,
+    recreate: bool = False,
+) -> None:
+    """Open the workspace console (tmuxinator) on a VM."""
+    from agentworks.ssh import interactive, run, ssh_target_for_vm
+
+    session = console_session_name(ws_name)
+    target = ssh_target_for_vm(vm, config)
+
+    if recreate:
+        run(target, f"tmux kill-session -t {session}", check=False, timeout=10)
+
+    sys.exit(interactive(target, f"tmuxinator start {session}"))
 
 
 def delete_vm_workspace(
@@ -122,7 +128,8 @@ def delete_vm_workspace(
 
     try:
         ssh_run(target, f"rm -rf {workspace_path}", timeout=30)
-        ssh_run(target, f"rm -f ~/.config/tmuxinator/{ws_name}.yml", check=False, timeout=10)
+        session = console_session_name(ws_name)
+        ssh_run(target, f"rm -f ~/.config/tmuxinator/{session}.yml", check=False, timeout=10)
     except SSHError as e:
         typer.echo(f"Warning: remote cleanup failed: {e}", err=True)
 

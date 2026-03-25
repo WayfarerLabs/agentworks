@@ -77,19 +77,30 @@ def create_local_workspace(
 
 
 def shell_local_workspace(
-    ws_name: str,
     workspace_path: str,
-    *,
-    use_tmuxinator: bool = True,
-    tmuxinator_enabled: bool = True,
 ) -> None:
-    """Open a shell into a local workspace."""
-    if use_tmuxinator and tmuxinator_enabled:
-        os.execlp("tmuxinator", "tmuxinator", "start", ws_name)
-    else:
-        shell = os.environ.get("SHELL", "/bin/sh")
-        os.chdir(workspace_path)
-        os.execlp(shell, shell, "-l")
+    """Open a plain shell into a local workspace."""
+    shell = os.environ.get("SHELL", "/bin/sh")
+    os.chdir(workspace_path)
+    os.execlp(shell, shell, "-l")
+
+
+def console_local_workspace(
+    ws_name: str,
+    *,
+    recreate: bool = False,
+) -> None:
+    """Open the workspace console (tmuxinator) for a local workspace."""
+    import subprocess
+
+    from agentworks.workspaces.tmuxinator import console_session_name
+
+    session = console_session_name(ws_name)
+
+    if recreate:
+        subprocess.run(["tmux", "kill-session", "-t", session], capture_output=True)  # noqa: S603, S607
+
+    os.execlp("tmuxinator", "tmuxinator", "start", session)
 
 
 def delete_local_workspace(ws_name: str, workspace_path: str) -> None:
