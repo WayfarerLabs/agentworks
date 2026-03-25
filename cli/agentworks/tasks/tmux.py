@@ -102,7 +102,12 @@ def create_task_session(
     q_path = shlex.quote(workspace_path)
 
     if is_admin:
-        shell_cmd = f"cd {q_path} && {command}" if command else ""
+        if command:
+            # Run via login shell so PATH (e.g. ~/.local/bin) is available
+            inner = shlex.quote(f"cd {q_path} && {command}")
+            shell_cmd = f"$SHELL -lc {inner}"
+        else:
+            shell_cmd = ""
     else:
         assert linux_user is not None
         q_user = shlex.quote(linux_user)
