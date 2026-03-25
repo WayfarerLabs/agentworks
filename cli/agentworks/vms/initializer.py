@@ -728,12 +728,16 @@ def _phase_a_bootstrap(
     db.update_vm_tailscale(vm_name, tailscale_ip)
     db.update_vm_provisioning_status(vm_name, ProvisioningStatus.COMPLETE)
 
-    # Switch to Tailscale SSH, carrying over the SSH logger
+    # Switch to Tailscale SSH, carrying over the SSH logger.
+    # On Windows, force TTY to prevent zsh/login shell pipe hangs.
+    import sys
+
     ts_target = ExecTarget(
         ssh=SSHTarget(
             host=tailscale_ip,
             user=admin_username,
             identity_file=config.user.ssh_private_key,
+            force_tty=sys.platform == "win32",
         ),
         default_timeout=60,
         logger=exec_target.logger,
