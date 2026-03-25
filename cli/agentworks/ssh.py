@@ -198,11 +198,8 @@ def run(
 
     last_err: Exception | None = None
     for attempt in range(retries):
-        if attempt > 0:
-            if on_retry is not None:
-                on_retry(attempt, retries)
-            if logger is not None:
-                logger.log_timeout(command, attempt, retries)
+        if attempt > 0 and on_retry is not None:
+            on_retry(attempt, retries)
         try:
             result = subprocess.run(
                 args,
@@ -225,9 +222,14 @@ def run(
             return ssh_result
         except subprocess.TimeoutExpired as err:
             last_err = err
+            if logger is not None:
+                logger.log_timeout(command, attempt + 1, retries)
             continue
 
-    raise SSHError(f"SSH command timed out after {retries} attempts ({timeout}s each): {command}") from last_err
+    msg = f"SSH command timed out after {retries} attempts ({timeout}s each): {command}"
+    if logger is not None:
+        logger.log_error(msg)
+    raise SSHError(msg) from last_err
 
 
 def interactive(target: SSHTarget, command: str) -> int:
