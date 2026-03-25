@@ -739,10 +739,20 @@ def _phase_a_bootstrap(
         logger=exec_target.logger,
     )
 
-    # Verify Tailscale SSH works
+    # Verify Tailscale SSH works (retry -- peer connection may take time)
     logger.step("Verify Tailscale SSH")
     typer.echo("  Verifying Tailscale SSH...")
-    _run_logged(ts_target, "echo ok", logger, timeout=30)
+    import time
+
+    for attempt in range(5):
+        try:
+            _run_logged(ts_target, "echo ok", logger, timeout=15)
+            break
+        except SSHError:
+            if attempt == 4:
+                raise
+            typer.echo(f"  Tailscale SSH not ready, retrying ({attempt + 1}/5)...")
+            time.sleep(3)
 
     return ts_target
 
