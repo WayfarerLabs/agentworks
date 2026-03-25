@@ -94,17 +94,18 @@ Manage machines that host VMs (for remote Lima mode).
 
 Manage virtual machines across Lima (local or remote), Azure, and WSL2.
 
-| Command                       | Description                              |
-| ----------------------------- | ---------------------------------------- |
-| `agentworks vm create`        | Create a new VM (provision + initialize) |
-| `agentworks vm list`          | List VMs with status and resources       |
-| `agentworks vm describe <name>` | Show VM details, workspaces, and event log |
-| `agentworks vm shell <name>`  | SSH into a VM's home directory           |
-| `agentworks vm start <name>`  | Start a stopped VM                       |
-| `agentworks vm stop <name>`   | Stop a running VM                        |
-| `agentworks vm reinit <name>` | Re-run initialization on a provisioned VM |
-| `agentworks vm delete <name>` | Delete a VM (prompts for confirmation)   |
-| `agentworks vm add-git-credential <name> <cred>` | Add or update a git credential |
+| Command                                          | Description                                |
+| ------------------------------------------------ | ------------------------------------------ |
+| `agentworks vm create`                           | Create a new VM (provision + initialize)   |
+| `agentworks vm list`                             | List VMs with status and resources         |
+| `agentworks vm describe <name>`                  | Show VM details, workspaces, and event log |
+| `agentworks vm shell <name>`                     | SSH into a VM's home directory             |
+| `agentworks vm start <name>`                     | Start a stopped VM                         |
+| `agentworks vm stop <name>`                      | Stop a running VM                          |
+| `agentworks vm reinit <name>`                    | Re-run initialization on a provisioned VM  |
+| `agentworks vm delete <name>`                    | Delete a VM (with confirmation)            |
+| `agentworks vm console <name>`                   | Attach to the VM console                   |
+| `agentworks vm add-git-credential <name> <cred>` | Add or update a git credential             |
 
 `vm create` accepts `--name`, `--platform`, `--vm-host`, `--admin-username`, `--cpus`, `--memory`,
 `--disk`, and `--azure-vm-size`. These are immutable provisioning parameters stored in the database.
@@ -112,6 +113,9 @@ All initialization behavior (packages, install commands, etc.) is driven by conf
 
 `vm reinit` re-runs the initialization phase using the current config without reprovisioning the VM.
 Changes to config (new packages, different install commands, etc.) are picked up automatically.
+
+`vm delete` requires `--force` if the VM has workspaces, agents, or tasks. The confirmation
+message shows what will be deleted. Pass `--yes` to skip the prompt.
 
 ### Workspaces
 
@@ -126,6 +130,9 @@ Manage workspaces on VMs or locally.
 
 `workspace create` accepts `--name`, `--vm`, `--local`, `--template`, and `--open-vscode`.
 
+`workspace delete` requires `--force` if the workspace has tasks. Running task sessions are
+killed during deletion. Pass `--yes` to skip the confirmation prompt.
+
 ### Agents
 
 Manage agents (isolated Linux users) within VM workspaces.
@@ -137,31 +144,103 @@ Manage agents (isolated Linux users) within VM workspaces.
 | `agentworks agent shell <name> [--workspace <ws>]` | Shell into an agent |
 | `agentworks agent delete <name> --workspace <ws>`  | Delete an agent     |
 
+### Tasks
+
+Manage tasks (named work streams running in workspaces).
+
+| Command                                          | Description                 |
+| ------------------------------------------------ | --------------------------- |
+| `agentworks task create`                         | Create and start a task     |
+| `agentworks task list [--workspace <ws>]`        | List tasks with status      |
+| `agentworks task attach <name> --workspace <ws>` | Attach to a running task    |
+| `agentworks task stop <name> --workspace <ws>`   | Stop a running task         |
+| `agentworks task restart <name> --workspace <ws>` | Restart a task             |
+| `agentworks task delete <name> --workspace <ws>` | Stop and delete a task      |
+| `agentworks task logs <name> --workspace <ws>`   | Dump task scrollback buffer |
+| `agentworks vm console <vm-name>`                | Attach to the VM console    |
+
+`task create` accepts `--name`, `--workspace`, `--template`, and `--agent`. Both name and workspace
+are prompted interactively if omitted. Pass `--new-workspace` to create a workspace on the fly
+(with optional `--workspace-name`, `--workspace-template`, and `--vm`).
+
+### Task tmux Architecture
+
+Each task runs in its own locked-down tmux session on the VM. The VM `console` aggregates all tasks
+into a single tmux session for the operator.
+
+```text
+vm-console (full tmux, operator controls)
+  Window 1: admin-shell             login shell for the admin user
+  Window 2: myproject--task-a       attached to task session
+  Window 3: myproject--task-b       attached to task session
+```
+
+**Task sessions** are restricted: no window/pane creation, no session management, no command prompt.
+The admin user's `~/.tmux.conf` (which can be customized as part of the dotfiles mechanism) is
+loaded first so that familiar keybindings (prefix, detach, copy mode, scroll) work for direct
+`task attach`. The dangerous bindings (split, new-window, command-prompt, etc.) are then selectively
+unbound.
+
+**Console sessions** use the full default tmux config (plus the admin user's `~/.tmux.conf`, again
+customizable via dotfiles). The initial window is `admin-shell` (a login shell for the admin user).
+Each running task gets its own window that attaches to the task's locked-down session.
+
+Key behaviors:
+
+- **Direct attach** (`task attach`): the user's prefix key, detach, copy mode, and scroll all work
+  normally. Status bar is hidden since there is only one pane.
+- **Console** (`vm console`): the console's prefix key eclipses the task session's prefix, so window
+  switching, detach, etc. all operate at the console level. Task windows use a wrapper that
+  re-attaches if the inner session disconnects and shows a message when the task ends.
+- **Nesting protection**: `vm console` refuses to run inside an existing tmux session to avoid
+  potentially-confusing nesting (prefix key conflicts, etc.). Pass `--allow-nesting` to override.
+- **Console lifecycle**: the console is independent of task sessions. Killing or detaching the
+  console does not affect running tasks. `--recreate` rebuilds the console from scratch with all
+  currently running tasks.
+
+### Task Templates
+
+Templates define the command a task runs. The built-in `default` template runs a login shell
+(`$SHELL --login`), respecting whatever shell the user (admin or agent) is configured with.
+Define custom templates in config:
+
+```toml
+[task_templates.default]               # override the built-in default
+command = "claude --name {{task_name}}"
+restart_command = "claude --resume {{task_name}}"
+description = "Claude Code interactive session"
+```
+
+Template commands support `{{task_name}}` and `{{workspace_name}}` variable substitution
+(double-brace syntax, consistent with nerftools manifests). The optional `restart_command` is
+used by `task restart` -- useful for tools like Claude Code where `--resume` picks up the
+previous conversation. If omitted, the regular `command` is used.
+
 ### Installers
 
 Browse and inspect the built-in catalog of installable tools.
 
-| Command                                     | Description                     |
-| ------------------------------------------- | ------------------------------- |
-| `agentworks installer list`                | List all available catalog entries |
-| `agentworks installer describe <name>`     | Show details of a catalog entry |
+| Command                                | Description                        |
+| -------------------------------------- | ---------------------------------- |
+| `agentworks installer list`            | List all available catalog entries |
+| `agentworks installer describe <name>` | Show details of a catalog entry    |
 
 `installer list` accepts `--type` (apt-source, apt-package, system-install-cmd, user-install-cmd)
 and `--source` (builtin, user) filters.
 
 ### Config
 
-| Command                                | Description                                |
-| -------------------------------------- | ------------------------------------------ |
-| `agentworks config init`              | Create a sample config file                |
-| `agentworks config sample`            | Print the sample config to stdout          |
-| `agentworks config sync-ssh-config`   | Rebuild SSH config entries for all VMs     |
+| Command                             | Description                            |
+| ----------------------------------- | -------------------------------------- |
+| `agentworks config init`            | Create a sample config file            |
+| `agentworks config sample`          | Print the sample config to stdout      |
+| `agentworks config sync-ssh-config` | Rebuild SSH config entries for all VMs |
 
 ## Configuration
 
-Config lives at `~/.config/agentworks/config.toml`. Run `agentworks config init` to generate a sample with
-all options documented. See [sample-config.toml](agentworks/sample-config.toml) for the full
-reference.
+Config lives at `~/.config/agentworks/config.toml`. Run `agentworks config init` to generate a
+sample with all options documented. See [sample-config.toml](agentworks/sample-config.toml) for the
+full reference.
 
 Key sections:
 
@@ -171,6 +250,8 @@ Key sections:
 - `[dotfiles]` -- dotfiles sync to VMs
 - `[vm.config]` -- VM resources, apt packages, system/user install commands, username
 - `[agent.config]` -- user install commands and shell for agents
+- `[task.config]` -- task defaults (history limit)
+- `[task_templates.*]` -- task templates with variable substitution
 - `[apt_sources.*]` -- user-defined third-party apt repositories
 - `[apt_packages.*]` -- user-defined named apt package sets
 - `[system_install_commands.*]` -- user-defined system-level install commands
@@ -204,7 +285,8 @@ provisioning parameters (name, platform, resources). `vm reinit` takes only the 
 initialization using the current config.
 
 Non-fatal initialization failures (packages, dotfiles) produce a `partial` status rather than
-aborting. Fatal failures prompt for deletion or reinit. Use `vm describe` to view the full event log.
+aborting. Fatal failures prompt for deletion or reinit. Use `vm describe` to view the full event
+log.
 
 ## Tailscale
 
@@ -251,7 +333,7 @@ fpath=(~/.zfunc $fpath)
 autoload -Uz compinit && compinit
 ```
 
-Completions include dynamic VM, workspace, and VM host name lookups.
+Completions include dynamic VM, workspace, VM host, task, and template name lookups.
 
 ## State
 

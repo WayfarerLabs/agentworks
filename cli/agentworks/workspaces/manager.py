@@ -210,10 +210,26 @@ def list_workspaces(
         typer.echo("No workspaces found.")
         return
 
-    typer.echo(f"{'NAME':<20} {'TYPE':<8} {'VM':<15} {'TEMPLATE':<15} {'CREATED'}")
-    typer.echo("-" * 80)
-    for ws in workspaces:
-        typer.echo(f"{ws.name:<20} {ws.type:<8} {ws.vm_name or '-':<15} {ws.template or '-':<15} {ws.created_at}")
+    def _tpl_name(t: str | None) -> str:
+        if t is None or t == "(built-in)":
+            return "default"
+        return t
+
+    rows = [
+        (ws.name, ws.type, ws.vm_name or "-", _tpl_name(ws.template), ws.created_at)
+        for ws in workspaces
+    ]
+
+    name_w = max(len("NAME"), max(len(r[0]) for r in rows))
+    type_w = max(len("TYPE"), max(len(r[1]) for r in rows))
+    vm_w = max(len("VM"), max(len(r[2]) for r in rows))
+    tpl_w = max(len("TEMPLATE"), max(len(r[3]) for r in rows))
+
+    header = f"{'NAME':<{name_w}}  {'TYPE':<{type_w}}  {'VM':<{vm_w}}  {'TEMPLATE':<{tpl_w}}  CREATED"
+    typer.echo(header)
+    typer.echo("-" * len(header))
+    for ws_name, ws_type, vm_name, tpl, created in rows:
+        typer.echo(f"{ws_name:<{name_w}}  {ws_type:<{type_w}}  {vm_name:<{vm_w}}  {tpl:<{tpl_w}}  {created}")
 
 
 def delete_workspace(
@@ -221,6 +237,7 @@ def delete_workspace(
     config: Config,
     name: str,
     *,
+    force: bool = False,
     yes: bool = False,
 ) -> None:
     """Delete a workspace."""
@@ -229,10 +246,38 @@ def delete_workspace(
         typer.echo(f"Error: workspace '{name}' not found", err=True)
         raise typer.Exit(1)
 
-    if not yes:
-        typer.confirm(f"Delete workspace '{name}'?", abort=True)
+    # Check for tasks
+    task_count = len(db.list_tasks(workspace_name=name))
+    if task_count > 0 and not force:
+        typer.echo(
+            f"Error: workspace '{name}' has {task_count} task(s). "
+            "Delete them first, or use --force.",
+            err=True,
+        )
+        raise typer.Exit(1)
 
-    # Delete agents first (remote cleanup + DB)
+    if not yes:
+        msg = f"Delete workspace '{name}'?"
+        if task_count > 0:
+            msg += f" ({task_count} task(s) will also be deleted)"
+        typer.confirm(msg, abort=True)
+
+    # Kill running task sessions and delete task records
+    if ws.type == "vm" and ws.vm_name:
+        vm = db.get_vm(ws.vm_name)
+        if vm is not None and vm.tailscale_host is not None:
+            from functools import partial
+
+            from agentworks.ssh import run, ssh_target_for_vm
+            from agentworks.tasks.tmux import kill_task_session
+
+            target = ssh_target_for_vm(vm, config)
+            run_command = partial(run, target)
+            for task in db.list_tasks(workspace_name=name):
+                kill_task_session(name, task.name, run_command=run_command)
+    db.delete_tasks_for_workspace(name)
+
+    # Delete agents (remote cleanup + DB)
     from agentworks.agents.manager import delete_agents_for_workspace
 
     delete_agents_for_workspace(db, config, ws)

@@ -228,52 +228,103 @@ def list_vms(db: Database) -> None:
 
     header = (
         f"{'NAME':<20} {'PLATFORM':<10} {'HOST':<15} {'PROV':<12} {'INIT':<12} "
-        f"{'WS':<4} {'RESOURCES':<15} {'TAILSCALE':<20} {'CREATED'}"
+        f"{'WS/AG/TS':<10} {'TAILSCALE':<20} {'CREATED'}"
     )
     typer.echo(header)
-    typer.echo("-" * 130)
+    typer.echo("-" * len(header))
     for vm in vms:
-        resources = "-"
-        if vm.cpus is not None:
-            resources = f"{vm.cpus}c/{vm.memory_gib}G/{vm.disk_gib}G"
-        ws_count = db.count_workspaces_on_vm(vm.name)
+        ws = db.count_workspaces_on_vm(vm.name)
+        ag = db.count_agents_on_vm(vm.name)
+        ts = db.count_tasks_on_vm(vm.name)
+        counts = f"{ws}/{ag}/{ts}"
         typer.echo(
             f"{vm.name:<20} {vm.platform:<10} {vm.vm_host_name or '-':<15} "
             f"{vm.provisioning_status:<12} {vm.init_status:<12} "
-            f"{ws_count:<4} {resources:<15} "
-            f"{vm.tailscale_host or '-':<20} {vm.created_at}"
+            f"{counts:<10} {vm.tailscale_host or '-':<20} {vm.created_at}"
         )
 
 
-def describe_vm(db: Database, name: str) -> None:
+def describe_vm(db: Database, config: Config, name: str) -> None:
     """Show detailed information about a VM."""
     vm = _require_vm(db, name)
 
     # VM details
     typer.echo(f"Name:           {vm.name}")
+    typer.echo(f"Created:        {vm.created_at}")
     typer.echo(f"Platform:       {vm.platform}")
     typer.echo(f"VM Host:        {vm.vm_host_name or '-'}")
     typer.echo(f"Admin User:     {vm.admin_username}")
     typer.echo(f"Provisioning:   {vm.provisioning_status}")
     typer.echo(f"Initialization: {vm.init_status}")
-    typer.echo(f"Tailscale:      {vm.tailscale_host or '-'}")
+    typer.echo(f"Tailscale IP:   {vm.tailscale_host or '-'}")
 
-    if vm.cpus is not None:
-        typer.echo(f"Resources:      {vm.cpus} CPUs, {vm.memory_gib} GiB RAM, {vm.disk_gib} GiB disk")
+    # Resources table: Initial / Current / Used (Used%)
+    live = None
+    if vm.tailscale_host is not None:
+        live = _query_live_resources(vm, config)
+
+    if vm.cpus is not None or live is not None:
+        typer.echo(f"\n{'Resources':<16}{'Provisioned':<14}{'Current':<14}{'Used'}")
+        typer.echo(f"  {'CPU':<16}"
+                   f"{str(vm.cpus) if vm.cpus else '-':<14}"
+                   f"{live['cpus'] if live else '-':<14}"
+                   f"{'load ' + live['load_avg'] if live else '-'}")
+        typer.echo(f"  {'Memory':<16}"
+                   f"{str(vm.memory_gib) + 'G' if vm.memory_gib else '-':<14}"
+                   f"{live['mem_total'] if live else '-':<14}"
+                   f"{live['mem_used'] + ' (' + live['mem_pct'] + ')' if live else '-'}")
+        typer.echo(f"  {'Swap':<16}"
+                   f"{'-':<14}"
+                   f"{live['swap_total'] if live else '-':<14}"
+                   f"{live['swap_used'] + ' (' + live['swap_pct'] + ')' if live else '-'}")
+        typer.echo(f"  {'Disk':<16}"
+                   f"{str(vm.disk_gib) + 'G' if vm.disk_gib else '-':<14}"
+                   f"{live['disk_total'] if live else '-':<14}"
+                   f"{live['disk_used'] + ' (' + live['disk_pct'] + ')' if live else '-'}")
+
     if vm.azure_resource_id:
         typer.echo(f"Azure ID:       {vm.azure_resource_id}")
     if vm.wsl_distro_name:
         typer.echo(f"WSL Distro:     {vm.wsl_distro_name}")
-    typer.echo(f"Created:        {vm.created_at}")
     if vm.last_seen_at:
         typer.echo(f"Last Seen:      {vm.last_seen_at}")
 
-    # Workspaces
+    # Workspaces with tasks and agents
     workspaces = db.list_workspaces(vm_name=name)
     typer.echo(f"\nWorkspaces ({len(workspaces)}):")
     if workspaces:
         for ws in workspaces:
-            typer.echo(f"  {ws.name:<20} {ws.type:<10} {ws.workspace_path}")
+            typer.echo(f"  {ws.name}  ({ws.workspace_path})")
+
+            tasks = db.list_tasks(workspace_name=ws.name)
+            agents = db.list_agents(workspace_name=ws.name)
+
+            # Track which agents are used by tasks
+            used_agents: set[str] = set()
+            for task in tasks:
+                if task.mode == "agent":
+                    used_agents.add(task.linux_user)
+
+            if tasks:
+                typer.echo(f"    Tasks ({len(tasks)}):")
+                for task in tasks:
+                    if task.mode == "agent":
+                        agent_name = next(
+                            (a.name for a in agents if a.linux_user == task.linux_user), task.linux_user
+                        )
+                        mode_label = f"agent:{agent_name}"
+                    else:
+                        mode_label = "admin"
+                    typer.echo(f"      {task.name}  [{task.template}]  {task.status}  {mode_label}")
+
+            unused_agents = [a for a in agents if a.linux_user not in used_agents]
+            if unused_agents:
+                typer.echo(f"    Unused Agents ({len(unused_agents)}):")
+                for agent in unused_agents:
+                    typer.echo(f"      {agent.name}  (user: {agent.linux_user})")
+
+            if not tasks and not agents:
+                typer.echo("    (empty)")
     else:
         typer.echo("  (none)")
 
@@ -394,19 +445,34 @@ def delete_vm(
     """Delete a VM, cleaning up all associated resources."""
     vm = _require_vm(db, name)
 
-    # Check for workspaces
+    # Check for workspaces (which contain agents and tasks)
     ws_count = db.count_workspaces_on_vm(name)
-    if ws_count > 0 and not force:
+    ag_count = db.count_agents_on_vm(name)
+    ts_count = db.count_tasks_on_vm(name)
+    has_children = ws_count > 0
+
+    if has_children and not force:
+        parts = [f"{ws_count} workspace(s)"]
+        if ag_count > 0:
+            parts.append(f"{ag_count} agent(s)")
+        if ts_count > 0:
+            parts.append(f"{ts_count} task(s)")
         typer.echo(
-            f"Error: VM '{name}' has {ws_count} workspace(s). Delete them first, or use --force.",
+            f"Error: VM '{name}' has {', '.join(parts)}. "
+            "Delete them first, or use --force.",
             err=True,
         )
         raise typer.Exit(1)
 
     if not yes and not force:
         msg = f"Delete VM '{name}'?"
-        if ws_count > 0:
-            msg += f" ({ws_count} workspace(s) will also be deleted)"
+        if has_children:
+            parts = [f"{ws_count} workspace(s)"]
+            if ag_count > 0:
+                parts.append(f"{ag_count} agent(s)")
+            if ts_count > 0:
+                parts.append(f"{ts_count} task(s)")
+            msg += f" ({', '.join(parts)} will also be deleted)"
         typer.confirm(msg, abort=True)
 
     # Platform-specific cleanup (also handles Tailscale logout)
@@ -637,6 +703,81 @@ def _collect_secrets(
 
     typer.echo("")
     return ts_auth_key, git_tokens
+
+
+_RESOURCE_QUERY_RETRIES = 3
+_RESOURCE_QUERY_TIMEOUT = 15
+
+
+def _query_live_resources(vm: VMRow, config: Config) -> dict[str, str] | None:
+    """Query live resource usage from a VM over SSH. Retries on failure."""
+    from agentworks.ssh import run, ssh_target_for_vm
+
+    target = ssh_target_for_vm(vm, config)
+    cmd = (
+        "nproc && "
+        "uptime | grep -oP 'load average: \\K[^,]+' && "
+        "free -b | awk '/^Mem:/{print $2,$3} /^Swap:/{print $2,$3}' && "
+        "df -h / | awk 'NR==2{print $2,$3,$5}'"
+    )
+
+    result = None
+    for attempt in range(_RESOURCE_QUERY_RETRIES):
+        try:
+            result = run(target, cmd, check=False, timeout=_RESOURCE_QUERY_TIMEOUT)
+            if result.ok:
+                break
+        except Exception:
+            pass
+    if result is None or not result.ok:
+        return None
+
+    lines = result.stdout.strip().splitlines()
+    if len(lines) < 5:
+        return None
+
+    try:
+        cpus = lines[0].strip()
+        load_avg = lines[1].strip()
+        mem_parts = lines[2].split()
+        swap_parts = lines[3].split()
+        disk_parts = lines[4].split()
+
+        mem_total_b = int(mem_parts[0])
+        mem_used_b = int(mem_parts[1])
+        swap_total_b = int(swap_parts[0])
+        swap_used_b = int(swap_parts[1])
+
+        mem_pct = f"{mem_used_b * 100 // mem_total_b}%" if mem_total_b > 0 else "0%"
+        swap_pct = f"{swap_used_b * 100 // swap_total_b}%" if swap_total_b > 0 else "0%"
+
+        return {
+            "cpus": cpus,
+            "load_avg": load_avg,
+            "mem_total": _human_bytes(mem_total_b),
+            "mem_used": _human_bytes(mem_used_b),
+            "mem_pct": mem_pct,
+            "swap_total": _human_bytes(swap_total_b),
+            "swap_used": _human_bytes(swap_used_b),
+            "swap_pct": swap_pct,
+            "disk_total": disk_parts[0],
+            "disk_used": disk_parts[1],
+            "disk_pct": disk_parts[2],
+        }
+    except (IndexError, ValueError):
+        return None
+
+
+def _human_bytes(b: int) -> str:
+    """Format bytes as a human-readable string (e.g. 494M, 8.0G)."""
+    if b < 1024:
+        return f"{b}B"
+    for unit in ("K", "M", "G", "T"):
+        b_f = b / 1024
+        if b_f < 1024 or unit == "T":
+            return f"{b_f:.1f}{unit}" if b_f >= 10 else f"{b_f:.2f}{unit}"
+        b = int(b_f)
+    return f"{b}T"
 
 
 def _require_vm(db: Database, name: str) -> VMRow:

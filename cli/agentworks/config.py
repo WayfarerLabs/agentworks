@@ -150,6 +150,25 @@ class GitCredentialConfig:
 
 
 @dataclass(frozen=True)
+class TaskTemplate:
+    name: str
+    command: str
+    description: str = ""
+    restart_command: str = ""
+    env: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class TaskConfig:
+    history_limit: int = 50_000
+
+
+BUILTIN_TASK_TEMPLATES: dict[str, TaskTemplate] = {
+    "default": TaskTemplate(name="default", command="", description="Login shell"),
+}
+
+
+@dataclass(frozen=True)
 class AzureConfig:
     subscription_id: str
     resource_group: str
@@ -165,6 +184,8 @@ class Config:
     dotfiles: DotfilesConfig
     vm: VMConfig
     agent: AgentConfig
+    task: TaskConfig
+    task_templates: dict[str, TaskTemplate]
     workspace_templates: dict[str, WorkspaceTemplate]
     git_credentials: dict[str, GitCredentialConfig]
     apt_sources: dict[str, object] = field(default_factory=dict)
@@ -489,6 +510,59 @@ def _load_git_credentials(data: dict[str, object]) -> dict[str, GitCredentialCon
     return creds
 
 
+_TASK_CONFIG_KEYS = {"history_limit"}
+
+
+def _load_task_config(data: dict[str, object]) -> TaskConfig:
+    task_section = data.get("task", {})
+    if not isinstance(task_section, dict):
+        raise ConfigError("[task] must be a table")
+    raw = task_section.get("config", {})
+    if not isinstance(raw, dict):
+        raise ConfigError("[task.config] must be a table")
+
+    _warn_unexpected_keys(raw, _TASK_CONFIG_KEYS, "task.config")
+
+    history_limit = int(raw.get("history_limit", 50_000))
+    if history_limit < 1:
+        raise ConfigError("task.config.history_limit must be a positive integer")
+
+    return TaskConfig(
+        history_limit=history_limit,
+    )
+
+
+_TASK_TEMPLATE_KEYS = {"command", "description", "restart_command", "env"}
+
+
+def _load_task_templates(data: dict[str, object]) -> dict[str, TaskTemplate]:
+    raw = data.get("task_templates", {})
+    if not isinstance(raw, dict):
+        raise ConfigError("[task_templates] must be a table")
+
+    # Start with built-in templates, allow user overrides
+    templates = dict(BUILTIN_TASK_TEMPLATES)
+    for name, tdata in raw.items():
+        if not isinstance(tdata, dict):
+            raise ConfigError(f"task_templates.{name} must be a table")
+        _warn_unexpected_keys(tdata, _TASK_TEMPLATE_KEYS, f"task_templates.{name}")
+        command = tdata.get("command")
+        if command is None:
+            raise ConfigError(f"task_templates.{name}.command is required")
+        env_raw = tdata.get("env", {})
+        if not isinstance(env_raw, dict):
+            raise ConfigError(f"task_templates.{name}.env must be a table")
+        templates[name] = TaskTemplate(
+            name=name,
+            command=str(command),
+            description=str(tdata.get("description", "")),
+            restart_command=str(tdata.get("restart_command", "")),
+            env={str(k): str(v) for k, v in env_raw.items()},
+        )
+
+    return templates
+
+
 def _load_azure(data: dict[str, object]) -> AzureConfig | None:
     raw = data.get("azure")
     if raw is None:
@@ -510,6 +584,8 @@ EXPECTED_TOP_LEVEL_KEYS = {
     "dotfiles",
     "vm",
     "agent",
+    "task",
+    "task_templates",
     "apt_sources",
     "apt_packages",
     "system_install_commands",
@@ -570,6 +646,9 @@ def load_config(path: Path | None = None) -> Config:
     git_credentials = _load_git_credentials(data)
     apt_sources, apt_packages, system_cmds, user_cmds = _load_catalog_sections(data)
 
+    task_config = _load_task_config(data)
+    task_templates = _load_task_templates(data)
+
     return Config(
         user=_load_user(data),
         paths=_load_paths(data),
@@ -577,6 +656,8 @@ def load_config(path: Path | None = None) -> Config:
         dotfiles=_load_dotfiles(data),
         vm=_load_vm_config(data),
         agent=_load_agent_config(data),
+        task=task_config,
+        task_templates=task_templates,
         workspace_templates=_load_workspace_templates(data),
         git_credentials=git_credentials,
         apt_sources=apt_sources,

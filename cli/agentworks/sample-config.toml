@@ -90,6 +90,38 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # user_install_commands = ["claude"]         # per-user commands from catalog
 # shell = "bash"                             # agent shell (default: bash)
 
+# --- Task configuration ---
+# Settings for task lifecycle and defaults.
+
+# [task.config]
+# history_limit = 50000                     # tmux scrollback buffer lines per task session
+
+# --- Task templates ---
+# Define commands that tasks can run. The built-in "default" template runs a
+# login shell. Override it or add new templates.
+#
+# Template commands support {{task_name}} and {{workspace_name}} variables,
+# using double-brace syntax consistent with nerftools manifests.
+#
+# Templates may define a restart_command for `task restart`. If omitted,
+# the regular command is used. This is useful for tools like Claude Code
+# where --resume picks up the previous conversation.
+
+# [task_templates.default]                  # override the built-in default
+# command = "claude --name {{task_name}}"
+# restart_command = "claude --resume {{task_name}}"
+# description = "Claude Code interactive session"
+
+# [task_templates.claude]
+# command = "claude --name {{task_name}}"
+# restart_command = "claude --resume {{task_name}}"
+# description = "Claude Code interactive session"
+
+# [task_templates.custom-tool]
+# command = "my-tool --flag"
+# description = "Custom tool"
+# env = { MY_VAR = "value" }               # environment variables to set
+
 # --- User-defined apt sources ---
 # Third-party apt repositories. These extend the built-in catalog.
 # Use {arch} as a placeholder for the VM architecture (amd64 or arm64).

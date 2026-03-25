@@ -116,6 +116,27 @@ def run(
     return ssh_result
 
 
+def interactive(target: SSHTarget, command: str) -> int:
+    """Run an interactive SSH command with a TTY (for tmux attach, etc.).
+
+    Returns the process exit code. Does not raise on failure.
+    """
+    # Build args without BatchMode (which rejects interactive prompts/TTY)
+    args = ["ssh", "-t", "-o", "StrictHostKeyChecking=accept-new"]
+    if target.port is not None:
+        args.extend(["-p", str(target.port)])
+    if target.identity_file is not None:
+        args.extend(["-i", str(target.identity_file)])
+    if target.proxy_jump is not None:
+        args.extend(["-J", target.proxy_jump])
+    if target.user:
+        args.append(f"{target.user}@{target.host}")
+    else:
+        args.append(target.host)
+    args.append(command)
+    return subprocess.call(args)
+
+
 def run_as_root(
     target: SSHTarget,
     command: str,

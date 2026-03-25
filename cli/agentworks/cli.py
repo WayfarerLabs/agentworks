@@ -49,6 +49,13 @@ agent_app = typer.Typer(
 )
 app.add_typer(agent_app)
 
+task_app = typer.Typer(
+    name="task",
+    help="Manage tasks (named work streams in workspaces).",
+    no_args_is_help=True,
+)
+app.add_typer(task_app)
+
 installer_app = typer.Typer(
     name="installer",
     help="List and inspect available installers from the catalog.",
@@ -82,6 +89,63 @@ def _prompt_name(label: str, name: str | None) -> str:
         return name
     default = _generate_name()
     return str(typer.prompt(f"{label} name", default=default))
+
+
+def _prompt_workspace(db: Database, workspace: str | None) -> str:
+    """Prompt for a workspace if not provided, listing available workspaces."""
+    if workspace is not None:
+        return workspace
+
+    workspaces = db.list_workspaces()
+    if not workspaces:
+        typer.echo("Error: no workspaces found. Create one with 'agentworks workspace create'.", err=True)
+        raise typer.Exit(1)
+
+    if len(workspaces) == 1:
+        typer.echo(f"Using workspace '{workspaces[0].name}'")
+        return workspaces[0].name
+
+    typer.echo("Select a workspace:")
+    for i, ws in enumerate(workspaces, 1):
+        label = f"  {i}) {ws.name}"
+        if ws.vm_name:
+            label += f"  (vm: {ws.vm_name})"
+        elif ws.type == "local":
+            label += "  (local)"
+        typer.echo(label)
+
+    choice = int(typer.prompt("Workspace number", type=int))
+    if choice < 1 or choice > len(workspaces):
+        typer.echo(f"Error: invalid choice {choice}", err=True)
+        raise typer.Exit(1)
+
+    return workspaces[choice - 1].name
+
+
+def _prompt_vm(db: Database, vm_name: str | None) -> str:
+    """Prompt for a VM if not provided, listing available VMs."""
+    if vm_name is not None:
+        return vm_name
+
+    vms = db.list_vms()
+    if not vms:
+        typer.echo("Error: no VMs found. Create one with 'agentworks vm create'.", err=True)
+        raise typer.Exit(1)
+
+    if len(vms) == 1:
+        typer.echo(f"Using VM '{vms[0].name}'")
+        return vms[0].name
+
+    typer.echo("Select a VM:")
+    for i, v in enumerate(vms, 1):
+        typer.echo(f"  {i}) {v.name}  ({v.platform})")
+
+    choice = int(typer.prompt("VM number", type=int))
+    if choice < 1 or choice > len(vms):
+        typer.echo(f"Error: invalid choice {choice}", err=True)
+        raise typer.Exit(1)
+
+    return vms[choice - 1].name
 
 
 class _HasDescription(Protocol):
@@ -208,9 +272,10 @@ def vm_describe(
     name: Annotated[str, typer.Argument(help="VM name")],
 ) -> None:
     """Show detailed information about a VM."""
+    from agentworks.config import load_config
     from agentworks.vms.manager import describe_vm
 
-    describe_vm(_get_db(), name)
+    describe_vm(_get_db(), load_config(), name)
 
 
 @vm_app.command("start")
@@ -282,6 +347,21 @@ def vm_add_git_credential(
     add_git_credential(_get_db(), load_config(), name, credential)
 
 
+@vm_app.command("console")
+def vm_console(
+    name: Annotated[str, typer.Argument(help="VM name")],
+    recreate: Annotated[bool, typer.Option("--recreate", help="Kill and rebuild the console")] = False,
+    allow_nesting: Annotated[bool, typer.Option("--allow-nesting", help="Allow running inside tmux")] = False,
+) -> None:
+    """Attach to the VM console (creates it if needed)."""
+    from agentworks.config import load_config
+    from agentworks.tasks.console import attach_console
+
+    attach_console(
+        _get_db(), load_config(), vm_name=name, recreate=recreate, allow_nesting=allow_nesting,
+    )
+
+
 # -- Workspace commands ----------------------------------------------------
 
 
@@ -344,13 +424,14 @@ def workspace_list(
 @workspace_app.command("delete")
 def workspace_delete(
     name: Annotated[str, typer.Argument(help="Workspace name")],
+    force: Annotated[bool, typer.Option("--force", help="Force delete even with tasks")] = False,
     yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip confirmation")] = False,
 ) -> None:
     """Delete a workspace."""
     from agentworks.config import load_config
     from agentworks.workspaces.manager import delete_workspace
 
-    delete_workspace(_get_db(), load_config(), name, yes=yes)
+    delete_workspace(_get_db(), load_config(), name, force=force, yes=yes)
 
 
 # -- Agent commands --------------------------------------------------------
@@ -400,6 +481,146 @@ def agent_delete(
     from agentworks.config import load_config
 
     delete_agent(_get_db(), load_config(), name=name, workspace_name=workspace)
+
+
+# -- Task commands ---------------------------------------------------------
+
+
+@task_app.command("create")
+def task_create(
+    name: Annotated[str | None, typer.Option("--name", help="Task name (prompted if omitted)")] = None,
+    workspace: Annotated[str | None, typer.Option("--workspace", help="Existing workspace")] = None,
+    template: Annotated[str | None, typer.Option("--template", help="Task template")] = None,
+    agent: Annotated[str | None, typer.Option("--agent", help="Agent name (agent mode)")] = None,
+    new_workspace: Annotated[bool, typer.Option("--new-workspace", help="Create a new workspace")] = False,
+    workspace_name: Annotated[str | None, typer.Option("--workspace-name", help="Name for new workspace")] = None,
+    workspace_template: Annotated[
+        str | None, typer.Option("--workspace-template", help="Template for new workspace")
+    ] = None,
+    vm: Annotated[str | None, typer.Option("--vm", help="VM for new workspace")] = None,
+) -> None:
+    """Create and start a task in a workspace."""
+    from agentworks.config import load_config
+    from agentworks.tasks.manager import create_task
+    from agentworks.workspaces.manager import create_workspace
+
+    # Validate flag combinations before any prompts
+    if workspace and new_workspace:
+        typer.echo("Error: --workspace and --new-workspace are mutually exclusive", err=True)
+        raise typer.Exit(1)
+    if not new_workspace and (workspace_name or workspace_template or vm):
+        typer.echo(
+            "Error: --workspace-name, --workspace-template, and --vm "
+            "require --new-workspace",
+            err=True,
+        )
+        raise typer.Exit(1)
+
+    db = _get_db()
+    config = load_config()
+
+    if new_workspace:
+        # Resolve task name first (workspace name may depend on it)
+        resolved_name = _prompt_name("Task", name)
+        resolved_ws_name = workspace_name or f"ws-{resolved_name}"
+
+        # Resolve VM (prompt if needed)
+        resolved_vm = _prompt_vm(db, vm)
+
+        # Create the workspace
+        create_workspace(
+            db, config,
+            name=resolved_ws_name,
+            vm_name=resolved_vm,
+            template_name=workspace_template,
+        )
+        resolved_workspace = resolved_ws_name
+    else:
+        resolved_workspace = _prompt_workspace(db, workspace)
+        resolved_name = _prompt_name("Task", name)
+
+    create_task(
+        db,
+        config,
+        name=resolved_name,
+        workspace_name=resolved_workspace,
+        template_name=template,
+        agent_name=agent,
+    )
+
+
+@task_app.command("list")
+def task_list(
+    workspace: Annotated[str | None, typer.Option("--workspace", help="Filter by workspace")] = None,
+) -> None:
+    """List tasks."""
+    from agentworks.config import load_config
+    from agentworks.tasks.manager import list_tasks
+
+    list_tasks(_get_db(), load_config(), workspace_name=workspace)
+
+
+@task_app.command("stop")
+def task_stop(
+    name: Annotated[str, typer.Argument(help="Task name")],
+    workspace: Annotated[str, typer.Option("--workspace", help="Workspace name")] = ...,  # type: ignore[assignment]
+) -> None:
+    """Stop a running task."""
+    from agentworks.config import load_config
+    from agentworks.tasks.manager import stop_task
+
+    stop_task(_get_db(), load_config(), name=name, workspace_name=workspace)
+
+
+@task_app.command("restart")
+def task_restart(
+    name: Annotated[str, typer.Argument(help="Task name")],
+    workspace: Annotated[str, typer.Option("--workspace", help="Workspace name")] = ...,  # type: ignore[assignment]
+    force: Annotated[bool, typer.Option("--force", help="Kill if still running")] = False,
+) -> None:
+    """Restart a task (uses restart_command if defined in template)."""
+    from agentworks.config import load_config
+    from agentworks.tasks.manager import restart_task
+
+    restart_task(_get_db(), load_config(), name=name, workspace_name=workspace, force=force)
+
+
+@task_app.command("attach")
+def task_attach(
+    name: Annotated[str, typer.Argument(help="Task name")],
+    workspace: Annotated[str, typer.Option("--workspace", help="Workspace name")] = ...,  # type: ignore[assignment]
+) -> None:
+    """Attach to a task's tmux session."""
+    from agentworks.config import load_config
+    from agentworks.tasks.manager import attach_task
+
+    attach_task(_get_db(), load_config(), name=name, workspace_name=workspace)
+
+
+@task_app.command("delete")
+def task_delete(
+    name: Annotated[str, typer.Argument(help="Task name")],
+    workspace: Annotated[str, typer.Option("--workspace", help="Workspace name")] = ...,  # type: ignore[assignment]
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip confirmation")] = False,
+) -> None:
+    """Stop and delete a task."""
+    from agentworks.config import load_config
+    from agentworks.tasks.manager import delete_task
+
+    delete_task(_get_db(), load_config(), name=name, workspace_name=workspace, yes=yes)
+
+
+@task_app.command("logs")
+def task_logs(
+    name: Annotated[str, typer.Argument(help="Task name")],
+    workspace: Annotated[str, typer.Option("--workspace", help="Workspace name")] = ...,  # type: ignore[assignment]
+    lines: Annotated[int | None, typer.Option("--lines", "-n", help="Number of lines")] = None,
+) -> None:
+    """Dump the scrollback buffer for a task."""
+    from agentworks.config import load_config
+    from agentworks.tasks.manager import task_logs as _task_logs
+
+    _task_logs(_get_db(), load_config(), name=name, workspace_name=workspace, lines=lines)
 
 
 # -- Installer catalog commands --------------------------------------------

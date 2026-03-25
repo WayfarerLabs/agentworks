@@ -50,6 +50,8 @@ class CommandSpec:
 #   "ws_templates"    -> [workspace_templates.*] sections in config.toml
 #   "git_credentials" -> [git_credentials.*] sections in config.toml
 #   "catalog_entries" -> all entry names from built-in + user catalog
+#   "tasks"           -> agentworks task list
+#   "task_templates"  -> [task_templates.*] sections in config.toml
 
 DYNAMIC_COMPLETIONS: dict[tuple[str, str], str] = {
     ("vm.start", "name"): "vms",
@@ -72,6 +74,24 @@ DYNAMIC_COMPLETIONS: dict[tuple[str, str], str] = {
     ("agent.delete", "workspace"): "workspaces",
     ("agent.list", "workspace"): "workspaces",
     ("installer.describe", "name"): "catalog_entries",
+    # Task commands
+    ("task.create", "workspace"): "workspaces",
+    ("task.create", "template"): "task_templates",
+    ("task.create", "workspace_template"): "ws_templates",
+    ("task.create", "vm"): "vms",
+    ("task.list", "workspace"): "workspaces",
+    ("task.stop", "name"): "tasks",
+    ("task.stop", "workspace"): "workspaces",
+    ("task.restart", "name"): "tasks",
+    ("task.restart", "workspace"): "workspaces",
+    ("task.attach", "name"): "tasks",
+    ("task.attach", "workspace"): "workspaces",
+    ("task.delete", "name"): "tasks",
+    ("task.delete", "workspace"): "workspaces",
+    ("task.logs", "name"): "tasks",
+    ("task.logs", "workspace"): "workspaces",
+    # VM console
+    ("vm.console", "name"): "vms",
 }
 
 
