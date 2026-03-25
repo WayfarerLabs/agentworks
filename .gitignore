@@ -49,6 +49,9 @@ GEMINI.md
 # Tmux
 .tmuxinator.yml
 
+# Secrets / env files
+*.env*
+
 # OS
 .DS_Store
 Thumbs.db
