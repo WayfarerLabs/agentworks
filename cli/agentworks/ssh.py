@@ -10,6 +10,10 @@ import subprocess
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 @dataclass(frozen=True)
@@ -58,8 +62,18 @@ class SSHError(Exception):
     """Raised when an SSH command fails unexpectedly."""
 
 
+SSH_CONNECT_TIMEOUT = 30
+SSH_DEFAULT_RETRIES = 1
+
+
 def _ssh_base_args(target: SSHTarget) -> list[str]:
+    import sys
+
     args = ["ssh", "-o", "StrictHostKeyChecking=accept-new", "-o", "BatchMode=yes"]
+    # Windows SSH needs forced PTY allocation to prevent non-interactive
+    # login shells (especially zsh) from hanging on piped stdout.
+    if sys.platform == "win32":
+        args.insert(1, "-tt")
     if target.port is not None:
         args.extend(["-p", str(target.port)])
     if target.identity_file is not None:
@@ -79,14 +93,21 @@ def run(
     *,
     check: bool = True,
     timeout: int | None = None,
+    retries: int = SSH_DEFAULT_RETRIES,
+    on_retry: Callable[[int, int], None] | None = None,
 ) -> SSHResult:
     """Execute a command on a remote host via SSH.
+
+    Retries on timeout (connection flakiness). Command failures are not
+    retried -- only connection-level timeouts trigger a retry.
 
     Args:
         target: SSH connection info.
         command: Shell command to execute remotely.
         check: If True, raise SSHError on non-zero exit.
         timeout: Timeout in seconds.
+        retries: Number of attempts (default: SSH_RETRIES).
+        on_retry: Optional callback(attempt, max_retries) called before each retry.
 
     Returns:
         SSHResult with exit code, stdout, and stderr.
@@ -97,22 +118,33 @@ def run(
     else:
         args.append(command)
 
-    try:
-        result = subprocess.run(
-            args,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-        )
-    except subprocess.TimeoutExpired as err:
-        raise SSHError(f"SSH command timed out after {timeout}s: {command}") from err
-    ssh_result = SSHResult(
-        returncode=result.returncode,
-        stdout=result.stdout,
-        stderr=result.stderr,
-    )
-    if check and not ssh_result.ok:
-        raise SSHError(f"SSH command failed (exit {result.returncode}): {command}\nstderr: {result.stderr.strip()}")
+    last_err: Exception | None = None
+    for attempt in range(retries):
+        if attempt > 0 and on_retry is not None:
+            on_retry(attempt, retries)
+        try:
+            result = subprocess.run(
+                args,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+            )
+            ssh_result = SSHResult(
+                returncode=result.returncode,
+                stdout=result.stdout,
+                stderr=result.stderr,
+            )
+            if check and not ssh_result.ok:
+                raise SSHError(
+                    f"SSH command failed (exit {result.returncode}): {command}\n"
+                    f"stderr: {result.stderr.strip()}"
+                )
+            return ssh_result
+        except subprocess.TimeoutExpired as err:
+            last_err = err
+            continue
+
+    raise SSHError(f"SSH command timed out after {retries} attempts ({timeout}s each): {command}") from last_err
     return ssh_result
 
 

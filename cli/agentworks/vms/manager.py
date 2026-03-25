@@ -705,12 +705,8 @@ def _collect_secrets(
     return ts_auth_key, git_tokens
 
 
-_RESOURCE_QUERY_RETRIES = 3
-_RESOURCE_QUERY_TIMEOUT = 15
-
-
 def _query_live_resources(vm: VMRow, config: Config) -> dict[str, str] | None:
-    """Query live resource usage from a VM over SSH. Retries on failure."""
+    """Query live resource usage from a VM over SSH."""
     from agentworks.ssh import run, ssh_target_for_vm
 
     target = ssh_target_for_vm(vm, config)
@@ -721,15 +717,12 @@ def _query_live_resources(vm: VMRow, config: Config) -> dict[str, str] | None:
         "df -h / | awk 'NR==2{print $2,$3,$5}'"
     )
 
-    result = None
-    for attempt in range(_RESOURCE_QUERY_RETRIES):
-        try:
-            result = run(target, cmd, check=False, timeout=_RESOURCE_QUERY_TIMEOUT)
-            if result.ok:
-                break
-        except Exception:
-            pass
-    if result is None or not result.ok:
+    try:
+        result = run(target, cmd, check=False, retries=3)
+    except Exception:
+        return None
+
+    if not result.ok:
         return None
 
     lines = result.stdout.strip().splitlines()
