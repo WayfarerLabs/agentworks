@@ -304,7 +304,10 @@ class Database:
         current = row[0] or 0
 
         for version in range(current + 1, LATEST_VERSION + 1):
-            self._conn.executescript(MIGRATIONS[version])
+            for stmt in MIGRATIONS[version].split(";"):
+                stmt = stmt.strip()
+                if stmt:
+                    self._conn.execute(stmt)
             self._conn.execute("INSERT INTO schema_version (version) VALUES (?)", (version,))
         self._conn.commit()
 

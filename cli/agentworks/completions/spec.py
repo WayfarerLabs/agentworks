@@ -52,6 +52,7 @@ class CommandSpec:
 #   "catalog_entries" -> all entry names from built-in + user catalog
 #   "tasks"           -> agentworks task list
 #   "task_templates"  -> [task_templates.*] sections in config.toml
+#   "agents"          -> agentworks agent list
 
 DYNAMIC_COMPLETIONS: dict[tuple[str, str], str] = {
     ("vm.start", "name"): "vms",
@@ -79,6 +80,7 @@ DYNAMIC_COMPLETIONS: dict[tuple[str, str], str] = {
     ("agent.list", "workspace"): "workspaces",
     ("installer.describe", "name"): "catalog_entries",
     # Task commands
+    ("task.create", "agent"): "agents",
     ("task.create", "workspace"): "workspaces",
     ("task.create", "template"): "task_templates",
     ("task.create", "workspace_template"): "ws_templates",

@@ -40,19 +40,36 @@ tmux new-session -d -s <workspace>--<task> -c <workspace-path> \
   '<command>'
 ```
 
-The restricted tmux config:
+The restricted tmux config loads the user's `~/.tmux.conf` first (preserving familiar keybindings
+such as the prefix key, detach, copy mode, and scroll), then selectively unbinds window/pane/session
+management keys on top:
 
 ```conf
-# Large scrollback buffer
+# Load user config first
+if-shell "test -f ~/.tmux.conf" "source-file ~/.tmux.conf"
+
+# Large scrollback buffer (override user config)
 set -g history-limit 50000
 
-# Disable all window/pane management
+# Disable status bar
 set -g status off
-set -g prefix None
-unbind-key -a
 
-# Pass through ctrl-c to the running process
-bind -n C-c send-keys C-c
+# Disable window/pane/session creation and management.
+# The user's prefix key, detach, copy mode, and scroll bindings are preserved.
+unbind c          # new-window
+unbind %          # split-window -h
+unbind '"'        # split-window -v
+unbind &          # kill-window
+unbind x          # kill-pane
+unbind n          # next-window
+unbind p          # previous-window
+unbind w          # choose-window
+unbind s          # choose-session
+unbind $          # rename-session
+unbind ,          # rename-window
+unbind .          # move-window
+unbind !          # break-pane
+unbind :          # command-prompt (prevents arbitrary tmux commands)
 ```
 
 When the command exits, the tmux session exits (`remain-on-exit off` is the default). The CLI
@@ -61,13 +78,13 @@ detects this by checking session existence and updates the task status according
 The scrollback buffer size (history-limit) is configurable via `[task.config]` in the agentworks
 config. The default of 50,000 lines provides substantial history for long-running agent sessions.
 
-### Console Session
+### Console Sessions
 
-The console is a regular tmux session (default config, full controls) at the VM level. Its name
-is `vm-console` to avoid collisions with other tmux sessions on the VM.
+There are two levels of console:
 
-Each task window in the console attaches to the task's tmux session (with `$TMUX` unset to allow
-nesting). Since the task session has all keybindings stripped, the console's prefix key works
+**VM console** (`vm-console`): A regular tmux session (default config, full controls) at the VM
+level. Each task window attaches to a task's tmux session (with `$TMUX` unset to allow nesting).
+Since the task session's management keys are selectively unbound, the console's prefix key works
 without conflict. Task windows use a wrapper that re-attaches if the connection drops and shows
 a message when the task session ends.
 
@@ -78,8 +95,19 @@ vm-console (full tmux)
   Window 2: "myproject--claude-2"  ->  attached to task session (locked-down)
 ```
 
-The `vm console` command refuses to run inside an existing tmux session to avoid confusing
-prefix key conflicts. Pass `--allow-nesting` to override this check.
+**Workspace console** (`ws-<name>-console`): A per-workspace tmux session managed via tmuxinator.
+Like the VM console, it provides an admin-shell window plus one window per task. The workspace
+console is regenerated from DB state on structural changes (task create/delete/restart, agent
+create/delete).
+
+```text
+ws-myproject-console (tmuxinator, full tmux)
+  Window 0: "admin-shell"          ->  login shell for the admin user
+  Window 1: "myproject--claude-1"  ->  attached to task session (locked-down)
+```
+
+The `vm console` and `workspace console` commands refuse to run inside an existing tmux session
+to avoid confusing prefix key conflicts. Pass `--allow-nesting` to override this check.
 
 When a task stops, its console window shows a message indicating the session has ended
 (`remain-on-exit` is enabled on the console session).
@@ -98,13 +126,15 @@ When a task stops, its console window shows a message indicating the session has
 Templates are defined in the agentworks config under `[task_templates]`:
 
 ```toml
-[task_templates.claude]
+[task_templates.my-template]
 command = "claude --name {{task_name}}"
 description = "Claude Code interactive session"
+restart_command = "claude --continue --name {{task_name}}"
 ```
 
-The built-in "default" template (bash) is used when `--template` is not specified. Users can
-override it by defining `[task_templates.default]` in their config.
+The single built-in template is "default", which runs a login shell with an empty command. Users
+can override it by defining `[task_templates.default]` in their config. When `--template` is not
+specified, the "default" template is used.
 
 Template resolution (same pattern as workspace templates):
 
@@ -132,11 +162,20 @@ The command is executed via a login shell to pick up the user's profile, PATH, a
   proper login shell as the agent user, inheriting the agent's home directory, PATH, and
   installed tools.
 
+### Restart command
+
+Templates may specify a `restart_command` that is used instead of `command` when a task is
+restarted. This is useful for tools that support resuming a previous session (e.g.
+`claude --continue`). If `restart_command` is not set, the regular `command` is used on restart.
+
+### Environment variables
+
 Templates may also specify environment variables (which also support `{{var}}` substitution):
 
 ```toml
 [task_templates.claude-with-key]
 command = "claude --name {{task_name}}"
+restart_command = "claude --continue --name {{task_name}}"
 description = "Claude with custom API key"
 env = { ANTHROPIC_API_KEY = "sk-..." }
 ```
@@ -203,9 +242,14 @@ New config sections:
 
 ```toml
 [task.config]
-history_limit = 50000             # tmux scrollback buffer lines
+history_limit = 50000             # tmux scrollback buffer lines (default: 50000)
 
-[task_templates.default]          # override the built-in default (bash)
+[task_templates.default]          # override the built-in default (login shell)
 command = "claude --name {{task_name}}"
+restart_command = "claude --continue --name {{task_name}}"
 description = "Claude Code interactive session"
 ```
+
+The `[task.config]` section currently supports only `history_limit`. Task templates are defined
+under `[task_templates.<name>]` with the fields `command`, `description`, `restart_command`
+(optional), and `env` (optional table).

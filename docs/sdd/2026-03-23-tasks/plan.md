@@ -2,11 +2,11 @@
 
 ## Definition of Done
 
-- `agentworks task create/list/stop/start/attach/delete/logs` commands work end-to-end.
+- `agentworks task create/list/stop/restart/attach/delete/logs` commands work end-to-end.
 - `agentworks vm console` creates and attaches to the VM-level console.
 - Task tmux sessions are locked down (no splits, no new windows, no prefix key, large scrollback).
 - Console auto-populates with running tasks and survives task lifecycle changes.
-- Task templates are config-driven with a built-in "claude" default.
+- Task templates are config-driven with a built-in "default" template (login shell).
 - Tasks work with both admin users and agent users.
 - Completions are updated for all new commands.
 - Sample config is updated with new sections.
@@ -43,14 +43,14 @@
   - `kill_task_session(workspace_name, task_name, run_command)` -- kills the session
   - `session_exists(workspace_name, task_name, run_command)` -- checks if the tmux session is alive
   - `capture_output(workspace_name, task_name, lines, run_command)` -- captures scrollback buffer
-- [ ] Write LLD for the restricted tmux config (exact keybindings, escapes, edge cases)
+- ~~Write LLD for the restricted tmux config~~ (dropped -- README covers the architecture)
 
 **Done when**: Can create and destroy locked-down tmux sessions on a VM over SSH.
 
 ## Phase 3: Task Templates
 
 - [x] Add `[task.config]` and `[task_templates.*]` to config parsing in `config.py`
-- [x] Add built-in templates: "claude", "shell"
+- [x] Add built-in "default" template (login shell)
 - [x] Implement template resolution logic (explicit > default > built-in)
 - [x] Update `sample-config.toml` with task config and template examples
 - [x] Validate template commands at config load time
@@ -63,7 +63,7 @@
   - `create_task(db, config, name, workspace_name, template_name, agent_name)` -- validates inputs,
     inserts DB row, deploys tmux config if needed, creates tmux session, updates console
   - `stop_task(db, config, name, workspace_name)` -- kills tmux session, updates DB
-  - `start_task(db, config, name, workspace_name)` -- re-creates tmux session from DB state
+  - `restart_task(db, config, name, workspace_name)` -- re-creates tmux session from DB state
   - `delete_task(db, config, name, workspace_name)` -- stops if running, deletes DB row
   - `list_tasks(db, workspace_name)` -- lists tasks with reconciled status
   - `attach_task(db, config, name, workspace_name)` -- interactive SSH attach to tmux session
@@ -82,7 +82,7 @@
   - `attach_console(db, config, vm_name, recreate)` -- interactive SSH attach to the console
   - `console_exists(run_command)` -- checks if console session exists
   - `recreate_console(running_tasks, run_command)` -- kills and rebuilds
-- [x] Console session naming: `console` (one per VM, no collision risk)
+- [x] Console session naming: `vm-console` (one per VM, no collision risk)
 - [x] Task window naming in console: use `<workspace>--<task>` to match the session name
 - [x] Auto-add tasks to console on task create (if console exists)
 
@@ -94,7 +94,7 @@
   - `task create <name> --workspace <ws> [--template <tpl>] [--agent <agent>]`
   - `task list [--workspace <ws>]`
   - `task stop <name> --workspace <ws>`
-  - `task start <name> --workspace <ws>`
+  - `task restart <name> --workspace <ws>`
   - `task attach <name> --workspace <ws>`
   - `task delete <name> --workspace <ws>`
   - `task logs <name> --workspace <ws> [--lines <n>]`
@@ -107,9 +107,9 @@
 ## Phase 7: Documentation and Cleanup
 
 - [x] Update sample-config.toml with `[task.config]` and `[task_templates.*]` sections
-- [ ] Update any relevant existing docs
+- [x] Update any relevant existing docs
 - [x] Spell-check new files with cspell
 - [x] Verify completions work for new commands
-- [ ] Consider whether tmuxinator code should be deprecated or removed in this phase
+- [x] Repurpose tmuxinator code for task session management (no longer used for original workflow)
 
 **Done when**: Docs are accurate, config is complete, completions work.

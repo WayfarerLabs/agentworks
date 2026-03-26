@@ -83,7 +83,7 @@ VM. It is a convenience layer, not a requirement.
 
 ### R1: Task lifecycle
 
-An operator can create, restart, stop, and delete tasks.
+An operator can create, stop, restart, and delete tasks.
 
 - **Create** registers the task in the database and starts it (creates the tmux session, runs the
   template command).
@@ -94,8 +94,9 @@ An operator can create, restart, stop, and delete tasks.
   running unless `--force` is passed, which kills the existing session first.
 - **Delete** stops the task if running (with confirmation), then removes it from the database.
 
-A task's tmux session uses the task name as the session name. When the template command exits, the
-tmux session exits. When the tmux session is killed, the task is considered stopped.
+A task's tmux session uses `<workspace>--<task>` as the session name (consistent with the namespace
+convention described in the domain model). When the template command exits, the tmux session exits.
+When the tmux session is killed, the task is considered stopped.
 
 ### R2: Locked-down task sessions
 
@@ -104,7 +105,7 @@ Task tmux sessions are locked down:
 - No new windows or panes can be created.
 - No key bindings for split, new-window, or session management.
 - The status bar is hidden.
-- The prefix key is disabled or rebound to a no-op.
+- The user's `tmux.conf` is loaded, preserving the prefix key and other personal settings.
 - Large scrollback buffer (configurable, default 50,000 lines).
 - The operator can still attach to view output and interact with the running command.
 
@@ -118,7 +119,7 @@ config file.
 
 - Each template has a name and a command (string or list).
 - The command is run in the workspace directory as the task's user.
-- A built-in "default" template (bash) is used when --template is not specified.
+- A built-in "default" template that runs a login shell is used when --template is not specified.
 - Operators can define custom templates (e.g., "claude", "aider", "cursor-agent").
 - Templates may include environment variables to set.
 - The "default" template can be overridden in config (same pattern as workspace templates).

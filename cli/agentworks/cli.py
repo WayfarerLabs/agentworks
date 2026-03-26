@@ -350,7 +350,7 @@ def vm_add_git_credential(
 @vm_app.command("logs")
 def vm_logs(
     name: Annotated[str, typer.Argument(help="VM name")],
-    latest: Annotated[bool, typer.Option("--latest", help="Show only the latest log")] = True,
+    show_all: Annotated[bool, typer.Option("--all", help="Show all logs instead of only the latest")] = False,
 ) -> None:
     """Show SSH logs for a VM."""
     from agentworks.ssh import LOG_DIR
@@ -367,15 +367,13 @@ def vm_logs(
         typer.echo(f"No SSH logs found for VM '{name}'.")
         return
 
-    if latest:
-        log_path, log_name = logs[0]
+    from pathlib import Path
+
+    display = logs if show_all else logs[:1]
+    for log_path, log_name in display:
         typer.echo(f"--- {log_name} ---")
-        typer.echo(open(log_path).read(), nl=False)  # noqa: SIM115
-    else:
-        for log_path, log_name in logs:
-            typer.echo(f"--- {log_name} ---")
-            typer.echo(open(log_path).read(), nl=False)  # noqa: SIM115
-            typer.echo("")
+        typer.echo(Path(log_path).read_text(), nl=False)
+        typer.echo("")
 
 
 @vm_app.command("console")

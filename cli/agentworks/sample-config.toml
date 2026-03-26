@@ -43,7 +43,7 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # For private repos, ensure git credentials are configured on the VM.
 
 # [dotfiles]
-# enabled = true                             # enable dotfiles sync during init
+# enabled = true                             # enable dotfiles sync during init:w
 # repo = "https://github.com/user/dotfiles"  # clone from a git repo (recommended)
 # source = "~/.dotfiles"                     # OR copy from a local path
 # destination = "~/.dotfiles"                # where to put them on the VM (~ supported)
@@ -58,7 +58,7 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 
 [vm.config]
 # -- Provisioning (set once at create time) --
-# admin_username = "agentworks"               # admin username created on VMs
+# admin_username = "agentworks"              # admin username created on VMs
 # cpus = 4                                   # number of CPUs (Lima)
 # memory = 8                                 # memory in GiB (Lima)
 # disk = 50                                  # disk size in GiB (Lima)

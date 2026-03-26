@@ -56,6 +56,12 @@ _agentworks_tasks() {
     tasks=(${(f)"$(agentworks task list 2>/dev/null | tail -n +3 | awk '{print $1}')"})
     _describe 'task' tasks
 }""",
+    "agents": """\
+_agentworks_agents() {
+    local -a agents
+    agents=(${(f)"$(agentworks agent list 2>/dev/null | tail -n +3 | awk '{print $1}')"})
+    _describe 'agent' agents
+}""",
     "task_templates": """\
 _agentworks_task_templates() {
     local -a templates config_file
@@ -78,6 +84,7 @@ COMPLETER_FUNC_NAMES: dict[str, str] = {
     "catalog_entries": "_agentworks_catalog_entries",
     "tasks": "_agentworks_tasks",
     "task_templates": "_agentworks_task_templates",
+    "agents": "_agentworks_agents",
 }
 
 

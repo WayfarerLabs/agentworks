@@ -21,8 +21,7 @@ from typing import TYPE_CHECKING
 import typer
 
 from agentworks.db import InitStatus, ProvisioningStatus
-from agentworks.ssh import ExecTarget, SSHError, SSHTarget
-from agentworks.vms.init_log import InitLogger
+from agentworks.ssh import ExecTarget, SSHError, SSHLogger, SSHTarget
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -49,7 +48,7 @@ SYSTEM_PACKAGES = [
 def _run_logged(
     target: ExecTarget,
     command: str,
-    logger: InitLogger,
+    logger: SSHLogger,
     *,
     as_root: bool = False,
     check: bool = True,
@@ -76,7 +75,7 @@ def _run_logged(
 def _write_path_additions(
     target: ExecTarget,
     path_additions: list[str],
-    logger: InitLogger,
+    logger: SSHLogger,
 ) -> None:
     """Write accumulated PATH additions to $HOME/.agentworks-path.sh.
 
@@ -131,7 +130,7 @@ def _reconcile_authorized_keys(
     target: ExecTarget,
     config: Config,
     home: str,
-    logger: InitLogger,
+    logger: SSHLogger,
 ) -> None:
     """Reconcile ~/.ssh/authorized_keys with the configured key set.
 
@@ -162,7 +161,7 @@ def _configure_apt_sources(
     target: ExecTarget,
     config: Config,
     catalog: object,
-    logger: InitLogger,
+    logger: SSHLogger,
 ) -> None:
     """Configure apt sources required by selected apt_packages. Idempotent."""
     from agentworks.catalog import ResolvedCatalog
@@ -272,7 +271,7 @@ def _install_apt_packages(
     target: ExecTarget,
     config: Config,
     catalog: object,
-    logger: InitLogger,
+    logger: SSHLogger,
 ) -> None:
     """Install apt packages from both direct list and catalog entries."""
     from agentworks.catalog import ResolvedCatalog
@@ -327,7 +326,7 @@ def _run_catalog_commands(
     entries: Mapping[str, SystemInstallCommandEntry | UserInstallCommandEntry],
     shell: str,
     home: str,
-    logger: InitLogger,
+    logger: SSHLogger,
     *,
     label: str = "Install command",
 ) -> list[str]:
@@ -466,7 +465,7 @@ def _join_tailscale(
     exec_target: ExecTarget,
     *,
     is_wsl2: bool = False,
-    logger: InitLogger | None = None,
+    logger: SSHLogger | None = None,
     tailscale_auth_key: str | None = None,
 ) -> str:
     """Join Tailscale, update DB. Returns the Tailscale IP."""
@@ -533,18 +532,15 @@ def initialize_vm(
     from agentworks.ssh import SSHLogger
 
     home = f"/home/{admin_username}"
-    logger = InitLogger(vm_name)
-    ssh_logger = SSHLogger(vm_name, "vm-create")
+    logger = SSHLogger(vm_name, "vm-create")
     if tailscale_auth_key:
         logger.add_redaction(tailscale_auth_key)
-        ssh_logger.add_redaction(tailscale_auth_key)
     if git_tokens:
         for token in git_tokens.values():
             logger.add_redaction(token)
-            ssh_logger.add_redaction(token)
 
-    # Attach SSH logger to the provisioning transport
-    exec_target = replace(exec_target, logger=ssh_logger)
+    # Attach logger to the provisioning transport
+    exec_target = replace(exec_target, logger=logger)
 
     transport = _describe_transport(exec_target)
 
@@ -566,8 +562,7 @@ def initialize_vm(
         db.update_vm_provisioning_status(vm_name, ProvisioningStatus.FAILED)
         db.insert_vm_event(vm_name, "provisioning_failed", str(e))
         logger.close()
-        ssh_logger.close()
-        typer.echo(f"  SSH log: {ssh_logger.path}", err=True)
+        typer.echo(f"  Log: {logger.path}", err=True)
         raise
 
     run_initialization(
@@ -591,7 +586,7 @@ def run_initialization(
     providers: dict[str, GitCredentialProvider],
     home: str,
     admin_username: str,
-    logger: InitLogger,
+    logger: SSHLogger,
     *,
     git_tokens: dict[str, str] | None = None,
 ) -> None:
@@ -638,7 +633,7 @@ def _phase_a_bootstrap(
     home: str,
     admin_username: str,
     is_wsl2: bool,
-    logger: InitLogger,
+    logger: SSHLogger,
     *,
     tailscale_auth_key: str | None = None,
 ) -> ExecTarget:
@@ -709,7 +704,7 @@ def _phase_a_bootstrap(
             logger.warning(warning)
         if step.error:
             typer.echo(f"  Error: {step.error}", err=True)
-            logger.error(step.error)
+            logger.log_error(step.error)
 
     # Log full output for troubleshooting
     if detached.output:
@@ -784,7 +779,7 @@ def _phase_b_setup(
     providers: dict[str, GitCredentialProvider],
     home: str,
     admin_username: str,
-    logger: InitLogger,
+    logger: SSHLogger,
     *,
     git_tokens: dict[str, str] | None = None,
 ) -> None:
@@ -894,7 +889,7 @@ def _sync_dotfiles_repo(
     ts_target: ExecTarget,
     repo: str,
     dest: str,
-    logger: InitLogger,
+    logger: SSHLogger,
 ) -> None:
     """Clone or pull a dotfiles git repo to the destination."""
     is_git = ts_target.run(f"test -d {dest}/.git", check=False)
@@ -923,7 +918,7 @@ def _sync_dotfiles_source(
     ts_target: ExecTarget,
     source: Path,
     dest: str,
-    logger: InitLogger,
+    logger: SSHLogger,
 ) -> None:
     """Copy dotfiles from a local path to the destination."""
     if ts_target.run(f"test -d {dest}", check=False).ok:
@@ -937,7 +932,7 @@ def _sync_dotfiles_source(
 def _install_nerf_tools(
     ts_target: ExecTarget,
     config: Config,
-    logger: InitLogger,
+    logger: SSHLogger,
 ) -> None:
     """Build nerf tools locally and deploy artifacts to the VM. Non-fatal."""
     logger.step("Nerf tools")
@@ -1049,7 +1044,7 @@ def _configure_git_credentials(
     vm_name: str,
     ts_target: ExecTarget,
     providers: dict[str, GitCredentialProvider],
-    logger: InitLogger,
+    logger: SSHLogger,
     git_tokens: dict[str, str] | None = None,
 ) -> None:
     """Configure git credential store on the VM with pre-collected or prompted tokens."""

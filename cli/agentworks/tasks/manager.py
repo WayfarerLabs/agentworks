@@ -280,9 +280,9 @@ def stop_task(
         return
 
     # Send C-c to the running process first
-    session = shlex.quote(
-        f"{workspace_name}--{name}"
-    )
+    from agentworks.tasks.tmux import derive_session_name
+
+    session = shlex.quote(derive_session_name(workspace_name, name))
     run_command(f"tmux send-keys -t {session} C-c", check=False)
 
     # Wait for graceful exit
