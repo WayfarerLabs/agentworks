@@ -72,13 +72,18 @@ LOG_DIR = Path.home() / ".config" / "agentworks" / "logs"
 
 
 class SSHLogger:
-    """Incremental SSH command logger. Writes to disk on every command.
+    """Incremental command logger. Writes to disk on every call.
+
+    Replaces the old InitLogger with a unified logger that covers SSH
+    commands, init steps, warnings, and general output. All output is
+    written incrementally so partial logs survive crashes.
 
     Usage:
         logger = SSHLogger("myvm", "vm-create")
-        # pass to ssh.run via logger= or attach to ExecTarget
-        run(target, "ls", logger=logger)
-        logger.close()  # writes footer, optional
+        logger.step("Installing packages")
+        run(target, "apt-get install ...", logger=logger)
+        logger.warning("package X failed")
+        logger.close()
     """
 
     def __init__(self, vm_name: str, command_stem: str) -> None:
@@ -89,9 +94,10 @@ class SSHLogger:
         self.path = LOG_DIR / f"{vm_name}-{timestamp}-{command_stem}.log"
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._redact: list[str] = []
+        self._warnings: list[str] = []
 
         ts = datetime.now(tz=UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
-        self._write(f"# SSH Log: {vm_name} ({command_stem})\n# Started: {ts}\n\n")
+        self._write(f"# Log: {vm_name} ({command_stem})\n# Started: {ts}\n\n")
 
     def add_redaction(self, secret: str) -> None:
         """Register a secret to be redacted from all output."""
@@ -102,6 +108,19 @@ class SSHLogger:
         for secret in self._redact:
             text = text.replace(secret, "[REDACTED]")
         return text
+
+    def step(self, name: str) -> None:
+        """Log the start of a named step."""
+        from datetime import UTC, datetime
+
+        ts = datetime.now(tz=UTC).strftime("%H:%M:%S")
+        self._write(f"--- [{ts}] {name} ---\n")
+
+    def output(self, text: str) -> None:
+        """Log general output (with redaction)."""
+        if text:
+            text = self._sanitize(text)
+            self._write(text if text.endswith("\n") else text + "\n")
 
     def log_command(self, command: str, result: SSHResult) -> None:
         """Log a completed command with its output."""
@@ -123,6 +142,11 @@ class SSHLogger:
         ts = datetime.now(tz=UTC).strftime("%H:%M:%S")
         self._write(f"[{ts}] TIMEOUT (attempt {attempt}/{retries}): {self._sanitize(command)}\n")
 
+    def warning(self, msg: str) -> None:
+        """Record a warning (also written to the log)."""
+        self._warnings.append(msg)
+        self._write(f"WARNING: {self._sanitize(msg)}\n")
+
     def log_error(self, msg: str) -> None:
         """Log an error message."""
         from datetime import UTC, datetime
@@ -130,12 +154,25 @@ class SSHLogger:
         ts = datetime.now(tz=UTC).strftime("%H:%M:%S")
         self._write(f"[{ts}] ERROR: {self._sanitize(msg)}\n")
 
+    @property
+    def warnings(self) -> list[str]:
+        return list(self._warnings)
+
+    @property
+    def has_warnings(self) -> bool:
+        return len(self._warnings) > 0
+
     def close(self) -> None:
-        """Write a footer line."""
+        """Write a footer with summary."""
         from datetime import UTC, datetime
 
         ts = datetime.now(tz=UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
-        self._write(f"\n# Finished: {ts}\n")
+        lines = [f"\n# Finished: {ts}"]
+        if self._warnings:
+            lines.append(f"# Warnings: {len(self._warnings)}")
+            for w in self._warnings:
+                lines.append(f"#   - {w}")
+        self._write("\n".join(lines) + "\n")
 
     def _write(self, text: str) -> None:
         with open(self.path, "a") as f:
@@ -190,9 +227,11 @@ def run(
     Returns:
         SSHResult with exit code, stdout, and stderr.
     """
+    import shlex
+
     args = _ssh_base_args(target)
     if target.login_shell:
-        args.append(f"$SHELL -lc '{command}'")
+        args.append(f"$SHELL -lc {shlex.quote(command)}")
     else:
         args.append(command)
 

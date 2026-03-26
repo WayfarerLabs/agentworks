@@ -178,17 +178,11 @@ def create_vm(
             git_tokens=git_tokens,
         )
     except Exception as e:
-        import traceback
-
-        from agentworks.vms.init_log import InitLogger, find_init_logs
-
-        logger = InitLogger(vm_name)
-        logger.step("Error")
-        logger.output(traceback.format_exc())
-        logger.close()
-
         typer.echo(f"\nError: {e}", err=True)
-        logs = find_init_logs(vm_name)
+        # The logger inside initialize_vm already captured the details
+        from agentworks.ssh import LOG_DIR
+
+        logs = sorted(LOG_DIR.glob(f"{vm_name}-*-vm-create.log"), reverse=True)
         if logs:
             typer.echo(f"Details: {logs[0]}", err=True)
 
@@ -509,12 +503,14 @@ def delete_vm(
     except Exception as e:
         typer.echo(f"Warning: platform cleanup failed: {e}", err=True)
 
-    # Clean up init logs
-    from agentworks.vms.init_log import delete_init_logs
+    # Clean up logs
+    from agentworks.ssh import LOG_DIR
 
-    log_count = delete_init_logs(name)
-    if log_count:
-        typer.echo(f"Cleaned up {log_count} init log(s)")
+    vm_logs = list(LOG_DIR.glob(f"{name}-*.log")) if LOG_DIR.exists() else []
+    for log in vm_logs:
+        log.unlink(missing_ok=True)
+    if vm_logs:
+        typer.echo(f"Cleaned up {len(vm_logs)} log(s)")
 
     # Remove from DB (cascades workspaces and agents), then rebuild SSH config
     db.delete_vm(name)
@@ -535,7 +531,6 @@ def reinit_vm(
     Requires provisioning_status == complete and a valid Tailscale connection.
     """
     from agentworks.ssh import ExecTarget, ssh_target_for_vm
-    from agentworks.vms.init_log import InitLogger
 
     vm = _require_vm(db, name)
 
@@ -563,13 +558,12 @@ def reinit_vm(
     # Build Tailscale SSH target with logging
     from agentworks.ssh import SSHLogger
 
-    ssh_logger = SSHLogger(name, "vm-reinit")
+    logger = SSHLogger(name, "vm-reinit")
     for token in git_tokens.values():
-        ssh_logger.add_redaction(token)
-    ts_target = ExecTarget(ssh=ssh_target_for_vm(vm, config), default_timeout=60, logger=ssh_logger)
+        logger.add_redaction(token)
+    ts_target = ExecTarget(ssh=ssh_target_for_vm(vm, config), default_timeout=60, logger=logger)
 
     home = f"/home/{vm.admin_username}"
-    logger = InitLogger(name)
 
     try:
         run_initialization(
@@ -584,20 +578,20 @@ def reinit_vm(
             git_tokens=git_tokens,
         )
     except Exception:
-        ssh_logger.close()
-        typer.echo(f"  SSH log: {ssh_logger.path}", err=True)
+        logger.close()
+        typer.echo(f"  Log: {logger.path}", err=True)
         raise
 
-    ssh_logger.close()
+    logger.close()
 
     refreshed_vm = db.get_vm(name)
     assert refreshed_vm is not None
     if refreshed_vm.init_status == InitStatus.PARTIAL.value:
         typer.echo(f"\nVM '{name}' reinitialized (with warnings -- see above)")
-        typer.echo(f"  SSH log: {ssh_logger.path}")
+        typer.echo(f"  Log: {logger.path}")
     else:
         typer.echo(f"\nVM '{name}' reinitialized successfully!")
-        typer.echo(f"  SSH log: {ssh_logger.path}")
+        typer.echo(f"  Log: {logger.path}")
 
 
 
@@ -624,11 +618,13 @@ def _tailscale_logout(provisioner: VMProvisioner, vm: VMRow) -> None:
 
 
 def _init_log_hint(vm_name: str) -> str:
-    """Return a log hint suffix like ' See init log: <path>' or empty string."""
-    from agentworks.vms.init_log import find_init_logs
+    """Return a log hint suffix like ' See log: <path>' or empty string."""
+    from agentworks.ssh import LOG_DIR
 
-    logs = find_init_logs(vm_name)
-    return f" See init log: {logs[0]}" if logs else ""
+    if not LOG_DIR.exists():
+        return ""
+    logs = sorted(LOG_DIR.glob(f"{vm_name}-*.log"), reverse=True)
+    return f" See log: {logs[0]}" if logs else ""
 
 
 def _guard_failed_vm(vm: VMRow) -> None:

@@ -66,10 +66,13 @@ def create_local_workspace(
         tmux_file = workspace_dir / ".tmuxinator.yml"
         tmux_file.write_text(tmux_config)
 
-        # Symlink for tmuxinator to find it
+        # Symlink for tmuxinator to find it by console session name
+        from agentworks.workspaces.tmuxinator import console_session_name
+
+        session = console_session_name(ws_name)
         tmux_config_dir = Path.home() / ".config" / "tmuxinator"
         tmux_config_dir.mkdir(parents=True, exist_ok=True)
-        link = tmux_config_dir / f"{ws_name}.yml"
+        link = tmux_config_dir / f"{session}.yml"
         link.unlink(missing_ok=True)
         link.symlink_to(tmux_file)
 
@@ -110,5 +113,8 @@ def delete_local_workspace(ws_name: str, workspace_path: str) -> None:
         shutil.rmtree(ws_dir)
 
     # Remove tmuxinator symlink
-    link = Path.home() / ".config" / "tmuxinator" / f"{ws_name}.yml"
+    from agentworks.workspaces.tmuxinator import console_session_name
+
+    session = console_session_name(ws_name)
+    link = Path.home() / ".config" / "tmuxinator" / f"{session}.yml"
     link.unlink(missing_ok=True)

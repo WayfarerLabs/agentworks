@@ -187,7 +187,7 @@ def _report_db_contents(
 ) -> None:
     """Report DB contents and flag VMs in non-complete states."""
     from agentworks.db import Database, InitStatus
-    from agentworks.vms.init_log import find_init_logs
+    from agentworks.ssh import LOG_DIR
 
     assert isinstance(db, Database)
     assert callable(ok) and callable(warn)
@@ -196,15 +196,17 @@ def _report_db_contents(
     ws_count = len(db.list_workspaces())
     ok(f"{len(vms)} VMs, {ws_count} workspaces")
 
+    def _log_hint(vm_name: str) -> str:
+        if not LOG_DIR.exists():
+            return ""
+        logs = sorted(LOG_DIR.glob(f"{vm_name}-*.log"), reverse=True)
+        return f" Log: {logs[0]}" if logs else ""
+
     for vm in vms:
         if vm.init_status == InitStatus.FAILED.value:
-            logs = find_init_logs(vm.name)
-            log_hint = f" Log: {logs[0]}" if logs else ""
-            warn(f"VM '{vm.name}' is in 'failed' state (only delete supported).{log_hint}")
+            warn(f"VM '{vm.name}' is in 'failed' state (only delete supported).{_log_hint(vm.name)}")
         elif vm.init_status == InitStatus.PARTIAL.value:
-            logs = find_init_logs(vm.name)
-            log_hint = f" Log: {logs[0]}" if logs else ""
-            warn(f"VM '{vm.name}' initialized with warnings.{log_hint}")
+            warn(f"VM '{vm.name}' initialized with warnings.{_log_hint(vm.name)}")
         elif vm.init_status not in (InitStatus.COMPLETE.value, InitStatus.PENDING.value):
             warn(f"VM '{vm.name}' has unexpected init status: {vm.init_status}")
 
