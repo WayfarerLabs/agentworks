@@ -160,24 +160,12 @@ def shell_agent(
 
     _ensure_vm_running(db, config, vm)
 
-    if vm.tailscale_host is None:
-        typer.echo(f"Error: VM '{vm.name}' has no Tailscale address", err=True)
-        raise typer.Exit(1)
-
-    # SSH as user account, then su to the agent user in the workspace directory
-    ssh_cmd = ["ssh"]
-    if config.user.ssh_private_key:
-        ssh_cmd.extend(["-i", str(config.user.ssh_private_key)])
-    ssh_cmd.append(f"{vm.admin_username}@{vm.tailscale_host}")
-    ssh_cmd.extend(["-t", f"cd {ws.workspace_path} && exec su - {agent.linux_user}"])
-
-    import subprocess
     import sys
 
-    sys.exit(subprocess.call(ssh_cmd))
+    from agentworks.ssh import interactive
 
-
-# -- Tmuxinator ------------------------------------------------------------
+    target = ssh_target_for_vm(vm, config)
+    sys.exit(interactive(target, f"cd {ws.workspace_path} && exec su - {agent.linux_user}"))
 
 
 # -- VM operations ---------------------------------------------------------

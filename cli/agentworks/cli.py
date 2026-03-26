@@ -350,7 +350,7 @@ def vm_add_git_credential(
 @vm_app.command("logs")
 def vm_logs(
     name: Annotated[str, typer.Argument(help="VM name")],
-    latest: Annotated[bool, typer.Option("--latest", help="Show only the latest log")] = True,
+    show_all: Annotated[bool, typer.Option("--all", help="Show all logs instead of only the latest")] = False,
 ) -> None:
     """Show SSH logs for a VM."""
     from agentworks.ssh import LOG_DIR
@@ -369,7 +369,7 @@ def vm_logs(
 
     from pathlib import Path
 
-    display = logs[:1] if latest else logs
+    display = logs if show_all else logs[:1]
     for log_path, log_name in display:
         typer.echo(f"--- {log_name} ---")
         typer.echo(Path(log_path).read_text(), nl=False)
