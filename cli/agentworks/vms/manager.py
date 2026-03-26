@@ -779,6 +779,93 @@ def _is_tailscale_reachable(tailscale_host: str) -> bool:
         return False
 
 
+def port_forward_vm(
+    db: Database,
+    config: Config,
+    name: str,
+    ports: list[str],
+    address: str = "localhost",
+    verbose: bool = False,
+) -> None:
+    """Forward one or more local ports to a VM via SSH tunnels.
+
+    Each port spec is either REMOTE_PORT (local defaults to same) or
+    LOCAL_PORT:REMOTE_PORT, matching kubectl port-forward syntax.
+    """
+    import signal
+    import subprocess
+    import sys
+
+    vm = _require_vm(db, name)
+    _guard_failed_vm(vm)
+    if vm.tailscale_host is None:
+        typer.echo(f"Error: VM '{name}' has no Tailscale IP (init may not be complete)", err=True)
+        raise typer.Exit(1)
+
+    # Parse port specs
+    forwards: list[tuple[int, int]] = []  # (local_port, remote_port)
+    for spec in ports:
+        parts = spec.split(":")
+        if len(parts) == 1:
+            try:
+                port = int(parts[0])
+            except ValueError:
+                typer.echo(f"Error: invalid port '{spec}'", err=True)
+                raise typer.Exit(1) from None
+            forwards.append((port, port))
+        elif len(parts) == 2:
+            try:
+                local_port = int(parts[0])
+                remote_port = int(parts[1])
+            except ValueError:
+                typer.echo(f"Error: invalid port spec '{spec}'", err=True)
+                raise typer.Exit(1) from None
+            forwards.append((local_port, remote_port))
+        else:
+            typer.echo(f"Error: invalid port spec '{spec}' (expected [LOCAL:]REMOTE)", err=True)
+            raise typer.Exit(1)
+
+    # Validate port ranges
+    for local_port, remote_port in forwards:
+        for label, port in [("local", local_port), ("remote", remote_port)]:
+            if port < 1 or port > 65535:
+                typer.echo(f"Error: {label} port {port} out of range (1-65535)", err=True)
+                raise typer.Exit(1)
+
+    # Build SSH command with -L flags for each forward
+    ssh_cmd = ["ssh", "-N", "-o", "StrictHostKeyChecking=accept-new"]
+    if config.user.ssh_private_key:
+        ssh_cmd.extend(["-i", str(config.user.ssh_private_key)])
+    for local_port, remote_port in forwards:
+        ssh_cmd.extend(["-L", f"{address}:{local_port}:localhost:{remote_port}"])
+    if verbose:
+        ssh_cmd.append("-v")
+    ssh_cmd.append(f"{vm.admin_username}@{vm.tailscale_host}")
+
+    # Print forwarding info
+    for local_port, remote_port in forwards:
+        typer.echo(f"Forwarding {address}:{local_port} -> {vm.tailscale_host}:{remote_port}")
+    if not verbose:
+        typer.echo("Use --verbose for detailed SSH output.")
+
+    # Run in foreground until interrupted
+    try:
+        proc = subprocess.Popen(ssh_cmd)
+
+        # Forward SIGINT/SIGTERM to the SSH process for clean shutdown
+        def _handle_signal(sig: int, _frame: object) -> None:
+            proc.terminate()
+
+        signal.signal(signal.SIGINT, _handle_signal)
+        signal.signal(signal.SIGTERM, _handle_signal)
+
+        rc = proc.wait()
+        sys.exit(rc)
+    except OSError as e:
+        typer.echo(f"Error: failed to start SSH: {e}", err=True)
+        raise typer.Exit(1) from e
+
+
 def _ensure_tailscale(
     db: Database,
     config: Config,

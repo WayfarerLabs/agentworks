@@ -335,6 +335,20 @@ def vm_shell(
     shell_vm(_get_db(), load_config(), name)
 
 
+@vm_app.command("port-forward")
+def vm_port_forward(
+    name: Annotated[str, typer.Argument(help="VM name")],
+    ports: Annotated[list[str], typer.Argument(help="Port specs: [LOCAL_PORT:]REMOTE_PORT")],
+    address: Annotated[str, typer.Option("--address", help="Local address to bind to")] = "localhost",
+    verbose: Annotated[bool, typer.Option("--verbose", "-v", help="Verbose SSH output")] = False,
+) -> None:
+    """Forward local port(s) to a VM (like kubectl port-forward)."""
+    from agentworks.config import load_config
+    from agentworks.vms.manager import port_forward_vm
+
+    port_forward_vm(_get_db(), load_config(), name, ports, address=address, verbose=verbose)
+
+
 @vm_app.command("add-git-credential")
 def vm_add_git_credential(
     name: Annotated[str, typer.Argument(help="VM name")],
