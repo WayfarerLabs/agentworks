@@ -79,6 +79,7 @@ class VMRow:
     cpus: int | None
     memory_gib: int | None
     disk_gib: int | None
+    swap_gib: int | None
     admin_username: str
     created_at: str
     last_seen_at: str | None
@@ -251,6 +252,10 @@ MIGRATIONS: dict[int, str] = {
     9: """
         UPDATE workspaces SET template = 'default' WHERE template = '(built-in)';
     """,
+    10: """
+        ALTER TABLE vms ADD COLUMN swap_gib INTEGER;
+        UPDATE vms SET swap_gib = 0;
+    """,
 }
 
 LATEST_VERSION = max(MIGRATIONS)
@@ -362,13 +367,14 @@ class Database:
         cpus: int | None = None,
         memory_gib: int | None = None,
         disk_gib: int | None = None,
+        swap_gib: int | None = None,
         admin_username: str = "agentworks",
     ) -> VMRow:
         self._conn.execute(
             "INSERT INTO vms "
             "(name, platform, vm_host_name, azure_resource_id, wsl_distro_name, "
-            "cpus, memory_gib, disk_gib, admin_username) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "cpus, memory_gib, disk_gib, swap_gib, admin_username) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 name,
                 platform,
@@ -378,6 +384,7 @@ class Database:
                 cpus,
                 memory_gib,
                 disk_gib,
+                swap_gib,
                 admin_username,
             ),
         )
@@ -677,6 +684,7 @@ def _to_vm(row: sqlite3.Row) -> VMRow:
         cpus=row["cpus"],
         memory_gib=row["memory_gib"],
         disk_gib=row["disk_gib"],
+        swap_gib=row["swap_gib"],
         admin_username=row["admin_username"],
         created_at=row["created_at"],
         last_seen_at=row["last_seen_at"],

@@ -27,18 +27,9 @@ class _HasSubscriptionId(Protocol):
     def subscription_id(self) -> str: ...
 
 
-CLOUD_INIT_TEMPLATE = """\
-#cloud-config
-package_update: true
-packages:
-  - openssh-server
-users:
-  - name: {admin_username}
-    ssh_authorized_keys:
-      - {ssh_public_key}
-    sudo: ALL=(ALL) NOPASSWD:ALL
-    shell: /bin/bash
-"""
+from agentworks.ssh import SSHError
+from agentworks.vms.bootstrap_script import generate_bootstrap_script
+from agentworks.vms.cloud_init import SYSTEM_PACKAGES, generate_cloud_init
 
 
 class AzureError(RuntimeError):
@@ -134,18 +125,37 @@ class AzureProvisioner(VMProvisioner):
         *,
         azure_vm_size: str = "Standard_B2s",
         admin_username: str = "agentworks",
+        tailscale_auth_key: str | None = None,
     ) -> ProvisionResult:
         assert config.azure is not None, "Azure config is required"
         az = config.azure
 
         typer.echo("Connecting to Azure...")
         typer.echo(f"Provisioning Azure VM '{vm_name}' in {az.region} (size: {azure_vm_size})...")
+        if config.vm.swap_gb > 0:
+            typer.echo(f"  Swap: {config.vm.swap_gb} GiB")
 
         ssh_pub_key = config.user.ssh_public_key.read_text().strip()
-        cloud_init = CLOUD_INIT_TEMPLATE.format(
-            ssh_public_key=ssh_pub_key,
-            admin_username=admin_username,
-        )
+
+        # Generate the same bootstrap script used by Lima, wrapped in
+        # cloud-init write_files + runcmd for delivery via Azure custom_data.
+        if tailscale_auth_key:
+            bootstrap = generate_bootstrap_script(
+                admin_username=admin_username,
+                ssh_public_key=ssh_pub_key,
+                system_packages=SYSTEM_PACKAGES,
+                tailscale_auth_key=tailscale_auth_key,
+                swap_gb=config.vm.swap_gb,
+            )
+            cloud_init = generate_cloud_init(bootstrap)
+        else:
+            # No Tailscale key -- minimal cloud-init, bootstrap deferred to Phase A
+            cloud_init = (
+                "#cloud-config\n"
+                "package_update: true\n"
+                "packages:\n"
+                "  - openssh-server\n"
+            )
         cloud_init_b64 = base64.b64encode(cloud_init.encode()).decode()
 
         compute = _compute_client(az)
@@ -288,17 +298,77 @@ class AzureProvisioner(VMProvisioner):
 
         import sys
 
-        return ProvisionResult(
-            exec_target=ExecTarget(
-                ssh=SSHTarget(
-                    host=public_ip,
-                    user=admin_username,
-                    identity_file=config.user.ssh_private_key,
-                    force_tty=sys.platform == "win32",
-                )
-            ),
-            azure_resource_id=resource_id or None,
+        exec_target = ExecTarget(
+            ssh=SSHTarget(
+                host=public_ip,
+                user=admin_username,
+                identity_file=config.user.ssh_private_key,
+                force_tty=sys.platform == "win32",
+            )
         )
+
+        # If bootstrap was embedded in cloud-init, wait for it to finish
+        # and extract the Tailscale IP.
+        tailscale_ip = None
+        bootstrap_complete = False
+        if tailscale_auth_key:
+            tailscale_ip = self._wait_for_bootstrap(exec_target, vm_name)
+            if tailscale_ip:
+                bootstrap_complete = True
+
+        return ProvisionResult(
+            exec_target=exec_target,
+            azure_resource_id=resource_id or None,
+            bootstrap_complete=bootstrap_complete,
+            tailscale_ip=tailscale_ip,
+        )
+
+    def _wait_for_bootstrap(self, exec_target: ExecTarget, vm_name: str) -> str | None:
+        """Wait for cloud-init to finish and return the Tailscale IP.
+
+        SSH may not be immediately available after VM creation, so we retry.
+        Returns None if we cannot get the IP (Phase A will handle it).
+        """
+        import time
+
+        from agentworks.ssh import run as ssh_run
+
+        typer.echo("  Waiting for cloud-init bootstrap to complete (this may take several minutes)...")
+
+        # Wait for SSH to become available
+        assert exec_target.ssh is not None
+        for attempt in range(30):
+            try:
+                ssh_run(exec_target.ssh, "echo ok", check=True, timeout=10)
+                break
+            except SSHError:
+                if attempt == 29:
+                    typer.echo("  Warning: SSH not available, deferring bootstrap to Phase A", err=True)
+                    return None
+                time.sleep(10)
+
+        # Wait for cloud-init to finish
+        try:
+            ssh_run(
+                exec_target.ssh,
+                "cloud-init status --wait",
+                check=True,
+                timeout=600,
+            )
+        except SSHError as e:
+            typer.echo(f"  Warning: cloud-init wait failed: {e}", err=True)
+            typer.echo("  Deferring bootstrap to Phase A", err=True)
+            return None
+
+        # Get Tailscale IP
+        try:
+            result = ssh_run(exec_target.ssh, "sudo tailscale ip -4", check=True, timeout=15)
+            tailscale_ip = result.stdout.strip()
+            typer.echo(f"  Tailscale IP: {tailscale_ip}")
+            return tailscale_ip
+        except SSHError as e:
+            typer.echo(f"  Warning: could not retrieve Tailscale IP: {e}", err=True)
+            return None
 
     def start(self, vm: VMRow) -> None:
         typer.echo(f"Starting Azure VM '{vm.name}'...")

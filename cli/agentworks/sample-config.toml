@@ -63,6 +63,7 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # memory = 8                                 # memory in GiB (Lima)
 # disk = 50                                  # disk size in GiB (Lima)
 # azure_vm_size = "Standard_B2s"             # Azure VM size
+# swap_gb = 4                                # swap file size in GiB (0 to disable)
 # -- Initialization (applied on create and reinit) --
 # admin_shell = "zsh"                        # shell for the admin user
 # apt = [                                    # direct apt packages

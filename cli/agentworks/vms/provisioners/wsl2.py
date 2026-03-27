@@ -227,6 +227,27 @@ class WSL2Provisioner(VMProvisioner):
             ]
         )
 
+        # Configure swap file
+        if config.vm.swap_gb > 0:
+            swap_mb = config.vm.swap_gb * 1024
+            typer.echo(f"  Setting up {config.vm.swap_gb} GiB swap file...")
+            _wsl(
+                [
+                    "--distribution",
+                    vm_name,
+                    "--user",
+                    "root",
+                    "--",
+                    "bash",
+                    "-c",
+                    f"fallocate -l {swap_mb}M /swapfile"
+                    " && chmod 600 /swapfile"
+                    " && mkswap /swapfile"
+                    " && swapon /swapfile"
+                    " && echo '/swapfile none swap sw 0 0' >> /etc/fstab",
+                ]
+            )
+
         # Create user account
         typer.echo(f"  Creating user '{admin_username}'...")
         _wsl(["--distribution", vm_name, "--user", "root", "--", "useradd", "-m", "-s", "/bin/bash", admin_username])

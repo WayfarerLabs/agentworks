@@ -111,6 +111,7 @@ def create_vm(
         cpus=resolved_cpus,
         memory_gib=resolved_memory,
         disk_gib=resolved_disk,
+        swap_gib=config.vm.swap_gb,
         admin_username=resolved_admin_username,
     )
 
@@ -128,6 +129,7 @@ def create_vm(
                 cpus=resolved_cpus,
                 memory=resolved_memory,
                 disk=resolved_disk,
+                tailscale_auth_key=tailscale_auth_key,
             )
         elif platform == "azure":
             from agentworks.vms.provisioners.azure import AzureProvisioner
@@ -138,6 +140,7 @@ def create_vm(
                 config,
                 azure_vm_size=resolved_azure_size,
                 admin_username=resolved_admin_username,
+                tailscale_auth_key=tailscale_auth_key,
             )
         elif platform == "wsl2":
             from agentworks.vms.provisioners.wsl2 import WSL2Provisioner
@@ -176,6 +179,8 @@ def create_vm(
             admin_username=resolved_admin_username,
             tailscale_auth_key=tailscale_auth_key,
             git_tokens=git_tokens,
+            bootstrap_complete=result.bootstrap_complete,
+            tailscale_ip=result.tailscale_ip,
         )
     except Exception as e:
         typer.echo(f"\nError: {e}", err=True)
@@ -290,7 +295,7 @@ def describe_vm(db: Database, config: Config, name: str) -> None:
                    f"{live['mem_total'] if live else '-':<14}"
                    f"{live['mem_used'] + ' (' + live['mem_pct'] + ')' if live else '-'}")
         typer.echo(f"  {'Swap':<16}"
-                   f"{'-':<14}"
+                   f"{str(vm.swap_gib) + 'G' if vm.swap_gib else '-':<14}"
                    f"{live['swap_total'] if live else '-':<14}"
                    f"{live['swap_used'] + ' (' + live['swap_pct'] + ')' if live else '-'}")
         typer.echo(f"  {'Disk':<16}"

@@ -114,6 +114,7 @@ class VMConfig:
     disk: int = 50  # GiB
     azure_vm_size: str = "Standard_B2s"
     admin_username: str = "agentworks"
+    swap_gb: int = 4  # GiB, 0 to disable
     # Initialization (applied on create and reinit)
     admin_shell: str = "zsh"
     apt: list[str] = field(default_factory=list)
@@ -355,6 +356,7 @@ _VM_CONFIG_KEYS = {
     "disk",
     "azure_vm_size",
     "admin_username",
+    "swap_gb",
     "admin_shell",
     "apt",
     "apt_packages",
@@ -388,6 +390,7 @@ def _load_vm_config(data: dict[str, object]) -> VMConfig:
         disk=int(raw.get("disk", 50)),
         azure_vm_size=str(raw.get("azure_vm_size", "Standard_B2s")),
         admin_username=str(raw.get("admin_username", "agentworks")),
+        swap_gb=int(raw.get("swap_gb", 4)),
         admin_shell=str(raw.get("admin_shell", "zsh")),
         apt=list(raw.get("apt", [])),
         apt_packages=list(raw.get("apt_packages", [])),

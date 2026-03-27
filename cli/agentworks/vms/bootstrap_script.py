@@ -25,6 +25,7 @@ SSH_PUBLIC_KEY={ssh_public_key}
 SYSTEM_PACKAGES={system_packages}
 TAILSCALE_AUTH_KEY={tailscale_auth_key}
 TS_EXTRA_FLAGS={ts_extra_flags}
+SWAP_GB={swap_gb}
 
 # -- Step 1: Ensure user --
 echo "##STEP## Ensure user"
@@ -54,7 +55,25 @@ chmod 700 "$HOME_DIR/.ssh"
 chmod 600 "$HOME_DIR/.ssh/authorized_keys"
 echo "##SUCCESS## SSH key installed"
 
-# -- Step 4: Install Tailscale --
+# -- Step 4: Swap file --
+echo "##STEP## Swap file"
+if [ "$SWAP_GB" -gt 0 ]; then
+    if [ -f /swapfile ]; then
+        echo "##SUCCESS## swap file already exists"
+    else
+        SWAP_MB=$((SWAP_GB * 1024))
+        fallocate -l "${{SWAP_MB}}M" /swapfile
+        chmod 600 /swapfile
+        mkswap /swapfile
+        swapon /swapfile
+        echo '/swapfile none swap sw 0 0' >> /etc/fstab
+        echo "##SUCCESS## ${{SWAP_GB}} GiB swap file created"
+    fi
+else
+    echo "##SUCCESS## swap disabled"
+fi
+
+# -- Step 5: Install Tailscale --
 echo "##STEP## Tailscale install"
 if command -v tailscale >/dev/null 2>&1; then
     echo "##SUCCESS## tailscale already installed"
@@ -63,7 +82,7 @@ else
     echo "##SUCCESS## tailscale installed"
 fi
 
-# -- Step 5: Join Tailscale --
+# -- Step 6: Join Tailscale --
 echo "##STEP## Tailscale join"
 # shellcheck disable=SC2086
 tailscale up --auth-key "$TAILSCALE_AUTH_KEY" $TS_EXTRA_FLAGS
@@ -78,6 +97,7 @@ def generate_bootstrap_script(
     ssh_public_key: str,
     system_packages: list[str],
     tailscale_auth_key: str,
+    swap_gb: int = 0,
     is_wsl2: bool = False,
 ) -> str:
     """Generate the Phase A bootstrap script with parameters baked in."""
@@ -89,6 +109,7 @@ def generate_bootstrap_script(
         system_packages=shlex.quote(" ".join(system_packages)),
         tailscale_auth_key=shlex.quote(tailscale_auth_key),
         ts_extra_flags=shlex.quote(ts_extra_flags),
+        swap_gb=swap_gb,
     )
 
 
