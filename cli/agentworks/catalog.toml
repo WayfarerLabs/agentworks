@@ -88,7 +88,8 @@ test_exec = "az"
 #   test_file: skip if this file exists (~ resolves to the user's home)
 #   test_dir:  skip if this directory exists (~ resolves to the user's home)
 #
-# path: optional list of directories to add to the user's PATH.
+# path: optional list of directories to add to the user's PATH. This is only necessary if the install
+# command doesn't modify shell files to update the PATH automatically.
 
 [user_install_commands.oh-my-zsh]
 description = "Oh My Zsh"
@@ -121,3 +122,8 @@ description = "Starship cross-shell prompt"
 command = "curl -sS https://starship.rs/install.sh | sh -s -- -y -b ~/.local/bin"
 path = ["~/.local/bin"]
 test_exec = "starship"
+
+[user_install_commands.uv]
+description = "uv Python version manager"
+command = "curl -LsSf https://astral.sh/uv/install.sh | sh"
+test_exec = "uv"
