@@ -317,7 +317,7 @@ class WSL2Provisioner(VMProvisioner):
         )
         typer.echo(f"WSL2 distro '{vm.name}' deleted")
 
-    def exec_target(self, vm: VMRow) -> ExecTarget:
+    def exec_target(self, vm: VMRow, *, config: object | None = None) -> ExecTarget:
         return ExecTarget(wsl2=WSL2Target(distro_name=vm.name, user=vm.admin_username))
 
     def status(self, vm: VMRow) -> VMStatus:

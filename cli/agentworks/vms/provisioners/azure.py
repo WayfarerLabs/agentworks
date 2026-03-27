@@ -470,7 +470,7 @@ class AzureProvisioner(VMProvisioner):
         with contextlib.suppress(Exception):
             network.public_ip_addresses.begin_delete(rg, f"{name}-ip").result()
 
-    def exec_target(self, vm: VMRow) -> ExecTarget:
+    def exec_target(self, vm: VMRow, *, config: object | None = None) -> ExecTarget:
         assert vm.azure_resource_id is not None
         rg, name, az_cfg = _parse_resource_id(vm.azure_resource_id)
         try:
@@ -487,8 +487,19 @@ class AzureProvisioner(VMProvisioner):
         public_ip = _get_vm_public_ip(vm_info, az_cfg)
         import sys
 
+        # Include identity file if config is available (needed for SSH auth
+        # via public IP, e.g., during Tailscale logout on delete)
+        identity_file = None
+        if config is not None:
+            identity_file = getattr(getattr(config, "user", None), "ssh_private_key", None)
+
         return ExecTarget(
-            ssh=SSHTarget(host=public_ip, user=vm.admin_username, force_tty=sys.platform == "win32"),
+            ssh=SSHTarget(
+                host=public_ip,
+                user=vm.admin_username,
+                identity_file=identity_file,
+                force_tty=sys.platform == "win32",
+            ),
         )
 
     def status(self, vm: VMRow) -> VMStatus:

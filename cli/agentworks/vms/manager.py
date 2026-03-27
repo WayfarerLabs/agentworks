@@ -502,7 +502,7 @@ def delete_vm(
 
         # Tailscale logout (best-effort, via provisioning transport)
         if vm.tailscale_host:
-            _tailscale_logout(provisioner, vm)
+            _tailscale_logout(provisioner, vm, config)
 
         provisioner.delete(vm)
     except Exception as e:
@@ -600,13 +600,16 @@ def reinit_vm(
 
 
 
-def _tailscale_logout(provisioner: VMProvisioner, vm: VMRow) -> None:
+def _tailscale_logout(provisioner: VMProvisioner, vm: VMRow, config: Config) -> None:
     """Best-effort: deregister from Tailscale via the provisioning transport.
 
     Uses the provisioner's exec_target (not Tailscale SSH) because we can't
     ask Tailscale to tear itself down over the connection it provides.
     For Azure VMs, temporarily attaches a public IP for SSH access.
     """
+    import time
+
+    from agentworks.ssh import SSHError as _SSHError
     from agentworks.vms.provisioners.azure import AzureProvisioner
 
     typer.echo("Deregistering from Tailscale...")
@@ -614,9 +617,26 @@ def _tailscale_logout(provisioner: VMProvisioner, vm: VMRow) -> None:
         azure_provisioner = provisioner if isinstance(provisioner, AzureProvisioner) else None
         if azure_provisioner is not None:
             azure_provisioner.attach_public_ip(vm)
-        exec_target = provisioner.exec_target(vm)
-        exec_target.run_as_root("tailscale down", timeout=15)
-        exec_target.run_as_root("tailscale logout", timeout=15)
+        exec_target = provisioner.exec_target(vm, config=config)
+
+        # Wait for SSH to be reachable (public IP may have just been attached)
+        for attempt in range(6):
+            try:
+                exec_target.run("echo ok", timeout=10)
+                break
+            except (_SSHError, Exception):
+                if attempt == 5:
+                    raise
+                time.sleep(5)
+
+        # Fire and forget: tailscale down + logout can disrupt networking
+        # on the VM, killing SSH-based transports before they get a response.
+        # Lima/WSL2 use local transports and are unaffected, but the nohup
+        # approach works universally.
+        exec_target.run_as_root(
+            "nohup sh -c 'tailscale down && tailscale logout' >/dev/null 2>&1 &",
+            timeout=10,
+        )
         typer.echo("Tailscale node deregistered")
     except Exception as e:
         typer.echo(f"Warning: Tailscale logout failed (node may remain in admin console): {e}", err=True)
@@ -898,7 +918,7 @@ def _ensure_tailscale(
 
     try:
         verify_tailscale_available()
-        exec_target = provisioner.exec_target(vm)
+        exec_target = provisioner.exec_target(vm, config=config)
         rejoin_tailscale(
             db,
             vm.name,
