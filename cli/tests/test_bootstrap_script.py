@@ -5,7 +5,15 @@ from __future__ import annotations
 from agentworks.vms.bootstrap_script import (
     generate_bootstrap_script,
     parse_bootstrap_output,
+    vm_hostname,
 )
+
+
+def test_vm_hostname() -> None:
+    """Hostname uses <platform>--<vm_name> format."""
+    assert vm_hostname("lima", "my-vm") == "lima--my-vm"
+    assert vm_hostname("azure", "test") == "azure--test"
+    assert vm_hostname("wsl2", "dev-box") == "wsl2--dev-box"
 
 
 def test_generate_bootstrap_script_all_steps() -> None:
@@ -15,6 +23,7 @@ def test_generate_bootstrap_script_all_steps() -> None:
         ssh_public_key="ssh-ed25519 AAAA testkey",
         system_packages=["curl", "git"],
         tailscale_auth_key="tskey-auth-test123",
+        hostname="lima--myvm",
         swap_gb=4,
     )
 
@@ -24,10 +33,12 @@ def test_generate_bootstrap_script_all_steps() -> None:
     assert "##STEP## System packages" in script
     assert "##STEP## SSH public key" in script
     assert "##STEP## Swap file" in script
+    assert "##STEP## Hostname" in script
     assert "##STEP## Tailscale install" in script
     assert "##STEP## Tailscale join" in script
     assert "tskey-auth-test123" in script
     assert "SWAP_GB=4" in script
+    assert "lima--myvm" in script
 
 
 def test_generate_bootstrap_script_swap_disabled() -> None:
@@ -37,6 +48,7 @@ def test_generate_bootstrap_script_swap_disabled() -> None:
         ssh_public_key="ssh-ed25519 AAAA testkey",
         system_packages=["curl", "git"],
         tailscale_auth_key="tskey-auth-test123",
+        hostname="azure--myvm",
         swap_gb=0,
     )
 
@@ -51,6 +63,7 @@ def test_generate_bootstrap_script_wsl2() -> None:
         ssh_public_key="ssh-ed25519 AAAA testkey",
         system_packages=["curl"],
         tailscale_auth_key="tskey-auth-test123",
+        hostname="wsl2--myvm",
         is_wsl2=True,
     )
 
@@ -64,6 +77,7 @@ def test_generate_bootstrap_script_not_wsl2() -> None:
         ssh_public_key="ssh-ed25519 AAAA testkey",
         system_packages=["curl"],
         tailscale_auth_key="tskey-auth-test123",
+        hostname="lima--myvm",
         is_wsl2=False,
     )
 

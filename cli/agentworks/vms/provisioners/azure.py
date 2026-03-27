@@ -28,7 +28,7 @@ class _HasSubscriptionId(Protocol):
 
 
 from agentworks.ssh import SSHError
-from agentworks.vms.bootstrap_script import generate_bootstrap_script
+from agentworks.vms.bootstrap_script import generate_bootstrap_script, vm_hostname
 from agentworks.vms.cloud_init import SYSTEM_PACKAGES, generate_cloud_init
 
 
@@ -145,6 +145,7 @@ class AzureProvisioner(VMProvisioner):
                 ssh_public_key=ssh_pub_key,
                 system_packages=SYSTEM_PACKAGES,
                 tailscale_auth_key=tailscale_auth_key,
+                hostname=vm_hostname("azure", vm_name),
                 swap_gb=config.vm.swap_gb,
             )
             cloud_init = generate_cloud_init(bootstrap)

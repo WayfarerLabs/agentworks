@@ -24,6 +24,7 @@ VM_USER={admin_username}
 SSH_PUBLIC_KEY={ssh_public_key}
 SYSTEM_PACKAGES={system_packages}
 TAILSCALE_AUTH_KEY={tailscale_auth_key}
+VM_HOSTNAME={vm_hostname}
 TS_EXTRA_FLAGS={ts_extra_flags}
 SWAP_GB={swap_gb}
 
@@ -73,7 +74,12 @@ else
     echo "##SUCCESS## swap disabled"
 fi
 
-# -- Step 5: Install Tailscale --
+# -- Step 5: Set hostname --
+echo "##STEP## Hostname"
+hostnamectl set-hostname "$VM_HOSTNAME" 2>/dev/null || hostname "$VM_HOSTNAME"
+echo "##SUCCESS## hostname set to $VM_HOSTNAME"
+
+# -- Step 6: Install Tailscale --
 echo "##STEP## Tailscale install"
 if command -v tailscale >/dev/null 2>&1; then
     echo "##SUCCESS## tailscale already installed"
@@ -82,7 +88,7 @@ else
     echo "##SUCCESS## tailscale installed"
 fi
 
-# -- Step 6: Join Tailscale --
+# -- Step 7: Join Tailscale --
 echo "##STEP## Tailscale join"
 # shellcheck disable=SC2086
 tailscale up --auth-key "$TAILSCALE_AUTH_KEY" $TS_EXTRA_FLAGS
@@ -91,12 +97,18 @@ echo "##SUCCESS## tailscale-ip=$TS_IP"
 """
 
 
+def vm_hostname(platform: str, vm_name: str) -> str:
+    """Build a consistent VM hostname: <platform>--<vm_name>."""
+    return f"{platform}--{vm_name}"
+
+
 def generate_bootstrap_script(
     *,
     admin_username: str,
     ssh_public_key: str,
     system_packages: list[str],
     tailscale_auth_key: str,
+    hostname: str,
     swap_gb: int = 0,
     is_wsl2: bool = False,
 ) -> str:
@@ -108,6 +120,7 @@ def generate_bootstrap_script(
         ssh_public_key=shlex.quote(ssh_public_key),
         system_packages=shlex.quote(" ".join(system_packages)),
         tailscale_auth_key=shlex.quote(tailscale_auth_key),
+        vm_hostname=shlex.quote(hostname),
         ts_extra_flags=shlex.quote(ts_extra_flags),
         swap_gb=swap_gb,
     )

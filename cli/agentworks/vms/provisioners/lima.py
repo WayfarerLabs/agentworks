@@ -15,7 +15,7 @@ from agentworks.db import VMStatus
 from agentworks.ssh import ExecTarget, LimaTarget, RemoteLimaTarget, SSHError, SSHTarget, copy_to
 from agentworks.ssh import run as ssh_run
 from agentworks.vms.base import ProvisionResult, VMProvisioner
-from agentworks.vms.bootstrap_script import generate_bootstrap_script, parse_bootstrap_output
+from agentworks.vms.bootstrap_script import generate_bootstrap_script, parse_bootstrap_output, vm_hostname
 from agentworks.vms.cloud_init import SYSTEM_PACKAGES
 
 if TYPE_CHECKING:
@@ -117,6 +117,7 @@ class LimaProvisioner(VMProvisioner):
                 ssh_public_key=ssh_pub_key,
                 system_packages=SYSTEM_PACKAGES,
                 tailscale_auth_key=tailscale_auth_key,
+                hostname=vm_hostname("lima", vm_name),
                 swap_gb=config.vm.swap_gb,
             )
         else:

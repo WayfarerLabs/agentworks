@@ -710,7 +710,7 @@ def _run_bootstrap_script(
     """
     import tempfile
 
-    from agentworks.vms.bootstrap_script import generate_bootstrap_script, parse_bootstrap_output
+    from agentworks.vms.bootstrap_script import generate_bootstrap_script, parse_bootstrap_output, vm_hostname
 
     typer.echo("Bootstrapping VM (detached)...")
 
@@ -718,11 +718,13 @@ def _run_bootstrap_script(
     ts_auth_key = _resolve_tailscale_auth_key(tailscale_auth_key)
 
     ssh_public_key = config.user.ssh_public_key.read_text().strip()
+    platform = "wsl2" if is_wsl2 else "unknown"
     script = generate_bootstrap_script(
         admin_username=admin_username,
         ssh_public_key=ssh_public_key,
         system_packages=SYSTEM_PACKAGES,
         tailscale_auth_key=ts_auth_key,
+        hostname=vm_hostname(platform, vm_name),
         swap_gb=0 if is_wsl2 else config.vm.swap_gb,  # WSL2 provisioner handles swap
         is_wsl2=is_wsl2,
     )
