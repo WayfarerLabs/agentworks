@@ -30,8 +30,19 @@ def create_agent(
     *,
     name: str,
     workspace_name: str,
+    template: str | None = None,
 ) -> None:
     """Create an agent on a workspace."""
+    from dataclasses import replace as _replace
+
+    from agentworks.agents.templates import resolve_template
+
+    agent_tmpl = resolve_template(config, template)
+
+    # Replace config.agent with the resolved template so downstream code uses it
+    if template is not None:
+        config = _replace(config, agent=agent_tmpl)
+
     validate_name(name)
 
     ws = _require_workspace(db, workspace_name)

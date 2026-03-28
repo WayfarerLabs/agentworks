@@ -30,6 +30,10 @@ DYNAMIC_SNIPPETS: dict[str, str] = {
         "$(sed -n 's/^\\[vm_templates\\.\\([^]]*\\)\\]/\\1/p'"
         ' "$HOME/.config/agentworks/config.toml" 2>/dev/null)'
     ),
+    "agent_templates": (
+        "$(sed -n 's/^\\[agent_templates\\.\\([^]]*\\)\\]/\\1/p'"
+        ' "$HOME/.config/agentworks/config.toml" 2>/dev/null)'
+    ),
 }
 
 

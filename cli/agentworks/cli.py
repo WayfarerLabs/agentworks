@@ -526,12 +526,13 @@ def workspace_copy(
 def agent_create(
     name: Annotated[str, typer.Argument(help="Agent name")],
     workspace: Annotated[str, typer.Option("--workspace", help="Workspace name")] = ...,  # type: ignore[assignment]
+    template: Annotated[str | None, typer.Option("--template", help="Agent template")] = None,
 ) -> None:
     """Create an agent (isolated Linux user) on a workspace."""
     from agentworks.agents.manager import create_agent
     from agentworks.config import load_config
 
-    create_agent(_get_db(), load_config(), name=name, workspace_name=workspace)
+    create_agent(_get_db(), load_config(), name=name, workspace_name=workspace, template=template)
 
 
 @agent_app.command("list")

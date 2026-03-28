@@ -137,6 +137,39 @@ git_credentials = ["github"]
 git_credentials = []    # agents get no credentials by default
 ```
 
+## `[agent.config]` replaced by `[agent_templates.default]`
+
+Agent configuration now uses the template system, consistent with VM and workspace templates.
+
+**Before:**
+
+```toml
+[agent.config]
+shell = "bash"
+user_install_commands = ["claude"]
+```
+
+**After:**
+
+```toml
+[agent_templates.default]
+shell = "bash"
+user_install_commands = ["claude"]
+```
+
+Additional templates with inheritance:
+
+```toml
+[agent_templates.restricted]
+inherits = ["default"]
+git_credentials = []
+mise_packages = []
+```
+
+```
+agentworks agent create myagent --workspace myws --template restricted
+```
+
 ## Mise catalog entries removed
 
 Mise packages are no longer defined as catalog entries (`[mise_packages.*]` sections). Instead, use

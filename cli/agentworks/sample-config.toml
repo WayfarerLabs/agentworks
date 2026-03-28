@@ -97,11 +97,13 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # mise_allow_unlocked = false                # install packages not in lockfile (with warning)
 # mise_install_before = "7d"                 # reject versions newer than this
 
-# --- Agent user configuration ---
-# Per-user settings for agent users created within workspaces.
+# --- Agent templates ---
+# Named agent configurations selected at agent create time with --template.
+# The "default" template is used when --template is not specified.
+# Templates support inheritance via the "inherits" key.
 # Agents default to nothing unless explicitly configured.
 
-# [agent.config]
+# [agent_templates.default]
 # shell = "bash"                             # agent shell (default: bash)
 # git_credentials = []                       # git credentials for agents (default: none)
 # user_install_commands = ["claude"]         # per-user commands from catalog
@@ -113,6 +115,11 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # mise_lockfile = "~/.config/agentworks/agent-mise.lock"
 # mise_allow_unlocked = false
 # mise_install_before = "7d"
+
+# [agent_templates.restricted]
+# inherits = ["default"]
+# git_credentials = []
+# mise_packages = []
 
 # --- Task configuration ---
 # Settings for task lifecycle and defaults.

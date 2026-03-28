@@ -143,20 +143,22 @@ class AdminConfig:
 
 
 @dataclass(frozen=True)
-class AgentConfig:
-    """Per-user config for agent users on VMs."""
+class AgentTemplate:
+    """Agent template definition. All fields are optional (None = inherit/default)."""
 
-    shell: str = "bash"
-    git_credentials: list[str] = field(default_factory=list)
-    user_install_commands: list[str] = field(default_factory=list)
+    name: str
+    inherits: list[str] = field(default_factory=list)
+    shell: str | None = None
+    git_credentials: list[str] | None = None
+    user_install_commands: list[str] | None = None
     dotfiles_source: str | None = None
-    dotfiles_destination: str = "~/.dotfiles"
-    dotfiles_install_cmd: str = "./install.sh"
-    mise_activate: bool = True
-    mise_packages: list[str] = field(default_factory=list)
+    dotfiles_destination: str | None = None
+    dotfiles_install_cmd: str | None = None
+    mise_activate: bool | None = None
+    mise_packages: list[str] | None = None
     mise_lockfile: str | None = None
-    mise_allow_unlocked: bool = False
-    mise_install_before: str = "7d"
+    mise_allow_unlocked: bool | None = None
+    mise_install_before: str | None = None
 
 
 @dataclass(frozen=True)
@@ -209,7 +211,8 @@ class Config:
     vm_templates: dict[str, VMTemplate]
     vm: object  # ResolvedVMTemplate (resolved from default template at load time)
     admin: AdminConfig
-    agent: AgentConfig
+    agent_templates: dict[str, AgentTemplate]
+    agent: object  # ResolvedAgentTemplate (resolved from default template at load time)
     task: TaskConfig
     task_templates: dict[str, TaskTemplate]
     workspace_templates: dict[str, WorkspaceTemplate]
@@ -436,48 +439,85 @@ _USER_CONFIG_KEYS = {
 }
 
 
-def _load_user_config(
-    data: dict[str, object], section: str, default_shell: str,
-) -> AdminConfig | AgentConfig:
-    """Load admin or agent per-user config from [<section>.config]."""
-    top = data.get(section, {})
+def _load_admin_config(data: dict[str, object]) -> AdminConfig:
+    """Load admin per-user config from [admin.config]."""
+    top = data.get("admin", {})
     if not isinstance(top, dict):
-        raise ConfigError(f"[{section}] must be a table")
+        raise ConfigError("[admin] must be a table")
     raw = top.get("config", {})
     if not isinstance(raw, dict):
-        raise ConfigError(f"[{section}.config] must be a table")
+        raise ConfigError("[admin.config] must be a table")
 
-    _warn_unexpected_keys(raw, _USER_CONFIG_KEYS, f"{section}.config")
+    _warn_unexpected_keys(raw, _USER_CONFIG_KEYS, "admin.config")
 
-    kwargs = {
-        "shell": str(raw.get("shell", default_shell)),
-        "git_credentials": list(raw.get("git_credentials", [])),
-        "user_install_commands": list(raw.get("user_install_commands", [])),
-        "dotfiles_source": str(raw["dotfiles_source"]) if "dotfiles_source" in raw else None,
-        "dotfiles_destination": str(raw.get("dotfiles_destination", "~/.dotfiles")),
-        "dotfiles_install_cmd": str(raw.get("dotfiles_install_cmd", "./install.sh")),
-        "mise_activate": bool(raw.get("mise_activate", True)),
-        "mise_packages": list(raw.get("mise_packages", [])),
-        "mise_lockfile": str(raw["mise_lockfile"]) if "mise_lockfile" in raw else None,
-        "mise_allow_unlocked": bool(raw.get("mise_allow_unlocked", False)),
-        "mise_install_before": str(raw.get("mise_install_before", "7d")),
-    }
-
-    if section == "admin":
-        return AdminConfig(**kwargs)
-    return AgentConfig(**kwargs)
+    return AdminConfig(
+        shell=str(raw.get("shell", "zsh")),
+        git_credentials=list(raw.get("git_credentials", [])),
+        user_install_commands=list(raw.get("user_install_commands", [])),
+        dotfiles_source=str(raw["dotfiles_source"]) if "dotfiles_source" in raw else None,
+        dotfiles_destination=str(raw.get("dotfiles_destination", "~/.dotfiles")),
+        dotfiles_install_cmd=str(raw.get("dotfiles_install_cmd", "./install.sh")),
+        mise_activate=bool(raw.get("mise_activate", True)),
+        mise_packages=list(raw.get("mise_packages", [])),
+        mise_lockfile=str(raw["mise_lockfile"]) if "mise_lockfile" in raw else None,
+        mise_allow_unlocked=bool(raw.get("mise_allow_unlocked", False)),
+        mise_install_before=str(raw.get("mise_install_before", "7d")),
+    )
 
 
-def _load_admin_config(data: dict[str, object]) -> AdminConfig:
-    result = _load_user_config(data, "admin", default_shell="zsh")
-    assert isinstance(result, AdminConfig)
-    return result
+_AGENT_TEMPLATE_KEYS = _USER_CONFIG_KEYS | {"inherits"}
 
 
-def _load_agent_config(data: dict[str, object]) -> AgentConfig:
-    result = _load_user_config(data, "agent", default_shell="bash")
-    assert isinstance(result, AgentConfig)
-    return result
+def _load_agent_templates(data: dict[str, object]) -> dict[str, AgentTemplate]:
+    raw = data.get("agent_templates", {})
+    if not isinstance(raw, dict):
+        raise ConfigError("[agent_templates] must be a table")
+
+    if "agent" in data and isinstance(data["agent"], dict) and "config" in data["agent"]:
+        raise ConfigError(
+            "[agent.config] has been replaced by [agent_templates.default]. "
+            "See docs/guides/config-migration.md for details."
+        )
+
+    templates: dict[str, AgentTemplate] = {}
+    for name, tdata in raw.items():
+        if not isinstance(tdata, dict):
+            raise ConfigError(f"agent_templates.{name} must be a table")
+        _warn_unexpected_keys(tdata, _AGENT_TEMPLATE_KEYS, f"agent_templates.{name}")
+
+        templates[name] = AgentTemplate(
+            name=name,
+            inherits=list(tdata.get("inherits", [])),
+            shell=str(tdata["shell"]) if "shell" in tdata else None,
+            git_credentials=list(tdata["git_credentials"]) if "git_credentials" in tdata else None,
+            user_install_commands=(
+                list(tdata["user_install_commands"]) if "user_install_commands" in tdata else None
+            ),
+            dotfiles_source=str(tdata["dotfiles_source"]) if "dotfiles_source" in tdata else None,
+            dotfiles_destination=(
+                str(tdata["dotfiles_destination"]) if "dotfiles_destination" in tdata else None
+            ),
+            dotfiles_install_cmd=(
+                str(tdata["dotfiles_install_cmd"]) if "dotfiles_install_cmd" in tdata else None
+            ),
+            mise_activate=bool(tdata["mise_activate"]) if "mise_activate" in tdata else None,
+            mise_packages=list(tdata["mise_packages"]) if "mise_packages" in tdata else None,
+            mise_lockfile=str(tdata["mise_lockfile"]) if "mise_lockfile" in tdata else None,
+            mise_allow_unlocked=(
+                bool(tdata["mise_allow_unlocked"]) if "mise_allow_unlocked" in tdata else None
+            ),
+            mise_install_before=(
+                str(tdata["mise_install_before"]) if "mise_install_before" in tdata else None
+            ),
+        )
+
+    for name, tmpl in templates.items():
+        for parent in tmpl.inherits:
+            if parent not in templates:
+                raise ConfigError(f"agent_templates.{name}.inherits references unknown template: {parent}")
+    _detect_template_cycles(templates, "agent_templates")
+
+    return templates
 
 
 def _load_catalog_sections(
@@ -657,7 +697,7 @@ EXPECTED_TOP_LEVEL_KEYS = {
     "defaults",
     "vm_templates",
     "admin",
-    "agent",
+    "agent_templates",
     "task",
     "task_templates",
     "apt_sources",
@@ -731,11 +771,16 @@ def load_config(path: Path | None = None) -> Config:
     task_templates = _load_task_templates(data)
 
     loaded_vm_templates = _load_vm_templates(data)
+    loaded_agent_templates = _load_agent_templates(data)
 
-    # Resolve the default VM template eagerly so config.vm works everywhere
+    # Resolve default templates eagerly so config.vm / config.agent work everywhere
     from agentworks.vms.templates import resolve_from_dict as _resolve_vm
 
     resolved_vm = _resolve_vm(loaded_vm_templates)
+
+    from agentworks.agents.templates import resolve_from_dict as _resolve_agent
+
+    resolved_agent = _resolve_agent(loaded_agent_templates)
 
     return Config(
         user=_load_user(data),
@@ -744,7 +789,8 @@ def load_config(path: Path | None = None) -> Config:
         vm_templates=loaded_vm_templates,
         vm=resolved_vm,
         admin=_load_admin_config(data),
-        agent=_load_agent_config(data),
+        agent_templates=loaded_agent_templates,
+        agent=resolved_agent,
         task=task_config,
         task_templates=task_templates,
         workspace_templates=_load_workspace_templates(data),
