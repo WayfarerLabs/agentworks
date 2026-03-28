@@ -53,6 +53,7 @@ class CommandSpec:
 #   "tasks"           -> agentworks task list
 #   "task_templates"  -> [task_templates.*] sections in config.toml
 #   "agents"          -> agentworks agent list
+#   "vm_templates"    -> [vm_templates.*] sections in config.toml
 
 DYNAMIC_COMPLETIONS: dict[tuple[str, str], str] = {
     ("vm.start", "name"): "vms",
@@ -63,6 +64,7 @@ DYNAMIC_COMPLETIONS: dict[tuple[str, str], str] = {
     ("vm.shell", "name"): "vms",
     ("vm.add-git-credential", "name"): "vms",
     ("vm.port-forward", "name"): "vms",
+    ("vm.create", "template"): "vm_templates",
     ("vm.create", "vm_host"): "vm_hosts",
     ("vm-host.remove", "name"): "vm_hosts",
     ("workspace.shell", "name"): "workspaces",

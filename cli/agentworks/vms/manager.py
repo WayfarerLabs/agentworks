@@ -48,6 +48,7 @@ def create_vm(
     config: Config,
     *,
     name: str,
+    template: str | None = None,
     platform: str | None = None,
     vm_host: str | None = None,
     cpus: int | None = None,
@@ -57,6 +58,17 @@ def create_vm(
     admin_username: str | None = None,
 ) -> None:
     """Create a new VM: provision + initialize."""
+    from dataclasses import replace as _replace
+
+    from agentworks.vms.templates import resolve_template
+
+    vm_tmpl = resolve_template(config, template)
+
+    # Replace config.vm with the resolved template so downstream code
+    # (initializer, provisioners) uses the right template values.
+    if template is not None:
+        config = _replace(config, vm=vm_tmpl)
+
     # Resolve defaults
     platform = platform or config.defaults.platform or "lima"
     if platform not in VALID_PLATFORMS:
@@ -87,12 +99,12 @@ def create_vm(
         typer.echo("Error: [azure] config section required for azure platform", err=True)
         raise typer.Exit(1)
 
-    # Resolve resource settings: CLI flag > config > built-in default
-    resolved_cpus = cpus if cpus is not None else config.vm.cpus
-    resolved_memory = memory if memory is not None else config.vm.memory
-    resolved_disk = disk if disk is not None else config.vm.disk
-    resolved_azure_size = azure_vm_size or config.vm.azure_vm_size
-    resolved_admin_username = admin_username or config.vm.admin_username
+    # Resolve resource settings: CLI flag > template > built-in default
+    resolved_cpus = cpus if cpus is not None else vm_tmpl.cpus
+    resolved_memory = memory if memory is not None else vm_tmpl.memory
+    resolved_disk = disk if disk is not None else vm_tmpl.disk
+    resolved_azure_size = azure_vm_size or vm_tmpl.azure_vm_size
+    resolved_admin_username = admin_username or vm_tmpl.admin_username
     validate_admin_username(resolved_admin_username)
 
     # Pre-flight checks
@@ -111,7 +123,7 @@ def create_vm(
         cpus=resolved_cpus,
         memory_gib=resolved_memory,
         disk_gib=resolved_disk,
-        swap_gib=config.vm.swap_gb,
+        swap_gib=vm_tmpl.swap_gb,
         admin_username=resolved_admin_username,
     )
 

@@ -25,7 +25,7 @@ def config_dir(tmp_path: Path) -> Path:
         ssh_public_key = "{pub}"
         ssh_private_key = "{priv}"
 
-        [vm.config]
+        [vm_templates.default]
         apt = ["zsh", "tmux"]
 
         [admin.config]

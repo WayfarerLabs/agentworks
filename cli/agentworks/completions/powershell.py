@@ -62,6 +62,13 @@ DYNAMIC_SNIPPETS: dict[str, str] = {
         " | ForEach-Object { $_.Matches[0].Groups[1].Value } }"
         ' ($builtins + $user) | Where-Object { $_ -like "$wordToComplete*" } }'
     ),
+    "vm_templates": (
+        "& { $f = Join-Path $env:USERPROFILE '.config/agentworks/config.toml';"
+        " $t = @(); if (Test-Path $f) {"
+        " $t = Get-Content $f | Select-String '^\\[vm_templates\\.([^\\]]+)\\]'"
+        " | ForEach-Object { $_.Matches[0].Groups[1].Value } }"
+        ' $t | Where-Object { $_ -like "$wordToComplete*" } }'
+    ),
 }
 
 

@@ -36,14 +36,15 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # vm_host = "mac-studio"                     # default VM host for remote Lima
 # git_credentials = ["github"]               # git credentials to configure on vm create
 
-# --- VM configuration ---
-# Settings that control VM provisioning (immutable after create) and
-# system-wide initialization (applied on create and reinit).
+# --- VM templates ---
+# Named VM configurations selected at create time with --template.
+# The "default" template is used when --template is not specified.
+# Templates support inheritance via the "inherits" key (same as workspace templates).
 #
 # Agentworks always installs system dependencies (openssh-server, curl, git,
 # sudo, ca-certificates, gnupg, tmux, tmuxinator) regardless of this config.
 
-[vm.config]
+[vm_templates.default]
 # -- Provisioning (set once at create time) --
 # admin_username = "agentworks"              # admin username created on VMs
 # cpus = 4                                   # number of CPUs (Lima)
@@ -73,6 +74,12 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # nerf_keep_existing = false                 # preserve unmanaged files in bin/skills dirs on reinit
 # nerf_bin_dir = "/opt/agentworks/nerf/bin"  # where to deploy generated tool scripts
 # nerf_skills_dir = "/opt/agentworks/nerf/skills"  # where to deploy generated skill files
+
+# [vm_templates.heavy]
+# inherits = ["default"]
+# cpus = 16
+# memory = 64
+# disk = 200
 
 # --- Admin user configuration ---
 # Per-user settings for the admin user on VMs. Applied during init/reinit.

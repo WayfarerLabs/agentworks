@@ -229,6 +229,7 @@ def vm_host_remove(
 @vm_app.command("create")
 def vm_create(
     name: Annotated[str | None, typer.Option("--name", help="VM name (prompted if omitted)")] = None,
+    template: Annotated[str | None, typer.Option("--template", help="VM template")] = None,
     platform: Annotated[
         str | None, typer.Option("--platform", help="Platform", click_type=click.Choice(["lima", "azure", "wsl2"]))
     ] = None,
@@ -249,6 +250,7 @@ def vm_create(
         _get_db(),
         config,
         name=resolved_name,
+        template=template,
         platform=platform,
         vm_host=vm_host,
         cpus=cpus,

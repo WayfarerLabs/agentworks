@@ -10,6 +10,7 @@ import sys
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Protocol
 
 CONFIG_DIR = Path.home() / ".config" / "agentworks"
 CONFIG_PATH = CONFIG_DIR / "config.toml"
@@ -98,27 +99,31 @@ class DefaultsConfig:
 
 
 @dataclass(frozen=True)
-class VMConfig:
-    # Provisioning (immutable after vm create)
-    cpus: int = 4
-    memory: int = 8  # GiB
-    disk: int = 50  # GiB
-    azure_vm_size: str = "Standard_B2s"
-    admin_username: str = "agentworks"
-    swap_gb: int = 4  # GiB, 0 to disable
-    # System-wide initialization (applied on create and reinit)
-    apt: list[str] = field(default_factory=list)
-    apt_packages: list[str] = field(default_factory=list)
-    snap: list[str] = field(default_factory=list)
-    system_install_commands: list[str] = field(default_factory=list)
-    install_mise: bool = True
+class VMTemplate:
+    """VM template definition. All fields are optional (None = inherit/default)."""
+
+    name: str
+    inherits: list[str] = field(default_factory=list)
+    # Provisioning
+    cpus: int | None = None
+    memory: int | None = None
+    disk: int | None = None
+    azure_vm_size: str | None = None
+    admin_username: str | None = None
+    swap_gb: int | None = None
+    # System-wide initialization
+    apt: list[str] | None = None
+    apt_packages: list[str] | None = None
+    snap: list[str] | None = None
+    system_install_commands: list[str] | None = None
+    install_mise: bool | None = None
     # Nerf tools
-    install_nerf_tools: bool = False
-    skip_nerf_defaults: bool = False
-    nerf_addl_manifests: list[Path] = field(default_factory=list)
-    nerf_keep_existing: bool = False
-    nerf_bin_dir: str = "/opt/agentworks/nerf/bin"
-    nerf_skills_dir: str = "/opt/agentworks/nerf/skills"
+    install_nerf_tools: bool | None = None
+    skip_nerf_defaults: bool | None = None
+    nerf_addl_manifests: list[Path] | None = None
+    nerf_keep_existing: bool | None = None
+    nerf_bin_dir: str | None = None
+    nerf_skills_dir: str | None = None
 
 
 @dataclass(frozen=True)
@@ -200,7 +205,8 @@ class Config:
     user: UserConfig
     paths: PathsConfig
     defaults: DefaultsConfig
-    vm: VMConfig
+    vm_templates: dict[str, VMTemplate]
+    vm: object  # ResolvedVMTemplate (resolved from default template at load time)
     admin: AdminConfig
     agent: AgentConfig
     task: TaskConfig
@@ -341,7 +347,8 @@ def _load_defaults(data: dict[str, object], git_credential_names: set[str]) -> D
     )
 
 
-_VM_CONFIG_KEYS = {
+_VM_TEMPLATE_KEYS = {
+    "inherits",
     "cpus",
     "memory",
     "disk",
@@ -362,37 +369,57 @@ _VM_CONFIG_KEYS = {
 }
 
 
-def _load_vm_config(data: dict[str, object]) -> VMConfig:
-    vm_section = data.get("vm", {})
-    if not isinstance(vm_section, dict):
-        raise ConfigError("[vm] must be a table")
-    raw = vm_section.get("config", {})
+def _load_vm_templates(data: dict[str, object]) -> dict[str, VMTemplate]:
+    raw = data.get("vm_templates", {})
     if not isinstance(raw, dict):
-        raise ConfigError("[vm.config] must be a table")
+        raise ConfigError("[vm_templates] must be a table")
 
-    _warn_unexpected_keys(raw, _VM_CONFIG_KEYS, "vm.config")
+    if "vm" in data and isinstance(data["vm"], dict) and "config" in data["vm"]:
+        raise ConfigError(
+            "[vm.config] has been replaced by [vm_templates.default]. "
+            "See docs/guides/config-migration.md for details."
+        )
 
-    nerf_addl_manifests = [_expand(str(m)) for m in raw.get("nerf_addl_manifests", [])]
+    templates: dict[str, VMTemplate] = {}
+    for name, tdata in raw.items():
+        if not isinstance(tdata, dict):
+            raise ConfigError(f"vm_templates.{name} must be a table")
+        _warn_unexpected_keys(tdata, _VM_TEMPLATE_KEYS, f"vm_templates.{name}")
 
-    return VMConfig(
-        cpus=int(raw.get("cpus", 4)),
-        memory=int(raw.get("memory", 8)),
-        disk=int(raw.get("disk", 50)),
-        azure_vm_size=str(raw.get("azure_vm_size", "Standard_B2s")),
-        admin_username=str(raw.get("admin_username", "agentworks")),
-        swap_gb=int(raw.get("swap_gb", 4)),
-        apt=list(raw.get("apt", [])),
-        apt_packages=list(raw.get("apt_packages", [])),
-        snap=list(raw.get("snap", [])),
-        system_install_commands=list(raw.get("system_install_commands", [])),
-        install_mise=bool(raw.get("install_mise", True)),
-        install_nerf_tools=bool(raw.get("install_nerf_tools", False)),
-        skip_nerf_defaults=bool(raw.get("skip_nerf_defaults", False)),
-        nerf_addl_manifests=nerf_addl_manifests,
-        nerf_keep_existing=bool(raw.get("nerf_keep_existing", False)),
-        nerf_bin_dir=str(raw.get("nerf_bin_dir", "/opt/agentworks/nerf/bin")),
-        nerf_skills_dir=str(raw.get("nerf_skills_dir", "/opt/agentworks/nerf/skills")),
-    )
+        nerf_addl = [_expand(str(m)) for m in tdata["nerf_addl_manifests"]] if "nerf_addl_manifests" in tdata else None
+
+        templates[name] = VMTemplate(
+            name=name,
+            inherits=list(tdata.get("inherits", [])),
+            cpus=int(tdata["cpus"]) if "cpus" in tdata else None,
+            memory=int(tdata["memory"]) if "memory" in tdata else None,
+            disk=int(tdata["disk"]) if "disk" in tdata else None,
+            azure_vm_size=str(tdata["azure_vm_size"]) if "azure_vm_size" in tdata else None,
+            admin_username=str(tdata["admin_username"]) if "admin_username" in tdata else None,
+            swap_gb=int(tdata["swap_gb"]) if "swap_gb" in tdata else None,
+            apt=list(tdata["apt"]) if "apt" in tdata else None,
+            apt_packages=list(tdata["apt_packages"]) if "apt_packages" in tdata else None,
+            snap=list(tdata["snap"]) if "snap" in tdata else None,
+            system_install_commands=(
+                list(tdata["system_install_commands"]) if "system_install_commands" in tdata else None
+            ),
+            install_mise=bool(tdata["install_mise"]) if "install_mise" in tdata else None,
+            install_nerf_tools=bool(tdata["install_nerf_tools"]) if "install_nerf_tools" in tdata else None,
+            skip_nerf_defaults=bool(tdata["skip_nerf_defaults"]) if "skip_nerf_defaults" in tdata else None,
+            nerf_addl_manifests=nerf_addl,
+            nerf_keep_existing=bool(tdata["nerf_keep_existing"]) if "nerf_keep_existing" in tdata else None,
+            nerf_bin_dir=str(tdata["nerf_bin_dir"]) if "nerf_bin_dir" in tdata else None,
+            nerf_skills_dir=str(tdata["nerf_skills_dir"]) if "nerf_skills_dir" in tdata else None,
+        )
+
+    # Validate inherits references and cycles
+    for name, tmpl in templates.items():
+        for parent in tmpl.inherits:
+            if parent not in templates:
+                raise ConfigError(f"vm_templates.{name}.inherits references unknown template: {parent}")
+    _detect_template_cycles(templates, "vm_templates")
+
+    return templates
 
 
 _USER_CONFIG_KEYS = {
@@ -503,18 +530,23 @@ def _load_workspace_templates(data: dict[str, object]) -> dict[str, WorkspaceTem
         for parent in tmpl.inherits:
             if parent not in templates:
                 raise ConfigError(f"workspace_templates.{name}.inherits references unknown template: {parent}")
-    _detect_cycles(templates)
+    _detect_template_cycles(templates, "workspace_templates")
 
     return templates
 
 
-def _detect_cycles(templates: dict[str, WorkspaceTemplate]) -> None:
+class _HasInherits(Protocol):
+    @property
+    def inherits(self) -> list[str]: ...
+
+
+def _detect_template_cycles(templates: dict[str, _HasInherits], label: str) -> None:
     visited: set[str] = set()
     in_stack: set[str] = set()
 
     def visit(name: str) -> None:
         if name in in_stack:
-            raise ConfigError(f"workspace template inheritance cycle detected involving: {name}")
+            raise ConfigError(f"{label} inheritance cycle detected involving: {name}")
         if name in visited:
             return
         in_stack.add(name)
@@ -622,7 +654,7 @@ EXPECTED_TOP_LEVEL_KEYS = {
     "user",
     "paths",
     "defaults",
-    "vm",
+    "vm_templates",
     "admin",
     "agent",
     "task",
@@ -697,11 +729,19 @@ def load_config(path: Path | None = None) -> Config:
     task_config = _load_task_config(data)
     task_templates = _load_task_templates(data)
 
+    loaded_vm_templates = _load_vm_templates(data)
+
+    # Resolve the default VM template eagerly so config.vm works everywhere
+    from agentworks.vms.templates import resolve_from_dict as _resolve_vm
+
+    resolved_vm = _resolve_vm(loaded_vm_templates)
+
     return Config(
         user=_load_user(data),
         paths=_load_paths(data),
         defaults=_load_defaults(data, set(git_credentials.keys())),
-        vm=_load_vm_config(data),
+        vm_templates=loaded_vm_templates,
+        vm=resolved_vm,
         admin=_load_admin_config(data),
         agent=_load_agent_config(data),
         task=task_config,

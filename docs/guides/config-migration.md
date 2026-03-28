@@ -80,6 +80,42 @@ Note the renames:
 
 The `install_mise` setting stays in `[vm.config]` since it controls system-wide apt installation.
 
+## `[vm.config]` replaced by `[vm_templates.default]`
+
+VM configuration now uses the template system, consistent with workspace and task templates.
+
+**Before:**
+
+```toml
+[vm.config]
+cpus = 4
+memory = 8
+apt = ["zsh", "build-essential"]
+```
+
+**After:**
+
+```toml
+[vm_templates.default]
+cpus = 4
+memory = 8
+apt = ["zsh", "build-essential"]
+```
+
+The field names are unchanged. You can now define additional templates and select them at create
+time:
+
+```toml
+[vm_templates.heavy]
+inherits = ["default"]
+cpus = 16
+memory = 64
+```
+
+```
+agentworks vm create --template heavy
+```
+
 ## Mise catalog entries removed
 
 Mise packages are no longer defined as catalog entries (`[mise_packages.*]` sections). Instead, use
