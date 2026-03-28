@@ -52,6 +52,7 @@ Settings that configure the admin user (shell, install commands, mise) are now i
 
 ```toml
 [vm.config]
+admin_username = "agentworks"
 admin_shell = "zsh"
 admin_install_commands = ["bun", "claude"]
 mise_activate = true
@@ -65,6 +66,7 @@ mise_install_before = "7d"
 
 ```toml
 [admin.config]
+username = "agentworks"
 shell = "zsh"
 user_install_commands = ["bun", "claude"]
 mise_activate = true
@@ -77,8 +79,10 @@ mise_install_before = "7d"
 Note the renames:
 - `admin_shell` -> `shell`
 - `admin_install_commands` -> `user_install_commands`
+- `admin_username` moved here from `[vm.config]` as `username`
 
-The `install_mise` setting stays in `[vm.config]` since it controls system-wide apt installation.
+The `install_mise` setting stays in `[vm_templates.*]` since it controls system-wide apt
+installation.
 
 ## `[vm.config]` replaced by `[vm_templates.default]`
 

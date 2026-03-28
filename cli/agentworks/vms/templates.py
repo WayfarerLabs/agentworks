@@ -26,7 +26,6 @@ class ResolvedVMTemplate:
     memory: int = 8
     disk: int = 50
     azure_vm_size: str = "Standard_B2s"
-    admin_username: str = "agentworks"
     swap_gb: int = 4
     # System-wide init
     apt: list[str] = field(default_factory=list)
@@ -93,7 +92,6 @@ def _merge(target: ResolvedVMTemplate, source: ResolvedVMTemplate) -> None:
     target.memory = source.memory
     target.disk = source.disk
     target.azure_vm_size = source.azure_vm_size
-    target.admin_username = source.admin_username
     target.swap_gb = source.swap_gb
     target.apt = list(source.apt)
     target.apt_packages = list(source.apt_packages)
@@ -118,8 +116,6 @@ def _merge_template(target: ResolvedVMTemplate, tmpl: VMTemplate) -> None:
         target.disk = tmpl.disk
     if tmpl.azure_vm_size is not None:
         target.azure_vm_size = tmpl.azure_vm_size
-    if tmpl.admin_username is not None:
-        target.admin_username = tmpl.admin_username
     if tmpl.swap_gb is not None:
         target.swap_gb = tmpl.swap_gb
     if tmpl.apt is not None:

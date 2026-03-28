@@ -104,7 +104,7 @@ def create_vm(
     resolved_memory = memory if memory is not None else vm_tmpl.memory
     resolved_disk = disk if disk is not None else vm_tmpl.disk
     resolved_azure_size = azure_vm_size or vm_tmpl.azure_vm_size
-    resolved_admin_username = admin_username or vm_tmpl.admin_username
+    resolved_admin_username = admin_username or config.admin.username
     validate_admin_username(resolved_admin_username)
 
     # Pre-flight checks

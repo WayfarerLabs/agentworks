@@ -108,7 +108,6 @@ class VMTemplate:
     memory: int | None = None
     disk: int | None = None
     azure_vm_size: str | None = None
-    admin_username: str | None = None
     swap_gb: int | None = None
     # System-wide initialization
     apt: list[str] | None = None
@@ -129,6 +128,7 @@ class VMTemplate:
 class AdminConfig:
     """Per-user config for the admin user on VMs."""
 
+    username: str = "agentworks"
     shell: str = "zsh"
     git_credentials: list[str] = field(default_factory=list)
     user_install_commands: list[str] = field(default_factory=list)
@@ -355,7 +355,6 @@ _VM_TEMPLATE_KEYS = {
     "memory",
     "disk",
     "azure_vm_size",
-    "admin_username",
     "swap_gb",
     "apt",
     "apt_packages",
@@ -397,7 +396,6 @@ def _load_vm_templates(data: dict[str, object]) -> dict[str, VMTemplate]:
             memory=int(tdata["memory"]) if "memory" in tdata else None,
             disk=int(tdata["disk"]) if "disk" in tdata else None,
             azure_vm_size=str(tdata["azure_vm_size"]) if "azure_vm_size" in tdata else None,
-            admin_username=str(tdata["admin_username"]) if "admin_username" in tdata else None,
             swap_gb=int(tdata["swap_gb"]) if "swap_gb" in tdata else None,
             apt=list(tdata["apt"]) if "apt" in tdata else None,
             apt_packages=list(tdata["apt_packages"]) if "apt_packages" in tdata else None,
@@ -425,6 +423,7 @@ def _load_vm_templates(data: dict[str, object]) -> dict[str, VMTemplate]:
 
 
 _USER_CONFIG_KEYS = {
+    "username",
     "shell",
     "git_credentials",
     "user_install_commands",
@@ -451,6 +450,7 @@ def _load_admin_config(data: dict[str, object]) -> AdminConfig:
     _warn_unexpected_keys(raw, _USER_CONFIG_KEYS, "admin.config")
 
     return AdminConfig(
+        username=str(raw.get("username", "agentworks")),
         shell=str(raw.get("shell", "zsh")),
         git_credentials=list(raw.get("git_credentials", [])),
         user_install_commands=list(raw.get("user_install_commands", [])),
