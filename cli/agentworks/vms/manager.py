@@ -168,6 +168,17 @@ def create_vm(
     # -- Initialization --
     # If this fails, the VM exists on the remote host and may be debuggable.
     # Keep the DB record so the user can reinit or delete.
+    # Build a callback to detach the Azure public IP once Tailscale is up
+    # (before Phase B starts). This minimizes the window where the VM has
+    # a public IP exposed to the internet.
+    def _on_tailscale_ready() -> None:
+        if platform == "azure":
+            from agentworks.vms.provisioners.azure import AzureProvisioner as _AP
+
+            _created_vm = db.get_vm(vm_name)
+            assert _created_vm is not None
+            _AP().detach_public_ip(_created_vm)
+
     try:
         initialize_vm(
             db,
@@ -181,6 +192,7 @@ def create_vm(
             git_tokens=git_tokens,
             bootstrap_complete=result.bootstrap_complete,
             tailscale_ip=result.tailscale_ip,
+            on_tailscale_ready=_on_tailscale_ready,
         )
     except Exception as e:
         typer.echo(f"\nError: {e}", err=True)
@@ -215,20 +227,13 @@ def create_vm(
             )
         return
 
-    # -- Post-init: SSH config + cleanup --
+    # -- Post-init: SSH config --
     try:
         from agentworks.ssh_config import sync_ssh_config
 
         sync_ssh_config(config, db)
-
-        if platform == "azure":
-            from agentworks.vms.provisioners.azure import AzureProvisioner as _AP
-
-            _created_vm = db.get_vm(vm_name)
-            assert _created_vm is not None
-            _AP().detach_public_ip(_created_vm)
     except Exception as e:
-        typer.echo(f"\nWarning: post-init step failed: {e}", err=True)
+        typer.echo(f"\nWarning: SSH config sync failed: {e}", err=True)
         typer.echo("VM is likely still usable.", err=True)
 
     # Final status is set by initialize_vm (COMPLETE or PARTIAL)

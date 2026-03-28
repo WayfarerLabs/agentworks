@@ -25,7 +25,7 @@ from agentworks.ssh import ExecTarget, SSHError, SSHLogger, SSHTarget
 from agentworks.vms.cloud_init import SYSTEM_PACKAGES
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Callable, Mapping
 
     from agentworks.catalog import AptSourceEntry, SystemInstallCommandEntry, UserInstallCommandEntry
     from agentworks.config import Config
@@ -761,6 +761,7 @@ def initialize_vm(
     git_tokens: dict[str, str] | None = None,
     bootstrap_complete: bool = False,
     tailscale_ip: str | None = None,
+    on_tailscale_ready: Callable[[], None] | None = None,
 ) -> None:
     """Run the full initialization sequence on a newly provisioned VM.
 
@@ -807,6 +808,36 @@ def initialize_vm(
         logger.close()
         typer.echo(f"  Log: {logger.path}", err=True)
         raise
+
+    # Tailscale is up; caller can clean up provisioning-only resources
+    # (e.g., detach Azure public IP since Phase B uses Tailscale SSH).
+    # Removing the public IP can destabilize the network stack briefly,
+    # so we wait for Tailscale SSH to be reliably reachable before
+    # proceeding with Phase B.
+    if on_tailscale_ready is not None:
+        try:
+            on_tailscale_ready()
+        except Exception as e:
+            typer.echo(f"  Warning: post-provisioning cleanup failed: {e}", err=True)
+
+        # Wait for Tailscale SSH to stabilize after network changes
+        import time
+
+        typer.echo("  Waiting for Tailscale connectivity to stabilize (this may take several minutes)...")
+        for attempt in range(16):
+            try:
+                ts_target.run("echo ok", timeout=10)
+                # One success isn't enough; the network can flap.
+                # Wait a beat and verify again.
+                if attempt > 0:
+                    time.sleep(2)
+                    ts_target.run("echo ok", timeout=10)
+                typer.echo("  Tailscale SSH stable")
+                break
+            except SSHError:
+                if attempt == 15:
+                    typer.echo("  Warning: Tailscale SSH not stable after ~240s, proceeding anyway", err=True)
+                time.sleep(5)
 
     run_initialization(
         db,
