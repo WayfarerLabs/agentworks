@@ -82,7 +82,7 @@ def test_builtin_fallback(tmp_path: Path) -> None:
     """))
     cfg = load_config(config_file)
     result = resolve_template(cfg)
-    assert result.name == "(built-in)"
+    assert result.name == "default"
     assert result.repo is None
     assert result.tmuxinator is True
 

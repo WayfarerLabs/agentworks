@@ -464,7 +464,9 @@ def _configure_apt_sources(
                     )
                 _run_logged(target, f"chmod a+r {shlex.quote(src.key_path)}", logger, as_root=True)
             except SSHError as exc:
-                _warn(f"apt source '{name}' failed: {exc}", logger)
+                msg = f"apt source '{name}' failed: {exc}"
+                logger.warning(msg)
+                typer.echo(f"  Warning: {msg}", err=True)
                 continue
 
         # Always ensure the source list file has the correct content,

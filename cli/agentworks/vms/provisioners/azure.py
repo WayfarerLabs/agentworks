@@ -9,8 +9,10 @@ from typing import TYPE_CHECKING, Protocol
 import typer
 
 from agentworks.db import VMStatus
-from agentworks.ssh import ExecTarget, SSHTarget
+from agentworks.ssh import ExecTarget, SSHError, SSHTarget
 from agentworks.vms.base import ProvisionResult, VMProvisioner
+from agentworks.vms.bootstrap_script import generate_bootstrap_script, vm_hostname
+from agentworks.vms.cloud_init import SYSTEM_PACKAGES, generate_cloud_init
 
 if TYPE_CHECKING:
     from azure.mgmt.compute import ComputeManagementClient
@@ -25,11 +27,6 @@ class _HasSubscriptionId(Protocol):
 
     @property
     def subscription_id(self) -> str: ...
-
-
-from agentworks.ssh import SSHError
-from agentworks.vms.bootstrap_script import generate_bootstrap_script, vm_hostname
-from agentworks.vms.cloud_init import SYSTEM_PACKAGES, generate_cloud_init
 
 
 class AzureError(RuntimeError):
