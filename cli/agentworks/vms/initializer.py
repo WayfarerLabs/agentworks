@@ -61,21 +61,25 @@ def _run_logged(
     return result
 
 
-def _write_path_additions(
+AGENTWORKS_PROFILE = ".agentworks-profile.sh"
+AGENTWORKS_RC = ".agentworks-rc.sh"
+
+
+def _write_agentworks_profile(
     target: ExecTarget,
     path_additions: list[str],
     logger: SSHLogger,
 ) -> None:
-    """Write accumulated PATH additions to $HOME/.agentworks-path.sh.
+    """Write the agentworks-managed login profile fragment.
 
-    Sources the file from ~/.profile (bash/sh) and ~/.zprofile (zsh).
-    Uses $HOME instead of ~ throughout because tilde expansion is not
-    reliable in all SSH/shell contexts.
+    Writes $HOME/.agentworks-profile.sh with PATH exports and env vars.
+    Sourced from ~/.profile (bash/sh) and ~/.zprofile (zsh) -- runs once
+    per login shell, inherited by child processes.
     """
     if not path_additions:
         return
 
-    # Deduplicate while preserving order
+    # Deduplicate paths while preserving order
     seen: set[str] = set()
     unique_paths: list[str] = []
     for p in path_additions:
@@ -83,31 +87,277 @@ def _write_path_additions(
             seen.add(p)
             unique_paths.append(p)
 
-    logger.step("PATH configuration")
-    typer.echo(f"  Adding {len(unique_paths)} PATH entries...")
+    logger.step("Shell profile")
+    typer.echo(f"  Writing agentworks profile ({len(unique_paths)} PATH entries)...")
 
     try:
-        # Build the path file content locally and copy it over
-        # (avoids quoting issues with nested quotes over SSH on Windows)
         lines = ["# Managed by agentworks -- do not edit"]
         for p in unique_paths:
             expanded = p.replace("~", "$HOME", 1) if p.startswith("~") else p
             lines.append(f'export PATH="{expanded}:$PATH"')
-        target.write_file("~/.agentworks-path.sh", "\n".join(lines) + "\n")
+        target.write_file(f"~/{AGENTWORKS_PROFILE}", "\n".join(lines) + "\n")
 
         # Source from ~/.profile (bash/sh) and ~/.zprofile (zsh)
-        source_line = ". $HOME/.agentworks-path.sh"
+        source_line = f". $HOME/{AGENTWORKS_PROFILE}"
         for rc in ("$HOME/.profile", "$HOME/.zprofile"):
             _run_logged(
                 target,
-                f"grep -q agentworks-path.sh {rc} 2>/dev/null || printf '%s\\n' '{source_line}' >> {rc}",
+                f"grep -q {AGENTWORKS_PROFILE} {rc} 2>/dev/null"
+                f" || printf '%s\\n' '{source_line}' >> {rc}",
                 logger,
             )
     except SSHError as e:
-        msg = f"PATH configuration failed: {e}"
+        msg = f"shell profile write failed: {e}"
         logger.warning(msg)
         typer.echo(f"  Warning: {msg}", err=True)
 
+
+def _write_agentworks_rc(
+    target: ExecTarget,
+    shell_snippets: list[str],
+    logger: SSHLogger,
+) -> None:
+    """Write the agentworks-managed rc fragment for interactive shells.
+
+    Writes $HOME/.agentworks-rc.sh with shell hooks (e.g., mise activate).
+    Sourced from ~/.bashrc and ~/.zshrc -- runs per interactive shell instance.
+    """
+    if not shell_snippets:
+        return
+
+    logger.step("Shell rc")
+    typer.echo("  Writing agentworks rc...")
+
+    try:
+        lines = ["# Managed by agentworks -- do not edit"]
+        lines.extend(shell_snippets)
+        target.write_file(f"~/{AGENTWORKS_RC}", "\n".join(lines) + "\n")
+
+        # Source from ~/.bashrc and ~/.zshrc
+        source_line = f". $HOME/{AGENTWORKS_RC}"
+        for rc in ("$HOME/.bashrc", "$HOME/.zshrc"):
+            _run_logged(
+                target,
+                f"grep -q {AGENTWORKS_RC} {rc} 2>/dev/null"
+                f" || printf '%s\\n' '{source_line}' >> {rc}",
+                logger,
+            )
+    except SSHError as e:
+        msg = f"shell rc write failed: {e}"
+        logger.warning(msg)
+        typer.echo(f"  Warning: {msg}", err=True)
+
+
+# -- Mise installation ---------------------------------------------------------
+
+MISE_GPG_KEY_URL = "https://mise.jdx.dev/gpg-key.pub"
+MISE_GPG_KEY_PATH = "/etc/apt/keyrings/mise-archive-keyring.asc"
+MISE_SOURCE_LINE = (
+    f"deb [signed-by={MISE_GPG_KEY_PATH}] https://mise.jdx.dev/deb stable main"
+)
+MISE_SOURCE_FILE = "/etc/apt/sources.list.d/mise.list"
+
+def _install_mise_apt(
+    target: ExecTarget,
+    logger: SSHLogger,
+) -> bool:
+    """Install mise system-wide via apt. Returns True on success."""
+    logger.step("Mise (apt)")
+    typer.echo("  Installing mise via apt...")
+
+    try:
+        # Download GPG key (curl -o so sudo covers the write)
+        _run_logged(
+            target,
+            f"curl -fsSL {MISE_GPG_KEY_URL} -o {MISE_GPG_KEY_PATH}",
+            logger,
+            as_root=True,
+            timeout=30,
+        )
+        # Write apt source list (sh -c so sudo covers the redirect)
+        inner = f"printf '%s\\n' '{MISE_SOURCE_LINE}' > {MISE_SOURCE_FILE}"
+        _run_logged(
+            target,
+            f"sh -c {shlex.quote(inner)}",
+            logger,
+            as_root=True,
+        )
+        # Install
+        _run_logged(target, "apt-get update -qq", logger, as_root=True, timeout=60)
+        _run_logged(target, "apt-get install -y -qq mise", logger, as_root=True, timeout=120)
+
+    except SSHError as e:
+        msg = f"mise apt installation failed: {e}"
+        logger.warning(msg)
+        typer.echo(f"  Warning: {msg}", err=True)
+        return False
+    return True
+
+
+MISE_ACTIVATE_LINES = (
+    '# agentworks-mise-activate\n'
+    'if [ -n "$ZSH_VERSION" ]; then\n'
+    '  eval "$(mise activate zsh)"\n'
+    'elif [ -n "$BASH_VERSION" ]; then\n'
+    '  eval "$(mise activate bash)"\n'
+    'else\n'
+    '  echo "agentworks: mise activate skipped (unsupported shell)" >&2\n'
+    'fi'
+)
+
+
+def _mise_shims_path(home: str) -> list[str]:
+    """Return PATH additions for mise shims (for non-interactive contexts)."""
+    return [f"{home}/.local/share/mise/shims"]
+
+
+def _write_mise_config(
+    target: ExecTarget,
+    packages: list[str],
+    install_before: str,
+    home: str,
+    logger: SSHLogger,
+) -> None:
+    """Write ~/.config/mise/config.toml from mise_packages list.
+
+    Packages are name@version strings (e.g., "jq@1.8.1").
+    """
+    if not packages:
+        return
+
+    logger.step("Mise config")
+    typer.echo(f"  Writing mise config with {len(packages)} package(s)...")
+
+    settings_lines = ["[settings]", f'install_before = "{install_before}"', ""]
+    tools_lines = ["[tools]"]
+
+    for pkg in packages:
+        if "@" in pkg:
+            name, version = pkg.rsplit("@", 1)
+            tools_lines.append(f'"{name}" = "{version}"')
+        else:
+            tools_lines.append(f'"{pkg}" = "latest"')
+
+    mise_config = "\n".join(settings_lines + tools_lines) + "\n"
+
+    try:
+        mise_config_dir = f"{home}/.config/mise"
+        _run_logged(target, f"mkdir -p {mise_config_dir}", logger)
+        target.write_file(f"{mise_config_dir}/config.toml", mise_config)
+    except SSHError as e:
+        msg = f"mise config write failed: {e}"
+        logger.warning(msg)
+        typer.echo(f"  Warning: {msg}", err=True)
+
+
+def _fetch_mise_lockfile(
+    target: ExecTarget,
+    lockfile_source: str,
+    home: str,
+    logger: SSHLogger,
+) -> None:
+    """Fetch a mise lockfile from a source reference to ~/.config/mise/mise.lock."""
+    from agentworks.sources import SourceRefError, fetch_file, parse_source_ref
+
+    logger.step("Mise lockfile")
+    typer.echo(f"  Fetching mise lockfile from {lockfile_source}...")
+
+    try:
+        ref = parse_source_ref(lockfile_source, default_filename="mise.lock")
+        dest = f"{home}/.config/mise/mise.lock"
+        _run_logged(target, f"mkdir -p {home}/.config/mise", logger)
+        fetch_file(ref, target, dest, logger=logger)
+    except SourceRefError as e:
+        msg = f"mise lockfile fetch failed: {e}"
+        logger.warning(msg)
+        typer.echo(f"  Warning: {msg}", err=True)
+
+
+def _parse_mise_failures(error: SSHError) -> list[str]:
+    """Extract failed tool names from mise stderr output.
+
+    Parses lines like:
+      mise ERROR Failed to install aqua:npryce/adr-tools@3.0.0: reason here
+    The tool name can contain colons (backend:path@version), so we split
+    on ": " (colon-space) to separate tool from reason.
+    """
+    failures: list[str] = []
+    error_str = str(error)
+    for line in error_str.splitlines():
+        if "Failed to install" in line:
+            part = line.split("Failed to install", 1)[1].strip()
+            tool = part.split(": ", 1)[0].strip()
+            if tool and tool not in failures:
+                failures.append(tool)
+    return failures
+
+
+def _run_mise_install(
+    target: ExecTarget,
+    shell: str,
+    home: str,
+    allow_unlocked: bool,
+    logger: SSHLogger,
+) -> None:
+    """Run mise install, handling locked/unlocked modes.
+
+    If a lockfile is present, tries --locked first. If that fails due to
+    unlocked packages and allow_unlocked is true, retries without --locked.
+    """
+    logger.step("Mise install")
+
+    # Check if a lockfile is present
+    lockfile_path = f"{home}/.config/mise/mise.lock"
+    has_lockfile = False
+    try:
+        check = target.run(f"test -f {lockfile_path}", check=False)
+        has_lockfile = check.ok
+    except SSHError:
+        pass
+
+    if has_lockfile:
+        typer.echo("  Running mise install (locked)...")
+        try:
+            _run_logged(
+                target,
+                f"{shell} -lc 'mise install -y --locked'",
+                logger,
+                timeout=300,
+            )
+            typer.echo("  Mise packages installed (locked)")
+            return
+        except SSHError as e:
+            logger.warning(f"mise install --locked failed: {e}")
+            failures = _parse_mise_failures(e)
+            for tool in failures:
+                typer.echo(f"  Locked install failed, not in lockfile: {tool}", err=True)
+            if not failures:
+                typer.echo("  Warning: mise install --locked failed (see vm logs)", err=True)
+            if not allow_unlocked:
+                typer.echo("  Hint: set mise_allow_unlocked = true to install unlocked packages", err=True)
+                return
+            typer.echo("  Retrying unlocked...", err=True)
+
+    # Unlocked install
+    typer.echo("  Running mise install...")
+    try:
+        _run_logged(
+            target,
+            f"{shell} -lc 'mise install -y'",
+            logger,
+            timeout=300,
+        )
+        typer.echo("  Mise packages installed")
+    except SSHError as e:
+        logger.warning(f"mise install failed: {e}")
+        failures = _parse_mise_failures(e)
+        for tool in failures:
+            typer.echo(f"  Failed: {tool}", err=True)
+        if not failures:
+            typer.echo("  Warning: mise install failed (see vm logs)", err=True)
+
+
+# -- SSH authorized keys ------------------------------------------------------
 
 AUTHORIZED_KEYS_HEADER = """\
 # Managed by agentworks -- manual edits will be overwritten on reinit.
@@ -867,6 +1117,11 @@ def _phase_b_setup(
     # Non-fatal: reconcile authorized_keys
     _reconcile_authorized_keys(ts_target, config, home, logger)
 
+    # Non-fatal: mise (system-wide apt install)
+    mise_available = False
+    if config.vm.install_mise:
+        mise_available = _install_mise_apt(ts_target, logger)
+
     # Non-fatal: system install commands
     system_path = _run_catalog_commands(
         ts_target,
@@ -878,32 +1133,21 @@ def _phase_b_setup(
         label="System install command",
     )
 
-    # Non-fatal: user install commands for admin user
-    user_path = _run_catalog_commands(
-        ts_target,
-        config.vm.admin_install_commands,
-        catalog.user_install_commands,
-        admin_shell,
-        home,
-        logger,
-        label="User install command",
-    )
+    # Non-fatal: mise config (written before dotfiles so dotfiles can override)
+    mise_path: list[str] = []
+    if mise_available and config.vm.mise_packages:
+        _write_mise_config(ts_target, config.vm.mise_packages, config.vm.mise_install_before, home, logger)
+        mise_path = _mise_shims_path(home)
+    elif mise_available:
+        mise_path = _mise_shims_path(home)
 
-    # Non-fatal: PATH additions from both system + user install commands
-    _write_path_additions(ts_target, system_path + user_path, logger)
-
-    # Non-fatal: nerf tools
-    if config.vm.install_nerf_tools:
-        _install_nerf_tools(ts_target, config, logger)
-
-    # Non-fatal: git credentials
+    # Non-fatal: git credentials (before dotfiles and mise lockfile for private repos)
     if providers:
         _configure_git_credentials(vm_name, ts_target, providers, logger, git_tokens=git_tokens)
 
-    # Non-fatal: dotfiles
+    # Non-fatal: dotfiles (can override mise config, can provide lockfile)
     if config.dotfiles.enabled and (config.dotfiles.source or config.dotfiles.repo):
         logger.step("Dotfiles")
-        # Resolve ~ to the admin user's home on the VM
         dest = config.dotfiles.destination.replace("~", home)
         try:
             if config.dotfiles.repo:
@@ -917,6 +1161,43 @@ def _phase_b_setup(
             msg = f"dotfiles install failed: {e}"
             logger.warning(msg)
             typer.echo(f"  Warning: {msg}", err=True)
+
+    # Non-fatal: mise lockfile (after git creds and dotfiles; overrides dotfiles lockfile)
+    if mise_available and config.vm.mise_lockfile:
+        _fetch_mise_lockfile(ts_target, config.vm.mise_lockfile, home, logger)
+
+    # Non-fatal: mise install (after config + dotfiles + lockfile are all settled)
+    if mise_available and (config.vm.mise_packages or config.vm.mise_lockfile):
+        _run_mise_install(ts_target, admin_shell, home, config.vm.mise_allow_unlocked, logger)
+    elif mise_available:
+        try:
+            check = ts_target.run(f"test -f {home}/.config/mise/config.toml", check=False)
+            if check.ok:
+                _run_mise_install(ts_target, admin_shell, home, config.vm.mise_allow_unlocked, logger)
+        except SSHError:
+            pass
+
+    # Non-fatal: user install commands for admin user (may depend on mise tools)
+    user_path = _run_catalog_commands(
+        ts_target,
+        config.vm.admin_install_commands,
+        catalog.user_install_commands,
+        admin_shell,
+        home,
+        logger,
+        label="User install command",
+    )
+
+    # Non-fatal: shell profile (PATH exports, sourced at login)
+    _write_agentworks_profile(ts_target, system_path + mise_path + user_path, logger)
+
+    # Non-fatal: shell rc (interactive shell hooks like mise activate)
+    rc_snippets = [MISE_ACTIVATE_LINES] if (mise_available and config.vm.mise_activate) else []
+    _write_agentworks_rc(ts_target, rc_snippets, logger)
+
+    # Non-fatal: nerf tools
+    if config.vm.install_nerf_tools:
+        _install_nerf_tools(ts_target, config, logger)
 
 
 def _sync_dotfiles_repo(

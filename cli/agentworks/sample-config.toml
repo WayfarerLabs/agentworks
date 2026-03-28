@@ -78,6 +78,13 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # snap = []                                  # direct snap packages
 # system_install_commands = ["az-cli"]       # system-level commands from catalog
 # admin_install_commands = ["bun", "claude"] # per-user commands for admin user
+# -- Mise (polyglot tool manager) --
+# install_mise = true                        # install mise via apt (default: true)
+# mise_activate = true                       # add mise activate to shell profile
+# mise_packages = ["jq@1.8.1", "adr-tools@3.0.0"]  # name@version tool declarations
+# mise_lockfile = "~/.config/agentworks/mise.lock"   # local path or git:: source ref (wins over dotfiles)
+# mise_allow_unlocked = false                # install packages not in lockfile (with warning)
+# mise_install_before = "7d"                 # reject versions newer than this
 # -- Nerf tools --
 # install_nerf_tools = false                 # set to true to build and deploy nerf tools during init
 # skip_nerf_defaults = false                 # skip built-in nerf catalog (nerf build --no-default)
@@ -94,6 +101,11 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 
 # [agent.config]
 # user_install_commands = ["claude"]         # per-user commands from catalog
+# mise_activate = true                       # add mise activate to agent shell profile
+# mise_packages = ["jq@1.8.1"]              # name@version (agents default to nothing)
+# mise_lockfile = "~/.config/agentworks/agent-mise.lock"
+# mise_allow_unlocked = false
+# mise_install_before = "7d"
 # shell = "bash"                             # agent shell (default: bash)
 
 # --- Task configuration ---

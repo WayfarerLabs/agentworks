@@ -122,6 +122,13 @@ class VMConfig:
     snap: list[str] = field(default_factory=list)
     system_install_commands: list[str] = field(default_factory=list)
     admin_install_commands: list[str] = field(default_factory=list)
+    # Mise (system-level: install_mise; admin-user: the rest)
+    install_mise: bool = True
+    mise_activate: bool = True
+    mise_packages: list[str] = field(default_factory=list)
+    mise_lockfile: str | None = None
+    mise_allow_unlocked: bool = False
+    mise_install_before: str = "7d"
     # Nerf tools
     install_nerf_tools: bool = False
     skip_nerf_defaults: bool = False
@@ -134,6 +141,11 @@ class VMConfig:
 @dataclass(frozen=True)
 class AgentConfig:
     user_install_commands: list[str] = field(default_factory=list)
+    mise_activate: bool = True
+    mise_packages: list[str] = field(default_factory=list)
+    mise_lockfile: str | None = None
+    mise_allow_unlocked: bool = False
+    mise_install_before: str = "7d"
     shell: str = "bash"
 
 
@@ -363,6 +375,12 @@ _VM_CONFIG_KEYS = {
     "snap",
     "system_install_commands",
     "admin_install_commands",
+    "install_mise",
+    "mise_activate",
+    "mise_packages",
+    "mise_lockfile",
+    "mise_allow_unlocked",
+    "mise_install_before",
     "install_nerf_tools",
     "skip_nerf_defaults",
     "nerf_addl_manifests",
@@ -397,6 +415,12 @@ def _load_vm_config(data: dict[str, object]) -> VMConfig:
         snap=list(raw.get("snap", [])),
         system_install_commands=list(raw.get("system_install_commands", [])),
         admin_install_commands=list(raw.get("admin_install_commands", [])),
+        install_mise=bool(raw.get("install_mise", True)),
+        mise_activate=bool(raw.get("mise_activate", True)),
+        mise_packages=list(raw.get("mise_packages", [])),
+        mise_lockfile=str(raw["mise_lockfile"]) if "mise_lockfile" in raw else None,
+        mise_allow_unlocked=bool(raw.get("mise_allow_unlocked", False)),
+        mise_install_before=str(raw.get("mise_install_before", "7d")),
         install_nerf_tools=bool(raw.get("install_nerf_tools", False)),
         skip_nerf_defaults=bool(raw.get("skip_nerf_defaults", False)),
         nerf_addl_manifests=nerf_addl_manifests,
@@ -406,7 +430,15 @@ def _load_vm_config(data: dict[str, object]) -> VMConfig:
     )
 
 
-_AGENT_CONFIG_KEYS = {"user_install_commands", "shell"}
+_AGENT_CONFIG_KEYS = {
+    "user_install_commands",
+    "mise_activate",
+    "mise_packages",
+    "mise_lockfile",
+    "mise_allow_unlocked",
+    "mise_install_before",
+    "shell",
+}
 
 
 def _load_agent_config(data: dict[str, object]) -> AgentConfig:
@@ -421,6 +453,11 @@ def _load_agent_config(data: dict[str, object]) -> AgentConfig:
 
     return AgentConfig(
         user_install_commands=list(raw.get("user_install_commands", [])),
+        mise_activate=bool(raw.get("mise_activate", True)),
+        mise_packages=list(raw.get("mise_packages", [])),
+        mise_lockfile=str(raw["mise_lockfile"]) if "mise_lockfile" in raw else None,
+        mise_allow_unlocked=bool(raw.get("mise_allow_unlocked", False)),
+        mise_install_before=str(raw.get("mise_install_before", "7d")),
         shell=str(raw.get("shell", "bash")),
     )
 

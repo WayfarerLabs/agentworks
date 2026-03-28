@@ -292,6 +292,12 @@ Key sections:
 - `[git_credentials.*]` -- git credential providers (GitHub, Azure DevOps)
 - `[azure]` -- Azure-specific settings
 
+### Mise (Polyglot Tool Manager)
+
+Agentworks installs [mise](https://mise.jdx.dev/) by default on all VMs for managing CLI tools
+(jq, adr-tools, node, etc.) with optional lockfile-based integrity verification. See
+[Using mise](../docs/guides/mise.md) for the full guide.
+
 ### Built-in Catalog
 
 Agentworks ships a built-in catalog of common tools (apt sources, apt packages, system install
@@ -308,9 +314,10 @@ VM creation follows a two-phase lifecycle tracked by separate status columns:
    install and join Tailscale
 
 2. **Initialization** (`init_status`) -- repeatable via `vm reinit`, over Tailscale SSH: configure
-   apt sources, install apt packages, install snap packages, set shell, reconcile SSH authorized
-   keys, run system install commands, run user install commands for the admin user, configure PATH,
-   configure git credentials, sync dotfiles
+   apt sources, install apt packages, install snap packages, install mise, set shell, reconcile SSH
+   authorized keys, run system install commands, write mise config, configure PATH, configure git
+   credentials, sync dotfiles, fetch mise lockfile, run mise install, run user install commands for
+   the admin user
 
 Initialization is fully declarative -- driven entirely by config. `vm create` only accepts immutable
 provisioning parameters (name, platform, resources). `vm reinit` takes only the VM name and re-runs

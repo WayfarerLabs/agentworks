@@ -199,6 +199,10 @@ def _create_agent_on_vm(
     # Run user install commands for this agent
     _run_agent_install_commands(vm, config, linux_user, home)
 
+    # Configure mise for this agent (if mise is installed and agent has packages)
+    if config.vm.install_mise:
+        _run_agent_mise_setup(vm, config, linux_user, home)
+
 
 def _delete_agent_on_vm(
     vm: VMRow,
@@ -276,6 +280,8 @@ def _run_agent_install_commands(
 
     # Write PATH additions for the agent
     if path_additions:
+        from agentworks.vms.initializer import AGENTWORKS_PROFILE
+
         typer.echo(f"  Adding {len(path_additions)} PATH entries for agent...")
         lines = ["# Managed by agentworks -- do not edit"]
         for p in path_additions:
@@ -283,25 +289,167 @@ def _run_agent_install_commands(
             lines.append(f'export PATH="{expanded}:$PATH"')
         content = "\n".join(lines) + "\n"
         try:
-            path_file = f"{home}/.agentworks-path.sh"
+            profile_path = f"{home}/{AGENTWORKS_PROFILE}"
             run_as_root(
                 target,
-                f"printf '%s' {shlex.quote(content)} > {shlex.quote(path_file)}",
+                f"printf '%s' {shlex.quote(content)} > {shlex.quote(profile_path)}",
             )
-            run_as_root(target, f"chown {shlex.quote(linux_user)} {shlex.quote(path_file)}")
+            run_as_root(target, f"chown {shlex.quote(linux_user)} {shlex.quote(profile_path)}")
             # Source from shell profiles
-            source_line = f". {path_file}"
+            source_line = f". {profile_path}"
             rc_files = [f"{home}/.profile", f"{home}/.bashrc"]
             if shell == "zsh":
                 rc_files.append(f"{home}/.zprofile")
             for rc in rc_files:
                 run_as_root(
                     target,
-                    f"grep -q agentworks-path.sh {shlex.quote(rc)} 2>/dev/null"
+                    f"grep -q {AGENTWORKS_PROFILE} {shlex.quote(rc)} 2>/dev/null"
                     f" || printf '%s\\n' '{source_line}' >> {shlex.quote(rc)}",
                 )
         except SSHError as e:
             typer.echo(f"  Warning: agent PATH configuration failed: {e}", err=True)
+
+
+def _run_agent_mise_setup(
+    vm: VMRow,
+    config: Config,
+    linux_user: str,
+    home: str,
+) -> None:
+    """Set up mise for an agent: shims PATH, config, lockfile, install.
+
+    Shell activation is handled system-wide via /etc/profile.d/mise.sh
+    (written during VM init), so no per-user rc file manipulation is needed.
+    Agents default to nothing unless explicitly configured.
+    """
+    import shlex
+
+    from agentworks.sources import SourceRefError, fetch_file, parse_source_ref
+    from agentworks.ssh import SSHError, run_as_root
+
+    target = ssh_target_for_vm(vm, config)
+    shell = config.agent.shell
+    agent_cfg = config.agent
+    has_packages = bool(agent_cfg.mise_packages)
+    has_lockfile = bool(agent_cfg.mise_lockfile)
+
+    if not has_packages and not has_lockfile:
+        return
+
+    # Append mise shims PATH to agent's agentworks profile (env vars, login shell)
+    from agentworks.vms.initializer import AGENTWORKS_PROFILE, AGENTWORKS_RC, MISE_ACTIVATE_LINES
+
+    shims_path = f"{home}/.local/share/mise/shims"
+    try:
+        profile_path = f"{home}/{AGENTWORKS_PROFILE}"
+        profile_line = f'export PATH="{shims_path}:$PATH"\n'
+        run_as_root(target, f"printf '%s' {shlex.quote(profile_line)} >> {shlex.quote(profile_path)}")
+        run_as_root(target, f"chown {shlex.quote(linux_user)} {shlex.quote(profile_path)}")
+
+        # Ensure profile is sourced (may already be set up by install commands)
+        source_line = f". {profile_path}"
+        for rc in [f"{home}/.profile", f"{home}/.zprofile"]:
+            run_as_root(
+                target,
+                f"grep -q {AGENTWORKS_PROFILE} {shlex.quote(rc)} 2>/dev/null"
+                f" || printf '%s\\n' '{source_line}' >> {shlex.quote(rc)}",
+            )
+    except SSHError as e:
+        typer.echo(f"  Warning: agent profile configuration failed: {e}", err=True)
+
+    # Write mise activation to agent's agentworks rc (shell hooks, interactive shell)
+    if agent_cfg.mise_activate:
+        try:
+            rc_path = f"{home}/{AGENTWORKS_RC}"
+            rc_content = f"# Managed by agentworks -- do not edit\n{MISE_ACTIVATE_LINES}\n"
+            run_as_root(target, f"printf '%s' {shlex.quote(rc_content)} >> {shlex.quote(rc_path)}")
+            run_as_root(target, f"chown {shlex.quote(linux_user)} {shlex.quote(rc_path)}")
+
+            source_line = f". {rc_path}"
+            for rc in [f"{home}/.bashrc", f"{home}/.zshrc"]:
+                run_as_root(
+                    target,
+                    f"grep -q {AGENTWORKS_RC} {shlex.quote(rc)} 2>/dev/null"
+                    f" || printf '%s\\n' '{source_line}' >> {shlex.quote(rc)}",
+                )
+        except SSHError as e:
+            typer.echo(f"  Warning: agent rc configuration failed: {e}", err=True)
+
+    mise_config_dir = f"{home}/.config/mise"
+
+    # Write mise config if packages declared
+    if has_packages:
+        typer.echo(f"  Writing mise config for agent ({len(agent_cfg.mise_packages)} packages)...")
+        settings_lines = ["[settings]", f'install_before = "{agent_cfg.mise_install_before}"', ""]
+        tools_lines = ["[tools]"]
+        for pkg in agent_cfg.mise_packages:
+            if "@" in pkg:
+                name, version = pkg.rsplit("@", 1)
+                tools_lines.append(f'"{name}" = "{version}"')
+            else:
+                tools_lines.append(f'"{pkg}" = "latest"')
+        mise_config = "\n".join(settings_lines + tools_lines) + "\n"
+        try:
+            run_as_root(target, f"mkdir -p {mise_config_dir}")
+            inner = f"printf '%s' {shlex.quote(mise_config)} > {mise_config_dir}/config.toml"
+            run_as_root(target, f"sh -c {shlex.quote(inner)}")
+            run_as_root(target, f"chown -R {shlex.quote(linux_user)} {home}/.config")
+        except SSHError as e:
+            typer.echo(f"  Warning: agent mise config write failed: {e}", err=True)
+            return
+
+    # Copy lockfile if configured
+    if has_lockfile and agent_cfg.mise_lockfile:
+        typer.echo(f"  Fetching agent mise lockfile from {agent_cfg.mise_lockfile}...")
+        try:
+            ref = parse_source_ref(agent_cfg.mise_lockfile, default_filename="mise.lock")
+            # For agents, we need to use the ExecTarget wrapper since fetch_file
+            # expects it. Build one from the SSH target.
+            from agentworks.ssh import ExecTarget
+
+            exec_target = ExecTarget(ssh=ssh_target_for_vm(vm, config))
+            run_as_root(target, f"mkdir -p {mise_config_dir}")
+            fetch_file(ref, exec_target, f"{mise_config_dir}/mise.lock")
+            run_as_root(target, f"chown {shlex.quote(linux_user)} {mise_config_dir}/mise.lock")
+        except (SourceRefError, SSHError) as e:
+            typer.echo(f"  Warning: agent mise lockfile fetch failed: {e}", err=True)
+
+    # Run mise install
+    lockfile_exists = False
+    try:
+        check = run_as_root(target, f"test -f {mise_config_dir}/mise.lock", check=False)
+        lockfile_exists = check.ok
+    except SSHError:
+        pass
+
+    install_flags = "-y --locked" if lockfile_exists else "-y"
+    inner_cmd = shlex.quote(f"mise install {install_flags}")
+    shell_cmd = shlex.quote(f"{shell} -lc {inner_cmd}")
+    try:
+        run_as_root(
+            target,
+            f"su - {shlex.quote(linux_user)} -c {shell_cmd}",
+            timeout=300,
+        )
+        typer.echo("  Agent mise packages installed")
+    except SSHError as e:
+        if lockfile_exists and agent_cfg.mise_allow_unlocked:
+            typer.echo("  Warning: some agent packages not in lockfile, installing unlocked...", err=True)
+            inner_cmd = shlex.quote("mise install -y")
+            shell_cmd = shlex.quote(f"{shell} -lc {inner_cmd}")
+            try:
+                run_as_root(
+                    target,
+                    f"su - {shlex.quote(linux_user)} -c {shell_cmd}",
+                    timeout=300,
+                )
+                typer.echo("  Agent mise packages installed (unlocked)")
+            except SSHError as e2:
+                typer.echo(f"  Warning: agent mise install failed: {e2}", err=True)
+        else:
+            typer.echo(f"  Warning: agent mise install failed: {e}", err=True)
+            if lockfile_exists:
+                typer.echo("  Hint: set mise_allow_unlocked = true to install unlocked packages", err=True)
 
 
 def _build_agent_test_command(

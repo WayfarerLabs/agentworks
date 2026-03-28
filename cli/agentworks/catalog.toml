@@ -91,6 +91,8 @@ test_exec = "az"
 # path: optional list of directories to add to the user's PATH. This is only necessary if the install
 # command doesn't modify shell files to update the PATH automatically.
 
+# -- User install commands -----------------------------------------------------
+
 [user_install_commands.oh-my-zsh]
 description = "Oh My Zsh"
 command = "sh -c \"$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)\" -- --unattended"
