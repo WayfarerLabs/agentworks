@@ -133,10 +133,16 @@ def run_doctor() -> None:
 
             # Dotfiles
             if config.dotfiles.enabled:
-                if config.dotfiles.source.exists():
-                    ok(f"Dotfiles source: {config.dotfiles.source}")
+                if config.dotfiles.source:
+                    from agentworks.sources import parse_source_ref
+
+                    ref = parse_source_ref(config.dotfiles.source)
+                    if ref.kind == "git" or Path(ref.path).expanduser().exists():
+                        ok(f"Dotfiles source: {config.dotfiles.source}")
+                    else:
+                        warn(f"Dotfiles enabled but source missing: {config.dotfiles.source}")
                 else:
-                    warn(f"Dotfiles enabled but source missing: {config.dotfiles.source}")
+                    warn("Dotfiles enabled but no source configured")
 
             # Git credentials
             if config.git_credentials:

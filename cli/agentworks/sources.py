@@ -1,10 +1,15 @@
-"""Source reference resolution for fetching files from local or remote sources.
+"""Source reference resolution for fetching files or directories from local or remote sources.
 
 Supports Terraform-style source references:
-  - Local file: ~/.config/agentworks/mise.lock (or file::~/.config/...)
-  - Git repo:   git::https://github.com/user/repo.git
-  - Git + path: git::https://github.com/user/repo.git//path/to/file
-  - Git + ref:  git::https://github.com/user/repo.git//path/to/file?ref=main
+  - Local path:  ~/.config/agentworks/mise.lock (or file::~/.config/...)
+  - Git repo:    git::https://github.com/user/repo.git
+  - Git + path:  git::https://github.com/user/repo.git//path/to/file
+  - Git + ref:   git::https://github.com/user/repo.git//path/to/file?ref=main
+
+Two fetch modes:
+  - fetch_file: fetches a single file (e.g., mise lockfile)
+  - fetch_dir:  fetches a directory (e.g., dotfiles repo); for git sources,
+    clones the repo to the destination with pull-on-reinit support
 """
 
 from __future__ import annotations
@@ -198,3 +203,105 @@ def _fetch_git(
         raise SourceRefError(f"failed to fetch from git source: {e}") from e
     finally:
         target.run(f"rm -rf {tmp_dir}", check=False)
+
+
+def fetch_dir(
+    source: SourceRef,
+    target: ExecTarget,
+    dest: str,
+    *,
+    logger: SSHLogger | None = None,
+) -> None:
+    """Fetch a directory from a source reference to a destination on the target.
+
+    For file sources, copies a local directory to the target.
+    For git sources, clones the repo to the destination (or pulls if the
+    destination is already a matching clone). The subpath is ignored for
+    directory fetches (the whole repo is cloned).
+
+    Args:
+        source: Parsed source reference.
+        target: SSH execution target.
+        dest: Destination directory path on the target.
+        logger: Optional SSH logger.
+    """
+    if source.kind == "file":
+        _fetch_local_dir(source, target, dest, logger=logger)
+    elif source.kind == "git":
+        _fetch_git_dir(source, target, dest, logger=logger)
+    else:
+        raise SourceRefError(f"unknown source kind: {source.kind}")
+
+
+def _fetch_local_dir(
+    source: SourceRef,
+    target: ExecTarget,
+    dest: str,
+    *,
+    logger: SSHLogger | None = None,
+) -> None:
+    """Copy a local directory to the target."""
+    local_path = Path(source.path).expanduser()
+    if not local_path.exists():
+        raise SourceRefError(f"local source directory does not exist: {local_path}")
+    if not local_path.is_dir():
+        raise SourceRefError(f"local source is not a directory: {local_path}")
+
+    # Check if destination exists and warn
+    if target.run(f"test -d {shlex.quote(dest)}", check=False).ok:
+        if logger:
+            logger.warning(f"overwriting existing {dest}")
+        target.run(f"rm -rf {shlex.quote(dest)}", check=False)
+
+    target.copy_dir_to(local_path, dest)
+    if logger:
+        logger.output(f"Copied {local_path} to {dest}")
+
+
+def _fetch_git_dir(
+    source: SourceRef,
+    target: ExecTarget,
+    dest: str,
+    *,
+    logger: SSHLogger | None = None,
+) -> None:
+    """Clone a git repo to the destination, or pull if already cloned."""
+    from agentworks.ssh import SSHError
+
+    # Check if destination is already a matching clone
+    is_git = target.run(f"test -d {shlex.quote(dest)}/.git", check=False)
+    if is_git.ok:
+        remote = target.run(
+            f"git -C {shlex.quote(dest)} remote get-url origin", check=False,
+        )
+        if remote.ok and remote.stdout.strip() == source.path:
+            if logger:
+                logger.output(f"Pulling {source.path} in {dest}")
+            try:
+                target.run(f"git -C {shlex.quote(dest)} pull", timeout=120)
+            except SSHError as e:
+                raise SourceRefError(f"git pull failed in {dest}: {e}") from e
+            return
+        # Different repo at the destination
+        raise SourceRefError(
+            f"{dest} exists but is a clone of "
+            f"{remote.stdout.strip()}, not {source.path}"
+        )
+
+    # Check if destination exists but is not a git repo
+    if target.run(f"test -d {shlex.quote(dest)}", check=False).ok:
+        raise SourceRefError(f"{dest} exists but is not a git repo")
+
+    # Fresh clone
+    clone_cmd = "git clone"
+    if source.ref:
+        clone_cmd += f" --branch {shlex.quote(source.ref)}"
+    clone_cmd += f" {shlex.quote(source.path)} {shlex.quote(dest)}"
+
+    try:
+        target.run(clone_cmd, timeout=120)
+    except SSHError as e:
+        raise SourceRefError(f"git clone failed: {e}") from e
+
+    if logger:
+        logger.output(f"Cloned {source.path} to {dest}")

@@ -1179,18 +1179,19 @@ def _phase_b_setup(
         _configure_git_credentials(vm_name, ts_target, providers, logger, git_tokens=git_tokens)
 
     # Non-fatal: dotfiles (can override mise config, can provide lockfile)
-    if config.dotfiles.enabled and (config.dotfiles.source or config.dotfiles.repo):
+    if config.dotfiles.enabled and config.dotfiles.source:
         logger.step("Dotfiles")
         dest = config.dotfiles.destination.replace("~", home)
         try:
-            if config.dotfiles.repo:
-                _sync_dotfiles_repo(ts_target, config.dotfiles.repo, dest, logger)
-            elif config.dotfiles.source and config.dotfiles.source.exists():
-                _sync_dotfiles_source(ts_target, config.dotfiles.source, dest, logger)
+            from agentworks.sources import SourceRefError, fetch_dir, parse_source_ref
+
+            ref = parse_source_ref(config.dotfiles.source)
+            typer.echo(f"  Syncing dotfiles from {config.dotfiles.source}...")
+            fetch_dir(ref, ts_target, dest, logger=logger)
 
             typer.echo(f"  Running dotfiles install: {config.dotfiles.install_cmd}")
             _run_logged(ts_target, f"cd {dest} && {config.dotfiles.install_cmd}", logger, timeout=120)
-        except Exception as e:
+        except (SourceRefError, Exception) as e:
             msg = f"dotfiles install failed: {e}"
             logger.warning(msg)
             typer.echo(f"  Warning: {msg}", err=True)
@@ -1233,48 +1234,6 @@ def _phase_b_setup(
         _install_nerf_tools(ts_target, config, logger)
 
 
-def _sync_dotfiles_repo(
-    ts_target: ExecTarget,
-    repo: str,
-    dest: str,
-    logger: SSHLogger,
-) -> None:
-    """Clone or pull a dotfiles git repo to the destination."""
-    is_git = ts_target.run(f"test -d {dest}/.git", check=False)
-    if is_git.ok:
-        # Destination is a git repo -- check it matches
-        remote = ts_target.run(f"git -C {dest} remote get-url origin", check=False)
-        if remote.ok and remote.stdout.strip() == repo:
-            typer.echo("  Updating dotfiles repo...")
-            _run_logged(ts_target, f"cd {dest} && git pull", logger, timeout=120)
-        else:
-            typer.echo(
-                f"  Warning: {dest} exists but is not a clone of {repo}. Skipping.",
-                err=True,
-            )
-            logger.warning(f"dotfiles: {dest} exists but is a different repo")
-    elif ts_target.run(f"test -d {dest}", check=False).ok:
-        # Destination exists but is not a git repo
-        typer.echo(f"  Warning: {dest} exists but is not a git repo. Skipping.", err=True)
-        logger.warning(f"dotfiles: {dest} exists but is not a git repo")
-    else:
-        typer.echo(f"  Cloning dotfiles from {repo}...")
-        _run_logged(ts_target, f"git clone {repo} {dest}", logger, timeout=120)
-
-
-def _sync_dotfiles_source(
-    ts_target: ExecTarget,
-    source: Path,
-    dest: str,
-    logger: SSHLogger,
-) -> None:
-    """Copy dotfiles from a local path to the destination."""
-    if ts_target.run(f"test -d {dest}", check=False).ok:
-        typer.echo(f"  Warning: {dest} exists, overwriting...")
-        logger.warning(f"dotfiles: overwriting existing {dest}")
-        ts_target.run(f"rm -rf {dest}", check=False)
-    typer.echo("  Copying dotfiles...")
-    ts_target.copy_dir_to(source, dest)
 
 
 def _install_nerf_tools(
