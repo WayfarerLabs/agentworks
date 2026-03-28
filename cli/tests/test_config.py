@@ -155,17 +155,17 @@ def test_orphaned_key_under_commented_section(tmp_path: Path) -> None:
         ssh_public_key = "{pub}"
         ssh_private_key = "{priv}"
 
-        # [dotfiles]          <-- commented out!
-        enabled = false       # orphaned in [user], not [dotfiles]
+        # [defaults]          <-- commented out!
+        platform = "lima"     # orphaned in [user], not [defaults]
     """))
     with warnings.catch_warnings(record=True) as w:
         warnings.simplefilter("always")
         cfg = load_config(config_file)
         assert len(w) == 1
-        assert "enabled" in str(w[0].message)
+        assert "platform" in str(w[0].message)
         assert "user" in str(w[0].message).lower()
-    # The orphaned key means dotfiles.enabled stays at default (True)
-    assert cfg.dotfiles.enabled is True
+    # The orphaned key means defaults.platform stays at default (None)
+    assert cfg.defaults.platform is None
 
 
 def test_extra_ssh_public_keys(tmp_path: Path) -> None:

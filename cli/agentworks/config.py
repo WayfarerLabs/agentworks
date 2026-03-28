@@ -98,14 +98,6 @@ class DefaultsConfig:
 
 
 @dataclass(frozen=True)
-class DotfilesConfig:
-    enabled: bool = True
-    source: str | None = None
-    destination: str = "~/.dotfiles"
-    install_cmd: str = "./install.sh"
-
-
-@dataclass(frozen=True)
 class VMConfig:
     # Provisioning (immutable after vm create)
     cpus: int = 4
@@ -135,6 +127,9 @@ class AdminConfig:
 
     shell: str = "zsh"
     user_install_commands: list[str] = field(default_factory=list)
+    dotfiles_source: str | None = None
+    dotfiles_destination: str = "~/.dotfiles"
+    dotfiles_install_cmd: str = "./install.sh"
     mise_activate: bool = True
     mise_packages: list[str] = field(default_factory=list)
     mise_lockfile: str | None = None
@@ -148,6 +143,9 @@ class AgentConfig:
 
     shell: str = "bash"
     user_install_commands: list[str] = field(default_factory=list)
+    dotfiles_source: str | None = None
+    dotfiles_destination: str = "~/.dotfiles"
+    dotfiles_install_cmd: str = "./install.sh"
     mise_activate: bool = True
     mise_packages: list[str] = field(default_factory=list)
     mise_lockfile: str | None = None
@@ -202,7 +200,6 @@ class Config:
     user: UserConfig
     paths: PathsConfig
     defaults: DefaultsConfig
-    dotfiles: DotfilesConfig
     vm: VMConfig
     admin: AdminConfig
     agent: AgentConfig
@@ -344,32 +341,6 @@ def _load_defaults(data: dict[str, object], git_credential_names: set[str]) -> D
     )
 
 
-_DOTFILES_KEYS = {"enabled", "source", "destination", "install_cmd"}
-
-
-def _load_dotfiles(data: dict[str, object]) -> DotfilesConfig:
-    raw = data.get("dotfiles", {})
-    if not isinstance(raw, dict):
-        raise ConfigError("[dotfiles] must be a table")
-
-    if "repo" in raw:
-        raise ConfigError(
-            "dotfiles.repo has been removed. Use dotfiles.source with a git:: "
-            "source reference instead, e.g.: source = \"git::https://github.com/user/dotfiles\""
-        )
-
-    _warn_unexpected_keys(raw, _DOTFILES_KEYS, "dotfiles")
-
-    source = str(raw["source"]) if "source" in raw else None
-
-    return DotfilesConfig(
-        enabled=bool(raw.get("enabled", True)),
-        source=source,
-        destination=str(raw.get("destination", "~/.dotfiles")),
-        install_cmd=str(raw.get("install_cmd", "./install.sh")),
-    )
-
-
 _VM_CONFIG_KEYS = {
     "cpus",
     "memory",
@@ -427,6 +398,9 @@ def _load_vm_config(data: dict[str, object]) -> VMConfig:
 _USER_CONFIG_KEYS = {
     "shell",
     "user_install_commands",
+    "dotfiles_source",
+    "dotfiles_destination",
+    "dotfiles_install_cmd",
     "mise_activate",
     "mise_packages",
     "mise_lockfile",
@@ -451,6 +425,9 @@ def _load_user_config(
     kwargs = {
         "shell": str(raw.get("shell", default_shell)),
         "user_install_commands": list(raw.get("user_install_commands", [])),
+        "dotfiles_source": str(raw["dotfiles_source"]) if "dotfiles_source" in raw else None,
+        "dotfiles_destination": str(raw.get("dotfiles_destination", "~/.dotfiles")),
+        "dotfiles_install_cmd": str(raw.get("dotfiles_install_cmd", "./install.sh")),
         "mise_activate": bool(raw.get("mise_activate", True)),
         "mise_packages": list(raw.get("mise_packages", [])),
         "mise_lockfile": str(raw["mise_lockfile"]) if "mise_lockfile" in raw else None,
@@ -645,7 +622,6 @@ EXPECTED_TOP_LEVEL_KEYS = {
     "user",
     "paths",
     "defaults",
-    "dotfiles",
     "vm",
     "admin",
     "agent",
@@ -708,6 +684,13 @@ def load_config(path: Path | None = None) -> Config:
 
     _warn_unexpected_top_level_keys(data)
 
+    if "dotfiles" in data:
+        raise ConfigError(
+            "[dotfiles] section has been removed. Move dotfiles settings into "
+            "[admin.config] (dotfiles_source, dotfiles_destination, dotfiles_install_cmd). "
+            "See docs/guides/config-migration.md for details."
+        )
+
     git_credentials = _load_git_credentials(data)
     apt_sources, apt_packages, system_cmds, user_cmds = _load_catalog_sections(data)
 
@@ -718,7 +701,6 @@ def load_config(path: Path | None = None) -> Config:
         user=_load_user(data),
         paths=_load_paths(data),
         defaults=_load_defaults(data, set(git_credentials.keys())),
-        dotfiles=_load_dotfiles(data),
         vm=_load_vm_config(data),
         admin=_load_admin_config(data),
         agent=_load_agent_config(data),

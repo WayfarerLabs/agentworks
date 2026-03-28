@@ -1,29 +1,44 @@
 # Config Migration Guide
 
-## Dotfiles: `repo` replaced by `source`
+## Dotfiles moved from `[dotfiles]` to `[admin.config]` and `[agent.config]`
 
-The separate `repo` and `source` fields have been replaced by a single `source` field that accepts
-both local paths and git source references.
+The standalone `[dotfiles]` section has been removed. Dotfiles are now per-user settings in
+`[admin.config]` (and optionally `[agent.config]`). The `repo` and `source` fields have been
+replaced by a single `dotfiles_source` field that accepts local paths and git source references.
 
 **Before:**
 
 ```toml
 [dotfiles]
+enabled = true
 repo = "https://github.com/user/dotfiles"
+destination = "~/.dotfiles"
+install_cmd = "./install.sh"
 ```
 
 **After:**
 
 ```toml
-[dotfiles]
-source = "git::https://github.com/user/dotfiles"
+[admin.config]
+dotfiles_source = "git::https://github.com/user/dotfiles"
+dotfiles_destination = "~/.dotfiles"
+dotfiles_install_cmd = "./install.sh"
 ```
 
-Local paths work unchanged:
+Local paths work the same way:
 
 ```toml
-[dotfiles]
-source = "~/.dotfiles"
+[admin.config]
+dotfiles_source = "~/.dotfiles"
+```
+
+The `enabled` field is gone. If `dotfiles_source` is not set, dotfiles are not synced.
+
+Agents can now have their own dotfiles:
+
+```toml
+[agent.config]
+dotfiles_source = "git::https://github.com/user/agent-dotfiles"
 ```
 
 See [source references](source-refs.md) for the full syntax including `?ref=` for pinning.

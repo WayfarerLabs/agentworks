@@ -132,17 +132,14 @@ def run_doctor() -> None:
             _check_ssh_key(config.user.ssh_private_key, "private", ok, warn, fail)
 
             # Dotfiles
-            if config.dotfiles.enabled:
-                if config.dotfiles.source:
-                    from agentworks.sources import parse_source_ref
+            if config.admin.dotfiles_source:
+                from agentworks.sources import parse_source_ref
 
-                    ref = parse_source_ref(config.dotfiles.source)
-                    if ref.kind == "git" or Path(ref.path).expanduser().exists():
-                        ok(f"Dotfiles source: {config.dotfiles.source}")
-                    else:
-                        warn(f"Dotfiles enabled but source missing: {config.dotfiles.source}")
+                ref = parse_source_ref(config.admin.dotfiles_source)
+                if ref.kind == "git" or Path(ref.path).expanduser().exists():
+                    ok(f"Admin dotfiles: {config.admin.dotfiles_source}")
                 else:
-                    warn("Dotfiles enabled but no source configured")
+                    warn(f"Admin dotfiles source missing: {config.admin.dotfiles_source}")
 
             # Git credentials
             if config.git_credentials:

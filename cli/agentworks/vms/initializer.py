@@ -1179,18 +1179,18 @@ def _phase_b_setup(
         _configure_git_credentials(vm_name, ts_target, providers, logger, git_tokens=git_tokens)
 
     # Non-fatal: dotfiles (can override mise config, can provide lockfile)
-    if config.dotfiles.enabled and config.dotfiles.source:
+    if config.admin.dotfiles_source:
         logger.step("Dotfiles")
-        dest = config.dotfiles.destination.replace("~", home)
+        dest = config.admin.dotfiles_destination.replace("~", home)
         try:
             from agentworks.sources import SourceRefError, fetch_dir, parse_source_ref
 
-            ref = parse_source_ref(config.dotfiles.source)
-            typer.echo(f"  Syncing dotfiles from {config.dotfiles.source}...")
+            ref = parse_source_ref(config.admin.dotfiles_source)
+            typer.echo(f"  Syncing dotfiles from {config.admin.dotfiles_source}...")
             fetch_dir(ref, ts_target, dest, logger=logger)
 
-            typer.echo(f"  Running dotfiles install: {config.dotfiles.install_cmd}")
-            _run_logged(ts_target, f"cd {dest} && {config.dotfiles.install_cmd}", logger, timeout=120)
+            typer.echo(f"  Running dotfiles install: {config.admin.dotfiles_install_cmd}")
+            _run_logged(ts_target, f"cd {dest} && {config.admin.dotfiles_install_cmd}", logger, timeout=120)
         except (SourceRefError, Exception) as e:
             msg = f"dotfiles install failed: {e}"
             logger.warning(msg)
