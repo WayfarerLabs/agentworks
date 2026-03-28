@@ -51,7 +51,7 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 
 # --- VM configuration ---
 # Settings that control VM provisioning (immutable after create) and
-# initialization (applied on create and reinit).
+# system-wide initialization (applied on create and reinit).
 #
 # Agentworks always installs system dependencies (openssh-server, curl, git,
 # sudo, ca-certificates, gnupg, tmux, tmuxinator) regardless of this config.
@@ -64,8 +64,7 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # disk = 50                                  # disk size in GiB (Lima)
 # azure_vm_size = "Standard_B2s"             # Azure VM size
 # swap_gb = 4                                # swap file size in GiB (0 to disable)
-# -- Initialization (applied on create and reinit) --
-# admin_shell = "zsh"                        # shell for the admin user
+# -- System-wide initialization (applied on create and reinit) --
 # apt = [                                    # direct apt packages
 #     "zsh",
 #     "unzip",
@@ -77,14 +76,7 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # apt_packages = ["gh", "docker"]            # named apt package sets from catalog
 # snap = []                                  # direct snap packages
 # system_install_commands = ["az-cli"]       # system-level commands from catalog
-# admin_install_commands = ["bun", "claude"] # per-user commands for admin user
-# -- Mise (polyglot tool manager) --
 # install_mise = true                        # install mise via apt (default: true)
-# mise_activate = true                       # add mise activate to shell profile
-# mise_packages = ["jq@1.8.1", "adr-tools@3.0.0"]  # name@version tool declarations
-# mise_lockfile = "~/.config/agentworks/mise.lock"   # local path or git:: source ref (wins over dotfiles)
-# mise_allow_unlocked = false                # install packages not in lockfile (with warning)
-# mise_install_before = "7d"                 # reject versions newer than this
 # -- Nerf tools --
 # install_nerf_tools = false                 # set to true to build and deploy nerf tools during init
 # skip_nerf_defaults = false                 # skip built-in nerf catalog (nerf build --no-default)
@@ -95,18 +87,30 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # nerf_bin_dir = "/opt/agentworks/nerf/bin"  # where to deploy generated tool scripts
 # nerf_skills_dir = "/opt/agentworks/nerf/skills"  # where to deploy generated skill files
 
-# --- Agent configuration ---
-# Settings for agent users created within workspaces. Agents get their own
-# shell and user install commands, separate from the VM admin user.
+# --- Admin user configuration ---
+# Per-user settings for the admin user on VMs. Applied during init/reinit.
+
+# [admin.config]
+# shell = "zsh"                              # admin shell (default: zsh)
+# user_install_commands = ["bun", "claude"]       # per-user commands from catalog
+# mise_activate = true                       # add mise activate to shell profile
+# mise_packages = ["jq@1.8.1", "adr-tools@3.0.0"]  # name@version tool declarations
+# mise_lockfile = "~/.config/agentworks/mise.lock"   # local path or git:: source ref (wins over dotfiles)
+# mise_allow_unlocked = false                # install packages not in lockfile (with warning)
+# mise_install_before = "7d"                 # reject versions newer than this
+
+# --- Agent user configuration ---
+# Per-user settings for agent users created within workspaces.
+# Agents default to nothing unless explicitly configured.
 
 # [agent.config]
-# user_install_commands = ["claude"]         # per-user commands from catalog
+# shell = "bash"                             # agent shell (default: bash)
+# user_install_commands = ["claude"]              # per-user commands from catalog
 # mise_activate = true                       # add mise activate to agent shell profile
 # mise_packages = ["jq@1.8.1"]              # name@version (agents default to nothing)
 # mise_lockfile = "~/.config/agentworks/agent-mise.lock"
 # mise_allow_unlocked = false
 # mise_install_before = "7d"
-# shell = "bash"                             # agent shell (default: bash)
 
 # --- Task configuration ---
 # Settings for task lifecycle and defaults.

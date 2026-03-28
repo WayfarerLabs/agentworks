@@ -26,9 +26,11 @@ def config_dir(tmp_path: Path) -> Path:
         ssh_private_key = "{priv}"
 
         [vm.config]
-        admin_shell = "zsh"
         apt = ["zsh", "tmux"]
-        admin_install_commands = ["hello"]
+
+        [admin.config]
+        shell = "zsh"
+        user_install_commands = ["hello"]
 
         [user_install_commands.hello]
         command = "echo hello"
@@ -58,9 +60,9 @@ def config_dir(tmp_path: Path) -> Path:
 
 def test_load_valid_config(config_dir: Path) -> None:
     cfg = load_config(config_dir)
-    assert cfg.vm.admin_shell == "zsh"
+    assert cfg.admin.shell == "zsh"
     assert cfg.vm.apt == ["zsh", "tmux"]
-    assert cfg.vm.admin_install_commands == ["hello"]
+    assert cfg.admin.user_install_commands == ["hello"]
     assert "hello" in cfg.user_install_commands
     assert "default" in cfg.workspace_templates
     assert "gruntweave" in cfg.workspace_templates

@@ -1129,7 +1129,7 @@ def _phase_b_setup(
     # Non-fatal: set default shell (before install commands so installers
     # write to the correct rc file)
     logger.step("Shell configuration")
-    admin_shell = config.vm.admin_shell
+    admin_shell = config.admin.shell
     typer.echo(f"  Setting shell to {admin_shell}...")
     try:
         # Touch .zshrc before chsh to prevent zsh's first-run wizard
@@ -1168,8 +1168,8 @@ def _phase_b_setup(
 
     # Non-fatal: mise config (written before dotfiles so dotfiles can override)
     mise_path: list[str] = []
-    if mise_available and config.vm.mise_packages:
-        _write_mise_config(ts_target, config.vm.mise_packages, config.vm.mise_install_before, home, logger)
+    if mise_available and config.admin.mise_packages:
+        _write_mise_config(ts_target, config.admin.mise_packages, config.admin.mise_install_before, home, logger)
         mise_path = _mise_shims_path(home)
     elif mise_available:
         mise_path = _mise_shims_path(home)
@@ -1197,24 +1197,24 @@ def _phase_b_setup(
             typer.echo(f"  Warning: {msg}", err=True)
 
     # Non-fatal: mise lockfile (after git creds and dotfiles; overrides dotfiles lockfile)
-    if mise_available and config.vm.mise_lockfile:
-        _fetch_mise_lockfile(ts_target, config.vm.mise_lockfile, home, logger)
+    if mise_available and config.admin.mise_lockfile:
+        _fetch_mise_lockfile(ts_target, config.admin.mise_lockfile, home, logger)
 
     # Non-fatal: mise install (after config + dotfiles + lockfile are all settled)
-    if mise_available and (config.vm.mise_packages or config.vm.mise_lockfile):
-        _run_mise_install(ts_target, admin_shell, home, config.vm.mise_allow_unlocked, logger)
+    if mise_available and (config.admin.mise_packages or config.admin.mise_lockfile):
+        _run_mise_install(ts_target, admin_shell, home, config.admin.mise_allow_unlocked, logger)
     elif mise_available:
         try:
             check = ts_target.run(f"test -f {home}/.config/mise/config.toml", check=False)
             if check.ok:
-                _run_mise_install(ts_target, admin_shell, home, config.vm.mise_allow_unlocked, logger)
+                _run_mise_install(ts_target, admin_shell, home, config.admin.mise_allow_unlocked, logger)
         except SSHError:
             pass
 
     # Non-fatal: user install commands for admin user (may depend on mise tools)
     user_path = _run_catalog_commands(
         ts_target,
-        config.vm.admin_install_commands,
+        config.admin.user_install_commands,
         catalog.user_install_commands,
         admin_shell,
         home,
@@ -1226,7 +1226,7 @@ def _phase_b_setup(
     _write_agentworks_profile(ts_target, system_path + mise_path + user_path, logger)
 
     # Non-fatal: shell rc (interactive shell hooks like mise activate)
-    rc_snippets = [MISE_ACTIVATE_LINES] if (mise_available and config.vm.mise_activate) else []
+    rc_snippets = [MISE_ACTIVATE_LINES] if (mise_available and config.admin.mise_activate) else []
     _write_agentworks_rc(ts_target, rc_snippets, logger)
 
     # Non-fatal: nerf tools

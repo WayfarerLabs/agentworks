@@ -114,20 +114,12 @@ class VMConfig:
     azure_vm_size: str = "Standard_B2s"
     admin_username: str = "agentworks"
     swap_gb: int = 4  # GiB, 0 to disable
-    # Initialization (applied on create and reinit)
-    admin_shell: str = "zsh"
+    # System-wide initialization (applied on create and reinit)
     apt: list[str] = field(default_factory=list)
     apt_packages: list[str] = field(default_factory=list)
     snap: list[str] = field(default_factory=list)
     system_install_commands: list[str] = field(default_factory=list)
-    admin_install_commands: list[str] = field(default_factory=list)
-    # Mise (system-level: install_mise; admin-user: the rest)
     install_mise: bool = True
-    mise_activate: bool = True
-    mise_packages: list[str] = field(default_factory=list)
-    mise_lockfile: str | None = None
-    mise_allow_unlocked: bool = False
-    mise_install_before: str = "7d"
     # Nerf tools
     install_nerf_tools: bool = False
     skip_nerf_defaults: bool = False
@@ -138,14 +130,29 @@ class VMConfig:
 
 
 @dataclass(frozen=True)
-class AgentConfig:
+class AdminConfig:
+    """Per-user config for the admin user on VMs."""
+
+    shell: str = "zsh"
     user_install_commands: list[str] = field(default_factory=list)
     mise_activate: bool = True
     mise_packages: list[str] = field(default_factory=list)
     mise_lockfile: str | None = None
     mise_allow_unlocked: bool = False
     mise_install_before: str = "7d"
+
+
+@dataclass(frozen=True)
+class AgentConfig:
+    """Per-user config for agent users on VMs."""
+
     shell: str = "bash"
+    user_install_commands: list[str] = field(default_factory=list)
+    mise_activate: bool = True
+    mise_packages: list[str] = field(default_factory=list)
+    mise_lockfile: str | None = None
+    mise_allow_unlocked: bool = False
+    mise_install_before: str = "7d"
 
 
 @dataclass(frozen=True)
@@ -197,6 +204,7 @@ class Config:
     defaults: DefaultsConfig
     dotfiles: DotfilesConfig
     vm: VMConfig
+    admin: AdminConfig
     agent: AgentConfig
     task: TaskConfig
     task_templates: dict[str, TaskTemplate]
@@ -369,18 +377,11 @@ _VM_CONFIG_KEYS = {
     "azure_vm_size",
     "admin_username",
     "swap_gb",
-    "admin_shell",
     "apt",
     "apt_packages",
     "snap",
     "system_install_commands",
-    "admin_install_commands",
     "install_mise",
-    "mise_activate",
-    "mise_packages",
-    "mise_lockfile",
-    "mise_allow_unlocked",
-    "mise_install_before",
     "install_nerf_tools",
     "skip_nerf_defaults",
     "nerf_addl_manifests",
@@ -409,18 +410,11 @@ def _load_vm_config(data: dict[str, object]) -> VMConfig:
         azure_vm_size=str(raw.get("azure_vm_size", "Standard_B2s")),
         admin_username=str(raw.get("admin_username", "agentworks")),
         swap_gb=int(raw.get("swap_gb", 4)),
-        admin_shell=str(raw.get("admin_shell", "zsh")),
         apt=list(raw.get("apt", [])),
         apt_packages=list(raw.get("apt_packages", [])),
         snap=list(raw.get("snap", [])),
         system_install_commands=list(raw.get("system_install_commands", [])),
-        admin_install_commands=list(raw.get("admin_install_commands", [])),
         install_mise=bool(raw.get("install_mise", True)),
-        mise_activate=bool(raw.get("mise_activate", True)),
-        mise_packages=list(raw.get("mise_packages", [])),
-        mise_lockfile=str(raw["mise_lockfile"]) if "mise_lockfile" in raw else None,
-        mise_allow_unlocked=bool(raw.get("mise_allow_unlocked", False)),
-        mise_install_before=str(raw.get("mise_install_before", "7d")),
         install_nerf_tools=bool(raw.get("install_nerf_tools", False)),
         skip_nerf_defaults=bool(raw.get("skip_nerf_defaults", False)),
         nerf_addl_manifests=nerf_addl_manifests,
@@ -430,36 +424,55 @@ def _load_vm_config(data: dict[str, object]) -> VMConfig:
     )
 
 
-_AGENT_CONFIG_KEYS = {
+_USER_CONFIG_KEYS = {
+    "shell",
     "user_install_commands",
     "mise_activate",
     "mise_packages",
     "mise_lockfile",
     "mise_allow_unlocked",
     "mise_install_before",
-    "shell",
 }
 
 
-def _load_agent_config(data: dict[str, object]) -> AgentConfig:
-    agent_section = data.get("agent", {})
-    if not isinstance(agent_section, dict):
-        raise ConfigError("[agent] must be a table")
-    raw = agent_section.get("config", {})
+def _load_user_config(
+    data: dict[str, object], section: str, default_shell: str,
+) -> AdminConfig | AgentConfig:
+    """Load admin or agent per-user config from [<section>.config]."""
+    top = data.get(section, {})
+    if not isinstance(top, dict):
+        raise ConfigError(f"[{section}] must be a table")
+    raw = top.get("config", {})
     if not isinstance(raw, dict):
-        raise ConfigError("[agent.config] must be a table")
+        raise ConfigError(f"[{section}.config] must be a table")
 
-    _warn_unexpected_keys(raw, _AGENT_CONFIG_KEYS, "agent.config")
+    _warn_unexpected_keys(raw, _USER_CONFIG_KEYS, f"{section}.config")
 
-    return AgentConfig(
-        user_install_commands=list(raw.get("user_install_commands", [])),
-        mise_activate=bool(raw.get("mise_activate", True)),
-        mise_packages=list(raw.get("mise_packages", [])),
-        mise_lockfile=str(raw["mise_lockfile"]) if "mise_lockfile" in raw else None,
-        mise_allow_unlocked=bool(raw.get("mise_allow_unlocked", False)),
-        mise_install_before=str(raw.get("mise_install_before", "7d")),
-        shell=str(raw.get("shell", "bash")),
-    )
+    kwargs = {
+        "shell": str(raw.get("shell", default_shell)),
+        "user_install_commands": list(raw.get("user_install_commands", [])),
+        "mise_activate": bool(raw.get("mise_activate", True)),
+        "mise_packages": list(raw.get("mise_packages", [])),
+        "mise_lockfile": str(raw["mise_lockfile"]) if "mise_lockfile" in raw else None,
+        "mise_allow_unlocked": bool(raw.get("mise_allow_unlocked", False)),
+        "mise_install_before": str(raw.get("mise_install_before", "7d")),
+    }
+
+    if section == "admin":
+        return AdminConfig(**kwargs)
+    return AgentConfig(**kwargs)
+
+
+def _load_admin_config(data: dict[str, object]) -> AdminConfig:
+    result = _load_user_config(data, "admin", default_shell="zsh")
+    assert isinstance(result, AdminConfig)
+    return result
+
+
+def _load_agent_config(data: dict[str, object]) -> AgentConfig:
+    result = _load_user_config(data, "agent", default_shell="bash")
+    assert isinstance(result, AgentConfig)
+    return result
 
 
 def _load_catalog_sections(
@@ -634,6 +647,7 @@ EXPECTED_TOP_LEVEL_KEYS = {
     "defaults",
     "dotfiles",
     "vm",
+    "admin",
     "agent",
     "task",
     "task_templates",
@@ -706,6 +720,7 @@ def load_config(path: Path | None = None) -> Config:
         defaults=_load_defaults(data, set(git_credentials.keys())),
         dotfiles=_load_dotfiles(data),
         vm=_load_vm_config(data),
+        admin=_load_admin_config(data),
         agent=_load_agent_config(data),
         task=task_config,
         task_templates=task_templates,

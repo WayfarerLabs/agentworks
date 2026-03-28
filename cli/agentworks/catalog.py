@@ -256,9 +256,9 @@ def validate_selections(config: Config, catalog: ResolvedCatalog) -> None:
     for ref in config.vm.system_install_commands:
         if ref not in catalog.system_install_commands:
             raise CatalogError(f"vm.config.system_install_commands references unknown entry: {ref}")
-    for ref in config.vm.admin_install_commands:
+    for ref in config.admin.user_install_commands:
         if ref not in catalog.user_install_commands:
-            raise CatalogError(f"vm.config.admin_install_commands references unknown entry: {ref}")
+            raise CatalogError(f"admin.config.user_install_commands references unknown entry: {ref}")
     for ref in config.agent.user_install_commands:
         if ref not in catalog.user_install_commands:
             raise CatalogError(f"agent.config.user_install_commands references unknown entry: {ref}")

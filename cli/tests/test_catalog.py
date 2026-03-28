@@ -175,8 +175,8 @@ def test_validate_selections_bad_system_command() -> None:
 
 def test_validate_selections_bad_admin_user_command() -> None:
     catalog = load_builtin_catalog()
-    config = _make_config_with_vm(admin_install_commands=["nonexistent"])
-    with pytest.raises(CatalogError, match="vm.config.admin_install_commands.*nonexistent"):
+    config = _make_config_with_vm(user_install_commands=["nonexistent"])
+    with pytest.raises(CatalogError, match="admin.config.user_install_commands.*nonexistent"):
         validate_selections(config, catalog)
 
 
@@ -192,7 +192,7 @@ def test_validate_selections_valid() -> None:
     config = _make_config_with_vm(
         apt_packages=["gh"],
         system_install_commands=["az-cli"],
-        admin_install_commands=["bun"],
+        user_install_commands=["bun"],
     )
     validate_selections(config, catalog)  # should not raise
 
@@ -219,12 +219,12 @@ def _make_config_with_vm(
     *,
     apt_packages: list[str] | None = None,
     system_install_commands: list[str] | None = None,
-    admin_install_commands: list[str] | None = None,
+    user_install_commands: list[str] | None = None,
 ) -> MagicMock:
     config = MagicMock()
     config.vm.apt_packages = apt_packages or []
     config.vm.system_install_commands = system_install_commands or []
-    config.vm.admin_install_commands = admin_install_commands or []
+    config.admin.user_install_commands = user_install_commands or []
     config.agent.user_install_commands = []
     return config
 
@@ -236,6 +236,6 @@ def _make_config_with_agent(
     config = MagicMock()
     config.vm.apt_packages = []
     config.vm.system_install_commands = []
-    config.vm.admin_install_commands = []
+    config.admin.user_install_commands = []
     config.agent.user_install_commands = user_install_commands or []
     return config
