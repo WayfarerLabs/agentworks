@@ -120,6 +120,7 @@ def create_vm(
         vm_name,
         platform=platform,
         vm_host_name=vm_host_name,
+        template=vm_tmpl.name,
         cpus=resolved_cpus,
         memory_gib=resolved_memory,
         disk_gib=resolved_disk,
@@ -266,7 +267,7 @@ def list_vms(db: Database) -> None:
         return
 
     header = (
-        f"{'NAME':<20} {'PLATFORM':<10} {'HOST':<15} {'PROV':<12} {'INIT':<12} "
+        f"{'NAME':<20} {'PLATFORM':<10} {'TEMPLATE':<12} {'HOST':<15} {'PROV':<12} {'INIT':<12} "
         f"{'WS/AG/TS':<10} {'TAILSCALE':<20} {'CREATED'}"
     )
     typer.echo(header)
@@ -277,7 +278,7 @@ def list_vms(db: Database) -> None:
         ts = db.count_tasks_on_vm(vm.name)
         counts = f"{ws}/{ag}/{ts}"
         typer.echo(
-            f"{vm.name:<20} {vm.platform:<10} {vm.vm_host_name or '-':<15} "
+            f"{vm.name:<20} {vm.platform:<10} {vm.template or '-':<12} {vm.vm_host_name or '-':<15} "
             f"{vm.provisioning_status:<12} {vm.init_status:<12} "
             f"{counts:<10} {vm.tailscale_host or '-':<20} {vm.created_at}"
         )
@@ -291,6 +292,7 @@ def describe_vm(db: Database, config: Config, name: str) -> None:
     typer.echo(f"Name:           {vm.name}")
     typer.echo(f"Created:        {vm.created_at}")
     typer.echo(f"Platform:       {vm.platform}")
+    typer.echo(f"Template:       {vm.template or '-'}")
     typer.echo(f"VM Host:        {vm.vm_host_name or '-'}")
     typer.echo(f"Admin User:     {vm.admin_username}")
     typer.echo(f"Provisioning:   {vm.provisioning_status}")
@@ -556,6 +558,14 @@ def reinit_vm(
     from agentworks.ssh import ExecTarget, ssh_target_for_vm
 
     vm = _require_vm(db, name)
+
+    # Resolve the VM's template so init uses the right values
+    if vm.template and vm.template != "default":
+        from dataclasses import replace as _replace
+
+        from agentworks.vms.templates import resolve_template
+
+        config = _replace(config, vm=resolve_template(config, vm.template))
 
     if vm.provisioning_status != ProvisioningStatus.COMPLETE.value:
         typer.echo(

@@ -70,6 +70,7 @@ class VMRow:
     name: str
     platform: str
     vm_host_name: str | None
+    template: str | None
     extra_packages: list[str]
     provisioning_status: str
     init_status: str
@@ -256,6 +257,10 @@ MIGRATIONS: dict[int, str] = {
         ALTER TABLE vms ADD COLUMN swap_gib INTEGER;
         UPDATE vms SET swap_gib = 0;
     """,
+    11: """
+        ALTER TABLE vms ADD COLUMN template TEXT;
+        UPDATE vms SET template = 'default';
+    """,
 }
 
 LATEST_VERSION = max(MIGRATIONS)
@@ -362,6 +367,7 @@ class Database:
         name: str,
         platform: str,
         vm_host_name: str | None = None,
+        template: str | None = None,
         azure_resource_id: str | None = None,
         wsl_distro_name: str | None = None,
         cpus: int | None = None,
@@ -372,13 +378,14 @@ class Database:
     ) -> VMRow:
         self._conn.execute(
             "INSERT INTO vms "
-            "(name, platform, vm_host_name, azure_resource_id, wsl_distro_name, "
+            "(name, platform, vm_host_name, template, azure_resource_id, wsl_distro_name, "
             "cpus, memory_gib, disk_gib, swap_gib, admin_username) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 name,
                 platform,
                 vm_host_name,
+                template,
                 azure_resource_id,
                 wsl_distro_name,
                 cpus,
@@ -675,6 +682,7 @@ def _to_vm(row: sqlite3.Row) -> VMRow:
         name=row["name"],
         platform=row["platform"],
         vm_host_name=row["vm_host_name"],
+        template=row["template"],
         extra_packages=json.loads(extra) if extra else [],
         provisioning_status=row["provisioning_status"],
         init_status=row["init_status"],
