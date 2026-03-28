@@ -34,7 +34,6 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 [defaults]
 # platform = "lima"                          # lima, azure, or wsl2
 # vm_host = "mac-studio"                     # default VM host for remote Lima
-# git_credentials = ["github"]               # git credentials to configure on vm create
 
 # --- VM templates ---
 # Named VM configurations selected at create time with --template.
@@ -86,6 +85,7 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 
 # [admin.config]
 # shell = "zsh"                              # admin shell (default: zsh)
+# git_credentials = ["github"]              # git credentials to configure for admin
 # user_install_commands = ["bun", "claude"]  # per-user commands from catalog
 # -- Dotfiles (source refs: local path or git::, see docs/guides/source-refs.md) --
 # dotfiles_source = "git::https://github.com/user/dotfiles"
@@ -103,6 +103,7 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 
 # [agent.config]
 # shell = "bash"                             # agent shell (default: bash)
+# git_credentials = []                       # git credentials for agents (default: none)
 # user_install_commands = ["claude"]         # per-user commands from catalog
 # dotfiles_source = "git::https://github.com/user/agent-dotfiles"
 # dotfiles_destination = "~/.dotfiles"

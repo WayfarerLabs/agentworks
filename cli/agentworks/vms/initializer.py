@@ -637,20 +637,18 @@ def verify_tailscale_available() -> None:
 
 def resolve_git_credential_providers(
     config: Config,
-    names: list[str] | None = None,
+    names: list[str],
 ) -> dict[str, GitCredentialProvider]:
     """Resolve git credential provider instances from config.
 
-    If names is provided, only those credential names are resolved.
-    Otherwise, all names from config.defaults.git_credentials are used.
+    Names are the credential names to resolve (from admin.config.git_credentials
+    or agent.config.git_credentials).
     """
     from agentworks.git_credentials.azdo import AzDOCredentialProvider
     from agentworks.git_credentials.github import GitHubCredentialProvider
 
-    names = names if names is not None else (config.defaults.git_credentials or [])
     providers: dict[str, GitCredentialProvider] = {}
     if not names:
-        typer.echo("Warning: no git credentials configured (set defaults.git_credentials in config)", err=True)
         return providers
     for name in names:
         cred_config = config.git_credentials.get(name)

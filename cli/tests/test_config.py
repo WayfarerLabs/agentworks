@@ -30,6 +30,7 @@ def config_dir(tmp_path: Path) -> Path:
 
         [admin.config]
         shell = "zsh"
+        git_credentials = ["github"]
         user_install_commands = ["hello"]
 
         [user_install_commands.hello]
@@ -53,7 +54,6 @@ def config_dir(tmp_path: Path) -> Path:
         org = "my-org"
 
         [defaults]
-        git_credentials = ["github"]
     """))
     return config_file
 
@@ -70,7 +70,7 @@ def test_load_valid_config(config_dir: Path) -> None:
     assert cfg.workspace_templates["child"].tmuxinator is False
     assert cfg.git_credentials["github"].type == "github"
     assert cfg.git_credentials["azdo"].org == "my-org"
-    assert cfg.defaults.git_credentials == ["github"]
+    assert cfg.admin.git_credentials == ["github"]
 
 
 def test_missing_config_file(tmp_path: Path) -> None:

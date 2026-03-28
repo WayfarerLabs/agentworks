@@ -116,6 +116,27 @@ memory = 64
 agentworks vm create --template heavy
 ```
 
+## `git_credentials` moved from `[defaults]` to `[admin.config]` and `[agent.config]`
+
+Git credentials are now per-user settings, allowing different credentials for admin and agent users.
+
+**Before:**
+
+```toml
+[defaults]
+git_credentials = ["github"]
+```
+
+**After:**
+
+```toml
+[admin.config]
+git_credentials = ["github"]
+
+[agent.config]
+git_credentials = []    # agents get no credentials by default
+```
+
 ## Mise catalog entries removed
 
 Mise packages are no longer defined as catalog entries (`[mise_packages.*]` sections). Instead, use

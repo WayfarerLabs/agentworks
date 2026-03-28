@@ -95,7 +95,6 @@ class PathsConfig:
 class DefaultsConfig:
     platform: str | None = None
     vm_host: str | None = None
-    git_credentials: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -131,6 +130,7 @@ class AdminConfig:
     """Per-user config for the admin user on VMs."""
 
     shell: str = "zsh"
+    git_credentials: list[str] = field(default_factory=list)
     user_install_commands: list[str] = field(default_factory=list)
     dotfiles_source: str | None = None
     dotfiles_destination: str = "~/.dotfiles"
@@ -147,6 +147,7 @@ class AgentConfig:
     """Per-user config for agent users on VMs."""
 
     shell: str = "bash"
+    git_credentials: list[str] = field(default_factory=list)
     user_install_commands: list[str] = field(default_factory=list)
     dotfiles_source: str | None = None
     dotfiles_destination: str = "~/.dotfiles"
@@ -319,13 +320,19 @@ def _load_paths(data: dict[str, object]) -> PathsConfig:
     return PathsConfig(local_workspaces=local_ws, code_workspaces=code_ws)
 
 
-_DEFAULTS_KEYS = {"platform", "vm_host", "git_credentials"}
+_DEFAULTS_KEYS = {"platform", "vm_host"}
 
 
-def _load_defaults(data: dict[str, object], git_credential_names: set[str]) -> DefaultsConfig:
+def _load_defaults(data: dict[str, object]) -> DefaultsConfig:
     raw = data.get("defaults", {})
     if not isinstance(raw, dict):
         raise ConfigError("[defaults] must be a table")
+
+    if "git_credentials" in raw:
+        raise ConfigError(
+            "defaults.git_credentials has been removed. Move git_credentials into "
+            "[admin.config] and/or [agent.config]. See docs/guides/config-migration.md."
+        )
 
     _warn_unexpected_keys(raw, _DEFAULTS_KEYS, "defaults")
 
@@ -333,17 +340,9 @@ def _load_defaults(data: dict[str, object], git_credential_names: set[str]) -> D
     if platform is not None and platform not in VALID_PLATFORMS:
         raise ConfigError(f"defaults.platform must be one of {VALID_PLATFORMS}, got: {platform}")
 
-    git_creds_val = raw.get("git_credentials", [])
-    if not isinstance(git_creds_val, list):
-        raise ConfigError("defaults.git_credentials must be a list")
-    for gc in git_creds_val:
-        if gc not in git_credential_names:
-            raise ConfigError(f"defaults.git_credentials references unknown git credential: {gc}")
-
     return DefaultsConfig(
         platform=str(platform) if platform is not None else None,
         vm_host=str(raw["vm_host"]) if "vm_host" in raw else None,
-        git_credentials=list(git_creds_val),
     )
 
 
@@ -424,6 +423,7 @@ def _load_vm_templates(data: dict[str, object]) -> dict[str, VMTemplate]:
 
 _USER_CONFIG_KEYS = {
     "shell",
+    "git_credentials",
     "user_install_commands",
     "dotfiles_source",
     "dotfiles_destination",
@@ -451,6 +451,7 @@ def _load_user_config(
 
     kwargs = {
         "shell": str(raw.get("shell", default_shell)),
+        "git_credentials": list(raw.get("git_credentials", [])),
         "user_install_commands": list(raw.get("user_install_commands", [])),
         "dotfiles_source": str(raw["dotfiles_source"]) if "dotfiles_source" in raw else None,
         "dotfiles_destination": str(raw.get("dotfiles_destination", "~/.dotfiles")),
@@ -739,7 +740,7 @@ def load_config(path: Path | None = None) -> Config:
     return Config(
         user=_load_user(data),
         paths=_load_paths(data),
-        defaults=_load_defaults(data, set(git_credentials.keys())),
+        defaults=_load_defaults(data),
         vm_templates=loaded_vm_templates,
         vm=resolved_vm,
         admin=_load_admin_config(data),

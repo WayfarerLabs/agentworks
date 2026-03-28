@@ -261,7 +261,7 @@ def _check_git_credentials(
     assert callable(ok) and callable(warn) and callable(fail)
 
     try:
-        providers = resolve_git_credential_providers(config)
+        providers = resolve_git_credential_providers(config, config.admin.git_credentials)
     except Exception as e:
         warn(f"Could not resolve git credential providers: {e}")
         return

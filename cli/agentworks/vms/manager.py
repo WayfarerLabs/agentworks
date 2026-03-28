@@ -109,7 +109,7 @@ def create_vm(
 
     # Pre-flight checks
     verify_tailscale_available()
-    providers = resolve_git_credential_providers(config)
+    providers = resolve_git_credential_providers(config, config.admin.git_credentials)
     verify_git_credential_auth(providers)
 
     # Collect secrets upfront so the user isn't interrupted mid-provisioning
@@ -569,7 +569,7 @@ def reinit_vm(
 
     # Pre-flight checks
     verify_tailscale_available()
-    providers = resolve_git_credential_providers(config)
+    providers = resolve_git_credential_providers(config, config.admin.git_credentials)
     verify_git_credential_auth(providers)
 
     # Collect git tokens upfront
