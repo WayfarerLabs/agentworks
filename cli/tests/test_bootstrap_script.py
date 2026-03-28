@@ -24,7 +24,7 @@ def test_generate_bootstrap_script_all_steps() -> None:
         system_packages=["curl", "git"],
         tailscale_auth_key="tskey-auth-test123",
         hostname="lima--myvm",
-        swap_gb=4,
+        swap=4,
     )
 
     assert script.startswith("#!/bin/bash\n")
@@ -42,14 +42,14 @@ def test_generate_bootstrap_script_all_steps() -> None:
 
 
 def test_generate_bootstrap_script_swap_disabled() -> None:
-    """swap_gb=0 still includes the step but skips creation."""
+    """swap=0 still includes the step but skips creation."""
     script = generate_bootstrap_script(
         admin_username="testuser",
         ssh_public_key="ssh-ed25519 AAAA testkey",
         system_packages=["curl", "git"],
         tailscale_auth_key="tskey-auth-test123",
         hostname="azure--myvm",
-        swap_gb=0,
+        swap=0,
     )
 
     assert "##STEP## Swap file" in script

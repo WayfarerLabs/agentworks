@@ -47,9 +47,9 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # -- Provisioning (set once at create time) --
 # cpus = 4                                   # number of CPUs (Lima)
 # memory = 8                                 # memory in GiB (Lima)
-# disk = 50                                  # disk size in GiB (Lima)
-# azure_vm_size = "Standard_B2s"             # Azure VM size
-# swap_gb = 4                                # swap file size in GiB (0 to disable)
+# azure_vm_size = "Standard_B2s"             # Azure VM size (determines cpu and memory for Azure)
+# disk = 50                                  # disk size in GiB
+# swap = 4                                   # swap file size in GiB (0 to disable)
 # -- System-wide initialization (applied on create and reinit) --
 # apt = [                                    # direct apt packages
 #     "zsh",

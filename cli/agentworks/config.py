@@ -108,7 +108,7 @@ class VMTemplate:
     memory: int | None = None
     disk: int | None = None
     azure_vm_size: str | None = None
-    swap_gb: int | None = None
+    swap: int | None = None
     # System-wide initialization
     apt: list[str] | None = None
     apt_packages: list[str] | None = None
@@ -355,7 +355,7 @@ _VM_TEMPLATE_KEYS = {
     "memory",
     "disk",
     "azure_vm_size",
-    "swap_gb",
+    "swap",
     "apt",
     "apt_packages",
     "snap",
@@ -396,7 +396,7 @@ def _load_vm_templates(data: dict[str, object]) -> dict[str, VMTemplate]:
             memory=int(tdata["memory"]) if "memory" in tdata else None,
             disk=int(tdata["disk"]) if "disk" in tdata else None,
             azure_vm_size=str(tdata["azure_vm_size"]) if "azure_vm_size" in tdata else None,
-            swap_gb=int(tdata["swap_gb"]) if "swap_gb" in tdata else None,
+            swap=int(tdata["swap"]) if "swap" in tdata else None,
             apt=list(tdata["apt"]) if "apt" in tdata else None,
             apt_packages=list(tdata["apt_packages"]) if "apt_packages" in tdata else None,
             snap=list(tdata["snap"]) if "snap" in tdata else None,
@@ -415,7 +415,7 @@ def _load_vm_templates(data: dict[str, object]) -> dict[str, VMTemplate]:
     # Validate inherits references and cycles
     for name, tmpl in templates.items():
         for parent in tmpl.inherits:
-            if parent not in templates:
+            if parent not in templates and parent != "default":
                 raise ConfigError(f"vm_templates.{name}.inherits references unknown template: {parent}")
     _detect_template_cycles(templates, "vm_templates")
 
@@ -513,7 +513,7 @@ def _load_agent_templates(data: dict[str, object]) -> dict[str, AgentTemplate]:
 
     for name, tmpl in templates.items():
         for parent in tmpl.inherits:
-            if parent not in templates:
+            if parent not in templates and parent != "default":
                 raise ConfigError(f"agent_templates.{name}.inherits references unknown template: {parent}")
     _detect_template_cycles(templates, "agent_templates")
 
@@ -569,7 +569,7 @@ def _load_workspace_templates(data: dict[str, object]) -> dict[str, WorkspaceTem
     # validate inherits references and cycles
     for name, tmpl in templates.items():
         for parent in tmpl.inherits:
-            if parent not in templates:
+            if parent not in templates and parent != "default":
                 raise ConfigError(f"workspace_templates.{name}.inherits references unknown template: {parent}")
     _detect_template_cycles(templates, "workspace_templates")
 
@@ -586,6 +586,8 @@ def _detect_template_cycles(templates: dict[str, _HasInherits], label: str) -> N
     in_stack: set[str] = set()
 
     def visit(name: str) -> None:
+        if name not in templates:
+            return  # implicit default or already validated
         if name in in_stack:
             raise ConfigError(f"{label} inheritance cycle detected involving: {name}")
         if name in visited:

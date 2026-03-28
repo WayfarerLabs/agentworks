@@ -228,9 +228,9 @@ class WSL2Provisioner(VMProvisioner):
         )
 
         # Configure swap file
-        if config.vm.swap_gb > 0:
-            swap_mb = config.vm.swap_gb * 1024
-            typer.echo(f"  Setting up {config.vm.swap_gb} GiB swap file...")
+        if config.vm.swap > 0:
+            swap_mb = config.vm.swap * 1024
+            typer.echo(f"  Setting up {config.vm.swap} GiB swap file...")
             _wsl(
                 [
                     "--distribution",

@@ -26,7 +26,7 @@ class ResolvedVMTemplate:
     memory: int = 8
     disk: int = 50
     azure_vm_size: str = "Standard_B2s"
-    swap_gb: int = 4
+    swap: int = 4
     # System-wide init
     apt: list[str] = field(default_factory=list)
     apt_packages: list[str] = field(default_factory=list)
@@ -63,6 +63,10 @@ def resolve_from_dict(
 
 def _resolve_from_dict(templates: dict[str, VMTemplate], name: str) -> ResolvedVMTemplate:
     """Depth-first resolution using a templates dict."""
+    if name not in templates:
+        # Implicit default: return built-in defaults
+        return ResolvedVMTemplate(name=name)
+
     tmpl = templates[name]
     result = ResolvedVMTemplate(name=name)
 
@@ -92,7 +96,7 @@ def _merge(target: ResolvedVMTemplate, source: ResolvedVMTemplate) -> None:
     target.memory = source.memory
     target.disk = source.disk
     target.azure_vm_size = source.azure_vm_size
-    target.swap_gb = source.swap_gb
+    target.swap = source.swap
     target.apt = list(source.apt)
     target.apt_packages = list(source.apt_packages)
     target.snap = list(source.snap)
@@ -116,8 +120,8 @@ def _merge_template(target: ResolvedVMTemplate, tmpl: VMTemplate) -> None:
         target.disk = tmpl.disk
     if tmpl.azure_vm_size is not None:
         target.azure_vm_size = tmpl.azure_vm_size
-    if tmpl.swap_gb is not None:
-        target.swap_gb = tmpl.swap_gb
+    if tmpl.swap is not None:
+        target.swap = tmpl.swap
     if tmpl.apt is not None:
         target.apt = list(tmpl.apt)
     if tmpl.apt_packages is not None:

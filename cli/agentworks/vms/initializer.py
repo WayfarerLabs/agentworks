@@ -1006,7 +1006,7 @@ def _run_bootstrap_script(
         system_packages=SYSTEM_PACKAGES,
         tailscale_auth_key=ts_auth_key,
         hostname=vm_hostname(platform, vm_name),
-        swap_gb=0 if is_wsl2 else config.vm.swap_gb,  # WSL2 provisioner handles swap
+        swap=0 if is_wsl2 else config.vm.swap,  # WSL2 provisioner handles swap
         is_wsl2=is_wsl2,
     )
 

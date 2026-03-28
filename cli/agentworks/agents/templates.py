@@ -55,6 +55,9 @@ def resolve_template(config: Config, template_name: str | None = None) -> Resolv
 
 def _resolve(templates: dict[str, AgentTemplate], name: str) -> ResolvedAgentTemplate:
     """Depth-first, left-to-right resolution."""
+    if name not in templates:
+        return ResolvedAgentTemplate(name=name)
+
     tmpl = templates[name]
     result = ResolvedAgentTemplate(name=name)
 

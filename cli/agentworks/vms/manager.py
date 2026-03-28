@@ -123,7 +123,7 @@ def create_vm(
         cpus=resolved_cpus,
         memory_gib=resolved_memory,
         disk_gib=resolved_disk,
-        swap_gib=vm_tmpl.swap_gb,
+        swap_gib=vm_tmpl.swap,
         admin_username=resolved_admin_username,
     )
 
@@ -151,6 +151,7 @@ def create_vm(
                 vm_name,
                 config,
                 azure_vm_size=resolved_azure_size,
+                disk=resolved_disk,
                 admin_username=resolved_admin_username,
                 tailscale_auth_key=tailscale_auth_key,
             )

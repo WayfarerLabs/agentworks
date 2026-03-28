@@ -105,8 +105,8 @@ class LimaProvisioner(VMProvisioner):
             typer.echo(f"Connecting to VM host '{self._vm_host_ssh}'...")
         typer.echo(f"Creating Lima VM '{vm_name}' ({'remote' if self.is_remote else 'local'})...")
         typer.echo(f"  Resources: {cpus} CPUs, {memory} GiB memory, {disk} GiB disk")
-        if config.vm.swap_gb > 0:
-            typer.echo(f"  Swap: {config.vm.swap_gb} GiB")
+        if config.vm.swap > 0:
+            typer.echo(f"  Swap: {config.vm.swap} GiB")
 
         # Generate the full bootstrap script and embed in the Lima provision block.
         # This handles user creation, system packages, swap, SSH key, and Tailscale.
@@ -118,7 +118,7 @@ class LimaProvisioner(VMProvisioner):
                 system_packages=SYSTEM_PACKAGES,
                 tailscale_auth_key=tailscale_auth_key,
                 hostname=vm_hostname("lima", vm_name),
-                swap_gb=config.vm.swap_gb,
+                swap=config.vm.swap,
             )
         else:
             # No Tailscale key -- provision block is a no-op.

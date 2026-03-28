@@ -26,7 +26,7 @@ SYSTEM_PACKAGES={system_packages}
 TAILSCALE_AUTH_KEY={tailscale_auth_key}
 VM_HOSTNAME={vm_hostname}
 TS_EXTRA_FLAGS={ts_extra_flags}
-SWAP_GB={swap_gb}
+SWAP_GB={swap}
 
 # -- Step 1: Ensure user --
 echo "##STEP## Ensure user"
@@ -109,7 +109,7 @@ def generate_bootstrap_script(
     system_packages: list[str],
     tailscale_auth_key: str,
     hostname: str,
-    swap_gb: int = 0,
+    swap: int = 0,
     is_wsl2: bool = False,
 ) -> str:
     """Generate the Phase A bootstrap script with parameters baked in."""
@@ -122,7 +122,7 @@ def generate_bootstrap_script(
         tailscale_auth_key=shlex.quote(tailscale_auth_key),
         vm_hostname=shlex.quote(hostname),
         ts_extra_flags=shlex.quote(ts_extra_flags),
-        swap_gb=swap_gb,
+        swap=swap,
     )
 
 
