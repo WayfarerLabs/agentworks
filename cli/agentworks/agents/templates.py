@@ -70,29 +70,46 @@ def _resolve(templates: dict[str, AgentTemplate], name: str) -> ResolvedAgentTem
     return result
 
 
+def _append_dedupe(target: list[str], source: list[str]) -> list[str]:
+    """Append source items to target, skipping dupes. Preserves order."""
+    seen = set(target)
+    result = list(target)
+    for item in source:
+        if item not in seen:
+            seen.add(item)
+            result.append(item)
+    return result
+
+
+def _merge_map(target: dict[str, str], source: dict[str, str]) -> dict[str, str]:
+    """Merge source map into target. Source wins on key collision."""
+    return {**target, **source}
+
+
 def _merge(target: ResolvedAgentTemplate, source: ResolvedAgentTemplate) -> None:
-    """Merge source into target (source wins for all fields)."""
+    """Merge source into target. Scalars: source wins. Lists: append with dedupe."""
     target.shell = source.shell
-    target.git_credentials = list(source.git_credentials)
-    target.user_install_commands = list(source.user_install_commands)
+    target.git_credentials = _append_dedupe(target.git_credentials, source.git_credentials)
+    target.user_install_commands = _append_dedupe(target.user_install_commands, source.user_install_commands)
     target.dotfiles_source = source.dotfiles_source
     target.dotfiles_destination = source.dotfiles_destination
     target.dotfiles_install_cmd = source.dotfiles_install_cmd
     target.mise_activate = source.mise_activate
-    target.mise_packages = list(source.mise_packages)
+    target.mise_packages = _append_dedupe(target.mise_packages, source.mise_packages)
     target.mise_lockfile = source.mise_lockfile
     target.mise_allow_unlocked = source.mise_allow_unlocked
     target.mise_install_before = source.mise_install_before
 
 
 def _merge_template(target: ResolvedAgentTemplate, tmpl: AgentTemplate) -> None:
-    """Merge a raw AgentTemplate into a ResolvedAgentTemplate. None = not set, skip."""
+    """Merge a raw AgentTemplate into a ResolvedAgentTemplate. None = not set, skip.
+    Scalars: child overrides. Lists: append with dedupe."""
     if tmpl.shell is not None:
         target.shell = tmpl.shell
     if tmpl.git_credentials is not None:
-        target.git_credentials = list(tmpl.git_credentials)
+        target.git_credentials = _append_dedupe(target.git_credentials, tmpl.git_credentials)
     if tmpl.user_install_commands is not None:
-        target.user_install_commands = list(tmpl.user_install_commands)
+        target.user_install_commands = _append_dedupe(target.user_install_commands, tmpl.user_install_commands)
     if tmpl.dotfiles_source is not None:
         target.dotfiles_source = tmpl.dotfiles_source
     if tmpl.dotfiles_destination is not None:
@@ -102,7 +119,7 @@ def _merge_template(target: ResolvedAgentTemplate, tmpl: AgentTemplate) -> None:
     if tmpl.mise_activate is not None:
         target.mise_activate = tmpl.mise_activate
     if tmpl.mise_packages is not None:
-        target.mise_packages = list(tmpl.mise_packages)
+        target.mise_packages = _append_dedupe(target.mise_packages, tmpl.mise_packages)
     if tmpl.mise_lockfile is not None:
         target.mise_lockfile = tmpl.mise_lockfile
     if tmpl.mise_allow_unlocked is not None:

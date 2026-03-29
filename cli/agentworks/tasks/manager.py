@@ -20,9 +20,10 @@ _TEMPLATE_VAR_RE = re.compile(r"\{\{(\w+)\}\}")
 _KNOWN_TEMPLATE_VARS = {"task_name", "workspace_name"}
 
 if TYPE_CHECKING:
-    from agentworks.config import Config, TaskTemplate
+    from agentworks.config import Config
     from agentworks.db import Database, TaskRow, VMRow, WorkspaceRow
     from agentworks.ssh import SSHLogger
+    from agentworks.tasks.templates import ResolvedTaskTemplate
     from agentworks.tasks.tmux import RunCommand
 
 
@@ -103,25 +104,15 @@ def _regenerate_tmuxinator(
     write_file(target, f"{ws.workspace_path}/.tmuxinator.yml", config_text, logger=logger)
 
 
-def _resolve_template(config: Config, template_name: str | None) -> TaskTemplate:
-    """Resolve a task template by name.
+def _resolve_template(config: Config, template_name: str | None) -> ResolvedTaskTemplate:
+    """Resolve a task template by name, applying inheritance."""
+    from agentworks.tasks.templates import resolve_template
 
-    Selection order:
-    1. Explicit template_name
-    2. "default" template (built-in or user-defined)
-    """
-    if template_name is not None:
-        tpl = config.task_templates.get(template_name)
-        if tpl is None:
-            typer.echo(f"Error: unknown task template '{template_name}'", err=True)
-            raise typer.Exit(1)
-        return tpl
-
-    tpl = config.task_templates.get("default")
-    if tpl is None:
-        typer.echo("Error: no 'default' task template found", err=True)
-        raise typer.Exit(1)
-    return tpl
+    try:
+        return resolve_template(config, template_name)
+    except ValueError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1) from None
 
 
 def _substitute_template_vars(text: str, variables: dict[str, str]) -> str:
@@ -138,7 +129,7 @@ def _substitute_template_vars(text: str, variables: dict[str, str]) -> str:
 
 
 def _build_task_command(
-    template: TaskTemplate,
+    template: ResolvedTaskTemplate,
     *,
     task_name: str,
     workspace_name: str,
