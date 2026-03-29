@@ -19,6 +19,8 @@ class ProvisionResult:
     exec_target: ExecTarget
     azure_resource_id: str | None = None
     wsl_distro_name: str | None = None
+    bootstrap_complete: bool = False
+    tailscale_ip: str | None = None
 
 
 class VMProvisioner(ABC):
@@ -45,5 +47,9 @@ class VMProvisioner(ABC):
         """Query the live runtime status of a VM."""
 
     @abstractmethod
-    def exec_target(self, vm: VMRow) -> ExecTarget:
-        """Return an ExecTarget for a running VM (provisioning transport)."""
+    def exec_target(self, vm: VMRow, *, config: object | None = None) -> ExecTarget:
+        """Return an ExecTarget for a running VM (provisioning transport).
+
+        config is optional; Azure needs it for the SSH identity file when
+        connecting via public IP (e.g., during Tailscale logout on delete).
+        """

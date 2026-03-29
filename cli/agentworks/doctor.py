@@ -132,11 +132,14 @@ def run_doctor() -> None:
             _check_ssh_key(config.user.ssh_private_key, "private", ok, warn, fail)
 
             # Dotfiles
-            if config.dotfiles.enabled:
-                if config.dotfiles.source.exists():
-                    ok(f"Dotfiles source: {config.dotfiles.source}")
+            if config.admin.dotfiles_source:
+                from agentworks.sources import parse_source_ref
+
+                ref = parse_source_ref(config.admin.dotfiles_source)
+                if ref.kind == "git" or Path(ref.path).expanduser().exists():
+                    ok(f"Admin dotfiles: {config.admin.dotfiles_source}")
                 else:
-                    warn(f"Dotfiles enabled but source missing: {config.dotfiles.source}")
+                    warn(f"Admin dotfiles source missing: {config.admin.dotfiles_source}")
 
             # Git credentials
             if config.git_credentials:
@@ -258,7 +261,7 @@ def _check_git_credentials(
     assert callable(ok) and callable(warn) and callable(fail)
 
     try:
-        providers = resolve_git_credential_providers(config)
+        providers = resolve_git_credential_providers(config, config.admin.git_credentials)
     except Exception as e:
         warn(f"Could not resolve git credential providers: {e}")
         return

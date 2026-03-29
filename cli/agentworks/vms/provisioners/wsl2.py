@@ -227,6 +227,27 @@ class WSL2Provisioner(VMProvisioner):
             ]
         )
 
+        # Configure swap file
+        if config.vm.swap > 0:
+            swap_mb = config.vm.swap * 1024
+            typer.echo(f"  Setting up {config.vm.swap} GiB swap file...")
+            _wsl(
+                [
+                    "--distribution",
+                    vm_name,
+                    "--user",
+                    "root",
+                    "--",
+                    "bash",
+                    "-c",
+                    f"fallocate -l {swap_mb}M /swapfile"
+                    " && chmod 600 /swapfile"
+                    " && mkswap /swapfile"
+                    " && swapon /swapfile"
+                    " && echo '/swapfile none swap sw 0 0' >> /etc/fstab",
+                ]
+            )
+
         # Create user account
         typer.echo(f"  Creating user '{admin_username}'...")
         _wsl(["--distribution", vm_name, "--user", "root", "--", "useradd", "-m", "-s", "/bin/bash", admin_username])
@@ -296,7 +317,7 @@ class WSL2Provisioner(VMProvisioner):
         )
         typer.echo(f"WSL2 distro '{vm.name}' deleted")
 
-    def exec_target(self, vm: VMRow) -> ExecTarget:
+    def exec_target(self, vm: VMRow, *, config: object | None = None) -> ExecTarget:
         return ExecTarget(wsl2=WSL2Target(distro_name=vm.name, user=vm.admin_username))
 
     def status(self, vm: VMRow) -> VMStatus:

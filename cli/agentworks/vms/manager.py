@@ -48,6 +48,7 @@ def create_vm(
     config: Config,
     *,
     name: str,
+    template: str | None = None,
     platform: str | None = None,
     vm_host: str | None = None,
     cpus: int | None = None,
@@ -57,6 +58,17 @@ def create_vm(
     admin_username: str | None = None,
 ) -> None:
     """Create a new VM: provision + initialize."""
+    from dataclasses import replace as _replace
+
+    from agentworks.vms.templates import resolve_template
+
+    vm_tmpl = resolve_template(config, template)
+
+    # Replace config.vm with the resolved template so downstream code
+    # (initializer, provisioners) uses the right template values.
+    if template is not None:
+        config = _replace(config, vm=vm_tmpl)
+
     # Resolve defaults
     platform = platform or config.defaults.platform or "lima"
     if platform not in VALID_PLATFORMS:
@@ -87,17 +99,17 @@ def create_vm(
         typer.echo("Error: [azure] config section required for azure platform", err=True)
         raise typer.Exit(1)
 
-    # Resolve resource settings: CLI flag > config > built-in default
-    resolved_cpus = cpus if cpus is not None else config.vm.cpus
-    resolved_memory = memory if memory is not None else config.vm.memory
-    resolved_disk = disk if disk is not None else config.vm.disk
-    resolved_azure_size = azure_vm_size or config.vm.azure_vm_size
-    resolved_admin_username = admin_username or config.vm.admin_username
+    # Resolve resource settings: CLI flag > template > built-in default
+    resolved_cpus = cpus if cpus is not None else vm_tmpl.cpus
+    resolved_memory = memory if memory is not None else vm_tmpl.memory
+    resolved_disk = disk if disk is not None else vm_tmpl.disk
+    resolved_azure_size = azure_vm_size or vm_tmpl.azure_vm_size
+    resolved_admin_username = admin_username or config.admin.username
     validate_admin_username(resolved_admin_username)
 
     # Pre-flight checks
     verify_tailscale_available()
-    providers = resolve_git_credential_providers(config)
+    providers = resolve_git_credential_providers(config, config.admin.git_credentials)
     verify_git_credential_auth(providers)
 
     # Collect secrets upfront so the user isn't interrupted mid-provisioning
@@ -108,9 +120,11 @@ def create_vm(
         vm_name,
         platform=platform,
         vm_host_name=vm_host_name,
+        template=vm_tmpl.name,
         cpus=resolved_cpus,
         memory_gib=resolved_memory,
         disk_gib=resolved_disk,
+        swap_gib=vm_tmpl.swap,
         admin_username=resolved_admin_username,
     )
 
@@ -128,6 +142,7 @@ def create_vm(
                 cpus=resolved_cpus,
                 memory=resolved_memory,
                 disk=resolved_disk,
+                tailscale_auth_key=tailscale_auth_key,
             )
         elif platform == "azure":
             from agentworks.vms.provisioners.azure import AzureProvisioner
@@ -137,7 +152,9 @@ def create_vm(
                 vm_name,
                 config,
                 azure_vm_size=resolved_azure_size,
+                disk=resolved_disk,
                 admin_username=resolved_admin_username,
+                tailscale_auth_key=tailscale_auth_key,
             )
         elif platform == "wsl2":
             from agentworks.vms.provisioners.wsl2 import WSL2Provisioner
@@ -165,6 +182,17 @@ def create_vm(
     # -- Initialization --
     # If this fails, the VM exists on the remote host and may be debuggable.
     # Keep the DB record so the user can reinit or delete.
+    # Build a callback to detach the Azure public IP once Tailscale is up
+    # (before Phase B starts). This minimizes the window where the VM has
+    # a public IP exposed to the internet.
+    def _on_tailscale_ready() -> None:
+        if platform == "azure":
+            from agentworks.vms.provisioners.azure import AzureProvisioner as _AP
+
+            _created_vm = db.get_vm(vm_name)
+            assert _created_vm is not None
+            _AP().detach_public_ip(_created_vm)
+
     try:
         initialize_vm(
             db,
@@ -176,6 +204,9 @@ def create_vm(
             admin_username=resolved_admin_username,
             tailscale_auth_key=tailscale_auth_key,
             git_tokens=git_tokens,
+            bootstrap_complete=result.bootstrap_complete,
+            tailscale_ip=result.tailscale_ip,
+            on_tailscale_ready=_on_tailscale_ready,
         )
     except Exception as e:
         typer.echo(f"\nError: {e}", err=True)
@@ -210,20 +241,13 @@ def create_vm(
             )
         return
 
-    # -- Post-init: SSH config + cleanup --
+    # -- Post-init: SSH config --
     try:
         from agentworks.ssh_config import sync_ssh_config
 
         sync_ssh_config(config, db)
-
-        if platform == "azure":
-            from agentworks.vms.provisioners.azure import AzureProvisioner as _AP
-
-            _created_vm = db.get_vm(vm_name)
-            assert _created_vm is not None
-            _AP().detach_public_ip(_created_vm)
     except Exception as e:
-        typer.echo(f"\nWarning: post-init step failed: {e}", err=True)
+        typer.echo(f"\nWarning: SSH config sync failed: {e}", err=True)
         typer.echo("VM is likely still usable.", err=True)
 
     # Final status is set by initialize_vm (COMPLETE or PARTIAL)
@@ -243,7 +267,7 @@ def list_vms(db: Database) -> None:
         return
 
     header = (
-        f"{'NAME':<20} {'PLATFORM':<10} {'HOST':<15} {'PROV':<12} {'INIT':<12} "
+        f"{'NAME':<20} {'PLATFORM':<10} {'TEMPLATE':<12} {'HOST':<15} {'PROV':<12} {'INIT':<12} "
         f"{'WS/AG/TS':<10} {'TAILSCALE':<20} {'CREATED'}"
     )
     typer.echo(header)
@@ -254,7 +278,7 @@ def list_vms(db: Database) -> None:
         ts = db.count_tasks_on_vm(vm.name)
         counts = f"{ws}/{ag}/{ts}"
         typer.echo(
-            f"{vm.name:<20} {vm.platform:<10} {vm.vm_host_name or '-':<15} "
+            f"{vm.name:<20} {vm.platform:<10} {vm.template or '-':<12} {vm.vm_host_name or '-':<15} "
             f"{vm.provisioning_status:<12} {vm.init_status:<12} "
             f"{counts:<10} {vm.tailscale_host or '-':<20} {vm.created_at}"
         )
@@ -268,6 +292,7 @@ def describe_vm(db: Database, config: Config, name: str) -> None:
     typer.echo(f"Name:           {vm.name}")
     typer.echo(f"Created:        {vm.created_at}")
     typer.echo(f"Platform:       {vm.platform}")
+    typer.echo(f"Template:       {vm.template or '-'}")
     typer.echo(f"VM Host:        {vm.vm_host_name or '-'}")
     typer.echo(f"Admin User:     {vm.admin_username}")
     typer.echo(f"Provisioning:   {vm.provisioning_status}")
@@ -290,7 +315,7 @@ def describe_vm(db: Database, config: Config, name: str) -> None:
                    f"{live['mem_total'] if live else '-':<14}"
                    f"{live['mem_used'] + ' (' + live['mem_pct'] + ')' if live else '-'}")
         typer.echo(f"  {'Swap':<16}"
-                   f"{'-':<14}"
+                   f"{str(vm.swap_gib) + 'G' if vm.swap_gib else '-':<14}"
                    f"{live['swap_total'] if live else '-':<14}"
                    f"{live['swap_used'] + ' (' + live['swap_pct'] + ')' if live else '-'}")
         typer.echo(f"  {'Disk':<16}"
@@ -431,6 +456,7 @@ def start_vm(db: Database, config: Config, name: str) -> None:
         provisioner.start(vm)
 
     _ensure_tailscale(db, config, vm, provisioner)
+    typer.echo(f"VM '{name}' is ready")
 
 
 def stop_vm(db: Database, config: Config, name: str) -> None:
@@ -443,11 +469,7 @@ def stop_vm(db: Database, config: Config, name: str) -> None:
         typer.echo(f"VM '{name}' is already stopped")
         return
     provisioner.stop(vm)
-
-    # Check if the Tailscale node survived the stop (ephemeral nodes disappear)
-    if vm.tailscale_host and not _is_tailscale_reachable(vm.tailscale_host):
-        typer.echo(f"Tailscale node for VM '{name}' is no longer reachable (ephemeral key?)")
-        db.clear_vm_tailscale(name)
+    typer.echo(f"VM '{name}' stopped")
 
 
 def delete_vm(
@@ -497,7 +519,7 @@ def delete_vm(
 
         # Tailscale logout (best-effort, via provisioning transport)
         if vm.tailscale_host:
-            _tailscale_logout(provisioner, vm)
+            _tailscale_logout(provisioner, vm, config)
 
         provisioner.delete(vm)
     except Exception as e:
@@ -534,6 +556,14 @@ def reinit_vm(
 
     vm = _require_vm(db, name)
 
+    # Resolve the VM's template so init uses the right values
+    if vm.template and vm.template != "default":
+        from dataclasses import replace as _replace
+
+        from agentworks.vms.templates import resolve_template
+
+        config = _replace(config, vm=resolve_template(config, vm.template))
+
     if vm.provisioning_status != ProvisioningStatus.COMPLETE.value:
         typer.echo(
             f"Error: VM '{name}' provisioning is '{vm.provisioning_status}', not 'complete'. Cannot reinitialize.",
@@ -547,7 +577,7 @@ def reinit_vm(
 
     # Pre-flight checks
     verify_tailscale_available()
-    providers = resolve_git_credential_providers(config)
+    providers = resolve_git_credential_providers(config, config.admin.git_credentials)
     verify_git_credential_auth(providers)
 
     # Collect git tokens upfront
@@ -591,17 +621,19 @@ def reinit_vm(
         typer.echo(f"  Log: {logger.path}")
     else:
         typer.echo(f"\nVM '{name}' reinitialized successfully!")
-        typer.echo(f"  Log: {logger.path}")
 
 
 
-def _tailscale_logout(provisioner: VMProvisioner, vm: VMRow) -> None:
+def _tailscale_logout(provisioner: VMProvisioner, vm: VMRow, config: Config) -> None:
     """Best-effort: deregister from Tailscale via the provisioning transport.
 
     Uses the provisioner's exec_target (not Tailscale SSH) because we can't
     ask Tailscale to tear itself down over the connection it provides.
     For Azure VMs, temporarily attaches a public IP for SSH access.
     """
+    import time
+
+    from agentworks.ssh import SSHError as _SSHError
     from agentworks.vms.provisioners.azure import AzureProvisioner
 
     typer.echo("Deregistering from Tailscale...")
@@ -609,9 +641,26 @@ def _tailscale_logout(provisioner: VMProvisioner, vm: VMRow) -> None:
         azure_provisioner = provisioner if isinstance(provisioner, AzureProvisioner) else None
         if azure_provisioner is not None:
             azure_provisioner.attach_public_ip(vm)
-        exec_target = provisioner.exec_target(vm)
-        exec_target.run_as_root("tailscale down", timeout=15)
-        exec_target.run_as_root("tailscale logout", timeout=15)
+        exec_target = provisioner.exec_target(vm, config=config)
+
+        # Wait for SSH to be reachable (public IP may have just been attached)
+        for attempt in range(6):
+            try:
+                exec_target.run("echo ok", timeout=10)
+                break
+            except (_SSHError, Exception):
+                if attempt == 5:
+                    raise
+                time.sleep(5)
+
+        # Fire and forget: tailscale down + logout can disrupt networking
+        # on the VM, killing SSH-based transports before they get a response.
+        # Lima/WSL2 use local transports and are unaffected, but the nohup
+        # approach works universally.
+        exec_target.run_as_root(
+            "nohup sh -c 'tailscale down && tailscale logout' >/dev/null 2>&1 &",
+            timeout=10,
+        )
         typer.echo("Tailscale node deregistered")
     except Exception as e:
         typer.echo(f"Warning: Tailscale logout failed (node may remain in admin console): {e}", err=True)
@@ -873,15 +922,20 @@ def _ensure_tailscale(
     provisioner: VMProvisioner,
 ) -> None:
     """After starting a VM, verify Tailscale connectivity and rejoin if needed."""
+    from agentworks.ssh import ExecTarget, ssh_target_for_vm, wait_for_reconnect
+
     # Refresh VM row in case tailscale_host was cleared on stop
     vm = _require_vm(db, vm.name)
 
-    if vm.tailscale_host and _is_tailscale_reachable(vm.tailscale_host):
-        typer.echo(f"Tailscale node reachable at {vm.tailscale_host}")
-        return
-
+    # If we have a known Tailscale host, wait for it to reconnect after boot.
+    # This avoids unnecessarily attaching a public IP on Azure.
     if vm.tailscale_host:
-        typer.echo(f"Tailscale node {vm.tailscale_host} is not reachable")
+        ts_target = ExecTarget(ssh=ssh_target_for_vm(vm, config))
+        if wait_for_reconnect(ts_target):
+            return
+
+        # Tailscale didn't reconnect (ephemeral key expired, etc.)
+        typer.echo(f"Tailscale node {vm.tailscale_host} did not reconnect, rejoining...")
         db.clear_vm_tailscale(vm.name)
 
     # For Azure, attach a temporary public IP for the rejoin
@@ -893,7 +947,7 @@ def _ensure_tailscale(
 
     try:
         verify_tailscale_available()
-        exec_target = provisioner.exec_target(vm)
+        exec_target = provisioner.exec_target(vm, config=config)
         rejoin_tailscale(
             db,
             vm.name,
@@ -903,6 +957,14 @@ def _ensure_tailscale(
     finally:
         if azure_provisioner is not None:
             azure_provisioner.detach_public_ip(vm)
+
+            # Wait for Tailscale SSH to reconnect after IP change
+            from agentworks.ssh import ExecTarget, ssh_target_for_vm, wait_for_reconnect
+
+            refreshed = db.get_vm(vm.name)
+            if refreshed and refreshed.tailscale_host:
+                ts_target = ExecTarget(ssh=ssh_target_for_vm(refreshed, config))
+                wait_for_reconnect(ts_target)
 
     # Update SSH config in case the Tailscale IP changed
     from agentworks.ssh_config import sync_ssh_config

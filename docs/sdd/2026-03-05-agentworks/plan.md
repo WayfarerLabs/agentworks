@@ -277,9 +277,10 @@ alongside VM workspaces in `workspace list`.
 
 ---
 
-## Phase 3: File Templating
+## Phase 3: File Templating (deferred)
 
-Adds file templating support to workspace templates.
+Adds file templating support to workspace templates. Deferred indefinitely -- no immediate need.
+Rulesync and dotfiles cover the primary use cases (editor configs, Claude Code permissions) for now.
 
 ### 3.1 Workspace Template File Processing
 
@@ -289,9 +290,6 @@ Adds file templating support to workspace templates.
       substitution
 - [ ] Define standard variables (workspace name, VM name, workspace template name, etc.)
 - [ ] Use cases: VS Code settings, Claude Code permissions, editor configs, etc.
-
-**Definition of done:** Workspace templates with a `files` section copy and process files into new
-workspaces with variable substitution.
 
 ---
 
@@ -380,8 +378,8 @@ verified.
 
 These items have architectural room in the current design but are not scheduled for implementation.
 
-- **VM templates**: named VM configurations (packages, install commands, shell) that can be selected
-  at `vm create` time, replacing the current single implicit default in `[vm.config]`
+- ~~**VM templates**: named VM configurations (packages, install commands, shell) that can be selected
+  at `vm create` time, replacing the current single implicit default in `[vm.config]`~~ (implemented)
 - **VM initialization plugins**: named install commands (`[install_commands.*]`) partially replace
   this concept. Full plugins would go further with structured, version-aware building blocks (e.g.
   `install.bun` installs bun, writes `.bun-version`, and verifies the installation)
@@ -391,8 +389,8 @@ These items have architectural room in the current design but are not scheduled 
 - **Non-VM Workspace Hosts**: Kubernetes StatefulSet pods as Workspace Hosts (`--platform k8s`),
   and/or container-based workspaces on existing VMs. When non-VM types ship, the `vm` CLI command
   group may be generalized to `host` or similar.
-- **Workspace move**: `workspace move <name> --to <vm-name|local>` to relocate workspaces between
-  VMs/local
+- ~~**Workspace move**: `workspace move <name> --to <vm-name|local>` to relocate workspaces between
+  VMs/local~~ (superseded by `workspace copy` which copies across VMs, VM-to-local, and local-to-VM)
 - **Azure auto-suspend**: systemd timer on Azure VMs that deallocates after idle timeout (requires
   `az cli` auth on the VM -- authentication mechanism TBD)
 - **Auto-authentication**: auto-authenticate tools (az cli, Claude Code, etc.) during VM

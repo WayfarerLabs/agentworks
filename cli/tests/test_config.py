@@ -25,10 +25,13 @@ def config_dir(tmp_path: Path) -> Path:
         ssh_public_key = "{pub}"
         ssh_private_key = "{priv}"
 
-        [vm.config]
-        admin_shell = "zsh"
+        [vm_templates.default]
         apt = ["zsh", "tmux"]
-        admin_install_commands = ["hello"]
+
+        [admin.config]
+        shell = "zsh"
+        git_credentials = ["github"]
+        user_install_commands = ["hello"]
 
         [user_install_commands.hello]
         command = "echo hello"
@@ -51,16 +54,15 @@ def config_dir(tmp_path: Path) -> Path:
         org = "my-org"
 
         [defaults]
-        git_credentials = ["github"]
     """))
     return config_file
 
 
 def test_load_valid_config(config_dir: Path) -> None:
     cfg = load_config(config_dir)
-    assert cfg.vm.admin_shell == "zsh"
+    assert cfg.admin.shell == "zsh"
     assert cfg.vm.apt == ["zsh", "tmux"]
-    assert cfg.vm.admin_install_commands == ["hello"]
+    assert cfg.admin.user_install_commands == ["hello"]
     assert "hello" in cfg.user_install_commands
     assert "default" in cfg.workspace_templates
     assert "gruntweave" in cfg.workspace_templates
@@ -68,7 +70,7 @@ def test_load_valid_config(config_dir: Path) -> None:
     assert cfg.workspace_templates["child"].tmuxinator is False
     assert cfg.git_credentials["github"].type == "github"
     assert cfg.git_credentials["azdo"].org == "my-org"
-    assert cfg.defaults.git_credentials == ["github"]
+    assert cfg.admin.git_credentials == ["github"]
 
 
 def test_missing_config_file(tmp_path: Path) -> None:
@@ -153,17 +155,17 @@ def test_orphaned_key_under_commented_section(tmp_path: Path) -> None:
         ssh_public_key = "{pub}"
         ssh_private_key = "{priv}"
 
-        # [dotfiles]          <-- commented out!
-        enabled = false       # orphaned in [user], not [dotfiles]
+        # [defaults]          <-- commented out!
+        platform = "lima"     # orphaned in [user], not [defaults]
     """))
     with warnings.catch_warnings(record=True) as w:
         warnings.simplefilter("always")
         cfg = load_config(config_file)
         assert len(w) == 1
-        assert "enabled" in str(w[0].message)
+        assert "platform" in str(w[0].message)
         assert "user" in str(w[0].message).lower()
-    # The orphaned key means dotfiles.enabled stays at default (True)
-    assert cfg.dotfiles.enabled is True
+    # The orphaned key means defaults.platform stays at default (None)
+    assert cfg.defaults.platform is None
 
 
 def test_extra_ssh_public_keys(tmp_path: Path) -> None:

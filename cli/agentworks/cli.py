@@ -72,6 +72,22 @@ app.add_typer(config_app)
 
 
 
+# -- Global options --------------------------------------------------------
+
+_non_interactive = False
+
+
+@app.callback()
+def _global_options(
+    non_interactive: Annotated[
+        bool, typer.Option("--non-interactive", help="Disable interactive prompts"),
+    ] = False,
+) -> None:
+    """Global options for all commands."""
+    global _non_interactive  # noqa: PLW0603
+    _non_interactive = non_interactive
+
+
 # -- Helpers ---------------------------------------------------------------
 
 
@@ -83,10 +99,28 @@ def _generate_name() -> str:
     return secrets.token_hex(4)
 
 
+def _is_interactive() -> bool:
+    """Check if stdin is a TTY and --non-interactive was not passed."""
+    import sys
+
+    if _non_interactive:
+        return False
+
+    return sys.stdin.isatty()
+
+
+def _require_interactive(what: str) -> None:
+    """Raise if not interactive and a prompt would be needed."""
+    if not _is_interactive():
+        typer.echo(f"Error: {what} is required in non-interactive mode", err=True)
+        raise typer.Exit(1)
+
+
 def _prompt_name(label: str, name: str | None) -> str:
     """Prompt for a name if not provided via --name, showing a random default."""
     if name is not None:
         return name
+    _require_interactive("--name")
     default = _generate_name()
     return str(typer.prompt(f"{label} name", default=default))
 
@@ -104,6 +138,8 @@ def _prompt_workspace(db: Database, workspace: str | None) -> str:
     if len(workspaces) == 1:
         typer.echo(f"Using workspace '{workspaces[0].name}'")
         return workspaces[0].name
+
+    _require_interactive("--workspace")
 
     typer.echo("Select a workspace:")
     for i, ws in enumerate(workspaces, 1):
@@ -135,6 +171,8 @@ def _prompt_vm(db: Database, vm_name: str | None) -> str:
     if len(vms) == 1:
         typer.echo(f"Using VM '{vms[0].name}'")
         return vms[0].name
+
+    _require_interactive("--vm")
 
     typer.echo("Select a VM:")
     for i, v in enumerate(vms, 1):
@@ -229,6 +267,7 @@ def vm_host_remove(
 @vm_app.command("create")
 def vm_create(
     name: Annotated[str | None, typer.Option("--name", help="VM name (prompted if omitted)")] = None,
+    template: Annotated[str | None, typer.Option("--template", help="VM template")] = None,
     platform: Annotated[
         str | None, typer.Option("--platform", help="Platform", click_type=click.Choice(["lima", "azure", "wsl2"]))
     ] = None,
@@ -249,6 +288,7 @@ def vm_create(
         _get_db(),
         config,
         name=resolved_name,
+        template=template,
         platform=platform,
         vm_host=vm_host,
         cpus=cpus,
@@ -424,9 +464,15 @@ def workspace_create(
         typer.echo("Error: --local and --vm are mutually exclusive", err=True)
         raise typer.Exit(1)
 
+    db = _get_db()
+
+    # 1. Select target (VM), 2. Name
+    if not local:
+        vm = _prompt_vm(db, vm)
     resolved_name = _prompt_name("Workspace", name)
+
     create_workspace(
-        _get_db(),
+        db,
         load_config(),
         name=resolved_name,
         vm_name=vm,
@@ -522,14 +568,21 @@ def workspace_copy(
 
 @agent_app.command("create")
 def agent_create(
-    name: Annotated[str, typer.Argument(help="Agent name")],
-    workspace: Annotated[str, typer.Option("--workspace", help="Workspace name")] = ...,  # type: ignore[assignment]
+    name: Annotated[str | None, typer.Option("--name", help="Agent name (prompted if omitted)")] = None,
+    workspace: Annotated[str | None, typer.Option("--workspace", help="Workspace name")] = None,
+    template: Annotated[str | None, typer.Option("--template", help="Agent template")] = None,
 ) -> None:
     """Create an agent (isolated Linux user) on a workspace."""
     from agentworks.agents.manager import create_agent
     from agentworks.config import load_config
 
-    create_agent(_get_db(), load_config(), name=name, workspace_name=workspace)
+    db = _get_db()
+
+    # 1. Select target (workspace), 2. Name
+    resolved_ws = _prompt_workspace(db, workspace)
+    resolved_name = _prompt_name("Agent", name)
+
+    create_agent(db, load_config(), name=resolved_name, workspace_name=resolved_ws, template=template)
 
 
 @agent_app.command("list")

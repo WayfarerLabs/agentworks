@@ -32,12 +32,14 @@ def create_vm_workspace(
     previous interrupted attempt), it is removed and recreated.
     """
     from agentworks.ssh import run as ssh_run
+    from agentworks.ssh import run_as_root
 
     assert vm.tailscale_host is not None
     target = ssh_target_for_vm(vm, config)
     lg = logger
 
     workspace_path = f"/home/{vm.admin_username}/workspaces/{ws_name}"
+    ws_group = f"ws-{ws_name}"
 
     # Remove stale directory from a previous interrupted attempt
     exists = ssh_run(target, f"test -d {workspace_path}", check=False, timeout=10, logger=lg)
@@ -45,14 +47,20 @@ def create_vm_workspace(
         typer.echo("  Removing stale workspace directory from previous attempt...")
         ssh_run(target, f"rm -rf {workspace_path}", timeout=30, logger=lg)
 
-    # Create directory
+    # Create workspace group (idempotent), add admin, and set up directory with setgid
+    run_as_root(target, f"sh -c 'getent group {ws_group} >/dev/null 2>&1 || /usr/sbin/groupadd {ws_group}'", logger=lg)
+    run_as_root(target, f"usermod -aG {ws_group} {vm.admin_username}", logger=lg)
     ssh_run(target, f"mkdir -p {workspace_path}", timeout=10, logger=lg)
+    run_as_root(target, f"chown {vm.admin_username}:{ws_group} {workspace_path}", logger=lg)
+    run_as_root(target, f"chmod 2775 {workspace_path}", logger=lg)
 
     # Git clone if repo is set
     if template.repo:
         typer.echo(f"Cloning {template.repo}...")
         try:
             ssh_run(target, f"git clone {template.repo} {workspace_path}", timeout=300, logger=lg)
+            # Ensure cloned files inherit the workspace group
+            run_as_root(target, f"chgrp -R {ws_group} {workspace_path}", logger=lg)
         except Exception:
             if template.repo.startswith("git@"):
                 typer.echo(

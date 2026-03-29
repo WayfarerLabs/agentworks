@@ -10,6 +10,7 @@ import sys
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Protocol
 
 CONFIG_DIR = Path.home() / ".config" / "agentworks"
 CONFIG_PATH = CONFIG_DIR / "config.toml"
@@ -94,46 +95,70 @@ class PathsConfig:
 class DefaultsConfig:
     platform: str | None = None
     vm_host: str | None = None
-    git_credentials: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
-class DotfilesConfig:
-    enabled: bool = True
-    source: Path | None = None
-    repo: str | None = None
-    destination: str = "~/.dotfiles"
-    install_cmd: str = "./install.sh"
+class VMTemplate:
+    """VM template definition. All fields are optional (None = inherit/default)."""
 
-
-@dataclass(frozen=True)
-class VMConfig:
-    # Provisioning (immutable after vm create)
-    cpus: int = 4
-    memory: int = 8  # GiB
-    disk: int = 50  # GiB
-    azure_vm_size: str = "Standard_B2s"
-    admin_username: str = "agentworks"
-    # Initialization (applied on create and reinit)
-    admin_shell: str = "zsh"
-    apt: list[str] = field(default_factory=list)
-    apt_packages: list[str] = field(default_factory=list)
-    snap: list[str] = field(default_factory=list)
-    system_install_commands: list[str] = field(default_factory=list)
-    admin_install_commands: list[str] = field(default_factory=list)
+    name: str
+    inherits: list[str] = field(default_factory=list)
+    # Provisioning
+    cpus: int | None = None
+    memory: int | None = None
+    disk: int | None = None
+    azure_vm_size: str | None = None
+    swap: int | None = None
+    # System-wide initialization
+    apt: list[str] | None = None
+    apt_packages: list[str] | None = None
+    snap: list[str] | None = None
+    system_install_commands: list[str] | None = None
+    install_mise: bool | None = None
     # Nerf tools
-    install_nerf_tools: bool = False
-    skip_nerf_defaults: bool = False
-    nerf_addl_manifests: list[Path] = field(default_factory=list)
-    nerf_keep_existing: bool = False
-    nerf_bin_dir: str = "/opt/agentworks/nerf/bin"
-    nerf_skills_dir: str = "/opt/agentworks/nerf/skills"
+    install_nerf_tools: bool | None = None
+    skip_nerf_defaults: bool | None = None
+    nerf_addl_manifests: list[Path] | None = None
+    nerf_keep_existing: bool | None = None
+    nerf_bin_dir: str | None = None
+    nerf_skills_dir: str | None = None
 
 
 @dataclass(frozen=True)
-class AgentConfig:
+class AdminConfig:
+    """Per-user config for the admin user on VMs."""
+
+    username: str = "agentworks"
+    shell: str = "zsh"
+    git_credentials: list[str] = field(default_factory=list)
     user_install_commands: list[str] = field(default_factory=list)
-    shell: str = "bash"
+    dotfiles_source: str | None = None
+    dotfiles_destination: str = "~/.dotfiles"
+    dotfiles_install_cmd: str = "./install.sh"
+    mise_activate: bool = True
+    mise_packages: list[str] = field(default_factory=list)
+    mise_lockfile: str | None = None
+    mise_allow_unlocked: bool = False
+    mise_install_before: str = "7d"
+
+
+@dataclass(frozen=True)
+class AgentTemplate:
+    """Agent template definition. All fields are optional (None = inherit/default)."""
+
+    name: str
+    inherits: list[str] = field(default_factory=list)
+    shell: str | None = None
+    git_credentials: list[str] | None = None
+    user_install_commands: list[str] | None = None
+    dotfiles_source: str | None = None
+    dotfiles_destination: str | None = None
+    dotfiles_install_cmd: str | None = None
+    mise_activate: bool | None = None
+    mise_packages: list[str] | None = None
+    mise_lockfile: str | None = None
+    mise_allow_unlocked: bool | None = None
+    mise_install_before: str | None = None
 
 
 @dataclass(frozen=True)
@@ -183,9 +208,11 @@ class Config:
     user: UserConfig
     paths: PathsConfig
     defaults: DefaultsConfig
-    dotfiles: DotfilesConfig
-    vm: VMConfig
-    agent: AgentConfig
+    vm_templates: dict[str, VMTemplate]
+    vm: object  # ResolvedVMTemplate (resolved from default template at load time)
+    admin: AdminConfig
+    agent_templates: dict[str, AgentTemplate]
+    agent: object  # ResolvedAgentTemplate (resolved from default template at load time)
     task: TaskConfig
     task_templates: dict[str, TaskTemplate]
     workspace_templates: dict[str, WorkspaceTemplate]
@@ -296,13 +323,19 @@ def _load_paths(data: dict[str, object]) -> PathsConfig:
     return PathsConfig(local_workspaces=local_ws, code_workspaces=code_ws)
 
 
-_DEFAULTS_KEYS = {"platform", "vm_host", "git_credentials"}
+_DEFAULTS_KEYS = {"platform", "vm_host"}
 
 
-def _load_defaults(data: dict[str, object], git_credential_names: set[str]) -> DefaultsConfig:
+def _load_defaults(data: dict[str, object]) -> DefaultsConfig:
     raw = data.get("defaults", {})
     if not isinstance(raw, dict):
         raise ConfigError("[defaults] must be a table")
+
+    if "git_credentials" in raw:
+        raise ConfigError(
+            "defaults.git_credentials has been removed. Move git_credentials into "
+            "[admin.config] and/or [agent.config]. See docs/guides/config-migration.md."
+        )
 
     _warn_unexpected_keys(raw, _DEFAULTS_KEYS, "defaults")
 
@@ -310,57 +343,24 @@ def _load_defaults(data: dict[str, object], git_credential_names: set[str]) -> D
     if platform is not None and platform not in VALID_PLATFORMS:
         raise ConfigError(f"defaults.platform must be one of {VALID_PLATFORMS}, got: {platform}")
 
-    git_creds_val = raw.get("git_credentials", [])
-    if not isinstance(git_creds_val, list):
-        raise ConfigError("defaults.git_credentials must be a list")
-    for gc in git_creds_val:
-        if gc not in git_credential_names:
-            raise ConfigError(f"defaults.git_credentials references unknown git credential: {gc}")
-
     return DefaultsConfig(
         platform=str(platform) if platform is not None else None,
         vm_host=str(raw["vm_host"]) if "vm_host" in raw else None,
-        git_credentials=list(git_creds_val),
     )
 
 
-_DOTFILES_KEYS = {"enabled", "source", "repo", "destination", "install_cmd"}
-
-
-def _load_dotfiles(data: dict[str, object]) -> DotfilesConfig:
-    raw = data.get("dotfiles", {})
-    if not isinstance(raw, dict):
-        raise ConfigError("[dotfiles] must be a table")
-
-    _warn_unexpected_keys(raw, _DOTFILES_KEYS, "dotfiles")
-
-    source = _expand(str(raw["source"])) if "source" in raw else None
-    repo = str(raw["repo"]) if "repo" in raw else None
-
-    if source is not None and repo is not None:
-        raise ConfigError("dotfiles.source and dotfiles.repo are mutually exclusive")
-
-    return DotfilesConfig(
-        enabled=bool(raw.get("enabled", True)),
-        source=source,
-        repo=repo,
-        destination=str(raw.get("destination", "~/.dotfiles")),
-        install_cmd=str(raw.get("install_cmd", "./install.sh")),
-    )
-
-
-_VM_CONFIG_KEYS = {
+_VM_TEMPLATE_KEYS = {
+    "inherits",
     "cpus",
     "memory",
     "disk",
     "azure_vm_size",
-    "admin_username",
-    "admin_shell",
+    "swap",
     "apt",
     "apt_packages",
     "snap",
     "system_install_commands",
-    "admin_install_commands",
+    "install_mise",
     "install_nerf_tools",
     "skip_nerf_defaults",
     "nerf_addl_manifests",
@@ -370,56 +370,154 @@ _VM_CONFIG_KEYS = {
 }
 
 
-def _load_vm_config(data: dict[str, object]) -> VMConfig:
-    vm_section = data.get("vm", {})
-    if not isinstance(vm_section, dict):
-        raise ConfigError("[vm] must be a table")
-    raw = vm_section.get("config", {})
+def _load_vm_templates(data: dict[str, object]) -> dict[str, VMTemplate]:
+    raw = data.get("vm_templates", {})
     if not isinstance(raw, dict):
-        raise ConfigError("[vm.config] must be a table")
+        raise ConfigError("[vm_templates] must be a table")
 
-    _warn_unexpected_keys(raw, _VM_CONFIG_KEYS, "vm.config")
+    if "vm" in data and isinstance(data["vm"], dict) and "config" in data["vm"]:
+        raise ConfigError(
+            "[vm.config] has been replaced by [vm_templates.default]. "
+            "See docs/guides/config-migration.md for details."
+        )
 
-    nerf_addl_manifests = [_expand(str(m)) for m in raw.get("nerf_addl_manifests", [])]
+    templates: dict[str, VMTemplate] = {}
+    for name, tdata in raw.items():
+        if not isinstance(tdata, dict):
+            raise ConfigError(f"vm_templates.{name} must be a table")
+        _warn_unexpected_keys(tdata, _VM_TEMPLATE_KEYS, f"vm_templates.{name}")
 
-    return VMConfig(
-        cpus=int(raw.get("cpus", 4)),
-        memory=int(raw.get("memory", 8)),
-        disk=int(raw.get("disk", 50)),
-        azure_vm_size=str(raw.get("azure_vm_size", "Standard_B2s")),
-        admin_username=str(raw.get("admin_username", "agentworks")),
-        admin_shell=str(raw.get("admin_shell", "zsh")),
-        apt=list(raw.get("apt", [])),
-        apt_packages=list(raw.get("apt_packages", [])),
-        snap=list(raw.get("snap", [])),
-        system_install_commands=list(raw.get("system_install_commands", [])),
-        admin_install_commands=list(raw.get("admin_install_commands", [])),
-        install_nerf_tools=bool(raw.get("install_nerf_tools", False)),
-        skip_nerf_defaults=bool(raw.get("skip_nerf_defaults", False)),
-        nerf_addl_manifests=nerf_addl_manifests,
-        nerf_keep_existing=bool(raw.get("nerf_keep_existing", False)),
-        nerf_bin_dir=str(raw.get("nerf_bin_dir", "/opt/agentworks/nerf/bin")),
-        nerf_skills_dir=str(raw.get("nerf_skills_dir", "/opt/agentworks/nerf/skills")),
-    )
+        nerf_addl = [_expand(str(m)) for m in tdata["nerf_addl_manifests"]] if "nerf_addl_manifests" in tdata else None
+
+        templates[name] = VMTemplate(
+            name=name,
+            inherits=list(tdata.get("inherits", [])),
+            cpus=int(tdata["cpus"]) if "cpus" in tdata else None,
+            memory=int(tdata["memory"]) if "memory" in tdata else None,
+            disk=int(tdata["disk"]) if "disk" in tdata else None,
+            azure_vm_size=str(tdata["azure_vm_size"]) if "azure_vm_size" in tdata else None,
+            swap=int(tdata["swap"]) if "swap" in tdata else None,
+            apt=list(tdata["apt"]) if "apt" in tdata else None,
+            apt_packages=list(tdata["apt_packages"]) if "apt_packages" in tdata else None,
+            snap=list(tdata["snap"]) if "snap" in tdata else None,
+            system_install_commands=(
+                list(tdata["system_install_commands"]) if "system_install_commands" in tdata else None
+            ),
+            install_mise=bool(tdata["install_mise"]) if "install_mise" in tdata else None,
+            install_nerf_tools=bool(tdata["install_nerf_tools"]) if "install_nerf_tools" in tdata else None,
+            skip_nerf_defaults=bool(tdata["skip_nerf_defaults"]) if "skip_nerf_defaults" in tdata else None,
+            nerf_addl_manifests=nerf_addl,
+            nerf_keep_existing=bool(tdata["nerf_keep_existing"]) if "nerf_keep_existing" in tdata else None,
+            nerf_bin_dir=str(tdata["nerf_bin_dir"]) if "nerf_bin_dir" in tdata else None,
+            nerf_skills_dir=str(tdata["nerf_skills_dir"]) if "nerf_skills_dir" in tdata else None,
+        )
+
+    # Validate inherits references and cycles
+    for name, tmpl in templates.items():
+        for parent in tmpl.inherits:
+            if parent not in templates and parent != "default":
+                raise ConfigError(f"vm_templates.{name}.inherits references unknown template: {parent}")
+    _detect_template_cycles(templates, "vm_templates")
+
+    return templates
 
 
-_AGENT_CONFIG_KEYS = {"user_install_commands", "shell"}
+_USER_CONFIG_KEYS = {
+    "username",
+    "shell",
+    "git_credentials",
+    "user_install_commands",
+    "dotfiles_source",
+    "dotfiles_destination",
+    "dotfiles_install_cmd",
+    "mise_activate",
+    "mise_packages",
+    "mise_lockfile",
+    "mise_allow_unlocked",
+    "mise_install_before",
+}
 
 
-def _load_agent_config(data: dict[str, object]) -> AgentConfig:
-    agent_section = data.get("agent", {})
-    if not isinstance(agent_section, dict):
-        raise ConfigError("[agent] must be a table")
-    raw = agent_section.get("config", {})
+def _load_admin_config(data: dict[str, object]) -> AdminConfig:
+    """Load admin per-user config from [admin.config]."""
+    top = data.get("admin", {})
+    if not isinstance(top, dict):
+        raise ConfigError("[admin] must be a table")
+    raw = top.get("config", {})
     if not isinstance(raw, dict):
-        raise ConfigError("[agent.config] must be a table")
+        raise ConfigError("[admin.config] must be a table")
 
-    _warn_unexpected_keys(raw, _AGENT_CONFIG_KEYS, "agent.config")
+    _warn_unexpected_keys(raw, _USER_CONFIG_KEYS, "admin.config")
 
-    return AgentConfig(
+    return AdminConfig(
+        username=str(raw.get("username", "agentworks")),
+        shell=str(raw.get("shell", "zsh")),
+        git_credentials=list(raw.get("git_credentials", [])),
         user_install_commands=list(raw.get("user_install_commands", [])),
-        shell=str(raw.get("shell", "bash")),
+        dotfiles_source=str(raw["dotfiles_source"]) if "dotfiles_source" in raw else None,
+        dotfiles_destination=str(raw.get("dotfiles_destination", "~/.dotfiles")),
+        dotfiles_install_cmd=str(raw.get("dotfiles_install_cmd", "./install.sh")),
+        mise_activate=bool(raw.get("mise_activate", True)),
+        mise_packages=list(raw.get("mise_packages", [])),
+        mise_lockfile=str(raw["mise_lockfile"]) if "mise_lockfile" in raw else None,
+        mise_allow_unlocked=bool(raw.get("mise_allow_unlocked", False)),
+        mise_install_before=str(raw.get("mise_install_before", "7d")),
     )
+
+
+_AGENT_TEMPLATE_KEYS = _USER_CONFIG_KEYS | {"inherits"}
+
+
+def _load_agent_templates(data: dict[str, object]) -> dict[str, AgentTemplate]:
+    raw = data.get("agent_templates", {})
+    if not isinstance(raw, dict):
+        raise ConfigError("[agent_templates] must be a table")
+
+    if "agent" in data and isinstance(data["agent"], dict) and "config" in data["agent"]:
+        raise ConfigError(
+            "[agent.config] has been replaced by [agent_templates.default]. "
+            "See docs/guides/config-migration.md for details."
+        )
+
+    templates: dict[str, AgentTemplate] = {}
+    for name, tdata in raw.items():
+        if not isinstance(tdata, dict):
+            raise ConfigError(f"agent_templates.{name} must be a table")
+        _warn_unexpected_keys(tdata, _AGENT_TEMPLATE_KEYS, f"agent_templates.{name}")
+
+        templates[name] = AgentTemplate(
+            name=name,
+            inherits=list(tdata.get("inherits", [])),
+            shell=str(tdata["shell"]) if "shell" in tdata else None,
+            git_credentials=list(tdata["git_credentials"]) if "git_credentials" in tdata else None,
+            user_install_commands=(
+                list(tdata["user_install_commands"]) if "user_install_commands" in tdata else None
+            ),
+            dotfiles_source=str(tdata["dotfiles_source"]) if "dotfiles_source" in tdata else None,
+            dotfiles_destination=(
+                str(tdata["dotfiles_destination"]) if "dotfiles_destination" in tdata else None
+            ),
+            dotfiles_install_cmd=(
+                str(tdata["dotfiles_install_cmd"]) if "dotfiles_install_cmd" in tdata else None
+            ),
+            mise_activate=bool(tdata["mise_activate"]) if "mise_activate" in tdata else None,
+            mise_packages=list(tdata["mise_packages"]) if "mise_packages" in tdata else None,
+            mise_lockfile=str(tdata["mise_lockfile"]) if "mise_lockfile" in tdata else None,
+            mise_allow_unlocked=(
+                bool(tdata["mise_allow_unlocked"]) if "mise_allow_unlocked" in tdata else None
+            ),
+            mise_install_before=(
+                str(tdata["mise_install_before"]) if "mise_install_before" in tdata else None
+            ),
+        )
+
+    for name, tmpl in templates.items():
+        for parent in tmpl.inherits:
+            if parent not in templates and parent != "default":
+                raise ConfigError(f"agent_templates.{name}.inherits references unknown template: {parent}")
+    _detect_template_cycles(templates, "agent_templates")
+
+    return templates
 
 
 def _load_catalog_sections(
@@ -471,20 +569,27 @@ def _load_workspace_templates(data: dict[str, object]) -> dict[str, WorkspaceTem
     # validate inherits references and cycles
     for name, tmpl in templates.items():
         for parent in tmpl.inherits:
-            if parent not in templates:
+            if parent not in templates and parent != "default":
                 raise ConfigError(f"workspace_templates.{name}.inherits references unknown template: {parent}")
-    _detect_cycles(templates)
+    _detect_template_cycles(templates, "workspace_templates")
 
     return templates
 
 
-def _detect_cycles(templates: dict[str, WorkspaceTemplate]) -> None:
+class _HasInherits(Protocol):
+    @property
+    def inherits(self) -> list[str]: ...
+
+
+def _detect_template_cycles(templates: dict[str, _HasInherits], label: str) -> None:
     visited: set[str] = set()
     in_stack: set[str] = set()
 
     def visit(name: str) -> None:
+        if name not in templates:
+            return  # implicit default or already validated
         if name in in_stack:
-            raise ConfigError(f"workspace template inheritance cycle detected involving: {name}")
+            raise ConfigError(f"{label} inheritance cycle detected involving: {name}")
         if name in visited:
             return
         in_stack.add(name)
@@ -592,9 +697,9 @@ EXPECTED_TOP_LEVEL_KEYS = {
     "user",
     "paths",
     "defaults",
-    "dotfiles",
-    "vm",
-    "agent",
+    "vm_templates",
+    "admin",
+    "agent_templates",
     "task",
     "task_templates",
     "apt_sources",
@@ -654,19 +759,40 @@ def load_config(path: Path | None = None) -> Config:
 
     _warn_unexpected_top_level_keys(data)
 
+    if "dotfiles" in data:
+        raise ConfigError(
+            "[dotfiles] section has been removed. Move dotfiles settings into "
+            "[admin.config] (dotfiles_source, dotfiles_destination, dotfiles_install_cmd). "
+            "See docs/guides/config-migration.md for details."
+        )
+
     git_credentials = _load_git_credentials(data)
     apt_sources, apt_packages, system_cmds, user_cmds = _load_catalog_sections(data)
 
     task_config = _load_task_config(data)
     task_templates = _load_task_templates(data)
 
+    loaded_vm_templates = _load_vm_templates(data)
+    loaded_agent_templates = _load_agent_templates(data)
+
+    # Resolve default templates eagerly so config.vm / config.agent work everywhere
+    from agentworks.vms.templates import resolve_from_dict as _resolve_vm
+
+    resolved_vm = _resolve_vm(loaded_vm_templates)
+
+    from agentworks.agents.templates import resolve_from_dict as _resolve_agent
+
+    resolved_agent = _resolve_agent(loaded_agent_templates)
+
     return Config(
         user=_load_user(data),
         paths=_load_paths(data),
-        defaults=_load_defaults(data, set(git_credentials.keys())),
-        dotfiles=_load_dotfiles(data),
-        vm=_load_vm_config(data),
-        agent=_load_agent_config(data),
+        defaults=_load_defaults(data),
+        vm_templates=loaded_vm_templates,
+        vm=resolved_vm,
+        admin=_load_admin_config(data),
+        agent_templates=loaded_agent_templates,
+        agent=resolved_agent,
         task=task_config,
         task_templates=task_templates,
         workspace_templates=_load_workspace_templates(data),

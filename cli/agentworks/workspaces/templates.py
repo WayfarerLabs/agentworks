@@ -44,6 +44,9 @@ def resolve_template(config: Config, template_name: str | None = None) -> Resolv
 
 def _resolve(config: Config, name: str) -> ResolvedTemplate:
     """Depth-first, left-to-right resolution of a template."""
+    if name not in config.workspace_templates:
+        return ResolvedTemplate(name=name)
+
     tmpl = config.workspace_templates[name]
     result = ResolvedTemplate(name=name)
 

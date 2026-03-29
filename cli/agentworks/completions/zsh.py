@@ -72,6 +72,26 @@ _agentworks_task_templates() {
     fi
     _describe 'task-template' templates
 }""",
+    "vm_templates": """\
+_agentworks_vm_templates() {
+    local -a templates config_file
+    config_file="${HOME}/.config/agentworks/config.toml"
+    templates=()
+    if [[ -f "$config_file" ]]; then
+        templates+=(${(f)"$(sed -n 's/^\\[vm_templates\\.\\([^]]*\\)\\]/\\1/p' "$config_file" 2>/dev/null)"})
+    fi
+    _describe 'vm-template' templates
+}""",
+    "agent_templates": """\
+_agentworks_agent_templates() {
+    local -a templates config_file
+    config_file="${HOME}/.config/agentworks/config.toml"
+    templates=()
+    if [[ -f "$config_file" ]]; then
+        templates+=(${(f)"$(sed -n 's/^\\[agent_templates\\.\\([^]]*\\)\\]/\\1/p' "$config_file" 2>/dev/null)"})
+    fi
+    _describe 'agent-template' templates
+}""",
 }
 
 # Maps completer identifiers to their zsh function names.
@@ -84,6 +104,8 @@ COMPLETER_FUNC_NAMES: dict[str, str] = {
     "catalog_entries": "_agentworks_catalog_entries",
     "tasks": "_agentworks_tasks",
     "task_templates": "_agentworks_task_templates",
+    "vm_templates": "_agentworks_vm_templates",
+    "agent_templates": "_agentworks_agent_templates",
     "agents": "_agentworks_agents",
 }
 

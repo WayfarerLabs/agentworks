@@ -6,9 +6,13 @@
 #
 # Agentworks ships a built-in catalog of common tools (apt sources, apt
 # packages, system install commands, user install commands). Run
-# `agentworks installer list` to see what is available. You can
-# reference catalog entries by name in vm.config and agent.config, and
-# define your own entries below to extend or override the catalog.
+# `agentworks installer list` to see what is available. You can reference
+# catalog entries by name in templates and define your own entries below
+# to extend or override the catalog.
+
+# =============================================================================
+# Operator identity and platform settings
+# =============================================================================
 
 # --- Operator identity ---
 # These settings identify you (the operator) to agentworks and your VMs.
@@ -34,37 +38,52 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 [defaults]
 # platform = "lima"                          # lima, azure, or wsl2
 # vm_host = "mac-studio"                     # default VM host for remote Lima
-# git_credentials = ["github"]               # git credentials to configure on vm create
 
-# --- Dotfiles ---
-# Synced to VMs for the admin user during init. Not applied to agent users.
-# Use either repo (cloned on the VM) or source (copied from local), not both.
-# On reinit, repo mode does a git pull instead of re-cloning.
-# For private repos, ensure git credentials are configured on the VM.
+# --- Git credential providers ---
+# Define how to obtain git tokens. Referenced by name in admin.config and
+# agent_templates. Tokens are prompted during VM init (or read from env vars)
+# and stored via git credential-store on the VM.
 
-# [dotfiles]
-# enabled = true                             # enable dotfiles sync during init:w
-# repo = "https://github.com/user/dotfiles"  # clone from a git repo (recommended)
-# source = "~/.dotfiles"                     # OR copy from a local path
-# destination = "~/.dotfiles"                # where to put them on the VM (~ supported)
-# install_cmd = "./install.sh"               # command to run after clone/copy
+# [git_credentials.github]
+# type = "github"
+# Token: create at https://github.com/settings/tokens (repo scope)
 
-# --- VM configuration ---
-# Settings that control VM provisioning (immutable after create) and
-# initialization (applied on create and reinit).
+# [git_credentials.azdo]
+# type = "azdo"
+# org = "my-org"
+# Token: create at https://dev.azure.com/{org}/_usersSettings/tokens
+
+# --- Azure settings (only needed for --platform azure) ---
+
+# [azure]
+# subscription_id = "..."                    # required for azure platform
+# resource_group = "agentworks-vms"          # required for azure platform
+# region = "eastus2"                         # required for azure platform
+
+# =============================================================================
+# Templates
+# =============================================================================
+#
+# Agentworks uses templates for VMs, workspaces, agents, and tasks. Each
+# template type supports a "default" entry used when --template is not
+# specified. Templates support inheritance via the "inherits" key:
+# child values override parents, depth-first left-to-right.
+
+# --- VM templates ---
+# System-level VM configuration: hardware resources, system packages, and
+# system-wide tools. Selected at vm create time with --template.
 #
 # Agentworks always installs system dependencies (openssh-server, curl, git,
 # sudo, ca-certificates, gnupg, tmux, tmuxinator) regardless of this config.
 
-[vm.config]
+[vm_templates.default]
 # -- Provisioning (set once at create time) --
-# admin_username = "agentworks"              # admin username created on VMs
 # cpus = 4                                   # number of CPUs (Lima)
 # memory = 8                                 # memory in GiB (Lima)
-# disk = 50                                  # disk size in GiB (Lima)
-# azure_vm_size = "Standard_B2s"             # Azure VM size
-# -- Initialization (applied on create and reinit) --
-# admin_shell = "zsh"                        # shell for the admin user
+# azure_vm_size = "Standard_B2s"             # Azure VM size (determines cpu and memory for Azure)
+# disk = 50                                  # disk size in GiB
+# swap = 4                                   # swap file size in GiB (0 to disable)
+# -- System-wide initialization (applied on create and reinit) --
 # apt = [                                    # direct apt packages
 #     "zsh",
 #     "unzip",
@@ -76,9 +95,9 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # apt_packages = ["gh", "docker"]            # named apt package sets from catalog
 # snap = []                                  # direct snap packages
 # system_install_commands = ["az-cli"]       # system-level commands from catalog
-# admin_install_commands = ["bun", "claude"] # per-user commands for admin user
+# install_mise = true                        # install mise via apt (default: true)
 # -- Nerf tools --
-# install_nerf_tools = false                 # set to true to build and deploy nerf tools during init
+# install_nerf_tools = false                 # build and deploy nerf tools during init
 # skip_nerf_defaults = false                 # skip built-in nerf catalog (nerf build --no-default)
 # nerf_addl_manifests = [                    # additional manifest files to merge in
 #     "~/.config/agentworks/nerf/my-tools/manifest.yaml",
@@ -87,19 +106,73 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # nerf_bin_dir = "/opt/agentworks/nerf/bin"  # where to deploy generated tool scripts
 # nerf_skills_dir = "/opt/agentworks/nerf/skills"  # where to deploy generated skill files
 
-# --- Agent configuration ---
-# Settings for agent users created within workspaces. Agents get their own
-# shell and user install commands, separate from the VM admin user.
+# [vm_templates.heavy]
+# inherits = ["default"]
+# cpus = 16
+# memory = 64
+# disk = 200
 
-# [agent.config]
-# user_install_commands = ["claude"]         # per-user commands from catalog
+# --- Admin user configuration ---
+# Per-user settings for the admin (operator) user on VMs. Applied during
+# init/reinit. This is not a template; there is one admin config.
+
+# [admin.config]
+# username = "agentworks"                    # admin username on VMs (default: agentworks)
+# shell = "zsh"                              # admin shell (default: zsh)
+# git_credentials = ["github"]              # git credential providers to configure
+# user_install_commands = ["bun", "claude"]  # per-user commands from catalog
+# -- Dotfiles (source refs: local path or git::, see docs/guides/source-refs.md) --
+# dotfiles_source = "git::https://github.com/user/dotfiles"
+# dotfiles_destination = "~/.dotfiles"       # where to put them on the VM
+# dotfiles_install_cmd = "./install.sh"      # command to run after clone/copy
+# -- Mise (see docs/guides/mise.md) --
+# mise_activate = true                       # add mise activate to shell profile
+# mise_packages = ["jq@1.8.1", "adr-tools@3.0.0"]  # name@version tool declarations
+# mise_lockfile = "~/.config/agentworks/mise.lock"   # source ref (wins over dotfiles)
+# mise_allow_unlocked = false                # install packages not in lockfile (with warning)
+# mise_install_before = "7d"                 # reject versions newer than this
+
+# --- Agent templates ---
+# Per-user settings for agent users. Selected at agent create time with
+# --template. Agents default to nothing unless explicitly configured.
+
+# [agent_templates.default]
 # shell = "bash"                             # agent shell (default: bash)
+# git_credentials = []                       # git credential providers (default: none)
+# user_install_commands = ["claude"]         # per-user commands from catalog
+# -- Dotfiles --
+# dotfiles_source = "git::https://github.com/user/agent-dotfiles"
+# dotfiles_destination = "~/.dotfiles"
+# dotfiles_install_cmd = "./install.sh"
+# -- Mise --
+# mise_activate = true                       # add mise activate to agent shell profile
+# mise_packages = ["jq@1.8.1"]              # name@version tool declarations
+# mise_lockfile = "~/.config/agentworks/agent-mise.lock"
+# mise_allow_unlocked = false
+# mise_install_before = "7d"
 
-# --- Task configuration ---
-# Settings for task lifecycle and defaults.
+# [agent_templates.restricted]
+# inherits = ["default"]
+# user_install_commands = []
+# mise_packages = []
 
-# [task.config]
-# history_limit = 50000                     # tmux scrollback buffer lines per task session
+# --- Workspace templates ---
+# Selected at workspace create time with --template. The "default" template
+# is used when --template is not specified.
+#
+# Repo URLs: use HTTPS format. Git credentials configured in admin.config
+# provide authentication via personal access tokens. Public repos work
+# without credentials.
+
+# [workspace_templates.default]
+# repo = "https://github.com/org/repo.git"  # git repo to clone into workspace
+# tmuxinator = true                          # generate tmuxinator config
+# inherits = []                              # list of parent template names
+
+# [workspace_templates.myproject]
+# repo = "https://github.com/org/myproject.git"
+# tmuxinator = false
+# inherits = ["default"]
 
 # --- Task templates ---
 # Define commands that tasks can run. The built-in "default" template runs a
@@ -127,8 +200,22 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # description = "Custom tool"
 # env = { MY_VAR = "value" }               # environment variables to set
 
+# --- Task configuration ---
+# Non-template task settings.
+
+# [task.config]
+# history_limit = 50000                     # tmux scrollback buffer lines per task session
+
+# =============================================================================
+# Catalog extensions
+# =============================================================================
+#
+# User-defined entries extend the built-in catalog. Entries with the same name
+# as a built-in entry override it. Run `agentworks installer list` to see all
+# available entries (built-in and user-defined).
+
 # --- User-defined apt sources ---
-# Third-party apt repositories. These extend the built-in catalog.
+# Third-party apt repositories.
 # Use {arch} as a placeholder for the VM architecture (amd64 or arm64).
 
 # [apt_sources.my-repo]
@@ -148,9 +235,9 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 
 # --- User-defined system install commands ---
 # Shell commands that install system-wide tooling (run during vm init/reinit).
-# These may be re-run (e.g. during reinit) so they really should be idempotent.
-# Optional checks can be defined to short-circuit installation if the tool is already present.
-# Please use only one of: test_exec, test_file, or test_dir.
+# These may be re-run (e.g. during reinit) so they should be idempotent.
+# Optional checks short-circuit installation if the tool is already present.
+# Use only one of: test_exec, test_file, or test_dir.
 
 # [system_install_commands.my-system-tool]
 # description = "Custom system-wide tool"
@@ -158,10 +245,9 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # test_exec = "my-system-tool"            # skip if command is on PATH
 
 # --- User-defined user install commands ---
-# Shell commands that install per-user tooling (run for admin user and agents).
-# These may be re-run so they really should be idempotent.
-# Optional checks can be defined to short-circuit installation if the tool is already present.
-# Please use only one of: test_exec, test_file, or test_dir.
+# Shell commands that install per-user tooling (run for admin and agents).
+# These may be re-run so they should be idempotent.
+# Use only one of: test_exec, test_file, or test_dir.
 # For test_file/test_dir, ~ resolves to the target user's home.
 
 # [user_install_commands.my-tool]
@@ -169,42 +255,3 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # command = "curl -fsSL https://example.com/install.sh | bash"
 # path = ["~/.my-tool/bin"]
 # test_exec = "my-tool"                   # skip if command is on PATH
-
-# --- Workspace templates ---
-# The "default" template is used when --template is not specified.
-# Templates support inheritance via the "inherits" key.
-#
-# Repo URLs: use HTTPS format for repos. The VM's git credential store
-# provides authentication via personal access tokens configured during
-# VM init. Public repos work without credentials.
-
-# [workspace_templates.default]
-# repo = "https://github.com/org/repo.git"  # git repo to clone into workspace
-# tmuxinator = true                          # generate tmuxinator config
-# inherits = []                              # list of parent template names
-
-# [workspace_templates.myproject]
-# repo = "https://github.com/org/myproject.git"
-# tmuxinator = false
-# inherits = ["default"]
-
-# --- Git credentials ---
-# Personal access tokens are prompted during VM init and stored via
-# git credential-store on the VM.
-
-# [git_credentials.github]
-# type = "github"
-# Token: create at https://github.com/settings/tokens (repo scope)
-
-# [git_credentials.azdo]
-# type = "azdo"
-# org = "my-org"
-# Token: create at https://dev.azure.com/{org}/_usersSettings/tokens
-
-# --- Azure settings (only needed for --platform azure) ---
-
-# [azure]
-# subscription_id = "..."                    # required for azure platform
-# resource_group = "agentworks-vms"          # required for azure platform
-# region = "eastus2"                         # required for azure platform
-# idle_timeout_hours = 2                     # auto-stop idle VMs after this many hours

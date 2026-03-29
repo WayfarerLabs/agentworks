@@ -24,7 +24,9 @@ VM_USER={admin_username}
 SSH_PUBLIC_KEY={ssh_public_key}
 SYSTEM_PACKAGES={system_packages}
 TAILSCALE_AUTH_KEY={tailscale_auth_key}
+VM_HOSTNAME={vm_hostname}
 TS_EXTRA_FLAGS={ts_extra_flags}
+SWAP_GB={swap}
 
 # -- Step 1: Ensure user --
 echo "##STEP## Ensure user"
@@ -44,6 +46,18 @@ apt-get update -qq
 apt-get install -y -qq $SYSTEM_PACKAGES
 echo "##SUCCESS## system packages installed"
 
+# -- Step 2b: Preserve SSH host keys across reboots --
+# By default, cloud-init may delete and regenerate SSH host keys on certain
+# boot events (e.g., VM stop/start). This causes SSH clients to reject the
+# connection due to a changed host key. Tell cloud-init to preserve existing keys.
+echo "##STEP## Preserve SSH host keys"
+mkdir -p /etc/cloud/cloud.cfg.d
+cat > /etc/cloud/cloud.cfg.d/99-preserve-ssh-keys.cfg <<'CLOUDCFG'
+ssh_deletekeys: false
+ssh_genkeytypes: []
+CLOUDCFG
+echo "##SUCCESS## SSH host key preservation configured"
+
 # -- Step 3: SSH public key --
 echo "##STEP## SSH public key"
 HOME_DIR="/home/$VM_USER"
@@ -54,7 +68,30 @@ chmod 700 "$HOME_DIR/.ssh"
 chmod 600 "$HOME_DIR/.ssh/authorized_keys"
 echo "##SUCCESS## SSH key installed"
 
-# -- Step 4: Install Tailscale --
+# -- Step 4: Swap file --
+echo "##STEP## Swap file"
+if [ "$SWAP_GB" -gt 0 ]; then
+    if [ -f /swapfile ]; then
+        echo "##SUCCESS## swap file already exists"
+    else
+        SWAP_MB=$((SWAP_GB * 1024))
+        fallocate -l "${{SWAP_MB}}M" /swapfile
+        chmod 600 /swapfile
+        mkswap /swapfile
+        swapon /swapfile
+        echo '/swapfile none swap sw 0 0' >> /etc/fstab
+        echo "##SUCCESS## ${{SWAP_GB}} GiB swap file created"
+    fi
+else
+    echo "##SUCCESS## swap disabled"
+fi
+
+# -- Step 5: Set hostname --
+echo "##STEP## Hostname"
+hostnamectl set-hostname "$VM_HOSTNAME" 2>/dev/null || hostname "$VM_HOSTNAME"
+echo "##SUCCESS## hostname set to $VM_HOSTNAME"
+
+# -- Step 6: Install Tailscale --
 echo "##STEP## Tailscale install"
 if command -v tailscale >/dev/null 2>&1; then
     echo "##SUCCESS## tailscale already installed"
@@ -63,7 +100,7 @@ else
     echo "##SUCCESS## tailscale installed"
 fi
 
-# -- Step 5: Join Tailscale --
+# -- Step 7: Join Tailscale --
 echo "##STEP## Tailscale join"
 # shellcheck disable=SC2086
 tailscale up --auth-key "$TAILSCALE_AUTH_KEY" $TS_EXTRA_FLAGS
@@ -72,12 +109,19 @@ echo "##SUCCESS## tailscale-ip=$TS_IP"
 """
 
 
+def vm_hostname(platform: str, vm_name: str) -> str:
+    """Build a consistent VM hostname: <platform>--<vm_name>."""
+    return f"{platform}--{vm_name}"
+
+
 def generate_bootstrap_script(
     *,
     admin_username: str,
     ssh_public_key: str,
     system_packages: list[str],
     tailscale_auth_key: str,
+    hostname: str,
+    swap: int = 0,
     is_wsl2: bool = False,
 ) -> str:
     """Generate the Phase A bootstrap script with parameters baked in."""
@@ -88,7 +132,9 @@ def generate_bootstrap_script(
         ssh_public_key=shlex.quote(ssh_public_key),
         system_packages=shlex.quote(" ".join(system_packages)),
         tailscale_auth_key=shlex.quote(tailscale_auth_key),
+        vm_hostname=shlex.quote(hostname),
         ts_extra_flags=shlex.quote(ts_extra_flags),
+        swap=swap,
     )
 
 
