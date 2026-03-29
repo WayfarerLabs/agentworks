@@ -624,7 +624,6 @@ def reinit_vm(
         typer.echo(f"  Log: {logger.path}")
     else:
         typer.echo(f"\nVM '{name}' reinitialized successfully!")
-        typer.echo(f"  Log: {logger.path}")
 
 
 
