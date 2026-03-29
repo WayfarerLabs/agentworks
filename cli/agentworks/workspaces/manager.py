@@ -528,12 +528,19 @@ def _resolve_vm(db: Database, vm_name: str | None) -> VMRow:
         raise typer.Exit(1)
 
     if len(usable_vms) == 1:
+        typer.echo(f"Using VM '{usable_vms[0].name}'")
         return usable_vms[0]
 
-    typer.echo("Error: multiple VMs available. Specify --vm:", err=True)
-    for v in usable_vms:
-        typer.echo(f"  {v.name}", err=True)
-    raise typer.Exit(1)
+    typer.echo("Select a VM:")
+    for i, v in enumerate(usable_vms, 1):
+        typer.echo(f"  {i}) {v.name}  ({v.platform})")
+
+    choice = int(typer.prompt("VM number", type=int))
+    if choice < 1 or choice > len(usable_vms):
+        typer.echo(f"Error: invalid choice {choice}", err=True)
+        raise typer.Exit(1)
+
+    return usable_vms[choice - 1]
 
 
 def _ensure_vm_running(db: Database, config: Config, vm: VMRow) -> None:

@@ -71,6 +71,17 @@ agentworks workspace shell my-workspace
 - [Tailscale](https://tailscale.com/) installed and connected (for VM workspaces)
 - One of: [Lima](https://lima-vm.io/), Azure CLI (`az`), or WSL2 (for VM provisioning)
 
+## Global Options
+
+| Flag                 | Description                    |
+| -------------------- | ------------------------------ |
+| `--non-interactive`  | Disable all interactive prompts |
+
+When `--non-interactive` is set (or stdin is not a TTY), commands that would normally prompt for
+missing values (VM selection, workspace selection, name generation) will fail with a clear error
+indicating which flag is required. Auto-selection still works: if there is exactly one VM or
+workspace, it is used without prompting.
+
 ## Commands
 
 ### Top-level
