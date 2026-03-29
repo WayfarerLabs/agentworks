@@ -277,6 +277,7 @@ and `--source` (builtin, user) filters.
 | Command                             | Description                            |
 | ----------------------------------- | -------------------------------------- |
 | `agentworks config init`            | Create a sample config file            |
+| `agentworks config edit`            | Open config in `$EDITOR`               |
 | `agentworks config sample`          | Print the sample config to stdout      |
 | `agentworks config sync-ssh-config` | Rebuild SSH config entries for all VMs |
 

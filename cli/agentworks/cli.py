@@ -950,6 +950,28 @@ def config_init() -> None:
     typer.echo("Edit it to match your setup, then run 'agentworks vm create' to get started.")
 
 
+@config_app.command("edit")
+def config_edit() -> None:
+    """Open the config file in your editor ($EDITOR)."""
+    import os
+    import subprocess
+    import sys
+
+    from agentworks.config import CONFIG_PATH
+
+    editor = os.environ.get("EDITOR") or os.environ.get("VISUAL")
+    if not editor:
+        typer.echo("Error: $EDITOR is not set. Set it to your preferred editor.", err=True)
+        raise typer.Exit(1)
+
+    if not CONFIG_PATH.exists():
+        typer.echo(f"Error: config file not found at {CONFIG_PATH}", err=True)
+        typer.echo("Run 'agentworks config init' to create one.", err=True)
+        raise typer.Exit(1)
+
+    sys.exit(subprocess.call([editor, str(CONFIG_PATH)]))
+
+
 @config_app.command("sample")
 def config_sample() -> None:
     """Print the sample config to stdout."""
