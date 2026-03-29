@@ -456,6 +456,7 @@ def start_vm(db: Database, config: Config, name: str) -> None:
         provisioner.start(vm)
 
     _ensure_tailscale(db, config, vm, provisioner)
+    typer.echo(f"VM '{name}' is ready")
 
 
 def stop_vm(db: Database, config: Config, name: str) -> None:
@@ -468,11 +469,7 @@ def stop_vm(db: Database, config: Config, name: str) -> None:
         typer.echo(f"VM '{name}' is already stopped")
         return
     provisioner.stop(vm)
-
-    # Check if the Tailscale node survived the stop (ephemeral nodes disappear)
-    if vm.tailscale_host and not _is_tailscale_reachable(vm.tailscale_host):
-        typer.echo(f"Tailscale node for VM '{name}' is no longer reachable (ephemeral key?)")
-        db.clear_vm_tailscale(name)
+    typer.echo(f"VM '{name}' stopped")
 
 
 def delete_vm(
@@ -925,15 +922,20 @@ def _ensure_tailscale(
     provisioner: VMProvisioner,
 ) -> None:
     """After starting a VM, verify Tailscale connectivity and rejoin if needed."""
+    from agentworks.ssh import ExecTarget, ssh_target_for_vm, wait_for_reconnect
+
     # Refresh VM row in case tailscale_host was cleared on stop
     vm = _require_vm(db, vm.name)
 
-    if vm.tailscale_host and _is_tailscale_reachable(vm.tailscale_host):
-        typer.echo(f"Tailscale node reachable at {vm.tailscale_host}")
-        return
-
+    # If we have a known Tailscale host, wait for it to reconnect after boot.
+    # This avoids unnecessarily attaching a public IP on Azure.
     if vm.tailscale_host:
-        typer.echo(f"Tailscale node {vm.tailscale_host} is not reachable")
+        ts_target = ExecTarget(ssh=ssh_target_for_vm(vm, config))
+        if wait_for_reconnect(ts_target):
+            return
+
+        # Tailscale didn't reconnect (ephemeral key expired, etc.)
+        typer.echo(f"Tailscale node {vm.tailscale_host} did not reconnect, rejoining...")
         db.clear_vm_tailscale(vm.name)
 
     # For Azure, attach a temporary public IP for the rejoin
