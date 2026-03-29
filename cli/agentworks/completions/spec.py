@@ -80,6 +80,8 @@ DYNAMIC_COMPLETIONS: dict[tuple[str, str], str] = {
     ("vm.add-git-credential", "credential"): "git_credentials",
     ("agent.create", "workspace"): "workspaces",
     ("agent.create", "template"): "agent_templates",
+    ("agent.reinit", "name"): "agents",
+    ("agent.reinit", "workspace"): "workspaces",
     ("agent.shell", "workspace"): "workspaces",
     ("agent.delete", "workspace"): "workspaces",
     ("agent.list", "workspace"): "workspaces",

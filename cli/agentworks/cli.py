@@ -595,6 +595,18 @@ def agent_list(
     list_agents(_get_db(), workspace_name=workspace)
 
 
+@agent_app.command("reinit")
+def agent_reinit(
+    name: Annotated[str, typer.Argument(help="Agent name")],
+    workspace: Annotated[str, typer.Option("--workspace", help="Workspace name")] = ...,  # type: ignore[assignment]
+) -> None:
+    """Re-run agent setup using the stored template."""
+    from agentworks.agents.manager import reinit_agent
+    from agentworks.config import load_config
+
+    reinit_agent(_get_db(), load_config(), name=name, workspace_name=workspace)
+
+
 @agent_app.command("shell")
 def agent_shell(
     name: Annotated[str, typer.Argument(help="Agent name")],

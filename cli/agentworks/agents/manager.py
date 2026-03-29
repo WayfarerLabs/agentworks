@@ -125,7 +125,7 @@ def create_agent(
             raise typer.Exit(1) from None
         ssh_logger.close()
 
-    agent = db.insert_agent(name, workspace_name, linux_user)
+    agent = db.insert_agent(name, workspace_name, linux_user, template=agent_tmpl.name)
 
     typer.echo(f"Agent '{name}' created (user: {agent.linux_user})")
 
@@ -155,6 +155,50 @@ def delete_agent(
     db.delete_agent(workspace_name, name)
 
     typer.echo(f"Agent '{name}' deleted from workspace '{workspace_name}'")
+
+
+def reinit_agent(
+    db: Database,
+    config: Config,
+    *,
+    name: str,
+    workspace_name: str,
+) -> None:
+    """Re-run agent setup using the stored template."""
+    from dataclasses import replace as _replace
+
+    from agentworks.agents.templates import resolve_template
+
+    ws = _require_workspace(db, workspace_name)
+    agent = db.get_agent(workspace_name, name)
+    if agent is None:
+        typer.echo(f"Error: agent '{name}' not found in workspace '{workspace_name}'", err=True)
+        raise typer.Exit(1)
+
+    if ws.type != "vm":
+        typer.echo("Error: agents are only supported on VM workspaces", err=True)
+        raise typer.Exit(1)
+
+    # Resolve the agent's stored template
+    agent_tmpl = resolve_template(config, agent.template)
+    if agent.template and agent.template != "default":
+        config = _replace(config, agent=agent_tmpl)
+
+    vm = _require_vm_for_workspace(db, ws)
+
+    from agentworks.ssh import SSHLogger
+
+    ssh_logger = SSHLogger(vm.name, "agent-reinit")
+    try:
+        _create_agent_on_vm(vm, config, agent.linux_user, workspace_name, logger=ssh_logger)
+    except Exception as e:
+        ssh_logger.close()
+        typer.echo(f"Error reinitializing agent: {e}", err=True)
+        typer.echo(f"  SSH log: {ssh_logger.path}", err=True)
+        raise typer.Exit(1) from None
+    ssh_logger.close()
+
+    typer.echo(f"Agent '{name}' reinitialized")
 
 
 def delete_agents_for_workspace(
@@ -193,10 +237,13 @@ def list_agents(
         typer.echo("No agents found.")
         return
 
-    typer.echo(f"{'NAME':<20} {'WORKSPACE':<20} {'LINUX USER':<30} {'CREATED'}")
-    typer.echo("-" * 95)
+    typer.echo(f"{'NAME':<20} {'WORKSPACE':<20} {'TEMPLATE':<12} {'LINUX USER':<30} {'CREATED'}")
+    typer.echo("-" * 107)
     for agent in agents:
-        typer.echo(f"{agent.name:<20} {agent.workspace_name:<20} {agent.linux_user:<30} {agent.created_at}")
+        typer.echo(
+            f"{agent.name:<20} {agent.workspace_name:<20} {agent.template or '-':<12} "
+            f"{agent.linux_user:<30} {agent.created_at}"
+        )
 
 
 def shell_agent(
@@ -268,9 +315,14 @@ def _create_agent_on_vm(
     agent_cfg = config.agent
     agent_shell = agent_cfg.shell
 
-    # Create user with the template's shell
+    # Create user with the template's shell (idempotent: skip if exists)
     shell_path = f"/bin/{agent_shell}" if "/" not in agent_shell else agent_shell
-    run_as_root(target, f"useradd -m -s {shell_path} {linux_user}", logger=lg)
+    user_exists = run_as_root(target, f"id {linux_user}", check=False, logger=lg)
+    if not user_exists.ok:
+        run_as_root(target, f"useradd -m -s {shell_path} {linux_user}", logger=lg)
+    else:
+        # Update shell in case template changed
+        run_as_root(target, f"usermod -s {shell_path} {linux_user}", logger=lg)
     run_as_root(target, f"usermod -aG {ws_group} {linux_user}", logger=lg)
 
     # Write a minimal rc file with a clear agent prompt

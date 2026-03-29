@@ -75,10 +75,8 @@ def _write_agentworks_profile(
     Writes $HOME/.agentworks-profile.sh with PATH exports and env vars.
     Sourced from ~/.profile (bash/sh) and ~/.zprofile (zsh) -- runs once
     per login shell, inherited by child processes.
+    Always written (even if empty) so that reinit can clear previously set paths.
     """
-    if not path_additions:
-        return
-
     # Deduplicate paths while preserving order
     seen: set[str] = set()
     unique_paths: list[str] = []
@@ -121,10 +119,8 @@ def _write_agentworks_rc(
 
     Writes $HOME/.agentworks-rc.sh with shell hooks (e.g., mise activate).
     Sourced from ~/.bashrc and ~/.zshrc -- runs per interactive shell instance.
+    Always written (even if empty) so that reinit can clear previously set hooks.
     """
-    if not shell_snippets:
-        return
-
     logger.step("Shell rc")
     typer.echo("  Writing agentworks rc...")
 
@@ -1210,7 +1206,10 @@ def _phase_b_setup(
     _write_agentworks_profile(ts_target, system_path + mise_path + user_path, logger)
 
     # Non-fatal: shell rc (interactive shell hooks like mise activate)
-    rc_snippets = [MISE_ACTIVATE_LINES] if (mise_available and config.admin.mise_activate) else []
+    if mise_available and config.admin.mise_activate:
+        rc_snippets = [MISE_ACTIVATE_LINES]
+    else:
+        rc_snippets = ["# mise activation disabled"]
     _write_agentworks_rc(ts_target, rc_snippets, logger)
 
     # Non-fatal: nerf tools

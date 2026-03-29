@@ -111,6 +111,7 @@ class AgentRow:
     name: str
     workspace_name: str
     linux_user: str
+    template: str | None
     created_at: str
 
 
@@ -260,6 +261,10 @@ MIGRATIONS: dict[int, str] = {
     11: """
         ALTER TABLE vms ADD COLUMN template TEXT;
         UPDATE vms SET template = 'default';
+    """,
+    12: """
+        ALTER TABLE agents ADD COLUMN template TEXT;
+        UPDATE agents SET template = 'default';
     """,
 }
 
@@ -534,10 +539,12 @@ class Database:
 
     # -- Agents ------------------------------------------------------------
 
-    def insert_agent(self, name: str, workspace_name: str, linux_user: str) -> AgentRow:
+    def insert_agent(
+        self, name: str, workspace_name: str, linux_user: str, template: str | None = None,
+    ) -> AgentRow:
         self._conn.execute(
-            "INSERT INTO agents (name, workspace_name, linux_user) VALUES (?, ?, ?)",
-            (name, workspace_name, linux_user),
+            "INSERT INTO agents (name, workspace_name, linux_user, template) VALUES (?, ?, ?, ?)",
+            (name, workspace_name, linux_user, template),
         )
         self._conn.commit()
         result = self.get_agent(workspace_name, name)
@@ -716,6 +723,7 @@ def _to_agent(row: sqlite3.Row) -> AgentRow:
         name=row["name"],
         workspace_name=row["workspace_name"],
         linux_user=row["linux_user"],
+        template=row["template"],
         created_at=row["created_at"],
     )
 
