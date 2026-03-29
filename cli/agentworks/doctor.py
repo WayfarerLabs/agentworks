@@ -260,8 +260,16 @@ def _check_git_credentials(
     assert isinstance(config, Config)
     assert callable(ok) and callable(warn) and callable(fail)
 
+    # Collect all credential names from admin and agent templates
+    all_cred_names: list[str] = list(config.admin.git_credentials)
+    for tmpl in config.agent_templates.values():
+        if tmpl.git_credentials is not None:
+            for name in tmpl.git_credentials:
+                if name not in all_cred_names:
+                    all_cred_names.append(name)
+
     try:
-        providers = resolve_git_credential_providers(config, config.admin.git_credentials)
+        providers = resolve_git_credential_providers(config, all_cred_names)
     except Exception as e:
         warn(f"Could not resolve git credential providers: {e}")
         return
