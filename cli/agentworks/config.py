@@ -140,6 +140,7 @@ class AdminConfig:
     mise_lockfile: str | None = None
     mise_allow_unlocked: bool = False
     mise_install_before: str = "7d"
+    mise_prune_on_reinit: bool = True
 
 
 @dataclass(frozen=True)
@@ -159,6 +160,7 @@ class AgentTemplate:
     mise_lockfile: str | None = None
     mise_allow_unlocked: bool | None = None
     mise_install_before: str | None = None
+    mise_prune_on_reinit: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -178,21 +180,19 @@ class GitCredentialConfig:
 
 @dataclass(frozen=True)
 class TaskTemplate:
+    """Task template definition. All fields optional (None = inherit/default)."""
+
     name: str
-    command: str
-    description: str = ""
-    restart_command: str = ""
-    env: dict[str, str] = field(default_factory=dict)
+    inherits: list[str] = field(default_factory=list)
+    command: str | None = None
+    description: str | None = None
+    restart_command: str | None = None
+    env: dict[str, str] | None = None
 
 
 @dataclass(frozen=True)
 class TaskConfig:
     history_limit: int = 50_000
-
-
-BUILTIN_TASK_TEMPLATES: dict[str, TaskTemplate] = {
-    "default": TaskTemplate(name="default", command="", description="Login shell"),
-}
 
 
 @dataclass(frozen=True)
@@ -435,6 +435,7 @@ _USER_CONFIG_KEYS = {
     "mise_lockfile",
     "mise_allow_unlocked",
     "mise_install_before",
+    "mise_prune_on_reinit",
 }
 
 
@@ -462,6 +463,7 @@ def _load_admin_config(data: dict[str, object]) -> AdminConfig:
         mise_lockfile=str(raw["mise_lockfile"]) if "mise_lockfile" in raw else None,
         mise_allow_unlocked=bool(raw.get("mise_allow_unlocked", False)),
         mise_install_before=str(raw.get("mise_install_before", "7d")),
+        mise_prune_on_reinit=bool(raw.get("mise_prune_on_reinit", True)),
     )
 
 
@@ -508,6 +510,9 @@ def _load_agent_templates(data: dict[str, object]) -> dict[str, AgentTemplate]:
             ),
             mise_install_before=(
                 str(tdata["mise_install_before"]) if "mise_install_before" in tdata else None
+            ),
+            mise_prune_on_reinit=(
+                bool(tdata["mise_prune_on_reinit"]) if "mise_prune_on_reinit" in tdata else None
             ),
         )
 
@@ -648,7 +653,7 @@ def _load_task_config(data: dict[str, object]) -> TaskConfig:
     )
 
 
-_TASK_TEMPLATE_KEYS = {"command", "description", "restart_command", "env"}
+_TASK_TEMPLATE_KEYS = {"inherits", "command", "description", "restart_command", "env"}
 
 
 def _load_task_templates(data: dict[str, object]) -> dict[str, TaskTemplate]:
@@ -656,25 +661,31 @@ def _load_task_templates(data: dict[str, object]) -> dict[str, TaskTemplate]:
     if not isinstance(raw, dict):
         raise ConfigError("[task_templates] must be a table")
 
-    # Start with built-in templates, allow user overrides
-    templates = dict(BUILTIN_TASK_TEMPLATES)
+    templates: dict[str, TaskTemplate] = {}
     for name, tdata in raw.items():
         if not isinstance(tdata, dict):
             raise ConfigError(f"task_templates.{name} must be a table")
         _warn_unexpected_keys(tdata, _TASK_TEMPLATE_KEYS, f"task_templates.{name}")
-        command = tdata.get("command")
-        if command is None:
-            raise ConfigError(f"task_templates.{name}.command is required")
-        env_raw = tdata.get("env", {})
-        if not isinstance(env_raw, dict):
-            raise ConfigError(f"task_templates.{name}.env must be a table")
+        env_raw = tdata.get("env")
+        env: dict[str, str] | None = None
+        if env_raw is not None:
+            if not isinstance(env_raw, dict):
+                raise ConfigError(f"task_templates.{name}.env must be a table")
+            env = {str(k): str(v) for k, v in env_raw.items()}
         templates[name] = TaskTemplate(
             name=name,
-            command=str(command),
-            description=str(tdata.get("description", "")),
-            restart_command=str(tdata.get("restart_command", "")),
-            env={str(k): str(v) for k, v in env_raw.items()},
+            inherits=list(tdata.get("inherits", [])),
+            command=str(tdata["command"]) if "command" in tdata else None,
+            description=str(tdata["description"]) if "description" in tdata else None,
+            restart_command=str(tdata["restart_command"]) if "restart_command" in tdata else None,
+            env=env,
         )
+
+    for name, tmpl in templates.items():
+        for parent in tmpl.inherits:
+            if parent not in templates and parent != "default":
+                raise ConfigError(f"task_templates.{name}.inherits references unknown template: {parent}")
+    _detect_template_cycles(templates, "task_templates")
 
     return templates
 

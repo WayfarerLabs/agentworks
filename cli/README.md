@@ -159,12 +159,13 @@ killed during deletion. Pass `--yes` to skip the confirmation prompt.
 
 Manage agents (isolated Linux users) within VM workspaces.
 
-| Command                                            | Description         |
-| -------------------------------------------------- | ------------------- |
-| `agentworks agent create <name> --workspace <ws>`  | Create an agent     |
-| `agentworks agent list [--workspace <ws>]`         | List agents         |
-| `agentworks agent shell <name> [--workspace <ws>]` | Shell into an agent |
-| `agentworks agent delete <name> --workspace <ws>`  | Delete an agent     |
+| Command                                             | Description                  |
+| --------------------------------------------------- | ---------------------------- |
+| `agentworks agent create [--name] [--workspace]`    | Create an agent              |
+| `agentworks agent list [--workspace <ws>]`          | List agents                  |
+| `agentworks agent reinit <name> --workspace <ws>`   | Re-run agent setup           |
+| `agentworks agent shell <name> --workspace <ws>`    | Shell into an agent          |
+| `agentworks agent delete <name> --workspace <ws>`   | Delete an agent              |
 
 ### Tasks
 
@@ -276,6 +277,7 @@ and `--source` (builtin, user) filters.
 | Command                             | Description                            |
 | ----------------------------------- | -------------------------------------- |
 | `agentworks config init`            | Create a sample config file            |
+| `agentworks config edit`            | Open config in `$EDITOR`               |
 | `agentworks config sample`          | Print the sample config to stdout      |
 | `agentworks config sync-ssh-config` | Rebuild SSH config entries for all VMs |
 
