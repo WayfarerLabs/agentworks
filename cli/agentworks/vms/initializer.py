@@ -294,6 +294,8 @@ def _run_mise_install(
     home: str,
     allow_unlocked: bool,
     logger: SSHLogger,
+    *,
+    prune: bool = True,
 ) -> None:
     """Run mise install, handling locked/unlocked modes.
 
@@ -311,6 +313,8 @@ def _run_mise_install(
     except SSHError:
         pass
 
+    installed = False
+
     if has_lockfile:
         typer.echo("  Running mise install (locked)...")
         try:
@@ -321,7 +325,7 @@ def _run_mise_install(
                 timeout=300,
             )
             typer.echo("  Mise packages installed (locked)")
-            return
+            installed = True
         except SSHError as e:
             logger.warning(f"mise install --locked failed: {e}")
             failures = _parse_mise_failures(e)
@@ -334,23 +338,31 @@ def _run_mise_install(
                 return
             typer.echo("  Retrying unlocked...", err=True)
 
-    # Unlocked install
-    typer.echo("  Running mise install...")
-    try:
-        _run_logged(
-            target,
-            f"{shell} -lc 'mise install -y'",
-            logger,
-            timeout=300,
-        )
-        typer.echo("  Mise packages installed")
-    except SSHError as e:
-        logger.warning(f"mise install failed: {e}")
-        failures = _parse_mise_failures(e)
-        for tool in failures:
-            typer.echo(f"  Failed: {tool}", err=True)
-        if not failures:
-            typer.echo("  Warning: mise install failed (see vm logs)", err=True)
+    if not installed:
+        typer.echo("  Running mise install...")
+        try:
+            _run_logged(
+                target,
+                f"{shell} -lc 'mise install -y'",
+                logger,
+                timeout=300,
+            )
+            typer.echo("  Mise packages installed")
+            installed = True
+        except SSHError as e:
+            logger.warning(f"mise install failed: {e}")
+            failures = _parse_mise_failures(e)
+            for tool in failures:
+                typer.echo(f"  Failed: {tool}", err=True)
+            if not failures:
+                typer.echo("  Warning: mise install failed (see vm logs)", err=True)
+
+    # Prune stale tool versions not in the current config
+    if installed and prune:
+        import contextlib
+
+        with contextlib.suppress(SSHError):
+            _run_logged(target, f"{shell} -lc 'mise prune -y'", logger, timeout=60)
 
 
 # -- SSH authorized keys ------------------------------------------------------
@@ -1181,13 +1193,14 @@ def _phase_b_setup(
         _fetch_mise_lockfile(ts_target, config.admin.mise_lockfile, home, logger)
 
     # Non-fatal: mise install (after config + dotfiles + lockfile are all settled)
+    prune = config.admin.mise_prune_on_reinit
     if mise_available and (config.admin.mise_packages or config.admin.mise_lockfile):
-        _run_mise_install(ts_target, admin_shell, home, config.admin.mise_allow_unlocked, logger)
+        _run_mise_install(ts_target, admin_shell, home, config.admin.mise_allow_unlocked, logger, prune=prune)
     elif mise_available:
         try:
             check = ts_target.run(f"test -f {home}/.config/mise/config.toml", check=False)
             if check.ok:
-                _run_mise_install(ts_target, admin_shell, home, config.admin.mise_allow_unlocked, logger)
+                _run_mise_install(ts_target, admin_shell, home, config.admin.mise_allow_unlocked, logger, prune=prune)
         except SSHError:
             pass
 

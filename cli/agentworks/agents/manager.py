@@ -608,22 +608,34 @@ def _run_agent_mise_setup(
     except SSHError:
         pass
 
+    installed = False
     install_flags = "-y --locked" if lockfile_exists else "-y"
     try:
         _run_as_agent(target, linux_user, f"mise install {install_flags}", timeout=300)
         typer.echo("  Agent mise packages installed")
+        installed = True
     except SSHError as e:
         if lockfile_exists and agent_cfg.mise_allow_unlocked:
             typer.echo("  Warning: some agent packages not in lockfile, installing unlocked...", err=True)
             try:
                 _run_as_agent(target, linux_user, "mise install -y", timeout=300)
                 typer.echo("  Agent mise packages installed (unlocked)")
+                installed = True
             except SSHError as e2:
                 typer.echo(f"  Warning: agent mise install failed: {e2}", err=True)
         else:
             typer.echo(f"  Warning: agent mise install failed: {e}", err=True)
             if lockfile_exists:
                 typer.echo("  Hint: set mise_allow_unlocked = true to install unlocked packages", err=True)
+
+    # Prune stale tool versions not in the current config
+    if installed and agent_cfg.mise_prune_on_reinit:
+        import contextlib
+
+        from agentworks.ssh import SSHError as _SSHError
+
+        with contextlib.suppress(_SSHError):
+            _run_as_agent(target, linux_user, "mise prune -y", timeout=60)
 
 
 def _build_agent_test_command(

@@ -30,6 +30,7 @@ class ResolvedAgentTemplate:
     mise_lockfile: str | None = None
     mise_allow_unlocked: bool = False
     mise_install_before: str = "7d"
+    mise_prune_on_reinit: bool = True
 
 
 def resolve_from_dict(
@@ -99,6 +100,7 @@ def _merge(target: ResolvedAgentTemplate, source: ResolvedAgentTemplate) -> None
     target.mise_lockfile = source.mise_lockfile
     target.mise_allow_unlocked = source.mise_allow_unlocked
     target.mise_install_before = source.mise_install_before
+    target.mise_prune_on_reinit = source.mise_prune_on_reinit
 
 
 def _merge_template(target: ResolvedAgentTemplate, tmpl: AgentTemplate) -> None:
@@ -126,3 +128,5 @@ def _merge_template(target: ResolvedAgentTemplate, tmpl: AgentTemplate) -> None:
         target.mise_allow_unlocked = tmpl.mise_allow_unlocked
     if tmpl.mise_install_before is not None:
         target.mise_install_before = tmpl.mise_install_before
+    if tmpl.mise_prune_on_reinit is not None:
+        target.mise_prune_on_reinit = tmpl.mise_prune_on_reinit

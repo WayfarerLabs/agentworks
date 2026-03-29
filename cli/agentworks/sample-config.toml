@@ -131,6 +131,7 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # mise_lockfile = "~/.config/agentworks/mise.lock"   # source ref (wins over dotfiles)
 # mise_allow_unlocked = false                # install packages not in lockfile (with warning)
 # mise_install_before = "7d"                 # reject versions newer than this
+# mise_prune_on_reinit = true                # remove stale tool versions on reinit
 
 # --- Agent templates ---
 # Per-user settings for agent users. Selected at agent create time with
@@ -150,6 +151,7 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # mise_lockfile = "~/.config/agentworks/agent-mise.lock"
 # mise_allow_unlocked = false
 # mise_install_before = "7d"
+# mise_prune_on_reinit = true
 
 # [agent_templates.restricted]
 # inherits = ["default"]

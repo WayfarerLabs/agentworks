@@ -140,6 +140,7 @@ class AdminConfig:
     mise_lockfile: str | None = None
     mise_allow_unlocked: bool = False
     mise_install_before: str = "7d"
+    mise_prune_on_reinit: bool = True
 
 
 @dataclass(frozen=True)
@@ -159,6 +160,7 @@ class AgentTemplate:
     mise_lockfile: str | None = None
     mise_allow_unlocked: bool | None = None
     mise_install_before: str | None = None
+    mise_prune_on_reinit: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -433,6 +435,7 @@ _USER_CONFIG_KEYS = {
     "mise_lockfile",
     "mise_allow_unlocked",
     "mise_install_before",
+    "mise_prune_on_reinit",
 }
 
 
@@ -460,6 +463,7 @@ def _load_admin_config(data: dict[str, object]) -> AdminConfig:
         mise_lockfile=str(raw["mise_lockfile"]) if "mise_lockfile" in raw else None,
         mise_allow_unlocked=bool(raw.get("mise_allow_unlocked", False)),
         mise_install_before=str(raw.get("mise_install_before", "7d")),
+        mise_prune_on_reinit=bool(raw.get("mise_prune_on_reinit", True)),
     )
 
 
@@ -506,6 +510,9 @@ def _load_agent_templates(data: dict[str, object]) -> dict[str, AgentTemplate]:
             ),
             mise_install_before=(
                 str(tdata["mise_install_before"]) if "mise_install_before" in tdata else None
+            ),
+            mise_prune_on_reinit=(
+                bool(tdata["mise_prune_on_reinit"]) if "mise_prune_on_reinit" in tdata else None
             ),
         )
 
