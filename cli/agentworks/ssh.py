@@ -629,3 +629,33 @@ class ExecTarget:
             Path(tmp_path).unlink(missing_ok=True)
         if mode:
             self.run(f"chmod {mode} {remote_path}")
+
+
+def wait_for_reconnect(target: ExecTarget, *, max_attempts: int = 16) -> bool:
+    """Wait for an ExecTarget to become reachable over SSH.
+
+    Used after network disruptions (e.g., Azure public IP changes) that
+    temporarily break Tailscale connectivity. Polls with a double-check
+    to handle flapping.
+
+    Returns True if the connection stabilized, False if it timed out.
+    """
+    import time
+
+    import typer
+
+    typer.echo("  Waiting for Tailscale to reconnect (this may take several minutes)...")
+    for attempt in range(max_attempts):
+        try:
+            target.run("echo ok", timeout=10)
+            # One success isn't enough; the network can flap.
+            if attempt > 0:
+                time.sleep(2)
+                target.run("echo ok", timeout=10)
+            typer.echo("  Tailscale SSH reconnected")
+            return True
+        except SSHError:
+            if attempt == max_attempts - 1:
+                typer.echo("  Warning: Tailscale SSH did not reconnect after ~240s, proceeding anyway", err=True)
+            time.sleep(5)
+    return False

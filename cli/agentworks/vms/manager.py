@@ -956,6 +956,14 @@ def _ensure_tailscale(
         if azure_provisioner is not None:
             azure_provisioner.detach_public_ip(vm)
 
+            # Wait for Tailscale SSH to reconnect after IP change
+            from agentworks.ssh import ExecTarget, ssh_target_for_vm, wait_for_reconnect
+
+            refreshed = db.get_vm(vm.name)
+            if refreshed and refreshed.tailscale_host:
+                ts_target = ExecTarget(ssh=ssh_target_for_vm(refreshed, config))
+                wait_for_reconnect(ts_target)
+
     # Update SSH config in case the Tailscale IP changed
     from agentworks.ssh_config import sync_ssh_config
 

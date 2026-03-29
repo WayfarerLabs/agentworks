@@ -820,24 +820,10 @@ def initialize_vm(
         except Exception as e:
             typer.echo(f"  Warning: post-provisioning cleanup failed: {e}", err=True)
 
-        # Wait for Tailscale SSH to stabilize after network changes
-        import time
+        # Wait for Tailscale SSH to reconnect after network changes
+        from agentworks.ssh import wait_for_reconnect
 
-        typer.echo("  Waiting for Tailscale connectivity to stabilize (this may take several minutes)...")
-        for attempt in range(16):
-            try:
-                ts_target.run("echo ok", timeout=10)
-                # One success isn't enough; the network can flap.
-                # Wait a beat and verify again.
-                if attempt > 0:
-                    time.sleep(2)
-                    ts_target.run("echo ok", timeout=10)
-                typer.echo("  Tailscale SSH stable")
-                break
-            except SSHError:
-                if attempt == 15:
-                    typer.echo("  Warning: Tailscale SSH not stable after ~240s, proceeding anyway", err=True)
-                time.sleep(5)
+        wait_for_reconnect(ts_target)
 
     run_initialization(
         db,
