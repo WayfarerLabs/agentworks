@@ -46,6 +46,18 @@ apt-get update -qq
 apt-get install -y -qq $SYSTEM_PACKAGES
 echo "##SUCCESS## system packages installed"
 
+# -- Step 2b: Preserve SSH host keys across reboots --
+# By default, cloud-init may delete and regenerate SSH host keys on certain
+# boot events (e.g., VM stop/start). This causes SSH clients to reject the
+# connection due to a changed host key. Tell cloud-init to preserve existing keys.
+echo "##STEP## Preserve SSH host keys"
+mkdir -p /etc/cloud/cloud.cfg.d
+cat > /etc/cloud/cloud.cfg.d/99-preserve-ssh-keys.cfg <<'CLOUDCFG'
+ssh_deletekeys: false
+ssh_genkeytypes: []
+CLOUDCFG
+echo "##SUCCESS## SSH host key preservation configured"
+
 # -- Step 3: SSH public key --
 echo "##STEP## SSH public key"
 HOME_DIR="/home/$VM_USER"
