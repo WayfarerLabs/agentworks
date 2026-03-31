@@ -827,6 +827,8 @@ def copy_workspace(
                 ["tar", "czf", str(tmp_path), "-C", src_ws.workspace_path, "."],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
             )
             if result.returncode != 0:
                 typer.echo(f"Error: tar failed: {result.stderr.strip()}", err=True)
@@ -872,6 +874,8 @@ def copy_workspace(
                 ["tar", "xzf", str(tmp_path), "-C", workspace_path],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
             )
             if result.returncode != 0:
                 typer.echo(f"Error: tar failed: {result.stderr.strip()}", err=True)

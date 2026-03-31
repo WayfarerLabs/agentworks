@@ -178,7 +178,7 @@ class SSHLogger:
         self._write("\n".join(lines) + "\n")
 
     def _write(self, text: str) -> None:
-        with open(self.path, "a") as f:
+        with open(self.path, "a", encoding="utf-8", errors="replace") as f:
             f.write(text)
 
 

@@ -190,7 +190,7 @@ def _atomic_write(path: Path, content: str) -> None:
     """Write content to a file atomically via temp file + rename."""
     fd, tmp = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
     try:
-        with open(fd, "w") as f:
+        with open(fd, "w", encoding="utf-8") as f:
             f.write(content)
         Path(tmp).replace(path)
     except BaseException:

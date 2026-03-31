@@ -817,6 +817,8 @@ def _is_tailscale_reachable(tailscale_host: str) -> bool:
             ["tailscale", "ping", "--timeout=5s", "-c=1", tailscale_host],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=10,
         )
         return result.returncode == 0

@@ -82,6 +82,8 @@ def _powershell(script: str, *, check: bool = True, timeout: int = 120) -> str:
         ["powershell", "-NoProfile", "-Command", script],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=timeout,
     )
     if check and result.returncode != 0:
