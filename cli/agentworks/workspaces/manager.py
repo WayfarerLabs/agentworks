@@ -357,16 +357,18 @@ def repair_workspace(
         typer.echo(f"  Warning: permission fix failed: {e}", err=True)
 
     # 4. Fix ACLs
+    # Default ACLs only apply to directories; use find to avoid warnings on files.
+    # Effective ACLs apply to all entries and should not produce output.
     try:
         run_as_root(
             target,
-            f"setfacl -R -d -m g::rwx -d -m m::rwx {ws.workspace_path}",
-            timeout=60,
+            f"find {ws.workspace_path} -type d -exec setfacl -d -m g::rwx -m m::rwx {{}} +",
+            timeout=120,
         )
         run_as_root(
             target,
             f"setfacl -R -m g::rwx -m m::rwx {ws.workspace_path}",
-            timeout=60,
+            timeout=120,
         )
         typer.echo("  OK: ACLs")
     except SSHError as e:
@@ -565,14 +567,14 @@ def _rehome_vm(
         try:
             run_as_root(
                 target,
-                f"setfacl -R -d -m g::rwx -d -m m::rwx {new_path}",
-                timeout=60,
+                f"find {new_path} -type d -exec setfacl -d -m g::rwx -m m::rwx {{}} +",
+                timeout=120,
                 logger=ssh_logger,
             )
             run_as_root(
                 target,
                 f"setfacl -R -m g::rwx -m m::rwx {new_path}",
-                timeout=60,
+                timeout=120,
                 logger=ssh_logger,
             )
         except SSHError as e:

@@ -1167,13 +1167,13 @@ def _phase_b_setup(
             logger,
             as_root=True,
         )
-        # Default ACLs on all directories (for future files)
+        # Default ACLs on directories only (setfacl -R -d warns on files)
         _run_logged(
             ts_target,
-            f"setfacl -R -d -m g::rwx -d -m m::rwx {workspaces_dir}",
+            f"find {workspaces_dir} -type d -exec setfacl -d -m g::rwx -m m::rwx {{}} +",
             logger,
             as_root=True,
-            timeout=60,
+            timeout=120,
         )
         # Access ACLs on all existing files and dirs
         _run_logged(
@@ -1181,7 +1181,7 @@ def _phase_b_setup(
             f"setfacl -R -m g::rwx -m m::rwx {workspaces_dir}",
             logger,
             as_root=True,
-            timeout=60,
+            timeout=120,
         )
     except SSHError as e:
         msg = f"workspaces directory setup failed: {e}"
