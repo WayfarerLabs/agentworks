@@ -247,6 +247,8 @@ def run(
                 args,
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=timeout,
             )
             ssh_result = SSHResult(
@@ -323,7 +325,7 @@ def copy_to(
     dest = f"{target.user}@{target.host}:{remote_path}" if target.user else f"{target.host}:{remote_path}"
     args.append(dest)
 
-    result = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
+    result = subprocess.run(args, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout)
     if result.returncode != 0:
         raise SSHError(f"scp failed: {result.stderr.strip()}")
 
@@ -381,7 +383,9 @@ def lima_run(
     """Execute a command inside a local Lima VM via limactl shell."""
     args = ["limactl", "shell", target.vm_name, "bash", "-lc", command]
     try:
-        result = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
+        result = subprocess.run(
+            args, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout
+        )
     except subprocess.TimeoutExpired as err:
         raise SSHError(f"Lima command timed out after {timeout}s: {command}") from err
     ssh_result = SSHResult(
@@ -457,7 +461,9 @@ def wsl2_run(
         command,
     ]
     try:
-        result = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
+        result = subprocess.run(
+            args, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout
+        )
     except subprocess.TimeoutExpired as err:
         raise SSHError(f"WSL2 command timed out after {timeout}s: {command}") from err
     ssh_result = SSHResult(
@@ -478,6 +484,8 @@ def _lima_copy_to(target: LimaTarget, local_path: str | Path, remote_path: str) 
         ["limactl", "copy", str(local_path), f"{target.vm_name}:{remote_path}"],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
     )
     if result.returncode != 0:
         raise SSHError(f"limactl copy failed: {result.stderr.strip()}")

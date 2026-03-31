@@ -68,7 +68,9 @@ _blob_opener = urllib.request.build_opener(_StripAuthRedirectHandler)
 
 def _wsl(args: list[str], *, check: bool = True, timeout: int = 300) -> str:
     """Run a wsl.exe command and return stdout."""
-    result = subprocess.run(["wsl", *args], capture_output=True, text=True, timeout=timeout)
+    result = subprocess.run(
+        ["wsl", *args], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout
+    )
     if check and result.returncode != 0:
         raise RuntimeError(f"wsl command failed: {result.stderr.strip()}")
     return result.stdout
