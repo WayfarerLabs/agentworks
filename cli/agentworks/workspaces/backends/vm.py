@@ -144,8 +144,10 @@ def delete_vm_workspace(
     target = ssh_target_for_vm(vm, config)
     lg = logger
 
+    from agentworks.ssh import run_as_root
+
     try:
-        ssh_run(target, f"rm -rf {workspace_path}", timeout=30, logger=lg)
+        run_as_root(target, f"rm -rf {workspace_path}", timeout=30, logger=lg)
         session = console_session_name(ws_name)
         ssh_run(target, f"rm -f ~/.config/tmuxinator/{session}.yml", check=False, timeout=10, logger=lg)
     except SSHError as e:

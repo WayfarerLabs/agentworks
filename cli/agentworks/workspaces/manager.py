@@ -309,6 +309,18 @@ def repair_workspace(
 
     typer.echo(f"Repairing workspace '{name}' on VM '{vm.name}'...")
 
+    # 0. Ensure acl package is installed (needed for setfacl)
+    try:
+        has_setfacl = run_as_root(target, "which setfacl", check=False)
+        if not has_setfacl.ok:
+            run_as_root(target, "apt-get install -y -qq acl", timeout=60)
+            typer.echo("  Fixed: installed acl package")
+            fixes += 1
+        else:
+            typer.echo("  OK: acl package")
+    except SSHError as e:
+        typer.echo(f"  Warning: acl package check failed: {e}", err=True)
+
     # 1. Ensure workspace group exists (with correct naming)
     try:
         # Check for old-style group and rename if needed

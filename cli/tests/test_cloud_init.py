@@ -33,3 +33,4 @@ def test_system_packages_constant() -> None:
     assert "curl" in SYSTEM_PACKAGES
     assert "git" in SYSTEM_PACKAGES
     assert "sudo" in SYSTEM_PACKAGES
+    assert "acl" in SYSTEM_PACKAGES
