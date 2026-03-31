@@ -13,7 +13,7 @@ from agentworks.workspaces.templates import ResolvedTemplate, resolve_template
 
 if TYPE_CHECKING:
     from agentworks.config import Config
-    from agentworks.db import Database, VMRow
+    from agentworks.db import Database, VMRow, WorkspaceRow
 
 
 def create_workspace(
@@ -422,6 +422,290 @@ def repair_workspace(
         typer.echo(f"\nRepaired {fixes} issue(s)")
     else:
         typer.echo("\nNo issues found")
+
+
+def rehome_workspace(
+    db: Database,
+    config: Config,
+    name: str,
+    *,
+    target_path: str | None = None,
+    remove_old: bool = False,
+    yes: bool = False,
+) -> None:
+    """Move a workspace to a new directory path."""
+    ws = db.get_workspace(name)
+    if ws is None:
+        typer.echo(f"Error: workspace '{name}' not found", err=True)
+        raise typer.Exit(1)
+
+    # Determine target path
+    if target_path is not None:
+        new_path = target_path
+    elif ws.type == "vm":
+        new_path = f"{config.paths.vm_workspaces}/{name}"
+    else:
+        new_path = str(config.paths.local_workspaces / name)
+
+    old_path = ws.workspace_path
+
+    if old_path == new_path:
+        typer.echo(f"Workspace '{name}' is already at {new_path}")
+        return
+
+    # Safety: detect overlapping paths
+    old_norm = old_path.rstrip("/") + "/"
+    new_norm = new_path.rstrip("/") + "/"
+    if new_norm.startswith(old_norm) or old_norm.startswith(new_norm):
+        typer.echo("Error: source and target paths overlap", err=True)
+        raise typer.Exit(1)
+
+    # Block if workspace has running tasks
+    from agentworks.db import TaskStatus
+
+    tasks = db.list_tasks(workspace_name=name)
+    running = [t for t in tasks if t.status == TaskStatus.RUNNING.value]
+    if running:
+        typer.echo(
+            f"Error: workspace '{name}' has {len(running)} running task(s). "
+            "Stop them first with 'agentworks task stop'.",
+            err=True,
+        )
+        raise typer.Exit(1)
+
+    if ws.type == "vm":
+        _rehome_vm(db, config, ws, new_path, remove_old=remove_old, yes=yes)
+    elif ws.type == "local":
+        _rehome_local(db, config, ws, new_path, remove_old=remove_old, yes=yes)
+    else:
+        typer.echo(f"Error: unknown workspace type '{ws.type}'", err=True)
+        raise typer.Exit(1)
+
+
+def _rehome_vm(
+    db: Database,
+    config: Config,
+    ws: WorkspaceRow,
+    new_path: str,
+    *,
+    remove_old: bool,
+    yes: bool,
+) -> None:
+    """Rehome a VM workspace."""
+    from agentworks.agents.manager import WS_GROUP_PREFIX
+    from agentworks.ssh import SSHError, SSHLogger, run_as_root, ssh_target_for_vm
+    from agentworks.ssh import run as ssh_run
+    from agentworks.workspaces.backends.vm import generate_code_workspace
+
+    ws_name = ws.name
+    old_path = ws.workspace_path
+    assert ws.vm_name is not None
+    vm_name = ws.vm_name
+
+    vm = db.get_vm(vm_name)
+    if vm is None:
+        typer.echo(f"Error: VM '{vm_name}' not found", err=True)
+        raise typer.Exit(1)
+
+    _guard_vm_status(vm)
+    _ensure_vm_running(db, config, vm)
+
+    target = ssh_target_for_vm(vm, config)
+
+    # Verify source exists
+    src_check = ssh_run(target, f"test -d {old_path}", check=False, timeout=10)
+    if not src_check.ok:
+        typer.echo(f"Error: source directory {old_path} does not exist on VM", err=True)
+        raise typer.Exit(1)
+
+    # Verify target does not exist
+    dst_check = ssh_run(target, f"test -d {new_path}", check=False, timeout=10)
+    if dst_check.ok:
+        typer.echo(f"Error: target directory {new_path} already exists on VM", err=True)
+        raise typer.Exit(1)
+
+    if not yes:
+        typer.echo(f"Rehome workspace '{ws_name}':")
+        typer.echo(f"  From: {old_path}")
+        typer.echo(f"  To:   {new_path}")
+        if remove_old:
+            typer.echo("  Old directory will be REMOVED after copy")
+        else:
+            typer.echo("  Old directory will be LEFT IN PLACE")
+        typer.confirm("Proceed?", abort=True)
+
+    ssh_logger = SSHLogger(vm.name, "workspace-rehome")
+    ws_group = f"{WS_GROUP_PREFIX}{ws_name}"
+
+    try:
+        # Create parent directory
+        parent = new_path.rsplit("/", 1)[0]
+        run_as_root(target, f"mkdir -p {parent}", logger=ssh_logger)
+
+        # Copy with rsync (fall back to cp -a)
+        typer.echo("Copying workspace...")
+        has_rsync = ssh_run(target, "which rsync", check=False, timeout=10, logger=ssh_logger)
+        if has_rsync.ok:
+            ssh_run(target, f"rsync -a {old_path}/ {new_path}/", timeout=600, logger=ssh_logger)
+        else:
+            run_as_root(target, f"cp -a {old_path} {new_path}", timeout=600, logger=ssh_logger)
+
+        # Verify copy succeeded
+        verify = ssh_run(target, f"test -d {new_path}", check=False, timeout=10, logger=ssh_logger)
+        if not verify.ok:
+            typer.echo("Error: copy verification failed, target directory not found", err=True)
+            typer.echo(f"  SSH log: {ssh_logger.path}", err=True)
+            ssh_logger.close()
+            raise typer.Exit(1)
+
+        # Fix ownership, permissions, and ACLs on the new path
+        typer.echo("Setting permissions...")
+        run_as_root(target, f"chown {vm.admin_username}:{ws_group} {new_path}", logger=ssh_logger)
+        run_as_root(target, f"chmod 2770 {new_path}", logger=ssh_logger)
+        try:
+            run_as_root(
+                target,
+                f"setfacl -R -d -m g::rwx -d -m m::rwx {new_path}",
+                timeout=60,
+                logger=ssh_logger,
+            )
+            run_as_root(
+                target,
+                f"setfacl -R -m g::rwx -m m::rwx {new_path}",
+                timeout=60,
+                logger=ssh_logger,
+            )
+        except SSHError as e:
+            typer.echo(f"  Warning: ACL setup failed: {e}", err=True)
+
+        # Fix parent directory traversal
+        run_as_root(
+            target,
+            f'sh -c \'p={new_path}; while [ "$p" != "/" ]; do chmod a+x "$p"; p=$(dirname "$p"); done\'',
+            logger=ssh_logger,
+        )
+
+        # Regenerate tmuxinator config at new path
+        from agentworks.ssh import write_file
+        from agentworks.workspaces.tmuxinator import console_session_name, generate_config
+
+        tmux_config = generate_config(ws_name, new_path)
+        write_file(target, f"{new_path}/.tmuxinator.yml", tmux_config, logger=ssh_logger)
+        session = console_session_name(ws_name)
+        ssh_run(target, "mkdir -p ~/.config/tmuxinator", timeout=10, logger=ssh_logger)
+        ssh_run(
+            target,
+            f"ln -sf {new_path}/.tmuxinator.yml ~/.config/tmuxinator/{session}.yml",
+            timeout=10,
+            logger=ssh_logger,
+        )
+
+        # Update database
+        db.update_workspace_path(ws_name, new_path)
+        typer.echo(f"Database updated: workspace_path = {new_path}")
+
+        # Regenerate VS Code workspace file
+        code_ws_path = generate_code_workspace(vm, config, ws_name, new_path)
+        typer.echo(f"VS Code workspace updated: {code_ws_path}")
+
+        # Handle old directory
+        if remove_old:
+            typer.echo(f"Removing old directory {old_path}...")
+            run_as_root(target, f"rm -rf {old_path}", timeout=60, logger=ssh_logger)
+            typer.echo("Old directory removed")
+        else:
+            typer.echo(f"\nOld directory left in place at {old_path}")
+            typer.echo("Remove it manually when ready, or re-run with --remove-old")
+
+    except SystemExit:
+        ssh_logger.close()
+        raise
+    except Exception as e:
+        typer.echo(f"Error during rehome: {e}", err=True)
+        typer.echo(f"  SSH log: {ssh_logger.path}", err=True)
+        typer.echo("  The database was NOT updated. The workspace is still at the original path.", err=True)
+        ssh_logger.close()
+        raise typer.Exit(1) from None
+
+    ssh_logger.close()
+    typer.echo(f"\nWorkspace '{ws_name}' rehomed to {new_path}")
+
+
+def _rehome_local(
+    db: Database,
+    config: Config,
+    ws: WorkspaceRow,
+    new_path: str,
+    *,
+    remove_old: bool,
+    yes: bool,
+) -> None:
+    """Rehome a local workspace."""
+    import shutil
+    from pathlib import Path
+
+    ws_name = ws.name
+    old_path = ws.workspace_path
+
+    old_dir = Path(old_path)
+    new_dir = Path(new_path)
+
+    if not old_dir.exists():
+        typer.echo(f"Error: source directory {old_path} does not exist", err=True)
+        raise typer.Exit(1)
+
+    if new_dir.exists():
+        typer.echo(f"Error: target directory {new_path} already exists", err=True)
+        raise typer.Exit(1)
+
+    if not yes:
+        typer.echo(f"Rehome workspace '{ws_name}':")
+        typer.echo(f"  From: {old_path}")
+        typer.echo(f"  To:   {new_path}")
+        if remove_old:
+            typer.echo("  Old directory will be REMOVED after copy")
+        else:
+            typer.echo("  Old directory will be LEFT IN PLACE")
+        typer.confirm("Proceed?", abort=True)
+
+    # Copy
+    typer.echo("Copying workspace...")
+    new_dir.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(old_path, new_path, symlinks=True)
+
+    # Verify
+    if not new_dir.exists():
+        typer.echo("Error: copy verification failed, target directory not found", err=True)
+        raise typer.Exit(1)
+
+    # Regenerate tmuxinator config at new path
+    from agentworks.workspaces.tmuxinator import console_session_name, generate_config
+
+    tmux_file = new_dir / ".tmuxinator.yml"
+    if tmux_file.exists() or (old_dir / ".tmuxinator.yml").exists():
+        tmux_config = generate_config(ws_name, new_path)
+        tmux_file.write_text(tmux_config)
+        session = console_session_name(ws_name)
+        tmux_config_dir = Path.home() / ".config" / "tmuxinator"
+        tmux_config_dir.mkdir(parents=True, exist_ok=True)
+        link = tmux_config_dir / f"{session}.yml"
+        link.unlink(missing_ok=True)
+        link.symlink_to(tmux_file)
+
+    # Update database
+    db.update_workspace_path(ws_name, new_path)
+    typer.echo(f"Database updated: workspace_path = {new_path}")
+
+    # Handle old directory
+    if remove_old:
+        typer.echo(f"Removing old directory {old_path}...")
+        shutil.rmtree(old_path)
+        typer.echo("Old directory removed")
+    else:
+        typer.echo(f"\nOld directory left in place at {old_path}")
+        typer.echo("Remove it manually when ready, or re-run with --remove-old")
+
+    typer.echo(f"\nWorkspace '{ws_name}' rehomed to {new_path}")
 
 
 def delete_workspace(

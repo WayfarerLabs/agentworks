@@ -539,6 +539,24 @@ def workspace_list(
     list_workspaces(_get_db(), vm_name=vm, ws_type=ws_type)
 
 
+@workspace_app.command("rehome")
+def workspace_rehome(
+    name: Annotated[str, typer.Argument(help="Workspace name")],
+    target: Annotated[
+        str | None, typer.Option("--target", help="Target path (default: configured workspace dir)")
+    ] = None,
+    remove_old: Annotated[
+        bool, typer.Option("--remove-old", help="Remove the old directory after verified copy")
+    ] = False,
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip confirmation")] = False,
+) -> None:
+    """Move a workspace to a new directory path."""
+    from agentworks.config import load_config
+    from agentworks.workspaces.manager import rehome_workspace
+
+    rehome_workspace(_get_db(), load_config(), name, target_path=target, remove_old=remove_old, yes=yes)
+
+
 @workspace_app.command("repair")
 def workspace_repair(
     name: Annotated[str, typer.Argument(help="Workspace name")],

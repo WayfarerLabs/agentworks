@@ -10,10 +10,11 @@ import sys
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
-from collections.abc import Mapping
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from agentworks.agents.templates import ResolvedAgentTemplate
     from agentworks.vms.templates import ResolvedVMTemplate
 

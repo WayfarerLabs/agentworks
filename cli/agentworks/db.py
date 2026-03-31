@@ -549,6 +549,13 @@ class Database:
         rows = self._conn.execute(query, params).fetchall()
         return [_to_workspace(r) for r in rows]
 
+    def update_workspace_path(self, name: str, workspace_path: str) -> None:
+        self._conn.execute(
+            "UPDATE workspaces SET workspace_path = ? WHERE name = ?",
+            (workspace_path, name),
+        )
+        self._conn.commit()
+
     def update_workspace_last_seen(self, name: str) -> None:
         self._conn.execute(
             "UPDATE workspaces SET last_seen_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE name = ?",

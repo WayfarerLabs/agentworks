@@ -139,6 +139,7 @@ Manage workspaces on VMs or locally.
 | `agentworks workspace console <name>`     | Open the workspace console (tmux)    |
 | `agentworks workspace list`               | List workspaces                      |
 | `agentworks workspace copy <source>`      | Copy a workspace to a new location   |
+| `agentworks workspace rehome <name>`      | Move workspace to a new path         |
 | `agentworks workspace repair <name>`      | Repair workspace infrastructure      |
 | `agentworks workspace delete <name>`      | Delete a workspace                   |
 
