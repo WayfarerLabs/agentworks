@@ -282,6 +282,152 @@ def list_workspaces(
         typer.echo(f"{ws_name:<{name_w}}  {ws_type:<{type_w}}  {vm_name:<{vm_w}}  {tpl:<{tpl_w}}  {created}")
 
 
+def repair_workspace(
+    db: Database,
+    config: Config,
+    name: str,
+) -> None:
+    """Repair workspace infrastructure: group, permissions, ACLs, agent access."""
+    from agentworks.agents.manager import AGENT_PREFIX, WS_GROUP_PREFIX
+    from agentworks.ssh import SSHError, run_as_root, ssh_target_for_vm
+
+    ws = db.get_workspace(name)
+    if ws is None:
+        typer.echo(f"Error: workspace '{name}' not found", err=True)
+        raise typer.Exit(1)
+
+    if ws.type != "vm":
+        typer.echo(f"Error: workspace '{name}' is local, nothing to repair", err=True)
+        raise typer.Exit(1)
+
+    assert ws.vm_name is not None
+    vm = db.get_vm(ws.vm_name)
+    if vm is None:
+        typer.echo(f"Error: VM '{ws.vm_name}' not found", err=True)
+        raise typer.Exit(1)
+
+    target = ssh_target_for_vm(vm, config)
+    ws_group = f"{WS_GROUP_PREFIX}{name}"
+    fixes = 0
+
+    typer.echo(f"Repairing workspace '{name}' on VM '{vm.name}'...")
+
+    # 1. Ensure workspace group exists (with correct naming)
+    try:
+        # Check for old-style group and rename if needed
+        old_group = f"ws-{name}"
+        old_exists = run_as_root(target, f"getent group {old_group}", check=False)
+        new_exists = run_as_root(target, f"getent group {ws_group}", check=False)
+
+        if old_exists.ok and not new_exists.ok:
+            run_as_root(target, f"groupmod -n {ws_group} {old_group}")
+            typer.echo(f"  Fixed: renamed group {old_group} -> {ws_group}")
+            fixes += 1
+        elif not new_exists.ok:
+            run_as_root(
+                target,
+                f"sh -c 'getent group {ws_group} >/dev/null 2>&1 || /usr/sbin/groupadd {ws_group}'",
+            )
+            typer.echo(f"  Fixed: created group {ws_group}")
+            fixes += 1
+        else:
+            typer.echo(f"  OK: group {ws_group} exists")
+    except SSHError as e:
+        typer.echo(f"  Warning: group check failed: {e}", err=True)
+
+    # 2. Ensure admin is in the group
+    try:
+        in_group = run_as_root(
+            target, f"id -nG {vm.admin_username}", check=False,
+        )
+        if in_group.ok and ws_group not in in_group.stdout.split():
+            run_as_root(target, f"usermod -aG {ws_group} {vm.admin_username}")
+            typer.echo(f"  Fixed: added admin '{vm.admin_username}' to {ws_group}")
+            fixes += 1
+        else:
+            typer.echo(f"  OK: admin in {ws_group}")
+    except SSHError as e:
+        typer.echo(f"  Warning: admin group check failed: {e}", err=True)
+
+    # 3. Fix directory permissions
+    try:
+        run_as_root(target, f"chown {vm.admin_username}:{ws_group} {ws.workspace_path}")
+        run_as_root(target, f"chmod 2770 {ws.workspace_path}")
+        typer.echo("  OK: directory ownership and permissions")
+    except SSHError as e:
+        typer.echo(f"  Warning: permission fix failed: {e}", err=True)
+
+    # 4. Fix ACLs
+    try:
+        run_as_root(
+            target,
+            f"setfacl -R -d -m g::rwx -d -m m::rwx {ws.workspace_path}",
+            timeout=60,
+        )
+        run_as_root(
+            target,
+            f"setfacl -R -m g::rwx -m m::rwx {ws.workspace_path}",
+            timeout=60,
+        )
+        typer.echo("  OK: ACLs")
+    except SSHError as e:
+        typer.echo(f"  Warning: ACL fix failed: {e}", err=True)
+
+    # 5. Fix parent directory traversal
+    try:
+        run_as_root(
+            target,
+            f"sh -c 'p={ws.workspace_path}; while [ \"$p\" != \"/\" ]; do chmod a+x \"$p\"; "
+            f"p=$(dirname \"$p\"); done'",
+        )
+        typer.echo("  OK: parent traversal")
+    except SSHError as e:
+        typer.echo(f"  Warning: parent traversal fix failed: {e}", err=True)
+
+    # 6. Reconcile agent group membership
+    # Get agents that SHOULD be in the group (have any grant)
+    granted_agents = set()
+    all_agents = db.list_agents(vm_name=vm.name)
+    for agent in all_agents:
+        if db.has_any_grant(agent.name, name):
+            granted_agents.add(agent.linux_user)
+
+    # Get agents that ARE in the group (only agt-- prefixed users)
+    try:
+        group_info = run_as_root(target, f"getent group {ws_group}", check=False)
+        current_members: set[str] = set()
+        if group_info.ok and ":" in group_info.stdout:
+            members_str = group_info.stdout.strip().split(":")[-1]
+            if members_str:
+                current_members = {
+                    m for m in members_str.split(",") if m.startswith(AGENT_PREFIX)
+                }
+
+        # Add missing agents
+        to_add = granted_agents - current_members
+        for user in sorted(to_add):
+            run_as_root(target, f"usermod -aG {ws_group} {user}")
+            typer.echo(f"  Fixed: added {user} to {ws_group}")
+            fixes += 1
+
+        # Remove agents that shouldn't be there
+        to_remove = current_members - granted_agents
+        for user in sorted(to_remove):
+            run_as_root(target, f"gpasswd -d {user} {ws_group}", check=False)
+            typer.echo(f"  Fixed: removed {user} from {ws_group}")
+            fixes += 1
+
+        if not to_add and not to_remove:
+            typer.echo(f"  OK: agent group membership ({len(current_members)} agent(s))")
+    except SSHError as e:
+        typer.echo(f"  Warning: agent membership check failed: {e}", err=True)
+
+    if fixes > 0:
+        typer.echo(f"\nRepaired {fixes} issue(s)")
+    else:
+        typer.echo("\nNo issues found")
+
+
 def delete_workspace(
     db: Database,
     config: Config,

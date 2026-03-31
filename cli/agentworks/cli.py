@@ -531,6 +531,17 @@ def workspace_list(
     list_workspaces(_get_db(), vm_name=vm, ws_type=ws_type)
 
 
+@workspace_app.command("repair")
+def workspace_repair(
+    name: Annotated[str, typer.Argument(help="Workspace name")],
+) -> None:
+    """Repair workspace infrastructure: group, permissions, ACLs, agent access."""
+    from agentworks.config import load_config
+    from agentworks.workspaces.manager import repair_workspace
+
+    repair_workspace(_get_db(), load_config(), name)
+
+
 @workspace_app.command("delete")
 def workspace_delete(
     name: Annotated[str, typer.Argument(help="Workspace name")],
