@@ -98,9 +98,7 @@ def _parse_git_source(url_str: str, default_filename: str) -> SourceRef:
 
     # Validate
     if not (url_str.startswith("https://") or url_str.startswith("git@")):
-        raise SourceRefError(
-            f"git source URL must start with https:// or git@, got: {url_str}"
-        )
+        raise SourceRefError(f"git source URL must start with https:// or git@, got: {url_str}")
 
     if ".." in subpath:
         raise SourceRefError(f"git source subpath must not contain '..': {subpath}")
@@ -272,7 +270,8 @@ def _fetch_git_dir(
     is_git = target.run(f"test -d {shlex.quote(dest)}/.git", check=False)
     if is_git.ok:
         remote = target.run(
-            f"git -C {shlex.quote(dest)} remote get-url origin", check=False,
+            f"git -C {shlex.quote(dest)} remote get-url origin",
+            check=False,
         )
         if remote.ok and remote.stdout.strip() == source.path:
             if logger:
@@ -283,10 +282,7 @@ def _fetch_git_dir(
                 raise SourceRefError(f"git pull failed in {dest}: {e}") from e
             return
         # Different repo at the destination
-        raise SourceRefError(
-            f"{dest} exists but is a clone of "
-            f"{remote.stdout.strip()}, not {source.path}"
-        )
+        raise SourceRefError(f"{dest} exists but is a clone of {remote.stdout.strip()}, not {source.path}")
 
     # Check if destination exists but is not a git repo
     if target.run(f"test -d {shlex.quote(dest)}", check=False).ok:

@@ -13,14 +13,14 @@ if TYPE_CHECKING:
     from agentworks.catalog import UserInstallCommandEntry
     from agentworks.config import Config
     from agentworks.db import Database, VMRow, WorkspaceRow
-    from agentworks.ssh import SSHLogger, SSHResult
+    from agentworks.ssh import SSHLogger, SSHResult, SSHTarget
 
 AGENT_PREFIX = "agt--"
 WS_GROUP_PREFIX = "ws--"
 
 
 def _run_as_agent(
-    target: object,
+    target: SSHTarget,
     linux_user: str,
     command: str,
     *,
@@ -49,7 +49,7 @@ def _run_as_agent(
 
 
 def _write_agent_file(
-    target: object,
+    target: SSHTarget,
     linux_user: str,
     dest: str,
     content: str,
@@ -125,8 +125,11 @@ def create_agent(
     ssh_logger.close()
 
     agent = db.insert_agent(
-        name, vm_name, linux_user,
-        template=agent_tmpl.name, grant_all=grant_all_workspaces,
+        name,
+        vm_name,
+        linux_user,
+        template=agent_tmpl.name,
+        grant_all=grant_all_workspaces,
     )
 
     # If grant_all, add to all existing workspace groups
@@ -380,8 +383,8 @@ def grant_workspaces(
         return
 
     for ws_name in workspace_names:
-        ws = db.get_workspace(ws_name)
-        if ws is None:
+        found_ws = db.get_workspace(ws_name)
+        if found_ws is None:
             typer.echo(f"Warning: workspace '{ws_name}' not found, skipping", err=True)
             continue
         _add_to_workspace_group(vm, config, agent.linux_user, ws_name, logger=None)
@@ -419,8 +422,7 @@ def deny_workspaces(
         typer.echo(f"All explicit grants removed for agent '{agent_name}'")
         if remaining_implicit:
             typer.echo(
-                f"  Note: agent still has implicit access via tasks to: "
-                f"{', '.join(remaining_implicit)}",
+                f"  Note: agent still has implicit access via tasks to: {', '.join(remaining_implicit)}",
                 err=True,
             )
         return
@@ -601,9 +603,11 @@ def _create_agent_on_vm(
 
             typer.echo(f"  Running agent dotfiles install: {agent_cfg.dotfiles_install_cmd}")
             _run_as_agent(
-                target, linux_user,
+                target,
+                linux_user,
                 f"cd {dest} && {agent_cfg.dotfiles_install_cmd}",
-                timeout=120, logger=lg,
+                timeout=120,
+                logger=lg,
             )
         except (SourceRefError, Exception) as e:
             typer.echo(f"  Warning: agent dotfiles failed: {e}", err=True)
@@ -707,9 +711,9 @@ def _run_agent_install_commands(
                 rc_files.append(f"{home}/.zprofile")
             for rc in rc_files:
                 _run_as_agent(
-                    target, linux_user,
-                    f"grep -q {AGENTWORKS_PROFILE} {rc} 2>/dev/null"
-                    f" || printf '%s\\n' '{source_line}' >> {rc}",
+                    target,
+                    linux_user,
+                    f"grep -q {AGENTWORKS_PROFILE} {rc} 2>/dev/null || printf '%s\\n' '{source_line}' >> {rc}",
                 )
         except SSHError as e:
             typer.echo(f"  Warning: agent PATH configuration failed: {e}", err=True)
@@ -739,15 +743,16 @@ def _run_agent_mise_setup(
     try:
         profile_path = f"{home}/{AGENTWORKS_PROFILE}"
         _run_as_agent(
-            target, linux_user,
+            target,
+            linux_user,
             f"printf '%s' 'export PATH=\"{shims_path}:$PATH\"\n' >> {profile_path}",
         )
         source_line = f". {profile_path}"
         for rc in [f"{home}/.profile", f"{home}/.zprofile"]:
             _run_as_agent(
-                target, linux_user,
-                f"grep -q {AGENTWORKS_PROFILE} {rc} 2>/dev/null"
-                f" || printf '%s\\n' '{source_line}' >> {rc}",
+                target,
+                linux_user,
+                f"grep -q {AGENTWORKS_PROFILE} {rc} 2>/dev/null || printf '%s\\n' '{source_line}' >> {rc}",
             )
     except SSHError as e:
         typer.echo(f"  Warning: agent profile configuration failed: {e}", err=True)
@@ -761,9 +766,9 @@ def _run_agent_mise_setup(
             source_line = f". {rc_path}"
             for rc in [f"{home}/.bashrc", f"{home}/.zshrc"]:
                 _run_as_agent(
-                    target, linux_user,
-                    f"grep -q {AGENTWORKS_RC} {rc} 2>/dev/null"
-                    f" || printf '%s\\n' '{source_line}' >> {rc}",
+                    target,
+                    linux_user,
+                    f"grep -q {AGENTWORKS_RC} {rc} 2>/dev/null || printf '%s\\n' '{source_line}' >> {rc}",
                 )
         except SSHError as e:
             typer.echo(f"  Warning: agent rc configuration failed: {e}", err=True)

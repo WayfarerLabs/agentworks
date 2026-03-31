@@ -149,12 +149,7 @@ class AzureProvisioner(VMProvisioner):
             cloud_init = generate_cloud_init(bootstrap)
         else:
             # No Tailscale key -- minimal cloud-init, bootstrap deferred to Phase A
-            cloud_init = (
-                "#cloud-config\n"
-                "package_update: true\n"
-                "packages:\n"
-                "  - openssh-server\n"
-            )
+            cloud_init = "#cloud-config\npackage_update: true\npackages:\n  - openssh-server\n"
         cloud_init_b64 = base64.b64encode(cloud_init.encode()).decode()
 
         compute = _compute_client(az)

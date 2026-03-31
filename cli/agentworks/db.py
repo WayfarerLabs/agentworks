@@ -576,8 +576,7 @@ class Database:
 
     def count_tasks_on_vm(self, vm_name: str) -> int:
         row = self._conn.execute(
-            "SELECT COUNT(*) FROM tasks WHERE workspace_name IN "
-            "(SELECT name FROM workspaces WHERE vm_name = ?)",
+            "SELECT COUNT(*) FROM tasks WHERE workspace_name IN (SELECT name FROM workspaces WHERE vm_name = ?)",
             (vm_name,),
         ).fetchone()
         return int(row[0])
@@ -585,12 +584,15 @@ class Database:
     # -- Agents ------------------------------------------------------------
 
     def insert_agent(
-        self, name: str, vm_name: str, linux_user: str,
-        template: str | None = None, grant_all: bool = False,
+        self,
+        name: str,
+        vm_name: str,
+        linux_user: str,
+        template: str | None = None,
+        grant_all: bool = False,
     ) -> AgentRow:
         self._conn.execute(
-            "INSERT INTO agents (name, vm_name, linux_user, template, grant_all) "
-            "VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO agents (name, vm_name, linux_user, template, grant_all) VALUES (?, ?, ?, ?, ?)",
             (name, vm_name, linux_user, template, int(grant_all)),
         )
         self._conn.commit()
@@ -600,7 +602,8 @@ class Database:
 
     def get_agent(self, name: str) -> AgentRow | None:
         row = self._conn.execute(
-            "SELECT * FROM agents WHERE name = ?", (name,),
+            "SELECT * FROM agents WHERE name = ?",
+            (name,),
         ).fetchone()
         return _to_agent(row) if row else None
 
@@ -632,8 +635,11 @@ class Database:
     # -- Agent workspace grants ------------------------------------------------
 
     def insert_agent_grant(
-        self, agent_name: str, workspace_name: str,
-        grant_type: str, task_name: str | None = None,
+        self,
+        agent_name: str,
+        workspace_name: str,
+        grant_type: str,
+        task_name: str | None = None,
     ) -> None:
         self._conn.execute(
             "INSERT OR IGNORE INTO agent_workspace_grants "
@@ -644,8 +650,11 @@ class Database:
         self._conn.commit()
 
     def delete_agent_grant(
-        self, agent_name: str, workspace_name: str,
-        grant_type: str, task_name: str | None = None,
+        self,
+        agent_name: str,
+        workspace_name: str,
+        grant_type: str,
+        task_name: str | None = None,
     ) -> None:
         if task_name is not None:
             self._conn.execute(
@@ -672,8 +681,7 @@ class Database:
     def has_any_grant(self, agent_name: str, workspace_name: str) -> bool:
         """Check if an agent has any grant (explicit or implicit) for a workspace."""
         row = self._conn.execute(
-            "SELECT COUNT(*) FROM agent_workspace_grants "
-            "WHERE agent_name = ? AND workspace_name = ?",
+            "SELECT COUNT(*) FROM agent_workspace_grants WHERE agent_name = ? AND workspace_name = ?",
             (agent_name, workspace_name),
         ).fetchone()
         return int(row[0]) > 0
@@ -688,8 +696,7 @@ class Database:
     def list_granted_workspaces(self, agent_name: str) -> list[str]:
         """List distinct workspace names the agent has access to."""
         rows = self._conn.execute(
-            "SELECT DISTINCT workspace_name FROM agent_workspace_grants WHERE agent_name = ? "
-            "ORDER BY workspace_name",
+            "SELECT DISTINCT workspace_name FROM agent_workspace_grants WHERE agent_name = ? ORDER BY workspace_name",
             (agent_name,),
         ).fetchall()
         return [row[0] for row in rows]
@@ -739,8 +746,7 @@ class Database:
         linux_user: str,
     ) -> TaskRow:
         self._conn.execute(
-            "INSERT INTO tasks (name, workspace_name, template, mode, linux_user) "
-            "VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO tasks (name, workspace_name, template, mode, linux_user) VALUES (?, ?, ?, ?, ?)",
             (name, workspace_name, template, mode.value, linux_user),
         )
         self._conn.commit()

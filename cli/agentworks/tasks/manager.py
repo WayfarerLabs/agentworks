@@ -145,7 +145,7 @@ def _build_task_command(
         "workspace_name": workspace_name,
     }
 
-    raw_command = (template.restart_command if restart and template.restart_command else template.command)
+    raw_command = template.restart_command if restart and template.restart_command else template.command
     command = _substitute_template_vars(raw_command, variables)
 
     parts = []
@@ -320,8 +320,7 @@ def restart_task(
     if session_exists(workspace_name, name, run_command=run_command):
         if not force:
             typer.echo(
-                f"Error: task '{name}' is still running. "
-                "Stop it first, or use --force.",
+                f"Error: task '{name}' is still running. Stop it first, or use --force.",
                 err=True,
             )
             raise typer.Exit(1)
@@ -332,7 +331,10 @@ def restart_task(
 
     # Use restart_command if available, otherwise fall back to command
     command = _build_task_command(
-        template, task_name=name, workspace_name=workspace_name, restart=True,
+        template,
+        task_name=name,
+        workspace_name=workspace_name,
+        restart=True,
     )
     is_admin = task.mode == TaskMode.ADMIN.value
 
@@ -459,15 +461,13 @@ def list_tasks(
     mode_w = max(len("MODE"), max(len(r[4]) for r in rows))
 
     header = (
-        f"{'NAME':<{name_w}}  {'WORKSPACE':<{ws_w}}  {'VM':<{vm_w}}  "
-        f"{'TEMPLATE':<{tpl_w}}  {'MODE':<{mode_w}}  STATUS"
+        f"{'NAME':<{name_w}}  {'WORKSPACE':<{ws_w}}  {'VM':<{vm_w}}  {'TEMPLATE':<{tpl_w}}  {'MODE':<{mode_w}}  STATUS"
     )
     typer.echo(header)
     typer.echo("-" * len(header))
     for task_name, ws_name, vm_col, tpl, mode, status in rows:
         typer.echo(
-            f"{task_name:<{name_w}}  {ws_name:<{ws_w}}  {vm_col:<{vm_w}}  "
-            f"{tpl:<{tpl_w}}  {mode:<{mode_w}}  {status}"
+            f"{task_name:<{name_w}}  {ws_name:<{ws_w}}  {vm_col:<{vm_w}}  {tpl:<{tpl_w}}  {mode:<{mode_w}}  {status}"
         )
 
 

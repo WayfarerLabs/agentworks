@@ -10,7 +10,12 @@ import sys
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Protocol
+from collections.abc import Mapping
+from typing import TYPE_CHECKING, Protocol
+
+if TYPE_CHECKING:
+    from agentworks.agents.templates import ResolvedAgentTemplate
+    from agentworks.vms.templates import ResolvedVMTemplate
 
 CONFIG_DIR = Path.home() / ".config" / "agentworks"
 CONFIG_PATH = CONFIG_DIR / "config.toml"
@@ -210,10 +215,10 @@ class Config:
     paths: PathsConfig
     defaults: DefaultsConfig
     vm_templates: dict[str, VMTemplate]
-    vm: object  # ResolvedVMTemplate (resolved from default template at load time)
+    vm: ResolvedVMTemplate
     admin: AdminConfig
     agent_templates: dict[str, AgentTemplate]
-    agent: object  # ResolvedAgentTemplate (resolved from default template at load time)
+    agent: ResolvedAgentTemplate
     task: TaskConfig
     task_templates: dict[str, TaskTemplate]
     workspace_templates: dict[str, WorkspaceTemplate]
@@ -379,8 +384,7 @@ def _load_vm_templates(data: dict[str, object]) -> dict[str, VMTemplate]:
 
     if "vm" in data and isinstance(data["vm"], dict) and "config" in data["vm"]:
         raise ConfigError(
-            "[vm.config] has been replaced by [vm_templates.default]. "
-            "See docs/guides/config-migration.md for details."
+            "[vm.config] has been replaced by [vm_templates.default]. See docs/guides/config-migration.md for details."
         )
 
     templates: dict[str, VMTemplate] = {}
@@ -494,28 +498,16 @@ def _load_agent_templates(data: dict[str, object]) -> dict[str, AgentTemplate]:
             inherits=list(tdata.get("inherits", [])),
             shell=str(tdata["shell"]) if "shell" in tdata else None,
             git_credentials=list(tdata["git_credentials"]) if "git_credentials" in tdata else None,
-            user_install_commands=(
-                list(tdata["user_install_commands"]) if "user_install_commands" in tdata else None
-            ),
+            user_install_commands=(list(tdata["user_install_commands"]) if "user_install_commands" in tdata else None),
             dotfiles_source=str(tdata["dotfiles_source"]) if "dotfiles_source" in tdata else None,
-            dotfiles_destination=(
-                str(tdata["dotfiles_destination"]) if "dotfiles_destination" in tdata else None
-            ),
-            dotfiles_install_cmd=(
-                str(tdata["dotfiles_install_cmd"]) if "dotfiles_install_cmd" in tdata else None
-            ),
+            dotfiles_destination=(str(tdata["dotfiles_destination"]) if "dotfiles_destination" in tdata else None),
+            dotfiles_install_cmd=(str(tdata["dotfiles_install_cmd"]) if "dotfiles_install_cmd" in tdata else None),
             mise_activate=bool(tdata["mise_activate"]) if "mise_activate" in tdata else None,
             mise_packages=list(tdata["mise_packages"]) if "mise_packages" in tdata else None,
             mise_lockfile=str(tdata["mise_lockfile"]) if "mise_lockfile" in tdata else None,
-            mise_allow_unlocked=(
-                bool(tdata["mise_allow_unlocked"]) if "mise_allow_unlocked" in tdata else None
-            ),
-            mise_install_before=(
-                str(tdata["mise_install_before"]) if "mise_install_before" in tdata else None
-            ),
-            mise_prune_on_reinit=(
-                bool(tdata["mise_prune_on_reinit"]) if "mise_prune_on_reinit" in tdata else None
-            ),
+            mise_allow_unlocked=(bool(tdata["mise_allow_unlocked"]) if "mise_allow_unlocked" in tdata else None),
+            mise_install_before=(str(tdata["mise_install_before"]) if "mise_install_before" in tdata else None),
+            mise_prune_on_reinit=(bool(tdata["mise_prune_on_reinit"]) if "mise_prune_on_reinit" in tdata else None),
         )
 
     for name, tmpl in templates.items():
@@ -588,7 +580,7 @@ class _HasInherits(Protocol):
     def inherits(self) -> list[str]: ...
 
 
-def _detect_template_cycles(templates: dict[str, _HasInherits], label: str) -> None:
+def _detect_template_cycles(templates: Mapping[str, _HasInherits], label: str) -> None:
     visited: set[str] = set()
     in_stack: set[str] = set()
 

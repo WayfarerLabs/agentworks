@@ -118,9 +118,7 @@ def test_builtin_cross_references_valid() -> None:
     catalog = load_builtin_catalog()
     for name, pkg in catalog.apt_packages.items():
         for src in pkg.apt_sources:
-            assert src in catalog.apt_sources, (
-                f"apt_packages.{name} references unknown apt source: {src}"
-            )
+            assert src in catalog.apt_sources, f"apt_packages.{name} references unknown apt source: {src}"
 
 
 def test_user_entries_override_builtin() -> None:

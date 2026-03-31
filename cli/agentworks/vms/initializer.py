@@ -100,8 +100,7 @@ def _write_agentworks_profile(
         for rc in ("$HOME/.profile", "$HOME/.zprofile"):
             _run_logged(
                 target,
-                f"grep -q {AGENTWORKS_PROFILE} {rc} 2>/dev/null"
-                f" || printf '%s\\n' '{source_line}' >> {rc}",
+                f"grep -q {AGENTWORKS_PROFILE} {rc} 2>/dev/null || printf '%s\\n' '{source_line}' >> {rc}",
                 logger,
             )
     except SSHError as e:
@@ -134,8 +133,7 @@ def _write_agentworks_rc(
         for rc in ("$HOME/.bashrc", "$HOME/.zshrc"):
             _run_logged(
                 target,
-                f"grep -q {AGENTWORKS_RC} {rc} 2>/dev/null"
-                f" || printf '%s\\n' '{source_line}' >> {rc}",
+                f"grep -q {AGENTWORKS_RC} {rc} 2>/dev/null || printf '%s\\n' '{source_line}' >> {rc}",
                 logger,
             )
     except SSHError as e:
@@ -148,10 +146,9 @@ def _write_agentworks_rc(
 
 MISE_GPG_KEY_URL = "https://mise.jdx.dev/gpg-key.pub"
 MISE_GPG_KEY_PATH = "/etc/apt/keyrings/mise-archive-keyring.asc"
-MISE_SOURCE_LINE = (
-    f"deb [signed-by={MISE_GPG_KEY_PATH}] https://mise.jdx.dev/deb stable main"
-)
+MISE_SOURCE_LINE = f"deb [signed-by={MISE_GPG_KEY_PATH}] https://mise.jdx.dev/deb stable main"
 MISE_SOURCE_FILE = "/etc/apt/sources.list.d/mise.list"
+
 
 def _install_mise_apt(
     target: ExecTarget,
@@ -191,14 +188,14 @@ def _install_mise_apt(
 
 
 MISE_ACTIVATE_LINES = (
-    '# agentworks-mise-activate\n'
+    "# agentworks-mise-activate\n"
     'if [ -n "$ZSH_VERSION" ]; then\n'
     '  eval "$(mise activate zsh)"\n'
     'elif [ -n "$BASH_VERSION" ]; then\n'
     '  eval "$(mise activate bash)"\n'
-    'else\n'
+    "else\n"
     '  echo "agentworks: mise activate skipped (unsupported shell)" >&2\n'
-    'fi'
+    "fi"
 )
 
 
@@ -496,7 +493,7 @@ def _configure_apt_sources(
         try:
             _run_logged(
                 target,
-                f"bash -c {shlex.quote(f'printf \"%s\\n\" {shlex.quote(resolved_source)} > {source_path}')}",
+                f"bash -c {shlex.quote(f'printf "%s\\n" {shlex.quote(resolved_source)} > {source_path}')}",
                 logger,
                 as_root=True,
             )
@@ -930,7 +927,13 @@ def _phase_a_bootstrap(
     else:
         # WSL2: run bootstrap script over the provisioning transport
         tailscale_ip = _run_bootstrap_script(
-            db, config, vm_name, exec_target, admin_username, is_wsl2, logger,
+            db,
+            config,
+            vm_name,
+            exec_target,
+            admin_username,
+            is_wsl2,
+            logger,
             tailscale_auth_key=tailscale_auth_key,
         )
 
@@ -1158,20 +1161,25 @@ def _phase_b_setup(
         # Ensure all parent directories are traversable by agents
         _run_logged(
             ts_target,
-            f"sh -c 'p={workspaces_dir}; while [ \"$p\" != \"/\" ]; do chmod a+x \"$p\"; p=$(dirname \"$p\"); done'",
-            logger, as_root=True,
+            f'sh -c \'p={workspaces_dir}; while [ "$p" != "/" ]; do chmod a+x "$p"; p=$(dirname "$p"); done\'',
+            logger,
+            as_root=True,
         )
         # Default ACLs on all directories (for future files)
         _run_logged(
             ts_target,
             f"setfacl -R -d -m g::rwx -d -m m::rwx {workspaces_dir}",
-            logger, as_root=True, timeout=60,
+            logger,
+            as_root=True,
+            timeout=60,
         )
         # Access ACLs on all existing files and dirs
         _run_logged(
             ts_target,
             f"setfacl -R -m g::rwx -m m::rwx {workspaces_dir}",
-            logger, as_root=True, timeout=60,
+            logger,
+            as_root=True,
+            timeout=60,
         )
     except SSHError as e:
         msg = f"workspaces directory setup failed: {e}"
@@ -1266,8 +1274,6 @@ def _phase_b_setup(
         _install_nerf_tools(ts_target, config, logger)
 
 
-
-
 def _install_nerf_tools(
     ts_target: ExecTarget,
     config: Config,
@@ -1292,14 +1298,14 @@ def _install_nerf_tools(
             # Build scripts and skills locally via Python API (no subprocess --
             # avoids Windows PATH issues with .cmd script wrappers)
             try:
-                from nerftools import BUILTIN_MANIFESTS_DIR  # type: ignore[import-not-found]
-                from nerftools.builder import build_scripts  # type: ignore[import-not-found]
-                from nerftools.manifest import (  # type: ignore[import-not-found]
+                from nerftools import BUILTIN_MANIFESTS_DIR  # type: ignore[import-untyped]
+                from nerftools.builder import build_scripts  # type: ignore[import-untyped]
+                from nerftools.manifest import (  # type: ignore[import-untyped]
                     ManifestError,
                     load_manifest,
                     merge_manifests,
                 )
-                from nerftools.skill import build_skills  # type: ignore[import-not-found]
+                from nerftools.skill import build_skills  # type: ignore[import-untyped]
             except ImportError as e:
                 raise RuntimeError(f"nerftools is not installed: {e}") from e
 
@@ -1320,7 +1326,7 @@ def _install_nerf_tools(
             build_skills(manifests, skills_out, keep_existing=keep)
 
             # Install nerfctl scripts (Claude Code permission management)
-            from nerftools import install_nerfctl  # type: ignore[import-not-found]
+            from nerftools import install_nerfctl
 
             install_nerfctl("claude", bin_out)
 

@@ -76,9 +76,7 @@ def _add_task_window(
         f"read"
     )
     result = run_command(
-        f"tmux new-window -t {CONSOLE_SESSION_NAME} "
-        f"-n {q_session} "
-        f"{shlex.quote(wrapper)}",
+        f"tmux new-window -t {CONSOLE_SESSION_NAME} -n {q_session} {shlex.quote(wrapper)}",
         check=False,
     )
     ok = getattr(result, "ok", True)
@@ -156,11 +154,15 @@ def attach_console(
     if recreate or not console_exists(run_command=run_command):
         if recreate:
             recreate_console(
-                running_tasks, run_command=run_command, admin_username=vm.admin_username,
+                running_tasks,
+                run_command=run_command,
+                admin_username=vm.admin_username,
             )
         else:
             create_console(
-                running_tasks, run_command=run_command, admin_username=vm.admin_username,
+                running_tasks,
+                run_command=run_command,
+                admin_username=vm.admin_username,
             )
 
     sys.exit(interactive(target, f"tmux attach -t {CONSOLE_SESSION_NAME}"))

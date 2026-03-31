@@ -47,12 +47,10 @@ class TestDynamicCompletionsMapping:
 
         for (command_path, param_name), completer_id in DYNAMIC_COMPLETIONS.items():
             assert completer_id in COMPLETER_FUNC_NAMES, (
-                f"Completer '{completer_id}' from ({command_path}, {param_name}) "
-                f"has no zsh function mapping"
+                f"Completer '{completer_id}' from ({command_path}, {param_name}) has no zsh function mapping"
             )
             assert completer_id in DYNAMIC_SNIPPETS, (
-                f"Completer '{completer_id}' from ({command_path}, {param_name}) "
-                f"has no PowerShell snippet mapping"
+                f"Completer '{completer_id}' from ({command_path}, {param_name}) has no PowerShell snippet mapping"
             )
 
 
@@ -102,6 +100,4 @@ def _assert_all_commands_present(spec, output: str) -> None:
     for name, sub in spec.subcommands.items():
         assert name in output, f"Command '{name}' not found in generated output"
         for sub_name in sub.subcommands:
-            assert sub_name in output, (
-                f"Subcommand '{name} {sub_name}' not found in generated output"
-            )
+            assert sub_name in output, f"Subcommand '{name} {sub_name}' not found in generated output"

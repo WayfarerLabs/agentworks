@@ -78,7 +78,6 @@ config_app = typer.Typer(
 app.add_typer(config_app)
 
 
-
 # -- Global options --------------------------------------------------------
 
 _non_interactive = False
@@ -87,7 +86,8 @@ _non_interactive = False
 @app.callback()
 def _global_options(
     non_interactive: Annotated[
-        bool, typer.Option("--non-interactive", help="Disable interactive prompts"),
+        bool,
+        typer.Option("--non-interactive", help="Disable interactive prompts"),
     ] = False,
 ) -> None:
     """Global options for all commands."""
@@ -448,7 +448,11 @@ def vm_console(
     from agentworks.tasks.console import attach_console
 
     attach_console(
-        _get_db(), load_config(), vm_name=name, recreate=recreate, allow_nesting=allow_nesting,
+        _get_db(),
+        load_config(),
+        vm_name=name,
+        recreate=recreate,
+        allow_nesting=allow_nesting,
     )
 
 
@@ -511,7 +515,11 @@ def workspace_console(
     from agentworks.workspaces.manager import console_workspace
 
     console_workspace(
-        _get_db(), load_config(), name, allow_nesting=allow_nesting, recreate=recreate,
+        _get_db(),
+        load_config(),
+        name,
+        allow_nesting=allow_nesting,
+        recreate=recreate,
     )
 
 
@@ -590,7 +598,8 @@ def agent_create(
     vm: Annotated[str | None, typer.Option("--vm", help="Target VM")] = None,
     template: Annotated[str | None, typer.Option("--template", help="Agent template")] = None,
     grant_all_workspaces: Annotated[
-        bool, typer.Option("--grant-all-workspaces", help="Grant access to all workspaces"),
+        bool,
+        typer.Option("--grant-all-workspaces", help="Grant access to all workspaces"),
     ] = False,
 ) -> None:
     """Create an agent (isolated Linux user) on a VM."""
@@ -604,8 +613,12 @@ def agent_create(
     resolved_name = _prompt_name("Agent", name)
 
     create_agent(
-        db, load_config(), name=resolved_name, vm_name=resolved_vm,
-        template=template, grant_all_workspaces=grant_all_workspaces,
+        db,
+        load_config(),
+        name=resolved_name,
+        vm_name=resolved_vm,
+        template=template,
+        grant_all_workspaces=grant_all_workspaces,
     )
 
 
@@ -736,8 +749,7 @@ def task_create(
         raise typer.Exit(1)
     if not new_workspace and (workspace_name or workspace_template or vm):
         typer.echo(
-            "Error: --workspace-name, --workspace-template, and --vm "
-            "require --new-workspace",
+            "Error: --workspace-name, --workspace-template, and --vm require --new-workspace",
             err=True,
         )
         raise typer.Exit(1)
@@ -755,7 +767,8 @@ def task_create(
 
         # Create the workspace
         create_workspace(
-            db, config,
+            db,
+            config,
             name=resolved_ws_name,
             vm_name=resolved_vm,
             template_name=workspace_template,
@@ -1066,4 +1079,3 @@ def config_sync_ssh_config() -> None:
     from agentworks.ssh_config import sync_ssh_config
 
     sync_ssh_config(load_config(), _get_db())
-

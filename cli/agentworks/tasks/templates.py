@@ -42,7 +42,8 @@ def _merge_map(target: dict[str, str], source: dict[str, str]) -> dict[str, str]
 
 
 def resolve_from_dict(
-    templates: dict[str, TaskTemplate], template_name: str | None = None,
+    templates: dict[str, TaskTemplate],
+    template_name: str | None = None,
 ) -> ResolvedTaskTemplate:
     """Resolve a task template from a templates dict (no Config required)."""
     if template_name is not None and template_name != "default":

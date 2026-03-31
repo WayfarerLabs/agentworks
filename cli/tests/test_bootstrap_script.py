@@ -106,10 +106,7 @@ def test_parse_bootstrap_output_success() -> None:
 
 def test_parse_bootstrap_output_failure() -> None:
     """Parse output from a failed bootstrap."""
-    output = (
-        "##STEP## Tailscale install\n"
-        "##ERROR## curl failed\n"
-    )
+    output = "##STEP## Tailscale install\n##ERROR## curl failed\n"
 
     result = parse_bootstrap_output(output, 1)
 

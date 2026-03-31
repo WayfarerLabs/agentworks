@@ -15,6 +15,9 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from agentworks.config import Config
+    from agentworks.db import VMRow
+
 
 @dataclass(frozen=True)
 class SSHTarget:
@@ -34,19 +37,19 @@ class SSHTarget:
     force_tty: bool = False
 
 
-def ssh_target_for_vm(vm: object, config: object) -> SSHTarget:
+def ssh_target_for_vm(vm: VMRow, config: Config) -> SSHTarget:
     """Build an SSHTarget from a VMRow and Config.
 
-    Accepts object types to avoid circular imports with db/config modules.
     On Windows, forces TTY allocation to prevent zsh from hanging on
     non-interactive piped SSH commands.
     """
     import sys
 
+    assert vm.tailscale_host is not None, f"VM {vm.name} has no Tailscale host"
     return SSHTarget(
-        host=vm.tailscale_host,  # type: ignore[attr-defined]
-        user=vm.admin_username,  # type: ignore[attr-defined]
-        identity_file=config.user.ssh_private_key,  # type: ignore[attr-defined]
+        host=vm.tailscale_host,
+        user=vm.admin_username,
+        identity_file=config.user.ssh_private_key,
         force_tty=sys.platform == "win32",
     )
 
@@ -255,8 +258,7 @@ def run(
                 logger.log_command(command, ssh_result)
             if check and not ssh_result.ok:
                 raise SSHError(
-                    f"SSH command failed (exit {result.returncode}): {command}\n"
-                    f"stderr: {result.stderr.strip()}"
+                    f"SSH command failed (exit {result.returncode}): {command}\nstderr: {result.stderr.strip()}"
                 )
             return ssh_result
         except subprocess.TimeoutExpired as err:
@@ -359,8 +361,6 @@ def write_file(
         Path(tmp_path).unlink(missing_ok=True)
     if mode:
         run(target, f"chmod {mode} {remote_path}", logger=logger)
-
-
 
 
 @dataclass

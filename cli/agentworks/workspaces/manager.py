@@ -265,10 +265,7 @@ def list_workspaces(
             return "default"
         return t
 
-    rows = [
-        (ws.name, ws.type, ws.vm_name or "-", _tpl_name(ws.template), ws.created_at)
-        for ws in workspaces
-    ]
+    rows = [(ws.name, ws.type, ws.vm_name or "-", _tpl_name(ws.template), ws.created_at) for ws in workspaces]
 
     name_w = max(len("NAME"), max(len(r[0]) for r in rows))
     type_w = max(len("TYPE"), max(len(r[1]) for r in rows))
@@ -338,7 +335,9 @@ def repair_workspace(
     # 2. Ensure admin is in the group
     try:
         in_group = run_as_root(
-            target, f"id -nG {vm.admin_username}", check=False,
+            target,
+            f"id -nG {vm.admin_username}",
+            check=False,
         )
         if in_group.ok and ws_group not in in_group.stdout.split():
             run_as_root(target, f"usermod -aG {ws_group} {vm.admin_username}")
@@ -377,8 +376,7 @@ def repair_workspace(
     try:
         run_as_root(
             target,
-            f"sh -c 'p={ws.workspace_path}; while [ \"$p\" != \"/\" ]; do chmod a+x \"$p\"; "
-            f"p=$(dirname \"$p\"); done'",
+            f'sh -c \'p={ws.workspace_path}; while [ "$p" != "/" ]; do chmod a+x "$p"; p=$(dirname "$p"); done\'',
         )
         typer.echo("  OK: parent traversal")
     except SSHError as e:
@@ -399,9 +397,7 @@ def repair_workspace(
         if group_info.ok and ":" in group_info.stdout:
             members_str = group_info.stdout.strip().split(":")[-1]
             if members_str:
-                current_members = {
-                    m for m in members_str.split(",") if m.startswith(AGENT_PREFIX)
-                }
+                current_members = {m for m in members_str.split(",") if m.startswith(AGENT_PREFIX)}
 
         # Add missing agents
         to_add = granted_agents - current_members
@@ -446,8 +442,7 @@ def delete_workspace(
     task_count = len(db.list_tasks(workspace_name=name))
     if task_count > 0 and not force:
         typer.echo(
-            f"Error: workspace '{name}' has {task_count} task(s). "
-            "Delete them first, or use --force.",
+            f"Error: workspace '{name}' has {task_count} task(s). Delete them first, or use --force.",
             err=True,
         )
         raise typer.Exit(1)
@@ -599,7 +594,10 @@ def copy_workspace(
                 raise typer.Exit(1)
 
             db.insert_workspace(
-                dest_name, ws_type="local", workspace_path=workspace_path, template="copied",
+                dest_name,
+                ws_type="local",
+                workspace_path=workspace_path,
+                template="copied",
             )
         else:
             from agentworks.ssh import SSHLogger, copy_to, run, run_as_root
@@ -624,8 +622,11 @@ def copy_workspace(
             run(dest_target, f"rm -f {remote_tmp}", check=False, timeout=10, logger=lg)
 
             db.insert_workspace(
-                dest_name, ws_type="vm", vm_name=dest_vm.name,
-                workspace_path=workspace_path, template="copied",
+                dest_name,
+                ws_type="vm",
+                vm_name=dest_vm.name,
+                workspace_path=workspace_path,
+                template="copied",
             )
 
             # Generate tmuxinator config and VS Code workspace

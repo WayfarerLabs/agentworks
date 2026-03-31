@@ -117,10 +117,7 @@ def create_task_session(
         else:
             shell_cmd = f"exec sudo su --login {q_user}"
 
-    cmd = (
-        f"tmux new-session -d -s {session} -c {q_path} "
-        f"-f {RESTRICTED_CONFIG_PATH}"
-    )
+    cmd = f"tmux new-session -d -s {session} -c {q_path} -f {RESTRICTED_CONFIG_PATH}"
     if shell_cmd:
         cmd += f" {shlex.quote(shell_cmd)}"
 

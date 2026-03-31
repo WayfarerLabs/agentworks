@@ -20,7 +20,8 @@ def config_dir(tmp_path: Path) -> Path:
     pub.write_text("ssh-ed25519 AAAA...")
     priv.write_text("-----BEGIN OPENSSH PRIVATE KEY-----")
 
-    config_file.write_text(dedent(f"""\
+    config_file.write_text(
+        dedent(f"""\
         [user]
         ssh_public_key = "{pub}"
         ssh_private_key = "{priv}"
@@ -54,7 +55,8 @@ def config_dir(tmp_path: Path) -> Path:
         org = "my-org"
 
         [defaults]
-    """))
+    """)
+    )
     return config_file
 
 
@@ -85,7 +87,8 @@ def test_cycle_detection(tmp_path: Path) -> None:
     priv.write_text("key")
 
     config_file = tmp_path / "config.toml"
-    config_file.write_text(dedent(f"""\
+    config_file.write_text(
+        dedent(f"""\
         [user]
         ssh_public_key = "{pub}"
         ssh_private_key = "{priv}"
@@ -95,7 +98,8 @@ def test_cycle_detection(tmp_path: Path) -> None:
 
         [workspace_templates.b]
         inherits = ["a"]
-    """))
+    """)
+    )
     with pytest.raises(ConfigError, match="cycle"):
         load_config(config_file)
 
@@ -107,14 +111,16 @@ def test_invalid_git_credential_type(tmp_path: Path) -> None:
     priv.write_text("key")
 
     config_file = tmp_path / "config.toml"
-    config_file.write_text(dedent(f"""\
+    config_file.write_text(
+        dedent(f"""\
         [user]
         ssh_public_key = "{pub}"
         ssh_private_key = "{priv}"
 
         [git_credentials.bad]
         type = "gitlab"
-    """))
+    """)
+    )
     with pytest.raises(ConfigError, match="git_credentials.bad.type"):
         load_config(config_file)
 
@@ -128,13 +134,15 @@ def test_unexpected_top_level_keys_warns(tmp_path: Path) -> None:
 
     config_file = tmp_path / "config.toml"
     # 'oops' appears before any [section] header
-    config_file.write_text(dedent(f"""\
+    config_file.write_text(
+        dedent(f"""\
         oops = true
 
         [user]
         ssh_public_key = "{pub}"
         ssh_private_key = "{priv}"
-    """))
+    """)
+    )
     with warnings.catch_warnings(record=True) as w:
         warnings.simplefilter("always")
         load_config(config_file)
@@ -150,14 +158,16 @@ def test_orphaned_key_under_commented_section(tmp_path: Path) -> None:
     priv.write_text("key")
 
     config_file = tmp_path / "config.toml"
-    config_file.write_text(dedent(f"""\
+    config_file.write_text(
+        dedent(f"""\
         [user]
         ssh_public_key = "{pub}"
         ssh_private_key = "{priv}"
 
         # [defaults]          <-- commented out!
         platform = "lima"     # orphaned in [user], not [defaults]
-    """))
+    """)
+    )
     with warnings.catch_warnings(record=True) as w:
         warnings.simplefilter("always")
         cfg = load_config(config_file)
@@ -179,12 +189,14 @@ def test_extra_ssh_public_keys(tmp_path: Path) -> None:
     extra2.write_text("ssh-rsa BBBB-extra2")
 
     config_file = tmp_path / "config.toml"
-    config_file.write_text(dedent(f"""\
+    config_file.write_text(
+        dedent(f"""\
         [user]
         ssh_public_key = "{pub}"
         ssh_private_key = "{priv}"
         extra_ssh_public_keys = ["{extra1}", "{extra2}"]
-    """))
+    """)
+    )
     cfg = load_config(config_file)
     assert len(cfg.user.extra_ssh_public_keys) == 2
     assert cfg.user.extra_ssh_public_keys[0] == extra1
@@ -198,12 +210,14 @@ def test_extra_ssh_public_keys_missing_file(tmp_path: Path) -> None:
     priv.write_text("key")
 
     config_file = tmp_path / "config.toml"
-    config_file.write_text(dedent(f"""\
+    config_file.write_text(
+        dedent(f"""\
         [user]
         ssh_public_key = "{pub}"
         ssh_private_key = "{priv}"
         extra_ssh_public_keys = ["/nonexistent/key.pub"]
-    """))
+    """)
+    )
     with pytest.raises(ConfigError, match="extra_ssh_public_keys.*does not exist"):
         load_config(config_file)
 
