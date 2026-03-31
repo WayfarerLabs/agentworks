@@ -53,6 +53,8 @@ def create_vm_workspace(
     run_as_root(target, f"mkdir -p {workspace_path}", logger=lg)
     run_as_root(target, f"chown {vm.admin_username}:{ws_group} {workspace_path}", logger=lg)
     run_as_root(target, f"chmod 2770 {workspace_path}", logger=lg)
+    # Set default ACLs so files created inside are group-writable
+    run_as_root(target, f"setfacl -d -m g::rwx -m m::rwx {workspace_path}", logger=lg)
 
     # Git clone if repo is set
     if template.repo:

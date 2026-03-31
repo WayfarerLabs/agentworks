@@ -538,9 +538,9 @@ def _rehome_vm(
     ws_group = f"{WS_GROUP_PREFIX}{ws_name}"
 
     try:
-        # Create parent directory
-        parent = new_path.rsplit("/", 1)[0]
-        run_as_root(target, f"mkdir -p {parent}", logger=ssh_logger)
+        # Create target directory as root and chown to admin so rsync can write
+        run_as_root(target, f"mkdir -p {new_path}", logger=ssh_logger)
+        run_as_root(target, f"chown {vm.admin_username} {new_path}", logger=ssh_logger)
 
         # Copy with rsync (fall back to cp -a)
         typer.echo("Copying workspace...")
@@ -548,7 +548,7 @@ def _rehome_vm(
         if has_rsync.ok:
             ssh_run(target, f"rsync -a {old_path}/ {new_path}/", timeout=600, logger=ssh_logger)
         else:
-            run_as_root(target, f"cp -a {old_path} {new_path}", timeout=600, logger=ssh_logger)
+            run_as_root(target, f"cp -a {old_path}/. {new_path}/", timeout=600, logger=ssh_logger)
 
         # Verify copy succeeded
         verify = ssh_run(target, f"test -d {new_path}", check=False, timeout=10, logger=ssh_logger)
