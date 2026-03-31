@@ -88,6 +88,7 @@ class UserConfig:
 @dataclass(frozen=True)
 class PathsConfig:
     local_workspaces: Path = field(default_factory=lambda: Path.home() / "workspaces")
+    vm_workspaces: str = "/opt/agentworks/workspaces"
     code_workspaces: Path = field(default_factory=lambda: Path.home() / "agentworks-workspaces")
 
 
@@ -319,8 +320,9 @@ def _load_paths(data: dict[str, object]) -> PathsConfig:
         raise ConfigError("[paths] must be a table")
     defaults = PathsConfig()
     local_ws = _expand(str(raw["local_workspaces"])) if "local_workspaces" in raw else defaults.local_workspaces
+    vm_ws = str(raw["vm_workspaces"]) if "vm_workspaces" in raw else defaults.vm_workspaces
     code_ws = _expand(str(raw["code_workspaces"])) if "code_workspaces" in raw else defaults.code_workspaces
-    return PathsConfig(local_workspaces=local_ws, code_workspaces=code_ws)
+    return PathsConfig(local_workspaces=local_ws, vm_workspaces=vm_ws, code_workspaces=code_ws)
 
 
 _DEFAULTS_KEYS = {"platform", "vm_host"}

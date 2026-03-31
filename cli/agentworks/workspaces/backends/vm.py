@@ -38,7 +38,7 @@ def create_vm_workspace(
     target = ssh_target_for_vm(vm, config)
     lg = logger
 
-    workspace_path = f"/home/{vm.admin_username}/workspaces/{ws_name}"
+    workspace_path = f"{config.paths.vm_workspaces}/{ws_name}"
     ws_group = f"ws--{ws_name}"
 
     # Remove stale directory from a previous interrupted attempt
@@ -50,7 +50,7 @@ def create_vm_workspace(
     # Create workspace group (idempotent), add admin, and set up directory with setgid
     run_as_root(target, f"sh -c 'getent group {ws_group} >/dev/null 2>&1 || /usr/sbin/groupadd {ws_group}'", logger=lg)
     run_as_root(target, f"usermod -aG {ws_group} {vm.admin_username}", logger=lg)
-    ssh_run(target, f"mkdir -p {workspace_path}", timeout=10, logger=lg)
+    run_as_root(target, f"mkdir -p {workspace_path}", logger=lg)
     run_as_root(target, f"chown {vm.admin_username}:{ws_group} {workspace_path}", logger=lg)
     run_as_root(target, f"chmod 2770 {workspace_path}", logger=lg)
 

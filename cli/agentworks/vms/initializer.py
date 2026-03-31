@@ -1145,10 +1145,22 @@ def _phase_b_setup(
     # Non-fatal: workspaces directory with ACLs for group-writable files.
     # Default ACLs ensure new files/dirs inherit group rwx regardless of umask.
     # Access ACLs fix existing files. Applied recursively to cover all workspaces.
-    workspaces_dir = f"{home}/workspaces"
+    workspaces_dir = config.paths.vm_workspaces
+    if workspaces_dir.startswith("/home/"):
+        typer.echo(
+            f"  Warning: vm_workspaces is under /home ({workspaces_dir}). "
+            "This may require the home directory to be world-traversable.",
+            err=True,
+        )
     try:
         _run_logged(ts_target, "apt-get install -y -qq acl", logger, as_root=True, timeout=60)
-        _run_logged(ts_target, f"mkdir -p {workspaces_dir}", logger)
+        _run_logged(ts_target, f"mkdir -p {workspaces_dir}", logger, as_root=True)
+        # Ensure all parent directories are traversable by agents
+        _run_logged(
+            ts_target,
+            f"sh -c 'p={workspaces_dir}; while [ \"$p\" != \"/\" ]; do chmod a+x \"$p\"; p=$(dirname \"$p\"); done'",
+            logger, as_root=True,
+        )
         # Default ACLs on all directories (for future files)
         _run_logged(
             ts_target,

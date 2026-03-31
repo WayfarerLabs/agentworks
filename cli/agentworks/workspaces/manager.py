@@ -456,7 +456,7 @@ def copy_workspace(
                 dest_name, ws_type="local", workspace_path=workspace_path, template="copied",
             )
         else:
-            from agentworks.ssh import SSHLogger, copy_to, run
+            from agentworks.ssh import SSHLogger, copy_to, run, run_as_root
 
             dest_vm = _resolve_vm(db, vm_name)
             _guard_vm_status(dest_vm)
@@ -467,10 +467,10 @@ def copy_workspace(
 
             lg = SSHLogger(dest_vm.name, "workspace-copy")
             dest_target = ssh_target_for_vm(dest_vm, config)
-            workspace_path = f"/home/{dest_vm.admin_username}/workspaces/{dest_name}"
+            workspace_path = f"{config.paths.vm_workspaces}/{dest_name}"
 
             typer.echo(f"Unpacking to workspace '{dest_name}' on VM '{dest_vm.name}'...")
-            run(dest_target, f"mkdir -p {workspace_path}", timeout=10, logger=lg)
+            run_as_root(dest_target, f"mkdir -p {workspace_path}", timeout=10, logger=lg)
 
             remote_tmp = f"/tmp/{dest_name}-copy.tgz"
             copy_to(dest_target, tmp_path, remote_tmp, timeout=300)
