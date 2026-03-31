@@ -148,6 +148,8 @@ def delete_agent(
     config: Config,
     *,
     name: str,
+    force: bool = False,
+    yes: bool = False,
 ) -> None:
     """Delete an agent from a VM."""
     agent = db.get_agent(name)
@@ -155,13 +157,46 @@ def delete_agent(
         typer.echo(f"Error: agent '{name}' not found", err=True)
         raise typer.Exit(1)
 
+    # Check for tasks using this agent
+    all_tasks = db.list_tasks()
+    agent_tasks = [t for t in all_tasks if t.agent_name == name]
+    if agent_tasks and not force:
+        typer.echo(
+            f"Error: agent '{name}' has {len(agent_tasks)} task(s). Delete them first, or use --force.",
+            err=True,
+        )
+        for t in agent_tasks:
+            typer.echo(f"  {t.workspace_name}/{t.name}  [{t.status}]", err=True)
+        raise typer.Exit(1)
+
+    if not yes:
+        msg = f"Delete agent '{name}'?"
+        if agent_tasks:
+            msg += f" ({len(agent_tasks)} task(s) will also be stopped)"
+        typer.confirm(msg, abort=True)
+
     vm = _require_vm(db, agent.vm_name)
 
-    # Remove from all workspace groups
-    granted_workspaces = db.list_granted_workspaces(name)
     from agentworks.ssh import SSHLogger
 
     ssh_logger = SSHLogger(vm.name, "agent-delete")
+
+    # Kill running task sessions for this agent
+    if agent_tasks:
+        from functools import partial
+
+        from agentworks.ssh import run, ssh_target_for_vm
+        from agentworks.tasks.tmux import kill_task_session
+
+        target = ssh_target_for_vm(vm, config)
+        run_command = partial(run, target, logger=ssh_logger)
+        for task in agent_tasks:
+            kill_task_session(task.workspace_name, task.name, run_command=run_command)
+            db.delete_task(task.workspace_name, task.name)
+        typer.echo(f"  Deleted {len(agent_tasks)} task(s)")
+
+    # Remove from all workspace groups
+    granted_workspaces = db.list_granted_workspaces(name)
     for ws_name in granted_workspaces:
         _remove_from_workspace_group(vm, config, agent.linux_user, ws_name, logger=ssh_logger)
 
@@ -305,7 +340,7 @@ def describe_agent(
 
     # Tasks (which also show implicit grants)
     all_tasks = db.list_tasks()
-    agent_tasks = [t for t in all_tasks if t.linux_user == agent.linux_user]
+    agent_tasks = [t for t in all_tasks if t.agent_name == name]
     typer.echo(f"\nTasks ({len(agent_tasks)}):")
     if agent_tasks:
         for task in agent_tasks:

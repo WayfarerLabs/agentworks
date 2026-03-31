@@ -131,10 +131,10 @@ class TaskRow:
     workspace_name: str
     template: str
     mode: str
-    linux_user: str
     status: str
     created_at: str
     updated_at: str
+    agent_name: str | None = None
 
 
 # -- Migrations ------------------------------------------------------------
@@ -307,6 +307,14 @@ MIGRATIONS: dict[int, str] = {
 
         -- Rename workspace groups: ws-<name> -> ws--<name>
         -- (actual Linux group rename must be done manually on VMs)
+    """,
+    14: """
+        ALTER TABLE tasks ADD COLUMN agent_name TEXT REFERENCES agents(name);
+        -- Backfill agent_name from linux_user for existing agent-mode tasks
+        UPDATE tasks SET agent_name = (
+            SELECT a.name FROM agents a WHERE a.linux_user = tasks.linux_user
+        ) WHERE mode = 'agent';
+        ALTER TABLE tasks DROP COLUMN linux_user;
     """,
 }
 
@@ -750,11 +758,11 @@ class Database:
         workspace_name: str,
         template: str,
         mode: TaskMode,
-        linux_user: str,
+        agent_name: str | None = None,
     ) -> TaskRow:
         self._conn.execute(
-            "INSERT INTO tasks (name, workspace_name, template, mode, linux_user) VALUES (?, ?, ?, ?, ?)",
-            (name, workspace_name, template, mode.value, linux_user),
+            "INSERT INTO tasks (name, workspace_name, template, mode, agent_name) VALUES (?, ?, ?, ?, ?)",
+            (name, workspace_name, template, mode.value, agent_name),
         )
         self._conn.commit()
         result = self.get_task(workspace_name, name)
@@ -899,10 +907,10 @@ def _to_task(row: sqlite3.Row) -> TaskRow:
         workspace_name=row["workspace_name"],
         template=row["template"],
         mode=row["mode"],
-        linux_user=row["linux_user"],
         status=row["status"],
         created_at=row["created_at"],
         updated_at=row["updated_at"],
+        agent_name=row["agent_name"],
     )
 
 

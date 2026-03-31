@@ -732,12 +732,14 @@ def agent_shell(
 @agent_app.command("delete")
 def agent_delete(
     name: Annotated[str, typer.Argument(help="Agent name")],
+    force: Annotated[bool, typer.Option("--force", help="Force delete even with tasks")] = False,
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip confirmation")] = False,
 ) -> None:
     """Delete an agent."""
     from agentworks.agents.manager import delete_agent
     from agentworks.config import load_config
 
-    delete_agent(_get_db(), load_config(), name=name)
+    delete_agent(_get_db(), load_config(), name=name, force=force, yes=yes)
 
 
 # -- Task commands ---------------------------------------------------------

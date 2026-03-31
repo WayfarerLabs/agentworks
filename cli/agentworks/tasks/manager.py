@@ -33,6 +33,20 @@ if TYPE_CHECKING:
 _STOP_GRACE_SECONDS = 5
 
 
+def _resolve_task_linux_user(db: Database, task: TaskRow, vm: VMRow) -> str:
+    """Resolve the Linux user for a task.
+
+    Agent-mode tasks look up the agent by name. Admin-mode tasks use the VM admin.
+    """
+    if task.agent_name:
+        agent = db.get_agent(task.agent_name)
+        if agent is None:
+            typer.echo(f"Error: agent '{task.agent_name}' not found (referenced by task '{task.name}')", err=True)
+            raise typer.Exit(1)
+        return agent.linux_user
+    return vm.admin_username
+
+
 def _require_workspace(db: Database, name: str) -> WorkspaceRow:
     ws = db.get_workspace(name)
     if ws is None:
@@ -206,6 +220,7 @@ def create_task(
         raise typer.Exit(1)
 
     # Resolve mode and linux user
+    resolved_agent_name: str | None = None
     if agent_name is not None:
         mode = TaskMode.AGENT
         agent = db.get_agent(agent_name)
@@ -220,6 +235,7 @@ def create_task(
             )
             raise typer.Exit(1)
         linux_user = agent.linux_user
+        resolved_agent_name = agent_name
 
         # Auto-grant implicit workspace access if needed
         if not db.has_any_grant(agent_name, workspace_name):
@@ -234,7 +250,7 @@ def create_task(
     template = _resolve_template(config, template_name)
 
     # Insert DB record first to avoid orphaned tmux sessions on crash
-    db.insert_task(name, workspace_name, template.name, mode, linux_user)
+    db.insert_task(name, workspace_name, template.name, mode, agent_name=resolved_agent_name)
 
     deploy_restricted_config(run_command, history_limit=config.task.history_limit)
     command = _build_task_command(template, task_name=name, workspace_name=workspace_name)
@@ -337,13 +353,14 @@ def restart_task(
         restart=True,
     )
     is_admin = task.mode == TaskMode.ADMIN.value
+    linux_user = _resolve_task_linux_user(db, task, vm)
 
     create_task_session(
         workspace_name,
         name,
         ws.workspace_path,
         command,
-        task.linux_user,
+        linux_user,
         run_command=run_command,
         is_admin=is_admin,
     )
@@ -376,26 +393,18 @@ def delete_task(
 
     # Check if task is an agent task before deleting (need info for grant cleanup)
     task = db.get_task(workspace_name, name)
-    agent_name_for_cleanup: str | None = None
-    if task and task.mode == "agent":
-        # Find the agent by linux_user
-        agents = db.list_agents(vm_name=vm.name)
-        for a in agents:
-            if a.linux_user == task.linux_user:
-                agent_name_for_cleanup = a.name
-                break
 
     kill_task_session(workspace_name, name, run_command=run_command)
     db.delete_task(workspace_name, name)
 
     # Clean up implicit grant for this task
-    if agent_name_for_cleanup:
-        db.delete_agent_grant(agent_name_for_cleanup, workspace_name, "implicit", task_name=name)
+    if task and task.agent_name:
+        db.delete_agent_grant(task.agent_name, workspace_name, "implicit", task_name=name)
         # If no grants remain, remove from workspace group
-        if not db.has_any_grant(agent_name_for_cleanup, workspace_name):
+        if not db.has_any_grant(task.agent_name, workspace_name):
             from agentworks.agents.manager import _remove_from_workspace_group
 
-            agent = db.get_agent(agent_name_for_cleanup)
+            agent = db.get_agent(task.agent_name)
             if agent:
                 _remove_from_workspace_group(vm, config, agent.linux_user, workspace_name)
 

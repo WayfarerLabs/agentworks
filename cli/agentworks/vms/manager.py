@@ -360,14 +360,7 @@ def describe_vm(db: Database, config: Config, name: str) -> None:
             if tasks:
                 typer.echo(f"    Tasks ({len(tasks)}):")
                 for task in tasks:
-                    if task.mode == "agent":
-                        agent_name = next(
-                            (a.name for a in agents if a.linux_user == task.linux_user),
-                            task.linux_user,
-                        )
-                        mode_label = f"agent:{agent_name}"
-                    else:
-                        mode_label = "admin"
+                    mode_label = f"agent:{task.agent_name}" if task.agent_name else "admin"
                     typer.echo(f"      {task.name}  [{task.template}]  {task.status}  {mode_label}")
             else:
                 typer.echo("    (no tasks)")
