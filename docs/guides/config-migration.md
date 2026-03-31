@@ -171,13 +171,13 @@ mise_packages = []
 ```
 
 ```
-agentworks agent create myagent --workspace myws --template restricted
+agentworks agent create myagent --vm myvm --template restricted
 ```
 
 ## Mise catalog entries removed
 
 Mise packages are no longer defined as catalog entries (`[mise_packages.*]` sections). Instead, use
-`mise_packages` in `[admin.config]` or `[agent.config]` with `name@version` strings, and provide
+`mise_packages` in `[admin.config]` or `[agent_templates.*]` with `name@version` strings, and provide
 lockfiles via `mise_lockfile` for integrity verification.
 
 **Before:**
@@ -202,3 +202,23 @@ mise_lockfile = "~/.config/agentworks/mise.lock"
 ```
 
 See [Using mise](mise.md) for how to generate and manage lockfiles.
+
+## Agents are now VM-scoped
+
+Agents are no longer scoped to a single workspace. They are now VM-scoped Linux users (`agt--<name>`)
+that access workspaces through a grant system. See [ADR-0010](../adrs/0010-vm-scoped-agents-with-workspace-grants.md)
+for the full rationale.
+
+**CLI changes:**
+
+- `agent create` takes `--vm` instead of `--workspace`
+- `agent create` accepts `--grant-all-workspaces` for agents that need access to every workspace
+- `agent workspace-grants grant/deny/list` commands manage workspace access
+- `agent shell` accepts optional `--workspace` to cd into a workspace
+- `agent delete` and `agent reinit` no longer take `--workspace`
+
+**Workspace groups:**
+
+Workspace groups changed from `ws-<name>` (single hyphen) to `ws--<name>` (double hyphen),
+consistent with the `agt--<name>` agent username convention. Use `agentworks workspace repair` to
+fix existing workspaces.

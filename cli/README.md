@@ -46,8 +46,7 @@ started, stopped, and deleted as work progresses.
 Each layer has (or will have) a templating mechanism so that patterns can be defined once and
 stamped many times. VM templates define what is installed and how the environment is configured.
 Workspace templates define which repos are cloned and how tools are configured for the project.
-Agent templates (future, dependent on nerfed commands) will define the permission model for
-different agent roles.
+Agent templates define the per-user environment for agent users (shell, dotfiles, tools, credentials).
 
 ## Getting Started
 
@@ -140,6 +139,7 @@ Manage workspaces on VMs or locally.
 | `agentworks workspace console <name>`     | Open the workspace console (tmux)    |
 | `agentworks workspace list`               | List workspaces                      |
 | `agentworks workspace copy <source>`      | Copy a workspace to a new location   |
+| `agentworks workspace repair <name>`      | Repair workspace infrastructure      |
 | `agentworks workspace delete <name>`      | Delete a workspace                   |
 
 `workspace create` accepts `--name`, `--vm`, `--local`, `--template`, and `--open-vscode`.
@@ -161,15 +161,17 @@ Manage agents (isolated Linux users) on VMs. Agents are VM-scoped and access wor
 
 | Command                                                    | Description                     |
 | ---------------------------------------------------------- | ------------------------------- |
-| `agentworks agent create [--name] [--vm]`                  | Create an agent on a VM         |
-| `agentworks agent list [--vm <vm>]`                        | List agents                     |
-| `agentworks agent reinit <name>`                           | Re-run agent setup              |
-| `agentworks agent grant-workspaces <name> <ws>[,<ws>]`     | Grant workspace access          |
-| `agentworks agent grant-workspaces <name> --all`           | Grant access to all workspaces  |
-| `agentworks agent deny-workspaces <name> <ws>[,<ws>]`      | Remove workspace access         |
-| `agentworks agent deny-workspaces <name> --all`            | Remove all explicit grants      |
-| `agentworks agent shell <name> [--workspace <ws>]`         | Shell into an agent             |
-| `agentworks agent delete <name>`                           | Delete an agent                 |
+| `agentworks agent create [--name] [--vm]`                           | Create an agent on a VM         |
+| `agentworks agent list [--vm <vm>]`                                 | List agents                     |
+| `agentworks agent describe <name>`                                  | Show agent details and grants   |
+| `agentworks agent reinit <name>`                                    | Re-run agent setup              |
+| `agentworks agent workspace-grants grant <name> <ws>[,<ws>]`       | Grant workspace access          |
+| `agentworks agent workspace-grants grant <name> --all`              | Grant access to all workspaces  |
+| `agentworks agent workspace-grants deny <name> <ws>[,<ws>]`        | Remove workspace access         |
+| `agentworks agent workspace-grants deny <name> --all`               | Remove all explicit grants      |
+| `agentworks agent workspace-grants list <name>`                     | List workspace grants           |
+| `agentworks agent shell <name> [--workspace <ws>]`                  | Shell into an agent             |
+| `agentworks agent delete <name>`                                    | Delete an agent                 |
 
 ### Tasks
 
@@ -295,18 +297,19 @@ Key sections:
 
 - `[user]` -- SSH keys (required), additional authorized keys, SSH config management, default shell
 - `[paths]` -- local workspace and `.code-workspace` file directories
-- `[defaults]` -- default platform, VM host, git credentials
-- `[dotfiles]` -- dotfiles sync to VMs (clone from repo or copy from local path)
-- `[vm.config]` -- VM resources, apt packages, system/user install commands, username
-- `[agent.config]` -- user install commands and shell for agents
+- `[defaults]` -- default platform, VM host
+- `[paths]` -- local workspace, VM workspace, and `.code-workspace` file directories
+- `[vm_templates.*]` -- VM resources, apt packages, system install commands, mise
+- `[admin.config]` -- admin user shell, dotfiles, git credentials, user install commands, mise
+- `[agent_templates.*]` -- agent user shell, dotfiles, git credentials, user install commands, mise
 - `[task.config]` -- task defaults (history limit)
 - `[task_templates.*]` -- task templates with variable substitution
+- `[workspace_templates.*]` -- workspace templates with inheritance
+- `[git_credentials.*]` -- git credential providers (GitHub, Azure DevOps)
 - `[apt_sources.*]` -- user-defined third-party apt repositories
 - `[apt_packages.*]` -- user-defined named apt package sets
 - `[system_install_commands.*]` -- user-defined system-level install commands
 - `[user_install_commands.*]` -- user-defined per-user install commands
-- `[workspace_templates.*]` -- workspace templates with inheritance
-- `[git_credentials.*]` -- git credential providers (GitHub, Azure DevOps)
 - `[azure]` -- Azure-specific settings
 
 ### Mise (Polyglot Tool Manager)
@@ -319,8 +322,8 @@ Agentworks installs [mise](https://mise.jdx.dev/) by default on all VMs for mana
 
 Agentworks ships a built-in catalog of common tools (apt sources, apt packages, system install
 commands, and user install commands). Run `agentworks installer list` to see what is available.
-Reference catalog entries by name in `vm.config` and `agent.config`. User-defined entries in your
-config override built-in entries with the same name.
+Reference catalog entries by name in `vm_templates`, `admin.config`, and `agent_templates`.
+User-defined entries in your config override built-in entries with the same name.
 
 ## VM Initialization
 

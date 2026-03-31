@@ -6,7 +6,7 @@ Date: 2026-03-30
 
 Accepted
 
-Supercedes [6. Agents are scoped to workspaces](0006-agents-are-scoped-to-workspaces.md)
+Supersedes [6. Agents are scoped to workspaces](0006-agents-are-scoped-to-workspaces.md)
 
 ## Context
 

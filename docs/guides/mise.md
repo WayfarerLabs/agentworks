@@ -9,7 +9,7 @@ etc.) with optional integrity verification via lockfiles.
 Agentworks handles three things:
 
 1. **Installing mise** via apt (system-wide, available to all users)
-2. **Shell activation** via `/etc/profile.d/mise.sh` (works for bash and zsh)
+2. **Shell activation** via per-user `.agentworks-rc.sh` (works for bash and zsh)
 3. **Per-user tool setup** based on your agentworks config
 
 Everything else (lockfile management, version resolution, backend selection) is delegated to mise
@@ -20,7 +20,7 @@ itself. Agentworks does not reinvent mise's integrity mechanisms.
 Add packages to your agentworks config:
 
 ```toml
-[vm.config]
+[admin.config]
 mise_packages = ["jq@1.8.1", "adr-tools@3.0.0"]
 ```
 
@@ -28,24 +28,25 @@ Run `agentworks vm create` or `agentworks vm reinit` and the tools will be avail
 
 ## Config reference
 
-These settings are available in both `[vm.config]` (for the admin user) and `[agent.config]` (for
-agents).
+These settings are available in `[admin.config]` (for the admin user) and `[agent_templates.*]`
+(for agents). The `install_mise` setting is VM-level and lives in `[vm_templates.*]`.
 
 | Setting | Default | Description |
 | --- | --- | --- |
-| `install_mise` | `true` | Install mise via apt (VM-level, `[vm.config]` only) |
+| `install_mise` | `true` | Install mise via apt (VM-level, `[vm_templates.*]` only) |
 | `mise_activate` | `true` | Add `mise activate` to the user's shell profile |
 | `mise_packages` | `[]` | List of `name@version` tool declarations |
 | `mise_lockfile` | (none) | [Source reference](source-refs.md) to a `mise.lock` file |
 | `mise_allow_unlocked` | `false` | Install packages not covered by the lockfile (with warning) |
 | `mise_install_before` | `"7d"` | Reject versions published more recently than this |
+| `mise_prune_on_reinit` | `true` | Remove stale tool versions on reinit |
 
 ### Agents
 
-Agents default to nothing. They only get mise tools if explicitly configured:
+Agents default to nothing. They only get mise tools if explicitly configured in an agent template:
 
 ```toml
-[agent.config]
+[agent_templates.default]
 mise_packages = ["jq@1.8.1"]
 ```
 
@@ -84,7 +85,7 @@ Point `mise_lockfile` at your lockfile using a local path or a
 [source reference](source-refs.md):
 
 ```toml
-[vm.config]
+[admin.config]
 mise_packages = ["jq@1.8.1", "adr-tools@3.0.0"]
 mise_lockfile = "~/.config/agentworks/mise.lock"
 ```
@@ -92,7 +93,7 @@ mise_lockfile = "~/.config/agentworks/mise.lock"
 Or from a git repository:
 
 ```toml
-[vm.config]
+[admin.config]
 mise_packages = ["jq@1.8.1", "adr-tools@3.0.0"]
 mise_lockfile = "git::https://github.com/myorg/tool-locks.git//mise.lock?ref=v1.0"
 ```
@@ -137,7 +138,7 @@ The `mise_install_before` setting filters out tool versions newer than the speci
 provides defense-in-depth against supply chain attacks on newly published versions.
 
 ```toml
-[vm.config]
+[admin.config]
 mise_install_before = "7d"    # reject versions less than 7 days old
 ```
 
@@ -150,7 +151,7 @@ affects fuzzy version requests (e.g., `latest`, `node@20`). Explicitly pinned ve
 If you do not want mise on your VMs:
 
 ```toml
-[vm.config]
+[vm_templates.default]
 install_mise = false
 ```
 
