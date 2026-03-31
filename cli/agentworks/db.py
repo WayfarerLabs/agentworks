@@ -109,9 +109,19 @@ class WorkspaceRow:
 @dataclass
 class AgentRow:
     name: str
-    workspace_name: str
+    vm_name: str
     linux_user: str
     template: str | None
+    grant_all: bool
+    created_at: str
+
+
+@dataclass
+class AgentGrantRow:
+    agent_name: str
+    workspace_name: str
+    grant_type: str  # 'explicit' or 'implicit'
+    task_name: str | None  # NULL for explicit, task name for implicit
     created_at: str
 
 
@@ -121,10 +131,10 @@ class TaskRow:
     workspace_name: str
     template: str
     mode: str
-    linux_user: str
     status: str
     created_at: str
     updated_at: str
+    agent_name: str | None = None
 
 
 # -- Migrations ------------------------------------------------------------
@@ -265,6 +275,46 @@ MIGRATIONS: dict[int, str] = {
     12: """
         ALTER TABLE agents ADD COLUMN template TEXT;
         UPDATE agents SET template = 'default';
+    """,
+    13: """
+        -- Restructure agents: workspace-scoped -> VM-scoped
+        CREATE TABLE agents_new (
+            name           TEXT PRIMARY KEY,
+            vm_name        TEXT NOT NULL,
+            linux_user     TEXT NOT NULL UNIQUE,
+            template       TEXT,
+            grant_all      INTEGER NOT NULL DEFAULT 0,
+            created_at     TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+            FOREIGN KEY (vm_name) REFERENCES vms(name) ON DELETE CASCADE
+        );
+        INSERT INTO agents_new (name, vm_name, linux_user, template, grant_all, created_at)
+            SELECT a.name, w.vm_name, 'agt--' || a.name, a.template, 0, a.created_at
+            FROM agents a JOIN workspaces w ON a.workspace_name = w.name
+            WHERE w.vm_name IS NOT NULL;
+        DROP TABLE agents;
+        ALTER TABLE agents_new RENAME TO agents;
+
+        -- Workspace grants table
+        CREATE TABLE IF NOT EXISTS agent_workspace_grants (
+            agent_name     TEXT NOT NULL,
+            workspace_name TEXT NOT NULL,
+            grant_type     TEXT NOT NULL,
+            task_name      TEXT,
+            created_at     TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+            FOREIGN KEY (agent_name) REFERENCES agents(name) ON DELETE CASCADE,
+            FOREIGN KEY (workspace_name) REFERENCES workspaces(name) ON DELETE CASCADE
+        );
+
+        -- Rename workspace groups: ws-<name> -> ws--<name>
+        -- (actual Linux group rename must be done manually on VMs)
+    """,
+    14: """
+        ALTER TABLE tasks ADD COLUMN agent_name TEXT REFERENCES agents(name);
+        -- Backfill agent_name from linux_user for existing agent-mode tasks
+        UPDATE tasks SET agent_name = (
+            SELECT a.name FROM agents a WHERE a.linux_user = tasks.linux_user
+        ) WHERE mode = 'agent';
+        ALTER TABLE tasks DROP COLUMN linux_user;
     """,
 }
 
@@ -453,8 +503,11 @@ class Database:
             "DELETE FROM tasks WHERE workspace_name IN (SELECT name FROM workspaces WHERE vm_name = ?)",
             (name,),
         )
+        # Agents are VM-scoped; grants cascade via FK
+        self._conn.execute("DELETE FROM agents WHERE vm_name = ?", (name,))
         self._conn.execute(
-            "DELETE FROM agents WHERE workspace_name IN (SELECT name FROM workspaces WHERE vm_name = ?)",
+            "DELETE FROM agent_workspace_grants WHERE workspace_name IN "
+            "(SELECT name FROM workspaces WHERE vm_name = ?)",
             (name,),
         )
         self._conn.execute("DELETE FROM workspaces WHERE vm_name = ?", (name,))
@@ -504,6 +557,13 @@ class Database:
         rows = self._conn.execute(query, params).fetchall()
         return [_to_workspace(r) for r in rows]
 
+    def update_workspace_path(self, name: str, workspace_path: str) -> None:
+        self._conn.execute(
+            "UPDATE workspaces SET workspace_path = ? WHERE name = ?",
+            (workspace_path, name),
+        )
+        self._conn.commit()
+
     def update_workspace_last_seen(self, name: str) -> None:
         self._conn.execute(
             "UPDATE workspaces SET last_seen_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE name = ?",
@@ -513,7 +573,8 @@ class Database:
 
     def delete_workspace(self, name: str) -> None:
         self._conn.execute("DELETE FROM tasks WHERE workspace_name = ?", (name,))
-        self._conn.execute("DELETE FROM agents WHERE workspace_name = ?", (name,))
+        # Grants cascade via FK; agents are VM-scoped so not deleted with workspaces
+        self._conn.execute("DELETE FROM agent_workspace_grants WHERE workspace_name = ?", (name,))
         self._conn.execute("DELETE FROM workspaces WHERE name = ?", (name,))
         self._conn.commit()
 
@@ -523,16 +584,14 @@ class Database:
 
     def count_agents_on_vm(self, vm_name: str) -> int:
         row = self._conn.execute(
-            "SELECT COUNT(*) FROM agents WHERE workspace_name IN "
-            "(SELECT name FROM workspaces WHERE vm_name = ?)",
+            "SELECT COUNT(*) FROM agents WHERE vm_name = ?",
             (vm_name,),
         ).fetchone()
         return int(row[0])
 
     def count_tasks_on_vm(self, vm_name: str) -> int:
         row = self._conn.execute(
-            "SELECT COUNT(*) FROM tasks WHERE workspace_name IN "
-            "(SELECT name FROM workspaces WHERE vm_name = ?)",
+            "SELECT COUNT(*) FROM tasks WHERE workspace_name IN (SELECT name FROM workspaces WHERE vm_name = ?)",
             (vm_name,),
         ).fetchone()
         return int(row[0])
@@ -540,52 +599,156 @@ class Database:
     # -- Agents ------------------------------------------------------------
 
     def insert_agent(
-        self, name: str, workspace_name: str, linux_user: str, template: str | None = None,
+        self,
+        name: str,
+        vm_name: str,
+        linux_user: str,
+        template: str | None = None,
+        grant_all: bool = False,
     ) -> AgentRow:
         self._conn.execute(
-            "INSERT INTO agents (name, workspace_name, linux_user, template) VALUES (?, ?, ?, ?)",
-            (name, workspace_name, linux_user, template),
+            "INSERT INTO agents (name, vm_name, linux_user, template, grant_all) VALUES (?, ?, ?, ?, ?)",
+            (name, vm_name, linux_user, template, int(grant_all)),
         )
         self._conn.commit()
-        result = self.get_agent(workspace_name, name)
+        result = self.get_agent(name)
         assert result is not None
         return result
 
-    def get_agent(self, workspace_name: str, name: str) -> AgentRow | None:
+    def get_agent(self, name: str) -> AgentRow | None:
         row = self._conn.execute(
-            "SELECT * FROM agents WHERE workspace_name = ? AND name = ?",
-            (workspace_name, name),
+            "SELECT * FROM agents WHERE name = ?",
+            (name,),
         ).fetchone()
         return _to_agent(row) if row else None
 
-    def list_agents(self, workspace_name: str | None = None) -> list[AgentRow]:
-        if workspace_name is not None:
+    def list_agents(self, vm_name: str | None = None) -> list[AgentRow]:
+        if vm_name is not None:
             rows = self._conn.execute(
-                "SELECT * FROM agents WHERE workspace_name = ? ORDER BY name",
-                (workspace_name,),
+                "SELECT * FROM agents WHERE vm_name = ? ORDER BY name",
+                (vm_name,),
             ).fetchall()
         else:
             rows = self._conn.execute(
-                "SELECT * FROM agents ORDER BY workspace_name, name",
+                "SELECT * FROM agents ORDER BY vm_name, name",
             ).fetchall()
         return [_to_agent(r) for r in rows]
 
-    def delete_agent(self, workspace_name: str, name: str) -> None:
+    def delete_agent(self, name: str) -> None:
+        # Grants cascade via FK
+        self._conn.execute("DELETE FROM agents WHERE name = ?", (name,))
+        self._conn.commit()
+
+    def list_agents_on_vm_with_grant_all(self, vm_name: str) -> list[AgentRow]:
+        """List agents on a VM that have grant_all enabled."""
+        rows = self._conn.execute(
+            "SELECT * FROM agents WHERE vm_name = ? AND grant_all = 1 ORDER BY name",
+            (vm_name,),
+        ).fetchall()
+        return [_to_agent(r) for r in rows]
+
+    # -- Agent workspace grants ------------------------------------------------
+
+    def insert_agent_grant(
+        self,
+        agent_name: str,
+        workspace_name: str,
+        grant_type: str,
+        task_name: str | None = None,
+    ) -> None:
         self._conn.execute(
-            "DELETE FROM agents WHERE workspace_name = ? AND name = ?",
-            (workspace_name, name),
+            "INSERT OR IGNORE INTO agent_workspace_grants "
+            "(agent_name, workspace_name, grant_type, task_name) "
+            "VALUES (?, ?, ?, ?)",
+            (agent_name, workspace_name, grant_type, task_name),
         )
         self._conn.commit()
 
-    def delete_agents_for_workspace(self, workspace_name: str) -> list[AgentRow]:
-        """Delete all agents for a workspace, returning the deleted agents."""
-        agents = self.list_agents(workspace_name=workspace_name)
+    def delete_agent_grant(
+        self,
+        agent_name: str,
+        workspace_name: str,
+        grant_type: str,
+        task_name: str | None = None,
+    ) -> None:
+        if task_name is not None:
+            self._conn.execute(
+                "DELETE FROM agent_workspace_grants "
+                "WHERE agent_name = ? AND workspace_name = ? AND grant_type = ? AND task_name = ?",
+                (agent_name, workspace_name, grant_type, task_name),
+            )
+        else:
+            self._conn.execute(
+                "DELETE FROM agent_workspace_grants "
+                "WHERE agent_name = ? AND workspace_name = ? AND grant_type = ? AND task_name IS NULL",
+                (agent_name, workspace_name, grant_type),
+            )
+        self._conn.commit()
+
+    def delete_explicit_grants(self, agent_name: str) -> None:
+        """Remove all explicit grants for an agent."""
         self._conn.execute(
-            "DELETE FROM agents WHERE workspace_name = ?",
-            (workspace_name,),
+            "DELETE FROM agent_workspace_grants WHERE agent_name = ? AND grant_type = 'explicit'",
+            (agent_name,),
         )
         self._conn.commit()
-        return agents
+
+    def has_any_grant(self, agent_name: str, workspace_name: str) -> bool:
+        """Check if an agent has any grant (explicit or implicit) for a workspace."""
+        row = self._conn.execute(
+            "SELECT COUNT(*) FROM agent_workspace_grants WHERE agent_name = ? AND workspace_name = ?",
+            (agent_name, workspace_name),
+        ).fetchone()
+        return int(row[0]) > 0
+
+    def list_agent_grants(self, agent_name: str) -> list[AgentGrantRow]:
+        rows = self._conn.execute(
+            "SELECT * FROM agent_workspace_grants WHERE agent_name = ? ORDER BY workspace_name",
+            (agent_name,),
+        ).fetchall()
+        return [_to_agent_grant(r) for r in rows]
+
+    def list_granted_workspaces(self, agent_name: str) -> list[str]:
+        """List distinct workspace names the agent has access to."""
+        rows = self._conn.execute(
+            "SELECT DISTINCT workspace_name FROM agent_workspace_grants WHERE agent_name = ? ORDER BY workspace_name",
+            (agent_name,),
+        ).fetchall()
+        return [row[0] for row in rows]
+
+    def list_granted_workspaces_with_types(self, agent_name: str) -> list[tuple[str, bool, bool]]:
+        """List workspaces with grant type info: (name, has_explicit, has_implicit)."""
+        rows = self._conn.execute(
+            "SELECT workspace_name, grant_type FROM agent_workspace_grants "
+            "WHERE agent_name = ? ORDER BY workspace_name",
+            (agent_name,),
+        ).fetchall()
+        # Aggregate by workspace
+        ws_map: dict[str, tuple[bool, bool]] = {}
+        for row in rows:
+            ws = row[0]
+            gt = row[1]
+            has_explicit, has_implicit = ws_map.get(ws, (False, False))
+            if gt == "explicit":
+                has_explicit = True
+            else:
+                has_implicit = True
+            ws_map[ws] = (has_explicit, has_implicit)
+        return [(ws, e, i) for ws, (e, i) in sorted(ws_map.items())]
+
+    def count_agent_grants(self, agent_name: str) -> int:
+        row = self._conn.execute(
+            "SELECT COUNT(DISTINCT workspace_name) FROM agent_workspace_grants WHERE agent_name = ?",
+            (agent_name,),
+        ).fetchone()
+        return int(row[0])
+
+    def update_agent_grant_all(self, name: str, grant_all: bool) -> None:
+        self._conn.execute(
+            "UPDATE agents SET grant_all = ? WHERE name = ?",
+            (int(grant_all), name),
+        )
+        self._conn.commit()
 
     # -- Tasks -------------------------------------------------------------
 
@@ -595,12 +758,11 @@ class Database:
         workspace_name: str,
         template: str,
         mode: TaskMode,
-        linux_user: str,
+        agent_name: str | None = None,
     ) -> TaskRow:
         self._conn.execute(
-            "INSERT INTO tasks (name, workspace_name, template, mode, linux_user) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (name, workspace_name, template, mode.value, linux_user),
+            "INSERT INTO tasks (name, workspace_name, template, mode, agent_name) VALUES (?, ?, ?, ?, ?)",
+            (name, workspace_name, template, mode.value, agent_name),
         )
         self._conn.commit()
         result = self.get_task(workspace_name, name)
@@ -721,9 +883,20 @@ def _to_workspace(row: sqlite3.Row) -> WorkspaceRow:
 def _to_agent(row: sqlite3.Row) -> AgentRow:
     return AgentRow(
         name=row["name"],
-        workspace_name=row["workspace_name"],
+        vm_name=row["vm_name"],
         linux_user=row["linux_user"],
         template=row["template"],
+        grant_all=bool(row["grant_all"]),
+        created_at=row["created_at"],
+    )
+
+
+def _to_agent_grant(row: sqlite3.Row) -> AgentGrantRow:
+    return AgentGrantRow(
+        agent_name=row["agent_name"],
+        workspace_name=row["workspace_name"],
+        grant_type=row["grant_type"],
+        task_name=row["task_name"],
         created_at=row["created_at"],
     )
 
@@ -734,10 +907,10 @@ def _to_task(row: sqlite3.Row) -> TaskRow:
         workspace_name=row["workspace_name"],
         template=row["template"],
         mode=row["mode"],
-        linux_user=row["linux_user"],
         status=row["status"],
         created_at=row["created_at"],
         updated_at=row["updated_at"],
+        agent_name=row["agent_name"],
     )
 
 

@@ -19,7 +19,8 @@ def config(tmp_path: Path):  # type: ignore[no-untyped-def]
     priv.write_text("key")
 
     config_file = tmp_path / "config.toml"
-    config_file.write_text(dedent(f"""\
+    config_file.write_text(
+        dedent(f"""\
         [user]
         ssh_public_key = "{pub}"
         ssh_private_key = "{priv}"
@@ -36,7 +37,8 @@ def config(tmp_path: Path):  # type: ignore[no-untyped-def]
         [workspace_templates.grandchild]
         inherits = ["child"]
         repo = "https://example.com/org/override.git"
-    """))
+    """)
+    )
     return load_config(config_file)
 
 
@@ -75,11 +77,13 @@ def test_builtin_fallback(tmp_path: Path) -> None:
     priv.write_text("key")
 
     config_file = tmp_path / "config.toml"
-    config_file.write_text(dedent(f"""\
+    config_file.write_text(
+        dedent(f"""\
         [user]
         ssh_public_key = "{pub}"
         ssh_private_key = "{priv}"
-    """))
+    """)
+    )
     cfg = load_config(config_file)
     result = resolve_template(cfg)
     assert result.name == "default"

@@ -2,85 +2,101 @@
 
 ## Overview
 
-The security model uses standard Linux users, groups, and file permissions to isolate agent
-workspaces. Each agent is a Linux user with access scoped to its workspace via group membership.
+The security model uses standard Linux users, groups, and file permissions to control agent
+workspace access. Each agent is a VM-scoped Linux user with access to specific workspaces via
+a grant system that translates to group membership.
 
 ## User and Group Topology
 
 ```text
 Users:
   agentworks              (admin user, sudo)
-  <workspace>--<agent>    (agent user, no sudo)
+  agt--<agent>            (agent user, no sudo)
 
 Groups:
-  ws-<workspace>          (workspace file access)
+  ws--<workspace>         (workspace file access)
 ```
 
 ### Admin user
 
 The operator's identity on the VM. Created during Phase A (bootstrap). Has unrestricted sudo.
-
-- Owns VM-level configuration and tooling
-- Is the account the `agentworks` CLI connects as
-- Configurable via `[admin.config]` (username, shell, dotfiles, git credentials, mise, etc.)
+Added to all workspace groups automatically.
 
 ### Agent users
 
 - Created via `agent create` with `useradd`
-- Username: `<workspace>--<agent>` (double-hyphen separator)
-- Home directory: `/home/<workspace>--<agent>/`
+- Username: `agt--<name>`
+- Home directory: `/home/agt--<name>/`
 - No sudo, no password
-- Member of: `ws-<workspace>`
-- Fully configurable via agent templates (shell, dotfiles, git credentials, user install commands,
-  mise packages)
+- Workspace access via group membership, managed by the grant system
+- Fully configurable via agent templates
 
 ### Workspace groups
 
-- Group name: `ws-<workspace-name>`
-- Created during workspace creation on a VM (and idempotently during agent creation for older
-  workspaces)
-- The admin user is added to every workspace group so they can read/write workspace files without
-  sudo
-- All agents in the workspace are members
-- Workspace directory has setgid (mode 2775) so new files inherit the group
-- Provides shared file access within the workspace directory
+- Group name: `ws--<workspace-name>`
+- Created during workspace creation on a VM
+- Admin user added to every workspace group
+- Workspace directory has setgid (mode 2770) so new files inherit the group
+- Agent membership managed by the grant system
+
+## Grant System
+
+### Grant types
+
+- **Explicit**: operator-managed via `agent grant-workspaces` / `agent deny-workspaces`
+- **Implicit**: auto-created when a task is created for an agent, removed when the task is deleted
+- **Grant-all**: flag on the agent that auto-grants access to all workspaces
+
+### Grant storage
+
+Grants are stored in the `agent_workspace_grants` table:
+
+| Column | Description |
+| --- | --- |
+| agent_name | Agent name (FK to agents) |
+| workspace_name | Workspace name (FK to workspaces, cascades on delete) |
+| grant_type | `explicit` or `implicit` |
+| task_name | NULL for explicit grants, task name for implicit |
+
+### Grant lifecycle
+
+- **On grant**: add agent to workspace group via `usermod -aG`
+- **On deny/task delete**: remove grant record, check if any remaining grants exist. If none,
+  remove agent from workspace group via `gpasswd -d`.
+- **On workspace create**: if agent has grant_all, auto-add to new workspace group
+- **On workspace delete**: all grants for that workspace cascade (FK)
+- **On agent delete**: all grants cascade (FK), agent removed from all workspace groups
 
 ## Agent Provisioning Flow
 
-When an agent is created for a workspace:
+When an agent is created on a VM:
 
-1. Ensure the workspace group exists: `groupadd ws-<workspace>` (idempotent)
-2. Add admin to the workspace group (idempotent)
-3. Repair workspace directory ownership if needed (`chgrp -R`, `chmod 2775`)
-4. Create the agent user with the template's shell: `useradd -m -s <shell> <workspace>--<agent>`
-5. Add to workspace group: `usermod -aG ws-<workspace> <workspace>--<agent>`
-6. Write shell rc file (prompt, shell-appropriate syntax)
-7. Configure git credentials (if specified in agent template)
-8. Run user install commands (from agent template)
-9. Sync dotfiles (from agent template, cloned as the agent user)
-10. Configure mise (from agent template: shims PATH, activation, config, lockfile, install)
-11. Record the agent in the database
+1. Create the Linux user: `useradd -m -s <shell> agt--<name>`
+2. Configure shell rc file (prompt)
+3. Configure git credentials (if specified in template)
+4. Run user install commands (from template)
+5. Sync dotfiles (from template)
+6. Configure mise (from template)
+7. Record in database
 
-Agent setup commands run as the agent user via `sudo su - <user> -c '...'`. File writes to the
-agent's home use scp to `/tmp/` followed by `mv` + `chown`.
+Workspace group membership is NOT set during creation. It is managed entirely by the grant system.
 
 ## Permissions Summary
 
 | Resource        | Owner      | Group          | Effect                    |
 | --------------- | ---------- | -------------- | ------------------------- |
-| Workspace dir   | admin      | ws-WORKSPACE   | Agents read/write via group |
+| Workspace dir   | admin      | ws--WORKSPACE  | Agents read/write via grant |
 | Agent home      | agent-user | agent-user     | Agent-private             |
-| VM tools        | admin      | admin          | Admin-only write          |
 
 ## What This Model Prevents
 
-- Agents accessing other workspaces' files (no group membership)
+- Agents accessing workspaces they have not been granted access to
 - Agents escalating to root (no sudo)
 - Agents killing other agents' processes (different UIDs)
 
 ## What This Model Does Not Prevent
 
-- Agents reading system-wide readable files (`/etc/passwd`, installed packages, etc.)
+- Agents reading system-wide readable files
 - Agents making arbitrary network requests
 - Agents consuming unbounded resources (no cgroups by default)
 

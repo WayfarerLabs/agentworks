@@ -20,20 +20,23 @@ def _is_valid(name: str) -> bool:
 # -- Valid names -----------------------------------------------------------
 
 
-@pytest.mark.parametrize("name", [
-    "a",
-    "abc",
-    "a1",
-    "dev-vm",
-    "my_workspace",
-    "ws-task-123",
-    "a-b-c",
-    "a_b_c",
-    "a-b_c-d",
-    "0abc",
-    "abc0",
-    "123",
-])
+@pytest.mark.parametrize(
+    "name",
+    [
+        "a",
+        "abc",
+        "a1",
+        "dev-vm",
+        "my_workspace",
+        "ws-task-123",
+        "a-b-c",
+        "a_b_c",
+        "a-b_c-d",
+        "0abc",
+        "abc0",
+        "123",
+    ],
+)
 def test_valid_names(name: str) -> None:
     assert _is_valid(name), f"Expected '{name}' to be valid"
 
@@ -41,22 +44,25 @@ def test_valid_names(name: str) -> None:
 # -- Invalid names ---------------------------------------------------------
 
 
-@pytest.mark.parametrize("name,reason", [
-    ("", "empty string"),
-    ("-abc", "starts with hyphen"),
-    ("abc-", "ends with hyphen"),
-    ("_abc", "starts with underscore"),
-    ("abc_", "ends with underscore"),
-    ("a--b", "consecutive hyphens (agent separator)"),
-    ("my--workspace", "consecutive hyphens"),
-    ("a.b", "contains dot"),
-    ("my.vm", "contains dot"),
-    ("ABC", "uppercase"),
-    ("Dev-VM", "mixed case"),
-    ("my workspace", "contains space"),
-    ("my@vm", "contains special character"),
-    ("a/b", "contains slash"),
-])
+@pytest.mark.parametrize(
+    "name,reason",
+    [
+        ("", "empty string"),
+        ("-abc", "starts with hyphen"),
+        ("abc-", "ends with hyphen"),
+        ("_abc", "starts with underscore"),
+        ("abc_", "ends with underscore"),
+        ("a--b", "consecutive hyphens (agent separator)"),
+        ("my--workspace", "consecutive hyphens"),
+        ("a.b", "contains dot"),
+        ("my.vm", "contains dot"),
+        ("ABC", "uppercase"),
+        ("Dev-VM", "mixed case"),
+        ("my workspace", "contains space"),
+        ("my@vm", "contains special character"),
+        ("a/b", "contains slash"),
+    ],
+)
 def test_invalid_names(name: str, reason: str) -> None:
     assert not _is_valid(name), f"Expected '{name}' to be invalid ({reason})"
 

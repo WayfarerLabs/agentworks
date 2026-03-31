@@ -75,6 +75,8 @@ class LimaProvisioner(VMProvisioner):
                 shlex.split(command),
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
             )
             if check and proc.returncode != 0:
                 raise SSHError(f"limactl failed: {proc.stderr.strip()}")
@@ -124,16 +126,12 @@ class LimaProvisioner(VMProvisioner):
             # No Tailscale key -- provision block is a no-op.
             # Phase A bootstrap will handle everything separately.
             provision_script = (
-                "#!/bin/bash\n"
-                "echo '##STEP## Provision'\n"
-                "echo '##SUCCESS## no-op (deferred to Phase A)'\n"
+                "#!/bin/bash\necho '##STEP## Provision'\necho '##SUCCESS## no-op (deferred to Phase A)'\n"
             )
 
         # Indent the provision script for YAML embedding (6 spaces)
         indented_script = textwrap.indent(provision_script, "      ")
-        rendered = LIMA_TEMPLATE.format(
-            cpus=cpus, memory=memory, disk=disk, provision_script=indented_script
-        )
+        rendered = LIMA_TEMPLATE.format(cpus=cpus, memory=memory, disk=disk, provision_script=indented_script)
 
         if self.is_remote:
             self._create_remote(vm_name, rendered)
@@ -148,9 +146,7 @@ class LimaProvisioner(VMProvisioner):
         if tailscale_auth_key:
             typer.echo("  Retrieving Tailscale IP...")
             try:
-                ip_output = self._run_lima(
-                    f"limactl shell {vm_name} sudo tailscale ip -4"
-                )
+                ip_output = self._run_lima(f"limactl shell {vm_name} sudo tailscale ip -4")
                 tailscale_ip = ip_output.strip()
                 bootstrap_complete = True
                 typer.echo(f"  Tailscale IP: {tailscale_ip}")
@@ -212,10 +208,7 @@ class LimaProvisioner(VMProvisioner):
             ssh=SSHTarget(host=self._vm_host_ssh, user=None, login_shell=True),
             logger=ssh_logger,
         )
-        lima_cmd = (
-            f"limactl create --name {vm_name} --tty=false {remote_template}"
-            f" && limactl start {vm_name}"
-        )
+        lima_cmd = f"limactl create --name {vm_name} --tty=false {remote_template} && limactl start {vm_name}"
         typer.echo("  Starting and provisioning VM via Lima (this may take several minutes)...")
         result = run_detached(
             host_target,
@@ -248,8 +241,7 @@ class LimaProvisioner(VMProvisioner):
         """Attempt to surface provision script errors from Lima logs."""
         try:
             log_output = self._run_lima(
-                f"limactl shell {vm_name} cat /var/log/cloud-init-output.log 2>/dev/null"
-                " || true",
+                f"limactl shell {vm_name} cat /var/log/cloud-init-output.log 2>/dev/null || true",
                 check=False,
             )
             if log_output.strip():

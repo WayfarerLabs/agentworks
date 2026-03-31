@@ -102,7 +102,8 @@ def test_run_detached_fresh_start(mock_time: MagicMock) -> None:
     )
 
     result = run_detached(
-        target, "echo hello",
+        target,
+        "echo hello",
         base_path="/tmp/agentworks-test",
         poll_interval=0,
     )
@@ -129,7 +130,8 @@ def test_run_detached_resume(mock_time: MagicMock) -> None:
     )
 
     result = run_detached(
-        target, "echo hello",
+        target,
+        "echo hello",
         base_path="/tmp/agentworks-test",
         poll_interval=0,
     )
@@ -152,7 +154,8 @@ def test_run_detached_nonzero_exit(mock_time: MagicMock) -> None:
     )
 
     result = run_detached(
-        target, "false",
+        target,
+        "false",
         base_path="/tmp/agentworks-test",
         poll_interval=0,
     )
@@ -173,7 +176,8 @@ def test_run_detached_as_root(mock_time: MagicMock) -> None:
     )
 
     result = run_detached(
-        target, "apt-get install -y foo",
+        target,
+        "apt-get install -y foo",
         base_path="/tmp/agentworks-test",
         poll_interval=0,
         as_root=True,

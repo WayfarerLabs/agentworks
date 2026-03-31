@@ -38,8 +38,8 @@ def create_vm_workspace(
     target = ssh_target_for_vm(vm, config)
     lg = logger
 
-    workspace_path = f"/home/{vm.admin_username}/workspaces/{ws_name}"
-    ws_group = f"ws-{ws_name}"
+    workspace_path = f"{config.paths.vm_workspaces}/{ws_name}"
+    ws_group = f"ws--{ws_name}"
 
     # Remove stale directory from a previous interrupted attempt
     exists = ssh_run(target, f"test -d {workspace_path}", check=False, timeout=10, logger=lg)
@@ -50,9 +50,11 @@ def create_vm_workspace(
     # Create workspace group (idempotent), add admin, and set up directory with setgid
     run_as_root(target, f"sh -c 'getent group {ws_group} >/dev/null 2>&1 || /usr/sbin/groupadd {ws_group}'", logger=lg)
     run_as_root(target, f"usermod -aG {ws_group} {vm.admin_username}", logger=lg)
-    ssh_run(target, f"mkdir -p {workspace_path}", timeout=10, logger=lg)
+    run_as_root(target, f"mkdir -p {workspace_path}", logger=lg)
     run_as_root(target, f"chown {vm.admin_username}:{ws_group} {workspace_path}", logger=lg)
-    run_as_root(target, f"chmod 2775 {workspace_path}", logger=lg)
+    run_as_root(target, f"chmod 2770 {workspace_path}", logger=lg)
+    # Set default ACLs so files created inside are group-writable
+    run_as_root(target, f"setfacl -d -m g::rwx -m m::rwx {workspace_path}", logger=lg)
 
     # Git clone if repo is set
     if template.repo:
@@ -142,15 +144,17 @@ def delete_vm_workspace(
     target = ssh_target_for_vm(vm, config)
     lg = logger
 
+    from agentworks.ssh import run_as_root
+
     try:
-        ssh_run(target, f"rm -rf {workspace_path}", timeout=30, logger=lg)
+        run_as_root(target, f"rm -rf {workspace_path}", timeout=30, logger=lg)
         session = console_session_name(ws_name)
         ssh_run(target, f"rm -f ~/.config/tmuxinator/{session}.yml", check=False, timeout=10, logger=lg)
     except SSHError as e:
         typer.echo(f"Warning: remote cleanup failed: {e}", err=True)
 
 
-def generate_code_workspace(
+def generate_vscode_workspace(
     vm: VMRow,
     config: Config,
     ws_name: str,
@@ -171,9 +175,9 @@ def generate_code_workspace(
         "remoteAuthority": f"ssh-remote+{ssh_host}",
     }
 
-    code_ws_dir = config.paths.code_workspaces
-    code_ws_dir.mkdir(parents=True, exist_ok=True)
-    code_ws_path = code_ws_dir / f"{ws_name}.code-workspace"
-    code_ws_path.write_text(json.dumps(ws_file, indent=2) + "\n")
+    vscode_dir = config.paths.vscode_workspaces
+    vscode_dir.mkdir(parents=True, exist_ok=True)
+    vscode_path = vscode_dir / f"{ws_name}.code-workspace"
+    vscode_path.write_text(json.dumps(ws_file, indent=2) + "\n")
 
-    return str(code_ws_path)
+    return str(vscode_path)

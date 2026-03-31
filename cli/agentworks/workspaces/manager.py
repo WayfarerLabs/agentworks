@@ -13,7 +13,7 @@ from agentworks.workspaces.templates import ResolvedTemplate, resolve_template
 
 if TYPE_CHECKING:
     from agentworks.config import Config
-    from agentworks.db import Database, VMRow
+    from agentworks.db import Database, VMRow, WorkspaceRow
 
 
 def create_workspace(
@@ -98,7 +98,7 @@ def _create_vm(
     from agentworks.workspaces.backends.vm import (
         create_vm_workspace,
         delete_vm_workspace,
-        generate_code_workspace,
+        generate_vscode_workspace,
     )
 
     vm = _resolve_vm(db, vm_name)
@@ -108,15 +108,15 @@ def _create_vm(
     _ensure_vm_running(db, config, vm)
 
     workspace_path: str | None = None
-    code_ws_path: str | None = None
+    vscode_path: str | None = None
 
     def _cleanup() -> None:
         if workspace_path:
             delete_vm_workspace(vm, config, ws_name, workspace_path)
-        if code_ws_path:
+        if vscode_path:
             from pathlib import Path
 
-            Path(code_ws_path).unlink(missing_ok=True)
+            Path(vscode_path).unlink(missing_ok=True)
 
     from agentworks.ssh import SSHLogger
 
@@ -126,8 +126,8 @@ def _create_vm(
         typer.echo(f"Creating workspace '{ws_name}' on VM '{vm.name}' (template: {template_name})...")
         workspace_path = create_vm_workspace(vm, config, ws_name, template, logger=ssh_logger)
 
-        code_ws_path = generate_code_workspace(vm, config, ws_name, workspace_path)
-        typer.echo(f"VS Code workspace: {code_ws_path}")
+        vscode_path = generate_vscode_workspace(vm, config, ws_name, workspace_path)
+        typer.echo(f"VS Code workspace: {vscode_path}")
 
         db.insert_workspace(
             ws_name,
@@ -147,10 +147,20 @@ def _create_vm(
         _cleanup()
         raise typer.Exit(1) from None
 
+    # Add grant_all agents to the new workspace group
+    grant_all_agents = db.list_agents_on_vm_with_grant_all(vm.name)
+    if grant_all_agents:
+        from agentworks.agents.manager import _add_to_workspace_group
+
+        for agent in grant_all_agents:
+            _add_to_workspace_group(vm, config, agent.linux_user, ws_name, logger=ssh_logger)
+            db.insert_agent_grant(agent.name, ws_name, "explicit")
+        typer.echo(f"  Added {len(grant_all_agents)} grant-all agent(s) to workspace")
+
     ssh_logger.close()
 
     if open_vscode:
-        subprocess.run(["code", code_ws_path], check=False)
+        subprocess.run(["code", vscode_path], check=False)
 
     typer.echo(f"Workspace '{ws_name}' created")
 
@@ -255,10 +265,7 @@ def list_workspaces(
             return "default"
         return t
 
-    rows = [
-        (ws.name, ws.type, ws.vm_name or "-", _tpl_name(ws.template), ws.created_at)
-        for ws in workspaces
-    ]
+    rows = [(ws.name, ws.type, ws.vm_name or "-", _tpl_name(ws.template), ws.created_at) for ws in workspaces]
 
     name_w = max(len("NAME"), max(len(r[0]) for r in rows))
     type_w = max(len("TYPE"), max(len(r[1]) for r in rows))
@@ -270,6 +277,449 @@ def list_workspaces(
     typer.echo("-" * len(header))
     for ws_name, ws_type, vm_name, tpl, created in rows:
         typer.echo(f"{ws_name:<{name_w}}  {ws_type:<{type_w}}  {vm_name:<{vm_w}}  {tpl:<{tpl_w}}  {created}")
+
+
+def repair_workspace(
+    db: Database,
+    config: Config,
+    name: str,
+) -> None:
+    """Repair workspace infrastructure: group, permissions, ACLs, agent access."""
+    from agentworks.agents.manager import AGENT_PREFIX, WS_GROUP_PREFIX
+    from agentworks.ssh import SSHError, run_as_root, ssh_target_for_vm
+
+    ws = db.get_workspace(name)
+    if ws is None:
+        typer.echo(f"Error: workspace '{name}' not found", err=True)
+        raise typer.Exit(1)
+
+    if ws.type != "vm":
+        typer.echo(f"Error: workspace '{name}' is local, nothing to repair", err=True)
+        raise typer.Exit(1)
+
+    assert ws.vm_name is not None
+    vm = db.get_vm(ws.vm_name)
+    if vm is None:
+        typer.echo(f"Error: VM '{ws.vm_name}' not found", err=True)
+        raise typer.Exit(1)
+
+    target = ssh_target_for_vm(vm, config)
+    ws_group = f"{WS_GROUP_PREFIX}{name}"
+    fixes = 0
+
+    typer.echo(f"Repairing workspace '{name}' on VM '{vm.name}'...")
+
+    # 0. Ensure acl package is installed (needed for setfacl)
+    try:
+        has_setfacl = run_as_root(target, "which setfacl", check=False)
+        if not has_setfacl.ok:
+            run_as_root(target, "apt-get install -y -qq acl", timeout=60)
+            typer.echo("  Fixed: installed acl package")
+            fixes += 1
+        else:
+            typer.echo("  OK: acl package")
+    except SSHError as e:
+        typer.echo(f"  Warning: acl package check failed: {e}", err=True)
+
+    # 1. Ensure workspace group exists (with correct naming)
+    try:
+        # Check for old-style group and rename if needed
+        old_group = f"ws-{name}"
+        old_exists = run_as_root(target, f"getent group {old_group}", check=False)
+        new_exists = run_as_root(target, f"getent group {ws_group}", check=False)
+
+        if old_exists.ok and not new_exists.ok:
+            run_as_root(target, f"groupmod -n {ws_group} {old_group}")
+            typer.echo(f"  Fixed: renamed group {old_group} -> {ws_group}")
+            fixes += 1
+        elif not new_exists.ok:
+            run_as_root(
+                target,
+                f"sh -c 'getent group {ws_group} >/dev/null 2>&1 || /usr/sbin/groupadd {ws_group}'",
+            )
+            typer.echo(f"  Fixed: created group {ws_group}")
+            fixes += 1
+        else:
+            typer.echo(f"  OK: group {ws_group} exists")
+    except SSHError as e:
+        typer.echo(f"  Warning: group check failed: {e}", err=True)
+
+    # 2. Ensure admin is in the group
+    try:
+        in_group = run_as_root(
+            target,
+            f"id -nG {vm.admin_username}",
+            check=False,
+        )
+        if in_group.ok and ws_group not in in_group.stdout.split():
+            run_as_root(target, f"usermod -aG {ws_group} {vm.admin_username}")
+            typer.echo(f"  Fixed: added admin '{vm.admin_username}' to {ws_group}")
+            fixes += 1
+        else:
+            typer.echo(f"  OK: admin in {ws_group}")
+    except SSHError as e:
+        typer.echo(f"  Warning: admin group check failed: {e}", err=True)
+
+    # 3. Fix directory permissions
+    try:
+        run_as_root(target, f"chown {vm.admin_username}:{ws_group} {ws.workspace_path}")
+        run_as_root(target, f"chmod 2770 {ws.workspace_path}")
+        typer.echo("  OK: directory ownership and permissions")
+    except SSHError as e:
+        typer.echo(f"  Warning: permission fix failed: {e}", err=True)
+
+    # 4. Fix ACLs
+    # Default ACLs only apply to directories; use find to avoid warnings on files.
+    # Effective ACLs apply to all entries and should not produce output.
+    try:
+        run_as_root(
+            target,
+            f"find {ws.workspace_path} -type d -exec setfacl -d -m g::rwx -m m::rwx {{}} +",
+            timeout=120,
+        )
+        run_as_root(
+            target,
+            f"setfacl -R -m g::rwx -m m::rwx {ws.workspace_path}",
+            timeout=120,
+        )
+        typer.echo("  OK: ACLs")
+    except SSHError as e:
+        typer.echo(f"  Warning: ACL fix failed: {e}", err=True)
+
+    # 5. Fix parent directory traversal
+    try:
+        run_as_root(
+            target,
+            f'sh -c \'p={ws.workspace_path}; while [ "$p" != "/" ]; do chmod a+x "$p"; p=$(dirname "$p"); done\'',
+        )
+        typer.echo("  OK: parent traversal")
+    except SSHError as e:
+        typer.echo(f"  Warning: parent traversal fix failed: {e}", err=True)
+
+    # 6. Reconcile agent group membership
+    # Get agents that SHOULD be in the group (have any grant)
+    granted_agents = set()
+    all_agents = db.list_agents(vm_name=vm.name)
+    for agent in all_agents:
+        if db.has_any_grant(agent.name, name):
+            granted_agents.add(agent.linux_user)
+
+    # Get agents that ARE in the group (only agt-- prefixed users)
+    try:
+        group_info = run_as_root(target, f"getent group {ws_group}", check=False)
+        current_members: set[str] = set()
+        if group_info.ok and ":" in group_info.stdout:
+            members_str = group_info.stdout.strip().split(":")[-1]
+            if members_str:
+                current_members = {m for m in members_str.split(",") if m.startswith(AGENT_PREFIX)}
+
+        # Add missing agents
+        to_add = granted_agents - current_members
+        for user in sorted(to_add):
+            run_as_root(target, f"usermod -aG {ws_group} {user}")
+            typer.echo(f"  Fixed: added {user} to {ws_group}")
+            fixes += 1
+
+        # Remove agents that shouldn't be there
+        to_remove = current_members - granted_agents
+        for user in sorted(to_remove):
+            run_as_root(target, f"gpasswd -d {user} {ws_group}", check=False)
+            typer.echo(f"  Fixed: removed {user} from {ws_group}")
+            fixes += 1
+
+        if not to_add and not to_remove:
+            typer.echo(f"  OK: agent group membership ({len(current_members)} agent(s))")
+    except SSHError as e:
+        typer.echo(f"  Warning: agent membership check failed: {e}", err=True)
+
+    if fixes > 0:
+        typer.echo(f"\nRepaired {fixes} issue(s)")
+    else:
+        typer.echo("\nNo issues found")
+
+
+def rehome_workspace(
+    db: Database,
+    config: Config,
+    name: str,
+    *,
+    target_path: str | None = None,
+    remove_old: bool = False,
+    yes: bool = False,
+) -> None:
+    """Move a workspace to a new directory path."""
+    ws = db.get_workspace(name)
+    if ws is None:
+        typer.echo(f"Error: workspace '{name}' not found", err=True)
+        raise typer.Exit(1)
+
+    # Determine target path
+    if target_path is not None:
+        new_path = target_path
+    elif ws.type == "vm":
+        new_path = f"{config.paths.vm_workspaces}/{name}"
+    else:
+        new_path = str(config.paths.local_workspaces / name)
+
+    old_path = ws.workspace_path
+
+    if old_path == new_path:
+        typer.echo(f"Workspace '{name}' is already at {new_path}")
+        return
+
+    # Safety: detect overlapping paths
+    old_norm = old_path.rstrip("/") + "/"
+    new_norm = new_path.rstrip("/") + "/"
+    if new_norm.startswith(old_norm) or old_norm.startswith(new_norm):
+        typer.echo("Error: source and target paths overlap", err=True)
+        raise typer.Exit(1)
+
+    # Block if workspace has running tasks
+    from agentworks.db import TaskStatus
+
+    tasks = db.list_tasks(workspace_name=name)
+    running = [t for t in tasks if t.status == TaskStatus.RUNNING.value]
+    if running:
+        typer.echo(
+            f"Error: workspace '{name}' has {len(running)} running task(s). "
+            "Stop them first with 'agentworks task stop'.",
+            err=True,
+        )
+        raise typer.Exit(1)
+
+    if ws.type == "vm":
+        _rehome_vm(db, config, ws, new_path, remove_old=remove_old, yes=yes)
+    elif ws.type == "local":
+        _rehome_local(db, config, ws, new_path, remove_old=remove_old, yes=yes)
+    else:
+        typer.echo(f"Error: unknown workspace type '{ws.type}'", err=True)
+        raise typer.Exit(1)
+
+
+def _rehome_vm(
+    db: Database,
+    config: Config,
+    ws: WorkspaceRow,
+    new_path: str,
+    *,
+    remove_old: bool,
+    yes: bool,
+) -> None:
+    """Rehome a VM workspace."""
+    from agentworks.agents.manager import WS_GROUP_PREFIX
+    from agentworks.ssh import SSHError, SSHLogger, run_as_root, ssh_target_for_vm
+    from agentworks.ssh import run as ssh_run
+    from agentworks.workspaces.backends.vm import generate_vscode_workspace
+
+    ws_name = ws.name
+    old_path = ws.workspace_path
+    assert ws.vm_name is not None
+    vm_name = ws.vm_name
+
+    vm = db.get_vm(vm_name)
+    if vm is None:
+        typer.echo(f"Error: VM '{vm_name}' not found", err=True)
+        raise typer.Exit(1)
+
+    _guard_vm_status(vm)
+    _ensure_vm_running(db, config, vm)
+
+    target = ssh_target_for_vm(vm, config)
+
+    # Verify source exists
+    src_check = ssh_run(target, f"test -d {old_path}", check=False, timeout=10)
+    if not src_check.ok:
+        typer.echo(f"Error: source directory {old_path} does not exist on VM", err=True)
+        raise typer.Exit(1)
+
+    # Verify target does not exist
+    dst_check = ssh_run(target, f"test -d {new_path}", check=False, timeout=10)
+    if dst_check.ok:
+        typer.echo(f"Error: target directory {new_path} already exists on VM", err=True)
+        raise typer.Exit(1)
+
+    if not yes:
+        typer.echo(f"Rehome workspace '{ws_name}':")
+        typer.echo(f"  From: {old_path}")
+        typer.echo(f"  To:   {new_path}")
+        if remove_old:
+            typer.echo("  Old directory will be REMOVED after copy")
+        else:
+            typer.echo("  Old directory will be LEFT IN PLACE")
+        typer.confirm("Proceed?", abort=True)
+
+    ssh_logger = SSHLogger(vm.name, "workspace-rehome")
+    ws_group = f"{WS_GROUP_PREFIX}{ws_name}"
+
+    try:
+        # Create target directory as root and chown to admin so rsync can write
+        run_as_root(target, f"mkdir -p {new_path}", logger=ssh_logger)
+        run_as_root(target, f"chown {vm.admin_username} {new_path}", logger=ssh_logger)
+
+        # Copy with rsync (fall back to cp -a)
+        typer.echo("Copying workspace...")
+        has_rsync = ssh_run(target, "which rsync", check=False, timeout=10, logger=ssh_logger)
+        if has_rsync.ok:
+            ssh_run(target, f"rsync -a {old_path}/ {new_path}/", timeout=600, logger=ssh_logger)
+        else:
+            run_as_root(target, f"cp -a {old_path}/. {new_path}/", timeout=600, logger=ssh_logger)
+
+        # Verify copy succeeded
+        verify = ssh_run(target, f"test -d {new_path}", check=False, timeout=10, logger=ssh_logger)
+        if not verify.ok:
+            typer.echo("Error: copy verification failed, target directory not found", err=True)
+            typer.echo(f"  SSH log: {ssh_logger.path}", err=True)
+            ssh_logger.close()
+            raise typer.Exit(1)
+
+        # Fix ownership, permissions, and ACLs on the new path
+        typer.echo("Setting permissions...")
+        run_as_root(target, f"chown {vm.admin_username}:{ws_group} {new_path}", logger=ssh_logger)
+        run_as_root(target, f"chmod 2770 {new_path}", logger=ssh_logger)
+        try:
+            run_as_root(
+                target,
+                f"find {new_path} -type d -exec setfacl -d -m g::rwx -m m::rwx {{}} +",
+                timeout=120,
+                logger=ssh_logger,
+            )
+            run_as_root(
+                target,
+                f"setfacl -R -m g::rwx -m m::rwx {new_path}",
+                timeout=120,
+                logger=ssh_logger,
+            )
+        except SSHError as e:
+            typer.echo(f"  Warning: ACL setup failed: {e}", err=True)
+
+        # Fix parent directory traversal
+        run_as_root(
+            target,
+            f'sh -c \'p={new_path}; while [ "$p" != "/" ]; do chmod a+x "$p"; p=$(dirname "$p"); done\'',
+            logger=ssh_logger,
+        )
+
+        # Regenerate tmuxinator config at new path
+        from agentworks.ssh import write_file
+        from agentworks.workspaces.tmuxinator import console_session_name, generate_config
+
+        tmux_config = generate_config(ws_name, new_path)
+        write_file(target, f"{new_path}/.tmuxinator.yml", tmux_config, logger=ssh_logger)
+        session = console_session_name(ws_name)
+        ssh_run(target, "mkdir -p ~/.config/tmuxinator", timeout=10, logger=ssh_logger)
+        ssh_run(
+            target,
+            f"ln -sf {new_path}/.tmuxinator.yml ~/.config/tmuxinator/{session}.yml",
+            timeout=10,
+            logger=ssh_logger,
+        )
+
+        # Update database
+        db.update_workspace_path(ws_name, new_path)
+        typer.echo(f"Database updated: workspace_path = {new_path}")
+
+        # Regenerate VS Code workspace file
+        vscode_path = generate_vscode_workspace(vm, config, ws_name, new_path)
+        typer.echo(f"VS Code workspace updated: {vscode_path}")
+
+        # Handle old directory
+        if remove_old:
+            typer.echo(f"Removing old directory {old_path}...")
+            run_as_root(target, f"rm -rf {old_path}", timeout=60, logger=ssh_logger)
+            typer.echo("Old directory removed")
+        else:
+            typer.echo(f"\nOld directory left in place at {old_path}")
+            typer.echo("Remove it manually when ready, or re-run with --remove-old")
+
+    except SystemExit:
+        ssh_logger.close()
+        raise
+    except Exception as e:
+        typer.echo(f"Error during rehome: {e}", err=True)
+        typer.echo(f"  SSH log: {ssh_logger.path}", err=True)
+        typer.echo("  The database was NOT updated. The workspace is still at the original path.", err=True)
+        ssh_logger.close()
+        raise typer.Exit(1) from None
+
+    ssh_logger.close()
+    typer.echo(f"\nWorkspace '{ws_name}' rehomed to {new_path}")
+
+
+def _rehome_local(
+    db: Database,
+    config: Config,
+    ws: WorkspaceRow,
+    new_path: str,
+    *,
+    remove_old: bool,
+    yes: bool,
+) -> None:
+    """Rehome a local workspace."""
+    import shutil
+    from pathlib import Path
+
+    ws_name = ws.name
+    old_path = ws.workspace_path
+
+    old_dir = Path(old_path)
+    new_dir = Path(new_path)
+
+    if not old_dir.exists():
+        typer.echo(f"Error: source directory {old_path} does not exist", err=True)
+        raise typer.Exit(1)
+
+    if new_dir.exists():
+        typer.echo(f"Error: target directory {new_path} already exists", err=True)
+        raise typer.Exit(1)
+
+    if not yes:
+        typer.echo(f"Rehome workspace '{ws_name}':")
+        typer.echo(f"  From: {old_path}")
+        typer.echo(f"  To:   {new_path}")
+        if remove_old:
+            typer.echo("  Old directory will be REMOVED after copy")
+        else:
+            typer.echo("  Old directory will be LEFT IN PLACE")
+        typer.confirm("Proceed?", abort=True)
+
+    # Copy
+    typer.echo("Copying workspace...")
+    new_dir.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(old_path, new_path, symlinks=True)
+
+    # Verify
+    if not new_dir.exists():
+        typer.echo("Error: copy verification failed, target directory not found", err=True)
+        raise typer.Exit(1)
+
+    # Regenerate tmuxinator config at new path
+    from agentworks.workspaces.tmuxinator import console_session_name, generate_config
+
+    tmux_file = new_dir / ".tmuxinator.yml"
+    if tmux_file.exists() or (old_dir / ".tmuxinator.yml").exists():
+        tmux_config = generate_config(ws_name, new_path)
+        tmux_file.write_text(tmux_config)
+        session = console_session_name(ws_name)
+        tmux_config_dir = Path.home() / ".config" / "tmuxinator"
+        tmux_config_dir.mkdir(parents=True, exist_ok=True)
+        link = tmux_config_dir / f"{session}.yml"
+        link.unlink(missing_ok=True)
+        link.symlink_to(tmux_file)
+
+    # Update database
+    db.update_workspace_path(ws_name, new_path)
+    typer.echo(f"Database updated: workspace_path = {new_path}")
+
+    # Handle old directory
+    if remove_old:
+        typer.echo(f"Removing old directory {old_path}...")
+        shutil.rmtree(old_path)
+        typer.echo("Old directory removed")
+    else:
+        typer.echo(f"\nOld directory left in place at {old_path}")
+        typer.echo("Remove it manually when ready, or re-run with --remove-old")
+
+    typer.echo(f"\nWorkspace '{ws_name}' rehomed to {new_path}")
 
 
 def delete_workspace(
@@ -290,8 +740,7 @@ def delete_workspace(
     task_count = len(db.list_tasks(workspace_name=name))
     if task_count > 0 and not force:
         typer.echo(
-            f"Error: workspace '{name}' has {task_count} task(s). "
-            "Delete them first, or use --force.",
+            f"Error: workspace '{name}' has {task_count} task(s). Delete them first, or use --force.",
             err=True,
         )
         raise typer.Exit(1)
@@ -324,10 +773,13 @@ def delete_workspace(
                 kill_task_session(name, task.name, run_command=run_command)
     db.delete_tasks_for_workspace(name)
 
-    # Delete agents (remote cleanup + DB)
-    from agentworks.agents.manager import delete_agents_for_workspace
+    # Revoke agent workspace grants (agents are VM-scoped, not deleted with workspaces)
+    if ws.type == "vm" and ws.vm_name:
+        vm_for_grants = db.get_vm(ws.vm_name)
+        if vm_for_grants:
+            from agentworks.agents.manager import revoke_workspace_grants
 
-    delete_agents_for_workspace(db, config, ws, logger=ssh_logger)
+            revoke_workspace_grants(db, config, name, vm_for_grants)
 
     if ws.type == "local":
         from agentworks.workspaces.backends.local import delete_local_workspace
@@ -344,8 +796,8 @@ def delete_workspace(
         ssh_logger.close()
 
     # Remove .code-workspace file
-    code_ws_path = config.paths.code_workspaces / f"{name}.code-workspace"
-    code_ws_path.unlink(missing_ok=True)
+    vscode_path = config.paths.vscode_workspaces / f"{name}.code-workspace"
+    vscode_path.unlink(missing_ok=True)
 
     db.delete_workspace(name)
     typer.echo(f"Workspace '{name}' deleted")
@@ -389,6 +841,8 @@ def copy_workspace(
                 ["tar", "czf", str(tmp_path), "-C", src_ws.workspace_path, "."],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
             )
             if result.returncode != 0:
                 typer.echo(f"Error: tar failed: {result.stderr.strip()}", err=True)
@@ -434,16 +888,21 @@ def copy_workspace(
                 ["tar", "xzf", str(tmp_path), "-C", workspace_path],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
             )
             if result.returncode != 0:
                 typer.echo(f"Error: tar failed: {result.stderr.strip()}", err=True)
                 raise typer.Exit(1)
 
             db.insert_workspace(
-                dest_name, ws_type="local", workspace_path=workspace_path, template="copied",
+                dest_name,
+                ws_type="local",
+                workspace_path=workspace_path,
+                template="copied",
             )
         else:
-            from agentworks.ssh import SSHLogger, copy_to, run
+            from agentworks.ssh import SSHLogger, copy_to, run, run_as_root
 
             dest_vm = _resolve_vm(db, vm_name)
             _guard_vm_status(dest_vm)
@@ -454,10 +913,10 @@ def copy_workspace(
 
             lg = SSHLogger(dest_vm.name, "workspace-copy")
             dest_target = ssh_target_for_vm(dest_vm, config)
-            workspace_path = f"/home/{dest_vm.admin_username}/workspaces/{dest_name}"
+            workspace_path = f"{config.paths.vm_workspaces}/{dest_name}"
 
             typer.echo(f"Unpacking to workspace '{dest_name}' on VM '{dest_vm.name}'...")
-            run(dest_target, f"mkdir -p {workspace_path}", timeout=10, logger=lg)
+            run_as_root(dest_target, f"mkdir -p {workspace_path}", timeout=10, logger=lg)
 
             remote_tmp = f"/tmp/{dest_name}-copy.tgz"
             copy_to(dest_target, tmp_path, remote_tmp, timeout=300)
@@ -465,13 +924,16 @@ def copy_workspace(
             run(dest_target, f"rm -f {remote_tmp}", check=False, timeout=10, logger=lg)
 
             db.insert_workspace(
-                dest_name, ws_type="vm", vm_name=dest_vm.name,
-                workspace_path=workspace_path, template="copied",
+                dest_name,
+                ws_type="vm",
+                vm_name=dest_vm.name,
+                workspace_path=workspace_path,
+                template="copied",
             )
 
             # Generate tmuxinator config and VS Code workspace
             from agentworks.ssh import write_file
-            from agentworks.workspaces.backends.vm import generate_code_workspace
+            from agentworks.workspaces.backends.vm import generate_vscode_workspace
             from agentworks.workspaces.tmuxinator import console_session_name, generate_config
 
             tmux_config = generate_config(dest_name, workspace_path)
@@ -484,8 +946,8 @@ def copy_workspace(
                 timeout=10,
                 logger=lg,
             )
-            code_ws_path = generate_code_workspace(dest_vm, config, dest_name, workspace_path)
-            typer.echo(f"  VS Code workspace: {code_ws_path}")
+            vscode_path = generate_vscode_workspace(dest_vm, config, dest_name, workspace_path)
+            typer.echo(f"  VS Code workspace: {vscode_path}")
             lg.close()
     finally:
         tmp_path.unlink(missing_ok=True)

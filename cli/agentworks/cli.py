@@ -44,10 +44,17 @@ app.add_typer(workspace_app)
 
 agent_app = typer.Typer(
     name="agent",
-    help="Manage agents (isolated users within workspaces).",
+    help="Manage agents (isolated users on VMs).",
     no_args_is_help=True,
 )
 app.add_typer(agent_app)
+
+agent_grants_app = typer.Typer(
+    name="workspace-grants",
+    help="Manage agent workspace access grants.",
+    no_args_is_help=True,
+)
+agent_app.add_typer(agent_grants_app)
 
 task_app = typer.Typer(
     name="task",
@@ -71,7 +78,6 @@ config_app = typer.Typer(
 app.add_typer(config_app)
 
 
-
 # -- Global options --------------------------------------------------------
 
 _non_interactive = False
@@ -80,7 +86,8 @@ _non_interactive = False
 @app.callback()
 def _global_options(
     non_interactive: Annotated[
-        bool, typer.Option("--non-interactive", help="Disable interactive prompts"),
+        bool,
+        typer.Option("--non-interactive", help="Disable interactive prompts"),
     ] = False,
 ) -> None:
     """Global options for all commands."""
@@ -441,7 +448,11 @@ def vm_console(
     from agentworks.tasks.console import attach_console
 
     attach_console(
-        _get_db(), load_config(), vm_name=name, recreate=recreate, allow_nesting=allow_nesting,
+        _get_db(),
+        load_config(),
+        vm_name=name,
+        recreate=recreate,
+        allow_nesting=allow_nesting,
     )
 
 
@@ -504,7 +515,11 @@ def workspace_console(
     from agentworks.workspaces.manager import console_workspace
 
     console_workspace(
-        _get_db(), load_config(), name, allow_nesting=allow_nesting, recreate=recreate,
+        _get_db(),
+        load_config(),
+        name,
+        allow_nesting=allow_nesting,
+        recreate=recreate,
     )
 
 
@@ -522,6 +537,35 @@ def workspace_list(
 
     ws_type = "local" if local else None
     list_workspaces(_get_db(), vm_name=vm, ws_type=ws_type)
+
+
+@workspace_app.command("rehome")
+def workspace_rehome(
+    name: Annotated[str, typer.Argument(help="Workspace name")],
+    target: Annotated[
+        str | None, typer.Option("--target", help="Target path (default: configured workspace dir)")
+    ] = None,
+    remove_old: Annotated[
+        bool, typer.Option("--remove-old", help="Remove the old directory after verified copy")
+    ] = False,
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip confirmation")] = False,
+) -> None:
+    """Move a workspace to a new directory path."""
+    from agentworks.config import load_config
+    from agentworks.workspaces.manager import rehome_workspace
+
+    rehome_workspace(_get_db(), load_config(), name, target_path=target, remove_old=remove_old, yes=yes)
+
+
+@workspace_app.command("repair")
+def workspace_repair(
+    name: Annotated[str, typer.Argument(help="Workspace name")],
+) -> None:
+    """Repair workspace infrastructure: group, permissions, ACLs, agent access."""
+    from agentworks.config import load_config
+    from agentworks.workspaces.manager import repair_workspace
+
+    repair_workspace(_get_db(), load_config(), name)
 
 
 @workspace_app.command("delete")
@@ -569,48 +613,114 @@ def workspace_copy(
 @agent_app.command("create")
 def agent_create(
     name: Annotated[str | None, typer.Option("--name", help="Agent name (prompted if omitted)")] = None,
-    workspace: Annotated[str | None, typer.Option("--workspace", help="Workspace name")] = None,
+    vm: Annotated[str | None, typer.Option("--vm", help="Target VM")] = None,
     template: Annotated[str | None, typer.Option("--template", help="Agent template")] = None,
+    grant_all_workspaces: Annotated[
+        bool,
+        typer.Option("--grant-all-workspaces", help="Grant access to all workspaces"),
+    ] = False,
 ) -> None:
-    """Create an agent (isolated Linux user) on a workspace."""
+    """Create an agent (isolated Linux user) on a VM."""
     from agentworks.agents.manager import create_agent
     from agentworks.config import load_config
 
     db = _get_db()
 
-    # 1. Select target (workspace), 2. Name
-    resolved_ws = _prompt_workspace(db, workspace)
+    # 1. Select target (VM), 2. Name
+    resolved_vm = _prompt_vm(db, vm)
     resolved_name = _prompt_name("Agent", name)
 
-    create_agent(db, load_config(), name=resolved_name, workspace_name=resolved_ws, template=template)
+    create_agent(
+        db,
+        load_config(),
+        name=resolved_name,
+        vm_name=resolved_vm,
+        template=template,
+        grant_all_workspaces=grant_all_workspaces,
+    )
 
 
 @agent_app.command("list")
 def agent_list(
-    workspace: Annotated[str | None, typer.Option("--workspace", help="Filter by workspace")] = None,
+    vm: Annotated[str | None, typer.Option("--vm", help="Filter by VM")] = None,
 ) -> None:
     """List agents."""
     from agentworks.agents.manager import list_agents
 
-    list_agents(_get_db(), workspace_name=workspace)
+    list_agents(_get_db(), vm_name=vm)
+
+
+@agent_app.command("describe")
+def agent_describe(
+    name: Annotated[str, typer.Argument(help="Agent name")],
+) -> None:
+    """Show detailed information about an agent."""
+    from agentworks.agents.manager import describe_agent
+
+    describe_agent(_get_db(), name=name)
 
 
 @agent_app.command("reinit")
 def agent_reinit(
     name: Annotated[str, typer.Argument(help="Agent name")],
-    workspace: Annotated[str, typer.Option("--workspace", help="Workspace name")] = ...,  # type: ignore[assignment]
 ) -> None:
     """Re-run agent setup using the stored template."""
     from agentworks.agents.manager import reinit_agent
     from agentworks.config import load_config
 
-    reinit_agent(_get_db(), load_config(), name=name, workspace_name=workspace)
+    reinit_agent(_get_db(), load_config(), name=name)
+
+
+@agent_grants_app.command("grant")
+def agent_grants_grant(
+    name: Annotated[str, typer.Argument(help="Agent name")],
+    workspaces: Annotated[str | None, typer.Argument(help="Workspace names (comma-separated)")] = None,
+    all_workspaces: Annotated[bool, typer.Option("--all", help="Grant access to all workspaces")] = False,
+) -> None:
+    """Grant an agent explicit access to workspaces."""
+    from agentworks.agents.manager import grant_workspaces
+    from agentworks.config import load_config
+
+    if not all_workspaces and not workspaces:
+        typer.echo("Error: specify workspace names or --all", err=True)
+        raise typer.Exit(1)
+
+    ws_list = [w.strip() for w in workspaces.split(",")] if workspaces else []
+    grant_workspaces(_get_db(), load_config(), agent_name=name, workspace_names=ws_list, grant_all=all_workspaces)
+
+
+@agent_grants_app.command("deny")
+def agent_grants_deny(
+    name: Annotated[str, typer.Argument(help="Agent name")],
+    workspaces: Annotated[str | None, typer.Argument(help="Workspace names (comma-separated)")] = None,
+    all_workspaces: Annotated[bool, typer.Option("--all", help="Remove all explicit grants")] = False,
+) -> None:
+    """Remove explicit workspace grants from an agent."""
+    from agentworks.agents.manager import deny_workspaces
+    from agentworks.config import load_config
+
+    if not all_workspaces and not workspaces:
+        typer.echo("Error: specify workspace names or --all", err=True)
+        raise typer.Exit(1)
+
+    ws_list = [w.strip() for w in workspaces.split(",")] if workspaces else []
+    deny_workspaces(_get_db(), load_config(), agent_name=name, workspace_names=ws_list, deny_all=all_workspaces)
+
+
+@agent_grants_app.command("list")
+def agent_grants_list(
+    name: Annotated[str, typer.Argument(help="Agent name")],
+) -> None:
+    """List workspace grants for an agent."""
+    from agentworks.agents.manager import list_grants
+
+    list_grants(_get_db(), agent_name=name)
 
 
 @agent_app.command("shell")
 def agent_shell(
     name: Annotated[str, typer.Argument(help="Agent name")],
-    workspace: Annotated[str, typer.Option("--workspace", help="Workspace name")] = ...,  # type: ignore[assignment]
+    workspace: Annotated[str | None, typer.Option("--workspace", help="cd into a workspace")] = None,
 ) -> None:
     """Open a shell as an agent user."""
     from agentworks.agents.manager import shell_agent
@@ -622,13 +732,14 @@ def agent_shell(
 @agent_app.command("delete")
 def agent_delete(
     name: Annotated[str, typer.Argument(help="Agent name")],
-    workspace: Annotated[str, typer.Option("--workspace", help="Workspace name")] = ...,  # type: ignore[assignment]
+    force: Annotated[bool, typer.Option("--force", help="Force delete even with tasks")] = False,
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip confirmation")] = False,
 ) -> None:
-    """Delete an agent from a workspace."""
+    """Delete an agent."""
     from agentworks.agents.manager import delete_agent
     from agentworks.config import load_config
 
-    delete_agent(_get_db(), load_config(), name=name, workspace_name=workspace)
+    delete_agent(_get_db(), load_config(), name=name, force=force, yes=yes)
 
 
 # -- Task commands ---------------------------------------------------------
@@ -658,8 +769,7 @@ def task_create(
         raise typer.Exit(1)
     if not new_workspace and (workspace_name or workspace_template or vm):
         typer.echo(
-            "Error: --workspace-name, --workspace-template, and --vm "
-            "require --new-workspace",
+            "Error: --workspace-name, --workspace-template, and --vm require --new-workspace",
             err=True,
         )
         raise typer.Exit(1)
@@ -677,7 +787,8 @@ def task_create(
 
         # Create the workspace
         create_workspace(
-            db, config,
+            db,
+            config,
             name=resolved_ws_name,
             vm_name=resolved_vm,
             template_name=workspace_template,
@@ -981,6 +1092,35 @@ def config_sample() -> None:
     typer.echo(sample.read_text(), nl=False)
 
 
+@config_app.command("sync-vscode-workspaces")
+def config_sync_vscode_workspaces() -> None:
+    """Regenerate .code-workspace files for all VM workspaces."""
+    from agentworks.config import load_config
+    from agentworks.workspaces.backends.vm import generate_vscode_workspace
+
+    config = load_config()
+    db = _get_db()
+
+    workspaces = db.list_workspaces(ws_type="vm")
+    if not workspaces:
+        typer.echo("No VM workspaces found.")
+        return
+
+    count = 0
+    for ws in workspaces:
+        if ws.vm_name is None:
+            continue
+        vm = db.get_vm(ws.vm_name)
+        if vm is None:
+            typer.echo(f"  Skipping '{ws.name}': VM '{ws.vm_name}' not found", err=True)
+            continue
+        path = generate_vscode_workspace(vm, config, ws.name, ws.workspace_path)
+        typer.echo(f"  {ws.name} -> {path}")
+        count += 1
+
+    typer.echo(f"Regenerated {count} VS Code workspace file(s) in {config.paths.vscode_workspaces}")
+
+
 @config_app.command("sync-ssh-config")
 def config_sync_ssh_config() -> None:
     """Rebuild SSH config entries for all VMs from current state."""
@@ -988,4 +1128,3 @@ def config_sync_ssh_config() -> None:
     from agentworks.ssh_config import sync_ssh_config
 
     sync_ssh_config(load_config(), _get_db())
-

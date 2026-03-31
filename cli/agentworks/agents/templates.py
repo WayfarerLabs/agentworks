@@ -34,7 +34,8 @@ class ResolvedAgentTemplate:
 
 
 def resolve_from_dict(
-    templates: dict[str, AgentTemplate], template_name: str | None = None,
+    templates: dict[str, AgentTemplate],
+    template_name: str | None = None,
 ) -> ResolvedAgentTemplate:
     """Resolve an agent template from a templates dict (no Config required)."""
     if template_name is not None and template_name != "default":

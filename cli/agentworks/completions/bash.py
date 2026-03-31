@@ -23,16 +23,14 @@ DYNAMIC_SNIPPETS: dict[str, str] = {
     "tasks": ("$(agentworks task list 2>/dev/null | tail -n +3 | awk '{print $1}')"),
     "agents": ("$(agentworks agent list 2>/dev/null | tail -n +3 | awk '{print $1}')"),
     "task_templates": (
-        'default $(sed -n \'s/^\\[task_templates\\.\\([^]]*\\)\\]/\\1/p\''
+        "default $(sed -n 's/^\\[task_templates\\.\\([^]]*\\)\\]/\\1/p'"
         ' "$HOME/.config/agentworks/config.toml" 2>/dev/null)'
     ),
     "vm_templates": (
-        "$(sed -n 's/^\\[vm_templates\\.\\([^]]*\\)\\]/\\1/p'"
-        ' "$HOME/.config/agentworks/config.toml" 2>/dev/null)'
+        "$(sed -n 's/^\\[vm_templates\\.\\([^]]*\\)\\]/\\1/p' \"$HOME/.config/agentworks/config.toml\" 2>/dev/null)"
     ),
     "agent_templates": (
-        "$(sed -n 's/^\\[agent_templates\\.\\([^]]*\\)\\]/\\1/p'"
-        ' "$HOME/.config/agentworks/config.toml" 2>/dev/null)'
+        "$(sed -n 's/^\\[agent_templates\\.\\([^]]*\\)\\]/\\1/p' \"$HOME/.config/agentworks/config.toml\" 2>/dev/null)"
     ),
 }
 

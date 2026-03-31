@@ -46,10 +46,13 @@ def test_primary_key_only(tmp_path: Path) -> None:
 
 
 def test_primary_plus_extra_keys(tmp_path: Path) -> None:
-    config = _make_config(tmp_path, extra_keys=[
-        "ssh-rsa BBBB-extra1",
-        "ssh-ed25519 CCCC-extra2",
-    ])
+    config = _make_config(
+        tmp_path,
+        extra_keys=[
+            "ssh-rsa BBBB-extra1",
+            "ssh-ed25519 CCCC-extra2",
+        ],
+    )
     target = MagicMock()
     logger = MagicMock()
     logger.has_warnings = False

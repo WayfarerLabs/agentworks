@@ -117,36 +117,32 @@ def test_count_helpers(db: Database) -> None:
 
 def test_roundtrip_agent(db: Database) -> None:
     db.insert_vm("dev-vm", platform="lima")
-    db.insert_workspace("ws-1", ws_type="vm", workspace_path="/tmp/ws-1", vm_name="dev-vm")
 
-    agent = db.insert_agent("coder", "ws-1", "ws-1--coder")
+    agent = db.insert_agent("coder", "dev-vm", "agt--coder")
     assert agent.name == "coder"
-    assert agent.workspace_name == "ws-1"
-    assert agent.linux_user == "ws-1--coder"
+    assert agent.vm_name == "dev-vm"
+    assert agent.linux_user == "agt--coder"
+    assert agent.grant_all is False
 
-    fetched = db.get_agent("ws-1", "coder")
+    fetched = db.get_agent("coder")
     assert fetched is not None
-    assert fetched.linux_user == "ws-1--coder"
+    assert fetched.linux_user == "agt--coder"
 
-    assert db.get_agent("ws-1", "nonexistent") is None
+    assert db.get_agent("nonexistent") is None
 
 
 def test_list_agents(db: Database) -> None:
     db.insert_vm("dev-vm", platform="lima")
-    db.insert_workspace("ws-1", ws_type="vm", workspace_path="/tmp/ws-1", vm_name="dev-vm")
-    db.insert_workspace("ws-2", ws_type="vm", workspace_path="/tmp/ws-2", vm_name="dev-vm")
+    db.insert_vm("other-vm", platform="lima")
 
-    db.insert_agent("coder", "ws-1", "ws-1--coder")
-    db.insert_agent("reviewer", "ws-1", "ws-1--reviewer")
-    db.insert_agent("coder", "ws-2", "ws-2--coder")
+    db.insert_agent("coder", "dev-vm", "agt--coder")
+    db.insert_agent("reviewer", "dev-vm", "agt--reviewer")
+    db.insert_agent("helper", "other-vm", "agt--helper")
 
-    # filter by workspace
-    ws1_agents = db.list_agents(workspace_name="ws-1")
-    assert len(ws1_agents) == 2
-    assert [a.name for a in ws1_agents] == ["coder", "reviewer"]
-
-    ws2_agents = db.list_agents(workspace_name="ws-2")
-    assert len(ws2_agents) == 1
+    # filter by VM
+    vm_agents = db.list_agents(vm_name="dev-vm")
+    assert len(vm_agents) == 2
+    assert [a.name for a in vm_agents] == ["coder", "reviewer"]
 
     # list all
     all_agents = db.list_agents()
@@ -155,63 +151,84 @@ def test_list_agents(db: Database) -> None:
 
 def test_delete_agent(db: Database) -> None:
     db.insert_vm("dev-vm", platform="lima")
-    db.insert_workspace("ws-1", ws_type="vm", workspace_path="/tmp/ws-1", vm_name="dev-vm")
-    db.insert_agent("coder", "ws-1", "ws-1--coder")
+    db.insert_agent("coder", "dev-vm", "agt--coder")
 
-    db.delete_agent("ws-1", "coder")
-    assert db.get_agent("ws-1", "coder") is None
+    db.delete_agent("coder")
+    assert db.get_agent("coder") is None
 
 
-def test_workspace_delete_cascades_agents(db: Database) -> None:
+def test_workspace_delete_does_not_cascade_agents(db: Database) -> None:
+    """Agents are VM-scoped; deleting a workspace only removes grants."""
     db.insert_vm("dev-vm", platform="lima")
     db.insert_workspace("ws-1", ws_type="vm", workspace_path="/tmp/ws-1", vm_name="dev-vm")
-    db.insert_agent("coder", "ws-1", "ws-1--coder")
-    db.insert_agent("reviewer", "ws-1", "ws-1--reviewer")
+    db.insert_agent("coder", "dev-vm", "agt--coder")
+    db.insert_agent_grant("coder", "ws-1", "explicit")
 
     db.delete_workspace("ws-1")
-    assert len(db.list_agents(workspace_name="ws-1")) == 0
+    # Agent still exists
+    assert db.get_agent("coder") is not None
+    # But grant is gone
+    assert not db.has_any_grant("coder", "ws-1")
 
 
 def test_vm_delete_cascades_agents(db: Database) -> None:
     db.insert_vm("dev-vm", platform="lima")
-    db.insert_workspace("ws-1", ws_type="vm", workspace_path="/tmp/ws-1", vm_name="dev-vm")
-    db.insert_agent("coder", "ws-1", "ws-1--coder")
+    db.insert_agent("coder", "dev-vm", "agt--coder")
 
     db.delete_vm("dev-vm")
-    assert len(db.list_agents(workspace_name="ws-1")) == 0
+    assert db.get_agent("coder") is None
+
+
+def test_agent_name_unique(db: Database) -> None:
+    db.insert_vm("dev-vm", platform="lima")
+    db.insert_agent("coder", "dev-vm", "agt--coder")
+
+    with pytest.raises(sqlite3.IntegrityError):
+        db.insert_agent("coder", "dev-vm", "agt--coder2")  # duplicate name
 
 
 def test_agent_linux_user_unique(db: Database) -> None:
     db.insert_vm("dev-vm", platform="lima")
-    db.insert_workspace("ws-1", ws_type="vm", workspace_path="/tmp/ws-1", vm_name="dev-vm")
-    db.insert_agent("coder", "ws-1", "ws-1--coder")
+    db.insert_agent("coder", "dev-vm", "agt--coder")
 
     with pytest.raises(sqlite3.IntegrityError):
-        db.insert_agent("coder2", "ws-1", "ws-1--coder")  # duplicate linux_user
+        db.insert_agent("coder2", "dev-vm", "agt--coder")  # duplicate linux_user
 
 
-def test_agent_composite_pk(db: Database) -> None:
-    """Same agent name in different workspaces is allowed."""
+def test_agent_grants(db: Database) -> None:
     db.insert_vm("dev-vm", platform="lima")
     db.insert_workspace("ws-1", ws_type="vm", workspace_path="/tmp/ws-1", vm_name="dev-vm")
     db.insert_workspace("ws-2", ws_type="vm", workspace_path="/tmp/ws-2", vm_name="dev-vm")
+    db.insert_agent("coder", "dev-vm", "agt--coder")
 
-    db.insert_agent("coder", "ws-1", "ws-1--coder")
-    db.insert_agent("coder", "ws-2", "ws-2--coder")
+    # Explicit grants
+    db.insert_agent_grant("coder", "ws-1", "explicit")
+    assert db.has_any_grant("coder", "ws-1")
+    assert not db.has_any_grant("coder", "ws-2")
 
-    assert db.get_agent("ws-1", "coder") is not None
-    assert db.get_agent("ws-2", "coder") is not None
+    # Implicit grant via task
+    db.insert_agent_grant("coder", "ws-2", "implicit", task_name="task-1")
+    assert db.has_any_grant("coder", "ws-2")
+    assert db.count_agent_grants("coder") == 2
+
+    # Remove implicit grant
+    db.delete_agent_grant("coder", "ws-2", "implicit", task_name="task-1")
+    assert not db.has_any_grant("coder", "ws-2")
+
+    # Granted workspaces
+    assert db.list_granted_workspaces("coder") == ["ws-1"]
 
 
-def test_delete_agents_for_workspace(db: Database) -> None:
+def test_agent_grant_all(db: Database) -> None:
     db.insert_vm("dev-vm", platform="lima")
-    db.insert_workspace("ws-1", ws_type="vm", workspace_path="/tmp/ws-1", vm_name="dev-vm")
-    db.insert_agent("coder", "ws-1", "ws-1--coder")
-    db.insert_agent("reviewer", "ws-1", "ws-1--reviewer")
+    db.insert_agent("coder", "dev-vm", "agt--coder", grant_all=True)
 
-    deleted = db.delete_agents_for_workspace("ws-1")
-    assert len(deleted) == 2
-    assert len(db.list_agents(workspace_name="ws-1")) == 0
+    agent = db.get_agent("coder")
+    assert agent is not None
+    assert agent.grant_all is True
+
+    grant_all_agents = db.list_agents_on_vm_with_grant_all("dev-vm")
+    assert len(grant_all_agents) == 1
 
 
 def test_provisioning_status(db: Database) -> None:

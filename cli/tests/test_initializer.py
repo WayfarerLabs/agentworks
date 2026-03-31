@@ -94,13 +94,11 @@ def _make_target(*, key_exists: bool = False) -> MagicMock:
             result.stderr = ""
             if "test.list" in cmd:
                 result.stdout = (
-                    "deb [arch=arm64 signed-by=/etc/apt/keyrings/test.gpg]"
-                    " https://example.com stable main\n"
+                    "deb [arch=arm64 signed-by=/etc/apt/keyrings/test.gpg] https://example.com stable main\n"
                 )
             elif "dearmor.list" in cmd:
                 result.stdout = (
-                    "deb [arch=arm64 signed-by=/etc/apt/keyrings/dearmor.gpg]"
-                    " https://example.com stable main\n"
+                    "deb [arch=arm64 signed-by=/etc/apt/keyrings/dearmor.gpg] https://example.com stable main\n"
                 )
             else:
                 result.stdout = ""
@@ -228,7 +226,12 @@ def test_run_catalog_commands_returns_path() -> None:
     logger.has_warnings = False
 
     result = _run_catalog_commands(
-        target, ["user-tool"], catalog.user_install_commands, "zsh", "/home/agentworks", logger,
+        target,
+        ["user-tool"],
+        catalog.user_install_commands,
+        "zsh",
+        "/home/agentworks",
+        logger,
     )
 
     assert result == ["~/.user-tool/bin"]
@@ -241,7 +244,12 @@ def test_run_catalog_commands_missing_entry() -> None:
     logger.has_warnings = False
 
     result = _run_catalog_commands(
-        target, ["nonexistent"], catalog.user_install_commands, "zsh", "/home/agentworks", logger,
+        target,
+        ["nonexistent"],
+        catalog.user_install_commands,
+        "zsh",
+        "/home/agentworks",
+        logger,
     )
 
     assert result == []
@@ -254,7 +262,12 @@ def test_run_catalog_commands_empty() -> None:
     logger = MagicMock()
 
     result = _run_catalog_commands(
-        target, [], catalog.user_install_commands, "zsh", "/home/agentworks", logger,
+        target,
+        [],
+        catalog.user_install_commands,
+        "zsh",
+        "/home/agentworks",
+        logger,
     )
 
     assert result == []
@@ -280,7 +293,12 @@ def test_run_catalog_commands_skips_when_test_exec_found() -> None:
     logger.has_warnings = False
 
     result = _run_catalog_commands(
-        target, ["my-tool"], entries, "zsh", "/home/agentworks", logger,
+        target,
+        ["my-tool"],
+        entries,
+        "zsh",
+        "/home/agentworks",
+        logger,
     )
 
     # PATH additions should still be returned
@@ -318,7 +336,12 @@ def test_run_catalog_commands_runs_when_test_exec_missing() -> None:
     logger.has_warnings = False
 
     result = _run_catalog_commands(
-        target, ["my-tool"], entries, "zsh", "/home/agentworks", logger,
+        target,
+        ["my-tool"],
+        entries,
+        "zsh",
+        "/home/agentworks",
+        logger,
     )
 
     assert result == ["~/.my-tool/bin"]
@@ -345,7 +368,12 @@ def test_run_catalog_commands_no_test_always_runs() -> None:
     logger.has_warnings = False
 
     result = _run_catalog_commands(
-        target, ["my-tool"], entries, "zsh", "/home/agentworks", logger,
+        target,
+        ["my-tool"],
+        entries,
+        "zsh",
+        "/home/agentworks",
+        logger,
     )
 
     assert result == ["~/.my-tool/bin"]
@@ -376,7 +404,12 @@ def test_run_catalog_commands_skips_when_test_file_found() -> None:
     logger.has_warnings = False
 
     result = _run_catalog_commands(
-        target, ["nvm"], entries, "zsh", "/home/agentworks", logger,
+        target,
+        ["nvm"],
+        entries,
+        "zsh",
+        "/home/agentworks",
+        logger,
     )
 
     assert result == ["~/.nvm/bin"]
@@ -412,7 +445,12 @@ def test_run_catalog_commands_runs_when_test_file_missing() -> None:
     logger.has_warnings = False
 
     result = _run_catalog_commands(
-        target, ["nvm"], entries, "zsh", "/home/agentworks", logger,
+        target,
+        ["nvm"],
+        entries,
+        "zsh",
+        "/home/agentworks",
+        logger,
     )
 
     assert result == ["~/.nvm/bin"]
@@ -438,7 +476,12 @@ def test_run_catalog_commands_skips_when_test_dir_found() -> None:
     logger.has_warnings = False
 
     result = _run_catalog_commands(
-        target, ["oh-my-zsh"], entries, "zsh", "/home/agentworks", logger,
+        target,
+        ["oh-my-zsh"],
+        entries,
+        "zsh",
+        "/home/agentworks",
+        logger,
     )
 
     assert result == []
@@ -474,7 +517,12 @@ def test_run_catalog_commands_runs_when_test_dir_missing() -> None:
     logger.has_warnings = False
 
     result = _run_catalog_commands(
-        target, ["oh-my-zsh"], entries, "zsh", "/home/agentworks", logger,
+        target,
+        ["oh-my-zsh"],
+        entries,
+        "zsh",
+        "/home/agentworks",
+        logger,
     )
 
     assert result == []

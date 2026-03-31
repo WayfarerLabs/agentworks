@@ -33,6 +33,20 @@ if TYPE_CHECKING:
 _STOP_GRACE_SECONDS = 5
 
 
+def _resolve_task_linux_user(db: Database, task: TaskRow, vm: VMRow) -> str:
+    """Resolve the Linux user for a task.
+
+    Agent-mode tasks look up the agent by name. Admin-mode tasks use the VM admin.
+    """
+    if task.agent_name:
+        agent = db.get_agent(task.agent_name)
+        if agent is None:
+            typer.echo(f"Error: agent '{task.agent_name}' not found (referenced by task '{task.name}')", err=True)
+            raise typer.Exit(1)
+        return agent.linux_user
+    return vm.admin_username
+
+
 def _require_workspace(db: Database, name: str) -> WorkspaceRow:
     ws = db.get_workspace(name)
     if ws is None:
@@ -145,7 +159,7 @@ def _build_task_command(
         "workspace_name": workspace_name,
     }
 
-    raw_command = (template.restart_command if restart and template.restart_command else template.command)
+    raw_command = template.restart_command if restart and template.restart_command else template.command
     command = _substitute_template_vars(raw_command, variables)
 
     parts = []
@@ -206,16 +220,29 @@ def create_task(
         raise typer.Exit(1)
 
     # Resolve mode and linux user
+    resolved_agent_name: str | None = None
     if agent_name is not None:
         mode = TaskMode.AGENT
-        agent = db.get_agent(workspace_name, agent_name)
+        agent = db.get_agent(agent_name)
         if agent is None:
+            typer.echo(f"Error: agent '{agent_name}' not found", err=True)
+            raise typer.Exit(1)
+        if agent.vm_name != vm.name:
             typer.echo(
-                f"Error: agent '{agent_name}' not found in workspace '{workspace_name}'",
+                f"Error: agent '{agent_name}' is on VM '{agent.vm_name}', "
+                f"but workspace '{workspace_name}' is on VM '{vm.name}'",
                 err=True,
             )
             raise typer.Exit(1)
         linux_user = agent.linux_user
+        resolved_agent_name = agent_name
+
+        # Auto-grant implicit workspace access if needed
+        if not db.has_any_grant(agent_name, workspace_name):
+            from agentworks.agents.manager import _add_to_workspace_group
+
+            _add_to_workspace_group(vm, config, linux_user, workspace_name)
+        db.insert_agent_grant(agent_name, workspace_name, "implicit", task_name=name)
     else:
         mode = TaskMode.ADMIN
         linux_user = vm.admin_username
@@ -223,7 +250,7 @@ def create_task(
     template = _resolve_template(config, template_name)
 
     # Insert DB record first to avoid orphaned tmux sessions on crash
-    db.insert_task(name, workspace_name, template.name, mode, linux_user)
+    db.insert_task(name, workspace_name, template.name, mode, agent_name=resolved_agent_name)
 
     deploy_restricted_config(run_command, history_limit=config.task.history_limit)
     command = _build_task_command(template, task_name=name, workspace_name=workspace_name)
@@ -309,8 +336,7 @@ def restart_task(
     if session_exists(workspace_name, name, run_command=run_command):
         if not force:
             typer.echo(
-                f"Error: task '{name}' is still running. "
-                "Stop it first, or use --force.",
+                f"Error: task '{name}' is still running. Stop it first, or use --force.",
                 err=True,
             )
             raise typer.Exit(1)
@@ -321,16 +347,20 @@ def restart_task(
 
     # Use restart_command if available, otherwise fall back to command
     command = _build_task_command(
-        template, task_name=name, workspace_name=workspace_name, restart=True,
+        template,
+        task_name=name,
+        workspace_name=workspace_name,
+        restart=True,
     )
     is_admin = task.mode == TaskMode.ADMIN.value
+    linux_user = _resolve_task_linux_user(db, task, vm)
 
     create_task_session(
         workspace_name,
         name,
         ws.workspace_path,
         command,
-        task.linux_user,
+        linux_user,
         run_command=run_command,
         is_admin=is_admin,
     )
@@ -361,8 +391,22 @@ def delete_task(
     if not yes and session_exists(workspace_name, name, run_command=run_command):
         typer.confirm(f"Task '{name}' is still running. Delete anyway?", abort=True)
 
+    # Check if task is an agent task before deleting (need info for grant cleanup)
+    task = db.get_task(workspace_name, name)
+
     kill_task_session(workspace_name, name, run_command=run_command)
     db.delete_task(workspace_name, name)
+
+    # Clean up implicit grant for this task
+    if task and task.agent_name:
+        db.delete_agent_grant(task.agent_name, workspace_name, "implicit", task_name=name)
+        # If no grants remain, remove from workspace group
+        if not db.has_any_grant(task.agent_name, workspace_name):
+            from agentworks.agents.manager import _remove_from_workspace_group
+
+            agent = db.get_agent(task.agent_name)
+            if agent:
+                _remove_from_workspace_group(vm, config, agent.linux_user, workspace_name)
 
     _regenerate_tmuxinator(db, config, vm, ws)
     typer.echo(f"Task '{name}' deleted")
@@ -426,15 +470,13 @@ def list_tasks(
     mode_w = max(len("MODE"), max(len(r[4]) for r in rows))
 
     header = (
-        f"{'NAME':<{name_w}}  {'WORKSPACE':<{ws_w}}  {'VM':<{vm_w}}  "
-        f"{'TEMPLATE':<{tpl_w}}  {'MODE':<{mode_w}}  STATUS"
+        f"{'NAME':<{name_w}}  {'WORKSPACE':<{ws_w}}  {'VM':<{vm_w}}  {'TEMPLATE':<{tpl_w}}  {'MODE':<{mode_w}}  STATUS"
     )
     typer.echo(header)
     typer.echo("-" * len(header))
     for task_name, ws_name, vm_col, tpl, mode, status in rows:
         typer.echo(
-            f"{task_name:<{name_w}}  {ws_name:<{ws_w}}  {vm_col:<{vm_w}}  "
-            f"{tpl:<{tpl_w}}  {mode:<{mode_w}}  {status}"
+            f"{task_name:<{name_w}}  {ws_name:<{ws_w}}  {vm_col:<{vm_w}}  {tpl:<{tpl_w}}  {mode:<{mode_w}}  {status}"
         )
 
 

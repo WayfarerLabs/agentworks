@@ -15,6 +15,9 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from agentworks.config import Config
+    from agentworks.db import VMRow
+
 
 @dataclass(frozen=True)
 class SSHTarget:
@@ -34,19 +37,19 @@ class SSHTarget:
     force_tty: bool = False
 
 
-def ssh_target_for_vm(vm: object, config: object) -> SSHTarget:
+def ssh_target_for_vm(vm: VMRow, config: Config) -> SSHTarget:
     """Build an SSHTarget from a VMRow and Config.
 
-    Accepts object types to avoid circular imports with db/config modules.
     On Windows, forces TTY allocation to prevent zsh from hanging on
     non-interactive piped SSH commands.
     """
     import sys
 
+    assert vm.tailscale_host is not None, f"VM {vm.name} has no Tailscale host"
     return SSHTarget(
-        host=vm.tailscale_host,  # type: ignore[attr-defined]
-        user=vm.admin_username,  # type: ignore[attr-defined]
-        identity_file=config.user.ssh_private_key,  # type: ignore[attr-defined]
+        host=vm.tailscale_host,
+        user=vm.admin_username,
+        identity_file=config.user.ssh_private_key,
         force_tty=sys.platform == "win32",
     )
 
@@ -175,7 +178,7 @@ class SSHLogger:
         self._write("\n".join(lines) + "\n")
 
     def _write(self, text: str) -> None:
-        with open(self.path, "a") as f:
+        with open(self.path, "a", encoding="utf-8", errors="replace") as f:
             f.write(text)
 
 
@@ -244,6 +247,8 @@ def run(
                 args,
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=timeout,
             )
             ssh_result = SSHResult(
@@ -255,8 +260,7 @@ def run(
                 logger.log_command(command, ssh_result)
             if check and not ssh_result.ok:
                 raise SSHError(
-                    f"SSH command failed (exit {result.returncode}): {command}\n"
-                    f"stderr: {result.stderr.strip()}"
+                    f"SSH command failed (exit {result.returncode}): {command}\nstderr: {result.stderr.strip()}"
                 )
             return ssh_result
         except subprocess.TimeoutExpired as err:
@@ -321,7 +325,7 @@ def copy_to(
     dest = f"{target.user}@{target.host}:{remote_path}" if target.user else f"{target.host}:{remote_path}"
     args.append(dest)
 
-    result = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
+    result = subprocess.run(args, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout)
     if result.returncode != 0:
         raise SSHError(f"scp failed: {result.stderr.strip()}")
 
@@ -361,8 +365,6 @@ def write_file(
         run(target, f"chmod {mode} {remote_path}", logger=logger)
 
 
-
-
 @dataclass
 class LimaTarget:
     """Execution target for local Lima VMs (used pre-Tailscale)."""
@@ -381,7 +383,9 @@ def lima_run(
     """Execute a command inside a local Lima VM via limactl shell."""
     args = ["limactl", "shell", target.vm_name, "bash", "-lc", command]
     try:
-        result = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
+        result = subprocess.run(
+            args, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout
+        )
     except subprocess.TimeoutExpired as err:
         raise SSHError(f"Lima command timed out after {timeout}s: {command}") from err
     ssh_result = SSHResult(
@@ -457,7 +461,9 @@ def wsl2_run(
         command,
     ]
     try:
-        result = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
+        result = subprocess.run(
+            args, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout
+        )
     except subprocess.TimeoutExpired as err:
         raise SSHError(f"WSL2 command timed out after {timeout}s: {command}") from err
     ssh_result = SSHResult(
@@ -478,6 +484,8 @@ def _lima_copy_to(target: LimaTarget, local_path: str | Path, remote_path: str) 
         ["limactl", "copy", str(local_path), f"{target.vm_name}:{remote_path}"],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
     )
     if result.returncode != 0:
         raise SSHError(f"limactl copy failed: {result.stderr.strip()}")

@@ -30,7 +30,7 @@ def test_include_directive_uses_resolved_path(tmp_path: Path) -> None:
     assert directive.startswith("Include ")
     assert "config.d/*" in directive
     # Should use forward slashes even on Windows
-    path_part = directive[len("Include "):]
+    path_part = directive[len("Include ") :]
     assert "\\" not in path_part
 
 
@@ -82,10 +82,7 @@ def test_ensure_include_noop_if_present_elsewhere(tmp_path: Path) -> None:
 
 def test_remove_legacy_section(tmp_path: Path) -> None:
     ssh_config = tmp_path / "config"
-    ssh_config.write_text(
-        f"Host *\n    Foo bar\n\n{_LEGACY_MARKER}\n"
-        "Host awvm--old-vm\n    HostName 1.2.3.4\n"
-    )
+    ssh_config.write_text(f"Host *\n    Foo bar\n\n{_LEGACY_MARKER}\nHost awvm--old-vm\n    HostName 1.2.3.4\n")
 
     _remove_legacy_section(ssh_config)
 
@@ -171,8 +168,7 @@ def test_rebuild_config_dir_no_vms_removes_file(tmp_path: Path) -> None:
 def test_rebuild_config_dir_cleans_legacy(tmp_path: Path) -> None:
     config, ssh_dir = _mock_config(tmp_path)
     config.user.ssh_config.write_text(
-        f"Host *\n    Foo bar\n\n{_LEGACY_MARKER}\n"
-        "Host awvm--old-vm\n    HostName 1.2.3.4\n"
+        f"Host *\n    Foo bar\n\n{_LEGACY_MARKER}\nHost awvm--old-vm\n    HostName 1.2.3.4\n"
     )
 
     db = MagicMock()

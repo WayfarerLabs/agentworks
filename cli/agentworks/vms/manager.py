@@ -306,22 +306,30 @@ def describe_vm(db: Database, config: Config, name: str) -> None:
 
     if vm.cpus is not None or live is not None:
         typer.echo(f"\n{'Resources':<16}{'Provisioned':<14}{'Current':<14}{'Used'}")
-        typer.echo(f"  {'CPU':<16}"
-                   f"{str(vm.cpus) if vm.cpus else '-':<14}"
-                   f"{live['cpus'] if live else '-':<14}"
-                   f"{'load ' + live['load_avg'] if live else '-'}")
-        typer.echo(f"  {'Memory':<16}"
-                   f"{str(vm.memory_gib) + 'G' if vm.memory_gib else '-':<14}"
-                   f"{live['mem_total'] if live else '-':<14}"
-                   f"{live['mem_used'] + ' (' + live['mem_pct'] + ')' if live else '-'}")
-        typer.echo(f"  {'Swap':<16}"
-                   f"{str(vm.swap_gib) + 'G' if vm.swap_gib else '-':<14}"
-                   f"{live['swap_total'] if live else '-':<14}"
-                   f"{live['swap_used'] + ' (' + live['swap_pct'] + ')' if live else '-'}")
-        typer.echo(f"  {'Disk':<16}"
-                   f"{str(vm.disk_gib) + 'G' if vm.disk_gib else '-':<14}"
-                   f"{live['disk_total'] if live else '-':<14}"
-                   f"{live['disk_used'] + ' (' + live['disk_pct'] + ')' if live else '-'}")
+        typer.echo(
+            f"  {'CPU':<16}"
+            f"{str(vm.cpus) if vm.cpus else '-':<14}"
+            f"{live['cpus'] if live else '-':<14}"
+            f"{'load ' + live['load_avg'] if live else '-'}"
+        )
+        typer.echo(
+            f"  {'Memory':<16}"
+            f"{str(vm.memory_gib) + 'G' if vm.memory_gib else '-':<14}"
+            f"{live['mem_total'] if live else '-':<14}"
+            f"{live['mem_used'] + ' (' + live['mem_pct'] + ')' if live else '-'}"
+        )
+        typer.echo(
+            f"  {'Swap':<16}"
+            f"{str(vm.swap_gib) + 'G' if vm.swap_gib else '-':<14}"
+            f"{live['swap_total'] if live else '-':<14}"
+            f"{live['swap_used'] + ' (' + live['swap_pct'] + ')' if live else '-'}"
+        )
+        typer.echo(
+            f"  {'Disk':<16}"
+            f"{str(vm.disk_gib) + 'G' if vm.disk_gib else '-':<14}"
+            f"{live['disk_total'] if live else '-':<14}"
+            f"{live['disk_used'] + ' (' + live['disk_pct'] + ')' if live else '-'}"
+        )
 
     if vm.azure_resource_id:
         typer.echo(f"Azure ID:       {vm.azure_resource_id}")
@@ -330,7 +338,18 @@ def describe_vm(db: Database, config: Config, name: str) -> None:
     if vm.last_seen_at:
         typer.echo(f"Last Seen:      {vm.last_seen_at}")
 
-    # Workspaces with tasks and agents
+    # Agents on this VM
+    agents = db.list_agents(vm_name=name)
+    typer.echo(f"\nAgents ({len(agents)}):")
+    if agents:
+        for agent in agents:
+            grant_count = db.count_agent_grants(agent.name)
+            grant_label = "all" if agent.grant_all else str(grant_count)
+            typer.echo(f"  {agent.name}  (user: {agent.linux_user}, grants: {grant_label})")
+    else:
+        typer.echo("  (none)")
+
+    # Workspaces with tasks
     workspaces = db.list_workspaces(vm_name=name)
     typer.echo(f"\nWorkspaces ({len(workspaces)}):")
     if workspaces:
@@ -338,34 +357,13 @@ def describe_vm(db: Database, config: Config, name: str) -> None:
             typer.echo(f"  {ws.name}  ({ws.workspace_path})")
 
             tasks = db.list_tasks(workspace_name=ws.name)
-            agents = db.list_agents(workspace_name=ws.name)
-
-            # Track which agents are used by tasks
-            used_agents: set[str] = set()
-            for task in tasks:
-                if task.mode == "agent":
-                    used_agents.add(task.linux_user)
-
             if tasks:
                 typer.echo(f"    Tasks ({len(tasks)}):")
                 for task in tasks:
-                    if task.mode == "agent":
-                        agent_name = next(
-                            (a.name for a in agents if a.linux_user == task.linux_user), task.linux_user
-                        )
-                        mode_label = f"agent:{agent_name}"
-                    else:
-                        mode_label = "admin"
+                    mode_label = f"agent:{task.agent_name}" if task.agent_name else "admin"
                     typer.echo(f"      {task.name}  [{task.template}]  {task.status}  {mode_label}")
-
-            unused_agents = [a for a in agents if a.linux_user not in used_agents]
-            if unused_agents:
-                typer.echo(f"    Unused Agents ({len(unused_agents)}):")
-                for agent in unused_agents:
-                    typer.echo(f"      {agent.name}  (user: {agent.linux_user})")
-
-            if not tasks and not agents:
-                typer.echo("    (empty)")
+            else:
+                typer.echo("    (no tasks)")
     else:
         typer.echo("  (none)")
 
@@ -496,8 +494,7 @@ def delete_vm(
         if ts_count > 0:
             parts.append(f"{ts_count} task(s)")
         typer.echo(
-            f"Error: VM '{name}' has {', '.join(parts)}. "
-            "Delete them first, or use --force.",
+            f"Error: VM '{name}' has {', '.join(parts)}. Delete them first, or use --force.",
             err=True,
         )
         raise typer.Exit(1)
@@ -621,7 +618,6 @@ def reinit_vm(
         typer.echo(f"  Log: {logger.path}")
     else:
         typer.echo(f"\nVM '{name}' reinitialized successfully!")
-
 
 
 def _tailscale_logout(provisioner: VMProvisioner, vm: VMRow, config: Config) -> None:
@@ -821,6 +817,8 @@ def _is_tailscale_reachable(tailscale_host: str) -> bool:
             ["tailscale", "ping", "--timeout=5s", "-c=1", tailscale_host],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=10,
         )
         return result.returncode == 0
@@ -970,4 +968,3 @@ def _ensure_tailscale(
     from agentworks.ssh_config import sync_ssh_config
 
     sync_ssh_config(config, db)
-

@@ -110,6 +110,8 @@ def _query_powershell_profile() -> Path | None:
                 [cmd, "-NoProfile", "-Command", "$PROFILE"],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=10,
             )
             path = result.stdout.strip()

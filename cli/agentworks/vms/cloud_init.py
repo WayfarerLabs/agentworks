@@ -20,6 +20,7 @@ SYSTEM_PACKAGES = [
     "unzip",
     "tmux",
     "tmuxinator",
+    "acl",
 ]
 
 

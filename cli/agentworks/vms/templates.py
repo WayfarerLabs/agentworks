@@ -43,7 +43,8 @@ class ResolvedVMTemplate:
 
 
 def resolve_from_dict(
-    templates: dict[str, VMTemplate], template_name: str | None = None,
+    templates: dict[str, VMTemplate],
+    template_name: str | None = None,
 ) -> ResolvedVMTemplate:
     """Resolve a VM template from a templates dict (no Config required).
 
