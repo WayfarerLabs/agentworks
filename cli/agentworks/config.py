@@ -95,7 +95,7 @@ class UserConfig:
 class PathsConfig:
     local_workspaces: Path = field(default_factory=lambda: Path.home() / "workspaces")
     vm_workspaces: str = "/opt/agentworks/workspaces"
-    code_workspaces: Path = field(default_factory=lambda: Path.home() / "agentworks-workspaces")
+    vscode_workspaces: Path = field(default_factory=lambda: Path.home() / "aw-vscode-workspaces")
 
 
 @dataclass(frozen=True)
@@ -327,8 +327,13 @@ def _load_paths(data: dict[str, object]) -> PathsConfig:
     defaults = PathsConfig()
     local_ws = _expand(str(raw["local_workspaces"])) if "local_workspaces" in raw else defaults.local_workspaces
     vm_ws = str(raw["vm_workspaces"]) if "vm_workspaces" in raw else defaults.vm_workspaces
-    code_ws = _expand(str(raw["code_workspaces"])) if "code_workspaces" in raw else defaults.code_workspaces
-    return PathsConfig(local_workspaces=local_ws, vm_workspaces=vm_ws, code_workspaces=code_ws)
+    if "vscode_workspaces" in raw:
+        vscode_ws = _expand(str(raw["vscode_workspaces"]))
+    elif "code_workspaces" in raw:
+        vscode_ws = _expand(str(raw["code_workspaces"]))
+    else:
+        vscode_ws = defaults.vscode_workspaces
+    return PathsConfig(local_workspaces=local_ws, vm_workspaces=vm_ws, vscode_workspaces=vscode_ws)
 
 
 _DEFAULTS_KEYS = {"platform", "vm_host"}

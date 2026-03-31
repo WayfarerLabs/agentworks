@@ -1090,6 +1090,35 @@ def config_sample() -> None:
     typer.echo(sample.read_text(), nl=False)
 
 
+@config_app.command("sync-vscode-workspaces")
+def config_sync_vscode_workspaces() -> None:
+    """Regenerate .code-workspace files for all VM workspaces."""
+    from agentworks.config import load_config
+    from agentworks.workspaces.backends.vm import generate_vscode_workspace
+
+    config = load_config()
+    db = _get_db()
+
+    workspaces = db.list_workspaces(ws_type="vm")
+    if not workspaces:
+        typer.echo("No VM workspaces found.")
+        return
+
+    count = 0
+    for ws in workspaces:
+        if ws.vm_name is None:
+            continue
+        vm = db.get_vm(ws.vm_name)
+        if vm is None:
+            typer.echo(f"  Skipping '{ws.name}': VM '{ws.vm_name}' not found", err=True)
+            continue
+        path = generate_vscode_workspace(vm, config, ws.name, ws.workspace_path)
+        typer.echo(f"  {ws.name} -> {path}")
+        count += 1
+
+    typer.echo(f"Regenerated {count} VS Code workspace file(s) in {config.paths.vscode_workspaces}")
+
+
 @config_app.command("sync-ssh-config")
 def config_sync_ssh_config() -> None:
     """Rebuild SSH config entries for all VMs from current state."""

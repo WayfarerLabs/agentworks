@@ -150,7 +150,7 @@ def delete_vm_workspace(
         typer.echo(f"Warning: remote cleanup failed: {e}", err=True)
 
 
-def generate_code_workspace(
+def generate_vscode_workspace(
     vm: VMRow,
     config: Config,
     ws_name: str,
@@ -171,9 +171,9 @@ def generate_code_workspace(
         "remoteAuthority": f"ssh-remote+{ssh_host}",
     }
 
-    code_ws_dir = config.paths.code_workspaces
-    code_ws_dir.mkdir(parents=True, exist_ok=True)
-    code_ws_path = code_ws_dir / f"{ws_name}.code-workspace"
-    code_ws_path.write_text(json.dumps(ws_file, indent=2) + "\n")
+    vscode_dir = config.paths.vscode_workspaces
+    vscode_dir.mkdir(parents=True, exist_ok=True)
+    vscode_path = vscode_dir / f"{ws_name}.code-workspace"
+    vscode_path.write_text(json.dumps(ws_file, indent=2) + "\n")
 
-    return str(code_ws_path)
+    return str(vscode_path)

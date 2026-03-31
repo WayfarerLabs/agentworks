@@ -222,3 +222,21 @@ for the full rationale.
 Workspace groups changed from `ws-<name>` (single hyphen) to `ws--<name>` (double hyphen),
 consistent with the `agt--<name>` agent username convention. Use `agentworks workspace repair` to
 fix existing workspaces.
+
+## `code_workspaces` renamed to `vscode_workspaces`
+
+The `[paths]` setting `code_workspaces` has been renamed to `vscode_workspaces` for clarity.
+
+**Before:**
+
+```toml
+[paths]
+code_workspaces = "~/aw-vscode-workspaces"
+```
+
+**After:**
+
+```toml
+[paths]
+vscode_workspaces = "~/aw-vscode-workspaces"
+```

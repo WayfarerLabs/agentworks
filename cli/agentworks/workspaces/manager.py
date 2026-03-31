@@ -98,7 +98,7 @@ def _create_vm(
     from agentworks.workspaces.backends.vm import (
         create_vm_workspace,
         delete_vm_workspace,
-        generate_code_workspace,
+        generate_vscode_workspace,
     )
 
     vm = _resolve_vm(db, vm_name)
@@ -108,15 +108,15 @@ def _create_vm(
     _ensure_vm_running(db, config, vm)
 
     workspace_path: str | None = None
-    code_ws_path: str | None = None
+    vscode_path: str | None = None
 
     def _cleanup() -> None:
         if workspace_path:
             delete_vm_workspace(vm, config, ws_name, workspace_path)
-        if code_ws_path:
+        if vscode_path:
             from pathlib import Path
 
-            Path(code_ws_path).unlink(missing_ok=True)
+            Path(vscode_path).unlink(missing_ok=True)
 
     from agentworks.ssh import SSHLogger
 
@@ -126,8 +126,8 @@ def _create_vm(
         typer.echo(f"Creating workspace '{ws_name}' on VM '{vm.name}' (template: {template_name})...")
         workspace_path = create_vm_workspace(vm, config, ws_name, template, logger=ssh_logger)
 
-        code_ws_path = generate_code_workspace(vm, config, ws_name, workspace_path)
-        typer.echo(f"VS Code workspace: {code_ws_path}")
+        vscode_path = generate_vscode_workspace(vm, config, ws_name, workspace_path)
+        typer.echo(f"VS Code workspace: {vscode_path}")
 
         db.insert_workspace(
             ws_name,
@@ -160,7 +160,7 @@ def _create_vm(
     ssh_logger.close()
 
     if open_vscode:
-        subprocess.run(["code", code_ws_path], check=False)
+        subprocess.run(["code", vscode_path], check=False)
 
     typer.echo(f"Workspace '{ws_name}' created")
 
@@ -495,7 +495,7 @@ def _rehome_vm(
     from agentworks.agents.manager import WS_GROUP_PREFIX
     from agentworks.ssh import SSHError, SSHLogger, run_as_root, ssh_target_for_vm
     from agentworks.ssh import run as ssh_run
-    from agentworks.workspaces.backends.vm import generate_code_workspace
+    from agentworks.workspaces.backends.vm import generate_vscode_workspace
 
     ws_name = ws.name
     old_path = ws.workspace_path
@@ -605,8 +605,8 @@ def _rehome_vm(
         typer.echo(f"Database updated: workspace_path = {new_path}")
 
         # Regenerate VS Code workspace file
-        code_ws_path = generate_code_workspace(vm, config, ws_name, new_path)
-        typer.echo(f"VS Code workspace updated: {code_ws_path}")
+        vscode_path = generate_vscode_workspace(vm, config, ws_name, new_path)
+        typer.echo(f"VS Code workspace updated: {vscode_path}")
 
         # Handle old directory
         if remove_old:
@@ -782,8 +782,8 @@ def delete_workspace(
         ssh_logger.close()
 
     # Remove .code-workspace file
-    code_ws_path = config.paths.code_workspaces / f"{name}.code-workspace"
-    code_ws_path.unlink(missing_ok=True)
+    vscode_path = config.paths.vscode_workspaces / f"{name}.code-workspace"
+    vscode_path.unlink(missing_ok=True)
 
     db.delete_workspace(name)
     typer.echo(f"Workspace '{name}' deleted")
@@ -915,7 +915,7 @@ def copy_workspace(
 
             # Generate tmuxinator config and VS Code workspace
             from agentworks.ssh import write_file
-            from agentworks.workspaces.backends.vm import generate_code_workspace
+            from agentworks.workspaces.backends.vm import generate_vscode_workspace
             from agentworks.workspaces.tmuxinator import console_session_name, generate_config
 
             tmux_config = generate_config(dest_name, workspace_path)
@@ -928,8 +928,8 @@ def copy_workspace(
                 timeout=10,
                 logger=lg,
             )
-            code_ws_path = generate_code_workspace(dest_vm, config, dest_name, workspace_path)
-            typer.echo(f"  VS Code workspace: {code_ws_path}")
+            vscode_path = generate_vscode_workspace(dest_vm, config, dest_name, workspace_path)
+            typer.echo(f"  VS Code workspace: {vscode_path}")
             lg.close()
     finally:
         tmp_path.unlink(missing_ok=True)

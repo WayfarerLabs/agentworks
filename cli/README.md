@@ -286,7 +286,8 @@ and `--source` (builtin, user) filters.
 | `agentworks config init`            | Create a sample config file            |
 | `agentworks config edit`            | Open config in `$EDITOR`               |
 | `agentworks config sample`          | Print the sample config to stdout      |
-| `agentworks config sync-ssh-config` | Rebuild SSH config entries for all VMs |
+| `agentworks config sync-ssh-config`        | Rebuild SSH config entries for all VMs       |
+| `agentworks config sync-vscode-workspaces` | Regenerate .code-workspace files for all VMs |
 
 ## Configuration
 
@@ -297,9 +298,8 @@ full reference.
 Key sections:
 
 - `[user]` -- SSH keys (required), additional authorized keys, SSH config management, default shell
-- `[paths]` -- local workspace and `.code-workspace` file directories
+- `[paths]` -- local workspace, VM workspace, and VS Code workspace file directories
 - `[defaults]` -- default platform, VM host
-- `[paths]` -- local workspace, VM workspace, and `.code-workspace` file directories
 - `[vm_templates.*]` -- VM resources, apt packages, system install commands, mise
 - `[admin.config]` -- admin user shell, dotfiles, git credentials, user install commands, mise
 - `[agent_templates.*]` -- agent user shell, dotfiles, git credentials, user install commands, mise
