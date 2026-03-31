@@ -15,7 +15,8 @@ if TYPE_CHECKING:
     from agentworks.db import Database, VMRow, WorkspaceRow
     from agentworks.ssh import SSHLogger, SSHResult
 
-AGENT_SEPARATOR = "--"
+AGENT_PREFIX = "agt--"
+WS_GROUP_PREFIX = "ws--"
 
 
 def _run_as_agent(
@@ -71,9 +72,14 @@ def _write_agent_file(
         run_as_root(target, f"chmod {mode} {dest}", logger=logger)
 
 
-def derive_linux_user(workspace_name: str, agent_name: str) -> str:
-    """Derive the Linux username for an agent: <workspace>--<agent>."""
-    return f"{workspace_name}{AGENT_SEPARATOR}{agent_name}"
+def derive_linux_user(agent_name: str) -> str:
+    """Derive the Linux username for an agent: agt--<name>."""
+    return f"{AGENT_PREFIX}{agent_name}"
+
+
+def workspace_group(workspace_name: str) -> str:
+    """Derive the Linux group name for a workspace: ws--<name>."""
+    return f"{WS_GROUP_PREFIX}{workspace_name}"
 
 
 def create_agent(
@@ -81,53 +87,57 @@ def create_agent(
     config: Config,
     *,
     name: str,
-    workspace_name: str,
+    vm_name: str,
     template: str | None = None,
+    grant_all_workspaces: bool = False,
 ) -> None:
-    """Create an agent on a workspace."""
+    """Create an agent on a VM."""
     from dataclasses import replace as _replace
 
     from agentworks.agents.templates import resolve_template
 
     agent_tmpl = resolve_template(config, template)
 
-    # Replace config.agent with the resolved template so downstream code uses it
     if template is not None:
         config = _replace(config, agent=agent_tmpl)
 
     validate_name(name)
 
-    ws = _require_workspace(db, workspace_name)
-
-    if db.get_agent(workspace_name, name) is not None:
-        typer.echo(f"Error: agent '{name}' already exists in workspace '{workspace_name}'", err=True)
+    if db.get_agent(name) is not None:
+        typer.echo(f"Error: agent '{name}' already exists", err=True)
         raise typer.Exit(1)
 
-    linux_user = derive_linux_user(workspace_name, name)
+    vm = _require_vm(db, vm_name)
+    linux_user = derive_linux_user(name)
 
-    if ws.type == "local":
-        typer.echo("Error: agents are not supported on local workspaces", err=True)
-        raise typer.Exit(1)
+    from agentworks.ssh import SSHLogger
 
-    if ws.type == "vm":
-        vm = _require_vm_for_workspace(db, ws)
-        from agentworks.ssh import SSHLogger
-
-        ssh_logger = SSHLogger(vm.name, "agent-create")
-        try:
-            _create_agent_on_vm(vm, config, linux_user, workspace_name, logger=ssh_logger)
-        except Exception as e:
-            ssh_logger.close()
-            typer.echo(f"Error creating agent: {e}", err=True)
-            typer.echo(f"  SSH log: {ssh_logger.path}", err=True)
-            typer.echo(f"  Cleaning up user '{linux_user}'...", err=True)
-            _delete_agent_on_vm(vm, config, linux_user, logger=ssh_logger)
-            raise typer.Exit(1) from None
+    ssh_logger = SSHLogger(vm.name, "agent-create")
+    try:
+        _create_agent_on_vm(vm, config, linux_user, logger=ssh_logger)
+    except Exception as e:
         ssh_logger.close()
+        typer.echo(f"Error creating agent: {e}", err=True)
+        typer.echo(f"  SSH log: {ssh_logger.path}", err=True)
+        typer.echo(f"  Cleaning up user '{linux_user}'...", err=True)
+        _delete_agent_on_vm(vm, config, linux_user, logger=ssh_logger)
+        raise typer.Exit(1) from None
+    ssh_logger.close()
 
-    agent = db.insert_agent(name, workspace_name, linux_user, template=agent_tmpl.name)
+    agent = db.insert_agent(
+        name, vm_name, linux_user,
+        template=agent_tmpl.name, grant_all=grant_all_workspaces,
+    )
 
-    typer.echo(f"Agent '{name}' created (user: {agent.linux_user})")
+    # If grant_all, add to all existing workspace groups
+    if grant_all_workspaces:
+        workspaces = db.list_workspaces(vm_name=vm_name)
+        for ws in workspaces:
+            if ws.type == "vm":
+                _add_to_workspace_group(vm, config, linux_user, ws.name, logger=None)
+                db.insert_agent_grant(name, ws.name, "explicit")
+
+    typer.echo(f"Agent '{name}' created on VM '{vm_name}' (user: {agent.linux_user})")
 
 
 def delete_agent(
@@ -135,26 +145,29 @@ def delete_agent(
     config: Config,
     *,
     name: str,
-    workspace_name: str,
 ) -> None:
-    """Delete an agent from a workspace."""
-    ws = _require_workspace(db, workspace_name)
-    agent = db.get_agent(workspace_name, name)
+    """Delete an agent from a VM."""
+    agent = db.get_agent(name)
     if agent is None:
-        typer.echo(f"Error: agent '{name}' not found in workspace '{workspace_name}'", err=True)
+        typer.echo(f"Error: agent '{name}' not found", err=True)
         raise typer.Exit(1)
 
-    if ws.type == "vm":
-        vm = _require_vm_for_workspace(db, ws)
-        from agentworks.ssh import SSHLogger
+    vm = _require_vm(db, agent.vm_name)
 
-        ssh_logger = SSHLogger(vm.name, "agent-delete")
-        _delete_agent_on_vm(vm, config, agent.linux_user, logger=ssh_logger)
-        ssh_logger.close()
+    # Remove from all workspace groups
+    granted_workspaces = db.list_granted_workspaces(name)
+    from agentworks.ssh import SSHLogger
 
-    db.delete_agent(workspace_name, name)
+    ssh_logger = SSHLogger(vm.name, "agent-delete")
+    for ws_name in granted_workspaces:
+        _remove_from_workspace_group(vm, config, agent.linux_user, ws_name, logger=ssh_logger)
 
-    typer.echo(f"Agent '{name}' deleted from workspace '{workspace_name}'")
+    _delete_agent_on_vm(vm, config, agent.linux_user, logger=ssh_logger)
+    ssh_logger.close()
+
+    db.delete_agent(name)
+
+    typer.echo(f"Agent '{name}' deleted")
 
 
 def reinit_agent(
@@ -162,35 +175,28 @@ def reinit_agent(
     config: Config,
     *,
     name: str,
-    workspace_name: str,
 ) -> None:
     """Re-run agent setup using the stored template."""
     from dataclasses import replace as _replace
 
     from agentworks.agents.templates import resolve_template
 
-    ws = _require_workspace(db, workspace_name)
-    agent = db.get_agent(workspace_name, name)
+    agent = db.get_agent(name)
     if agent is None:
-        typer.echo(f"Error: agent '{name}' not found in workspace '{workspace_name}'", err=True)
+        typer.echo(f"Error: agent '{name}' not found", err=True)
         raise typer.Exit(1)
 
-    if ws.type != "vm":
-        typer.echo("Error: agents are only supported on VM workspaces", err=True)
-        raise typer.Exit(1)
-
-    # Resolve the agent's stored template
     agent_tmpl = resolve_template(config, agent.template)
     if agent.template and agent.template != "default":
         config = _replace(config, agent=agent_tmpl)
 
-    vm = _require_vm_for_workspace(db, ws)
+    vm = _require_vm(db, agent.vm_name)
 
     from agentworks.ssh import SSHLogger
 
     ssh_logger = SSHLogger(vm.name, "agent-reinit")
     try:
-        _create_agent_on_vm(vm, config, agent.linux_user, workspace_name, logger=ssh_logger)
+        _create_agent_on_vm(vm, config, agent.linux_user, logger=ssh_logger)
     except Exception as e:
         ssh_logger.close()
         typer.echo(f"Error reinitializing agent: {e}", err=True)
@@ -201,49 +207,108 @@ def reinit_agent(
     typer.echo(f"Agent '{name}' reinitialized")
 
 
-def delete_agents_for_workspace(
+def revoke_workspace_grants(
     db: Database,
     config: Config,
-    ws: WorkspaceRow,
-    *,
-    logger: SSHLogger | None = None,
+    ws_name: str,
+    vm: VMRow,
 ) -> None:
-    """Delete all agents for a workspace (called during workspace deletion).
+    """Remove all agent grants for a workspace (called during workspace deletion).
 
-    Skips tmuxinator regeneration since the workspace itself is being deleted.
+    Agents are VM-scoped and not deleted with workspaces. Only their grants
+    and group memberships for this workspace are removed.
     """
-    agents = db.delete_agents_for_workspace(ws.name)
-    if not agents:
-        return
+    # Find agents that have grants for this workspace
+    # We need to remove group membership for each
+    from agentworks.ssh import SSHLogger
 
-    if ws.type == "vm" and ws.vm_name:
-        vm = db.get_vm(ws.vm_name)
-        if vm is not None:
-            for agent in agents:
-                _delete_agent_on_vm(vm, config, agent.linux_user, logger=logger)
+    ssh_logger = SSHLogger(vm.name, "workspace-delete-grants")
+    agents = db.list_agents(vm_name=vm.name)
+    for agent in agents:
+        if db.has_any_grant(agent.name, ws_name):
+            _remove_from_workspace_group(vm, config, agent.linux_user, ws_name, logger=ssh_logger)
+    ssh_logger.close()
 
-    names = ", ".join(a.name for a in agents)
-    typer.echo(f"  Deleted {len(agents)} agent(s): {names}")
+
+MAX_GRANTS_DISPLAY = 60
+
+
+def _format_grants(db: Database, agent_name: str, grant_all: bool) -> str:
+    """Format workspace grants for display in agent list."""
+    if grant_all:
+        return "--ALL--"
+
+    grants = db.list_granted_workspaces_with_types(agent_name)
+    if not grants:
+        return "(none)"
+
+    parts: list[str] = []
+    for ws_name, has_explicit, has_implicit in grants:
+        # Mark with * if implicit-only (no explicit grant)
+        suffix = "*" if has_implicit and not has_explicit else ""
+        parts.append(f"{ws_name}{suffix}")
+
+    result = ", ".join(parts)
+    if len(result) > MAX_GRANTS_DISPLAY:
+        result = result[: MAX_GRANTS_DISPLAY - 3] + "..."
+    return result
 
 
 def list_agents(
     db: Database,
     *,
-    workspace_name: str | None = None,
+    vm_name: str | None = None,
 ) -> None:
     """List agents."""
-    agents = db.list_agents(workspace_name=workspace_name)
+    agents = db.list_agents(vm_name=vm_name)
     if not agents:
         typer.echo("No agents found.")
         return
 
-    typer.echo(f"{'NAME':<20} {'WORKSPACE':<20} {'TEMPLATE':<12} {'LINUX USER':<30} {'CREATED'}")
-    typer.echo("-" * 107)
+    typer.echo(f"{'NAME':<20} {'VM':<15} {'TEMPLATE':<12} {'WORKSPACE GRANTS'}")
+    typer.echo("-" * 80)
     for agent in agents:
-        typer.echo(
-            f"{agent.name:<20} {agent.workspace_name:<20} {agent.template or '-':<12} "
-            f"{agent.linux_user:<30} {agent.created_at}"
-        )
+        grants = _format_grants(db, agent.name, agent.grant_all)
+        typer.echo(f"{agent.name:<20} {agent.vm_name:<15} {agent.template or '-':<12} {grants}")
+
+
+def describe_agent(
+    db: Database,
+    *,
+    name: str,
+) -> None:
+    """Show detailed information about an agent."""
+    agent = db.get_agent(name)
+    if agent is None:
+        typer.echo(f"Error: agent '{name}' not found", err=True)
+        raise typer.Exit(1)
+
+    typer.echo(f"Name:       {agent.name}")
+    typer.echo(f"VM:         {agent.vm_name}")
+    typer.echo(f"Linux user: {agent.linux_user}")
+    typer.echo(f"Template:   {agent.template or '-'}")
+    typer.echo(f"Grant all:  {'yes' if agent.grant_all else 'no'}")
+    typer.echo(f"Created:    {agent.created_at}")
+
+    # Explicit grants
+    grants = db.list_granted_workspaces_with_types(name)
+    explicit = [ws for ws, has_explicit, _ in grants if has_explicit]
+    typer.echo(f"\nExplicit grants ({len(explicit)}):")
+    if explicit:
+        for ws in explicit:
+            typer.echo(f"  {ws}")
+    else:
+        typer.echo("  (none)")
+
+    # Tasks (which also show implicit grants)
+    all_tasks = db.list_tasks()
+    agent_tasks = [t for t in all_tasks if t.linux_user == agent.linux_user]
+    typer.echo(f"\nTasks ({len(agent_tasks)}):")
+    if agent_tasks:
+        for task in agent_tasks:
+            typer.echo(f"  {task.name}  [{task.template}]  {task.status}  workspace: {task.workspace_name}")
+    else:
+        typer.echo("  (none)")
 
 
 def shell_agent(
@@ -251,20 +316,15 @@ def shell_agent(
     config: Config,
     *,
     name: str,
-    workspace_name: str,
+    workspace_name: str | None = None,
 ) -> None:
     """Open a shell as an agent user on a VM."""
-    ws = _require_workspace(db, workspace_name)
-    agent = db.get_agent(workspace_name, name)
+    agent = db.get_agent(name)
     if agent is None:
-        typer.echo(f"Error: agent '{name}' not found in workspace '{workspace_name}'", err=True)
+        typer.echo(f"Error: agent '{name}' not found", err=True)
         raise typer.Exit(1)
 
-    if ws.type != "vm":
-        typer.echo("Error: agents are only supported on VM workspaces", err=True)
-        raise typer.Exit(1)
-
-    vm = _require_vm_for_workspace(db, ws)
+    vm = _require_vm(db, agent.vm_name)
 
     from agentworks.workspaces.manager import _ensure_vm_running
 
@@ -275,13 +335,140 @@ def shell_agent(
     from agentworks.ssh import interactive
 
     target = ssh_target_for_vm(vm, config)
-    sys.exit(interactive(target, f"cd {ws.workspace_path} && exec sudo su - {agent.linux_user}"))
+
+    if workspace_name:
+        ws = db.get_workspace(workspace_name)
+        if ws is None:
+            typer.echo(f"Error: workspace '{workspace_name}' not found", err=True)
+            raise typer.Exit(1)
+        if not db.has_any_grant(name, workspace_name):
+            typer.echo(f"Error: agent '{name}' does not have access to workspace '{workspace_name}'", err=True)
+            raise typer.Exit(1)
+        sys.exit(interactive(target, f"cd {ws.workspace_path} && exec sudo su - {agent.linux_user}"))
+    else:
+        sys.exit(interactive(target, f"exec sudo su - {agent.linux_user}"))
 
 
 # -- VM operations ---------------------------------------------------------
 
 
-def _create_agent_on_vm(
+def grant_workspaces(
+    db: Database,
+    config: Config,
+    *,
+    agent_name: str,
+    workspace_names: list[str],
+    grant_all: bool = False,
+) -> None:
+    """Grant an agent explicit access to workspaces."""
+    agent = db.get_agent(agent_name)
+    if agent is None:
+        typer.echo(f"Error: agent '{agent_name}' not found", err=True)
+        raise typer.Exit(1)
+
+    vm = _require_vm(db, agent.vm_name)
+
+    if grant_all:
+        db.update_agent_grant_all(agent_name, True)
+        # Add to all existing VM workspace groups
+        workspaces = db.list_workspaces(vm_name=vm.name)
+        for ws in workspaces:
+            if ws.type == "vm":
+                _add_to_workspace_group(vm, config, agent.linux_user, ws.name, logger=None)
+                db.insert_agent_grant(agent_name, ws.name, "explicit")
+        typer.echo(f"Agent '{agent_name}' granted access to all workspaces")
+        return
+
+    for ws_name in workspace_names:
+        ws = db.get_workspace(ws_name)
+        if ws is None:
+            typer.echo(f"Warning: workspace '{ws_name}' not found, skipping", err=True)
+            continue
+        _add_to_workspace_group(vm, config, agent.linux_user, ws_name, logger=None)
+        db.insert_agent_grant(agent_name, ws_name, "explicit")
+        typer.echo(f"  Granted: {ws_name}")
+
+
+def deny_workspaces(
+    db: Database,
+    config: Config,
+    *,
+    agent_name: str,
+    workspace_names: list[str],
+    deny_all: bool = False,
+) -> None:
+    """Remove explicit workspace grants from an agent."""
+    agent = db.get_agent(agent_name)
+    if agent is None:
+        typer.echo(f"Error: agent '{agent_name}' not found", err=True)
+        raise typer.Exit(1)
+
+    vm = _require_vm(db, agent.vm_name)
+
+    if deny_all:
+        db.update_agent_grant_all(agent_name, False)
+        db.delete_explicit_grants(agent_name)
+        # Remove from groups where no implicit grants remain
+        remaining_implicit: list[str] = []
+        granted = db.list_granted_workspaces(agent_name)
+        for ws_name in granted:
+            if db.has_any_grant(agent_name, ws_name):
+                remaining_implicit.append(ws_name)
+            else:
+                _remove_from_workspace_group(vm, config, agent.linux_user, ws_name, logger=None)
+        typer.echo(f"All explicit grants removed for agent '{agent_name}'")
+        if remaining_implicit:
+            typer.echo(
+                f"  Note: agent still has implicit access via tasks to: "
+                f"{', '.join(remaining_implicit)}",
+                err=True,
+            )
+        return
+
+    for ws_name in workspace_names:
+        db.delete_agent_grant(agent_name, ws_name, "explicit")
+        if not db.has_any_grant(agent_name, ws_name):
+            _remove_from_workspace_group(vm, config, agent.linux_user, ws_name, logger=None)
+            typer.echo(f"  Denied: {ws_name}")
+        else:
+            typer.echo(f"  Denied: {ws_name} (still has implicit access via tasks)")
+
+
+def list_grants(
+    db: Database,
+    *,
+    agent_name: str,
+) -> None:
+    """List workspace grants for an agent."""
+    agent = db.get_agent(agent_name)
+    if agent is None:
+        typer.echo(f"Error: agent '{agent_name}' not found", err=True)
+        raise typer.Exit(1)
+
+    if agent.grant_all:
+        typer.echo(f"Agent '{agent_name}' has grant-all enabled (access to all workspaces)")
+
+    grants = db.list_granted_workspaces_with_types(agent_name)
+    if not grants:
+        typer.echo("No workspace grants.")
+        return
+
+    typer.echo(f"{'WORKSPACE':<25} {'TYPE'}")
+    typer.echo("-" * 45)
+    for ws_name, has_explicit, has_implicit in grants:
+        if has_explicit and has_implicit:
+            grant_type = "explicit + implicit"
+        elif has_explicit:
+            grant_type = "explicit"
+        else:
+            grant_type = "implicit (via tasks)"
+        typer.echo(f"{ws_name:<25} {grant_type}")
+
+
+# -- VM operations ---------------------------------------------------------
+
+
+def _add_to_workspace_group(
     vm: VMRow,
     config: Config,
     linux_user: str,
@@ -289,7 +476,44 @@ def _create_agent_on_vm(
     *,
     logger: SSHLogger | None = None,
 ) -> None:
-    """Create an agent Linux user on a VM and run user install commands."""
+    """Add an agent user to a workspace's Linux group."""
+    from agentworks.ssh import run_as_root
+
+    target = ssh_target_for_vm(vm, config)
+    ws_grp = workspace_group(workspace_name)
+    # Ensure group exists (idempotent)
+    run_as_root(target, f"sh -c 'getent group {ws_grp} >/dev/null 2>&1 || /usr/sbin/groupadd {ws_grp}'", logger=logger)
+    run_as_root(target, f"usermod -aG {ws_grp} {linux_user}", logger=logger)
+
+
+def _remove_from_workspace_group(
+    vm: VMRow,
+    config: Config,
+    linux_user: str,
+    workspace_name: str,
+    *,
+    logger: SSHLogger | None = None,
+) -> None:
+    """Remove an agent user from a workspace's Linux group."""
+    from agentworks.ssh import run_as_root
+
+    target = ssh_target_for_vm(vm, config)
+    ws_grp = workspace_group(workspace_name)
+    run_as_root(target, f"gpasswd -d {linux_user} {ws_grp}", check=False, logger=logger)
+
+
+def _create_agent_on_vm(
+    vm: VMRow,
+    config: Config,
+    linux_user: str,
+    *,
+    logger: SSHLogger | None = None,
+) -> None:
+    """Create an agent Linux user on a VM and set up their environment.
+
+    Workspace group membership is NOT set here - it is managed by the grant
+    system. This function only creates the user and configures their tools.
+    """
     from agentworks.ssh import run_as_root
 
     target = ssh_target_for_vm(vm, config)
@@ -297,20 +521,6 @@ def _create_agent_on_vm(
 
     typer.echo(f"  Creating user '{linux_user}' on VM '{vm.name}'...")
     home = f"/home/{linux_user}"
-    ws_group = f"ws-{workspace_name}"
-    ws_path = f"/home/{vm.admin_username}/workspaces/{workspace_name}"
-
-    # Ensure the workspace group exists, admin is a member, and the
-    # workspace directory has correct group ownership + setgid. This
-    # repairs existing workspaces that were created before group support.
-    run_as_root(target, f"sh -c 'getent group {ws_group} >/dev/null 2>&1 || /usr/sbin/groupadd {ws_group}'", logger=lg)
-    run_as_root(target, f"usermod -aG {ws_group} {vm.admin_username}", logger=lg)
-    run_as_root(
-        target,
-        f"sh -c 'test -d {ws_path} && chgrp -R {ws_group} {ws_path} && chmod 2775 {ws_path}'",
-        check=False,
-        logger=lg,
-    )
 
     agent_cfg = config.agent
     agent_shell = agent_cfg.shell
@@ -321,9 +531,7 @@ def _create_agent_on_vm(
     if not user_exists.ok:
         run_as_root(target, f"useradd -m -s {shell_path} {linux_user}", logger=lg)
     else:
-        # Update shell in case template changed
         run_as_root(target, f"usermod -s {shell_path} {linux_user}", logger=lg)
-    run_as_root(target, f"usermod -aG {ws_group} {linux_user}", logger=lg)
 
     # Write a minimal rc file with a clear agent prompt
     if agent_shell == "zsh":
@@ -663,6 +871,14 @@ def _build_agent_test_command(
 
 
 # -- Helpers ---------------------------------------------------------------
+
+
+def _require_vm(db: Database, vm_name: str) -> VMRow:
+    vm = db.get_vm(vm_name)
+    if vm is None:
+        typer.echo(f"Error: VM '{vm_name}' not found", err=True)
+        raise typer.Exit(1)
+    return vm
 
 
 def _require_workspace(db: Database, workspace_name: str) -> WorkspaceRow:

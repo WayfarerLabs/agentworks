@@ -39,7 +39,7 @@ def create_vm_workspace(
     lg = logger
 
     workspace_path = f"/home/{vm.admin_username}/workspaces/{ws_name}"
-    ws_group = f"ws-{ws_name}"
+    ws_group = f"ws--{ws_name}"
 
     # Remove stale directory from a previous interrupted attempt
     exists = ssh_run(target, f"test -d {workspace_path}", check=False, timeout=10, logger=lg)
@@ -52,7 +52,7 @@ def create_vm_workspace(
     run_as_root(target, f"usermod -aG {ws_group} {vm.admin_username}", logger=lg)
     ssh_run(target, f"mkdir -p {workspace_path}", timeout=10, logger=lg)
     run_as_root(target, f"chown {vm.admin_username}:{ws_group} {workspace_path}", logger=lg)
-    run_as_root(target, f"chmod 2775 {workspace_path}", logger=lg)
+    run_as_root(target, f"chmod 2770 {workspace_path}", logger=lg)
 
     # Git clone if repo is set
     if template.repo:

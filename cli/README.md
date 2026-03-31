@@ -25,11 +25,11 @@ agents (see below).
 
 ### Agents -- the actor
 
-An agent defines a **task-specific identity** with scoped permissions. Each agent is an isolated
-Linux user within a workspace. The agent's effective capability is the intersection of all three
-layers: it can only use tools present on the VM, configured at the workspace level, and granted to
-the agent via per-agent permission grants. An agent cannot bypass a workspace-level permission
-restriction or use a tool that is not installed on the VM.
+An agent defines a **security identity** on a VM: a Linux user (`agt--<name>`) with its own shell,
+tools, credentials, and dotfiles. Agents are VM-scoped and can be granted access to one or more
+workspaces via explicit grants or implicitly through tasks. An agent's effective capability is the
+intersection of all layers: it can only use tools present on the VM and access workspaces it has
+been granted.
 
 Agents are only supported on VM workspaces because the isolation model requires Linux user
 management (useradd, group membership).
@@ -38,8 +38,8 @@ management (useradd, group membership).
 
 The layers also differ in lifespan. VMs are long-lived -- provisioned once, used across many
 projects. Workspaces are more ephemeral -- created per task or project, destroyed when done. Agents
-are completely ephemeral -- spun up for a specific task within a workspace and discarded when the
-task is complete.
+persist on a VM and can work across multiple workspaces and tasks. Tasks are the most ephemeral --
+started, stopped, and deleted as work progresses.
 
 ### Templates
 
@@ -157,15 +157,19 @@ killed during deletion. Pass `--yes` to skip the confirmation prompt.
 
 ### Agents
 
-Manage agents (isolated Linux users) within VM workspaces.
+Manage agents (isolated Linux users) on VMs. Agents are VM-scoped and access workspaces via grants.
 
-| Command                                             | Description                  |
-| --------------------------------------------------- | ---------------------------- |
-| `agentworks agent create [--name] [--workspace]`    | Create an agent              |
-| `agentworks agent list [--workspace <ws>]`          | List agents                  |
-| `agentworks agent reinit <name> --workspace <ws>`   | Re-run agent setup           |
-| `agentworks agent shell <name> --workspace <ws>`    | Shell into an agent          |
-| `agentworks agent delete <name> --workspace <ws>`   | Delete an agent              |
+| Command                                                    | Description                     |
+| ---------------------------------------------------------- | ------------------------------- |
+| `agentworks agent create [--name] [--vm]`                  | Create an agent on a VM         |
+| `agentworks agent list [--vm <vm>]`                        | List agents                     |
+| `agentworks agent reinit <name>`                           | Re-run agent setup              |
+| `agentworks agent grant-workspaces <name> <ws>[,<ws>]`     | Grant workspace access          |
+| `agentworks agent grant-workspaces <name> --all`           | Grant access to all workspaces  |
+| `agentworks agent deny-workspaces <name> <ws>[,<ws>]`      | Remove workspace access         |
+| `agentworks agent deny-workspaces <name> --all`            | Remove all explicit grants      |
+| `agentworks agent shell <name> [--workspace <ws>]`         | Shell into an agent             |
+| `agentworks agent delete <name>`                           | Delete an agent                 |
 
 ### Tasks
 

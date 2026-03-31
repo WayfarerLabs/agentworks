@@ -44,10 +44,17 @@ app.add_typer(workspace_app)
 
 agent_app = typer.Typer(
     name="agent",
-    help="Manage agents (isolated users within workspaces).",
+    help="Manage agents (isolated users on VMs).",
     no_args_is_help=True,
 )
 app.add_typer(agent_app)
+
+agent_grants_app = typer.Typer(
+    name="workspace-grants",
+    help="Manage agent workspace access grants.",
+    no_args_is_help=True,
+)
+agent_app.add_typer(agent_grants_app)
 
 task_app = typer.Typer(
     name="task",
@@ -569,48 +576,109 @@ def workspace_copy(
 @agent_app.command("create")
 def agent_create(
     name: Annotated[str | None, typer.Option("--name", help="Agent name (prompted if omitted)")] = None,
-    workspace: Annotated[str | None, typer.Option("--workspace", help="Workspace name")] = None,
+    vm: Annotated[str | None, typer.Option("--vm", help="Target VM")] = None,
     template: Annotated[str | None, typer.Option("--template", help="Agent template")] = None,
+    grant_all_workspaces: Annotated[
+        bool, typer.Option("--grant-all-workspaces", help="Grant access to all workspaces"),
+    ] = False,
 ) -> None:
-    """Create an agent (isolated Linux user) on a workspace."""
+    """Create an agent (isolated Linux user) on a VM."""
     from agentworks.agents.manager import create_agent
     from agentworks.config import load_config
 
     db = _get_db()
 
-    # 1. Select target (workspace), 2. Name
-    resolved_ws = _prompt_workspace(db, workspace)
+    # 1. Select target (VM), 2. Name
+    resolved_vm = _prompt_vm(db, vm)
     resolved_name = _prompt_name("Agent", name)
 
-    create_agent(db, load_config(), name=resolved_name, workspace_name=resolved_ws, template=template)
+    create_agent(
+        db, load_config(), name=resolved_name, vm_name=resolved_vm,
+        template=template, grant_all_workspaces=grant_all_workspaces,
+    )
 
 
 @agent_app.command("list")
 def agent_list(
-    workspace: Annotated[str | None, typer.Option("--workspace", help="Filter by workspace")] = None,
+    vm: Annotated[str | None, typer.Option("--vm", help="Filter by VM")] = None,
 ) -> None:
     """List agents."""
     from agentworks.agents.manager import list_agents
 
-    list_agents(_get_db(), workspace_name=workspace)
+    list_agents(_get_db(), vm_name=vm)
+
+
+@agent_app.command("describe")
+def agent_describe(
+    name: Annotated[str, typer.Argument(help="Agent name")],
+) -> None:
+    """Show detailed information about an agent."""
+    from agentworks.agents.manager import describe_agent
+
+    describe_agent(_get_db(), name=name)
 
 
 @agent_app.command("reinit")
 def agent_reinit(
     name: Annotated[str, typer.Argument(help="Agent name")],
-    workspace: Annotated[str, typer.Option("--workspace", help="Workspace name")] = ...,  # type: ignore[assignment]
 ) -> None:
     """Re-run agent setup using the stored template."""
     from agentworks.agents.manager import reinit_agent
     from agentworks.config import load_config
 
-    reinit_agent(_get_db(), load_config(), name=name, workspace_name=workspace)
+    reinit_agent(_get_db(), load_config(), name=name)
+
+
+@agent_grants_app.command("grant")
+def agent_grants_grant(
+    name: Annotated[str, typer.Argument(help="Agent name")],
+    workspaces: Annotated[str | None, typer.Argument(help="Workspace names (comma-separated)")] = None,
+    all_workspaces: Annotated[bool, typer.Option("--all", help="Grant access to all workspaces")] = False,
+) -> None:
+    """Grant an agent explicit access to workspaces."""
+    from agentworks.agents.manager import grant_workspaces
+    from agentworks.config import load_config
+
+    if not all_workspaces and not workspaces:
+        typer.echo("Error: specify workspace names or --all", err=True)
+        raise typer.Exit(1)
+
+    ws_list = [w.strip() for w in workspaces.split(",")] if workspaces else []
+    grant_workspaces(_get_db(), load_config(), agent_name=name, workspace_names=ws_list, grant_all=all_workspaces)
+
+
+@agent_grants_app.command("deny")
+def agent_grants_deny(
+    name: Annotated[str, typer.Argument(help="Agent name")],
+    workspaces: Annotated[str | None, typer.Argument(help="Workspace names (comma-separated)")] = None,
+    all_workspaces: Annotated[bool, typer.Option("--all", help="Remove all explicit grants")] = False,
+) -> None:
+    """Remove explicit workspace grants from an agent."""
+    from agentworks.agents.manager import deny_workspaces
+    from agentworks.config import load_config
+
+    if not all_workspaces and not workspaces:
+        typer.echo("Error: specify workspace names or --all", err=True)
+        raise typer.Exit(1)
+
+    ws_list = [w.strip() for w in workspaces.split(",")] if workspaces else []
+    deny_workspaces(_get_db(), load_config(), agent_name=name, workspace_names=ws_list, deny_all=all_workspaces)
+
+
+@agent_grants_app.command("list")
+def agent_grants_list(
+    name: Annotated[str, typer.Argument(help="Agent name")],
+) -> None:
+    """List workspace grants for an agent."""
+    from agentworks.agents.manager import list_grants
+
+    list_grants(_get_db(), agent_name=name)
 
 
 @agent_app.command("shell")
 def agent_shell(
     name: Annotated[str, typer.Argument(help="Agent name")],
-    workspace: Annotated[str, typer.Option("--workspace", help="Workspace name")] = ...,  # type: ignore[assignment]
+    workspace: Annotated[str | None, typer.Option("--workspace", help="cd into a workspace")] = None,
 ) -> None:
     """Open a shell as an agent user."""
     from agentworks.agents.manager import shell_agent
@@ -622,13 +690,12 @@ def agent_shell(
 @agent_app.command("delete")
 def agent_delete(
     name: Annotated[str, typer.Argument(help="Agent name")],
-    workspace: Annotated[str, typer.Option("--workspace", help="Workspace name")] = ...,  # type: ignore[assignment]
 ) -> None:
-    """Delete an agent from a workspace."""
+    """Delete an agent."""
     from agentworks.agents.manager import delete_agent
     from agentworks.config import load_config
 
-    delete_agent(_get_db(), load_config(), name=name, workspace_name=workspace)
+    delete_agent(_get_db(), load_config(), name=name)
 
 
 # -- Task commands ---------------------------------------------------------

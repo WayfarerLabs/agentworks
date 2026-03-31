@@ -208,14 +208,25 @@ def create_task(
     # Resolve mode and linux user
     if agent_name is not None:
         mode = TaskMode.AGENT
-        agent = db.get_agent(workspace_name, agent_name)
+        agent = db.get_agent(agent_name)
         if agent is None:
+            typer.echo(f"Error: agent '{agent_name}' not found", err=True)
+            raise typer.Exit(1)
+        if agent.vm_name != vm.name:
             typer.echo(
-                f"Error: agent '{agent_name}' not found in workspace '{workspace_name}'",
+                f"Error: agent '{agent_name}' is on VM '{agent.vm_name}', "
+                f"but workspace '{workspace_name}' is on VM '{vm.name}'",
                 err=True,
             )
             raise typer.Exit(1)
         linux_user = agent.linux_user
+
+        # Auto-grant implicit workspace access if needed
+        if not db.has_any_grant(agent_name, workspace_name):
+            from agentworks.agents.manager import _add_to_workspace_group
+
+            _add_to_workspace_group(vm, config, linux_user, workspace_name)
+        db.insert_agent_grant(agent_name, workspace_name, "implicit", task_name=name)
     else:
         mode = TaskMode.ADMIN
         linux_user = vm.admin_username
@@ -361,8 +372,30 @@ def delete_task(
     if not yes and session_exists(workspace_name, name, run_command=run_command):
         typer.confirm(f"Task '{name}' is still running. Delete anyway?", abort=True)
 
+    # Check if task is an agent task before deleting (need info for grant cleanup)
+    task = db.get_task(workspace_name, name)
+    agent_name_for_cleanup: str | None = None
+    if task and task.mode == "agent":
+        # Find the agent by linux_user
+        agents = db.list_agents(vm_name=vm.name)
+        for a in agents:
+            if a.linux_user == task.linux_user:
+                agent_name_for_cleanup = a.name
+                break
+
     kill_task_session(workspace_name, name, run_command=run_command)
     db.delete_task(workspace_name, name)
+
+    # Clean up implicit grant for this task
+    if agent_name_for_cleanup:
+        db.delete_agent_grant(agent_name_for_cleanup, workspace_name, "implicit", task_name=name)
+        # If no grants remain, remove from workspace group
+        if not db.has_any_grant(agent_name_for_cleanup, workspace_name):
+            from agentworks.agents.manager import _remove_from_workspace_group
+
+            agent = db.get_agent(agent_name_for_cleanup)
+            if agent:
+                _remove_from_workspace_group(vm, config, agent.linux_user, workspace_name)
 
     _regenerate_tmuxinator(db, config, vm, ws)
     typer.echo(f"Task '{name}' deleted")

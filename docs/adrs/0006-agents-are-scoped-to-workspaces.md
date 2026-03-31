@@ -4,7 +4,7 @@ Date: 2026-03-08
 
 ## Status
 
-Accepted
+Superceded by [10. VM-scoped agents with workspace grants](0010-vm-scoped-agents-with-workspace-grants.md)
 
 ## Context
 

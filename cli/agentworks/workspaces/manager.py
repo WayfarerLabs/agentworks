@@ -147,6 +147,16 @@ def _create_vm(
         _cleanup()
         raise typer.Exit(1) from None
 
+    # Add grant_all agents to the new workspace group
+    grant_all_agents = db.list_agents_on_vm_with_grant_all(vm.name)
+    if grant_all_agents:
+        from agentworks.agents.manager import _add_to_workspace_group
+
+        for agent in grant_all_agents:
+            _add_to_workspace_group(vm, config, agent.linux_user, ws_name, logger=ssh_logger)
+            db.insert_agent_grant(agent.name, ws_name, "explicit")
+        typer.echo(f"  Added {len(grant_all_agents)} grant-all agent(s) to workspace")
+
     ssh_logger.close()
 
     if open_vscode:
@@ -324,10 +334,13 @@ def delete_workspace(
                 kill_task_session(name, task.name, run_command=run_command)
     db.delete_tasks_for_workspace(name)
 
-    # Delete agents (remote cleanup + DB)
-    from agentworks.agents.manager import delete_agents_for_workspace
+    # Revoke agent workspace grants (agents are VM-scoped, not deleted with workspaces)
+    if ws.type == "vm" and ws.vm_name:
+        vm_for_grants = db.get_vm(ws.vm_name)
+        if vm_for_grants:
+            from agentworks.agents.manager import revoke_workspace_grants
 
-    delete_agents_for_workspace(db, config, ws, logger=ssh_logger)
+            revoke_workspace_grants(db, config, name, vm_for_grants)
 
     if ws.type == "local":
         from agentworks.workspaces.backends.local import delete_local_workspace

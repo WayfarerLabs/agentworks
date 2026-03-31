@@ -1142,6 +1142,30 @@ def _phase_b_setup(
     # Non-fatal: reconcile authorized_keys
     _reconcile_authorized_keys(ts_target, config, home, logger)
 
+    # Non-fatal: workspaces directory with ACLs for group-writable files.
+    # Default ACLs ensure new files/dirs inherit group rwx regardless of umask.
+    # Access ACLs fix existing files. Applied recursively to cover all workspaces.
+    workspaces_dir = f"{home}/workspaces"
+    try:
+        _run_logged(ts_target, "apt-get install -y -qq acl", logger, as_root=True, timeout=60)
+        _run_logged(ts_target, f"mkdir -p {workspaces_dir}", logger)
+        # Default ACLs on all directories (for future files)
+        _run_logged(
+            ts_target,
+            f"setfacl -R -d -m g::rwx -d -m m::rwx {workspaces_dir}",
+            logger, as_root=True, timeout=60,
+        )
+        # Access ACLs on all existing files and dirs
+        _run_logged(
+            ts_target,
+            f"setfacl -R -m g::rwx -m m::rwx {workspaces_dir}",
+            logger, as_root=True, timeout=60,
+        )
+    except SSHError as e:
+        msg = f"workspaces directory setup failed: {e}"
+        logger.warning(msg)
+        typer.echo(f"  Warning: {msg}", err=True)
+
     # Non-fatal: mise (system-wide apt install)
     mise_available = False
     if config.vm.install_mise:
