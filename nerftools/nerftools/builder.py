@@ -264,12 +264,12 @@ def _arg_validations(args: dict[str, ArgSpec]) -> str:
         if spec.variadic:
             lines.append(f'for _v in "${{{var}[@]}}"; do')
             lines.append('  if [[ "$_v" == -* ]]; then')
-            lines.append(f'    echo "error: <{name}> values cannot start with \'-\'" >&2; exit 1')
+            lines.append(f"    echo \"error: <{name}> values cannot start with '-'\" >&2; exit 1")
             lines.append("  fi")
             lines.append("done")
             lines.append("")
             if spec.required:
-                lines.append(f'if [[ ${{#{var}[@]}} -eq 0 ]]; then')
+                lines.append(f"if [[ ${{#{var}[@]}} -eq 0 ]]; then")
                 lines.append(f'  echo "error: <{name}> is required" >&2; usage')
                 lines.append("fi")
                 lines.append("")
@@ -285,7 +285,7 @@ def _arg_validations(args: dict[str, ArgSpec]) -> str:
                 allow_checks = " && ".join(f'"$_v" != "{v}"' for v in spec.allow)
                 vals = ", ".join(spec.allow)
                 lines.append(f'for _v in "${{{var}[@]}}"; do')
-                lines.append(f'  if [[ {allow_checks} ]]; then')
+                lines.append(f"  if [[ {allow_checks} ]]; then")
                 lines.append(f'    echo "error: <{name}> must be one of: {vals}" >&2; exit 1')
                 lines.append("  fi")
                 lines.append("done")
@@ -300,7 +300,7 @@ def _arg_validations(args: dict[str, ArgSpec]) -> str:
                 lines.append("")
         else:
             lines.append(f'if [[ -n "${{{var}}}" ]] && [[ "${{{var}}}" == -* ]]; then')
-            lines.append(f'  echo "error: <{name}> cannot start with \'-\'" >&2; exit 1')
+            lines.append(f"  echo \"error: <{name}> cannot start with '-'\" >&2; exit 1")
             lines.append("fi")
             lines.append("")
             if spec.required:
@@ -368,7 +368,7 @@ def _substitute_command(
                     if spec.required:
                         result.append(f'"${{{var}[@]}}"')
                     else:
-                        result.append('${' + var + '[@]+"${' + var + '[@]}"}')
+                        result.append("${" + var + '[@]+"${' + var + '[@]}"}')
                 else:
                     if spec.required:
                         result.append(f'"${{{var}}}"')

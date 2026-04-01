@@ -1291,6 +1291,7 @@ def _install_nerf_tools(
     nerf_home = config.vm.nerf_home_dir
     bin_dir = f"{nerf_home}/bin"
     skills_dir = f"{nerf_home}/skills"
+    rules_dir = f"{nerf_home}/rules"
     keep = config.vm.nerf_keep_existing
 
     try:
@@ -1332,34 +1333,39 @@ def _install_nerf_tools(
             build_skills(manifests, skills_out, keep_existing=keep)
 
             # Install nerfctl scripts (Claude Code permission management)
-            from nerftools import install_nerfctl
+            from nerftools import BUILTIN_RULES_DIR, install_nerfctl
 
             install_nerfctl("claude", bin_out)
+
+            # Copy built-in rules
+            rules_out = tmp_path / "rules"
+            rules_out.mkdir()
+            if BUILTIN_RULES_DIR.exists():
+                for rule_file in sorted(BUILTIN_RULES_DIR.glob("*.md")):
+                    (rules_out / rule_file.name).write_bytes(rule_file.read_text(encoding="utf-8").encode("utf-8"))
 
             # Create/clear remote dirs as root, then chown to the current SSH user
             # so copy_dir_to can write without sudo. $(id -un) expands on the remote
             # shell before sudo runs, giving the SSH user's name.
+            all_dirs = [bin_dir, skills_dir, rules_dir]
             if not keep:
-                _run_logged(ts_target, f"rm -rf {shlex.quote(bin_dir)}", logger, as_root=True)
-                _run_logged(ts_target, f"mkdir -p {shlex.quote(bin_dir)}", logger, as_root=True)
-                _run_logged(ts_target, f"rm -rf {shlex.quote(skills_dir)}", logger, as_root=True)
-                _run_logged(ts_target, f"mkdir -p {shlex.quote(skills_dir)}", logger, as_root=True)
+                for d in all_dirs:
+                    _run_logged(ts_target, f"rm -rf {shlex.quote(d)}", logger, as_root=True)
+                    _run_logged(ts_target, f"mkdir -p {shlex.quote(d)}", logger, as_root=True)
             else:
-                _run_logged(
-                    ts_target,
-                    f"mkdir -p {shlex.quote(bin_dir)} {shlex.quote(skills_dir)}",
-                    logger,
-                    as_root=True,
-                )
+                dirs_str = " ".join(shlex.quote(d) for d in all_dirs)
+                _run_logged(ts_target, f"mkdir -p {dirs_str}", logger, as_root=True)
+            dirs_str = " ".join(shlex.quote(d) for d in all_dirs)
             _run_logged(
                 ts_target,
-                f"sudo chown $(id -un):$(id -un) {shlex.quote(bin_dir)} {shlex.quote(skills_dir)}",
+                f"sudo chown $(id -un):$(id -un) {dirs_str}",
                 logger,
             )
 
             # Copy artifacts (dirs already cleared above; delete=False to avoid re-rm)
             ts_target.copy_dir_to(bin_out, bin_dir, delete=False, timeout=60)
             ts_target.copy_dir_to(skills_out, skills_dir, delete=False, timeout=60)
+            ts_target.copy_dir_to(rules_out, rules_dir, delete=False, timeout=60)
 
             # Windows tarballs don't preserve Unix execute bits -- set them explicitly
             _run_logged(

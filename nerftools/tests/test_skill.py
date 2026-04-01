@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from nerftools.manifest import ArgSpec, FlagSpec, GuardSpec, NerfManifest, PackageMeta, ToolSpec
+from nerftools.manifest import ArgSpec, FlagSpec, NerfManifest, PackageMeta, ToolSpec
 from nerftools.skill import build_skill_text, build_skills
 
 
@@ -221,9 +221,7 @@ def test_deny_constraint_shown() -> None:
 
 
 def test_allow_constraint_shown() -> None:
-    m = _manifest(
-        tools={"t": _tool(["echo", "{{x}}"], flags={"x": _flag("--x", allow=("prod", "staging"))})}
-    )
+    m = _manifest(tools={"t": _tool(["echo", "{{x}}"], flags={"x": _flag("--x", allow=("prod", "staging"))})})
     skill = build_skill_text(m)
     assert "prod" in skill
     assert "staging" in skill

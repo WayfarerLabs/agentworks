@@ -3,6 +3,7 @@
 from pathlib import Path
 
 BUILTIN_MANIFESTS_DIR = Path(__file__).parent.parent / "manifests"
+BUILTIN_RULES_DIR = Path(__file__).parent / "rules"
 
 _NERFCTL_DIR = Path(__file__).parent / "nerfctl"
 

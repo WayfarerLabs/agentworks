@@ -139,10 +139,15 @@ def test_reset_removes_from_deny(tmp_path: Path) -> None:
 
 
 def test_reset_removes_from_both(tmp_path: Path) -> None:
-    s = _settings(tmp_path, {"permissions": {
-        "allow": ["Bash(nerf-git-log)", "Bash(nerf-git-fetch)"],
-        "deny": ["Bash(nerf-git-log)"],
-    }})
+    s = _settings(
+        tmp_path,
+        {
+            "permissions": {
+                "allow": ["Bash(nerf-git-log)", "Bash(nerf-git-fetch)"],
+                "deny": ["Bash(nerf-git-log)"],
+            }
+        },
+    )
     _run(_RESET, "nerf-git-log", "--settings", str(s))
     data = _read(s)
     assert "Bash(nerf-git-log)" not in data["permissions"]["allow"]
@@ -168,10 +173,15 @@ def test_reset_requires_tool_arg(tmp_path: Path) -> None:
 
 
 def test_list_shows_allowed_nerf_entries(tmp_path: Path) -> None:
-    s = _settings(tmp_path, {"permissions": {
-        "allow": ["Bash(nerf-git-log)", "Bash(some-other-tool)"],
-        "deny": [],
-    }})
+    s = _settings(
+        tmp_path,
+        {
+            "permissions": {
+                "allow": ["Bash(nerf-git-log)", "Bash(some-other-tool)"],
+                "deny": [],
+            }
+        },
+    )
     result = _run(_LIST, "--settings", str(s))
     assert result.returncode == 0
     assert "Bash(nerf-git-log)" in result.stdout
@@ -179,10 +189,15 @@ def test_list_shows_allowed_nerf_entries(tmp_path: Path) -> None:
 
 
 def test_list_shows_denied_nerf_entries(tmp_path: Path) -> None:
-    s = _settings(tmp_path, {"permissions": {
-        "allow": [],
-        "deny": ["Bash(nerf-git-push-origin)"],
-    }})
+    s = _settings(
+        tmp_path,
+        {
+            "permissions": {
+                "allow": [],
+                "deny": ["Bash(nerf-git-push-origin)"],
+            }
+        },
+    )
     result = _run(_LIST, "--settings", str(s))
     assert result.returncode == 0
     assert "Bash(nerf-git-push-origin)" in result.stdout
@@ -190,19 +205,29 @@ def test_list_shows_denied_nerf_entries(tmp_path: Path) -> None:
 
 
 def test_list_includes_nerfctl_entries(tmp_path: Path) -> None:
-    s = _settings(tmp_path, {"permissions": {
-        "allow": ["Bash(nerfctl-claude-grant)"],
-        "deny": [],
-    }})
+    s = _settings(
+        tmp_path,
+        {
+            "permissions": {
+                "allow": ["Bash(nerfctl-claude-grant)"],
+                "deny": [],
+            }
+        },
+    )
     result = _run(_LIST, "--settings", str(s))
     assert "Bash(nerfctl-claude-grant)" in result.stdout
 
 
 def test_list_filters_out_non_nerf_entries(tmp_path: Path) -> None:
-    s = _settings(tmp_path, {"permissions": {
-        "allow": ["Bash(nerf-git-log)", "Bash(unrelated-tool)"],
-        "deny": [],
-    }})
+    s = _settings(
+        tmp_path,
+        {
+            "permissions": {
+                "allow": ["Bash(nerf-git-log)", "Bash(unrelated-tool)"],
+                "deny": [],
+            }
+        },
+    )
     result = _run(_LIST, "--settings", str(s))
     assert "unrelated-tool" not in result.stdout
 

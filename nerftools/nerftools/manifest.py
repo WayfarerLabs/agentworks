@@ -312,9 +312,7 @@ def _validate_tool(
     # Check for name collision between flags and args
     overlap = set(flags.keys()) & set(args.keys())
     if overlap:
-        raise ManifestError(
-            f"{ctx}: names defined in both flags and args: {', '.join(sorted(overlap))}"
-        )
+        raise ManifestError(f"{ctx}: names defined in both flags and args: {', '.join(sorted(overlap))}")
 
     all_params = set(flags.keys()) | set(args.keys())
 
