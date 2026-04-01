@@ -54,10 +54,10 @@ def build_skills(
         out.write_text(text)
         written.append(out)
 
-    # Generate overview skill that lists all tool families
+    # Generate nerftools overview skill
     if manifests:
         overview_text = build_overview_text(manifests, prefix=prefix)
-        overview_dir = output_dir / (prefix + "overview")
+        overview_dir = output_dir / "nerftools"
         overview_dir.mkdir(exist_ok=True)
         out = overview_dir / "SKILL.md"
         out.write_text(overview_text)
@@ -67,32 +67,33 @@ def build_skills(
 
 
 def build_overview_text(manifests: list[NerfManifest], prefix: str = "") -> str:
-    """Return the generated overview SKILL.md listing all tool families."""
-    skill_name = prefix + "overview"
+    """Return the generated nerftools overview SKILL.md."""
     parts: list[str] = []
 
     parts.append("---")
-    parts.append(f"name: {skill_name}")
-    parts.append('description: "Overview of available nerf tool families"')
+    parts.append("name: nerftools")
+    parts.append('description: "Nerf tools overview and usage guidance"')
     parts.append('targets: ["*"]')
     parts.append("---")
     parts.append("")
-    parts.append(f"# {skill_name}")
+    parts.append("# Nerf Tools")
     parts.append("")
     parts.append(
-        "Nerf tools are scoped, safety-constrained wrappers for common CLI operations. "
-        "They enforce guardrails (validated parameters, restricted flags, pre-flight checks) "
-        "that keep operations safe and auditable."
+        "This environment has nerf tools installed -- scoped, safety-constrained wrappers for "
+        "common CLI operations like git, az, and other tools. They enforce guardrails (validated "
+        "parameters, restricted flags, pre-flight checks) that keep operations safe and auditable."
+    )
+    parts.append("")
+    parts.append(
+        "When a nerf tool exists that covers the operation you need, prefer it over invoking the "
+        "underlying tool directly. Shape your workflow to take advantage of them. For example, "
+        "stage files with the nerf git-add tool and then commit with the nerf git-commit tool, "
+        "rather than using raw `git` commands."
     )
     parts.append("")
     parts.append(
         "Invoke tools via the `$AGENTWORKS_NERF_BIN` environment variable "
-        "(e.g. `$AGENTWORKS_NERF_BIN/<tool-name>`). Do not assume they are on PATH."
-    )
-    parts.append("")
-    parts.append(
-        "Prefer nerf tools over direct CLI access when a tool exists that covers the "
-        "operation you need. Shape your workflow to take advantage of them."
+        "(e.g. `$AGENTWORKS_NERF_BIN/nerf-git-commit`). Do not assume they are on PATH."
     )
     parts.append("")
     parts.append("## Available tool families")
@@ -100,14 +101,10 @@ def build_overview_text(manifests: list[NerfManifest], prefix: str = "") -> str:
 
     for manifest in manifests:
         group = prefix + manifest.package.skill_group
-        tool_count = len(manifest.tools)
-        tool_names = ", ".join(prefix + name for name in manifest.tools)
-        parts.append(f"### {group}")
-        parts.append("")
-        parts.append(f"{manifest.package.description}. {tool_count} tool(s): {tool_names}.")
-        parts.append("")
-        parts.append(f"See the `{group}` skill for full usage details.")
-        parts.append("")
+        parts.append(f"- **{group}**: {manifest.package.description}")
+
+    parts.append("")
+    parts.append("Use the corresponding `nerf-*` skill for full usage details on each family.")
 
     return "\n".join(parts).rstrip() + "\n"
 

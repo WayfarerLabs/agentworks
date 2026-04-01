@@ -316,17 +316,17 @@ def test_build_skill_text_prefix_applied_to_tool_names(tmp_path: Path) -> None:
 # -- Overview skill ------------------------------------------------------------
 
 
-def test_overview_skill_generated(tmp_path: Path) -> None:
+def test_nerftools_skill_generated(tmp_path: Path) -> None:
     build_skills([_manifest(skill_group="git")], tmp_path, prefix="nerf-")
-    assert (tmp_path / "nerf-overview" / "SKILL.md").exists()
+    assert (tmp_path / "nerftools" / "SKILL.md").exists()
 
 
-def test_overview_not_generated_when_no_manifests(tmp_path: Path) -> None:
+def test_nerftools_skill_not_generated_when_no_manifests(tmp_path: Path) -> None:
     build_skills([], tmp_path, prefix="nerf-")
-    assert not (tmp_path / "nerf-overview").exists()
+    assert not (tmp_path / "nerftools").exists()
 
 
-def test_overview_lists_tool_families() -> None:
+def test_nerftools_skill_lists_tool_families() -> None:
     from nerftools.skill import build_overview_text
 
     manifests = [
@@ -334,18 +334,24 @@ def test_overview_lists_tool_families() -> None:
         _manifest(skill_group="az-repos", tools={"az-pr-create": _tool(["az", "repos", "pr", "create"])}),
     ]
     text = build_overview_text(manifests, prefix="nerf-")
-    assert "# nerf-overview" in text
-    assert "### nerf-git" in text
-    assert "### nerf-az-repos" in text
-    assert "nerf-git-add" in text
-    assert "nerf-az-pr-create" in text
-    assert "See the `nerf-git` skill" in text
-    assert "See the `nerf-az-repos` skill" in text
+    assert "# Nerf Tools" in text
+    assert "**nerf-git**" in text
+    assert "**nerf-az-repos**" in text
+    assert "Test package" in text
 
 
-def test_overview_has_frontmatter() -> None:
+def test_nerftools_skill_has_usage_guidance() -> None:
+    from nerftools.skill import build_overview_text
+
+    text = build_overview_text([_manifest(skill_group="git")], prefix="nerf-")
+    assert "prefer it over invoking the underlying tool directly" in text
+    assert "$AGENTWORKS_NERF_BIN" in text
+    assert "Do not assume they are on PATH" in text
+
+
+def test_nerftools_skill_has_frontmatter() -> None:
     from nerftools.skill import build_overview_text
 
     text = build_overview_text([_manifest(skill_group="git")], prefix="nerf-")
     assert text.startswith("---\n")
-    assert "name: nerf-overview" in text
+    assert "name: nerftools" in text
