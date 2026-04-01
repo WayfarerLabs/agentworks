@@ -85,6 +85,13 @@ def test_skill_has_h1_header() -> None:
     assert "# nerf-git\n" in skill
 
 
+def test_skill_has_env_var_preamble() -> None:
+    m = _manifest()
+    skill = build_skill_text(m)
+    assert "$AGENTWORKS_NERF_BIN" in skill
+    assert "Do not assume they are on PATH" in skill
+
+
 def test_skill_includes_intro() -> None:
     m = _manifest(skill_intro="Use these tools carefully.")
     skill = build_skill_text(m)
@@ -130,7 +137,14 @@ def test_tool_separated_by_horizontal_rule() -> None:
 def test_usage_line_simple_tool() -> None:
     m = _manifest(tools={"my-tool": _tool(["echo"])})
     skill = build_skill_text(m)
-    assert "**Usage:** `my-tool`" in skill
+    assert "**Usage:** `$AGENTWORKS_NERF_BIN/my-tool`" in skill
+    assert "**Maps to:** `echo`" in skill
+
+
+def test_maps_to_shows_placeholders() -> None:
+    m = _manifest(tools={"t": _tool(["git", "push", "{{remote}}", "{{branch}}"])})
+    skill = build_skill_text(m)
+    assert "**Maps to:** `git push <remote> <branch>`" in skill
 
 
 def test_usage_line_required_flag() -> None:
@@ -237,7 +251,8 @@ def test_boolean_flag_no_angle_brackets_in_usage() -> None:
     flags = {"draft": FlagSpec(flag="--draft", description="Draft PR", boolean=True)}
     m = _manifest(tools={"t": _tool(["gh", "pr", "create", "{{draft}}"], flags=flags)})
     skill = build_skill_text(m)
-    assert "<draft>" not in skill
+    usage_line = next(line for line in skill.splitlines() if line.startswith("**Usage:**"))
+    assert "<draft>" not in usage_line
 
 
 def test_boolean_flag_labeled_boolean_in_arguments() -> None:
@@ -297,4 +312,4 @@ def test_build_skill_text_prefix_applied_to_tool_names(tmp_path: Path) -> None:
     m = _manifest(skill_group="git", tools={"git-fetch": _tool(["git", "fetch"])})
     skill = build_skill_text(m, prefix="nerf-")
     assert "## nerf-git-fetch" in skill
-    assert "**Usage:** `nerf-git-fetch`" in skill
+    assert "**Usage:** `$AGENTWORKS_NERF_BIN/nerf-git-fetch`" in skill

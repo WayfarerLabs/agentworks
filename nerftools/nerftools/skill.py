@@ -77,6 +77,11 @@ def build_skill_text(manifest: NerfManifest, prefix: str = "") -> str:
 
     parts.append(f"# {skill_group}")
     parts.append("")
+    parts.append(
+        "Invoke these tools via the `$AGENTWORKS_NERF_BIN` environment variable "
+        "(e.g. `$AGENTWORKS_NERF_BIN/<tool-name>`). Do not assume they are on PATH."
+    )
+    parts.append("")
 
     if manifest.package.skill_intro:
         parts.append(manifest.package.skill_intro.strip())
@@ -101,6 +106,8 @@ def _tool_section(tool_name: str, tool_spec: ToolSpec) -> str:
 
     usage = _usage_line(tool_name, tool_spec)
     parts.append(f"**Usage:** `{usage}`")
+    maps_to = _maps_to_line(tool_spec)
+    parts.append(f"**Maps to:** `{maps_to}`")
     parts.append("")
 
     has_params = bool(tool_spec.flags) or bool(tool_spec.args)
@@ -124,7 +131,7 @@ def _tool_section(tool_name: str, tool_spec: ToolSpec) -> str:
 
 
 def _usage_line(tool_name: str, tool_spec: ToolSpec) -> str:
-    parts = [tool_name]
+    parts = [f"$AGENTWORKS_NERF_BIN/{tool_name}"]
     for name, p in tool_spec.flags.items():
         flag_display = f"{p.flag}|{p.short}" if p.short else p.flag
         if p.boolean:
@@ -135,6 +142,16 @@ def _usage_line(tool_name: str, tool_spec: ToolSpec) -> str:
     for name, spec in tool_spec.args.items():
         token = f"<{name}...>" if spec.variadic else f"<{name}>"
         parts.append(token if spec.required else f"[{token}]")
+    return " ".join(parts)
+
+
+def _maps_to_line(tool_spec: ToolSpec) -> str:
+    """Show the underlying command with placeholders replaced by <name>."""
+    import re
+
+    parts: list[str] = []
+    for token in tool_spec.command:
+        parts.append(re.sub(r"\{\{(\w+)\}\}", r"<\1>", token))
     return " ".join(parts)
 
 

@@ -1368,7 +1368,7 @@ def _install_nerf_tools(
                 logger,
             )
 
-        typer.echo(f"  Nerf tools installed to {bin_dir}")
+        typer.echo(f"  Nerf tools installed to {nerf_home}")
 
         # System-wide env vars so all users can locate nerf artifacts.
         env_lines = f'export AGENTWORKS_NERF_HOME="{nerf_home}"\nexport AGENTWORKS_NERF_BIN="{bin_dir}"'
