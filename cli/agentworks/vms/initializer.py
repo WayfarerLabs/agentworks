@@ -1264,7 +1264,7 @@ def _phase_b_setup(
     # Non-fatal: shell profile (PATH exports, sourced at login)
     all_paths = system_path + mise_path + user_path
     if config.admin.add_nerftools_to_path:
-        all_paths.append(config.vm.nerf_bin_dir)
+        all_paths.append("$AGENTWORKS_NERF_BIN")
     _write_agentworks_profile(ts_target, all_paths, logger)
 
     # Non-fatal: shell rc (interactive shell hooks like mise activate)
@@ -1288,8 +1288,9 @@ def _install_nerf_tools(
     logger.step("Nerf tools")
     typer.echo("  Building nerf tools...")
 
-    bin_dir = config.vm.nerf_bin_dir
-    skills_dir = config.vm.nerf_skills_dir
+    nerf_home = config.vm.nerf_home_dir
+    bin_dir = f"{nerf_home}/bin"
+    skills_dir = f"{nerf_home}/skills"
     keep = config.vm.nerf_keep_existing
 
     try:
@@ -1368,6 +1369,21 @@ def _install_nerf_tools(
             )
 
         typer.echo(f"  Nerf tools installed to {bin_dir}")
+
+        # System-wide env vars so all users can locate nerf artifacts.
+        env_lines = f'export AGENTWORKS_NERF_HOME="{nerf_home}"\nexport AGENTWORKS_NERF_BIN="{bin_dir}"'
+        _run_logged(
+            ts_target,
+            f"printf '%s\\n' {shlex.quote(env_lines)} | sudo tee /etc/profile.d/agentworks-nerf.sh > /dev/null",
+            logger,
+        )
+        # zsh doesn't source /etc/profile.d/ -- append to /etc/zsh/zprofile if not already there
+        _run_logged(
+            ts_target,
+            f"grep -qF AGENTWORKS_NERF_HOME /etc/zsh/zprofile 2>/dev/null"
+            f" || printf '%s\\n' {shlex.quote(env_lines)} | sudo tee -a /etc/zsh/zprofile > /dev/null",
+            logger,
+        )
 
     except (SSHError, RuntimeError) as e:
         msg = f"nerf tools installation failed: {e}"

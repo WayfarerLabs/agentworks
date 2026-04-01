@@ -38,8 +38,7 @@ class ResolvedVMTemplate:
     skip_nerf_defaults: bool = False
     nerf_addl_manifests: list[Path] = field(default_factory=list)
     nerf_keep_existing: bool = False
-    nerf_bin_dir: str = "/opt/agentworks/nerf/bin"
-    nerf_skills_dir: str = "/opt/agentworks/nerf/skills"
+    nerf_home_dir: str = "/opt/agentworks/nerf"
 
 
 def resolve_from_dict(
@@ -123,8 +122,7 @@ def _merge(target: ResolvedVMTemplate, source: ResolvedVMTemplate) -> None:
     target.skip_nerf_defaults = source.skip_nerf_defaults
     target.nerf_addl_manifests = list(source.nerf_addl_manifests)
     target.nerf_keep_existing = source.nerf_keep_existing
-    target.nerf_bin_dir = source.nerf_bin_dir
-    target.nerf_skills_dir = source.nerf_skills_dir
+    target.nerf_home_dir = source.nerf_home_dir
 
 
 def _merge_template(target: ResolvedVMTemplate, tmpl: VMTemplate) -> None:
@@ -158,7 +156,5 @@ def _merge_template(target: ResolvedVMTemplate, tmpl: VMTemplate) -> None:
         target.nerf_addl_manifests = list(tmpl.nerf_addl_manifests)
     if tmpl.nerf_keep_existing is not None:
         target.nerf_keep_existing = tmpl.nerf_keep_existing
-    if tmpl.nerf_bin_dir is not None:
-        target.nerf_bin_dir = tmpl.nerf_bin_dir
-    if tmpl.nerf_skills_dir is not None:
-        target.nerf_skills_dir = tmpl.nerf_skills_dir
+    if tmpl.nerf_home_dir is not None:
+        target.nerf_home_dir = tmpl.nerf_home_dir

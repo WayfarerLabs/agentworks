@@ -127,8 +127,7 @@ class VMTemplate:
     skip_nerf_defaults: bool | None = None
     nerf_addl_manifests: list[Path] | None = None
     nerf_keep_existing: bool | None = None
-    nerf_bin_dir: str | None = None
-    nerf_skills_dir: str | None = None
+    nerf_home_dir: str | None = None
 
 
 @dataclass(frozen=True)
@@ -380,8 +379,7 @@ _VM_TEMPLATE_KEYS = {
     "skip_nerf_defaults",
     "nerf_addl_manifests",
     "nerf_keep_existing",
-    "nerf_bin_dir",
-    "nerf_skills_dir",
+    "nerf_home_dir",
 }
 
 
@@ -422,8 +420,7 @@ def _load_vm_templates(data: dict[str, object]) -> dict[str, VMTemplate]:
             skip_nerf_defaults=bool(tdata["skip_nerf_defaults"]) if "skip_nerf_defaults" in tdata else None,
             nerf_addl_manifests=nerf_addl,
             nerf_keep_existing=bool(tdata["nerf_keep_existing"]) if "nerf_keep_existing" in tdata else None,
-            nerf_bin_dir=str(tdata["nerf_bin_dir"]) if "nerf_bin_dir" in tdata else None,
-            nerf_skills_dir=str(tdata["nerf_skills_dir"]) if "nerf_skills_dir" in tdata else None,
+            nerf_home_dir=str(tdata["nerf_home_dir"]) if "nerf_home_dir" in tdata else None,
         )
 
     # Validate inherits references and cycles

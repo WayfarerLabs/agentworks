@@ -104,8 +104,7 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 #     "~/.config/agentworks/nerf/my-tools/manifest.yaml",
 # ]
 # nerf_keep_existing = false                 # preserve unmanaged files in bin/skills dirs on reinit
-# nerf_bin_dir = "/opt/agentworks/nerf/bin"  # where to deploy generated tool scripts
-# nerf_skills_dir = "/opt/agentworks/nerf/skills"  # where to deploy generated skill files
+# nerf_home_dir = "/opt/agentworks/nerf"     # root dir for nerf artifacts (bin/ and skills/)
 
 # [vm_templates.heavy]
 # inherits = ["default"]
