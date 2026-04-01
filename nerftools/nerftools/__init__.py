@@ -12,6 +12,7 @@ NERFCTL_FRAMEWORKS: dict[str, dict[str, Path]] = {
         "deny": _NERFCTL_DIR / "claude" / "deny.sh",
         "reset": _NERFCTL_DIR / "claude" / "reset.sh",
         "list": _NERFCTL_DIR / "claude" / "list.sh",
+        "install-plugin": _NERFCTL_DIR / "claude" / "install-plugin.sh",
     },
 }
 

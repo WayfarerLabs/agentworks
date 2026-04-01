@@ -6,6 +6,7 @@ the package so AI coding assistants know how to use them.
 
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -64,6 +65,49 @@ def build_skills(
         written.append(out)
 
     return written
+
+
+def build_plugin_manifest(output_dir: Path) -> Path:
+    """Generate .claude-plugin/plugin.json and marketplace.json in output_dir.
+
+    This makes the nerf home directory a valid Claude Code plugin with a local
+    marketplace, exposing the skills/ directory to Claude Code when installed.
+    """
+    plugin_dir = output_dir / ".claude-plugin"
+    plugin_dir.mkdir(parents=True, exist_ok=True)
+
+    plugin = {
+        "name": "nerftools",
+        "version": "1.0.0",
+        "description": "Nerf tools -- scoped, safety-constrained CLI wrappers for AI agents",
+        "skills": "./skills/",
+    }
+    plugin_path = plugin_dir / "plugin.json"
+    plugin_path.write_text(json.dumps(plugin, indent=2) + "\n")
+
+    marketplace = {
+        "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+        "name": "agentworks-nerf-local",
+        "description": "Local nerf tools plugin from agentworks",
+        "owner": {
+            "name": "Agentworks",
+        },
+        "plugins": [
+            {
+                "name": "nerftools",
+                "description": "Nerf tools -- scoped, safety-constrained CLI wrappers for AI agents",
+                "author": {
+                    "name": "Agentworks",
+                },
+                "source": "./",
+                "category": "development",
+            }
+        ],
+    }
+    marketplace_path = plugin_dir / "marketplace.json"
+    marketplace_path.write_text(json.dumps(marketplace, indent=2) + "\n")
+
+    return plugin_path
 
 
 def build_overview_text(manifests: list[NerfManifest], prefix: str = "") -> str:

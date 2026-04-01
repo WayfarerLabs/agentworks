@@ -306,6 +306,26 @@ def test_build_skills_prefix_in_skill_content(tmp_path: Path) -> None:
     assert "# nerf-git" in content
 
 
+def test_plugin_manifest_generated(tmp_path: Path) -> None:
+    from nerftools.skill import build_plugin_manifest
+
+    out = build_plugin_manifest(tmp_path)
+    assert out.exists()
+    assert out.parent.name == ".claude-plugin"
+    import json
+
+    plugin = json.loads(out.read_text())
+    assert plugin["name"] == "nerftools"
+    assert plugin["skills"] == "./skills/"
+
+    marketplace_path = out.parent / "marketplace.json"
+    assert marketplace_path.exists()
+    marketplace = json.loads(marketplace_path.read_text())
+    assert marketplace["name"] == "agentworks-nerf-local"
+    assert marketplace["plugins"][0]["name"] == "nerftools"
+    assert marketplace["plugins"][0]["source"] == "./"
+
+
 def test_build_skill_text_prefix_applied_to_tool_names(tmp_path: Path) -> None:
     m = _manifest(skill_group="git", tools={"git-fetch": _tool(["git", "fetch"])})
     skill = build_skill_text(m, prefix="nerf-")

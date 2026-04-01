@@ -1336,10 +1336,16 @@ def _install_nerf_tools(
 
             install_nerfctl("claude", bin_out)
 
+            # Generate Claude Code plugin manifest
+            from nerftools.skill import build_plugin_manifest
+
+            build_plugin_manifest(tmp_path)
+
             # Create/clear remote dirs as root, then chown to the current SSH user
             # so copy_dir_to can write without sudo. $(id -un) expands on the remote
             # shell before sudo runs, giving the SSH user's name.
-            all_dirs = [bin_dir, skills_dir]
+            plugin_dir = f"{nerf_home}/.claude-plugin"
+            all_dirs = [bin_dir, skills_dir, plugin_dir]
             if not keep:
                 for d in all_dirs:
                     _run_logged(ts_target, f"rm -rf {shlex.quote(d)}", logger, as_root=True)
@@ -1357,6 +1363,7 @@ def _install_nerf_tools(
             # Copy artifacts (dirs already cleared above; delete=False to avoid re-rm)
             ts_target.copy_dir_to(bin_out, bin_dir, delete=False, timeout=60)
             ts_target.copy_dir_to(skills_out, skills_dir, delete=False, timeout=60)
+            ts_target.copy_dir_to(tmp_path / ".claude-plugin", plugin_dir, delete=False, timeout=60)
 
             # Windows tarballs don't preserve Unix execute bits -- set them explicitly
             _run_logged(

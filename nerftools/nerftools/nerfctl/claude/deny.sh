@@ -4,19 +4,20 @@
 
 set -euo pipefail
 
-SETTINGS_FILE=""
+SCOPE="user"
 TOOL=""
 
 usage() {
   cat >&2 <<'EOF'
-Usage: nerfctl-claude-deny <tool> [--settings <path>]
+Usage: nerfctl-claude-deny <tool> [--scope user|local]
 
   <tool>              Name of the nerf tool to deny (e.g. nerf-git-push-origin)
-  --settings <path>   Path to settings file (default: .claude/settings.local.json)
+  --scope user|local  Settings scope (default: user)
+                        user:  ~/.claude/settings.json
+                        local: .claude/settings.local.json
 
-Adds Bash(<tool>) to permissions.deny and removes it from permissions.allow
-if present. Operates on .claude/settings.local.json in the current directory
-by default. Use --settings to target a different file.
+Adds deny entries for both the absolute path ($AGENTWORKS_NERF_BIN/<tool>)
+and the bare command name, and removes any matching allow entries.
 
 Requires jq.
 EOF
@@ -31,27 +32,30 @@ _require_jq() {
 }
 
 _resolve_settings() {
-  if [[ -n "$SETTINGS_FILE" ]]; then
-    echo "$SETTINGS_FILE"
-    return
-  fi
-  if [[ ! -d ".claude" ]]; then
-    echo "error: .claude/ not found in current directory. Run from your workspace root or use --settings." >&2
-    exit 1
-  fi
-  echo ".claude/settings.local.json"
+  case "$SCOPE" in
+    user)  echo "$HOME/.claude/settings.json" ;;
+    local)
+      if [[ ! -d ".claude" ]]; then
+        echo "error: .claude/ not found in current directory" >&2
+        exit 1
+      fi
+      echo ".claude/settings.local.json"
+      ;;
+    *) echo "error: unknown scope '$SCOPE' (use 'user' or 'local')" >&2; exit 1 ;;
+  esac
 }
 
 _ensure_settings_file() {
   local file="$1"
-  if [[ ! -f "$file" ]]; then
-    echo '{}' > "$file"
-  fi
+  local dir
+  dir=$(dirname "$file")
+  [[ -d "$dir" ]] || mkdir -p "$dir"
+  [[ -f "$file" ]] || echo '{}' > "$file"
 }
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --settings) SETTINGS_FILE="$2"; shift 2 ;;
+    --scope) SCOPE="$2"; shift 2 ;;
     -h|--help) usage ;;
     -*) echo "error: unknown option: $1" >&2; usage ;;
     *)
@@ -73,21 +77,29 @@ _require_jq
 SETTINGS="$(_resolve_settings)"
 _ensure_settings_file "$SETTINGS"
 
-ENTRY="Bash($TOOL)"
+ENTRY_ABS='Bash($AGENTWORKS_NERF_BIN/'"$TOOL"')'
+ENTRY_BARE="Bash($TOOL)"
 
-# Remove from allow if present, then add to deny if not already there
+# Remove from allow, add to deny (both entries)
 UPDATED=$(jq \
-  --arg entry "$ENTRY" \
+  --arg abs "$ENTRY_ABS" \
+  --arg bare "$ENTRY_BARE" \
   '
     .permissions //= {}
     | .permissions.allow //= []
     | .permissions.deny //= []
-    | .permissions.allow = [.permissions.allow[] | select(. != $entry)]
-    | if (.permissions.deny | index($entry)) == null
-      then .permissions.deny += [$entry]
+    | .permissions.allow = [.permissions.allow[] | select(. != $abs and . != $bare)]
+    | if (.permissions.deny | index($abs)) == null
+      then .permissions.deny += [$abs]
+      else .
+      end
+    | if (.permissions.deny | index($bare)) == null
+      then .permissions.deny += [$bare]
       else .
       end
   ' "$SETTINGS")
 
 echo "$UPDATED" > "$SETTINGS"
-echo "Denied: $ENTRY in $SETTINGS"
+echo "Denied: $TOOL (scope: $SCOPE)"
+echo "  $ENTRY_ABS"
+echo "  $ENTRY_BARE"

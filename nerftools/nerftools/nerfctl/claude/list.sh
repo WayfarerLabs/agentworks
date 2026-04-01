@@ -4,17 +4,18 @@
 
 set -euo pipefail
 
-SETTINGS_FILE=""
+SCOPE="user"
 
 usage() {
   cat >&2 <<'EOF'
-Usage: nerfctl-claude-list [--settings <path>]
+Usage: nerfctl-claude-list [--scope user|local]
 
-  --settings <path>   Path to settings file (default: .claude/settings.local.json)
+  --scope user|local  Settings scope (default: user)
+                        user:  ~/.claude/settings.json
+                        local: .claude/settings.local.json
 
-Lists all Bash(nerf-*) and Bash(nerfctl-*) entries from permissions.allow and
-permissions.deny. Operates on .claude/settings.local.json in the current
-directory by default. Use --settings to target a different file.
+Lists all nerf-related entries from permissions.allow and permissions.deny.
+Matches both absolute path ($AGENTWORKS_NERF_BIN/...) and bare command entries.
 
 Requires jq.
 EOF
@@ -29,20 +30,22 @@ _require_jq() {
 }
 
 _resolve_settings() {
-  if [[ -n "$SETTINGS_FILE" ]]; then
-    echo "$SETTINGS_FILE"
-    return
-  fi
-  if [[ ! -d ".claude" ]]; then
-    echo "error: .claude/ not found in current directory. Run from your workspace root or use --settings." >&2
-    exit 1
-  fi
-  echo ".claude/settings.local.json"
+  case "$SCOPE" in
+    user)  echo "$HOME/.claude/settings.json" ;;
+    local)
+      if [[ ! -d ".claude" ]]; then
+        echo "error: .claude/ not found in current directory" >&2
+        exit 1
+      fi
+      echo ".claude/settings.local.json"
+      ;;
+    *) echo "error: unknown scope '$SCOPE' (use 'user' or 'local')" >&2; exit 1 ;;
+  esac
 }
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --settings) SETTINGS_FILE="$2"; shift 2 ;;
+    --scope) SCOPE="$2"; shift 2 ;;
     -h|--help) usage ;;
     -*) echo "error: unknown option: $1" >&2; usage ;;
     *) echo "error: unexpected argument: $1" >&2; usage ;;
@@ -54,27 +57,27 @@ _require_jq
 SETTINGS="$(_resolve_settings)"
 
 if [[ ! -f "$SETTINGS" ]]; then
-  echo "No settings file found at $SETTINGS"
+  echo "No settings file at $SETTINGS"
   exit 0
 fi
 
-# Extract nerf-* and nerfctl-* entries from allow and deny lists
+# Match nerf-*, nerfctl-*, and $AGENTWORKS_NERF_BIN/ entries
 ALLOW=$(jq -r '
   (.permissions.allow // [])[]
-  | select(test("^Bash\\((nerf-|nerfctl-)"))
+  | select(test("^Bash\\((nerf-|nerfctl-|\\$AGENTWORKS_NERF_BIN/)"))
 ' "$SETTINGS")
 
 DENY=$(jq -r '
   (.permissions.deny // [])[]
-  | select(test("^Bash\\((nerf-|nerfctl-)"))
+  | select(test("^Bash\\((nerf-|nerfctl-|\\$AGENTWORKS_NERF_BIN/)"))
 ' "$SETTINGS")
 
 if [[ -z "$ALLOW" && -z "$DENY" ]]; then
-  echo "No nerf tool permissions found in $SETTINGS"
+  echo "No nerf tool permissions found in $SETTINGS (scope: $SCOPE)"
   exit 0
 fi
 
-echo "Settings: $SETTINGS"
+echo "Settings: $SETTINGS (scope: $SCOPE)"
 echo ""
 
 if [[ -n "$ALLOW" ]]; then

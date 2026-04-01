@@ -4,21 +4,20 @@
 
 set -euo pipefail
 
-SETTINGS_FILE=""
+SCOPE="user"
 TOOL=""
 
 usage() {
   cat >&2 <<'EOF'
-Usage: nerfctl-claude-reset <tool> [--settings <path>]
+Usage: nerfctl-claude-reset <tool> [--scope user|local]
 
   <tool>              Name of the nerf tool to reset (e.g. nerf-git-push-origin)
-  --settings <path>   Path to settings file (default: .claude/settings.local.json)
+  --scope user|local  Settings scope (default: user)
+                        user:  ~/.claude/settings.json
+                        local: .claude/settings.local.json
 
-Removes Bash(<tool>) from both permissions.allow and permissions.deny. After
-reset the tool has no explicit permission entry -- framework defaults apply.
-
-Operates on .claude/settings.local.json in the current directory by default.
-Use --settings to target a different file.
+Removes all permission entries (both absolute path and bare name) from both
+allow and deny lists. After reset, framework defaults apply.
 
 Requires jq.
 EOF
@@ -33,20 +32,22 @@ _require_jq() {
 }
 
 _resolve_settings() {
-  if [[ -n "$SETTINGS_FILE" ]]; then
-    echo "$SETTINGS_FILE"
-    return
-  fi
-  if [[ ! -d ".claude" ]]; then
-    echo "error: .claude/ not found in current directory. Run from your workspace root or use --settings." >&2
-    exit 1
-  fi
-  echo ".claude/settings.local.json"
+  case "$SCOPE" in
+    user)  echo "$HOME/.claude/settings.json" ;;
+    local)
+      if [[ ! -d ".claude" ]]; then
+        echo "error: .claude/ not found in current directory" >&2
+        exit 1
+      fi
+      echo ".claude/settings.local.json"
+      ;;
+    *) echo "error: unknown scope '$SCOPE' (use 'user' or 'local')" >&2; exit 1 ;;
+  esac
 }
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --settings) SETTINGS_FILE="$2"; shift 2 ;;
+    --scope) SCOPE="$2"; shift 2 ;;
     -h|--help) usage ;;
     -*) echo "error: unknown option: $1" >&2; usage ;;
     *)
@@ -68,21 +69,23 @@ _require_jq
 SETTINGS="$(_resolve_settings)"
 
 if [[ ! -f "$SETTINGS" ]]; then
-  echo "Reset: Bash($TOOL) not found in $SETTINGS (file does not exist)"
+  echo "Reset: no settings file at $SETTINGS"
   exit 0
 fi
 
-ENTRY="Bash($TOOL)"
+ENTRY_ABS='Bash($AGENTWORKS_NERF_BIN/'"$TOOL"')'
+ENTRY_BARE="Bash($TOOL)"
 
 UPDATED=$(jq \
-  --arg entry "$ENTRY" \
+  --arg abs "$ENTRY_ABS" \
+  --arg bare "$ENTRY_BARE" \
   '
     .permissions //= {}
     | .permissions.allow //= []
     | .permissions.deny //= []
-    | .permissions.allow = [.permissions.allow[] | select(. != $entry)]
-    | .permissions.deny = [.permissions.deny[] | select(. != $entry)]
+    | .permissions.allow = [.permissions.allow[] | select(. != $abs and . != $bare)]
+    | .permissions.deny = [.permissions.deny[] | select(. != $abs and . != $bare)]
   ' "$SETTINGS")
 
 echo "$UPDATED" > "$SETTINGS"
-echo "Reset: $ENTRY removed from $SETTINGS"
+echo "Reset: $TOOL removed from $SETTINGS (scope: $SCOPE)"
