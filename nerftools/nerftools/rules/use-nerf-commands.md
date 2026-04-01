@@ -1,3 +1,8 @@
+---
+paths:
+  - '**/*'
+---
+
 # Use Nerf Commands
 
 This environment has "nerf tools" installed -- scoped, safety-constrained wrappers for common CLI
@@ -10,6 +15,6 @@ checks) that keep operations safe and auditable. Shape your workflow to take adv
 example, stage files with the nerf git-add tool and then commit with the nerf git-commit tool,
 rather than using raw `git` commands.
 
-Each nerf tool family has a corresponding `nerf-*` skill (e.g. `nerf-git`, `nerf-az-repos`) that
-documents available tools, their usage, arguments, and constraints. Consult the relevant skill when
-you need to understand what is available and how to use it.
+Use the `nerf-overview` skill for a summary of all available tool families. Each family also has its
+own `nerf-*` skill (e.g. `nerf-git`, `nerf-az-repos`) with full usage details, arguments, and
+constraints. Consult the relevant skill when you need specifics.

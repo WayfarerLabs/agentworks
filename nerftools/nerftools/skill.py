@@ -54,7 +54,62 @@ def build_skills(
         out.write_text(text)
         written.append(out)
 
+    # Generate overview skill that lists all tool families
+    if manifests:
+        overview_text = build_overview_text(manifests, prefix=prefix)
+        overview_dir = output_dir / (prefix + "overview")
+        overview_dir.mkdir(exist_ok=True)
+        out = overview_dir / "SKILL.md"
+        out.write_text(overview_text)
+        written.append(out)
+
     return written
+
+
+def build_overview_text(manifests: list[NerfManifest], prefix: str = "") -> str:
+    """Return the generated overview SKILL.md listing all tool families."""
+    skill_name = prefix + "overview"
+    parts: list[str] = []
+
+    parts.append("---")
+    parts.append(f"name: {skill_name}")
+    parts.append('description: "Overview of available nerf tool families"')
+    parts.append('targets: ["*"]')
+    parts.append("---")
+    parts.append("")
+    parts.append(f"# {skill_name}")
+    parts.append("")
+    parts.append(
+        "Nerf tools are scoped, safety-constrained wrappers for common CLI operations. "
+        "They enforce guardrails (validated parameters, restricted flags, pre-flight checks) "
+        "that keep operations safe and auditable."
+    )
+    parts.append("")
+    parts.append(
+        "Invoke tools via the `$AGENTWORKS_NERF_BIN` environment variable "
+        "(e.g. `$AGENTWORKS_NERF_BIN/<tool-name>`). Do not assume they are on PATH."
+    )
+    parts.append("")
+    parts.append(
+        "Prefer nerf tools over direct CLI access when a tool exists that covers the "
+        "operation you need. Shape your workflow to take advantage of them."
+    )
+    parts.append("")
+    parts.append("## Available tool families")
+    parts.append("")
+
+    for manifest in manifests:
+        group = prefix + manifest.package.skill_group
+        tool_count = len(manifest.tools)
+        tool_names = ", ".join(prefix + name for name in manifest.tools)
+        parts.append(f"### {group}")
+        parts.append("")
+        parts.append(f"{manifest.package.description}. {tool_count} tool(s): {tool_names}.")
+        parts.append("")
+        parts.append(f"See the `{group}` skill for full usage details.")
+        parts.append("")
+
+    return "\n".join(parts).rstrip() + "\n"
 
 
 def build_skill_text(manifest: NerfManifest, prefix: str = "") -> str:
