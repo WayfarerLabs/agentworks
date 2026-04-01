@@ -1262,7 +1262,10 @@ def _phase_b_setup(
     )
 
     # Non-fatal: shell profile (PATH exports, sourced at login)
-    _write_agentworks_profile(ts_target, system_path + mise_path + user_path, logger)
+    all_paths = system_path + mise_path + user_path
+    if config.admin.add_nerftools_to_path:
+        all_paths.append(config.vm.nerf_bin_dir)
+    _write_agentworks_profile(ts_target, all_paths, logger)
 
     # Non-fatal: shell rc (interactive shell hooks like mise activate)
     if mise_available and config.admin.mise_activate:
@@ -1365,21 +1368,6 @@ def _install_nerf_tools(
             )
 
         typer.echo(f"  Nerf tools installed to {bin_dir}")
-
-        # System-wide PATH so all users (including agent users) can find the tools.
-        # bash/sh login shells source /etc/profile.d/; zsh uses /etc/zsh/zprofile.
-        profile_line = f'export PATH="{bin_dir}:$PATH"'
-        _run_logged(
-            ts_target,
-            f"echo {shlex.quote(profile_line)} | sudo tee /etc/profile.d/agentworks-nerf.sh > /dev/null",
-            logger,
-        )
-        _run_logged(
-            ts_target,
-            f"grep -qF {shlex.quote(bin_dir)} /etc/zsh/zprofile 2>/dev/null"
-            f" || echo {shlex.quote(profile_line)} | sudo tee -a /etc/zsh/zprofile > /dev/null",
-            logger,
-        )
 
     except (SSHError, RuntimeError) as e:
         msg = f"nerf tools installation failed: {e}"

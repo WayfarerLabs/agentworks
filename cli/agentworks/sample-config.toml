@@ -133,6 +133,8 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # mise_allow_unlocked = false                # install packages not in lockfile (with warning)
 # mise_install_before = "7d"                 # reject versions newer than this
 # mise_prune_on_reinit = true                # remove stale tool versions on reinit
+# -- Nerf tools --
+# add_nerftools_to_path = false              # add nerf bin dir to this user's PATH
 
 # --- Agent templates ---
 # Per-user settings for agent users. Selected at agent create time with
@@ -153,6 +155,8 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # mise_allow_unlocked = false
 # mise_install_before = "7d"
 # mise_prune_on_reinit = true
+# -- Nerf tools --
+# add_nerftools_to_path = false              # add nerf bin dir to this agent's PATH
 
 # [agent_templates.restricted]
 # inherits = ["default"]

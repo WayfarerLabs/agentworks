@@ -726,6 +726,10 @@ def _run_agent_install_commands(
             typer.echo(f"  Warning: agent install command '{name}' failed: {e}", err=True)
         path_additions.extend(entry.path)
 
+    # Add nerf tools to PATH if configured
+    if config.agent.add_nerftools_to_path:
+        path_additions.append(config.vm.nerf_bin_dir)
+
     # Write PATH additions for the agent
     if path_additions:
         from agentworks.vms.initializer import AGENTWORKS_PROFILE
