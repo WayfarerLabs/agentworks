@@ -31,8 +31,11 @@ def create_local_workspace(
     workspace_path = str(workspace_dir)
 
     if workspace_dir.exists():
-        typer.echo("  Removing stale workspace directory from previous attempt...")
-        shutil.rmtree(workspace_dir)
+        typer.echo(
+            f"Error: directory {workspace_path} already exists.\nRemove it manually or choose a different name.",
+            err=True,
+        )
+        raise typer.Exit(1)
 
     # Git clone or just create directory
     if template.repo:

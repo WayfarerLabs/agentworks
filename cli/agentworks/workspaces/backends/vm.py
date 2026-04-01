@@ -41,11 +41,16 @@ def create_vm_workspace(
     workspace_path = f"{config.paths.vm_workspaces}/{ws_name}"
     ws_group = f"ws--{ws_name}"
 
-    # Remove stale directory from a previous interrupted attempt
+    # Refuse to create if directory already exists
     exists = ssh_run(target, f"test -d {workspace_path}", check=False, timeout=10, logger=lg)
     if exists.ok:
-        typer.echo("  Removing stale workspace directory from previous attempt...")
-        ssh_run(target, f"rm -rf {workspace_path}", timeout=30, logger=lg)
+        typer.echo(
+            f"Error: directory {workspace_path} already exists on the VM.\n"
+            f"Remove it manually (ssh to the VM and 'sudo rm -rf {workspace_path}') "
+            "or choose a different name.",
+            err=True,
+        )
+        raise typer.Exit(1)
 
     # Create workspace group (idempotent), add admin, and set up directory with setgid
     run_as_root(target, f"sh -c 'getent group {ws_group} >/dev/null 2>&1 || /usr/sbin/groupadd {ws_group}'", logger=lg)

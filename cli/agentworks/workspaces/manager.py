@@ -915,13 +915,33 @@ def copy_workspace(
             dest_target = ssh_target_for_vm(dest_vm, config)
             workspace_path = f"{config.paths.vm_workspaces}/{dest_name}"
 
-            typer.echo(f"Unpacking to workspace '{dest_name}' on VM '{dest_vm.name}'...")
-            run_as_root(dest_target, f"mkdir -p {workspace_path}", timeout=10, logger=lg)
+            ws_group = f"ws--{dest_name}"
 
+            typer.echo(f"Unpacking to workspace '{dest_name}' on VM '{dest_vm.name}'...")
+
+            # Set up group, directory, and permissions (same as create_vm_workspace)
+            run_as_root(
+                dest_target,
+                f"sh -c 'getent group {ws_group} >/dev/null 2>&1 || /usr/sbin/groupadd {ws_group}'",
+                logger=lg,
+            )
+            run_as_root(dest_target, f"usermod -aG {ws_group} {dest_vm.admin_username}", logger=lg)
+            run_as_root(dest_target, f"mkdir -p {workspace_path}", timeout=10, logger=lg)
+            run_as_root(dest_target, f"chown {dest_vm.admin_username}:{ws_group} {workspace_path}", logger=lg)
+            run_as_root(dest_target, f"chmod 2770 {workspace_path}", logger=lg)
+            run_as_root(dest_target, f"setfacl -d -m g::rwx -m m::rwx {workspace_path}", logger=lg)
+
+            # Unpack archive and fix ownership
             remote_tmp = f"/tmp/{dest_name}-copy.tgz"
             copy_to(dest_target, tmp_path, remote_tmp, timeout=300)
-            run(dest_target, f"tar xzf {remote_tmp} -C {workspace_path}", timeout=120, logger=lg)
+            run_as_root(dest_target, f"tar xzf {remote_tmp} -C {workspace_path}", timeout=120, logger=lg)
             run(dest_target, f"rm -f {remote_tmp}", check=False, timeout=10, logger=lg)
+            run_as_root(
+                dest_target,
+                f"chown -R {dest_vm.admin_username}:{ws_group} {workspace_path}",
+                timeout=60,
+                logger=lg,
+            )
 
             db.insert_workspace(
                 dest_name,
