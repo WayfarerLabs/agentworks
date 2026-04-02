@@ -110,6 +110,10 @@ def _build_script(tool_name: str, package_name: str, tool_spec: ToolSpec) -> str
         parts.append("")
         parts.append(_guard_checks(tool_spec))
 
+    if tool_spec.npm_pkgrun:
+        parts.append("")
+        parts.append(_npm_pkgrun_resolver())
+
     parts.append("")
     parts.append(_exec_line(tool_spec))
 
@@ -399,8 +403,28 @@ def _substitute_script(
     return _PLACEHOLDER_RE.sub(replace, script)
 
 
+def _npm_pkgrun_resolver() -> str:
+    """Generate a preamble that resolves the best npm package runner."""
+    return (
+        "# Resolve npm package runner\n"
+        '_PKGRUN=""\n'
+        "for _candidate in bunx pnpx npx; do\n"
+        '  if command -v "$_candidate" > /dev/null 2>&1; then\n'
+        '    _PKGRUN="$_candidate"\n'
+        "    break\n"
+        "  fi\n"
+        "done\n"
+        'if [[ -z "$_PKGRUN" ]]; then\n'
+        '  echo "error: no npm package runner found (tried bunx, pnpx, npx)" >&2\n'
+        "  exit 1\n"
+        "fi"
+    )
+
+
 def _exec_line(tool_spec: ToolSpec) -> str:
     args = _substitute_command(tool_spec.command, tool_spec.flags, tool_spec.args)
+    if tool_spec.npm_pkgrun:
+        return "exec $_PKGRUN " + " ".join(args)
     return "exec " + " ".join(args)
 
 

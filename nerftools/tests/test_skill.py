@@ -88,8 +88,8 @@ def test_skill_has_h1_header() -> None:
 def test_skill_has_env_var_preamble() -> None:
     m = _manifest()
     skill = build_skill_text(m)
-    assert "$AGENTWORKS_NERF_BIN" in skill
-    assert "Do not assume they are on PATH" in skill
+    assert "AGENTWORKS_NERF_BIN" in skill
+    assert "absolute path" in skill
 
 
 def test_skill_includes_intro() -> None:
@@ -137,7 +137,7 @@ def test_tool_separated_by_horizontal_rule() -> None:
 def test_usage_line_simple_tool() -> None:
     m = _manifest(tools={"my-tool": _tool(["echo"])})
     skill = build_skill_text(m)
-    assert "**Usage:** `$AGENTWORKS_NERF_BIN/my-tool`" in skill
+    assert "**Usage:** `<nerf-bin>/my-tool`" in skill
     assert "**Maps to:** `echo`" in skill
 
 
@@ -145,6 +145,18 @@ def test_maps_to_shows_placeholders() -> None:
     m = _manifest(tools={"t": _tool(["git", "push", "{{remote}}", "{{branch}}"])})
     skill = build_skill_text(m)
     assert "**Maps to:** `git push <remote> <branch>`" in skill
+
+
+def test_maps_to_npm_pkgrun_shows_runner() -> None:
+    tool = ToolSpec(
+        description="Run cspell",
+        command=("cspell@8.19.4", "{{args}}"),
+        args={"args": ArgSpec(description="args", variadic=True)},
+        npm_pkgrun=True,
+    )
+    m = _manifest(tools={"pkgrun-cspell": tool})
+    skill = build_skill_text(m)
+    assert "**Maps to:** `<runner> cspell@8.19.4 <args>`" in skill
 
 
 def test_usage_line_required_flag() -> None:
@@ -330,7 +342,7 @@ def test_build_skill_text_prefix_applied_to_tool_names(tmp_path: Path) -> None:
     m = _manifest(skill_group="git", tools={"git-fetch": _tool(["git", "fetch"])})
     skill = build_skill_text(m, prefix="nerf-")
     assert "## nerf-git-fetch" in skill
-    assert "**Usage:** `$AGENTWORKS_NERF_BIN/nerf-git-fetch`" in skill
+    assert "**Usage:** `<nerf-bin>/nerf-git-fetch`" in skill
 
 
 # -- Overview skill ------------------------------------------------------------
@@ -365,8 +377,8 @@ def test_nerftools_skill_has_usage_guidance() -> None:
 
     text = build_overview_text([_manifest(skill_group="git")], prefix="nerf-")
     assert "prefer it over invoking the underlying tool directly" in text
-    assert "$AGENTWORKS_NERF_BIN" in text
-    assert "Do not assume they are on PATH" in text
+    assert "AGENTWORKS_NERF_BIN" in text
+    assert "absolute path" in text
 
 
 def test_nerftools_skill_has_frontmatter() -> None:

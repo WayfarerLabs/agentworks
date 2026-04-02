@@ -77,29 +77,38 @@ _require_jq
 SETTINGS="$(_resolve_settings)"
 _ensure_settings_file "$SETTINGS"
 
-ENTRY_ABS='Bash($AGENTWORKS_NERF_BIN/'"$TOOL"')'
 ENTRY_BARE="Bash($TOOL)"
+if [[ -n "${AGENTWORKS_NERF_BIN:-}" ]]; then
+  ENTRY_ABS="Bash($AGENTWORKS_NERF_BIN/$TOOL)"
+else
+  ENTRY_ABS=""
+fi
 
-# Remove from allow, add to deny (both entries)
-UPDATED=$(jq \
-  --arg abs "$ENTRY_ABS" \
-  --arg bare "$ENTRY_BARE" \
-  '
-    .permissions //= {}
-    | .permissions.allow //= []
-    | .permissions.deny //= []
-    | .permissions.allow = [.permissions.allow[] | select(. != $abs and . != $bare)]
-    | if (.permissions.deny | index($abs)) == null
-      then .permissions.deny += [$abs]
-      else .
-      end
-    | if (.permissions.deny | index($bare)) == null
-      then .permissions.deny += [$bare]
-      else .
-      end
-  ' "$SETTINGS")
+# Build list of entries to deny
+ENTRIES=("$ENTRY_BARE")
+if [[ -n "$ENTRY_ABS" ]]; then
+  ENTRIES+=("$ENTRY_ABS")
+fi
+
+# Remove from allow, add to deny
+UPDATED=$(cat "$SETTINGS")
+for ENTRY in "${ENTRIES[@]}"; do
+  UPDATED=$(echo "$UPDATED" | jq \
+    --arg entry "$ENTRY" \
+    '
+      .permissions //= {}
+      | .permissions.allow //= []
+      | .permissions.deny //= []
+      | .permissions.allow = [.permissions.allow[] | select(. != $entry)]
+      | if (.permissions.deny | index($entry)) == null
+        then .permissions.deny += [$entry]
+        else .
+        end
+    ')
+done
 
 echo "$UPDATED" > "$SETTINGS"
 echo "Denied: $TOOL (scope: $SCOPE)"
-echo "  $ENTRY_ABS"
-echo "  $ENTRY_BARE"
+for ENTRY in "${ENTRIES[@]}"; do
+  echo "  $ENTRY"
+done

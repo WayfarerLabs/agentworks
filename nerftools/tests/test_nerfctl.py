@@ -15,6 +15,8 @@ from pathlib import Path
 import pytest
 
 _NERFCTL_DIR = Path(__file__).parent.parent / "nerftools" / "nerfctl" / "claude"
+_TEST_NERF_BIN = "/opt/test-nerf/bin"
+_NERF_ENV = {"AGENTWORKS_NERF_BIN": _TEST_NERF_BIN}
 
 
 def _ensure_jq() -> str | None:
@@ -110,11 +112,16 @@ def _read(path: Path) -> dict:  # type: ignore[type-arg]
 
 def test_grant_adds_to_allow(tmp_path: Path) -> None:
     _user_settings(tmp_path)
-    result = _run(_GRANT, "nerf-git-push-origin", home=tmp_path)
+    result = _run(
+        _GRANT,
+        "nerf-git-push-origin",
+        home=tmp_path,
+        env_extra={"AGENTWORKS_NERF_BIN": "/opt/agentworks/nerf/bin"},
+    )
     assert result.returncode == 0
     data = _read(tmp_path / ".claude" / "settings.json")
     assert "Bash(nerf-git-push-origin)" in data["permissions"]["allow"]
-    assert "Bash($AGENTWORKS_NERF_BIN/nerf-git-push-origin)" in data["permissions"]["allow"]
+    assert "Bash(/opt/agentworks/nerf/bin/nerf-git-push-origin)" in data["permissions"]["allow"]
 
 
 def test_grant_does_not_duplicate(tmp_path: Path) -> None:
@@ -122,7 +129,7 @@ def test_grant_does_not_duplicate(tmp_path: Path) -> None:
         tmp_path,
         {
             "permissions": {
-                "allow": ["Bash(nerf-git-push-origin)", "Bash($AGENTWORKS_NERF_BIN/nerf-git-push-origin)"],
+                "allow": ["Bash(nerf-git-push-origin)", "Bash(/opt/test-nerf/bin/nerf-git-push-origin)"],
                 "deny": [],
             }
         },
@@ -173,11 +180,11 @@ def test_grant_local_scope_no_claude_dir(tmp_path: Path) -> None:
 
 def test_deny_adds_to_deny(tmp_path: Path) -> None:
     _user_settings(tmp_path)
-    result = _run(_DENY, "nerf-git-push-origin", home=tmp_path)
+    result = _run(_DENY, "nerf-git-push-origin", home=tmp_path, env_extra=_NERF_ENV)
     assert result.returncode == 0
     data = _read(tmp_path / ".claude" / "settings.json")
     assert "Bash(nerf-git-push-origin)" in data["permissions"]["deny"]
-    assert "Bash($AGENTWORKS_NERF_BIN/nerf-git-push-origin)" in data["permissions"]["deny"]
+    assert f"Bash({_TEST_NERF_BIN}/nerf-git-push-origin)" in data["permissions"]["deny"]
 
 
 def test_deny_does_not_duplicate(tmp_path: Path) -> None:
@@ -186,11 +193,11 @@ def test_deny_does_not_duplicate(tmp_path: Path) -> None:
         {
             "permissions": {
                 "allow": [],
-                "deny": ["Bash(nerf-git-push-origin)", "Bash($AGENTWORKS_NERF_BIN/nerf-git-push-origin)"],
+                "deny": ["Bash(nerf-git-push-origin)", f"Bash({_TEST_NERF_BIN}/nerf-git-push-origin)"],
             }
         },
     )
-    _run(_DENY, "nerf-git-push-origin", home=tmp_path)
+    _run(_DENY, "nerf-git-push-origin", home=tmp_path, env_extra=_NERF_ENV)
     data = _read(tmp_path / ".claude" / "settings.json")
     assert data["permissions"]["deny"].count("Bash(nerf-git-push-origin)") == 1
 
@@ -232,17 +239,17 @@ def test_reset_removes_both_entries(tmp_path: Path) -> None:
             "permissions": {
                 "allow": [
                     "Bash(nerf-git-log)",
-                    "Bash($AGENTWORKS_NERF_BIN/nerf-git-log)",
+                    f"Bash({_TEST_NERF_BIN}/nerf-git-log)",
                     "Bash(nerf-git-fetch)",
                 ],
-                "deny": ["Bash(nerf-git-log)", "Bash($AGENTWORKS_NERF_BIN/nerf-git-log)"],
+                "deny": ["Bash(nerf-git-log)", f"Bash({_TEST_NERF_BIN}/nerf-git-log)"],
             }
         },
     )
-    _run(_RESET, "nerf-git-log", home=tmp_path)
+    _run(_RESET, "nerf-git-log", home=tmp_path, env_extra=_NERF_ENV)
     data = _read(tmp_path / ".claude" / "settings.json")
     assert "Bash(nerf-git-log)" not in data["permissions"]["allow"]
-    assert "Bash($AGENTWORKS_NERF_BIN/nerf-git-log)" not in data["permissions"]["allow"]
+    assert f"Bash({_TEST_NERF_BIN}/nerf-git-log)" not in data["permissions"]["allow"]
     assert "Bash(nerf-git-fetch)" in data["permissions"]["allow"]
     assert data["permissions"]["deny"] == []
 
@@ -292,9 +299,9 @@ def test_list_includes_nerfctl_entries(tmp_path: Path) -> None:
 
 
 def test_list_includes_abs_path_entries(tmp_path: Path) -> None:
-    _user_settings(tmp_path, {"permissions": {"allow": ["Bash($AGENTWORKS_NERF_BIN/nerf-git-log)"], "deny": []}})
+    _user_settings(tmp_path, {"permissions": {"allow": [f"Bash({_TEST_NERF_BIN}/nerf-git-log)"], "deny": []}})
     result = _run(_LIST, home=tmp_path)
-    assert "AGENTWORKS_NERF_BIN" in result.stdout
+    assert _TEST_NERF_BIN in result.stdout
 
 
 def test_list_filters_out_non_nerf_entries(tmp_path: Path) -> None:

@@ -61,15 +61,15 @@ if [[ ! -f "$SETTINGS" ]]; then
   exit 0
 fi
 
-# Match nerf-*, nerfctl-*, and $AGENTWORKS_NERF_BIN/ entries
+# Match entries containing nerf- or nerfctl- anywhere in the Bash() wrapper
 ALLOW=$(jq -r '
   (.permissions.allow // [])[]
-  | select(test("^Bash\\((nerf-|nerfctl-|\\$AGENTWORKS_NERF_BIN/)"))
+  | select(test("^Bash\\(.*nerf(ctl)?-"))
 ' "$SETTINGS")
 
 DENY=$(jq -r '
   (.permissions.deny // [])[]
-  | select(test("^Bash\\((nerf-|nerfctl-|\\$AGENTWORKS_NERF_BIN/)"))
+  | select(test("^Bash\\(.*nerf(ctl)?-"))
 ' "$SETTINGS")
 
 if [[ -z "$ALLOW" && -z "$DENY" ]]; then

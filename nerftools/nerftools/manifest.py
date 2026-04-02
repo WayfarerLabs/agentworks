@@ -102,6 +102,7 @@ class ToolSpec:
     args: dict[str, ArgSpec] = field(default_factory=dict)
     env: dict[str, str] = field(default_factory=dict)
     guards: tuple[GuardSpec, ...] = field(default_factory=tuple)
+    npm_pkgrun: bool = False
 
 
 @dataclass(frozen=True)
@@ -196,6 +197,8 @@ def _load_tool(raw: dict[str, Any], path: Path, tool_name: str) -> ToolSpec:
         raise ManifestError(f"{ctx}: 'guards' must be a list")
     guards = tuple(_load_guard(g, path, tool_name, i) for i, g in enumerate(guards_raw))
 
+    npm_pkgrun = bool(raw.get("npm_pkgrun", False))
+
     _validate_tool(command, guards, flags, args, ctx)
 
     return ToolSpec(
@@ -205,6 +208,7 @@ def _load_tool(raw: dict[str, Any], path: Path, tool_name: str) -> ToolSpec:
         args=args,
         env=env,
         guards=guards,
+        npm_pkgrun=npm_pkgrun,
     )
 
 

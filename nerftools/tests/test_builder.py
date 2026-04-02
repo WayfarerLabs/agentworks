@@ -460,3 +460,38 @@ def test_build_scripts_prefix_in_script_header(tmp_path: Path) -> None:
 def test_build_scripts_empty_prefix(tmp_path: Path) -> None:
     build_scripts([_simple_manifest()], tmp_path, prefix="")
     assert (tmp_path / "my-tool").exists()
+
+
+# -- npm_pkgrun ----------------------------------------------------------------
+
+
+def test_npm_pkgrun_includes_resolver() -> None:
+    tool = ToolSpec(
+        description="Run cspell",
+        command=("cspell@8.19.4", "{{args}}"),
+        args={"args": _arg(required=True, variadic=True)},
+        npm_pkgrun=True,
+    )
+    script = build_script_text("pkgrun-cspell", "pkgrun", tool)
+    assert "_PKGRUN" in script
+    assert "bunx" in script
+    assert "pnpx" in script
+    assert "npx" in script
+    assert "no npm package runner found" in script
+
+
+def test_npm_pkgrun_exec_uses_runner_var() -> None:
+    tool = ToolSpec(
+        description="Run cspell",
+        command=("cspell@8.19.4", "{{args}}"),
+        args={"args": _arg(required=True, variadic=True)},
+        npm_pkgrun=True,
+    )
+    script = build_script_text("pkgrun-cspell", "pkgrun", tool)
+    assert "exec $_PKGRUN cspell@8.19.4" in script
+
+
+def test_non_pkgrun_has_no_resolver() -> None:
+    tool = _tool(["git", "add", "{{files}}"], args={"files": _arg(variadic=True)})
+    script = build_script_text("git-add", "test", tool)
+    assert "_PKGRUN" not in script

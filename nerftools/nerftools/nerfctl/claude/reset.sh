@@ -73,19 +73,31 @@ if [[ ! -f "$SETTINGS" ]]; then
   exit 0
 fi
 
-ENTRY_ABS='Bash($AGENTWORKS_NERF_BIN/'"$TOOL"')'
 ENTRY_BARE="Bash($TOOL)"
+if [[ -n "${AGENTWORKS_NERF_BIN:-}" ]]; then
+  ENTRY_ABS="Bash($AGENTWORKS_NERF_BIN/$TOOL)"
+else
+  ENTRY_ABS=""
+fi
 
-UPDATED=$(jq \
-  --arg abs "$ENTRY_ABS" \
-  --arg bare "$ENTRY_BARE" \
-  '
-    .permissions //= {}
-    | .permissions.allow //= []
-    | .permissions.deny //= []
-    | .permissions.allow = [.permissions.allow[] | select(. != $abs and . != $bare)]
-    | .permissions.deny = [.permissions.deny[] | select(. != $abs and . != $bare)]
-  ' "$SETTINGS")
+# Build list of entries to remove
+ENTRIES=("$ENTRY_BARE")
+if [[ -n "$ENTRY_ABS" ]]; then
+  ENTRIES+=("$ENTRY_ABS")
+fi
+
+UPDATED=$(cat "$SETTINGS")
+for ENTRY in "${ENTRIES[@]}"; do
+  UPDATED=$(echo "$UPDATED" | jq \
+    --arg entry "$ENTRY" \
+    '
+      .permissions //= {}
+      | .permissions.allow //= []
+      | .permissions.deny //= []
+      | .permissions.allow = [.permissions.allow[] | select(. != $entry)]
+      | .permissions.deny = [.permissions.deny[] | select(. != $entry)]
+    ')
+done
 
 echo "$UPDATED" > "$SETTINGS"
-echo "Reset: $TOOL removed from $SETTINGS (scope: $SCOPE)"
+echo "Reset: $TOOL removed (scope: $SCOPE)"

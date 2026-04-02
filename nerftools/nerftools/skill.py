@@ -136,8 +136,10 @@ def build_overview_text(manifests: list[NerfManifest], prefix: str = "") -> str:
     )
     parts.append("")
     parts.append(
-        "Invoke tools via the `$AGENTWORKS_NERF_BIN` environment variable "
-        "(e.g. `$AGENTWORKS_NERF_BIN/nerf-git-commit`). Do not assume they are on PATH."
+        "To find the nerf bin directory, resolve the `$AGENTWORKS_NERF_BIN` environment variable "
+        "(e.g. `echo $AGENTWORKS_NERF_BIN`). Then invoke tools using the resolved absolute path "
+        "(e.g. `/opt/agentworks/nerf/bin/nerf-git-commit`). Using the absolute path is required "
+        "so that permission entries can match the command exactly."
     )
     parts.append("")
     parts.append("## Available tool families")
@@ -174,8 +176,8 @@ def build_skill_text(manifest: NerfManifest, prefix: str = "") -> str:
     parts.append(f"# {skill_group}")
     parts.append("")
     parts.append(
-        "Invoke these tools via the `$AGENTWORKS_NERF_BIN` environment variable "
-        "(e.g. `$AGENTWORKS_NERF_BIN/<tool-name>`). Do not assume they are on PATH."
+        "Resolve `$AGENTWORKS_NERF_BIN` to get the nerf bin directory, then invoke tools "
+        "using the resolved absolute path. Do not use the env var directly in commands."
     )
     parts.append("")
 
@@ -227,7 +229,7 @@ def _tool_section(tool_name: str, tool_spec: ToolSpec) -> str:
 
 
 def _usage_line(tool_name: str, tool_spec: ToolSpec) -> str:
-    parts = [f"$AGENTWORKS_NERF_BIN/{tool_name}"]
+    parts = [f"<nerf-bin>/{tool_name}"]
     for name, p in tool_spec.flags.items():
         flag_display = f"{p.flag}|{p.short}" if p.short else p.flag
         if p.boolean:
@@ -246,6 +248,8 @@ def _maps_to_line(tool_spec: ToolSpec) -> str:
     import re
 
     parts: list[str] = []
+    if tool_spec.npm_pkgrun:
+        parts.append("<runner>")
     for token in tool_spec.command:
         parts.append(re.sub(r"\{\{(\w+)\}\}", r"<\1>", token))
     return " ".join(parts)
