@@ -1330,10 +1330,17 @@ def _build_nerf_claude_plugin(
             # Copy plugin artifacts
             ts_target.copy_dir_to(tmp_path, plugin_dir, delete=False, timeout=60)
 
-            # Fix execute bits on scripts (Windows tarballs lose them)
+            # Make the entire nerf home world-readable so all users can access the plugin
             _run_logged(
                 ts_target,
-                f"find {shlex.quote(plugin_dir)} -name 'nerf-*' -o -name 'nerfctl-*' | xargs -r chmod +x",
+                f"chmod -R a+rX {shlex.quote(nerf_home)}",
+                logger,
+                as_root=True,
+            )
+            # Fix execute bits on scripts (Windows tarballs lose them, a+rX only sets x on dirs)
+            _run_logged(
+                ts_target,
+                f"find {shlex.quote(plugin_dir)} -name 'nerf-*' -o -name 'nerfctl-*' | xargs -r chmod a+x",
                 logger,
             )
 
