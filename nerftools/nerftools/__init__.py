@@ -4,33 +4,26 @@ from pathlib import Path
 
 BUILTIN_MANIFESTS_DIR = Path(__file__).parent.parent / "manifests"
 
-_NERFCTL_DIR = Path(__file__).parent / "nerfctl"
+_NERFCTL_DIR = Path(__file__).parent / "nerfctl" / "claude"
 
-NERFCTL_FRAMEWORKS: dict[str, dict[str, Path]] = {
-    "claude": {
-        "grant": _NERFCTL_DIR / "claude" / "grant.sh",
-        "deny": _NERFCTL_DIR / "claude" / "deny.sh",
-        "reset": _NERFCTL_DIR / "claude" / "reset.sh",
-        "list": _NERFCTL_DIR / "claude" / "list.sh",
-    },
+NERFCTL_SCRIPTS: dict[str, Path] = {
+    "nerfctl-grant-allow": _NERFCTL_DIR / "grant-allow.sh",
+    "nerfctl-grant-deny": _NERFCTL_DIR / "grant-deny.sh",
+    "nerfctl-grant-reset": _NERFCTL_DIR / "grant-reset.sh",
+    "nerfctl-grant-list": _NERFCTL_DIR / "grant-list.sh",
+    "nerfctl-install-plugin": _NERFCTL_DIR / "install-plugin.sh",
 }
 
 
-def install_nerfctl(framework: str, output: Path) -> list[Path]:
-    """Copy nerfctl scripts for *framework* into *output*. Returns paths written."""
-    scripts = NERFCTL_FRAMEWORKS.get(framework)
-    if scripts is None:
-        known = ", ".join(NERFCTL_FRAMEWORKS)
-        msg = f"unknown nerfctl framework '{framework}'. Known: {known}"
-        raise ValueError(msg)
-
+def install_nerfctl(output: Path) -> list[Path]:
+    """Copy nerfctl scripts into *output*. Returns paths written."""
     output.mkdir(parents=True, exist_ok=True)
     written: list[Path] = []
-    for action, src in scripts.items():
+    for name, src in NERFCTL_SCRIPTS.items():
         if not src.exists():
             msg = f"nerfctl script not found: {src}"
             raise FileNotFoundError(msg)
-        dest = output / f"nerfctl-{framework}-{action}"
+        dest = output / name
         # Read as text to normalize CRLF -> LF (Windows checkout), then
         # write as raw UTF-8 bytes to guarantee Unix line endings.
         dest.write_bytes(src.read_text(encoding="utf-8").encode("utf-8"))

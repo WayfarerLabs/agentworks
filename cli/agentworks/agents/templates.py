@@ -31,6 +31,7 @@ class ResolvedAgentTemplate:
     mise_allow_unlocked: bool = False
     mise_install_before: str = "7d"
     mise_prune_on_reinit: bool = True
+    nerf_install_claude_plugin: bool = False
 
 
 def resolve_from_dict(
@@ -102,6 +103,7 @@ def _merge(target: ResolvedAgentTemplate, source: ResolvedAgentTemplate) -> None
     target.mise_allow_unlocked = source.mise_allow_unlocked
     target.mise_install_before = source.mise_install_before
     target.mise_prune_on_reinit = source.mise_prune_on_reinit
+    target.nerf_install_claude_plugin = source.nerf_install_claude_plugin
 
 
 def _merge_template(target: ResolvedAgentTemplate, tmpl: AgentTemplate) -> None:
@@ -131,3 +133,5 @@ def _merge_template(target: ResolvedAgentTemplate, tmpl: AgentTemplate) -> None:
         target.mise_install_before = tmpl.mise_install_before
     if tmpl.mise_prune_on_reinit is not None:
         target.mise_prune_on_reinit = tmpl.mise_prune_on_reinit
+    if tmpl.nerf_install_claude_plugin is not None:
+        target.nerf_install_claude_plugin = tmpl.nerf_install_claude_plugin

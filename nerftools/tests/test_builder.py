@@ -32,7 +32,9 @@ def _arg(
     allow: tuple[str, ...] = (),
     deny: tuple[str, ...] = (),
 ) -> ArgSpec:
-    return ArgSpec(description=description, required=required, variadic=variadic, pattern=pattern, allow=allow, deny=deny)
+    return ArgSpec(
+        description=description, required=required, variadic=variadic, pattern=pattern, allow=allow, deny=deny
+    )
 
 
 def _tool(
@@ -218,7 +220,7 @@ def test_optional_variadic_uses_conditional_expansion() -> None:
 def test_boolean_flag_shift_one() -> None:
     flags = {"draft": FlagSpec(flag="--draft", description="Draft", boolean=True)}
     script = build_script_text("t", "p", _tool(["gh", "pr", "create", "{{draft}}"], flags=flags))
-    assert "DRAFT=\"true\"; shift 1" in script
+    assert 'DRAFT="true"; shift 1' in script
 
 
 def test_boolean_flag_no_shift_two() -> None:
@@ -302,9 +304,7 @@ def test_env_exports_before_exec() -> None:
 def test_guard_check_before_exec() -> None:
     guards = (GuardSpec(command=("git", "remote", "get-url", "{{remote}}"), fail_message="Remote not found"),)
     flags = {"remote": _flag("--remote")}
-    script = build_script_text(
-        "t", "p", _tool(["git", "push", "{{remote}}", "HEAD"], flags=flags, guards=guards)
-    )
+    script = build_script_text("t", "p", _tool(["git", "push", "{{remote}}", "HEAD"], flags=flags, guards=guards))
     lines = script.splitlines()
     guard_idx = next(i for i, line in enumerate(lines) if "get-url" in line)
     exec_idx = next(i for i, line in enumerate(lines) if line.startswith("exec "))
@@ -336,7 +336,7 @@ def test_script_guard_single_line_wrapped_in_subshell() -> None:
 
 
 def test_script_guard_multiline_uses_subshell_block() -> None:
-    guards = (GuardSpec(script="x=$(git rev-parse HEAD)\n[ -n \"$x\" ]", fail_message="No HEAD"),)
+    guards = (GuardSpec(script='x=$(git rev-parse HEAD)\n[ -n "$x" ]', fail_message="No HEAD"),)
     script = build_script_text("t", "p", _tool(["git", "log"], guards=guards))
     assert "(\n" in script or "(\r\n" in script
 
@@ -344,7 +344,9 @@ def test_script_guard_multiline_uses_subshell_block() -> None:
 def test_script_guard_substitutes_placeholders() -> None:
     guards = (GuardSpec(script='! git rev-parse "refs/tags/{{tag}}" > /dev/null 2>&1', fail_message="Tag exists"),)
     args = {"tag": _arg(required=True)}
-    script = build_script_text("t", "p", _tool(["git", "tag", "-a", "{{tag}}", "-m", "{{tag}}"], args=args, guards=guards))
+    script = build_script_text(
+        "t", "p", _tool(["git", "tag", "-a", "{{tag}}", "-m", "{{tag}}"], args=args, guards=guards)
+    )
     assert "${TAG}" in script
     assert "Tag exists" in script
 
@@ -395,9 +397,7 @@ def test_simple_tool_bash_syntax() -> None:
 def test_tool_with_flags_and_args_bash_syntax() -> None:
     flags = {"verbose": _flag("--verbose", optional=True)}
     args = {"target": _arg(required=True)}
-    script = build_script_text(
-        "my-tool", "my-pkg", _tool(["cmd", "{{verbose}}", "{{target}}"], flags=flags, args=args)
-    )
+    script = build_script_text("my-tool", "my-pkg", _tool(["cmd", "{{verbose}}", "{{target}}"], flags=flags, args=args))
     result = subprocess.run(["bash", "-n"], input=script, capture_output=True, text=True)
     assert result.returncode == 0, f"bash -n failed:\n{result.stderr}"
 
@@ -460,3 +460,38 @@ def test_build_scripts_prefix_in_script_header(tmp_path: Path) -> None:
 def test_build_scripts_empty_prefix(tmp_path: Path) -> None:
     build_scripts([_simple_manifest()], tmp_path, prefix="")
     assert (tmp_path / "my-tool").exists()
+
+
+# -- npm_pkgrun ----------------------------------------------------------------
+
+
+def test_npm_pkgrun_includes_resolver() -> None:
+    tool = ToolSpec(
+        description="Run cspell",
+        command=("cspell@8.19.4", "{{args}}"),
+        args={"args": _arg(required=True, variadic=True)},
+        npm_pkgrun=True,
+    )
+    script = build_script_text("pkgrun-cspell", "pkgrun", tool)
+    assert "_PKGRUN" in script
+    assert "bunx" in script
+    assert "pnpx" in script
+    assert "npx" in script
+    assert "no npm package runner found" in script
+
+
+def test_npm_pkgrun_exec_uses_runner_var() -> None:
+    tool = ToolSpec(
+        description="Run cspell",
+        command=("cspell@8.19.4", "{{args}}"),
+        args={"args": _arg(required=True, variadic=True)},
+        npm_pkgrun=True,
+    )
+    script = build_script_text("pkgrun-cspell", "pkgrun", tool)
+    assert "exec $_PKGRUN cspell@8.19.4" in script
+
+
+def test_non_pkgrun_has_no_resolver() -> None:
+    tool = _tool(["git", "add", "{{files}}"], args={"files": _arg(variadic=True)})
+    script = build_script_text("git-add", "test", tool)
+    assert "_PKGRUN" not in script

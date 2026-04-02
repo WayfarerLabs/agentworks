@@ -651,6 +651,45 @@ def _create_agent_on_vm(
     if config.vm.install_mise:
         _run_agent_mise_setup(vm, config, linux_user, home)
 
+    # Install nerf Claude plugin for the agent
+    if config.agent.nerf_install_claude_plugin:
+        _install_nerf_claude_plugin_for_agent(target, linux_user, agent_shell)
+
+
+def _install_nerf_claude_plugin_for_agent(
+    target: SSHTarget,
+    linux_user: str,
+    shell: str,
+) -> None:
+    """Install the nerf Claude Code plugin for an agent user. Non-fatal."""
+    from agentworks.ssh import SSHError
+
+    try:
+        check = _run_as_agent(
+            target,
+            linux_user,
+            f"{shell} -lc 'test -x $AGENTWORKS_NERF_HOME/claude-plugin/scripts/nerfctl-install-plugin'",
+            check=False,
+        )
+        if not check.ok:
+            typer.echo(
+                "  Warning: nerf Claude plugin not found on this VM. "
+                "Set nerf_build_claude_plugin = true in your VM template and reinit.",
+                err=True,
+            )
+            return
+
+        typer.echo("  Installing nerf Claude plugin for agent...")
+        _run_as_agent(
+            target,
+            linux_user,
+            f"{shell} -lc '$AGENTWORKS_NERF_HOME/claude-plugin/scripts/nerfctl-install-plugin'",
+            timeout=30,
+        )
+        typer.echo("  Nerf Claude plugin installed for agent")
+    except SSHError as e:
+        typer.echo(f"  Warning: agent nerf plugin install failed: {e}", err=True)
+
 
 def _delete_agent_on_vm(
     vm: VMRow,

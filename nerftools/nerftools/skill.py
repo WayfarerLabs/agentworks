@@ -54,7 +54,61 @@ def build_skills(
         out.write_text(text)
         written.append(out)
 
+    # Generate nerftools overview skill
+    if manifests:
+        overview_text = build_overview_text(manifests, prefix=prefix)
+        overview_dir = output_dir / "nerftools"
+        overview_dir.mkdir(exist_ok=True)
+        out = overview_dir / "SKILL.md"
+        out.write_text(overview_text)
+        written.append(out)
+
     return written
+
+
+def build_overview_text(manifests: list[NerfManifest], prefix: str = "") -> str:
+    """Return the generated nerftools overview SKILL.md."""
+    parts: list[str] = []
+
+    parts.append("---")
+    parts.append("name: nerftools")
+    parts.append('description: "Nerf tools overview and usage guidance"')
+    parts.append('targets: ["*"]')
+    parts.append("---")
+    parts.append("")
+    parts.append("# Nerf Tools")
+    parts.append("")
+    parts.append(
+        "This environment has nerf tools installed -- scoped, safety-constrained wrappers for "
+        "common CLI operations like git, az, and other tools. They enforce guardrails (validated "
+        "parameters, restricted flags, pre-flight checks) that keep operations safe and auditable."
+    )
+    parts.append("")
+    parts.append(
+        "When a nerf tool exists that covers the operation you need, prefer it over invoking the "
+        "underlying tool directly. Shape your workflow to take advantage of them. For example, "
+        "stage files with the nerf git-add tool and then commit with the nerf git-commit tool, "
+        "rather than using raw `git` commands."
+    )
+    parts.append("")
+    parts.append(
+        "To find the nerf bin directory, resolve the `$AGENTWORKS_NERF_BIN` environment variable "
+        "(e.g. `echo $AGENTWORKS_NERF_BIN`). Then invoke tools using the resolved absolute path "
+        "(e.g. `/opt/agentworks/nerf/bin/nerf-git-commit`). Using the absolute path is required "
+        "so that permission entries can match the command exactly."
+    )
+    parts.append("")
+    parts.append("## Available tool families")
+    parts.append("")
+
+    for manifest in manifests:
+        group = prefix + manifest.package.skill_group
+        parts.append(f"- **{group}**: {manifest.package.description}")
+
+    parts.append("")
+    parts.append("Use the corresponding `nerf-*` skill for full usage details on each family.")
+
+    return "\n".join(parts).rstrip() + "\n"
 
 
 def build_skill_text(manifest: NerfManifest, prefix: str = "") -> str:
@@ -76,6 +130,11 @@ def build_skill_text(manifest: NerfManifest, prefix: str = "") -> str:
     parts.append("")
 
     parts.append(f"# {skill_group}")
+    parts.append("")
+    parts.append(
+        "Resolve `$AGENTWORKS_NERF_BIN` to get the nerf bin directory, then invoke tools "
+        "using the resolved absolute path. Do not use the env var directly in commands."
+    )
     parts.append("")
 
     if manifest.package.skill_intro:
@@ -101,6 +160,8 @@ def _tool_section(tool_name: str, tool_spec: ToolSpec) -> str:
 
     usage = _usage_line(tool_name, tool_spec)
     parts.append(f"**Usage:** `{usage}`")
+    maps_to = _maps_to_line(tool_spec)
+    parts.append(f"**Maps to:** `{maps_to}`")
     parts.append("")
 
     has_params = bool(tool_spec.flags) or bool(tool_spec.args)
@@ -124,7 +185,7 @@ def _tool_section(tool_name: str, tool_spec: ToolSpec) -> str:
 
 
 def _usage_line(tool_name: str, tool_spec: ToolSpec) -> str:
-    parts = [tool_name]
+    parts = [f"<nerf-bin>/{tool_name}"]
     for name, p in tool_spec.flags.items():
         flag_display = f"{p.flag}|{p.short}" if p.short else p.flag
         if p.boolean:
@@ -135,6 +196,18 @@ def _usage_line(tool_name: str, tool_spec: ToolSpec) -> str:
     for name, spec in tool_spec.args.items():
         token = f"<{name}...>" if spec.variadic else f"<{name}>"
         parts.append(token if spec.required else f"[{token}]")
+    return " ".join(parts)
+
+
+def _maps_to_line(tool_spec: ToolSpec) -> str:
+    """Show the underlying command with placeholders replaced by <name>."""
+    import re
+
+    parts: list[str] = []
+    if tool_spec.npm_pkgrun:
+        parts.append("<runner>")
+    for token in tool_spec.command:
+        parts.append(re.sub(r"\{\{(\w+)\}\}", r"<\1>", token))
     return " ".join(parts)
 
 

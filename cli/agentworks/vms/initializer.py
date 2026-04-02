@@ -1262,7 +1262,8 @@ def _phase_b_setup(
     )
 
     # Non-fatal: shell profile (PATH exports, sourced at login)
-    _write_agentworks_profile(ts_target, system_path + mise_path + user_path, logger)
+    all_paths = system_path + mise_path + user_path
+    _write_agentworks_profile(ts_target, all_paths, logger)
 
     # Non-fatal: shell rc (interactive shell hooks like mise activate)
     if mise_available and config.admin.mise_activate:
@@ -1272,117 +1273,133 @@ def _phase_b_setup(
     _write_agentworks_rc(ts_target, rc_snippets, logger)
 
     # Non-fatal: nerf tools
-    if config.vm.install_nerf_tools:
-        _install_nerf_tools(ts_target, config, logger)
+    if config.vm.nerf_build_claude_plugin:
+        _build_nerf_claude_plugin(ts_target, config, logger)
+
+    # Non-fatal: install nerf Claude plugin for admin user
+    if config.admin.nerf_install_claude_plugin:
+        _install_nerf_claude_plugin_for_user(ts_target, admin_shell, logger)
 
 
-def _install_nerf_tools(
+def _build_nerf_claude_plugin(
     ts_target: ExecTarget,
     config: Config,
     logger: SSHLogger,
 ) -> None:
-    """Build nerf tools locally and deploy artifacts to the VM. Non-fatal."""
-    logger.step("Nerf tools")
-    typer.echo("  Building nerf tools...")
+    """Build the nerf Claude Code plugin locally and deploy to the VM. Non-fatal."""
+    logger.step("Nerf tools (Claude plugin)")
+    typer.echo("  Building nerf Claude Code plugin...")
 
-    bin_dir = config.vm.nerf_bin_dir
-    skills_dir = config.vm.nerf_skills_dir
-    keep = config.vm.nerf_keep_existing
+    nerf_home = config.vm.nerf_home_dir
+    plugin_dir = f"{nerf_home}/claude-plugin"
 
     try:
+        try:
+            from nerftools import BUILTIN_MANIFESTS_DIR  # type: ignore[import-untyped]
+            from nerftools.formats import build_claude_plugin  # type: ignore[import-untyped]
+            from nerftools.manifest import (  # type: ignore[import-untyped]
+                ManifestError,
+                load_manifest,
+                merge_manifests,
+            )
+        except ImportError as e:
+            raise RuntimeError(f"nerftools is not installed: {e}") from e
+
+        manifest_paths: list[Path] = []
+        if not config.vm.skip_nerf_defaults and BUILTIN_MANIFESTS_DIR.exists():
+            for pkg_dir in sorted(BUILTIN_MANIFESTS_DIR.iterdir()):
+                mf = pkg_dir / "manifest.yaml"
+                if mf.exists():
+                    manifest_paths.append(mf)
+        manifest_paths.extend(config.vm.nerf_addl_manifests)
+
+        try:
+            manifests = merge_manifests([load_manifest(p) for p in manifest_paths])
+        except ManifestError as e:
+            raise RuntimeError(f"nerf manifest error: {e}") from e
+
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
-            bin_out = tmp_path / "bin"
-            skills_out = tmp_path / "skills"
-            bin_out.mkdir()
-            skills_out.mkdir()
+            build_claude_plugin(manifests, tmp_path)
 
-            # Build scripts and skills locally via Python API (no subprocess --
-            # avoids Windows PATH issues with .cmd script wrappers)
-            try:
-                from nerftools import BUILTIN_MANIFESTS_DIR  # type: ignore[import-untyped]
-                from nerftools.builder import build_scripts  # type: ignore[import-untyped]
-                from nerftools.manifest import (  # type: ignore[import-untyped]
-                    ManifestError,
-                    load_manifest,
-                    merge_manifests,
-                )
-                from nerftools.skill import build_skills  # type: ignore[import-untyped]
-            except ImportError as e:
-                raise RuntimeError(f"nerftools is not installed: {e}") from e
+            # Clean and create remote dir
+            _run_logged(ts_target, f"rm -rf {shlex.quote(plugin_dir)}", logger, as_root=True)
+            _run_logged(ts_target, f"mkdir -p {shlex.quote(plugin_dir)}", logger, as_root=True)
+            _run_logged(ts_target, f"sudo chown -R $(id -un):$(id -un) {shlex.quote(plugin_dir)}", logger)
 
-            manifest_paths: list[Path] = []
-            if not config.vm.skip_nerf_defaults and BUILTIN_MANIFESTS_DIR.exists():
-                for pkg_dir in sorted(BUILTIN_MANIFESTS_DIR.iterdir()):
-                    mf = pkg_dir / "manifest.yaml"
-                    if mf.exists():
-                        manifest_paths.append(mf)
-            manifest_paths.extend(config.vm.nerf_addl_manifests)
+            # Copy plugin artifacts
+            ts_target.copy_dir_to(tmp_path, plugin_dir, delete=False, timeout=60)
 
-            try:
-                manifests = merge_manifests([load_manifest(p) for p in manifest_paths])
-            except ManifestError as e:
-                raise RuntimeError(f"nerf manifest error: {e}") from e
-
-            build_scripts(manifests, bin_out, keep_existing=keep)
-            build_skills(manifests, skills_out, keep_existing=keep)
-
-            # Install nerfctl scripts (Claude Code permission management)
-            from nerftools import install_nerfctl
-
-            install_nerfctl("claude", bin_out)
-
-            # Create/clear remote dirs as root, then chown to the current SSH user
-            # so copy_dir_to can write without sudo. $(id -un) expands on the remote
-            # shell before sudo runs, giving the SSH user's name.
-            if not keep:
-                _run_logged(ts_target, f"rm -rf {shlex.quote(bin_dir)}", logger, as_root=True)
-                _run_logged(ts_target, f"mkdir -p {shlex.quote(bin_dir)}", logger, as_root=True)
-                _run_logged(ts_target, f"rm -rf {shlex.quote(skills_dir)}", logger, as_root=True)
-                _run_logged(ts_target, f"mkdir -p {shlex.quote(skills_dir)}", logger, as_root=True)
-            else:
-                _run_logged(
-                    ts_target,
-                    f"mkdir -p {shlex.quote(bin_dir)} {shlex.quote(skills_dir)}",
-                    logger,
-                    as_root=True,
-                )
+            # Make the entire nerf home world-readable so all users can access the plugin
             _run_logged(
                 ts_target,
-                f"sudo chown $(id -un):$(id -un) {shlex.quote(bin_dir)} {shlex.quote(skills_dir)}",
+                f"chmod -R a+rX {shlex.quote(nerf_home)}",
+                logger,
+                as_root=True,
+            )
+            # Fix execute bits on scripts (Windows tarballs lose them, a+rX only sets x on dirs)
+            _run_logged(
+                ts_target,
+                f"find {shlex.quote(plugin_dir)} -name 'nerf-*' -o -name 'nerfctl-*' | xargs -r chmod a+x",
                 logger,
             )
 
-            # Copy artifacts (dirs already cleared above; delete=False to avoid re-rm)
-            ts_target.copy_dir_to(bin_out, bin_dir, delete=False, timeout=60)
-            ts_target.copy_dir_to(skills_out, skills_dir, delete=False, timeout=60)
+        typer.echo(f"  Nerf Claude plugin built to {plugin_dir}")
 
-            # Windows tarballs don't preserve Unix execute bits -- set them explicitly
-            _run_logged(
-                ts_target,
-                f"find {shlex.quote(bin_dir)} -type f -exec chmod +x {{}} +",
-                logger,
-            )
-
-        typer.echo(f"  Nerf tools installed to {bin_dir}")
-
-        # System-wide PATH so all users (including agent users) can find the tools.
-        # bash/sh login shells source /etc/profile.d/; zsh uses /etc/zsh/zprofile.
-        profile_line = f'export PATH="{bin_dir}:$PATH"'
+        # System-wide env var so all users can locate nerf home
+        env_line = f'export AGENTWORKS_NERF_HOME="{nerf_home}"'
         _run_logged(
             ts_target,
-            f"echo {shlex.quote(profile_line)} | sudo tee /etc/profile.d/agentworks-nerf.sh > /dev/null",
+            f"printf '%s\\n' {shlex.quote(env_line)} | sudo tee /etc/profile.d/agentworks-nerf.sh > /dev/null",
             logger,
         )
         _run_logged(
             ts_target,
-            f"grep -qF {shlex.quote(bin_dir)} /etc/zsh/zprofile 2>/dev/null"
-            f" || echo {shlex.quote(profile_line)} | sudo tee -a /etc/zsh/zprofile > /dev/null",
+            f"grep -qF AGENTWORKS_NERF_HOME /etc/zsh/zprofile 2>/dev/null"
+            f" || printf '%s\\n' {shlex.quote(env_line)} | sudo tee -a /etc/zsh/zprofile > /dev/null",
             logger,
         )
 
     except (SSHError, RuntimeError) as e:
-        msg = f"nerf tools installation failed: {e}"
+        msg = f"nerf Claude plugin build failed: {e}"
+        logger.warning(msg)
+        typer.echo(f"  Warning: {msg}", err=True)
+
+
+def _install_nerf_claude_plugin_for_user(
+    target: ExecTarget,
+    shell: str,
+    logger: SSHLogger,
+) -> None:
+    """Install the nerf Claude Code plugin for the current user. Non-fatal."""
+    logger.step("Nerf plugin install")
+
+    try:
+        # Check that the plugin and install script exist via the system env var
+        check_result = _run_logged(
+            target,
+            f"{shell} -lc 'test -x $AGENTWORKS_NERF_HOME/claude-plugin/scripts/nerfctl-install-plugin'",
+            logger,
+            check=False,
+        )
+        if not check_result.ok:
+            typer.echo(
+                "  Warning: nerf Claude plugin not found on this VM. "
+                "Set nerf_build_claude_plugin = true in your VM template and reinit.",
+                err=True,
+            )
+            return
+
+        typer.echo("  Installing nerf Claude plugin...")
+        _run_logged(
+            target,
+            f"{shell} -lc '$AGENTWORKS_NERF_HOME/claude-plugin/scripts/nerfctl-install-plugin'",
+            logger,
+            timeout=30,
+        )
+        typer.echo("  Nerf Claude plugin installed")
+    except SSHError as e:
+        msg = f"nerf plugin install failed: {e}"
         logger.warning(msg)
         typer.echo(f"  Warning: {msg}", err=True)
 
