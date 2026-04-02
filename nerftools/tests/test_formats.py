@@ -95,6 +95,17 @@ def test_claude_plugin_nerfctl_scripts(tmp_path: Path) -> None:
     assert (scripts_dir / "nerfctl-claude-install-plugin").exists()
 
 
+def test_claude_plugin_nerfctl_skills(tmp_path: Path) -> None:
+    build_format("claude-plugin", [_manifest()], tmp_path)
+
+    for name in ("nerf-grant", "nerf-deny", "nerf-reset", "nerf-list"):
+        skill_md = tmp_path / "skills" / name / "SKILL.md"
+        assert skill_md.exists(), f"missing {name}/SKILL.md"
+        content = skill_md.read_text()
+        assert "disable-model-invocation: true" in content
+        assert "${CLAUDE_PLUGIN_ROOT}" in content
+
+
 def test_claude_plugin_cleans_output_by_default(tmp_path: Path) -> None:
     stale = tmp_path / "old-stuff"
     stale.mkdir()

@@ -19,6 +19,96 @@ if TYPE_CHECKING:
 
 KNOWN_FORMATS = ("claude-plugin",)
 
+_NERFCTL_SKILLS = [
+    {
+        "dir_name": "nerf-grant",
+        "content": """\
+---
+name: nerf-grant
+description: Grant a nerf tool permission in Claude Code settings
+argument-hint: <tool-name>
+disable-model-invocation: true
+allowed-tools: Bash
+---
+
+Grant permission for the specified nerf tool by running the nerfctl-claude-grant script.
+
+Run this command:
+
+```bash
+${CLAUDE_PLUGIN_ROOT}/scripts/nerfctl-claude-grant $ARGUMENTS
+```
+
+Report the output to the user.
+""",
+    },
+    {
+        "dir_name": "nerf-deny",
+        "content": """\
+---
+name: nerf-deny
+description: Deny a nerf tool permission in Claude Code settings
+argument-hint: <tool-name>
+disable-model-invocation: true
+allowed-tools: Bash
+---
+
+Deny permission for the specified nerf tool by running the nerfctl-claude-deny script.
+
+Run this command:
+
+```bash
+${CLAUDE_PLUGIN_ROOT}/scripts/nerfctl-claude-deny $ARGUMENTS
+```
+
+Report the output to the user.
+""",
+    },
+    {
+        "dir_name": "nerf-reset",
+        "content": """\
+---
+name: nerf-reset
+description: Remove a nerf tool from Claude Code permission lists
+argument-hint: <tool-name>
+disable-model-invocation: true
+allowed-tools: Bash
+---
+
+Reset permissions for the specified nerf tool by running the nerfctl-claude-reset script.
+
+Run this command:
+
+```bash
+${CLAUDE_PLUGIN_ROOT}/scripts/nerfctl-claude-reset $ARGUMENTS
+```
+
+Report the output to the user.
+""",
+    },
+    {
+        "dir_name": "nerf-list",
+        "content": """\
+---
+name: nerf-list
+description: List nerf tool permissions in Claude Code settings
+disable-model-invocation: true
+allowed-tools: Bash
+---
+
+List all nerf tool permissions by running the nerfctl-claude-list script.
+
+Run this command:
+
+```bash
+${CLAUDE_PLUGIN_ROOT}/scripts/nerfctl-claude-list $ARGUMENTS
+```
+
+Report the output to the user.
+""",
+    },
+]
+
 
 def build_format(
     fmt: str,
@@ -151,6 +241,14 @@ def _build_claude_plugin(
     scripts_root.mkdir(exist_ok=True)
     nerfctl_written = install_nerfctl("claude", scripts_root)
     written.extend(nerfctl_written)
+
+    # nerfctl user-invokable skills (grant, deny, reset, list)
+    for nerfctl_skill in _NERFCTL_SKILLS:
+        skill_dir = skills_dir / nerfctl_skill["dir_name"]
+        skill_dir.mkdir(exist_ok=True)
+        out = skill_dir / "SKILL.md"
+        out.write_text(nerfctl_skill["content"])
+        written.append(out)
 
     # Overview skill
     if manifests:
