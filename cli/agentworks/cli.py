@@ -539,6 +539,16 @@ def workspace_list(
     list_workspaces(_get_db(), vm_name=vm, ws_type=ws_type)
 
 
+@workspace_app.command("describe")
+def workspace_describe(
+    name: Annotated[str, typer.Argument(help="Workspace name")],
+) -> None:
+    """Show workspace details, tasks, and agent access."""
+    from agentworks.workspaces.manager import describe_workspace
+
+    describe_workspace(_get_db(), name)
+
+
 @workspace_app.command("rehome")
 def workspace_rehome(
     name: Annotated[str, typer.Argument(help="Workspace name")],
@@ -869,6 +879,20 @@ def _prompt_task_mode(db: Database, workspace_name: str) -> str | None:
         typer.echo(f"Error: invalid choice {choice}", err=True)
         raise typer.Exit(1)
     return agents[idx].name
+
+
+@task_app.command("describe")
+def task_describe(
+    name: Annotated[str, typer.Argument(help="Task name")],
+    workspace: Annotated[str, typer.Option("--workspace", help="Workspace name")] = "",
+) -> None:
+    """Show task details."""
+    from agentworks.config import load_config
+    from agentworks.tasks.manager import describe_task
+
+    db = _get_db()
+    resolved_workspace = _prompt_workspace(db, workspace or None)
+    describe_task(db, load_config(), name=name, workspace_name=resolved_workspace)
 
 
 @task_app.command("list")

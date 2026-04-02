@@ -135,6 +135,7 @@ Manage workspaces on VMs or locally.
 | Command                                   | Description                          |
 | ----------------------------------------- | ------------------------------------ |
 | `agentworks workspace create`             | Create a workspace (VM or `--local`) |
+| `agentworks workspace describe <name>`    | Show workspace details and tasks     |
 | `agentworks workspace shell <name>`       | Open a plain shell into a workspace  |
 | `agentworks workspace console <name>`     | Open the workspace console (tmux)    |
 | `agentworks workspace list`               | List workspaces                      |
@@ -181,6 +182,7 @@ Manage tasks (named work streams running in workspaces).
 | Command                                          | Description                 |
 | ------------------------------------------------ | --------------------------- |
 | `agentworks task create`                         | Create and start a task     |
+| `agentworks task describe <name> --workspace <ws>` | Show task details        |
 | `agentworks task list [--workspace <ws>]`        | List tasks with status      |
 | `agentworks task attach <name> --workspace <ws>` | Attach to a running task    |
 | `agentworks task stop <name> --workspace <ws>`   | Stop a running task         |

@@ -248,6 +248,47 @@ def console_workspace(
         raise typer.Exit(1)
 
 
+def describe_workspace(
+    db: Database,
+    name: str,
+) -> None:
+    """Show workspace details."""
+    ws = db.get_workspace(name)
+    if ws is None:
+        typer.echo(f"Error: workspace '{name}' not found", err=True)
+        raise typer.Exit(1)
+
+    typer.echo(f"Name:       {ws.name}")
+    typer.echo(f"Type:       {ws.type}")
+    typer.echo(f"VM:         {ws.vm_name or '-'}")
+    typer.echo(f"Template:   {ws.template or 'default'}")
+    typer.echo(f"Path:       {ws.workspace_path}")
+    typer.echo(f"Created:    {ws.created_at}")
+    if ws.last_seen_at:
+        typer.echo(f"Last Seen:  {ws.last_seen_at}")
+
+    # Tasks
+    tasks = db.list_tasks(workspace_name=name)
+    typer.echo(f"\nTasks ({len(tasks)}):")
+    if tasks:
+        for task in tasks:
+            mode_label = f"agent: {task.agent_name}" if task.agent_name else "admin"
+            typer.echo(f"  {task.name}  [{task.template}]  {task.status}  {mode_label}")
+    else:
+        typer.echo("  (none)")
+
+    # Agents with grants (VM workspaces only)
+    if ws.type == "vm" and ws.vm_name:
+        agents = db.list_agents(vm_name=ws.vm_name)
+        granted = [a for a in agents if db.has_any_grant(a.name, name)]
+        typer.echo(f"\nAgents with access ({len(granted)}):")
+        if granted:
+            for agent in granted:
+                typer.echo(f"  {agent.name}  (user: {agent.linux_user})")
+        else:
+            typer.echo("  (none)")
+
+
 def list_workspaces(
     db: Database,
     *,

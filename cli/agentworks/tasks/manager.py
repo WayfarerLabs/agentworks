@@ -413,6 +413,40 @@ def delete_task(
     typer.echo(f"Task '{name}' deleted")
 
 
+def describe_task(
+    db: Database,
+    config: Config,
+    *,
+    name: str,
+    workspace_name: str,
+) -> None:
+    """Show task details."""
+    task = _require_task(db, workspace_name, name)
+    ws, vm, run_command = _prepare_vm(db, config, workspace_name, operation=None)
+
+    # Reconcile status with tmux
+    from agentworks.tasks.tmux import session_exists
+
+    live = session_exists(workspace_name, name, run_command=run_command)
+    if live and task.status != TaskStatus.RUNNING.value:
+        db.update_task_status(workspace_name, name, TaskStatus.RUNNING)
+        task = _require_task(db, workspace_name, name)
+    elif not live and task.status == TaskStatus.RUNNING.value:
+        db.update_task_status(workspace_name, name, TaskStatus.STOPPED)
+        task = _require_task(db, workspace_name, name)
+
+    mode_label = f"agent: {task.agent_name}" if task.agent_name else "admin"
+
+    typer.echo(f"Name:       {task.name}")
+    typer.echo(f"Workspace:  {task.workspace_name}")
+    typer.echo(f"VM:         {vm.name}")
+    typer.echo(f"Template:   {task.template}")
+    typer.echo(f"Mode:       {mode_label}")
+    typer.echo(f"Status:     {task.status}")
+    typer.echo(f"Created:    {task.created_at}")
+    typer.echo(f"Updated:    {task.updated_at}")
+
+
 def list_tasks(
     db: Database,
     config: Config,
