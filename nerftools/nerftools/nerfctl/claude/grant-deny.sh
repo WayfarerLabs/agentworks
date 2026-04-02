@@ -1,23 +1,23 @@
 #!/usr/bin/env bash
-# nerfctl-claude-deny -- Deny a nerf tool permission in Claude Code settings
+# nerfctl-grant-deny -- Deny nerf tools entirely
 # This is a control-plane tool for operators, not for agents.
 
 set -euo pipefail
 
 SCOPE="user"
-TOOL=""
+PLUGIN_ROOT=""
+PATTERN=""
 
 usage() {
   cat >&2 <<'EOF'
-Usage: nerfctl-claude-deny <tool> [--scope user|local]
+Usage: nerfctl-grant-deny <plugin-root> <pattern> [--scope user|local]
 
-  <tool>              Name of the nerf tool to deny (e.g. nerf-git-push-origin)
+  <plugin-root>       Absolute path to the plugin root (passed by the skill)
+  <pattern>           Tool name or glob pattern (e.g. nerf-git-commit or nerf-git-*)
   --scope user|local  Settings scope (default: user)
-                        user:  ~/.claude/settings.json
-                        local: .claude/settings.local.json
 
-Adds deny entries for both the absolute path ($AGENTWORKS_NERF_BIN/<tool>)
-and the bare command name, and removes any matching allow entries.
+Finds all matching tool scripts under the plugin root and adds deny entries
+for each, removing any matching allow entries.
 
 Requires jq.
 EOF
@@ -59,8 +59,10 @@ while [[ $# -gt 0 ]]; do
     -h|--help) usage ;;
     -*) echo "error: unknown option: $1" >&2; usage ;;
     *)
-      if [[ -z "$TOOL" ]]; then
-        TOOL="$1"; shift
+      if [[ -z "$PLUGIN_ROOT" ]]; then
+        PLUGIN_ROOT="$1"; shift
+      elif [[ -z "$PATTERN" ]]; then
+        PATTERN="$1"; shift
       else
         echo "error: unexpected argument: $1" >&2; usage
       fi
@@ -68,31 +70,29 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ -z "$TOOL" ]]; then
-  echo "error: <tool> is required" >&2; usage
+if [[ -z "$PLUGIN_ROOT" || -z "$PATTERN" ]]; then
+  echo "error: <plugin-root> and <pattern> are required" >&2; usage
 fi
 
 _require_jq
 
+# Find matching tool scripts
+mapfile -t MATCHES < <(find "$PLUGIN_ROOT/skills" -path "*/scripts/$PATTERN" -type f 2>/dev/null | sort)
+
+if [[ ${#MATCHES[@]} -eq 0 ]]; then
+  echo "error: no tools matching '$PATTERN' found under $PLUGIN_ROOT/skills/*/scripts/" >&2
+  echo "hint: use 'nerf-git-*' to match a family, or check tool names in the nerf skills" >&2
+  exit 1
+fi
+
 SETTINGS="$(_resolve_settings)"
 _ensure_settings_file "$SETTINGS"
 
-ENTRY_BARE="Bash($TOOL)"
-if [[ -n "${AGENTWORKS_NERF_BIN:-}" ]]; then
-  ENTRY_ABS="Bash($AGENTWORKS_NERF_BIN/$TOOL)"
-else
-  ENTRY_ABS=""
-fi
-
-# Build list of entries to deny
-ENTRIES=("$ENTRY_BARE")
-if [[ -n "$ENTRY_ABS" ]]; then
-  ENTRIES+=("$ENTRY_ABS")
-fi
-
-# Remove from allow, add to deny
 UPDATED=$(cat "$SETTINGS")
-for ENTRY in "${ENTRIES[@]}"; do
+for SCRIPT_PATH in "${MATCHES[@]}"; do
+  TOOL_NAME=$(basename "$SCRIPT_PATH")
+  ENTRY="Bash($SCRIPT_PATH)"
+
   UPDATED=$(echo "$UPDATED" | jq \
     --arg entry "$ENTRY" \
     '
@@ -105,10 +105,10 @@ for ENTRY in "${ENTRIES[@]}"; do
         else .
         end
     ')
+  echo "  Denied: $TOOL_NAME"
+  echo "    $ENTRY"
 done
 
 echo "$UPDATED" > "$SETTINGS"
-echo "Denied: $TOOL (scope: $SCOPE)"
-for ENTRY in "${ENTRIES[@]}"; do
-  echo "  $ENTRY"
-done
+echo ""
+echo "Denied ${#MATCHES[@]} tool(s) (scope: $SCOPE)"

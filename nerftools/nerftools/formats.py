@@ -15,87 +15,91 @@ if TYPE_CHECKING:
 
 _NERFCTL_SKILLS = [
     {
-        "dir_name": "nerf-grant",
+        "dir_name": "nerfctl-grant-allow",
         "content": """\
 ---
-name: nerf-grant
-description: Grant a nerf tool permission in Claude Code settings
-argument-hint: <tool-name>
+name: nerfctl-grant-allow
+description: Allow nerf tools without prompting (supports glob patterns like nerf-git-*)
+argument-hint: <pattern> [--scope user|local]
 disable-model-invocation: true
 allowed-tools: Bash
 ---
 
-Grant permission for the specified nerf tool by running the nerfctl-claude-grant script.
+Allow nerf tools matching the given pattern without prompting. Supports glob patterns
+(e.g. `nerf-git-*` to allow all git tools). Default scope is user.
 
-Run this command:
+Quote all arguments so they are passed to the script unprocessed by the shell.
 
 ```bash
-${CLAUDE_PLUGIN_ROOT}/scripts/nerfctl-claude-grant $ARGUMENTS
+${CLAUDE_PLUGIN_ROOT}/scripts/nerfctl-grant-allow ${CLAUDE_PLUGIN_ROOT} $ARGUMENTS
 ```
 
 Report the output to the user.
 """,
     },
     {
-        "dir_name": "nerf-deny",
+        "dir_name": "nerfctl-grant-deny",
         "content": """\
 ---
-name: nerf-deny
-description: Deny a nerf tool permission in Claude Code settings
-argument-hint: <tool-name>
+name: nerfctl-grant-deny
+description: Deny nerf tools entirely (supports glob patterns like nerf-git-*)
+argument-hint: <pattern> [--scope user|local]
 disable-model-invocation: true
 allowed-tools: Bash
 ---
 
-Deny permission for the specified nerf tool by running the nerfctl-claude-deny script.
+Deny nerf tools matching the given pattern entirely. Supports glob patterns
+(e.g. `nerf-git-*` to deny all git tools). Default scope is user.
 
-Run this command:
+Quote all arguments so they are passed to the script unprocessed by the shell.
 
 ```bash
-${CLAUDE_PLUGIN_ROOT}/scripts/nerfctl-claude-deny $ARGUMENTS
+${CLAUDE_PLUGIN_ROOT}/scripts/nerfctl-grant-deny ${CLAUDE_PLUGIN_ROOT} $ARGUMENTS
 ```
 
 Report the output to the user.
 """,
     },
     {
-        "dir_name": "nerf-reset",
+        "dir_name": "nerfctl-grant-reset",
         "content": """\
 ---
-name: nerf-reset
-description: Remove a nerf tool from Claude Code permission lists
-argument-hint: <tool-name>
+name: nerfctl-grant-reset
+description: Reset nerf tools to ask-every-time (supports glob patterns like nerf-git-*)
+argument-hint: <pattern> [--scope user|local]
 disable-model-invocation: true
 allowed-tools: Bash
 ---
 
-Reset permissions for the specified nerf tool by running the nerfctl-claude-reset script.
+Reset permissions for nerf tools matching the given pattern back to the default
+ask-every-time behavior. Supports glob patterns. Default scope is user.
 
-Run this command:
+Quote all arguments so they are passed to the script unprocessed by the shell.
 
 ```bash
-${CLAUDE_PLUGIN_ROOT}/scripts/nerfctl-claude-reset $ARGUMENTS
+${CLAUDE_PLUGIN_ROOT}/scripts/nerfctl-grant-reset ${CLAUDE_PLUGIN_ROOT} $ARGUMENTS
 ```
 
 Report the output to the user.
 """,
     },
     {
-        "dir_name": "nerf-list",
+        "dir_name": "nerfctl-grant-list",
         "content": """\
 ---
-name: nerf-list
-description: List nerf tool permissions in Claude Code settings
+name: nerfctl-grant-list
+description: List nerf tool permissions across all scopes
+argument-hint: [--scope user|local]
 disable-model-invocation: true
 allowed-tools: Bash
 ---
 
-List all nerf tool permissions by running the nerfctl-claude-list script.
+List all nerf tool permissions. Shows all scopes unless a specific scope is requested.
 
 Run this command:
 
 ```bash
-${CLAUDE_PLUGIN_ROOT}/scripts/nerfctl-claude-list $ARGUMENTS
+${CLAUDE_PLUGIN_ROOT}/scripts/nerfctl-grant-list $ARGUMENTS
 ```
 
 Report the output to the user.
@@ -202,7 +206,7 @@ def build_claude_plugin(
     # nerfctl scripts go in the plugin-level scripts/ dir
     scripts_root = output_dir / "scripts"
     scripts_root.mkdir(exist_ok=True)
-    nerfctl_written = install_nerfctl("claude", scripts_root)
+    nerfctl_written = install_nerfctl(scripts_root)
     written.extend(nerfctl_written)
 
     # nerfctl user-invokable skills (grant, deny, reset, list)

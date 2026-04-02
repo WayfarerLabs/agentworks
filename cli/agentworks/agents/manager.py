@@ -668,7 +668,7 @@ def _install_nerf_claude_plugin_for_agent(
         check = _run_as_agent(
             target,
             linux_user,
-            f"{shell} -lc 'test -x $AGENTWORKS_NERF_HOME/claude-plugin/scripts/nerfctl-claude-install-plugin'",
+            f"{shell} -lc 'test -x $AGENTWORKS_NERF_HOME/claude-plugin/scripts/nerfctl-install-plugin'",
             check=False,
         )
         if not check.ok:
@@ -683,7 +683,7 @@ def _install_nerf_claude_plugin_for_agent(
         _run_as_agent(
             target,
             linux_user,
-            f"{shell} -lc '$AGENTWORKS_NERF_HOME/claude-plugin/scripts/nerfctl-claude-install-plugin'",
+            f"{shell} -lc '$AGENTWORKS_NERF_HOME/claude-plugin/scripts/nerfctl-install-plugin'",
             timeout=30,
         )
         typer.echo("  Nerf Claude plugin installed for agent")

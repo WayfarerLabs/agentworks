@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# nerfctl-claude-install-plugin -- Install the nerftools Claude Code plugin
+# nerfctl-install-plugin -- Install the nerftools Claude Code plugin
 # This is a control-plane tool for operators, not for agents.
 
 set -euo pipefail
@@ -8,7 +8,7 @@ SCOPE="user"
 
 usage() {
   cat >&2 <<'EOF'
-Usage: nerfctl-claude-install-plugin [--scope user|local]
+Usage: nerfctl-install-plugin [--scope user|local]
 
   --scope user|local  Installation scope (default: user)
 

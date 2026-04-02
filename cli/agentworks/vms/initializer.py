@@ -1378,7 +1378,7 @@ def _install_nerf_claude_plugin_for_user(
         # Check that the plugin and install script exist via the system env var
         check_result = _run_logged(
             target,
-            f"{shell} -lc 'test -x $AGENTWORKS_NERF_HOME/claude-plugin/scripts/nerfctl-claude-install-plugin'",
+            f"{shell} -lc 'test -x $AGENTWORKS_NERF_HOME/claude-plugin/scripts/nerfctl-install-plugin'",
             logger,
             check=False,
         )
@@ -1393,7 +1393,7 @@ def _install_nerf_claude_plugin_for_user(
         typer.echo("  Installing nerf Claude plugin...")
         _run_logged(
             target,
-            f"{shell} -lc '$AGENTWORKS_NERF_HOME/claude-plugin/scripts/nerfctl-claude-install-plugin'",
+            f"{shell} -lc '$AGENTWORKS_NERF_HOME/claude-plugin/scripts/nerfctl-install-plugin'",
             logger,
             timeout=30,
         )

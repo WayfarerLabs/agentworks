@@ -1,23 +1,23 @@
 #!/usr/bin/env bash
-# nerfctl-claude-reset -- Remove a nerf tool from Claude Code settings entirely
+# nerfctl-grant-reset -- Reset nerf tools to ask-every-time (default)
 # This is a control-plane tool for operators, not for agents.
 
 set -euo pipefail
 
 SCOPE="user"
-TOOL=""
+PLUGIN_ROOT=""
+PATTERN=""
 
 usage() {
   cat >&2 <<'EOF'
-Usage: nerfctl-claude-reset <tool> [--scope user|local]
+Usage: nerfctl-grant-reset <plugin-root> <pattern> [--scope user|local]
 
-  <tool>              Name of the nerf tool to reset (e.g. nerf-git-push-origin)
+  <plugin-root>       Absolute path to the plugin root (passed by the skill)
+  <pattern>           Tool name or glob pattern (e.g. nerf-git-commit or nerf-git-*)
   --scope user|local  Settings scope (default: user)
-                        user:  ~/.claude/settings.json
-                        local: .claude/settings.local.json
 
-Removes all permission entries (both absolute path and bare name) from both
-allow and deny lists. After reset, framework defaults apply.
+Finds all matching tool scripts under the plugin root and removes their
+permission entries from both allow and deny lists.
 
 Requires jq.
 EOF
@@ -51,8 +51,10 @@ while [[ $# -gt 0 ]]; do
     -h|--help) usage ;;
     -*) echo "error: unknown option: $1" >&2; usage ;;
     *)
-      if [[ -z "$TOOL" ]]; then
-        TOOL="$1"; shift
+      if [[ -z "$PLUGIN_ROOT" ]]; then
+        PLUGIN_ROOT="$1"; shift
+      elif [[ -z "$PATTERN" ]]; then
+        PATTERN="$1"; shift
       else
         echo "error: unexpected argument: $1" >&2; usage
       fi
@@ -60,8 +62,8 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ -z "$TOOL" ]]; then
-  echo "error: <tool> is required" >&2; usage
+if [[ -z "$PLUGIN_ROOT" || -z "$PATTERN" ]]; then
+  echo "error: <plugin-root> and <pattern> are required" >&2; usage
 fi
 
 _require_jq
@@ -73,21 +75,20 @@ if [[ ! -f "$SETTINGS" ]]; then
   exit 0
 fi
 
-ENTRY_BARE="Bash($TOOL)"
-if [[ -n "${AGENTWORKS_NERF_BIN:-}" ]]; then
-  ENTRY_ABS="Bash($AGENTWORKS_NERF_BIN/$TOOL)"
-else
-  ENTRY_ABS=""
-fi
+# Find matching tool scripts
+mapfile -t MATCHES < <(find "$PLUGIN_ROOT/skills" -path "*/scripts/$PATTERN" -type f 2>/dev/null | sort)
 
-# Build list of entries to remove
-ENTRIES=("$ENTRY_BARE")
-if [[ -n "$ENTRY_ABS" ]]; then
-  ENTRIES+=("$ENTRY_ABS")
+if [[ ${#MATCHES[@]} -eq 0 ]]; then
+  echo "error: no tools matching '$PATTERN' found under $PLUGIN_ROOT/skills/*/scripts/" >&2
+  echo "hint: use 'nerf-git-*' to match a family, or check tool names in the nerf skills" >&2
+  exit 1
 fi
 
 UPDATED=$(cat "$SETTINGS")
-for ENTRY in "${ENTRIES[@]}"; do
+for SCRIPT_PATH in "${MATCHES[@]}"; do
+  TOOL_NAME=$(basename "$SCRIPT_PATH")
+  ENTRY="Bash($SCRIPT_PATH)"
+
   UPDATED=$(echo "$UPDATED" | jq \
     --arg entry "$ENTRY" \
     '
@@ -97,7 +98,9 @@ for ENTRY in "${ENTRIES[@]}"; do
       | .permissions.allow = [.permissions.allow[] | select(. != $entry)]
       | .permissions.deny = [.permissions.deny[] | select(. != $entry)]
     ')
+  echo "  Reset: $TOOL_NAME"
 done
 
 echo "$UPDATED" > "$SETTINGS"
-echo "Reset: $TOOL removed (scope: $SCOPE)"
+echo ""
+echo "Reset ${#MATCHES[@]} tool(s) (scope: $SCOPE)"
