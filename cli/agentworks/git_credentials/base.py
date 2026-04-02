@@ -26,8 +26,16 @@ class GitCredentialProvider(ABC):
       2. Interactive prompt (via _prompt_token)
     """
 
-    def __init__(self, config_name: str) -> None:
+    def __init__(self, config_name: str, description: str | None = None) -> None:
         self._config_name = config_name
+        self._description = description
+
+    @property
+    def display_name(self) -> str:
+        """Human-readable name: 'key (description)' or just 'key'."""
+        if self._description:
+            return f"{self._config_name} ({self._description})"
+        return self._config_name
 
     @abstractmethod
     def verify_auth(self) -> bool:
@@ -47,7 +55,7 @@ class GitCredentialProvider(ABC):
         env_name = env_var_for_credential(self._config_name)
         token = os.environ.get(env_name)
         if token:
-            typer.echo(f"  Git credential '{self._config_name}' found in environment")
+            typer.echo(f"  Git credential '{self.display_name}' found in environment")
             return token
         return self._prompt_token(vm_name)
 

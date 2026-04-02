@@ -9,8 +9,8 @@ from agentworks.prompt import prompt_secret
 class AzDOCredentialProvider(GitCredentialProvider):
     """Configures git credentials for Azure DevOps via a personal access token."""
 
-    def __init__(self, config_name: str, org: str) -> None:
-        super().__init__(config_name)
+    def __init__(self, config_name: str, org: str, description: str | None = None) -> None:
+        super().__init__(config_name, description=description)
         self._org = org
 
     def verify_auth(self) -> bool:
@@ -21,7 +21,7 @@ class AzDOCredentialProvider(GitCredentialProvider):
 
     def _prompt_token(self, vm_name: str) -> str:
         return prompt_secret(
-            f"  Azure DevOps PAT for {self._org}",
+            f"  Azure DevOps PAT for '{self.display_name}'",
             hint=self.auth_hint(),
         )
 

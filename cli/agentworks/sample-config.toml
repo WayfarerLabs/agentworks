@@ -47,11 +47,13 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 
 # [git_credentials.github]
 # type = "github"
+# description = "GitHub full access"               # optional, shown in prompts and logs
 # Token: create at https://github.com/settings/tokens (repo scope)
 
 # [git_credentials.azdo]
 # type = "azdo"
 # org = "my-org"
+# description = "Azure DevOps for my-org"          # optional, shown in prompts and logs
 # Token: create at https://dev.azure.com/{org}/_usersSettings/tokens
 
 # --- Azure settings (only needed for --platform azure) ---

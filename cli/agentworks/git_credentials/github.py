@@ -16,7 +16,7 @@ class GitHubCredentialProvider(GitCredentialProvider):
         return "Create a PAT at https://github.com/settings/tokens (repo scope)"
 
     def _prompt_token(self, vm_name: str) -> str:
-        return prompt_secret("  GitHub personal access token", hint=self.auth_hint())
+        return prompt_secret(f"  GitHub PAT for '{self.display_name}'", hint=self.auth_hint())
 
     def credential_lines(self, token: str) -> list[str]:
         return [f"https://x-access-token:{token}@github.com"]

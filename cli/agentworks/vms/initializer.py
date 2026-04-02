@@ -662,11 +662,12 @@ def resolve_git_credential_providers(
         if cred_config is None:
             typer.echo(f"Error: git credential '{name}' not found in config", err=True)
             raise typer.Exit(1)
+        desc = cred_config.description
         if cred_config.type == "azdo":
             assert cred_config.org is not None
-            providers[name] = AzDOCredentialProvider(config_name=name, org=cred_config.org)
+            providers[name] = AzDOCredentialProvider(config_name=name, org=cred_config.org, description=desc)
         elif cred_config.type == "github":
-            providers[name] = GitHubCredentialProvider(config_name=name)
+            providers[name] = GitHubCredentialProvider(config_name=name, description=desc)
     return providers
 
 
@@ -677,7 +678,8 @@ def verify_git_credential_auth(providers: dict[str, GitCredentialProvider]) -> N
             typer.echo(f"Error: Authentication check failed for '{name}'. {provider.auth_hint()}", err=True)
             raise typer.Exit(1)
     if providers:
-        typer.echo(f"Git credentials configured: {', '.join(providers.keys())}")
+        labels = [p.display_name for p in providers.values()]
+        typer.echo(f"Git credentials configured: {', '.join(labels)}")
 
 
 def rejoin_tailscale(

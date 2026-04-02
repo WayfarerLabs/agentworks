@@ -183,6 +183,7 @@ class GitCredentialConfig:
     name: str
     type: str
     org: str | None = None
+    description: str | None = None
 
 
 @dataclass(frozen=True)
@@ -630,6 +631,7 @@ def _load_git_credentials(data: dict[str, object]) -> dict[str, GitCredentialCon
             name=name,
             type=cred_type,
             org=str(cdata["org"]) if "org" in cdata else None,
+            description=str(cdata["description"]) if "description" in cdata else None,
         )
     return creds
 

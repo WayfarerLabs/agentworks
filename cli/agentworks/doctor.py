@@ -279,16 +279,17 @@ def _check_git_credentials(
     from agentworks.git_credentials.base import env_var_for_credential
 
     for name, provider in providers.items():
+        label = provider.display_name
         try:
             if not provider.verify_auth():
-                warn(f"{name}: auth check failed ({provider.auth_hint()})")
+                warn(f"{label}: auth check failed ({provider.auth_hint()})")
                 continue
             if os.environ.get(env_var_for_credential(name)):
-                ok(f"{name}: ready (token set via environment)")
+                ok(f"{label}: ready (token set via environment)")
             else:
-                ok(f"{name}: ready (will prompt for token during VM init)")
+                ok(f"{label}: ready (will prompt for token during VM init)")
         except Exception as e:
-            warn(f"{name}: auth check error: {e}")
+            warn(f"{label}: auth check error: {e}")
 
 
 def _check_completions(
