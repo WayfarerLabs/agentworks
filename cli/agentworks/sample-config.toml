@@ -98,14 +98,12 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # system_install_commands = ["az-cli"]       # system-level commands from catalog
 # install_mise = true                        # install mise via apt (default: true)
 # -- Nerf tools --
-# install_nerf_tools = false                   # build and deploy nerf tools during init
-# nerf_tool_output_formats = ["claude-plugin"]  # output formats to generate
-# skip_nerf_defaults = false                 # skip built-in nerf catalog
-# nerf_addl_manifests = [                    # additional manifest files to merge in
+# nerf_build_claude_plugin = false             # build Claude Code nerf tools plugin
+# skip_nerf_defaults = false                   # skip built-in nerf catalog
+# nerf_addl_manifests = [                      # additional manifest files to merge in
 #     "~/.config/agentworks/nerf/my-tools/manifest.yaml",
 # ]
-# nerf_keep_existing = false                 # preserve unmanaged files on reinit
-# nerf_home_dir = "/opt/agentworks/nerf"     # root dir for nerf artifacts
+# nerf_home_dir = "/opt/agentworks/nerf"       # root dir for nerf artifacts
 
 # [vm_templates.heavy]
 # inherits = ["default"]
@@ -133,6 +131,8 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # mise_allow_unlocked = false                # install packages not in lockfile (with warning)
 # mise_install_before = "7d"                 # reject versions newer than this
 # mise_prune_on_reinit = true                # remove stale tool versions on reinit
+# -- Nerf tools --
+# nerf_install_claude_plugin = false           # install nerf plugin for this user
 
 # --- Agent templates ---
 # Per-user settings for agent users. Selected at agent create time with
@@ -154,7 +154,7 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # mise_install_before = "7d"
 # mise_prune_on_reinit = true
 # -- Nerf tools --
-# add_nerftools_to_path = false              # add nerf bin dir to this agent's PATH
+# nerf_install_claude_plugin = false           # install nerf plugin for this agent
 
 # [agent_templates.restricted]
 # inherits = ["default"]

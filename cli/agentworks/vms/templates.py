@@ -34,11 +34,9 @@ class ResolvedVMTemplate:
     system_install_commands: list[str] = field(default_factory=list)
     install_mise: bool = True
     # Nerf tools
-    install_nerf_tools: bool = False
-    nerf_tool_output_formats: list[str] = field(default_factory=list)
+    nerf_build_claude_plugin: bool = False
     skip_nerf_defaults: bool = False
     nerf_addl_manifests: list[Path] = field(default_factory=list)
-    nerf_keep_existing: bool = False
     nerf_home_dir: str = "/opt/agentworks/nerf"
 
 
@@ -119,11 +117,9 @@ def _merge(target: ResolvedVMTemplate, source: ResolvedVMTemplate) -> None:
     target.snap = _append_dedupe(target.snap, source.snap)
     target.system_install_commands = _append_dedupe(target.system_install_commands, source.system_install_commands)
     target.install_mise = source.install_mise
-    target.install_nerf_tools = source.install_nerf_tools
-    target.nerf_tool_output_formats = list(source.nerf_tool_output_formats)
+    target.nerf_build_claude_plugin = source.nerf_build_claude_plugin
     target.skip_nerf_defaults = source.skip_nerf_defaults
     target.nerf_addl_manifests = list(source.nerf_addl_manifests)
-    target.nerf_keep_existing = source.nerf_keep_existing
     target.nerf_home_dir = source.nerf_home_dir
 
 
@@ -150,15 +146,11 @@ def _merge_template(target: ResolvedVMTemplate, tmpl: VMTemplate) -> None:
         target.system_install_commands = _append_dedupe(target.system_install_commands, tmpl.system_install_commands)
     if tmpl.install_mise is not None:
         target.install_mise = tmpl.install_mise
-    if tmpl.install_nerf_tools is not None:
-        target.install_nerf_tools = tmpl.install_nerf_tools
-    if tmpl.nerf_tool_output_formats is not None:
-        target.nerf_tool_output_formats = list(tmpl.nerf_tool_output_formats)
+    if tmpl.nerf_build_claude_plugin is not None:
+        target.nerf_build_claude_plugin = tmpl.nerf_build_claude_plugin
     if tmpl.skip_nerf_defaults is not None:
         target.skip_nerf_defaults = tmpl.skip_nerf_defaults
     if tmpl.nerf_addl_manifests is not None:
         target.nerf_addl_manifests = list(tmpl.nerf_addl_manifests)
-    if tmpl.nerf_keep_existing is not None:
-        target.nerf_keep_existing = tmpl.nerf_keep_existing
     if tmpl.nerf_home_dir is not None:
         target.nerf_home_dir = tmpl.nerf_home_dir

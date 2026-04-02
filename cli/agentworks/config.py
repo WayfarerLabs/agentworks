@@ -123,11 +123,9 @@ class VMTemplate:
     system_install_commands: list[str] | None = None
     install_mise: bool | None = None
     # Nerf tools
-    install_nerf_tools: bool | None = None
-    nerf_tool_output_formats: list[str] | None = None
+    nerf_build_claude_plugin: bool | None = None
     skip_nerf_defaults: bool | None = None
     nerf_addl_manifests: list[Path] | None = None
-    nerf_keep_existing: bool | None = None
     nerf_home_dir: str | None = None
 
 
@@ -148,6 +146,7 @@ class AdminConfig:
     mise_allow_unlocked: bool = False
     mise_install_before: str = "7d"
     mise_prune_on_reinit: bool = True
+    nerf_install_claude_plugin: bool = False
 
 
 @dataclass(frozen=True)
@@ -168,6 +167,7 @@ class AgentTemplate:
     mise_allow_unlocked: bool | None = None
     mise_install_before: str | None = None
     mise_prune_on_reinit: bool | None = None
+    nerf_install_claude_plugin: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -374,11 +374,9 @@ _VM_TEMPLATE_KEYS = {
     "snap",
     "system_install_commands",
     "install_mise",
-    "install_nerf_tools",
-    "nerf_tool_output_formats",
+    "nerf_build_claude_plugin",
     "skip_nerf_defaults",
     "nerf_addl_manifests",
-    "nerf_keep_existing",
     "nerf_home_dir",
 }
 
@@ -416,13 +414,11 @@ def _load_vm_templates(data: dict[str, object]) -> dict[str, VMTemplate]:
                 list(tdata["system_install_commands"]) if "system_install_commands" in tdata else None
             ),
             install_mise=bool(tdata["install_mise"]) if "install_mise" in tdata else None,
-            install_nerf_tools=bool(tdata["install_nerf_tools"]) if "install_nerf_tools" in tdata else None,
-            nerf_tool_output_formats=(
-                list(tdata["nerf_tool_output_formats"]) if "nerf_tool_output_formats" in tdata else None
+            nerf_build_claude_plugin=(
+                bool(tdata["nerf_build_claude_plugin"]) if "nerf_build_claude_plugin" in tdata else None
             ),
             skip_nerf_defaults=bool(tdata["skip_nerf_defaults"]) if "skip_nerf_defaults" in tdata else None,
             nerf_addl_manifests=nerf_addl,
-            nerf_keep_existing=bool(tdata["nerf_keep_existing"]) if "nerf_keep_existing" in tdata else None,
             nerf_home_dir=str(tdata["nerf_home_dir"]) if "nerf_home_dir" in tdata else None,
         )
 
@@ -450,6 +446,7 @@ _USER_CONFIG_KEYS = {
     "mise_allow_unlocked",
     "mise_install_before",
     "mise_prune_on_reinit",
+    "nerf_install_claude_plugin",
 }
 
 
@@ -478,6 +475,7 @@ def _load_admin_config(data: dict[str, object]) -> AdminConfig:
         mise_allow_unlocked=bool(raw.get("mise_allow_unlocked", False)),
         mise_install_before=str(raw.get("mise_install_before", "7d")),
         mise_prune_on_reinit=bool(raw.get("mise_prune_on_reinit", True)),
+        nerf_install_claude_plugin=bool(raw.get("nerf_install_claude_plugin", False)),
     )
 
 
@@ -516,6 +514,9 @@ def _load_agent_templates(data: dict[str, object]) -> dict[str, AgentTemplate]:
             mise_allow_unlocked=(bool(tdata["mise_allow_unlocked"]) if "mise_allow_unlocked" in tdata else None),
             mise_install_before=(str(tdata["mise_install_before"]) if "mise_install_before" in tdata else None),
             mise_prune_on_reinit=(bool(tdata["mise_prune_on_reinit"]) if "mise_prune_on_reinit" in tdata else None),
+            nerf_install_claude_plugin=(
+                bool(tdata["nerf_install_claude_plugin"]) if "nerf_install_claude_plugin" in tdata else None
+            ),
         )
 
     for name, tmpl in templates.items():

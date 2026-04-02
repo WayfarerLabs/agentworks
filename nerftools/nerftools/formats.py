@@ -1,11 +1,7 @@
-"""Output format builders for nerf tools.
+"""Claude Code plugin builder for nerf tools.
 
-Each format generates a complete, self-contained output directory from a set
-of manifests. The format determines the directory layout, how skills reference
-scripts, and what metadata is included.
-
-Supported formats:
-  - claude-plugin: Self-contained Claude Code plugin with skills and scripts.
+Generates a self-contained Claude Code plugin from nerf manifests, including
+skills, scripts, plugin manifest, and marketplace metadata.
 """
 
 from __future__ import annotations
@@ -16,8 +12,6 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from nerftools.manifest import NerfManifest, ToolSpec
-
-KNOWN_FORMATS = ("claude-plugin",)
 
 _NERFCTL_SKILLS = [
     {
@@ -110,40 +104,10 @@ Report the output to the user.
 ]
 
 
-def build_format(
-    fmt: str,
+def build_claude_plugin(
     manifests: list[NerfManifest],
     output_dir: Path,
     *,
-    keep_existing: bool = False,
-    prefix: str = "nerf-",
-) -> list[Path]:
-    """Build all artifacts for a given output format.
-
-    Args:
-        fmt: Output format name (e.g. "claude-plugin").
-        manifests: Loaded and merged nerf manifests.
-        output_dir: Root directory for this format's output.
-        keep_existing: If True, preserve unmanaged files in output_dir.
-        prefix: Prefix for tool names and skill directories.
-
-    Returns:
-        List of paths written.
-    """
-    if fmt == "claude-plugin":
-        return _build_claude_plugin(manifests, output_dir, keep_existing=keep_existing, prefix=prefix)
-    msg = f"unknown output format '{fmt}'. Known formats: {', '.join(KNOWN_FORMATS)}"
-    raise ValueError(msg)
-
-
-# -- claude-plugin format ------------------------------------------------------
-
-
-def _build_claude_plugin(
-    manifests: list[NerfManifest],
-    output_dir: Path,
-    *,
-    keep_existing: bool = False,
     prefix: str = "nerf-",
 ) -> list[Path]:
     """Build a self-contained Claude Code plugin.
@@ -168,14 +132,13 @@ def _build_claude_plugin(
 
     written: list[Path] = []
 
-    # Clean output dir
+    # Always start clean
     output_dir.mkdir(parents=True, exist_ok=True)
-    if not keep_existing:
-        for item in output_dir.iterdir():
-            if item.is_dir():
-                shutil.rmtree(item)
-            elif item.is_file():
-                item.unlink()
+    for item in output_dir.iterdir():
+        if item.is_dir():
+            shutil.rmtree(item)
+        elif item.is_file():
+            item.unlink()
 
     # Plugin manifest
     plugin_dir = output_dir / ".claude-plugin"

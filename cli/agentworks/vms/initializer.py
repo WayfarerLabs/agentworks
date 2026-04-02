@@ -1273,32 +1273,30 @@ def _phase_b_setup(
     _write_agentworks_rc(ts_target, rc_snippets, logger)
 
     # Non-fatal: nerf tools
-    if config.vm.install_nerf_tools:
-        _install_nerf_tools(ts_target, config, logger)
+    if config.vm.nerf_build_claude_plugin:
+        _build_nerf_claude_plugin(ts_target, config, logger)
+
+    # Non-fatal: install nerf Claude plugin for admin user
+    if config.admin.nerf_install_claude_plugin:
+        _install_nerf_claude_plugin_for_user(ts_target, admin_shell, logger)
 
 
-def _install_nerf_tools(
+def _build_nerf_claude_plugin(
     ts_target: ExecTarget,
     config: Config,
     logger: SSHLogger,
 ) -> None:
-    """Build nerf tools locally and deploy artifacts to the VM. Non-fatal."""
-    logger.step("Nerf tools")
-    typer.echo("  Building nerf tools...")
+    """Build the nerf Claude Code plugin locally and deploy to the VM. Non-fatal."""
+    logger.step("Nerf tools (Claude plugin)")
+    typer.echo("  Building nerf Claude Code plugin...")
 
     nerf_home = config.vm.nerf_home_dir
-    output_formats = config.vm.nerf_tool_output_formats
-    keep = config.vm.nerf_keep_existing
-
-    if not output_formats:
-        typer.echo("  No output formats configured, skipping nerf tools build")
-        return
+    plugin_dir = f"{nerf_home}/claude-plugin"
 
     try:
-        # Load manifests
         try:
             from nerftools import BUILTIN_MANIFESTS_DIR  # type: ignore[import-untyped]
-            from nerftools.formats import build_format  # type: ignore[import-untyped]
+            from nerftools.formats import build_claude_plugin  # type: ignore[import-untyped]
             from nerftools.manifest import (  # type: ignore[import-untyped]
                 ManifestError,
                 load_manifest,
@@ -1320,44 +1318,26 @@ def _install_nerf_tools(
         except ManifestError as e:
             raise RuntimeError(f"nerf manifest error: {e}") from e
 
-        # Build each output format into a temp dir, then deploy to VM
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
+            build_claude_plugin(manifests, tmp_path)
 
-            remote_dirs: list[str] = []
-            local_dirs: list[tuple[Path, str]] = []
+            # Clean and create remote dir
+            _run_logged(ts_target, f"rm -rf {shlex.quote(plugin_dir)}", logger, as_root=True)
+            _run_logged(ts_target, f"mkdir -p {shlex.quote(plugin_dir)}", logger, as_root=True)
+            _run_logged(ts_target, f"sudo chown -R $(id -un):$(id -un) {shlex.quote(plugin_dir)}", logger)
 
-            for fmt in output_formats:
-                fmt_out = tmp_path / fmt
-                fmt_out.mkdir()
-                build_format(fmt, manifests, fmt_out, keep_existing=keep)
-
-                remote_dir = f"{nerf_home}/{fmt}"
-                remote_dirs.append(remote_dir)
-                local_dirs.append((fmt_out, remote_dir))
-
-            # Create/clear remote dirs as root, then chown for unprivileged copy
-            if not keep:
-                for d in remote_dirs:
-                    _run_logged(ts_target, f"rm -rf {shlex.quote(d)}", logger, as_root=True)
-            for d in remote_dirs:
-                _run_logged(ts_target, f"mkdir -p {shlex.quote(d)}", logger, as_root=True)
-            dirs_str = " ".join(shlex.quote(d) for d in remote_dirs)
-            _run_logged(ts_target, f"sudo chown -R $(id -un):$(id -un) {dirs_str}", logger)
-
-            # Copy each format's artifacts
-            for local_dir, remote_dir in local_dirs:
-                ts_target.copy_dir_to(local_dir, remote_dir, delete=False, timeout=60)
+            # Copy plugin artifacts
+            ts_target.copy_dir_to(tmp_path, plugin_dir, delete=False, timeout=60)
 
             # Fix execute bits on scripts (Windows tarballs lose them)
-            for d in remote_dirs:
-                _run_logged(
-                    ts_target,
-                    f"find {shlex.quote(d)} -name 'nerf-*' -o -name 'nerfctl-*' | xargs -r chmod +x",
-                    logger,
-                )
+            _run_logged(
+                ts_target,
+                f"find {shlex.quote(plugin_dir)} -name 'nerf-*' -o -name 'nerfctl-*' | xargs -r chmod +x",
+                logger,
+            )
 
-        typer.echo(f"  Nerf tools built to {nerf_home} (formats: {', '.join(output_formats)})")
+        typer.echo(f"  Nerf Claude plugin built to {plugin_dir}")
 
         # System-wide env var so all users can locate nerf home
         env_line = f'export AGENTWORKS_NERF_HOME="{nerf_home}"'
@@ -1374,7 +1354,45 @@ def _install_nerf_tools(
         )
 
     except (SSHError, RuntimeError) as e:
-        msg = f"nerf tools installation failed: {e}"
+        msg = f"nerf Claude plugin build failed: {e}"
+        logger.warning(msg)
+        typer.echo(f"  Warning: {msg}", err=True)
+
+
+def _install_nerf_claude_plugin_for_user(
+    target: ExecTarget,
+    shell: str,
+    logger: SSHLogger,
+) -> None:
+    """Install the nerf Claude Code plugin for the current user. Non-fatal."""
+    logger.step("Nerf plugin install")
+
+    try:
+        # Check that the plugin and install script exist via the system env var
+        check_result = _run_logged(
+            target,
+            f"{shell} -lc 'test -x $AGENTWORKS_NERF_HOME/claude-plugin/scripts/nerfctl-claude-install-plugin'",
+            logger,
+            check=False,
+        )
+        if not check_result.ok:
+            typer.echo(
+                "  Warning: nerf Claude plugin not found on this VM. "
+                "Set nerf_build_claude_plugin = true in your VM template and reinit.",
+                err=True,
+            )
+            return
+
+        typer.echo("  Installing nerf Claude plugin...")
+        _run_logged(
+            target,
+            f"{shell} -lc '$AGENTWORKS_NERF_HOME/claude-plugin/scripts/nerfctl-claude-install-plugin'",
+            logger,
+            timeout=30,
+        )
+        typer.echo("  Nerf Claude plugin installed")
+    except SSHError as e:
+        msg = f"nerf plugin install failed: {e}"
         logger.warning(msg)
         typer.echo(f"  Warning: {msg}", err=True)
 
