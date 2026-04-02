@@ -103,17 +103,21 @@ def create_task_session(
 
     if is_admin:
         if command:
-            # Run via login shell so PATH (e.g. ~/.local/bin) is available
+            # Run via interactive login shell so PATH and rc files are available
             inner = shlex.quote(f"cd {q_path} && {command}")
-            shell_cmd = f"$SHELL -lc {inner}"
+            shell_cmd = f"$SHELL -lic {inner}"
         else:
             shell_cmd = ""
     else:
         assert linux_user is not None
         q_user = shlex.quote(linux_user)
         if command:
-            inner_cmd = shlex.quote(f"cd {q_path} && {command}")
-            shell_cmd = f"sudo su --login {q_user} -c {inner_cmd}"
+            # Start an interactive login shell as the agent user.
+            # su --login sources the profile; $SHELL -lic sources rc files
+            # (e.g. .bashrc) so tools installed to user-specific paths are available.
+            inner_cmd = shlex.quote(f"cd {q_path} && exec {command}")
+            su_inner = shlex.quote(f"exec $SHELL -lic {inner_cmd}")
+            shell_cmd = f"sudo su --login {q_user} -c {su_inner}"
         else:
             shell_cmd = f"exec sudo su --login {q_user}"
 
