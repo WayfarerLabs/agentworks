@@ -269,7 +269,8 @@ def create_task(
         db.delete_task(workspace_name, name)
         raise
 
-    typer.echo(f"Task '{name}' started ({mode.value} mode, template: {template.name})")
+    mode_label = f"agent: {resolved_agent_name}" if resolved_agent_name else "admin"
+    typer.echo(f"Task '{name}' started ({mode_label}, template: {template.name})")
 
     # Update tmuxinator config and add to console if it exists
     _regenerate_tmuxinator(db, config, vm, ws)

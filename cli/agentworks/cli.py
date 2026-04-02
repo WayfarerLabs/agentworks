@@ -750,6 +750,7 @@ def task_create(
     name: Annotated[str | None, typer.Option("--name", help="Task name (prompted if omitted)")] = None,
     workspace: Annotated[str | None, typer.Option("--workspace", help="Existing workspace")] = None,
     template: Annotated[str | None, typer.Option("--template", help="Task template")] = None,
+    admin: Annotated[bool, typer.Option("--admin", help="Run as the VM admin user")] = False,
     agent: Annotated[str | None, typer.Option("--agent", help="Agent name (agent mode)")] = None,
     new_workspace: Annotated[bool, typer.Option("--new-workspace", help="Create a new workspace")] = False,
     workspace_name: Annotated[str | None, typer.Option("--workspace-name", help="Name for new workspace")] = None,
@@ -764,6 +765,9 @@ def task_create(
     from agentworks.workspaces.manager import create_workspace
 
     # Validate flag combinations before any prompts
+    if admin and agent:
+        typer.echo("Error: --admin and --agent are mutually exclusive", err=True)
+        raise typer.Exit(1)
     if workspace and new_workspace:
         typer.echo("Error: --workspace and --new-workspace are mutually exclusive", err=True)
         raise typer.Exit(1)
@@ -778,14 +782,36 @@ def task_create(
     config = load_config()
 
     if new_workspace:
-        # Resolve task name first (workspace name may depend on it)
-        resolved_name = _prompt_name("Task", name)
-        resolved_ws_name = workspace_name or f"ws-{resolved_name}"
-
-        # Resolve VM (prompt if needed)
         resolved_vm = _prompt_vm(db, vm)
+        resolved_workspace = workspace_name  # may be None, resolved after task name
 
-        # Create the workspace
+        # Resolve mode (need VM name for agent lookup)
+        resolved_agent: str | None = agent
+        if not admin and agent is None:
+            # Look up agents on the target VM
+            vm_agents = db.list_agents(vm_name=resolved_vm)
+            if vm_agents:
+                _require_interactive("--admin or --agent")
+                typer.echo("Run task as:")
+                typer.echo("  1) admin")
+                for i, a in enumerate(vm_agents, 2):
+                    label = f"agent: {a.name}"
+                    if a.template:
+                        label += f" [{a.template}]"
+                    typer.echo(f"  {i}) {label}")
+                choice = int(typer.prompt("Choice", type=int))
+                if choice == 1:
+                    resolved_agent = None
+                else:
+                    idx = choice - 2
+                    if idx < 0 or idx >= len(vm_agents):
+                        typer.echo(f"Error: invalid choice {choice}", err=True)
+                        raise typer.Exit(1)
+                    resolved_agent = vm_agents[idx].name
+
+        resolved_name = _prompt_name("Task", name)
+        resolved_ws_name = resolved_workspace or f"ws-{resolved_name}"
+
         create_workspace(
             db,
             config,
@@ -796,6 +822,12 @@ def task_create(
         resolved_workspace = resolved_ws_name
     else:
         resolved_workspace = _prompt_workspace(db, workspace)
+
+        # Resolve mode
+        resolved_agent: str | None = agent  # type: ignore[no-redef]
+        if not admin and agent is None:
+            resolved_agent = _prompt_task_mode(db, resolved_workspace)
+
         resolved_name = _prompt_name("Task", name)
 
     create_task(
@@ -804,8 +836,39 @@ def task_create(
         name=resolved_name,
         workspace_name=resolved_workspace,
         template_name=template,
-        agent_name=agent,
+        agent_name=resolved_agent,
     )
+
+
+def _prompt_task_mode(db: Database, workspace_name: str) -> str | None:
+    """Prompt for admin vs agent mode. Returns agent name or None for admin."""
+    ws = db.get_workspace(workspace_name)
+    if ws is None or ws.vm_name is None:
+        return None
+
+    agents = db.list_agents(vm_name=ws.vm_name)
+    if not agents:
+        # No agents on this VM, default to admin
+        return None
+
+    _require_interactive("--admin or --agent")
+
+    typer.echo("Run task as:")
+    typer.echo("  1) admin")
+    for i, a in enumerate(agents, 2):
+        label = f"agent: {a.name}"
+        if a.template:
+            label += f" [{a.template}]"
+        typer.echo(f"  {i}) {label}")
+
+    choice = int(typer.prompt("Choice", type=int))
+    if choice == 1:
+        return None
+    idx = choice - 2
+    if idx < 0 or idx >= len(agents):
+        typer.echo(f"Error: invalid choice {choice}", err=True)
+        raise typer.Exit(1)
+    return agents[idx].name
 
 
 @task_app.command("list")
