@@ -135,6 +135,7 @@ class TaskRow:
     created_at: str
     updated_at: str
     agent_name: str | None = None
+    created_workspace: bool = False
 
 
 # -- Migrations ------------------------------------------------------------
@@ -315,6 +316,9 @@ MIGRATIONS: dict[int, str] = {
             SELECT a.name FROM agents a WHERE a.linux_user = tasks.linux_user
         ) WHERE mode = 'agent';
         ALTER TABLE tasks DROP COLUMN linux_user;
+    """,
+    15: """
+        ALTER TABLE tasks ADD COLUMN created_workspace INTEGER NOT NULL DEFAULT 0;
     """,
 }
 
@@ -759,10 +763,12 @@ class Database:
         template: str,
         mode: TaskMode,
         agent_name: str | None = None,
+        created_workspace: bool = False,
     ) -> TaskRow:
         self._conn.execute(
-            "INSERT INTO tasks (name, workspace_name, template, mode, agent_name) VALUES (?, ?, ?, ?, ?)",
-            (name, workspace_name, template, mode.value, agent_name),
+            "INSERT INTO tasks (name, workspace_name, template, mode, agent_name, created_workspace)"
+            " VALUES (?, ?, ?, ?, ?, ?)",
+            (name, workspace_name, template, mode.value, agent_name, int(created_workspace)),
         )
         self._conn.commit()
         result = self.get_task(workspace_name, name)
@@ -911,6 +917,7 @@ def _to_task(row: sqlite3.Row) -> TaskRow:
         created_at=row["created_at"],
         updated_at=row["updated_at"],
         agent_name=row["agent_name"],
+        created_workspace=bool(row["created_workspace"]),
     )
 
 

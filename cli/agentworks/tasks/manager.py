@@ -204,6 +204,7 @@ def create_task(
     workspace_name: str,
     template_name: str | None = None,
     agent_name: str | None = None,
+    created_workspace: bool = False,
 ) -> None:
     """Create and start a task."""
     from agentworks.config import validate_name
@@ -250,7 +251,14 @@ def create_task(
     template = _resolve_template(config, template_name)
 
     # Insert DB record first to avoid orphaned tmux sessions on crash
-    db.insert_task(name, workspace_name, template.name, mode, agent_name=resolved_agent_name)
+    db.insert_task(
+        name,
+        workspace_name,
+        template.name,
+        mode,
+        agent_name=resolved_agent_name,
+        created_workspace=created_workspace,
+    )
 
     deploy_restricted_config(run_command, history_limit=config.task.history_limit)
     command = _build_task_command(template, task_name=name, workspace_name=workspace_name)
@@ -411,6 +419,27 @@ def delete_task(
 
     _regenerate_tmuxinator(db, config, vm, ws)
     typer.echo(f"Task '{name}' deleted")
+
+    # If this task created its workspace, offer to delete it
+    if task and task.created_workspace:
+        remaining = db.list_tasks(workspace_name=workspace_name)
+        if remaining:
+            typer.echo(
+                f"  Workspace '{workspace_name}' was created with this task but has "
+                f"{len(remaining)} other task(s), not offering to delete."
+            )
+        elif not yes:
+            if typer.confirm(
+                f"  Workspace '{workspace_name}' was created with this task and has no other tasks. Delete it?",
+            ):
+                from agentworks.workspaces.manager import delete_workspace
+
+                delete_workspace(db, config, workspace_name, yes=True)
+        else:
+            from agentworks.workspaces.manager import delete_workspace
+
+            typer.echo(f"  Deleting workspace '{workspace_name}' (created with this task)...")
+            delete_workspace(db, config, workspace_name, yes=True)
 
 
 def describe_task(

@@ -847,6 +847,7 @@ def task_create(
         workspace_name=resolved_workspace,
         template_name=template,
         agent_name=resolved_agent,
+        created_workspace=new_workspace,
     )
 
 
