@@ -175,6 +175,11 @@ Manage agents (isolated Linux users) on VMs. Agents are VM-scoped and access wor
 | `agentworks agent shell <name> [--workspace <ws>]`                  | Shell into an agent             |
 | `agentworks agent delete <name>`                                    | Delete an agent                 |
 
+`agent create` accepts `--name`, `--vm`, `--template`, and `--grant-all-workspaces`.
+
+`agent delete` requires `--force` if the agent has running tasks. Pass `--yes` to skip the
+confirmation prompt.
+
 ### Tasks
 
 Manage tasks (named work streams running in workspaces).
@@ -191,9 +196,12 @@ Manage tasks (named work streams running in workspaces).
 | `agentworks task logs <name> --workspace <ws>`   | Dump task scrollback buffer |
 | `agentworks vm console <vm-name>`                | Attach to the VM console    |
 
-`task create` accepts `--name`, `--workspace`, `--template`, and `--agent`. Both name and workspace
-are prompted interactively if omitted. Pass `--new-workspace` to create a workspace on the fly
-(with optional `--workspace-name`, `--workspace-template`, and `--vm`).
+`task create` accepts `--name`, `--workspace`, `--template`, `--admin`, and `--agent`. Workspace,
+mode (admin vs agent), and name are prompted interactively if omitted. If agents exist on the VM
+and neither `--admin` nor `--agent` is specified, you are prompted to choose. Pass `--new-workspace`
+to create a workspace on the fly (with optional `--workspace-name`, `--workspace-template`, and
+`--vm`). When a task created with `--new-workspace` is later deleted, you are offered the option
+to delete the workspace as well (if no other tasks remain on it).
 
 ### tmux Architecture
 
@@ -320,6 +328,32 @@ Key sections:
 Agentworks installs [mise](https://mise.jdx.dev/) by default on all VMs for managing CLI tools
 (jq, adr-tools, node, etc.) with optional lockfile-based integrity verification. See
 [Using mise](../docs/guides/mise.md) for the full guide.
+
+### Nerf Tools (Claude Code Plugin)
+
+Agentworks can build and deploy a Claude Code plugin containing "nerf tools" -- scoped,
+safety-constrained wrappers for CLI operations like git, az, and other tools. Nerf tools
+enforce guardrails (validated parameters, restricted flags, pre-flight checks) so AI agents
+operate safely.
+
+Enable in your VM template:
+
+```toml
+[vm_templates.default]
+nerf_build_claude_plugin = true
+```
+
+This builds the plugin to `nerf_home_dir/claude-plugin/` during VM init. To auto-install the
+plugin for users, add to admin or agent config:
+
+```toml
+[admin.config]
+nerf_install_claude_plugin = true
+```
+
+The plugin provides skills that document available tools, and operator commands for managing
+permissions (`/nerftools:nerfctl-grant-allow`, `/nerftools:nerfctl-grant-deny`, etc.). Custom
+tool manifests can be added via `nerf_addl_manifests`.
 
 ### Built-in Catalog
 

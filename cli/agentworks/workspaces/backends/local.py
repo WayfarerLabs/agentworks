@@ -24,8 +24,7 @@ def create_local_workspace(
 ) -> str:
     """Create a local workspace. Returns the workspace path.
 
-    Idempotent: if the workspace directory already exists (e.g. from a
-    previous interrupted attempt), it is removed and recreated.
+    Errors if the workspace directory already exists.
     """
     workspace_dir = config.paths.local_workspaces / ws_name
     workspace_path = str(workspace_dir)

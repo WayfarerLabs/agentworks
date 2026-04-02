@@ -28,8 +28,7 @@ def create_vm_workspace(
 ) -> str:
     """Create a workspace on a VM. Returns the remote workspace path.
 
-    Idempotent: if the workspace directory already exists (e.g. from a
-    previous interrupted attempt), it is removed and recreated.
+    Errors if the workspace directory already exists on the VM.
     """
     from agentworks.ssh import run as ssh_run
     from agentworks.ssh import run_as_root

@@ -85,6 +85,7 @@
     "subpath",
     "subpaths",
     "subshell",
+    "syscalls",
     "tailnet",
     "tenv",
     "tmuxinator",
