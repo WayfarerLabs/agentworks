@@ -356,25 +356,13 @@ def test_grant_then_reset_clears_entry(tmp_path: Path) -> None:
 # -- install-plugin (pre-flight checks only; actual install needs claude CLI) -
 
 
-def test_install_plugin_requires_env_var(tmp_path: Path) -> None:
-    env = {k: v for k, v in os.environ.items() if k != "AGENTWORKS_NERF_HOME"}
+def test_install_plugin_requires_marketplace() -> None:
+    """Script resolves plugin dir from its own location; since the source
+    nerfctl dir has no marketplace.json, it should fail."""
     result = subprocess.run(
         ["bash", "--norc", "--noprofile", str(_INSTALL_PLUGIN)],
         capture_output=True,
         text=True,
-        env={**env, "HOME": str(tmp_path)},
-    )
-    assert result.returncode != 0
-    assert "AGENTWORKS_NERF_HOME" in result.stderr
-
-
-def test_install_plugin_requires_marketplace(tmp_path: Path) -> None:
-    nerf_home = tmp_path / "nerf"
-    nerf_home.mkdir()
-    result = _run(
-        _INSTALL_PLUGIN,
-        home=tmp_path,
-        env_extra={"AGENTWORKS_NERF_HOME": str(nerf_home)},
     )
     assert result.returncode != 0
     assert "marketplace" in result.stderr

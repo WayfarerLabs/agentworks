@@ -13,8 +13,8 @@ Usage: nerfctl-claude-install-plugin [--scope user|local]
   --scope user|local  Installation scope (default: user)
 
 Registers the nerftools local marketplace and installs the nerftools plugin
-so Claude Code can discover nerf tool skills. Uses the AGENTWORKS_NERF_HOME
-environment variable to locate the plugin.
+so Claude Code can discover nerf tool skills. Locates the plugin directory
+relative to this script's location.
 
 Requires the claude CLI.
 EOF
@@ -30,13 +30,10 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ -z "${AGENTWORKS_NERF_HOME:-}" ]]; then
-  echo "error: AGENTWORKS_NERF_HOME is not set" >&2
-  echo "hint: nerf tools must be installed via 'agentworks vm init' first" >&2
-  exit 1
-fi
-
-PLUGIN_DIR="$AGENTWORKS_NERF_HOME"
+# Resolve the plugin directory from this script's location
+# Script is at: <plugin-root>/scripts/nerfctl-claude-install-plugin
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PLUGIN_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 if [[ ! -f "$PLUGIN_DIR/.claude-plugin/marketplace.json" ]]; then
   echo "error: no marketplace manifest at $PLUGIN_DIR/.claude-plugin/marketplace.json" >&2
@@ -57,4 +54,4 @@ claude plugin marketplace add "$PLUGIN_DIR"
 echo "Installing nerftools plugin (scope: $SCOPE)..."
 claude plugin install "nerftools@agentworks-nerf-local" --scope "$SCOPE"
 
-echo "Done. Nerftools plugin installed."
+echo "Done. Nerftools plugin installed from $PLUGIN_DIR"

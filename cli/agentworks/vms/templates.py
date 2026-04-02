@@ -35,6 +35,7 @@ class ResolvedVMTemplate:
     install_mise: bool = True
     # Nerf tools
     install_nerf_tools: bool = False
+    nerf_tool_output_formats: list[str] = field(default_factory=list)
     skip_nerf_defaults: bool = False
     nerf_addl_manifests: list[Path] = field(default_factory=list)
     nerf_keep_existing: bool = False
@@ -119,6 +120,7 @@ def _merge(target: ResolvedVMTemplate, source: ResolvedVMTemplate) -> None:
     target.system_install_commands = _append_dedupe(target.system_install_commands, source.system_install_commands)
     target.install_mise = source.install_mise
     target.install_nerf_tools = source.install_nerf_tools
+    target.nerf_tool_output_formats = list(source.nerf_tool_output_formats)
     target.skip_nerf_defaults = source.skip_nerf_defaults
     target.nerf_addl_manifests = list(source.nerf_addl_manifests)
     target.nerf_keep_existing = source.nerf_keep_existing
@@ -150,6 +152,8 @@ def _merge_template(target: ResolvedVMTemplate, tmpl: VMTemplate) -> None:
         target.install_mise = tmpl.install_mise
     if tmpl.install_nerf_tools is not None:
         target.install_nerf_tools = tmpl.install_nerf_tools
+    if tmpl.nerf_tool_output_formats is not None:
+        target.nerf_tool_output_formats = list(tmpl.nerf_tool_output_formats)
     if tmpl.skip_nerf_defaults is not None:
         target.skip_nerf_defaults = tmpl.skip_nerf_defaults
     if tmpl.nerf_addl_manifests is not None:

@@ -124,6 +124,7 @@ class VMTemplate:
     install_mise: bool | None = None
     # Nerf tools
     install_nerf_tools: bool | None = None
+    nerf_tool_output_formats: list[str] | None = None
     skip_nerf_defaults: bool | None = None
     nerf_addl_manifests: list[Path] | None = None
     nerf_keep_existing: bool | None = None
@@ -147,7 +148,6 @@ class AdminConfig:
     mise_allow_unlocked: bool = False
     mise_install_before: str = "7d"
     mise_prune_on_reinit: bool = True
-    add_nerftools_to_path: bool = False
 
 
 @dataclass(frozen=True)
@@ -168,7 +168,6 @@ class AgentTemplate:
     mise_allow_unlocked: bool | None = None
     mise_install_before: str | None = None
     mise_prune_on_reinit: bool | None = None
-    add_nerftools_to_path: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -376,6 +375,7 @@ _VM_TEMPLATE_KEYS = {
     "system_install_commands",
     "install_mise",
     "install_nerf_tools",
+    "nerf_tool_output_formats",
     "skip_nerf_defaults",
     "nerf_addl_manifests",
     "nerf_keep_existing",
@@ -417,6 +417,9 @@ def _load_vm_templates(data: dict[str, object]) -> dict[str, VMTemplate]:
             ),
             install_mise=bool(tdata["install_mise"]) if "install_mise" in tdata else None,
             install_nerf_tools=bool(tdata["install_nerf_tools"]) if "install_nerf_tools" in tdata else None,
+            nerf_tool_output_formats=(
+                list(tdata["nerf_tool_output_formats"]) if "nerf_tool_output_formats" in tdata else None
+            ),
             skip_nerf_defaults=bool(tdata["skip_nerf_defaults"]) if "skip_nerf_defaults" in tdata else None,
             nerf_addl_manifests=nerf_addl,
             nerf_keep_existing=bool(tdata["nerf_keep_existing"]) if "nerf_keep_existing" in tdata else None,
@@ -447,7 +450,6 @@ _USER_CONFIG_KEYS = {
     "mise_allow_unlocked",
     "mise_install_before",
     "mise_prune_on_reinit",
-    "add_nerftools_to_path",
 }
 
 
@@ -476,7 +478,6 @@ def _load_admin_config(data: dict[str, object]) -> AdminConfig:
         mise_allow_unlocked=bool(raw.get("mise_allow_unlocked", False)),
         mise_install_before=str(raw.get("mise_install_before", "7d")),
         mise_prune_on_reinit=bool(raw.get("mise_prune_on_reinit", True)),
-        add_nerftools_to_path=bool(raw.get("add_nerftools_to_path", False)),
     )
 
 
@@ -515,7 +516,6 @@ def _load_agent_templates(data: dict[str, object]) -> dict[str, AgentTemplate]:
             mise_allow_unlocked=(bool(tdata["mise_allow_unlocked"]) if "mise_allow_unlocked" in tdata else None),
             mise_install_before=(str(tdata["mise_install_before"]) if "mise_install_before" in tdata else None),
             mise_prune_on_reinit=(bool(tdata["mise_prune_on_reinit"]) if "mise_prune_on_reinit" in tdata else None),
-            add_nerftools_to_path=(bool(tdata["add_nerftools_to_path"]) if "add_nerftools_to_path" in tdata else None),
         )
 
     for name, tmpl in templates.items():

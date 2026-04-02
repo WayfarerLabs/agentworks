@@ -1263,8 +1263,6 @@ def _phase_b_setup(
 
     # Non-fatal: shell profile (PATH exports, sourced at login)
     all_paths = system_path + mise_path + user_path
-    if config.admin.add_nerftools_to_path:
-        all_paths.append("$AGENTWORKS_NERF_BIN")
     _write_agentworks_profile(ts_target, all_paths, logger)
 
     # Non-fatal: shell rc (interactive shell hooks like mise activate)
@@ -1289,103 +1287,89 @@ def _install_nerf_tools(
     typer.echo("  Building nerf tools...")
 
     nerf_home = config.vm.nerf_home_dir
-    bin_dir = f"{nerf_home}/bin"
-    skills_dir = f"{nerf_home}/skills"
+    output_formats = config.vm.nerf_tool_output_formats
     keep = config.vm.nerf_keep_existing
 
+    if not output_formats:
+        typer.echo("  No output formats configured, skipping nerf tools build")
+        return
+
     try:
+        # Load manifests
+        try:
+            from nerftools import BUILTIN_MANIFESTS_DIR  # type: ignore[import-untyped]
+            from nerftools.formats import build_format  # type: ignore[import-untyped]
+            from nerftools.manifest import (  # type: ignore[import-untyped]
+                ManifestError,
+                load_manifest,
+                merge_manifests,
+            )
+        except ImportError as e:
+            raise RuntimeError(f"nerftools is not installed: {e}") from e
+
+        manifest_paths: list[Path] = []
+        if not config.vm.skip_nerf_defaults and BUILTIN_MANIFESTS_DIR.exists():
+            for pkg_dir in sorted(BUILTIN_MANIFESTS_DIR.iterdir()):
+                mf = pkg_dir / "manifest.yaml"
+                if mf.exists():
+                    manifest_paths.append(mf)
+        manifest_paths.extend(config.vm.nerf_addl_manifests)
+
+        try:
+            manifests = merge_manifests([load_manifest(p) for p in manifest_paths])
+        except ManifestError as e:
+            raise RuntimeError(f"nerf manifest error: {e}") from e
+
+        # Build each output format into a temp dir, then deploy to VM
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
-            bin_out = tmp_path / "bin"
-            skills_out = tmp_path / "skills"
-            bin_out.mkdir()
-            skills_out.mkdir()
 
-            # Build scripts and skills locally via Python API (no subprocess --
-            # avoids Windows PATH issues with .cmd script wrappers)
-            try:
-                from nerftools import BUILTIN_MANIFESTS_DIR  # type: ignore[import-untyped]
-                from nerftools.builder import build_scripts  # type: ignore[import-untyped]
-                from nerftools.manifest import (  # type: ignore[import-untyped]
-                    ManifestError,
-                    load_manifest,
-                    merge_manifests,
-                )
-                from nerftools.skill import build_skills  # type: ignore[import-untyped]
-            except ImportError as e:
-                raise RuntimeError(f"nerftools is not installed: {e}") from e
+            remote_dirs: list[str] = []
+            local_dirs: list[tuple[Path, str]] = []
 
-            manifest_paths: list[Path] = []
-            if not config.vm.skip_nerf_defaults and BUILTIN_MANIFESTS_DIR.exists():
-                for pkg_dir in sorted(BUILTIN_MANIFESTS_DIR.iterdir()):
-                    mf = pkg_dir / "manifest.yaml"
-                    if mf.exists():
-                        manifest_paths.append(mf)
-            manifest_paths.extend(config.vm.nerf_addl_manifests)
+            for fmt in output_formats:
+                fmt_out = tmp_path / fmt
+                fmt_out.mkdir()
+                build_format(fmt, manifests, fmt_out, keep_existing=keep)
 
-            try:
-                manifests = merge_manifests([load_manifest(p) for p in manifest_paths])
-            except ManifestError as e:
-                raise RuntimeError(f"nerf manifest error: {e}") from e
+                remote_dir = f"{nerf_home}/{fmt}"
+                remote_dirs.append(remote_dir)
+                local_dirs.append((fmt_out, remote_dir))
 
-            build_scripts(manifests, bin_out, keep_existing=keep)
-            build_skills(manifests, skills_out, keep_existing=keep)
-
-            # Install nerfctl scripts (Claude Code permission management)
-            from nerftools import install_nerfctl
-
-            install_nerfctl("claude", bin_out)
-
-            # Generate Claude Code plugin manifest
-            from nerftools.skill import build_plugin_manifest
-
-            build_plugin_manifest(tmp_path)
-
-            # Create/clear remote dirs as root, then chown to the current SSH user
-            # so copy_dir_to can write without sudo. $(id -un) expands on the remote
-            # shell before sudo runs, giving the SSH user's name.
-            plugin_dir = f"{nerf_home}/.claude-plugin"
-            all_dirs = [bin_dir, skills_dir, plugin_dir]
+            # Create/clear remote dirs as root, then chown for unprivileged copy
             if not keep:
-                for d in all_dirs:
+                for d in remote_dirs:
                     _run_logged(ts_target, f"rm -rf {shlex.quote(d)}", logger, as_root=True)
-                    _run_logged(ts_target, f"mkdir -p {shlex.quote(d)}", logger, as_root=True)
-            else:
-                dirs_str = " ".join(shlex.quote(d) for d in all_dirs)
-                _run_logged(ts_target, f"mkdir -p {dirs_str}", logger, as_root=True)
-            dirs_str = " ".join(shlex.quote(d) for d in all_dirs)
-            _run_logged(
-                ts_target,
-                f"sudo chown $(id -un):$(id -un) {dirs_str}",
-                logger,
-            )
+            for d in remote_dirs:
+                _run_logged(ts_target, f"mkdir -p {shlex.quote(d)}", logger, as_root=True)
+            dirs_str = " ".join(shlex.quote(d) for d in remote_dirs)
+            _run_logged(ts_target, f"sudo chown -R $(id -un):$(id -un) {dirs_str}", logger)
 
-            # Copy artifacts (dirs already cleared above; delete=False to avoid re-rm)
-            ts_target.copy_dir_to(bin_out, bin_dir, delete=False, timeout=60)
-            ts_target.copy_dir_to(skills_out, skills_dir, delete=False, timeout=60)
-            ts_target.copy_dir_to(tmp_path / ".claude-plugin", plugin_dir, delete=False, timeout=60)
+            # Copy each format's artifacts
+            for local_dir, remote_dir in local_dirs:
+                ts_target.copy_dir_to(local_dir, remote_dir, delete=False, timeout=60)
 
-            # Windows tarballs don't preserve Unix execute bits -- set them explicitly
-            _run_logged(
-                ts_target,
-                f"find {shlex.quote(bin_dir)} -type f -exec chmod +x {{}} +",
-                logger,
-            )
+            # Fix execute bits on scripts (Windows tarballs lose them)
+            for d in remote_dirs:
+                _run_logged(
+                    ts_target,
+                    f"find {shlex.quote(d)} -name 'nerf-*' -o -name 'nerfctl-*' | xargs -r chmod +x",
+                    logger,
+                )
 
-        typer.echo(f"  Nerf tools installed to {nerf_home}")
+        typer.echo(f"  Nerf tools built to {nerf_home} (formats: {', '.join(output_formats)})")
 
-        # System-wide env vars so all users can locate nerf artifacts.
-        env_lines = f'export AGENTWORKS_NERF_HOME="{nerf_home}"\nexport AGENTWORKS_NERF_BIN="{bin_dir}"'
+        # System-wide env var so all users can locate nerf home
+        env_line = f'export AGENTWORKS_NERF_HOME="{nerf_home}"'
         _run_logged(
             ts_target,
-            f"printf '%s\\n' {shlex.quote(env_lines)} | sudo tee /etc/profile.d/agentworks-nerf.sh > /dev/null",
+            f"printf '%s\\n' {shlex.quote(env_line)} | sudo tee /etc/profile.d/agentworks-nerf.sh > /dev/null",
             logger,
         )
-        # zsh doesn't source /etc/profile.d/ -- append to /etc/zsh/zprofile if not already there
         _run_logged(
             ts_target,
             f"grep -qF AGENTWORKS_NERF_HOME /etc/zsh/zprofile 2>/dev/null"
-            f" || printf '%s\\n' {shlex.quote(env_lines)} | sudo tee -a /etc/zsh/zprofile > /dev/null",
+            f" || printf '%s\\n' {shlex.quote(env_line)} | sudo tee -a /etc/zsh/zprofile > /dev/null",
             logger,
         )
 

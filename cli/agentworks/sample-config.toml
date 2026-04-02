@@ -98,13 +98,14 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # system_install_commands = ["az-cli"]       # system-level commands from catalog
 # install_mise = true                        # install mise via apt (default: true)
 # -- Nerf tools --
-# install_nerf_tools = false                 # build and deploy nerf tools during init
-# skip_nerf_defaults = false                 # skip built-in nerf catalog (nerf build --no-default)
+# install_nerf_tools = false                   # build and deploy nerf tools during init
+# nerf_tool_output_formats = ["claude-plugin"]  # output formats to generate
+# skip_nerf_defaults = false                 # skip built-in nerf catalog
 # nerf_addl_manifests = [                    # additional manifest files to merge in
 #     "~/.config/agentworks/nerf/my-tools/manifest.yaml",
 # ]
-# nerf_keep_existing = false                 # preserve unmanaged files in bin/skills dirs on reinit
-# nerf_home_dir = "/opt/agentworks/nerf"     # root dir for nerf artifacts (bin/ and skills/)
+# nerf_keep_existing = false                 # preserve unmanaged files on reinit
+# nerf_home_dir = "/opt/agentworks/nerf"     # root dir for nerf artifacts
 
 # [vm_templates.heavy]
 # inherits = ["default"]
@@ -132,8 +133,6 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # mise_allow_unlocked = false                # install packages not in lockfile (with warning)
 # mise_install_before = "7d"                 # reject versions newer than this
 # mise_prune_on_reinit = true                # remove stale tool versions on reinit
-# -- Nerf tools --
-# add_nerftools_to_path = false              # add nerf bin dir to this user's PATH
 
 # --- Agent templates ---
 # Per-user settings for agent users. Selected at agent create time with
