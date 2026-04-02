@@ -110,11 +110,14 @@ def create_agent(
     vm = _require_vm(db, vm_name)
     linux_user = derive_linux_user(name)
 
+    # Collect credentials up front before any SSH work
+    git_tokens = _collect_agent_credentials(config)
+
     from agentworks.ssh import SSHLogger
 
     ssh_logger = SSHLogger(vm.name, "agent-create")
     try:
-        _create_agent_on_vm(vm, config, linux_user, logger=ssh_logger)
+        _create_agent_on_vm(vm, config, linux_user, git_tokens=git_tokens, logger=ssh_logger)
     except Exception as e:
         ssh_logger.close()
         typer.echo(f"Error creating agent: {e}", err=True)
@@ -230,11 +233,14 @@ def reinit_agent(
 
     vm = _require_vm(db, agent.vm_name)
 
+    # Collect credentials up front before any SSH work
+    git_tokens = _collect_agent_credentials(config)
+
     from agentworks.ssh import SSHLogger
 
     ssh_logger = SSHLogger(vm.name, "agent-reinit")
     try:
-        _create_agent_on_vm(vm, config, agent.linux_user, logger=ssh_logger)
+        _create_agent_on_vm(vm, config, agent.linux_user, git_tokens=git_tokens, logger=ssh_logger)
     except Exception as e:
         ssh_logger.close()
         typer.echo(f"Error reinitializing agent: {e}", err=True)
@@ -539,11 +545,25 @@ def _remove_from_workspace_group(
     run_as_root(target, f"gpasswd -d {linux_user} {ws_grp}", check=False, logger=logger)
 
 
+def _collect_agent_credentials(config: Config) -> dict[str, str]:
+    """Collect git credentials up front before any SSH work begins."""
+    agent_cfg = config.agent
+    git_tokens: dict[str, str] = {}
+    if agent_cfg.git_credentials:
+        from agentworks.vms.initializer import resolve_git_credential_providers
+
+        providers = resolve_git_credential_providers(config, agent_cfg.git_credentials)
+        for cred_name, provider in providers.items():
+            git_tokens[cred_name] = provider.obtain_token("agent")
+    return git_tokens
+
+
 def _create_agent_on_vm(
     vm: VMRow,
     config: Config,
     linux_user: str,
     *,
+    git_tokens: dict[str, str] | None = None,
     logger: SSHLogger | None = None,
 ) -> None:
     """Create an agent Linux user on a VM and set up their environment.
@@ -585,17 +605,18 @@ def _create_agent_on_vm(
     if rc_content and rc_file:
         _write_agent_file(target, linux_user, rc_file, rc_content, logger=lg)
 
-    # Git credentials for the agent
-    if agent_cfg.git_credentials:
+    # Git credentials for the agent (tokens collected up front)
+    if agent_cfg.git_credentials and git_tokens:
         from agentworks.vms.initializer import resolve_git_credential_providers
 
         typer.echo("  Configuring git credentials for agent...")
         try:
             providers = resolve_git_credential_providers(config, agent_cfg.git_credentials)
             cred_lines: list[str] = []
-            for _cred_name, provider in providers.items():
-                token = provider.obtain_token(vm.name)
-                cred_lines.extend(provider.credential_lines(token))
+            for cred_name, provider in providers.items():
+                token = git_tokens.get(cred_name)
+                if token:
+                    cred_lines.extend(provider.credential_lines(token))
             if cred_lines:
                 cred_content = "\n".join(cred_lines) + "\n"
                 _write_agent_file(target, linux_user, f"{home}/.git-credentials", cred_content, mode="600", logger=lg)
