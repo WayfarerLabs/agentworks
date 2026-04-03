@@ -63,6 +63,19 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # resource_group = "agentworks-vms"          # required for azure platform
 # region = "eastus2"                         # required for azure platform
 
+# --- Proxmox settings (only needed for --platform proxmox) ---
+
+# [proxmox]
+# api_url = "https://pve.example.com:8006"   # required: Proxmox API URL
+# node = "pve"                                # required: Proxmox node name
+# token_id = "agentworks@pam!agentworks"      # required: API token ID
+# template_vmid = 9000                        # required: VMID of Debian 12 cloud-init template
+# storage = "local-lvm"                       # target storage for cloned disks
+# bridge = "vmbr0"                            # network bridge
+# pool = "agentworks"                         # Proxmox resource pool for VMs
+# verify_ssl = true                           # verify TLS certificate
+# Token secret: set PROXMOX_TOKEN_SECRET environment variable
+
 # =============================================================================
 # Templates
 # =============================================================================

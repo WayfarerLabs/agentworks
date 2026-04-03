@@ -103,7 +103,14 @@
     "virtiofs",
     "wcid",
     "workstreams",
-    "zfunc"
+    "zfunc",
+    "proxmox",
+    "vmid",
+    "qcow",
+    "cicustom",
+    "ciuser",
+    "vmbr",
+    "ipconfig"
   ],
   "ignoreRegExpList": [
     "`[^`\\r\\n]+`"

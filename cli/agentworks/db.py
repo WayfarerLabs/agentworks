@@ -77,6 +77,7 @@ class VMRow:
     tailscale_host: str | None
     azure_resource_id: str | None
     wsl_distro_name: str | None
+    proxmox_vmid: str | None
     cpus: int | None
     memory_gib: int | None
     disk_gib: int | None
@@ -320,6 +321,9 @@ MIGRATIONS: dict[int, str] = {
     15: """
         ALTER TABLE tasks ADD COLUMN created_workspace INTEGER NOT NULL DEFAULT 0;
     """,
+    16: """
+        ALTER TABLE vms ADD COLUMN proxmox_vmid TEXT;
+    """,
 }
 
 LATEST_VERSION = max(MIGRATIONS)
@@ -429,6 +433,7 @@ class Database:
         template: str | None = None,
         azure_resource_id: str | None = None,
         wsl_distro_name: str | None = None,
+        proxmox_vmid: str | None = None,
         cpus: int | None = None,
         memory_gib: int | None = None,
         disk_gib: int | None = None,
@@ -438,8 +443,8 @@ class Database:
         self._conn.execute(
             "INSERT INTO vms "
             "(name, platform, vm_host_name, template, azure_resource_id, wsl_distro_name, "
-            "cpus, memory_gib, disk_gib, swap_gib, admin_username) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "proxmox_vmid, cpus, memory_gib, disk_gib, swap_gib, admin_username) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 name,
                 platform,
@@ -447,6 +452,7 @@ class Database:
                 template,
                 azure_resource_id,
                 wsl_distro_name,
+                proxmox_vmid,
                 cpus,
                 memory_gib,
                 disk_gib,
@@ -493,6 +499,10 @@ class Database:
 
     def update_vm_wsl_distro_name(self, name: str, wsl_distro_name: str) -> None:
         self._conn.execute("UPDATE vms SET wsl_distro_name = ? WHERE name = ?", (wsl_distro_name, name))
+        self._conn.commit()
+
+    def update_vm_proxmox_vmid(self, name: str, proxmox_vmid: str) -> None:
+        self._conn.execute("UPDATE vms SET proxmox_vmid = ? WHERE name = ?", (proxmox_vmid, name))
         self._conn.commit()
 
     def update_vm_last_seen(self, name: str) -> None:
@@ -864,6 +874,7 @@ def _to_vm(row: sqlite3.Row) -> VMRow:
         tailscale_host=row["tailscale_host"],
         azure_resource_id=row["azure_resource_id"],
         wsl_distro_name=row["wsl_distro_name"],
+        proxmox_vmid=row["proxmox_vmid"],
         cpus=row["cpus"],
         memory_gib=row["memory_gib"],
         disk_gib=row["disk_gib"],
