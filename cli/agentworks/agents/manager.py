@@ -388,9 +388,12 @@ def shell_agent(
         if not db.has_any_grant(name, workspace_name):
             typer.echo(f"Error: agent '{name}' does not have access to workspace '{workspace_name}'", err=True)
             raise typer.Exit(1)
-        sys.exit(interactive(target, f"cd {ws.workspace_path} && exec sudo su - {agent.linux_user}"))
+        import shlex
+
+        q_path = shlex.quote(ws.workspace_path)
+        sys.exit(interactive(target, f"exec sudo su --login {agent.linux_user} -c 'cd {q_path} && exec $SHELL -li'"))
     else:
-        sys.exit(interactive(target, f"exec sudo su - {agent.linux_user}"))
+        sys.exit(interactive(target, f"exec sudo su --login {agent.linux_user}"))
 
 
 # -- VM operations ---------------------------------------------------------
