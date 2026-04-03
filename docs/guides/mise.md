@@ -1,7 +1,7 @@
 # Using mise with agentworks
 
 [mise](https://mise.jdx.dev/) is a polyglot tool version manager that agentworks installs by
-default on all VMs. It provides a unified way to install CLI tools (jq, adr-tools, node, python,
+default on all VMs. It provides a unified way to install CLI tools (terraform, adr-tools, node, python,
 etc.) with optional integrity verification via lockfiles.
 
 ## How it works
@@ -21,7 +21,7 @@ Add packages to your agentworks config:
 
 ```toml
 [admin.config]
-mise_packages = ["jq@1.8.1", "adr-tools@3.0.0"]
+mise_packages = ["terraform@1.14.5", "adr-tools@3.0.0"]
 ```
 
 Run `agentworks vm create` or `agentworks vm reinit` and the tools will be available.
@@ -47,7 +47,7 @@ Agents default to nothing. They only get mise tools if explicitly configured in 
 
 ```toml
 [agent_templates.default]
-mise_packages = ["jq@1.8.1"]
+mise_packages = ["terraform@1.14.5"]
 ```
 
 ## Lockfiles
@@ -64,7 +64,7 @@ On any machine with mise installed:
 # Write a mise.toml with your tools
 cat > mise.toml << 'EOF'
 [tools]
-jq = "1.8.1"
+terraform = "1.14.5"
 adr-tools = "3.0.0"
 EOF
 
@@ -76,8 +76,9 @@ mise lock
 cat mise.lock
 ```
 
-Not all tools support checksums. Tools installed from GitHub source archives (like adr-tools) will
-have URLs but no checksums in the lockfile. Tools with binary releases (like jq) will have both.
+Not all tools support checksums. Tools installed from GitHub source archives will have URLs but no
+checksums in the lockfile. Tools with pre-built binary releases may have both. Check the generated
+lockfile to see what your tools support.
 
 ### Providing a lockfile to agentworks
 
@@ -86,7 +87,7 @@ Point `mise_lockfile` at your lockfile using a local path or a
 
 ```toml
 [admin.config]
-mise_packages = ["jq@1.8.1", "adr-tools@3.0.0"]
+mise_packages = ["terraform@1.14.5", "adr-tools@3.0.0"]
 mise_lockfile = "~/.config/agentworks/mise.lock"
 ```
 
@@ -94,7 +95,7 @@ Or from a git repository:
 
 ```toml
 [admin.config]
-mise_packages = ["jq@1.8.1", "adr-tools@3.0.0"]
+mise_packages = ["terraform@1.14.5", "adr-tools@3.0.0"]
 mise_lockfile = "git::https://github.com/myorg/tool-locks.git//mise.lock?ref=v1.0"
 ```
 
@@ -144,7 +145,7 @@ mise_install_before = "7d"    # reject versions less than 7 days old
 
 Supports relative durations (`7d`, `90d`, `6m`, `1y`) and absolute dates (`2024-06-01`). This only
 affects fuzzy version requests (e.g., `latest`, `node@20`). Explicitly pinned versions (e.g.,
-`jq@1.8.1`) bypass the filter.
+`terraform@1.14.5`) bypass the filter.
 
 ## Disabling mise
 

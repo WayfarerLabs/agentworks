@@ -21,6 +21,7 @@ SYSTEM_PACKAGES = [
     "tmux",
     "tmuxinator",
     "acl",
+    "jq",
 ]
 
 

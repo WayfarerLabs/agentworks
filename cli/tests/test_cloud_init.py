@@ -34,3 +34,4 @@ def test_system_packages_constant() -> None:
     assert "git" in SYSTEM_PACKAGES
     assert "sudo" in SYSTEM_PACKAGES
     assert "acl" in SYSTEM_PACKAGES
+    assert "jq" in SYSTEM_PACKAGES

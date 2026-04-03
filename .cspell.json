@@ -85,6 +85,7 @@
     "subpath",
     "subpaths",
     "subshell",
+    "runcmd",
     "syscalls",
     "tailnet",
     "tenv",

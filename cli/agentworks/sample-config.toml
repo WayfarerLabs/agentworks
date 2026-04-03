@@ -128,7 +128,7 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # dotfiles_install_cmd = "./install.sh"      # command to run after clone/copy
 # -- Mise (see docs/guides/mise.md) --
 # mise_activate = true                       # add mise activate to shell profile
-# mise_packages = ["jq@1.8.1", "adr-tools@3.0.0"]  # name@version tool declarations
+# mise_packages = ["terraform@1.14.5", "adr-tools@3.0.0"]  # name@version tool declarations
 # mise_lockfile = "~/.config/agentworks/mise.lock"   # source ref (wins over dotfiles)
 # mise_allow_unlocked = false                # install packages not in lockfile (with warning)
 # mise_install_before = "7d"                 # reject versions newer than this
@@ -150,7 +150,7 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # dotfiles_install_cmd = "./install.sh"
 # -- Mise --
 # mise_activate = true                       # add mise activate to agent shell profile
-# mise_packages = ["jq@1.8.1"]              # name@version tool declarations
+# mise_packages = ["terraform@1.14.5"]              # name@version tool declarations
 # mise_lockfile = "~/.config/agentworks/agent-mise.lock"
 # mise_allow_unlocked = false
 # mise_install_before = "7d"

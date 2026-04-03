@@ -56,7 +56,7 @@ admin_username = "agentworks"
 admin_shell = "zsh"
 admin_install_commands = ["bun", "claude"]
 mise_activate = true
-mise_packages = ["jq@1.8.1", "adr-tools@3.0.0"]
+mise_packages = ["terraform@1.14.5", "adr-tools@3.0.0"]
 mise_lockfile = "~/.config/agentworks/mise.lock"
 mise_allow_unlocked = false
 mise_install_before = "7d"
@@ -70,7 +70,7 @@ username = "agentworks"
 shell = "zsh"
 user_install_commands = ["bun", "claude"]
 mise_activate = true
-mise_packages = ["jq@1.8.1", "adr-tools@3.0.0"]
+mise_packages = ["terraform@1.14.5", "adr-tools@3.0.0"]
 mise_lockfile = "~/.config/agentworks/mise.lock"
 mise_allow_unlocked = false
 mise_install_before = "7d"
@@ -184,11 +184,11 @@ lockfiles via `mise_lockfile` for integrity verification.
 
 ```toml
 [vm.config]
-mise_packages = ["jq", "adr-tools"]
+mise_packages = ["terraform", "adr-tools"]
 
-[mise_packages.jq]
-description = "Command-line JSON processor"
-version = "1.8.1"
+[mise_packages.terraform]
+description = "Infrastructure as code"
+version = "1.14.5"
 backend = "aqua"
 checksums.linux-x64 = "sha256:..."
 ```
@@ -197,7 +197,7 @@ checksums.linux-x64 = "sha256:..."
 
 ```toml
 [admin.config]
-mise_packages = ["jq@1.8.1", "adr-tools@3.0.0"]
+mise_packages = ["terraform@1.14.5", "adr-tools@3.0.0"]
 mise_lockfile = "~/.config/agentworks/mise.lock"
 ```
 

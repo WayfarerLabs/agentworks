@@ -326,7 +326,7 @@ Key sections:
 ### Mise (Polyglot Tool Manager)
 
 Agentworks installs [mise](https://mise.jdx.dev/) by default on all VMs for managing CLI tools
-(jq, adr-tools, node, etc.) with optional lockfile-based integrity verification. See
+(terraform, adr-tools, node, etc.) with optional lockfile-based integrity verification. See
 [Using mise](../docs/guides/mise.md) for the full guide.
 
 ### Nerf Tools (Claude Code Plugin)
