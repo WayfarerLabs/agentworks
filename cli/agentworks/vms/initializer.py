@@ -22,7 +22,7 @@ import typer
 
 from agentworks.db import InitStatus, ProvisioningStatus
 from agentworks.ssh import ExecTarget, SSHError, SSHLogger, SSHTarget
-from agentworks.vms.cloud_init import SYSTEM_PACKAGES
+from agentworks.vms.cloud_init import INIT_SYSTEM_PACKAGES, PROVISIONING_PACKAGES
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -150,41 +150,6 @@ MISE_SOURCE_LINE = f"deb [signed-by={MISE_GPG_KEY_PATH}] https://mise.jdx.dev/de
 MISE_SOURCE_FILE = "/etc/apt/sources.list.d/mise.list"
 
 
-def _install_mise_apt(
-    target: ExecTarget,
-    logger: SSHLogger,
-) -> bool:
-    """Install mise system-wide via apt. Returns True on success."""
-    logger.step("Mise (apt)")
-    typer.echo("  Installing mise via apt...")
-
-    try:
-        # Download GPG key (curl -o so sudo covers the write)
-        _run_logged(
-            target,
-            f"curl -fsSL {MISE_GPG_KEY_URL} -o {MISE_GPG_KEY_PATH}",
-            logger,
-            as_root=True,
-            timeout=30,
-        )
-        # Write apt source list (sh -c so sudo covers the redirect)
-        inner = f"printf '%s\\n' '{MISE_SOURCE_LINE}' > {MISE_SOURCE_FILE}"
-        _run_logged(
-            target,
-            f"sh -c {shlex.quote(inner)}",
-            logger,
-            as_root=True,
-        )
-        # Install
-        _run_logged(target, "apt-get update -qq", logger, as_root=True, timeout=60)
-        _run_logged(target, "apt-get install -y -qq mise", logger, as_root=True, timeout=120)
-
-    except SSHError as e:
-        msg = f"mise apt installation failed: {e}"
-        logger.warning(msg)
-        typer.echo(f"  Warning: {msg}", err=True)
-        return False
-    return True
 
 
 MISE_ACTIVATE_LINES = (
@@ -511,6 +476,47 @@ def _configure_apt_sources(
             msg = f"apt-get update failed after adding sources: {e}"
             logger.warning(msg)
             typer.echo(f"  Warning: {msg}", err=True)
+
+
+def _install_system_packages(
+    target: ExecTarget,
+    logger: SSHLogger,
+) -> None:
+    """Install system repos and packages. Always runs on every init/reinit."""
+    logger.step("System packages")
+
+    # Add mise apt source
+    try:
+        _run_logged(
+            target,
+            f"curl -fsSL {MISE_GPG_KEY_URL} -o {MISE_GPG_KEY_PATH}",
+            logger,
+            as_root=True,
+            timeout=30,
+        )
+        inner = f"printf '%s\\n' '{MISE_SOURCE_LINE}' > {MISE_SOURCE_FILE}"
+        _run_logged(target, f"sh -c {shlex.quote(inner)}", logger, as_root=True)
+    except SSHError as e:
+        msg = f"mise apt source setup failed: {e}"
+        logger.warning(msg)
+        typer.echo(f"  Warning: {msg}", err=True)
+
+    typer.echo("  Running apt-get update...")
+    try:
+        _run_logged(target, "apt-get update -qq", logger, as_root=True, timeout=120)
+    except SSHError as e:
+        msg = f"apt-get update failed: {e}"
+        logger.warning(msg)
+        typer.echo(f"  Warning: {msg}", err=True)
+
+    typer.echo(f"  Installing {len(INIT_SYSTEM_PACKAGES)} system packages...")
+    apt_str = " ".join(shlex.quote(p) for p in INIT_SYSTEM_PACKAGES)
+    try:
+        _run_logged(target, f"apt-get install -y -qq {apt_str}", logger, as_root=True, timeout=300)
+    except SSHError as e:
+        msg = f"system packages failed: {e}"
+        logger.warning(msg)
+        typer.echo(f"  Warning: {msg}", err=True)
 
 
 def _install_apt_packages(
@@ -1004,7 +1010,7 @@ def _run_bootstrap_script(
     script = generate_bootstrap_script(
         admin_username=admin_username,
         ssh_public_key=ssh_public_key,
-        system_packages=SYSTEM_PACKAGES,
+        provisioning_packages=PROVISIONING_PACKAGES,
         tailscale_auth_key=ts_auth_key,
         hostname=vm_hostname(platform, vm_name),
         swap=0 if is_wsl2 else config.vm.swap,  # WSL2 provisioner handles swap
@@ -1107,6 +1113,9 @@ def _phase_b_setup(
     catalog = load_catalog(config)
     validate_selections(config, catalog)
 
+    # Non-fatal: system repos + packages (mise repo added, then all packages)
+    _install_system_packages(ts_target, logger)
+
     # Non-fatal: apt sources required by selected apt_packages
     _configure_apt_sources(ts_target, config, catalog, logger)
 
@@ -1160,7 +1169,7 @@ def _phase_b_setup(
             err=True,
         )
     try:
-        _run_logged(ts_target, "apt-get install -y -qq acl", logger, as_root=True, timeout=60)
+        # acl is now installed as a system package in _install_system_packages
         _run_logged(ts_target, f"mkdir -p {workspaces_dir}", logger, as_root=True)
         # Ensure all parent directories are traversable by agents
         _run_logged(
@@ -1190,11 +1199,6 @@ def _phase_b_setup(
         logger.warning(msg)
         typer.echo(f"  Warning: {msg}", err=True)
 
-    # Non-fatal: mise (system-wide apt install)
-    mise_available = False
-    if config.vm.install_mise:
-        mise_available = _install_mise_apt(ts_target, logger)
-
     # Non-fatal: system install commands
     system_path = _run_catalog_commands(
         ts_target,
@@ -1207,12 +1211,9 @@ def _phase_b_setup(
     )
 
     # Non-fatal: mise config (written before dotfiles so dotfiles can override)
-    mise_path: list[str] = []
-    if mise_available and config.admin.mise_packages:
+    mise_path: list[str] = _mise_shims_path(home)
+    if config.admin.mise_packages:
         _write_mise_config(ts_target, config.admin.mise_packages, config.admin.mise_install_before, home, logger)
-        mise_path = _mise_shims_path(home)
-    elif mise_available:
-        mise_path = _mise_shims_path(home)
 
     # Non-fatal: git credentials (before dotfiles and mise lockfile for private repos)
     if providers:
@@ -1237,14 +1238,14 @@ def _phase_b_setup(
             typer.echo(f"  Warning: {msg}", err=True)
 
     # Non-fatal: mise lockfile (after git creds and dotfiles; overrides dotfiles lockfile)
-    if mise_available and config.admin.mise_lockfile:
+    if config.admin.mise_lockfile:
         _fetch_mise_lockfile(ts_target, config.admin.mise_lockfile, home, logger)
 
     # Non-fatal: mise install (after config + dotfiles + lockfile are all settled)
     prune = config.admin.mise_prune_on_reinit
-    if mise_available and (config.admin.mise_packages or config.admin.mise_lockfile):
+    if config.admin.mise_packages or config.admin.mise_lockfile:
         _run_mise_install(ts_target, admin_shell, home, config.admin.mise_allow_unlocked, logger, prune=prune)
-    elif mise_available:
+    else:
         try:
             check = ts_target.run(f"test -f {home}/.config/mise/config.toml", check=False)
             if check.ok:
@@ -1268,10 +1269,7 @@ def _phase_b_setup(
     _write_agentworks_profile(ts_target, all_paths, logger)
 
     # Non-fatal: shell rc (interactive shell hooks like mise activate)
-    if mise_available and config.admin.mise_activate:
-        rc_snippets = [MISE_ACTIVATE_LINES]
-    else:
-        rc_snippets = ["# mise activation disabled"]
+    rc_snippets = [MISE_ACTIVATE_LINES] if config.admin.mise_activate else ["# mise activation disabled"]
     _write_agentworks_rc(ts_target, rc_snippets, logger)
 
     # Non-fatal: nerf tools

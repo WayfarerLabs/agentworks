@@ -22,7 +22,7 @@ set -euo pipefail
 
 VM_USER={admin_username}
 SSH_PUBLIC_KEY={ssh_public_key}
-SYSTEM_PACKAGES={system_packages}
+PROVISIONING_PACKAGES={provisioning_packages}
 TAILSCALE_AUTH_KEY={tailscale_auth_key}
 VM_HOSTNAME={vm_hostname}
 TS_EXTRA_FLAGS={ts_extra_flags}
@@ -39,12 +39,12 @@ fi
 usermod -aG sudo "$VM_USER"
 echo "$VM_USER ALL=(ALL) NOPASSWD:ALL" > "/etc/sudoers.d/$VM_USER"
 
-# -- Step 2: System packages --
-echo "##STEP## System packages"
+# -- Step 2: Provisioning packages --
+echo "##STEP## Provisioning packages"
 apt-get update -qq
 # shellcheck disable=SC2086
-apt-get install -y -qq $SYSTEM_PACKAGES
-echo "##SUCCESS## system packages installed"
+apt-get install -y -qq $PROVISIONING_PACKAGES
+echo "##SUCCESS## provisioning packages installed"
 
 # -- Step 2b: Preserve SSH host keys across reboots --
 # By default, cloud-init may delete and regenerate SSH host keys on certain
@@ -118,7 +118,7 @@ def generate_bootstrap_script(
     *,
     admin_username: str,
     ssh_public_key: str,
-    system_packages: list[str],
+    provisioning_packages: list[str],
     tailscale_auth_key: str,
     hostname: str,
     swap: int = 0,
@@ -130,7 +130,7 @@ def generate_bootstrap_script(
     return SCRIPT_TEMPLATE.format(
         admin_username=shlex.quote(admin_username),
         ssh_public_key=shlex.quote(ssh_public_key),
-        system_packages=shlex.quote(" ".join(system_packages)),
+        provisioning_packages=shlex.quote(" ".join(provisioning_packages)),
         tailscale_auth_key=shlex.quote(tailscale_auth_key),
         vm_hostname=shlex.quote(hostname),
         ts_extra_flags=shlex.quote(ts_extra_flags),

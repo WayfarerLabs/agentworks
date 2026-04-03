@@ -29,11 +29,10 @@ Run `agentworks vm create` or `agentworks vm reinit` and the tools will be avail
 ## Config reference
 
 These settings are available in `[admin.config]` (for the admin user) and `[agent_templates.*]`
-(for agents). The `install_mise` setting is VM-level and lives in `[vm_templates.*]`.
+(for agents). Mise itself is always installed as a system package on every VM.
 
 | Setting | Default | Description |
 | --- | --- | --- |
-| `install_mise` | `true` | Install mise via apt (VM-level, `[vm_templates.*]` only) |
 | `mise_activate` | `true` | Add `mise activate` to the user's shell profile |
 | `mise_packages` | `[]` | List of `name@version` tool declarations |
 | `mise_lockfile` | (none) | [Source reference](source-refs.md) to a `mise.lock` file |
@@ -147,13 +146,9 @@ Supports relative durations (`7d`, `90d`, `6m`, `1y`) and absolute dates (`2024-
 affects fuzzy version requests (e.g., `latest`, `node@20`). Explicitly pinned versions (e.g.,
 `terraform@1.14.5`) bypass the filter.
 
-## Disabling mise
+## Disabling mise activation
 
-If you do not want mise on your VMs:
-
-```toml
-[vm_templates.default]
-install_mise = false
-```
-
-This skips the apt install, shell activation, and all per-user mise setup.
+Mise is always installed as a system package. To disable shell activation (so mise tools are not
+automatically available in shells), set `mise_activate = false` in your admin or agent config.
+The `mise` binary will still be available but tools will not be on PATH unless explicitly invoked
+via `mise exec`.

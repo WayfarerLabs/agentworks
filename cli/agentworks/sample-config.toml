@@ -76,8 +76,9 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # System-level VM configuration: hardware resources, system packages, and
 # system-wide tools. Selected at vm create time with --template.
 #
-# Agentworks always installs system dependencies (openssh-server, curl, git,
-# sudo, ca-certificates, gnupg, tmux, tmuxinator) regardless of this config.
+# Agentworks always installs system packages (git, tmux, tmuxinator, acl, jq,
+# unzip) during init, in addition to provisioning packages (openssh-server,
+# curl, sudo, ca-certificates, gnupg) installed at VM create time.
 
 [vm_templates.default]
 # -- Provisioning (set once at create time) --
@@ -98,7 +99,6 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # apt_packages = ["gh", "docker"]            # named apt package sets from catalog
 # snap = []                                  # direct snap packages
 # system_install_commands = ["az-cli"]       # system-level commands from catalog
-# install_mise = true                        # install mise via apt (default: true)
 # -- Nerf tools --
 # nerf_build_claude_plugin = false             # build Claude Code nerf tools plugin
 # skip_nerf_defaults = false                   # skip built-in nerf catalog

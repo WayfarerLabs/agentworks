@@ -9,19 +9,26 @@ from __future__ import annotations
 
 import textwrap
 
-# Base system packages installed on every VM regardless of user config.
-SYSTEM_PACKAGES = [
+# Minimal packages needed during provisioning (cloud-init/bootstrap).
+# Only what is required to get the VM to a state where init can SSH in.
+PROVISIONING_PACKAGES = [
     "openssh-server",
     "curl",
-    "git",
     "sudo",
     "ca-certificates",
     "gnupg",
+]
+
+# System packages installed during init (every create/reinit).
+# These are always installed regardless of user config.
+INIT_SYSTEM_PACKAGES = [
+    "git",
     "unzip",
     "tmux",
     "tmuxinator",
     "acl",
     "jq",
+    "mise",
 ]
 
 

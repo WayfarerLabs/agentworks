@@ -12,7 +12,7 @@ from agentworks.db import VMStatus
 from agentworks.ssh import ExecTarget, SSHError, SSHTarget
 from agentworks.vms.base import ProvisionResult, VMProvisioner
 from agentworks.vms.bootstrap_script import generate_bootstrap_script, vm_hostname
-from agentworks.vms.cloud_init import SYSTEM_PACKAGES, generate_cloud_init
+from agentworks.vms.cloud_init import PROVISIONING_PACKAGES, generate_cloud_init
 
 if TYPE_CHECKING:
     from azure.mgmt.compute import ComputeManagementClient
@@ -141,7 +141,7 @@ class AzureProvisioner(VMProvisioner):
             bootstrap = generate_bootstrap_script(
                 admin_username=admin_username,
                 ssh_public_key=ssh_pub_key,
-                system_packages=SYSTEM_PACKAGES,
+                provisioning_packages=PROVISIONING_PACKAGES,
                 tailscale_auth_key=tailscale_auth_key,
                 hostname=vm_hostname("azure", vm_name),
                 swap=config.vm.swap,

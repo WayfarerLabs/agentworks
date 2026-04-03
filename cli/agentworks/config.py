@@ -121,7 +121,6 @@ class VMTemplate:
     apt_packages: list[str] | None = None
     snap: list[str] | None = None
     system_install_commands: list[str] | None = None
-    install_mise: bool | None = None
     # Nerf tools
     nerf_build_claude_plugin: bool | None = None
     skip_nerf_defaults: bool | None = None
@@ -374,7 +373,6 @@ _VM_TEMPLATE_KEYS = {
     "apt_packages",
     "snap",
     "system_install_commands",
-    "install_mise",
     "nerf_build_claude_plugin",
     "skip_nerf_defaults",
     "nerf_addl_manifests",
@@ -414,7 +412,7 @@ def _load_vm_templates(data: dict[str, object]) -> dict[str, VMTemplate]:
             system_install_commands=(
                 list(tdata["system_install_commands"]) if "system_install_commands" in tdata else None
             ),
-            install_mise=bool(tdata["install_mise"]) if "install_mise" in tdata else None,
+
             nerf_build_claude_plugin=(
                 bool(tdata["nerf_build_claude_plugin"]) if "nerf_build_claude_plugin" in tdata else None
             ),

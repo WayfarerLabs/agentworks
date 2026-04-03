@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from agentworks.vms.cloud_init import SYSTEM_PACKAGES, generate_cloud_init
+from agentworks.vms.cloud_init import INIT_SYSTEM_PACKAGES, PROVISIONING_PACKAGES, generate_cloud_init
 
 
 def test_generate_cloud_init_wraps_script() -> None:
@@ -27,11 +27,23 @@ def test_generate_cloud_init_preserves_script_content() -> None:
     assert "apt-get update" in result
 
 
-def test_system_packages_constant() -> None:
-    """SYSTEM_PACKAGES contains the expected base packages."""
-    assert "openssh-server" in SYSTEM_PACKAGES
-    assert "curl" in SYSTEM_PACKAGES
-    assert "git" in SYSTEM_PACKAGES
-    assert "sudo" in SYSTEM_PACKAGES
-    assert "acl" in SYSTEM_PACKAGES
-    assert "jq" in SYSTEM_PACKAGES
+def test_provisioning_packages_minimal() -> None:
+    """PROVISIONING_PACKAGES contains only what is needed to bootstrap."""
+    assert "openssh-server" in PROVISIONING_PACKAGES
+    assert "curl" in PROVISIONING_PACKAGES
+    assert "sudo" in PROVISIONING_PACKAGES
+    assert "ca-certificates" in PROVISIONING_PACKAGES
+    # These should NOT be in provisioning -- they belong in init
+    assert "git" not in PROVISIONING_PACKAGES
+    assert "tmux" not in PROVISIONING_PACKAGES
+    assert "jq" not in PROVISIONING_PACKAGES
+
+
+def test_init_system_packages() -> None:
+    """INIT_SYSTEM_PACKAGES contains the packages installed during init."""
+    assert "git" in INIT_SYSTEM_PACKAGES
+    assert "tmux" in INIT_SYSTEM_PACKAGES
+    assert "tmuxinator" in INIT_SYSTEM_PACKAGES
+    assert "acl" in INIT_SYSTEM_PACKAGES
+    assert "jq" in INIT_SYSTEM_PACKAGES
+    assert "mise" in INIT_SYSTEM_PACKAGES

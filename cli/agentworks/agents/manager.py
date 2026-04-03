@@ -669,8 +669,7 @@ def _create_agent_on_vm(
             typer.echo(f"  Warning: agent dotfiles failed: {e}", err=True)
 
     # Mise for the agent
-    if config.vm.install_mise:
-        _run_agent_mise_setup(vm, config, linux_user, home)
+    _run_agent_mise_setup(vm, config, linux_user, home)
 
     # Install nerf Claude plugin for the agent
     if config.agent.nerf_install_claude_plugin:

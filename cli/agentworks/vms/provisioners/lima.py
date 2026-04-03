@@ -16,7 +16,7 @@ from agentworks.ssh import ExecTarget, LimaTarget, RemoteLimaTarget, SSHError, S
 from agentworks.ssh import run as ssh_run
 from agentworks.vms.base import ProvisionResult, VMProvisioner
 from agentworks.vms.bootstrap_script import generate_bootstrap_script, parse_bootstrap_output, vm_hostname
-from agentworks.vms.cloud_init import SYSTEM_PACKAGES
+from agentworks.vms.cloud_init import PROVISIONING_PACKAGES
 
 if TYPE_CHECKING:
     from agentworks.config import Config
@@ -117,7 +117,7 @@ class LimaProvisioner(VMProvisioner):
             provision_script = generate_bootstrap_script(
                 admin_username=config.admin.username,
                 ssh_public_key=ssh_pub_key,
-                system_packages=SYSTEM_PACKAGES,
+                provisioning_packages=PROVISIONING_PACKAGES,
                 tailscale_auth_key=tailscale_auth_key,
                 hostname=vm_hostname("lima", vm_name),
                 swap=config.vm.swap,

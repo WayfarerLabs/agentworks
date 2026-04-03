@@ -21,7 +21,7 @@ def test_generate_bootstrap_script_all_steps() -> None:
     script = generate_bootstrap_script(
         admin_username="testuser",
         ssh_public_key="ssh-ed25519 AAAA testkey",
-        system_packages=["curl", "git"],
+        provisioning_packages=["curl", "git"],
         tailscale_auth_key="tskey-auth-test123",
         hostname="lima--myvm",
         swap=4,
@@ -30,7 +30,7 @@ def test_generate_bootstrap_script_all_steps() -> None:
     assert script.startswith("#!/bin/bash\n")
     assert "set -euo pipefail" in script
     assert "##STEP## Ensure user" in script
-    assert "##STEP## System packages" in script
+    assert "##STEP## Provisioning packages" in script
     assert "##STEP## SSH public key" in script
     assert "##STEP## Swap file" in script
     assert "##STEP## Hostname" in script
@@ -46,7 +46,7 @@ def test_generate_bootstrap_script_swap_disabled() -> None:
     script = generate_bootstrap_script(
         admin_username="testuser",
         ssh_public_key="ssh-ed25519 AAAA testkey",
-        system_packages=["curl", "git"],
+        provisioning_packages=["curl", "git"],
         tailscale_auth_key="tskey-auth-test123",
         hostname="azure--myvm",
         swap=0,
@@ -61,7 +61,7 @@ def test_generate_bootstrap_script_wsl2() -> None:
     script = generate_bootstrap_script(
         admin_username="testuser",
         ssh_public_key="ssh-ed25519 AAAA testkey",
-        system_packages=["curl"],
+        provisioning_packages=["curl"],
         tailscale_auth_key="tskey-auth-test123",
         hostname="wsl2--myvm",
         is_wsl2=True,
@@ -75,7 +75,7 @@ def test_generate_bootstrap_script_not_wsl2() -> None:
     script = generate_bootstrap_script(
         admin_username="testuser",
         ssh_public_key="ssh-ed25519 AAAA testkey",
-        system_packages=["curl"],
+        provisioning_packages=["curl"],
         tailscale_auth_key="tskey-auth-test123",
         hostname="lima--myvm",
         is_wsl2=False,
