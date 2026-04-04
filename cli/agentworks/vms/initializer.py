@@ -150,8 +150,6 @@ MISE_SOURCE_LINE = f"deb [signed-by={MISE_GPG_KEY_PATH}] https://mise.jdx.dev/de
 MISE_SOURCE_FILE = "/etc/apt/sources.list.d/mise.list"
 
 
-
-
 MISE_ACTIVATE_LINES = (
     "# agentworks-mise-activate\n"
     'if [ -n "$ZSH_VERSION" ]; then\n'

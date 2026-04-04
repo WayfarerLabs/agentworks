@@ -314,6 +314,17 @@ def vm_list() -> None:
     list_vms(_get_db())
 
 
+@vm_app.command("backup")
+def vm_backup(
+    name: Annotated[str, typer.Argument(help="VM name")],
+) -> None:
+    """Create a full backup of a VM: metadata, agents, workspaces, and files."""
+    from agentworks.config import load_config
+    from agentworks.vms.backup import backup_vm
+
+    backup_vm(_get_db(), load_config(), name)
+
+
 @vm_app.command("describe")
 def vm_describe(
     name: Annotated[str, typer.Argument(help="VM name")],

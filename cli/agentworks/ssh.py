@@ -330,6 +330,28 @@ def copy_to(
         raise SSHError(f"scp failed: {result.stderr.strip()}")
 
 
+def copy_from(
+    target: SSHTarget,
+    remote_path: str,
+    local_path: str | Path,
+    *,
+    timeout: int | None = None,
+) -> None:
+    """Copy a file from a remote host via scp."""
+    args = ["scp", "-o", "StrictHostKeyChecking=accept-new", "-o", "BatchMode=yes"]
+    if target.port is not None:
+        args.extend(["-P", str(target.port)])
+    if target.identity_file is not None:
+        args.extend(["-i", str(target.identity_file)])
+    src = f"{target.user}@{target.host}:{remote_path}" if target.user else f"{target.host}:{remote_path}"
+    args.append(src)
+    args.append(str(local_path))
+
+    result = subprocess.run(args, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout)
+    if result.returncode != 0:
+        raise SSHError(f"scp failed: {result.stderr.strip()}")
+
+
 def write_file(
     target: SSHTarget,
     remote_path: str,
@@ -571,6 +593,15 @@ class ExecTarget:
             _wsl2_copy_to(self.wsl2, local_path, remote_path)
         else:
             msg = "ExecTarget has no target configured"
+            raise SSHError(msg)
+
+    def copy_from(self, remote_path: str, local_path: str | Path, *, timeout: int | None = None) -> None:
+        """Copy a remote file to a local path."""
+        if self.ssh is not None:
+            copy_from(self.ssh, remote_path, local_path, timeout=timeout)
+        else:
+            # For non-SSH targets, use a shell command to cat the file
+            msg = "copy_from is only supported for SSH targets"
             raise SSHError(msg)
 
     def copy_dir_to(

@@ -836,6 +836,37 @@ class Database:
         ).fetchall()
         return [_to_vm_event(r) for r in rows]
 
+    def snapshot_vm_backup_data(
+        self,
+        vm_name: str,
+    ) -> tuple[
+        VMRow | None,
+        list[AgentRow],
+        list[WorkspaceRow],
+        list[TaskRow],
+        list[VMEventRow],
+        dict[str, list[AgentGrantRow]],
+    ]:
+        """Read all VM-related data in a single transaction for backup consistency.
+
+        Returns (vm, agents, workspaces, tasks, events, grants_by_agent).
+        """
+        self._conn.execute("BEGIN")
+        try:
+            vm = self.get_vm(vm_name)
+            agents = self.list_agents(vm_name=vm_name)
+            workspaces = self.list_workspaces(vm_name=vm_name)
+            ws_names = {ws.name for ws in workspaces}
+            all_tasks = self.list_tasks()
+            tasks = [t for t in all_tasks if t.workspace_name in ws_names]
+            events = self.list_vm_events(vm_name)
+            grants_by_agent: dict[str, list[AgentGrantRow]] = {}
+            for agent in agents:
+                grants_by_agent[agent.name] = self.list_agent_grants(agent.name)
+        finally:
+            self._conn.execute("COMMIT")
+        return vm, agents, workspaces, tasks, events, grants_by_agent
+
 
 # -- Row converters --------------------------------------------------------
 

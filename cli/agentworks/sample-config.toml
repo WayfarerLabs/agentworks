@@ -33,6 +33,7 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # local_workspaces = "~/workspaces"             # local workspace directory
 # vm_workspaces = "/opt/agentworks/workspaces"  # workspace directory on VMs
 # vscode_workspaces = "~/aw-vscode-workspaces"   # .code-workspace file directory
+# backups = "~/.config/agentworks/backups"       # vm backup directory
 
 # --- Default values for CLI flags ---
 

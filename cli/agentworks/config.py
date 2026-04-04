@@ -96,6 +96,7 @@ class PathsConfig:
     local_workspaces: Path = field(default_factory=lambda: Path.home() / "workspaces")
     vm_workspaces: str = "/opt/agentworks/workspaces"
     vscode_workspaces: Path = field(default_factory=lambda: Path.home() / "aw-vscode-workspaces")
+    backups: Path = field(default_factory=lambda: CONFIG_DIR / "backups")
 
 
 @dataclass(frozen=True)
@@ -333,7 +334,8 @@ def _load_paths(data: dict[str, object]) -> PathsConfig:
         vscode_ws = _expand(str(raw["code_workspaces"]))
     else:
         vscode_ws = defaults.vscode_workspaces
-    return PathsConfig(local_workspaces=local_ws, vm_workspaces=vm_ws, vscode_workspaces=vscode_ws)
+    backups = _expand(str(raw["backups"])) if "backups" in raw else defaults.backups
+    return PathsConfig(local_workspaces=local_ws, vm_workspaces=vm_ws, vscode_workspaces=vscode_ws, backups=backups)
 
 
 _DEFAULTS_KEYS = {"platform", "vm_host"}
@@ -412,7 +414,6 @@ def _load_vm_templates(data: dict[str, object]) -> dict[str, VMTemplate]:
             system_install_commands=(
                 list(tdata["system_install_commands"]) if "system_install_commands" in tdata else None
             ),
-
             nerf_build_claude_plugin=(
                 bool(tdata["nerf_build_claude_plugin"]) if "nerf_build_claude_plugin" in tdata else None
             ),
