@@ -401,9 +401,9 @@ def repair_workspace(
     except SSHError as e:
         typer.echo(f"  Warning: admin group check failed: {e}", err=True)
 
-    # 3. Fix directory permissions
+    # 3. Fix directory permissions (recursive chgrp so ACLs apply correctly)
     try:
-        run_as_root(target, f"chown {vm.admin_username}:{ws_group} {ws.workspace_path}")
+        run_as_root(target, f"chown -R {vm.admin_username}:{ws_group} {ws.workspace_path}", timeout=120)
         run_as_root(target, f"chmod 2770 {ws.workspace_path}")
         typer.echo("  OK: directory ownership and permissions")
     except SSHError as e:
