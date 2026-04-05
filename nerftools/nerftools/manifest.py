@@ -57,13 +57,7 @@ class ThreatLevel(Enum):
         return _THREAT_ORDER[self] > _THREAT_ORDER[other]
 
 
-_THREAT_ORDER: dict[ThreatLevel, int] = {
-    ThreatLevel.NONE: 0,
-    ThreatLevel.WORKSPACE: 1,
-    ThreatLevel.MACHINE: 2,
-    ThreatLevel.REMOTE: 3,
-    ThreatLevel.ADMIN: 4,
-}
+_THREAT_ORDER: dict[ThreatLevel, int] = {member: i for i, member in enumerate(ThreatLevel)}
 
 THREAT_LEVEL_NAMES = tuple(t.value for t in ThreatLevel)
 
@@ -199,7 +193,7 @@ class NerfManifest:
 
 # -- Loading -------------------------------------------------------------------
 
-_PLACEHOLDER_RE = re.compile(r"\{\{(\w+)\}\}")
+PLACEHOLDER_RE = re.compile(r"\{\{(\w+)\}\}")
 
 
 def load_manifest(path: Path) -> NerfManifest:
@@ -502,12 +496,11 @@ def _load_env(raw: dict[str, Any], path: Path, tool_name: str) -> dict[str, str]
 
 def _validate_tool(tool: ToolSpec, ctx: str) -> None:
     """Cross-reference validation across fields."""
-    all_params = set(tool.switches.keys()) | set(tool.options.keys()) | set(tool.arguments.keys())
-
-    # Name collision check
     sw_names = set(tool.switches.keys())
     opt_names = set(tool.options.keys())
     arg_names = set(tool.arguments.keys())
+    all_params = sw_names | opt_names | arg_names
+
     for a, b, a_label, b_label in [
         (sw_names, opt_names, "switches", "options"),
         (sw_names, arg_names, "switches", "arguments"),
@@ -518,30 +511,25 @@ def _validate_tool(tool: ToolSpec, ctx: str) -> None:
             raise ManifestError(f"{ctx}: names overlap between {a_label} and {b_label}: {', '.join(sorted(overlap))}")
 
     if tool.template is not None:
-        _validate_template_refs(tool, ctx)
-    elif tool.script is not None:
-        _validate_script_refs(tool, ctx)
+        _validate_template_refs(tool, all_params, ctx)
 
-    # Variadic argument must be last
     arg_names_list = list(tool.arguments.keys())
     for name in arg_names_list[:-1]:
         if tool.arguments[name].variadic:
             raise ManifestError(f"{ctx}: argument '{name}' is variadic but is not the last argument")
 
-    # Guard placeholders must reference defined params
     for i, guard in enumerate(tool.guards):
         parts: list[str] = list(guard.command) if guard.command else [guard.script or ""]
         for part in parts:
-            for match in _PLACEHOLDER_RE.finditer(part):
+            for match in PLACEHOLDER_RE.finditer(part):
                 name = match.group(1)
                 if name not in all_params:
                     raise ManifestError(
                         f"{ctx}: guards[{i}] references '{{{{{name}}}}}' but '{name}' is not defined"
                     )
 
-    # Pre-hook placeholder validation
     if tool.pre:
-        for match in _PLACEHOLDER_RE.finditer(tool.pre):
+        for match in PLACEHOLDER_RE.finditer(tool.pre):
             name = match.group(1)
             if name not in all_params:
                 raise ManifestError(
@@ -549,16 +537,15 @@ def _validate_tool(tool: ToolSpec, ctx: str) -> None:
                 )
 
 
-def _validate_template_refs(tool: ToolSpec, ctx: str) -> None:
+def _validate_template_refs(tool: ToolSpec, all_params: set[str], ctx: str) -> None:
     """Validate that template command placeholders and params match."""
     assert tool.template is not None
     command = tool.template.command
-    all_params = set(tool.switches.keys()) | set(tool.options.keys()) | set(tool.arguments.keys())
 
     # All {{param}} in command must be defined
     referenced: set[str] = set()
     for part in command:
-        for match in _PLACEHOLDER_RE.finditer(part):
+        for match in PLACEHOLDER_RE.finditer(part):
             referenced.add(match.group(1))
 
     for name in referenced:
@@ -585,12 +572,6 @@ def _validate_template_refs(tool: ToolSpec, ctx: str) -> None:
                     f"{ctx}: variadic argument '{last_arg}' placeholder must be the last element in template command"
                 )
 
-
-def _validate_script_refs(tool: ToolSpec, ctx: str) -> None:
-    """Validate that script mode params are referenced (but not strictly -- script can use vars directly)."""
-    # In script mode we only check that params are defined; the script accesses
-    # them as shell variables so we can't verify usage from YAML alone.
-    pass
 
 
 # -- Merging -------------------------------------------------------------------

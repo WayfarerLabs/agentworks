@@ -6,8 +6,9 @@ skills, scripts, plugin manifest, and marketplace metadata.
 
 from __future__ import annotations
 
-import re
 from typing import TYPE_CHECKING
+
+from nerftools.rendering import arg_line, maps_to_text, option_line, switch_line, usage_tokens
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -298,87 +299,41 @@ def _claude_plugin_tool_section(tool_name: str, skill_group: str, tool_spec: Too
     parts.append(tool_spec.description + ".")
     parts.append("")
 
-    # Usage line with resolved plugin path
     script_path = f"${{CLAUDE_PLUGIN_ROOT}}/skills/{skill_group}/scripts/{tool_name}"
-    usage_parts = [script_path]
+    usage = " ".join([script_path, *usage_tokens(tool_spec)])
+    parts.append(f"**Usage:** `{usage}`")
 
-    for _name, sw in tool_spec.switches.items():
-        flag_display = f"{sw.flag}|{sw.short}" if sw.short else sw.flag
-        usage_parts.append(f"[{flag_display}]")
-
-    for name, opt in tool_spec.options.items():
-        flag_display = f"{opt.flag}|{opt.short}" if opt.short else opt.flag
-        token = f"{flag_display} <{name}>"
-        usage_parts.append(token if opt.required else f"[{token}]")
-
-    for name, spec in tool_spec.arguments.items():
-        token = f"<{name}...>" if spec.variadic else f"<{name}>"
-        usage_parts.append(token if spec.required else f"[{token}]")
-
-    if tool_spec.passthrough is not None and not tool_spec.arguments:
-        usage_parts.append("[tokens...]")
-
-    parts.append(f"**Usage:** `{' '.join(usage_parts)}`")
-
-    # Maps-to line
-    maps_to = _maps_to_line(tool_spec)
+    maps_to = maps_to_text(tool_spec)
     if maps_to:
         parts.append(f"**Maps to:** `{maps_to}`")
     parts.append("")
 
-    # Passthrough deny patterns
     if tool_spec.passthrough is not None and tool_spec.passthrough.deny:
         denied = ", ".join(f"`{d}`" for d in tool_spec.passthrough.deny)
         parts.append(f"**Denied patterns:** {denied}")
         parts.append("")
 
-    # Parameters
     has_params = bool(tool_spec.switches) or bool(tool_spec.options) or bool(tool_spec.arguments)
     if has_params:
         if tool_spec.switches:
             parts.append("**Switches:**")
             parts.append("")
             for _name, sw in tool_spec.switches.items():
-                flag_display = f"{sw.flag}, {sw.short}" if sw.short else sw.flag
-                parts.append(f"- `{flag_display}`: {sw.description}")
+                parts.append(switch_line(sw))
             parts.append("")
 
         if tool_spec.options:
             parts.append("**Options:**")
             parts.append("")
-            for _name, opt in tool_spec.options.items():
-                flag_display = f"{opt.flag}|{opt.short}" if opt.short else opt.flag
-                required = "required" if opt.required else "optional"
-                constraints: list[str] = []
-                if opt.pattern:
-                    constraints.append(f"must match `{opt.pattern}`")
-                if opt.allow:
-                    vals = ", ".join(f"`{v}`" for v in opt.allow)
-                    constraints.append(f"one of {vals}")
-                if opt.deny:
-                    vals = ", ".join(f"`{v}`" for v in opt.deny)
-                    constraints.append(f"not {vals}")
-                suffix = ". " + "; ".join(constraints) if constraints else ""
-                parts.append(f"- `{flag_display}` ({required}): {opt.description}{suffix}")
+            for name, opt in tool_spec.options.items():
+                parts.append(option_line(name, opt))
             parts.append("")
 
         if tool_spec.arguments:
             parts.append("**Arguments:**")
             parts.append("")
             for name, spec in tool_spec.arguments.items():
-                required = "required" if spec.required else "optional"
-                label = f"<{name}...>" if spec.variadic else f"<{name}>"
-                constraints = []
-                if spec.pattern:
-                    constraints.append(f"must match `{spec.pattern}`")
-                if spec.allow:
-                    vals = ", ".join(f"`{v}`" for v in spec.allow)
-                    constraints.append(f"one of {vals}")
-                if spec.deny:
-                    vals = ", ".join(f"`{v}`" for v in spec.deny)
-                    constraints.append(f"not {vals}")
-                suffix = ". " + "; ".join(constraints) if constraints else ""
-                parts.append(f"- `{label}` ({required}): {spec.description}{suffix}")
+                parts.append(arg_line(name, spec))
             parts.append("")
     else:
         if tool_spec.passthrough is None:
@@ -388,25 +343,6 @@ def _claude_plugin_tool_section(tool_name: str, skill_group: str, tool_spec: Too
     parts.append("---")
     parts.append("")
     return "\n".join(parts)
-
-
-def _maps_to_line(tool_spec: ToolSpec) -> str | None:
-    """Show the underlying command with placeholders replaced by <name>."""
-    if tool_spec.template is not None:
-        parts: list[str] = []
-        if tool_spec.template.npm_pkgrun:
-            parts.append("<runner>")
-        for token in tool_spec.template.command:
-            parts.append(re.sub(r"\{\{(\w+)\}\}", r"<\1>", token))
-        return " ".join(parts)
-    if tool_spec.passthrough is not None:
-        pt = tool_spec.passthrough
-        parts = [pt.command]
-        parts.extend(pt.prefix)
-        parts.append('"$@"')
-        parts.extend(pt.suffix)
-        return " ".join(parts)
-    return None
 
 
 def _build_claude_plugin_overview_text(manifests: list[NerfManifest], prefix: str = "") -> str:

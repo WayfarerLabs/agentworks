@@ -8,15 +8,16 @@ script (inline bash).
 
 from __future__ import annotations
 
-import re
 from typing import TYPE_CHECKING
 
+from nerftools.manifest import PLACEHOLDER_RE
+from nerftools.rendering import maps_to_text, usage_tokens
+
 if TYPE_CHECKING:
+    import re
     from pathlib import Path
 
-    from nerftools.manifest import ArgSpec, NerfManifest, OptionSpec, SwitchSpec, ToolSpec
-
-_PLACEHOLDER_RE = re.compile(r"\{\{(\w+)\}\}")
+    from nerftools.manifest import ArgSpec, NerfManifest, ToolSpec
 
 
 # -- Public API ----------------------------------------------------------------
@@ -71,7 +72,6 @@ def build_script_text(tool_name: str, package_name: str, tool_spec: ToolSpec) ->
 def _build_script(tool_name: str, package_name: str, tool_spec: ToolSpec) -> str:
     parts: list[str] = []
 
-    # Header
     parts.append("#!/usr/bin/env bash")
     parts.append(f"# {tool_name} -- {tool_spec.description}")
     parts.append(f"# Generated from {package_name} manifest. Do not edit directly.")
@@ -80,11 +80,8 @@ def _build_script(tool_name: str, package_name: str, tool_spec: ToolSpec) -> str
     parts.append("")
     parts.append("set -euo pipefail")
     parts.append("")
-
-    # Usage
     parts.append(_usage_function(tool_name, tool_spec))
 
-    # Parameter parsing (template + script modes only)
     has_params = bool(tool_spec.switches) or bool(tool_spec.options)
     has_positional = bool(tool_spec.arguments)
 
@@ -98,7 +95,6 @@ def _build_script(tool_name: str, package_name: str, tool_spec: ToolSpec) -> str
         parts.append("")
         parts.append(_positional_parser(tool_spec.arguments))
 
-    # Validations
     if has_params:
         validations = _param_validations(tool_name, tool_spec)
         if validations.strip():
@@ -111,22 +107,18 @@ def _build_script(tool_name: str, package_name: str, tool_spec: ToolSpec) -> str
             parts.append("")
             parts.append(validations)
 
-    # Env
     if tool_spec.env:
         parts.append("")
         parts.append(_env_exports(tool_spec.env))
 
-    # Guards
     if tool_spec.guards:
         parts.append("")
         parts.append(_guard_checks(tool_name, tool_spec))
 
-    # Pre-hook
     if tool_spec.pre:
         parts.append("")
         parts.append(_pre_hook(tool_name, tool_spec))
 
-    # Execution mode
     if tool_spec.template is not None:
         if tool_spec.template.npm_pkgrun:
             parts.append("")
@@ -148,26 +140,7 @@ def _build_script(tool_name: str, package_name: str, tool_spec: ToolSpec) -> str
 
 
 def _usage_function(tool_name: str, tool_spec: ToolSpec) -> str:
-    usage_parts = [tool_name]
-
-    for _name, sw in tool_spec.switches.items():
-        flag_display = f"{sw.flag}|{sw.short}" if sw.short else sw.flag
-        usage_parts.append(f"[{flag_display}]")
-
-    for name, opt in tool_spec.options.items():
-        flag_display = f"{opt.flag}|{opt.short}" if opt.short else opt.flag
-        token = f"{flag_display} <{name}>"
-        usage_parts.append(token if opt.required else f"[{token}]")
-
-    for name, spec in tool_spec.arguments.items():
-        token = f"<{name}...>" if spec.variadic else f"<{name}>"
-        usage_parts.append(token if spec.required else f"[{token}]")
-
-    # Passthrough mode: show [tokens...]
-    if tool_spec.passthrough is not None and not tool_spec.arguments:
-        usage_parts.append("[tokens...]")
-
-    usage_line = " ".join(usage_parts)
+    usage_line = " ".join([tool_name, *usage_tokens(tool_spec)])
     lines = [f"Usage: {usage_line}", ""]
 
     # Switches
@@ -202,7 +175,7 @@ def _usage_function(tool_name: str, tool_spec: ToolSpec) -> str:
         lines.append("")
 
     # Maps to (template and passthrough only)
-    maps_to = _maps_to_text(tool_spec)
+    maps_to = maps_to_text(tool_spec)
     if maps_to:
         lines.append(f"Maps to: {maps_to}")
         lines.append("")
@@ -218,24 +191,6 @@ def _usage_function(tool_name: str, tool_spec: ToolSpec) -> str:
     body = "\n".join(lines)
     return f"usage() {{\n  cat >&2 <<'EOF'\n{body}\nEOF\n  exit 1\n}}"
 
-
-def _maps_to_text(tool_spec: ToolSpec) -> str | None:
-    """Return the 'Maps to' string, or None for script mode."""
-    if tool_spec.template is not None:
-        parts: list[str] = []
-        if tool_spec.template.npm_pkgrun:
-            parts.append("<runner>")
-        for token in tool_spec.template.command:
-            parts.append(re.sub(r"\{\{(\w+)\}\}", r"<\1>", token))
-        return " ".join(parts)
-    if tool_spec.passthrough is not None:
-        pt = tool_spec.passthrough
-        parts = [pt.command]
-        parts.extend(pt.prefix)
-        parts.append('"$@"')
-        parts.extend(pt.suffix)
-        return " ".join(parts)
-    return None
 
 
 def _append_constraints(
@@ -484,15 +439,11 @@ def _guard_checks(tool_name: str, tool_spec: ToolSpec) -> str:
         safe_msg = guard.fail_message.replace("'", "'\"'\"'")
 
         if guard.command is not None:
-            cmd_args = _substitute_template_command(
-                guard.command, tool_spec.switches, tool_spec.options, tool_spec.arguments
-            )
+            cmd_args = _substitute_template_command(guard.command, tool_spec)
             check = " ".join(cmd_args) + " > /dev/null 2>&1"
             lines.append(f"{check} || {{ echo 'error: {tool_name}: {safe_msg}' >&2; exit 1; }}")
         else:
-            script_text = _substitute_script(
-                guard.script or "", tool_spec.switches, tool_spec.options, tool_spec.arguments
-            )
+            script_text = _substitute_script(guard.script or "", tool_spec)
             script_lines = script_text.strip().splitlines()
             if len(script_lines) == 1:
                 lines.append(f"( {script_lines[0]} ) || {{ echo 'error: {tool_name}: {safe_msg}' >&2; exit 1; }}")
@@ -509,9 +460,7 @@ def _guard_checks(tool_name: str, tool_spec: ToolSpec) -> str:
 
 
 def _pre_hook(tool_name: str, tool_spec: ToolSpec) -> str:
-    pre_body = _substitute_script(
-        tool_spec.pre or "", tool_spec.switches, tool_spec.options, tool_spec.arguments
-    )
+    pre_body = _substitute_script(tool_spec.pre or "", tool_spec)
     lines = [
         "_nerf_pre() {",
     ]
@@ -534,9 +483,7 @@ def _pre_hook(tool_name: str, tool_spec: ToolSpec) -> str:
 def _template_exec(tool_spec: ToolSpec) -> str:
     """Generate the exec line for template mode."""
     assert tool_spec.template is not None
-    args = _substitute_template_command(
-        tool_spec.template.command, tool_spec.switches, tool_spec.options, tool_spec.arguments
-    )
+    args = _substitute_template_command(tool_spec.template.command, tool_spec)
     if tool_spec.template.npm_pkgrun:
         return "exec $_PKGRUN " + " ".join(args)
     return "exec " + " ".join(args)
@@ -587,35 +534,26 @@ def _passthrough_exec(tool_name: str, tool_spec: ToolSpec) -> str:
 
 def _substitute_template_command(
     command: tuple[str, ...],
-    switches: dict[str, SwitchSpec],
-    options: dict[str, OptionSpec],
-    arguments: dict[str, ArgSpec],
+    tool: ToolSpec,
 ) -> list[str]:
-    """Substitute {{param}} placeholders in a command word list.
-
-    Required options/args use "$VAR" (always present).
-    Optional options/single-args use ${VAR:+"$VAR"} (omitted when empty).
-    Required variadic args use "${VAR[@]}".
-    Optional variadic args use ${VAR[@]+"${VAR[@]}"}.
-    Switches use ${VAR:+"--flag"}.
-    """
+    """Substitute {{param}} placeholders in a command word list."""
     result: list[str] = []
     for part in command:
-        m = _PLACEHOLDER_RE.fullmatch(part)
+        m = PLACEHOLDER_RE.fullmatch(part)
         if m:
             name = m.group(1)
             var = _var_name(name)
-            if name in switches:
-                sw = switches[name]
+            if name in tool.switches:
+                sw = tool.switches[name]
                 result.append("${" + var + ':+"' + sw.flag + '"' + "}")
-            elif name in options:
-                opt = options[name]
+            elif name in tool.options:
+                opt = tool.options[name]
                 if opt.required:
                     result.append(f'"${{{var}}}"')
                 else:
                     result.append("${" + var + ':+"$' + var + '"}')
-            elif name in arguments:
-                spec = arguments[name]
+            elif name in tool.arguments:
+                spec = tool.arguments[name]
                 if spec.variadic:
                     if spec.required:
                         result.append(f'"${{{var}[@]}}"')
@@ -633,23 +571,14 @@ def _substitute_template_command(
     return result
 
 
-def _substitute_script(
-    script: str,
-    switches: dict[str, SwitchSpec],
-    options: dict[str, OptionSpec],
-    arguments: dict[str, ArgSpec],
-) -> str:
-    """Substitute {{param}} placeholders inline within a bash script string.
-
-    Each {{name}} becomes ${VAR} without extra quoting -- the script author
-    is responsible for quoting around the placeholder as needed.
-    """
+def _substitute_script(script: str, tool: ToolSpec) -> str:
+    """Substitute {{param}} placeholders inline within a bash script string."""
 
     def replace(m: re.Match) -> str:  # type: ignore[type-arg]
         name = m.group(1)
         return "${" + _var_name(name) + "}"
 
-    return _PLACEHOLDER_RE.sub(replace, script)
+    return PLACEHOLDER_RE.sub(replace, script)
 
 
 def _npm_pkgrun_resolver() -> str:
