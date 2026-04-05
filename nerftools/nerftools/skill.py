@@ -179,7 +179,7 @@ def _tool_section(tool_name: str, tool_spec: ToolSpec) -> str:
         if tool_spec.switches:
             parts.append("**Switches:**")
             parts.append("")
-            for name, sw in tool_spec.switches.items():
+            for _name, sw in tool_spec.switches.items():
                 parts.append(_switch_line(sw))
             parts.append("")
 
@@ -210,7 +210,7 @@ def _tool_section(tool_name: str, tool_spec: ToolSpec) -> str:
 def _usage_line(tool_name: str, tool_spec: ToolSpec) -> str:
     usage_parts = [f"<nerf-bin>/{tool_name}"]
 
-    for name, sw in tool_spec.switches.items():
+    for _name, sw in tool_spec.switches.items():
         flag_display = f"{sw.flag}|{sw.short}" if sw.short else sw.flag
         usage_parts.append(f"[{flag_display}]")
 

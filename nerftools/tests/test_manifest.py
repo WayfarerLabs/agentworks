@@ -85,7 +85,11 @@ def test_load_manifest_with_skill_intro(tmp_path: Path) -> None:
 
 def test_missing_package_section_raises(tmp_path: Path) -> None:
     p = tmp_path / "manifest.yaml"
-    p.write_text("version: 1\ntools:\n  foo:\n    description: x\n    threat:\n      read: none\n      write: none\n    template:\n      command: [echo]\n")
+    p.write_text(
+        "version: 1\ntools:\n  foo:\n    description: x\n"
+        "    threat:\n      read: none\n      write: none\n"
+        "    template:\n      command: [echo]\n"
+    )
     with pytest.raises(ManifestError, match="'package' section is required"):
         load_manifest(p)
 

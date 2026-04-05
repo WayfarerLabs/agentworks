@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from nerftools.manifest import (
     ArgSpec,
     NerfManifest,
@@ -184,13 +182,19 @@ def test_usage_line_option_with_short() -> None:
 
 
 def test_usage_line_optional_option_bracketed() -> None:
-    m = _manifest(tools={"t": _template_tool(["echo", "{{branch}}"], options={"branch": _option("--branch", required=False)})})
+    m = _manifest(tools={"t": _template_tool(
+        ["echo", "{{branch}}"],
+        options={"branch": _option("--branch", required=False)},
+    )})
     skill = build_skill_text(m)
     assert "[--branch <branch>]" in skill
 
 
 def test_usage_line_positional_required() -> None:
-    m = _manifest(tools={"t": _template_tool(["git", "fetch", "{{remote}}"], arguments={"remote": _arg(required=True)})})
+    m = _manifest(tools={"t": _template_tool(
+        ["git", "fetch", "{{remote}}"],
+        arguments={"remote": _arg(required=True)},
+    )})
     skill = build_skill_text(m)
     assert "<remote>" in skill
 
@@ -241,7 +245,10 @@ def test_pattern_constraint_shown() -> None:
 
 
 def test_arg_listed_in_arguments() -> None:
-    m = _manifest(tools={"t": _template_tool(["cmd", "{{target}}"], arguments={"target": _arg("The target", required=True)})})
+    m = _manifest(tools={"t": _template_tool(
+        ["cmd", "{{target}}"],
+        arguments={"target": _arg("The target", required=True)},
+    )})
     skill = build_skill_text(m)
     assert "**Arguments:**" in skill
     assert "<target>" in skill

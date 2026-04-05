@@ -191,7 +191,10 @@ def test_allow_validation() -> None:
 def test_option_parser_break_when_positional_args_present() -> None:
     options = {"verbose": _option("--verbose", required=False)}
     arguments = {"target": _arg(required=True)}
-    script = build_script_text("t", "p", _template_tool(["cmd", "{{verbose}}", "{{target}}"], options=options, arguments=arguments))
+    tool = _template_tool(
+        ["cmd", "{{verbose}}", "{{target}}"], options=options, arguments=arguments,
+    )
+    script = build_script_text("t", "p", tool)
     assert "*) break ;;" in script
 
 
@@ -319,7 +322,10 @@ def test_env_exports_before_exec() -> None:
 def test_guard_check_before_exec() -> None:
     guards = (GuardSpec(command=("git", "remote", "get-url", "{{remote}}"), fail_message="Remote not found"),)
     arguments = {"remote": _arg(required=True)}
-    script = build_script_text("t", "p", _template_tool(["git", "push", "{{remote}}", "HEAD"], arguments=arguments, guards=guards))
+    tool = _template_tool(
+        ["git", "push", "{{remote}}", "HEAD"], arguments=arguments, guards=guards,
+    )
+    script = build_script_text("t", "p", tool)
     lines = script.splitlines()
     guard_idx = next(i for i, line in enumerate(lines) if "get-url" in line)
     exec_idx = next(i for i, line in enumerate(lines) if line.startswith("exec "))
@@ -365,7 +371,10 @@ def test_pre_hook_before_exec() -> None:
 
 
 def test_pre_hook_bash_syntax() -> None:
-    tool = _template_tool(["echo"], pre='BRANCH=$(git symbolic-ref --short HEAD)\nif [ -z "$BRANCH" ]; then\n  return 1\nfi')
+    tool = _template_tool(
+        ["echo"],
+        pre='BRANCH=$(git symbolic-ref --short HEAD)\nif [ -z "$BRANCH" ]; then\n  return 1\nfi',
+    )
     script = build_script_text("t", "p", tool)
     result = subprocess.run(["bash", "-n"], input=script, capture_output=True, text=True)
     assert result.returncode == 0, f"bash -n failed:\n{result.stderr}"
@@ -520,7 +529,10 @@ def test_structured_error_has_hint() -> None:
 
 def test_generated_script_is_valid_bash() -> None:
     options = {"remote": _option("--remote", pattern="^[a-z]+$", deny=("origin",))}
-    script = build_script_text("my-tool", "my-pkg", _template_tool(["git", "push", "{{remote}}", "HEAD"], options=options))
+    tool = _template_tool(
+        ["git", "push", "{{remote}}", "HEAD"], options=options,
+    )
+    script = build_script_text("my-tool", "my-pkg", tool)
     result = subprocess.run(["bash", "-n"], input=script, capture_output=True, text=True)
     assert result.returncode == 0, f"bash -n failed:\n{result.stderr}"
 
@@ -534,7 +546,10 @@ def test_simple_tool_bash_syntax() -> None:
 def test_tool_with_options_and_args_bash_syntax() -> None:
     options = {"verbose": _option("--verbose", required=False)}
     arguments = {"target": _arg(required=True)}
-    script = build_script_text("my-tool", "my-pkg", _template_tool(["cmd", "{{verbose}}", "{{target}}"], options=options, arguments=arguments))
+    tool = _template_tool(
+        ["cmd", "{{verbose}}", "{{target}}"], options=options, arguments=arguments,
+    )
+    script = build_script_text("my-tool", "my-pkg", tool)
     result = subprocess.run(["bash", "-n"], input=script, capture_output=True, text=True)
     assert result.returncode == 0, f"bash -n failed:\n{result.stderr}"
 

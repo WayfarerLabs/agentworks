@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from nerftools.manifest import ArgSpec, NerfManifest, OptionSpec, SwitchSpec, ToolSpec
+    from nerftools.manifest import NerfManifest, ToolSpec
 
 _NERFCTL_SKILLS = [
     {
@@ -302,7 +302,7 @@ def _claude_plugin_tool_section(tool_name: str, skill_group: str, tool_spec: Too
     script_path = f"${{CLAUDE_PLUGIN_ROOT}}/skills/{skill_group}/scripts/{tool_name}"
     usage_parts = [script_path]
 
-    for name, sw in tool_spec.switches.items():
+    for _name, sw in tool_spec.switches.items():
         flag_display = f"{sw.flag}|{sw.short}" if sw.short else sw.flag
         usage_parts.append(f"[{flag_display}]")
 
@@ -346,7 +346,7 @@ def _claude_plugin_tool_section(tool_name: str, skill_group: str, tool_spec: Too
         if tool_spec.options:
             parts.append("**Options:**")
             parts.append("")
-            for name, opt in tool_spec.options.items():
+            for _name, opt in tool_spec.options.items():
                 flag_display = f"{opt.flag}|{opt.short}" if opt.short else opt.flag
                 required = "required" if opt.required else "optional"
                 constraints: list[str] = []

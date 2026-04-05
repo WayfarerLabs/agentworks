@@ -150,7 +150,7 @@ def _build_script(tool_name: str, package_name: str, tool_spec: ToolSpec) -> str
 def _usage_function(tool_name: str, tool_spec: ToolSpec) -> str:
     usage_parts = [tool_name]
 
-    for name, sw in tool_spec.switches.items():
+    for _name, sw in tool_spec.switches.items():
         flag_display = f"{sw.flag}|{sw.short}" if sw.short else sw.flag
         usage_parts.append(f"[{flag_display}]")
 
@@ -173,7 +173,7 @@ def _usage_function(tool_name: str, tool_spec: ToolSpec) -> str:
     # Switches
     if tool_spec.switches:
         lines.append("Switches:")
-        for name, sw in tool_spec.switches.items():
+        for _name, sw in tool_spec.switches.items():
             flag_display = f"{sw.flag}, {sw.short}" if sw.short else f"{sw.flag}"
             lines.append(f"  {flag_display}")
             lines.append(f"      {sw.description}")
@@ -342,7 +342,7 @@ def _param_validations(tool_name: str, tool_spec: ToolSpec) -> str:
             lines.append(f'  echo "error: {tool_name}: option {opt.flag} is not an allowed value" >&2')
             lines.append(f'  echo "  value:   \\"${{{var}}}\\"" >&2')
             lines.append(f'  echo "  allowed: {vals}" >&2')
-            lines.append(f'  echo "  hint: use one of the allowed values" >&2')
+            lines.append('  echo "  hint: use one of the allowed values" >&2')
             lines.append("  exit 1")
             lines.append("fi")
             lines.append("")
@@ -353,7 +353,7 @@ def _param_validations(tool_name: str, tool_spec: ToolSpec) -> str:
                 lines.append(f'  echo "error: {tool_name}: option {opt.flag} is not allowed" >&2')
                 lines.append(f'  echo "  value:  \\"{denied}\\"" >&2')
                 lines.append(f'  echo "  denied: {", ".join(opt.deny)}" >&2')
-                lines.append(f'  echo "  hint: use a different value" >&2')
+                lines.append('  echo "  hint: use a different value" >&2')
                 lines.append("  exit 1")
                 lines.append("fi")
             lines.append("")
@@ -370,7 +370,7 @@ def _arg_validations(tool_name: str, arguments: dict[str, ArgSpec]) -> str:
             lines.append(f'for _v in "${{{var}[@]}}"; do')
             lines.append('  if [[ "$_v" == -* ]]; then')
             lines.append(f"    echo \"error: {tool_name}: <{name}> values cannot start with '-'\" >&2")
-            lines.append(f'    echo "  hint: use -- before positional arguments if needed" >&2')
+            lines.append('    echo "  hint: use -- before positional arguments if needed" >&2')
             lines.append("    exit 1")
             lines.append("  fi")
             lines.append("done")
@@ -378,7 +378,7 @@ def _arg_validations(tool_name: str, arguments: dict[str, ArgSpec]) -> str:
             if spec.required:
                 lines.append(f"if [[ ${{#{var}[@]}} -eq 0 ]]; then")
                 lines.append(f'  echo "error: {tool_name}: missing required argument <{name}>" >&2')
-                lines.append(f'  echo "  hint: provide at least one value" >&2')
+                lines.append('  echo "  hint: provide at least one value" >&2')
                 lines.append("  usage")
                 lines.append("fi")
                 lines.append("")
@@ -387,7 +387,7 @@ def _arg_validations(tool_name: str, arguments: dict[str, ArgSpec]) -> str:
                 lines.append(f'for _v in "${{{var}[@]}}"; do')
                 lines.append(f'  if ! [[ "$_v" =~ {safe_pattern} ]]; then')
                 lines.append(f'    echo "error: {tool_name}: argument <{name}> does not match required pattern" >&2')
-                lines.append(f'    echo "  value:   \\"$_v\\"" >&2')
+                lines.append('    echo "  value:   \\"$_v\\"" >&2')
                 lines.append(f'    echo "  pattern: {spec.pattern}" >&2')
                 lines.append(f'    echo "  hint: value must match {spec.pattern}" >&2')
                 lines.append("    exit 1")
@@ -400,9 +400,9 @@ def _arg_validations(tool_name: str, arguments: dict[str, ArgSpec]) -> str:
                 lines.append(f'for _v in "${{{var}[@]}}"; do')
                 lines.append(f"  if [[ {allow_checks} ]]; then")
                 lines.append(f'    echo "error: {tool_name}: argument <{name}> is not an allowed value" >&2')
-                lines.append(f'    echo "  value:   \\"$_v\\"" >&2')
+                lines.append('    echo "  value:   \\"$_v\\"" >&2')
                 lines.append(f'    echo "  allowed: {vals}" >&2')
-                lines.append(f'    echo "  hint: use one of the allowed values" >&2')
+                lines.append('    echo "  hint: use one of the allowed values" >&2')
                 lines.append("    exit 1")
                 lines.append("  fi")
                 lines.append("done")
@@ -414,7 +414,7 @@ def _arg_validations(tool_name: str, arguments: dict[str, ArgSpec]) -> str:
                     lines.append(f'    echo "error: {tool_name}: argument <{name}> is not allowed" >&2')
                     lines.append(f'    echo "  value:  \\"{denied}\\"" >&2')
                     lines.append(f'    echo "  denied: {", ".join(spec.deny)}" >&2')
-                    lines.append(f'    echo "  hint: use a different value" >&2')
+                    lines.append('    echo "  hint: use a different value" >&2')
                     lines.append("    exit 1")
                     lines.append("  fi")
                 lines.append("done")
@@ -422,7 +422,7 @@ def _arg_validations(tool_name: str, arguments: dict[str, ArgSpec]) -> str:
         else:
             lines.append(f'if [[ -n "${{{var}}}" ]] && [[ "${{{var}}}" == -* ]]; then')
             lines.append(f"  echo \"error: {tool_name}: <{name}> cannot start with '-'\" >&2")
-            lines.append(f'  echo "  hint: use -- before positional arguments if needed" >&2')
+            lines.append('  echo "  hint: use -- before positional arguments if needed" >&2')
             lines.append("  exit 1")
             lines.append("fi")
             lines.append("")
@@ -450,7 +450,7 @@ def _arg_validations(tool_name: str, arguments: dict[str, ArgSpec]) -> str:
                 lines.append(f'  echo "error: {tool_name}: argument <{name}> is not an allowed value" >&2')
                 lines.append(f'  echo "  value:   \\"${{{var}}}\\"" >&2')
                 lines.append(f'  echo "  allowed: {vals}" >&2')
-                lines.append(f'  echo "  hint: use one of the allowed values" >&2')
+                lines.append('  echo "  hint: use one of the allowed values" >&2')
                 lines.append("  exit 1")
                 lines.append("fi")
                 lines.append("")
@@ -460,7 +460,7 @@ def _arg_validations(tool_name: str, arguments: dict[str, ArgSpec]) -> str:
                     lines.append(f'  echo "error: {tool_name}: argument <{name}> is not allowed" >&2')
                     lines.append(f'  echo "  value:  \\"{denied}\\"" >&2')
                     lines.append(f'  echo "  denied: {", ".join(spec.deny)}" >&2')
-                    lines.append(f'  echo "  hint: use a different value" >&2')
+                    lines.append('  echo "  hint: use a different value" >&2')
                     lines.append("  exit 1")
                     lines.append("fi")
                 lines.append("")
@@ -557,9 +557,13 @@ def _passthrough_exec(tool_name: str, tool_spec: ToolSpec) -> str:
         lines.append('  for _pat in "${_NERF_DENY_PATTERNS[@]}"; do')
         lines.append('    case "$_tok" in')
         lines.append("      $_pat)")
-        lines.append(f'        echo "error: {tool_name}: token \'$_tok\' is not allowed (matched deny pattern \'$_pat\')" >&2')
-        lines.append(f'        echo "  denied patterns: ${{_NERF_DENY_PATTERNS[*]}}" >&2')
-        lines.append(f"        echo \"  hint: remove '\\$_tok' and retry\" >&2")
+        lines.append(
+            f'        echo "error: {tool_name}:'
+            " token '\\$_tok' is not allowed"
+            " (matched deny pattern '\\$_pat')\" >&2"
+        )
+        lines.append('        echo "  denied patterns: ${_NERF_DENY_PATTERNS[*]}" >&2')
+        lines.append("        echo \"  hint: remove '\\$_tok' and retry\" >&2")
         lines.append("        exit 1")
         lines.append("        ;;")
         lines.append("    esac")

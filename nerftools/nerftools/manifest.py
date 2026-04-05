@@ -36,8 +36,6 @@ class ThreatLevel(Enum):
     REMOTE = "remote"
     ADMIN = "admin"
 
-    _ORDER: dict[str, int]  # type: ignore[assignment]
-
     def __le__(self, other: object) -> bool:
         if not isinstance(other, ThreatLevel):
             return NotImplemented
@@ -325,11 +323,13 @@ def _load_threat(raw: dict[str, Any], path: Path, tool_name: str) -> ThreatSpec:
     try:
         read = ThreatLevel(str(read_str))
     except ValueError:
-        raise ManifestError(f"{ctx}.threat: invalid read level '{read_str}' (expected one of {', '.join(THREAT_LEVEL_NAMES)})") from None
+        valid = ", ".join(THREAT_LEVEL_NAMES)
+        raise ManifestError(f"{ctx}.threat: invalid read level '{read_str}' (expected one of {valid})") from None
     try:
         write = ThreatLevel(str(write_str))
     except ValueError:
-        raise ManifestError(f"{ctx}.threat: invalid write level '{write_str}' (expected one of {', '.join(THREAT_LEVEL_NAMES)})") from None
+        valid = ", ".join(THREAT_LEVEL_NAMES)
+        raise ManifestError(f"{ctx}.threat: invalid write level '{write_str}' (expected one of {valid})") from None
 
     return ThreatSpec(read=read, write=write)
 
