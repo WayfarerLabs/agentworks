@@ -372,6 +372,8 @@ def _load_switches(raw: dict[str, Any], path: Path, tool_name: str) -> dict[str,
         flag = str(spec_raw["flag"]) if "flag" in spec_raw else f"--{name.replace('_', '-')}"
         short = str(spec_raw["short"]) if "short" in spec_raw else None
 
+        if not re.fullmatch(r"-{1,2}[a-zA-Z][a-zA-Z0-9-]*", flag):
+            raise ManifestError(f"{ctx}: 'flag' must match -<name> or --<name> pattern, got {flag!r}")
         if short is not None and not re.fullmatch(r"-[a-zA-Z]", short):
             raise ManifestError(f"{ctx}: 'short' must be a single-character flag like -v, got {short!r}")
 
@@ -399,6 +401,8 @@ def _load_options(raw: dict[str, Any], path: Path, tool_name: str) -> dict[str, 
         allow = tuple(str(v) for v in spec_raw.get("allow", []))
         deny = tuple(str(v) for v in spec_raw.get("deny", []))
 
+        if not re.fullmatch(r"-{1,2}[a-zA-Z][a-zA-Z0-9-]*", flag):
+            raise ManifestError(f"{ctx}: 'flag' must match -<name> or --<name> pattern, got {flag!r}")
         if short is not None and not re.fullmatch(r"-[a-zA-Z]", short):
             raise ManifestError(f"{ctx}: 'short' must be a single-character flag like -r, got {short!r}")
         if allow and deny:
@@ -488,7 +492,15 @@ def _load_env(raw: dict[str, Any], path: Path, tool_name: str) -> dict[str, str]
     env_raw = raw.get("env", {})
     if not isinstance(env_raw, dict):
         raise ManifestError(f"{path}:tools.{tool_name}: 'env' must be a mapping")
-    return {str(k): str(v) for k, v in env_raw.items()}
+    env: dict[str, str] = {}
+    for k, v in env_raw.items():
+        key = str(k)
+        if not re.fullmatch(r"[A-Z_][A-Z0-9_]*", key):
+            raise ManifestError(
+                f"{path}:tools.{tool_name}.env: key '{key}' must match [A-Z_][A-Z0-9_]*"
+            )
+        env[key] = str(v)
+    return env
 
 
 # -- Validation ----------------------------------------------------------------

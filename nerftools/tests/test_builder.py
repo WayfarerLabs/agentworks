@@ -313,7 +313,7 @@ def test_env_exports_before_exec() -> None:
     export_idx = next(i for i, line in enumerate(lines) if "AZURE_CONFIG_DIR" in line)
     exec_idx = next(i for i, line in enumerate(lines) if line.startswith("exec "))
     assert export_idx < exec_idx
-    assert 'export AZURE_CONFIG_DIR="/home/user/.azure"' in script
+    assert "export AZURE_CONFIG_DIR='/home/user/.azure'" in script
 
 
 # -- Guards --------------------------------------------------------------------
@@ -390,7 +390,7 @@ def test_passthrough_exec() -> None:
         passthrough=PassthroughSpec(command="find", prefix=(".",)),
     )
     script = build_script_text("nerf-safe-find", "find", tool)
-    assert 'exec find . "$@"' in script
+    assert "exec find '.' \"$@\"" in script
 
 
 def test_passthrough_deny_scan() -> None:
@@ -413,7 +413,7 @@ def test_passthrough_suffix() -> None:
         passthrough=PassthroughSpec(command="kubectl", suffix=("--context=prod",)),
     )
     script = build_script_text("t", "p", tool)
-    assert 'exec kubectl "$@" --context=prod' in script
+    assert "exec kubectl \"$@\" '--context=prod'" in script
 
 
 def test_passthrough_usage_shows_tokens() -> None:
@@ -621,7 +621,7 @@ def test_npm_pkgrun_includes_resolver() -> None:
     script = build_script_text("pkgrun-cspell", "pkgrun", tool)
     assert "_PKGRUN" in script
     assert "bunx" in script
-    assert "exec $_PKGRUN cspell@8.19.4" in script
+    assert 'exec "$_PKGRUN" cspell@8.19.4' in script
 
 
 def test_non_pkgrun_has_no_resolver() -> None:

@@ -234,6 +234,7 @@ def _flag_parser(tool_spec: ToolSpec, *, has_positional: bool) -> str:
         cases.append(f'    {pattern}) {var}="$2"; shift 2 ;;')
 
     cases.append("    -h|--help) usage ;;")
+    cases.append("    --) shift; break ;;")
     if has_positional:
         cases.append("    *) break ;;")
     else:
@@ -280,8 +281,8 @@ def _param_validations(tool_name: str, tool_spec: ToolSpec) -> str:
             lines.append("")
 
         if opt.pattern:
-            safe_pattern = opt.pattern.replace("'", "'\"'\"'")
-            lines.append(f'if [[ -n "${{{var}}}" ]] && ! [[ "${{{var}}}" =~ {safe_pattern} ]]; then')
+            anchored = _anchored_pattern(opt.pattern)
+            lines.append(f'if [[ -n "${{{var}}}" ]] && ! [[ "${{{var}}}" =~ {anchored} ]]; then')
             lines.append(f'  echo "error: {tool_name}: option {opt.flag} does not match required pattern" >&2')
             lines.append(f'  echo "  value:   \\"${{{var}}}\\"" >&2')
             lines.append(f'  echo "  pattern: {opt.pattern}" >&2')
@@ -291,12 +292,12 @@ def _param_validations(tool_name: str, tool_spec: ToolSpec) -> str:
             lines.append("")
 
         if opt.allow:
-            allow_checks = " && ".join(f'"${{{var}}}" != "{v}"' for v in opt.allow)
+            allow_checks = " && ".join(f'"${{{var}}}" != "{_shell_escape_dq(v)}"' for v in opt.allow)
             vals = ", ".join(opt.allow)
             lines.append(f'if [[ -n "${{{var}}}" ]] && [[ {allow_checks} ]]; then')
             lines.append(f'  echo "error: {tool_name}: option {opt.flag} is not an allowed value" >&2')
             lines.append(f'  echo "  value:   \\"${{{var}}}\\"" >&2')
-            lines.append(f'  echo "  allowed: {vals}" >&2')
+            lines.append(f'  echo "  allowed: {_shell_escape_dq(vals)}" >&2')
             lines.append('  echo "  hint: use one of the allowed values" >&2')
             lines.append("  exit 1")
             lines.append("fi")
@@ -304,10 +305,11 @@ def _param_validations(tool_name: str, tool_spec: ToolSpec) -> str:
 
         if opt.deny:
             for denied in opt.deny:
-                lines.append(f'if [[ "${{{var}}}" == "{denied}" ]]; then')
+                escaped = _shell_escape_dq(denied)
+                lines.append(f'if [[ "${{{var}}}" == "{escaped}" ]]; then')
                 lines.append(f'  echo "error: {tool_name}: option {opt.flag} is not allowed" >&2')
-                lines.append(f'  echo "  value:  \\"{denied}\\"" >&2')
-                lines.append(f'  echo "  denied: {", ".join(opt.deny)}" >&2')
+                lines.append(f'  echo "  value:  \\"{escaped}\\"" >&2')
+                lines.append(f'  echo "  denied: {_shell_escape_dq(", ".join(opt.deny))}" >&2')
                 lines.append('  echo "  hint: use a different value" >&2')
                 lines.append("  exit 1")
                 lines.append("fi")
@@ -338,9 +340,9 @@ def _arg_validations(tool_name: str, arguments: dict[str, ArgSpec]) -> str:
                 lines.append("fi")
                 lines.append("")
             if spec.pattern:
-                safe_pattern = spec.pattern.replace("'", "'\"'\"'")
+                anchored = _anchored_pattern(spec.pattern)
                 lines.append(f'for _v in "${{{var}[@]}}"; do')
-                lines.append(f'  if ! [[ "$_v" =~ {safe_pattern} ]]; then')
+                lines.append(f'  if ! [[ "$_v" =~ {anchored} ]]; then')
                 lines.append(f'    echo "error: {tool_name}: argument <{name}> does not match required pattern" >&2')
                 lines.append('    echo "  value:   \\"$_v\\"" >&2')
                 lines.append(f'    echo "  pattern: {spec.pattern}" >&2')
@@ -350,13 +352,13 @@ def _arg_validations(tool_name: str, arguments: dict[str, ArgSpec]) -> str:
                 lines.append("done")
                 lines.append("")
             if spec.allow:
-                allow_checks = " && ".join(f'"$_v" != "{v}"' for v in spec.allow)
+                allow_checks = " && ".join(f'"$_v" != "{_shell_escape_dq(v)}"' for v in spec.allow)
                 vals = ", ".join(spec.allow)
                 lines.append(f'for _v in "${{{var}[@]}}"; do')
                 lines.append(f"  if [[ {allow_checks} ]]; then")
                 lines.append(f'    echo "error: {tool_name}: argument <{name}> is not an allowed value" >&2')
                 lines.append('    echo "  value:   \\"$_v\\"" >&2')
-                lines.append(f'    echo "  allowed: {vals}" >&2')
+                lines.append(f'    echo "  allowed: {_shell_escape_dq(vals)}" >&2')
                 lines.append('    echo "  hint: use one of the allowed values" >&2')
                 lines.append("    exit 1")
                 lines.append("  fi")
@@ -365,10 +367,11 @@ def _arg_validations(tool_name: str, arguments: dict[str, ArgSpec]) -> str:
             if spec.deny:
                 lines.append(f'for _v in "${{{var}[@]}}"; do')
                 for denied in spec.deny:
-                    lines.append(f'  if [[ "$_v" == "{denied}" ]]; then')
+                    escaped = _shell_escape_dq(denied)
+                    lines.append(f'  if [[ "$_v" == "{escaped}" ]]; then')
                     lines.append(f'    echo "error: {tool_name}: argument <{name}> is not allowed" >&2')
-                    lines.append(f'    echo "  value:  \\"{denied}\\"" >&2')
-                    lines.append(f'    echo "  denied: {", ".join(spec.deny)}" >&2')
+                    lines.append(f'    echo "  value:  \\"{escaped}\\"" >&2')
+                    lines.append(f'    echo "  denied: {_shell_escape_dq(", ".join(spec.deny))}" >&2')
                     lines.append('    echo "  hint: use a different value" >&2')
                     lines.append("    exit 1")
                     lines.append("  fi")
@@ -389,8 +392,8 @@ def _arg_validations(tool_name: str, arguments: dict[str, ArgSpec]) -> str:
                 lines.append("fi")
                 lines.append("")
             if spec.pattern:
-                safe_pattern = spec.pattern.replace("'", "'\"'\"'")
-                lines.append(f'if [[ -n "${{{var}}}" ]] && ! [[ "${{{var}}}" =~ {safe_pattern} ]]; then')
+                anchored = _anchored_pattern(spec.pattern)
+                lines.append(f'if [[ -n "${{{var}}}" ]] && ! [[ "${{{var}}}" =~ {anchored} ]]; then')
                 lines.append(f'  echo "error: {tool_name}: argument <{name}> does not match required pattern" >&2')
                 lines.append(f'  echo "  value:   \\"${{{var}}}\\"" >&2')
                 lines.append(f'  echo "  pattern: {spec.pattern}" >&2')
@@ -399,22 +402,23 @@ def _arg_validations(tool_name: str, arguments: dict[str, ArgSpec]) -> str:
                 lines.append("fi")
                 lines.append("")
             if spec.allow:
-                allow_checks = " && ".join(f'"${{{var}}}" != "{v}"' for v in spec.allow)
+                allow_checks = " && ".join(f'"${{{var}}}" != "{_shell_escape_dq(v)}"' for v in spec.allow)
                 vals = ", ".join(spec.allow)
                 lines.append(f'if [[ -n "${{{var}}}" ]] && [[ {allow_checks} ]]; then')
                 lines.append(f'  echo "error: {tool_name}: argument <{name}> is not an allowed value" >&2')
                 lines.append(f'  echo "  value:   \\"${{{var}}}\\"" >&2')
-                lines.append(f'  echo "  allowed: {vals}" >&2')
+                lines.append(f'  echo "  allowed: {_shell_escape_dq(vals)}" >&2')
                 lines.append('  echo "  hint: use one of the allowed values" >&2')
                 lines.append("  exit 1")
                 lines.append("fi")
                 lines.append("")
             if spec.deny:
                 for denied in spec.deny:
-                    lines.append(f'if [[ "${{{var}}}" == "{denied}" ]]; then')
+                    escaped = _shell_escape_dq(denied)
+                    lines.append(f'if [[ "${{{var}}}" == "{escaped}" ]]; then')
                     lines.append(f'  echo "error: {tool_name}: argument <{name}> is not allowed" >&2')
-                    lines.append(f'  echo "  value:  \\"{denied}\\"" >&2')
-                    lines.append(f'  echo "  denied: {", ".join(spec.deny)}" >&2')
+                    lines.append(f'  echo "  value:  \\"{escaped}\\"" >&2')
+                    lines.append(f'  echo "  denied: {_shell_escape_dq(", ".join(spec.deny))}" >&2')
                     lines.append('  echo "  hint: use a different value" >&2')
                     lines.append("  exit 1")
                     lines.append("fi")
@@ -427,7 +431,10 @@ def _arg_validations(tool_name: str, arguments: dict[str, ArgSpec]) -> str:
 
 
 def _env_exports(env: dict[str, str]) -> str:
-    return "\n".join(f'export {k}="{v}"' for k, v in env.items())
+    lines = []
+    for k, v in env.items():
+        lines.append(f"export {k}='{_shell_escape_sq(v)}'")
+    return "\n".join(lines)
 
 
 # -- Guard checks --------------------------------------------------------------
@@ -485,7 +492,7 @@ def _template_exec(tool_spec: ToolSpec) -> str:
     assert tool_spec.template is not None
     args = _substitute_template_command(tool_spec.template.command, tool_spec)
     if tool_spec.template.npm_pkgrun:
-        return "exec $_PKGRUN " + " ".join(args)
+        return 'exec "$_PKGRUN" ' + " ".join(args)
     return "exec " + " ".join(args)
 
 
@@ -496,8 +503,7 @@ def _passthrough_exec(tool_name: str, tool_spec: ToolSpec) -> str:
     lines: list[str] = []
 
     if pt.deny:
-        # Deny pattern array
-        deny_items = " ".join(f"'{d}'" for d in pt.deny)
+        deny_items = " ".join(f"'{_shell_escape_sq(d)}'" for d in pt.deny)
         lines.append(f"_NERF_DENY_PATTERNS=({deny_items})")
         lines.append("")
         lines.append('for _tok in "$@"; do')
@@ -517,11 +523,10 @@ def _passthrough_exec(tool_name: str, tool_spec: ToolSpec) -> str:
         lines.append("  done")
         lines.append("done")
 
-    # Exec line with prefix/suffix
     exec_parts = [pt.command]
-    exec_parts.extend(pt.prefix)
+    exec_parts.extend(f"'{_shell_escape_sq(p)}'" for p in pt.prefix)
     exec_parts.append('"$@"')
-    exec_parts.extend(pt.suffix)
+    exec_parts.extend(f"'{_shell_escape_sq(s)}'" for s in pt.suffix)
     if lines:
         lines.append("")
     lines.append("exec " + " ".join(exec_parts))
@@ -599,5 +604,27 @@ def _npm_pkgrun_resolver() -> str:
     )
 
 
+# -- Helpers -------------------------------------------------------------------
+
+
 def _var_name(param_name: str) -> str:
     return param_name.upper().replace("-", "_")
+
+
+def _anchored_pattern(pattern: str) -> str:
+    """Ensure a regex pattern is anchored for full-match in bash =~."""
+    if not pattern.startswith("^"):
+        pattern = "^" + pattern
+    if not pattern.endswith("$"):
+        pattern = pattern + "$"
+    return pattern
+
+
+def _shell_escape_dq(value: str) -> str:
+    """Escape a string for embedding in double-quoted bash strings."""
+    return value.replace("\\", "\\\\").replace('"', '\\"').replace("$", "\\$").replace("`", "\\`")
+
+
+def _shell_escape_sq(value: str) -> str:
+    """Escape a string for embedding in single-quoted bash strings."""
+    return value.replace("'", "'\"'\"'")
