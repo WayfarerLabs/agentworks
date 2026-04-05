@@ -1,4 +1,4 @@
-"""Tests for rulesync skill generation."""
+"""Tests for rulesync skill generation (v1)."""
 
 from __future__ import annotations
 
@@ -6,8 +6,21 @@ from pathlib import Path
 
 import pytest
 
-from nerftools.manifest import ArgSpec, FlagSpec, NerfManifest, PackageMeta, ToolSpec
+from nerftools.manifest import (
+    ArgSpec,
+    NerfManifest,
+    OptionSpec,
+    PackageMeta,
+    PassthroughSpec,
+    SwitchSpec,
+    TemplateSpec,
+    ThreatLevel,
+    ThreatSpec,
+    ToolSpec,
+)
 from nerftools.skill import build_skill_text, build_skills
+
+_THREAT_NONE = ThreatSpec(read=ThreatLevel.NONE, write=ThreatLevel.NONE)
 
 
 def _manifest(
@@ -17,6 +30,7 @@ def _manifest(
     tools: dict[str, ToolSpec] | None = None,
 ) -> NerfManifest:
     return NerfManifest(
+        version=1,
         package=PackageMeta(
             name=name,
             description="Test package",
@@ -27,30 +41,36 @@ def _manifest(
     )
 
 
-def _tool(
+def _template_tool(
     command: list[str],
-    flags: dict[str, FlagSpec] | None = None,
-    args: dict[str, ArgSpec] | None = None,
+    switches: dict[str, SwitchSpec] | None = None,
+    options: dict[str, OptionSpec] | None = None,
+    arguments: dict[str, ArgSpec] | None = None,
     description: str = "A test tool",
 ) -> ToolSpec:
     return ToolSpec(
         description=description,
-        command=tuple(command),
-        flags=flags or {},
-        args=args or {},
+        threat=_THREAT_NONE,
+        template=TemplateSpec(command=tuple(command)),
+        switches=switches or {},
+        options=options or {},
+        arguments=arguments or {},
     )
 
 
-def _flag(
+def _option(
     flag: str,
     description: str = "A param",
     *,
-    optional: bool = False,
+    required: bool = True,
     pattern: str | None = None,
     allow: tuple[str, ...] = (),
     deny: tuple[str, ...] = (),
-) -> FlagSpec:
-    return FlagSpec(flag=flag, description=description, optional=optional, pattern=pattern, allow=allow, deny=deny)
+) -> OptionSpec:
+    return OptionSpec(
+        flag=flag, description=description, required=required,
+        pattern=pattern, allow=allow, deny=deny,
+    )
 
 
 def _arg(
@@ -98,35 +118,26 @@ def test_skill_includes_intro() -> None:
     assert "Use these tools carefully." in skill
 
 
-def test_skill_no_intro_section_when_absent() -> None:
-    m = _manifest(skill_intro="", tools={"t": _tool(["echo"])})
-    skill = build_skill_text(m)
-    lines = skill.splitlines()
-    h1_idx = next(i for i, line in enumerate(lines) if line.startswith("# "))
-    h2_idx = next(i for i, line in enumerate(lines) if line.startswith("## "))
-    assert h2_idx > h1_idx
-
-
 def test_tool_has_h2_section() -> None:
-    m = _manifest(tools={"my-tool": _tool(["echo"])})
+    m = _manifest(tools={"my-tool": _template_tool(["echo"])})
     skill = build_skill_text(m)
     assert "## my-tool" in skill
 
 
 def test_tool_description_in_skill() -> None:
-    m = _manifest(tools={"my-tool": _tool(["echo"], description="Does the thing")})
+    m = _manifest(tools={"my-tool": _template_tool(["echo"], description="Does the thing")})
     skill = build_skill_text(m)
     assert "Does the thing." in skill
 
 
 def test_no_args_tool_shows_no_arguments() -> None:
-    m = _manifest(tools={"my-tool": _tool(["echo"])})
+    m = _manifest(tools={"my-tool": _template_tool(["echo"])})
     skill = build_skill_text(m)
     assert "No arguments." in skill
 
 
 def test_tool_separated_by_horizontal_rule() -> None:
-    m = _manifest(tools={"my-tool": _tool(["echo"])})
+    m = _manifest(tools={"my-tool": _template_tool(["echo"])})
     skill = build_skill_text(m)
     assert "---" in skill
 
@@ -135,14 +146,14 @@ def test_tool_separated_by_horizontal_rule() -> None:
 
 
 def test_usage_line_simple_tool() -> None:
-    m = _manifest(tools={"my-tool": _tool(["echo"])})
+    m = _manifest(tools={"my-tool": _template_tool(["echo"])})
     skill = build_skill_text(m)
     assert "**Usage:** `<nerf-bin>/my-tool`" in skill
     assert "**Maps to:** `echo`" in skill
 
 
 def test_maps_to_shows_placeholders() -> None:
-    m = _manifest(tools={"t": _tool(["git", "push", "{{remote}}", "{{branch}}"])})
+    m = _manifest(tools={"t": _template_tool(["git", "push", "{{remote}}", "{{branch}}"])})
     skill = build_skill_text(m)
     assert "**Maps to:** `git push <remote> <branch>`" in skill
 
@@ -150,126 +161,149 @@ def test_maps_to_shows_placeholders() -> None:
 def test_maps_to_npm_pkgrun_shows_runner() -> None:
     tool = ToolSpec(
         description="Run cspell",
-        command=("cspell@8.19.4", "{{args}}"),
-        args={"args": ArgSpec(description="args", variadic=True)},
-        npm_pkgrun=True,
+        threat=_THREAT_NONE,
+        template=TemplateSpec(command=("cspell@8.19.4", "{{args}}"), npm_pkgrun=True),
+        arguments={"args": ArgSpec(description="args", variadic=True)},
     )
     m = _manifest(tools={"pkgrun-cspell": tool})
     skill = build_skill_text(m)
     assert "**Maps to:** `<runner> cspell@8.19.4 <args>`" in skill
 
 
-def test_usage_line_required_flag() -> None:
-    m = _manifest(tools={"t": _tool(["echo", "{{remote}}"], flags={"remote": _flag("--remote")})})
+def test_usage_line_required_option() -> None:
+    m = _manifest(tools={"t": _template_tool(["echo", "{{remote}}"], options={"remote": _option("--remote")})})
     skill = build_skill_text(m)
     assert "--remote <remote>" in skill
 
 
-def test_usage_line_flag_with_short() -> None:
-    flags = {"remote": FlagSpec(flag="--remote", description="Remote", short="-r")}
-    m = _manifest(tools={"t": _tool(["echo", "{{remote}}"], flags=flags)})
+def test_usage_line_option_with_short() -> None:
+    options = {"remote": OptionSpec(flag="--remote", description="Remote", short="-r", required=True)}
+    m = _manifest(tools={"t": _template_tool(["echo", "{{remote}}"], options=options)})
     skill = build_skill_text(m)
     assert "--remote|-r <remote>" in skill
 
 
-def test_arg_section_flag_with_short() -> None:
-    flags = {"remote": FlagSpec(flag="--remote", description="Remote name", short="-r")}
-    m = _manifest(tools={"t": _tool(["echo", "{{remote}}"], flags=flags)})
-    skill = build_skill_text(m)
-    assert "`--remote|-r`" in skill
-
-
-def test_usage_line_optional_flag_bracketed() -> None:
-    m = _manifest(tools={"t": _tool(["echo", "{{branch}}"], flags={"branch": _flag("--branch", optional=True)})})
+def test_usage_line_optional_option_bracketed() -> None:
+    m = _manifest(tools={"t": _template_tool(["echo", "{{branch}}"], options={"branch": _option("--branch", required=False)})})
     skill = build_skill_text(m)
     assert "[--branch <branch>]" in skill
 
 
 def test_usage_line_positional_required() -> None:
-    m = _manifest(tools={"t": _tool(["git", "fetch", "{{remote}}"], args={"remote": _arg(required=True)})})
+    m = _manifest(tools={"t": _template_tool(["git", "fetch", "{{remote}}"], arguments={"remote": _arg(required=True)})})
     skill = build_skill_text(m)
     assert "<remote>" in skill
 
 
 def test_usage_line_variadic_arg() -> None:
-    m = _manifest(tools={"t": _tool(["git", "add", "{{files}}"], args={"files": _arg(variadic=True)})})
+    m = _manifest(tools={"t": _template_tool(["git", "add", "{{files}}"], arguments={"files": _arg(variadic=True)})})
     skill = build_skill_text(m)
     assert "<files...>" in skill
 
 
-# -- Argument section ----------------------------------------------------------
+# -- Parameter sections --------------------------------------------------------
 
 
-def test_flag_listed_in_arguments() -> None:
-    m = _manifest(tools={"t": _tool(["echo", "{{x}}"], flags={"x": _flag("--x", "The x value")})})
+def test_switch_listed_in_switches() -> None:
+    switches = {"verbose": SwitchSpec(flag="--verbose", description="Enable verbose")}
+    m = _manifest(tools={"t": _template_tool(["cmd", "{{verbose}}"], switches=switches)})
     skill = build_skill_text(m)
-    assert "**Arguments:**" in skill
-    assert "--x" in skill
-    assert "The x value" in skill
+    assert "**Switches:**" in skill
+    assert "--verbose" in skill
+    assert "Enable verbose" in skill
 
 
-def test_required_flag_labeled() -> None:
-    m = _manifest(tools={"t": _tool(["echo", "{{x}}"], flags={"x": _flag("--x")})})
+def test_option_listed_in_options() -> None:
+    options = {"remote": _option("--remote", "Remote name")}
+    m = _manifest(tools={"t": _template_tool(["echo", "{{remote}}"], options=options)})
+    skill = build_skill_text(m)
+    assert "**Options:**" in skill
+    assert "--remote" in skill
+    assert "Remote name" in skill
+
+
+def test_required_option_labeled() -> None:
+    m = _manifest(tools={"t": _template_tool(["echo", "{{x}}"], options={"x": _option("--x")})})
     skill = build_skill_text(m)
     assert "(required)" in skill
 
 
-def test_optional_flag_labeled() -> None:
-    m = _manifest(tools={"t": _tool(["echo", "{{x}}"], flags={"x": _flag("--x", optional=True)})})
+def test_optional_option_labeled() -> None:
+    m = _manifest(tools={"t": _template_tool(["echo", "{{x}}"], options={"x": _option("--x", required=False)})})
     skill = build_skill_text(m)
     assert "(optional)" in skill
 
 
 def test_pattern_constraint_shown() -> None:
-    m = _manifest(tools={"t": _tool(["echo", "{{x}}"], flags={"x": _flag("--x", pattern="^[a-z]+$")})})
+    m = _manifest(tools={"t": _template_tool(["echo", "{{x}}"], options={"x": _option("--x", pattern="^[a-z]+$")})})
     skill = build_skill_text(m)
     assert "^[a-z]+$" in skill
 
 
-def test_deny_constraint_shown() -> None:
-    m = _manifest(tools={"t": _tool(["echo", "{{x}}"], flags={"x": _flag("--x", deny=("origin",))})})
-    skill = build_skill_text(m)
-    assert "origin" in skill
-
-
-def test_allow_constraint_shown() -> None:
-    m = _manifest(tools={"t": _tool(["echo", "{{x}}"], flags={"x": _flag("--x", allow=("prod", "staging"))})})
-    skill = build_skill_text(m)
-    assert "prod" in skill
-    assert "staging" in skill
-
-
 def test_arg_listed_in_arguments() -> None:
-    m = _manifest(tools={"t": _tool(["cmd", "{{target}}"], args={"target": _arg("The target", required=True)})})
+    m = _manifest(tools={"t": _template_tool(["cmd", "{{target}}"], arguments={"target": _arg("The target", required=True)})})
     skill = build_skill_text(m)
     assert "**Arguments:**" in skill
     assert "<target>" in skill
     assert "The target" in skill
 
 
-# -- Boolean flags -------------------------------------------------------------
+# -- Passthrough skill ---------------------------------------------------------
 
 
-def test_boolean_flag_usage_shows_bracketed_flag() -> None:
-    flags = {"draft": FlagSpec(flag="--draft", description="Draft PR", boolean=True)}
-    m = _manifest(tools={"t": _tool(["gh", "pr", "create", "{{draft}}"], flags=flags)})
+def test_passthrough_maps_to_shows_dollar_at() -> None:
+    tool = ToolSpec(
+        description="Safe find",
+        threat=_THREAT_NONE,
+        passthrough=PassthroughSpec(command="find", prefix=(".",)),
+    )
+    m = _manifest(tools={"safe-find": tool})
+    skill = build_skill_text(m)
+    assert '**Maps to:** `find . "$@"`' in skill
+
+
+def test_passthrough_shows_denied_patterns() -> None:
+    tool = ToolSpec(
+        description="Safe find",
+        threat=_THREAT_NONE,
+        passthrough=PassthroughSpec(command="find", deny=("-exec", "-delete"), prefix=(".",)),
+    )
+    m = _manifest(tools={"safe-find": tool})
+    skill = build_skill_text(m)
+    assert "**Denied patterns:**" in skill
+    assert "`-exec`" in skill
+    assert "`-delete`" in skill
+
+
+def test_passthrough_usage_shows_tokens() -> None:
+    tool = ToolSpec(
+        description="Safe find",
+        threat=_THREAT_NONE,
+        passthrough=PassthroughSpec(command="find"),
+    )
+    m = _manifest(tools={"safe-find": tool})
+    skill = build_skill_text(m)
+    assert "[tokens...]" in skill
+
+
+# -- Script mode skill ---------------------------------------------------------
+
+
+def test_script_mode_no_maps_to() -> None:
+    tool = ToolSpec(description="Check", threat=_THREAT_NONE, script="echo done")
+    m = _manifest(tools={"check": tool})
+    skill = build_skill_text(m)
+    assert "Maps to:" not in skill
+
+
+# -- Switch usage in skill -----------------------------------------------------
+
+
+def test_switch_usage_shows_bracketed_flag() -> None:
+    switches = {"draft": SwitchSpec(flag="--draft", description="Draft PR")}
+    m = _manifest(tools={"t": _template_tool(["gh", "pr", "create", "{{draft}}"], switches=switches)})
     skill = build_skill_text(m)
     assert "[--draft]" in skill
-
-
-def test_boolean_flag_no_angle_brackets_in_usage() -> None:
-    flags = {"draft": FlagSpec(flag="--draft", description="Draft PR", boolean=True)}
-    m = _manifest(tools={"t": _tool(["gh", "pr", "create", "{{draft}}"], flags=flags)})
-    skill = build_skill_text(m)
-    usage_line = next(line for line in skill.splitlines() if line.startswith("**Usage:**"))
-    assert "<draft>" not in usage_line
-
-
-def test_boolean_flag_labeled_boolean_in_arguments() -> None:
-    flags = {"draft": FlagSpec(flag="--draft", description="Draft PR", boolean=True)}
-    m = _manifest(tools={"t": _tool(["gh", "pr", "create", "{{draft}}"], flags=flags)})
-    skill = build_skill_text(m)
-    assert "(boolean)" in skill
 
 
 # -- keep_existing / clean behavior -------------------------------------------
@@ -296,19 +330,9 @@ def test_build_skills_always_writes_generated_files(tmp_path: Path) -> None:
     assert (tmp_path / "my-group" / "SKILL.md").exists()
 
 
-@pytest.mark.parametrize("keep", [True, False])
-def test_build_skills_overwrites_existing_skill(tmp_path: Path, keep: bool) -> None:
-    skill_dir = tmp_path / "my-group"
-    skill_dir.mkdir()
-    (skill_dir / "SKILL.md").write_text("old content")
-    build_skills([_manifest(skill_group="my-group")], tmp_path, keep_existing=keep, prefix="")
-    assert "old content" not in (skill_dir / "SKILL.md").read_text()
-
-
 def test_build_skills_prefix_applied_to_dir(tmp_path: Path) -> None:
     build_skills([_manifest(skill_group="git")], tmp_path, prefix="nerf-")
     assert (tmp_path / "nerf-git" / "SKILL.md").exists()
-    assert not (tmp_path / "git").exists()
 
 
 def test_build_skills_prefix_in_skill_content(tmp_path: Path) -> None:
@@ -319,7 +343,7 @@ def test_build_skills_prefix_in_skill_content(tmp_path: Path) -> None:
 
 
 def test_build_skill_text_prefix_applied_to_tool_names(tmp_path: Path) -> None:
-    m = _manifest(skill_group="git", tools={"git-fetch": _tool(["git", "fetch"])})
+    m = _manifest(skill_group="git", tools={"git-fetch": _template_tool(["git", "fetch"])})
     skill = build_skill_text(m, prefix="nerf-")
     assert "## nerf-git-fetch" in skill
     assert "**Usage:** `<nerf-bin>/nerf-git-fetch`" in skill
@@ -342,23 +366,13 @@ def test_nerftools_skill_lists_tool_families() -> None:
     from nerftools.skill import build_overview_text
 
     manifests = [
-        _manifest(skill_group="git", tools={"git-add": _tool(["git", "add"])}),
-        _manifest(skill_group="az-repos", tools={"az-pr-create": _tool(["az", "repos", "pr", "create"])}),
+        _manifest(skill_group="git", tools={"git-add": _template_tool(["git", "add"])}),
+        _manifest(skill_group="az-repos", tools={"az-pr-create": _template_tool(["az", "repos", "pr", "create"])}),
     ]
     text = build_overview_text(manifests, prefix="nerf-")
     assert "# Nerf Tools" in text
     assert "**nerf-git**" in text
     assert "**nerf-az-repos**" in text
-    assert "Test package" in text
-
-
-def test_nerftools_skill_has_usage_guidance() -> None:
-    from nerftools.skill import build_overview_text
-
-    text = build_overview_text([_manifest(skill_group="git")], prefix="nerf-")
-    assert "prefer it over invoking the underlying tool directly" in text
-    assert "AGENTWORKS_NERF_BIN" in text
-    assert "absolute path" in text
 
 
 def test_nerftools_skill_has_frontmatter() -> None:

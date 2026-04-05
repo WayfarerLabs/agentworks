@@ -1,4 +1,4 @@
-"""Claude Code plugin builder for nerf tools.
+"""Claude Code plugin builder for nerf tools (v1).
 
 Generates a self-contained Claude Code plugin from nerf manifests, including
 skills, scripts, plugin manifest, and marketplace metadata.
@@ -6,12 +6,13 @@ skills, scripts, plugin manifest, and marketplace metadata.
 
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from nerftools.manifest import NerfManifest, ToolSpec
+    from nerftools.manifest import ArgSpec, NerfManifest, OptionSpec, SwitchSpec, ToolSpec
 
 _NERFCTL_SKILLS = [
     {
@@ -265,8 +266,6 @@ def _build_claude_plugin_skill_text(manifest: NerfManifest, prefix: str = "") ->
 
 def _claude_plugin_tool_section(tool_name: str, skill_group: str, tool_spec: ToolSpec) -> str:
     """Generate a tool section for the claude-plugin format."""
-    import re
-
     parts: list[str] = []
     parts.append(f"## {tool_name}")
     parts.append("")
@@ -276,72 +275,112 @@ def _claude_plugin_tool_section(tool_name: str, skill_group: str, tool_spec: Too
     # Usage line with resolved plugin path
     script_path = f"${{CLAUDE_PLUGIN_ROOT}}/skills/{skill_group}/scripts/{tool_name}"
     usage_parts = [script_path]
-    for name, p in tool_spec.flags.items():
-        flag_display = f"{p.flag}|{p.short}" if p.short else p.flag
-        if p.boolean:
-            usage_parts.append(f"[{flag_display}]")
-        else:
-            token = f"{flag_display} <{name}>"
-            usage_parts.append(token if p.required else f"[{token}]")
-    for name, spec in tool_spec.args.items():
+
+    for name, sw in tool_spec.switches.items():
+        flag_display = f"{sw.flag}|{sw.short}" if sw.short else sw.flag
+        usage_parts.append(f"[{flag_display}]")
+
+    for name, opt in tool_spec.options.items():
+        flag_display = f"{opt.flag}|{opt.short}" if opt.short else opt.flag
+        token = f"{flag_display} <{name}>"
+        usage_parts.append(token if opt.required else f"[{token}]")
+
+    for name, spec in tool_spec.arguments.items():
         token = f"<{name}...>" if spec.variadic else f"<{name}>"
         usage_parts.append(token if spec.required else f"[{token}]")
+
+    if tool_spec.passthrough is not None and not tool_spec.arguments:
+        usage_parts.append("[tokens...]")
 
     parts.append(f"**Usage:** `{' '.join(usage_parts)}`")
 
     # Maps-to line
-    maps_parts: list[str] = []
-    if tool_spec.npm_pkgrun:
-        maps_parts.append("<runner>")
-    for token in tool_spec.command:
-        maps_parts.append(re.sub(r"\{\{(\w+)\}\}", r"<\1>", token))
-    parts.append(f"**Maps to:** `{' '.join(maps_parts)}`")
+    maps_to = _maps_to_line(tool_spec)
+    if maps_to:
+        parts.append(f"**Maps to:** `{maps_to}`")
     parts.append("")
 
-    # Arguments
-    has_params = bool(tool_spec.flags) or bool(tool_spec.args)
-    if has_params:
-        parts.append("**Arguments:**")
+    # Passthrough deny patterns
+    if tool_spec.passthrough is not None and tool_spec.passthrough.deny:
+        denied = ", ".join(f"`{d}`" for d in tool_spec.passthrough.deny)
+        parts.append(f"**Denied patterns:** {denied}")
         parts.append("")
-        for _name, p in tool_spec.flags.items():
-            flag_display = f"{p.flag}|{p.short}" if p.short else p.flag
-            if p.boolean:
-                parts.append(f"- `{flag_display}` (boolean): {p.description}")
-            else:
-                required = "required" if p.required else "optional"
+
+    # Parameters
+    has_params = bool(tool_spec.switches) or bool(tool_spec.options) or bool(tool_spec.arguments)
+    if has_params:
+        if tool_spec.switches:
+            parts.append("**Switches:**")
+            parts.append("")
+            for _name, sw in tool_spec.switches.items():
+                flag_display = f"{sw.flag}, {sw.short}" if sw.short else sw.flag
+                parts.append(f"- `{flag_display}`: {sw.description}")
+            parts.append("")
+
+        if tool_spec.options:
+            parts.append("**Options:**")
+            parts.append("")
+            for name, opt in tool_spec.options.items():
+                flag_display = f"{opt.flag}|{opt.short}" if opt.short else opt.flag
+                required = "required" if opt.required else "optional"
                 constraints: list[str] = []
-                if p.pattern:
-                    constraints.append(f"must match `{p.pattern}`")
-                if p.allow:
-                    vals = ", ".join(f"`{v}`" for v in p.allow)
+                if opt.pattern:
+                    constraints.append(f"must match `{opt.pattern}`")
+                if opt.allow:
+                    vals = ", ".join(f"`{v}`" for v in opt.allow)
                     constraints.append(f"one of {vals}")
-                if p.deny:
-                    vals = ", ".join(f"`{v}`" for v in p.deny)
+                if opt.deny:
+                    vals = ", ".join(f"`{v}`" for v in opt.deny)
                     constraints.append(f"not {vals}")
                 suffix = ". " + "; ".join(constraints) if constraints else ""
-                parts.append(f"- `{flag_display}` ({required}): {p.description}{suffix}")
-        for name, spec in tool_spec.args.items():
-            required = "required" if spec.required else "optional"
-            label = f"<{name}...>" if spec.variadic else f"<{name}>"
-            constraints = []
-            if spec.pattern:
-                constraints.append(f"must match `{spec.pattern}`")
-            if spec.allow:
-                vals = ", ".join(f"`{v}`" for v in spec.allow)
-                constraints.append(f"one of {vals}")
-            if spec.deny:
-                vals = ", ".join(f"`{v}`" for v in spec.deny)
-                constraints.append(f"not {vals}")
-            suffix = ". " + "; ".join(constraints) if constraints else ""
-            parts.append(f"- `{label}` ({required}): {spec.description}{suffix}")
-        parts.append("")
+                parts.append(f"- `{flag_display}` ({required}): {opt.description}{suffix}")
+            parts.append("")
+
+        if tool_spec.arguments:
+            parts.append("**Arguments:**")
+            parts.append("")
+            for name, spec in tool_spec.arguments.items():
+                required = "required" if spec.required else "optional"
+                label = f"<{name}...>" if spec.variadic else f"<{name}>"
+                constraints = []
+                if spec.pattern:
+                    constraints.append(f"must match `{spec.pattern}`")
+                if spec.allow:
+                    vals = ", ".join(f"`{v}`" for v in spec.allow)
+                    constraints.append(f"one of {vals}")
+                if spec.deny:
+                    vals = ", ".join(f"`{v}`" for v in spec.deny)
+                    constraints.append(f"not {vals}")
+                suffix = ". " + "; ".join(constraints) if constraints else ""
+                parts.append(f"- `{label}` ({required}): {spec.description}{suffix}")
+            parts.append("")
     else:
-        parts.append("No arguments.")
-        parts.append("")
+        if tool_spec.passthrough is None:
+            parts.append("No arguments.")
+            parts.append("")
 
     parts.append("---")
     parts.append("")
     return "\n".join(parts)
+
+
+def _maps_to_line(tool_spec: ToolSpec) -> str | None:
+    """Show the underlying command with placeholders replaced by <name>."""
+    if tool_spec.template is not None:
+        parts: list[str] = []
+        if tool_spec.template.npm_pkgrun:
+            parts.append("<runner>")
+        for token in tool_spec.template.command:
+            parts.append(re.sub(r"\{\{(\w+)\}\}", r"<\1>", token))
+        return " ".join(parts)
+    if tool_spec.passthrough is not None:
+        pt = tool_spec.passthrough
+        parts = [pt.command]
+        parts.extend(pt.prefix)
+        parts.append('"$@"')
+        parts.extend(pt.suffix)
+        return " ".join(parts)
+    return None
 
 
 def _build_claude_plugin_overview_text(manifests: list[NerfManifest], prefix: str = "") -> str:

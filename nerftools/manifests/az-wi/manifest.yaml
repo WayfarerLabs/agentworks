@@ -1,3 +1,5 @@
+version: 1
+
 package:
   name: az-wi
   description: Azure Boards work item tools for viewing and commenting on work items
@@ -12,8 +14,12 @@ package:
 tools:
   az-boards-wi-show:
     description: Show details and comments for any work item
-    command: [az, boards, work-item, show, --id, "{{wi_id}}", --output, json]
-    args:
+    threat:
+      read: remote
+      write: none
+    template:
+      command: [az, boards, work-item, show, --id, "{{wi_id}}", --output, json]
+    arguments:
       wi_id:
         description: Work item ID (numeric)
         required: true
@@ -21,8 +27,12 @@ tools:
 
   az-boards-wi-comment:
     description: Add a comment to any work item
-    command: [az, boards, work-item, update, --id, "{{wi_id}}", --discussion, "{{comment}}", --output, none]
-    args:
+    threat:
+      read: remote
+      write: remote
+    template:
+      command: [az, boards, work-item, update, --id, "{{wi_id}}", --discussion, "{{comment}}", --output, none]
+    arguments:
       wi_id:
         description: Work item ID (numeric)
         required: true
@@ -33,8 +43,12 @@ tools:
 
   az-boards-mywi-show:
     description: Show details and comments for a work item assigned to you
-    command: [az, boards, work-item, show, --id, "{{wi_id}}", --output, json]
-    args:
+    threat:
+      read: remote
+      write: none
+    template:
+      command: [az, boards, work-item, show, --id, "{{wi_id}}", --output, json]
+    arguments:
       wi_id:
         description: Work item ID (numeric, must be assigned to you)
         required: true
@@ -42,8 +56,12 @@ tools:
 
   az-boards-mywi-comment:
     description: Add a comment to a work item assigned to you
-    command: [az, boards, work-item, update, --id, "{{wi_id}}", --discussion, "{{comment}}", --output, none]
-    args:
+    threat:
+      read: remote
+      write: remote
+    template:
+      command: [az, boards, work-item, update, --id, "{{wi_id}}", --discussion, "{{comment}}", --output, none]
+    arguments:
       wi_id:
         description: Work item ID (numeric, must be assigned to you)
         required: true

@@ -1,14 +1,19 @@
-"""Nerf manifest loading and validation.
+"""Nerf manifest loading and validation (v1).
 
 A nerf manifest is a YAML file that defines a family of scoped tool wrappers.
-It is the single source of truth for tool definitions, parameter specs, and
-rulesync skill metadata.
+It is the single source of truth for tool definitions, parameter specs, safety
+guardrails, threat metadata, and AI skill metadata.
+
+Version 1 introduces three execution modes (template, passthrough, script),
+a 2D threat model (read/write), and refined parameter types (switches, options,
+arguments).
 """
 
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from enum import Enum
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -17,6 +22,52 @@ if TYPE_CHECKING:
 
 class ManifestError(Exception):
     """Raised when a manifest is invalid."""
+
+
+# -- Enums ---------------------------------------------------------------------
+
+
+class ThreatLevel(Enum):
+    """Ordered threat scope from narrow to broad."""
+
+    NONE = "none"
+    WORKSPACE = "workspace"
+    MACHINE = "machine"
+    REMOTE = "remote"
+    ADMIN = "admin"
+
+    _ORDER: dict[str, int]  # type: ignore[assignment]
+
+    def __le__(self, other: object) -> bool:
+        if not isinstance(other, ThreatLevel):
+            return NotImplemented
+        return _THREAT_ORDER[self] <= _THREAT_ORDER[other]
+
+    def __lt__(self, other: object) -> bool:
+        if not isinstance(other, ThreatLevel):
+            return NotImplemented
+        return _THREAT_ORDER[self] < _THREAT_ORDER[other]
+
+    def __ge__(self, other: object) -> bool:
+        if not isinstance(other, ThreatLevel):
+            return NotImplemented
+        return _THREAT_ORDER[self] >= _THREAT_ORDER[other]
+
+    def __gt__(self, other: object) -> bool:
+        if not isinstance(other, ThreatLevel):
+            return NotImplemented
+        return _THREAT_ORDER[self] > _THREAT_ORDER[other]
+
+
+_THREAT_ORDER: dict[ThreatLevel, int] = {
+    ThreatLevel.NONE: 0,
+    ThreatLevel.WORKSPACE: 1,
+    ThreatLevel.MACHINE: 2,
+    ThreatLevel.REMOTE: 3,
+    ThreatLevel.ADMIN: 4,
+}
+
+THREAT_LEVEL_NAMES = tuple(t.value for t in ThreatLevel)
 
 
 # -- Data classes --------------------------------------------------------------
@@ -31,40 +82,38 @@ class PackageMeta:
 
 
 @dataclass(frozen=True)
-class FlagSpec:
-    """Specification for a named flag argument (e.g. --remote <value>).
+class ThreatSpec:
+    """Two-dimensional threat profile: what a tool reads and writes."""
 
-    The flag string is auto-derived from the param name if not set explicitly
-    (e.g. name 'remote' -> '--remote'). Flags are required by default; set
-    optional=True to make them optional.
+    read: ThreatLevel
+    write: ThreatLevel
 
-    Boolean flags (boolean=True) take no value -- they are either present or
-    absent (e.g. --draft, --check). Boolean flags are always optional.
-    """
 
-    flag: str
+@dataclass(frozen=True)
+class SwitchSpec:
+    """A boolean flag -- present or absent, no value. Always optional."""
+
     description: str
-    optional: bool = False
-    boolean: bool = False
+    flag: str  # e.g. --verbose
     short: str | None = None
+
+
+@dataclass(frozen=True)
+class OptionSpec:
+    """A named flag that takes exactly one value (option flag + option value)."""
+
+    description: str
+    flag: str  # e.g. --remote
+    short: str | None = None
+    required: bool = False
     pattern: str | None = None
     allow: tuple[str, ...] = field(default_factory=tuple)
     deny: tuple[str, ...] = field(default_factory=tuple)
 
-    @property
-    def required(self) -> bool:
-        return not self.optional
-
 
 @dataclass(frozen=True)
 class ArgSpec:
-    """Specification for a positional argument.
-
-    Positional args are optional by default. Set required=True to require them.
-    Set variadic=True to collect all remaining arguments into a bash array;
-    variadic must be the last arg and is mutually exclusive with other args
-    that come after it.
-    """
+    """A positional argument identified by position, not by a flag."""
 
     description: str
     required: bool = False
@@ -72,6 +121,24 @@ class ArgSpec:
     pattern: str | None = None
     allow: tuple[str, ...] = field(default_factory=tuple)
     deny: tuple[str, ...] = field(default_factory=tuple)
+
+
+@dataclass(frozen=True)
+class TemplateSpec:
+    """Build a command from an explicit template with {{param}} placeholders."""
+
+    command: tuple[str, ...]
+    npm_pkgrun: bool = False
+
+
+@dataclass(frozen=True)
+class PassthroughSpec:
+    """Forward all tokens after deny-list scan."""
+
+    command: str
+    deny: tuple[str, ...] = field(default_factory=tuple)
+    prefix: tuple[str, ...] = field(default_factory=tuple)
+    suffix: tuple[str, ...] = field(default_factory=tuple)
 
 
 @dataclass(frozen=True)
@@ -86,7 +153,7 @@ class GuardSpec:
     script to print fail_message and exit 1.
 
     {{param}} placeholders in command parts and script text are substituted
-    with the tool's flag/arg values, the same as in the main command.
+    with the tool's parameter values.
     """
 
     fail_message: str
@@ -97,16 +164,36 @@ class GuardSpec:
 @dataclass(frozen=True)
 class ToolSpec:
     description: str
-    command: tuple[str, ...]
-    flags: dict[str, FlagSpec] = field(default_factory=dict)
-    args: dict[str, ArgSpec] = field(default_factory=dict)
-    env: dict[str, str] = field(default_factory=dict)
+    threat: ThreatSpec
+
+    # Execution mode (exactly one set):
+    template: TemplateSpec | None = None
+    passthrough: PassthroughSpec | None = None
+    script: str | None = None
+
+    # Parameters (template + script only):
+    switches: dict[str, SwitchSpec] = field(default_factory=dict)
+    options: dict[str, OptionSpec] = field(default_factory=dict)
+    arguments: dict[str, ArgSpec] = field(default_factory=dict)
+
+    # Lifecycle:
+    pre: str | None = None
     guards: tuple[GuardSpec, ...] = field(default_factory=tuple)
-    npm_pkgrun: bool = False
+    env: dict[str, str] = field(default_factory=dict)
+
+    @property
+    def mode(self) -> str:
+        """Return the active execution mode name."""
+        if self.template is not None:
+            return "template"
+        if self.passthrough is not None:
+            return "passthrough"
+        return "script"
 
 
 @dataclass(frozen=True)
 class NerfManifest:
+    version: int
     package: PackageMeta
     tools: dict[str, ToolSpec]
     source_path: Path | None = None
@@ -129,10 +216,16 @@ def load_manifest(path: Path) -> NerfManifest:
     if not isinstance(raw, dict):
         raise ManifestError(f"{path}: manifest must be a YAML mapping")
 
+    version = raw.get("version")
+    if version is None:
+        raise ManifestError(f"{path}: 'version' is required")
+    if not isinstance(version, int) or version != 1:
+        raise ManifestError(f"{path}: unsupported manifest version: {version} (expected 1)")
+
     package = _load_package(raw, path)
     tools = _load_tools(raw, path)
 
-    return NerfManifest(package=package, tools=tools, source_path=path)
+    return NerfManifest(version=version, package=package, tools=tools, source_path=path)
 
 
 def _load_package(raw: dict[str, Any], path: Path) -> PackageMeta:
@@ -172,112 +265,203 @@ def _load_tool(raw: dict[str, Any], path: Path, tool_name: str) -> ToolSpec:
     ctx = f"{path}:tools.{tool_name}"
 
     description = _require_str(raw, "description", ctx)
-    command_raw = raw.get("command")
+    threat = _load_threat(raw, path, tool_name)
+
+    # Execution mode
+    template = _load_template(raw, path, tool_name) if "template" in raw else None
+    passthrough = _load_passthrough(raw, path, tool_name) if "passthrough" in raw else None
+    script = str(raw["script"]).strip() if "script" in raw else None
+
+    modes = sum(x is not None for x in (template, passthrough, script))
+    if modes == 0:
+        raise ManifestError(f"{ctx}: exactly one of 'template', 'passthrough', or 'script' is required")
+    if modes > 1:
+        raise ManifestError(f"{ctx}: only one of 'template', 'passthrough', or 'script' may be set")
+
+    # Parameters
+    switches = _load_switches(raw, path, tool_name)
+    options = _load_options(raw, path, tool_name)
+    arguments = _load_arguments(raw, path, tool_name)
+
+    if passthrough is not None and (switches or options or arguments):
+        raise ManifestError(f"{ctx}: switches/options/arguments are not allowed in passthrough mode")
+
+    # Lifecycle
+    pre = str(raw["pre"]).strip() if "pre" in raw else None
+    guards = _load_guards(raw, path, tool_name)
+    env = _load_env(raw, path, tool_name)
+
+    tool = ToolSpec(
+        description=description,
+        threat=threat,
+        template=template,
+        passthrough=passthrough,
+        script=script,
+        switches=switches,
+        options=options,
+        arguments=arguments,
+        pre=pre,
+        guards=guards,
+        env=env,
+    )
+
+    _validate_tool(tool, ctx)
+    return tool
+
+
+def _load_threat(raw: dict[str, Any], path: Path, tool_name: str) -> ThreatSpec:
+    ctx = f"{path}:tools.{tool_name}"
+    threat_raw = raw.get("threat")
+    if not isinstance(threat_raw, dict):
+        raise ManifestError(f"{ctx}: 'threat' is required and must be a mapping")
+
+    read_str = threat_raw.get("read")
+    write_str = threat_raw.get("write")
+    if read_str is None:
+        raise ManifestError(f"{ctx}.threat: 'read' is required")
+    if write_str is None:
+        raise ManifestError(f"{ctx}.threat: 'write' is required")
+
+    try:
+        read = ThreatLevel(str(read_str))
+    except ValueError:
+        raise ManifestError(f"{ctx}.threat: invalid read level '{read_str}' (expected one of {', '.join(THREAT_LEVEL_NAMES)})") from None
+    try:
+        write = ThreatLevel(str(write_str))
+    except ValueError:
+        raise ManifestError(f"{ctx}.threat: invalid write level '{write_str}' (expected one of {', '.join(THREAT_LEVEL_NAMES)})") from None
+
+    return ThreatSpec(read=read, write=write)
+
+
+def _load_template(raw: dict[str, Any], path: Path, tool_name: str) -> TemplateSpec:
+    ctx = f"{path}:tools.{tool_name}.template"
+    tmpl_raw = raw["template"]
+    if not isinstance(tmpl_raw, dict):
+        raise ManifestError(f"{ctx}: must be a mapping")
+
+    command_raw = tmpl_raw.get("command")
     if not isinstance(command_raw, list) or not command_raw:
         raise ManifestError(f"{ctx}: 'command' must be a non-empty list")
     command = tuple(str(c) for c in command_raw)
+    npm_pkgrun = bool(tmpl_raw.get("npm_pkgrun", False))
 
-    env_raw = raw.get("env", {})
-    if not isinstance(env_raw, dict):
-        raise ManifestError(f"{ctx}: 'env' must be a mapping")
-    env = {str(k): str(v) for k, v in env_raw.items()}
+    return TemplateSpec(command=command, npm_pkgrun=npm_pkgrun)
 
-    flags_raw = raw.get("flags", {})
-    if not isinstance(flags_raw, dict):
-        raise ManifestError(f"{ctx}: 'flags' must be a mapping")
-    flags = {k: _load_flag(v, path, tool_name, k) for k, v in flags_raw.items()}
 
-    args_raw = raw.get("args", {})
+def _load_passthrough(raw: dict[str, Any], path: Path, tool_name: str) -> PassthroughSpec:
+    ctx = f"{path}:tools.{tool_name}.passthrough"
+    pt_raw = raw["passthrough"]
+    if not isinstance(pt_raw, dict):
+        raise ManifestError(f"{ctx}: must be a mapping")
+
+    command = _require_str(pt_raw, "command", ctx)
+    deny = tuple(str(d) for d in pt_raw.get("deny", []))
+    prefix = tuple(str(p) for p in pt_raw.get("prefix", []))
+    suffix = tuple(str(s) for s in pt_raw.get("suffix", []))
+
+    return PassthroughSpec(command=command, deny=deny, prefix=prefix, suffix=suffix)
+
+
+def _load_switches(raw: dict[str, Any], path: Path, tool_name: str) -> dict[str, SwitchSpec]:
+    switches_raw = raw.get("switches", {})
+    if not isinstance(switches_raw, dict):
+        raise ManifestError(f"{path}:tools.{tool_name}: 'switches' must be a mapping")
+
+    switches: dict[str, SwitchSpec] = {}
+    for name, spec_raw in switches_raw.items():
+        ctx = f"{path}:tools.{tool_name}.switches.{name}"
+        if not isinstance(spec_raw, dict):
+            raise ManifestError(f"{ctx}: must be a mapping")
+
+        description = _require_str(spec_raw, "description", ctx)
+        flag = str(spec_raw["flag"]) if "flag" in spec_raw else f"--{name.replace('_', '-')}"
+        short = str(spec_raw["short"]) if "short" in spec_raw else None
+
+        if short is not None and not re.fullmatch(r"-[a-zA-Z]", short):
+            raise ManifestError(f"{ctx}: 'short' must be a single-character flag like -v, got {short!r}")
+
+        switches[name] = SwitchSpec(description=description, flag=flag, short=short)
+
+    return switches
+
+
+def _load_options(raw: dict[str, Any], path: Path, tool_name: str) -> dict[str, OptionSpec]:
+    options_raw = raw.get("options", {})
+    if not isinstance(options_raw, dict):
+        raise ManifestError(f"{path}:tools.{tool_name}: 'options' must be a mapping")
+
+    options: dict[str, OptionSpec] = {}
+    for name, spec_raw in options_raw.items():
+        ctx = f"{path}:tools.{tool_name}.options.{name}"
+        if not isinstance(spec_raw, dict):
+            raise ManifestError(f"{ctx}: must be a mapping")
+
+        description = _require_str(spec_raw, "description", ctx)
+        flag = str(spec_raw["flag"]) if "flag" in spec_raw else f"--{name.replace('_', '-')}"
+        short = str(spec_raw["short"]) if "short" in spec_raw else None
+        required = bool(spec_raw.get("required", False))
+        pattern = str(spec_raw["pattern"]) if "pattern" in spec_raw else None
+        allow = tuple(str(v) for v in spec_raw.get("allow", []))
+        deny = tuple(str(v) for v in spec_raw.get("deny", []))
+
+        if short is not None and not re.fullmatch(r"-[a-zA-Z]", short):
+            raise ManifestError(f"{ctx}: 'short' must be a single-character flag like -r, got {short!r}")
+        if allow and deny:
+            raise ManifestError(f"{ctx}: 'allow' and 'deny' cannot both be set")
+        if pattern is not None:
+            try:
+                re.compile(pattern)
+            except re.error as e:
+                raise ManifestError(f"{ctx}: invalid 'pattern' regex: {e}") from e
+
+        options[name] = OptionSpec(
+            description=description, flag=flag, short=short,
+            required=required, pattern=pattern, allow=allow, deny=deny,
+        )
+
+    return options
+
+
+def _load_arguments(raw: dict[str, Any], path: Path, tool_name: str) -> dict[str, ArgSpec]:
+    args_raw = raw.get("arguments", {})
     if not isinstance(args_raw, dict):
-        raise ManifestError(f"{ctx}: 'args' must be a mapping")
-    args = {k: _load_arg(v, path, tool_name, k) for k, v in args_raw.items()}
+        raise ManifestError(f"{path}:tools.{tool_name}: 'arguments' must be a mapping")
 
+    arguments: dict[str, ArgSpec] = {}
+    for name, spec_raw in args_raw.items():
+        ctx = f"{path}:tools.{tool_name}.arguments.{name}"
+        if not isinstance(spec_raw, dict):
+            raise ManifestError(f"{ctx}: must be a mapping")
+
+        description = _require_str(spec_raw, "description", ctx)
+        required = bool(spec_raw.get("required", False))
+        variadic = bool(spec_raw.get("variadic", False))
+        pattern = str(spec_raw["pattern"]) if "pattern" in spec_raw else None
+        allow = tuple(str(v) for v in spec_raw.get("allow", []))
+        deny = tuple(str(v) for v in spec_raw.get("deny", []))
+
+        if allow and deny:
+            raise ManifestError(f"{ctx}: 'allow' and 'deny' cannot both be set")
+        if pattern is not None:
+            try:
+                re.compile(pattern)
+            except re.error as e:
+                raise ManifestError(f"{ctx}: invalid 'pattern' regex: {e}") from e
+
+        arguments[name] = ArgSpec(
+            description=description, required=required, variadic=variadic,
+            pattern=pattern, allow=allow, deny=deny,
+        )
+
+    return arguments
+
+
+def _load_guards(raw: dict[str, Any], path: Path, tool_name: str) -> tuple[GuardSpec, ...]:
     guards_raw = raw.get("guards", [])
     if not isinstance(guards_raw, list):
-        raise ManifestError(f"{ctx}: 'guards' must be a list")
-    guards = tuple(_load_guard(g, path, tool_name, i) for i, g in enumerate(guards_raw))
-
-    npm_pkgrun = bool(raw.get("npm_pkgrun", False))
-
-    _validate_tool(command, guards, flags, args, ctx)
-
-    return ToolSpec(
-        description=description,
-        command=command,
-        flags=flags,
-        args=args,
-        env=env,
-        guards=guards,
-        npm_pkgrun=npm_pkgrun,
-    )
-
-
-def _load_flag(raw: Any, path: Path, tool_name: str, flag_name: str) -> FlagSpec:
-    ctx = f"{path}:tools.{tool_name}.flags.{flag_name}"
-    if not isinstance(raw, dict):
-        raise ManifestError(f"{ctx}: must be a mapping")
-
-    # Auto-derive --flag-name from the dict key if not specified explicitly
-    flag = str(raw["flag"]) if "flag" in raw else f"--{flag_name.replace('_', '-')}"
-    description = _require_str(raw, "description", ctx)
-    boolean = bool(raw.get("boolean", False))
-    # Boolean flags are always optional (they are either present or absent)
-    optional = True if boolean else bool(raw.get("optional", False))
-    short = str(raw["short"]) if "short" in raw else None
-    pattern = str(raw["pattern"]) if "pattern" in raw else None
-    allow = tuple(str(v) for v in raw.get("allow", []))
-    deny = tuple(str(v) for v in raw.get("deny", []))
-
-    if short is not None and not re.fullmatch(r"-[a-zA-Z]", short):
-        raise ManifestError(f"{ctx}: 'short' must be a single-character flag like -r, got {short!r}")
-    if allow and deny:
-        raise ManifestError(f"{ctx}: 'allow' and 'deny' cannot both be set")
-    if pattern is not None:
-        try:
-            re.compile(pattern)
-        except re.error as e:
-            raise ManifestError(f"{ctx}: invalid 'pattern' regex: {e}") from e
-
-    return FlagSpec(
-        flag=flag,
-        description=description,
-        optional=optional,
-        boolean=boolean,
-        short=short,
-        pattern=pattern,
-        allow=allow,
-        deny=deny,
-    )
-
-
-def _load_arg(raw: Any, path: Path, tool_name: str, arg_name: str) -> ArgSpec:
-    ctx = f"{path}:tools.{tool_name}.args.{arg_name}"
-    if not isinstance(raw, dict):
-        raise ManifestError(f"{ctx}: must be a mapping")
-
-    description = _require_str(raw, "description", ctx)
-    required = bool(raw.get("required", False))
-    variadic = bool(raw.get("variadic", False))
-    pattern = str(raw["pattern"]) if "pattern" in raw else None
-    allow = tuple(str(v) for v in raw.get("allow", []))
-    deny = tuple(str(v) for v in raw.get("deny", []))
-
-    if allow and deny:
-        raise ManifestError(f"{ctx}: 'allow' and 'deny' cannot both be set")
-    if pattern is not None:
-        try:
-            re.compile(pattern)
-        except re.error as e:
-            raise ManifestError(f"{ctx}: invalid 'pattern' regex: {e}") from e
-
-    return ArgSpec(
-        description=description,
-        required=required,
-        variadic=variadic,
-        pattern=pattern,
-        allow=allow,
-        deny=deny,
-    )
+        raise ManifestError(f"{path}:tools.{tool_name}: 'guards' must be a list")
+    return tuple(_load_guard(g, path, tool_name, i) for i, g in enumerate(guards_raw))
 
 
 def _load_guard(raw: Any, path: Path, tool_name: str, index: int) -> GuardSpec:
@@ -306,19 +490,70 @@ def _load_guard(raw: Any, path: Path, tool_name: str, index: int) -> GuardSpec:
     return GuardSpec(fail_message=fail_message, script=script)
 
 
-def _validate_tool(
-    command: tuple[str, ...],
-    guards: tuple[GuardSpec, ...],
-    flags: dict[str, FlagSpec],
-    args: dict[str, ArgSpec],
-    ctx: str,
-) -> None:
-    # Check for name collision between flags and args
-    overlap = set(flags.keys()) & set(args.keys())
-    if overlap:
-        raise ManifestError(f"{ctx}: names defined in both flags and args: {', '.join(sorted(overlap))}")
+def _load_env(raw: dict[str, Any], path: Path, tool_name: str) -> dict[str, str]:
+    env_raw = raw.get("env", {})
+    if not isinstance(env_raw, dict):
+        raise ManifestError(f"{path}:tools.{tool_name}: 'env' must be a mapping")
+    return {str(k): str(v) for k, v in env_raw.items()}
 
-    all_params = set(flags.keys()) | set(args.keys())
+
+# -- Validation ----------------------------------------------------------------
+
+
+def _validate_tool(tool: ToolSpec, ctx: str) -> None:
+    """Cross-reference validation across fields."""
+    all_params = set(tool.switches.keys()) | set(tool.options.keys()) | set(tool.arguments.keys())
+
+    # Name collision check
+    sw_names = set(tool.switches.keys())
+    opt_names = set(tool.options.keys())
+    arg_names = set(tool.arguments.keys())
+    for a, b, a_label, b_label in [
+        (sw_names, opt_names, "switches", "options"),
+        (sw_names, arg_names, "switches", "arguments"),
+        (opt_names, arg_names, "options", "arguments"),
+    ]:
+        overlap = a & b
+        if overlap:
+            raise ManifestError(f"{ctx}: names overlap between {a_label} and {b_label}: {', '.join(sorted(overlap))}")
+
+    if tool.template is not None:
+        _validate_template_refs(tool, ctx)
+    elif tool.script is not None:
+        _validate_script_refs(tool, ctx)
+
+    # Variadic argument must be last
+    arg_names_list = list(tool.arguments.keys())
+    for name in arg_names_list[:-1]:
+        if tool.arguments[name].variadic:
+            raise ManifestError(f"{ctx}: argument '{name}' is variadic but is not the last argument")
+
+    # Guard placeholders must reference defined params
+    for i, guard in enumerate(tool.guards):
+        parts: list[str] = list(guard.command) if guard.command else [guard.script or ""]
+        for part in parts:
+            for match in _PLACEHOLDER_RE.finditer(part):
+                name = match.group(1)
+                if name not in all_params:
+                    raise ManifestError(
+                        f"{ctx}: guards[{i}] references '{{{{{name}}}}}' but '{name}' is not defined"
+                    )
+
+    # Pre-hook placeholder validation
+    if tool.pre:
+        for match in _PLACEHOLDER_RE.finditer(tool.pre):
+            name = match.group(1)
+            if name not in all_params:
+                raise ManifestError(
+                    f"{ctx}: pre references '{{{{{name}}}}}' but '{name}' is not defined"
+                )
+
+
+def _validate_template_refs(tool: ToolSpec, ctx: str) -> None:
+    """Validate that template command placeholders and params match."""
+    assert tool.template is not None
+    command = tool.template.command
+    all_params = set(tool.switches.keys()) | set(tool.options.keys()) | set(tool.arguments.keys())
 
     # All {{param}} in command must be defined
     referenced: set[str] = set()
@@ -329,31 +564,33 @@ def _validate_tool(
     for name in referenced:
         if name not in all_params:
             raise ManifestError(
-                f"{ctx}: command references '{{{{name}}}}' but '{name}' is not defined in flags or args"
+                f"{ctx}: template command references '{{{{{name}}}}}' but '{name}' is not defined"
             )
 
-    # All flags and args must be referenced in command
+    # All params must be referenced in command
     for name in all_params:
         placeholder = "{{" + name + "}}"
         if not any(placeholder in part for part in command):
-            raise ManifestError(f"{ctx}: '{name}' is defined but not referenced in command")
+            raise ManifestError(f"{ctx}: '{name}' is defined but not referenced in template command")
 
-    # Variadic arg must be last
-    arg_names = list(args.keys())
-    for name in arg_names[:-1]:
-        if args[name].variadic:
-            raise ManifestError(f"{ctx}: arg '{name}' is variadic but is not the last arg")
+    # Variadic arg placeholder must be last element in command
+    arg_names = list(tool.arguments.keys())
+    if arg_names:
+        last_arg = arg_names[-1]
+        if tool.arguments[last_arg].variadic:
+            last_cmd = command[-1] if command else ""
+            placeholder = "{{" + last_arg + "}}"
+            if last_cmd != placeholder:
+                raise ManifestError(
+                    f"{ctx}: variadic argument '{last_arg}' placeholder must be the last element in template command"
+                )
 
-    # Guard placeholders must reference defined params
-    for i, guard in enumerate(guards):
-        parts: list[str] = list(guard.command) if guard.command else [guard.script or ""]
-        for part in parts:
-            for match in _PLACEHOLDER_RE.finditer(part):
-                name = match.group(1)
-                if name not in all_params:
-                    raise ManifestError(
-                        f"{ctx}: guards[{i}] references '{{{{name}}}}' but '{name}' is not defined in flags or args"
-                    )
+
+def _validate_script_refs(tool: ToolSpec, ctx: str) -> None:
+    """Validate that script mode params are referenced (but not strictly -- script can use vars directly)."""
+    # In script mode we only check that params are defined; the script accesses
+    # them as shell variables so we can't verify usage from YAML alone.
+    pass
 
 
 # -- Merging -------------------------------------------------------------------
@@ -366,6 +603,7 @@ def merge_manifests(manifests: list[NerfManifest]) -> list[NerfManifest]:
     replaces the same-named tool from an earlier manifest.
     """
     packages: dict[str, PackageMeta] = {}
+    versions: dict[str, int] = {}
     tools_by_package: dict[str, dict[str, ToolSpec]] = {}
     source_by_package: dict[str, Path | None] = {}
 
@@ -373,12 +611,14 @@ def merge_manifests(manifests: list[NerfManifest]) -> list[NerfManifest]:
         pkg_name = manifest.package.name
         if pkg_name not in packages:
             packages[pkg_name] = manifest.package
+            versions[pkg_name] = manifest.version
             tools_by_package[pkg_name] = {}
             source_by_package[pkg_name] = manifest.source_path
         tools_by_package[pkg_name].update(manifest.tools)
 
     return [
         NerfManifest(
+            version=versions[pkg_name],
             package=packages[pkg_name],
             tools=tools_by_package[pkg_name],
             source_path=source_by_package[pkg_name],

@@ -1,3 +1,5 @@
+version: 1
+
 package:
   name: az-pipelines
   description: Azure Pipelines tools for viewing pipeline status and run history
@@ -12,16 +14,28 @@ package:
 tools:
   az-pipelines-list:
     description: List all pipelines in the Azure DevOps project
-    command: [az, pipelines, list, --output, table]
+    threat:
+      read: remote
+      write: none
+    template:
+      command: [az, pipelines, list, --output, table]
 
   az-pipelines-runs:
     description: List the 20 most recent pipeline runs across all pipelines
-    command: [az, pipelines, runs, list, --top, "20", --output, table]
+    threat:
+      read: remote
+      write: none
+    template:
+      command: [az, pipelines, runs, list, --top, "20", --output, table]
 
   az-pipelines-check:
     description: Show details and the 10 most recent runs for a specific pipeline (by ID)
-    command: [az, pipelines, runs, list, --pipeline-ids, "{{pipeline_id}}", --top, "10", --output, table]
-    args:
+    threat:
+      read: remote
+      write: none
+    template:
+      command: [az, pipelines, runs, list, --pipeline-ids, "{{pipeline_id}}", --top, "10", --output, table]
+    arguments:
       pipeline_id:
         description: Pipeline ID (numeric, from az-pipelines-list)
         required: true

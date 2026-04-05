@@ -1,8 +1,9 @@
-"""Shell script generation from nerf manifest tool specs.
+"""Shell script generation from nerf manifest tool specs (v1).
 
 Each tool becomes a self-contained bash script with all argument parsing,
-validation, and error formatting inlined. Scripts use exec as the final
-instruction so exit codes and signal handling match the underlying tool.
+validation, and error formatting inlined. Three execution modes are supported:
+template (exec with substituted params), passthrough (deny-scan + exec), and
+script (inline bash).
 """
 
 from __future__ import annotations
@@ -13,7 +14,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from nerftools.manifest import ArgSpec, FlagSpec, NerfManifest, ToolSpec
+    from nerftools.manifest import ArgSpec, NerfManifest, OptionSpec, SwitchSpec, ToolSpec
 
 _PLACEHOLDER_RE = re.compile(r"\{\{(\w+)\}\}")
 
@@ -70,86 +71,129 @@ def build_script_text(tool_name: str, package_name: str, tool_spec: ToolSpec) ->
 def _build_script(tool_name: str, package_name: str, tool_spec: ToolSpec) -> str:
     parts: list[str] = []
 
+    # Header
     parts.append("#!/usr/bin/env bash")
     parts.append(f"# {tool_name} -- {tool_spec.description}")
     parts.append(f"# Generated from {package_name} manifest. Do not edit directly.")
+    parts.append(f"# nerf:threat:read={tool_spec.threat.read.value}")
+    parts.append(f"# nerf:threat:write={tool_spec.threat.write.value}")
     parts.append("")
     parts.append("set -euo pipefail")
     parts.append("")
+
+    # Usage
     parts.append(_usage_function(tool_name, tool_spec))
 
-    has_positional = bool(tool_spec.args)
+    # Parameter parsing (template + script modes only)
+    has_params = bool(tool_spec.switches) or bool(tool_spec.options)
+    has_positional = bool(tool_spec.arguments)
 
-    if tool_spec.flags:
+    if has_params:
         parts.append("")
-        parts.append(_var_declarations(tool_spec.flags))
+        parts.append(_var_declarations(tool_spec))
         parts.append("")
-        parts.append(_flag_parser(tool_spec.flags, has_positional=has_positional))
+        parts.append(_flag_parser(tool_spec, has_positional=has_positional))
 
-    if tool_spec.args:
+    if has_positional:
         parts.append("")
-        parts.append(_positional_parser(tool_spec.args))
+        parts.append(_positional_parser(tool_spec.arguments))
 
-    if tool_spec.flags:
-        validations = _flag_validations(tool_spec.flags)
+    # Validations
+    if has_params:
+        validations = _param_validations(tool_name, tool_spec)
         if validations.strip():
             parts.append("")
             parts.append(validations)
 
-    if tool_spec.args:
-        validations = _arg_validations(tool_spec.args)
+    if has_positional:
+        validations = _arg_validations(tool_name, tool_spec.arguments)
         if validations.strip():
             parts.append("")
             parts.append(validations)
 
+    # Env
     if tool_spec.env:
         parts.append("")
         parts.append(_env_exports(tool_spec.env))
 
+    # Guards
     if tool_spec.guards:
         parts.append("")
-        parts.append(_guard_checks(tool_spec))
+        parts.append(_guard_checks(tool_name, tool_spec))
 
-    if tool_spec.npm_pkgrun:
+    # Pre-hook
+    if tool_spec.pre:
         parts.append("")
-        parts.append(_npm_pkgrun_resolver())
+        parts.append(_pre_hook(tool_name, tool_spec))
+
+    # Execution mode
+    if tool_spec.template is not None:
+        if tool_spec.template.npm_pkgrun:
+            parts.append("")
+            parts.append(_npm_pkgrun_resolver())
+        parts.append("")
+        parts.append(_template_exec(tool_spec))
+    elif tool_spec.passthrough is not None:
+        parts.append("")
+        parts.append(_passthrough_exec(tool_name, tool_spec))
+    elif tool_spec.script is not None:
+        parts.append("")
+        parts.append(tool_spec.script.rstrip())
 
     parts.append("")
-    parts.append(_exec_line(tool_spec))
+    return "\n".join(parts)
 
-    return "\n".join(parts) + "\n"
+
+# -- Usage function ------------------------------------------------------------
 
 
 def _usage_function(tool_name: str, tool_spec: ToolSpec) -> str:
     usage_parts = [tool_name]
-    for name, p in tool_spec.flags.items():
-        flag_display = f"{p.flag}|{p.short}" if p.short else p.flag
-        if p.boolean:
-            usage_parts.append(f"[{flag_display}]")
-        else:
-            flag_str = f"{flag_display} <{name}>"
-            usage_parts.append(flag_str if p.required else f"[{flag_str}]")
-    for name, spec in tool_spec.args.items():
+
+    for name, sw in tool_spec.switches.items():
+        flag_display = f"{sw.flag}|{sw.short}" if sw.short else sw.flag
+        usage_parts.append(f"[{flag_display}]")
+
+    for name, opt in tool_spec.options.items():
+        flag_display = f"{opt.flag}|{opt.short}" if opt.short else opt.flag
+        token = f"{flag_display} <{name}>"
+        usage_parts.append(token if opt.required else f"[{token}]")
+
+    for name, spec in tool_spec.arguments.items():
         token = f"<{name}...>" if spec.variadic else f"<{name}>"
         usage_parts.append(token if spec.required else f"[{token}]")
-    usage_line = " ".join(usage_parts)
 
+    # Passthrough mode: show [tokens...]
+    if tool_spec.passthrough is not None and not tool_spec.arguments:
+        usage_parts.append("[tokens...]")
+
+    usage_line = " ".join(usage_parts)
     lines = [f"Usage: {usage_line}", ""]
 
-    if tool_spec.flags:
-        for name, p in tool_spec.flags.items():
-            required_marker = " (required)" if p.required else ""
-            flag_display = f"{p.flag}|{p.short}" if p.short else p.flag
-            if p.boolean:
-                lines.append(f"  {flag_display}")
-            else:
-                lines.append(f"  {flag_display} <{name}>{required_marker}")
-            lines.append(f"      {p.description}")
-            _append_constraints(lines, p.pattern, p.allow, p.deny, indent="      ")
+    # Switches
+    if tool_spec.switches:
+        lines.append("Switches:")
+        for name, sw in tool_spec.switches.items():
+            flag_display = f"{sw.flag}, {sw.short}" if sw.short else f"{sw.flag}"
+            lines.append(f"  {flag_display}")
+            lines.append(f"      {sw.description}")
         lines.append("")
 
-    if tool_spec.args:
-        for name, spec in tool_spec.args.items():
+    # Options
+    if tool_spec.options:
+        lines.append("Options:")
+        for name, opt in tool_spec.options.items():
+            flag_display = f"{opt.flag}, {opt.short}" if opt.short else f"{opt.flag}"
+            required_marker = " (required)" if opt.required else ""
+            lines.append(f"  {flag_display} <{name}>{required_marker}")
+            lines.append(f"      {opt.description}")
+            _append_constraints(lines, opt.pattern, opt.allow, opt.deny, indent="      ")
+        lines.append("")
+
+    # Arguments
+    if tool_spec.arguments:
+        lines.append("Arguments:")
+        for name, spec in tool_spec.arguments.items():
             required_marker = " (required)" if spec.required else ""
             arg_label = f"<{name}...>" if spec.variadic else f"<{name}>"
             lines.append(f"  {arg_label}{required_marker}")
@@ -157,10 +201,41 @@ def _usage_function(tool_name: str, tool_spec: ToolSpec) -> str:
             _append_constraints(lines, spec.pattern, spec.allow, spec.deny, indent="      ")
         lines.append("")
 
+    # Maps to (template and passthrough only)
+    maps_to = _maps_to_text(tool_spec)
+    if maps_to:
+        lines.append(f"Maps to: {maps_to}")
+        lines.append("")
+
+    # Passthrough deny list
+    if tool_spec.passthrough is not None and tool_spec.passthrough.deny:
+        denied = ", ".join(tool_spec.passthrough.deny)
+        lines.append(f"Denied patterns: {denied}")
+        lines.append("")
+
     lines.append(tool_spec.description + ".")
 
     body = "\n".join(lines)
     return f"usage() {{\n  cat >&2 <<'EOF'\n{body}\nEOF\n  exit 1\n}}"
+
+
+def _maps_to_text(tool_spec: ToolSpec) -> str | None:
+    """Return the 'Maps to' string, or None for script mode."""
+    if tool_spec.template is not None:
+        parts: list[str] = []
+        if tool_spec.template.npm_pkgrun:
+            parts.append("<runner>")
+        for token in tool_spec.template.command:
+            parts.append(re.sub(r"\{\{(\w+)\}\}", r"<\1>", token))
+        return " ".join(parts)
+    if tool_spec.passthrough is not None:
+        pt = tool_spec.passthrough
+        parts = [pt.command]
+        parts.extend(pt.prefix)
+        parts.append('"$@"')
+        parts.extend(pt.suffix)
+        return " ".join(parts)
+    return None
 
 
 def _append_constraints(
@@ -178,23 +253,31 @@ def _append_constraints(
         lines.append(f"{indent}Not allowed: {', '.join(deny)}")
 
 
-def _var_declarations(flags: dict[str, FlagSpec]) -> str:
+# -- Variable declarations and parsing ----------------------------------------
+
+
+def _var_declarations(tool_spec: ToolSpec) -> str:
     lines = []
-    for name in flags:
-        var = _var_name(name)
-        lines.append(f'{var}=""')
+    for name in tool_spec.switches:
+        lines.append(f'{_var_name(name)}=""')
+    for name in tool_spec.options:
+        lines.append(f'{_var_name(name)}=""')
     return "\n".join(lines)
 
 
-def _flag_parser(flags: dict[str, FlagSpec], *, has_positional: bool) -> str:
+def _flag_parser(tool_spec: ToolSpec, *, has_positional: bool) -> str:
     cases = []
-    for name, p in flags.items():
+
+    for name, sw in tool_spec.switches.items():
         var = _var_name(name)
-        pattern = f"{p.flag}|{p.short}" if p.short else p.flag
-        if p.boolean:
-            cases.append(f'    {pattern}) {var}="true"; shift 1 ;;')
-        else:
-            cases.append(f'    {pattern}) {var}="$2"; shift 2 ;;')
+        pattern = f"{sw.flag}|{sw.short}" if sw.short else sw.flag
+        cases.append(f'    {pattern}) {var}="true"; shift 1 ;;')
+
+    for name, opt in tool_spec.options.items():
+        var = _var_name(name)
+        pattern = f"{opt.flag}|{opt.short}" if opt.short else opt.flag
+        cases.append(f'    {pattern}) {var}="$2"; shift 2 ;;')
+
     cases.append("    -h|--help) usage ;;")
     if has_positional:
         cases.append("    *) break ;;")
@@ -212,9 +295,9 @@ def _flag_parser(flags: dict[str, FlagSpec], *, has_positional: bool) -> str:
     )
 
 
-def _positional_parser(args: dict[str, ArgSpec]) -> str:
+def _positional_parser(arguments: dict[str, ArgSpec]) -> str:
     lines = []
-    for name, spec in args.items():
+    for name, spec in arguments.items():
         var = _var_name(name)
         if spec.variadic:
             lines.append(f'{var}=("$@")')
@@ -224,64 +307,90 @@ def _positional_parser(args: dict[str, ArgSpec]) -> str:
     return "\n".join(lines)
 
 
-def _flag_validations(flags: dict[str, FlagSpec]) -> str:
+# -- Validations ---------------------------------------------------------------
+
+
+def _param_validations(tool_name: str, tool_spec: ToolSpec) -> str:
     lines: list[str] = []
-    for name, p in flags.items():
+
+    for name, opt in tool_spec.options.items():
         var = _var_name(name)
 
-        if p.required:
+        if opt.required:
             lines.append(f'if [[ -z "${{{var}}}" ]]; then')
-            lines.append(f'  echo "error: {p.flag} is required" >&2; usage')
+            lines.append(f'  echo "error: {tool_name}: missing required option {opt.flag}" >&2')
+            lines.append(f'  echo "  hint: provide {opt.flag} <value>" >&2')
+            lines.append("  usage")
             lines.append("fi")
             lines.append("")
 
-        if p.pattern:
-            safe_pattern = p.pattern.replace("'", "'\"'\"'")
+        if opt.pattern:
+            safe_pattern = opt.pattern.replace("'", "'\"'\"'")
             lines.append(f'if [[ -n "${{{var}}}" ]] && ! [[ "${{{var}}}" =~ {safe_pattern} ]]; then')
-            lines.append(f'  echo "error: {p.flag} must match {p.pattern}" >&2; exit 1')
+            lines.append(f'  echo "error: {tool_name}: option {opt.flag} does not match required pattern" >&2')
+            lines.append(f'  echo "  value:   \\"${{{var}}}\\"" >&2')
+            lines.append(f'  echo "  pattern: {opt.pattern}" >&2')
+            lines.append(f'  echo "  hint: value must match {opt.pattern}" >&2')
+            lines.append("  exit 1")
             lines.append("fi")
             lines.append("")
 
-        if p.allow:
-            allow_checks = " && ".join(f'"${{{var}}}" != "{v}"' for v in p.allow)
-            vals = ", ".join(p.allow)
+        if opt.allow:
+            allow_checks = " && ".join(f'"${{{var}}}" != "{v}"' for v in opt.allow)
+            vals = ", ".join(opt.allow)
             lines.append(f'if [[ -n "${{{var}}}" ]] && [[ {allow_checks} ]]; then')
-            lines.append(f'  echo "error: {p.flag} must be one of: {vals}" >&2; exit 1')
+            lines.append(f'  echo "error: {tool_name}: option {opt.flag} is not an allowed value" >&2')
+            lines.append(f'  echo "  value:   \\"${{{var}}}\\"" >&2')
+            lines.append(f'  echo "  allowed: {vals}" >&2')
+            lines.append(f'  echo "  hint: use one of the allowed values" >&2')
+            lines.append("  exit 1")
             lines.append("fi")
             lines.append("")
 
-        if p.deny:
-            for denied in p.deny:
+        if opt.deny:
+            for denied in opt.deny:
                 lines.append(f'if [[ "${{{var}}}" == "{denied}" ]]; then')
-                lines.append(f'  echo "error: {p.flag} cannot be \\"{denied}\\"" >&2; exit 1')
+                lines.append(f'  echo "error: {tool_name}: option {opt.flag} is not allowed" >&2')
+                lines.append(f'  echo "  value:  \\"{denied}\\"" >&2')
+                lines.append(f'  echo "  denied: {", ".join(opt.deny)}" >&2')
+                lines.append(f'  echo "  hint: use a different value" >&2')
+                lines.append("  exit 1")
                 lines.append("fi")
             lines.append("")
 
     return "\n".join(lines).rstrip()
 
 
-def _arg_validations(args: dict[str, ArgSpec]) -> str:
+def _arg_validations(tool_name: str, arguments: dict[str, ArgSpec]) -> str:
     lines: list[str] = []
-    for name, spec in args.items():
+    for name, spec in arguments.items():
         var = _var_name(name)
 
         if spec.variadic:
             lines.append(f'for _v in "${{{var}[@]}}"; do')
             lines.append('  if [[ "$_v" == -* ]]; then')
-            lines.append(f"    echo \"error: <{name}> values cannot start with '-'\" >&2; exit 1")
+            lines.append(f"    echo \"error: {tool_name}: <{name}> values cannot start with '-'\" >&2")
+            lines.append(f'    echo "  hint: use -- before positional arguments if needed" >&2')
+            lines.append("    exit 1")
             lines.append("  fi")
             lines.append("done")
             lines.append("")
             if spec.required:
                 lines.append(f"if [[ ${{#{var}[@]}} -eq 0 ]]; then")
-                lines.append(f'  echo "error: <{name}> is required" >&2; usage')
+                lines.append(f'  echo "error: {tool_name}: missing required argument <{name}>" >&2')
+                lines.append(f'  echo "  hint: provide at least one value" >&2')
+                lines.append("  usage")
                 lines.append("fi")
                 lines.append("")
             if spec.pattern:
                 safe_pattern = spec.pattern.replace("'", "'\"'\"'")
                 lines.append(f'for _v in "${{{var}[@]}}"; do')
                 lines.append(f'  if ! [[ "$_v" =~ {safe_pattern} ]]; then')
-                lines.append(f'    echo "error: <{name}> must match {spec.pattern}" >&2; exit 1')
+                lines.append(f'    echo "error: {tool_name}: argument <{name}> does not match required pattern" >&2')
+                lines.append(f'    echo "  value:   \\"$_v\\"" >&2')
+                lines.append(f'    echo "  pattern: {spec.pattern}" >&2')
+                lines.append(f'    echo "  hint: value must match {spec.pattern}" >&2')
+                lines.append("    exit 1")
                 lines.append("  fi")
                 lines.append("done")
                 lines.append("")
@@ -290,7 +399,11 @@ def _arg_validations(args: dict[str, ArgSpec]) -> str:
                 vals = ", ".join(spec.allow)
                 lines.append(f'for _v in "${{{var}[@]}}"; do')
                 lines.append(f"  if [[ {allow_checks} ]]; then")
-                lines.append(f'    echo "error: <{name}> must be one of: {vals}" >&2; exit 1')
+                lines.append(f'    echo "error: {tool_name}: argument <{name}> is not an allowed value" >&2')
+                lines.append(f'    echo "  value:   \\"$_v\\"" >&2')
+                lines.append(f'    echo "  allowed: {vals}" >&2')
+                lines.append(f'    echo "  hint: use one of the allowed values" >&2')
+                lines.append("    exit 1")
                 lines.append("  fi")
                 lines.append("done")
                 lines.append("")
@@ -298,59 +411,189 @@ def _arg_validations(args: dict[str, ArgSpec]) -> str:
                 lines.append(f'for _v in "${{{var}[@]}}"; do')
                 for denied in spec.deny:
                     lines.append(f'  if [[ "$_v" == "{denied}" ]]; then')
-                    lines.append(f'    echo "error: <{name}> cannot be \\"{denied}\\"" >&2; exit 1')
+                    lines.append(f'    echo "error: {tool_name}: argument <{name}> is not allowed" >&2')
+                    lines.append(f'    echo "  value:  \\"{denied}\\"" >&2')
+                    lines.append(f'    echo "  denied: {", ".join(spec.deny)}" >&2')
+                    lines.append(f'    echo "  hint: use a different value" >&2')
+                    lines.append("    exit 1")
                     lines.append("  fi")
                 lines.append("done")
                 lines.append("")
         else:
             lines.append(f'if [[ -n "${{{var}}}" ]] && [[ "${{{var}}}" == -* ]]; then')
-            lines.append(f"  echo \"error: <{name}> cannot start with '-'\" >&2; exit 1")
+            lines.append(f"  echo \"error: {tool_name}: <{name}> cannot start with '-'\" >&2")
+            lines.append(f'  echo "  hint: use -- before positional arguments if needed" >&2')
+            lines.append("  exit 1")
             lines.append("fi")
             lines.append("")
             if spec.required:
                 lines.append(f'if [[ -z "${{{var}}}" ]]; then')
-                lines.append(f'  echo "error: <{name}> is required" >&2; usage')
+                lines.append(f'  echo "error: {tool_name}: missing required argument <{name}>" >&2')
+                lines.append(f'  echo "  hint: provide a value for <{name}>" >&2')
+                lines.append("  usage")
                 lines.append("fi")
                 lines.append("")
             if spec.pattern:
                 safe_pattern = spec.pattern.replace("'", "'\"'\"'")
                 lines.append(f'if [[ -n "${{{var}}}" ]] && ! [[ "${{{var}}}" =~ {safe_pattern} ]]; then')
-                lines.append(f'  echo "error: <{name}> must match {spec.pattern}" >&2; exit 1')
+                lines.append(f'  echo "error: {tool_name}: argument <{name}> does not match required pattern" >&2')
+                lines.append(f'  echo "  value:   \\"${{{var}}}\\"" >&2')
+                lines.append(f'  echo "  pattern: {spec.pattern}" >&2')
+                lines.append(f'  echo "  hint: value must match {spec.pattern}" >&2')
+                lines.append("  exit 1")
                 lines.append("fi")
                 lines.append("")
             if spec.allow:
                 allow_checks = " && ".join(f'"${{{var}}}" != "{v}"' for v in spec.allow)
                 vals = ", ".join(spec.allow)
                 lines.append(f'if [[ -n "${{{var}}}" ]] && [[ {allow_checks} ]]; then')
-                lines.append(f'  echo "error: <{name}> must be one of: {vals}" >&2; exit 1')
+                lines.append(f'  echo "error: {tool_name}: argument <{name}> is not an allowed value" >&2')
+                lines.append(f'  echo "  value:   \\"${{{var}}}\\"" >&2')
+                lines.append(f'  echo "  allowed: {vals}" >&2')
+                lines.append(f'  echo "  hint: use one of the allowed values" >&2')
+                lines.append("  exit 1")
                 lines.append("fi")
                 lines.append("")
             if spec.deny:
                 for denied in spec.deny:
                     lines.append(f'if [[ "${{{var}}}" == "{denied}" ]]; then')
-                    lines.append(f'  echo "error: <{name}> cannot be \\"{denied}\\"" >&2; exit 1')
+                    lines.append(f'  echo "error: {tool_name}: argument <{name}> is not allowed" >&2')
+                    lines.append(f'  echo "  value:  \\"{denied}\\"" >&2')
+                    lines.append(f'  echo "  denied: {", ".join(spec.deny)}" >&2')
+                    lines.append(f'  echo "  hint: use a different value" >&2')
+                    lines.append("  exit 1")
                     lines.append("fi")
                 lines.append("")
 
     return "\n".join(lines).rstrip()
 
 
+# -- Environment ---------------------------------------------------------------
+
+
 def _env_exports(env: dict[str, str]) -> str:
     return "\n".join(f'export {k}="{v}"' for k, v in env.items())
 
 
-def _substitute_command(
+# -- Guard checks --------------------------------------------------------------
+
+
+def _guard_checks(tool_name: str, tool_spec: ToolSpec) -> str:
+    lines: list[str] = []
+    for guard in tool_spec.guards:
+        safe_msg = guard.fail_message.replace("'", "'\"'\"'")
+
+        if guard.command is not None:
+            cmd_args = _substitute_template_command(
+                guard.command, tool_spec.switches, tool_spec.options, tool_spec.arguments
+            )
+            check = " ".join(cmd_args) + " > /dev/null 2>&1"
+            lines.append(f"{check} || {{ echo 'error: {tool_name}: {safe_msg}' >&2; exit 1; }}")
+        else:
+            script_text = _substitute_script(
+                guard.script or "", tool_spec.switches, tool_spec.options, tool_spec.arguments
+            )
+            script_lines = script_text.strip().splitlines()
+            if len(script_lines) == 1:
+                lines.append(f"( {script_lines[0]} ) || {{ echo 'error: {tool_name}: {safe_msg}' >&2; exit 1; }}")
+            else:
+                lines.append("(")
+                for sl in script_lines:
+                    lines.append(f"  {sl}")
+                lines.append(f") || {{ echo 'error: {tool_name}: {safe_msg}' >&2; exit 1; }}")
+
+    return "\n".join(lines)
+
+
+# -- Pre-hook ------------------------------------------------------------------
+
+
+def _pre_hook(tool_name: str, tool_spec: ToolSpec) -> str:
+    pre_body = _substitute_script(
+        tool_spec.pre or "", tool_spec.switches, tool_spec.options, tool_spec.arguments
+    )
+    lines = [
+        "_nerf_pre() {",
+    ]
+    for line in pre_body.strip().splitlines():
+        lines.append(f"  {line}")
+    lines.append("}")
+    lines.append("")
+    lines.append("_nerf_pre_rc=0")
+    lines.append("_nerf_pre || _nerf_pre_rc=$?")
+    lines.append("if [ $_nerf_pre_rc -ne 0 ]; then")
+    lines.append(f'  echo "error: {tool_name}: pre-hook failed (exit code $_nerf_pre_rc)" >&2')
+    lines.append("  exit $_nerf_pre_rc")
+    lines.append("fi")
+    return "\n".join(lines)
+
+
+# -- Execution modes -----------------------------------------------------------
+
+
+def _template_exec(tool_spec: ToolSpec) -> str:
+    """Generate the exec line for template mode."""
+    assert tool_spec.template is not None
+    args = _substitute_template_command(
+        tool_spec.template.command, tool_spec.switches, tool_spec.options, tool_spec.arguments
+    )
+    if tool_spec.template.npm_pkgrun:
+        return "exec $_PKGRUN " + " ".join(args)
+    return "exec " + " ".join(args)
+
+
+def _passthrough_exec(tool_name: str, tool_spec: ToolSpec) -> str:
+    """Generate the deny scan and exec for passthrough mode."""
+    assert tool_spec.passthrough is not None
+    pt = tool_spec.passthrough
+    lines: list[str] = []
+
+    if pt.deny:
+        # Deny pattern array
+        deny_items = " ".join(f"'{d}'" for d in pt.deny)
+        lines.append(f"_NERF_DENY_PATTERNS=({deny_items})")
+        lines.append("")
+        lines.append('for _tok in "$@"; do')
+        lines.append('  for _pat in "${_NERF_DENY_PATTERNS[@]}"; do')
+        lines.append('    case "$_tok" in')
+        lines.append("      $_pat)")
+        lines.append(f'        echo "error: {tool_name}: token \'$_tok\' is not allowed (matched deny pattern \'$_pat\')" >&2')
+        lines.append(f'        echo "  denied patterns: ${{_NERF_DENY_PATTERNS[*]}}" >&2')
+        lines.append(f"        echo \"  hint: remove '\\$_tok' and retry\" >&2")
+        lines.append("        exit 1")
+        lines.append("        ;;")
+        lines.append("    esac")
+        lines.append("  done")
+        lines.append("done")
+
+    # Exec line with prefix/suffix
+    exec_parts = [pt.command]
+    exec_parts.extend(pt.prefix)
+    exec_parts.append('"$@"')
+    exec_parts.extend(pt.suffix)
+    if lines:
+        lines.append("")
+    lines.append("exec " + " ".join(exec_parts))
+
+    return "\n".join(lines)
+
+
+# -- Substitution helpers ------------------------------------------------------
+
+
+def _substitute_template_command(
     command: tuple[str, ...],
-    flags: dict[str, FlagSpec],
-    args: dict[str, ArgSpec],
+    switches: dict[str, SwitchSpec],
+    options: dict[str, OptionSpec],
+    arguments: dict[str, ArgSpec],
 ) -> list[str]:
     """Substitute {{param}} placeholders in a command word list.
 
-    Required flags/args use "$VAR" (always present).
-    Optional flags/single-args use ${VAR:+"$VAR"} (omitted when empty).
+    Required options/args use "$VAR" (always present).
+    Optional options/single-args use ${VAR:+"$VAR"} (omitted when empty).
     Required variadic args use "${VAR[@]}".
     Optional variadic args use ${VAR[@]+"${VAR[@]}"}.
-    Boolean flags use ${VAR:+"--flag"}.
+    Switches use ${VAR:+"--flag"}.
     """
     result: list[str] = []
     for part in command:
@@ -358,16 +601,17 @@ def _substitute_command(
         if m:
             name = m.group(1)
             var = _var_name(name)
-            if name in flags:
-                p = flags[name]
-                if p.boolean:
-                    result.append("${" + var + ':+"' + p.flag + '"' + "}")
-                elif p.required:
+            if name in switches:
+                sw = switches[name]
+                result.append("${" + var + ':+"' + sw.flag + '"' + "}")
+            elif name in options:
+                opt = options[name]
+                if opt.required:
                     result.append(f'"${{{var}}}"')
                 else:
                     result.append("${" + var + ':+"$' + var + '"}')
-            elif name in args:
-                spec = args[name]
+            elif name in arguments:
+                spec = arguments[name]
                 if spec.variadic:
                     if spec.required:
                         result.append(f'"${{{var}[@]}}"')
@@ -387,8 +631,9 @@ def _substitute_command(
 
 def _substitute_script(
     script: str,
-    flags: dict[str, FlagSpec],
-    args: dict[str, ArgSpec],
+    switches: dict[str, SwitchSpec],
+    options: dict[str, OptionSpec],
+    arguments: dict[str, ArgSpec],
 ) -> str:
     """Substitute {{param}} placeholders inline within a bash script string.
 
@@ -419,45 +664,6 @@ def _npm_pkgrun_resolver() -> str:
         "  exit 1\n"
         "fi"
     )
-
-
-def _exec_line(tool_spec: ToolSpec) -> str:
-    args = _substitute_command(tool_spec.command, tool_spec.flags, tool_spec.args)
-    if tool_spec.npm_pkgrun:
-        return "exec $_PKGRUN " + " ".join(args)
-    return "exec " + " ".join(args)
-
-
-def _guard_checks(tool_spec: ToolSpec) -> str:
-    """Generate pre-flight guard checks that run before exec.
-
-    Both command and script guards use the same pattern:
-      <check> || { echo 'error: <message>' >&2; exit 1; }
-
-    Command guards suppress output. Script guards run as-is (the script is
-    responsible for its own redirection if silence is desired).
-    Multi-line scripts are wrapped in a subshell.
-    """
-    lines: list[str] = []
-    for guard in tool_spec.guards:
-        safe_msg = guard.fail_message.replace("'", "'\"'\"'")
-
-        if guard.command is not None:
-            cmd_args = _substitute_command(guard.command, tool_spec.flags, tool_spec.args)
-            check = " ".join(cmd_args) + " > /dev/null 2>&1"
-            lines.append(f"{check} || {{ echo 'error: {safe_msg}' >&2; exit 1; }}")
-        else:
-            script_text = _substitute_script(guard.script or "", tool_spec.flags, tool_spec.args)
-            script_lines = script_text.strip().splitlines()
-            if len(script_lines) == 1:
-                lines.append(f"( {script_lines[0]} ) || {{ echo 'error: {safe_msg}' >&2; exit 1; }}")
-            else:
-                lines.append("(")
-                for sl in script_lines:
-                    lines.append(f"  {sl}")
-                lines.append(f") || {{ echo 'error: {safe_msg}' >&2; exit 1; }}")
-
-    return "\n".join(lines)
 
 
 def _var_name(param_name: str) -> str:

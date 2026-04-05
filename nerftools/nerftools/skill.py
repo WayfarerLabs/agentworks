@@ -1,4 +1,4 @@
-"""Rulesync skill generation from nerf manifests.
+"""Rulesync skill generation from nerf manifests (v1).
 
 Generates a markdown skill file per package. The skill describes all tools in
 the package so AI coding assistants know how to use them.
@@ -6,12 +6,13 @@ the package so AI coding assistants know how to use them.
 
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from nerftools.manifest import ArgSpec, FlagSpec, NerfManifest, ToolSpec
+    from nerftools.manifest import ArgSpec, NerfManifest, OptionSpec, SwitchSpec, ToolSpec
 
 # -- Public API ----------------------------------------------------------------
 
@@ -160,23 +161,45 @@ def _tool_section(tool_name: str, tool_spec: ToolSpec) -> str:
 
     usage = _usage_line(tool_name, tool_spec)
     parts.append(f"**Usage:** `{usage}`")
+
     maps_to = _maps_to_line(tool_spec)
-    parts.append(f"**Maps to:** `{maps_to}`")
+    if maps_to:
+        parts.append(f"**Maps to:** `{maps_to}`")
     parts.append("")
 
-    has_params = bool(tool_spec.flags) or bool(tool_spec.args)
+    # Passthrough deny patterns
+    if tool_spec.passthrough is not None and tool_spec.passthrough.deny:
+        denied = ", ".join(f"`{d}`" for d in tool_spec.passthrough.deny)
+        parts.append(f"**Denied patterns:** {denied}")
+        parts.append("")
+
+    has_params = bool(tool_spec.switches) or bool(tool_spec.options) or bool(tool_spec.arguments)
 
     if has_params:
-        parts.append("**Arguments:**")
-        parts.append("")
-        for name, p in tool_spec.flags.items():
-            parts.append(_flag_line(name, p))
-        for name, spec in tool_spec.args.items():
-            parts.append(_arg_line(name, spec))
-        parts.append("")
+        if tool_spec.switches:
+            parts.append("**Switches:**")
+            parts.append("")
+            for name, sw in tool_spec.switches.items():
+                parts.append(_switch_line(sw))
+            parts.append("")
+
+        if tool_spec.options:
+            parts.append("**Options:**")
+            parts.append("")
+            for name, opt in tool_spec.options.items():
+                parts.append(_option_line(name, opt))
+            parts.append("")
+
+        if tool_spec.arguments:
+            parts.append("**Arguments:**")
+            parts.append("")
+            for name, spec in tool_spec.arguments.items():
+                parts.append(_arg_line(name, spec))
+            parts.append("")
     else:
-        parts.append("No arguments.")
-        parts.append("")
+        if tool_spec.passthrough is None:
+            parts.append("No arguments.")
+            parts.append("")
 
     parts.append("---")
     parts.append("")
@@ -185,59 +208,72 @@ def _tool_section(tool_name: str, tool_spec: ToolSpec) -> str:
 
 
 def _usage_line(tool_name: str, tool_spec: ToolSpec) -> str:
-    parts = [f"<nerf-bin>/{tool_name}"]
-    for name, p in tool_spec.flags.items():
-        flag_display = f"{p.flag}|{p.short}" if p.short else p.flag
-        if p.boolean:
-            parts.append(f"[{flag_display}]")
-        else:
-            token = f"{flag_display} <{name}>"
-            parts.append(token if p.required else f"[{token}]")
-    for name, spec in tool_spec.args.items():
+    usage_parts = [f"<nerf-bin>/{tool_name}"]
+
+    for name, sw in tool_spec.switches.items():
+        flag_display = f"{sw.flag}|{sw.short}" if sw.short else sw.flag
+        usage_parts.append(f"[{flag_display}]")
+
+    for name, opt in tool_spec.options.items():
+        flag_display = f"{opt.flag}|{opt.short}" if opt.short else opt.flag
+        token = f"{flag_display} <{name}>"
+        usage_parts.append(token if opt.required else f"[{token}]")
+
+    for name, spec in tool_spec.arguments.items():
         token = f"<{name}...>" if spec.variadic else f"<{name}>"
-        parts.append(token if spec.required else f"[{token}]")
-    return " ".join(parts)
+        usage_parts.append(token if spec.required else f"[{token}]")
+
+    if tool_spec.passthrough is not None and not tool_spec.arguments:
+        usage_parts.append("[tokens...]")
+
+    return " ".join(usage_parts)
 
 
-def _maps_to_line(tool_spec: ToolSpec) -> str:
+def _maps_to_line(tool_spec: ToolSpec) -> str | None:
     """Show the underlying command with placeholders replaced by <name>."""
-    import re
+    if tool_spec.template is not None:
+        parts: list[str] = []
+        if tool_spec.template.npm_pkgrun:
+            parts.append("<runner>")
+        for token in tool_spec.template.command:
+            parts.append(re.sub(r"\{\{(\w+)\}\}", r"<\1>", token))
+        return " ".join(parts)
+    if tool_spec.passthrough is not None:
+        pt = tool_spec.passthrough
+        parts = [pt.command]
+        parts.extend(pt.prefix)
+        parts.append('"$@"')
+        parts.extend(pt.suffix)
+        return " ".join(parts)
+    return None
 
-    parts: list[str] = []
-    if tool_spec.npm_pkgrun:
-        parts.append("<runner>")
-    for token in tool_spec.command:
-        parts.append(re.sub(r"\{\{(\w+)\}\}", r"<\1>", token))
-    return " ".join(parts)
+
+def _switch_line(sw: SwitchSpec) -> str:
+    flag_display = f"{sw.flag}, {sw.short}" if sw.short else sw.flag
+    return f"- `{flag_display}`: {sw.description}"
 
 
-def _flag_line(name: str, p: FlagSpec) -> str:
-    flag_display = f"{p.flag}|{p.short}" if p.short else p.flag
-    desc = p.description
-
-    if p.boolean:
-        return f"- `{flag_display}` (boolean): {desc}"
-
-    required = "required" if p.required else "optional"
+def _option_line(name: str, opt: OptionSpec) -> str:
+    flag_display = f"{opt.flag}|{opt.short}" if opt.short else opt.flag
+    required = "required" if opt.required else "optional"
 
     constraints: list[str] = []
-    if p.pattern:
-        constraints.append(f"must match `{p.pattern}`")
-    if p.allow:
-        vals = ", ".join(f"`{v}`" for v in p.allow)
+    if opt.pattern:
+        constraints.append(f"must match `{opt.pattern}`")
+    if opt.allow:
+        vals = ", ".join(f"`{v}`" for v in opt.allow)
         constraints.append(f"one of {vals}")
-    if p.deny:
-        vals = ", ".join(f"`{v}`" for v in p.deny)
+    if opt.deny:
+        vals = ", ".join(f"`{v}`" for v in opt.deny)
         constraints.append(f"not {vals}")
 
     suffix = ". " + "; ".join(constraints) if constraints else ""
-    return f"- `{flag_display}` ({required}): {desc}{suffix}"
+    return f"- `{flag_display}` ({required}): {opt.description}{suffix}"
 
 
 def _arg_line(name: str, spec: ArgSpec) -> str:
     required = "required" if spec.required else "optional"
     label = f"<{name}...>" if spec.variadic else f"<{name}>"
-    desc = spec.description
 
     constraints: list[str] = []
     if spec.pattern:
@@ -250,4 +286,4 @@ def _arg_line(name: str, spec: ArgSpec) -> str:
         constraints.append(f"not {vals}")
 
     suffix = ". " + "; ".join(constraints) if constraints else ""
-    return f"- `{label}` ({required}): {desc}{suffix}"
+    return f"- `{label}` ({required}): {spec.description}{suffix}"

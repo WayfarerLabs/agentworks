@@ -1,3 +1,5 @@
+version: 1
+
 package:
   name: git
   description: Git workflow tools for safe, scoped git operations
@@ -11,8 +13,12 @@ package:
 tools:
   git-add:
     description: Stage files or directories for commit
-    command: [git, add, "{{files}}"]
-    args:
+    threat:
+      read: workspace
+      write: workspace
+    template:
+      command: [git, add, "{{files}}"]
+    arguments:
       files:
         description: Files or directories to stage
         required: true
@@ -24,8 +30,12 @@ tools:
       Format: type[(scope)][!]: description.
       Allowed types: feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert.
       Must not contain Co-Authored-By trailers.
-    command: [git, commit, -m, "{{message}}"]
-    args:
+    threat:
+      read: workspace
+      write: workspace
+    template:
+      command: [git, commit, -m, "{{message}}"]
+    arguments:
       message:
         description: "Commit message: type[(scope)][!]: description"
         required: true
@@ -39,8 +49,12 @@ tools:
 
   git-fetch:
     description: Fetch all branches and tags from a remote
-    command: [git, fetch, "{{remote}}", --tags]
-    args:
+    threat:
+      read: remote
+      write: workspace
+    template:
+      command: [git, fetch, "{{remote}}", --tags]
+    arguments:
       remote:
         description: Remote name (e.g. origin)
         required: true
@@ -48,8 +62,12 @@ tools:
 
   git-pull:
     description: Pull the current branch from a remote
-    command: [git, pull, "{{remote}}"]
-    args:
+    threat:
+      read: remote
+      write: workspace
+    template:
+      command: [git, pull, "{{remote}}"]
+    arguments:
       remote:
         description: Remote name (e.g. origin)
         required: true
@@ -59,8 +77,12 @@ tools:
     description: >-
       Push the local main branch to a remote including annotated tags (no force push).
       Use only when the local main branch is ready to publish.
-    command: [git, push, --follow-tags, "{{remote}}", main]
-    args:
+    threat:
+      read: workspace
+      write: remote
+    template:
+      command: [git, push, --follow-tags, "{{remote}}", main]
+    arguments:
       remote:
         description: Remote name (e.g. origin)
         required: true
@@ -70,29 +92,45 @@ tools:
     description: >-
       Push the current branch to a remote including annotated tags (no force push).
       Fails if in detached HEAD state or on main. Do not use on main -- use git-push-main instead.
-    command: [git, push, --follow-tags, "{{remote}}", HEAD]
-    args:
+    threat:
+      read: workspace
+      write: remote
+    template:
+      command: [git, push, --follow-tags, "{{remote}}", HEAD]
+    arguments:
       remote:
         description: Remote name (e.g. origin)
         required: true
         pattern: "^[a-z0-9_-]+$"
-    guards:
-      - command: [git, symbolic-ref, --quiet, HEAD]
-        fail_message: Cannot push from detached HEAD state. Check out a branch first.
-      - script: |
-          [ "$(git symbolic-ref --short HEAD 2>/dev/null)" != "main" ]
-        fail_message: Current branch is main. Use git-push-main to push the main branch.
+    pre: |
+      BRANCH=$(git symbolic-ref --short HEAD 2>/dev/null)
+      if [ -z "$BRANCH" ]; then
+        echo "error: cannot push from detached HEAD state" >&2
+        return 1
+      fi
+      if [ "$BRANCH" = "main" ]; then
+        echo "error: use git-push-main for the main branch" >&2
+        return 1
+      fi
 
   git-log:
     description: Show a short one-line log of recent commits
-    command: [git, log, --oneline, --no-decorate, -20]
+    threat:
+      read: workspace
+      write: none
+    template:
+      command: [git, log, --oneline, --no-decorate, -20]
 
   git-tag:
     description: >-
       Create a new annotated git tag at HEAD. Fails if the tag already exists.
       No force, delete, or other destructive operations.
-    command: [git, tag, -a, "{{tag}}", -m, "{{tag}}"]
-    args:
+    threat:
+      read: workspace
+      write: workspace
+    template:
+      command: [git, tag, -a, "{{tag}}", -m, "{{tag}}"]
+    arguments:
       tag:
         description: Tag name to create (e.g. v1.2.3)
         required: true
