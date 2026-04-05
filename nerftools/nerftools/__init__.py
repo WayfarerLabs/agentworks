@@ -10,6 +10,7 @@ NERFCTL_SCRIPTS: dict[str, Path] = {
     "nerfctl-grant-allow": _NERFCTL_DIR / "grant-allow.sh",
     "nerfctl-grant-deny": _NERFCTL_DIR / "grant-deny.sh",
     "nerfctl-grant-reset": _NERFCTL_DIR / "grant-reset.sh",
+    "nerfctl-grant-by-threat": _NERFCTL_DIR / "grant-by-threat.sh",
     "nerfctl-grant-list": _NERFCTL_DIR / "grant-list.sh",
     "nerfctl-install-plugin": _NERFCTL_DIR / "install-plugin.sh",
 }

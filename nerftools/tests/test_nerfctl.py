@@ -17,6 +17,7 @@ _NERFCTL_DIR = Path(__file__).parent.parent / "nerftools" / "nerfctl" / "claude"
 _GRANT = _NERFCTL_DIR / "grant-allow.sh"
 _DENY = _NERFCTL_DIR / "grant-deny.sh"
 _RESET = _NERFCTL_DIR / "grant-reset.sh"
+_BY_THREAT = _NERFCTL_DIR / "grant-by-threat.sh"
 _LIST = _NERFCTL_DIR / "grant-list.sh"
 _INSTALL_PLUGIN = _NERFCTL_DIR / "install-plugin.sh"
 
@@ -80,6 +81,31 @@ def _mock_plugin(tmp_path: Path, tools: list[str] | None = None) -> Path:
     for tool in tools or ["nerf-test-tool"]:
         script = scripts_dir / tool
         script.write_text("#!/bin/bash\necho ok\n")
+        script.chmod(0o755)
+    return plugin_root
+
+
+def _mock_plugin_with_threats(
+    tmp_path: Path,
+    tools: dict[str, tuple[str, str]],
+) -> Path:
+    """Create a mock plugin with threat metadata in scripts.
+
+    tools: dict of tool_name -> (read_level, write_level)
+    """
+    plugin_root = tmp_path / "plugin"
+    scripts_dir = plugin_root / "skills" / "nerf-test" / "scripts"
+    scripts_dir.mkdir(parents=True)
+    for tool_name, (read, write) in tools.items():
+        script = scripts_dir / tool_name
+        script.write_text(
+            f"#!/bin/bash\n"
+            f"# {tool_name} -- test tool\n"
+            f"# nerf:threat:read={read}\n"
+            f"# nerf:threat:write={write}\n"
+            f"set -euo pipefail\n"
+            f"echo ok\n"
+        )
         script.chmod(0o755)
     return plugin_root
 
@@ -294,7 +320,106 @@ def test_install_plugin_requires_marketplace() -> None:
 # -- help flags ---------------------------------------------------------------
 
 
-@pytest.mark.parametrize("script", [_GRANT, _DENY, _RESET, _LIST, _INSTALL_PLUGIN])
+# -- grant-by-threat -----------------------------------------------------------
+
+
+def test_by_threat_allows_inside_denies_outside(tmp_path: Path) -> None:
+    _user_settings(tmp_path)
+    plugin = _mock_plugin_with_threats(tmp_path, {
+        "nerf-git-log": ("workspace", "none"),
+        "nerf-git-add": ("workspace", "workspace"),
+        "nerf-git-push": ("workspace", "remote"),
+    })
+    result = _run(
+        _BY_THREAT, str(plugin),
+        "--read", "workspace", "--write", "workspace",
+        home=tmp_path,
+    )
+    assert result.returncode == 0
+    data = _read(tmp_path / ".claude" / "settings.json")
+    allow_str = " ".join(data["permissions"]["allow"])
+    deny_str = " ".join(data["permissions"]["deny"])
+    assert "nerf-git-log" in allow_str
+    assert "nerf-git-add" in allow_str
+    assert "nerf-git-push" in deny_str
+
+
+def test_by_threat_outside_reset(tmp_path: Path) -> None:
+    plugin = _mock_plugin_with_threats(tmp_path, {
+        "nerf-git-log": ("workspace", "none"),
+        "nerf-git-push": ("workspace", "remote"),
+    })
+    # Pre-seed push as allowed
+    script_path = str(plugin / "skills" / "nerf-test" / "scripts" / "nerf-git-push")
+    _user_settings(tmp_path, {"permissions": {"allow": [f"Bash({script_path})"], "deny": []}})
+    result = _run(
+        _BY_THREAT, str(plugin),
+        "--read", "workspace", "--write", "workspace",
+        "--outside", "reset",
+        home=tmp_path,
+    )
+    assert result.returncode == 0
+    data = _read(tmp_path / ".claude" / "settings.json")
+    # Push should be removed from allow (reset), not in deny
+    deny_str = " ".join(data["permissions"].get("deny", []))
+    allow_str = " ".join(data["permissions"].get("allow", []))
+    assert "nerf-git-push" not in deny_str
+    assert "nerf-git-log" in allow_str
+
+
+def test_by_threat_filter(tmp_path: Path) -> None:
+    _user_settings(tmp_path)
+    plugin = _mock_plugin_with_threats(tmp_path, {
+        "nerf-git-log": ("workspace", "none"),
+        "nerf-az-list": ("remote", "none"),
+    })
+    result = _run(
+        _BY_THREAT, str(plugin),
+        "--read", "workspace", "--write", "workspace",
+        "--filter", "nerf-git-*",
+        home=tmp_path,
+    )
+    assert result.returncode == 0
+    data = _read(tmp_path / ".claude" / "settings.json")
+    # Only git tool affected
+    all_entries = data["permissions"].get("allow", []) + data["permissions"].get("deny", [])
+    assert any("nerf-git-log" in e for e in all_entries)
+    assert not any("nerf-az-list" in e for e in all_entries)
+
+
+def test_by_threat_requires_read_write(tmp_path: Path) -> None:
+    plugin = _mock_plugin_with_threats(tmp_path, {"nerf-t": ("none", "none")})
+    result = _run(_BY_THREAT, str(plugin), home=tmp_path)
+    assert result.returncode != 0
+    assert "--read is required" in result.stderr
+
+
+def test_by_threat_invalid_level(tmp_path: Path) -> None:
+    plugin = _mock_plugin_with_threats(tmp_path, {"nerf-t": ("none", "none")})
+    result = _run(_BY_THREAT, str(plugin), "--read", "galaxy", "--write", "none", home=tmp_path)
+    assert result.returncode != 0
+    assert "invalid read level" in result.stderr
+
+
+def test_by_threat_annotations(tmp_path: Path) -> None:
+    plugin = _mock_plugin_with_threats(tmp_path, {
+        "nerf-git-push": ("workspace", "remote"),
+    })
+    script_path = str(plugin / "skills" / "nerf-test" / "scripts" / "nerf-git-push")
+    _user_settings(tmp_path, {"permissions": {"allow": [f"Bash({script_path})"], "deny": []}})
+    result = _run(
+        _BY_THREAT, str(plugin),
+        "--read", "workspace", "--write", "workspace",
+        home=tmp_path,
+    )
+    assert result.returncode == 0
+    assert "(was: allowed)" in result.stdout
+
+
+# -- help flags ---------------------------------------------------------------
+
+
+@pytest.mark.parametrize("script", [_GRANT, _DENY, _RESET, _BY_THREAT, _LIST, _INSTALL_PLUGIN])
 def test_help_flag_exits_nonzero_with_usage(script: Path) -> None:
     result = _run(script, "--help")
     assert result.returncode != 0

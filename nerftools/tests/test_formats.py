@@ -109,6 +109,7 @@ def test_claude_plugin_nerfctl_scripts(tmp_path: Path) -> None:
     assert (scripts_dir / "nerfctl-grant-allow").exists()
     assert (scripts_dir / "nerfctl-grant-deny").exists()
     assert (scripts_dir / "nerfctl-grant-reset").exists()
+    assert (scripts_dir / "nerfctl-grant-by-threat").exists()
     assert (scripts_dir / "nerfctl-grant-list").exists()
     assert (scripts_dir / "nerfctl-install-plugin").exists()
 
@@ -116,7 +117,7 @@ def test_claude_plugin_nerfctl_scripts(tmp_path: Path) -> None:
 def test_claude_plugin_nerfctl_skills(tmp_path: Path) -> None:
     build_claude_plugin([_manifest()], tmp_path)
 
-    for name in ("nerfctl-grant-allow", "nerfctl-grant-deny", "nerfctl-grant-reset", "nerfctl-grant-list"):
+    for name in ("nerfctl-grant-allow", "nerfctl-grant-deny", "nerfctl-grant-reset", "nerfctl-grant-by-threat", "nerfctl-grant-list"):
         skill_md = tmp_path / "skills" / name / "SKILL.md"
         assert skill_md.exists(), f"missing {name}/SKILL.md"
         content = skill_md.read_text()
