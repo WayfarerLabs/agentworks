@@ -608,6 +608,13 @@ def _create_agent_on_vm(
     if rc_content and rc_file:
         _write_agent_file(target, linux_user, rc_file, rc_content, logger=lg)
 
+    # Git safe.directory wildcard (agents access repos owned by admin)
+    if config.admin.git_force_safe_directory:
+        try:
+            _run_as_agent(target, linux_user, "git config --global --add safe.directory '*'", logger=lg)
+        except Exception as e:
+            typer.echo(f"  Warning: agent git safe.directory setup failed: {e}", err=True)
+
     # Git credentials for the agent (tokens collected up front)
     if agent_cfg.git_credentials and git_tokens:
         from agentworks.vms.initializer import resolve_git_credential_providers

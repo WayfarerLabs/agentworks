@@ -1213,6 +1213,17 @@ def _phase_b_setup(
     if config.admin.mise_packages:
         _write_mise_config(ts_target, config.admin.mise_packages, config.admin.mise_install_before, home, logger)
 
+    # Non-fatal: git safe.directory wildcard (disables ownership checks for the
+    # multi-user workspace model where agents access repos owned by admin)
+    if config.admin.git_force_safe_directory:
+        try:
+            _run_logged(ts_target, "git config --global --add safe.directory '*'", logger)
+            typer.echo("  Git safe.directory wildcard configured")
+        except SSHError as e:
+            msg = f"git safe.directory setup failed: {e}"
+            logger.warning(msg)
+            typer.echo(f"  Warning: {msg}", err=True)
+
     # Non-fatal: git credentials (before dotfiles and mise lockfile for private repos)
     if providers:
         _configure_git_credentials(vm_name, ts_target, providers, logger, git_tokens=git_tokens)

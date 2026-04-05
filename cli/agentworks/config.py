@@ -147,6 +147,7 @@ class AdminConfig:
     mise_install_before: str = "7d"
     mise_prune_on_reinit: bool = True
     nerf_install_claude_plugin: bool = False
+    git_force_safe_directory: bool = True
 
 
 @dataclass(frozen=True)
@@ -447,6 +448,7 @@ _USER_CONFIG_KEYS = {
     "mise_install_before",
     "mise_prune_on_reinit",
     "nerf_install_claude_plugin",
+    "git_force_safe_directory",
 }
 
 
@@ -476,6 +478,7 @@ def _load_admin_config(data: dict[str, object]) -> AdminConfig:
         mise_install_before=str(raw.get("mise_install_before", "7d")),
         mise_prune_on_reinit=bool(raw.get("mise_prune_on_reinit", True)),
         nerf_install_claude_plugin=bool(raw.get("nerf_install_claude_plugin", False)),
+        git_force_safe_directory=bool(raw.get("git_force_safe_directory", True)),
     )
 
 

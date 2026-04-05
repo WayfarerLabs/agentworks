@@ -34,6 +34,15 @@ been granted.
 Agents are only supported on VM workspaces because the isolation model requires Linux user
 management (useradd, group membership).
 
+### Multi-user considerations
+
+The multi-user model means workspace files are owned by the admin user but accessed by agent users
+via group membership and POSIX ACLs. Some tools check file ownership and may reject files owned by a
+different user. Git is the most common example: its `safe.directory` check will refuse to operate in
+a repo owned by another user. Agentworks handles this automatically by configuring
+`safe.directory = '*'` for both admin and agent users during VM init and agent creation. This can be
+disabled by setting `git_force_safe_directory = false` in `[admin.config]`.
+
 ### Ephemerality
 
 The layers also differ in lifespan. VMs are long-lived -- provisioned once, used across many
