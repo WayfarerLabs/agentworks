@@ -15,18 +15,22 @@ THREAT_ORDER="none workspace machine remote admin"
 
 usage() {
   cat >&2 <<'EOF'
-Usage: nerfctl-grant-by-threat <plugin-root> --read <level> --write <level>
+Usage: nerfctl-grant-by-threat --read <level> --write <level>
        [--filter <glob>] [--outside deny|reset] [--scope user|local]
+       [--plugin-root <path>]
 
-  <plugin-root>         Absolute path to the plugin root (passed by the skill)
-  --read <level>        Read ceiling (none|workspace|machine|remote|admin)
-  --write <level>       Write ceiling (none|workspace|machine|remote|admin)
-  --filter <glob>       Only affect tools matching this name pattern (default: *)
-  --outside deny|reset  Action for tools outside the box (default: deny)
-  --scope user|local    Settings scope (default: user)
+  --read <level>         Read ceiling (none|workspace|machine|remote|admin)
+  --write <level>        Write ceiling (none|workspace|machine|remote|admin)
+  --filter <glob>        Only affect tools matching this name pattern (default: *)
+  --outside deny|reset   Action for tools outside the box (default: deny)
+  --scope user|local     Settings scope (default: user)
+  --plugin-root <path>   Override plugin root (for testing; skips auto-detection)
 
 Allows all tools within the threat box (read <= ceiling AND write <= ceiling).
 Tools outside the box are denied or reset based on --outside.
+
+The plugin root is auto-detected from CLAUDE_PLUGIN_ROOT or the script's
+own location. Use --plugin-root only for testing.
 
 Requires jq.
 EOF
@@ -62,6 +66,42 @@ _ensure_settings_file() {
   [[ -f "$file" ]] || echo '{}' > "$file"
 }
 
+_resolve_plugin_root() {
+  if [[ -n "$PLUGIN_ROOT" ]]; then
+    echo "$PLUGIN_ROOT"
+    return
+  fi
+
+  local resolved=""
+
+  if [[ -n "${CLAUDE_PLUGIN_ROOT:-}" ]]; then
+    if [[ "$CLAUDE_PLUGIN_ROOT" == "$HOME/.claude/plugins/"* ]]; then
+      resolved="$CLAUDE_PLUGIN_ROOT"
+    else
+      echo "warning: CLAUDE_PLUGIN_ROOT '$CLAUDE_PLUGIN_ROOT' is not under ~/.claude/plugins/; deriving from script location" >&2
+    fi
+  else
+    echo "warning: CLAUDE_PLUGIN_ROOT not set; deriving from script location" >&2
+  fi
+
+  if [[ -z "$resolved" ]]; then
+    local script_dir
+    script_dir=$(cd "$(dirname "$(realpath "$0")")" && pwd)
+    resolved=$(cd "$script_dir/.." && pwd)
+  fi
+
+  if [[ ! -d "$resolved/.claude-plugin" ]]; then
+    echo "error: '$resolved' does not contain .claude-plugin/ -- not a valid plugin root" >&2
+    exit 1
+  fi
+  if [[ ! -d "$resolved/skills" ]]; then
+    echo "error: '$resolved' does not contain skills/ -- not a valid plugin root" >&2
+    exit 1
+  fi
+
+  echo "$resolved"
+}
+
 _threat_rank() {
   local level="$1"
   local i=0
@@ -86,7 +126,6 @@ _valid_threat() {
   return 1
 }
 
-# Parse args
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --read) READ_CEILING="$2"; shift 2 ;;
@@ -94,21 +133,13 @@ while [[ $# -gt 0 ]]; do
     --filter) FILTER="$2"; shift 2 ;;
     --outside) OUTSIDE="$2"; shift 2 ;;
     --scope) SCOPE="$2"; shift 2 ;;
+    --plugin-root) PLUGIN_ROOT="$2"; shift 2 ;;
     -h|--help) usage ;;
     -*)  echo "error: unknown option: $1" >&2; usage ;;
-    *)
-      if [[ -z "$PLUGIN_ROOT" ]]; then
-        PLUGIN_ROOT="$1"; shift
-      else
-        echo "error: unexpected argument: $1" >&2; usage
-      fi
-      ;;
+    *)   echo "error: unexpected argument: $1" >&2; usage ;;
   esac
 done
 
-if [[ -z "$PLUGIN_ROOT" ]]; then
-  echo "error: <plugin-root> is required" >&2; usage
-fi
 if [[ -z "$READ_CEILING" ]]; then
   echo "error: --read is required" >&2; usage
 fi
@@ -128,6 +159,8 @@ if [[ "$OUTSIDE" != "deny" && "$OUTSIDE" != "reset" ]]; then
 fi
 
 _require_jq
+
+RESOLVED_ROOT="$(_resolve_plugin_root)"
 
 READ_RANK=$(_threat_rank "$READ_CEILING")
 WRITE_RANK=$(_threat_rank "$WRITE_CEILING")
@@ -165,10 +198,10 @@ while IFS= read -r script_path; do
   TOOL_PATHS+=("$script_path")
   TOOL_READ["$script_path"]="$read_level"
   TOOL_WRITE["$script_path"]="$write_level"
-done < <(find "$PLUGIN_ROOT/skills" -path "*/scripts/*" -type f 2>/dev/null | sort)
+done < <(find "$RESOLVED_ROOT/skills" -path "*/scripts/*" -type f 2>/dev/null | sort)
 
 if [[ ${#TOOL_PATHS[@]} -eq 0 ]]; then
-  echo "No tools found matching filter '$FILTER' under $PLUGIN_ROOT/skills/*/scripts/"
+  echo "No tools found matching filter '$FILTER' under $RESOLVED_ROOT/skills/*/scripts/"
   exit 0
 fi
 

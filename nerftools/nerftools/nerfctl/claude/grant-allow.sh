@@ -10,14 +10,17 @@ PATTERN=""
 
 usage() {
   cat >&2 <<'EOF'
-Usage: nerfctl-grant-allow <plugin-root> <pattern> [--scope user|local]
+Usage: nerfctl-grant-allow <pattern> [--scope user|local] [--plugin-root <path>]
 
-  <plugin-root>       Absolute path to the plugin root (passed by the skill)
-  <pattern>           Tool name or glob pattern (e.g. nerf-git-commit or nerf-git-*)
-  --scope user|local  Settings scope (default: user)
+  <pattern>              Tool name or glob pattern (e.g. nerf-git-commit or nerf-git-*)
+  --scope user|local     Settings scope (default: user)
+  --plugin-root <path>   Override plugin root (for testing; skips auto-detection)
 
 Finds all matching tool scripts under the plugin root and adds permission
 entries for each to the allow list.
+
+The plugin root is auto-detected from CLAUDE_PLUGIN_ROOT or the script's
+own location. Use --plugin-root only for testing.
 
 Requires jq.
 EOF
@@ -53,15 +56,54 @@ _ensure_settings_file() {
   [[ -f "$file" ]] || echo '{}' > "$file"
 }
 
+_resolve_plugin_root() {
+  # If --plugin-root was given, use it directly (testing override)
+  if [[ -n "$PLUGIN_ROOT" ]]; then
+    echo "$PLUGIN_ROOT"
+    return
+  fi
+
+  local resolved=""
+
+  # Try CLAUDE_PLUGIN_ROOT env var
+  if [[ -n "${CLAUDE_PLUGIN_ROOT:-}" ]]; then
+    if [[ "$CLAUDE_PLUGIN_ROOT" == "$HOME/.claude/plugins/"* ]]; then
+      resolved="$CLAUDE_PLUGIN_ROOT"
+    else
+      echo "warning: CLAUDE_PLUGIN_ROOT '$CLAUDE_PLUGIN_ROOT' is not under ~/.claude/plugins/; deriving from script location" >&2
+    fi
+  else
+    echo "warning: CLAUDE_PLUGIN_ROOT not set; deriving from script location" >&2
+  fi
+
+  # Fall back to deriving from script location: <plugin-root>/scripts/<this-script>
+  if [[ -z "$resolved" ]]; then
+    local script_dir
+    script_dir=$(cd "$(dirname "$(realpath "$0")")" && pwd)
+    resolved=$(cd "$script_dir/.." && pwd)
+  fi
+
+  # Verify the resolved root looks like a plugin
+  if [[ ! -d "$resolved/.claude-plugin" ]]; then
+    echo "error: '$resolved' does not contain .claude-plugin/ -- not a valid plugin root" >&2
+    exit 1
+  fi
+  if [[ ! -d "$resolved/skills" ]]; then
+    echo "error: '$resolved' does not contain skills/ -- not a valid plugin root" >&2
+    exit 1
+  fi
+
+  echo "$resolved"
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --scope) SCOPE="$2"; shift 2 ;;
+    --plugin-root) PLUGIN_ROOT="$2"; shift 2 ;;
     -h|--help) usage ;;
     -*) echo "error: unknown option: $1" >&2; usage ;;
     *)
-      if [[ -z "$PLUGIN_ROOT" ]]; then
-        PLUGIN_ROOT="$1"; shift
-      elif [[ -z "$PATTERN" ]]; then
+      if [[ -z "$PATTERN" ]]; then
         PATTERN="$1"; shift
       else
         echo "error: unexpected argument: $1" >&2; usage
@@ -70,17 +112,19 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ -z "$PLUGIN_ROOT" || -z "$PATTERN" ]]; then
-  echo "error: <plugin-root> and <pattern> are required" >&2; usage
+if [[ -z "$PATTERN" ]]; then
+  echo "error: <pattern> is required" >&2; usage
 fi
 
 _require_jq
 
+RESOLVED_ROOT="$(_resolve_plugin_root)"
+
 # Find matching tool scripts
-mapfile -t MATCHES < <(find "$PLUGIN_ROOT/skills" -path "*/scripts/$PATTERN" -type f 2>/dev/null | sort)
+mapfile -t MATCHES < <(find "$RESOLVED_ROOT/skills" -path "*/scripts/$PATTERN" -type f 2>/dev/null | sort)
 
 if [[ ${#MATCHES[@]} -eq 0 ]]; then
-  echo "error: no tools matching '$PATTERN' found under $PLUGIN_ROOT/skills/*/scripts/" >&2
+  echo "error: no tools matching '$PATTERN' found under $RESOLVED_ROOT/skills/*/scripts/" >&2
   echo "hint: use 'nerf-git-*' to match a family, or check tool names in the nerf skills" >&2
   exit 1
 fi

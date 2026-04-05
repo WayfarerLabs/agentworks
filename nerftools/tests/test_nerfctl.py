@@ -128,7 +128,7 @@ def _read(path: Path) -> dict:  # type: ignore[type-arg]
 def test_grant_adds_to_allow(tmp_path: Path) -> None:
     _user_settings(tmp_path)
     plugin = _mock_plugin(tmp_path, ["nerf-test-tool"])
-    result = _run(_GRANT, str(plugin), "nerf-test-tool", home=tmp_path)
+    result = _run(_GRANT, "nerf-test-tool", "--plugin-root", str(plugin), home=tmp_path)
     assert result.returncode == 0
     data = _read(tmp_path / ".claude" / "settings.json")
     entries = data["permissions"]["allow"]
@@ -139,7 +139,7 @@ def test_grant_adds_to_allow(tmp_path: Path) -> None:
 def test_grant_glob_matches_multiple(tmp_path: Path) -> None:
     _user_settings(tmp_path)
     plugin = _mock_plugin(tmp_path, ["nerf-test-a", "nerf-test-b", "nerf-test-c"])
-    result = _run(_GRANT, str(plugin), "nerf-test-*", home=tmp_path)
+    result = _run(_GRANT, "nerf-test-*", "--plugin-root", str(plugin), home=tmp_path)
     assert result.returncode == 0
     data = _read(tmp_path / ".claude" / "settings.json")
     assert len(data["permissions"]["allow"]) == 3
@@ -148,7 +148,7 @@ def test_grant_glob_matches_multiple(tmp_path: Path) -> None:
 def test_grant_no_matches_fails(tmp_path: Path) -> None:
     _user_settings(tmp_path)
     plugin = _mock_plugin(tmp_path, ["nerf-test-tool"])
-    result = _run(_GRANT, str(plugin), "nerf-nonexistent-*", home=tmp_path)
+    result = _run(_GRANT, "nerf-nonexistent-*", "--plugin-root", str(plugin), home=tmp_path)
     assert result.returncode != 0
     assert "no tools matching" in result.stderr
 
@@ -156,8 +156,8 @@ def test_grant_no_matches_fails(tmp_path: Path) -> None:
 def test_grant_does_not_duplicate(tmp_path: Path) -> None:
     _user_settings(tmp_path)
     plugin = _mock_plugin(tmp_path, ["nerf-test-tool"])
-    _run(_GRANT, str(plugin), "nerf-test-tool", home=tmp_path)
-    _run(_GRANT, str(plugin), "nerf-test-tool", home=tmp_path)
+    _run(_GRANT, "nerf-test-tool", "--plugin-root", str(plugin), home=tmp_path)
+    _run(_GRANT, "nerf-test-tool", "--plugin-root", str(plugin), home=tmp_path)
     data = _read(tmp_path / ".claude" / "settings.json")
     assert len(data["permissions"]["allow"]) == 1
 
@@ -167,7 +167,7 @@ def test_grant_removes_from_deny(tmp_path: Path) -> None:
     script_path = str(plugin / "skills" / "nerf-test" / "scripts" / "nerf-test-tool")
     # Seed with stale (no :*) deny entry
     _user_settings(tmp_path, {"permissions": {"allow": [], "deny": [f"Bash({script_path})"]}})
-    _run(_GRANT, str(plugin), "nerf-test-tool", home=tmp_path)
+    _run(_GRANT, "nerf-test-tool", "--plugin-root", str(plugin), home=tmp_path)
     data = _read(tmp_path / ".claude" / "settings.json")
     # New :* entry in allow, stale entry removed from deny
     assert f"Bash({script_path}:*)" in data["permissions"]["allow"]
@@ -185,7 +185,7 @@ def test_grant_requires_args(tmp_path: Path) -> None:
 def test_grant_local_scope(tmp_path: Path) -> None:
     (tmp_path / ".claude").mkdir(parents=True)
     plugin = _mock_plugin(tmp_path, ["nerf-test-tool"])
-    result = _run(_GRANT, str(plugin), "nerf-test-tool", "--scope", "local", cwd=tmp_path)
+    result = _run(_GRANT, "nerf-test-tool", "--plugin-root", str(plugin), "--scope", "local", cwd=tmp_path)
     assert result.returncode == 0
     assert (tmp_path / ".claude" / "settings.local.json").exists()
 
@@ -196,7 +196,7 @@ def test_grant_local_scope(tmp_path: Path) -> None:
 def test_deny_adds_to_deny(tmp_path: Path) -> None:
     _user_settings(tmp_path)
     plugin = _mock_plugin(tmp_path, ["nerf-test-tool"])
-    result = _run(_DENY, str(plugin), "nerf-test-tool", home=tmp_path)
+    result = _run(_DENY, "nerf-test-tool", "--plugin-root", str(plugin), home=tmp_path)
     assert result.returncode == 0
     data = _read(tmp_path / ".claude" / "settings.json")
     assert any("nerf-test-tool" in e for e in data["permissions"]["deny"])
@@ -207,7 +207,7 @@ def test_deny_removes_from_allow(tmp_path: Path) -> None:
     script_path = str(plugin / "skills" / "nerf-test" / "scripts" / "nerf-test-tool")
     # Seed with stale (no :*) allow entry
     _user_settings(tmp_path, {"permissions": {"allow": [f"Bash({script_path})"], "deny": []}})
-    _run(_DENY, str(plugin), "nerf-test-tool", home=tmp_path)
+    _run(_DENY, "nerf-test-tool", "--plugin-root", str(plugin), home=tmp_path)
     data = _read(tmp_path / ".claude" / "settings.json")
     # Stale entry removed from allow, new :* entry in deny
     assert f"Bash({script_path})" not in data["permissions"]["allow"]
@@ -236,7 +236,7 @@ def test_reset_removes_entries(tmp_path: Path) -> None:
             }
         },
     )
-    result = _run(_RESET, str(plugin), "nerf-test-tool", home=tmp_path)
+    result = _run(_RESET, "nerf-test-tool", "--plugin-root", str(plugin), home=tmp_path)
     assert result.returncode == 0
     data = _read(tmp_path / ".claude" / "settings.json")
     assert f"Bash({script_path})" not in data["permissions"]["allow"]
@@ -246,7 +246,7 @@ def test_reset_removes_entries(tmp_path: Path) -> None:
 
 def test_reset_noop_when_file_missing(tmp_path: Path) -> None:
     plugin = _mock_plugin(tmp_path, ["nerf-test-tool"])
-    result = _run(_RESET, str(plugin), "nerf-test-tool", home=tmp_path)
+    result = _run(_RESET, "nerf-test-tool", "--plugin-root", str(plugin), home=tmp_path)
     assert result.returncode == 0
 
 
@@ -294,8 +294,8 @@ def test_list_no_nerf_entries(tmp_path: Path) -> None:
 def test_grant_then_deny_moves_entry(tmp_path: Path) -> None:
     _user_settings(tmp_path)
     plugin = _mock_plugin(tmp_path, ["nerf-test-tool"])
-    _run(_GRANT, str(plugin), "nerf-test-tool", home=tmp_path)
-    _run(_DENY, str(plugin), "nerf-test-tool", home=tmp_path)
+    _run(_GRANT, "nerf-test-tool", "--plugin-root", str(plugin), home=tmp_path)
+    _run(_DENY, "nerf-test-tool", "--plugin-root", str(plugin), home=tmp_path)
     data = _read(tmp_path / ".claude" / "settings.json")
     assert not any("nerf-test-tool" in e for e in data["permissions"]["allow"])
     assert any("nerf-test-tool" in e for e in data["permissions"]["deny"])
@@ -304,8 +304,8 @@ def test_grant_then_deny_moves_entry(tmp_path: Path) -> None:
 def test_grant_then_reset_clears_entry(tmp_path: Path) -> None:
     _user_settings(tmp_path)
     plugin = _mock_plugin(tmp_path, ["nerf-test-tool"])
-    _run(_GRANT, str(plugin), "nerf-test-tool", home=tmp_path)
-    _run(_RESET, str(plugin), "nerf-test-tool", home=tmp_path)
+    _run(_GRANT, "nerf-test-tool", "--plugin-root", str(plugin), home=tmp_path)
+    _run(_RESET, "nerf-test-tool", "--plugin-root", str(plugin), home=tmp_path)
     data = _read(tmp_path / ".claude" / "settings.json")
     assert not any("nerf-test-tool" in e for e in data["permissions"]["allow"])
     assert not any("nerf-test-tool" in e for e in data["permissions"]["deny"])
@@ -338,8 +338,9 @@ def test_by_threat_allows_inside_denies_outside(tmp_path: Path) -> None:
         "nerf-git-push": ("workspace", "remote"),
     })
     result = _run(
-        _BY_THREAT, str(plugin),
+        _BY_THREAT,
         "--read", "workspace", "--write", "workspace",
+        "--plugin-root", str(plugin),
         home=tmp_path,
     )
     assert result.returncode == 0
@@ -360,9 +361,10 @@ def test_by_threat_outside_reset(tmp_path: Path) -> None:
     script_path = str(plugin / "skills" / "nerf-test" / "scripts" / "nerf-git-push")
     _user_settings(tmp_path, {"permissions": {"allow": [f"Bash({script_path})"], "deny": []}})
     result = _run(
-        _BY_THREAT, str(plugin),
+        _BY_THREAT,
         "--read", "workspace", "--write", "workspace",
         "--outside", "reset",
+        "--plugin-root", str(plugin),
         home=tmp_path,
     )
     assert result.returncode == 0
@@ -381,9 +383,10 @@ def test_by_threat_filter(tmp_path: Path) -> None:
         "nerf-az-list": ("remote", "none"),
     })
     result = _run(
-        _BY_THREAT, str(plugin),
+        _BY_THREAT,
         "--read", "workspace", "--write", "workspace",
         "--filter", "nerf-git-*",
+        "--plugin-root", str(plugin),
         home=tmp_path,
     )
     assert result.returncode == 0
@@ -396,14 +399,14 @@ def test_by_threat_filter(tmp_path: Path) -> None:
 
 def test_by_threat_requires_read_write(tmp_path: Path) -> None:
     plugin = _mock_plugin_with_threats(tmp_path, {"nerf-t": ("none", "none")})
-    result = _run(_BY_THREAT, str(plugin), home=tmp_path)
+    result = _run(_BY_THREAT, "--plugin-root", str(plugin), home=tmp_path)
     assert result.returncode != 0
     assert "--read is required" in result.stderr
 
 
 def test_by_threat_invalid_level(tmp_path: Path) -> None:
     plugin = _mock_plugin_with_threats(tmp_path, {"nerf-t": ("none", "none")})
-    result = _run(_BY_THREAT, str(plugin), "--read", "galaxy", "--write", "none", home=tmp_path)
+    result = _run(_BY_THREAT, "--read", "galaxy", "--write", "none", "--plugin-root", str(plugin), home=tmp_path)
     assert result.returncode != 0
     assert "invalid read level" in result.stderr
 
@@ -415,8 +418,9 @@ def test_by_threat_annotations(tmp_path: Path) -> None:
     script_path = str(plugin / "skills" / "nerf-test" / "scripts" / "nerf-git-push")
     _user_settings(tmp_path, {"permissions": {"allow": [f"Bash({script_path})"], "deny": []}})
     result = _run(
-        _BY_THREAT, str(plugin),
+        _BY_THREAT,
         "--read", "workspace", "--write", "workspace",
+        "--plugin-root", str(plugin),
         home=tmp_path,
     )
     assert result.returncode == 0

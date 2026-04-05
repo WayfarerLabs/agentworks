@@ -33,7 +33,7 @@ Allow nerf tools matching the given pattern without prompting. Supports glob pat
 Quote all arguments so they are passed to the script unprocessed by the shell.
 
 ```bash
-${CLAUDE_PLUGIN_ROOT}/scripts/nerfctl-grant-allow ${CLAUDE_PLUGIN_ROOT} $ARGUMENTS
+${CLAUDE_PLUGIN_ROOT}/scripts/nerfctl-grant-allow $ARGUMENTS
 ```
 
 Report the output to the user.
@@ -56,7 +56,7 @@ Deny nerf tools matching the given pattern entirely. Supports glob patterns
 Quote all arguments so they are passed to the script unprocessed by the shell.
 
 ```bash
-${CLAUDE_PLUGIN_ROOT}/scripts/nerfctl-grant-deny ${CLAUDE_PLUGIN_ROOT} $ARGUMENTS
+${CLAUDE_PLUGIN_ROOT}/scripts/nerfctl-grant-deny $ARGUMENTS
 ```
 
 Report the output to the user.
@@ -79,7 +79,7 @@ ask-every-time behavior. Supports glob patterns. Default scope is user.
 Quote all arguments so they are passed to the script unprocessed by the shell.
 
 ```bash
-${CLAUDE_PLUGIN_ROOT}/scripts/nerfctl-grant-reset ${CLAUDE_PLUGIN_ROOT} $ARGUMENTS
+${CLAUDE_PLUGIN_ROOT}/scripts/nerfctl-grant-reset $ARGUMENTS
 ```
 
 Report the output to the user.
@@ -105,7 +105,7 @@ Threat levels (narrow to broad): `none`, `workspace`, `machine`, `remote`, `admi
 Quote all arguments so they are passed to the script unprocessed by the shell.
 
 ```bash
-${CLAUDE_PLUGIN_ROOT}/scripts/nerfctl-grant-by-threat ${CLAUDE_PLUGIN_ROOT} $ARGUMENTS
+${CLAUDE_PLUGIN_ROOT}/scripts/nerfctl-grant-by-threat $ARGUMENTS
 ```
 
 Report the output to the user.
