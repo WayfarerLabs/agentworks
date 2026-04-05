@@ -165,11 +165,15 @@ def test_grant_does_not_duplicate(tmp_path: Path) -> None:
 def test_grant_removes_from_deny(tmp_path: Path) -> None:
     plugin = _mock_plugin(tmp_path, ["nerf-test-tool"])
     script_path = str(plugin / "skills" / "nerf-test" / "scripts" / "nerf-test-tool")
+    # Seed with stale (no :*) deny entry
     _user_settings(tmp_path, {"permissions": {"allow": [], "deny": [f"Bash({script_path})"]}})
     _run(_GRANT, str(plugin), "nerf-test-tool", home=tmp_path)
     data = _read(tmp_path / ".claude" / "settings.json")
-    assert f"Bash({script_path})" in data["permissions"]["allow"]
+    # New :* entry in allow, stale entry removed from deny
+    assert f"Bash({script_path}:*)" in data["permissions"]["allow"]
+    assert f"Bash({script_path})" not in data["permissions"]["allow"]
     assert f"Bash({script_path})" not in data["permissions"]["deny"]
+    assert f"Bash({script_path}:*)" not in data["permissions"]["deny"]
 
 
 def test_grant_requires_args(tmp_path: Path) -> None:
@@ -201,11 +205,14 @@ def test_deny_adds_to_deny(tmp_path: Path) -> None:
 def test_deny_removes_from_allow(tmp_path: Path) -> None:
     plugin = _mock_plugin(tmp_path, ["nerf-test-tool"])
     script_path = str(plugin / "skills" / "nerf-test" / "scripts" / "nerf-test-tool")
+    # Seed with stale (no :*) allow entry
     _user_settings(tmp_path, {"permissions": {"allow": [f"Bash({script_path})"], "deny": []}})
     _run(_DENY, str(plugin), "nerf-test-tool", home=tmp_path)
     data = _read(tmp_path / ".claude" / "settings.json")
+    # Stale entry removed from allow, new :* entry in deny
     assert f"Bash({script_path})" not in data["permissions"]["allow"]
-    assert f"Bash({script_path})" in data["permissions"]["deny"]
+    assert f"Bash({script_path}:*)" not in data["permissions"]["allow"]
+    assert f"Bash({script_path}:*)" in data["permissions"]["deny"]
 
 
 def test_deny_requires_args(tmp_path: Path) -> None:

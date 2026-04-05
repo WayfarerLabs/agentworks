@@ -91,15 +91,18 @@ _ensure_settings_file "$SETTINGS"
 UPDATED=$(cat "$SETTINGS")
 for SCRIPT_PATH in "${MATCHES[@]}"; do
   TOOL_NAME=$(basename "$SCRIPT_PATH")
-  ENTRY="Bash($SCRIPT_PATH)"
+  ENTRY="Bash($SCRIPT_PATH:*)"
+  STALE_ENTRY="Bash($SCRIPT_PATH)"
 
   UPDATED=$(echo "$UPDATED" | jq \
     --arg entry "$ENTRY" \
+    --arg stale "$STALE_ENTRY" \
     '
       .permissions //= {}
       | .permissions.allow //= []
       | .permissions.deny //= []
-      | .permissions.allow = [.permissions.allow[] | select(. != $entry)]
+      | .permissions.allow = [.permissions.allow[] | select(. != $entry and . != $stale)]
+      | .permissions.deny = [.permissions.deny[] | select(. != $stale)]
       | if (.permissions.deny | index($entry)) == null
         then .permissions.deny += [$entry]
         else .

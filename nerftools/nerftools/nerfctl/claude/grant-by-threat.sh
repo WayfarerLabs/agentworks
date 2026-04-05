@@ -182,28 +182,32 @@ OUTSIDE_COUNT=0
 
 for SCRIPT_PATH in "${TOOL_PATHS[@]}"; do
   TOOL_NAME=$(basename "$SCRIPT_PATH")
-  ENTRY="Bash($SCRIPT_PATH)"
+  ENTRY="Bash($SCRIPT_PATH:*)"
+  STALE_ENTRY="Bash($SCRIPT_PATH)"
 
   tool_read_rank=$(_threat_rank "${TOOL_READ[$SCRIPT_PATH]}")
   tool_write_rank=$(_threat_rank "${TOOL_WRITE[$SCRIPT_PATH]}")
 
-  # Check current status for annotations
+  # Check current status for annotations (check both new and stale entry forms)
   was=""
-  if echo "$UPDATED" | jq -e --arg entry "$ENTRY" '.permissions.allow // [] | index($entry) != null' > /dev/null 2>&1; then
+  if echo "$UPDATED" | jq -e --arg e "$ENTRY" --arg s "$STALE_ENTRY" \
+    '(.permissions.allow // [] | (index($e) != null or index($s) != null))' > /dev/null 2>&1; then
     was="allowed"
-  elif echo "$UPDATED" | jq -e --arg entry "$ENTRY" '.permissions.deny // [] | index($entry) != null' > /dev/null 2>&1; then
+  elif echo "$UPDATED" | jq -e --arg e "$ENTRY" --arg s "$STALE_ENTRY" \
+    '(.permissions.deny // [] | (index($e) != null or index($s) != null))' > /dev/null 2>&1; then
     was="denied"
   fi
 
   if [[ $tool_read_rank -le $READ_RANK && $tool_write_rank -le $WRITE_RANK ]]; then
-    # Inside the box: allow
     UPDATED=$(echo "$UPDATED" | jq \
       --arg entry "$ENTRY" \
+      --arg stale "$STALE_ENTRY" \
       '
         .permissions //= {}
         | .permissions.allow //= []
         | .permissions.deny //= []
-        | .permissions.deny = [.permissions.deny[] | select(. != $entry)]
+        | .permissions.deny = [.permissions.deny[] | select(. != $entry and . != $stale)]
+        | .permissions.allow = [.permissions.allow[] | select(. != $stale)]
         | if (.permissions.allow | index($entry)) == null
           then .permissions.allow += [$entry]
           else .
@@ -214,15 +218,16 @@ for SCRIPT_PATH in "${TOOL_PATHS[@]}"; do
     echo "  Allowed: $TOOL_NAME  read:${TOOL_READ[$SCRIPT_PATH]}  write:${TOOL_WRITE[$SCRIPT_PATH]}$annotation"
     ALLOWED_COUNT=$((ALLOWED_COUNT + 1))
   else
-    # Outside the box
     if [[ "$OUTSIDE" == "deny" ]]; then
       UPDATED=$(echo "$UPDATED" | jq \
         --arg entry "$ENTRY" \
+        --arg stale "$STALE_ENTRY" \
         '
           .permissions //= {}
           | .permissions.allow //= []
           | .permissions.deny //= []
-          | .permissions.allow = [.permissions.allow[] | select(. != $entry)]
+          | .permissions.allow = [.permissions.allow[] | select(. != $entry and . != $stale)]
+          | .permissions.deny = [.permissions.deny[] | select(. != $stale)]
           | if (.permissions.deny | index($entry)) == null
             then .permissions.deny += [$entry]
             else .
@@ -232,15 +237,15 @@ for SCRIPT_PATH in "${TOOL_PATHS[@]}"; do
       [[ -n "$was" && "$was" != "denied" ]] && annotation=" (was: $was)"
       echo "  Denied:  $TOOL_NAME  read:${TOOL_READ[$SCRIPT_PATH]}  write:${TOOL_WRITE[$SCRIPT_PATH]}$annotation"
     else
-      # reset
       UPDATED=$(echo "$UPDATED" | jq \
         --arg entry "$ENTRY" \
+        --arg stale "$STALE_ENTRY" \
         '
           .permissions //= {}
           | .permissions.allow //= []
           | .permissions.deny //= []
-          | .permissions.allow = [.permissions.allow[] | select(. != $entry)]
-          | .permissions.deny = [.permissions.deny[] | select(. != $entry)]
+          | .permissions.allow = [.permissions.allow[] | select(. != $entry and . != $stale)]
+          | .permissions.deny = [.permissions.deny[] | select(. != $entry and . != $stale)]
         ')
       annotation=""
       [[ -n "$was" ]] && annotation=" (was: $was)"

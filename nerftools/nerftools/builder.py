@@ -282,7 +282,8 @@ def _param_validations(tool_name: str, tool_spec: ToolSpec) -> str:
 
         if opt.pattern:
             anchored = _anchored_pattern(opt.pattern)
-            lines.append(f'if [[ -n "${{{var}}}" ]] && ! [[ "${{{var}}}" =~ {anchored} ]]; then')
+            lines.append(f"_NERF_PATTERN='{_shell_escape_sq(anchored)}'")
+            lines.append(f'if [[ -n "${{{var}}}" ]] && ! [[ "${{{var}}}" =~ $_NERF_PATTERN ]]; then')
             lines.append(f'  echo "error: {tool_name}: option {opt.flag} does not match required pattern" >&2')
             lines.append(f'  echo "  value:   \\"${{{var}}}\\"" >&2')
             lines.append(f'  echo "  pattern: {opt.pattern}" >&2')
@@ -341,8 +342,9 @@ def _arg_validations(tool_name: str, arguments: dict[str, ArgSpec]) -> str:
                 lines.append("")
             if spec.pattern:
                 anchored = _anchored_pattern(spec.pattern)
+                lines.append(f"_NERF_PATTERN='{_shell_escape_sq(anchored)}'")
                 lines.append(f'for _v in "${{{var}[@]}}"; do')
-                lines.append(f'  if ! [[ "$_v" =~ {anchored} ]]; then')
+                lines.append('  if ! [[ "$_v" =~ $_NERF_PATTERN ]]; then')
                 lines.append(f'    echo "error: {tool_name}: argument <{name}> does not match required pattern" >&2')
                 lines.append('    echo "  value:   \\"$_v\\"" >&2')
                 lines.append(f'    echo "  pattern: {spec.pattern}" >&2')
@@ -393,7 +395,8 @@ def _arg_validations(tool_name: str, arguments: dict[str, ArgSpec]) -> str:
                 lines.append("")
             if spec.pattern:
                 anchored = _anchored_pattern(spec.pattern)
-                lines.append(f'if [[ -n "${{{var}}}" ]] && ! [[ "${{{var}}}" =~ {anchored} ]]; then')
+                lines.append(f"_NERF_PATTERN='{_shell_escape_sq(anchored)}'")
+                lines.append(f'if [[ -n "${{{var}}}" ]] && ! [[ "${{{var}}}" =~ $_NERF_PATTERN ]]; then')
                 lines.append(f'  echo "error: {tool_name}: argument <{name}> does not match required pattern" >&2')
                 lines.append(f'  echo "  value:   \\"${{{var}}}\\"" >&2')
                 lines.append(f'  echo "  pattern: {spec.pattern}" >&2')
