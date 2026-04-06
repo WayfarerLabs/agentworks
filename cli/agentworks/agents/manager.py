@@ -662,12 +662,17 @@ def _create_agent_on_vm(
                         check=False, logger=lg,
                     )
                     if remote.ok and remote.stdout.strip() == ref.path:
-                        typer.echo(f"  Dotfiles already cloned, pulling latest...")
-                        _run_as_agent(
+                        typer.echo("  Dotfiles already cloned, pulling latest...")
+                        pull = _run_as_agent(
                             target, linux_user,
                             f"git -C {_shlex.quote(dest)} pull",
-                            timeout=120, logger=lg,
+                            check=False, timeout=120, logger=lg,
                         )
+                        if not pull.ok:
+                            typer.echo(
+                                f"  Warning: dotfiles pull failed (local changes?), skipping",
+                                err=True,
+                            )
                     else:
                         raise SourceRefError(
                             f"dotfiles destination {dest} exists but is a different repo"
