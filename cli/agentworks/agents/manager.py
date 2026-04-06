@@ -646,14 +646,40 @@ def _create_agent_on_vm(
             ref = parse_source_ref(agent_cfg.dotfiles_source)
             dest = agent_cfg.dotfiles_destination.replace("~", home)
 
-            # Clone as the agent user (git credentials are already configured)
+            # Clone/pull as the agent user (git credentials are already configured)
             if ref.kind == "git":
-                clone_cmd = f"git clone {ref.path} {dest}"
-                if ref.ref:
-                    import shlex as _shlex
+                import shlex as _shlex
 
-                    clone_cmd = f"git clone --branch {_shlex.quote(ref.ref)} {ref.path} {dest}"
-                _run_as_agent(target, linux_user, clone_cmd, timeout=120, logger=lg)
+                # If already cloned from the same repo, pull instead of clone
+                is_git = _run_as_agent(
+                    target, linux_user, f"test -d {_shlex.quote(dest)}/.git",
+                    check=False, logger=lg,
+                )
+                if is_git.ok:
+                    remote = _run_as_agent(
+                        target, linux_user,
+                        f"git -C {_shlex.quote(dest)} remote get-url origin",
+                        check=False, logger=lg,
+                    )
+                    if remote.ok and remote.stdout.strip() == ref.path:
+                        typer.echo(f"  Dotfiles already cloned, pulling latest...")
+                        _run_as_agent(
+                            target, linux_user,
+                            f"git -C {_shlex.quote(dest)} pull",
+                            timeout=120, logger=lg,
+                        )
+                    else:
+                        raise SourceRefError(
+                            f"dotfiles destination {dest} exists but is a different repo"
+                        )
+                else:
+                    clone_cmd = f"git clone {_shlex.quote(ref.path)} {_shlex.quote(dest)}"
+                    if ref.ref:
+                        clone_cmd = (
+                            f"git clone --branch {_shlex.quote(ref.ref)}"
+                            f" {_shlex.quote(ref.path)} {_shlex.quote(dest)}"
+                        )
+                    _run_as_agent(target, linux_user, clone_cmd, timeout=120, logger=lg)
             else:
                 # Local source: copy as admin then chown
                 from agentworks.ssh import ExecTarget
