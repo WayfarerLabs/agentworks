@@ -73,6 +73,41 @@ tools:
         return 1
       fi
 
+  git-revert:
+    description: >-
+      Create a new commit that undoes a previous commit. Does not rewrite
+      history -- safe to use on pushed commits.
+    threat:
+      read: workspace
+      write: workspace
+    template:
+      command: [git, revert, --no-edit, "{{ref}}"]
+    arguments:
+      ref:
+        description: Commit to revert (e.g. HEAD, a commit SHA, or HEAD~2)
+        required: true
+
+  git-reset-hard-last:
+    description: >-
+      Drop the most recent commit entirely, discarding its changes.
+      Fails if the commit has already been pushed to any remote.
+    threat:
+      read: workspace
+      write: workspace
+    template:
+      command: [git, reset, --hard, HEAD~1]
+    pre: |
+      if ! git rev-parse HEAD > /dev/null 2>&1; then
+        echo "error: no commits to reset" >&2
+        return 1
+      fi
+      REMOTE_BRANCHES=$(git branch -r --contains HEAD 2>/dev/null)
+      if [ -n "$REMOTE_BRANCHES" ]; then
+        echo "error: HEAD exists on remote branches -- resetting would require a force push" >&2
+        echo "  remote branches: $(echo "$REMOTE_BRANCHES" | tr -s ' \n' ', ' | sed 's/,$//')" >&2
+        return 1
+      fi
+
   git-fetch:
     description: Fetch all branches and tags from a remote
     threat:
