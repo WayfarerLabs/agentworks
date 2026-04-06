@@ -79,7 +79,7 @@ tools:
       Use only when the local main branch is ready to publish.
     threat:
       read: workspace
-      write: remote
+      write: admin
     template:
       command: [git, push, --follow-tags, "{{remote}}", main]
     arguments:
