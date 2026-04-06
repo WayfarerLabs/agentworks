@@ -33,7 +33,6 @@ its native transport:
 - **Lima (local)**: `ExecTarget(lima=LimaTarget(vm_name))`
 - **Lima (remote)**: `ExecTarget(ssh=SSHTarget(vm_host, user))`
 - **Azure**: `ExecTarget(ssh=SSHTarget(public_ip, user))` (queries public IP via `az vm show`)
-- **Proxmox**: `ExecTarget(ssh=SSHTarget(guest_ip, user))` (queries IP via QEMU guest agent)
 - **WSL2**: `ExecTarget(wsl2=WSL2Target(distro_name, user))`
 
 `SSHTarget` is the connection info needed for the initializer to reach the new VM (host, user, port,
@@ -198,61 +197,6 @@ Azure `stop` uses `deallocate` (not `stop`) to avoid continued billing.
 
 Azure `delete` must clean up associated resources. The `az vm delete` command does not remove the
 NIC, disk, NSG, or public IP by default. These must be explicitly deleted.
-
----
-
-## Proxmox Provisioner
-
-Proxmox VE VMs are created by cloning a pre-existing VM template via the Proxmox REST API. The
-template is a Debian 12 cloud image with cloud-init support, prepared by the user.
-
-### Prerequisites
-
-1. Create a Debian 12 cloud-init VM template on the Proxmox node (e.g. VMID 9000)
-2. Create a Proxmox API token: `pveum user token add agentworks@pam agentworks --privsep=0`
-3. Configure the `[proxmox]` section in config.toml
-4. Set `PROXMOX_TOKEN_SECRET` environment variable
-
-### VM Creation
-
-```text
-1. GET /cluster/nextid -> allocate new VMID
-2. POST /nodes/{node}/qemu/{template_vmid}/clone (newid, name, full=1)
-3. Wait for clone task to complete
-4. PUT /nodes/{node}/qemu/{vmid}/config (cores, memory, ciuser, sshkeys, ipconfig0, cicustom, net0)
-5. Upload cloud-init userdata snippet to storage
-6. PUT /nodes/{node}/qemu/{vmid}/resize (disk resize if needed)
-7. POST /nodes/{node}/qemu/{vmid}/status/start
-8. Poll GET /nodes/{node}/qemu/{vmid}/agent/network-get-interfaces for IP
-9. Return ProvisionResult with SSH target (guest IP) and proxmox_vmid
-```
-
-### Cloud-Init Delivery
-
-Proxmox supports cloud-init via `cicustom`, which references a snippet file on storage. The
-provisioner uploads the bootstrap script (wrapped in `#cloud-config` YAML via
-`generate_cloud_init()`) as a snippet, then sets `cicustom=user={storage}:snippets/{name}-user.yml`.
-
-### Provisioning Transport
-
-- **exec_target**: `ExecTarget(ssh=SSHTarget(guest_ip, admin_username))`
-- The guest IP is discovered via the QEMU guest agent before Tailscale is available
-- After Tailscale joins the tailnet, connections switch to the Tailscale address
-
-### Lifecycle Commands
-
-| Command | Implementation                                                          |
-| ------- | ----------------------------------------------------------------------- |
-| start   | `POST /nodes/{node}/qemu/{vmid}/status/start`                          |
-| stop    | `POST /nodes/{node}/qemu/{vmid}/status/stop`                           |
-| delete  | Stop (if running), `DELETE /nodes/{node}/qemu/{vmid}`, cleanup snippet |
-| status  | `GET /nodes/{node}/qemu/{vmid}/status/current` (parse status field)    |
-
-### API Client
-
-The `ProxmoxAPI` class (`vms/provisioners/proxmox_api.py`) is a thin REST client using stdlib
-`urllib.request`. Authentication uses `PVEAPIToken` headers (no session cookies). No external
-dependencies are required.
 
 ---
 

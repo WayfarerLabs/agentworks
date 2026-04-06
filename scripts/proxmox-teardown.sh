@@ -89,13 +89,13 @@ echo "--- Step 3: User & Token ---"
 
 # Remove ACLs (best-effort, ignore errors for paths that don't exist)
 echo "  Removing ACLs..."
-pveum aclmod "/pool/$POOL" -token "$TOKEN_ID" -role AgentworksVM -delete 2>/dev/null || true
-pveum aclmod "/vms/$VMID" -token "$TOKEN_ID" -role AgentworksTemplate -delete 2>/dev/null || true
+pveum aclmod "/pool/$POOL" -user "$USER" -role AgentworksVM -delete 2>/dev/null || true
+pveum aclmod "/vms/$VMID" -user "$USER" -role AgentworksTemplate -delete 2>/dev/null || true
 # Try common storage names for ACL removal
 for storage in local local-lvm data; do
-    pveum aclmod "/storage/$storage" -token "$TOKEN_ID" -role AgentworksStorage -delete 2>/dev/null || true
+    pveum aclmod "/storage/$storage" -user "$USER" -role AgentworksStorage -delete 2>/dev/null || true
 done
-pveum aclmod /sdn/zones/localnetwork -token "$TOKEN_ID" -role AgentworksSDN -delete 2>/dev/null || true
+pveum aclmod /sdn/zones/localnetwork -user "$USER" -role AgentworksSDN -delete 2>/dev/null || true
 
 # Remove token
 echo "  Removing API token..."

@@ -241,7 +241,7 @@ class Config:
     system_install_commands: dict[str, object] = field(default_factory=dict)
     user_install_commands: dict[str, object] = field(default_factory=dict)
     azure: AzureConfig | None = None
-    proxmox: object | None = None  # ProxmoxConfig (object to avoid forward ref issues)
+    proxmox: ProxmoxConfig | None = None
 
 
 # -- Loading ---------------------------------------------------------------
