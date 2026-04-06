@@ -383,6 +383,7 @@ arguments:
     description: <string>         # Required
     required: <bool>              # Default: false
     variadic: <bool>              # Collect remaining args into array (default: false)
+    allow_flags: <bool>           # Allow flag-like tokens in variadic args (default: false)
     pattern: <string>             # Regex the value must match (auto-anchored)
     allow: [<string>, ...]        # Exhaustive list of allowed values
     deny:  [<string>, ...]        # Values to reject
@@ -394,6 +395,8 @@ Rules:
 - At most one argument may be `variadic`, and it must be the last in `arguments`.
 - In `template` mode, a variadic `{{param}}` must be the last element in `template.command`.
 - Variadic arguments become bash arrays; all others become scalar variables.
+- By default, variadic arguments reject tokens starting with `-` to prevent flag injection. Set
+  `allow_flags: true` when forwarding to a tool that expects its own flags (e.g. pytest, ruff).
 
 ## Lifecycle
 

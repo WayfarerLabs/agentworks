@@ -105,11 +105,18 @@ class OptionSpec:
 
 @dataclass(frozen=True)
 class ArgSpec:
-    """A positional argument identified by position, not by a flag."""
+    """A positional argument identified by position, not by a flag.
+
+    For variadic arguments, allow_flags controls whether flag-like tokens
+    (starting with -) are accepted. Default is False (rejected) for safety.
+    Set allow_flags=True when forwarding to a tool that has its own flags
+    (e.g. pytest, ruff).
+    """
 
     description: str
     required: bool = False
     variadic: bool = False
+    allow_flags: bool = False
     pattern: str | None = None
     allow: tuple[str, ...] = field(default_factory=tuple)
     deny: tuple[str, ...] = field(default_factory=tuple)
@@ -435,6 +442,7 @@ def _load_arguments(raw: dict[str, Any], path: Path, tool_name: str) -> dict[str
         description = _require_str(spec_raw, "description", ctx)
         required = bool(spec_raw.get("required", False))
         variadic = bool(spec_raw.get("variadic", False))
+        allow_flags = bool(spec_raw.get("allow_flags", False))
         pattern = str(spec_raw["pattern"]) if "pattern" in spec_raw else None
         allow = tuple(str(v) for v in spec_raw.get("allow", []))
         deny = tuple(str(v) for v in spec_raw.get("deny", []))
@@ -449,7 +457,7 @@ def _load_arguments(raw: dict[str, Any], path: Path, tool_name: str) -> dict[str
 
         arguments[name] = ArgSpec(
             description=description, required=required, variadic=variadic,
-            pattern=pattern, allow=allow, deny=deny,
+            allow_flags=allow_flags, pattern=pattern, allow=allow, deny=deny,
         )
 
     return arguments

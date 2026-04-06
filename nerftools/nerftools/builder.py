@@ -325,14 +325,15 @@ def _arg_validations(tool_name: str, arguments: dict[str, ArgSpec]) -> str:
         var = _var_name(name)
 
         if spec.variadic:
-            lines.append(f'for _v in "${{{var}[@]}}"; do')
-            lines.append('  if [[ "$_v" == -* ]]; then')
-            lines.append(f"    echo \"error: {tool_name}: <{name}> values cannot start with '-'\" >&2")
-            lines.append('    echo "  hint: use -- before positional arguments if needed" >&2')
-            lines.append("    exit 1")
-            lines.append("  fi")
-            lines.append("done")
-            lines.append("")
+            if not spec.allow_flags:
+                lines.append(f'for _v in "${{{var}[@]}}"; do')
+                lines.append('  if [[ "$_v" == -* ]]; then')
+                lines.append(f"    echo \"error: {tool_name}: <{name}> values cannot start with '-'\" >&2")
+                lines.append('    echo "  hint: use -- before positional arguments if needed" >&2')
+                lines.append("    exit 1")
+                lines.append("  fi")
+                lines.append("done")
+                lines.append("")
             if spec.required:
                 lines.append(f"if [[ ${{#{var}[@]}} -eq 0 ]]; then")
                 lines.append(f'  echo "error: {tool_name}: missing required argument <{name}>" >&2')

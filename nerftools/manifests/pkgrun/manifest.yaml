@@ -25,6 +25,7 @@ tools:
         description: Arguments to pass to cspell (e.g. '**/*.md' or --words-only '**/*.md')
         required: true
         variadic: true
+        allow_flags: true
 
   pkgrun-markdownlint:
     description: Run markdownlint-cli2 v0.21.0 with the given arguments (e.g. '**/*.md')
@@ -39,6 +40,7 @@ tools:
         description: Arguments to pass to markdownlint-cli2 (e.g. '**/*.md')
         required: true
         variadic: true
+        allow_flags: true
 
   pkgrun-prettier:
     description: Run prettier v3.8.1 with the given arguments (e.g. --write '**/*.ts')
@@ -53,3 +55,4 @@ tools:
         description: Arguments to pass to prettier (e.g. --write '**/*.ts' or --check .)
         required: true
         variadic: true
+        allow_flags: true
