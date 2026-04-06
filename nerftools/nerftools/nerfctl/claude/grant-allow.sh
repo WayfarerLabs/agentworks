@@ -83,7 +83,14 @@ _resolve_plugin_root() {
     resolved=$(cd "$script_dir/.." && pwd)
   fi
 
-  # Verify the resolved root looks like a plugin
+  # Verify the resolved root is under the Claude plugin hierarchy
+  if [[ "$resolved" != "$HOME/.claude/plugins/"* ]]; then
+    echo "error: resolved plugin root '$resolved' is not under ~/.claude/plugins/" >&2
+    echo "  hint: if testing, use --plugin-root to override" >&2
+    exit 1
+  fi
+
+  # Verify it looks like a plugin
   if [[ ! -d "$resolved/.claude-plugin" ]]; then
     echo "error: '$resolved' does not contain .claude-plugin/ -- not a valid plugin root" >&2
     exit 1
