@@ -47,6 +47,32 @@ tools:
           ! echo "{{message}}" | grep -qi 'co-authored-by:'
         fail_message: Commit message must not contain Co-Authored-By trailers.
 
+  git-commit-amend:
+    description: >-
+      Amend the most recent commit with a new message. Fails if the commit has
+      already been pushed to any remote. Use only to fix the last local commit.
+    threat:
+      read: workspace
+      write: workspace
+    template:
+      command: [git, commit, --amend, -m, "{{message}}"]
+    arguments:
+      message:
+        description: "Commit message: type[(scope)][!]: description"
+        required: true
+        pattern: "^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\\([a-zA-Z0-9._-]+\\))?!?: .+"
+    pre: |
+      if ! git rev-parse HEAD > /dev/null 2>&1; then
+        echo "error: no commits to amend" >&2
+        return 1
+      fi
+      REMOTE_BRANCHES=$(git branch -r --contains HEAD 2>/dev/null)
+      if [ -n "$REMOTE_BRANCHES" ]; then
+        echo "error: HEAD exists on remote branches -- amending would require a force push" >&2
+        echo "  remote branches: $(echo "$REMOTE_BRANCHES" | tr -s ' \n' ', ' | sed 's/,$//')" >&2
+        return 1
+      fi
+
   git-fetch:
     description: Fetch all branches and tags from a remote
     threat:
