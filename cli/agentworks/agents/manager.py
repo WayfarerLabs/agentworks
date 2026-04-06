@@ -612,6 +612,7 @@ def _create_agent_on_vm(
     if config.admin.git_force_safe_directory:
         try:
             _run_as_agent(target, linux_user, "git config --global --add safe.directory '*'", logger=lg)
+            typer.echo("  Git safe.directory configured for agent")
         except Exception as e:
             typer.echo(f"  Warning: agent git safe.directory setup failed: {e}", err=True)
 
