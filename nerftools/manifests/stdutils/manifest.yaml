@@ -1,0 +1,34 @@
+version: 1
+
+package:
+  name: stdutils
+  description: Safe wrappers for common Unix utilities
+  skill_group: stdutils
+  skill_intro: |
+    These tools wrap standard Unix utilities with safety guardrails.
+    Use find and find-cwd for file discovery without code execution
+    capabilities. find-cwd is pre-scoped to the current directory.
+
+tools:
+  find:
+    description: >-
+      Search for files and directories. Exec-like actions are denied --
+      use this for discovery only, not for running commands on results.
+    threat:
+      read: machine
+      write: none
+    passthrough:
+      command: find
+      deny: [-exec, -execdir, -ok, -okdir, -delete]
+
+  find-cwd:
+    description: >-
+      Search for files and directories under the current directory. Exec-like
+      actions are denied. The search root is always '.' (current directory).
+    threat:
+      read: workspace
+      write: none
+    passthrough:
+      command: find
+      deny: [-exec, -execdir, -ok, -okdir, -delete]
+      prefix: [.]

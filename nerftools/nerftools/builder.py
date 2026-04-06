@@ -515,11 +515,11 @@ def _passthrough_exec(tool_name: str, tool_spec: ToolSpec) -> str:
         lines.append("      $_pat)")
         lines.append(
             f'        echo "error: {tool_name}:'
-            " token '\\$_tok' is not allowed"
-            " (matched deny pattern '\\$_pat')\" >&2"
+            " token '$_tok' is not allowed"
+            ' (matched deny pattern \'$_pat\')" >&2'
         )
         lines.append('        echo "  denied patterns: ${_NERF_DENY_PATTERNS[*]}" >&2')
-        lines.append("        echo \"  hint: remove '\\$_tok' and retry\" >&2")
+        lines.append('        echo "  hint: remove \'$_tok\' and retry" >&2')
         lines.append("        exit 1")
         lines.append("        ;;")
         lines.append("    esac")
