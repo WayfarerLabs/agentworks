@@ -20,7 +20,7 @@ def maps_to_text(tool_spec: ToolSpec) -> str | None:
         if tool_spec.template.npm_pkgrun:
             parts.append("<runner>")
         for token in tool_spec.template.command:
-            parts.append(re.sub(r"\{\{(\w+)\}\}", r"<\1>", token))
+            parts.append(re.sub(r"\{\{(?:\w+\.)?(\w+)\}\}", r"<\1>", token))
         return " ".join(parts)
     if tool_spec.passthrough is not None:
         pt = tool_spec.passthrough

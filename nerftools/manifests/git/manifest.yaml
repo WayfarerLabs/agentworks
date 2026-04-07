@@ -17,7 +17,7 @@ tools:
       read: workspace
       write: workspace
     template:
-      command: [git, add, "{{files}}"]
+      command: [git, add, "{{arguments.files}}"]
     arguments:
       files:
         description: Files or directories to stage
@@ -34,7 +34,7 @@ tools:
       read: workspace
       write: workspace
     template:
-      command: [git, commit, -m, "{{message}}"]
+      command: [git, commit, -m, "{{arguments.message}}"]
     arguments:
       message:
         description: "Commit message: type[(scope)][!]: description"
@@ -44,7 +44,7 @@ tools:
       - script: "! git diff --cached --quiet"
         fail_message: No staged changes. Use git-add to stage changes first.
       - script: |
-          ! echo "{{message}}" | grep -qi 'co-authored-by:'
+          ! echo "{{arguments.message}}" | grep -qi 'co-authored-by:'
         fail_message: Commit message must not contain Co-Authored-By trailers.
 
   git-commit-amend:
@@ -55,7 +55,7 @@ tools:
       read: workspace
       write: workspace
     template:
-      command: [git, commit, --amend, -m, "{{message}}"]
+      command: [git, commit, --amend, -m, "{{arguments.message}}"]
     arguments:
       message:
         description: "Commit message: type[(scope)][!]: description"
@@ -81,7 +81,7 @@ tools:
       read: workspace
       write: workspace
     template:
-      command: [git, revert, --no-edit, "{{ref}}"]
+      command: [git, revert, --no-edit, "{{arguments.ref}}"]
     arguments:
       ref:
         description: Commit to revert (e.g. HEAD, a commit SHA, or HEAD~2)
@@ -114,7 +114,7 @@ tools:
       read: remote
       write: workspace
     template:
-      command: [git, fetch, "{{remote}}", --tags]
+      command: [git, fetch, "{{arguments.remote}}", --tags]
     arguments:
       remote:
         description: Remote name (e.g. origin)
@@ -127,7 +127,7 @@ tools:
       read: remote
       write: workspace
     template:
-      command: [git, pull, "{{remote}}"]
+      command: [git, pull, "{{arguments.remote}}"]
     arguments:
       remote:
         description: Remote name (e.g. origin)
@@ -142,7 +142,7 @@ tools:
       read: workspace
       write: admin
     template:
-      command: [git, push, --follow-tags, "{{remote}}", main]
+      command: [git, push, --follow-tags, "{{arguments.remote}}", main]
     arguments:
       remote:
         description: Remote name (e.g. origin)
@@ -157,7 +157,7 @@ tools:
       read: workspace
       write: remote
     template:
-      command: [git, push, --follow-tags, "{{remote}}", HEAD]
+      command: [git, push, --follow-tags, "{{arguments.remote}}", HEAD]
     arguments:
       remote:
         description: Remote name (e.g. origin)
@@ -190,7 +190,7 @@ tools:
       read: workspace
       write: workspace
     template:
-      command: [git, tag, -a, "{{tag}}", -m, "{{tag}}"]
+      command: [git, tag, -a, "{{arguments.tag}}", -m, "{{arguments.tag}}"]
     arguments:
       tag:
         description: Tag name to create (e.g. v1.2.3)
@@ -198,5 +198,5 @@ tools:
         pattern: "^[a-zA-Z0-9._/-]+$"
     guards:
       - script: |
-          ! git rev-parse "refs/tags/{{tag}}" > /dev/null 2>&1
+          ! git rev-parse "refs/tags/{{arguments.tag}}" > /dev/null 2>&1
         fail_message: Tag already exists. Use a different version.

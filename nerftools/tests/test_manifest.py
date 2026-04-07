@@ -253,7 +253,7 @@ def test_switch_loaded(tmp_path: Path) -> None:
         "t": {
             "description": "x",
             "threat": {"read": "none", "write": "none"},
-            "template": {"command": ["cmd", "{{verbose}}"]},
+            "template": {"command": ["cmd", "{{switches.verbose}}"]},
             "switches": {"verbose": {"description": "Enable verbose"}},
         },
     })
@@ -269,7 +269,7 @@ def test_switch_short(tmp_path: Path) -> None:
         "t": {
             "description": "x",
             "threat": {"read": "none", "write": "none"},
-            "template": {"command": ["cmd", "{{verbose}}"]},
+            "template": {"command": ["cmd", "{{switches.verbose}}"]},
             "switches": {"verbose": {"description": "Verbose", "short": "-v"}},
         },
     })
@@ -283,7 +283,7 @@ def test_invalid_switch_short_raises(tmp_path: Path) -> None:
         "t": {
             "description": "x",
             "threat": {"read": "none", "write": "none"},
-            "template": {"command": ["cmd", "{{verbose}}"]},
+            "template": {"command": ["cmd", "{{switches.verbose}}"]},
             "switches": {"verbose": {"description": "Verbose", "short": "--vv"}},
         },
     })
@@ -300,7 +300,7 @@ def test_option_loaded(tmp_path: Path) -> None:
         "t": {
             "description": "x",
             "threat": {"read": "none", "write": "none"},
-            "template": {"command": ["cmd", "{{remote}}"]},
+            "template": {"command": ["cmd", "{{options.remote}}"]},
             "options": {
                 "remote": {
                     "description": "Remote name",
@@ -325,7 +325,7 @@ def test_option_allow_deny_conflict_raises(tmp_path: Path) -> None:
         "t": {
             "description": "x",
             "threat": {"read": "none", "write": "none"},
-            "template": {"command": ["cmd", "{{x}}"]},
+            "template": {"command": ["cmd", "{{options.x}}"]},
             "options": {"x": {"description": "x", "allow": ["a"], "deny": ["b"]}},
         },
     })
@@ -339,7 +339,7 @@ def test_invalid_option_pattern_raises(tmp_path: Path) -> None:
         "t": {
             "description": "x",
             "threat": {"read": "none", "write": "none"},
-            "template": {"command": ["cmd", "{{x}}"]},
+            "template": {"command": ["cmd", "{{options.x}}"]},
             "options": {"x": {"description": "x", "pattern": "[invalid"}},
         },
     })
@@ -356,7 +356,7 @@ def test_argument_loaded(tmp_path: Path) -> None:
         "t": {
             "description": "x",
             "threat": {"read": "none", "write": "none"},
-            "template": {"command": ["git", "fetch", "{{remote}}"]},
+            "template": {"command": ["git", "fetch", "{{arguments.remote}}"]},
             "arguments": {
                 "remote": {"description": "Remote name", "required": True},
             },
@@ -374,7 +374,7 @@ def test_variadic_argument(tmp_path: Path) -> None:
         "t": {
             "description": "x",
             "threat": {"read": "none", "write": "none"},
-            "template": {"command": ["git", "add", "{{files}}"]},
+            "template": {"command": ["git", "add", "{{arguments.files}}"]},
             "arguments": {"files": {"description": "Files", "variadic": True}},
         },
     })
@@ -388,7 +388,7 @@ def test_argument_allow_deny_conflict_raises(tmp_path: Path) -> None:
         "t": {
             "description": "x",
             "threat": {"read": "none", "write": "none"},
-            "template": {"command": ["cmd", "{{x}}"]},
+            "template": {"command": ["cmd", "{{arguments.x}}"]},
             "arguments": {"x": {"description": "x", "allow": ["a"], "deny": ["b"]}},
         },
     })
@@ -405,17 +405,17 @@ def test_guard_loaded(tmp_path: Path) -> None:
         "t": {
             "description": "x",
             "threat": {"read": "none", "write": "none"},
-            "template": {"command": ["git", "push", "{{remote}}", "HEAD"]},
+            "template": {"command": ["git", "push", "{{arguments.remote}}", "HEAD"]},
             "arguments": {"remote": {"description": "Remote", "required": True}},
             "guards": [
-                {"command": ["git", "remote", "get-url", "{{remote}}"], "fail_message": "Remote not found"},
+                {"command": ["git", "remote", "get-url", "{{arguments.remote}}"], "fail_message": "Remote not found"},
             ],
         },
     })
     p = _write_manifest(tmp_path, raw)
     m = load_manifest(p)
     assert len(m.tools["t"].guards) == 1
-    assert m.tools["t"].guards[0].command == ("git", "remote", "get-url", "{{remote}}")
+    assert m.tools["t"].guards[0].command == ("git", "remote", "get-url", "{{arguments.remote}}")
 
 
 def test_pre_hook_loaded(tmp_path: Path) -> None:
@@ -440,7 +440,7 @@ def test_undefined_placeholder_raises(tmp_path: Path) -> None:
         "t": {
             "description": "x",
             "threat": {"read": "none", "write": "none"},
-            "template": {"command": ["echo", "{{x}}"]},
+            "template": {"command": ["echo", "{{arguments.x}}"]},
         },
     })
     p = _write_manifest(tmp_path, raw)
@@ -467,7 +467,7 @@ def test_name_overlap_raises(tmp_path: Path) -> None:
         "t": {
             "description": "x",
             "threat": {"read": "none", "write": "none"},
-            "template": {"command": ["cmd", "{{x}}"]},
+            "template": {"command": ["cmd", "{{arguments.x}}"]},
             "switches": {"x": {"description": "x"}},
             "arguments": {"x": {"description": "x"}},
         },
@@ -492,7 +492,7 @@ def test_variadic_not_last_raises(tmp_path: Path) -> None:
         "      read: none\n"
         "      write: none\n"
         "    template:\n"
-        "      command: [echo, '{{files}}', '{{extra}}']\n"
+        "      command: [echo, '{{arguments.files}}', '{{arguments.extra}}']\n"
         "    arguments:\n"
         "      files:\n"
         "        description: Files\n"
@@ -509,9 +509,9 @@ def test_guard_undefined_placeholder_raises(tmp_path: Path) -> None:
         "t": {
             "description": "x",
             "threat": {"read": "none", "write": "none"},
-            "template": {"command": ["echo", "{{x}}"]},
+            "template": {"command": ["echo", "{{arguments.x}}"]},
             "arguments": {"x": {"description": "x"}},
-            "guards": [{"command": ["check", "{{y}}"], "fail_message": "fail"}],
+            "guards": [{"command": ["check", "{{arguments.y}}"], "fail_message": "fail"}],
         },
     })
     p = _write_manifest(tmp_path, raw)

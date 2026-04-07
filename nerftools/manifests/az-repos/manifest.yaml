@@ -25,7 +25,7 @@ tools:
       read: remote
       write: none
     template:
-      command: [az, repos, pr, show, --id, "{{pr_id}}", --output, table]
+      command: [az, repos, pr, show, --id, "{{arguments.pr_id}}", --output, table]
     arguments:
       pr_id:
         description: Pull request ID (numeric, from az-repos-pr-list)
@@ -41,7 +41,7 @@ tools:
       read: remote
       write: remote
     template:
-      command: [az, repos, pr, create, --title, "{{title}}", --description, "{{description}}", "{{draft}}", --output, table]
+      command: [az, repos, pr, create, --title, "{{arguments.title}}", --description, "{{arguments.description}}", "{{switches.draft}}", --output, table]
     arguments:
       title:
         description: PR title

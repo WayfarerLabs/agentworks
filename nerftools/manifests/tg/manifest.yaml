@@ -34,7 +34,7 @@ tools:
       read: remote
       write: workspace
     template:
-      command: [terragrunt, init, --non-interactive, -input=false, "{{upgrade}}"]
+      command: [terragrunt, init, --non-interactive, -input=false, "{{switches.upgrade}}"]
     switches:
       upgrade:
         description: Upgrade modules and plugins to latest versions
@@ -46,7 +46,7 @@ tools:
       read: remote
       write: workspace
     template:
-      command: [terragrunt, run, --all, init, --non-interactive, -input=false, "{{upgrade}}"]
+      command: [terragrunt, run, --all, init, --non-interactive, -input=false, "{{switches.upgrade}}"]
     switches:
       upgrade:
         description: Upgrade modules and plugins to latest versions
@@ -90,7 +90,7 @@ tools:
       read: workspace
       write: none
     template:
-      command: [terragrunt, hcl, format, --non-interactive, "{{check}}"]
+      command: [terragrunt, hcl, format, --non-interactive, "{{switches.check}}"]
     switches:
       check:
         description: Check formatting without modifying files (exits non-zero if files are unformatted)
@@ -101,7 +101,7 @@ tools:
       read: workspace
       write: none
     template:
-      command: [terragrunt, run, --all, hcl, format, --non-interactive, "{{check}}"]
+      command: [terragrunt, run, --all, hcl, format, --non-interactive, "{{switches.check}}"]
     switches:
       check:
         description: Check formatting without modifying files (exits non-zero if files are unformatted)

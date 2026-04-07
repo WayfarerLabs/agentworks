@@ -17,7 +17,7 @@ tools:
       read: workspace
       write: workspace
     template:
-      command: [uv, run, pytest, "{{args}}"]
+      command: [uv, run, pytest, "{{arguments.args}}"]
     arguments:
       args:
         description: Arguments to pass to pytest (e.g. tests/ -v or -x -q)
@@ -31,7 +31,7 @@ tools:
       read: workspace
       write: none
     template:
-      command: [uv, run, ruff, check, "{{args}}"]
+      command: [uv, run, ruff, check, "{{arguments.args}}"]
     arguments:
       args:
         description: Arguments to pass to ruff check (e.g. src/)
@@ -45,7 +45,7 @@ tools:
       read: workspace
       write: workspace
     template:
-      command: [uv, run, ruff, check, --fix, "{{args}}"]
+      command: [uv, run, ruff, check, --fix, "{{arguments.args}}"]
     arguments:
       args:
         description: Arguments to pass to ruff check --fix (e.g. src/)
@@ -59,7 +59,7 @@ tools:
       read: workspace
       write: none
     template:
-      command: [uv, run, mypy, "{{args}}"]
+      command: [uv, run, mypy, "{{arguments.args}}"]
     arguments:
       args:
         description: Arguments to pass to mypy (e.g. src/ or --strict)

@@ -532,30 +532,23 @@ def _load_env(raw: dict[str, Any], path: Path, tool_name: str) -> dict[str, str]
 
 
 def resolve_placeholder(ref: str, tool: ToolSpec) -> tuple[str, str] | None:
-    """Resolve a placeholder reference to (kind, name).
+    """Resolve a qualified placeholder reference to (kind, name).
 
-    Supports both bare {{name}} and qualified {{kind.name}} syntax.
-    Returns None if the reference cannot be resolved.
+    Placeholders must use {{kind.name}} syntax where kind is one of
+    switches, options, or arguments. Returns None if the reference
+    cannot be resolved.
     """
-    if "." in ref:
-        kind, name = ref.split(".", 1)
-        if kind not in _VALID_PLACEHOLDER_KINDS:
-            return None
-        if kind == "switches":
-            return (kind, name) if name in tool.switches else None
-        if kind == "options":
-            return (kind, name) if name in tool.options else None
-        if kind == "arguments":
-            return (kind, name) if name in tool.arguments else None
+    if "." not in ref:
         return None
-
-    # Bare name: look up across all categories
-    if ref in tool.switches:
-        return ("switches", ref)
-    if ref in tool.options:
-        return ("options", ref)
-    if ref in tool.arguments:
-        return ("arguments", ref)
+    kind, name = ref.split(".", 1)
+    if kind not in _VALID_PLACEHOLDER_KINDS:
+        return None
+    if kind == "switches":
+        return (kind, name) if name in tool.switches else None
+    if kind == "options":
+        return (kind, name) if name in tool.options else None
+    if kind == "arguments":
+        return (kind, name) if name in tool.arguments else None
     return None
 
 
@@ -625,7 +618,7 @@ def _validate_template_refs(tool: ToolSpec, all_params: set[str], ctx: str) -> N
                 )
             referenced_names.add(resolved[1])
 
-    # All params must be referenced in command (by bare or qualified name)
+    # All params must be referenced in command
     for name in all_params:
         if name not in referenced_names:
             raise ManifestError(f"{ctx}: '{name}' is defined but not referenced in template command")
@@ -636,10 +629,8 @@ def _validate_template_refs(tool: ToolSpec, all_params: set[str], ctx: str) -> N
         last_arg = arg_names[-1]
         if tool.arguments[last_arg].variadic:
             last_cmd = command[-1] if command else ""
-            # Accept both bare and qualified
-            placeholder_bare = "{{" + last_arg + "}}"
-            placeholder_qual = "{{arguments." + last_arg + "}}"
-            if last_cmd not in (placeholder_bare, placeholder_qual):
+            placeholder = "{{arguments." + last_arg + "}}"
+            if last_cmd != placeholder:
                 raise ManifestError(
                     f"{ctx}: variadic argument '{last_arg}' placeholder must be the last element in template command"
                 )

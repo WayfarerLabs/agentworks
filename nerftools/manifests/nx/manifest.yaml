@@ -28,7 +28,7 @@ tools:
       read: workspace
       write: none
     template:
-      command: [npx, nx, show, project, "{{project}}"]
+      command: [npx, nx, show, project, "{{arguments.project}}"]
     arguments:
       project:
         description: Nx project name (from nx-show-projects)
@@ -44,7 +44,7 @@ tools:
       read: workspace
       write: workspace
     template:
-      command: [npx, nx, run, "{{target}}"]
+      command: [npx, nx, run, "{{arguments.target}}"]
     arguments:
       target:
         description: "Target in project:target format (e.g. myapp:build, myapp:test, myapp:lint)"

@@ -68,7 +68,7 @@ def test_claude_plugin_creates_marketplace_json(tmp_path: Path) -> None:
 
 def test_claude_plugin_creates_skills_with_scripts(tmp_path: Path) -> None:
     tools = {"git-add": _template_tool(
-        ["git", "add", "{{files}}"],
+        ["git", "add", "{{arguments.files}}"],
         arguments={"files": ArgSpec(description="files", variadic=True)},
     )}
     build_claude_plugin([_manifest(skill_group="git", tools=tools)], tmp_path, prefix="nerf-")
@@ -137,7 +137,7 @@ def test_claude_plugin_cleans_output_by_default(tmp_path: Path) -> None:
 
 
 def test_claude_plugin_maps_to_line(tmp_path: Path) -> None:
-    tools = {"git-push": _template_tool(["git", "push", "{{remote}}", "HEAD"])}
+    tools = {"git-push": _template_tool(["git", "push", "{{arguments.remote}}", "HEAD"])}
     build_claude_plugin([_manifest(skill_group="git", tools=tools)], tmp_path, prefix="nerf-")
 
     content = (tmp_path / "skills" / "nerf-git" / "SKILL.md").read_text()

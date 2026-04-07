@@ -151,7 +151,7 @@ def test_usage_line_simple_tool() -> None:
 
 
 def test_maps_to_shows_placeholders() -> None:
-    m = _manifest(tools={"t": _template_tool(["git", "push", "{{remote}}", "{{branch}}"])})
+    m = _manifest(tools={"t": _template_tool(["git", "push", "{{arguments.remote}}", "{{arguments.branch}}"])})
     skill = build_skill_text(m)
     assert "**Maps to:** `git push <remote> <branch>`" in skill
 
@@ -160,7 +160,7 @@ def test_maps_to_npm_pkgrun_shows_runner() -> None:
     tool = ToolSpec(
         description="Run cspell",
         threat=_THREAT_NONE,
-        template=TemplateSpec(command=("cspell@8.19.4", "{{args}}"), npm_pkgrun=True),
+        template=TemplateSpec(command=("cspell@8.19.4", "{{arguments.args}}"), npm_pkgrun=True),
         arguments={"args": ArgSpec(description="args", variadic=True)},
     )
     m = _manifest(tools={"pkgrun-cspell": tool})
@@ -169,21 +169,21 @@ def test_maps_to_npm_pkgrun_shows_runner() -> None:
 
 
 def test_usage_line_required_option() -> None:
-    m = _manifest(tools={"t": _template_tool(["echo", "{{remote}}"], options={"remote": _option("--remote")})})
+    m = _manifest(tools={"t": _template_tool(["echo", "{{options.remote}}"], options={"remote": _option("--remote")})})
     skill = build_skill_text(m)
     assert "--remote <remote>" in skill
 
 
 def test_usage_line_option_with_short() -> None:
     options = {"remote": OptionSpec(flag="--remote", description="Remote", short="-r", required=True)}
-    m = _manifest(tools={"t": _template_tool(["echo", "{{remote}}"], options=options)})
+    m = _manifest(tools={"t": _template_tool(["echo", "{{options.remote}}"], options=options)})
     skill = build_skill_text(m)
     assert "--remote|-r <remote>" in skill
 
 
 def test_usage_line_optional_option_bracketed() -> None:
     m = _manifest(tools={"t": _template_tool(
-        ["echo", "{{branch}}"],
+        ["echo", "{{options.branch}}"],
         options={"branch": _option("--branch", required=False)},
     )})
     skill = build_skill_text(m)
@@ -192,7 +192,7 @@ def test_usage_line_optional_option_bracketed() -> None:
 
 def test_usage_line_positional_required() -> None:
     m = _manifest(tools={"t": _template_tool(
-        ["git", "fetch", "{{remote}}"],
+        ["git", "fetch", "{{arguments.remote}}"],
         arguments={"remote": _arg(required=True)},
     )})
     skill = build_skill_text(m)
@@ -200,7 +200,7 @@ def test_usage_line_positional_required() -> None:
 
 
 def test_usage_line_variadic_arg() -> None:
-    m = _manifest(tools={"t": _template_tool(["git", "add", "{{files}}"], arguments={"files": _arg(variadic=True)})})
+    m = _manifest(tools={"t": _template_tool(["git", "add", "{{arguments.files}}"], arguments={"files": _arg(variadic=True)})})
     skill = build_skill_text(m)
     assert "<files...>" in skill
 
@@ -210,7 +210,7 @@ def test_usage_line_variadic_arg() -> None:
 
 def test_switch_listed_in_switches() -> None:
     switches = {"verbose": SwitchSpec(flag="--verbose", description="Enable verbose")}
-    m = _manifest(tools={"t": _template_tool(["cmd", "{{verbose}}"], switches=switches)})
+    m = _manifest(tools={"t": _template_tool(["cmd", "{{switches.verbose}}"], switches=switches)})
     skill = build_skill_text(m)
     assert "**Switches:**" in skill
     assert "--verbose" in skill
@@ -219,7 +219,7 @@ def test_switch_listed_in_switches() -> None:
 
 def test_option_listed_in_options() -> None:
     options = {"remote": _option("--remote", "Remote name")}
-    m = _manifest(tools={"t": _template_tool(["echo", "{{remote}}"], options=options)})
+    m = _manifest(tools={"t": _template_tool(["echo", "{{options.remote}}"], options=options)})
     skill = build_skill_text(m)
     assert "**Options:**" in skill
     assert "--remote" in skill
@@ -227,13 +227,13 @@ def test_option_listed_in_options() -> None:
 
 
 def test_required_option_labeled() -> None:
-    m = _manifest(tools={"t": _template_tool(["echo", "{{x}}"], options={"x": _option("--x")})})
+    m = _manifest(tools={"t": _template_tool(["echo", "{{options.x}}"], options={"x": _option("--x")})})
     skill = build_skill_text(m)
     assert "(required)" in skill
 
 
 def test_optional_option_labeled() -> None:
-    m = _manifest(tools={"t": _template_tool(["echo", "{{x}}"], options={"x": _option("--x", required=False)})})
+    m = _manifest(tools={"t": _template_tool(["echo", "{{options.x}}"], options={"x": _option("--x", required=False)})})
     skill = build_skill_text(m)
     assert "(optional)" in skill
 

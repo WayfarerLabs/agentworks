@@ -18,7 +18,7 @@ tools:
       read: workspace
       write: none
     template:
-      command: ["cspell@8.19.4", "{{args}}"]
+      command: ["cspell@8.19.4", "{{arguments.args}}"]
       npm_pkgrun: true
     arguments:
       args:
@@ -33,7 +33,7 @@ tools:
       read: workspace
       write: none
     template:
-      command: ["markdownlint-cli2@0.21.0", "{{args}}"]
+      command: ["markdownlint-cli2@0.21.0", "{{arguments.args}}"]
       npm_pkgrun: true
     arguments:
       args:
@@ -48,7 +48,7 @@ tools:
       read: workspace
       write: workspace
     template:
-      command: ["prettier@3.8.1", "{{args}}"]
+      command: ["prettier@3.8.1", "{{arguments.args}}"]
       npm_pkgrun: true
     arguments:
       args:

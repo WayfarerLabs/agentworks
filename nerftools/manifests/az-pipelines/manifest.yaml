@@ -34,7 +34,7 @@ tools:
       read: remote
       write: none
     template:
-      command: [az, pipelines, runs, list, --pipeline-ids, "{{pipeline_id}}", --top, "10", --output, table]
+      command: [az, pipelines, runs, list, --pipeline-ids, "{{arguments.pipeline_id}}", --top, "10", --output, table]
     arguments:
       pipeline_id:
         description: Pipeline ID (numeric, from az-pipelines-list)

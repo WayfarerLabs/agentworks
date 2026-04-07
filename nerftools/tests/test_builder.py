@@ -126,63 +126,63 @@ def test_threat_metadata_in_header() -> None:
 
 def test_option_in_case_statement() -> None:
     options = {"remote": _option("--remote")}
-    script = build_script_text("t", "p", _template_tool(["git", "push", "{{remote}}"], options=options))
+    script = build_script_text("t", "p", _template_tool(["git", "push", "{{options.remote}}"], options=options))
     assert "--remote) REMOTE=" in script
 
 
 def test_option_with_short_in_case() -> None:
     options = {"remote": OptionSpec(flag="--remote", description="Remote", short="-r", required=True)}
-    script = build_script_text("t", "p", _template_tool(["git", "push", "{{remote}}"], options=options))
+    script = build_script_text("t", "p", _template_tool(["git", "push", "{{options.remote}}"], options=options))
     assert "--remote|-r) REMOTE=" in script
 
 
 def test_option_with_short_in_usage() -> None:
     options = {"remote": OptionSpec(flag="--remote", description="Remote", short="-r", required=True)}
-    script = build_script_text("t", "p", _template_tool(["git", "push", "{{remote}}"], options=options))
+    script = build_script_text("t", "p", _template_tool(["git", "push", "{{options.remote}}"], options=options))
     assert "--remote|-r <remote>" in script
 
 
 def test_option_exec_substitution() -> None:
     options = {"remote": _option("--remote")}
-    script = build_script_text("t", "p", _template_tool(["git", "push", "{{remote}}", "HEAD"], options=options))
+    script = build_script_text("t", "p", _template_tool(["git", "push", "{{options.remote}}", "HEAD"], options=options))
     assert 'exec git push "${REMOTE}" HEAD' in script
 
 
 def test_required_option_validation() -> None:
     options = {"remote": _option("--remote")}
-    script = build_script_text("t", "p", _template_tool(["echo", "{{remote}}"], options=options))
+    script = build_script_text("t", "p", _template_tool(["echo", "{{options.remote}}"], options=options))
     assert "missing required option --remote" in script
 
 
 def test_optional_option_no_required_check() -> None:
     options = {"remote": _option("--remote", required=False)}
-    script = build_script_text("t", "p", _template_tool(["echo", "{{remote}}"], options=options))
+    script = build_script_text("t", "p", _template_tool(["echo", "{{options.remote}}"], options=options))
     assert "missing required option --remote" not in script
 
 
 def test_optional_option_uses_conditional_expansion() -> None:
     options = {"remote": _option("--remote", required=False)}
-    script = build_script_text("t", "p", _template_tool(["git", "fetch", "{{remote}}"], options=options))
+    script = build_script_text("t", "p", _template_tool(["git", "fetch", "{{options.remote}}"], options=options))
     assert '${REMOTE:+"$REMOTE"}' in script
 
 
 def test_pattern_validation() -> None:
     options = {"remote": _option("--remote", pattern="^[a-z]+$")}
-    script = build_script_text("t", "p", _template_tool(["echo", "{{remote}}"], options=options))
+    script = build_script_text("t", "p", _template_tool(["echo", "{{options.remote}}"], options=options))
     assert "^[a-z]+$" in script
     assert "does not match required pattern" in script
 
 
 def test_deny_validation() -> None:
     options = {"remote": _option("--remote", deny=("origin", "main"))}
-    script = build_script_text("t", "p", _template_tool(["echo", "{{remote}}"], options=options))
+    script = build_script_text("t", "p", _template_tool(["echo", "{{options.remote}}"], options=options))
     assert '"${REMOTE}" == "origin"' in script
     assert '"${REMOTE}" == "main"' in script
 
 
 def test_allow_validation() -> None:
     options = {"env": _option("--env", allow=("prod", "staging"))}
-    script = build_script_text("t", "p", _template_tool(["echo", "{{env}}"], options=options))
+    script = build_script_text("t", "p", _template_tool(["echo", "{{options.env}}"], options=options))
     assert '"${ENV}" != "prod"' in script
     assert '"${ENV}" != "staging"' in script
     assert "not an allowed value" in script
@@ -192,7 +192,7 @@ def test_option_parser_break_when_positional_args_present() -> None:
     options = {"verbose": _option("--verbose", required=False)}
     arguments = {"target": _arg(required=True)}
     tool = _template_tool(
-        ["cmd", "{{verbose}}", "{{target}}"], options=options, arguments=arguments,
+        ["cmd", "{{options.verbose}}", "{{arguments.target}}"], options=options, arguments=arguments,
     )
     script = build_script_text("t", "p", tool)
     assert "*) break ;;" in script
@@ -200,7 +200,7 @@ def test_option_parser_break_when_positional_args_present() -> None:
 
 def test_option_parser_error_when_no_positional_args() -> None:
     options = {"remote": _option("--remote")}
-    script = build_script_text("t", "p", _template_tool(["echo", "{{remote}}"], options=options))
+    script = build_script_text("t", "p", _template_tool(["echo", "{{options.remote}}"], options=options))
     assert "unknown argument" in script
     assert "*) break ;;" not in script
 
@@ -210,31 +210,36 @@ def test_option_parser_error_when_no_positional_args() -> None:
 
 def test_switch_shift_one() -> None:
     switches = {"draft": SwitchSpec(flag="--draft", description="Draft")}
-    script = build_script_text("t", "p", _template_tool(["gh", "pr", "create", "{{draft}}"], switches=switches))
+    tool = _template_tool(["gh", "pr", "create", "{{switches.draft}}"], switches=switches)
+    script = build_script_text("t", "p", tool)
     assert 'DRAFT="true"; shift 1' in script
 
 
 def test_switch_no_shift_two() -> None:
     switches = {"draft": SwitchSpec(flag="--draft", description="Draft")}
-    script = build_script_text("t", "p", _template_tool(["gh", "pr", "create", "{{draft}}"], switches=switches))
+    tool = _template_tool(["gh", "pr", "create", "{{switches.draft}}"], switches=switches)
+    script = build_script_text("t", "p", tool)
     assert "shift 2" not in script
 
 
 def test_switch_expands_to_flag_string() -> None:
     switches = {"draft": SwitchSpec(flag="--draft", description="Draft")}
-    script = build_script_text("t", "p", _template_tool(["gh", "pr", "create", "{{draft}}"], switches=switches))
+    tool = _template_tool(["gh", "pr", "create", "{{switches.draft}}"], switches=switches)
+    script = build_script_text("t", "p", tool)
     assert '${DRAFT:+"--draft"}' in script
 
 
 def test_switch_usage_shows_bracketed_flag() -> None:
     switches = {"draft": SwitchSpec(flag="--draft", description="Draft")}
-    script = build_script_text("t", "p", _template_tool(["gh", "pr", "create", "{{draft}}"], switches=switches))
+    tool = _template_tool(["gh", "pr", "create", "{{switches.draft}}"], switches=switches)
+    script = build_script_text("t", "p", tool)
     assert "[--draft]" in script
 
 
 def test_switch_bash_syntax() -> None:
     switches = {"draft": SwitchSpec(flag="--draft", description="Draft")}
-    script = build_script_text("t", "p", _template_tool(["gh", "pr", "create", "{{draft}}"], switches=switches))
+    tool = _template_tool(["gh", "pr", "create", "{{switches.draft}}"], switches=switches)
+    script = build_script_text("t", "p", tool)
     result = subprocess.run(["bash", "-n"], input=script, capture_output=True, text=True)
     assert result.returncode == 0, f"bash -n failed:\n{result.stderr}"
 
@@ -244,43 +249,43 @@ def test_switch_bash_syntax() -> None:
 
 def test_positional_arg_collected() -> None:
     arguments = {"remote": _arg(required=True)}
-    script = build_script_text("t", "p", _template_tool(["git", "fetch", "{{remote}}"], arguments=arguments))
+    script = build_script_text("t", "p", _template_tool(["git", "fetch", "{{arguments.remote}}"], arguments=arguments))
     assert 'REMOTE="${1:-}"' in script
 
 
 def test_positional_exec_substitution() -> None:
     arguments = {"remote": _arg(required=True)}
-    script = build_script_text("t", "p", _template_tool(["git", "fetch", "{{remote}}"], arguments=arguments))
+    script = build_script_text("t", "p", _template_tool(["git", "fetch", "{{arguments.remote}}"], arguments=arguments))
     assert 'exec git fetch "${REMOTE}"' in script
 
 
 def test_required_arg_validation() -> None:
     arguments = {"target": _arg(required=True)}
-    script = build_script_text("t", "p", _template_tool(["cmd", "{{target}}"], arguments=arguments))
+    script = build_script_text("t", "p", _template_tool(["cmd", "{{arguments.target}}"], arguments=arguments))
     assert "missing required argument <target>" in script
 
 
 def test_optional_arg_no_required_check() -> None:
     arguments = {"target": _arg(required=False)}
-    script = build_script_text("t", "p", _template_tool(["cmd", "{{target}}"], arguments=arguments))
+    script = build_script_text("t", "p", _template_tool(["cmd", "{{arguments.target}}"], arguments=arguments))
     assert "missing required argument <target>" not in script
 
 
 def test_variadic_arg_collected() -> None:
     arguments = {"files": _arg(variadic=True)}
-    script = build_script_text("t", "p", _template_tool(["git", "add", "{{files}}"], arguments=arguments))
+    script = build_script_text("t", "p", _template_tool(["git", "add", "{{arguments.files}}"], arguments=arguments))
     assert 'FILES=("$@")' in script
 
 
 def test_variadic_arg_exec_substitution() -> None:
     arguments = {"files": _arg(required=True, variadic=True)}
-    script = build_script_text("t", "p", _template_tool(["git", "add", "{{files}}"], arguments=arguments))
+    script = build_script_text("t", "p", _template_tool(["git", "add", "{{arguments.files}}"], arguments=arguments))
     assert '"${FILES[@]}"' in script
 
 
 def test_optional_variadic_uses_conditional_expansion() -> None:
     arguments = {"files": _arg(variadic=True)}
-    script = build_script_text("t", "p", _template_tool(["git", "add", "{{files}}"], arguments=arguments))
+    script = build_script_text("t", "p", _template_tool(["git", "add", "{{arguments.files}}"], arguments=arguments))
     assert '${FILES[@]+"${FILES[@]}"}' in script
 
 
@@ -289,14 +294,14 @@ def test_optional_variadic_uses_conditional_expansion() -> None:
 
 def test_positional_arg_rejects_flag_like_value() -> None:
     arguments = {"target": _arg(required=True)}
-    script = build_script_text("t", "p", _template_tool(["cmd", "{{target}}"], arguments=arguments))
+    script = build_script_text("t", "p", _template_tool(["cmd", "{{arguments.target}}"], arguments=arguments))
     assert '"${TARGET}" == -*' in script
     assert "cannot start with '-'" in script
 
 
 def test_variadic_arg_rejects_flag_like_values() -> None:
     arguments = {"files": _arg(variadic=True)}
-    script = build_script_text("t", "p", _template_tool(["git", "add", "{{files}}"], arguments=arguments))
+    script = build_script_text("t", "p", _template_tool(["git", "add", "{{arguments.files}}"], arguments=arguments))
     assert '"$_v" == -*' in script
     assert "cannot start with '-'" in script
 
@@ -320,10 +325,10 @@ def test_env_exports_before_exec() -> None:
 
 
 def test_guard_check_before_exec() -> None:
-    guards = (GuardSpec(command=("git", "remote", "get-url", "{{remote}}"), fail_message="Remote not found"),)
+    guards = (GuardSpec(command=("git", "remote", "get-url", "{{arguments.remote}}"), fail_message="Remote not found"),)
     arguments = {"remote": _arg(required=True)}
     tool = _template_tool(
-        ["git", "push", "{{remote}}", "HEAD"], arguments=arguments, guards=guards,
+        ["git", "push", "{{arguments.remote}}", "HEAD"], arguments=arguments, guards=guards,
     )
     script = build_script_text("t", "p", tool)
     lines = script.splitlines()
@@ -341,11 +346,19 @@ def test_script_guard_check_before_exec() -> None:
 
 
 def test_script_guard_substitutes_placeholders() -> None:
-    guards = (GuardSpec(script='! git rev-parse "refs/tags/{{tag}}" > /dev/null 2>&1', fail_message="Tag exists"),)
-    arguments = {"tag": _arg(required=True)}
-    script = build_script_text(
-        "t", "p", _template_tool(["git", "tag", "-a", "{{tag}}", "-m", "{{tag}}"], arguments=arguments, guards=guards)
+    guards = (
+        GuardSpec(
+            script='! git rev-parse "refs/tags/{{arguments.tag}}" > /dev/null 2>&1',
+            fail_message="Tag exists",
+        ),
     )
+    arguments = {"tag": _arg(required=True)}
+    tool = _template_tool(
+        ["git", "tag", "-a", "{{arguments.tag}}", "-m", "{{arguments.tag}}"],
+        arguments=arguments,
+        guards=guards,
+    )
+    script = build_script_text("t", "p", tool)
     assert "${TAG}" in script
 
 
@@ -514,13 +527,13 @@ def test_usage_contains_description() -> None:
 
 def test_structured_error_has_tool_name() -> None:
     arguments = {"target": _arg(required=True)}
-    script = build_script_text("nerf-deploy", "p", _template_tool(["cmd", "{{target}}"], arguments=arguments))
+    script = build_script_text("nerf-deploy", "p", _template_tool(["cmd", "{{arguments.target}}"], arguments=arguments))
     assert "error: nerf-deploy:" in script
 
 
 def test_structured_error_has_hint() -> None:
     arguments = {"target": _arg(required=True)}
-    script = build_script_text("t", "p", _template_tool(["cmd", "{{target}}"], arguments=arguments))
+    script = build_script_text("t", "p", _template_tool(["cmd", "{{arguments.target}}"], arguments=arguments))
     assert "hint:" in script
 
 
@@ -530,7 +543,7 @@ def test_structured_error_has_hint() -> None:
 def test_generated_script_is_valid_bash() -> None:
     options = {"remote": _option("--remote", pattern="^[a-z]+$", deny=("origin",))}
     tool = _template_tool(
-        ["git", "push", "{{remote}}", "HEAD"], options=options,
+        ["git", "push", "{{options.remote}}", "HEAD"], options=options,
     )
     script = build_script_text("my-tool", "my-pkg", tool)
     result = subprocess.run(["bash", "-n"], input=script, capture_output=True, text=True)
@@ -547,7 +560,7 @@ def test_tool_with_options_and_args_bash_syntax() -> None:
     options = {"verbose": _option("--verbose", required=False)}
     arguments = {"target": _arg(required=True)}
     tool = _template_tool(
-        ["cmd", "{{verbose}}", "{{target}}"], options=options, arguments=arguments,
+        ["cmd", "{{options.verbose}}", "{{arguments.target}}"], options=options, arguments=arguments,
     )
     script = build_script_text("my-tool", "my-pkg", tool)
     result = subprocess.run(["bash", "-n"], input=script, capture_output=True, text=True)
@@ -556,7 +569,8 @@ def test_tool_with_options_and_args_bash_syntax() -> None:
 
 def test_variadic_tool_bash_syntax() -> None:
     arguments = {"files": _arg(required=True, variadic=True)}
-    script = build_script_text("my-tool", "my-pkg", _template_tool(["git", "add", "{{files}}"], arguments=arguments))
+    tool = _template_tool(["git", "add", "{{arguments.files}}"], arguments=arguments)
+    script = build_script_text("my-tool", "my-pkg", tool)
     result = subprocess.run(["bash", "-n"], input=script, capture_output=True, text=True)
     assert result.returncode == 0, f"bash -n failed:\n{result.stderr}"
 
@@ -614,7 +628,7 @@ def test_build_scripts_prefix_in_script_header(tmp_path: Path) -> None:
 
 def test_npm_pkgrun_includes_resolver() -> None:
     tool = _template_tool(
-        ["cspell@8.19.4", "{{args}}"],
+        ["cspell@8.19.4", "{{arguments.args}}"],
         arguments={"args": _arg(required=True, variadic=True)},
         npm_pkgrun=True,
     )
@@ -625,6 +639,6 @@ def test_npm_pkgrun_includes_resolver() -> None:
 
 
 def test_non_pkgrun_has_no_resolver() -> None:
-    tool = _template_tool(["git", "add", "{{files}}"], arguments={"files": _arg(variadic=True)})
+    tool = _template_tool(["git", "add", "{{arguments.files}}"], arguments={"files": _arg(variadic=True)})
     script = build_script_text("git-add", "test", tool)
     assert "_PKGRUN" not in script

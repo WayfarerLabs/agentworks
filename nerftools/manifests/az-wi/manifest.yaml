@@ -18,7 +18,7 @@ tools:
       read: remote
       write: none
     template:
-      command: [az, boards, work-item, show, --id, "{{wi_id}}", --output, json]
+      command: [az, boards, work-item, show, --id, "{{arguments.wi_id}}", --output, json]
     arguments:
       wi_id:
         description: Work item ID (numeric)
@@ -31,7 +31,7 @@ tools:
       read: remote
       write: remote
     template:
-      command: [az, boards, work-item, update, --id, "{{wi_id}}", --discussion, "{{comment}}", --output, none]
+      command: [az, boards, work-item, update, --id, "{{arguments.wi_id}}", --discussion, "{{arguments.comment}}", --output, none]
     arguments:
       wi_id:
         description: Work item ID (numeric)
@@ -47,7 +47,7 @@ tools:
       read: remote
       write: none
     template:
-      command: [az, boards, work-item, show, --id, "{{wi_id}}", --output, json]
+      command: [az, boards, work-item, show, --id, "{{arguments.wi_id}}", --output, json]
     arguments:
       wi_id:
         description: Work item ID (numeric, must be assigned to you)
@@ -60,7 +60,7 @@ tools:
       read: remote
       write: remote
     template:
-      command: [az, boards, work-item, update, --id, "{{wi_id}}", --discussion, "{{comment}}", --output, none]
+      command: [az, boards, work-item, update, --id, "{{arguments.wi_id}}", --discussion, "{{arguments.comment}}", --output, none]
     arguments:
       wi_id:
         description: Work item ID (numeric, must be assigned to you)

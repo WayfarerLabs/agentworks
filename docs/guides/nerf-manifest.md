@@ -202,20 +202,20 @@ This enables runtime tool discovery and threat classification without the manife
 
 ### template
 
-Build a command from an explicit template with `{{param}}` placeholders. Best for wrapping a single
+Build a command from an explicit template with `{{kind.name}}` placeholders. Best for wrapping a single
 tool call where you want full control over exposed parameters.
 
 ```yaml
 template:
-  command: [<string>, ...]        # Command parts with {{param}} placeholders
+  command: [<string>, ...]        # Command parts with {{kind.name}} placeholders
   npm_pkgrun: <bool>              # Use bunx/pnpx/npx resolver (default: false)
 ```
 
 Rules:
 
-- Every `{{param}}` in `command` must be defined in `switches`, `options`, or `arguments`.
-- Every parameter must be referenced by a `{{param}}` in `command`.
-- A variadic argument's `{{param}}` must be the last element of `command`.
+- Every `{{kind.name}}` in `command` must be defined in `switches`, `options`, or `arguments`.
+- Every parameter must be referenced by a `{{kind.name}}` in `command`.
+- A variadic argument's `{{kind.name}}` must be the last element of `command`.
 - The generated script ends with `exec`, replacing the process.
 
 Example:
@@ -227,7 +227,7 @@ git-commit:
     read: workspace
     write: workspace
   template:
-    command: [git, commit, -m, "{{message}}"]
+    command: [git, commit, -m, "{{arguments.message}}"]
   arguments:
     message:
       description: "Commit message: type[(scope)][!]: description"
@@ -341,9 +341,11 @@ switches:
     description: <string>         # Required
     flag: <string>                # Override flag (default: --<name> with _ replaced by -)
     short: <string>               # Single-char short form (e.g. -v)
+    repeatable: <bool>            # Can be passed multiple times (default: false)
 ```
 
-The shell variable is `"true"` when present, `""` when absent.
+The shell variable is `"true"` when present, `""` when absent. For repeatable switches, the
+variable is an integer count (0 when absent, incremented each time the switch is passed).
 
 Rules:
 
@@ -361,6 +363,7 @@ options:
     flag: <string>                # Override flag (default: --<name> with _ replaced by -)
     short: <string>               # Single-char short form
     required: <bool>              # Default: false
+    repeatable: <bool>            # Can be passed multiple times (default: false)
     pattern: <string>             # Regex the value must match (auto-anchored with ^...$)
     allow: [<string>, ...]        # Exhaustive list of allowed values
     deny:  [<string>, ...]        # Values to reject
@@ -372,6 +375,8 @@ Rules:
 - `flag` must match `-<name>` or `--<name>` pattern.
 - `short` must match `-[a-zA-Z]`.
 - `pattern` is automatically anchored to a full match in the generated bash script.
+- When `repeatable: true`, the option can be passed multiple times. The generated script
+  accumulates flag-value pairs in an array so `"${VAR[@]}"` expands to `--flag val1 --flag val2`.
 
 ### arguments
 
@@ -393,7 +398,7 @@ Rules:
 
 - `allow` and `deny` are mutually exclusive.
 - At most one argument may be `variadic`, and it must be the last in `arguments`.
-- In `template` mode, a variadic `{{param}}` must be the last element in `template.command`.
+- In `template` mode, a variadic `{{kind.name}}` must be the last element in `template.command`.
 - Variadic arguments become bash arrays; all others become scalar variables.
 - By default, variadic arguments reject tokens starting with `-` to prevent flag injection. Set
   `allow_flags: true` when forwarding to a tool that expects its own flags (e.g. pytest, ruff).
@@ -418,7 +423,7 @@ guards:
     script: <string>             # Inline bash snippet
 ```
 
-Exactly one of `command` or `script`. The check passes on exit code 0. `{{param}}` placeholders are
+Exactly one of `command` or `script`. The check passes on exit code 0. `{{kind.name}}` placeholders are
 substituted with parameter values.
 
 ### pre
@@ -438,7 +443,7 @@ The pre script is wrapped in a shell function (`_nerf_pre`). Key points:
 - **Print your own error messages.** The fallback message is generic. Write
   `echo "error: ..." >&2` before `return 1`.
 - **Shell variables set in pre are visible to main.** Functions execute in the caller's scope.
-- **`{{param}}` placeholders work.** Parameters are parsed before pre runs.
+- **`{{kind.name}}` placeholders work.** Parameters are parsed before pre runs.
 
 Example:
 
@@ -449,7 +454,7 @@ git-push-branch:
     read: workspace
     write: remote
   template:
-    command: [git, push, --follow-tags, "{{remote}}", HEAD]
+    command: [git, push, --follow-tags, "{{arguments.remote}}", HEAD]
   arguments:
     remote:
       description: Remote name
@@ -475,17 +480,18 @@ env:
 ```
 
 Key-value pairs exported as environment variables before guards, pre, and main execution. Values are
-static strings (no `{{param}}` substitution). Keys must match `[A-Z_][A-Z0-9_]*`.
+static strings (no `{{kind.name}}` substitution). Keys must match `[A-Z_][A-Z0-9_]*`.
 
 ## Placeholder substitution
 
-`{{param}}` placeholders in `template.command`, `guard.command`, `guard.script`, and `pre` are
+Placeholders use the form `{{kind.name}}` where `kind` is one of `switches`, `options`, or
+`arguments`. They appear in `template.command`, `guard.command`, `guard.script`, and `pre` and are
 replaced with shell variable references.
 
-| Context | Required scalar | Optional scalar | Required variadic | Optional variadic | Switch |
-|---|---|---|---|---|---|
-| template command | `"$VAR"` | `${VAR:+"$VAR"}` | `"${VAR[@]}"` | `${VAR[@]+"${VAR[@]}"}` | `${VAR:+"--flag"}` |
-| guard/pre script | `${VAR}` | `${VAR}` | `${VAR}` | `${VAR}` | `${VAR}` |
+| Context | Required scalar | Optional scalar | Required variadic | Optional variadic | Switch | Repeatable option |
+|---|---|---|---|---|---|---|
+| template command | `"$VAR"` | `--flag $VAR` (conditional) | `"${VAR[@]}"` | `${VAR[@]+"${VAR[@]}"}` | `${VAR:+"--flag"}` | `"${VAR[@]}"` (flag-value pairs) |
+| guard/pre script | `${VAR}` | `${VAR}` | `${VAR}` | `${VAR}` | `${VAR}` | `${VAR}` |
 
 In script contexts (guards, pre, inline script body), the author is responsible for quoting.
 
@@ -543,10 +549,10 @@ Generated skill files follow the same structure formatted as markdown for AI ass
 | `threat.read` and `threat.write` required | tool |
 | Exactly one of `template`, `passthrough`, `script` | tool |
 | `switches`/`options`/`arguments` not allowed with `passthrough` | tool |
-| `{{param}}` refs must exist in switches/options/arguments | template, guards, pre |
-| All switches/options/arguments must be referenced in `{{param}}` | template only |
+| `{{kind.name}}` refs must exist in switches/options/arguments | template, guards, pre |
+| All switches/options/arguments must be referenced in `{{kind.name}}` | template only |
 | Variadic argument must be last in `arguments` | arguments |
-| Variadic `{{param}}` must be last element in `template.command` | template |
+| Variadic `{{kind.name}}` must be last element in `template.command` | template |
 | `allow` and `deny` are mutually exclusive | options, arguments |
 | Switch/option/argument names must not overlap | tool |
 | `flag` matches `-<name>` or `--<name>` pattern | switches, options |
