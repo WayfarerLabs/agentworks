@@ -80,6 +80,8 @@ def _build_script(tool_name: str, package_name: str, tool_spec: ToolSpec) -> str
     parts.append("")
     parts.append("set -euo pipefail")
     parts.append("")
+    parts.append('_NERF_DRY_RUN=""')
+    parts.append("")
     parts.append(_usage_function(tool_name, tool_spec))
 
     has_params = bool(tool_spec.switches) or bool(tool_spec.options)
@@ -88,8 +90,13 @@ def _build_script(tool_name: str, package_name: str, tool_spec: ToolSpec) -> str
     if has_params:
         parts.append("")
         parts.append(_var_declarations(tool_spec))
-        parts.append("")
-        parts.append(_flag_parser(tool_spec, has_positional=has_positional))
+
+    # Flag parser is always emitted (at minimum for --nerf-dry-run and --help)
+    is_passthrough = tool_spec.passthrough is not None
+    parts.append("")
+    parts.append(_flag_parser(
+        tool_spec, has_positional=has_positional, is_passthrough=is_passthrough,
+    ))
 
     if has_positional:
         parts.append("")
@@ -124,11 +131,15 @@ def _build_script(tool_name: str, package_name: str, tool_spec: ToolSpec) -> str
             parts.append("")
             parts.append(_npm_pkgrun_resolver())
         parts.append("")
+        parts.append(_dry_run_check(tool_name, tool_spec))
+        parts.append("")
         parts.append(_template_exec(tool_spec))
     elif tool_spec.passthrough is not None:
         parts.append("")
         parts.append(_passthrough_exec(tool_name, tool_spec))
     elif tool_spec.script is not None:
+        parts.append("")
+        parts.append(_dry_run_check(tool_name, tool_spec))
         parts.append("")
         parts.append(tool_spec.script.rstrip())
 
@@ -228,7 +239,7 @@ def _var_declarations(tool_spec: ToolSpec) -> str:
     return "\n".join(lines)
 
 
-def _flag_parser(tool_spec: ToolSpec, *, has_positional: bool) -> str:
+def _flag_parser(tool_spec: ToolSpec, *, has_positional: bool, is_passthrough: bool = False) -> str:
     cases = []
 
     for name, sw in tool_spec.switches.items():
@@ -255,9 +266,10 @@ def _flag_parser(tool_spec: ToolSpec, *, has_positional: bool) -> str:
             )
             cases.append(f'    {pattern}) {dup_check}{var}="$2"; shift 2 ;;')
 
+    cases.append('    --nerf-dry-run) _NERF_DRY_RUN="true"; shift 1 ;;')
     cases.append("    -h|--help) usage ;;")
     cases.append("    --) shift; break ;;")
-    if has_positional:
+    if has_positional or is_passthrough:
         cases.append("    *) break ;;")
     else:
         cases.append('    *) echo "error: unknown argument: $1" >&2; usage ;;')
@@ -513,6 +525,32 @@ def _pre_hook(tool_name: str, tool_spec: ToolSpec) -> str:
 # -- Execution modes -----------------------------------------------------------
 
 
+def _dry_run_check(tool_name: str, tool_spec: ToolSpec) -> str:
+    """Generate the --nerf-dry-run output block."""
+    lines = ['if [[ "$_NERF_DRY_RUN" == "true" ]]; then']
+
+    if tool_spec.template is not None:
+        exec_args = _substitute_template_command(tool_spec.template.command, tool_spec)
+        if tool_spec.template.npm_pkgrun:
+            cmd = 'echo "dry-run: $_PKGRUN ' + " ".join(exec_args) + '"'
+        else:
+            cmd = 'echo "dry-run: ' + " ".join(exec_args) + '"'
+        lines.append(f"  {cmd}")
+    elif tool_spec.passthrough is not None:
+        pt = tool_spec.passthrough
+        exec_parts = [pt.command]
+        exec_parts.extend(f"'{_shell_escape_sq(p)}'" for p in pt.prefix)
+        exec_parts.append('"$@"')
+        exec_parts.extend(f"'{_shell_escape_sq(s)}'" for s in pt.suffix)
+        lines.append(f'  echo "dry-run: {" ".join(exec_parts)}"')
+    elif tool_spec.script is not None:
+        lines.append(f'  echo "dry-run: {tool_name} would run inline script"')
+
+    lines.append("  exit 0")
+    lines.append("fi")
+    return "\n".join(lines)
+
+
 def _template_exec(tool_spec: ToolSpec) -> str:
     """Generate the exec line for template mode."""
     assert tool_spec.template is not None
@@ -553,9 +591,18 @@ def _passthrough_exec(tool_name: str, tool_spec: ToolSpec) -> str:
     exec_parts.extend(f"'{_shell_escape_sq(p)}'" for p in pt.prefix)
     exec_parts.append('"$@"')
     exec_parts.extend(f"'{_shell_escape_sq(s)}'" for s in pt.suffix)
+    exec_str = " ".join(exec_parts)
+
     if lines:
         lines.append("")
-    lines.append("exec " + " ".join(exec_parts))
+
+    # Dry-run check after deny scan but before exec
+    lines.append('if [[ "$_NERF_DRY_RUN" == "true" ]]; then')
+    lines.append(f'  echo "dry-run: {exec_str}"')
+    lines.append("  exit 0")
+    lines.append("fi")
+    lines.append("")
+    lines.append("exec " + exec_str)
 
     return "\n".join(lines)
 

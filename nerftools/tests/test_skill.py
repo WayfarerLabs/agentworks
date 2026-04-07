@@ -200,7 +200,10 @@ def test_usage_line_positional_required() -> None:
 
 
 def test_usage_line_variadic_arg() -> None:
-    m = _manifest(tools={"t": _template_tool(["git", "add", "{{arguments.files}}"], arguments={"files": _arg(variadic=True)})})
+    tool = _template_tool(
+        ["git", "add", "{{arguments.files}}"], arguments={"files": _arg(variadic=True)},
+    )
+    m = _manifest(tools={"t": tool})
     skill = build_skill_text(m)
     assert "<files...>" in skill
 
@@ -239,14 +242,17 @@ def test_optional_option_labeled() -> None:
 
 
 def test_pattern_constraint_shown() -> None:
-    m = _manifest(tools={"t": _template_tool(["echo", "{{x}}"], options={"x": _option("--x", pattern="^[a-z]+$")})})
+    tool = _template_tool(
+        ["echo", "{{options.x}}"], options={"x": _option("--x", pattern="^[a-z]+$")},
+    )
+    m = _manifest(tools={"t": tool})
     skill = build_skill_text(m)
     assert "^[a-z]+$" in skill
 
 
 def test_arg_listed_in_arguments() -> None:
     m = _manifest(tools={"t": _template_tool(
-        ["cmd", "{{target}}"],
+        ["cmd", "{{arguments.target}}"],
         arguments={"target": _arg("The target", required=True)},
     )})
     skill = build_skill_text(m)
@@ -308,7 +314,7 @@ def test_script_mode_no_maps_to() -> None:
 
 def test_switch_usage_shows_bracketed_flag() -> None:
     switches = {"draft": SwitchSpec(flag="--draft", description="Draft PR")}
-    m = _manifest(tools={"t": _template_tool(["gh", "pr", "create", "{{draft}}"], switches=switches)})
+    m = _manifest(tools={"t": _template_tool(["gh", "pr", "create", "{{switches.draft}}"], switches=switches)})
     skill = build_skill_text(m)
     assert "[--draft]" in skill
 

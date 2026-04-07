@@ -98,10 +98,10 @@ def test_simple_tool_exec_line() -> None:
     assert "exec echo hello" in script
 
 
-def test_simple_tool_no_argument_parsing() -> None:
+def test_simple_tool_has_dry_run_support() -> None:
     script = build_script_text("my-tool", "my-pkg", _template_tool(["echo", "hello"]))
-    assert "while [[ $#" not in script
-    assert 'case "$1"' not in script
+    assert "--nerf-dry-run)" in script
+    assert "dry-run:" in script
 
 
 def test_generated_header_comment() -> None:
