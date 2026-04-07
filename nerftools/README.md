@@ -46,7 +46,11 @@ By default, the CLI includes all built-in packages. You can add your own manifes
 ```bash
 # Built-ins + your custom manifest
 uv run nerf generate --target bin --outdir ./bin path/to/my-manifest.yaml
+```
 
+You can also choose to ignore the built-in manifests entirely and only use your custom manifests:
+
+```bash
 # Only your custom manifests, no built-ins
 uv run nerf generate --target bin --outdir ./bin --no-default path/to/my-manifest.yaml
 
@@ -54,8 +58,10 @@ uv run nerf generate --target bin --outdir ./bin --no-default path/to/my-manifes
 uv run nerf validate --no-default path/to/my-manifest.yaml
 ```
 
-When both built-in and custom manifests define tools in the same package, the custom manifest wins
-(last-wins merge by tool name within a package).
+When both built-in and custom manifests define tools in the same package (same `package.name`),
+tools are merged at the individual tool level with last-wins semantics. A custom `git-commit`
+replaces the built-in `git-commit`, but the other built-in git tools remain. Package metadata
+(description, skill_group, skill_intro) is kept from the first manifest that defines the package.
 
 ## Built-in packages
 
