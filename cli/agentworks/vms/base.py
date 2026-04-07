@@ -19,6 +19,7 @@ class ProvisionResult:
     exec_target: ExecTarget
     azure_resource_id: str | None = None
     wsl_distro_name: str | None = None
+    proxmox_vmid: str | None = None
     bootstrap_complete: bool = False
     tailscale_ip: str | None = None
 

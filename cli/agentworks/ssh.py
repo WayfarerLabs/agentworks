@@ -321,6 +321,8 @@ def copy_to(
         args.extend(["-P", str(target.port)])
     if target.identity_file is not None:
         args.extend(["-i", str(target.identity_file)])
+    if target.proxy_jump is not None:
+        args.extend(["-J", target.proxy_jump])
     args.append(str(local_path))
     dest = f"{target.user}@{target.host}:{remote_path}" if target.user else f"{target.host}:{remote_path}"
     args.append(dest)

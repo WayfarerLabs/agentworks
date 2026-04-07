@@ -225,3 +225,129 @@ def test_extra_ssh_public_keys_missing_file(tmp_path: Path) -> None:
 def test_extra_ssh_public_keys_defaults_empty(config_dir: Path) -> None:
     cfg = load_config(config_dir)
     assert cfg.user.extra_ssh_public_keys == []
+
+
+# -- Proxmox config tests (table-driven) --------------------------------------
+
+_PROXMOX_TEST_CASES = [
+    {
+        "id": "valid_all_fields",
+        "toml": """\
+            [proxmox]
+            api_url = "https://pve.example.com:8006"
+            node = "pve"
+            token_id = "agentworks@pam!agentworks"
+            template_vmid = 9000
+            storage = "zfs-pool"
+            bridge = "vmbr1"
+            verify_ssl = false
+        """,
+        "expect_error": None,
+        "check": lambda cfg: (
+            cfg.proxmox.api_url == "https://pve.example.com:8006"
+            and cfg.proxmox.node == "pve"
+            and cfg.proxmox.token_id == "agentworks@pam!agentworks"
+            and cfg.proxmox.template_vmid == 9000
+            and cfg.proxmox.storage == "zfs-pool"
+            and cfg.proxmox.bridge == "vmbr1"
+            and cfg.proxmox.verify_ssl is False
+        ),
+    },
+    {
+        "id": "valid_defaults",
+        "toml": """\
+            [proxmox]
+            api_url = "https://pve.local:8006"
+            node = "node1"
+            token_id = "root@pam!test"
+            template_vmid = 100
+        """,
+        "expect_error": None,
+        "check": lambda cfg: (
+            cfg.proxmox.storage == "local-lvm"
+            and cfg.proxmox.bridge == "vmbr0"
+            and cfg.proxmox.verify_ssl is True
+        ),
+    },
+    {
+        "id": "missing_api_url",
+        "toml": """\
+            [proxmox]
+            node = "pve"
+            token_id = "u@p!t"
+            template_vmid = 9000
+
+        """,
+        "expect_error": "proxmox.api_url is required",
+        "check": None,
+    },
+    {
+        "id": "missing_node",
+        "toml": """\
+            [proxmox]
+            api_url = "https://pve:8006"
+            token_id = "u@p!t"
+            template_vmid = 9000
+
+        """,
+        "expect_error": "proxmox.node is required",
+        "check": None,
+    },
+    {
+        "id": "missing_token_id",
+        "toml": """\
+            [proxmox]
+            api_url = "https://pve:8006"
+            node = "pve"
+            template_vmid = 9000
+
+        """,
+        "expect_error": "proxmox.token_id is required",
+        "check": None,
+    },
+    {
+        "id": "missing_template_vmid",
+        "toml": """\
+            [proxmox]
+            api_url = "https://pve:8006"
+            node = "pve"
+            token_id = "u@p!t"
+
+        """,
+        "expect_error": "proxmox.template_vmid is required",
+        "check": None,
+    },
+]
+
+
+@pytest.mark.parametrize(
+    "case",
+    _PROXMOX_TEST_CASES,
+    ids=[c["id"] for c in _PROXMOX_TEST_CASES],
+)
+def test_proxmox_config(tmp_path: Path, case: dict) -> None:
+    pub = tmp_path / "id.pub"
+    priv = tmp_path / "id"
+    pub.write_text("key")
+    priv.write_text("key")
+
+    config_file = tmp_path / "config.toml"
+    config_file.write_text(dedent(f"""\
+        [user]
+        ssh_public_key = "{pub}"
+        ssh_private_key = "{priv}"
+
+        {dedent(case["toml"])}
+    """))
+
+    if case["expect_error"]:
+        with pytest.raises(ConfigError, match=case["expect_error"]):
+            load_config(config_file)
+    else:
+        cfg = load_config(config_file)
+        assert case["check"](cfg), f"Check failed for {case['id']}"
+
+
+def test_proxmox_section_absent(config_dir: Path) -> None:
+    cfg = load_config(config_dir)
+    assert cfg.proxmox is None
