@@ -57,8 +57,10 @@ _resolve_plugin_root() {
   local resolved=""
 
   if [[ -n "${CLAUDE_PLUGIN_ROOT:-}" ]]; then
-    if [[ "$CLAUDE_PLUGIN_ROOT" == "$HOME/.claude/plugins/"* ]]; then
-      resolved="$CLAUDE_PLUGIN_ROOT"
+    local canonical
+    canonical=$(realpath "$CLAUDE_PLUGIN_ROOT" 2>/dev/null || echo "")
+    if [[ -n "$canonical" && "$canonical" == "$HOME/.claude/plugins/"* ]]; then
+      resolved="$canonical"
     else
       echo "warning: CLAUDE_PLUGIN_ROOT '$CLAUDE_PLUGIN_ROOT' is not under ~/.claude/plugins/; deriving from script location" >&2
     fi

@@ -526,7 +526,11 @@ def _pre_hook(tool_name: str, tool_spec: ToolSpec) -> str:
 
 
 def _dry_run_check(tool_name: str, tool_spec: ToolSpec) -> str:
-    """Generate the --nerf-dry-run output block."""
+    """Generate the --nerf-dry-run output block.
+
+    Only called for template and script modes. Passthrough mode handles
+    dry-run inline in _passthrough_exec (after the deny scan).
+    """
     lines = ['if [[ "$_NERF_DRY_RUN" == "true" ]]; then']
 
     if tool_spec.template is not None:
@@ -536,14 +540,7 @@ def _dry_run_check(tool_name: str, tool_spec: ToolSpec) -> str:
         else:
             cmd = 'echo "dry-run: ' + " ".join(exec_args) + '"'
         lines.append(f"  {cmd}")
-    elif tool_spec.passthrough is not None:
-        pt = tool_spec.passthrough
-        exec_parts = [pt.command]
-        exec_parts.extend(f"'{_shell_escape_sq(p)}'" for p in pt.prefix)
-        exec_parts.append('"$@"')
-        exec_parts.extend(f"'{_shell_escape_sq(s)}'" for s in pt.suffix)
-        lines.append(f'  echo "dry-run: {" ".join(exec_parts)}"')
-    elif tool_spec.script is not None:
+    else:
         lines.append(f'  echo "dry-run: {tool_name} would run inline script"')
 
     lines.append("  exit 0")
@@ -717,7 +714,15 @@ def _anchored_pattern(pattern: str) -> str:
 
 def _shell_escape_dq(value: str) -> str:
     """Escape a string for embedding in double-quoted bash strings."""
-    return value.replace("\\", "\\\\").replace('"', '\\"').replace("$", "\\$").replace("`", "\\`")
+    return (
+        value
+        .replace("\\", "\\\\")
+        .replace('"', '\\"')
+        .replace("$", "\\$")
+        .replace("`", "\\`")
+        .replace("\n", "\\n")
+        .replace("\r", "\\r")
+    )
 
 
 def _shell_escape_sq(value: str) -> str:

@@ -10,7 +10,7 @@ manifests and generates self-contained bash scripts, rulesync skills, and Claude
 threat profiles. Rather, the goal is that each nerf tool should limit usage of the underlying CLI
 tool to a set of operations with a roughly-equivalent threat profile (as expressed in its declared
 threat model) so that permissions can be broadly granted (e.g. in tools like Claude Code) with
-cofidence that the agent can't perform operations outside the declared threat profile.
+confidence that the agent can't perform operations outside the declared threat profile.
 
 ## Quick start
 

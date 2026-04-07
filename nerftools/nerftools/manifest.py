@@ -335,15 +335,14 @@ def _load_threat(raw: dict[str, Any], path: Path, tool_name: str) -> ThreatSpec:
     if write_str is None:
         raise ManifestError(f"{ctx}.threat: 'write' is required")
 
+    valid = ", ".join(THREAT_LEVEL_NAMES)
     try:
         read = ThreatLevel(str(read_str))
     except ValueError:
-        valid = ", ".join(THREAT_LEVEL_NAMES)
         raise ManifestError(f"{ctx}.threat: invalid read level '{read_str}' (expected one of {valid})") from None
     try:
         write = ThreatLevel(str(write_str))
     except ValueError:
-        valid = ", ".join(THREAT_LEVEL_NAMES)
         raise ManifestError(f"{ctx}.threat: invalid write level '{write_str}' (expected one of {valid})") from None
 
     return ThreatSpec(read=read, write=write)
@@ -464,6 +463,8 @@ def _load_arguments(raw: dict[str, Any], path: Path, tool_name: str) -> dict[str
         allow = tuple(str(v) for v in spec_raw.get("allow", []))
         deny = tuple(str(v) for v in spec_raw.get("deny", []))
 
+        if allow_flags and not variadic:
+            raise ManifestError(f"{ctx}: 'allow_flags' is only valid on variadic arguments")
         if allow and deny:
             raise ManifestError(f"{ctx}: 'allow' and 'deny' cannot both be set")
         if pattern is not None:
@@ -634,7 +635,6 @@ def _validate_template_refs(tool: ToolSpec, all_params: set[str], ctx: str) -> N
                 raise ManifestError(
                     f"{ctx}: variadic argument '{last_arg}' placeholder must be the last element in template command"
                 )
-
 
 
 # -- Merging -------------------------------------------------------------------

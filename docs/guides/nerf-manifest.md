@@ -587,4 +587,3 @@ Generated skill files follow the same structure formatted as markdown for AI ass
 | `pattern` is a valid regex | options, arguments |
 | `env` keys match `[A-Z_][A-Z0-9_]*` | env |
 | Guard has exactly one of `command` or `script` | guards |
-| `deny` entries are valid glob patterns | passthrough |
