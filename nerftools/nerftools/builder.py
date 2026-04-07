@@ -237,7 +237,11 @@ def _flag_parser(tool_spec: ToolSpec, *, has_positional: bool) -> str:
         if sw.repeatable:
             cases.append(f"    {pattern}) {var}=$(({var} + 1)); shift 1 ;;")
         else:
-            cases.append(f'    {pattern}) {var}="true"; shift 1 ;;')
+            dup_check = (
+                f'if [[ -n "${{{var}}}" ]]; then '
+                f'echo "error: {sw.flag} can only be specified once" >&2; exit 1; fi; '
+            )
+            cases.append(f'    {pattern}) {dup_check}{var}="true"; shift 1 ;;')
 
     for name, opt in tool_spec.options.items():
         var = _var_name(name)
@@ -245,7 +249,11 @@ def _flag_parser(tool_spec: ToolSpec, *, has_positional: bool) -> str:
         if opt.repeatable:
             cases.append(f'    {pattern}) {var}+=("{opt.flag}" "$2"); shift 2 ;;')
         else:
-            cases.append(f'    {pattern}) {var}="$2"; shift 2 ;;')
+            dup_check = (
+                f'if [[ -n "${{{var}}}" ]]; then '
+                f'echo "error: {opt.flag} can only be specified once" >&2; exit 1; fi; '
+            )
+            cases.append(f'    {pattern}) {dup_check}{var}="$2"; shift 2 ;;')
 
     cases.append("    -h|--help) usage ;;")
     cases.append("    --) shift; break ;;")

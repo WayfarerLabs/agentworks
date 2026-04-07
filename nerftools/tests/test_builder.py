@@ -127,13 +127,15 @@ def test_threat_metadata_in_header() -> None:
 def test_option_in_case_statement() -> None:
     options = {"remote": _option("--remote")}
     script = build_script_text("t", "p", _template_tool(["git", "push", "{{options.remote}}"], options=options))
-    assert "--remote) REMOTE=" in script
+    assert "--remote)" in script
+    assert 'REMOTE="$2"' in script
 
 
 def test_option_with_short_in_case() -> None:
     options = {"remote": OptionSpec(flag="--remote", description="Remote", short="-r", required=True)}
     script = build_script_text("t", "p", _template_tool(["git", "push", "{{options.remote}}"], options=options))
-    assert "--remote|-r) REMOTE=" in script
+    assert "--remote|-r)" in script
+    assert 'REMOTE="$2"' in script
 
 
 def test_option_with_short_in_usage() -> None:
