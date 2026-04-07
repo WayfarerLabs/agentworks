@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-BUILTIN_MANIFESTS_DIR = Path(__file__).parent.parent / "manifests"
+BUILTIN_MANIFESTS_DIR = Path(__file__).parent.parent / "default-manifests"
 
 _NERFCTL_DIR = Path(__file__).parent / "nerfctl" / "claude"
 

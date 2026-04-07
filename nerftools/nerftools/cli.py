@@ -16,7 +16,7 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 
-_BUILTIN_MANIFESTS_DIR = Path(__file__).parent.parent / "manifests"
+_DEFAULT_MANIFESTS_DIR = Path(__file__).parent.parent / "default-manifests"
 
 _VALID_TARGETS = ("bin", "skills", "claude-plugin")
 
@@ -29,11 +29,10 @@ def _load_manifests(
     from nerftools.manifest import ManifestError, load_manifest, merge_manifests
 
     paths: list[Path] = []
-    if not no_default and _BUILTIN_MANIFESTS_DIR.exists():
-        for pkg_dir in sorted(_BUILTIN_MANIFESTS_DIR.iterdir()):
-            manifest_file = pkg_dir / "manifest.yaml"
-            if manifest_file.exists():
-                paths.append(manifest_file)
+    if not no_default and _DEFAULT_MANIFESTS_DIR.exists():
+        for f in sorted(_DEFAULT_MANIFESTS_DIR.iterdir()):
+            if f.suffix == ".yaml" and f.is_file():
+                paths.append(f)
 
     paths.extend(user_manifests)
 

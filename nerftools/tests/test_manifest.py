@@ -577,9 +577,9 @@ def test_merge_different_packages(tmp_path: Path) -> None:
 
 
 def test_builtin_git_loads() -> None:
-    from nerftools.cli import _BUILTIN_MANIFESTS_DIR
+    from nerftools.cli import _DEFAULT_MANIFESTS_DIR
 
-    manifest_path = _BUILTIN_MANIFESTS_DIR / "git" / "manifest.yaml"
+    manifest_path = _DEFAULT_MANIFESTS_DIR / "git.yaml"
     assert manifest_path.exists(), f"Built-in manifest not found: {manifest_path}"
     m = load_manifest(manifest_path)
     assert m.version == 1

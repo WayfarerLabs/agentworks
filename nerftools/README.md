@@ -30,7 +30,8 @@ uv run nerf generate --target claude-plugin --outdir ./claude-plugin
 
 ## Manifest format
 
-Manifests are YAML files in `manifests/<package>/manifest.yaml`. Each declares a package of tools
+A manifest is a YAML file that declares a package of tools. Default manifests ship in
+`default-manifests/`. Each declares a package of tools
 with one of three execution modes:
 
 - **template** -- build a command from explicit parameters and a `{{kind.name}}` template
@@ -127,6 +128,6 @@ nerftools/
     formats.py         Claude Code plugin builder
     cli.py             CLI (validate + generate)
     nerfctl/claude/    Grant management shell scripts
-  manifests/           Built-in tool package manifests
+  default-manifests/   Default tool package manifests
   tests/               Test suite
 ```
