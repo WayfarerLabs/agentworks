@@ -113,6 +113,7 @@
     "virtiofs",
     "wcid",
     "workstreams",
+    "stdutils",
     "zfunc"
   ],
   "ignoreRegExpList": [

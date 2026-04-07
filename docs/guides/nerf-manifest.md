@@ -423,8 +423,8 @@ guards:
     script: <string>             # Inline bash snippet
 ```
 
-Exactly one of `command` or `script`. The check passes on exit code 0. `{{kind.name}}` placeholders are
-substituted with parameter values.
+Exactly one of `command` or `script`. The check passes on exit code 0.
+`{{kind.name}}` placeholders are substituted with parameter values.
 
 ### pre
 
@@ -521,6 +521,33 @@ error: nerf-safe-find: token '-exec' is not allowed (matched deny pattern '-exec
   denied patterns: -exec, -execdir, -ok*, --delete
   hint: remove '-exec' and retry
 ```
+
+## Dry-run mode
+
+Every generated tool supports `--nerf-dry-run`. When passed as the first argument, the tool runs
+all validation, guards, pre-hooks, and deny scans as normal, but instead of executing the final
+command it prints what would be run and exits.
+
+```bash
+$ nerf-git-fetch --nerf-dry-run origin
+dry-run: git fetch origin --tags
+
+$ nerf-find-cwd --nerf-dry-run -name '*.py'
+dry-run: find '.' -name *.py
+
+$ nerf-deploy-check --nerf-dry-run staging
+dry-run: nerf-deploy-check would run inline script
+```
+
+If a guard or deny rule would reject the invocation, the error is reported as usual:
+
+```bash
+$ nerf-find-cwd --nerf-dry-run -exec echo {} \;
+error: nerf-find-cwd: token '-exec' is not allowed (matched deny pattern '-exec')
+```
+
+`--nerf-dry-run` must be the first token because the parser stops consuming flags at the first
+unrecognized argument.
 
 ## Generated documentation
 
