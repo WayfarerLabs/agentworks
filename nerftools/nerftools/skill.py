@@ -81,7 +81,7 @@ def build_overview_text(manifests: list[NerfManifest], prefix: str = "") -> str:
     parts.append("# Nerf Tools")
     parts.append("")
     parts.append(
-        "This environment has nerf tools installed -- scoped, safety-constrained wrappers for "
+        "This environment has nerf tools installed. These are scoped, safety-constrained wrappers for "
         "common CLI operations like git, az, and other tools. They enforce guardrails (validated "
         "parameters, restricted flags, pre-flight checks) that keep operations safe and auditable."
     )

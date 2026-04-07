@@ -1,6 +1,6 @@
 # nerftools
 
-Build and manage nerf tools -- defanged, scoped wrappers for AI agent use.
+Build and manage nerf tools: defanged, scoped wrappers for AI agent use.
 
 Nerf tools wrap CLI commands with safety guardrails: validated parameters, restricted flags,
 pre-flight checks, and a 2D threat model for permission management. A Python CLI reads YAML
@@ -31,14 +31,14 @@ uv run nerf generate --target claude-plugin --outdir ./claude-plugin
 ## Manifests
 
 A manifest is a single YAML file that declares tools within a package. Multiple manifests can
-contribute to the same package -- tools are merged with last-wins semantics. Each tool uses one of
+contribute to the same package, with tools merged using last-wins semantics. Each tool uses one of
 three execution modes:
 
-- **template** -- build a command from explicit parameters and a `{{kind.name}}` template
-- **passthrough** -- forward all tokens after a deny-list scan
-- **script** -- run an inline bash script
+- **template**: build a command from explicit parameters and a `{{kind.name}}` template
+- **passthrough**: forward all tokens after a deny-list scan
+- **script**: run an inline bash script
 
-No special directory structure is required -- a manifest is just a `.yaml` file passed to the CLI.
+No special directory structure is required. A manifest is just a `.yaml` file passed to the CLI.
 
 The `default-manifests/` directory contains the manifests that ship with nerftools. These are
 included automatically unless `--no-default` is passed. Custom manifests can be added alongside or

@@ -1,4 +1,4 @@
-"""nerftools -- build and manage nerf tools."""
+"""nerftools: build and manage nerf tools."""
 
 from pathlib import Path
 

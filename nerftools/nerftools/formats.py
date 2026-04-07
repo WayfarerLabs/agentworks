@@ -179,7 +179,7 @@ def build_claude_plugin(
     plugin_json = {
         "name": "nerftools",
         "version": "1.0.0",
-        "description": "Nerf tools -- scoped, safety-constrained CLI wrappers for AI agents",
+        "description": "Nerf tools: scoped, safety-constrained CLI wrappers for AI agents",
         "skills": "./skills/",
     }
     p = plugin_dir / "plugin.json"
@@ -194,7 +194,7 @@ def build_claude_plugin(
         "plugins": [
             {
                 "name": "nerftools",
-                "description": "Nerf tools -- scoped, safety-constrained CLI wrappers for AI agents",
+                "description": "Nerf tools: scoped, safety-constrained CLI wrappers for AI agents",
                 "author": {"name": "Agentworks"},
                 "source": "./",
                 "category": "development",
@@ -358,7 +358,7 @@ def _build_claude_plugin_overview_text(manifests: list[NerfManifest], prefix: st
     parts.append("# Nerf Tools")
     parts.append("")
     parts.append(
-        "This environment has nerf tools installed -- scoped, safety-constrained wrappers for "
+        "This environment has nerf tools installed. These are scoped, safety-constrained wrappers for "
         "common CLI operations like git, az, and other tools. They enforce guardrails (validated "
         "parameters, restricted flags, pre-flight checks) that keep operations safe and auditable."
     )

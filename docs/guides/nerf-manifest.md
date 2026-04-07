@@ -1,11 +1,11 @@
 # Nerf Manifest Reference
 
 A nerf manifest is a YAML file that declares tools within a package. Multiple manifests can
-contribute to the same package -- when they share a `package.name`, tools are merged with last-wins
+contribute to the same package. When they share a `package.name`, tools are merged with last-wins
 semantics. The manifest is the source of truth for tool definitions, parameter specs, safety
 guardrails, threat metadata, and AI skill documentation.
 
-Each tool defines exactly **one execution mode** -- `template`, `passthrough`, or `script` -- plus
+Each tool defines exactly **one execution mode** (`template`, `passthrough`, or `script`) plus
 optional lifecycle hooks and shared configuration. The `nerf` CLI reads manifests and generates
 self-contained bash scripts, rulesync skills, and Claude Code plugins.
 
@@ -62,10 +62,10 @@ documentation.
 
 ### Token
 
-A **token** is a single raw element of `$@` -- one shell argument as received by the script. Before
+A **token** is a single raw element of `$@`, one shell argument as received by the script. Before
 parsing, every `$1`, `$2`, etc. is just a token.
 
-Passthrough mode operates **exclusively at the token level**. It never classifies tokens -- it scans
+Passthrough mode operates **exclusively at the token level**. It never classifies tokens; it scans
 them against deny rules and forwards them as-is.
 
 ### Parameter types (template and script modes)
@@ -155,7 +155,7 @@ threat:
   write: <scope>
 ```
 
-The threat profile is metadata only -- it does not change what the tool does. Enforcement is at the
+The threat profile is metadata only and does not change what the tool does. Enforcement is at the
 permission layer (nerfctl grant commands, settings.json).
 
 ### Scopes (ordered, narrow to broad)
@@ -165,7 +165,7 @@ permission layer (nerfctl grant commands, settings.json).
 | `none` | No access in this dimension. |
 | `workspace` | Confined to the current workspace directory tree. |
 | `machine` | Anywhere on the local filesystem. |
-| `remote` | Network operations -- APIs, remote repos, cloud services. |
+| `remote` | Network operations: APIs, remote repos, cloud services. |
 | `admin` | Destructive, irreversible, or elevated operations. |
 
 ### Examples
@@ -245,7 +245,7 @@ Forward all tokens to an underlying command, rejecting any that match a deny lis
 a tool mostly as-is while removing dangerous capabilities.
 
 Passthrough mode operates **exclusively at the token level**. There is no parsing, no classification
-into switches/options/arguments -- every element of `$@` is scanned against deny rules and forwarded
+into switches/options/arguments. Every element of `$@` is scanned against deny rules and forwarded
 as-is.
 
 ```yaml
@@ -292,7 +292,7 @@ script: |
 
 - Parameters are parsed and available as shell variables before the script runs.
 - The script runs in the main shell (not a subshell). Its exit code becomes the tool's exit code.
-- There is no `exec` -- the script controls its own flow.
+- There is no `exec`. The script controls its own flow.
 
 Example:
 
@@ -334,7 +334,7 @@ underscores (e.g. `my-param` becomes `MY_PARAM`).
 
 ### switches
 
-A boolean flag -- present or absent, no value. Switches are always optional.
+A boolean flag, present or absent, with no value. Switches are always optional.
 
 ```yaml
 switches:

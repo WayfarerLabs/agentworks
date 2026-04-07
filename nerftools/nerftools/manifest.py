@@ -83,7 +83,7 @@ class ThreatSpec:
 
 @dataclass(frozen=True)
 class SwitchSpec:
-    """A boolean flag -- present or absent, no value. Always optional.
+    """A boolean flag, present or absent, with no value. Always optional.
 
     When repeatable=True, the switch can be passed multiple times and the
     generated script stores the count (e.g. -v -v -> VERBOSE=2).

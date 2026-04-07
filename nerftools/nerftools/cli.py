@@ -1,4 +1,4 @@
-"""nerf CLI -- validate and generate nerf tools."""
+"""nerf CLI: validate and generate nerf tools."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ import typer
 
 app = typer.Typer(
     name="nerf",
-    help="Build and manage nerf tools -- defanged, scoped wrappers for agent use.",
+    help="Build and manage nerf tools: defanged, scoped wrappers for agent use.",
     no_args_is_help=True,
 )
 
