@@ -28,43 +28,41 @@ uv run nerf generate --target skills --outdir ./skills
 uv run nerf generate --target claude-plugin --outdir ./claude-plugin
 ```
 
-## Manifest format
+## Manifests
 
-A manifest is a YAML file that declares a package of tools. Default manifests ship in
-`default-manifests/`. Each declares a package of tools
-with one of three execution modes:
+A manifest is a single YAML file that declares a package of tools with one of three execution
+modes:
 
 - **template** -- build a command from explicit parameters and a `{{kind.name}}` template
 - **passthrough** -- forward all tokens after a deny-list scan
 - **script** -- run an inline bash script
 
-See [docs/guides/nerf-manifest.md](../docs/guides/nerf-manifest.md) for the full reference.
+No special directory structure is required -- a manifest is just a `.yaml` file passed to the CLI.
 
-## Custom manifests
-
-By default, the CLI includes all built-in packages. You can add your own manifests on top:
-
-```bash
-# Built-ins + your custom manifest
-uv run nerf generate --target bin --outdir ./bin path/to/my-manifest.yaml
-```
-
-You can also choose to ignore the built-in manifests entirely and only use your custom manifests:
+The `default-manifests/` directory contains the manifests that ship with nerftools. These are
+included automatically unless `--no-default` is passed. Custom manifests can be added alongside or
+instead of the defaults:
 
 ```bash
-# Only your custom manifests, no built-ins
-uv run nerf generate --target bin --outdir ./bin --no-default path/to/my-manifest.yaml
+# Defaults + your custom manifest
+uv run nerf generate --target bin --outdir ./bin path/to/my-tools.yaml
+
+# Only your custom manifests, skip defaults
+uv run nerf generate --target bin --outdir ./bin --no-default path/to/my-tools.yaml
 
 # Validate a custom manifest in isolation
-uv run nerf validate --no-default path/to/my-manifest.yaml
+uv run nerf validate --no-default path/to/my-tools.yaml
 ```
 
-When both built-in and custom manifests define tools in the same package (same `package.name`),
+When both default and custom manifests define tools in the same package (same `package.name`),
 tools are merged at the individual tool level with last-wins semantics. A custom `git-commit`
-replaces the built-in `git-commit`, but the other built-in git tools remain. Package metadata
+replaces the default `git-commit`, but the other default git tools remain. Package metadata
 (description, skill_group, skill_intro) is kept from the first manifest that defines the package.
 
-## Built-in packages
+See [docs/guides/nerf-manifest.md](../docs/guides/nerf-manifest.md) for the full manifest
+reference.
+
+## Default packages
 
 | Package      | Tools | Description                                                      |
 | ------------ | ----- | ---------------------------------------------------------------- |
@@ -110,7 +108,7 @@ uv run pytest tests/ -v
 uv run ruff check nerftools/ tests/
 uv run mypy nerftools/
 
-# Validate all built-in manifests
+# Validate all default manifests
 uv run nerf validate
 ```
 
