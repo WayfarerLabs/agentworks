@@ -39,6 +39,24 @@ with one of three execution modes:
 
 See [docs/guides/nerf-manifest.md](../docs/guides/nerf-manifest.md) for the full reference.
 
+## Custom manifests
+
+By default, the CLI includes all built-in packages. You can add your own manifests on top:
+
+```bash
+# Built-ins + your custom manifest
+uv run nerf generate --target bin --outdir ./bin path/to/my-manifest.yaml
+
+# Only your custom manifests, no built-ins
+uv run nerf generate --target bin --outdir ./bin --no-default path/to/my-manifest.yaml
+
+# Validate a custom manifest in isolation
+uv run nerf validate --no-default path/to/my-manifest.yaml
+```
+
+When both built-in and custom manifests define tools in the same package, the custom manifest wins
+(last-wins merge by tool name within a package).
+
 ## Built-in packages
 
 | Package      | Tools | Description                                                      |
