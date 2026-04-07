@@ -560,6 +560,8 @@ def _substitute_template_command(
                 if opt.required:
                     result.append(f'"${{{var}}}"')
                 else:
+                    # Emit both flag and value conditionally — both vanish when empty
+                    result.append("${" + var + ':+"' + opt.flag + '"}')
                     result.append("${" + var + ':+"$' + var + '"}')
             elif name in tool.arguments:
                 spec = tool.arguments[name]
