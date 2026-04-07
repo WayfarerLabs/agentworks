@@ -1,8 +1,9 @@
 # Nerf Manifest Reference
 
-A nerf manifest is a YAML file that declares a package of scoped tool wrappers. It is the single
-source of truth for tool definitions, parameter specs, safety guardrails, threat metadata, and AI
-skill documentation.
+A nerf manifest is a YAML file that declares tools within a package. Multiple manifests can
+contribute to the same package -- when they share a `package.name`, tools are merged with last-wins
+semantics. The manifest is the source of truth for tool definitions, parameter specs, safety
+guardrails, threat metadata, and AI skill documentation.
 
 Each tool defines exactly **one execution mode** -- `template`, `passthrough`, or `script` -- plus
 optional lifecycle hooks and shared configuration. The `nerf` CLI reads manifests and generates

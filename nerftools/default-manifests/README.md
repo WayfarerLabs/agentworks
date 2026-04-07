@@ -1,7 +1,8 @@
 # Default Manifests
 
 These manifests ship with nerftools and are included automatically by the `nerf` CLI unless
-`--no-default` is passed. Each `.yaml` file declares one package of tools.
+`--no-default` is passed. Each `.yaml` file declares tools within a package (one package per file by convention, though
+multiple files can contribute to the same package via merge).
 
 To add your own tools, create a separate manifest file anywhere and pass it to the CLI:
 

@@ -30,8 +30,9 @@ uv run nerf generate --target claude-plugin --outdir ./claude-plugin
 
 ## Manifests
 
-A manifest is a single YAML file that declares a package of tools with one of three execution
-modes:
+A manifest is a single YAML file that declares tools within a package. Multiple manifests can
+contribute to the same package -- tools are merged with last-wins semantics. Each tool uses one of
+three execution modes:
 
 - **template** -- build a command from explicit parameters and a `{{kind.name}}` template
 - **passthrough** -- forward all tokens after a deny-list scan
