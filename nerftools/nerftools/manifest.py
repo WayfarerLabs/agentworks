@@ -83,21 +83,32 @@ class ThreatSpec:
 
 @dataclass(frozen=True)
 class SwitchSpec:
-    """A boolean flag -- present or absent, no value. Always optional."""
+    """A boolean flag -- present or absent, no value. Always optional.
+
+    When repeatable=True, the switch can be passed multiple times and the
+    generated script stores the count (e.g. -v -v -> VERBOSE=2).
+    """
 
     description: str
     flag: str  # e.g. --verbose
     short: str | None = None
+    repeatable: bool = False
 
 
 @dataclass(frozen=True)
 class OptionSpec:
-    """A named flag that takes exactly one value (option flag + option value)."""
+    """A named flag that takes exactly one value (option flag + option value).
+
+    When repeatable=True, the option can be passed multiple times and the
+    generated script accumulates flag-value pairs in an array so
+    "${VAR[@]}" expands to --flag val1 --flag val2.
+    """
 
     description: str
     flag: str  # e.g. --remote
     short: str | None = None
     required: bool = False
+    repeatable: bool = False
     pattern: str | None = None
     allow: tuple[str, ...] = field(default_factory=tuple)
     deny: tuple[str, ...] = field(default_factory=tuple)
@@ -200,7 +211,10 @@ class NerfManifest:
 
 # -- Loading -------------------------------------------------------------------
 
-PLACEHOLDER_RE = re.compile(r"\{\{(\w+)\}\}")
+# Matches {{name}} or {{kind.name}} where kind is switches/options/arguments
+PLACEHOLDER_RE = re.compile(r"\{\{(\w+(?:\.\w+)?)\}\}")
+
+_VALID_PLACEHOLDER_KINDS = {"switches", "options", "arguments"}
 
 
 def load_manifest(path: Path) -> NerfManifest:
@@ -378,13 +392,14 @@ def _load_switches(raw: dict[str, Any], path: Path, tool_name: str) -> dict[str,
         description = _require_str(spec_raw, "description", ctx)
         flag = str(spec_raw["flag"]) if "flag" in spec_raw else f"--{name.replace('_', '-')}"
         short = str(spec_raw["short"]) if "short" in spec_raw else None
+        repeatable = bool(spec_raw.get("repeatable", False))
 
         if not re.fullmatch(r"-{1,2}[a-zA-Z][a-zA-Z0-9-]*", flag):
             raise ManifestError(f"{ctx}: 'flag' must match -<name> or --<name> pattern, got {flag!r}")
         if short is not None and not re.fullmatch(r"-[a-zA-Z]", short):
             raise ManifestError(f"{ctx}: 'short' must be a single-character flag like -v, got {short!r}")
 
-        switches[name] = SwitchSpec(description=description, flag=flag, short=short)
+        switches[name] = SwitchSpec(description=description, flag=flag, short=short, repeatable=repeatable)
 
     return switches
 
@@ -404,6 +419,7 @@ def _load_options(raw: dict[str, Any], path: Path, tool_name: str) -> dict[str, 
         flag = str(spec_raw["flag"]) if "flag" in spec_raw else f"--{name.replace('_', '-')}"
         short = str(spec_raw["short"]) if "short" in spec_raw else None
         required = bool(spec_raw.get("required", False))
+        repeatable = bool(spec_raw.get("repeatable", False))
         pattern = str(spec_raw["pattern"]) if "pattern" in spec_raw else None
         allow = tuple(str(v) for v in spec_raw.get("allow", []))
         deny = tuple(str(v) for v in spec_raw.get("deny", []))
@@ -422,7 +438,8 @@ def _load_options(raw: dict[str, Any], path: Path, tool_name: str) -> dict[str, 
 
         options[name] = OptionSpec(
             description=description, flag=flag, short=short,
-            required=required, pattern=pattern, allow=allow, deny=deny,
+            required=required, repeatable=repeatable,
+            pattern=pattern, allow=allow, deny=deny,
         )
 
     return options
@@ -514,6 +531,34 @@ def _load_env(raw: dict[str, Any], path: Path, tool_name: str) -> dict[str, str]
 # -- Validation ----------------------------------------------------------------
 
 
+def resolve_placeholder(ref: str, tool: ToolSpec) -> tuple[str, str] | None:
+    """Resolve a placeholder reference to (kind, name).
+
+    Supports both bare {{name}} and qualified {{kind.name}} syntax.
+    Returns None if the reference cannot be resolved.
+    """
+    if "." in ref:
+        kind, name = ref.split(".", 1)
+        if kind not in _VALID_PLACEHOLDER_KINDS:
+            return None
+        if kind == "switches":
+            return (kind, name) if name in tool.switches else None
+        if kind == "options":
+            return (kind, name) if name in tool.options else None
+        if kind == "arguments":
+            return (kind, name) if name in tool.arguments else None
+        return None
+
+    # Bare name: look up across all categories
+    if ref in tool.switches:
+        return ("switches", ref)
+    if ref in tool.options:
+        return ("options", ref)
+    if ref in tool.arguments:
+        return ("arguments", ref)
+    return None
+
+
 def _validate_tool(tool: ToolSpec, ctx: str) -> None:
     """Cross-reference validation across fields."""
     sw_names = set(tool.switches.keys())
@@ -538,22 +583,28 @@ def _validate_tool(tool: ToolSpec, ctx: str) -> None:
         if tool.arguments[name].variadic:
             raise ManifestError(f"{ctx}: argument '{name}' is variadic but is not the last argument")
 
-    for i, guard in enumerate(tool.guards):
+    # Guard and pre placeholder validation
+    _validate_placeholder_refs(tool, tool.guards, ctx)
+
+
+def _validate_placeholder_refs(tool: ToolSpec, guards: tuple[GuardSpec, ...], ctx: str) -> None:
+    """Validate placeholders in guards and pre scripts resolve to defined params."""
+    for i, guard in enumerate(guards):
         parts: list[str] = list(guard.command) if guard.command else [guard.script or ""]
         for part in parts:
             for match in PLACEHOLDER_RE.finditer(part):
-                name = match.group(1)
-                if name not in all_params:
+                ref = match.group(1)
+                if resolve_placeholder(ref, tool) is None:
                     raise ManifestError(
-                        f"{ctx}: guards[{i}] references '{{{{{name}}}}}' but '{name}' is not defined"
+                        f"{ctx}: guards[{i}] references '{{{{{ref}}}}}' but it cannot be resolved"
                     )
 
     if tool.pre:
         for match in PLACEHOLDER_RE.finditer(tool.pre):
-            name = match.group(1)
-            if name not in all_params:
+            ref = match.group(1)
+            if resolve_placeholder(ref, tool) is None:
                 raise ManifestError(
-                    f"{ctx}: pre references '{{{{{name}}}}}' but '{name}' is not defined"
+                    f"{ctx}: pre references '{{{{{ref}}}}}' but it cannot be resolved"
                 )
 
 
@@ -562,22 +613,21 @@ def _validate_template_refs(tool: ToolSpec, all_params: set[str], ctx: str) -> N
     assert tool.template is not None
     command = tool.template.command
 
-    # All {{param}} in command must be defined
-    referenced: set[str] = set()
+    # All {{param}} in command must resolve
+    referenced_names: set[str] = set()
     for part in command:
         for match in PLACEHOLDER_RE.finditer(part):
-            referenced.add(match.group(1))
+            ref = match.group(1)
+            resolved = resolve_placeholder(ref, tool)
+            if resolved is None:
+                raise ManifestError(
+                    f"{ctx}: template command references '{{{{{ref}}}}}' but it cannot be resolved"
+                )
+            referenced_names.add(resolved[1])
 
-    for name in referenced:
-        if name not in all_params:
-            raise ManifestError(
-                f"{ctx}: template command references '{{{{{name}}}}}' but '{name}' is not defined"
-            )
-
-    # All params must be referenced in command
+    # All params must be referenced in command (by bare or qualified name)
     for name in all_params:
-        placeholder = "{{" + name + "}}"
-        if not any(placeholder in part for part in command):
+        if name not in referenced_names:
             raise ManifestError(f"{ctx}: '{name}' is defined but not referenced in template command")
 
     # Variadic arg placeholder must be last element in command
@@ -586,8 +636,10 @@ def _validate_template_refs(tool: ToolSpec, all_params: set[str], ctx: str) -> N
         last_arg = arg_names[-1]
         if tool.arguments[last_arg].variadic:
             last_cmd = command[-1] if command else ""
-            placeholder = "{{" + last_arg + "}}"
-            if last_cmd != placeholder:
+            # Accept both bare and qualified
+            placeholder_bare = "{{" + last_arg + "}}"
+            placeholder_qual = "{{arguments." + last_arg + "}}"
+            if last_cmd not in (placeholder_bare, placeholder_qual):
                 raise ManifestError(
                     f"{ctx}: variadic argument '{last_arg}' placeholder must be the last element in template command"
                 )

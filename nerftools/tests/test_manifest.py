@@ -444,7 +444,7 @@ def test_undefined_placeholder_raises(tmp_path: Path) -> None:
         },
     })
     p = _write_manifest(tmp_path, raw)
-    with pytest.raises(ManifestError, match="'x' is not defined"):
+    with pytest.raises(ManifestError, match="cannot be resolved"):
         load_manifest(p)
 
 
@@ -515,7 +515,7 @@ def test_guard_undefined_placeholder_raises(tmp_path: Path) -> None:
         },
     })
     p = _write_manifest(tmp_path, raw)
-    with pytest.raises(ManifestError, match="'y' is not defined"):
+    with pytest.raises(ManifestError, match="cannot be resolved"):
         load_manifest(p)
 
 

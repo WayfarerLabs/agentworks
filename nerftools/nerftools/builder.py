@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from nerftools.manifest import PLACEHOLDER_RE
+from nerftools.manifest import PLACEHOLDER_RE, resolve_placeholder
 from nerftools.rendering import maps_to_text, usage_tokens
 
 if TYPE_CHECKING:
@@ -213,10 +213,18 @@ def _append_constraints(
 
 def _var_declarations(tool_spec: ToolSpec) -> str:
     lines = []
-    for name in tool_spec.switches:
-        lines.append(f'{_var_name(name)}=""')
-    for name in tool_spec.options:
-        lines.append(f'{_var_name(name)}=""')
+    for name, sw in tool_spec.switches.items():
+        var = _var_name(name)
+        if sw.repeatable:
+            lines.append(f"{var}=0")
+        else:
+            lines.append(f'{var}=""')
+    for name, opt in tool_spec.options.items():
+        var = _var_name(name)
+        if opt.repeatable:
+            lines.append(f"{var}=()")
+        else:
+            lines.append(f'{var}=""')
     return "\n".join(lines)
 
 
@@ -226,12 +234,18 @@ def _flag_parser(tool_spec: ToolSpec, *, has_positional: bool) -> str:
     for name, sw in tool_spec.switches.items():
         var = _var_name(name)
         pattern = f"{sw.flag}|{sw.short}" if sw.short else sw.flag
-        cases.append(f'    {pattern}) {var}="true"; shift 1 ;;')
+        if sw.repeatable:
+            cases.append(f"    {pattern}) {var}=$(({var} + 1)); shift 1 ;;")
+        else:
+            cases.append(f'    {pattern}) {var}="true"; shift 1 ;;')
 
     for name, opt in tool_spec.options.items():
         var = _var_name(name)
         pattern = f"{opt.flag}|{opt.short}" if opt.short else opt.flag
-        cases.append(f'    {pattern}) {var}="$2"; shift 2 ;;')
+        if opt.repeatable:
+            cases.append(f'    {pattern}) {var}+=("{opt.flag}" "$2"); shift 2 ;;')
+        else:
+            cases.append(f'    {pattern}) {var}="$2"; shift 2 ;;')
 
     cases.append("    -h|--help) usage ;;")
     cases.append("    --) shift; break ;;")
@@ -550,20 +564,38 @@ def _substitute_template_command(
     for part in command:
         m = PLACEHOLDER_RE.fullmatch(part)
         if m:
-            name = m.group(1)
+            ref = m.group(1)
+            resolved = resolve_placeholder(ref, tool)
+            if resolved is None:
+                result.append(part)
+                continue
+            kind, name = resolved
             var = _var_name(name)
-            if name in tool.switches:
+
+            if kind == "switches":
                 sw = tool.switches[name]
-                result.append("${" + var + ':+"' + sw.flag + '"' + "}")
-            elif name in tool.options:
+                if sw.repeatable:
+                    # Repeatable switch: emit flag N times via loop
+                    # Handled inline: seq generates the flag repeated $VAR times
+                    result.append(
+                        "$(for _ in $(seq 1 $" + var + " 2>/dev/null); do"
+                        f" echo -n '{_shell_escape_sq(sw.flag)} '; done)"
+                    )
+                else:
+                    result.append("${" + var + ':+"' + sw.flag + '"' + "}")
+
+            elif kind == "options":
                 opt = tool.options[name]
-                if opt.required:
+                if opt.repeatable:
+                    # Array of flag-value pairs: "${VAR[@]}"
+                    result.append("${" + var + '[@]+"${' + var + '[@]}"}')
+                elif opt.required:
                     result.append(f'"${{{var}}}"')
                 else:
-                    # Emit both flag and value conditionally — both vanish when empty
                     result.append("${" + var + ':+"' + opt.flag + '"}')
                     result.append("${" + var + ':+"$' + var + '"}')
-            elif name in tool.arguments:
+
+            elif kind == "arguments":
                 spec = tool.arguments[name]
                 if spec.variadic:
                     if spec.required:
@@ -575,8 +607,6 @@ def _substitute_template_command(
                         result.append(f'"${{{var}}}"')
                     else:
                         result.append("${" + var + ':+"$' + var + '"}')
-            else:
-                result.append(f'"${{{var}}}"')
         else:
             result.append(part)
     return result
@@ -586,7 +616,11 @@ def _substitute_script(script: str, tool: ToolSpec) -> str:
     """Substitute {{param}} placeholders inline within a bash script string."""
 
     def replace(m: re.Match) -> str:  # type: ignore[type-arg]
-        name = m.group(1)
+        ref: str = m.group(1)
+        resolved = resolve_placeholder(ref, tool)
+        if resolved is None:
+            return str(m.group(0))
+        _kind, name = resolved
         return "${" + _var_name(name) + "}"
 
     return PLACEHOLDER_RE.sub(replace, script)

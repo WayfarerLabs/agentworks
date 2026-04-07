@@ -42,7 +42,20 @@ tools:
       read: workspace
       write: none
     template:
-      command: [grep, -r, -n, "{{ignore_case}}", "{{line_regexp}}", "{{word_regexp}}", "{{count}}", "{{files_with_matches}}", "{{include}}", "{{exclude}}", --, "{{pattern}}", .]
+      command:
+        - grep
+        - -r
+        - -n
+        - "{{switches.ignore_case}}"
+        - "{{switches.line_regexp}}"
+        - "{{switches.word_regexp}}"
+        - "{{switches.count}}"
+        - "{{switches.files_with_matches}}"
+        - "{{options.include}}"
+        - "{{options.exclude}}"
+        - --
+        - "{{arguments.pattern}}"
+        - .
     switches:
       ignore_case:
         description: Case-insensitive matching
@@ -68,9 +81,11 @@ tools:
       include:
         description: Search only files matching this glob (e.g. '*.py')
         flag: --include
+        repeatable: true
       exclude:
         description: Skip files matching this glob (e.g. '*.log')
         flag: --exclude
+        repeatable: true
     arguments:
       pattern:
         description: Regular expression pattern to search for
@@ -85,7 +100,20 @@ tools:
       read: machine
       write: none
     template:
-      command: [grep, -n, "{{recursive}}", "{{ignore_case}}", "{{line_regexp}}", "{{word_regexp}}", "{{count}}", "{{files_with_matches}}", "{{include}}", "{{exclude}}", --, "{{pattern}}", "{{paths}}"]
+      command:
+        - grep
+        - -n
+        - "{{switches.recursive}}"
+        - "{{switches.ignore_case}}"
+        - "{{switches.line_regexp}}"
+        - "{{switches.word_regexp}}"
+        - "{{switches.count}}"
+        - "{{switches.files_with_matches}}"
+        - "{{options.include}}"
+        - "{{options.exclude}}"
+        - --
+        - "{{arguments.pattern}}"
+        - "{{arguments.paths}}"
     switches:
       recursive:
         description: Search directories recursively
@@ -115,9 +143,11 @@ tools:
       include:
         description: Search only files matching this glob (e.g. '*.py')
         flag: --include
+        repeatable: true
       exclude:
         description: Skip files matching this glob (e.g. '*.log')
         flag: --exclude
+        repeatable: true
     arguments:
       pattern:
         description: Regular expression pattern to search for
