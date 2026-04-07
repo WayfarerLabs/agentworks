@@ -100,7 +100,7 @@ def build_overview_text(manifests: list[NerfManifest], prefix: str = "") -> str:
         "so that permission entries can match the command exactly."
     )
     parts.append("")
-    parts.append("## Available tool families")
+    parts.append("## Available tool packages")
     parts.append("")
 
     for manifest in manifests:
@@ -108,7 +108,7 @@ def build_overview_text(manifests: list[NerfManifest], prefix: str = "") -> str:
         parts.append(f"- **{group}**: {manifest.package.description}")
 
     parts.append("")
-    parts.append("Use the corresponding `nerf-*` skill for full usage details on each family.")
+    parts.append("Use the corresponding `nerf-*` skill for full usage details on each package.")
 
     return "\n".join(parts).rstrip() + "\n"
 

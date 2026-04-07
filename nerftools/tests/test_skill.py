@@ -375,7 +375,7 @@ def test_nerftools_skill_not_generated_when_no_manifests(tmp_path: Path) -> None
     assert not (tmp_path / "nerftools").exists()
 
 
-def test_nerftools_skill_lists_tool_families() -> None:
+def test_nerftools_skill_lists_tool_packages() -> None:
     from nerftools.skill import build_overview_text
 
     manifests = [

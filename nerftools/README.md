@@ -6,6 +6,12 @@ Nerf tools wrap CLI commands with safety guardrails: validated parameters, restr
 pre-flight checks, and a 2D threat model for permission management. A Python CLI reads YAML
 manifests and generates self-contained bash scripts, rulesync skills, and Claude Code plugins.
 
+**IMPORTANT: Nerf tools should not be considered universally safe.** Different tools have different
+threat profiles. Rather, the goal is that each nerf tool should limit usage of the underlying CLI
+tool to a set of operations with a roughly-equivalent threat profile (as expressed in its declared
+threat model) so that permissions can be broadly granted (e.g. in tools like Claude Code) with
+cofidence that the agent can't perform operations outside the declared threat profile.
+
 ## Quick start
 
 ```bash
@@ -24,7 +30,7 @@ uv run nerf generate --target claude-plugin --outdir ./claude-plugin
 
 ## Manifest format
 
-Manifests are YAML files in `manifests/<package>/manifest.yaml`. Each declares a family of tools
+Manifests are YAML files in `manifests/<package>/manifest.yaml`. Each declares a package of tools
 with one of three execution modes:
 
 - **template** -- build a command from explicit parameters and a `{{kind.name}}` template
@@ -35,17 +41,17 @@ See [docs/guides/nerf-manifest.md](../docs/guides/nerf-manifest.md) for the full
 
 ## Built-in packages
 
-| Package | Tools | Description |
-|---|---|---|
-| git | 11 | Git workflow with commit, push, fetch, tag, amend, revert, reset |
-| az-repos | 3 | Azure Repos PR management |
-| az-pipelines | 3 | Azure Pipelines monitoring |
-| az-wi | 4 | Azure Boards work items |
-| nx | 6 | Nx monorepo workspace operations |
-| tg | 10 | Terragrunt infrastructure management |
-| pkgrun | 3 | npm package runners (cspell, markdownlint, prettier) |
-| stdutils | 4 | Unix utilities (find, grep) with safety guardrails |
-| uv | 4 | Python dev tools via uv run (pytest, ruff, mypy) |
+| Package      | Tools | Description                                                      |
+| ------------ | ----- | ---------------------------------------------------------------- |
+| git          | 11    | Git workflow with commit, push, fetch, tag, amend, revert, reset |
+| az-repos     | 3     | Azure Repos PR management                                        |
+| az-pipelines | 3     | Azure Pipelines monitoring                                       |
+| az-wi        | 4     | Azure Boards work items                                          |
+| nx           | 6     | Nx monorepo workspace operations                                 |
+| tg           | 10    | Terragrunt infrastructure management                             |
+| pkgrun       | 3     | npm package runners (cspell, markdownlint, prettier)             |
+| stdutils     | 4     | Unix utilities (find, grep) with safety guardrails               |
+| uv           | 4     | Python dev tools via uv run (pytest, ruff, mypy)                 |
 
 ## Threat model
 
@@ -53,8 +59,8 @@ Every tool declares what it reads and writes using a 2D threat profile:
 
 ```yaml
 threat:
-  read: workspace    # none | workspace | machine | remote | admin
-  write: remote      # none | workspace | machine | remote | admin
+  read: workspace # none | workspace | machine | remote | admin
+  write: remote # none | workspace | machine | remote | admin
 ```
 
 Operators grant permissions by threat ceiling rather than enumerating tools:
@@ -97,6 +103,6 @@ nerftools/
     formats.py         Claude Code plugin builder
     cli.py             CLI (validate + generate)
     nerfctl/claude/    Grant management shell scripts
-  manifests/           Built-in tool family manifests
+  manifests/           Built-in tool package manifests
   tests/               Test suite
 ```

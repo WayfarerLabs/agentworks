@@ -1,6 +1,6 @@
 """Nerf manifest loading and validation (v1).
 
-A nerf manifest is a YAML file that defines a family of scoped tool wrappers.
+A nerf manifest is a YAML file that defines a package of scoped tool wrappers.
 It is the single source of truth for tool definitions, parameter specs, safety
 guardrails, threat metadata, and AI skill metadata.
 

@@ -374,7 +374,7 @@ def _build_claude_plugin_overview_text(manifests: list[NerfManifest], prefix: st
         "Each tool's usage line shows the full absolute path to call it. Use that path directly in Bash commands."
     )
     parts.append("")
-    parts.append("## Available tool families")
+    parts.append("## Available tool packages")
     parts.append("")
 
     for manifest in manifests:
@@ -382,6 +382,6 @@ def _build_claude_plugin_overview_text(manifests: list[NerfManifest], prefix: st
         parts.append(f"- **{group}**: {manifest.package.description}")
 
     parts.append("")
-    parts.append("Use the corresponding `nerf-*` skill for full usage details on each family.")
+    parts.append("Use the corresponding `nerf-*` skill for full usage details on each package.")
 
     return "\n".join(parts).rstrip() + "\n"

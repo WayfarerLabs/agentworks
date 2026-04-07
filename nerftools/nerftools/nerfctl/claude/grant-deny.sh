@@ -126,7 +126,7 @@ mapfile -t MATCHES < <(find "$RESOLVED_ROOT/skills" -path "*/scripts/$PATTERN" -
 
 if [[ ${#MATCHES[@]} -eq 0 ]]; then
   echo "error: no tools matching '$PATTERN' found under $RESOLVED_ROOT/skills/*/scripts/" >&2
-  echo "hint: use 'nerf-git-*' to match a family, or check tool names in the nerf skills" >&2
+  echo "hint: use 'nerf-git-*' to match a package, or check tool names in the nerf skills" >&2
   exit 1
 fi
 
