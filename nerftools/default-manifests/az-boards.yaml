@@ -1,15 +1,14 @@
 version: 1
 
 package:
-  name: az-wi
-  description: Azure Boards work item tools for viewing and commenting on work items
-  skill_group: az-wi
+  name: az-boards
+  description: Azure Boards work item tools for querying, viewing, creating, and updating work items
+  skill_group: az-boards
   skill_intro: |
     These tools interact with Azure Boards work items. The organization and
     project are auto-detected from the git remote. The az-boards-wi-*
     tools operate on any work item. The az-boards-mywi-* tools are
-    intended for work items assigned to you -- use them to comment on or
-    view your own work.
+    scoped to work items assigned to you.
 
 tools:
   az-boards-wi-list:

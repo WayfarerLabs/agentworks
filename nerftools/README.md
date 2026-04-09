@@ -70,7 +70,7 @@ reference.
 | git          | 11    | Git workflow with commit, push, fetch, tag, amend, revert, reset |
 | az-repos     | 3     | Azure Repos PR management                                        |
 | az-pipelines | 3     | Azure Pipelines monitoring                                       |
-| az-wi        | 4     | Azure Boards work items                                          |
+| az-boards    | 7     | Azure Boards work items (query, view, create, update)            |
 | nx           | 6     | Nx monorepo workspace operations                                 |
 | tg           | 10    | Terragrunt infrastructure management                             |
 | pkgrun       | 3     | npm package runners (cspell, markdownlint, prettier)             |
