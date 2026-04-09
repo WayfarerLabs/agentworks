@@ -157,6 +157,38 @@ tools:
         description: Comment to add to the work item discussion
         flag: --discussion
 
+  az-boards-wi-add-parent:
+    description: >-
+      Set the parent of a work item. Takes the child ID and parent ID as
+      positional arguments. Idempotent if the link already exists.
+    threat:
+      read: remote
+      write: remote
+    template:
+      command:
+        - az
+        - boards
+        - work-item
+        - relation
+        - add
+        - --id
+        - "{{arguments.child_id}}"
+        - --relation-type
+        - parent
+        - --target-id
+        - "{{arguments.parent_id}}"
+        - --output
+        - json
+    arguments:
+      child_id:
+        description: Work item ID of the child (numeric)
+        required: true
+        pattern: "^[0-9]+$"
+      parent_id:
+        description: Work item ID of the parent (numeric)
+        required: true
+        pattern: "^[0-9]+$"
+
   az-boards-mywi-show:
     description: Show details and comments for a work item assigned to you
     threat:
