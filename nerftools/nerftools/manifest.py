@@ -283,7 +283,11 @@ def _load_tool(raw: dict[str, Any], path: Path, tool_name: str) -> ToolSpec:
     # Execution mode
     template = _load_template(raw, path, tool_name) if "template" in raw else None
     passthrough = _load_passthrough(raw, path, tool_name) if "passthrough" in raw else None
-    script = str(raw["script"]).strip() if "script" in raw else None
+    script: str | None = None
+    if "script" in raw:
+        script = str(raw["script"]).strip()
+        if not script:
+            raise ManifestError(f"{ctx}: 'script' must not be empty")
 
     modes = sum(x is not None for x in (template, passthrough, script))
     if modes == 0:
@@ -370,6 +374,10 @@ def _load_passthrough(raw: dict[str, Any], path: Path, tool_name: str) -> Passth
         raise ManifestError(f"{ctx}: must be a mapping")
 
     command = _require_str(pt_raw, "command", ctx)
+    for key in ("deny", "prefix", "suffix"):
+        val = pt_raw.get(key)
+        if val is not None and not isinstance(val, list):
+            raise ManifestError(f"{ctx}: '{key}' must be a list, got {type(val).__name__}")
     deny = tuple(str(d) for d in pt_raw.get("deny", []))
     prefix = tuple(str(p) for p in pt_raw.get("prefix", []))
     suffix = tuple(str(s) for s in pt_raw.get("suffix", []))
@@ -420,6 +428,10 @@ def _load_options(raw: dict[str, Any], path: Path, tool_name: str) -> dict[str, 
         required = bool(spec_raw.get("required", False))
         repeatable = bool(spec_raw.get("repeatable", False))
         pattern = str(spec_raw["pattern"]) if "pattern" in spec_raw else None
+        for key in ("allow", "deny"):
+            val = spec_raw.get(key)
+            if val is not None and not isinstance(val, list):
+                raise ManifestError(f"{ctx}: '{key}' must be a list, got {type(val).__name__}")
         allow = tuple(str(v) for v in spec_raw.get("allow", []))
         deny = tuple(str(v) for v in spec_raw.get("deny", []))
 
@@ -460,6 +472,10 @@ def _load_arguments(raw: dict[str, Any], path: Path, tool_name: str) -> dict[str
         variadic = bool(spec_raw.get("variadic", False))
         allow_flags = bool(spec_raw.get("allow_flags", False))
         pattern = str(spec_raw["pattern"]) if "pattern" in spec_raw else None
+        for key in ("allow", "deny"):
+            val = spec_raw.get(key)
+            if val is not None and not isinstance(val, list):
+                raise ManifestError(f"{ctx}: '{key}' must be a list, got {type(val).__name__}")
         allow = tuple(str(v) for v in spec_raw.get("allow", []))
         deny = tuple(str(v) for v in spec_raw.get("deny", []))
 
@@ -607,17 +623,27 @@ def _validate_template_refs(tool: ToolSpec, all_params: set[str], ctx: str) -> N
     assert tool.template is not None
     command = tool.template.command
 
-    # All {{param}} in command must resolve
+    # All {{param}} command tokens must resolve, and placeholders may only
+    # appear as a complete command element so validation matches substitution.
     referenced_names: set[str] = set()
     for part in command:
-        for match in PLACEHOLDER_RE.finditer(part):
-            ref = match.group(1)
-            resolved = resolve_placeholder(ref, tool)
-            if resolved is None:
-                raise ManifestError(
-                    f"{ctx}: template command references '{{{{{ref}}}}}' but it cannot be resolved"
-                )
-            referenced_names.add(resolved[1])
+        if not PLACEHOLDER_RE.search(part):
+            continue
+
+        match = PLACEHOLDER_RE.fullmatch(part)
+        if match is None:
+            raise ManifestError(
+                f"{ctx}: template command element '{part}' contains an inline placeholder; "
+                "placeholders must occupy the entire command element"
+            )
+
+        ref = match.group(1)
+        resolved = resolve_placeholder(ref, tool)
+        if resolved is None:
+            raise ManifestError(
+                f"{ctx}: template command references '{{{{{ref}}}}}' but it cannot be resolved"
+            )
+        referenced_names.add(resolved[1])
 
     # All params must be referenced in command
     for name in all_params:
