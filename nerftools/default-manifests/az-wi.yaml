@@ -12,6 +12,24 @@ package:
     view your own work.
 
 tools:
+  az-boards-wi-list:
+    description: >-
+      Query work items using WIQL (Work Item Query Language). Returns matching
+      work items as JSON. The organization and project are auto-detected from
+      the git remote.
+    threat:
+      read: remote
+      write: none
+    template:
+      command: [az, boards, query, --wiql, "{{arguments.wiql}}", --output, json]
+    arguments:
+      wiql:
+        description: >-
+          WIQL query string (e.g. "SELECT [System.Id], [System.Title],
+          [System.State] FROM WorkItems WHERE [System.AssignedTo] = @Me
+          AND [System.State] <> 'Closed' ORDER BY [System.ChangedDate] DESC")
+        required: true
+
   az-boards-wi-show:
     description: Show details and comments for any work item
     threat:
