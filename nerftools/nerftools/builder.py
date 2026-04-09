@@ -611,11 +611,18 @@ def _substitute_template_command(
     command: tuple[str, ...],
     tool: ToolSpec,
 ) -> list[str]:
-    """Substitute {{param}} placeholders in a command word list."""
+    """Substitute {{param}} placeholders in a command word list.
+
+    Tokens that are exactly a placeholder get type-aware expansion (conditional
+    flags, array expansion, etc.). Tokens with inline placeholders (e.g. a URL
+    like "repos/{owner}/{repo}/pulls/{{arguments.pr}}/comments") get simple
+    variable substitution within a double-quoted string.
+    """
     result: list[str] = []
     for part in command:
         m = PLACEHOLDER_RE.fullmatch(part)
         if m:
+            # Whole-token placeholder: type-aware expansion
             ref = m.group(1)
             resolved = resolve_placeholder(ref, tool)
             if resolved is None:
@@ -627,8 +634,6 @@ def _substitute_template_command(
             if kind == "switches":
                 sw = tool.switches[name]
                 if sw.repeatable:
-                    # Repeatable switch: emit flag N times via loop
-                    # Handled inline: seq generates the flag repeated $VAR times
                     result.append(
                         "$(for _ in $(seq 1 $" + var + " 2>/dev/null); do"
                         f" echo -n '{_shell_escape_sq(sw.flag)} '; done)"
@@ -639,7 +644,6 @@ def _substitute_template_command(
             elif kind == "options":
                 opt = tool.options[name]
                 if opt.repeatable:
-                    # Array of flag-value pairs: "${VAR[@]}"
                     result.append("${" + var + '[@]+"${' + var + '[@]}"}')
                 elif opt.required:
                     result.append(f'"${{{var}}}"')
@@ -659,6 +663,18 @@ def _substitute_template_command(
                         result.append(f'"${{{var}}}"')
                     else:
                         result.append("${" + var + ':+"$' + var + '"}')
+
+        elif PLACEHOLDER_RE.search(part):
+            # Inline placeholder: simple variable substitution in a quoted string
+            def _inline_replace(match: re.Match) -> str:  # type: ignore[type-arg]
+                ref: str = match.group(1)
+                resolved = resolve_placeholder(ref, tool)
+                if resolved is None:
+                    return str(match.group(0))
+                _kind, name = resolved
+                return "${" + _var_name(name) + "}"
+            result.append('"' + PLACEHOLDER_RE.sub(_inline_replace, part) + '"')
+
         else:
             result.append(part)
     return result

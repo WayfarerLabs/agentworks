@@ -81,6 +81,24 @@ tools:
         description: PR number, URL, or branch name
         required: true
 
+  gh-pr-review-comments:
+    description: >-
+      List inline review comments on a pull request as JSON. These are
+      comments attached to specific lines of code (e.g. from code review).
+    threat:
+      read: remote
+      write: none
+    template:
+      command:
+        - gh
+        - api
+        - "repos/{owner}/{repo}/pulls/{{arguments.pr}}/comments"
+    arguments:
+      pr:
+        description: PR number
+        required: true
+        pattern: "^[0-9]+$"
+
   gh-pr-create:
     description: >-
       Create a pull request from the current branch. Pushes the branch if

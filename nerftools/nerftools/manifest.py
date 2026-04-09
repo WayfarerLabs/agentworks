@@ -623,27 +623,17 @@ def _validate_template_refs(tool: ToolSpec, all_params: set[str], ctx: str) -> N
     assert tool.template is not None
     command = tool.template.command
 
-    # All {{param}} command tokens must resolve, and placeholders may only
-    # appear as a complete command element so validation matches substitution.
+    # All {{kind.name}} in command must resolve
     referenced_names: set[str] = set()
     for part in command:
-        if not PLACEHOLDER_RE.search(part):
-            continue
-
-        match = PLACEHOLDER_RE.fullmatch(part)
-        if match is None:
-            raise ManifestError(
-                f"{ctx}: template command element '{part}' contains an inline placeholder; "
-                "placeholders must occupy the entire command element"
-            )
-
-        ref = match.group(1)
-        resolved = resolve_placeholder(ref, tool)
-        if resolved is None:
-            raise ManifestError(
-                f"{ctx}: template command references '{{{{{ref}}}}}' but it cannot be resolved"
-            )
-        referenced_names.add(resolved[1])
+        for match in PLACEHOLDER_RE.finditer(part):
+            ref = match.group(1)
+            resolved = resolve_placeholder(ref, tool)
+            if resolved is None:
+                raise ManifestError(
+                    f"{ctx}: template command references '{{{{{ref}}}}}' but it cannot be resolved"
+                )
+            referenced_names.add(resolved[1])
 
     # All params must be referenced in command
     for name in all_params:
