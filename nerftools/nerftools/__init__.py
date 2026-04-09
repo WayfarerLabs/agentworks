@@ -1,8 +1,11 @@
 """nerftools: build and manage nerf tools."""
 
+from importlib.resources import files
 from pathlib import Path
 
-BUILTIN_MANIFESTS_DIR = Path(__file__).parent.parent / "default-manifests"
+# Default manifests ship as a subpackage, accessible via importlib.resources
+# for both editable installs and published wheels.
+BUILTIN_MANIFESTS_DIR = Path(str(files("nerftools.default_manifests")))
 
 _NERFCTL_DIR = Path(__file__).parent / "nerfctl" / "claude"
 

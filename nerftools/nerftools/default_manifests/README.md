@@ -11,5 +11,5 @@ nerf generate --target bin --outdir ./bin path/to/my-tools.yaml
 ```
 
 Your manifest can define new packages or override individual tools in an existing package by using
-the same `package.name`. See the [manifest reference](../docs/guides/nerf-manifest.md) for the
+the same `package.name`. See the [manifest reference](../../../docs/guides/nerf-manifest.md) for the
 full format.

@@ -5,18 +5,18 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated
 
+import typer
+
+from nerftools import BUILTIN_MANIFESTS_DIR as _DEFAULT_MANIFESTS_DIR
+
 if TYPE_CHECKING:
     from nerftools.manifest import NerfManifest
-
-import typer
 
 app = typer.Typer(
     name="nerf",
     help="Build and manage nerf tools: defanged, scoped wrappers for agent use.",
     no_args_is_help=True,
 )
-
-_DEFAULT_MANIFESTS_DIR = Path(__file__).parent.parent / "default-manifests"
 
 _VALID_TARGETS = ("bin", "skills", "claude-plugin")
 

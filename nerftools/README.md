@@ -40,7 +40,7 @@ three execution modes:
 
 No special directory structure is required. A manifest is just a `.yaml` file passed to the CLI.
 
-The `default-manifests/` directory contains the manifests that ship with nerftools. These are
+The `nerftools/default_manifests/` directory contains the manifests that ship with nerftools. These are
 included automatically unless `--no-default` is passed. Custom manifests can be added alongside or
 instead of the defaults:
 
@@ -128,6 +128,6 @@ nerftools/
     formats.py         Claude Code plugin builder
     cli.py             CLI (validate + generate)
     nerfctl/claude/    Grant management shell scripts
-  default-manifests/   Default tool package manifests
+    default_manifests/ Default tool package manifests (YAML)
   tests/               Test suite
 ```
