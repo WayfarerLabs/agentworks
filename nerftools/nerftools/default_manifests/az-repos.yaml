@@ -12,36 +12,101 @@ package:
 
 tools:
   az-repos-pr-list:
-    description: List active pull requests in the project (most recent 10)
+    description: List pull requests in the project as JSON
     threat:
       read: remote
       write: none
     template:
-      command: [az, repos, pr, list, --status, active, --top, "10", --output, table]
+      command:
+        - az
+        - repos
+        - pr
+        - list
+        - "{{options.status}}"
+        - "{{options.top}}"
+        - "{{options.creator}}"
+        - "{{options.reviewer}}"
+        - --output
+        - json
+    options:
+      status:
+        description: "Filter by status (default: active)"
+        flag: --status
+        allow: [active, abandoned, completed, all]
+      top:
+        description: Maximum number of PRs to return (default 10)
+        flag: --top
+        pattern: "^[0-9]+$"
+      creator:
+        description: Filter by PR creator
+        flag: --creator
+      reviewer:
+        description: Filter by reviewer
+        flag: --reviewer
 
   az-repos-pr-show:
-    description: Show details for a specific pull request
+    description: Show full details for a pull request as JSON
     threat:
       read: remote
       write: none
     template:
-      command: [az, repos, pr, show, --id, "{{arguments.pr_id}}", --output, table]
+      command: [az, repos, pr, show, --id, "{{arguments.pr_id}}", --output, json]
     arguments:
       pr_id:
-        description: Pull request ID (numeric, from az-repos-pr-list)
+        description: Pull request ID (numeric)
+        required: true
+        pattern: "^[0-9]+$"
+
+  az-repos-pr-comments:
+    description: >-
+      List all comment threads on a pull request as JSON. Extracts the
+      repository name from the git remote automatically.
+    threat:
+      read: remote
+      write: none
+    script: |
+      REMOTE_URL=$(git remote get-url origin 2>/dev/null || true)
+      if [ -z "$REMOTE_URL" ]; then
+        echo "error: could not detect git remote 'origin'" >&2
+        exit 1
+      fi
+      REPO_NAME=$(echo "$REMOTE_URL" | sed -E 's|.*/_git/||; s|\.git$||')
+      if [ -z "$REPO_NAME" ]; then
+        echo "error: could not extract repository name from remote URL '$REMOTE_URL'" >&2
+        exit 1
+      fi
+      exec az devops invoke \
+        --area git \
+        --resource pullRequestThreads \
+        --route-parameters "repositoryId=$REPO_NAME" "pullRequestId=$PR_ID" \
+        --output json
+    arguments:
+      pr_id:
+        description: Pull request ID (numeric)
         required: true
         pattern: "^[0-9]+$"
 
   az-repos-pr-create:
     description: >-
-      Create a pull request from the current branch to the default target branch.
-      Source branch is auto-detected from HEAD. Cannot be run from detached HEAD
-      or from main.
+      Create a pull request from the current branch to the default target
+      branch. Source branch is auto-detected from HEAD. Cannot be run from
+      detached HEAD or from main.
     threat:
       read: remote
       write: remote
     template:
-      command: [az, repos, pr, create, --title, "{{arguments.title}}", --description, "{{arguments.description}}", "{{switches.draft}}", --output, table]
+      command:
+        - az
+        - repos
+        - pr
+        - create
+        - --title
+        - "{{arguments.title}}"
+        - --description
+        - "{{arguments.description}}"
+        - "{{switches.draft}}"
+        - --output
+        - json
     arguments:
       title:
         description: PR title

@@ -18,7 +18,7 @@ tools:
       read: remote
       write: none
     template:
-      command: [az, pipelines, list, --output, table]
+      command: [az, pipelines, list, --output, json]
 
   az-pipelines-runs:
     description: List the 20 most recent pipeline runs across all pipelines
@@ -26,7 +26,7 @@ tools:
       read: remote
       write: none
     template:
-      command: [az, pipelines, runs, list, --top, "20", --output, table]
+      command: [az, pipelines, runs, list, --top, "20", --output, json]
 
   az-pipelines-check:
     description: Show details and the 10 most recent runs for a specific pipeline (by ID)
@@ -34,7 +34,7 @@ tools:
       read: remote
       write: none
     template:
-      command: [az, pipelines, runs, list, --pipeline-ids, "{{arguments.pipeline_id}}", --top, "10", --output, table]
+      command: [az, pipelines, runs, list, --pipeline-ids, "{{arguments.pipeline_id}}", --top, "10", --output, json]
     arguments:
       pipeline_id:
         description: Pipeline ID (numeric, from az-pipelines-list)
