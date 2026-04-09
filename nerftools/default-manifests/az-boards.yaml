@@ -80,6 +80,7 @@ tools:
         - "{{options.area}}"
         - "{{options.iteration}}"
         - "{{options.discussion}}"
+        - "{{options.fields}}"
         - --output
         - json
     arguments:
@@ -106,6 +107,10 @@ tools:
       discussion:
         description: Comment to add to the work item discussion
         flag: --discussion
+      fields:
+        description: "Custom field assignment (e.g. \"System.Tags=Rock\")"
+        flag: --fields
+        short: -f
 
   az-boards-wi-create:
     description: >-
@@ -130,6 +135,7 @@ tools:
         - "{{options.iteration}}"
         - "{{options.description}}"
         - "{{options.discussion}}"
+        - "{{options.fields}}"
         - --output
         - json
     arguments:
@@ -156,6 +162,10 @@ tools:
       discussion:
         description: Comment to add to the work item discussion
         flag: --discussion
+      fields:
+        description: "Custom field assignment (e.g. \"System.Tags=Rock\")"
+        flag: --fields
+        short: -f
 
   az-boards-wi-add-parent:
     description: >-
