@@ -50,12 +50,32 @@ tools:
         pattern: "^[0-9]+$"
 
   gh-pr-view:
-    description: View details of a pull request (by number, URL, or branch name)
+    description: >-
+      View full details of a pull request as JSON, including metadata,
+      comments, reviews, and file list
     threat:
       read: remote
       write: none
     template:
-      command: [gh, pr, view, "{{arguments.pr}}"]
+      command:
+        - gh
+        - pr
+        - view
+        - "{{arguments.pr}}"
+        - --json
+        - title,body,state,author,baseRefName,headRefName,comments,reviews,reviewDecision,labels,isDraft,additions,deletions,files,mergedAt,mergedBy
+    arguments:
+      pr:
+        description: PR number, URL, or branch name
+        required: true
+
+  gh-pr-diff:
+    description: Show the diff for a pull request
+    threat:
+      read: remote
+      write: none
+    template:
+      command: [gh, pr, diff, "{{arguments.pr}}"]
     arguments:
       pr:
         description: PR number, URL, or branch name
@@ -152,12 +172,20 @@ tools:
         pattern: "^[0-9]+$"
 
   gh-issue-view:
-    description: View details of an issue (by number or URL)
+    description: >-
+      View full details of an issue as JSON, including metadata, comments,
+      and labels
     threat:
       read: remote
       write: none
     template:
-      command: [gh, issue, view, "{{arguments.issue}}"]
+      command:
+        - gh
+        - issue
+        - view
+        - "{{arguments.issue}}"
+        - --json
+        - title,body,state,author,comments,labels,assignees,milestone,createdAt,updatedAt,closedAt
     arguments:
       issue:
         description: Issue number or URL
