@@ -1,0 +1,137 @@
+version: 1
+
+package:
+  name: az-repos
+  description: Azure Repos tools for viewing and creating pull requests
+  skill_group: az-repos
+  skill_intro: |
+    These tools interact with Azure Repos pull requests. The organization and
+    project are auto-detected from the git remote. Use az-repos-pr-list to
+    see open PRs, az-repos-pr-show to inspect a specific PR, and
+    az-repos-pr-create to create a new PR from the current branch.
+
+tools:
+  az-repos-pr-list:
+    description: List pull requests in the project as JSON
+    threat:
+      read: remote
+      write: none
+    template:
+      command:
+        - az
+        - repos
+        - pr
+        - list
+        - "{{options.status}}"
+        - "{{options.top}}"
+        - "{{options.creator}}"
+        - "{{options.reviewer}}"
+        - --output
+        - json
+    options:
+      status:
+        description: "Filter by status (default: active)"
+        flag: --status
+        allow: [active, abandoned, completed, all]
+      top:
+        description: Maximum number of PRs to return (default 10)
+        flag: --top
+        pattern: "^[0-9]+$"
+      creator:
+        description: Filter by PR creator
+        flag: --creator
+      reviewer:
+        description: Filter by reviewer
+        flag: --reviewer
+
+  az-repos-pr-show:
+    description: Show full details for a pull request as JSON
+    threat:
+      read: remote
+      write: none
+    template:
+      command: [az, repos, pr, show, --id, "{{arguments.pr_id}}", --output, json]
+    arguments:
+      pr_id:
+        description: Pull request ID (numeric)
+        required: true
+        pattern: "^[0-9]+$"
+
+  az-repos-pr-comments:
+    description: >-
+      List all comment threads on a pull request as JSON. Extracts the
+      repository name from the git remote automatically.
+    threat:
+      read: remote
+      write: none
+    script: |
+      REMOTE_URL=$(git remote get-url origin 2>/dev/null || true)
+      if [ -z "$REMOTE_URL" ]; then
+        echo "error: could not detect git remote 'origin'" >&2
+        exit 1
+      fi
+      # Extract project and repo from Azure DevOps remote URL
+      # HTTPS: https://dev.azure.com/{org}/{project}/_git/{repo}
+      # SSH:   git@ssh.dev.azure.com:v3/{org}/{project}/{repo}
+      if echo "$REMOTE_URL" | grep -q '/_git/'; then
+        PROJECT=$(echo "$REMOTE_URL" | sed -E 's|.*dev.azure.com/[^/]+/([^/]+)/_git/.*|\1|')
+        REPO_NAME=$(echo "$REMOTE_URL" | sed -E 's|.*/_git/||; s|\.git$||')
+      elif echo "$REMOTE_URL" | grep -q 'ssh.dev.azure.com'; then
+        PROJECT=$(echo "$REMOTE_URL" | sed -E 's|.*:v3/[^/]+/([^/]+)/.*|\1|')
+        REPO_NAME=$(echo "$REMOTE_URL" | sed -E 's|.*:v3/[^/]+/[^/]+/||; s|\.git$||')
+      else
+        echo "error: unrecognized Azure DevOps remote URL format: '$REMOTE_URL'" >&2
+        exit 1
+      fi
+      if [ -z "$PROJECT" ] || [ -z "$REPO_NAME" ]; then
+        echo "error: could not extract project/repo from remote URL '$REMOTE_URL'" >&2
+        exit 1
+      fi
+      exec az devops invoke \
+        --area git \
+        --resource pullRequestThreads \
+        --route-parameters "project=$PROJECT" "repositoryId=$REPO_NAME" "pullRequestId=$PR_ID" \
+        --output json
+    arguments:
+      pr_id:
+        description: Pull request ID (numeric)
+        required: true
+        pattern: "^[0-9]+$"
+
+  az-repos-pr-create:
+    description: >-
+      Create a pull request from the current branch to the default target
+      branch. Source branch is auto-detected from HEAD. Cannot be run from
+      detached HEAD or from main.
+    threat:
+      read: remote
+      write: remote
+    template:
+      command:
+        - az
+        - repos
+        - pr
+        - create
+        - --title
+        - "{{arguments.title}}"
+        - --description
+        - "{{arguments.description}}"
+        - "{{switches.draft}}"
+        - --output
+        - json
+    arguments:
+      title:
+        description: PR title
+        required: true
+      description:
+        description: PR description (body text)
+        required: true
+    switches:
+      draft:
+        description: Create the PR as a draft
+    guards:
+      - command: [git, symbolic-ref, --quiet, HEAD]
+        fail_message: Cannot create a PR from detached HEAD state. Check out a feature branch first.
+      - script: |
+          [ "$(git symbolic-ref --short HEAD 2>/dev/null)" != "main" ]
+        fail_message: Cannot create a PR from main. Check out a feature branch first.

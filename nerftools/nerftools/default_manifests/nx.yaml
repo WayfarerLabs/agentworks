@@ -1,3 +1,5 @@
+version: 1
+
 package:
   name: nx
   description: Nx workspace tools for building, testing, and inspecting projects
@@ -11,15 +13,23 @@ package:
 tools:
   nx-show-projects:
     description: List all projects in the Nx workspace (one per line)
-    command: [npx, nx, show, projects]
+    threat:
+      read: workspace
+      write: none
+    template:
+      command: [npx, nx, show, projects]
     guards:
       - command: [test, -f, nx.json]
         fail_message: Not in an Nx workspace root (nx.json not found). Run from the repo root.
 
   nx-show-project:
     description: Show configuration details for a specific Nx project (targets, source root, metadata)
-    command: [npx, nx, show, project, "{{project}}"]
-    args:
+    threat:
+      read: workspace
+      write: none
+    template:
+      command: [npx, nx, show, project, "{{arguments.project}}"]
+    arguments:
       project:
         description: Nx project name (from nx-show-projects)
         required: true
@@ -30,8 +40,12 @@ tools:
 
   nx-run:
     description: Run an Nx target on a project in project:target format (e.g. myapp:build)
-    command: [npx, nx, run, "{{target}}"]
-    args:
+    threat:
+      read: workspace
+      write: workspace
+    template:
+      command: [npx, nx, run, "{{arguments.target}}"]
+    arguments:
       target:
         description: "Target in project:target format (e.g. myapp:build, myapp:test, myapp:lint)"
         required: true
@@ -42,21 +56,33 @@ tools:
 
   nx-affected:
     description: List Nx projects affected by current changes compared to main
-    command: [npx, nx, show, projects, --affected]
+    threat:
+      read: workspace
+      write: none
+    template:
+      command: [npx, nx, show, projects, --affected]
     guards:
       - command: [test, -f, nx.json]
         fail_message: Not in an Nx workspace root (nx.json not found). Run from the repo root.
 
   nx-graph:
     description: Print the Nx project dependency graph as JSON
-    command: [npx, nx, graph, --print-affected]
+    threat:
+      read: workspace
+      write: none
+    template:
+      command: [npx, nx, graph, --print-affected]
     guards:
       - command: [test, -f, nx.json]
         fail_message: Not in an Nx workspace root (nx.json not found). Run from the repo root.
 
   nx-reset:
     description: Clear the Nx cache and reset the Nx daemon
-    command: [npx, nx, reset]
+    threat:
+      read: workspace
+      write: workspace
+    template:
+      command: [npx, nx, reset]
     guards:
       - command: [test, -f, nx.json]
         fail_message: Not in an Nx workspace root (nx.json not found). Run from the repo root.

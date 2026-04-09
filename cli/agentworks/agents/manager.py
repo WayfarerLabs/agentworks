@@ -612,6 +612,7 @@ def _create_agent_on_vm(
     if config.admin.git_force_safe_directory:
         try:
             _run_as_agent(target, linux_user, "git config --global --add safe.directory '*'", logger=lg)
+            typer.echo("  Git safe.directory configured for agent")
         except Exception as e:
             typer.echo(f"  Warning: agent git safe.directory setup failed: {e}", err=True)
 
@@ -646,14 +647,62 @@ def _create_agent_on_vm(
             ref = parse_source_ref(agent_cfg.dotfiles_source)
             dest = agent_cfg.dotfiles_destination.replace("~", home)
 
-            # Clone as the agent user (git credentials are already configured)
+            # Clone/pull as the agent user (git credentials are already configured)
             if ref.kind == "git":
-                clone_cmd = f"git clone {ref.path} {dest}"
-                if ref.ref:
-                    import shlex as _shlex
+                import shlex as _shlex
 
-                    clone_cmd = f"git clone --branch {_shlex.quote(ref.ref)} {ref.path} {dest}"
-                _run_as_agent(target, linux_user, clone_cmd, timeout=120, logger=lg)
+                # If already cloned from the same repo, pull instead of clone
+                is_git = _run_as_agent(
+                    target, linux_user, f"test -d {_shlex.quote(dest)}/.git",
+                    check=False, logger=lg,
+                )
+                if is_git.ok:
+                    remote = _run_as_agent(
+                        target, linux_user,
+                        f"git -C {_shlex.quote(dest)} remote get-url origin",
+                        check=False, logger=lg,
+                    )
+                    if remote.ok and remote.stdout.strip() == ref.path:
+                        typer.echo("  Dotfiles already cloned, pulling latest...")
+                        if ref.ref:
+                            _run_as_agent(
+                                target, linux_user,
+                                f"git -C {_shlex.quote(dest)} fetch",
+                                check=False, timeout=120, logger=lg,
+                            )
+                            checkout = _run_as_agent(
+                                target, linux_user,
+                                f"git -C {_shlex.quote(dest)} checkout {_shlex.quote(ref.ref)}",
+                                check=False, logger=lg,
+                            )
+                            if not checkout.ok:
+                                typer.echo(
+                                    f"  Warning: dotfiles checkout of '{ref.ref}' failed, skipping",
+                                    err=True,
+                                )
+                        else:
+                            pull = _run_as_agent(
+                                target, linux_user,
+                                f"git -C {_shlex.quote(dest)} pull",
+                                check=False, timeout=120, logger=lg,
+                            )
+                            if not pull.ok:
+                                typer.echo(
+                                    "  Warning: dotfiles pull failed (local changes?), skipping",
+                                    err=True,
+                                )
+                    else:
+                        raise SourceRefError(
+                            f"dotfiles destination {dest} exists but is a different repo"
+                        )
+                else:
+                    clone_cmd = f"git clone {_shlex.quote(ref.path)} {_shlex.quote(dest)}"
+                    if ref.ref:
+                        clone_cmd = (
+                            f"git clone --branch {_shlex.quote(ref.ref)}"
+                            f" {_shlex.quote(ref.path)} {_shlex.quote(dest)}"
+                        )
+                    _run_as_agent(target, linux_user, clone_cmd, timeout=120, logger=lg)
             else:
                 # Local source: copy as admin then chown
                 from agentworks.ssh import ExecTarget

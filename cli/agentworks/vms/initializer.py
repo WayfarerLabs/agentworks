@@ -1321,10 +1321,9 @@ def _build_nerf_claude_plugin(
 
         manifest_paths: list[Path] = []
         if not config.vm.skip_nerf_defaults and BUILTIN_MANIFESTS_DIR.exists():
-            for pkg_dir in sorted(BUILTIN_MANIFESTS_DIR.iterdir()):
-                mf = pkg_dir / "manifest.yaml"
-                if mf.exists():
-                    manifest_paths.append(mf)
+            for f in sorted(BUILTIN_MANIFESTS_DIR.iterdir()):
+                if f.suffix == ".yaml" and f.is_file():
+                    manifest_paths.append(f)
         manifest_paths.extend(config.vm.nerf_addl_manifests)
 
         try:

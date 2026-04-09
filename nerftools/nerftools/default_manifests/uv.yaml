@@ -1,0 +1,68 @@
+version: 1
+
+package:
+  name: uv
+  description: Python development tools via uv run
+  skill_group: uv
+  skill_intro: |
+    These tools run Python development tools via uv run, using the project's
+    virtual environment. Use uv-pytest for testing, uv-ruff-check and
+    uv-ruff-fix for linting, and uv-mypy for type checking. All tools
+    forward arguments directly to the underlying command.
+
+tools:
+  uv-pytest:
+    description: Run pytest with the given arguments
+    threat:
+      read: workspace
+      write: workspace
+    template:
+      command: [uv, run, pytest, "{{arguments.args}}"]
+    arguments:
+      args:
+        description: Arguments to pass to pytest (e.g. tests/ -v or -x -q)
+        required: false
+        variadic: true
+        allow_flags: true
+
+  uv-ruff-check:
+    description: Run ruff check (lint without modifying files)
+    threat:
+      read: workspace
+      write: none
+    template:
+      command: [uv, run, ruff, check, "{{arguments.args}}"]
+    arguments:
+      args:
+        description: Arguments to pass to ruff check (e.g. src/)
+        required: false
+        variadic: true
+        allow_flags: true
+
+  uv-ruff-fix:
+    description: Run ruff check with --fix to auto-fix lint issues
+    threat:
+      read: workspace
+      write: workspace
+    template:
+      command: [uv, run, ruff, check, --fix, "{{arguments.args}}"]
+    arguments:
+      args:
+        description: Arguments to pass to ruff check --fix (e.g. src/)
+        required: false
+        variadic: true
+        allow_flags: true
+
+  uv-mypy:
+    description: Run mypy type checker with the given arguments
+    threat:
+      read: workspace
+      write: none
+    template:
+      command: [uv, run, mypy, "{{arguments.args}}"]
+    arguments:
+      args:
+        description: Arguments to pass to mypy (e.g. src/ or --strict)
+        required: false
+        variadic: true
+        allow_flags: true

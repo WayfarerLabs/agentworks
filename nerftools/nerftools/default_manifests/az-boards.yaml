@@ -1,0 +1,229 @@
+version: 1
+
+package:
+  name: az-boards
+  description: Azure Boards work item tools for querying, viewing, creating, and updating work items
+  skill_group: az-boards
+  skill_intro: |
+    These tools interact with Azure Boards work items. The organization and
+    project are auto-detected from the git remote. The az-boards-wi-*
+    tools operate on any work item. The az-boards-mywi-* tools are
+    scoped to work items assigned to you.
+
+tools:
+  az-boards-wi-list:
+    description: >-
+      Query work items using WIQL (Work Item Query Language). Returns matching
+      work items as JSON. The organization and project are auto-detected from
+      the git remote.
+    threat:
+      read: remote
+      write: none
+    template:
+      command: [az, boards, query, --wiql, "{{arguments.wiql}}", --output, json]
+    arguments:
+      wiql:
+        description: >-
+          WIQL query string (e.g. "SELECT [System.Id], [System.Title],
+          [System.State] FROM WorkItems WHERE [System.AssignedTo] = @Me
+          AND [System.State] <> 'Closed' ORDER BY [System.ChangedDate] DESC")
+        required: true
+
+  az-boards-wi-show:
+    description: Show details and comments for any work item
+    threat:
+      read: remote
+      write: none
+    template:
+      command: [az, boards, work-item, show, --id, "{{arguments.wi_id}}", --output, json]
+    arguments:
+      wi_id:
+        description: Work item ID (numeric)
+        required: true
+        pattern: "^[0-9]+$"
+
+  az-boards-wi-comment:
+    description: Add a comment to any work item
+    threat:
+      read: remote
+      write: remote
+    template:
+      command: [az, boards, work-item, update, --id, "{{arguments.wi_id}}", --discussion, "{{arguments.comment}}", --output, none]
+    arguments:
+      wi_id:
+        description: Work item ID (numeric)
+        required: true
+        pattern: "^[0-9]+$"
+      comment:
+        description: Comment text to add to the work item
+        required: true
+
+  az-boards-wi-update:
+    description: >-
+      Update fields on a work item. Supports state, title, assigned-to, area,
+      iteration, and adding a discussion comment. Returns the updated work item
+      as JSON.
+    threat:
+      read: remote
+      write: remote
+    template:
+      command:
+        - az
+        - boards
+        - work-item
+        - update
+        - --id
+        - "{{arguments.wi_id}}"
+        - "{{options.state}}"
+        - "{{options.title}}"
+        - "{{options.assigned_to}}"
+        - "{{options.area}}"
+        - "{{options.iteration}}"
+        - "{{options.discussion}}"
+        - "{{options.fields}}"
+        - --output
+        - json
+    arguments:
+      wi_id:
+        description: Work item ID (numeric)
+        required: true
+        pattern: "^[0-9]+$"
+    options:
+      state:
+        description: New state (e.g. Active, Resolved, Closed)
+        flag: --state
+      title:
+        description: New title
+        flag: --title
+      assigned_to:
+        description: Person to assign to (e.g. user@example.com)
+        flag: --assigned-to
+      area:
+        description: Area path (e.g. MyProject\MyArea)
+        flag: --area
+      iteration:
+        description: Iteration path (e.g. MyProject\Sprint 1)
+        flag: --iteration
+      discussion:
+        description: Comment to add to the work item discussion
+        flag: --discussion
+      fields:
+        description: "Custom field assignment (e.g. \"System.Tags=Rock\")"
+        flag: --fields
+        short: -f
+
+  az-boards-wi-create:
+    description: >-
+      Create a new work item. Requires a type and title. Optionally set
+      assigned-to, area, iteration, description, and a discussion comment.
+      Returns the created work item as JSON.
+    threat:
+      read: remote
+      write: remote
+    template:
+      command:
+        - az
+        - boards
+        - work-item
+        - create
+        - --type
+        - "{{arguments.type}}"
+        - --title
+        - "{{arguments.title}}"
+        - "{{options.assigned_to}}"
+        - "{{options.area}}"
+        - "{{options.iteration}}"
+        - "{{options.description}}"
+        - "{{options.discussion}}"
+        - "{{options.fields}}"
+        - --output
+        - json
+    arguments:
+      type:
+        description: Work item type (e.g. Bug, Task, User Story, Feature)
+        required: true
+      title:
+        description: Title of the work item
+        required: true
+    options:
+      assigned_to:
+        description: Person to assign to (e.g. user@example.com)
+        flag: --assigned-to
+      area:
+        description: Area path (e.g. MyProject\MyArea)
+        flag: --area
+      iteration:
+        description: Iteration path (e.g. MyProject\Sprint 1)
+        flag: --iteration
+      description:
+        description: Description of the work item
+        flag: --description
+        short: -d
+      discussion:
+        description: Comment to add to the work item discussion
+        flag: --discussion
+      fields:
+        description: "Custom field assignment (e.g. \"System.Tags=Rock\")"
+        flag: --fields
+        short: -f
+
+  az-boards-wi-add-parent:
+    description: >-
+      Set the parent of a work item. Takes the child ID and parent ID as
+      positional arguments. Idempotent if the link already exists.
+    threat:
+      read: remote
+      write: remote
+    template:
+      command:
+        - az
+        - boards
+        - work-item
+        - relation
+        - add
+        - --id
+        - "{{arguments.child_id}}"
+        - --relation-type
+        - parent
+        - --target-id
+        - "{{arguments.parent_id}}"
+        - --output
+        - json
+    arguments:
+      child_id:
+        description: Work item ID of the child (numeric)
+        required: true
+        pattern: "^[0-9]+$"
+      parent_id:
+        description: Work item ID of the parent (numeric)
+        required: true
+        pattern: "^[0-9]+$"
+
+  az-boards-mywi-show:
+    description: Show details and comments for a work item assigned to you
+    threat:
+      read: remote
+      write: none
+    template:
+      command: [az, boards, work-item, show, --id, "{{arguments.wi_id}}", --output, json]
+    arguments:
+      wi_id:
+        description: Work item ID (numeric, must be assigned to you)
+        required: true
+        pattern: "^[0-9]+$"
+
+  az-boards-mywi-comment:
+    description: Add a comment to a work item assigned to you
+    threat:
+      read: remote
+      write: remote
+    template:
+      command: [az, boards, work-item, update, --id, "{{arguments.wi_id}}", --discussion, "{{arguments.comment}}", --output, none]
+    arguments:
+      wi_id:
+        description: Work item ID (numeric, must be assigned to you)
+        required: true
+        pattern: "^[0-9]+$"
+      comment:
+        description: Comment text to add to the work item
+        required: true

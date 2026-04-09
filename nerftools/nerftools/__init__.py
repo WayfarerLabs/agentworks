@@ -1,8 +1,11 @@
-"""nerftools -- build and manage nerf tools."""
+"""nerftools: build and manage nerf tools."""
 
+from importlib.resources import files
 from pathlib import Path
 
-BUILTIN_MANIFESTS_DIR = Path(__file__).parent.parent / "manifests"
+# Default manifests ship as a subpackage, accessible via importlib.resources
+# for both editable installs and published wheels.
+BUILTIN_MANIFESTS_DIR = Path(str(files("nerftools.default_manifests")))
 
 _NERFCTL_DIR = Path(__file__).parent / "nerfctl" / "claude"
 
@@ -10,6 +13,7 @@ NERFCTL_SCRIPTS: dict[str, Path] = {
     "nerfctl-grant-allow": _NERFCTL_DIR / "grant-allow.sh",
     "nerfctl-grant-deny": _NERFCTL_DIR / "grant-deny.sh",
     "nerfctl-grant-reset": _NERFCTL_DIR / "grant-reset.sh",
+    "nerfctl-grant-by-threat": _NERFCTL_DIR / "grant-by-threat.sh",
     "nerfctl-grant-list": _NERFCTL_DIR / "grant-list.sh",
     "nerfctl-install-plugin": _NERFCTL_DIR / "install-plugin.sh",
 }

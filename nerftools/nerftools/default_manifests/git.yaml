@@ -1,0 +1,202 @@
+version: 1
+
+package:
+  name: git
+  description: Git workflow tools for safe, scoped git operations
+  skill_group: git
+  skill_intro: |
+    These tools wrap git operations with safety guardrails. Always stage changes
+    with git-add before committing. Commit messages must follow the
+    Conventional Commits specification. All remote operations take the remote
+    name as the first positional argument (typically origin).
+
+tools:
+  git-add:
+    description: Stage files or directories for commit
+    threat:
+      read: workspace
+      write: workspace
+    template:
+      command: [git, add, "{{arguments.files}}"]
+    arguments:
+      files:
+        description: Files or directories to stage
+        required: true
+        variadic: true
+
+  git-commit:
+    description: >-
+      Create a git commit with a Conventional Commits message (changes must already be staged).
+      Format: type[(scope)][!]: description.
+      Allowed types: feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert.
+      Must not contain Co-Authored-By trailers.
+    threat:
+      read: workspace
+      write: workspace
+    template:
+      command: [git, commit, -m, "{{arguments.message}}"]
+    arguments:
+      message:
+        description: "Commit message: type[(scope)][!]: description"
+        required: true
+        pattern: "^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\\([a-zA-Z0-9._-]+\\))?!?: .+"
+    guards:
+      - script: "! git diff --cached --quiet"
+        fail_message: No staged changes. Use git-add to stage changes first.
+      - script: |
+          ! echo "{{arguments.message}}" | grep -qi 'co-authored-by:'
+        fail_message: Commit message must not contain Co-Authored-By trailers.
+
+  git-commit-amend:
+    description: >-
+      Amend the most recent commit with a new message. Fails if the commit has
+      already been pushed to any remote. Use only to fix the last local commit.
+    threat:
+      read: workspace
+      write: workspace
+    template:
+      command: [git, commit, --amend, -m, "{{arguments.message}}"]
+    arguments:
+      message:
+        description: "Commit message: type[(scope)][!]: description"
+        required: true
+        pattern: "^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\\([a-zA-Z0-9._-]+\\))?!?: .+"
+    pre: |
+      if ! git rev-parse HEAD > /dev/null 2>&1; then
+        echo "error: no commits to amend" >&2
+        return 1
+      fi
+      REMOTE_BRANCHES=$(git branch -r --contains HEAD 2>/dev/null)
+      if [ -n "$REMOTE_BRANCHES" ]; then
+        echo "error: HEAD exists on remote branches -- amending would require a force push" >&2
+        echo "  remote branches: $(echo "$REMOTE_BRANCHES" | tr -s ' \n' ', ' | sed 's/,$//')" >&2
+        return 1
+      fi
+
+  git-revert:
+    description: >-
+      Create a new commit that undoes a previous commit. Does not rewrite
+      history -- safe to use on pushed commits.
+    threat:
+      read: workspace
+      write: workspace
+    template:
+      command: [git, revert, --no-edit, "{{arguments.ref}}"]
+    arguments:
+      ref:
+        description: Commit to revert (e.g. HEAD, a commit SHA, or HEAD~2)
+        required: true
+
+  git-reset-hard-last:
+    description: >-
+      Drop the most recent commit entirely, discarding its changes.
+      Fails if the commit has already been pushed to any remote.
+    threat:
+      read: workspace
+      write: workspace
+    template:
+      command: [git, reset, --hard, HEAD~1]
+    pre: |
+      if ! git rev-parse HEAD > /dev/null 2>&1; then
+        echo "error: no commits to reset" >&2
+        return 1
+      fi
+      REMOTE_BRANCHES=$(git branch -r --contains HEAD 2>/dev/null)
+      if [ -n "$REMOTE_BRANCHES" ]; then
+        echo "error: HEAD exists on remote branches -- resetting would require a force push" >&2
+        echo "  remote branches: $(echo "$REMOTE_BRANCHES" | tr -s ' \n' ', ' | sed 's/,$//')" >&2
+        return 1
+      fi
+
+  git-fetch:
+    description: Fetch all branches and tags from a remote
+    threat:
+      read: remote
+      write: workspace
+    template:
+      command: [git, fetch, "{{arguments.remote}}", --tags]
+    arguments:
+      remote:
+        description: Remote name (e.g. origin)
+        required: true
+        pattern: "^[a-z0-9_-]+$"
+
+  git-pull:
+    description: Pull the current branch from a remote
+    threat:
+      read: remote
+      write: workspace
+    template:
+      command: [git, pull, "{{arguments.remote}}"]
+    arguments:
+      remote:
+        description: Remote name (e.g. origin)
+        required: true
+        pattern: "^[a-z0-9_-]+$"
+
+  git-push-main:
+    description: >-
+      Push the local main branch to a remote including annotated tags (no force push).
+      Use only when the local main branch is ready to publish.
+    threat:
+      read: workspace
+      write: admin
+    template:
+      command: [git, push, --follow-tags, "{{arguments.remote}}", main]
+    arguments:
+      remote:
+        description: Remote name (e.g. origin)
+        required: true
+        pattern: "^[a-z0-9_-]+$"
+
+  git-push-branch:
+    description: >-
+      Push the current branch to a remote including annotated tags (no force push).
+      Fails if in detached HEAD state or on main. Do not use on main -- use git-push-main instead.
+    threat:
+      read: workspace
+      write: remote
+    template:
+      command: [git, push, --follow-tags, "{{arguments.remote}}", HEAD]
+    arguments:
+      remote:
+        description: Remote name (e.g. origin)
+        required: true
+        pattern: "^[a-z0-9_-]+$"
+    pre: |
+      BRANCH=$(git symbolic-ref --short HEAD 2>/dev/null)
+      if [ -z "$BRANCH" ]; then
+        echo "error: cannot push from detached HEAD state" >&2
+        return 1
+      fi
+      if [ "$BRANCH" = "main" ]; then
+        echo "error: use git-push-main for the main branch" >&2
+        return 1
+      fi
+
+  git-log:
+    description: Show a short one-line log of recent commits
+    threat:
+      read: workspace
+      write: none
+    template:
+      command: [git, log, --oneline, --no-decorate, -20]
+
+  git-tag:
+    description: >-
+      Create a new annotated git tag at HEAD. Fails if the tag already exists.
+      No force, delete, or other destructive operations.
+    threat:
+      read: workspace
+      write: workspace
+    template:
+      command: [git, tag, -a, "{{arguments.tag}}", -m, "{{arguments.tag}}"]
+    arguments:
+      tag:
+        description: Tag name to create (e.g. v1.2.3)
+        required: true
+        pattern: "^[a-zA-Z0-9._/-]+$"
+    guards:
+      - script: |
+          ! git rev-parse "refs/tags/{{arguments.tag}}" > /dev/null 2>&1
+        fail_message: Tag already exists. Use a different version.

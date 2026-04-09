@@ -1,4 +1,4 @@
-"""Claude Code plugin builder for nerf tools.
+"""Claude Code plugin builder for nerf tools (v1).
 
 Generates a self-contained Claude Code plugin from nerf manifests, including
 skills, scripts, plugin manifest, and marketplace metadata.
@@ -7,6 +7,8 @@ skills, scripts, plugin manifest, and marketplace metadata.
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+
+from nerftools.rendering import arg_line, maps_to_text, option_line, switch_line, usage_tokens
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -31,7 +33,7 @@ Allow nerf tools matching the given pattern without prompting. Supports glob pat
 Quote all arguments so they are passed to the script unprocessed by the shell.
 
 ```bash
-${CLAUDE_PLUGIN_ROOT}/scripts/nerfctl-grant-allow ${CLAUDE_PLUGIN_ROOT} $ARGUMENTS
+${CLAUDE_PLUGIN_ROOT}/scripts/nerfctl-grant-allow $ARGUMENTS
 ```
 
 Report the output to the user.
@@ -54,7 +56,7 @@ Deny nerf tools matching the given pattern entirely. Supports glob patterns
 Quote all arguments so they are passed to the script unprocessed by the shell.
 
 ```bash
-${CLAUDE_PLUGIN_ROOT}/scripts/nerfctl-grant-deny ${CLAUDE_PLUGIN_ROOT} $ARGUMENTS
+${CLAUDE_PLUGIN_ROOT}/scripts/nerfctl-grant-deny $ARGUMENTS
 ```
 
 Report the output to the user.
@@ -77,7 +79,33 @@ ask-every-time behavior. Supports glob patterns. Default scope is user.
 Quote all arguments so they are passed to the script unprocessed by the shell.
 
 ```bash
-${CLAUDE_PLUGIN_ROOT}/scripts/nerfctl-grant-reset ${CLAUDE_PLUGIN_ROOT} $ARGUMENTS
+${CLAUDE_PLUGIN_ROOT}/scripts/nerfctl-grant-reset $ARGUMENTS
+```
+
+Report the output to the user.
+""",
+    },
+    {
+        "dir_name": "nerfctl-grant-by-threat",
+        "content": """\
+---
+name: nerfctl-grant-by-threat
+description: Allow/deny nerf tools by threat profile (read/write ceiling)
+argument-hint: --read <level> --write <level> [--filter <glob>] [--outside deny|reset] [--scope user|local]
+disable-model-invocation: true
+allowed-tools: Bash
+---
+
+Allow or deny nerf tools based on their threat profile. Tools within the
+threat box (read <= ceiling AND write <= ceiling) are allowed. Tools outside
+are denied or reset.
+
+Threat levels (narrow to broad): `none`, `workspace`, `machine`, `remote`, `admin`
+
+Quote all arguments so they are passed to the script unprocessed by the shell.
+
+```bash
+${CLAUDE_PLUGIN_ROOT}/scripts/nerfctl-grant-by-threat $ARGUMENTS
 ```
 
 Report the output to the user.
@@ -151,7 +179,7 @@ def build_claude_plugin(
     plugin_json = {
         "name": "nerftools",
         "version": "1.0.0",
-        "description": "Nerf tools -- scoped, safety-constrained CLI wrappers for AI agents",
+        "description": "Nerf tools: scoped, safety-constrained CLI wrappers for AI agents",
         "skills": "./skills/",
     }
     p = plugin_dir / "plugin.json"
@@ -166,7 +194,7 @@ def build_claude_plugin(
         "plugins": [
             {
                 "name": "nerftools",
-                "description": "Nerf tools -- scoped, safety-constrained CLI wrappers for AI agents",
+                "description": "Nerf tools: scoped, safety-constrained CLI wrappers for AI agents",
                 "author": {"name": "Agentworks"},
                 "source": "./",
                 "category": "development",
@@ -265,79 +293,52 @@ def _build_claude_plugin_skill_text(manifest: NerfManifest, prefix: str = "") ->
 
 def _claude_plugin_tool_section(tool_name: str, skill_group: str, tool_spec: ToolSpec) -> str:
     """Generate a tool section for the claude-plugin format."""
-    import re
-
     parts: list[str] = []
     parts.append(f"## {tool_name}")
     parts.append("")
     parts.append(tool_spec.description + ".")
     parts.append("")
 
-    # Usage line with resolved plugin path
     script_path = f"${{CLAUDE_PLUGIN_ROOT}}/skills/{skill_group}/scripts/{tool_name}"
-    usage_parts = [script_path]
-    for name, p in tool_spec.flags.items():
-        flag_display = f"{p.flag}|{p.short}" if p.short else p.flag
-        if p.boolean:
-            usage_parts.append(f"[{flag_display}]")
-        else:
-            token = f"{flag_display} <{name}>"
-            usage_parts.append(token if p.required else f"[{token}]")
-    for name, spec in tool_spec.args.items():
-        token = f"<{name}...>" if spec.variadic else f"<{name}>"
-        usage_parts.append(token if spec.required else f"[{token}]")
+    usage = " ".join([script_path, *usage_tokens(tool_spec)])
+    parts.append(f"**Usage:** `{usage}`")
 
-    parts.append(f"**Usage:** `{' '.join(usage_parts)}`")
-
-    # Maps-to line
-    maps_parts: list[str] = []
-    if tool_spec.npm_pkgrun:
-        maps_parts.append("<runner>")
-    for token in tool_spec.command:
-        maps_parts.append(re.sub(r"\{\{(\w+)\}\}", r"<\1>", token))
-    parts.append(f"**Maps to:** `{' '.join(maps_parts)}`")
+    maps_to = maps_to_text(tool_spec)
+    if maps_to:
+        parts.append(f"**Maps to:** `{maps_to}`")
     parts.append("")
 
-    # Arguments
-    has_params = bool(tool_spec.flags) or bool(tool_spec.args)
+    if tool_spec.passthrough is not None and tool_spec.passthrough.deny:
+        denied = ", ".join(f"`{d}`" for d in tool_spec.passthrough.deny)
+        parts.append(f"**Denied patterns:** {denied}")
+        parts.append("")
+
+    has_params = bool(tool_spec.switches) or bool(tool_spec.options) or bool(tool_spec.arguments)
     if has_params:
-        parts.append("**Arguments:**")
-        parts.append("")
-        for _name, p in tool_spec.flags.items():
-            flag_display = f"{p.flag}|{p.short}" if p.short else p.flag
-            if p.boolean:
-                parts.append(f"- `{flag_display}` (boolean): {p.description}")
-            else:
-                required = "required" if p.required else "optional"
-                constraints: list[str] = []
-                if p.pattern:
-                    constraints.append(f"must match `{p.pattern}`")
-                if p.allow:
-                    vals = ", ".join(f"`{v}`" for v in p.allow)
-                    constraints.append(f"one of {vals}")
-                if p.deny:
-                    vals = ", ".join(f"`{v}`" for v in p.deny)
-                    constraints.append(f"not {vals}")
-                suffix = ". " + "; ".join(constraints) if constraints else ""
-                parts.append(f"- `{flag_display}` ({required}): {p.description}{suffix}")
-        for name, spec in tool_spec.args.items():
-            required = "required" if spec.required else "optional"
-            label = f"<{name}...>" if spec.variadic else f"<{name}>"
-            constraints = []
-            if spec.pattern:
-                constraints.append(f"must match `{spec.pattern}`")
-            if spec.allow:
-                vals = ", ".join(f"`{v}`" for v in spec.allow)
-                constraints.append(f"one of {vals}")
-            if spec.deny:
-                vals = ", ".join(f"`{v}`" for v in spec.deny)
-                constraints.append(f"not {vals}")
-            suffix = ". " + "; ".join(constraints) if constraints else ""
-            parts.append(f"- `{label}` ({required}): {spec.description}{suffix}")
-        parts.append("")
+        if tool_spec.switches:
+            parts.append("**Switches:**")
+            parts.append("")
+            for _name, sw in tool_spec.switches.items():
+                parts.append(switch_line(sw))
+            parts.append("")
+
+        if tool_spec.options:
+            parts.append("**Options:**")
+            parts.append("")
+            for name, opt in tool_spec.options.items():
+                parts.append(option_line(name, opt))
+            parts.append("")
+
+        if tool_spec.arguments:
+            parts.append("**Arguments:**")
+            parts.append("")
+            for name, spec in tool_spec.arguments.items():
+                parts.append(arg_line(name, spec))
+            parts.append("")
     else:
-        parts.append("No arguments.")
-        parts.append("")
+        if tool_spec.passthrough is None:
+            parts.append("No arguments.")
+            parts.append("")
 
     parts.append("---")
     parts.append("")
@@ -357,7 +358,7 @@ def _build_claude_plugin_overview_text(manifests: list[NerfManifest], prefix: st
     parts.append("# Nerf Tools")
     parts.append("")
     parts.append(
-        "This environment has nerf tools installed -- scoped, safety-constrained wrappers for "
+        "This environment has nerf tools installed. These are scoped, safety-constrained wrappers for "
         "common CLI operations like git, az, and other tools. They enforce guardrails (validated "
         "parameters, restricted flags, pre-flight checks) that keep operations safe and auditable."
     )
@@ -373,7 +374,7 @@ def _build_claude_plugin_overview_text(manifests: list[NerfManifest], prefix: st
         "Each tool's usage line shows the full absolute path to call it. Use that path directly in Bash commands."
     )
     parts.append("")
-    parts.append("## Available tool families")
+    parts.append("## Available tool packages")
     parts.append("")
 
     for manifest in manifests:
@@ -381,6 +382,6 @@ def _build_claude_plugin_overview_text(manifests: list[NerfManifest], prefix: st
         parts.append(f"- **{group}**: {manifest.package.description}")
 
     parts.append("")
-    parts.append("Use the corresponding `nerf-*` skill for full usage details on each family.")
+    parts.append("Use the corresponding `nerf-*` skill for full usage details on each package.")
 
     return "\n".join(parts).rstrip() + "\n"

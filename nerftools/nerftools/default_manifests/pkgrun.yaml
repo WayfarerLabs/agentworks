@@ -1,3 +1,5 @@
+version: 1
+
 package:
   name: pkgrun
   description: Package runner tools for cspell, markdownlint, and prettier at locked versions
@@ -12,30 +14,45 @@ package:
 tools:
   pkgrun-cspell:
     description: Run cspell v8.19.4 with the given arguments (e.g. '**/*.md')
-    npm_pkgrun: true
-    command: ["cspell@8.19.4", "{{args}}"]
-    args:
+    threat:
+      read: workspace
+      write: none
+    template:
+      command: ["cspell@8.19.4", "{{arguments.args}}"]
+      npm_pkgrun: true
+    arguments:
       args:
         description: Arguments to pass to cspell (e.g. '**/*.md' or --words-only '**/*.md')
         required: true
         variadic: true
+        allow_flags: true
 
   pkgrun-markdownlint:
     description: Run markdownlint-cli2 v0.21.0 with the given arguments (e.g. '**/*.md')
-    npm_pkgrun: true
-    command: ["markdownlint-cli2@0.21.0", "{{args}}"]
-    args:
+    threat:
+      read: workspace
+      write: none
+    template:
+      command: ["markdownlint-cli2@0.21.0", "{{arguments.args}}"]
+      npm_pkgrun: true
+    arguments:
       args:
         description: Arguments to pass to markdownlint-cli2 (e.g. '**/*.md')
         required: true
         variadic: true
+        allow_flags: true
 
   pkgrun-prettier:
     description: Run prettier v3.8.1 with the given arguments (e.g. --write '**/*.ts')
-    npm_pkgrun: true
-    command: ["prettier@3.8.1", "{{args}}"]
-    args:
+    threat:
+      read: workspace
+      write: workspace
+    template:
+      command: ["prettier@3.8.1", "{{arguments.args}}"]
+      npm_pkgrun: true
+    arguments:
       args:
         description: Arguments to pass to prettier (e.g. --write '**/*.ts' or --check .)
         required: true
         variadic: true
+        allow_flags: true

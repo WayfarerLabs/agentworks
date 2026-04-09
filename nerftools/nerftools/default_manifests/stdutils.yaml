@@ -1,0 +1,158 @@
+version: 1
+
+package:
+  name: stdutils
+  description: Safe wrappers for common Unix utilities
+  skill_group: stdutils
+  skill_intro: |
+    These tools wrap standard Unix utilities with safety guardrails.
+    Use find and find-cwd for file discovery without code execution
+    capabilities. Use grep and grep-recursive-cwd for text search.
+    find-cwd and grep-recursive-cwd are pre-scoped to the current directory.
+
+tools:
+  find:
+    description: >-
+      Search for files and directories. Exec-like actions are denied --
+      use this for discovery only, not for running commands on results.
+    threat:
+      read: machine
+      write: none
+    passthrough:
+      command: find
+      deny: [-exec, -execdir, -ok, -okdir, -delete]
+
+  find-cwd:
+    description: >-
+      Search for files and directories under the current directory. Exec-like
+      actions are denied. The search root is always '.' (current directory).
+    threat:
+      read: workspace
+      write: none
+    passthrough:
+      command: find
+      deny: [-exec, -execdir, -ok, -okdir, -delete]
+      prefix: [.]
+
+  grep-recursive-cwd:
+    description: >-
+      Search for a pattern recursively in the current directory. Prints
+      matching lines with filenames and line numbers.
+    threat:
+      read: workspace
+      write: none
+    template:
+      command:
+        - grep
+        - -r
+        - -n
+        - "{{switches.ignore_case}}"
+        - "{{switches.line_regexp}}"
+        - "{{switches.word_regexp}}"
+        - "{{switches.count}}"
+        - "{{switches.files_with_matches}}"
+        - "{{options.include}}"
+        - "{{options.exclude}}"
+        - --
+        - "{{arguments.pattern}}"
+        - .
+    switches:
+      ignore_case:
+        description: Case-insensitive matching
+        flag: --ignore-case
+        short: -i
+      line_regexp:
+        description: Match whole lines only
+        flag: --line-regexp
+        short: -x
+      word_regexp:
+        description: Match whole words only
+        flag: --word-regexp
+        short: -w
+      count:
+        description: Print only a count of matching lines per file
+        flag: --count
+        short: -c
+      files_with_matches:
+        description: Print only filenames containing matches
+        flag: --files-with-matches
+        short: -l
+    options:
+      include:
+        description: Search only files matching this glob (e.g. '*.py')
+        flag: --include
+        repeatable: true
+      exclude:
+        description: Skip files matching this glob (e.g. '*.log')
+        flag: --exclude
+        repeatable: true
+    arguments:
+      pattern:
+        description: Regular expression pattern to search for
+        required: true
+
+  grep:
+    description: >-
+      Search for a pattern in files or directories. Supports recursive search
+      via -r. Files and directories are specified as trailing positional
+      arguments after the pattern.
+    threat:
+      read: machine
+      write: none
+    template:
+      command:
+        - grep
+        - -n
+        - "{{switches.recursive}}"
+        - "{{switches.ignore_case}}"
+        - "{{switches.line_regexp}}"
+        - "{{switches.word_regexp}}"
+        - "{{switches.count}}"
+        - "{{switches.files_with_matches}}"
+        - "{{options.include}}"
+        - "{{options.exclude}}"
+        - --
+        - "{{arguments.pattern}}"
+        - "{{arguments.paths}}"
+    switches:
+      recursive:
+        description: Search directories recursively
+        flag: --recursive
+        short: -r
+      ignore_case:
+        description: Case-insensitive matching
+        flag: --ignore-case
+        short: -i
+      line_regexp:
+        description: Match whole lines only
+        flag: --line-regexp
+        short: -x
+      word_regexp:
+        description: Match whole words only
+        flag: --word-regexp
+        short: -w
+      count:
+        description: Print only a count of matching lines per file
+        flag: --count
+        short: -c
+      files_with_matches:
+        description: Print only filenames containing matches
+        flag: --files-with-matches
+        short: -l
+    options:
+      include:
+        description: Search only files matching this glob (e.g. '*.py')
+        flag: --include
+        repeatable: true
+      exclude:
+        description: Skip files matching this glob (e.g. '*.log')
+        flag: --exclude
+        repeatable: true
+    arguments:
+      pattern:
+        description: Regular expression pattern to search for
+        required: true
+      paths:
+        description: Files or directories to search
+        required: true
+        variadic: true
