@@ -4,6 +4,12 @@
 
 set -euo pipefail
 
+if [[ "${BASH_VERSINFO[0]}" -lt 4 ]]; then
+  echo "error: grant-by-threat requires bash 4+ (associative arrays). Found bash ${BASH_VERSION}" >&2
+  echo "  hint: on macOS, install a newer bash via 'brew install bash'" >&2
+  exit 1
+fi
+
 SCOPE="user"
 PLUGIN_ROOT=""
 READ_CEILING=""
