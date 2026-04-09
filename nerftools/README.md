@@ -75,6 +75,7 @@ reference.
 | tg           | 10    | Terragrunt infrastructure management                             |
 | pkgrun       | 3     | npm package runners (cspell, markdownlint, prettier)             |
 | stdutils     | 4     | Unix utilities (find, grep) with safety guardrails               |
+| gh           | 10    | GitHub CLI (PRs, issues, workflow runs)                          |
 | uv           | 4     | Python dev tools via uv run (pytest, ruff, mypy)                 |
 
 ## Threat model
