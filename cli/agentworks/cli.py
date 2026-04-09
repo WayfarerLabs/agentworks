@@ -276,7 +276,7 @@ def vm_create(
     name: Annotated[str | None, typer.Option("--name", help="VM name (prompted if omitted)")] = None,
     template: Annotated[str | None, typer.Option("--template", help="VM template")] = None,
     platform: Annotated[
-        str | None, typer.Option("--platform", help="Platform", click_type=click.Choice(["lima", "azure", "wsl2"]))
+        str | None, typer.Option("--platform", help="Platform", click_type=click.Choice(["lima", "azure", "wsl2", "proxmox"]))
     ] = None,
     vm_host: Annotated[str | None, typer.Option("--vm-host", help="VM host for Lima")] = None,
     cpus: Annotated[int | None, typer.Option("--cpus", help="Number of CPUs")] = None,

@@ -70,7 +70,7 @@ def validate_admin_username(admin_username: str) -> None:
 
 
 # Valid values for enum-like fields
-VALID_PLATFORMS = ("lima", "azure", "wsl2")
+VALID_PLATFORMS = ("lima", "azure", "wsl2", "proxmox")
 VALID_GIT_CREDENTIAL_TYPES = ("azdo", "github")
 
 
@@ -213,6 +213,18 @@ class AzureConfig:
 
 
 @dataclass(frozen=True)
+class ProxmoxConfig:
+    api_url: str
+    node: str
+    token_id: str
+    template_vmid: int
+    storage: str = "local-lvm"
+    bridge: str = "vmbr0"
+    pool: str = "agentworks"
+    verify_ssl: bool = True
+
+
+@dataclass(frozen=True)
 class Config:
     user: UserConfig
     paths: PathsConfig
@@ -231,6 +243,7 @@ class Config:
     system_install_commands: dict[str, object] = field(default_factory=dict)
     user_install_commands: dict[str, object] = field(default_factory=dict)
     azure: AzureConfig | None = None
+    proxmox: ProxmoxConfig | None = None
 
 
 # -- Loading ---------------------------------------------------------------
@@ -711,6 +724,24 @@ def _load_azure(data: dict[str, object]) -> AzureConfig | None:
     )
 
 
+def _load_proxmox(data: dict[str, object]) -> ProxmoxConfig | None:
+    raw = data.get("proxmox")
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise ConfigError("[proxmox] must be a table")
+    return ProxmoxConfig(
+        api_url=str(_require(raw, "api_url", "proxmox")),
+        node=str(_require(raw, "node", "proxmox")),
+        token_id=str(_require(raw, "token_id", "proxmox")),
+        template_vmid=int(_require(raw, "template_vmid", "proxmox")),
+        storage=str(raw.get("storage", "local-lvm")),
+        bridge=str(raw.get("bridge", "vmbr0")),
+        pool=str(raw.get("pool", "agentworks")),
+        verify_ssl=bool(raw.get("verify_ssl", True)),
+    )
+
+
 EXPECTED_TOP_LEVEL_KEYS = {
     "user",
     "paths",
@@ -727,6 +758,7 @@ EXPECTED_TOP_LEVEL_KEYS = {
     "workspace_templates",
     "git_credentials",
     "azure",
+    "proxmox",
 }
 
 
@@ -820,4 +852,5 @@ def load_config(path: Path | None = None) -> Config:
         system_install_commands=system_cmds,
         user_install_commands=user_cmds,
         azure=_load_azure(data),
+        proxmox=_load_proxmox(data),
     )

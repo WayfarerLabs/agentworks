@@ -113,7 +113,13 @@
     "virtiofs",
     "wcid",
     "workstreams",
+    "cicustom",
+    "ciuser",
+    "ipconfig",
+    "proxmox",
     "stdutils",
+    "vmbr",
+    "vmid",
     "zfunc"
   ],
   "ignoreRegExpList": [

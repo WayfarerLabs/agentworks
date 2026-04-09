@@ -1004,7 +1004,12 @@ def _run_bootstrap_script(
     ts_auth_key = _resolve_tailscale_auth_key(tailscale_auth_key)
 
     ssh_public_key = config.user.ssh_public_key.read_text().strip()
+    # Determine platform for hostname. Look up the VM record for the actual
+    # platform; fall back to transport-based detection.
     platform = "wsl2" if is_wsl2 else "unknown"
+    vm_row = db.get_vm(vm_name)
+    if vm_row is not None:
+        platform = vm_row.platform
     script = generate_bootstrap_script(
         admin_username=admin_username,
         ssh_public_key=ssh_public_key,

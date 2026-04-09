@@ -38,6 +38,11 @@ def get_provisioner(platform: str, vm_host_ssh: str | None = None) -> VMProvisio
         from agentworks.vms.provisioners.wsl2 import WSL2Provisioner
 
         return WSL2Provisioner()
+    elif platform == "proxmox":
+        from agentworks.vms.provisioners.proxmox import ProxmoxProvisioner
+
+        # ProxmoxProvisioner requires config; caller must use create_vm flow
+        raise ValueError("Use create_vm for proxmox provisioning")
     else:
         msg = f"Unknown platform: {platform}"
         raise ValueError(msg)
@@ -97,6 +102,11 @@ def create_vm(
     # Azure config validation
     if platform == "azure" and config.azure is None:
         typer.echo("Error: [azure] config section required for azure platform", err=True)
+        raise typer.Exit(1)
+
+    # Proxmox config validation
+    if platform == "proxmox" and config.proxmox is None:
+        typer.echo("Error: [proxmox] config section required for proxmox platform", err=True)
         raise typer.Exit(1)
 
     # Resolve resource settings: CLI flag > template > built-in default
@@ -165,6 +175,19 @@ def create_vm(
                 config,
                 admin_username=resolved_admin_username,
             )
+        elif platform == "proxmox":
+            from agentworks.vms.provisioners.proxmox import ProxmoxProvisioner
+
+            proxmox = ProxmoxProvisioner(config.proxmox)  # type: ignore[arg-type]
+            result = proxmox.create(
+                vm_name,
+                config,
+                cpus=resolved_cpus,
+                memory=resolved_memory,
+                disk=resolved_disk,
+                admin_username=resolved_admin_username,
+                tailscale_auth_key=tailscale_auth_key,
+            )
         else:
             msg = f"Unknown platform: {platform}"
             raise ValueError(msg)
@@ -178,6 +201,8 @@ def create_vm(
         db.update_vm_azure_resource_id(vm_name, result.azure_resource_id)
     if result.wsl_distro_name:
         db.update_vm_wsl_distro_name(vm_name, result.wsl_distro_name)
+    if result.proxmox_vmid:
+        db.update_vm_proxmox_vmid(vm_name, result.proxmox_vmid)
 
     # -- Initialization --
     # If this fails, the VM exists on the remote host and may be debuggable.
@@ -335,6 +360,8 @@ def describe_vm(db: Database, config: Config, name: str) -> None:
         typer.echo(f"Azure ID:       {vm.azure_resource_id}")
     if vm.wsl_distro_name:
         typer.echo(f"WSL Distro:     {vm.wsl_distro_name}")
+    if vm.proxmox_vmid:
+        typer.echo(f"Proxmox VMID:   {vm.proxmox_vmid}")
     if vm.last_seen_at:
         typer.echo(f"Last Seen:      {vm.last_seen_at}")
 
@@ -799,7 +826,15 @@ def _require_vm(db: Database, name: str) -> VMRow:
     return vm
 
 
-def _get_provisioner_for_vm(db: Database, vm: VMRow) -> VMProvisioner:
+def _get_provisioner_for_vm(db: Database, vm: VMRow, config: Config | None = None) -> VMProvisioner:
+    if vm.platform == "proxmox":
+        from agentworks.vms.provisioners.proxmox import ProxmoxProvisioner
+
+        if config is None:
+            from agentworks.config import load_config
+            config = load_config()
+        return ProxmoxProvisioner(config.proxmox)  # type: ignore[arg-type]
+
     vm_host_ssh: str | None = None
     if vm.vm_host_name:
         host = db.get_vm_host(vm.vm_host_name)
