@@ -664,16 +664,33 @@ def _create_agent_on_vm(
                     )
                     if remote.ok and remote.stdout.strip() == ref.path:
                         typer.echo("  Dotfiles already cloned, pulling latest...")
-                        pull = _run_as_agent(
-                            target, linux_user,
-                            f"git -C {_shlex.quote(dest)} pull",
-                            check=False, timeout=120, logger=lg,
-                        )
-                        if not pull.ok:
-                            typer.echo(
-                                f"  Warning: dotfiles pull failed (local changes?), skipping",
-                                err=True,
+                        if ref.ref:
+                            _run_as_agent(
+                                target, linux_user,
+                                f"git -C {_shlex.quote(dest)} fetch",
+                                check=False, timeout=120, logger=lg,
                             )
+                            checkout = _run_as_agent(
+                                target, linux_user,
+                                f"git -C {_shlex.quote(dest)} checkout {_shlex.quote(ref.ref)}",
+                                check=False, logger=lg,
+                            )
+                            if not checkout.ok:
+                                typer.echo(
+                                    f"  Warning: dotfiles checkout of '{ref.ref}' failed, skipping",
+                                    err=True,
+                                )
+                        else:
+                            pull = _run_as_agent(
+                                target, linux_user,
+                                f"git -C {_shlex.quote(dest)} pull",
+                                check=False, timeout=120, logger=lg,
+                            )
+                            if not pull.ok:
+                                typer.echo(
+                                    "  Warning: dotfiles pull failed (local changes?), skipping",
+                                    err=True,
+                                )
                     else:
                         raise SourceRefError(
                             f"dotfiles destination {dest} exists but is a different repo"
