@@ -70,15 +70,27 @@ tools:
         echo "error: could not detect git remote 'origin'" >&2
         exit 1
       fi
-      REPO_NAME=$(echo "$REMOTE_URL" | sed -E 's|.*/_git/||; s|\.git$||')
-      if [ -z "$REPO_NAME" ]; then
-        echo "error: could not extract repository name from remote URL '$REMOTE_URL'" >&2
+      # Extract project and repo from Azure DevOps remote URL
+      # HTTPS: https://dev.azure.com/{org}/{project}/_git/{repo}
+      # SSH:   git@ssh.dev.azure.com:v3/{org}/{project}/{repo}
+      if echo "$REMOTE_URL" | grep -q '/_git/'; then
+        PROJECT=$(echo "$REMOTE_URL" | sed -E 's|.*dev.azure.com/[^/]+/([^/]+)/_git/.*|\1|')
+        REPO_NAME=$(echo "$REMOTE_URL" | sed -E 's|.*/_git/||; s|\.git$||')
+      elif echo "$REMOTE_URL" | grep -q 'ssh.dev.azure.com'; then
+        PROJECT=$(echo "$REMOTE_URL" | sed -E 's|.*:v3/[^/]+/([^/]+)/.*|\1|')
+        REPO_NAME=$(echo "$REMOTE_URL" | sed -E 's|.*:v3/[^/]+/[^/]+/||; s|\.git$||')
+      else
+        echo "error: unrecognized Azure DevOps remote URL format: '$REMOTE_URL'" >&2
+        exit 1
+      fi
+      if [ -z "$PROJECT" ] || [ -z "$REPO_NAME" ]; then
+        echo "error: could not extract project/repo from remote URL '$REMOTE_URL'" >&2
         exit 1
       fi
       exec az devops invoke \
         --area git \
         --resource pullRequestThreads \
-        --route-parameters "repositoryId=$REPO_NAME" "pullRequestId=$PR_ID" \
+        --route-parameters "project=$PROJECT" "repositoryId=$REPO_NAME" "pullRequestId=$PR_ID" \
         --output json
     arguments:
       pr_id:
