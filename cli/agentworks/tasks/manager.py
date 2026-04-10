@@ -69,6 +69,42 @@ def _socket_path_for_task(db: Database, task: TaskRow) -> str | None:
     return agent_socket_path(linux_user, task.workspace_name, task.name)
 
 
+def _kill_task_any_server(
+    workspace_name: str,
+    task_name: str,
+    *,
+    run_command: RunCommand,
+    socket_path: str | None,
+) -> None:
+    """Kill a task session on both the agent socket and the default server.
+
+    Handles migration from the old model (agent sessions on the admin's
+    default tmux server) to the new model (per-agent sockets). Safe to call
+    even if the session exists on neither or both.
+    """
+    from agentworks.tasks.tmux import kill_task_session
+
+    if socket_path:
+        kill_task_session(workspace_name, task_name, run_command=run_command, socket_path=socket_path)
+    # Always try the default server too, to clean up legacy sessions
+    kill_task_session(workspace_name, task_name, run_command=run_command)
+
+
+def _session_exists_any_server(
+    workspace_name: str,
+    task_name: str,
+    *,
+    run_command: RunCommand,
+    socket_path: str | None,
+) -> bool:
+    """Check if a task session exists on either the agent socket or the default server."""
+    from agentworks.tasks.tmux import session_exists
+
+    if socket_path and session_exists(workspace_name, task_name, run_command=run_command, socket_path=socket_path):
+        return True
+    return session_exists(workspace_name, task_name, run_command=run_command)
+
+
 def _require_workspace(db: Database, name: str) -> WorkspaceRow:
     ws = db.get_workspace(name)
     if ws is None:
@@ -208,10 +244,8 @@ def _reconcile_status(
     db: Database,
 ) -> str:
     """Check tmux session and reconcile task status in the DB."""
-    from agentworks.tasks.tmux import session_exists
-
     sock = _socket_path_for_task(db, task)
-    alive = session_exists(workspace_name, task.name, run_command=run_command, socket_path=sock)
+    alive = _session_exists_any_server(workspace_name, task.name, run_command=run_command, socket_path=sock)
     if task.status == TaskStatus.RUNNING.value and not alive:
         db.update_task_status(workspace_name, task.name, TaskStatus.STOPPED)
         return TaskStatus.STOPPED.value
@@ -327,7 +361,7 @@ def stop_task(
     """Stop a running task. Sends C-c first, then kills after a grace period."""
     import time
 
-    from agentworks.tasks.tmux import kill_task_session, send_keys, session_exists
+    from agentworks.tasks.tmux import send_keys
 
     _ws, _vm, run_command = _prepare_vm(db, config, workspace_name, operation="task-stop")
     task = _require_task(db, workspace_name, name)
@@ -338,15 +372,17 @@ def stop_task(
 
     sock = _socket_path_for_task(db, task)
 
-    # Send C-c to the running process first
+    # Send C-c to the running process first (try both socket and default server)
     send_keys(workspace_name, name, "C-c", run_command=run_command, socket_path=sock)
+    if sock:
+        send_keys(workspace_name, name, "C-c", run_command=run_command)
 
     # Wait for graceful exit
     time.sleep(_STOP_GRACE_SECONDS)
 
-    # Kill if still alive
-    if session_exists(workspace_name, name, run_command=run_command, socket_path=sock):
-        kill_task_session(workspace_name, name, run_command=run_command, socket_path=sock)
+    # Kill if still alive (checks both servers for migration compatibility)
+    if _session_exists_any_server(workspace_name, name, run_command=run_command, socket_path=sock):
+        _kill_task_any_server(workspace_name, name, run_command=run_command, socket_path=sock)
 
     db.update_task_status(workspace_name, name, TaskStatus.STOPPED)
     typer.echo(f"Task '{name}' stopped")
@@ -364,22 +400,20 @@ def restart_task(
     from agentworks.tasks.tmux import (
         create_task_session,
         deploy_restricted_config,
-        kill_task_session,
-        session_exists,
     )
 
     ws, vm, run_command = _prepare_vm(db, config, workspace_name, operation="task-restart")
     task = _require_task(db, workspace_name, name)
     sock = _socket_path_for_task(db, task)
 
-    if session_exists(workspace_name, name, run_command=run_command, socket_path=sock):
+    if _session_exists_any_server(workspace_name, name, run_command=run_command, socket_path=sock):
         if not force:
             typer.echo(
                 f"Error: task '{name}' is still running. Stop it first, or use --force.",
                 err=True,
             )
             raise typer.Exit(1)
-        kill_task_session(workspace_name, name, run_command=run_command, socket_path=sock)
+        _kill_task_any_server(workspace_name, name, run_command=run_command, socket_path=sock)
 
     template = _resolve_template(config, task.template)
     deploy_restricted_config(run_command, history_limit=config.task.history_limit)
@@ -422,16 +456,14 @@ def delete_task(
     yes: bool = False,
 ) -> None:
     """Stop and delete a task."""
-    from agentworks.tasks.tmux import kill_task_session, session_exists
-
     ws, vm, run_command = _prepare_vm(db, config, workspace_name, operation="task-delete")
     task = _require_task(db, workspace_name, name)
     sock = _socket_path_for_task(db, task)
 
-    if not yes and session_exists(workspace_name, name, run_command=run_command, socket_path=sock):
+    if not yes and _session_exists_any_server(workspace_name, name, run_command=run_command, socket_path=sock):
         typer.confirm(f"Task '{name}' is still running. Delete anyway?", abort=True)
 
-    kill_task_session(workspace_name, name, run_command=run_command, socket_path=sock)
+    _kill_task_any_server(workspace_name, name, run_command=run_command, socket_path=sock)
     db.delete_task(workspace_name, name)
 
     # Clean up implicit grant for this task
