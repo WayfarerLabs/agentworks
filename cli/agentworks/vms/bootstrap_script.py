@@ -43,6 +43,7 @@ echo "$VM_USER ALL=(ALL) NOPASSWD:ALL" > "/etc/sudoers.d/$VM_USER"
 echo "##STEP## Provisioning packages"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
+apt-get dist-upgrade -y -qq -o Dpkg::Options::="--force-confnew"
 # shellcheck disable=SC2086
 apt-get install -y -qq -o Dpkg::Options::="--force-confnew" $PROVISIONING_PACKAGES
 echo "##SUCCESS## provisioning packages installed"
