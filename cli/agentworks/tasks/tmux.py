@@ -233,8 +233,9 @@ def create_task_session(
             cmd += f" {shlex.quote(shell_cmd)}"
         run_command(cmd)
 
-        # Fix socket permissions (tmux creates sockets mode 0700)
-        run_command(f"chmod g+rwx {q_sock}")
+        # Fix socket permissions (tmux creates sockets mode 0700).
+        # Socket is owned by the agent user, so sudo is needed.
+        run_command(f"sudo chmod g+rwx {q_sock}")
 
         # Grant tmux server-access to all socket-group members
         _grant_server_access(run_command, linux_user, sock)
