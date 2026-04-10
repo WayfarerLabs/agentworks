@@ -1202,6 +1202,25 @@ def _phase_b_setup(
         logger.warning(msg)
         typer.echo(f"  Warning: {msg}", err=True)
 
+    # Non-fatal: agent tmux socket directory infrastructure.
+    # Creates the shared group, root directory, and per-agent subdirectories.
+    try:
+        from agentworks.tasks.tmux import ensure_agent_socket_dir, ensure_agent_socket_root
+
+        logger.step("Agent tmux socket directories")
+        typer.echo("  Setting up agent tmux socket infrastructure...")
+
+        def _root_cmd(command: str, *, check: bool = True) -> object:
+            return _run_logged(ts_target, command, logger, as_root=True, check=check)
+
+        ensure_agent_socket_root(_root_cmd, admin_username)
+        for agent in db.list_agents(vm_name):
+            ensure_agent_socket_dir(_root_cmd, agent.linux_user)
+    except SSHError as e:
+        msg = f"agent tmux socket setup failed: {e}"
+        logger.warning(msg)
+        typer.echo(f"  Warning: {msg}", err=True)
+
     # Non-fatal: system install commands
     system_path = _run_catalog_commands(
         ts_target,

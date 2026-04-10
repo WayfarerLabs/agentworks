@@ -593,6 +593,14 @@ def _create_agent_on_vm(
     else:
         run_as_root(target, f"usermod -s {shell_path} {linux_user}", logger=lg)
 
+    # Ensure the agent has a tmux socket directory for agent-mode tasks
+    from functools import partial as _partial
+
+    from agentworks.tasks.tmux import ensure_agent_socket_dir
+
+    _root_cmd = _partial(run_as_root, target, logger=lg)
+    ensure_agent_socket_dir(_root_cmd, linux_user)
+
     # Write a minimal rc file with a clear agent prompt
     if agent_shell == "zsh":
         rc_content = f"export PS1='[agent:{linux_user}] %~%# '\n"
