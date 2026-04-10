@@ -30,7 +30,7 @@ any VM commands. This is consistent with how the rest of the VM-side infrastruct
 groups, home directories, file ownership, process isolation).
 
 ```text
-/run/agentworks/agent-tmux-sockets/      root:tmux-agent-access 2770
+/run/agentworks/agent-tmux-sockets/      root:tmux-agent-access 2771
   agt--alice/                            agt--alice:tmux-agent-access 2770
     workspace--task.sock                 agt--alice:tmux-agent-access 0770*
   agt--bob/                              agt--bob:tmux-agent-access 2770
@@ -42,7 +42,8 @@ groups, home directories, file ownership, process isolation).
 ### Directory permissions
 
 - **Root directory** (`/run/agentworks/agent-tmux-sockets/`): Owned by `root`, group
-  `tmux-agent-access`, mode `2770`. SGID ensures subdirectories inherit the group.
+  `tmux-agent-access`, mode `2771`. SGID ensures subdirectories inherit the group. The `other`
+  execute bit allows agent users (who are not in the group) to traverse into their own subdirectory.
 - **Per-agent directory**: Owned by the agent's Linux user, group `tmux-agent-access` (inherited via
   SGID), mode `2770`. The agent can create sockets here. The admin can access via group membership.
   Other agents cannot access (no owner match, not in group).

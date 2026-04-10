@@ -49,7 +49,9 @@ def ensure_agent_socket_root(run_command: RunCommand, admin_username: str) -> No
     run_command(f"usermod -aG {grp} {admin}")
     run_command(f"mkdir -p {AGENT_SOCKET_ROOT}")
     run_command(f"chown root:{grp} {AGENT_SOCKET_ROOT}")
-    run_command(f"chmod 2770 {AGENT_SOCKET_ROOT}")
+    # 2771: SGID + rwxrwx--x. The 'other' execute bit allows agent users
+    # (who are not in the group) to traverse into their own subdirectory.
+    run_command(f"chmod 2771 {AGENT_SOCKET_ROOT}")
 
 
 def ensure_agent_socket_dir(run_command: RunCommand, linux_user: str) -> None:
