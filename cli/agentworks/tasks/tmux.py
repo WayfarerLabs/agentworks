@@ -41,8 +41,12 @@ def ensure_agent_socket_root(run_command: RunCommand, admin_username: str) -> No
     """Create the agent tmux socket root directory and group (idempotent)."""
     grp = shlex.quote(AGENT_SOCKET_GROUP)
     admin = shlex.quote(admin_username)
+    # Create group separately (idempotent, allowed to fail if it exists)
     run_command(
-        f"{{ getent group {grp} >/dev/null 2>&1 || /usr/sbin/groupadd {grp}; }} && "
+        f"getent group {grp} >/dev/null 2>&1 || /usr/sbin/groupadd {grp}",
+        check=False,
+    )
+    run_command(
         f"usermod -aG {grp} {admin} && "
         f"mkdir -p {AGENT_SOCKET_ROOT} && "
         f"chown root:{grp} {AGENT_SOCKET_ROOT} && "
