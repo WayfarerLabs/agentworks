@@ -14,7 +14,7 @@ from __future__ import annotations
 import shlex
 from typing import TYPE_CHECKING
 
-from agentworks.tasks.tmux import derive_session_name
+from agentworks.tasks.tmux import _tmux_cmd, derive_session_name
 
 if TYPE_CHECKING:
     from agentworks.db import TaskRow
@@ -31,11 +31,15 @@ def generate_config(
     ws_name: str,
     workspace_path: str,
     tasks: list[TaskRow] | None = None,
+    socket_paths: dict[str, str | None] | None = None,
 ) -> str:
     """Generate a tmuxinator YAML config for a workspace.
 
     Produces an admin-shell window plus one window per task. Task windows
     use a wrapper that attaches to the task's locked-down tmux session.
+
+    *socket_paths* maps ``<workspace>--<task>`` keys to socket paths for
+    agent-mode tasks. Admin tasks have ``None`` values (or are absent).
     """
     lines = [
         GENERATED_HEADER,
@@ -48,14 +52,18 @@ def generate_config(
         '        - ""',
     ]
 
+    paths = socket_paths or {}
     for task in tasks or []:
         session = derive_session_name(ws_name, task.name)
         q_session = shlex.quote(session)
+        sock = paths.get(session)
         # Wrapper: unset TMUX for nesting, loop attach while session exists
+        has_cmd = _tmux_cmd(f"has-session -t {q_session}", sock)
+        attach_cmd = _tmux_cmd(f"attach -t {q_session}", sock)
         wrapper = (
             f"unset TMUX; "
-            f"while tmux has-session -t {q_session} 2>/dev/null; do "
-            f"tmux attach -t {q_session}; "
+            f"while {has_cmd} 2>/dev/null; do "
+            f"{attach_cmd}; "
             f"sleep 0.5; "
             f"done; "
             f"echo 'Task session {q_session} has ended. Press enter to close.'; "

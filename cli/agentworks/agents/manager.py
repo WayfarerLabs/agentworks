@@ -189,12 +189,13 @@ def delete_agent(
         from functools import partial
 
         from agentworks.ssh import run, ssh_target_for_vm
-        from agentworks.tasks.tmux import kill_task_session
+        from agentworks.tasks.tmux import agent_socket_path, kill_task_session
 
         target = ssh_target_for_vm(vm, config)
         run_command = partial(run, target, logger=ssh_logger)
         for task in agent_tasks:
-            kill_task_session(task.workspace_name, task.name, run_command=run_command)
+            sock = agent_socket_path(agent.linux_user, task.workspace_name, task.name)
+            kill_task_session(task.workspace_name, task.name, run_command=run_command, socket_path=sock)
             db.delete_task(task.workspace_name, task.name)
         typer.echo(f"  Deleted {len(agent_tasks)} task(s)")
 
