@@ -215,6 +215,7 @@ class LimaProvisioner(VMProvisioner):
             lima_cmd,
             label=f"Lima ({vm_name})",
             base_path=f"/tmp/agentworks-lima-{vm_name}",
+            timeout=600,
             quiet=True,
         )
         if result.exit_code != 0:

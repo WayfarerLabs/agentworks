@@ -46,6 +46,7 @@ def run_detached(
     base_path: str = "/tmp/agentworks-detached",
     poll_interval: int = 3,
     quiet_timeout: int = 300,
+    timeout: int | None = None,
     as_root: bool = False,
     quiet: bool = False,
 ) -> DetachedResult:
@@ -61,6 +62,7 @@ def run_detached(
         base_path: Base path for output/pid/status files (unique per operation).
         poll_interval: Seconds between polls.
         quiet_timeout: Warn if no new output for this many seconds.
+        timeout: Hard timeout in seconds. Returns exit code 1 if exceeded.
         as_root: Run the wrapper script as root.
 
     Returns:
@@ -113,6 +115,7 @@ def run_detached(
         label=label,
         poll_interval=poll_interval,
         quiet_timeout=quiet_timeout,
+        timeout=timeout,
         quiet=quiet,
     )
 
@@ -151,15 +154,25 @@ def _poll_until_done(
     label: str,
     poll_interval: int,
     quiet_timeout: int,
+    timeout: int | None = None,
     quiet: bool = False,
 ) -> str:
     """Poll the remote process until it completes, streaming new output."""
     last_size = 0
     last_output_time = time.monotonic()
+    start_time = time.monotonic()
     warned_quiet = False
 
     while True:
         time.sleep(poll_interval)
+
+        # Hard timeout
+        if timeout is not None and (time.monotonic() - start_time) > timeout:
+            typer.echo(
+                f"  {label}: timed out after {timeout}s",
+                err=True,
+            )
+            break
 
         # Read new output since last poll
         new_output = _read_new_output(target, output_file, last_size)
