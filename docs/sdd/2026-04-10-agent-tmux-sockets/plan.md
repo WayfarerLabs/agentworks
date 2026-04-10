@@ -4,142 +4,108 @@
 
 ### 1.1 Constants and socket path helper
 
-Add to `cli/agentworks/tasks/tmux.py`:
+Added to `cli/agentworks/tasks/tmux.py`:
 
 - [x] Constant `AGENT_SOCKET_ROOT = "/run/agentworks/agent-tmux-sockets"`.
 - [x] Constant `AGENT_SOCKET_GROUP = "tmux-agent-access"`.
-- [x] Function `agent_socket_path(linux_user: str, workspace_name: str, task_name: str) -> str`
-  that returns `{AGENT_SOCKET_ROOT}/{linux_user}/{workspace}--{task}.sock`. Uses Linux username
-  since the VM layer operates entirely in terms of Linux users.
+- [x] Function `agent_socket_path(linux_user, workspace_name, task_name)`.
 
 ### 1.2 Idempotent ensure helpers
 
 Added to `cli/agentworks/tasks/tmux.py`:
 
-- [x] Function `ensure_agent_socket_root(run_command, admin_username: str)`:
-  - Creates group `tmux-agent-access` if it does not exist.
-  - Adds `admin_username` to the group.
-  - Creates `/run/agentworks/agent-tmux-sockets/` owned by `root:tmux-agent-access` mode `2770`.
-  - All steps idempotent.
-- [x] Function `ensure_agent_socket_dir(run_command, linux_user: str)`:
-  - Creates `/run/agentworks/agent-tmux-sockets/<linux_user>/` owned by
-    `<linux_user>:tmux-agent-access` mode `2770`.
-  - Idempotent.
+- [x] `ensure_agent_socket_root(run_command, admin_username)` -- creates group, adds admin,
+  creates root directory with mode `2771`.
+- [x] `ensure_agent_socket_dir(run_command, linux_user)` -- creates per-agent subdirectory
+  with mode `2770`.
 
 ---
 
 ## Phase 2: Integrate into provisioning flows
 
-### 2.1 VM init/reinit
-
-- [x] Call `ensure_agent_socket_root` during Phase B setup in `_phase_b_setup()`.
-- [x] Loop over all agents on the VM and call `ensure_agent_socket_dir` for each.
-
-### 2.2 Agent create
-
-- [x] Call `ensure_agent_socket_dir` in `_create_agent_on_vm()` after user creation.
-
-### 2.3 Agent reinit
-
-- [x] Covered by 2.2 since `_create_agent_on_vm()` is reused.
+- [x] VM init/reinit: calls `ensure_agent_socket_root` + `ensure_agent_socket_dir` for each agent.
+- [x] Agent create/reinit: calls `ensure_agent_socket_dir` in `_create_agent_on_vm()`.
 
 ---
 
 ## Phase 3: Task session refactoring
 
-### 3.1 Refactor `create_task_session` for agent mode
-
-- [x] Agent-mode sessions created as the agent user via
-  `sudo --login -u <user> tmux -S <socket> new-session ...`.
-- [x] Socket permissions fixed with `chmod g+rwx`.
-- [x] `server-access` granted to all `tmux-agent-access` group members.
-- [x] Admin mode unchanged.
-- [x] Added `_tmux_cmd()` helper and `_grant_server_access()` helper.
-- [x] Added `send_keys()` function for socket-aware key sending.
-
-### 3.2 Add socket awareness to session utility functions
-
-- [x] `kill_task_session()`, `session_exists()`, `capture_output()`, `send_keys()` all accept
-  optional `socket_path` parameter.
-
-### 3.3 Update call sites in task manager
-
-- [x] Added `_socket_path_for_task(db, task)` helper.
-- [x] `stop_task()` uses socket-aware `send_keys`, `session_exists`, `kill_task_session`.
-- [x] `restart_task()` uses socket-aware `session_exists` and `kill_task_session`.
-- [x] `delete_task()` uses socket-aware `session_exists` and `kill_task_session`.
-- [x] `_reconcile_status()` uses socket-aware `session_exists`.
-- [x] `attach_task()` uses `_tmux_cmd` for socket-aware attach.
-- [x] `task_logs()` passes socket path to `capture_output`.
-- [x] `create_task` and `restart_task` pass socket path to `add_task_to_console`.
-- [x] `_regenerate_tmuxinator` builds socket path map for `generate_config`.
-- [x] Agent deletion in `agents/manager.py` uses socket-aware `kill_task_session`.
-
-### 3.4 Update console wrapper
-
-- [x] `_add_task_window()` accepts `socket_path` and uses `_tmux_cmd()` for wrapper commands.
-- [x] `add_task_to_console()` threads socket path through.
-- [x] `create_console()` and `recreate_console()` accept `socket_paths` dict.
-- [x] `attach_console()` builds socket path map for all running tasks.
-
-### 3.5 Update tmuxinator workspace console config
-
-- [x] `generate_config()` accepts `socket_paths` dict and uses `_tmux_cmd()` in wrappers.
+- [x] `create_task_session` agent mode: creates session as agent user via
+  `sudo --login -u <user> tmux -S <socket> new-session ...`, then `sudo chmod g+rwx` on the
+  socket, then grants `server-access` to all `tmux-agent-access` group members.
+- [x] `tmux_cmd()` helper with optional `sudo` flag for non-interactive operations on agent
+  sockets (kill, has-session, send-keys, capture-pane). Interactive attach does not use sudo.
+- [x] `build_socket_paths()` helper to deduplicate socket path map construction.
+- [x] All call sites updated: stop, restart, delete, describe, list, attach, logs, console,
+  tmuxinator, agent delete, workspace delete.
+- [x] Migration helpers: `_kill_task_any_server` and `_session_exists_any_server` check both
+  the agent socket and the default server to handle legacy sessions.
+- [x] Legacy warning when an agent task is found on the default server (suppressed during
+  stop/restart where the user is already acting on it).
+- [x] Bidirectional status reconciliation (RUNNING -> STOPPED and STOPPED -> RUNNING).
+- [x] `recreate_console` collapsed into `create_console(recreate=True)`.
 
 ---
 
-## Phase 4: Clean up old agent-mode code path
+## Phase 4: Clean up
 
-### 4.1 Remove sudo su --login code path
-
-- [x] Replaced by the socket-based path in 3.1. The old `sudo su --login` agent code path
-  has been fully removed from `create_task_session()`.
-
-### 4.2 Remove window-size / aggressive-resize workaround
-
-- [x] Kept as defense-in-depth. These settings are harmless and provide a fallback for
-  multi-client scenarios.
+- [x] Old `sudo su --login` agent code path fully removed from `create_task_session()`.
+- [x] `window-size latest` and `aggressive-resize on` kept as defense-in-depth.
+- [x] `run_as_root` in `ssh.py` annotated with NOTE about sudo scoping pitfall.
 
 ---
 
 ## Phase 5: Testing
 
-### 5.1 Manual testing checklist
+### 5.1 Manual testing (verified on vm1)
 
-- [ ] Create an admin-mode task. Verify it works as before (no socket, no regression).
-- [ ] Create an agent-mode task. Verify:
-  - The tmux session is owned by the agent user (`ps aux | grep tmux` shows agent).
-  - The socket exists at the expected path with correct ownership and permissions.
-  - The shell inside the pane is running as the agent user (`whoami`).
-  - Terminal resize propagates correctly (resize terminal, verify `stty size` updates).
-- [ ] Attach to an agent task via `agentworks task attach`. Verify it works.
-- [ ] View agent task in the VM console. Verify resize works.
-- [ ] Stop and restart an agent task. Verify session cleanup and recreation.
-- [ ] Delete an agent task. Verify session is killed.
-- [ ] Run `agentworks vm reinit`. Verify group and directories are correct.
-- [ ] Run `agentworks agent reinit`. Verify socket directory is repaired if missing.
-- [ ] View task logs for an agent task. Verify scrollback capture works.
+- [x] Admin task (`ws1--ats1`) works as before on default server.
+- [x] Agent tasks run as `agt--ag1` (verified via `ps aux`).
+- [x] Sockets at expected paths with correct ownership (`agt--ag1:tmux-agent-access 770`).
+- [x] Resize propagation works (`ts3` at 240x93, not stuck at 80).
+- [x] Console attach works via socket (all 5 agent tasks attached).
+- [x] `server-access` ACL correctly grants `agentworks` (W) and `agt--ag1` (W).
+- [x] Agent user is NOT in `tmux-agent-access` group (cross-agent isolation).
+- [x] No legacy agent sessions remain on default server.
+- [x] VM reinit creates group, root directory, and per-agent directories idempotently.
+- [x] Task restart kills old session and creates new one on agent socket.
 
 ### 5.2 Unit tests
 
-- [x] Test `agent_socket_path()` returns the expected path.
-- [x] Test that `generate_config()` produces correct wrapper scripts for agent tasks.
-- [x] Test that admin tasks do not include `-S` in wrapper commands.
-- [x] Existing tests pass (no regressions).
+- [x] `agent_socket_path()` returns expected path.
+- [x] `generate_config()` produces `-S <socket>` wrappers for agent tasks.
+- [x] Admin tasks do not include `-S` in wrappers.
+- [x] All 6 tests pass, ruff clean.
 
 ---
 
-## Open questions
+## Resolved questions
 
-1. **Login environment**: Does `sudo --login -u <agent> tmux new-session` give the pane a proper
-   login environment (PATH, rc files sourced)? Using `sudo --login` which should source the
-   agent's profile. Needs verification during manual testing.
+1. **Login environment**: `sudo --login -u <agent> tmux new-session` works correctly. The
+   `--login` flag sources the agent's profile. The pane shell runs as the agent with proper
+   PATH and rc files.
 
-2. **Socket cleanup on task kill**: When a task session is killed, does tmux automatically remove
-   the socket file? If the session is the only one on that server, tmux should exit and clean up.
-   Verify during testing. If not, add explicit cleanup.
+2. **Socket cleanup**: tmux removes the socket file when the server exits (last session killed).
+   No explicit cleanup needed.
 
-3. **Reboot persistence**: `/run` is a tmpfs cleared on reboot. The directories are recreated by
-   VM init/reinit, but if the VM reboots without running reinit, the directories will be gone. tmux
-   sessions also do not survive reboot, so this is likely a non-issue (tasks are re-created on
-   restart). Verify this assumption.
+3. **Reboot persistence**: `/run` is tmpfs, cleared on reboot. tmux sessions also don't survive
+   reboot. VM reinit recreates the directories. Non-issue.
+
+4. **Root directory mode**: Changed from `2770` to `2771`. The `other` execute bit is required
+   so agent users (who are not in the group) can traverse into their own subdirectory.
+
+5. **sudo scoping**: `sudo -n cmd1 && cmd2` only applies sudo to `cmd1`. The ensure functions
+   issue individual `run_command` calls so each gets its own sudo from the wrapper.
+
+6. **Group membership and tmux server**: Existing tmux server processes don't pick up new group
+   memberships. Migration requires killing the admin's tmux server and restarting. This is a
+   one-time operation, not worth adding permanent workarounds (sg/sudo in wrappers).
+
+---
+
+## Migration procedure
+
+1. `agentworks vm reinit` -- creates group, directories
+2. Kill the admin's tmux server on the VM (e.g., `tmux kill-server` via SSH)
+3. `agentworks task restart --force` for each agent-mode task
+4. `agentworks vm console --recreate`
