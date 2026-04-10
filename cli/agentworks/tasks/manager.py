@@ -47,6 +47,72 @@ def _resolve_task_linux_user(db: Database, task: TaskRow, vm: VMRow) -> str:
     return vm.admin_username
 
 
+def _agent_linux_user_lookup(db: Database):
+    """Return a callable that resolves agent name to linux_user via DB."""
+
+    def _lookup(agent_name: str) -> str | None:
+        agent = db.get_agent(agent_name)
+        return agent.linux_user if agent else None
+
+    return _lookup
+
+
+def _socket_path_for_task(db: Database, task: TaskRow) -> str | None:
+    """Return the agent socket path for an agent-mode task, or None for admin."""
+    if not task.agent_name:
+        return None
+    from agentworks.tasks.tmux import agent_socket_path
+
+    linux_user = _agent_linux_user_lookup(db)(task.agent_name)
+    if linux_user is None:
+        return None
+    return agent_socket_path(linux_user, task.workspace_name, task.name)
+
+
+def _kill_task_any_server(
+    workspace_name: str,
+    task_name: str,
+    *,
+    run_command: RunCommand,
+    socket_path: str | None,
+) -> None:
+    """Kill a task session on both the agent socket and the default server.
+
+    Handles migration from the old model (agent sessions on the admin's
+    default tmux server) to the new model (per-agent sockets). Safe to call
+    even if the session exists on neither or both.
+    """
+    from agentworks.tasks.tmux import kill_task_session
+
+    if socket_path:
+        kill_task_session(workspace_name, task_name, run_command=run_command, socket_path=socket_path)
+    # Always try the default server too, to clean up legacy sessions
+    kill_task_session(workspace_name, task_name, run_command=run_command)
+
+
+def _session_exists_any_server(
+    workspace_name: str,
+    task_name: str,
+    *,
+    run_command: RunCommand,
+    socket_path: str | None,
+    warn_legacy: bool = True,
+) -> bool:
+    """Check if a task session exists on either the agent socket or the default server."""
+    from agentworks.tasks.tmux import session_exists
+
+    if socket_path and session_exists(workspace_name, task_name, run_command=run_command, socket_path=socket_path):
+        return True
+    on_default = session_exists(workspace_name, task_name, run_command=run_command)
+    if on_default and socket_path and warn_legacy:
+        typer.echo(
+            f"  Note: agent task '{task_name}' is running on the default tmux server "
+            f"(legacy mode). Restart it to use the new per-agent socket.",
+            err=True,
+        )
+    return on_default
+
+
 def _require_workspace(db: Database, name: str) -> WorkspaceRow:
     ws = db.get_workspace(name)
     if ws is None:
@@ -110,10 +176,12 @@ def _regenerate_tmuxinator(
 ) -> None:
     """Regenerate the workspace tmuxinator config from current task state."""
     from agentworks.ssh import write_file
+    from agentworks.tasks.tmux import build_socket_paths
     from agentworks.workspaces.tmuxinator import generate_config
 
     tasks = db.list_tasks(workspace_name=ws.name)
-    config_text = generate_config(ws.name, ws.workspace_path, tasks=tasks)
+    paths = build_socket_paths(tasks, _agent_linux_user_lookup(db))
+    config_text = generate_config(ws.name, ws.workspace_path, tasks=tasks, socket_paths=paths)
     target = ssh_target_for_vm(vm, config)
     write_file(target, f"{ws.workspace_path}/.tmuxinator.yml", config_text, logger=logger)
 
@@ -184,12 +252,14 @@ def _reconcile_status(
     db: Database,
 ) -> str:
     """Check tmux session and reconcile task status in the DB."""
-    from agentworks.tasks.tmux import session_exists
-
-    alive = session_exists(workspace_name, task.name, run_command=run_command)
+    sock = _socket_path_for_task(db, task)
+    alive = _session_exists_any_server(workspace_name, task.name, run_command=run_command, socket_path=sock)
     if task.status == TaskStatus.RUNNING.value and not alive:
         db.update_task_status(workspace_name, task.name, TaskStatus.STOPPED)
         return TaskStatus.STOPPED.value
+    if task.status == TaskStatus.STOPPED.value and alive:
+        db.update_task_status(workspace_name, task.name, TaskStatus.RUNNING)
+        return TaskStatus.RUNNING.value
     return task.status
 
 
@@ -284,7 +354,12 @@ def create_task(
     _regenerate_tmuxinator(db, config, vm, ws)
     from agentworks.tasks.console import add_task_to_console
 
-    add_task_to_console(name, workspace_name, run_command=run_command)
+    sock = None
+    if mode == TaskMode.AGENT:
+        from agentworks.tasks.tmux import agent_socket_path
+
+        sock = agent_socket_path(linux_user, workspace_name, name)
+    add_task_to_console(name, workspace_name, run_command=run_command, socket_path=sock)
 
 
 def stop_task(
@@ -297,7 +372,7 @@ def stop_task(
     """Stop a running task. Sends C-c first, then kills after a grace period."""
     import time
 
-    from agentworks.tasks.tmux import kill_task_session, session_exists
+    from agentworks.tasks.tmux import send_keys
 
     _ws, _vm, run_command = _prepare_vm(db, config, workspace_name, operation="task-stop")
     task = _require_task(db, workspace_name, name)
@@ -306,18 +381,19 @@ def stop_task(
         typer.echo(f"Task '{name}' is already stopped")
         return
 
-    # Send C-c to the running process first
-    from agentworks.tasks.tmux import derive_session_name
+    sock = _socket_path_for_task(db, task)
 
-    session = shlex.quote(derive_session_name(workspace_name, name))
-    run_command(f"tmux send-keys -t {session} C-c", check=False)
+    # Send C-c to the running process first (try both socket and default server)
+    send_keys(workspace_name, name, "C-c", run_command=run_command, socket_path=sock)
+    if sock:
+        send_keys(workspace_name, name, "C-c", run_command=run_command)
 
     # Wait for graceful exit
     time.sleep(_STOP_GRACE_SECONDS)
 
-    # Kill if still alive
-    if session_exists(workspace_name, name, run_command=run_command):
-        kill_task_session(workspace_name, name, run_command=run_command)
+    # Kill if still alive (checks both servers for migration compatibility)
+    if _session_exists_any_server(workspace_name, name, run_command=run_command, socket_path=sock, warn_legacy=False):
+        _kill_task_any_server(workspace_name, name, run_command=run_command, socket_path=sock)
 
     db.update_task_status(workspace_name, name, TaskStatus.STOPPED)
     typer.echo(f"Task '{name}' stopped")
@@ -335,21 +411,20 @@ def restart_task(
     from agentworks.tasks.tmux import (
         create_task_session,
         deploy_restricted_config,
-        kill_task_session,
-        session_exists,
     )
 
     ws, vm, run_command = _prepare_vm(db, config, workspace_name, operation="task-restart")
     task = _require_task(db, workspace_name, name)
+    sock = _socket_path_for_task(db, task)
 
-    if session_exists(workspace_name, name, run_command=run_command):
+    if _session_exists_any_server(workspace_name, name, run_command=run_command, socket_path=sock, warn_legacy=False):
         if not force:
             typer.echo(
                 f"Error: task '{name}' is still running. Stop it first, or use --force.",
                 err=True,
             )
             raise typer.Exit(1)
-        kill_task_session(workspace_name, name, run_command=run_command)
+        _kill_task_any_server(workspace_name, name, run_command=run_command, socket_path=sock)
 
     template = _resolve_template(config, task.template)
     deploy_restricted_config(run_command, history_limit=config.task.history_limit)
@@ -380,7 +455,7 @@ def restart_task(
     _regenerate_tmuxinator(db, config, vm, ws)
     from agentworks.tasks.console import add_task_to_console
 
-    add_task_to_console(name, workspace_name, run_command=run_command)
+    add_task_to_console(name, workspace_name, run_command=run_command, socket_path=sock)
 
 
 def delete_task(
@@ -392,18 +467,14 @@ def delete_task(
     yes: bool = False,
 ) -> None:
     """Stop and delete a task."""
-    from agentworks.tasks.tmux import kill_task_session, session_exists
-
     ws, vm, run_command = _prepare_vm(db, config, workspace_name, operation="task-delete")
-    _require_task(db, workspace_name, name)
+    task = _require_task(db, workspace_name, name)
+    sock = _socket_path_for_task(db, task)
 
-    if not yes and session_exists(workspace_name, name, run_command=run_command):
+    if not yes and _session_exists_any_server(workspace_name, name, run_command=run_command, socket_path=sock):
         typer.confirm(f"Task '{name}' is still running. Delete anyway?", abort=True)
 
-    # Check if task is an agent task before deleting (need info for grant cleanup)
-    task = db.get_task(workspace_name, name)
-
-    kill_task_session(workspace_name, name, run_command=run_command)
+    _kill_task_any_server(workspace_name, name, run_command=run_command, socket_path=sock)
     db.delete_task(workspace_name, name)
 
     # Clean up implicit grant for this task
@@ -454,9 +525,8 @@ def describe_task(
     ws, vm, run_command = _prepare_vm(db, config, workspace_name, operation=None)
 
     # Reconcile status with tmux
-    from agentworks.tasks.tmux import session_exists
-
-    live = session_exists(workspace_name, name, run_command=run_command)
+    sock = _socket_path_for_task(db, task)
+    live = _session_exists_any_server(workspace_name, name, run_command=run_command, socket_path=sock)
     if live and task.status != TaskStatus.RUNNING.value:
         db.update_task_status(workspace_name, name, TaskStatus.RUNNING)
         task = _require_task(db, workspace_name, name)
@@ -481,8 +551,9 @@ def list_tasks(
     config: Config,
     *,
     workspace_name: str | None = None,
+    no_status: bool = False,
 ) -> None:
-    """List tasks, reconciling status with tmux."""
+    """List tasks, optionally reconciling status with tmux."""
     tasks = db.list_tasks(workspace_name=workspace_name)
     if not tasks:
         typer.echo("No tasks found.")
@@ -498,7 +569,7 @@ def list_tasks(
         ws = db.get_workspace(ws_name)
         vm_name = ws.vm_name or "-" if ws else "-"
 
-        if ws is None or ws.type != "vm":
+        if no_status or ws is None or ws.type != "vm":
             for task in ws_tasks:
                 rows.append((task.name, ws_name, vm_name, task.template, task.mode, task.status))
             continue
@@ -553,18 +624,24 @@ def attach_task(
 ) -> None:
     """Attach to a task's tmux session (interactive)."""
     from agentworks.ssh import interactive
-    from agentworks.tasks.tmux import derive_session_name, session_exists
+    from agentworks.tasks.tmux import derive_session_name, session_exists, tmux_cmd
 
     _ws, vm, run_command = _prepare_vm(db, config, workspace_name, operation="task-attach")
-    _require_task(db, workspace_name, name)
+    task = _require_task(db, workspace_name, name)
+    sock = _socket_path_for_task(db, task)
 
-    if not session_exists(workspace_name, name, run_command=run_command):
+    if not _session_exists_any_server(workspace_name, name, run_command=run_command, socket_path=sock):
         typer.echo(f"Error: task '{name}' is not running", err=True)
         raise typer.Exit(1)
 
+    # Determine which server has the session. Prefer the socket; fall back
+    # to the default server for legacy sessions.
     session = shlex.quote(derive_session_name(workspace_name, name))
     target = ssh_target_for_vm(vm, config)
-    sys.exit(interactive(target, f"tmux attach -t {session}"))
+    if sock and session_exists(workspace_name, name, run_command=run_command, socket_path=sock):
+        sys.exit(interactive(target, tmux_cmd(f"attach -t {session}", sock)))
+    else:
+        sys.exit(interactive(target, tmux_cmd(f"attach -t {session}")))
 
 
 def task_logs(
@@ -576,15 +653,21 @@ def task_logs(
     lines: int | None = None,
 ) -> None:
     """Dump the scrollback buffer for a task."""
-    from agentworks.tasks.tmux import capture_output
+    from agentworks.tasks.tmux import capture_output, session_exists
 
     _ws, _vm, run_command = _prepare_vm(db, config, workspace_name, operation="task-logs")
-    _require_task(db, workspace_name, name)
+    task = _require_task(db, workspace_name, name)
+    sock = _socket_path_for_task(db, task)
+
+    # For legacy sessions, fall back to the default server
+    if sock and not session_exists(workspace_name, name, run_command=run_command, socket_path=sock):
+        sock = None
 
     output = capture_output(
         workspace_name,
         name,
         run_command=run_command,
         lines=lines or config.task.history_limit,
+        socket_path=sock,
     )
     typer.echo(output, nl=False)

@@ -45,7 +45,7 @@ DYNAMIC_SNIPPETS: dict[str, str] = {
         ' | Where-Object { $_ -like "$wordToComplete*" } }'
     ),
     "tasks": (
-        "(agentworks task list 2>$null | Select-Object -Skip 2 |"
+        "(agentworks task list --no-status 2>$null | Select-Object -Skip 2 |"
         " ForEach-Object { ($_ -split '\\s+')[0] } |"
         ' Where-Object { $_ -like "$wordToComplete*" })'
     ),

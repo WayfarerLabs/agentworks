@@ -305,6 +305,9 @@ def run_as_root(
     logger: SSHLogger | None = None,
 ) -> SSHResult:
     """Execute a command as root via sudo on a remote host."""
+    # NOTE: sudo -n only applies to the first command in a shell pipeline.
+    # ``sudo -n cmd1 && cmd2`` runs cmd2 without privilege. If you need
+    # multiple root commands, issue separate run_as_root calls.
     return run(target, f"sudo -n {command}", check=check, timeout=timeout, logger=logger)
 
 

@@ -50,7 +50,7 @@ class CommandSpec:
 #   "ws_templates"    -> [workspace_templates.*] sections in config.toml
 #   "git_credentials" -> [git_credentials.*] sections in config.toml
 #   "catalog_entries" -> all entry names from built-in + user catalog
-#   "tasks"           -> agentworks task list
+#   "tasks"           -> agentworks task list --no-status
 #   "task_templates"  -> [task_templates.*] sections in config.toml
 #   "agents"          -> agentworks agent list
 #   "vm_templates"    -> [vm_templates.*] sections in config.toml

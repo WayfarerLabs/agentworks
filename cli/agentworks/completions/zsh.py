@@ -53,7 +53,7 @@ _agentworks_catalog_entries() {
     "tasks": """\
 _agentworks_tasks() {
     local -a tasks
-    tasks=(${(f)"$(agentworks task list 2>/dev/null | tail -n +3 | awk '{print $1}')"})
+    tasks=(${(f)"$(agentworks task list --no-status 2>/dev/null | tail -n +3 | awk '{print $1}')"})
     _describe 'task' tasks
 }""",
     "agents": """\

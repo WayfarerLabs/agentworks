@@ -15,6 +15,10 @@ TASK_SEPARATOR = "--"
 RESTRICTED_CONFIG_PATH = "/opt/agentworks/tmux-task.conf"
 DEFAULT_HISTORY_LIMIT = 50_000
 
+# Agent tmux socket infrastructure
+AGENT_SOCKET_ROOT = "/run/agentworks/agent-tmux-sockets"
+AGENT_SOCKET_GROUP = "tmux-agent-access"
+
 
 class RunCommand(Protocol):
     """Callable that runs a shell command on a target (e.g. partial of ssh.run)."""
@@ -25,6 +29,70 @@ class RunCommand(Protocol):
 def derive_session_name(workspace_name: str, task_name: str) -> str:
     """Return the tmux session name for a task: <workspace>--<task>."""
     return f"{workspace_name}{TASK_SEPARATOR}{task_name}"
+
+
+def agent_socket_path(linux_user: str, workspace_name: str, task_name: str) -> str:
+    """Return the tmux socket path for an agent-mode task."""
+    session = derive_session_name(workspace_name, task_name)
+    return f"{AGENT_SOCKET_ROOT}/{linux_user}/{session}.sock"
+
+
+def ensure_agent_socket_root(run_command: RunCommand, admin_username: str) -> None:
+    """Create the agent tmux socket root directory and group (idempotent).
+
+    Each command is a separate call so that callers wrapping with sudo (e.g.
+    ``run_as_root``) apply privilege to every command individually.
+    """
+    grp = shlex.quote(AGENT_SOCKET_GROUP)
+    admin = shlex.quote(admin_username)
+    # Two calls: getent doesn't need root but groupadd does. Keeping them
+    # separate avoids the sudo scoping issue with || in a single command.
+    result = run_command(f"getent group {grp} >/dev/null 2>&1", check=False)
+    if not getattr(result, "ok", True):
+        run_command(f"/usr/sbin/groupadd {grp}")
+    run_command(f"usermod -aG {grp} {admin}")
+    run_command(f"mkdir -p {AGENT_SOCKET_ROOT}")
+    run_command(f"chown root:{grp} {AGENT_SOCKET_ROOT}")
+    # 2771: SGID + rwxrwx--x. The 'other' execute bit allows agent users
+    # (who are not in the group) to traverse into their own subdirectory.
+    run_command(f"chmod 2771 {AGENT_SOCKET_ROOT}")
+
+
+def ensure_agent_socket_dir(run_command: RunCommand, linux_user: str) -> None:
+    """Create a per-agent tmux socket directory (idempotent).
+
+    Each command is a separate call so that callers wrapping with sudo apply
+    privilege to every command individually.
+    """
+    q_user = shlex.quote(linux_user)
+    grp = shlex.quote(AGENT_SOCKET_GROUP)
+    q_path = shlex.quote(f"{AGENT_SOCKET_ROOT}/{linux_user}")
+    run_command(f"mkdir -p {q_path}")
+    run_command(f"chown {q_user}:{grp} {q_path}")
+    run_command(f"chmod 2770 {q_path}")
+
+
+def build_socket_paths(
+    tasks: list[object],
+    get_agent_linux_user: object,
+) -> dict[str, str | None]:
+    """Build a session-name to socket-path map for a list of tasks.
+
+    *get_agent_linux_user* is a callable ``(agent_name: str) -> str | None``
+    that resolves an agent name to its Linux username (typically via DB lookup).
+    """
+    paths: dict[str, str | None] = {}
+    for task in tasks:
+        agent_name = getattr(task, "agent_name", None)
+        ws = getattr(task, "workspace_name", "")
+        name = getattr(task, "name", "")
+        key = derive_session_name(ws, name)
+        if agent_name:
+            linux_user = get_agent_linux_user(agent_name)  # type: ignore[operator]
+            paths[key] = agent_socket_path(linux_user, ws, name) if linux_user else None
+        else:
+            paths[key] = None
+    return paths
 
 
 def generate_restricted_config(history_limit: int = DEFAULT_HISTORY_LIMIT) -> str:
@@ -90,6 +158,34 @@ def deploy_restricted_config(
     run_command(f"sudo tee {RESTRICTED_CONFIG_PATH} > /dev/null << 'TMUX_CONF'\n{config}TMUX_CONF")
 
 
+def tmux_cmd(base: str, socket_path: str | None = None, *, sudo: bool = False) -> str:
+    """Build a tmux command string, optionally with ``-S`` and ``sudo``.
+
+    Use ``sudo=True`` for non-interactive operations on agent sockets
+    (kill, has-session, send-keys, capture-pane) to guarantee access
+    regardless of socket file permissions. Do NOT use sudo for interactive
+    attach -- that reintroduces the use_pty resize problem.
+    """
+    cmd = f"tmux -S {shlex.quote(socket_path)} {base}" if socket_path else f"tmux {base}"
+    return f"sudo -n {cmd}" if sudo else cmd
+
+
+def _grant_server_access(
+    run_command: RunCommand,
+    linux_user: str,
+    socket_path: str,
+) -> None:
+    """Grant tmux server-access to every member of the socket group."""
+    q_user = shlex.quote(linux_user)
+    q_sock = shlex.quote(socket_path)
+    grp = shlex.quote(AGENT_SOCKET_GROUP)
+    run_command(
+        f"for u in $(getent group {grp} | cut -d: -f4 | tr ',' ' '); do "
+        f"sudo -u {q_user} tmux -S {q_sock} server-access -a \"$u\"; "
+        f"done",
+    )
+
+
 def create_task_session(
     workspace_name: str,
     task_name: str,
@@ -102,37 +198,56 @@ def create_task_session(
 ) -> None:
     """Create a locked-down tmux session for a task.
 
-    For admin mode, the command runs directly. For agent mode, the command
-    is wrapped in `su --login <user>` to get a proper login shell.
+    For admin mode, the command runs directly on the admin's default tmux
+    server.  For agent mode, the session is created as the agent Linux user
+    with a per-task socket so the agent's tmux server (and shell) run under
+    the agent's uid.  The admin gains access via group permissions on the
+    socket and the tmux ``server-access`` ACL.
     """
-    session = shlex.quote(derive_session_name(workspace_name, task_name))
+    session = derive_session_name(workspace_name, task_name)
+    q_session = shlex.quote(session)
     q_path = shlex.quote(workspace_path)
 
     if is_admin:
         if command:
-            # Run via interactive login shell so PATH and rc files are available
             inner = shlex.quote(f"cd {q_path} && {command}")
             shell_cmd = f"$SHELL -lic {inner}"
         else:
             shell_cmd = ""
+
+        cmd = f"tmux new-session -d -s {q_session} -c {q_path} -f {RESTRICTED_CONFIG_PATH}"
+        if shell_cmd:
+            cmd += f" {shlex.quote(shell_cmd)}"
+        run_command(cmd)
     else:
         assert linux_user is not None
         q_user = shlex.quote(linux_user)
+        sock = agent_socket_path(linux_user, workspace_name, task_name)
+        q_sock = shlex.quote(sock)
+
+        # Build the pane command.  sudo --login gives the agent a proper
+        # login environment; tmux then starts the pane shell as that user.
         if command:
-            # Start an interactive login shell as the agent user.
-            # su --login sources the profile; $SHELL -lic sources rc files
-            # (e.g. .bashrc) so tools installed to user-specific paths are available.
-            inner_cmd = shlex.quote(f"cd {q_path} && exec {command}")
-            su_inner = shlex.quote(f"exec $SHELL -lic {inner_cmd}")
-            shell_cmd = f"sudo su --login {q_user} -c {su_inner}"
+            inner = shlex.quote(f"cd {q_path} && {command}")
+            shell_cmd = f"$SHELL -lic {inner}"
         else:
-            shell_cmd = f"exec sudo su --login {q_user}"
+            shell_cmd = ""
 
-    cmd = f"tmux new-session -d -s {session} -c {q_path} -f {RESTRICTED_CONFIG_PATH}"
-    if shell_cmd:
-        cmd += f" {shlex.quote(shell_cmd)}"
+        cmd = (
+            f"sudo --login -u {q_user} "
+            f"tmux -S {q_sock} new-session -d -s {q_session} "
+            f"-c {q_path} -f {RESTRICTED_CONFIG_PATH}"
+        )
+        if shell_cmd:
+            cmd += f" {shlex.quote(shell_cmd)}"
+        run_command(cmd)
 
-    run_command(cmd)
+        # Fix socket permissions (tmux creates sockets mode 0700).
+        # Socket is owned by the agent user, so sudo is needed.
+        run_command(f"sudo chmod g+rwx {q_sock}")
+
+        # Grant tmux server-access to all socket-group members
+        _grant_server_access(run_command, linux_user, sock)
 
 
 def kill_task_session(
@@ -140,11 +255,14 @@ def kill_task_session(
     task_name: str,
     *,
     run_command: RunCommand,
+    socket_path: str | None = None,
 ) -> bool:
     """Kill a task's tmux session. Returns True if the session existed."""
     session = shlex.quote(derive_session_name(workspace_name, task_name))
-    result = run_command(f"tmux kill-session -t {session}", check=False)
-    # RunCommand protocol returns an object; we check for .ok if available
+    result = run_command(
+        tmux_cmd(f"kill-session -t {session}", socket_path, sudo=bool(socket_path)),
+        check=False,
+    )
     return getattr(result, "ok", True)
 
 
@@ -153,11 +271,31 @@ def session_exists(
     task_name: str,
     *,
     run_command: RunCommand,
+    socket_path: str | None = None,
 ) -> bool:
     """Check if a task's tmux session is alive."""
     session = shlex.quote(derive_session_name(workspace_name, task_name))
-    result = run_command(f"tmux has-session -t {session} 2>/dev/null", check=False)
+    result = run_command(
+        tmux_cmd(f"has-session -t {session}", socket_path, sudo=bool(socket_path)) + " 2>/dev/null",
+        check=False,
+    )
     return getattr(result, "ok", False)
+
+
+def send_keys(
+    workspace_name: str,
+    task_name: str,
+    keys: str,
+    *,
+    run_command: RunCommand,
+    socket_path: str | None = None,
+) -> None:
+    """Send keys to a task's tmux session."""
+    session = shlex.quote(derive_session_name(workspace_name, task_name))
+    run_command(
+        tmux_cmd(f"send-keys -t {session} {keys}", socket_path, sudo=bool(socket_path)),
+        check=False,
+    )
 
 
 def capture_output(
@@ -166,11 +304,12 @@ def capture_output(
     *,
     run_command: RunCommand,
     lines: int = DEFAULT_HISTORY_LIMIT,
+    socket_path: str | None = None,
 ) -> str:
     """Capture the scrollback buffer from a task's tmux session."""
     session = shlex.quote(derive_session_name(workspace_name, task_name))
     result = run_command(
-        f"tmux capture-pane -t {session} -p -S -{lines}",
+        tmux_cmd(f"capture-pane -t {session} -p -S -{lines}", socket_path, sudo=bool(socket_path)),
         check=False,
     )
     return getattr(result, "stdout", "") or ""

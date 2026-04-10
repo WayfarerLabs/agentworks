@@ -510,7 +510,13 @@ def _install_system_packages(
     typer.echo(f"  Installing {len(INIT_SYSTEM_PACKAGES)} system packages...")
     apt_str = " ".join(shlex.quote(p) for p in INIT_SYSTEM_PACKAGES)
     try:
-        _run_logged(target, f"apt-get install -y -qq {apt_str}", logger, as_root=True, timeout=300)
+        _run_logged(
+            target,
+            f"DEBIAN_FRONTEND=noninteractive apt-get install -y -qq -o Dpkg::Options::=--force-confnew {apt_str}",
+            logger,
+            as_root=True,
+            timeout=300,
+        )
     except SSHError as e:
         msg = f"system packages failed: {e}"
         logger.warning(msg)
@@ -542,7 +548,13 @@ def _install_apt_packages(
     typer.echo(f"  Installing {len(all_apt)} apt packages...")
     apt_str = " ".join(shlex.quote(p) for p in all_apt)
     try:
-        _run_logged(target, f"apt-get install -y -qq {apt_str}", logger, as_root=True, timeout=300)
+        _run_logged(
+            target,
+            f"DEBIAN_FRONTEND=noninteractive apt-get install -y -qq -o Dpkg::Options::=--force-confnew {apt_str}",
+            logger,
+            as_root=True,
+            timeout=300,
+        )
     except SSHError as e:
         msg = f"apt packages failed: {e}"
         logger.warning(msg)
@@ -1199,6 +1211,25 @@ def _phase_b_setup(
         )
     except SSHError as e:
         msg = f"workspaces directory setup failed: {e}"
+        logger.warning(msg)
+        typer.echo(f"  Warning: {msg}", err=True)
+
+    # Non-fatal: agent tmux socket directory infrastructure.
+    # Creates the shared group, root directory, and per-agent subdirectories.
+    try:
+        from agentworks.tasks.tmux import ensure_agent_socket_dir, ensure_agent_socket_root
+
+        logger.step("Agent tmux socket directories")
+        typer.echo("  Setting up agent tmux socket infrastructure...")
+
+        def _root_cmd(command: str, *, check: bool = True) -> object:
+            return _run_logged(ts_target, command, logger, as_root=True, check=check)
+
+        ensure_agent_socket_root(_root_cmd, admin_username)
+        for agent in db.list_agents(vm_name):
+            ensure_agent_socket_dir(_root_cmd, agent.linux_user)
+    except SSHError as e:
+        msg = f"agent tmux socket setup failed: {e}"
         logger.warning(msg)
         typer.echo(f"  Warning: {msg}", err=True)
 
