@@ -122,9 +122,8 @@ def _regenerate_tmuxinator(
 ) -> None:
     """Regenerate the workspace tmuxinator config from current task state."""
     from agentworks.ssh import write_file
-    from agentworks.workspaces.tmuxinator import generate_config
-
     from agentworks.tasks.tmux import agent_socket_path, derive_session_name
+    from agentworks.workspaces.tmuxinator import generate_config
 
     tasks = db.list_tasks(workspace_name=ws.name)
 

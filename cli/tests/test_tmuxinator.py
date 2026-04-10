@@ -1,8 +1,9 @@
-"""Tests for tmuxinator config generation."""
+"""Tests for tmuxinator config generation and tmux socket helpers."""
 
 from __future__ import annotations
 
 from agentworks.db import TaskRow
+from agentworks.tasks.tmux import AGENT_SOCKET_ROOT, agent_socket_path
 from agentworks.workspaces.tmuxinator import GENERATED_HEADER, console_session_name, generate_config
 
 
@@ -63,3 +64,45 @@ def test_generate_config_admin_window_first() -> None:
     admin_idx = next(i for i, line in enumerate(lines) if "- admin-shell:" in line)
     task_idx = next(i for i, line in enumerate(lines) if "- ws--alpha:" in line)
     assert admin_idx < task_idx
+
+
+def test_agent_socket_path() -> None:
+    path = agent_socket_path("agt--alice", "myws", "dev")
+    assert path == f"{AGENT_SOCKET_ROOT}/agt--alice/myws--dev.sock"
+
+
+def test_generate_config_agent_task_socket() -> None:
+    """Agent-mode tasks should use -S <socket> in wrapper commands."""
+    tasks = [
+        TaskRow(
+            name="dev",
+            workspace_name="ws",
+            template="default",
+            mode="agent",
+            status="running",
+            created_at="",
+            updated_at="",
+            agent_name="alice",
+        ),
+    ]
+    sock = "/run/agentworks/agent-tmux-sockets/agt--alice/ws--dev.sock"
+    config = generate_config("ws", "/tmp/ws", tasks=tasks, socket_paths={"ws--dev": sock})
+    assert f"-S {sock}" in config
+    assert "tmux -S" in config
+
+
+def test_generate_config_admin_task_no_socket() -> None:
+    """Admin-mode tasks should not have -S in wrapper commands."""
+    tasks = [
+        TaskRow(
+            name="build",
+            workspace_name="ws",
+            template="default",
+            mode="admin",
+            status="running",
+            created_at="",
+            updated_at="",
+        ),
+    ]
+    config = generate_config("ws", "/tmp/ws", tasks=tasks)
+    assert "-S " not in config
