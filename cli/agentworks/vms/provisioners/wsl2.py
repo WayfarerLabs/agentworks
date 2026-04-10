@@ -221,7 +221,7 @@ class WSL2Provisioner(VMProvisioner):
                 "bash",
                 "-c",
                 "DEBIAN_FRONTEND=noninteractive apt-get update -qq"
-                " && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq -o Dpkg::Options::=--force-confold"
+                " && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq -o Dpkg::Options::=--force-confnew"
                 " bash bash-completion sudo passwd"
                 " openssh-server curl git ca-certificates"
                 " tmux tmuxinator"

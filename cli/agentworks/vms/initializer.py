@@ -512,7 +512,7 @@ def _install_system_packages(
     try:
         _run_logged(
             target,
-            f"DEBIAN_FRONTEND=noninteractive apt-get install -y -qq -o Dpkg::Options::=--force-confold {apt_str}",
+            f"DEBIAN_FRONTEND=noninteractive apt-get install -y -qq -o Dpkg::Options::=--force-confnew {apt_str}",
             logger,
             as_root=True,
             timeout=300,
@@ -550,7 +550,7 @@ def _install_apt_packages(
     try:
         _run_logged(
             target,
-            f"DEBIAN_FRONTEND=noninteractive apt-get install -y -qq -o Dpkg::Options::=--force-confold {apt_str}",
+            f"DEBIAN_FRONTEND=noninteractive apt-get install -y -qq -o Dpkg::Options::=--force-confnew {apt_str}",
             logger,
             as_root=True,
             timeout=300,
