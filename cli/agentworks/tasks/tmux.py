@@ -38,33 +38,32 @@ def agent_socket_path(linux_user: str, workspace_name: str, task_name: str) -> s
 
 
 def ensure_agent_socket_root(run_command: RunCommand, admin_username: str) -> None:
-    """Create the agent tmux socket root directory and group (idempotent)."""
+    """Create the agent tmux socket root directory and group (idempotent).
+
+    Each command is a separate call so that callers wrapping with sudo (e.g.
+    ``run_as_root``) apply privilege to every command individually.
+    """
     grp = shlex.quote(AGENT_SOCKET_GROUP)
     admin = shlex.quote(admin_username)
-    # Create group separately (idempotent, allowed to fail if it exists).
-    # Wrapping in sh -c so sudo applies to both sides of the ||.
-    run_command(
-        f"sh -c 'getent group {grp} >/dev/null 2>&1 || /usr/sbin/groupadd {grp}'",
-        check=False,
-    )
-    run_command(
-        f"sh -c 'usermod -aG {grp} {admin} && "
-        f"mkdir -p {AGENT_SOCKET_ROOT} && "
-        f"chown root:{grp} {AGENT_SOCKET_ROOT} && "
-        f"chmod 2770 {AGENT_SOCKET_ROOT}'",
-    )
+    run_command(f"groupadd -f {grp}")
+    run_command(f"usermod -aG {grp} {admin}")
+    run_command(f"mkdir -p {AGENT_SOCKET_ROOT}")
+    run_command(f"chown root:{grp} {AGENT_SOCKET_ROOT}")
+    run_command(f"chmod 2770 {AGENT_SOCKET_ROOT}")
 
 
 def ensure_agent_socket_dir(run_command: RunCommand, linux_user: str) -> None:
-    """Create a per-agent tmux socket directory (idempotent)."""
+    """Create a per-agent tmux socket directory (idempotent).
+
+    Each command is a separate call so that callers wrapping with sudo apply
+    privilege to every command individually.
+    """
     q_user = shlex.quote(linux_user)
     grp = shlex.quote(AGENT_SOCKET_GROUP)
     q_path = shlex.quote(f"{AGENT_SOCKET_ROOT}/{linux_user}")
-    run_command(
-        f"sh -c 'mkdir -p {q_path} && "
-        f"chown {q_user}:{grp} {q_path} && "
-        f"chmod 2770 {q_path}'",
-    )
+    run_command(f"mkdir -p {q_path}")
+    run_command(f"chown {q_user}:{grp} {q_path}")
+    run_command(f"chmod 2770 {q_path}")
 
 
 def build_socket_paths(

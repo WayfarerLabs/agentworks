@@ -308,6 +308,27 @@ def run_as_root(
     return run(target, f"sudo -n {command}", check=check, timeout=timeout, logger=logger)
 
 
+def run_as_root_multi(
+    target: SSHTarget,
+    commands: list[str],
+    *,
+    check: bool = True,
+    timeout: int | None = None,
+    logger: SSHLogger | None = None,
+) -> SSHResult:
+    """Execute multiple commands as root, each with its own sudo, joined with &&.
+
+    Avoids the common pitfall where ``sudo -n cmd1 && cmd2`` only runs cmd1
+    under sudo. Each command in *commands* is individually prefixed with
+    ``sudo -n``.
+
+    # TODO: consider migrating existing run_as_root callers that use
+    # ``sh -c`` or ``&&`` to this function.
+    """
+    joined = " && ".join(f"sudo -n {cmd}" for cmd in commands)
+    return run(target, joined, check=check, timeout=timeout, logger=logger)
+
+
 def copy_to(
     target: SSHTarget,
     local_path: str | Path,
