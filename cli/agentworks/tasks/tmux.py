@@ -49,6 +49,13 @@ if-shell "test -f ~/.tmux.conf" "source-file ~/.tmux.conf"
 # Large scrollback buffer (override user config)
 set -g history-limit {history_limit}
 
+# Size windows based on the most recently active client, not the smallest.
+# Task sessions are created detached (default geometry) then attached from
+# within the console session. Without this, the inner session stays stuck
+# at the small detached size.
+set -g window-size latest
+set -g aggressive-resize on
+
 # Disable status bar -- the console provides this when nested;
 # for direct attach, the task is the only thing on screen.
 set -g status off
