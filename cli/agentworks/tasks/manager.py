@@ -525,9 +525,8 @@ def describe_task(
     ws, vm, run_command = _prepare_vm(db, config, workspace_name, operation=None)
 
     # Reconcile status with tmux
-    from agentworks.tasks.tmux import session_exists
-
-    live = session_exists(workspace_name, name, run_command=run_command)
+    sock = _socket_path_for_task(db, task)
+    live = _session_exists_any_server(workspace_name, name, run_command=run_command, socket_path=sock)
     if live and task.status != TaskStatus.RUNNING.value:
         db.update_task_status(workspace_name, name, TaskStatus.RUNNING)
         task = _require_task(db, workspace_name, name)
@@ -631,13 +630,18 @@ def attach_task(
     task = _require_task(db, workspace_name, name)
     sock = _socket_path_for_task(db, task)
 
-    if not session_exists(workspace_name, name, run_command=run_command, socket_path=sock):
+    if not _session_exists_any_server(workspace_name, name, run_command=run_command, socket_path=sock):
         typer.echo(f"Error: task '{name}' is not running", err=True)
         raise typer.Exit(1)
 
+    # Determine which server has the session. Prefer the socket; fall back
+    # to the default server for legacy sessions.
     session = shlex.quote(derive_session_name(workspace_name, name))
     target = ssh_target_for_vm(vm, config)
-    sys.exit(interactive(target, tmux_cmd(f"attach -t {session}", sock)))
+    if sock and session_exists(workspace_name, name, run_command=run_command, socket_path=sock):
+        sys.exit(interactive(target, tmux_cmd(f"attach -t {session}", sock)))
+    else:
+        sys.exit(interactive(target, tmux_cmd(f"attach -t {session}")))
 
 
 def task_logs(
@@ -649,11 +653,15 @@ def task_logs(
     lines: int | None = None,
 ) -> None:
     """Dump the scrollback buffer for a task."""
-    from agentworks.tasks.tmux import capture_output
+    from agentworks.tasks.tmux import capture_output, session_exists
 
     _ws, _vm, run_command = _prepare_vm(db, config, workspace_name, operation="task-logs")
     task = _require_task(db, workspace_name, name)
     sock = _socket_path_for_task(db, task)
+
+    # For legacy sessions, fall back to the default server
+    if sock and not session_exists(workspace_name, name, run_command=run_command, socket_path=sock):
+        sock = None
 
     output = capture_output(
         workspace_name,

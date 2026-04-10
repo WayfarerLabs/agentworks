@@ -196,6 +196,7 @@ def delete_agent(
         for task in agent_tasks:
             sock = agent_socket_path(agent.linux_user, task.workspace_name, task.name)
             kill_task_session(task.workspace_name, task.name, run_command=run_command, socket_path=sock)
+            kill_task_session(task.workspace_name, task.name, run_command=run_command)
             db.delete_task(task.workspace_name, task.name)
         typer.echo(f"  Deleted {len(agent_tasks)} task(s)")
 
@@ -594,12 +595,15 @@ def _create_agent_on_vm(
     else:
         run_as_root(target, f"usermod -s {shell_path} {linux_user}", logger=lg)
 
-    # Ensure the agent has a tmux socket directory for agent-mode tasks
+    # Ensure the agent tmux socket infrastructure exists. Call
+    # ensure_agent_socket_root first so this works on VMs that haven't
+    # been reinited since the socket feature was added.
     from functools import partial as _partial
 
-    from agentworks.tasks.tmux import ensure_agent_socket_dir
+    from agentworks.tasks.tmux import ensure_agent_socket_dir, ensure_agent_socket_root
 
     _root_cmd = _partial(run_as_root, target, logger=lg)
+    ensure_agent_socket_root(_root_cmd, vm.admin_username)
     ensure_agent_socket_dir(_root_cmd, linux_user)
 
     # Write a minimal rc file with a clear agent prompt

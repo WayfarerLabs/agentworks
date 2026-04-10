@@ -61,7 +61,7 @@ def create_console(
     paths = socket_paths or {}
     typer.echo(f"Adding {len(running_tasks)} task(s) to console...")
     for task in running_tasks:
-        key = f"{task.workspace_name}--{task.name}"
+        key = derive_session_name(task.workspace_name, task.name)
         _add_task_window(
             task.workspace_name, task.name,
             run_command=run_command,

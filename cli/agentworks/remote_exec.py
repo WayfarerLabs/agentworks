@@ -166,11 +166,15 @@ def _poll_until_done(
     while True:
         time.sleep(poll_interval)
 
-        # Hard timeout
+        # Hard timeout -- kill the remote process to avoid orphans
         if timeout is not None and (time.monotonic() - start_time) > timeout:
             typer.echo(
-                f"  {label}: timed out after {timeout}s",
+                f"  {label}: timed out after {timeout}s, killing remote process",
                 err=True,
+            )
+            target.run(
+                f"test -f {pid_file} && kill $(cat {pid_file}) 2>/dev/null",
+                check=False,
             )
             break
 

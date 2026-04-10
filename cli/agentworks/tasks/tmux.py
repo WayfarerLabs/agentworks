@@ -45,7 +45,11 @@ def ensure_agent_socket_root(run_command: RunCommand, admin_username: str) -> No
     """
     grp = shlex.quote(AGENT_SOCKET_GROUP)
     admin = shlex.quote(admin_username)
-    run_command(f"groupadd -f {grp}")
+    # Two calls: getent doesn't need root but groupadd does. Keeping them
+    # separate avoids the sudo scoping issue with || in a single command.
+    result = run_command(f"getent group {grp} >/dev/null 2>&1", check=False)
+    if not getattr(result, "ok", True):
+        run_command(f"/usr/sbin/groupadd {grp}")
     run_command(f"usermod -aG {grp} {admin}")
     run_command(f"mkdir -p {AGENT_SOCKET_ROOT}")
     run_command(f"chown root:{grp} {AGENT_SOCKET_ROOT}")
@@ -163,7 +167,7 @@ def tmux_cmd(base: str, socket_path: str | None = None, *, sudo: bool = False) -
     attach -- that reintroduces the use_pty resize problem.
     """
     cmd = f"tmux -S {shlex.quote(socket_path)} {base}" if socket_path else f"tmux {base}"
-    return f"sudo {cmd}" if sudo else cmd
+    return f"sudo -n {cmd}" if sudo else cmd
 
 
 def _grant_server_access(
