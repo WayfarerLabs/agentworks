@@ -96,6 +96,7 @@ def _session_exists_any_server(
     *,
     run_command: RunCommand,
     socket_path: str | None,
+    warn_legacy: bool = True,
 ) -> bool:
     """Check if a task session exists on either the agent socket or the default server."""
     from agentworks.tasks.tmux import session_exists
@@ -103,7 +104,7 @@ def _session_exists_any_server(
     if socket_path and session_exists(workspace_name, task_name, run_command=run_command, socket_path=socket_path):
         return True
     on_default = session_exists(workspace_name, task_name, run_command=run_command)
-    if on_default and socket_path:
+    if on_default and socket_path and warn_legacy:
         typer.echo(
             f"  Note: agent task '{task_name}' is running on the default tmux server "
             f"(legacy mode). Restart it to use the new per-agent socket.",
@@ -391,7 +392,7 @@ def stop_task(
     time.sleep(_STOP_GRACE_SECONDS)
 
     # Kill if still alive (checks both servers for migration compatibility)
-    if _session_exists_any_server(workspace_name, name, run_command=run_command, socket_path=sock):
+    if _session_exists_any_server(workspace_name, name, run_command=run_command, socket_path=sock, warn_legacy=False):
         _kill_task_any_server(workspace_name, name, run_command=run_command, socket_path=sock)
 
     db.update_task_status(workspace_name, name, TaskStatus.STOPPED)
@@ -416,7 +417,7 @@ def restart_task(
     task = _require_task(db, workspace_name, name)
     sock = _socket_path_for_task(db, task)
 
-    if _session_exists_any_server(workspace_name, name, run_command=run_command, socket_path=sock):
+    if _session_exists_any_server(workspace_name, name, run_command=run_command, socket_path=sock, warn_legacy=False):
         if not force:
             typer.echo(
                 f"Error: task '{name}' is still running. Stop it first, or use --force.",
