@@ -41,16 +41,17 @@ def ensure_agent_socket_root(run_command: RunCommand, admin_username: str) -> No
     """Create the agent tmux socket root directory and group (idempotent)."""
     grp = shlex.quote(AGENT_SOCKET_GROUP)
     admin = shlex.quote(admin_username)
-    # Create group separately (idempotent, allowed to fail if it exists)
+    # Create group separately (idempotent, allowed to fail if it exists).
+    # Wrapping in sh -c so sudo applies to both sides of the ||.
     run_command(
-        f"getent group {grp} >/dev/null 2>&1 || /usr/sbin/groupadd {grp}",
+        f"sh -c 'getent group {grp} >/dev/null 2>&1 || /usr/sbin/groupadd {grp}'",
         check=False,
     )
     run_command(
-        f"usermod -aG {grp} {admin} && "
+        f"sh -c 'usermod -aG {grp} {admin} && "
         f"mkdir -p {AGENT_SOCKET_ROOT} && "
         f"chown root:{grp} {AGENT_SOCKET_ROOT} && "
-        f"chmod 2770 {AGENT_SOCKET_ROOT}",
+        f"chmod 2770 {AGENT_SOCKET_ROOT}'",
     )
 
 
@@ -60,9 +61,9 @@ def ensure_agent_socket_dir(run_command: RunCommand, linux_user: str) -> None:
     grp = shlex.quote(AGENT_SOCKET_GROUP)
     q_path = shlex.quote(f"{AGENT_SOCKET_ROOT}/{linux_user}")
     run_command(
-        f"mkdir -p {q_path} && "
+        f"sh -c 'mkdir -p {q_path} && "
         f"chown {q_user}:{grp} {q_path} && "
-        f"chmod 2770 {q_path}",
+        f"chmod 2770 {q_path}'",
     )
 
 
