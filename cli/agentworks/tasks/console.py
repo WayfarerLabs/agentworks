@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING
 import typer
 
 from agentworks.db import TaskStatus
-from agentworks.tasks.tmux import _tmux_cmd, derive_session_name
+from agentworks.tasks.tmux import derive_session_name, tmux_cmd
 
 if TYPE_CHECKING:
     from agentworks.config import Config
@@ -38,8 +38,15 @@ def create_console(
     run_command: RunCommand,
     admin_username: str,
     socket_paths: dict[str, str | None] | None = None,
+    recreate: bool = False,
 ) -> None:
-    """Create the VM console session with one window per running task."""
+    """Create the VM console session with one window per running task.
+
+    When *recreate* is True, kills any existing console session first.
+    """
+    if recreate:
+        run_command(f"tmux kill-session -t {CONSOLE_SESSION_NAME}", check=False)
+
     # Create the session with a login shell as the initial window
     run_command(
         f"tmux new-session -d -s {CONSOLE_SESSION_NAME} "
@@ -74,8 +81,8 @@ def _add_task_window(
     q_session = shlex.quote(session_name)
     # Unset TMUX to allow nesting (console -> task session), then loop
     # re-attach while the task session is alive.
-    has_cmd = _tmux_cmd(f"has-session -t {q_session}", socket_path)
-    attach_cmd = _tmux_cmd(f"attach -t {q_session}", socket_path)
+    has_cmd = tmux_cmd(f"has-session -t {q_session}", socket_path)
+    attach_cmd = tmux_cmd(f"attach -t {q_session}", socket_path)
     wrapper = (
         f"unset TMUX; "
         f"while {has_cmd} 2>/dev/null; do "
@@ -109,21 +116,6 @@ def add_task_to_console(
     _add_task_window(workspace_name, task_name, run_command=run_command, socket_path=socket_path)
 
 
-def recreate_console(
-    running_tasks: list[TaskRow],
-    *,
-    run_command: RunCommand,
-    admin_username: str,
-    socket_paths: dict[str, str | None] | None = None,
-) -> None:
-    """Kill the existing console and rebuild from running tasks."""
-    run_command(f"tmux kill-session -t {CONSOLE_SESSION_NAME}", check=False)
-    create_console(
-        running_tasks,
-        run_command=run_command,
-        admin_username=admin_username,
-        socket_paths=socket_paths,
-    )
 
 
 def attach_console(
@@ -169,32 +161,22 @@ def attach_console(
     running_tasks = _get_running_tasks_for_vm(db, vm)
 
     # Build socket path map for agent-mode tasks
-    from agentworks.tasks.tmux import agent_socket_path
+    from agentworks.tasks.tmux import build_socket_paths
 
-    paths: dict[str, str | None] = {}
-    for task in running_tasks:
-        key = f"{task.workspace_name}--{task.name}"
-        if task.agent_name:
-            agent = db.get_agent(task.agent_name)
-            paths[key] = agent_socket_path(agent.linux_user, task.workspace_name, task.name) if agent else None
-        else:
-            paths[key] = None
+    def _agent_lookup(agent_name: str) -> str | None:
+        agent = db.get_agent(agent_name)
+        return agent.linux_user if agent else None
+
+    paths = build_socket_paths(running_tasks, _agent_lookup)
 
     if recreate or not console_exists(run_command=run_command):
-        if recreate:
-            recreate_console(
-                running_tasks,
-                run_command=run_command,
-                admin_username=vm.admin_username,
-                socket_paths=paths,
-            )
-        else:
-            create_console(
-                running_tasks,
-                run_command=run_command,
-                admin_username=vm.admin_username,
-                socket_paths=paths,
-            )
+        create_console(
+            running_tasks,
+            run_command=run_command,
+            admin_username=vm.admin_username,
+            socket_paths=paths,
+            recreate=recreate,
+        )
 
     sys.exit(interactive(target, f"tmux attach -t {CONSOLE_SESSION_NAME}"))
 

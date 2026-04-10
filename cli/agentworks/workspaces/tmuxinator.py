@@ -14,7 +14,7 @@ from __future__ import annotations
 import shlex
 from typing import TYPE_CHECKING
 
-from agentworks.tasks.tmux import _tmux_cmd, derive_session_name
+from agentworks.tasks.tmux import derive_session_name, tmux_cmd
 
 if TYPE_CHECKING:
     from agentworks.db import TaskRow
@@ -58,8 +58,8 @@ def generate_config(
         q_session = shlex.quote(session)
         sock = paths.get(session)
         # Wrapper: unset TMUX for nesting, loop attach while session exists
-        has_cmd = _tmux_cmd(f"has-session -t {q_session}", sock)
-        attach_cmd = _tmux_cmd(f"attach -t {q_session}", sock)
+        has_cmd = tmux_cmd(f"has-session -t {q_session}", sock)
+        attach_cmd = tmux_cmd(f"attach -t {q_session}", sock)
         wrapper = (
             f"unset TMUX; "
             f"while {has_cmd} 2>/dev/null; do "

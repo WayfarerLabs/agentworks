@@ -42,23 +42,47 @@ def ensure_agent_socket_root(run_command: RunCommand, admin_username: str) -> No
     grp = shlex.quote(AGENT_SOCKET_GROUP)
     admin = shlex.quote(admin_username)
     run_command(
-        f"getent group {grp} >/dev/null 2>&1 || /usr/sbin/groupadd {grp}",
-        check=False,
+        f"{{ getent group {grp} >/dev/null 2>&1 || /usr/sbin/groupadd {grp}; }} && "
+        f"usermod -aG {grp} {admin} && "
+        f"mkdir -p {AGENT_SOCKET_ROOT} && "
+        f"chown root:{grp} {AGENT_SOCKET_ROOT} && "
+        f"chmod 2770 {AGENT_SOCKET_ROOT}",
     )
-    run_command(f"usermod -aG {grp} {admin}")
-    run_command(f"mkdir -p {AGENT_SOCKET_ROOT}")
-    run_command(f"chown root:{grp} {AGENT_SOCKET_ROOT}")
-    run_command(f"chmod 2770 {AGENT_SOCKET_ROOT}")
 
 
 def ensure_agent_socket_dir(run_command: RunCommand, linux_user: str) -> None:
     """Create a per-agent tmux socket directory (idempotent)."""
     q_user = shlex.quote(linux_user)
     grp = shlex.quote(AGENT_SOCKET_GROUP)
-    path = f"{AGENT_SOCKET_ROOT}/{linux_user}"
-    run_command(f"mkdir -p {shlex.quote(path)}")
-    run_command(f"chown {q_user}:{grp} {shlex.quote(path)}")
-    run_command(f"chmod 2770 {shlex.quote(path)}")
+    q_path = shlex.quote(f"{AGENT_SOCKET_ROOT}/{linux_user}")
+    run_command(
+        f"mkdir -p {q_path} && "
+        f"chown {q_user}:{grp} {q_path} && "
+        f"chmod 2770 {q_path}",
+    )
+
+
+def build_socket_paths(
+    tasks: list[object],
+    get_agent_linux_user: object,
+) -> dict[str, str | None]:
+    """Build a session-name to socket-path map for a list of tasks.
+
+    *get_agent_linux_user* is a callable ``(agent_name: str) -> str | None``
+    that resolves an agent name to its Linux username (typically via DB lookup).
+    """
+    paths: dict[str, str | None] = {}
+    for task in tasks:
+        agent_name = getattr(task, "agent_name", None)
+        ws = getattr(task, "workspace_name", "")
+        name = getattr(task, "name", "")
+        key = derive_session_name(ws, name)
+        if agent_name:
+            linux_user = get_agent_linux_user(agent_name)  # type: ignore[operator]
+            paths[key] = agent_socket_path(linux_user, ws, name) if linux_user else None
+        else:
+            paths[key] = None
+    return paths
 
 
 def generate_restricted_config(history_limit: int = DEFAULT_HISTORY_LIMIT) -> str:
@@ -124,7 +148,7 @@ def deploy_restricted_config(
     run_command(f"sudo tee {RESTRICTED_CONFIG_PATH} > /dev/null << 'TMUX_CONF'\n{config}TMUX_CONF")
 
 
-def _tmux_cmd(base: str, socket_path: str | None = None) -> str:
+def tmux_cmd(base: str, socket_path: str | None = None) -> str:
     """Prepend ``-S <socket>`` to a tmux subcommand when a socket is given."""
     if socket_path:
         return f"tmux -S {shlex.quote(socket_path)} {base}"
@@ -219,7 +243,7 @@ def kill_task_session(
 ) -> bool:
     """Kill a task's tmux session. Returns True if the session existed."""
     session = shlex.quote(derive_session_name(workspace_name, task_name))
-    result = run_command(_tmux_cmd(f"kill-session -t {session}", socket_path), check=False)
+    result = run_command(tmux_cmd(f"kill-session -t {session}", socket_path), check=False)
     return getattr(result, "ok", True)
 
 
@@ -233,7 +257,7 @@ def session_exists(
     """Check if a task's tmux session is alive."""
     session = shlex.quote(derive_session_name(workspace_name, task_name))
     result = run_command(
-        _tmux_cmd(f"has-session -t {session}", socket_path) + " 2>/dev/null",
+        tmux_cmd(f"has-session -t {session}", socket_path) + " 2>/dev/null",
         check=False,
     )
     return getattr(result, "ok", False)
@@ -249,7 +273,7 @@ def send_keys(
 ) -> None:
     """Send keys to a task's tmux session."""
     session = shlex.quote(derive_session_name(workspace_name, task_name))
-    run_command(_tmux_cmd(f"send-keys -t {session} {keys}", socket_path), check=False)
+    run_command(tmux_cmd(f"send-keys -t {session} {keys}", socket_path), check=False)
 
 
 def capture_output(
@@ -263,7 +287,7 @@ def capture_output(
     """Capture the scrollback buffer from a task's tmux session."""
     session = shlex.quote(derive_session_name(workspace_name, task_name))
     result = run_command(
-        _tmux_cmd(f"capture-pane -t {session} -p -S -{lines}", socket_path),
+        tmux_cmd(f"capture-pane -t {session} -p -S -{lines}", socket_path),
         check=False,
     )
     return getattr(result, "stdout", "") or ""

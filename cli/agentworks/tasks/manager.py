@@ -47,16 +47,26 @@ def _resolve_task_linux_user(db: Database, task: TaskRow, vm: VMRow) -> str:
     return vm.admin_username
 
 
+def _agent_linux_user_lookup(db: Database):
+    """Return a callable that resolves agent name to linux_user via DB."""
+
+    def _lookup(agent_name: str) -> str | None:
+        agent = db.get_agent(agent_name)
+        return agent.linux_user if agent else None
+
+    return _lookup
+
+
 def _socket_path_for_task(db: Database, task: TaskRow) -> str | None:
     """Return the agent socket path for an agent-mode task, or None for admin."""
     if not task.agent_name:
         return None
     from agentworks.tasks.tmux import agent_socket_path
 
-    agent = db.get_agent(task.agent_name)
-    if agent is None:
+    linux_user = _agent_linux_user_lookup(db)(task.agent_name)
+    if linux_user is None:
         return None
-    return agent_socket_path(agent.linux_user, task.workspace_name, task.name)
+    return agent_socket_path(linux_user, task.workspace_name, task.name)
 
 
 def _require_workspace(db: Database, name: str) -> WorkspaceRow:
@@ -122,18 +132,11 @@ def _regenerate_tmuxinator(
 ) -> None:
     """Regenerate the workspace tmuxinator config from current task state."""
     from agentworks.ssh import write_file
-    from agentworks.tasks.tmux import agent_socket_path, derive_session_name
+    from agentworks.tasks.tmux import build_socket_paths
     from agentworks.workspaces.tmuxinator import generate_config
 
     tasks = db.list_tasks(workspace_name=ws.name)
-
-    # Build socket path map for agent-mode tasks
-    paths: dict[str, str | None] = {}
-    for t in tasks:
-        key = derive_session_name(ws.name, t.name)
-        if t.agent_name:
-            agent = db.get_agent(t.agent_name)
-            paths[key] = agent_socket_path(agent.linux_user, ws.name, t.name) if agent else None
+    paths = build_socket_paths(tasks, _agent_linux_user_lookup(db))
     config_text = generate_config(ws.name, ws.workspace_path, tasks=tasks, socket_paths=paths)
     target = ssh_target_for_vm(vm, config)
     write_file(target, f"{ws.workspace_path}/.tmuxinator.yml", config_text, logger=logger)
@@ -578,7 +581,7 @@ def attach_task(
 ) -> None:
     """Attach to a task's tmux session (interactive)."""
     from agentworks.ssh import interactive
-    from agentworks.tasks.tmux import _tmux_cmd, derive_session_name, session_exists
+    from agentworks.tasks.tmux import derive_session_name, session_exists, tmux_cmd
 
     _ws, vm, run_command = _prepare_vm(db, config, workspace_name, operation="task-attach")
     task = _require_task(db, workspace_name, name)
@@ -590,7 +593,7 @@ def attach_task(
 
     session = shlex.quote(derive_session_name(workspace_name, name))
     target = ssh_target_for_vm(vm, config)
-    sys.exit(interactive(target, _tmux_cmd(f"attach -t {session}", sock)))
+    sys.exit(interactive(target, tmux_cmd(f"attach -t {session}", sock)))
 
 
 def task_logs(
