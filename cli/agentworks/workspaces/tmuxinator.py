@@ -14,7 +14,7 @@ from __future__ import annotations
 import shlex
 from typing import TYPE_CHECKING
 
-from agentworks.tasks.tmux import AGENT_SOCKET_GROUP, derive_session_name, tmux_cmd
+from agentworks.tasks.tmux import derive_session_name, tmux_cmd
 
 if TYPE_CHECKING:
     from agentworks.db import TaskRow
@@ -57,12 +57,9 @@ def generate_config(
         session = derive_session_name(ws_name, task.name)
         q_session = shlex.quote(session)
         sock = paths.get(session)
-        # Wrapper: unset TMUX for nesting, loop attach while session exists.
-        # For agent sockets, use sudo for has-session and sg for attach
-        # (see console.py for explanation of group inheritance issue).
-        has_cmd = tmux_cmd(f"has-session -t {q_session}", sock, sudo=bool(sock))
-        raw_attach = tmux_cmd(f"attach -t {q_session}", sock)
-        attach_cmd = f"sg {AGENT_SOCKET_GROUP} -c {shlex.quote(raw_attach)}" if sock else raw_attach
+        # Wrapper: unset TMUX for nesting, loop attach while session exists
+        has_cmd = tmux_cmd(f"has-session -t {q_session}", sock)
+        attach_cmd = tmux_cmd(f"attach -t {q_session}", sock)
         wrapper = (
             f"unset TMUX; "
             f"while {has_cmd} 2>/dev/null; do "
