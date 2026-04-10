@@ -102,7 +102,14 @@ def _session_exists_any_server(
 
     if socket_path and session_exists(workspace_name, task_name, run_command=run_command, socket_path=socket_path):
         return True
-    return session_exists(workspace_name, task_name, run_command=run_command)
+    on_default = session_exists(workspace_name, task_name, run_command=run_command)
+    if on_default and socket_path:
+        typer.echo(
+            f"  Note: agent task '{task_name}' is running on the default tmux server "
+            f"(legacy mode). Restart it to use the new per-agent socket.",
+            err=True,
+        )
+    return on_default
 
 
 def _require_workspace(db: Database, name: str) -> WorkspaceRow:
