@@ -256,6 +256,9 @@ def _reconcile_status(
     if task.status == TaskStatus.RUNNING.value and not alive:
         db.update_task_status(workspace_name, task.name, TaskStatus.STOPPED)
         return TaskStatus.STOPPED.value
+    if task.status == TaskStatus.STOPPED.value and alive:
+        db.update_task_status(workspace_name, task.name, TaskStatus.RUNNING)
+        return TaskStatus.RUNNING.value
     return task.status
 
 
