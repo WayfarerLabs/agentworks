@@ -806,11 +806,19 @@ def delete_workspace(
             from functools import partial
 
             from agentworks.ssh import run, ssh_target_for_vm
-            from agentworks.tasks.tmux import kill_task_session
+            from agentworks.tasks.tmux import agent_socket_path, kill_task_session
 
             target = ssh_target_for_vm(vm, config)
             run_command = partial(run, target, logger=ssh_logger)
             for task in db.list_tasks(workspace_name=name):
+                sock = None
+                if task.agent_name:
+                    agent = db.get_agent(task.agent_name)
+                    if agent:
+                        sock = agent_socket_path(agent.linux_user, name, task.name)
+                # Kill on both socket and default server for migration compat
+                if sock:
+                    kill_task_session(name, task.name, run_command=run_command, socket_path=sock)
                 kill_task_session(name, task.name, run_command=run_command)
     db.delete_tasks_for_workspace(name)
 
