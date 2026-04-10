@@ -910,12 +910,13 @@ def task_describe(
 @task_app.command("list")
 def task_list(
     workspace: Annotated[str | None, typer.Option("--workspace", help="Filter by workspace")] = None,
+    no_status: Annotated[bool, typer.Option("--no-status", help="Skip SSH status check (faster)")] = False,
 ) -> None:
     """List tasks."""
     from agentworks.config import load_config
     from agentworks.tasks.manager import list_tasks
 
-    list_tasks(_get_db(), load_config(), workspace_name=workspace)
+    list_tasks(_get_db(), load_config(), workspace_name=workspace, no_status=no_status)
 
 
 @task_app.command("stop")

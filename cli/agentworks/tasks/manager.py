@@ -552,8 +552,9 @@ def list_tasks(
     config: Config,
     *,
     workspace_name: str | None = None,
+    no_status: bool = False,
 ) -> None:
-    """List tasks, reconciling status with tmux."""
+    """List tasks, optionally reconciling status with tmux."""
     tasks = db.list_tasks(workspace_name=workspace_name)
     if not tasks:
         typer.echo("No tasks found.")
@@ -569,7 +570,7 @@ def list_tasks(
         ws = db.get_workspace(ws_name)
         vm_name = ws.vm_name or "-" if ws else "-"
 
-        if ws is None or ws.type != "vm":
+        if no_status or ws is None or ws.type != "vm":
             for task in ws_tasks:
                 rows.append((task.name, ws_name, vm_name, task.template, task.mode, task.status))
             continue
