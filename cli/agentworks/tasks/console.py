@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING
 import typer
 
 from agentworks.db import TaskStatus
-from agentworks.tasks.tmux import derive_session_name, tmux_cmd
+from agentworks.tasks.tmux import AGENT_SOCKET_GROUP, derive_session_name, tmux_cmd
 
 if TYPE_CHECKING:
     from agentworks.config import Config
@@ -81,8 +81,14 @@ def _add_task_window(
     q_session = shlex.quote(session_name)
     # Unset TMUX to allow nesting (console -> task session), then loop
     # re-attach while the task session is alive.
-    has_cmd = tmux_cmd(f"has-session -t {q_session}", socket_path)
-    attach_cmd = tmux_cmd(f"attach -t {q_session}", socket_path)
+    #
+    # For agent sockets: the console pane may not have the socket group in
+    # its process groups (tmux server predates the group addition). Use
+    # sudo for has-session (non-interactive, use_pty is fine) and sg to
+    # pick up the group for the interactive attach.
+    has_cmd = tmux_cmd(f"has-session -t {q_session}", socket_path, sudo=bool(socket_path))
+    raw_attach = tmux_cmd(f"attach -t {q_session}", socket_path)
+    attach_cmd = f"sg {AGENT_SOCKET_GROUP} -c {shlex.quote(raw_attach)}" if socket_path else raw_attach
     wrapper = (
         f"unset TMUX; "
         f"while {has_cmd} 2>/dev/null; do "
