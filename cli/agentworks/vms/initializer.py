@@ -510,7 +510,13 @@ def _install_system_packages(
     typer.echo(f"  Installing {len(INIT_SYSTEM_PACKAGES)} system packages...")
     apt_str = " ".join(shlex.quote(p) for p in INIT_SYSTEM_PACKAGES)
     try:
-        _run_logged(target, f"apt-get install -y -qq {apt_str}", logger, as_root=True, timeout=300)
+        _run_logged(
+            target,
+            f"DEBIAN_FRONTEND=noninteractive apt-get install -y -qq -o Dpkg::Options::=--force-confold {apt_str}",
+            logger,
+            as_root=True,
+            timeout=300,
+        )
     except SSHError as e:
         msg = f"system packages failed: {e}"
         logger.warning(msg)
@@ -542,7 +548,13 @@ def _install_apt_packages(
     typer.echo(f"  Installing {len(all_apt)} apt packages...")
     apt_str = " ".join(shlex.quote(p) for p in all_apt)
     try:
-        _run_logged(target, f"apt-get install -y -qq {apt_str}", logger, as_root=True, timeout=300)
+        _run_logged(
+            target,
+            f"DEBIAN_FRONTEND=noninteractive apt-get install -y -qq -o Dpkg::Options::=--force-confold {apt_str}",
+            logger,
+            as_root=True,
+            timeout=300,
+        )
     except SSHError as e:
         msg = f"apt packages failed: {e}"
         logger.warning(msg)

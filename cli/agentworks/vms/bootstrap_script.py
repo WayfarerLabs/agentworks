@@ -41,9 +41,10 @@ echo "$VM_USER ALL=(ALL) NOPASSWD:ALL" > "/etc/sudoers.d/$VM_USER"
 
 # -- Step 2: Provisioning packages --
 echo "##STEP## Provisioning packages"
+export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
 # shellcheck disable=SC2086
-apt-get install -y -qq $PROVISIONING_PACKAGES
+apt-get install -y -qq -o Dpkg::Options::="--force-confold" $PROVISIONING_PACKAGES
 echo "##SUCCESS## provisioning packages installed"
 
 # -- Step 2b: Preserve SSH host keys across reboots --
