@@ -56,12 +56,12 @@ agent_grants_app = typer.Typer(
 )
 agent_app.add_typer(agent_grants_app)
 
-task_app = typer.Typer(
-    name="task",
-    help="Manage tasks (named work streams in workspaces).",
+session_app = typer.Typer(
+    name="session",
+    help="Manage sessions.",
     no_args_is_help=True,
 )
-app.add_typer(task_app)
+app.add_typer(session_app)
 
 installer_app = typer.Typer(
     name="installer",
@@ -521,7 +521,7 @@ def workspace_console(
     recreate: Annotated[bool, typer.Option("--recreate", help="Kill and rebuild the console")] = False,
     allow_nesting: Annotated[bool, typer.Option("--allow-nesting", help="Allow running inside tmux")] = False,
 ) -> None:
-    """Open the workspace console (tmux session with tasks)."""
+    """Open the workspace console (tmux session with sessions)."""
     from agentworks.config import load_config
     from agentworks.workspaces.manager import console_workspace
 
@@ -554,7 +554,7 @@ def workspace_list(
 def workspace_describe(
     name: Annotated[str, typer.Argument(help="Workspace name")],
 ) -> None:
-    """Show workspace details, tasks, and agent access."""
+    """Show workspace details, sessions, and agent access."""
     from agentworks.workspaces.manager import describe_workspace
 
     describe_workspace(_get_db(), name)
@@ -592,7 +592,7 @@ def workspace_repair(
 @workspace_app.command("delete")
 def workspace_delete(
     name: Annotated[str, typer.Argument(help="Workspace name")],
-    force: Annotated[bool, typer.Option("--force", help="Force delete even with tasks")] = False,
+    force: Annotated[bool, typer.Option("--force", help="Force delete even with sessions")] = False,
     yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip confirmation")] = False,
 ) -> None:
     """Delete a workspace."""
@@ -753,7 +753,7 @@ def agent_shell(
 @agent_app.command("delete")
 def agent_delete(
     name: Annotated[str, typer.Argument(help="Agent name")],
-    force: Annotated[bool, typer.Option("--force", help="Force delete even with tasks")] = False,
+    force: Annotated[bool, typer.Option("--force", help="Force delete even with sessions")] = False,
     yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip confirmation")] = False,
 ) -> None:
     """Delete an agent."""
@@ -763,14 +763,14 @@ def agent_delete(
     delete_agent(_get_db(), load_config(), name=name, force=force, yes=yes)
 
 
-# -- Task commands ---------------------------------------------------------
+# -- Session commands ---------------------------------------------------------
 
 
-@task_app.command("create")
-def task_create(
-    name: Annotated[str | None, typer.Option("--name", help="Task name (prompted if omitted)")] = None,
+@session_app.command("create")
+def session_create(
+    name: Annotated[str | None, typer.Option("--name", help="Session name (prompted if omitted)")] = None,
     workspace: Annotated[str | None, typer.Option("--workspace", help="Existing workspace")] = None,
-    template: Annotated[str | None, typer.Option("--template", help="Task template")] = None,
+    template: Annotated[str | None, typer.Option("--template", help="Session template")] = None,
     admin: Annotated[bool, typer.Option("--admin", help="Run as the VM admin user")] = False,
     agent: Annotated[str | None, typer.Option("--agent", help="Agent name (agent mode)")] = None,
     new_workspace: Annotated[bool, typer.Option("--new-workspace", help="Create a new workspace")] = False,
@@ -780,9 +780,9 @@ def task_create(
     ] = None,
     vm: Annotated[str | None, typer.Option("--vm", help="VM for new workspace")] = None,
 ) -> None:
-    """Create and start a task in a workspace."""
+    """Create and start a session in a workspace."""
     from agentworks.config import load_config
-    from agentworks.sessions.manager import create_task
+    from agentworks.sessions.manager import create_session
     from agentworks.workspaces.manager import create_workspace
 
     # Validate flag combinations before any prompts
@@ -804,7 +804,7 @@ def task_create(
 
     if new_workspace:
         resolved_vm = _prompt_vm(db, vm)
-        resolved_workspace = workspace_name  # may be None, resolved after task name
+        resolved_workspace = workspace_name  # may be None, resolved after session name
 
         # Resolve mode (need VM name for agent lookup)
         resolved_agent: str | None = agent
@@ -813,7 +813,7 @@ def task_create(
             vm_agents = db.list_agents(vm_name=resolved_vm)
             if vm_agents:
                 _require_interactive("--admin or --agent")
-                typer.echo("Run task as:")
+                typer.echo("Run session as:")
                 typer.echo("  1) admin")
                 for i, a in enumerate(vm_agents, 2):
                     label = f"agent: {a.name}"
@@ -830,7 +830,7 @@ def task_create(
                         raise typer.Exit(1)
                     resolved_agent = vm_agents[idx].name
 
-        resolved_name = _prompt_name("Task", name)
+        resolved_name = _prompt_name("Session", name)
         resolved_ws_name = resolved_workspace or f"ws-{resolved_name}"
 
         create_workspace(
@@ -847,11 +847,11 @@ def task_create(
         # Resolve mode
         resolved_agent: str | None = agent  # type: ignore[no-redef]
         if not admin and agent is None:
-            resolved_agent = _prompt_task_mode(db, resolved_workspace)
+            resolved_agent = _prompt_session_mode(db, resolved_workspace)
 
-        resolved_name = _prompt_name("Task", name)
+        resolved_name = _prompt_name("Session", name)
 
-    create_task(
+    create_session(
         db,
         config,
         name=resolved_name,
@@ -862,7 +862,7 @@ def task_create(
     )
 
 
-def _prompt_task_mode(db: Database, workspace_name: str) -> str | None:
+def _prompt_session_mode(db: Database, workspace_name: str) -> str | None:
     """Prompt for admin vs agent mode. Returns agent name or None for admin."""
     ws = db.get_workspace(workspace_name)
     if ws is None or ws.vm_name is None:
@@ -875,7 +875,7 @@ def _prompt_task_mode(db: Database, workspace_name: str) -> str | None:
 
     _require_interactive("--admin or --agent")
 
-    typer.echo("Run task as:")
+    typer.echo("Run session as:")
     typer.echo("  1) admin")
     for i, a in enumerate(agents, 2):
         label = f"agent: {a.name}"
@@ -893,93 +893,85 @@ def _prompt_task_mode(db: Database, workspace_name: str) -> str | None:
     return agents[idx].name
 
 
-@task_app.command("describe")
-def task_describe(
-    name: Annotated[str, typer.Argument(help="Task name")],
-    workspace: Annotated[str, typer.Option("--workspace", help="Workspace name")] = "",
+@session_app.command("describe")
+def session_describe(
+    name: Annotated[str, typer.Argument(help="Session name")],
 ) -> None:
-    """Show task details."""
+    """Show session details."""
     from agentworks.config import load_config
-    from agentworks.sessions.manager import describe_task
+    from agentworks.sessions.manager import describe_session
 
-    db = _get_db()
-    resolved_workspace = _prompt_workspace(db, workspace or None)
-    describe_task(db, load_config(), name=name, workspace_name=resolved_workspace)
+    describe_session(_get_db(), load_config(), name=name)
 
 
-@task_app.command("list")
-def task_list(
+@session_app.command("list")
+def session_list(
     workspace: Annotated[str | None, typer.Option("--workspace", help="Filter by workspace")] = None,
     no_status: Annotated[bool, typer.Option("--no-status", help="Skip SSH status check (faster)")] = False,
 ) -> None:
-    """List tasks."""
+    """List sessions."""
     from agentworks.config import load_config
-    from agentworks.sessions.manager import list_tasks
+    from agentworks.sessions.manager import list_sessions
 
-    list_tasks(_get_db(), load_config(), workspace_name=workspace, no_status=no_status)
+    list_sessions(_get_db(), load_config(), workspace_name=workspace, no_status=no_status)
 
 
-@task_app.command("stop")
-def task_stop(
-    name: Annotated[str, typer.Argument(help="Task name")],
-    workspace: Annotated[str, typer.Option("--workspace", help="Workspace name")] = ...,  # type: ignore[assignment]
+@session_app.command("stop")
+def session_stop(
+    name: Annotated[str, typer.Argument(help="Session name")],
 ) -> None:
-    """Stop a running task."""
+    """Stop a running session."""
     from agentworks.config import load_config
-    from agentworks.sessions.manager import stop_task
+    from agentworks.sessions.manager import stop_session
 
-    stop_task(_get_db(), load_config(), name=name, workspace_name=workspace)
+    stop_session(_get_db(), load_config(), name=name)
 
 
-@task_app.command("restart")
-def task_restart(
-    name: Annotated[str, typer.Argument(help="Task name")],
-    workspace: Annotated[str, typer.Option("--workspace", help="Workspace name")] = ...,  # type: ignore[assignment]
+@session_app.command("restart")
+def session_restart(
+    name: Annotated[str, typer.Argument(help="Session name")],
     force: Annotated[bool, typer.Option("--force", help="Kill if still running")] = False,
 ) -> None:
-    """Restart a task (uses restart_command if defined in template)."""
+    """Restart a session (uses restart_command if defined in template)."""
     from agentworks.config import load_config
-    from agentworks.sessions.manager import restart_task
+    from agentworks.sessions.manager import restart_session
 
-    restart_task(_get_db(), load_config(), name=name, workspace_name=workspace, force=force)
+    restart_session(_get_db(), load_config(), name=name, force=force)
 
 
-@task_app.command("attach")
-def task_attach(
-    name: Annotated[str, typer.Argument(help="Task name")],
-    workspace: Annotated[str, typer.Option("--workspace", help="Workspace name")] = ...,  # type: ignore[assignment]
+@session_app.command("attach")
+def session_attach(
+    name: Annotated[str, typer.Argument(help="Session name")],
 ) -> None:
-    """Attach to a task's tmux session."""
+    """Attach to a session."""
     from agentworks.config import load_config
-    from agentworks.sessions.manager import attach_task
+    from agentworks.sessions.manager import attach_session
 
-    attach_task(_get_db(), load_config(), name=name, workspace_name=workspace)
+    attach_session(_get_db(), load_config(), name=name)
 
 
-@task_app.command("delete")
-def task_delete(
-    name: Annotated[str, typer.Argument(help="Task name")],
-    workspace: Annotated[str, typer.Option("--workspace", help="Workspace name")] = ...,  # type: ignore[assignment]
+@session_app.command("delete")
+def session_delete(
+    name: Annotated[str, typer.Argument(help="Session name")],
     yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip confirmation")] = False,
 ) -> None:
-    """Stop and delete a task."""
+    """Stop and delete a session."""
     from agentworks.config import load_config
-    from agentworks.sessions.manager import delete_task
+    from agentworks.sessions.manager import delete_session
 
-    delete_task(_get_db(), load_config(), name=name, workspace_name=workspace, yes=yes)
+    delete_session(_get_db(), load_config(), name=name, yes=yes)
 
 
-@task_app.command("logs")
-def task_logs(
-    name: Annotated[str, typer.Argument(help="Task name")],
-    workspace: Annotated[str, typer.Option("--workspace", help="Workspace name")] = ...,  # type: ignore[assignment]
+@session_app.command("logs")
+def session_logs(
+    name: Annotated[str, typer.Argument(help="Session name")],
     lines: Annotated[int | None, typer.Option("--lines", "-n", help="Number of lines")] = None,
 ) -> None:
-    """Dump the scrollback buffer for a task."""
+    """Dump the scrollback buffer for a session."""
     from agentworks.config import load_config
-    from agentworks.sessions.manager import task_logs as _task_logs
+    from agentworks.sessions.manager import session_logs as _session_logs
 
-    _task_logs(_get_db(), load_config(), name=name, workspace_name=workspace, lines=lines)
+    _session_logs(_get_db(), load_config(), name=name, lines=lines)
 
 
 # -- Installer catalog commands --------------------------------------------

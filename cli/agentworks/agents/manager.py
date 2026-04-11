@@ -160,22 +160,22 @@ def delete_agent(
         typer.echo(f"Error: agent '{name}' not found", err=True)
         raise typer.Exit(1)
 
-    # Check for tasks using this agent
-    all_tasks = db.list_tasks()
-    agent_tasks = [t for t in all_tasks if t.agent_name == name]
-    if agent_tasks and not force:
+    # Check for sessions using this agent
+    all_sessions = db.list_sessions()
+    agent_sessions = [s for s in all_sessions if s.agent_name == name]
+    if agent_sessions and not force:
         typer.echo(
-            f"Error: agent '{name}' has {len(agent_tasks)} task(s). Delete them first, or use --force.",
+            f"Error: agent '{name}' has {len(agent_sessions)} session(s). Delete them first, or use --force.",
             err=True,
         )
-        for t in agent_tasks:
-            typer.echo(f"  {t.workspace_name}/{t.name}  [{t.status}]", err=True)
+        for s in agent_sessions:
+            typer.echo(f"  {s.name}  [{s.status}]", err=True)
         raise typer.Exit(1)
 
     if not yes:
         msg = f"Delete agent '{name}'?"
-        if agent_tasks:
-            msg += f" ({len(agent_tasks)} task(s) will also be stopped)"
+        if agent_sessions:
+            msg += f" ({len(agent_sessions)} session(s) will also be stopped)"
         typer.confirm(msg, abort=True)
 
     vm = _require_vm(db, agent.vm_name)
@@ -184,21 +184,22 @@ def delete_agent(
 
     ssh_logger = SSHLogger(vm.name, "agent-delete")
 
-    # Kill running task sessions for this agent
-    if agent_tasks:
+    # Kill running sessions for this agent
+    if agent_sessions:
         from functools import partial
 
         from agentworks.ssh import run, ssh_target_for_vm
-        from agentworks.sessions.tmux import agent_socket_path, kill_task_session
+        from agentworks.sessions.tmux import kill_session
 
         target = ssh_target_for_vm(vm, config)
         run_command = partial(run, target, logger=ssh_logger)
-        for task in agent_tasks:
-            sock = agent_socket_path(agent.linux_user, task.workspace_name, task.name)
-            kill_task_session(task.workspace_name, task.name, run_command=run_command, socket_path=sock)
-            kill_task_session(task.workspace_name, task.name, run_command=run_command)
-            db.delete_task(task.workspace_name, task.name)
-        typer.echo(f"  Deleted {len(agent_tasks)} task(s)")
+        for session in agent_sessions:
+            sock = session.socket_path
+            if sock:
+                kill_session(session.name, run_command=run_command, socket_path=sock)
+            kill_session(session.name, run_command=run_command)
+            db.delete_session(session.name)
+        typer.echo(f"  Deleted {len(agent_sessions)} session(s)")
 
     # Remove from all workspace groups
     granted_workspaces = db.list_granted_workspaces(name)
@@ -346,13 +347,13 @@ def describe_agent(
     else:
         typer.echo("  (none)")
 
-    # Tasks (which also show implicit grants)
-    all_tasks = db.list_tasks()
-    agent_tasks = [t for t in all_tasks if t.agent_name == name]
-    typer.echo(f"\nTasks ({len(agent_tasks)}):")
-    if agent_tasks:
-        for task in agent_tasks:
-            typer.echo(f"  {task.name}  [{task.template}]  {task.status}  workspace: {task.workspace_name}")
+    # Sessions (which also show implicit grants)
+    all_sessions = db.list_sessions()
+    agent_sessions = [s for s in all_sessions if s.agent_name == name]
+    typer.echo(f"\nSessions ({len(agent_sessions)}):")
+    if agent_sessions:
+        for s in agent_sessions:
+            typer.echo(f"  {s.name}  [{s.template}]  {s.status}  workspace: {s.workspace_name}")
     else:
         typer.echo("  (none)")
 
@@ -468,7 +469,7 @@ def deny_workspaces(
         typer.echo(f"All explicit grants removed for agent '{agent_name}'")
         if remaining_implicit:
             typer.echo(
-                f"  Note: agent still has implicit access via tasks to: {', '.join(remaining_implicit)}",
+                f"  Note: agent still has implicit access via sessions to: {', '.join(remaining_implicit)}",
                 err=True,
             )
         return
@@ -479,7 +480,7 @@ def deny_workspaces(
             _remove_from_workspace_group(vm, config, agent.linux_user, ws_name, logger=None)
             typer.echo(f"  Denied: {ws_name}")
         else:
-            typer.echo(f"  Denied: {ws_name} (still has implicit access via tasks)")
+            typer.echo(f"  Denied: {ws_name} (still has implicit access via sessions)")
 
 
 def list_grants(
@@ -509,7 +510,7 @@ def list_grants(
         elif has_explicit:
             grant_type = "explicit"
         else:
-            grant_type = "implicit (via tasks)"
+            grant_type = "implicit (via sessions)"
         typer.echo(f"{ws_name:<25} {grant_type}")
 
 

@@ -207,7 +207,7 @@ def console_workspace(
     allow_nesting: bool = False,
     recreate: bool = False,
 ) -> None:
-    """Open the workspace console (tmuxinator session with tasks)."""
+    """Open the workspace console (tmuxinator session with sessions)."""
     import os
 
     if os.environ.get("TMUX") and not allow_nesting:
@@ -267,13 +267,13 @@ def describe_workspace(
     if ws.last_seen_at:
         typer.echo(f"Last Seen:  {ws.last_seen_at}")
 
-    # Tasks
-    tasks = db.list_tasks(workspace_name=name)
-    typer.echo(f"\nTasks ({len(tasks)}):")
-    if tasks:
-        for task in tasks:
-            mode_label = f"agent: {task.agent_name}" if task.agent_name else "admin"
-            typer.echo(f"  {task.name}  [{task.template}]  {task.status}  {mode_label}")
+    # Sessions
+    sessions = db.list_sessions(workspace_name=name)
+    typer.echo(f"\nSessions ({len(sessions)}):")
+    if sessions:
+        for s in sessions:
+            mode_label = f"agent: {s.agent_name}" if s.agent_name else "admin"
+            typer.echo(f"  {s.name}  [{s.template}]  {s.status}  {mode_label}")
     else:
         typer.echo("  (none)")
 
@@ -515,15 +515,15 @@ def rehome_workspace(
         typer.echo("Error: source and target paths overlap", err=True)
         raise typer.Exit(1)
 
-    # Block if workspace has running tasks
-    from agentworks.db import TaskStatus
+    # Block if workspace has running sessions
+    from agentworks.db import SessionStatus
 
-    tasks = db.list_tasks(workspace_name=name)
-    running = [t for t in tasks if t.status == TaskStatus.RUNNING.value]
+    sessions = db.list_sessions(workspace_name=name)
+    running = [s for s in sessions if t.status == SessionStatus.RUNNING.value]
     if running:
         typer.echo(
-            f"Error: workspace '{name}' has {len(running)} running task(s). "
-            "Stop them first with 'agentworks task stop'.",
+            f"Error: workspace '{name}' has {len(running)} running session(s). "
+            "Stop them first with 'agentworks session stop'.",
             err=True,
         )
         raise typer.Exit(1)
@@ -777,19 +777,19 @@ def delete_workspace(
         typer.echo(f"Error: workspace '{name}' not found", err=True)
         raise typer.Exit(1)
 
-    # Check for tasks
-    task_count = len(db.list_tasks(workspace_name=name))
-    if task_count > 0 and not force:
+    # Check for sessions
+    session_count = len(db.list_sessions(workspace_name=name))
+    if session_count > 0 and not force:
         typer.echo(
-            f"Error: workspace '{name}' has {task_count} task(s). Delete them first, or use --force.",
+            f"Error: workspace '{name}' has {session_count} session(s). Delete them first, or use --force.",
             err=True,
         )
         raise typer.Exit(1)
 
     if not yes:
         msg = f"Delete workspace '{name}'?"
-        if task_count > 0:
-            msg += f" ({task_count} task(s) will also be deleted)"
+        if session_count > 0:
+            msg += f" ({session_count} session(s) will also be deleted)"
         typer.confirm(msg, abort=True)
 
     # Create SSH logger for VM operations
@@ -799,28 +799,24 @@ def delete_workspace(
 
         ssh_logger = SSHLogger(ws.vm_name, "workspace-delete")
 
-    # Kill running task sessions and delete task records
+    # Kill running sessions and delete session records
     if ws.type == "vm" and ws.vm_name:
         vm = db.get_vm(ws.vm_name)
         if vm is not None and vm.tailscale_host is not None:
             from functools import partial
 
             from agentworks.ssh import run, ssh_target_for_vm
-            from agentworks.sessions.tmux import agent_socket_path, kill_task_session
+            from agentworks.sessions.tmux import kill_session
 
             target = ssh_target_for_vm(vm, config)
             run_command = partial(run, target, logger=ssh_logger)
-            for task in db.list_tasks(workspace_name=name):
-                sock = None
-                if task.agent_name:
-                    agent = db.get_agent(task.agent_name)
-                    if agent:
-                        sock = agent_socket_path(agent.linux_user, name, task.name)
+            for session in db.list_sessions(workspace_name=name):
+                sock = session.socket_path
                 # Kill on both socket and default server for migration compat
                 if sock:
-                    kill_task_session(name, task.name, run_command=run_command, socket_path=sock)
-                kill_task_session(name, task.name, run_command=run_command)
-    db.delete_tasks_for_workspace(name)
+                    kill_session(session.name, run_command=run_command, socket_path=sock)
+                kill_session(session.name, run_command=run_command)
+    db.delete_sessions_for_workspace(name)
 
     # Revoke agent workspace grants (agents are VM-scoped, not deleted with workspaces)
     if ws.type == "vm" and ws.vm_name:
