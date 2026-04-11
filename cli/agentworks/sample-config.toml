@@ -197,40 +197,40 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # tmuxinator = false
 # inherits = ["default"]
 
-# --- Task templates ---
-# Define commands that tasks can run. The built-in "default" template runs a
+# --- Session templates ---
+# Define commands that sessions can run. The built-in "default" template runs a
 # login shell. Templates support inheritance via "inherits".
 #
-# Template commands support {{task_name}} and {{workspace_name}} variables,
+# Template commands support {{session_name}} and {{workspace_name}} variables,
 # using double-brace syntax consistent with nerftools manifests.
 #
-# Templates may define a restart_command for `task restart`. If omitted,
+# Templates may define a restart_command for `session restart`. If omitted,
 # the regular command is used. This is useful for tools like Claude Code
 # where --resume picks up the previous conversation.
 #
 # env maps are merged during inheritance (child wins on key collision).
 
-# [task_templates.default]                  # override the built-in default
-# command = "claude --name {{task_name}}"
-# restart_command = "claude --resume {{task_name}}"
+# [session_templates.default]               # override the built-in default
+# command = "claude --name {{session_name}}"
+# restart_command = "claude --resume {{session_name}}"
 # description = "Claude Code interactive session"
 
-# [task_templates.claude]
+# [session_templates.claude]
 # inherits = ["default"]
-# command = "claude --name {{task_name}}"
-# restart_command = "claude --resume {{task_name}}"
+# command = "claude --name {{session_name}}"
+# restart_command = "claude --resume {{session_name}}"
 # description = "Claude Code interactive session"
 
-# [task_templates.custom-tool]
+# [session_templates.custom-tool]
 # command = "my-tool --flag"
 # description = "Custom tool"
 # env = { MY_VAR = "value" }               # environment variables to set
 
-# --- Task configuration ---
-# Non-template task settings.
+# --- Session configuration ---
+# Non-template session settings.
 
-# [task.config]
-# history_limit = 50000                     # tmux scrollback buffer lines per task session
+# [session.config]
+# history_limit = 50000                     # tmux scrollback buffer lines per session
 
 # =============================================================================
 # Catalog extensions
