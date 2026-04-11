@@ -20,10 +20,10 @@ DYNAMIC_SNIPPETS: dict[str, str] = {
         "$(sed -n 's/^\\[git_credentials\\.\\([^]]*\\)\\]/\\1/p' \"$HOME/.config/agentworks/config.toml\" 2>/dev/null)"
     ),
     "catalog_entries": ("$(agentworks installer list 2>/dev/null | tail -n +3 | awk '{print $2}')"),
-    "tasks": ("$(agentworks task list --no-status 2>/dev/null | tail -n +3 | awk '{print $1}')"),
+    "sessions": ("$(agentworks session list --no-status 2>/dev/null | tail -n +3 | awk '{print $1}')"),
     "agents": ("$(agentworks agent list 2>/dev/null | tail -n +3 | awk '{print $1}')"),
-    "task_templates": (
-        "default $(sed -n 's/^\\[task_templates\\.\\([^]]*\\)\\]/\\1/p'"
+    "session_templates": (
+        "default $(sed -n 's/^\\[session_templates\\.\\([^]]*\\)\\]/\\1/p'"
         ' "$HOME/.config/agentworks/config.toml" 2>/dev/null)'
     ),
     "vm_templates": (
