@@ -1217,7 +1217,7 @@ def _phase_b_setup(
     # Non-fatal: agent tmux socket directory infrastructure.
     # Creates the shared group, root directory, and per-agent subdirectories.
     try:
-        from agentworks.tasks.tmux import ensure_agent_socket_dir, ensure_agent_socket_root
+        from agentworks.sessions.tmux import ensure_agent_socket_dir, ensure_agent_socket_root
 
         logger.step("Agent tmux socket directories")
         typer.echo("  Setting up agent tmux socket infrastructure...")

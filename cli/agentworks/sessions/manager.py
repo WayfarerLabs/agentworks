@@ -23,8 +23,8 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database, TaskRow, VMRow, WorkspaceRow
     from agentworks.ssh import SSHLogger
-    from agentworks.tasks.templates import ResolvedTaskTemplate
-    from agentworks.tasks.tmux import RunCommand
+    from agentworks.sessions.templates import ResolvedTaskTemplate
+    from agentworks.sessions.tmux import RunCommand
 
 
 # -- Helpers ---------------------------------------------------------------
@@ -61,7 +61,7 @@ def _socket_path_for_task(db: Database, task: TaskRow) -> str | None:
     """Return the agent socket path for an agent-mode task, or None for admin."""
     if not task.agent_name:
         return None
-    from agentworks.tasks.tmux import agent_socket_path
+    from agentworks.sessions.tmux import agent_socket_path
 
     linux_user = _agent_linux_user_lookup(db)(task.agent_name)
     if linux_user is None:
@@ -82,7 +82,7 @@ def _kill_task_any_server(
     default tmux server) to the new model (per-agent sockets). Safe to call
     even if the session exists on neither or both.
     """
-    from agentworks.tasks.tmux import kill_task_session
+    from agentworks.sessions.tmux import kill_task_session
 
     if socket_path:
         kill_task_session(workspace_name, task_name, run_command=run_command, socket_path=socket_path)
@@ -99,7 +99,7 @@ def _session_exists_any_server(
     warn_legacy: bool = True,
 ) -> bool:
     """Check if a task session exists on either the agent socket or the default server."""
-    from agentworks.tasks.tmux import session_exists
+    from agentworks.sessions.tmux import session_exists
 
     if socket_path and session_exists(workspace_name, task_name, run_command=run_command, socket_path=socket_path):
         return True
@@ -176,7 +176,7 @@ def _regenerate_tmuxinator(
 ) -> None:
     """Regenerate the workspace tmuxinator config from current task state."""
     from agentworks.ssh import write_file
-    from agentworks.tasks.tmux import build_socket_paths
+    from agentworks.sessions.tmux import build_socket_paths
     from agentworks.workspaces.tmuxinator import generate_config
 
     tasks = db.list_tasks(workspace_name=ws.name)
@@ -188,7 +188,7 @@ def _regenerate_tmuxinator(
 
 def _resolve_template(config: Config, template_name: str | None) -> ResolvedTaskTemplate:
     """Resolve a task template by name, applying inheritance."""
-    from agentworks.tasks.templates import resolve_template
+    from agentworks.sessions.templates import resolve_template
 
     try:
         return resolve_template(config, template_name)
@@ -278,7 +278,7 @@ def create_task(
 ) -> None:
     """Create and start a task."""
     from agentworks.config import validate_name
-    from agentworks.tasks.tmux import (
+    from agentworks.sessions.tmux import (
         create_task_session,
         deploy_restricted_config,
     )
@@ -352,11 +352,11 @@ def create_task(
 
     # Update tmuxinator config and add to console if it exists
     _regenerate_tmuxinator(db, config, vm, ws)
-    from agentworks.tasks.console import add_task_to_console
+    from agentworks.sessions.console import add_task_to_console
 
     sock = None
     if mode == TaskMode.AGENT:
-        from agentworks.tasks.tmux import agent_socket_path
+        from agentworks.sessions.tmux import agent_socket_path
 
         sock = agent_socket_path(linux_user, workspace_name, name)
     add_task_to_console(name, workspace_name, run_command=run_command, socket_path=sock)
@@ -372,7 +372,7 @@ def stop_task(
     """Stop a running task. Sends C-c first, then kills after a grace period."""
     import time
 
-    from agentworks.tasks.tmux import send_keys
+    from agentworks.sessions.tmux import send_keys
 
     _ws, _vm, run_command = _prepare_vm(db, config, workspace_name, operation="task-stop")
     task = _require_task(db, workspace_name, name)
@@ -408,7 +408,7 @@ def restart_task(
     force: bool = False,
 ) -> None:
     """Restart a task. Errors if running unless --force is passed."""
-    from agentworks.tasks.tmux import (
+    from agentworks.sessions.tmux import (
         create_task_session,
         deploy_restricted_config,
     )
@@ -453,7 +453,7 @@ def restart_task(
     typer.echo(f"Task '{name}' restarted")
 
     _regenerate_tmuxinator(db, config, vm, ws)
-    from agentworks.tasks.console import add_task_to_console
+    from agentworks.sessions.console import add_task_to_console
 
     add_task_to_console(name, workspace_name, run_command=run_command, socket_path=sock)
 
@@ -624,7 +624,7 @@ def attach_task(
 ) -> None:
     """Attach to a task's tmux session (interactive)."""
     from agentworks.ssh import interactive
-    from agentworks.tasks.tmux import derive_session_name, session_exists, tmux_cmd
+    from agentworks.sessions.tmux import derive_session_name, session_exists, tmux_cmd
 
     _ws, vm, run_command = _prepare_vm(db, config, workspace_name, operation="task-attach")
     task = _require_task(db, workspace_name, name)
@@ -653,7 +653,7 @@ def task_logs(
     lines: int | None = None,
 ) -> None:
     """Dump the scrollback buffer for a task."""
-    from agentworks.tasks.tmux import capture_output, session_exists
+    from agentworks.sessions.tmux import capture_output, session_exists
 
     _ws, _vm, run_command = _prepare_vm(db, config, workspace_name, operation="task-logs")
     task = _require_task(db, workspace_name, name)

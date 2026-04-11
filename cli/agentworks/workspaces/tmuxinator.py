@@ -14,7 +14,7 @@ from __future__ import annotations
 import shlex
 from typing import TYPE_CHECKING
 
-from agentworks.tasks.tmux import derive_session_name, tmux_cmd
+from agentworks.sessions.tmux import derive_session_name, tmux_cmd
 
 if TYPE_CHECKING:
     from agentworks.db import TaskRow

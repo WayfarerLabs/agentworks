@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from agentworks.db import TaskRow
-from agentworks.tasks.tmux import AGENT_SOCKET_ROOT, agent_socket_path
+from agentworks.sessions.tmux import AGENT_SOCKET_ROOT, agent_socket_path
 from agentworks.workspaces.tmuxinator import GENERATED_HEADER, console_session_name, generate_config
 
 

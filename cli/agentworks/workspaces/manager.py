@@ -806,7 +806,7 @@ def delete_workspace(
             from functools import partial
 
             from agentworks.ssh import run, ssh_target_for_vm
-            from agentworks.tasks.tmux import agent_socket_path, kill_task_session
+            from agentworks.sessions.tmux import agent_socket_path, kill_task_session
 
             target = ssh_target_for_vm(vm, config)
             run_command = partial(run, target, logger=ssh_logger)

@@ -16,12 +16,12 @@ from typing import TYPE_CHECKING
 import typer
 
 from agentworks.db import TaskStatus
-from agentworks.tasks.tmux import derive_session_name, tmux_cmd
+from agentworks.sessions.tmux import derive_session_name, tmux_cmd
 
 if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database, TaskRow, VMRow
-    from agentworks.tasks.tmux import RunCommand
+    from agentworks.sessions.tmux import RunCommand
 
 CONSOLE_SESSION_NAME = "vm-console"
 
@@ -161,7 +161,7 @@ def attach_console(
     running_tasks = _get_running_tasks_for_vm(db, vm)
 
     # Build socket path map for agent-mode tasks
-    from agentworks.tasks.tmux import build_socket_paths
+    from agentworks.sessions.tmux import build_socket_paths
 
     def _agent_lookup(agent_name: str) -> str | None:
         agent = db.get_agent(agent_name)

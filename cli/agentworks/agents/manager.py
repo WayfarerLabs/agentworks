@@ -189,7 +189,7 @@ def delete_agent(
         from functools import partial
 
         from agentworks.ssh import run, ssh_target_for_vm
-        from agentworks.tasks.tmux import agent_socket_path, kill_task_session
+        from agentworks.sessions.tmux import agent_socket_path, kill_task_session
 
         target = ssh_target_for_vm(vm, config)
         run_command = partial(run, target, logger=ssh_logger)
@@ -600,7 +600,7 @@ def _create_agent_on_vm(
     # been reinited since the socket feature was added.
     from functools import partial as _partial
 
-    from agentworks.tasks.tmux import ensure_agent_socket_dir, ensure_agent_socket_root
+    from agentworks.sessions.tmux import ensure_agent_socket_dir, ensure_agent_socket_root
 
     _root_cmd = _partial(run_as_root, target, logger=lg)
     ensure_agent_socket_root(_root_cmd, vm.admin_username)

@@ -456,7 +456,7 @@ def vm_console(
 ) -> None:
     """Attach to the VM console (creates it if needed)."""
     from agentworks.config import load_config
-    from agentworks.tasks.console import attach_console
+    from agentworks.sessions.console import attach_console
 
     attach_console(
         _get_db(),
@@ -782,7 +782,7 @@ def task_create(
 ) -> None:
     """Create and start a task in a workspace."""
     from agentworks.config import load_config
-    from agentworks.tasks.manager import create_task
+    from agentworks.sessions.manager import create_task
     from agentworks.workspaces.manager import create_workspace
 
     # Validate flag combinations before any prompts
@@ -900,7 +900,7 @@ def task_describe(
 ) -> None:
     """Show task details."""
     from agentworks.config import load_config
-    from agentworks.tasks.manager import describe_task
+    from agentworks.sessions.manager import describe_task
 
     db = _get_db()
     resolved_workspace = _prompt_workspace(db, workspace or None)
@@ -914,7 +914,7 @@ def task_list(
 ) -> None:
     """List tasks."""
     from agentworks.config import load_config
-    from agentworks.tasks.manager import list_tasks
+    from agentworks.sessions.manager import list_tasks
 
     list_tasks(_get_db(), load_config(), workspace_name=workspace, no_status=no_status)
 
@@ -926,7 +926,7 @@ def task_stop(
 ) -> None:
     """Stop a running task."""
     from agentworks.config import load_config
-    from agentworks.tasks.manager import stop_task
+    from agentworks.sessions.manager import stop_task
 
     stop_task(_get_db(), load_config(), name=name, workspace_name=workspace)
 
@@ -939,7 +939,7 @@ def task_restart(
 ) -> None:
     """Restart a task (uses restart_command if defined in template)."""
     from agentworks.config import load_config
-    from agentworks.tasks.manager import restart_task
+    from agentworks.sessions.manager import restart_task
 
     restart_task(_get_db(), load_config(), name=name, workspace_name=workspace, force=force)
 
@@ -951,7 +951,7 @@ def task_attach(
 ) -> None:
     """Attach to a task's tmux session."""
     from agentworks.config import load_config
-    from agentworks.tasks.manager import attach_task
+    from agentworks.sessions.manager import attach_task
 
     attach_task(_get_db(), load_config(), name=name, workspace_name=workspace)
 
@@ -964,7 +964,7 @@ def task_delete(
 ) -> None:
     """Stop and delete a task."""
     from agentworks.config import load_config
-    from agentworks.tasks.manager import delete_task
+    from agentworks.sessions.manager import delete_task
 
     delete_task(_get_db(), load_config(), name=name, workspace_name=workspace, yes=yes)
 
@@ -977,7 +977,7 @@ def task_logs(
 ) -> None:
     """Dump the scrollback buffer for a task."""
     from agentworks.config import load_config
-    from agentworks.tasks.manager import task_logs as _task_logs
+    from agentworks.sessions.manager import task_logs as _task_logs
 
     _task_logs(_get_db(), load_config(), name=name, workspace_name=workspace, lines=lines)
 
