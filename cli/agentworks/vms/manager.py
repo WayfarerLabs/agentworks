@@ -385,7 +385,7 @@ def describe_vm(db: Database, config: Config, name: str) -> None:
 
             sessions = db.list_sessions(workspace_name=ws.name)
             if sessions:
-                typer.echo(f"    Tasks ({len(tasks)}):")
+                typer.echo(f"    Sessions ({len(sessions)}):")
                 for s in sessions:
                     mode_label = f"agent:{s.agent_name}" if s.agent_name else "admin"
                     typer.echo(f"      {s.name}  [{s.template}]  {s.status}  {mode_label}")

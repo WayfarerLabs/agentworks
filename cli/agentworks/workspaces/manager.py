@@ -519,7 +519,7 @@ def rehome_workspace(
     from agentworks.db import SessionStatus
 
     sessions = db.list_sessions(workspace_name=name)
-    running = [s for s in sessions if t.status == SessionStatus.RUNNING.value]
+    running = [s for s in sessions if s.status == SessionStatus.RUNNING.value]
     if running:
         typer.echo(
             f"Error: workspace '{name}' has {len(running)} running session(s). "

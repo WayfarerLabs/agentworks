@@ -496,13 +496,8 @@ def describe_session(
     ws, vm, run_command = _prepare_vm(db, config, session.workspace_name, operation=None)
 
     # Reconcile status with tmux
-    sock = session.socket_path
-    live = _session_exists_any_server(name, run_command=run_command, socket_path=sock)
-    if live and session.status != SessionStatus.RUNNING.value:
-        db.update_session_status(name, SessionStatus.RUNNING)
-        session = _require_session(db, name)
-    elif not live and session.status == SessionStatus.RUNNING.value:
-        db.update_session_status(name, SessionStatus.STOPPED)
+    status = _reconcile_status(session, run_command=run_command, db=db)
+    if status != session.status:
         session = _require_session(db, name)
 
     mode_label = f"agent: {session.agent_name}" if session.agent_name else "admin"
