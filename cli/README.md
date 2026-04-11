@@ -4,8 +4,7 @@ CLI for orchestrating workspace lifecycle across multiple compute targets (VMs a
 
 ## Core Concepts
 
-Agentworks organizes work into three layers. Each layer narrows the scope of the one above it --
-permissions compose downward and can only constrain, never expand.
+Agentworks organizes work into four concepts:
 
 ### VMs -- the environment
 
@@ -27,28 +26,28 @@ agents (see below).
 
 An agent defines a **security identity** on a VM: a Linux user (`agt--<name>`) with its own shell,
 tools, credentials, and dotfiles. Agents are VM-scoped and can be granted access to one or more
-workspaces via explicit grants or implicitly through tasks. An agent's effective capability is the
-intersection of all layers: it can only use tools present on the VM and access workspaces it has
-been granted.
+workspaces via explicit grants or implicitly through sessions. An agent's effective capability is
+the intersection of all layers: it can only use tools present on the VM and access workspaces it
+has been granted.
 
 Agents are only supported on VM workspaces because the isolation model requires Linux user
 management (useradd, group membership).
 
-### Multi-user considerations
+### Sessions -- the interaction
 
-The multi-user model means workspace files are owned by the admin user but accessed by agent users
-via group membership and POSIX ACLs. Some tools check file ownership and may reject files owned by a
-different user. Git is the most common example: its `safe.directory` check will refuse to operate in
-a repo owned by another user. Agentworks handles this automatically by configuring
-`safe.directory = '*'` for both admin and agent users during VM init and agent creation. This can be
-disabled by setting `git_force_safe_directory = false` in `[admin.config]`.
+A session is a **persistent tmux session** that runs a command (typically a Claude Code instance) in
+a workspace. Sessions have globally unique names, are the primary interactive surface in agentworks,
+and map 1:1 to a tmux session on the VM. Sessions can run as the admin user or as an agent user.
+
+Agent-mode sessions run on a dedicated per-agent tmux socket so the agent's shell connects directly
+to the tmux pane PTY with no intermediary sudo process. The socket path is persisted in the database.
 
 ### Ephemerality
 
-The layers also differ in lifespan. VMs are long-lived -- provisioned once, used across many
-projects. Workspaces are more ephemeral -- created per task or project, destroyed when done. Agents
-persist on a VM and can work across multiple workspaces and tasks. Tasks are the most ephemeral --
-started, stopped, and deleted as work progresses.
+The layers differ in lifespan. VMs are long-lived -- provisioned once, used across many projects.
+Workspaces are medium-lived -- created per project, destroyed when done. Agents persist on a VM
+and can work across multiple workspaces and sessions. Sessions are the most ephemeral -- started,
+stopped, and deleted as work progresses.
 
 ### Templates
 
@@ -134,7 +133,7 @@ All initialization behavior (packages, install commands, etc.) is driven by conf
 `vm reinit` re-runs the initialization phase using the current config without reprovisioning the VM.
 Changes to config (new packages, different install commands, etc.) are picked up automatically.
 
-`vm delete` requires `--force` if the VM has workspaces, agents, or tasks. The confirmation
+`vm delete` requires `--force` if the VM has workspaces, agents, or sessions. The confirmation
 message shows what will be deleted. Pass `--yes` to skip the prompt.
 
 ### Workspaces
@@ -144,7 +143,7 @@ Manage workspaces on VMs or locally.
 | Command                                   | Description                          |
 | ----------------------------------------- | ------------------------------------ |
 | `agentworks workspace create`             | Create a workspace (VM or `--local`) |
-| `agentworks workspace describe <name>`    | Show workspace details and tasks     |
+| `agentworks workspace describe <name>`    | Show workspace details and sessions  |
 | `agentworks workspace shell <name>`       | Open a plain shell into a workspace  |
 | `agentworks workspace console <name>`     | Open the workspace console (tmux)    |
 | `agentworks workspace list`               | List workspaces                      |
@@ -156,14 +155,14 @@ Manage workspaces on VMs or locally.
 `workspace create` accepts `--name`, `--vm`, `--local`, `--template`, and `--open-vscode`.
 
 `workspace console` opens a tmuxinator session (`ws-<name>-console`) with an admin-shell
-window plus one window per task in the workspace. Pass `--recreate` to kill and rebuild the
-session. This is the recommended way to interact with tasks from within VS Code or any
+window plus one window per session in the workspace. Pass `--recreate` to kill and rebuild the
+console. This is the recommended way to interact with sessions from within VS Code or any
 terminal on the VM.
 
 `workspace copy` copies a workspace to a new location. Accepts `--name`, `--vm`, and `--local`
 (same pattern as `workspace create`). Works across VMs, VM to local, and local to VM.
 
-`workspace delete` requires `--force` if the workspace has tasks. Running task sessions are
+`workspace delete` requires `--force` if the workspace has sessions. Running sessions are
 killed during deletion. Pass `--yes` to skip the confirmation prompt.
 
 ### Agents
@@ -186,62 +185,66 @@ Manage agents (isolated Linux users) on VMs. Agents are VM-scoped and access wor
 
 `agent create` accepts `--name`, `--vm`, `--template`, and `--grant-all-workspaces`.
 
-`agent delete` requires `--force` if the agent has running tasks. Pass `--yes` to skip the
+`agent delete` requires `--force` if the agent has running sessions. Pass `--yes` to skip the
 confirmation prompt.
 
-### Tasks
+### Sessions
 
-Manage tasks (named work streams running in workspaces).
+Manage sessions (persistent tmux sessions running in workspaces). Session names are globally
+unique -- no `--workspace` flag needed for most commands.
 
-| Command                                          | Description                 |
-| ------------------------------------------------ | --------------------------- |
-| `agentworks task create`                         | Create and start a task     |
-| `agentworks task describe <name> --workspace <ws>` | Show task details        |
-| `agentworks task list [--workspace <ws>]`        | List tasks with status      |
-| `agentworks task attach <name> --workspace <ws>` | Attach to a running task    |
-| `agentworks task stop <name> --workspace <ws>`   | Stop a running task         |
-| `agentworks task restart <name> --workspace <ws>` | Restart a task             |
-| `agentworks task delete <name> --workspace <ws>` | Stop and delete a task      |
-| `agentworks task logs <name> --workspace <ws>`   | Dump task scrollback buffer |
-| `agentworks vm console <vm-name>`                | Attach to the VM console    |
+| Command                                    | Description                    |
+| ------------------------------------------ | ------------------------------ |
+| `agentworks session create`                | Create and start a session     |
+| `agentworks session describe <name>`       | Show session details           |
+| `agentworks session list [--workspace]`    | List sessions with status      |
+| `agentworks session attach <name>`         | Attach to a running session    |
+| `agentworks session stop <name>`           | Stop a running session         |
+| `agentworks session restart <name>`        | Restart a session              |
+| `agentworks session delete <name>`         | Stop and delete a session      |
+| `agentworks session logs <name>`           | Dump session scrollback buffer |
+| `agentworks vm console <vm-name>`          | Attach to the VM console       |
 
-`task create` accepts `--name`, `--workspace`, `--template`, `--admin`, and `--agent`. Workspace,
-mode (admin vs agent), and name are prompted interactively if omitted. If agents exist on the VM
-and neither `--admin` nor `--agent` is specified, you are prompted to choose. Pass `--new-workspace`
-to create a workspace on the fly (with optional `--workspace-name`, `--workspace-template`, and
-`--vm`). When a task created with `--new-workspace` is later deleted, you are offered the option
-to delete the workspace as well (if no other tasks remain on it).
+`session create` accepts `--name`, `--workspace`, `--template`, `--admin`, and `--agent`.
+Workspace, mode (admin vs agent), and name are prompted interactively if omitted. If agents exist
+on the VM and neither `--admin` nor `--agent` is specified, you are prompted to choose. Pass
+`--new-workspace` to create a workspace on the fly (with optional `--workspace-name`,
+`--workspace-template`, and `--vm`). When a session created with `--new-workspace` is later
+deleted, you are offered the option to delete the workspace as well (if no other sessions remain).
 
 ### tmux Architecture
 
-Each task runs in its own locked-down tmux session on the VM. There are three ways to interact
-with tasks, at different scopes:
+Each session runs in its own locked-down tmux session on the VM. There are three ways to interact
+with sessions, at different scopes:
 
-| Method | Scope | Session name | Entry point |
+| Method | Scope | tmux session name | Entry point |
 | --- | --- | --- | --- |
-| `task attach` | One task | `<workspace>--<task>` | Operator's machine |
+| `session attach` | One session | `<session-name>` | Operator's machine |
 | `workspace console` | One workspace | `ws-<workspace>-console` | On-VM or operator's machine |
 | `vm console` | All workspaces | `vm-console` | Operator's machine |
 
-#### Task sessions
+#### Session tmux sessions
 
-Each task gets a locked-down tmux session (`<workspace>--<task>`). The admin user's
-`~/.tmux.conf` (customizable via dotfiles) is loaded first so that familiar keybindings
-(prefix, detach, copy mode, scroll) work for direct `task attach`. Window/pane creation,
-session management, and the command prompt are selectively unbound.
+Each session gets a locked-down tmux session using the session name directly as the tmux session
+name. The user's `~/.tmux.conf` (customizable via dotfiles) is loaded first so that familiar
+keybindings (prefix, detach, copy mode, scroll) work for direct `session attach`. Window/pane
+creation, session management, and the command prompt are selectively unbound.
+
+Agent-mode sessions run on a per-agent tmux socket so the agent's shell connects directly to the
+tmux pane PTY. The socket path is persisted in the database.
 
 #### Workspace console
 
 `workspace console` uses tmuxinator to create or attach to a `ws-<name>-console` session.
-The tmuxinator config (`.tmuxinator.yml` in the workspace root) is regenerated whenever tasks
-change, so the session always reflects the current set of tasks. This is the recommended way
-to interact with tasks from within VS Code or any terminal on the VM.
+The tmuxinator config (`.tmuxinator.yml` in the workspace root) is regenerated whenever sessions
+change, so the console always reflects the current set of sessions. This is the recommended way
+to interact with sessions from within VS Code or any terminal on the VM.
 
 ```text
 ws-myproject-console (tmuxinator, full tmux)
-  Window 1: admin-shell             login shell for the admin user
-  Window 2: myproject--task-a       attached to task session
-  Window 3: myproject--task-b       attached to task session
+  Window 1: admin-shell                login shell for the admin user
+  Window 2: myproject-claude           attached to session
+  Window 3: myproject-debug            attached to session
 ```
 
 #### VM console
@@ -257,33 +260,33 @@ need a terminal without the console structure.
 
 #### Key behaviors
 
-- **Direct attach** (`task attach`): the user's prefix key, detach, copy mode, and scroll all
+- **Direct attach** (`session attach`): the user's prefix key, detach, copy mode, and scroll all
   work normally. Status bar is hidden since there is only one pane.
-- **Consoles** (`workspace console`, `vm console`): the console's prefix key eclipses the task
-  session's prefix, so window switching, detach, etc. all operate at the console level. Task
+- **Consoles** (`workspace console`, `vm console`): the console's prefix key eclipses the inner
+  session's prefix, so window switching, detach, etc. all operate at the console level. Session
   windows use a wrapper that re-attaches if the inner session disconnects and shows a message
-  when the task ends.
+  when the session ends.
 - **Nesting protection**: both console commands refuse to run inside an existing tmux session to
   avoid prefix key conflicts. Pass `--allow-nesting` to override.
-- **Console lifecycle**: consoles are independent of task sessions. Killing or detaching a
-  console does not affect running tasks. `--recreate` rebuilds from scratch.
+- **Console lifecycle**: consoles are independent of sessions. Killing or detaching a console
+  does not affect running sessions. `--recreate` rebuilds from scratch.
 
-### Task Templates
+### Session Templates
 
-Templates define the command a task runs. The built-in `default` template runs a login shell
+Templates define the command a session runs. The built-in `default` template runs a login shell
 (`$SHELL --login`), respecting whatever shell the user (admin or agent) is configured with.
 Define custom templates in config:
 
 ```toml
-[task_templates.default]               # override the built-in default
-command = "claude --name {{task_name}}"
-restart_command = "claude --resume {{task_name}}"
+[session_templates.default]            # override the built-in default
+command = "claude --name {{session_name}}"
+restart_command = "claude --resume {{session_name}}"
 description = "Claude Code interactive session"
 ```
 
-Template commands support `{{task_name}}` and `{{workspace_name}}` variable substitution
+Template commands support `{{session_name}}` and `{{workspace_name}}` variable substitution
 (double-brace syntax, consistent with nerftools manifests). The optional `restart_command` is
-used by `task restart` -- useful for tools like Claude Code where `--resume` picks up the
+used by `session restart` -- useful for tools like Claude Code where `--resume` picks up the
 previous conversation. If omitted, the regular `command` is used.
 
 ### Installers
@@ -322,8 +325,8 @@ Key sections:
 - `[vm_templates.*]` -- VM resources, apt packages, system install commands, mise
 - `[admin.config]` -- admin user shell, dotfiles, git credentials, user install commands, mise
 - `[agent_templates.*]` -- agent user shell, dotfiles, git credentials, user install commands, mise
-- `[task.config]` -- task defaults (history limit)
-- `[task_templates.*]` -- task templates with variable substitution
+- `[session.config]` -- session defaults (history limit)
+- `[session_templates.*]` -- session templates with variable substitution
 - `[workspace_templates.*]` -- workspace templates with inheritance
 - `[git_credentials.*]` -- git credential providers (GitHub, Azure DevOps)
 - `[apt_sources.*]` -- user-defined third-party apt repositories
@@ -438,7 +441,7 @@ fpath=(~/.zfunc $fpath)
 autoload -Uz compinit && compinit
 ```
 
-Completions include dynamic VM, workspace, VM host, task, and template name lookups.
+Completions include dynamic VM, workspace, VM host, session, and template name lookups.
 
 ## State
 

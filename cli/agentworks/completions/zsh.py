@@ -52,9 +52,9 @@ _agentworks_catalog_entries() {
 }""",
     "sessions": """\
 _agentworks_sessions() {
-    local -a tasks
-    tasks=(${(f)"$(agentworks session list --no-status 2>/dev/null | tail -n +3 | awk '{print $1}')"})
-    _describe 'task' tasks
+    local -a sessions
+    sessions=(${(f)"$(agentworks session list --no-status 2>/dev/null | tail -n +3 | awk '{print $1}')"})
+    _describe 'session' sessions
 }""",
     "agents": """\
 _agentworks_agents() {
@@ -70,7 +70,7 @@ _agentworks_session_templates() {
     if [[ -f "$config_file" ]]; then
         templates+=(${(f)"$(sed -n 's/^\\[session_templates\\.\\([^]]*\\)\\]/\\1/p' "$config_file" 2>/dev/null)"})
     fi
-    _describe 'task-template' templates
+    _describe 'session-template' templates
 }""",
     "vm_templates": """\
 _agentworks_vm_templates() {
