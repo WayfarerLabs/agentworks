@@ -1,9 +1,9 @@
 """VM console management.
 
 The console is a VM-level tmux session that provides a unified view of all
-tasks running on the VM. It has full tmux controls (the operator can split
-panes, create windows, rearrange layout). Each task appears as a window
-that attaches to the task's locked-down tmux session.
+sessions running on the VM. It has full tmux controls (the operator can split
+panes, create windows, rearrange layout). Each session appears as a window
+that attaches to the session's locked-down tmux session.
 """
 
 from __future__ import annotations
@@ -15,12 +15,12 @@ from typing import TYPE_CHECKING
 
 import typer
 
-from agentworks.db import TaskStatus
-from agentworks.sessions.tmux import derive_session_name, tmux_cmd
+from agentworks.db import SessionStatus
+from agentworks.sessions.tmux import tmux_cmd
 
 if TYPE_CHECKING:
     from agentworks.config import Config
-    from agentworks.db import Database, TaskRow, VMRow
+    from agentworks.db import Database, SessionRow, VMRow
     from agentworks.sessions.tmux import RunCommand
 
 CONSOLE_SESSION_NAME = "vm-console"
@@ -33,14 +33,13 @@ def console_exists(*, run_command: RunCommand) -> bool:
 
 
 def create_console(
-    running_tasks: list[TaskRow],
+    running_sessions: list[SessionRow],
     *,
     run_command: RunCommand,
     admin_username: str,
-    socket_paths: dict[str, str | None] | None = None,
     recreate: bool = False,
 ) -> None:
-    """Create the VM console session with one window per running task.
+    """Create the VM console session with one window per running session.
 
     When *recreate* is True, kills any existing console session first.
     """
@@ -54,33 +53,29 @@ def create_console(
         f"{shlex.quote('exec sudo su --login ' + shlex.quote(admin_username))}"
     )
 
-    # Keep windows open when attached task command exits
+    # Keep windows open when attached session command exits
     run_command(f"tmux set -t {CONSOLE_SESSION_NAME} remain-on-exit on", check=False)
 
-    # Add a window for each running task
-    paths = socket_paths or {}
-    typer.echo(f"Adding {len(running_tasks)} task(s) to console...")
-    for task in running_tasks:
-        key = derive_session_name(task.workspace_name, task.name)
-        _add_task_window(
-            task.workspace_name, task.name,
+    # Add a window for each running session
+    typer.echo(f"Adding {len(running_sessions)} session(s) to console...")
+    for session in running_sessions:
+        _add_session_window(
+            session.name,
             run_command=run_command,
-            socket_path=paths.get(key),
+            socket_path=session.socket_path,
         )
 
 
-def _add_task_window(
-    workspace_name: str,
-    task_name: str,
+def _add_session_window(
+    session_name: str,
     *,
     run_command: RunCommand,
     socket_path: str | None = None,
 ) -> None:
-    """Add a single task window to the console."""
-    session_name = derive_session_name(workspace_name, task_name)
+    """Add a single session window to the console."""
     q_session = shlex.quote(session_name)
-    # Unset TMUX to allow nesting (console -> task session), then loop
-    # re-attach while the task session is alive.
+    # Unset TMUX to allow nesting (console -> session), then loop
+    # re-attach while the session is alive.
     has_cmd = tmux_cmd(f"has-session -t {q_session}", socket_path)
     attach_cmd = tmux_cmd(f"attach -t {q_session}", socket_path)
     wrapper = (
@@ -89,7 +84,7 @@ def _add_task_window(
         f"{attach_cmd}; "
         f"sleep 0.5; "
         f"done; "
-        f"echo 'Task session {q_session} has ended. Press enter to close.'; "
+        f"echo 'Session {q_session} has ended. Press enter to close.'; "
         f"read"
     )
     result = run_command(
@@ -102,20 +97,17 @@ def _add_task_window(
         typer.echo(f"  Warning: failed to add window for '{session_name}': {stderr}", err=True)
 
 
-def add_task_to_console(
-    task_name: str,
-    workspace_name: str,
+def add_session_to_console(
+    session_name: str,
     *,
     run_command: RunCommand,
     socket_path: str | None = None,
 ) -> None:
-    """Add a task window to an existing console (best-effort)."""
+    """Add a session window to an existing console (best-effort)."""
     if not console_exists(run_command=run_command):
         return
 
-    _add_task_window(workspace_name, task_name, run_command=run_command, socket_path=socket_path)
-
-
+    _add_session_window(session_name, run_command=run_command, socket_path=socket_path)
 
 
 def attach_console(
@@ -157,35 +149,25 @@ def attach_console(
     target = ssh_target_for_vm(vm, config)
     run_command = partial(run, target)
 
-    # Get running tasks for this VM
-    running_tasks = _get_running_tasks_for_vm(db, vm)
-
-    # Build socket path map for agent-mode tasks
-    from agentworks.sessions.tmux import build_socket_paths
-
-    def _agent_lookup(agent_name: str) -> str | None:
-        agent = db.get_agent(agent_name)
-        return agent.linux_user if agent else None
-
-    paths = build_socket_paths(running_tasks, _agent_lookup)
+    # Get running sessions for this VM
+    running_sessions = _get_running_sessions_for_vm(db, vm)
 
     if recreate or not console_exists(run_command=run_command):
         create_console(
-            running_tasks,
+            running_sessions,
             run_command=run_command,
             admin_username=vm.admin_username,
-            socket_paths=paths,
             recreate=recreate,
         )
 
     sys.exit(interactive(target, f"tmux attach -t {CONSOLE_SESSION_NAME}"))
 
 
-def _get_running_tasks_for_vm(db: Database, vm: VMRow) -> list[TaskRow]:
-    """Get all running tasks across all workspaces on a VM."""
+def _get_running_sessions_for_vm(db: Database, vm: VMRow) -> list[SessionRow]:
+    """Get all running sessions across all workspaces on a VM."""
     workspaces = db.list_workspaces(vm_name=vm.name)
-    tasks: list[TaskRow] = []
+    sessions: list[SessionRow] = []
     for ws in workspaces:
-        ws_tasks = db.list_tasks(workspace_name=ws.name)
-        tasks.extend(t for t in ws_tasks if t.status == TaskStatus.RUNNING.value)
-    return tasks
+        ws_sessions = db.list_sessions(workspace_name=ws.name)
+        sessions.extend(s for s in ws_sessions if s.status == SessionStatus.RUNNING.value)
+    return sessions
