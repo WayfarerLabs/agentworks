@@ -405,6 +405,14 @@ def repair_workspace(
     try:
         run_as_root(target, f"chown -R {vm.admin_username}:{ws_group} {ws.workspace_path}", timeout=120)
         run_as_root(target, f"chmod 2770 {ws.workspace_path}")
+        # Set SGID on all subdirectories so new files inherit the workspace group.
+        # This is critical for atomic-write tools (including Claude Code) that
+        # create a temp file and rename it over the original.
+        run_as_root(
+            target,
+            f"find {ws.workspace_path} -type d -exec chmod g+s {{}} +",
+            timeout=120,
+        )
         typer.echo("  OK: directory ownership and permissions")
     except SSHError as e:
         typer.echo(f"  Warning: permission fix failed: {e}", err=True)
@@ -617,6 +625,7 @@ def _rehome_vm(
         typer.echo("Setting permissions...")
         run_as_root(target, f"chown {vm.admin_username}:{ws_group} {new_path}", logger=ssh_logger)
         run_as_root(target, f"chmod 2770 {new_path}", logger=ssh_logger)
+        run_as_root(target, f"find {new_path} -type d -exec chmod g+s {{}} +", timeout=120, logger=ssh_logger)
         try:
             run_as_root(
                 target,
@@ -985,6 +994,12 @@ def copy_workspace(
                 dest_target,
                 f"chown -R {dest_vm.admin_username}:{ws_group} {workspace_path}",
                 timeout=60,
+                logger=lg,
+            )
+            run_as_root(
+                dest_target,
+                f"find {workspace_path} -type d -exec chmod g+s {{}} +",
+                timeout=120,
                 logger=lg,
             )
 
