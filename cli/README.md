@@ -6,11 +6,15 @@ CLI for interacting with Agentworks, the swiss army knife for managing agentic w
 
 Agentworks organizes work into four concepts:
 
-### The Operator: the person in control
+### The Operator - the Person in Control
 
-### VMs: the compute environment
+Agentworks is currently designed around a single human "operator" who is in control of all agentic
+workloads. The operator is responsible for creating VMs, workspaces, agents, and sessions, and for
+orchestrating how these components interact.
 
-The VM defines the base **compute environment** for all workloads. As discussed in
+### VMs - the Compute Environment
+
+VMs define the base **compute environment** for all workloads. As discussed in
 [ADR 0001](../docs/adrs/0001-vm-based-infrastructure.md), Agentworks uses VMs as the fundamental
 unit of compute to provide for strong isolation while providing all the capabilities of a full Linux
 environment (full daemonized services, multi-user, ability to run containers, etc.).
@@ -28,7 +32,7 @@ Each VM also includes an "admin" user that has full sudo privileges that is used
 provisioning and management tasks on the VM. While not recommended, the admin user is also available
 for agentic workloads if the operator so desires.
 
-### Workspaces -- the project
+### Workspaces - the Project
 
 A workspace defines the **project scope**. Workspaces ultimately consist of a root directory that
 can be based on a git repository or an empty directory. The workspace also maps to a Linux group
@@ -43,24 +47,27 @@ While VM workspaces are the primary supported workspace type, local workspaces c
 on the user workstation. Local workspaces do not support agents because the isolation model that
 underpins agent execution requires Linux user management that is only available on VMs.
 
-### Agents -- the actor
+### Agents - the Actor
 
 An agent defines a **security identity** on a VM. Each agent maps to its own full Linux user,
 capable of having its own processes, private files, shell environment, etc. This allows for the
 creation of different identities with different privileges and capabilities.
 
-Agents are then mapped to workspaces, either explicitly via grants or implicitly via sessions (see
+Agents are mapped to workspaces, either explicitly via grants or implicitly via sessions (see
 below). This mapping drives standard group and filesystem permissions that control what agents are
 able to access.
 
 Agents are only supported on VM workspaces because the isolation model requires Linux user
 management (useradd, group membership).
 
-### Sessions -- the interaction
+### Sessions - the Workloads
 
-A session is a **persistent tmux session** that runs a command (e.g. a Claude Code instance or a
-simple shell) as an agent (or the admin user) in a workspace. Sessions have globally unique names
-and can be attached to, detached from, and restarted as needed by the operator.
+A session is the primary way of running interactive **workloads** in Agentworks (e.g. a Claude Code
+instance). It provides the mechanism by which an agent can execute commands within the context of a
+workspace. A unique name and a persistent tmux session allow the operator to have any number of
+concurrent workloads running across their VMs, workspaces, and agents. Agentworks allows the
+operator to attach to and detaching from them as needed to monitor progress or interact with the
+workload, and then to stop, restart, and delete them to manage their lifecycle.
 
 ## Key Principles
 
@@ -103,8 +110,20 @@ tools that add significant value. While these tools could theoretically be repla
 alternatives, this would involve significant additional complexity that would slow down development
 and increase the likelihood of inconsistencies or errors.
 
-Those using Agentworks are highly encourage to embrace these tools rather than attempting to work
+Those using Agentworks are highly encouraged to embrace these tools rather than attempting to work
 around them.
+
+### SSH
+
+SSH is the control plane for all VM operations. Agentworks uses SSH to provision VMs, initialize
+them, manage agents, run sessions, transfer files, and execute commands. The operator's SSH key
+(configured in `[user]`) is deployed to VMs during provisioning and is the sole authentication
+mechanism for all subsequent operations.
+
+During provisioning, SSH access uses the platform's native transport (Lima shell, Azure public IP,
+WSL2 exec, or Proxmox guest agent). Once Tailscale is joined (see below), all further SSH access
+goes over the tailnet. Agentworks automatically manages `~/.ssh/config` entries for each VM so
+that standard SSH tools (scp, ssh, VS Code Remote) work seamlessly.
 
 ### Tailscale
 
@@ -123,16 +142,15 @@ gracefully on `vm start` by prompting for a new auth key (or using `TAILSCALE_AU
 ### Tmux
 
 Sessions are built on [tmux](https://github.com/tmux/tmux), which provides persistent terminal
-sessions that survive disconnects and support attach/detach. Each session maps 1:1 to a tmux
-session on the VM.
+sessions that survive disconnects and support attach/detach. Each session maps 1:1 to a tmux session
+on the VM.
 
 Agentworks provides two console layers for interacting with sessions:
 
-- **Workspace console** (`workspace console`): a tmuxinator-managed tmux session with one window
-  per session in the workspace, plus an admin shell. This is the recommended way to interact with
+- **Workspace console** (`workspace console`): a tmuxinator-managed tmux session with one window per
+  session in the workspace, plus an admin shell. This is the recommended way to interact with
   sessions.
-- **VM console** (`vm console`): a dynamically-built tmux session spanning all workspaces on the
-  VM.
+- **VM console** (`vm console`): a dynamically-built tmux session spanning all workspaces on the VM.
 
 Agent-mode sessions run on per-agent tmux sockets for proper process isolation and terminal resize
 propagation. See the [tmux Architecture](#tmux-architecture) section for details.
@@ -473,7 +491,6 @@ initialization using the current config.
 Non-fatal initialization failures (packages, dotfiles) produce a `partial` status rather than
 aborting. Fatal failures prompt for deletion or reinit. Use `vm describe` to view the full event
 log.
-
 
 ## Shell Completion
 
