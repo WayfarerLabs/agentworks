@@ -1,60 +1,141 @@
 # Agentworks CLI
 
-CLI for orchestrating workspace lifecycle across multiple compute targets (VMs and local host).
+CLI for interacting with Agentworks, the swiss army knife for managing agentic workloads.
 
 ## Core Concepts
 
 Agentworks organizes work into four concepts:
 
-### VMs -- the environment
+### The Operator: the person in control
 
-A VM defines the **capability ceiling**: the tools, runtimes, packages, and system configuration
-available to everything running inside it. This is the maximum set of possibility. Nothing below the
-VM layer can use a tool or capability that the VM does not provide.
+### VMs: the compute environment
+
+The VM defines the base **compute environment** for all workloads. As discussed in
+[ADR 0001](../docs/adrs/0001-vm-based-infrastructure.md), Agentworks uses VMs as the fundamental
+unit of compute to provide for strong isolation while providing all the capabilities of a full Linux
+environment (full daemonized services, multi-user, ability to run containers, etc.).
+
+VMs further use a single operating system (Debian Bookworm, see
+[ADR 0002](../docs/adrs/0002-use-debian-as-the-vm-base-image.md)) to ensure consistency and minimize
+VM management complexity and risk.
+
+VMs are generally intended to be long-lived and are designed to support any number of agentic
+workloads. A robust configuration and templating mechanism is provided so that VM provisioning can
+be automated and standardized across environments. VMs can further be "reinitialized" to
+declaratively update them based on changes to the template or configuration.
+
+Each VM also includes an "admin" user that has full sudo privileges that is used for all
+provisioning and management tasks on the VM. While not recommended, the admin user is also available
+for agentic workloads if the operator so desires.
 
 ### Workspaces -- the project
 
-A workspace defines the **project scope**: the repo(s) being worked on, plus the behavioral
-configuration that shapes how tools operate within this project. This includes rulesync artifacts
-(rules, skills), workspace-level code assistant permissions (Claude Code, Copilot, etc.), and editor
-configs. A workspace narrows the VM's raw capability into a project-specific context.
+A workspace defines the **project scope**. Workspaces ultimately consist of a root directory that
+can be based on a git repository or an empty directory. The workspace also maps to a Linux group
+with workspace permissions and ACLs set to allow collaborative access to the files within the
+workspace for all members of the group. Workspace-level configuration (e.g. Claude Code's project
+settings) can be used to control how tools behave within the context of this workspace.
 
-Workspaces can live on a VM or locally on the User Workstation. Local workspaces do not support
-agents (see below).
+The Agentworks workspace mechanism fully supports any number of workspaces mapping to the same
+underlying repository. To simplify administration, each is a full independent clone.
+
+While VM workspaces are the primary supported workspace type, local workspaces can also be created
+on the user workstation. Local workspaces do not support agents because the isolation model that
+underpins agent execution requires Linux user management that is only available on VMs.
 
 ### Agents -- the actor
 
-An agent defines a **security identity** on a VM: a Linux user (`agt--<name>`) with its own shell,
-tools, credentials, and dotfiles. Agents are VM-scoped and can be granted access to one or more
-workspaces via explicit grants or implicitly through sessions. An agent's effective capability is
-the intersection of all layers: it can only use tools present on the VM and access workspaces it
-has been granted.
+An agent defines a **security identity** on a VM. Each agent maps to its own full Linux user,
+capable of having its own processes, private files, shell environment, etc. This allows for the
+creation of different identities with different privileges and capabilities.
+
+Agents are then mapped to workspaces, either explicitly via grants or implicitly via sessions (see
+below). This mapping drives standard group and filesystem permissions that control what agents are
+able to access.
 
 Agents are only supported on VM workspaces because the isolation model requires Linux user
 management (useradd, group membership).
 
 ### Sessions -- the interaction
 
-A session is a **persistent tmux session** that runs a command (typically a Claude Code instance) in
-a workspace. Sessions have globally unique names, are the primary interactive surface in agentworks,
-and map 1:1 to a tmux session on the VM. Sessions can run as the admin user or as an agent user.
+A session is a **persistent tmux session** that runs a command (e.g. a Claude Code instance or a
+simple shell) as an agent (or the admin user) in a workspace. Sessions have globally unique names
+and can be attached to, detached from, and restarted as needed by the operator.
 
-Agent-mode sessions run on a dedicated per-agent tmux socket so the agent's shell connects directly
-to the tmux pane PTY with no intermediary sudo process. The socket path is persisted in the database.
+## Key Principles
+
+### Opinionated Consistency
+
+Systems like Agentworks can easily spiral into significant complexity by attempting to support too
+many ways of doing the same thing. To protect against this, Agentworks takes an opinionated stance
+on how things should be set up. A single base operating system, tightly-integrated tooling, and
+emphasis on declarative configuration all help minimize variation and surprises across workload
+executions.
+
+### Composable Isolation
+
+This model provides several isolation mechanisms, which operators can compose to achieve their
+desired security posture. While the system suggests a full isolation model (VMs, agents, and
+workspaces), this is by no means required. Operators are free to use any subset that makes sense for
+their security and operational requirements.
 
 ### Ephemerality
 
-The layers differ in lifespan. VMs are long-lived -- provisioned once, used across many projects.
-Workspaces are medium-lived -- created per project, destroyed when done. Agents persist on a VM
-and can work across multiple workspaces and sessions. Sessions are the most ephemeral -- started,
-stopped, and deleted as work progresses.
+The layers differ in intended lifespan. VMs are intended to be long-lived: provisioned once and used
+across many projects. Workspaces are intended to be medium-lived: created to support a particular
+workstream or project and destroyed when done. Agents can be long-lived or short-lived depending on
+the operator's preferences. Long-lived agents can be reused across multiple workspaces and sessions
+or they can be created for a single workspace or session and destroyed when no longer needed.
+Sessions are intended to be the most ephemeral: started for a specific activity and discarded when
+done.
 
-### Templates
+### Declarative Configuration and Templates
 
-Each layer has (or will have) a templating mechanism so that patterns can be defined once and
-stamped many times. VM templates define what is installed and how the environment is configured.
-Workspace templates define which repos are cloned and how tools are configured for the project.
-Agent templates define the per-user environment for agent users (shell, dotfiles, tools, credentials).
+Each layer has a templating mechanism using declarative configuration so that patterns can be
+defined once and stamped many times. The longer-lived resources (VMs and agents) provide for
+[mostly idempotent](../docs/guides/idempotency.md) "reinitialization" so that they can be reliably
+evolved over time.
+
+## Tightly Integrated Tools
+
+In the spirit of opinionated consistency, Agentworks tightly integrates a small set of excellent
+tools that add significant value. While these tools could theoretically be replaced with
+alternatives, this would involve significant additional complexity that would slow down development
+and increase the likelihood of inconsistencies or errors.
+
+Those using Agentworks are highly encourage to embrace these tools rather than attempting to work
+around them.
+
+### Tailscale
+
+VMs join a [Tailscale](https://tailscale.com/) tailnet during provisioning. All subsequent SSH
+access (workspace shell, VM shell, initialization) goes over Tailscale, providing secure
+connectivity without exposing SSH ports to the public internet.
+
+During `vm create` (and `vm start` when re-joining), you will be prompted for a Tailscale auth key
+unless the `TAILSCALE_AUTH_KEY` environment variable is set. Generate keys at the
+[Tailscale admin console](https://login.tailscale.com/admin/settings/keys).
+
+Ephemeral auth keys (with `?ephemeral=true` appended) are fully supported. The Tailscale node is
+automatically removed from the tailnet when the VM goes offline. Agentworks handles re-joining
+gracefully on `vm start` by prompting for a new auth key (or using `TAILSCALE_AUTH_KEY`).
+
+### Tmux
+
+Sessions are built on [tmux](https://github.com/tmux/tmux), which provides persistent terminal
+sessions that survive disconnects and support attach/detach. Each session maps 1:1 to a tmux
+session on the VM.
+
+Agentworks provides two console layers for interacting with sessions:
+
+- **Workspace console** (`workspace console`): a tmuxinator-managed tmux session with one window
+  per session in the workspace, plus an admin shell. This is the recommended way to interact with
+  sessions.
+- **VM console** (`vm console`): a dynamically-built tmux session spanning all workspaces on the
+  VM.
+
+Agent-mode sessions run on per-agent tmux sockets for proper process isolation and terminal resize
+propagation. See the [tmux Architecture](#tmux-architecture) section for details.
 
 ## Getting Started
 
@@ -80,9 +161,9 @@ agentworks workspace shell my-workspace
 
 ## Global Options
 
-| Flag                 | Description                    |
-| -------------------- | ------------------------------ |
-| `--non-interactive`  | Disable all interactive prompts |
+| Flag                | Description                     |
+| ------------------- | ------------------------------- |
+| `--non-interactive` | Disable all interactive prompts |
 
 When `--non-interactive` is set (or stdin is not a TTY), commands that would normally prompt for
 missing values (VM selection, workspace selection, name generation) will fail with a clear error
@@ -140,48 +221,47 @@ message shows what will be deleted. Pass `--yes` to skip the prompt.
 
 Manage workspaces on VMs or locally.
 
-| Command                                   | Description                          |
-| ----------------------------------------- | ------------------------------------ |
-| `agentworks workspace create`             | Create a workspace (VM or `--local`) |
-| `agentworks workspace describe <name>`    | Show workspace details and sessions  |
-| `agentworks workspace shell <name>`       | Open a plain shell into a workspace  |
-| `agentworks workspace console <name>`     | Open the workspace console (tmux)    |
-| `agentworks workspace list`               | List workspaces                      |
-| `agentworks workspace copy <source>`      | Copy a workspace to a new location   |
-| `agentworks workspace rehome <name>`      | Move workspace to a new path         |
-| `agentworks workspace repair <name>`      | Repair workspace infrastructure      |
-| `agentworks workspace delete <name>`      | Delete a workspace                   |
+| Command                                | Description                          |
+| -------------------------------------- | ------------------------------------ |
+| `agentworks workspace create`          | Create a workspace (VM or `--local`) |
+| `agentworks workspace describe <name>` | Show workspace details and sessions  |
+| `agentworks workspace shell <name>`    | Open a plain shell into a workspace  |
+| `agentworks workspace console <name>`  | Open the workspace console (tmux)    |
+| `agentworks workspace list`            | List workspaces                      |
+| `agentworks workspace copy <source>`   | Copy a workspace to a new location   |
+| `agentworks workspace rehome <name>`   | Move workspace to a new path         |
+| `agentworks workspace repair <name>`   | Repair workspace infrastructure      |
+| `agentworks workspace delete <name>`   | Delete a workspace                   |
 
 `workspace create` accepts `--name`, `--vm`, `--local`, `--template`, and `--open-vscode`.
 
-`workspace console` opens a tmuxinator session (`ws-<name>-console`) with an admin-shell
-window plus one window per session in the workspace. Pass `--recreate` to kill and rebuild the
-console. This is the recommended way to interact with sessions from within VS Code or any
-terminal on the VM.
+`workspace console` opens a tmuxinator session (`ws-<name>-console`) with an admin-shell window plus
+one window per session in the workspace. Pass `--recreate` to kill and rebuild the console. This is
+the recommended way to interact with sessions from within VS Code or any terminal on the VM.
 
-`workspace copy` copies a workspace to a new location. Accepts `--name`, `--vm`, and `--local`
-(same pattern as `workspace create`). Works across VMs, VM to local, and local to VM.
+`workspace copy` copies a workspace to a new location. Accepts `--name`, `--vm`, and `--local` (same
+pattern as `workspace create`). Works across VMs, VM to local, and local to VM.
 
-`workspace delete` requires `--force` if the workspace has sessions. Running sessions are
-killed during deletion. Pass `--yes` to skip the confirmation prompt.
+`workspace delete` requires `--force` if the workspace has sessions. Running sessions are killed
+during deletion. Pass `--yes` to skip the confirmation prompt.
 
 ### Agents
 
 Manage agents (isolated Linux users) on VMs. Agents are VM-scoped and access workspaces via grants.
 
-| Command                                                    | Description                     |
-| ---------------------------------------------------------- | ------------------------------- |
-| `agentworks agent create [--name] [--vm]`                           | Create an agent on a VM         |
-| `agentworks agent list [--vm <vm>]`                                 | List agents                     |
-| `agentworks agent describe <name>`                                  | Show agent details and grants   |
-| `agentworks agent reinit <name>`                                    | Re-run agent setup              |
-| `agentworks agent workspace-grants grant <name> <ws>[,<ws>]`       | Grant workspace access          |
-| `agentworks agent workspace-grants grant <name> --all`              | Grant access to all workspaces  |
-| `agentworks agent workspace-grants deny <name> <ws>[,<ws>]`        | Remove workspace access         |
-| `agentworks agent workspace-grants deny <name> --all`               | Remove all explicit grants      |
-| `agentworks agent workspace-grants list <name>`                     | List workspace grants           |
-| `agentworks agent shell <name> [--workspace <ws>]`                  | Shell into an agent             |
-| `agentworks agent delete <name>`                                    | Delete an agent                 |
+| Command                                                      | Description                    |
+| ------------------------------------------------------------ | ------------------------------ |
+| `agentworks agent create [--name] [--vm]`                    | Create an agent on a VM        |
+| `agentworks agent list [--vm <vm>]`                          | List agents                    |
+| `agentworks agent describe <name>`                           | Show agent details and grants  |
+| `agentworks agent reinit <name>`                             | Re-run agent setup             |
+| `agentworks agent workspace-grants grant <name> <ws>[,<ws>]` | Grant workspace access         |
+| `agentworks agent workspace-grants grant <name> --all`       | Grant access to all workspaces |
+| `agentworks agent workspace-grants deny <name> <ws>[,<ws>]`  | Remove workspace access        |
+| `agentworks agent workspace-grants deny <name> --all`        | Remove all explicit grants     |
+| `agentworks agent workspace-grants list <name>`              | List workspace grants          |
+| `agentworks agent shell <name> [--workspace <ws>]`           | Shell into an agent            |
+| `agentworks agent delete <name>`                             | Delete an agent                |
 
 `agent create` accepts `--name`, `--vm`, `--template`, and `--grant-all-workspaces`.
 
@@ -190,38 +270,38 @@ confirmation prompt.
 
 ### Sessions
 
-Manage sessions (persistent tmux sessions running in workspaces). Session names are globally
-unique -- no `--workspace` flag needed for most commands.
+Manage sessions (persistent tmux sessions running in workspaces). Session names are globally unique
+-- no `--workspace` flag needed for most commands.
 
-| Command                                    | Description                    |
-| ------------------------------------------ | ------------------------------ |
-| `agentworks session create`                | Create and start a session     |
-| `agentworks session describe <name>`       | Show session details           |
-| `agentworks session list [--workspace]`    | List sessions with status      |
-| `agentworks session attach <name>`         | Attach to a running session    |
-| `agentworks session stop <name>`           | Stop a running session         |
-| `agentworks session restart <name>`        | Restart a session              |
-| `agentworks session delete <name>`         | Stop and delete a session      |
-| `agentworks session logs <name>`           | Dump session scrollback buffer |
-| `agentworks vm console <vm-name>`          | Attach to the VM console       |
+| Command                                 | Description                    |
+| --------------------------------------- | ------------------------------ |
+| `agentworks session create`             | Create and start a session     |
+| `agentworks session describe <name>`    | Show session details           |
+| `agentworks session list [--workspace]` | List sessions with status      |
+| `agentworks session attach <name>`      | Attach to a running session    |
+| `agentworks session stop <name>`        | Stop a running session         |
+| `agentworks session restart <name>`     | Restart a session              |
+| `agentworks session delete <name>`      | Stop and delete a session      |
+| `agentworks session logs <name>`        | Dump session scrollback buffer |
+| `agentworks vm console <vm-name>`       | Attach to the VM console       |
 
-`session create` accepts `--name`, `--workspace`, `--template`, `--admin`, and `--agent`.
-Workspace, mode (admin vs agent), and name are prompted interactively if omitted. If agents exist
-on the VM and neither `--admin` nor `--agent` is specified, you are prompted to choose. Pass
-`--new-workspace` to create a workspace on the fly (with optional `--workspace-name`,
-`--workspace-template`, and `--vm`). When a session created with `--new-workspace` is later
-deleted, you are offered the option to delete the workspace as well (if no other sessions remain).
+`session create` accepts `--name`, `--workspace`, `--template`, `--admin`, and `--agent`. Workspace,
+mode (admin vs agent), and name are prompted interactively if omitted. If agents exist on the VM and
+neither `--admin` nor `--agent` is specified, you are prompted to choose. Pass `--new-workspace` to
+create a workspace on the fly (with optional `--workspace-name`, `--workspace-template`, and
+`--vm`). When a session created with `--new-workspace` is later deleted, you are offered the option
+to delete the workspace as well (if no other sessions remain).
 
 ### tmux Architecture
 
 Each session runs in its own locked-down tmux session on the VM. There are three ways to interact
 with sessions, at different scopes:
 
-| Method | Scope | tmux session name | Entry point |
-| --- | --- | --- | --- |
-| `session attach` | One session | `<session-name>` | Operator's machine |
-| `workspace console` | One workspace | `ws-<workspace>-console` | On-VM or operator's machine |
-| `vm console` | All workspaces | `vm-console` | Operator's machine |
+| Method              | Scope          | tmux session name        | Entry point                 |
+| ------------------- | -------------- | ------------------------ | --------------------------- |
+| `session attach`    | One session    | `<session-name>`         | Operator's machine          |
+| `workspace console` | One workspace  | `ws-<workspace>-console` | On-VM or operator's machine |
+| `vm console`        | All workspaces | `vm-console`             | Operator's machine          |
 
 #### Session tmux sessions
 
@@ -235,10 +315,10 @@ tmux pane PTY. The socket path is persisted in the database.
 
 #### Workspace console
 
-`workspace console` uses tmuxinator to create or attach to a `ws-<name>-console` session.
-The tmuxinator config (`.tmuxinator.yml` in the workspace root) is regenerated whenever sessions
-change, so the console always reflects the current set of sessions. This is the recommended way
-to interact with sessions from within VS Code or any terminal on the VM.
+`workspace console` uses tmuxinator to create or attach to a `ws-<name>-console` session. The
+tmuxinator config (`.tmuxinator.yml` in the workspace root) is regenerated whenever sessions change,
+so the console always reflects the current set of sessions. This is the recommended way to interact
+with sessions from within VS Code or any terminal on the VM.
 
 ```text
 ws-myproject-console (tmuxinator, full tmux)
@@ -249,14 +329,13 @@ ws-myproject-console (tmuxinator, full tmux)
 
 #### VM console
 
-`vm console` creates or attaches to the `vm-console` session, which spans all workspaces on
-the VM. This is built dynamically (not via tmuxinator) and is managed from the operator's
-machine.
+`vm console` creates or attaches to the `vm-console` session, which spans all workspaces on the VM.
+This is built dynamically (not via tmuxinator) and is managed from the operator's machine.
 
 #### Shells
 
-`workspace shell` and `vm shell` open plain login shells with no tmux. Use these when you just
-need a terminal without the console structure.
+`workspace shell` and `vm shell` open plain login shells with no tmux. Use these when you just need
+a terminal without the console structure.
 
 #### Key behaviors
 
@@ -264,18 +343,18 @@ need a terminal without the console structure.
   work normally. Status bar is hidden since there is only one pane.
 - **Consoles** (`workspace console`, `vm console`): the console's prefix key eclipses the inner
   session's prefix, so window switching, detach, etc. all operate at the console level. Session
-  windows use a wrapper that re-attaches if the inner session disconnects and shows a message
-  when the session ends.
+  windows use a wrapper that re-attaches if the inner session disconnects and shows a message when
+  the session ends.
 - **Nesting protection**: both console commands refuse to run inside an existing tmux session to
   avoid prefix key conflicts. Pass `--allow-nesting` to override.
-- **Console lifecycle**: consoles are independent of sessions. Killing or detaching a console
-  does not affect running sessions. `--recreate` rebuilds from scratch.
+- **Console lifecycle**: consoles are independent of sessions. Killing or detaching a console does
+  not affect running sessions. `--recreate` rebuilds from scratch.
 
 ### Session Templates
 
 Templates define the command a session runs. The built-in `default` template runs a login shell
-(`$SHELL --login`), respecting whatever shell the user (admin or agent) is configured with.
-Define custom templates in config:
+(`$SHELL --login`), respecting whatever shell the user (admin or agent) is configured with. Define
+custom templates in config:
 
 ```toml
 [session_templates.default]            # override the built-in default
@@ -285,9 +364,9 @@ description = "Claude Code interactive session"
 ```
 
 Template commands support `{{session_name}}` and `{{workspace_name}}` variable substitution
-(double-brace syntax, consistent with nerftools manifests). The optional `restart_command` is
-used by `session restart` -- useful for tools like Claude Code where `--resume` picks up the
-previous conversation. If omitted, the regular `command` is used.
+(double-brace syntax, consistent with nerftools manifests). The optional `restart_command` is used
+by `session restart` -- useful for tools like Claude Code where `--resume` picks up the previous
+conversation. If omitted, the regular `command` is used.
 
 ### Installers
 
@@ -303,11 +382,11 @@ and `--source` (builtin, user) filters.
 
 ### Config
 
-| Command                             | Description                            |
-| ----------------------------------- | -------------------------------------- |
-| `agentworks config init`            | Create a sample config file            |
-| `agentworks config edit`            | Open config in `$EDITOR`               |
-| `agentworks config sample`          | Print the sample config to stdout      |
+| Command                                    | Description                                  |
+| ------------------------------------------ | -------------------------------------------- |
+| `agentworks config init`                   | Create a sample config file                  |
+| `agentworks config edit`                   | Open config in `$EDITOR`                     |
+| `agentworks config sample`                 | Print the sample config to stdout            |
 | `agentworks config sync-ssh-config`        | Rebuild SSH config entries for all VMs       |
 | `agentworks config sync-vscode-workspaces` | Regenerate .code-workspace files for all VMs |
 
@@ -344,9 +423,8 @@ Agentworks installs [mise](https://mise.jdx.dev/) by default on all VMs for mana
 ### Nerf Tools (Claude Code Plugin)
 
 Agentworks can build and deploy a Claude Code plugin containing "nerf tools" -- scoped,
-safety-constrained wrappers for CLI operations like git, az, and other tools. Nerf tools
-enforce guardrails (validated parameters, restricted flags, pre-flight checks) so AI agents
-operate safely.
+safety-constrained wrappers for CLI operations like git, az, and other tools. Nerf tools enforce
+guardrails (validated parameters, restricted flags, pre-flight checks) so AI agents operate safely.
 
 Enable in your VM template:
 
@@ -355,8 +433,8 @@ Enable in your VM template:
 nerf_build_claude_plugin = true
 ```
 
-This builds the plugin to `nerf_home_dir/claude-plugin/` during VM init. To auto-install the
-plugin for users, add to admin or agent config:
+This builds the plugin to `nerf_home_dir/claude-plugin/` during VM init. To auto-install the plugin
+for users, add to admin or agent config:
 
 ```toml
 [admin.config]
@@ -364,8 +442,8 @@ nerf_install_claude_plugin = true
 ```
 
 The plugin provides skills that document available tools, and operator commands for managing
-permissions (`/nerftools:nerfctl-grant-allow`, `/nerftools:nerfctl-grant-deny`, etc.). Custom
-tool manifests can be added via `nerf_addl_manifests`.
+permissions (`/nerftools:nerfctl-grant-allow`, `/nerftools:nerfctl-grant-deny`, etc.). Custom tool
+manifests can be added via `nerf_addl_manifests`.
 
 ### Built-in Catalog
 
@@ -396,36 +474,6 @@ Non-fatal initialization failures (packages, dotfiles) produce a `partial` statu
 aborting. Fatal failures prompt for deletion or reinit. Use `vm describe` to view the full event
 log.
 
-## Tailscale
-
-VMs join a Tailscale tailnet during initialization. All subsequent SSH access (workspace shell, VM
-shell, Phase B setup) goes over Tailscale.
-
-### Auth keys
-
-During `vm create` (and `vm start` when re-joining), you will be prompted for a Tailscale auth key
-unless the `TAILSCALE_AUTH_KEY` environment variable is set. Generate keys at the
-[Tailscale admin console](https://login.tailscale.com/admin/settings/keys).
-
-### Ephemeral nodes
-
-If you use an ephemeral auth key (one with `?ephemeral=true` appended), the Tailscale node is
-automatically removed from the tailnet when the VM goes offline. Agentworks handles this gracefully:
-
-- **On stop**: checks whether the Tailscale node survived. If not, clears the stored IP so the next
-  start knows to re-join.
-- **On start**: verifies Tailscale connectivity. If the node is gone (ephemeral or otherwise),
-  re-joins the tailnet via the provisioning transport (Lima shell, SSH, or WSL2 exec) and prompts
-  for a new auth key (or uses `TAILSCALE_AUTH_KEY`).
-
-This means ephemeral keys work fine for disposable VMs and are also resilient across stop/start
-cycles. Non-ephemeral keys work without any re-joining.
-
-### Cleanup on delete
-
-`vm delete` performs a best-effort Tailscale logout via SSH before destroying the VM. For ephemeral
-nodes this is a no-op since they auto-remove. For non-ephemeral nodes, this deregisters the node
-from the tailnet.
 
 ## Shell Completion
 
