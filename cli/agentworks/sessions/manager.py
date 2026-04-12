@@ -466,6 +466,12 @@ def delete_session(
         typer.confirm(f"Session '{name}' is still running. Delete anyway?", abort=True)
 
     _kill_session_any_server(name, run_command=run_command, socket_path=sock)
+
+    # Remove the socket file if it exists (tmux doesn't always clean up)
+    if sock:
+        import shlex
+        run_command(f"sudo rm -f {shlex.quote(sock)}", check=False)
+
     db.delete_session(name)
 
     # Clean up implicit grant for this session
