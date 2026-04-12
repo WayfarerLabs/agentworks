@@ -122,8 +122,8 @@ mechanism for all subsequent operations.
 
 During provisioning, SSH access uses the platform's native transport (Lima shell, Azure public IP,
 WSL2 exec, or Proxmox guest agent). Once Tailscale is joined (see below), all further SSH access
-goes over the tailnet. Agentworks automatically manages `~/.ssh/config` entries for each VM so
-that standard SSH tools (scp, ssh, VS Code Remote) work seamlessly.
+goes over the tailnet. Agentworks automatically manages `~/.ssh/config` entries for each VM so that
+standard SSH tools (scp, ssh, VS Code Remote) work seamlessly.
 
 ### Tailscale
 
@@ -431,6 +431,7 @@ Key sections:
 - `[system_install_commands.*]` -- user-defined system-level install commands
 - `[user_install_commands.*]` -- user-defined per-user install commands
 - `[azure]` -- Azure-specific settings
+- `[proxmox]` -- Proxmox VE API settings
 
 ### Mise (Polyglot Tool Manager)
 
@@ -515,6 +516,7 @@ forward-only and run automatically.
 
 ## Environment Variables
 
-| Variable             | Description                       |
-| -------------------- | --------------------------------- |
-| `TAILSCALE_AUTH_KEY` | Tailscale auth key (skips prompt) |
+| Variable                      | Description                                     |
+| ----------------------------- | ----------------------------------------------- |
+| `TAILSCALE_AUTH_KEY`          | Tailscale auth key (skips prompt)               |
+| `GIT_CREDENTIALS_<CRED_NAME>` | Git credential for `<CRED_NAME>` (skips prompt) |
