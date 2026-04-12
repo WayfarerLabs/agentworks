@@ -47,6 +47,24 @@ def _resolve_session_linux_user(db: Database, session: SessionRow, vm: VMRow) ->
     return vm.admin_username
 
 
+def _effective_socket_path(db: Database, session: SessionRow) -> str | None:
+    """Return the socket path for a session, deriving it for migrated agent sessions.
+
+    Migrated sessions have socket_path=NULL in the DB. For agent-mode sessions,
+    we can derive the path from the agent's linux_user and the session name.
+    """
+    if session.socket_path:
+        return session.socket_path
+    if not session.agent_name:
+        return None
+    from agentworks.sessions.tmux import agent_socket_path
+
+    agent = db.get_agent(session.agent_name)
+    if agent is None:
+        return None
+    return agent_socket_path(agent.linux_user, session.name)
+
+
 def _kill_session_any_server(
     session_name: str,
     *,
@@ -225,8 +243,9 @@ def _reconcile_status(
     db: Database,
 ) -> str:
     """Check tmux session and reconcile session status in the DB."""
+    sock = _effective_socket_path(db, session)
     alive = _session_exists_any_server(
-        session.name, run_command=run_command, socket_path=session.socket_path,
+        session.name, run_command=run_command, socket_path=sock,
     )
     if session.status == SessionStatus.RUNNING.value and not alive:
         db.update_session_status(session.name, SessionStatus.STOPPED)
@@ -352,7 +371,7 @@ def stop_session(
         typer.echo(f"Session '{name}' is already stopped")
         return
 
-    sock = session.socket_path
+    sock = _effective_socket_path(db, session)
 
     # Send C-c to the running process first (try both socket and default server)
     send_keys(name, "C-c", run_command=run_command, socket_path=sock)
@@ -385,7 +404,7 @@ def restart_session(
 
     session = _require_session(db, name)
     ws, vm, run_command = _prepare_vm(db, config, session.workspace_name, operation="session-restart")
-    sock = session.socket_path
+    sock = _effective_socket_path(db, session)
 
     if _session_exists_any_server(name, run_command=run_command, socket_path=sock, warn_legacy=False):
         if not force:
@@ -441,7 +460,7 @@ def delete_session(
     """Stop and delete a session."""
     session = _require_session(db, name)
     ws, vm, run_command = _prepare_vm(db, config, session.workspace_name, operation="session-delete")
-    sock = session.socket_path
+    sock = _effective_socket_path(db, session)
 
     if not yes and _session_exists_any_server(name, run_command=run_command, socket_path=sock):
         typer.confirm(f"Session '{name}' is still running. Delete anyway?", abort=True)
@@ -592,7 +611,7 @@ def attach_session(
 
     session = _require_session(db, name)
     _ws, vm, run_command = _prepare_vm(db, config, session.workspace_name, operation="session-attach")
-    sock = session.socket_path
+    sock = _effective_socket_path(db, session)
 
     if not _session_exists_any_server(name, run_command=run_command, socket_path=sock):
         typer.echo(f"Error: session '{name}' is not running", err=True)
@@ -620,7 +639,7 @@ def session_logs(
 
     session = _require_session(db, name)
     _ws, _vm, run_command = _prepare_vm(db, config, session.workspace_name, operation="session-logs")
-    sock = session.socket_path
+    sock = _effective_socket_path(db, session)
 
     # For legacy sessions, fall back to the default server
     if sock and not session_exists(name, run_command=run_command, socket_path=sock):
