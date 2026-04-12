@@ -1217,7 +1217,11 @@ def _phase_b_setup(
     # Non-fatal: agent tmux socket directory infrastructure.
     # Creates the shared group, root directory, and per-agent subdirectories.
     try:
-        from agentworks.sessions.tmux import ensure_agent_socket_dir, ensure_agent_socket_root
+        from agentworks.sessions.tmux import (
+            cleanup_stale_sockets,
+            ensure_agent_socket_dir,
+            ensure_agent_socket_root,
+        )
 
         logger.step("Agent tmux socket directories")
         typer.echo("  Setting up agent tmux socket infrastructure...")
@@ -1228,6 +1232,9 @@ def _phase_b_setup(
         ensure_agent_socket_root(_root_cmd, admin_username)
         for agent in db.list_agents(vm_name):
             ensure_agent_socket_dir(_root_cmd, agent.linux_user)
+            removed = cleanup_stale_sockets(_root_cmd, agent.linux_user)
+            if removed:
+                typer.echo(f"  Cleaned up {removed} stale socket(s) for {agent.linux_user}")
     except SSHError as e:
         msg = f"agent tmux socket setup failed: {e}"
         logger.warning(msg)

@@ -601,11 +601,14 @@ def _create_agent_on_vm(
     # been reinited since the socket feature was added.
     from functools import partial as _partial
 
-    from agentworks.sessions.tmux import ensure_agent_socket_dir, ensure_agent_socket_root
+    from agentworks.sessions.tmux import cleanup_stale_sockets, ensure_agent_socket_dir, ensure_agent_socket_root
 
     _root_cmd = _partial(run_as_root, target, logger=lg)
     ensure_agent_socket_root(_root_cmd, vm.admin_username)
     ensure_agent_socket_dir(_root_cmd, linux_user)
+    removed = cleanup_stale_sockets(_root_cmd, linux_user)
+    if removed:
+        typer.echo(f"  Cleaned up {removed} stale socket(s)")
 
     # Write a minimal rc file with a clear agent prompt
     if agent_shell == "zsh":

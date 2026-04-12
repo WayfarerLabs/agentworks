@@ -65,6 +65,35 @@ def ensure_agent_socket_dir(run_command: RunCommand, linux_user: str) -> None:
     run_command(f"chmod 2770 {q_path}")
 
 
+def cleanup_stale_sockets(run_command: RunCommand, linux_user: str) -> int:
+    """Remove socket files whose tmux server is no longer running.
+
+    Returns the number of stale sockets removed.
+    """
+    q_dir = shlex.quote(f"{AGENT_SOCKET_ROOT}/{linux_user}")
+    # List .sock files in the agent's socket directory
+    result = run_command(f"find {q_dir} -name '*.sock' -type s 2>/dev/null", check=False)
+    stdout = getattr(result, "stdout", "") or ""
+    if not stdout.strip():
+        return 0
+
+    removed = 0
+    for sock_path in stdout.strip().splitlines():
+        sock_path = sock_path.strip()
+        if not sock_path:
+            continue
+        q_sock = shlex.quote(sock_path)
+        # Check if a tmux server is running on this socket
+        check = run_command(
+            f"sudo -n tmux -S {q_sock} list-sessions 2>/dev/null",
+            check=False,
+        )
+        if not getattr(check, "ok", False):
+            run_command(f"sudo rm -f {q_sock}", check=False)
+            removed += 1
+    return removed
+
+
 def generate_restricted_config(history_limit: int = DEFAULT_HISTORY_LIMIT) -> str:
     """Generate the locked-down tmux config for sessions.
 
