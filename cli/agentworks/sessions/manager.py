@@ -573,13 +573,15 @@ def list_sessions(
 
         if no_status or ws is None or ws.type != "vm":
             for session in ws_sessions:
-                rows.append((session.name, ws_name, vm_name, session.template, session.mode, session.status))
+                mode_label = f"agent: {session.agent_name}" if session.agent_name else "admin"
+                rows.append((session.name, ws_name, vm_name, session.template, mode_label, session.status))
             continue
 
         vm = db.get_vm(ws.vm_name)  # type: ignore[arg-type]
         if vm is None or vm.tailscale_host is None:
             for session in ws_sessions:
-                rows.append((session.name, ws_name, vm_name, session.template, session.mode, session.status))
+                mode_label = f"agent: {session.agent_name}" if session.agent_name else "admin"
+                rows.append((session.name, ws_name, vm_name, session.template, mode_label, session.status))
             continue
 
         from agentworks.ssh import run
@@ -593,7 +595,8 @@ def list_sessions(
                 run_command=run_command,
                 db=db,
             )
-            rows.append((session.name, ws_name, vm_name, session.template, session.mode, status))
+            mode_label = f"agent: {session.agent_name}" if session.agent_name else "admin"
+            rows.append((session.name, ws_name, vm_name, session.template, mode_label, status))
 
     if not rows:
         typer.echo("No sessions found.")
