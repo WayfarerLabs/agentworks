@@ -44,8 +44,8 @@ DYNAMIC_SNIPPETS: dict[str, str] = {
         " | ForEach-Object { ($_ -split '\\s+')[1] }"
         ' | Where-Object { $_ -like "$wordToComplete*" } }'
     ),
-    "tasks": (
-        "(agentworks task list --no-status 2>$null | Select-Object -Skip 2 |"
+    "sessions": (
+        "(agentworks session list --no-status 2>$null | Select-Object -Skip 2 |"
         " ForEach-Object { ($_ -split '\\s+')[0] } |"
         ' Where-Object { $_ -like "$wordToComplete*" })'
     ),
@@ -54,11 +54,11 @@ DYNAMIC_SNIPPETS: dict[str, str] = {
         " ForEach-Object { ($_ -split '\\s+')[0] } |"
         ' Where-Object { $_ -like "$wordToComplete*" })'
     ),
-    "task_templates": (
+    "session_templates": (
         "& { $builtins = @('default');"
         " $f = Join-Path $env:USERPROFILE '.config/agentworks/config.toml';"
         " $user = @(); if (Test-Path $f) {"
-        " $user = Get-Content $f | Select-String '^\\[task_templates\\.([^\\]]+)\\]'"
+        " $user = Get-Content $f | Select-String '^\\[session_templates\\.([^\\]]+)\\]'"
         " | ForEach-Object { $_.Matches[0].Groups[1].Value } }"
         ' ($builtins + $user) | Where-Object { $_ -like "$wordToComplete*" } }'
     ),

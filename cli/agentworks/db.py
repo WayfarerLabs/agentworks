@@ -42,12 +42,12 @@ class VMStatus(Enum):
     UNKNOWN = "unknown"
 
 
-class TaskMode(Enum):
+class SessionMode(Enum):
     ADMIN = "admin"
     AGENT = "agent"
 
 
-class TaskStatus(Enum):
+class SessionStatus(Enum):
     RUNNING = "running"
     STOPPED = "stopped"
 
@@ -122,12 +122,12 @@ class AgentGrantRow:
     agent_name: str
     workspace_name: str
     grant_type: str  # 'explicit' or 'implicit'
-    task_name: str | None  # NULL for explicit, task name for implicit
+    session_name: str | None  # NULL for explicit, session name for implicit
     created_at: str
 
 
 @dataclass
-class TaskRow:
+class SessionRow:
     name: str
     workspace_name: str
     template: str
@@ -137,6 +137,7 @@ class TaskRow:
     updated_at: str
     agent_name: str | None = None
     created_workspace: bool = False
+    socket_path: str | None = None
 
 
 # -- Migrations ------------------------------------------------------------
@@ -323,6 +324,45 @@ MIGRATIONS: dict[int, str] = {
     """,
     16: """
         ALTER TABLE vms ADD COLUMN proxmox_vmid TEXT;
+    """,
+    17: """
+        -- Rename tasks -> sessions with globally unique names
+        CREATE TABLE sessions (
+            name              TEXT PRIMARY KEY,
+            workspace_name    TEXT NOT NULL,
+            template          TEXT NOT NULL,
+            mode              TEXT NOT NULL DEFAULT 'admin',
+            status            TEXT NOT NULL DEFAULT 'running',
+            created_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+            updated_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+            agent_name        TEXT REFERENCES agents(name),
+            created_workspace INTEGER NOT NULL DEFAULT 0,
+            socket_path       TEXT,
+            FOREIGN KEY (workspace_name) REFERENCES workspaces(name)
+        );
+        INSERT INTO sessions (name, workspace_name, template, mode, status, created_at, updated_at, agent_name, created_workspace)
+            SELECT workspace_name || '--' || name, workspace_name, template, mode, status, created_at, updated_at, agent_name, created_workspace
+            FROM tasks;
+        DROP TABLE tasks;
+    """,
+    18: """
+        -- Rename task_name -> session_name in agent_workspace_grants
+        CREATE TABLE agent_workspace_grants_new (
+            agent_name     TEXT NOT NULL,
+            workspace_name TEXT NOT NULL,
+            grant_type     TEXT NOT NULL,
+            session_name   TEXT,
+            created_at     TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+            FOREIGN KEY (agent_name) REFERENCES agents(name) ON DELETE CASCADE,
+            FOREIGN KEY (workspace_name) REFERENCES workspaces(name) ON DELETE CASCADE
+        );
+        INSERT INTO agent_workspace_grants_new (agent_name, workspace_name, grant_type, session_name, created_at)
+            SELECT agent_name, workspace_name, grant_type,
+                   CASE WHEN task_name IS NOT NULL THEN workspace_name || '--' || task_name ELSE NULL END,
+                   created_at
+            FROM agent_workspace_grants;
+        DROP TABLE agent_workspace_grants;
+        ALTER TABLE agent_workspace_grants_new RENAME TO agent_workspace_grants;
     """,
 }
 
@@ -514,7 +554,7 @@ class Database:
 
     def delete_vm(self, name: str) -> None:
         self._conn.execute(
-            "DELETE FROM tasks WHERE workspace_name IN (SELECT name FROM workspaces WHERE vm_name = ?)",
+            "DELETE FROM sessions WHERE workspace_name IN (SELECT name FROM workspaces WHERE vm_name = ?)",
             (name,),
         )
         # Agents are VM-scoped; grants cascade via FK
@@ -586,7 +626,7 @@ class Database:
         self._conn.commit()
 
     def delete_workspace(self, name: str) -> None:
-        self._conn.execute("DELETE FROM tasks WHERE workspace_name = ?", (name,))
+        self._conn.execute("DELETE FROM sessions WHERE workspace_name = ?", (name,))
         # Grants cascade via FK; agents are VM-scoped so not deleted with workspaces
         self._conn.execute("DELETE FROM agent_workspace_grants WHERE workspace_name = ?", (name,))
         self._conn.execute("DELETE FROM workspaces WHERE name = ?", (name,))
@@ -603,9 +643,9 @@ class Database:
         ).fetchone()
         return int(row[0])
 
-    def count_tasks_on_vm(self, vm_name: str) -> int:
+    def count_sessions_on_vm(self, vm_name: str) -> int:
         row = self._conn.execute(
-            "SELECT COUNT(*) FROM tasks WHERE workspace_name IN (SELECT name FROM workspaces WHERE vm_name = ?)",
+            "SELECT COUNT(*) FROM sessions WHERE workspace_name IN (SELECT name FROM workspaces WHERE vm_name = ?)",
             (vm_name,),
         ).fetchone()
         return int(row[0])
@@ -668,13 +708,13 @@ class Database:
         agent_name: str,
         workspace_name: str,
         grant_type: str,
-        task_name: str | None = None,
+        session_name: str | None = None,
     ) -> None:
         self._conn.execute(
             "INSERT OR IGNORE INTO agent_workspace_grants "
-            "(agent_name, workspace_name, grant_type, task_name) "
+            "(agent_name, workspace_name, grant_type, session_name) "
             "VALUES (?, ?, ?, ?)",
-            (agent_name, workspace_name, grant_type, task_name),
+            (agent_name, workspace_name, grant_type, session_name),
         )
         self._conn.commit()
 
@@ -683,18 +723,18 @@ class Database:
         agent_name: str,
         workspace_name: str,
         grant_type: str,
-        task_name: str | None = None,
+        session_name: str | None = None,
     ) -> None:
-        if task_name is not None:
+        if session_name is not None:
             self._conn.execute(
                 "DELETE FROM agent_workspace_grants "
-                "WHERE agent_name = ? AND workspace_name = ? AND grant_type = ? AND task_name = ?",
-                (agent_name, workspace_name, grant_type, task_name),
+                "WHERE agent_name = ? AND workspace_name = ? AND grant_type = ? AND session_name = ?",
+                (agent_name, workspace_name, grant_type, session_name),
             )
         else:
             self._conn.execute(
                 "DELETE FROM agent_workspace_grants "
-                "WHERE agent_name = ? AND workspace_name = ? AND grant_type = ? AND task_name IS NULL",
+                "WHERE agent_name = ? AND workspace_name = ? AND grant_type = ? AND session_name IS NULL",
                 (agent_name, workspace_name, grant_type),
             )
         self._conn.commit()
@@ -764,71 +804,81 @@ class Database:
         )
         self._conn.commit()
 
-    # -- Tasks -------------------------------------------------------------
+    # -- Sessions ----------------------------------------------------------
 
-    def insert_task(
+    def insert_session(
         self,
         name: str,
         workspace_name: str,
         template: str,
-        mode: TaskMode,
+        mode: SessionMode,
         agent_name: str | None = None,
         created_workspace: bool = False,
-    ) -> TaskRow:
+        socket_path: str | None = None,
+    ) -> SessionRow:
         self._conn.execute(
-            "INSERT INTO tasks (name, workspace_name, template, mode, agent_name, created_workspace)"
-            " VALUES (?, ?, ?, ?, ?, ?)",
-            (name, workspace_name, template, mode.value, agent_name, int(created_workspace)),
+            "INSERT INTO sessions (name, workspace_name, template, mode, agent_name, created_workspace, socket_path)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (name, workspace_name, template, mode.value, agent_name, int(created_workspace), socket_path),
         )
         self._conn.commit()
-        result = self.get_task(workspace_name, name)
+        result = self.get_session(name)
         assert result is not None
         return result
 
-    def get_task(self, workspace_name: str, name: str) -> TaskRow | None:
+    def get_session(self, name: str) -> SessionRow | None:
         row = self._conn.execute(
-            "SELECT * FROM tasks WHERE workspace_name = ? AND name = ?",
-            (workspace_name, name),
+            "SELECT * FROM sessions WHERE name = ?",
+            (name,),
         ).fetchone()
-        return _to_task(row) if row else None
+        return _to_session(row) if row else None
 
-    def list_tasks(self, workspace_name: str | None = None) -> list[TaskRow]:
+    def list_sessions(self, workspace_name: str | None = None) -> list[SessionRow]:
         if workspace_name is not None:
             rows = self._conn.execute(
-                "SELECT * FROM tasks WHERE workspace_name = ? ORDER BY name",
+                "SELECT * FROM sessions WHERE workspace_name = ? ORDER BY name",
                 (workspace_name,),
             ).fetchall()
         else:
             rows = self._conn.execute(
-                "SELECT * FROM tasks ORDER BY workspace_name, name",
+                "SELECT * FROM sessions ORDER BY workspace_name, name",
             ).fetchall()
-        return [_to_task(r) for r in rows]
+        return [_to_session(r) for r in rows]
 
-    def update_task_status(self, workspace_name: str, name: str, status: TaskStatus) -> None:
+    def update_session_status(self, name: str, status: SessionStatus) -> None:
         self._conn.execute(
-            "UPDATE tasks SET status = ?, "
+            "UPDATE sessions SET status = ?, "
             "updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') "
-            "WHERE workspace_name = ? AND name = ?",
-            (status.value, workspace_name, name),
+            "WHERE name = ?",
+            (status.value, name),
         )
         self._conn.commit()
 
-    def delete_task(self, workspace_name: str, name: str) -> None:
+    def update_session_socket_path(self, name: str, socket_path: str | None) -> None:
         self._conn.execute(
-            "DELETE FROM tasks WHERE workspace_name = ? AND name = ?",
-            (workspace_name, name),
+            "UPDATE sessions SET socket_path = ?, "
+            "updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') "
+            "WHERE name = ?",
+            (socket_path, name),
         )
         self._conn.commit()
 
-    def delete_tasks_for_workspace(self, workspace_name: str) -> list[TaskRow]:
-        """Delete all tasks for a workspace, returning the deleted tasks."""
-        tasks = self.list_tasks(workspace_name=workspace_name)
+    def delete_session(self, name: str) -> None:
         self._conn.execute(
-            "DELETE FROM tasks WHERE workspace_name = ?",
+            "DELETE FROM sessions WHERE name = ?",
+            (name,),
+        )
+        self._conn.commit()
+
+    def delete_sessions_for_workspace(self, workspace_name: str) -> list[SessionRow]:
+        """Delete all sessions for a workspace, returning the deleted sessions."""
+        sessions = self.list_sessions(workspace_name=workspace_name)
+        self._conn.execute(
+            "DELETE FROM sessions WHERE workspace_name = ?",
             (workspace_name,),
         )
         self._conn.commit()
-        return tasks
+        return sessions
 
     # -- VM Events ---------------------------------------------------------
 
@@ -853,13 +903,13 @@ class Database:
         VMRow | None,
         list[AgentRow],
         list[WorkspaceRow],
-        list[TaskRow],
+        list[SessionRow],
         list[VMEventRow],
         dict[str, list[AgentGrantRow]],
     ]:
         """Read all VM-related data in a single transaction for backup consistency.
 
-        Returns (vm, agents, workspaces, tasks, events, grants_by_agent).
+        Returns (vm, agents, workspaces, sessions, events, grants_by_agent).
         """
         self._conn.execute("BEGIN")
         try:
@@ -867,15 +917,15 @@ class Database:
             agents = self.list_agents(vm_name=vm_name)
             workspaces = self.list_workspaces(vm_name=vm_name)
             ws_names = {ws.name for ws in workspaces}
-            all_tasks = self.list_tasks()
-            tasks = [t for t in all_tasks if t.workspace_name in ws_names]
+            all_sessions = self.list_sessions()
+            sessions = [s for s in all_sessions if s.workspace_name in ws_names]
             events = self.list_vm_events(vm_name)
             grants_by_agent: dict[str, list[AgentGrantRow]] = {}
             for agent in agents:
                 grants_by_agent[agent.name] = self.list_agent_grants(agent.name)
         finally:
             self._conn.execute("COMMIT")
-        return vm, agents, workspaces, tasks, events, grants_by_agent
+        return vm, agents, workspaces, sessions, events, grants_by_agent
 
 
 # -- Row converters --------------------------------------------------------
@@ -944,13 +994,13 @@ def _to_agent_grant(row: sqlite3.Row) -> AgentGrantRow:
         agent_name=row["agent_name"],
         workspace_name=row["workspace_name"],
         grant_type=row["grant_type"],
-        task_name=row["task_name"],
+        session_name=row["session_name"],
         created_at=row["created_at"],
     )
 
 
-def _to_task(row: sqlite3.Row) -> TaskRow:
-    return TaskRow(
+def _to_session(row: sqlite3.Row) -> SessionRow:
+    return SessionRow(
         name=row["name"],
         workspace_name=row["workspace_name"],
         template=row["template"],
@@ -960,6 +1010,7 @@ def _to_task(row: sqlite3.Row) -> TaskRow:
         updated_at=row["updated_at"],
         agent_name=row["agent_name"],
         created_workspace=bool(row["created_workspace"]),
+        socket_path=row["socket_path"],
     )
 
 

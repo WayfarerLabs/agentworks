@@ -50,11 +50,11 @@ _agentworks_catalog_entries() {
     entries=(${(f)"$(agentworks installer list 2>/dev/null | tail -n +3 | awk '{print $2}')"})
     _describe 'installer' entries
 }""",
-    "tasks": """\
-_agentworks_tasks() {
-    local -a tasks
-    tasks=(${(f)"$(agentworks task list --no-status 2>/dev/null | tail -n +3 | awk '{print $1}')"})
-    _describe 'task' tasks
+    "sessions": """\
+_agentworks_sessions() {
+    local -a sessions
+    sessions=(${(f)"$(agentworks session list --no-status 2>/dev/null | tail -n +3 | awk '{print $1}')"})
+    _describe 'session' sessions
 }""",
     "agents": """\
 _agentworks_agents() {
@@ -62,15 +62,15 @@ _agentworks_agents() {
     agents=(${(f)"$(agentworks agent list 2>/dev/null | tail -n +3 | awk '{print $1}')"})
     _describe 'agent' agents
 }""",
-    "task_templates": """\
-_agentworks_task_templates() {
+    "session_templates": """\
+_agentworks_session_templates() {
     local -a templates config_file
     config_file="${HOME}/.config/agentworks/config.toml"
     templates=(default)
     if [[ -f "$config_file" ]]; then
-        templates+=(${(f)"$(sed -n 's/^\\[task_templates\\.\\([^]]*\\)\\]/\\1/p' "$config_file" 2>/dev/null)"})
+        templates+=(${(f)"$(sed -n 's/^\\[session_templates\\.\\([^]]*\\)\\]/\\1/p' "$config_file" 2>/dev/null)"})
     fi
-    _describe 'task-template' templates
+    _describe 'session-template' templates
 }""",
     "vm_templates": """\
 _agentworks_vm_templates() {
@@ -102,8 +102,8 @@ COMPLETER_FUNC_NAMES: dict[str, str] = {
     "ws_templates": "_agentworks_templates",
     "git_credentials": "_agentworks_git_credentials",
     "catalog_entries": "_agentworks_catalog_entries",
-    "tasks": "_agentworks_tasks",
-    "task_templates": "_agentworks_task_templates",
+    "sessions": "_agentworks_sessions",
+    "session_templates": "_agentworks_session_templates",
     "vm_templates": "_agentworks_vm_templates",
     "agent_templates": "_agentworks_agent_templates",
     "agents": "_agentworks_agents",

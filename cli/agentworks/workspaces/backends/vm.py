@@ -65,8 +65,11 @@ def create_vm_workspace(
         typer.echo(f"Cloning {template.repo}...")
         try:
             ssh_run(target, f"git clone {template.repo} {workspace_path}", timeout=300, logger=lg)
-            # Ensure cloned files inherit the workspace group
+            # Ensure cloned files inherit the workspace group and subdirectories
+            # have SGID so new files (including atomic writes) get the right group
             run_as_root(target, f"chgrp -R {ws_group} {workspace_path}", logger=lg)
+            import shlex
+            run_as_root(target, f"find {shlex.quote(workspace_path)} -type d -exec chmod g+s {{}} +", timeout=120, logger=lg)
         except Exception:
             if template.repo.startswith("git@"):
                 typer.echo(

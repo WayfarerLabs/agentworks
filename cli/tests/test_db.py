@@ -206,13 +206,13 @@ def test_agent_grants(db: Database) -> None:
     assert db.has_any_grant("coder", "ws-1")
     assert not db.has_any_grant("coder", "ws-2")
 
-    # Implicit grant via task
-    db.insert_agent_grant("coder", "ws-2", "implicit", task_name="task-1")
+    # Implicit grant via session
+    db.insert_agent_grant("coder", "ws-2", "implicit", session_name="ws-2-session-1")
     assert db.has_any_grant("coder", "ws-2")
     assert db.count_agent_grants("coder") == 2
 
     # Remove implicit grant
-    db.delete_agent_grant("coder", "ws-2", "implicit", task_name="task-1")
+    db.delete_agent_grant("coder", "ws-2", "implicit", session_name="ws-2-session-1")
     assert not db.has_any_grant("coder", "ws-2")
 
     # Granted workspaces

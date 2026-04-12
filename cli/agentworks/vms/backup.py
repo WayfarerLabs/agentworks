@@ -60,7 +60,7 @@ def backup_vm(
 
     # Snapshot all DB data in a single transaction for consistency
     typer.echo("  Reading database (consistent snapshot)...")
-    _vm, agents, workspaces, tasks, events, grants_by_agent = db.snapshot_vm_backup_data(vm_name)
+    _vm, agents, workspaces, sessions, events, grants_by_agent = db.snapshot_vm_backup_data(vm_name)
 
     # 1. VM metadata
     typer.echo("  Exporting VM metadata...")
@@ -116,9 +116,9 @@ def backup_vm(
         ws_data.append(ws_entry)
     _write_json(backup_dir / "workspaces.json", ws_data)
 
-    # 5. Tasks
-    typer.echo(f"  Exporting {len(tasks)} tasks...")
-    _write_json(backup_dir / "tasks.json", [asdict(t) for t in tasks])
+    # 5. Sessions
+    typer.echo(f"  Exporting {len(sessions)} sessions...")
+    _write_json(backup_dir / "sessions.json", [asdict(s) for s in sessions])
 
     # 6. Workspace files -- use a single remote temp dir for all archives
     vm_workspaces = [ws for ws in workspaces if ws.type == "vm"]
@@ -153,7 +153,7 @@ def backup_vm(
         "timestamp": timestamp,
         "agent_count": len(agents_data),
         "workspace_count": len(ws_data),
-        "task_count": len(tasks),
+        "session_count": len(sessions),
         "event_count": len(events),
     }
     _write_json(backup_dir / "manifest.json", manifest)

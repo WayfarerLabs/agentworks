@@ -1,4 +1,4 @@
-"""Task template resolution and processing.
+"""Session template resolution and processing.
 
 Handles inheritance (depth-first, left-to-right), merge rules, and the
 built-in default template fallback. Follows the same pattern as VM,
@@ -11,12 +11,12 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from agentworks.config import Config, TaskTemplate
+    from agentworks.config import Config, SessionTemplate
 
 
 @dataclass
-class ResolvedTaskTemplate:
-    """A fully resolved task template with all inheritance applied."""
+class ResolvedSessionTemplate:
+    """A fully resolved session template with all inheritance applied."""
 
     name: str
     command: str = ""
@@ -42,34 +42,34 @@ def _merge_map(target: dict[str, str], source: dict[str, str]) -> dict[str, str]
 
 
 def resolve_from_dict(
-    templates: dict[str, TaskTemplate],
+    templates: dict[str, SessionTemplate],
     template_name: str | None = None,
-) -> ResolvedTaskTemplate:
-    """Resolve a task template from a templates dict (no Config required)."""
+) -> ResolvedSessionTemplate:
+    """Resolve a session template from a templates dict (no Config required)."""
     if template_name is not None and template_name != "default":
         if template_name not in templates:
-            msg = f"Unknown task template: {template_name}"
+            msg = f"Unknown session template: {template_name}"
             raise ValueError(msg)
         return _resolve(templates, template_name)
 
     if "default" in templates:
         return _resolve(templates, "default")
 
-    return ResolvedTaskTemplate(name="default")
+    return ResolvedSessionTemplate(name="default")
 
 
-def resolve_template(config: Config, template_name: str | None = None) -> ResolvedTaskTemplate:
-    """Resolve a task template by name, applying inheritance."""
-    return resolve_from_dict(config.task_templates, template_name)
+def resolve_template(config: Config, template_name: str | None = None) -> ResolvedSessionTemplate:
+    """Resolve a session template by name, applying inheritance."""
+    return resolve_from_dict(config.session_templates, template_name)
 
 
-def _resolve(templates: dict[str, TaskTemplate], name: str) -> ResolvedTaskTemplate:
+def _resolve(templates: dict[str, SessionTemplate], name: str) -> ResolvedSessionTemplate:
     """Depth-first, left-to-right resolution."""
     if name not in templates:
-        return ResolvedTaskTemplate(name=name)
+        return ResolvedSessionTemplate(name=name)
 
     tmpl = templates[name]
-    result = ResolvedTaskTemplate(name=name)
+    result = ResolvedSessionTemplate(name=name)
 
     for parent_name in tmpl.inherits:
         parent = _resolve(templates, parent_name)
@@ -80,7 +80,7 @@ def _resolve(templates: dict[str, TaskTemplate], name: str) -> ResolvedTaskTempl
     return result
 
 
-def _merge(target: ResolvedTaskTemplate, source: ResolvedTaskTemplate) -> None:
+def _merge(target: ResolvedSessionTemplate, source: ResolvedSessionTemplate) -> None:
     """Merge source into target. Scalars: source wins. Maps: merge with source wins."""
     target.command = source.command
     target.description = source.description
@@ -88,8 +88,8 @@ def _merge(target: ResolvedTaskTemplate, source: ResolvedTaskTemplate) -> None:
     target.env = _merge_map(target.env, source.env)
 
 
-def _merge_template(target: ResolvedTaskTemplate, tmpl: TaskTemplate) -> None:
-    """Merge a raw TaskTemplate into a ResolvedTaskTemplate. None = not set, skip.
+def _merge_template(target: ResolvedSessionTemplate, tmpl: SessionTemplate) -> None:
+    """Merge a raw SessionTemplate into a ResolvedSessionTemplate. None = not set, skip.
     Scalars: child overrides. Maps: merge with child wins."""
     if tmpl.command is not None:
         target.command = tmpl.command

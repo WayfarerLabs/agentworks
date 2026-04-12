@@ -188,8 +188,8 @@ class GitCredentialConfig:
 
 
 @dataclass(frozen=True)
-class TaskTemplate:
-    """Task template definition. All fields optional (None = inherit/default)."""
+class SessionTemplate:
+    """Session template definition. All fields optional (None = inherit/default)."""
 
     name: str
     inherits: list[str] = field(default_factory=list)
@@ -200,7 +200,7 @@ class TaskTemplate:
 
 
 @dataclass(frozen=True)
-class TaskConfig:
+class SessionConfig:
     history_limit: int = 50_000
 
 
@@ -234,8 +234,8 @@ class Config:
     admin: AdminConfig
     agent_templates: dict[str, AgentTemplate]
     agent: ResolvedAgentTemplate
-    task: TaskConfig
-    task_templates: dict[str, TaskTemplate]
+    session: SessionConfig
+    session_templates: dict[str, SessionTemplate]
     workspace_templates: dict[str, WorkspaceTemplate]
     git_credentials: dict[str, GitCredentialConfig]
     apt_sources: dict[str, object] = field(default_factory=dict)
@@ -651,48 +651,48 @@ def _load_git_credentials(data: dict[str, object]) -> dict[str, GitCredentialCon
     return creds
 
 
-_TASK_CONFIG_KEYS = {"history_limit"}
+_SESSION_CONFIG_KEYS = {"history_limit"}
 
 
-def _load_task_config(data: dict[str, object]) -> TaskConfig:
-    task_section = data.get("task", {})
-    if not isinstance(task_section, dict):
-        raise ConfigError("[task] must be a table")
-    raw = task_section.get("config", {})
+def _load_session_config(data: dict[str, object]) -> SessionConfig:
+    session_section = data.get("session", {})
+    if not isinstance(session_section, dict):
+        raise ConfigError("[session] must be a table")
+    raw = session_section.get("config", {})
     if not isinstance(raw, dict):
-        raise ConfigError("[task.config] must be a table")
+        raise ConfigError("[session.config] must be a table")
 
-    _warn_unexpected_keys(raw, _TASK_CONFIG_KEYS, "task.config")
+    _warn_unexpected_keys(raw, _SESSION_CONFIG_KEYS, "session.config")
 
     history_limit = int(raw.get("history_limit", 50_000))
     if history_limit < 1:
-        raise ConfigError("task.config.history_limit must be a positive integer")
+        raise ConfigError("session.config.history_limit must be a positive integer")
 
-    return TaskConfig(
+    return SessionConfig(
         history_limit=history_limit,
     )
 
 
-_TASK_TEMPLATE_KEYS = {"inherits", "command", "description", "restart_command", "env"}
+_SESSION_TEMPLATE_KEYS = {"inherits", "command", "description", "restart_command", "env"}
 
 
-def _load_task_templates(data: dict[str, object]) -> dict[str, TaskTemplate]:
-    raw = data.get("task_templates", {})
+def _load_session_templates(data: dict[str, object]) -> dict[str, SessionTemplate]:
+    raw = data.get("session_templates", {})
     if not isinstance(raw, dict):
-        raise ConfigError("[task_templates] must be a table")
+        raise ConfigError("[session_templates] must be a table")
 
-    templates: dict[str, TaskTemplate] = {}
+    templates: dict[str, SessionTemplate] = {}
     for name, tdata in raw.items():
         if not isinstance(tdata, dict):
-            raise ConfigError(f"task_templates.{name} must be a table")
-        _warn_unexpected_keys(tdata, _TASK_TEMPLATE_KEYS, f"task_templates.{name}")
+            raise ConfigError(f"session_templates.{name} must be a table")
+        _warn_unexpected_keys(tdata, _SESSION_TEMPLATE_KEYS, f"session_templates.{name}")
         env_raw = tdata.get("env")
         env: dict[str, str] | None = None
         if env_raw is not None:
             if not isinstance(env_raw, dict):
-                raise ConfigError(f"task_templates.{name}.env must be a table")
+                raise ConfigError(f"session_templates.{name}.env must be a table")
             env = {str(k): str(v) for k, v in env_raw.items()}
-        templates[name] = TaskTemplate(
+        templates[name] = SessionTemplate(
             name=name,
             inherits=list(tdata.get("inherits", [])),
             command=str(tdata["command"]) if "command" in tdata else None,
@@ -704,8 +704,8 @@ def _load_task_templates(data: dict[str, object]) -> dict[str, TaskTemplate]:
     for name, tmpl in templates.items():
         for parent in tmpl.inherits:
             if parent not in templates and parent != "default":
-                raise ConfigError(f"task_templates.{name}.inherits references unknown template: {parent}")
-    _detect_template_cycles(templates, "task_templates")
+                raise ConfigError(f"session_templates.{name}.inherits references unknown template: {parent}")
+    _detect_template_cycles(templates, "session_templates")
 
     return templates
 
@@ -749,8 +749,8 @@ EXPECTED_TOP_LEVEL_KEYS = {
     "vm_templates",
     "admin",
     "agent_templates",
-    "task",
-    "task_templates",
+    "session",
+    "session_templates",
     "apt_sources",
     "apt_packages",
     "system_install_commands",
@@ -819,8 +819,8 @@ def load_config(path: Path | None = None) -> Config:
     git_credentials = _load_git_credentials(data)
     apt_sources, apt_packages, system_cmds, user_cmds = _load_catalog_sections(data)
 
-    task_config = _load_task_config(data)
-    task_templates = _load_task_templates(data)
+    session_config = _load_session_config(data)
+    session_templates = _load_session_templates(data)
 
     loaded_vm_templates = _load_vm_templates(data)
     loaded_agent_templates = _load_agent_templates(data)
@@ -843,8 +843,8 @@ def load_config(path: Path | None = None) -> Config:
         admin=_load_admin_config(data),
         agent_templates=loaded_agent_templates,
         agent=resolved_agent,
-        task=task_config,
-        task_templates=task_templates,
+        session=session_config,
+        session_templates=session_templates,
         workspace_templates=_load_workspace_templates(data),
         git_credentials=git_credentials,
         apt_sources=apt_sources,

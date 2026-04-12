@@ -300,7 +300,7 @@ def list_vms(db: Database) -> None:
     for vm in vms:
         ws = db.count_workspaces_on_vm(vm.name)
         ag = db.count_agents_on_vm(vm.name)
-        ts = db.count_tasks_on_vm(vm.name)
+        ts = db.count_sessions_on_vm(vm.name)
         counts = f"{ws}/{ag}/{ts}"
         typer.echo(
             f"{vm.name:<20} {vm.platform:<10} {vm.template or '-':<12} {vm.vm_host_name or '-':<15} "
@@ -376,21 +376,21 @@ def describe_vm(db: Database, config: Config, name: str) -> None:
     else:
         typer.echo("  (none)")
 
-    # Workspaces with tasks
+    # Workspaces with sessions
     workspaces = db.list_workspaces(vm_name=name)
     typer.echo(f"\nWorkspaces ({len(workspaces)}):")
     if workspaces:
         for ws in workspaces:
             typer.echo(f"  {ws.name}  ({ws.workspace_path})")
 
-            tasks = db.list_tasks(workspace_name=ws.name)
-            if tasks:
-                typer.echo(f"    Tasks ({len(tasks)}):")
-                for task in tasks:
-                    mode_label = f"agent:{task.agent_name}" if task.agent_name else "admin"
-                    typer.echo(f"      {task.name}  [{task.template}]  {task.status}  {mode_label}")
+            sessions = db.list_sessions(workspace_name=ws.name)
+            if sessions:
+                typer.echo(f"    Sessions ({len(sessions)}):")
+                for s in sessions:
+                    mode_label = f"agent:{s.agent_name}" if s.agent_name else "admin"
+                    typer.echo(f"      {s.name}  [{s.template}]  {s.status}  {mode_label}")
             else:
-                typer.echo("    (no tasks)")
+                typer.echo("    (no sessions)")
     else:
         typer.echo("  (none)")
 
@@ -508,10 +508,10 @@ def delete_vm(
     """Delete a VM, cleaning up all associated resources."""
     vm = _require_vm(db, name)
 
-    # Check for workspaces (which contain agents and tasks)
+    # Check for workspaces (which contain agents and sessions)
     ws_count = db.count_workspaces_on_vm(name)
     ag_count = db.count_agents_on_vm(name)
-    ts_count = db.count_tasks_on_vm(name)
+    ts_count = db.count_sessions_on_vm(name)
     has_children = ws_count > 0
 
     if has_children and not force:
@@ -519,7 +519,7 @@ def delete_vm(
         if ag_count > 0:
             parts.append(f"{ag_count} agent(s)")
         if ts_count > 0:
-            parts.append(f"{ts_count} task(s)")
+            parts.append(f"{ts_count} session(s)")
         typer.echo(
             f"Error: VM '{name}' has {', '.join(parts)}. Delete them first, or use --force.",
             err=True,
@@ -533,7 +533,7 @@ def delete_vm(
             if ag_count > 0:
                 parts.append(f"{ag_count} agent(s)")
             if ts_count > 0:
-                parts.append(f"{ts_count} task(s)")
+                parts.append(f"{ts_count} session(s)")
             msg += f" ({', '.join(parts)} will also be deleted)"
         typer.confirm(msg, abort=True)
 
