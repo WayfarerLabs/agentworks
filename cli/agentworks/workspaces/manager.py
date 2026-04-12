@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shlex
 import subprocess
 from typing import TYPE_CHECKING
 
@@ -410,7 +411,7 @@ def repair_workspace(
         # create a temp file and rename it over the original.
         run_as_root(
             target,
-            f"find {ws.workspace_path} -type d -exec chmod g+s {{}} +",
+            f"find {shlex.quote(ws.workspace_path)} -type d -exec chmod g+s {{}} +",
             timeout=120,
         )
         typer.echo("  OK: directory ownership and permissions")
@@ -625,7 +626,7 @@ def _rehome_vm(
         typer.echo("Setting permissions...")
         run_as_root(target, f"chown {vm.admin_username}:{ws_group} {new_path}", logger=ssh_logger)
         run_as_root(target, f"chmod 2770 {new_path}", logger=ssh_logger)
-        run_as_root(target, f"find {new_path} -type d -exec chmod g+s {{}} +", timeout=120, logger=ssh_logger)
+        run_as_root(target, f"find {shlex.quote(new_path)} -type d -exec chmod g+s {{}} +", timeout=120, logger=ssh_logger)
         try:
             run_as_root(
                 target,
@@ -815,12 +816,13 @@ def delete_workspace(
             from functools import partial
 
             from agentworks.ssh import run, ssh_target_for_vm
+            from agentworks.sessions.manager import _effective_socket_path
             from agentworks.sessions.tmux import kill_session
 
             target = ssh_target_for_vm(vm, config)
             run_command = partial(run, target, logger=ssh_logger)
             for session in db.list_sessions(workspace_name=name):
-                sock = session.socket_path
+                sock = _effective_socket_path(db, session)
                 # Kill on both socket and default server for migration compat
                 if sock:
                     kill_session(session.name, run_command=run_command, socket_path=sock)
@@ -998,7 +1000,7 @@ def copy_workspace(
             )
             run_as_root(
                 dest_target,
-                f"find {workspace_path} -type d -exec chmod g+s {{}} +",
+                f"find {shlex.quote(workspace_path)} -type d -exec chmod g+s {{}} +",
                 timeout=120,
                 logger=lg,
             )

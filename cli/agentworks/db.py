@@ -856,7 +856,9 @@ class Database:
 
     def update_session_socket_path(self, name: str, socket_path: str | None) -> None:
         self._conn.execute(
-            "UPDATE sessions SET socket_path = ? WHERE name = ?",
+            "UPDATE sessions SET socket_path = ?, "
+            "updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') "
+            "WHERE name = ?",
             (socket_path, name),
         )
         self._conn.commit()

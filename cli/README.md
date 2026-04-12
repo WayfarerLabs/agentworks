@@ -66,7 +66,7 @@ A session is the primary way of running interactive **workloads** in Agentworks 
 instance). It provides the mechanism by which an agent can execute commands within the context of a
 workspace. A unique name and a persistent tmux session allow the operator to have any number of
 concurrent workloads running across their VMs, workspaces, and agents. Agentworks allows the
-operator to attach to and detaching from them as needed to monitor progress or interact with the
+operator to attach to and detach from them as needed to monitor progress or interact with the
 workload, and then to stop, restart, and delete them to manage their lifecycle.
 
 ## Key Principles
@@ -295,7 +295,7 @@ Manage sessions (persistent tmux sessions running in workspaces). Session names 
 | --------------------------------------- | ------------------------------ |
 | `agentworks session create`             | Create and start a session     |
 | `agentworks session describe <name>`    | Show session details           |
-| `agentworks session list [--workspace]` | List sessions with status      |
+| `agentworks session list [--workspace <ws>]` | List sessions with status      |
 | `agentworks session attach <name>`      | Attach to a running session    |
 | `agentworks session stop <name>`        | Stop a running session         |
 | `agentworks session restart <name>`     | Restart a session              |

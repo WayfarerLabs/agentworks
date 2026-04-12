@@ -173,7 +173,9 @@ def _regenerate_tmuxinator(
     from agentworks.workspaces.tmuxinator import generate_config
 
     sessions = db.list_sessions(workspace_name=ws.name)
-    config_text = generate_config(ws.name, ws.workspace_path, sessions=sessions)
+    # Build effective socket paths for tmuxinator (migrated sessions have NULL socket_path)
+    socket_paths = {s.name: _effective_socket_path(db, s) for s in sessions}
+    config_text = generate_config(ws.name, ws.workspace_path, sessions=sessions, socket_paths=socket_paths)
     target = ssh_target_for_vm(vm, config)
     write_file(target, f"{ws.workspace_path}/.tmuxinator.yml", config_text, logger=logger)
 
@@ -337,6 +339,8 @@ def create_session(
         )
     except Exception:
         db.delete_session(name)
+        if resolved_agent_name:
+            db.delete_agent_grant(resolved_agent_name, workspace_name, "implicit", session_name=name)
         raise
 
     # Persist socket path

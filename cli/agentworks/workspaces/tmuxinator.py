@@ -31,11 +31,15 @@ def generate_config(
     ws_name: str,
     workspace_path: str,
     sessions: list[SessionRow] | None = None,
+    socket_paths: dict[str, str | None] | None = None,
 ) -> str:
     """Generate a tmuxinator YAML config for a workspace.
 
     Produces an admin-shell window plus one window per session. Session windows
     use a wrapper that attaches to the session's locked-down tmux session.
+
+    *socket_paths* overrides ``session.socket_path`` when provided (used to
+    supply derived paths for migrated sessions with NULL socket_path).
     """
     lines = [
         GENERATED_HEADER,
@@ -48,9 +52,10 @@ def generate_config(
         '        - ""',
     ]
 
+    paths = socket_paths or {}
     for session in sessions or []:
         q_session = shlex.quote(session.name)
-        sock = session.socket_path
+        sock = paths.get(session.name, session.socket_path)
         # Wrapper: unset TMUX for nesting, loop attach while session exists
         has_cmd = tmux_cmd(f"has-session -t {q_session}", sock)
         attach_cmd = tmux_cmd(f"attach -t {q_session}", sock)
@@ -65,7 +70,7 @@ def generate_config(
         )
         lines.extend(
             [
-                f"  - {session.name}:",
+                f"  - \"{session.name}\":",
                 "      panes:",
                 f"        - {wrapper}",
             ]

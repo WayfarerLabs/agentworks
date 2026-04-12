@@ -41,8 +41,8 @@ def test_generate_config_with_sessions() -> None:
     config = generate_config("ws-1", "/home/agentworks/workspaces/ws-1", sessions=sessions)
 
     assert "  - admin-shell:" in config
-    assert "  - ws-1-build:" in config
-    assert "  - ws-1-test:" in config
+    assert '  - "ws-1-build":' in config
+    assert '  - "ws-1-test":' in config
 
 
 def test_generate_config_admin_window_first() -> None:
@@ -62,7 +62,7 @@ def test_generate_config_admin_window_first() -> None:
     lines = config.splitlines()
 
     admin_idx = next(i for i, line in enumerate(lines) if "- admin-shell:" in line)
-    session_idx = next(i for i, line in enumerate(lines) if "- ws-alpha:" in line)
+    session_idx = next(i for i, line in enumerate(lines) if '"ws-alpha":' in line)
     assert admin_idx < session_idx
 
 

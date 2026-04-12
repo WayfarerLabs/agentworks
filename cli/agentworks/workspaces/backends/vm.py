@@ -68,7 +68,8 @@ def create_vm_workspace(
             # Ensure cloned files inherit the workspace group and subdirectories
             # have SGID so new files (including atomic writes) get the right group
             run_as_root(target, f"chgrp -R {ws_group} {workspace_path}", logger=lg)
-            run_as_root(target, f"find {workspace_path} -type d -exec chmod g+s {{}} +", timeout=120, logger=lg)
+            import shlex
+            run_as_root(target, f"find {shlex.quote(workspace_path)} -type d -exec chmod g+s {{}} +", timeout=120, logger=lg)
         except Exception:
             if template.repo.startswith("git@"):
                 typer.echo(
