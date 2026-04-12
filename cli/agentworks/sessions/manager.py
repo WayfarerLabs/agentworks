@@ -441,8 +441,10 @@ def restart_session(
         is_admin=is_admin,
     )
 
-    # Update socket path if it changed
-    if new_sock != sock:
+    # Persist socket path if it differs from what's stored. Compare against
+    # session.socket_path (not the derived effective path) so migrated sessions
+    # with NULL socket_path get backfilled on restart.
+    if new_sock != session.socket_path:
         db.update_session_socket_path(name, new_sock)
 
     db.update_session_status(name, SessionStatus.RUNNING)
