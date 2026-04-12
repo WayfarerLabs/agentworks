@@ -536,7 +536,7 @@ def describe_session(
     if status != session.status:
         session = _require_session(db, name)
 
-    mode_label = f"agent: {session.agent_name}" if session.agent_name else "admin"
+    mode_label = f"agent ({session.agent_name})" if session.agent_name else "admin"
 
     typer.echo(f"Name:       {session.name}")
     typer.echo(f"Workspace:  {session.workspace_name}")
@@ -573,14 +573,14 @@ def list_sessions(
 
         if no_status or ws is None or ws.type != "vm":
             for session in ws_sessions:
-                mode_label = f"agent: {session.agent_name}" if session.agent_name else "admin"
+                mode_label = f"agent ({session.agent_name})" if session.agent_name else "admin"
                 rows.append((session.name, ws_name, vm_name, session.template, mode_label, session.status))
             continue
 
         vm = db.get_vm(ws.vm_name)  # type: ignore[arg-type]
         if vm is None or vm.tailscale_host is None:
             for session in ws_sessions:
-                mode_label = f"agent: {session.agent_name}" if session.agent_name else "admin"
+                mode_label = f"agent ({session.agent_name})" if session.agent_name else "admin"
                 rows.append((session.name, ws_name, vm_name, session.template, mode_label, session.status))
             continue
 
@@ -595,7 +595,7 @@ def list_sessions(
                 run_command=run_command,
                 db=db,
             )
-            mode_label = f"agent: {session.agent_name}" if session.agent_name else "admin"
+            mode_label = f"agent ({session.agent_name})" if session.agent_name else "admin"
             rows.append((session.name, ws_name, vm_name, session.template, mode_label, status))
 
     if not rows:
