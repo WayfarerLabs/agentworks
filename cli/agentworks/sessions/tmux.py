@@ -225,6 +225,26 @@ def create_session(
         sock = agent_socket_path(linux_user, session_name)
         q_sock = shlex.quote(sock)
 
+        # Check for an existing socket file before creating the session.
+        # A stale socket (no server) is removed to start clean. An active
+        # socket (server running) is an error -- something else is using it.
+        sock_exists = run_command(f"test -e {q_sock}", check=False)
+        if getattr(sock_exists, "ok", False):
+            server_alive = run_command(
+                f"sudo -n tmux -S {q_sock} list-sessions 2>/dev/null",
+                check=False,
+            )
+            if getattr(server_alive, "ok", False):
+                raise RuntimeError(
+                    f"Socket {sock} already has an active tmux server. "
+                    f"Kill it first or choose a different session name."
+                )
+            # Stale socket -- remove it
+            import typer as _typer
+
+            _typer.echo(f"  Removing stale socket: {sock}")
+            run_command(f"sudo rm -f {q_sock}", check=False)
+
         # Build the pane command.  sudo --login gives the agent a proper
         # login environment; tmux then starts the pane shell as that user.
         if command:
