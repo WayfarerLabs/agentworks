@@ -467,10 +467,16 @@ def delete_session(
 
     _kill_session_any_server(name, run_command=run_command, socket_path=sock)
 
-    # Remove the socket file if it exists (tmux doesn't always clean up)
+    # Remove stale socket file if the tmux server has exited.
+    # Only clean up if no server is running -- if the kill failed, leave the
+    # socket so the operator can still connect to debug.
     if sock:
         import shlex
-        run_command(f"sudo rm -f {shlex.quote(sock)}", check=False)
+
+        from agentworks.sessions.tmux import session_exists
+
+        if not session_exists(name, run_command=run_command, socket_path=sock):
+            run_command(f"sudo rm -f {shlex.quote(sock)}", check=False)
 
     db.delete_session(name)
 
