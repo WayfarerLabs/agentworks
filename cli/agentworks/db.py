@@ -341,7 +341,7 @@ MIGRATIONS: dict[int, str] = {
             FOREIGN KEY (workspace_name) REFERENCES workspaces(name)
         );
         INSERT INTO sessions (name, workspace_name, template, mode, status, created_at, updated_at, agent_name, created_workspace)
-            SELECT workspace_name || '-' || name, workspace_name, template, mode, status, created_at, updated_at, agent_name, created_workspace
+            SELECT workspace_name || '--' || name, workspace_name, template, mode, status, created_at, updated_at, agent_name, created_workspace
             FROM tasks;
         DROP TABLE tasks;
     """,
@@ -358,7 +358,7 @@ MIGRATIONS: dict[int, str] = {
         );
         INSERT INTO agent_workspace_grants_new (agent_name, workspace_name, grant_type, session_name, created_at)
             SELECT agent_name, workspace_name, grant_type,
-                   CASE WHEN task_name IS NOT NULL THEN workspace_name || '-' || task_name ELSE NULL END,
+                   CASE WHEN task_name IS NOT NULL THEN workspace_name || '--' || task_name ELSE NULL END,
                    created_at
             FROM agent_workspace_grants;
         DROP TABLE agent_workspace_grants;

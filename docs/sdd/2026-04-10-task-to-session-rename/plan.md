@@ -224,18 +224,13 @@ Specific updates:
 
 Existing tasks are migrated to sessions with globally unique names:
 
-- Task `claude` in workspace `myws` becomes session `myws-claude`
-- Task `debug` in workspace `api` becomes session `api-debug`
+- Task `claude` in workspace `myws` becomes session `myws--claude`
+- Task `debug` in workspace `api` becomes session `api--debug`
 
-The single dash keeps names valid (no `--` separator in the name itself). The migration SQL
-concatenates `workspace_name || '-' || name` to produce the new session name.
-
-The tmux session names on the VM will NOT match after migration (they still use the old
-`<workspace>--<task>` pattern). This is fine because:
-
-1. Active tmux sessions will be killed/recreated on next `session restart`
-2. The migration helpers (`_kill_session_any_server`, `_session_exists_any_server`) already check
-   both socket and default server -- they can also check the legacy name pattern
+The `--` separator is used because it is already disallowed in names (by name validation), making
+the mapping collision-free. It also matches the existing tmux session naming pattern
+(`<workspace>--<task>`), so migrated DB names match live tmux sessions and socket paths exactly.
+No legacy name fallback is needed.
 
 ### Socket paths
 
@@ -247,17 +242,15 @@ session's tmux socket. This decouples naming conventions from socket location.
 
 New sessions use the session name directly: `<session>.sock`. For example:
 
-- Old derived path: `/run/agentworks/agent-tmux-sockets/agt--alice/myws--claude.sock`
-- New persisted path: `/run/agentworks/agent-tmux-sockets/agt--alice/myws-claude.sock`
+- `/run/agentworks/agent-tmux-sockets/agt--alice/myws--claude.sock`
+
+Since the migration uses `--` as the separator, migrated session names match the existing socket
+file names exactly. No socket rename or fallback is needed.
 
 The DB migration sets `socket_path` to NULL for all existing sessions (since we cannot know the
-linux username from the tasks table alone). On next `session restart`, the socket path will be
-computed and persisted. Until then, the legacy derivation (`build_socket_paths`) is used as a
-fallback when `socket_path` is NULL for agent-mode sessions.
-
-`/run` is tmpfs (cleared on reboot) and sockets are created fresh by tmux on session start. The
-actual socket file at the old path will be gone after reboot regardless. The DB column ensures
-we always know where to look going forward.
+linux username from the sessions table alone). On next `session restart`, the socket path will be
+computed and persisted. `/run` is tmpfs (cleared on reboot) and sockets are created fresh by tmux
+on session start, so this is naturally self-healing.
 
 ### VM-side config file rename
 

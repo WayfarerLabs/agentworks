@@ -62,7 +62,8 @@ A new migration:
 1. Renames the `tasks` table to `sessions`.
 2. Renames `task_name` in `agent_grants` to `session_name`.
 3. Migrates existing task data: each task named `<task>` in workspace `<workspace>` becomes a
-   session named `<workspace>-<task>` (single dash to keep valid names without `--`).
+   session named `<workspace>--<task>` (double dash, matching the existing tmux session and socket
+   naming convention). The `--` separator is collision-free because it is disallowed in names.
 4. Adds a `socket_path` column to the sessions table. This is the persisted path to the tmux
    socket for agent-mode sessions (NULL for admin-mode sessions that use the default tmux server).
    Persisting the socket path decouples naming conventions from socket location, making future
