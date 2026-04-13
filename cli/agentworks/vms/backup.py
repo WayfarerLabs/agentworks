@@ -226,10 +226,9 @@ def _archive_workspaces(
         from agentworks.ssh import write_file as ssh_write_file
 
         # Admin can't write to root-owned temp dir, so stage via a securely
-        # created temp file (mktemp, mode 0600), then move as root.
+        # created temp file (mktemp creates with mode 0600), then move as root.
         staging_paths = target.run("mktemp /tmp/_aw_paths_XXXXXX.txt").stdout.strip()
         q_staging = shlex.quote(staging_paths)
-        target.run(f"chmod 600 {q_staging}")
         ssh_write_file(target_ssh, staging_paths, path_content)
         target.run_as_root(f"mv {q_staging} {q_paths_file}")
 
@@ -341,16 +340,9 @@ def _transfer_with_progress(
     Uses Popen so the process can be terminated on Ctrl-C and the partially
     downloaded file cleaned up.
     """
-    from agentworks.ssh import SSHError
+    from agentworks.ssh import SSHError, _scp_base_args
 
-    # Build scp args
-    args = ["scp", "-q", "-o", "StrictHostKeyChecking=accept-new", "-o", "BatchMode=yes"]
-    if target_ssh.port is not None:
-        args.extend(["-P", str(target_ssh.port)])
-    if target_ssh.identity_file is not None:
-        args.extend(["-i", str(target_ssh.identity_file)])
-    if target_ssh.proxy_jump is not None:
-        args.extend(["-J", target_ssh.proxy_jump])
+    args = _scp_base_args(target_ssh)
     if target_ssh.user:
         src = f"{target_ssh.user}@{target_ssh.host}:{remote_path}"
     else:
