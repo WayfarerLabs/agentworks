@@ -96,9 +96,31 @@ def run_detached(
         # Clear any stale files from a previous run
         run_fn(f"rm -f {output_file} {pid_file} {status_file}", check=False)
 
-        # Launch detached
-        nohup_cmd = f"nohup /bin/bash {wrapper_file} &"
-        run_fn(nohup_cmd, check=False)
+        # Launch detached. We need nohup on the OUTSIDE of sudo so sudo
+        # itself is protected from the SIGHUP sent when the SSH shell exits.
+        # Redirect all fds so SSH returns immediately.
+        #
+        # Critical: this command must NOT run over an SSH PTY (-tt). When SSH
+        # allocates a PTY (as on Windows where force_tty=True), closing it
+        # sends SIGHUP to the entire foreground process group before nohup
+        # can intercept. We temporarily disable force_tty for this one call.
+        from dataclasses import is_dataclass, replace
+
+        no_tty_target = target
+        if (
+            target.ssh is not None
+            and is_dataclass(target.ssh)
+            and getattr(target.ssh, "force_tty", False)
+        ):
+            no_tty_ssh = replace(target.ssh, force_tty=False)
+            no_tty_target = replace(target, ssh=no_tty_ssh)
+
+        if as_root:
+            nohup_cmd = f"nohup sudo -n /bin/bash {wrapper_file} </dev/null >/dev/null 2>&1 &"
+            no_tty_target.run(nohup_cmd, check=False)
+        else:
+            nohup_cmd = f"nohup /bin/bash {wrapper_file} </dev/null >/dev/null 2>&1 &"
+            no_tty_target.run(nohup_cmd, check=False)
 
         # Brief pause for PID file to be written
         time.sleep(0.5)

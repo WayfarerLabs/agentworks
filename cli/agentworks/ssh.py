@@ -319,7 +319,7 @@ def copy_to(
     timeout: int | None = None,
 ) -> None:
     """Copy a file to a remote host via scp."""
-    args = ["scp", "-o", "StrictHostKeyChecking=accept-new", "-o", "BatchMode=yes"]
+    args = ["scp", "-q", "-o", "StrictHostKeyChecking=accept-new", "-o", "BatchMode=yes"]
     if target.port is not None:
         args.extend(["-P", str(target.port)])
     if target.identity_file is not None:
@@ -343,7 +343,7 @@ def copy_from(
     timeout: int | None = None,
 ) -> None:
     """Copy a file from a remote host via scp."""
-    args = ["scp", "-o", "StrictHostKeyChecking=accept-new", "-o", "BatchMode=yes"]
+    args = ["scp", "-q", "-o", "StrictHostKeyChecking=accept-new", "-o", "BatchMode=yes"]
     if target.port is not None:
         args.extend(["-P", str(target.port)])
     if target.identity_file is not None:

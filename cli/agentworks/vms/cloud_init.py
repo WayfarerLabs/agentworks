@@ -29,6 +29,7 @@ INIT_SYSTEM_PACKAGES = [
     "acl",
     "jq",
     "mise",
+    "zstd",
 ]
 
 
