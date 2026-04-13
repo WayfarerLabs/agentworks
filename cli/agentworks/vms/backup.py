@@ -236,10 +236,11 @@ def _archive_workspaces(
         # run_detached handles nohup reliably via scp'd wrapper script.
         tar_cmd = f"ZSTD_CLEVEL=15 tar --zstd -cf {q_archive} -C / -T {q_paths_file}"
 
-        # Create a secure subdirectory inside the root-owned temp dir for
-        # run_detached's files. Avoids races and symlink attacks that mktemp -u
-        # in /tmp would be vulnerable to (since run_detached runs as root).
-        detached_dir = target.run_as_root(f"mktemp -d {q_tmp}/detached-XXXXXX").stdout.strip()
+        # Create a secure admin-owned directory (mktemp -d creates mode 0700)
+        # for run_detached's files. Can't use the root-owned tmp_dir because
+        # run_detached writes its wrapper script via scp (as admin). Using
+        # mktemp -d (not -u) avoids the race/symlink risks of mktemp -u.
+        detached_dir = target.run("mktemp -d /tmp/_aw_detached_XXXXXX").stdout.strip()
         detached_base = f"{detached_dir}/run"
 
         import threading
@@ -328,6 +329,7 @@ def _archive_workspaces(
         raise
     else:
         target.run_as_root(f"rm -rf {q_tmp}", check=False)
+        target.run(f"rm -rf {shlex.quote(detached_dir)}", check=False)
 
     return [ws.workspace_path for ws in valid], skipped
 
