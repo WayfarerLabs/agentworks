@@ -96,8 +96,9 @@ def run_detached(
         # Clear any stale files from a previous run
         run_fn(f"rm -f {output_file} {pid_file} {status_file}", check=False)
 
-        # Launch detached
-        nohup_cmd = f"nohup /bin/bash {wrapper_file} &"
+        # Launch detached. Redirect all file descriptors so SSH returns
+        # immediately instead of waiting for the background process.
+        nohup_cmd = f"nohup /bin/bash {wrapper_file} </dev/null >/dev/null 2>&1 &"
         run_fn(nohup_cmd, check=False)
 
         # Brief pause for PID file to be written
