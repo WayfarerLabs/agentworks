@@ -258,3 +258,63 @@ def test_run_detached_disables_force_tty_for_nohup_launch(mock_time: MagicMock) 
     assert nohup_force_tty == [False]
     # Original target unchanged
     assert target.ssh.force_tty is True
+
+
+@patch("agentworks.remote_exec.time")
+def test_run_detached_timeout_kills_and_returns_partial(mock_time: MagicMock) -> None:
+    """When timeout is exceeded, the remote process is killed and partial
+    output is returned with exit code 1."""
+    # First two calls are setup (last_output_time, start_time), return 0.
+    # Third call (first poll loop iteration) returns 100 to trigger timeout.
+    call_count = 0
+
+    def monotonic() -> int:
+        nonlocal call_count
+        call_count += 1
+        return 0 if call_count <= 2 else 100
+
+    mock_time.monotonic.side_effect = monotonic
+    mock_time.sleep = MagicMock()
+
+    killed_commands: list[str] = []
+
+    target = MagicMock()
+
+    def run_side_effect(cmd: str, *, check: bool = True, timeout: int | None = None):
+        result = MagicMock()
+        result.stdout = ""
+        result.returncode = 0
+        # Status file never exists (process never finishes on its own)
+        if cmd.startswith("test -f") and ".status" in cmd:
+            result.returncode = 1
+        elif cmd.startswith("test -f") and ".pid" in cmd:
+            result.returncode = 0  # PID file exists
+        if "kill $(cat" in cmd:
+            killed_commands.append(cmd)
+        elif cmd.startswith("tail -c") or cmd.startswith("cat") and ".out" in cmd:
+            result.stdout = "partial output from killed process\n"
+        elif cmd.startswith("cat") and ".status" in cmd:
+            # Status file doesn't exist, cat fails
+            result.stdout = ""
+            result.returncode = 1
+        return result
+
+    target.run.side_effect = run_side_effect
+    target.run_as_root.side_effect = run_side_effect
+    target.write_file = MagicMock()
+
+    result = run_detached(
+        target,
+        "sleep 999",
+        base_path="/tmp/agentworks-test",
+        poll_interval=0,
+        timeout=60,
+    )
+
+    # Kill command should have been issued
+    assert len(killed_commands) == 1
+    assert "kill $(cat" in killed_commands[0]
+    # Exit code defaults to 1 when status file can't be read
+    assert result.exit_code == 1
+    # Partial output is still captured
+    assert "partial output" in result.output
