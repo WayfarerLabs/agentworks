@@ -311,7 +311,7 @@ def run_as_root(
     return run(target, f"sudo -n {command}", check=check, timeout=timeout, logger=logger)
 
 
-def _scp_base_args(target: SSHTarget) -> list[str]:
+def scp_base_args(target: SSHTarget) -> list[str]:
     """Build the base scp argument list (flags and options, no paths)."""
     args = ["scp", "-q", "-o", "StrictHostKeyChecking=accept-new", "-o", "BatchMode=yes"]
     if target.port is not None:
@@ -331,7 +331,7 @@ def copy_to(
     timeout: int | None = None,
 ) -> None:
     """Copy a file to a remote host via scp."""
-    args = _scp_base_args(target)
+    args = scp_base_args(target)
     args.append(str(local_path))
     dest = f"{target.user}@{target.host}:{remote_path}" if target.user else f"{target.host}:{remote_path}"
     args.append(dest)
@@ -349,7 +349,7 @@ def copy_from(
     timeout: int | None = None,
 ) -> None:
     """Copy a file from a remote host via scp."""
-    args = _scp_base_args(target)
+    args = scp_base_args(target)
     src = f"{target.user}@{target.host}:{remote_path}" if target.user else f"{target.host}:{remote_path}"
     args.append(src)
     args.append(str(local_path))

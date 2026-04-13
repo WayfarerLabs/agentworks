@@ -236,8 +236,11 @@ def _archive_workspaces(
         # run_detached handles nohup reliably via scp'd wrapper script.
         tar_cmd = f"ZSTD_CLEVEL=15 tar --zstd -cf {q_archive} -C / -T {q_paths_file}"
 
-        # Unique base path for run_detached (mktemp so concurrent backups don't collide)
-        detached_base = target.run("mktemp -u /tmp/_aw_detached_XXXXXX").stdout.strip()
+        # Create a secure subdirectory inside the root-owned temp dir for
+        # run_detached's files. Avoids races and symlink attacks that mktemp -u
+        # in /tmp would be vulnerable to (since run_detached runs as root).
+        detached_dir = target.run_as_root(f"mktemp -d {q_tmp}/detached-XXXXXX").stdout.strip()
+        detached_base = f"{detached_dir}/run"
 
         import threading
 
@@ -340,9 +343,9 @@ def _transfer_with_progress(
     Uses Popen so the process can be terminated on Ctrl-C and the partially
     downloaded file cleaned up.
     """
-    from agentworks.ssh import SSHError, _scp_base_args
+    from agentworks.ssh import SSHError, scp_base_args
 
-    args = _scp_base_args(target_ssh)
+    args = scp_base_args(target_ssh)
     if target_ssh.user:
         src = f"{target_ssh.user}@{target_ssh.host}:{remote_path}"
     else:

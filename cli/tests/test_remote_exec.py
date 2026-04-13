@@ -212,17 +212,30 @@ def test_run_detached_disables_force_tty_for_nohup_launch(mock_time: MagicMock) 
         write_file: MagicMock = field(default_factory=MagicMock)
 
     # Track the force_tty value on whichever target each command ran against.
-    # We intercept run/run_as_root at the class level by using a method that
-    # inspects the bound `self` (the target) at call time.
     nohup_force_tty: list[bool] = []
+
+    # Simulate a successful detached run: status file appears after first poll,
+    # exit code 0, some output captured.
+    status_exists_after = 1
+    poll_count = 0
 
     def make_side_effect(owner: _Target) -> MagicMock:
         def side_effect(cmd: str, *, check: bool = True, timeout: int | None = None):
+            nonlocal poll_count
             if "nohup" in cmd:
                 nohup_force_tty.append(owner.ssh.force_tty)
             result = MagicMock()
             result.stdout = ""
-            result.returncode = 1 if cmd.startswith("test -f") else 0
+            result.returncode = 0
+            if cmd.startswith("test -f") and ".status" in cmd:
+                poll_count += 1
+                result.returncode = 0 if poll_count > status_exists_after else 1
+            elif cmd.startswith("test -f") and ".pid" in cmd:
+                result.returncode = 1  # No existing PID -> fresh start
+            elif cmd.startswith("tail -c") or (cmd.startswith("cat") and ".out" in cmd):
+                result.stdout = "done\n"
+            elif cmd.startswith("cat") and ".status" in cmd:
+                result.stdout = "0"
             return result
 
         return MagicMock(side_effect=side_effect)
@@ -231,9 +244,8 @@ def test_run_detached_disables_force_tty_for_nohup_launch(mock_time: MagicMock) 
     target.run = make_side_effect(target)
     target.run_as_root = make_side_effect(target)
 
-    # Intercept replace() by patching dataclasses module (where remote_exec
-    # imports it from). The replaced copy gets fresh mocks so calls to it
-    # record against the copy, not the original.
+    # Intercept replace() so the replaced copy gets its own mocks that record
+    # calls made against it.
     import dataclasses as _dc
 
     real_replace = _dc.replace
@@ -246,7 +258,7 @@ def test_run_detached_disables_force_tty_for_nohup_launch(mock_time: MagicMock) 
         return result
 
     with patch.object(_dc, "replace", side_effect=tracked_replace):
-        run_detached(
+        result = run_detached(
             target,
             "tar cf /tmp/x.tar .",
             base_path="/tmp/agentworks-test",
@@ -258,6 +270,8 @@ def test_run_detached_disables_force_tty_for_nohup_launch(mock_time: MagicMock) 
     assert nohup_force_tty == [False]
     # Original target unchanged
     assert target.ssh.force_tty is True
+    # And the overall run succeeded
+    assert result.exit_code == 0
 
 
 @patch("agentworks.remote_exec.time")
