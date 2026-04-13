@@ -186,3 +186,75 @@ def test_run_detached_as_root(mock_time: MagicMock) -> None:
     assert result.exit_code == 0
     # The rm and nohup commands should go through run_as_root
     assert target.run_as_root.call_count > 0
+
+
+@patch("agentworks.remote_exec.time")
+def test_run_detached_disables_force_tty_for_nohup_launch(mock_time: MagicMock) -> None:
+    """When the target's SSH has force_tty=True (Windows), the nohup launch
+    must run on a target copy with force_tty=False. Otherwise SIGHUP from the
+    closing SSH PTY kills the detached process before it can run.
+    """
+    from dataclasses import dataclass, field
+
+    mock_time.monotonic.return_value = 0
+    mock_time.sleep = MagicMock()
+
+    @dataclass
+    class _SSH:
+        host: str = "vm"
+        force_tty: bool = True
+
+    @dataclass
+    class _Target:
+        ssh: _SSH
+        run: MagicMock = field(default_factory=MagicMock)
+        run_as_root: MagicMock = field(default_factory=MagicMock)
+        write_file: MagicMock = field(default_factory=MagicMock)
+
+    # Track the force_tty value on whichever target each command ran against.
+    # We intercept run/run_as_root at the class level by using a method that
+    # inspects the bound `self` (the target) at call time.
+    nohup_force_tty: list[bool] = []
+
+    def make_side_effect(owner: _Target) -> MagicMock:
+        def side_effect(cmd: str, *, check: bool = True, timeout: int | None = None):
+            if "nohup" in cmd:
+                nohup_force_tty.append(owner.ssh.force_tty)
+            result = MagicMock()
+            result.stdout = ""
+            result.returncode = 1 if cmd.startswith("test -f") else 0
+            return result
+
+        return MagicMock(side_effect=side_effect)
+
+    target = _Target(ssh=_SSH(force_tty=True))
+    target.run = make_side_effect(target)
+    target.run_as_root = make_side_effect(target)
+
+    # Intercept replace() by patching dataclasses module (where remote_exec
+    # imports it from). The replaced copy gets fresh mocks so calls to it
+    # record against the copy, not the original.
+    import dataclasses as _dc
+
+    real_replace = _dc.replace
+
+    def tracked_replace(obj, **changes):  # type: ignore[no-untyped-def]
+        result = real_replace(obj, **changes)
+        if isinstance(result, _Target):
+            result.run = make_side_effect(result)
+            result.run_as_root = make_side_effect(result)
+        return result
+
+    with patch.object(_dc, "replace", side_effect=tracked_replace):
+        run_detached(
+            target,
+            "tar cf /tmp/x.tar .",
+            base_path="/tmp/agentworks-test",
+            poll_interval=0,
+            as_root=True,
+        )
+
+    # The nohup command must have run on a target where force_tty=False
+    assert nohup_force_tty == [False]
+    # Original target unchanged
+    assert target.ssh.force_tty is True

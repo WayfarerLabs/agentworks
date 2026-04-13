@@ -121,10 +121,14 @@ def backup_vm(
     # 6. Workspace files -- single archive of all workspace paths
     vm_workspaces = [ws for ws in workspaces if ws.type == "vm"]
 
+    archived_paths: list[str] = []
+    skipped_paths: list[str] = []
     if vm_workspaces:
         local_archive = backup_dir / "workspaces.tar.zst"
         try:
-            _archive_workspaces(target, target_ssh, vm_workspaces, local_archive)
+            archived_paths, skipped_paths = _archive_workspaces(
+                target, target_ssh, vm_workspaces, local_archive,
+            )
         except Exception:
             db.insert_vm_event(vm_name, "backup_failed")
             raise
@@ -140,7 +144,8 @@ def backup_vm(
         "workspace_count": len(ws_data),
         "session_count": len(sessions),
         "event_count": len(events),
-        "workspace_paths": [ws.workspace_path for ws in vm_workspaces],
+        "archived_paths": archived_paths,
+        "skipped_paths": skipped_paths,
     }
     _write_json(backup_dir / "manifest.json", manifest)
 
@@ -157,7 +162,7 @@ def _archive_workspaces(
     target_ssh: SSHTarget,
     vm_workspaces: list[WorkspaceRow],
     local_archive: Path,
-) -> None:
+) -> tuple[list[str], list[str]]:
     """Create a single zstd-compressed tar of all workspace paths and transfer locally.
 
     Runs tar via nohup so it survives SSH disconnects. Polls for completion
@@ -165,6 +170,9 @@ def _archive_workspaces(
 
     The archive is created in a root-owned temp directory to avoid symlink
     attacks and collisions in /tmp.
+
+    Returns (archived_paths, skipped_paths) -- paths that were actually included
+    and paths that were skipped because they didn't exist on the VM.
     """
 
     # Create a secure temp directory (root-owned, mode 0700)
@@ -175,12 +183,14 @@ def _archive_workspaces(
 
     try:
         # Verify workspace paths exist on the VM
-        valid = []
+        valid: list[WorkspaceRow] = []
+        skipped: list[str] = []
         for ws in vm_workspaces:
             if target.run_as_root(f"test -d {shlex.quote(ws.workspace_path)}", check=False).ok:
                 valid.append(ws)
             else:
                 typer.echo(f"    Warning: path not found, skipping: {ws.workspace_path}", err=True)
+                skipped.append(ws.workspace_path)
 
         if not valid:
             typer.echo("  Error: no workspace paths exist on the VM", err=True)
@@ -215,15 +225,20 @@ def _archive_workspaces(
 
         from agentworks.ssh import write_file as ssh_write_file
 
-        # Admin can't write to root-owned temp dir, so stage via /tmp
-        tmp_suffix = tmp_dir.rsplit("/", 1)[-1]
-        staging_paths = f"/tmp/_aw_paths_{tmp_suffix}.txt"
+        # Admin can't write to root-owned temp dir, so stage via a securely
+        # created temp file (mktemp, mode 0600), then move as root.
+        staging_paths = target.run("mktemp /tmp/_aw_paths_XXXXXX.txt").stdout.strip()
+        q_staging = shlex.quote(staging_paths)
+        target.run(f"chmod 600 {q_staging}")
         ssh_write_file(target_ssh, staging_paths, path_content)
-        target.run_as_root(f"mv {shlex.quote(staging_paths)} {q_paths_file}")
+        target.run_as_root(f"mv {q_staging} {q_paths_file}")
 
         # Use run_detached in a background thread so we can poll archive size.
         # run_detached handles nohup reliably via scp'd wrapper script.
         tar_cmd = f"ZSTD_CLEVEL=15 tar --zstd -cf {q_archive} -C / -T {q_paths_file}"
+
+        # Unique base path for run_detached (mktemp so concurrent backups don't collide)
+        detached_base = target.run("mktemp -u /tmp/_aw_detached_XXXXXX").stdout.strip()
 
         import threading
 
@@ -238,7 +253,7 @@ def _archive_workspaces(
                     target,
                     tar_cmd,
                     label="Archive",
-                    base_path=f"/tmp/_aw_detached_{tmp_suffix}",
+                    base_path=detached_base,
                     poll_interval=5,
                     quiet_timeout=300,
                     as_root=True,
@@ -260,8 +275,13 @@ def _archive_workspaces(
                     _report_size(target, archive)
                     last_report = time.monotonic()
         except KeyboardInterrupt:
-            typer.echo("\n  Interrupted. Cleaning up...", err=True)
-            # run_detached's remote process will keep running but we exit
+            typer.echo("\n  Interrupted. Killing remote tar and cleaning up...", err=True)
+            # Read the PID that run_detached's wrapper wrote, kill the process group
+            pid_result = target.run_as_root(f"cat {shlex.quote(detached_base)}.pid", check=False)
+            pid = pid_result.stdout.strip() if pid_result.ok else ""
+            if pid.isdigit():
+                # Kill the wrapper shell's process group (tar + wrapper)
+                target.run_as_root(f"kill -TERM -{pid} 2>/dev/null", check=False)
             raise typer.Exit(1) from None
 
         if error_holder:
@@ -307,6 +327,8 @@ def _archive_workspaces(
     else:
         target.run_as_root(f"rm -rf {q_tmp}", check=False)
 
+    return [ws.workspace_path for ws in valid], skipped
+
 
 def _transfer_with_progress(
     target_ssh: SSHTarget,
@@ -327,6 +349,8 @@ def _transfer_with_progress(
         args.extend(["-P", str(target_ssh.port)])
     if target_ssh.identity_file is not None:
         args.extend(["-i", str(target_ssh.identity_file)])
+    if target_ssh.proxy_jump is not None:
+        args.extend(["-J", target_ssh.proxy_jump])
     if target_ssh.user:
         src = f"{target_ssh.user}@{target_ssh.host}:{remote_path}"
     else:
