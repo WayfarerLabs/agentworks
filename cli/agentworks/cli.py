@@ -986,7 +986,7 @@ def installer_list(
         str | None, typer.Option("--source", help="Filter by source", click_type=click.Choice(["builtin", "user"]))
     ] = None,
 ) -> None:
-    """List available installers from the built-in and user catalog."""
+    """List available installers from the built-in and operator-defined catalog."""
     from agentworks.catalog import load_builtin_catalog, load_catalog
     from agentworks.config import load_config
 

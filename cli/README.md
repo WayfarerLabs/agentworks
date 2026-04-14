@@ -191,7 +191,7 @@ around them.
 
 SSH is the control plane for all VM operations. Agentworks uses SSH to provision VMs, initialize
 them, manage agents, run sessions, transfer files, and execute commands. The operator's SSH key
-(configured in `[user]`) is deployed to VMs during provisioning and is the sole authentication
+(configured in `[operator]`) is deployed to VMs during provisioning and is the sole authentication
 mechanism for all subsequent operations.
 
 During provisioning, SSH access uses the platform's native transport (Lima shell, Azure public IP,
@@ -507,7 +507,7 @@ full reference.
 
 Key sections:
 
-- `[user]` -- SSH keys (required), additional authorized keys, SSH config management, default shell
+- `[operator]` -- SSH keys (required), additional authorized keys, SSH config management
 - `[paths]` -- local workspace, VM workspace, and VS Code workspace file directories
 - `[defaults]` -- default platform, VM host
 - `[vm_templates.*]` -- VM resources, apt packages, system install commands, mise

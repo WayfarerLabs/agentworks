@@ -112,10 +112,10 @@ def _mock_config(tmp_path: Path) -> tuple[MagicMock, Path]:
     ssh_config.write_text("")
 
     config = MagicMock()
-    config.user.ssh_config = ssh_config
-    config.user.ssh_config_dir = True
-    config.user.ssh_host_prefix = "awvm--"
-    config.user.ssh_private_key = Path("/home/user/.ssh/id_ed25519")
+    config.operator.ssh_config = ssh_config
+    config.operator.ssh_config_dir = True
+    config.operator.ssh_host_prefix = "awvm--"
+    config.operator.ssh_private_key = Path("/home/user/.ssh/id_ed25519")
     return config, ssh_dir
 
 
@@ -147,7 +147,7 @@ def test_rebuild_config_dir(tmp_path: Path) -> None:
     assert "Managed by agentworks" in content
 
     # Include directive added with absolute path
-    ssh_content = config.user.ssh_config.read_text()
+    ssh_content = config.operator.ssh_config.read_text()
     assert str(ssh_dir / "config.d") in ssh_content
 
 
@@ -167,7 +167,7 @@ def test_rebuild_config_dir_no_vms_removes_file(tmp_path: Path) -> None:
 
 def test_rebuild_config_dir_cleans_legacy(tmp_path: Path) -> None:
     config, ssh_dir = _mock_config(tmp_path)
-    config.user.ssh_config.write_text(
+    config.operator.ssh_config.write_text(
         f"Host *\n    Foo bar\n\n{_LEGACY_MARKER}\nHost awvm--old-vm\n    HostName 1.2.3.4\n"
     )
 
@@ -176,10 +176,10 @@ def test_rebuild_config_dir_cleans_legacy(tmp_path: Path) -> None:
 
     _rebuild_config_dir(config, db)
 
-    content = config.user.ssh_config.read_text()
+    content = config.operator.ssh_config.read_text()
     assert _LEGACY_MARKER not in content
     assert "Foo bar" in content
-    directive = _include_directive(config.user.ssh_config)
+    directive = _include_directive(config.operator.ssh_config)
     assert directive in content
 
 

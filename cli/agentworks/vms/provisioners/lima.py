@@ -113,7 +113,7 @@ class LimaProvisioner(VMProvisioner):
         # Generate the full bootstrap script and embed in the Lima provision block.
         # This handles user creation, system packages, swap, SSH key, and Tailscale.
         if tailscale_auth_key:
-            ssh_pub_key = config.user.ssh_public_key.read_text().strip()
+            ssh_pub_key = config.operator.ssh_public_key.read_text().strip()
             provision_script = generate_bootstrap_script(
                 admin_username=config.admin.username,
                 ssh_public_key=ssh_pub_key,

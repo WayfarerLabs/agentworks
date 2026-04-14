@@ -22,7 +22,7 @@ def config_dir(tmp_path: Path) -> Path:
 
     config_file.write_text(
         dedent(f"""\
-        [user]
+        [operator]
         ssh_public_key = "{pub}"
         ssh_private_key = "{priv}"
 
@@ -89,7 +89,7 @@ def test_cycle_detection(tmp_path: Path) -> None:
     config_file = tmp_path / "config.toml"
     config_file.write_text(
         dedent(f"""\
-        [user]
+        [operator]
         ssh_public_key = "{pub}"
         ssh_private_key = "{priv}"
 
@@ -113,7 +113,7 @@ def test_invalid_git_credential_type(tmp_path: Path) -> None:
     config_file = tmp_path / "config.toml"
     config_file.write_text(
         dedent(f"""\
-        [user]
+        [operator]
         ssh_public_key = "{pub}"
         ssh_private_key = "{priv}"
 
@@ -138,7 +138,7 @@ def test_unexpected_top_level_keys_warns(tmp_path: Path) -> None:
         dedent(f"""\
         oops = true
 
-        [user]
+        [operator]
         ssh_public_key = "{pub}"
         ssh_private_key = "{priv}"
     """)
@@ -160,12 +160,12 @@ def test_orphaned_key_under_commented_section(tmp_path: Path) -> None:
     config_file = tmp_path / "config.toml"
     config_file.write_text(
         dedent(f"""\
-        [user]
+        [operator]
         ssh_public_key = "{pub}"
         ssh_private_key = "{priv}"
 
         # [defaults]          <-- commented out!
-        platform = "lima"     # orphaned in [user], not [defaults]
+        platform = "lima"     # orphaned in [operator], not [defaults]
     """)
     )
     with warnings.catch_warnings(record=True) as w:
@@ -173,7 +173,7 @@ def test_orphaned_key_under_commented_section(tmp_path: Path) -> None:
         cfg = load_config(config_file)
         assert len(w) == 1
         assert "platform" in str(w[0].message)
-        assert "user" in str(w[0].message).lower()
+        assert "operator" in str(w[0].message).lower()
     # The orphaned key means defaults.platform stays at default (None)
     assert cfg.defaults.platform is None
 
@@ -191,16 +191,16 @@ def test_extra_ssh_public_keys(tmp_path: Path) -> None:
     config_file = tmp_path / "config.toml"
     config_file.write_text(
         dedent(f"""\
-        [user]
+        [operator]
         ssh_public_key = "{pub}"
         ssh_private_key = "{priv}"
         extra_ssh_public_keys = ["{extra1}", "{extra2}"]
     """)
     )
     cfg = load_config(config_file)
-    assert len(cfg.user.extra_ssh_public_keys) == 2
-    assert cfg.user.extra_ssh_public_keys[0] == extra1
-    assert cfg.user.extra_ssh_public_keys[1] == extra2
+    assert len(cfg.operator.extra_ssh_public_keys) == 2
+    assert cfg.operator.extra_ssh_public_keys[0] == extra1
+    assert cfg.operator.extra_ssh_public_keys[1] == extra2
 
 
 def test_extra_ssh_public_keys_missing_file(tmp_path: Path) -> None:
@@ -212,7 +212,7 @@ def test_extra_ssh_public_keys_missing_file(tmp_path: Path) -> None:
     config_file = tmp_path / "config.toml"
     config_file.write_text(
         dedent(f"""\
-        [user]
+        [operator]
         ssh_public_key = "{pub}"
         ssh_private_key = "{priv}"
         extra_ssh_public_keys = ["/nonexistent/key.pub"]
@@ -224,7 +224,7 @@ def test_extra_ssh_public_keys_missing_file(tmp_path: Path) -> None:
 
 def test_extra_ssh_public_keys_defaults_empty(config_dir: Path) -> None:
     cfg = load_config(config_dir)
-    assert cfg.user.extra_ssh_public_keys == []
+    assert cfg.operator.extra_ssh_public_keys == []
 
 
 # -- Proxmox config tests (table-driven) --------------------------------------
@@ -333,7 +333,7 @@ def test_proxmox_config(tmp_path: Path, case: dict) -> None:
 
     config_file = tmp_path / "config.toml"
     config_file.write_text(dedent(f"""\
-        [user]
+        [operator]
         ssh_public_key = "{pub}"
         ssh_private_key = "{priv}"
 

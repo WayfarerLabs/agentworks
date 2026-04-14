@@ -1,4 +1,4 @@
-"""User configuration loading and validation.
+"""Agentworks configuration loading and validation.
 
 Config lives at ~/.config/agentworks/config.toml. It is read-only at runtime.
 """
@@ -82,7 +82,7 @@ class ConfigError(Exception):
 
 
 @dataclass(frozen=True)
-class UserConfig:
+class OperatorConfig:
     ssh_public_key: Path
     ssh_private_key: Path
     ssh_config: Path = field(default_factory=lambda: Path.home() / ".ssh" / "config")
@@ -226,7 +226,7 @@ class ProxmoxConfig:
 
 @dataclass(frozen=True)
 class Config:
-    user: UserConfig
+    operator: OperatorConfig
     paths: PathsConfig
     defaults: DefaultsConfig
     vm_templates: dict[str, VMTemplate]
@@ -282,7 +282,7 @@ def _warn_unexpected_keys(
         )
 
 
-_USER_KEYS = {
+_OPERATOR_KEYS = {
     "ssh_public_key",
     "ssh_private_key",
     "ssh_config",
@@ -292,20 +292,20 @@ _USER_KEYS = {
 }
 
 
-def _load_user(data: dict[str, object]) -> UserConfig:
-    raw = data.get("user")
+def _load_operator(data: dict[str, object]) -> OperatorConfig:
+    raw = data.get("operator")
     if not isinstance(raw, dict):
-        raise ConfigError("[user] section is required")
+        raise ConfigError("[operator] section is required")
 
-    _warn_unexpected_keys(raw, _USER_KEYS, "user")
+    _warn_unexpected_keys(raw, _OPERATOR_KEYS, "operator")
 
-    pub = _expand(str(_require(raw, "ssh_public_key", "user")))
-    priv = _expand(str(_require(raw, "ssh_private_key", "user")))
+    pub = _expand(str(_require(raw, "ssh_public_key", "operator")))
+    priv = _expand(str(_require(raw, "ssh_private_key", "operator")))
 
     if not pub.exists():
-        raise ConfigError(f"user.ssh_public_key does not exist: {pub}")
+        raise ConfigError(f"operator.ssh_public_key does not exist: {pub}")
     if not priv.exists():
-        raise ConfigError(f"user.ssh_private_key does not exist: {priv}")
+        raise ConfigError(f"operator.ssh_private_key does not exist: {priv}")
 
     ssh_config = Path.home() / ".ssh" / "config"
     if "ssh_config" in raw:
@@ -315,17 +315,17 @@ def _load_user(data: dict[str, object]) -> UserConfig:
     for entry in raw.get("extra_ssh_public_keys", []):
         p = _expand(str(entry))
         if not p.exists():
-            raise ConfigError(f"user.extra_ssh_public_keys: file does not exist: {p}")
+            raise ConfigError(f"operator.extra_ssh_public_keys: file does not exist: {p}")
         extra_keys.append(p)
 
     host_prefix = str(raw.get("ssh_host_prefix", "awvm--"))
     if not SSH_HOST_PREFIX_RE.match(host_prefix):
         raise ConfigError(
-            f"user.ssh_host_prefix must be alphanumeric with hyphens, underscores, "
+            f"operator.ssh_host_prefix must be alphanumeric with hyphens, underscores, "
             f"or dots (no whitespace or special characters), got: {host_prefix!r}"
         )
 
-    return UserConfig(
+    return OperatorConfig(
         ssh_public_key=pub,
         ssh_private_key=priv,
         ssh_config=ssh_config,
@@ -743,7 +743,7 @@ def _load_proxmox(data: dict[str, object]) -> ProxmoxConfig | None:
 
 
 EXPECTED_TOP_LEVEL_KEYS = {
-    "user",
+    "operator",
     "paths",
     "defaults",
     "vm_templates",
@@ -782,7 +782,7 @@ def _warn_unexpected_top_level_keys(data: dict[str, object]) -> None:
 
 
 def load_config(path: Path | None = None) -> Config:
-    """Load and validate the user configuration.
+    """Load and validate the agentworks configuration.
 
     Args:
         path: Override config file path (default: ~/.config/agentworks/config.toml).
@@ -835,7 +835,7 @@ def load_config(path: Path | None = None) -> Config:
     resolved_agent = _resolve_agent(loaded_agent_templates)
 
     return Config(
-        user=_load_user(data),
+        operator=_load_operator(data),
         paths=_load_paths(data),
         defaults=_load_defaults(data),
         vm_templates=loaded_vm_templates,

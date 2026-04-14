@@ -21,7 +21,7 @@ def config(tmp_path: Path):  # type: ignore[no-untyped-def]
     config_file = tmp_path / "config.toml"
     config_file.write_text(
         dedent(f"""\
-        [user]
+        [operator]
         ssh_public_key = "{pub}"
         ssh_private_key = "{priv}"
 
@@ -79,7 +79,7 @@ def test_builtin_fallback(tmp_path: Path) -> None:
     config_file = tmp_path / "config.toml"
     config_file.write_text(
         dedent(f"""\
-        [user]
+        [operator]
         ssh_public_key = "{pub}"
         ssh_private_key = "{priv}"
     """)

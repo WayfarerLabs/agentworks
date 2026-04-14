@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock
 
-from agentworks.config import UserConfig
+from agentworks.config import OperatorConfig
 from agentworks.vms.initializer import AUTHORIZED_KEYS_HEADER, _reconcile_authorized_keys
 
 
@@ -20,13 +20,13 @@ def _make_config(tmp_path: Path, extra_keys: list[str] | None = None) -> MagicMo
         p.write_text(content + "\n")
         extra_paths.append(p)
 
-    user = UserConfig(
+    operator = OperatorConfig(
         ssh_public_key=pub,
         ssh_private_key=tmp_path / "id",
         extra_ssh_public_keys=extra_paths,
     )
     config = MagicMock()
-    config.user = user
+    config.operator = operator
     return config
 
 
