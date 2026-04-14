@@ -271,13 +271,10 @@ def _warn_unexpected_keys(
     """
     unexpected = set(raw.keys()) - known
     if unexpected:
-        import sys
+        from agentworks.output import warn
 
         keys = ", ".join(sorted(unexpected))
-        print(
-            f"Warning: unexpected keys in [{section}]: {keys}",
-            file=sys.stderr,
-        )
+        warn(f"unexpected keys in [{section}]: {keys}")
 
 
 _OPERATOR_KEYS = {
@@ -768,13 +765,10 @@ def _warn_unexpected_top_level_keys(data: dict[str, object]) -> None:
     """
     unexpected = set(data.keys()) - EXPECTED_TOP_LEVEL_KEYS
     if unexpected:
-        import sys
+        from agentworks.output import warn
 
         keys = ", ".join(sorted(unexpected))
-        print(
-            f"Warning: unexpected top-level keys in config: {keys}",
-            file=sys.stderr,
-        )
+        warn(f"unexpected top-level keys in config: {keys}")
 
 
 def load_config(path: Path | None = None) -> Config:

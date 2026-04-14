@@ -9,7 +9,7 @@ a future server) can replace it via ``set_warn_handler``.
 from __future__ import annotations
 
 import sys
-from typing import Callable
+from collections.abc import Callable
 
 WarnHandler = Callable[[str], None]
 
