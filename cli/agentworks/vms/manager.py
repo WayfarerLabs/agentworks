@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 import typer
 
 from agentworks.config import VALID_PLATFORMS, validate_admin_username, validate_name
+from agentworks.output import warn
 from agentworks.db import InitStatus, ProvisioningStatus, VMStatus
 from agentworks.vms.initializer import (
     initialize_vm,
@@ -272,7 +273,7 @@ def create_vm(
 
         sync_ssh_config(config, db)
     except Exception as e:
-        typer.echo(f"\nWarning: SSH config sync failed: {e}", err=True)
+        warn(f"SSH config sync failed: {e}")
         typer.echo("VM is likely still usable.", err=True)
 
     # Final status is set by initialize_vm (COMPLETE or PARTIAL)
@@ -547,7 +548,7 @@ def delete_vm(
 
         provisioner.delete(vm)
     except Exception as e:
-        typer.echo(f"Warning: platform cleanup failed: {e}", err=True)
+        warn(f"platform cleanup failed: {e}")
 
     # Clean up logs
     from agentworks.ssh import LOG_DIR
@@ -686,7 +687,7 @@ def _tailscale_logout(provisioner: VMProvisioner, vm: VMRow, config: Config) -> 
         )
         typer.echo("Tailscale node deregistered")
     except Exception as e:
-        typer.echo(f"Warning: Tailscale logout failed (node may remain in admin console): {e}", err=True)
+        warn(f"Tailscale logout failed (node may remain in admin console): {e}")
 
 
 def _init_log_hint(vm_name: str) -> str:

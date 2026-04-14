@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 import typer
 
 from agentworks.db import VMStatus
+from agentworks.output import warn
 from agentworks.ssh import ExecTarget, LimaTarget, RemoteLimaTarget, SSHError, SSHTarget, copy_to
 from agentworks.ssh import run as ssh_run
 from agentworks.vms.base import ProvisionResult, VMProvisioner
@@ -151,7 +152,7 @@ class LimaProvisioner(VMProvisioner):
                 bootstrap_complete = True
                 typer.echo(f"  Tailscale IP: {tailscale_ip}")
             except SSHError as e:
-                typer.echo(f"  Warning: could not retrieve Tailscale IP: {e}", err=True)
+                warn(f"could not retrieve Tailscale IP: {e}")
                 typer.echo("  Tailscale will be set up during Phase A bootstrap.", err=True)
 
         if self.is_remote:

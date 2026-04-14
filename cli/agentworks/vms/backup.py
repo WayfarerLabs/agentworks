@@ -12,6 +12,8 @@ from typing import TYPE_CHECKING
 
 import typer
 
+from agentworks.output import warn
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -85,7 +87,7 @@ def backup_vm(
                 agent_data["live_uid"] = result.stdout.strip()
             else:
                 agent_data["live_uid"] = None
-                typer.echo(f"    Warning: user '{agent.linux_user}' not found on VM", err=True)
+                warn(f"user '{agent.linux_user}' not found on VM")
         except SSHError:
             agent_data["live_uid"] = None
 
@@ -107,7 +109,7 @@ def backup_vm(
                 ws_entry["live_gid"] = parts[2] if len(parts) > 2 else None
             else:
                 ws_entry["live_gid"] = None
-                typer.echo(f"    Warning: group '{ws_group}' not found on VM", err=True)
+                warn(f"group '{ws_group}' not found on VM")
         except SSHError:
             ws_entry["live_gid"] = None
 
@@ -189,7 +191,7 @@ def _archive_workspaces(
             if target.run_as_root(f"test -d {shlex.quote(ws.workspace_path)}", check=False).ok:
                 valid.append(ws)
             else:
-                typer.echo(f"    Warning: path not found, skipping: {ws.workspace_path}", err=True)
+                warn(f"path not found, skipping: {ws.workspace_path}")
                 skipped.append(ws.workspace_path)
 
         if not valid:

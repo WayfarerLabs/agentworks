@@ -23,6 +23,7 @@ import typer
 from agentworks.db import InitStatus, ProvisioningStatus
 from agentworks.ssh import ExecTarget, SSHError, SSHLogger, SSHTarget
 from agentworks.vms.cloud_init import INIT_SYSTEM_PACKAGES, PROVISIONING_PACKAGES
+from agentworks.output import warn
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -106,7 +107,7 @@ def _write_agentworks_profile(
     except SSHError as e:
         msg = f"shell profile write failed: {e}"
         logger.warning(msg)
-        typer.echo(f"  Warning: {msg}", err=True)
+        warn(msg)
 
 
 def _write_agentworks_rc(
@@ -139,7 +140,7 @@ def _write_agentworks_rc(
     except SSHError as e:
         msg = f"shell rc write failed: {e}"
         logger.warning(msg)
-        typer.echo(f"  Warning: {msg}", err=True)
+        warn(msg)
 
 
 # -- Mise installation ---------------------------------------------------------
@@ -203,7 +204,7 @@ def _write_mise_config(
     except SSHError as e:
         msg = f"mise config write failed: {e}"
         logger.warning(msg)
-        typer.echo(f"  Warning: {msg}", err=True)
+        warn(msg)
 
 
 def _fetch_mise_lockfile(
@@ -226,7 +227,7 @@ def _fetch_mise_lockfile(
     except SourceRefError as e:
         msg = f"mise lockfile fetch failed: {e}"
         logger.warning(msg)
-        typer.echo(f"  Warning: {msg}", err=True)
+        warn(msg)
 
 
 def _parse_mise_failures(error: SSHError) -> list[str]:
@@ -292,7 +293,7 @@ def _run_mise_install(
             for tool in failures:
                 typer.echo(f"  Locked install failed, not in lockfile: {tool}", err=True)
             if not failures:
-                typer.echo("  Warning: mise install --locked failed (see vm logs)", err=True)
+                warn("mise install --locked failed (see vm logs)")
             if not allow_unlocked:
                 typer.echo("  Hint: set mise_allow_unlocked = true to install unlocked packages", err=True)
                 return
@@ -315,7 +316,7 @@ def _run_mise_install(
             for tool in failures:
                 typer.echo(f"  Failed: {tool}", err=True)
             if not failures:
-                typer.echo("  Warning: mise install failed (see vm logs)", err=True)
+                warn("mise install failed (see vm logs)")
 
     # Prune stale tool versions not in the current config
     if installed and prune:
@@ -361,7 +362,7 @@ def _reconcile_authorized_keys(
     except SSHError as e:
         msg = f"authorized_keys reconciliation failed: {e}"
         logger.warning(msg)
-        typer.echo(f"  Warning: {msg}", err=True)
+        warn(msg)
 
 
 def _configure_apt_sources(
@@ -434,7 +435,7 @@ def _configure_apt_sources(
             except SSHError as exc:
                 msg = f"apt source '{name}' failed: {exc}"
                 logger.warning(msg)
-                typer.echo(f"  Warning: {msg}", err=True)
+                warn(msg)
                 continue
 
         # Always ensure the source list file has the correct content,
@@ -464,7 +465,7 @@ def _configure_apt_sources(
         except SSHError as e:
             msg = f"apt source '{name}' failed: {e}"
             logger.warning(msg)
-            typer.echo(f"  Warning: {msg}", err=True)
+            warn(msg)
 
     if newly_configured:
         typer.echo("  Running apt-get update...")
@@ -473,7 +474,7 @@ def _configure_apt_sources(
         except SSHError as e:
             msg = f"apt-get update failed after adding sources: {e}"
             logger.warning(msg)
-            typer.echo(f"  Warning: {msg}", err=True)
+            warn(msg)
 
 
 def _install_system_packages(
@@ -497,7 +498,7 @@ def _install_system_packages(
     except SSHError as e:
         msg = f"mise apt source setup failed: {e}"
         logger.warning(msg)
-        typer.echo(f"  Warning: {msg}", err=True)
+        warn(msg)
 
     typer.echo("  Running apt-get update...")
     try:
@@ -505,7 +506,7 @@ def _install_system_packages(
     except SSHError as e:
         msg = f"apt-get update failed: {e}"
         logger.warning(msg)
-        typer.echo(f"  Warning: {msg}", err=True)
+        warn(msg)
 
     typer.echo(f"  Installing {len(INIT_SYSTEM_PACKAGES)} system packages...")
     apt_str = " ".join(shlex.quote(p) for p in INIT_SYSTEM_PACKAGES)
@@ -520,7 +521,7 @@ def _install_system_packages(
     except SSHError as e:
         msg = f"system packages failed: {e}"
         logger.warning(msg)
-        typer.echo(f"  Warning: {msg}", err=True)
+        warn(msg)
 
 
 def _install_apt_packages(
@@ -558,7 +559,7 @@ def _install_apt_packages(
     except SSHError as e:
         msg = f"apt packages failed: {e}"
         logger.warning(msg)
-        typer.echo(f"  Warning: {msg}", err=True)
+        warn(msg)
 
 
 def _build_test_command(
@@ -604,7 +605,7 @@ def _run_catalog_commands(
         if entry is None:
             msg = f"{label.lower()} '{name}' not found in catalog"
             logger.warning(msg)
-            typer.echo(f"  Warning: {msg}", err=True)
+            warn(msg)
             continue
         logger.step(f"{label} {i}/{total}: {name}")
 
@@ -629,7 +630,7 @@ def _run_catalog_commands(
         except SSHError as e:
             msg = f"{label.lower()} '{name}' failed: {truncated}... ({e})"
             logger.warning(msg)
-            typer.echo(f"  Warning: {msg}", err=True)
+            warn(msg)
         path_additions.extend(entry.path)
 
     return path_additions
@@ -843,7 +844,7 @@ def initialize_vm(
         try:
             on_tailscale_ready()
         except Exception as e:
-            typer.echo(f"  Warning: post-provisioning cleanup failed: {e}", err=True)
+            warn(f"post-provisioning cleanup failed: {e}")
 
         # Wait for Tailscale SSH to reconnect after network changes
         from agentworks.ssh import wait_for_reconnect
@@ -1067,7 +1068,7 @@ def _run_bootstrap_script(
             typer.echo(f"  {step.name}: {step.success_msg}")
             logger.output(step.success_msg)
         for warning in step.warnings:
-            typer.echo(f"  Warning: {warning}", err=True)
+            warn(warning)
             logger.warning(warning)
         if step.error:
             typer.echo(f"  Error: {step.error}", err=True)
@@ -1147,7 +1148,7 @@ def _phase_b_setup(
             except SSHError as e:
                 msg = f"snap install '{pkg}' failed: {e}"
                 logger.warning(msg)
-                typer.echo(f"  Warning: {msg}", err=True)
+                warn(msg)
 
     # Non-fatal: set default shell (before install commands so installers
     # write to the correct rc file)
@@ -1168,7 +1169,7 @@ def _phase_b_setup(
     except SSHError as e:
         msg = f"shell configuration failed: {e}"
         logger.warning(msg)
-        typer.echo(f"  Warning: {msg}", err=True)
+        warn(msg)
 
     # Non-fatal: reconcile authorized_keys
     _reconcile_authorized_keys(ts_target, config, home, logger)
@@ -1212,7 +1213,7 @@ def _phase_b_setup(
     except SSHError as e:
         msg = f"workspaces directory setup failed: {e}"
         logger.warning(msg)
-        typer.echo(f"  Warning: {msg}", err=True)
+        warn(msg)
 
     # Non-fatal: agent tmux socket directory infrastructure.
     # Creates the shared group, root directory, and per-agent subdirectories.
@@ -1238,7 +1239,7 @@ def _phase_b_setup(
     except SSHError as e:
         msg = f"agent tmux socket setup failed: {e}"
         logger.warning(msg)
-        typer.echo(f"  Warning: {msg}", err=True)
+        warn(msg)
 
     # Non-fatal: system install commands
     system_path = _run_catalog_commands(
@@ -1265,7 +1266,7 @@ def _phase_b_setup(
         except SSHError as e:
             msg = f"git safe.directory setup failed: {e}"
             logger.warning(msg)
-            typer.echo(f"  Warning: {msg}", err=True)
+            warn(msg)
 
     # Non-fatal: git credentials (before dotfiles and mise lockfile for private repos)
     if providers:
@@ -1287,7 +1288,7 @@ def _phase_b_setup(
         except (SourceRefError, Exception) as e:
             msg = f"dotfiles install failed: {e}"
             logger.warning(msg)
-            typer.echo(f"  Warning: {msg}", err=True)
+            warn(msg)
 
     # Non-fatal: mise lockfile (after git creds and dotfiles; overrides dotfiles lockfile)
     if config.admin.mise_lockfile:
@@ -1414,7 +1415,7 @@ def _build_nerf_claude_plugin(
     except (SSHError, RuntimeError) as e:
         msg = f"nerf Claude plugin build failed: {e}"
         logger.warning(msg)
-        typer.echo(f"  Warning: {msg}", err=True)
+        warn(msg)
 
 
 def _install_nerf_claude_plugin_for_user(
@@ -1452,7 +1453,7 @@ def _install_nerf_claude_plugin_for_user(
     except SSHError as e:
         msg = f"nerf plugin install failed: {e}"
         logger.warning(msg)
-        typer.echo(f"  Warning: {msg}", err=True)
+        warn(msg)
 
 
 def _configure_git_credentials(
@@ -1477,7 +1478,7 @@ def _configure_git_credentials(
         except Exception as e:
             msg = f"git credential setup failed for {name}: {e}"
             logger.warning(msg)
-            typer.echo(f"  Warning: {msg}", err=True)
+            warn(msg)
 
     if not credential_lines:
         return
@@ -1495,4 +1496,4 @@ def _configure_git_credentials(
     except SSHError as e:
         msg = f"git credential store setup failed: {e}"
         logger.warning(msg)
-        typer.echo(f"  Warning: {msg}", err=True)
+        warn(msg)

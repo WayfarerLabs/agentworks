@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 import typer
 
 from agentworks.db import SessionStatus
+from agentworks.output import warn
 from agentworks.sessions.tmux import tmux_cmd
 
 if TYPE_CHECKING:
@@ -94,7 +95,7 @@ def _add_session_window(
     ok = getattr(result, "ok", True)
     stderr = getattr(result, "stderr", "")
     if not ok:
-        typer.echo(f"  Warning: failed to add window for '{session_name}': {stderr}", err=True)
+        warn(f"failed to add window for '{session_name}': {stderr}")
 
 
 def add_session_to_console(

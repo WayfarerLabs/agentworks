@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 import typer
 
 from agentworks.config import validate_name
+from agentworks.output import warn
 from agentworks.ssh import SSHError, SSHTarget, run
 
 if TYPE_CHECKING:
@@ -48,7 +49,7 @@ def add_vm_host(db: Database, name: str, ssh_host: str, platform: str = "lima") 
     if detected_os:
         typer.echo(f"Detected OS: {detected_os}")
     else:
-        typer.echo("Warning: could not detect OS (SSH connection may have failed)")
+        warn("could not detect OS (SSH connection may have failed)")
 
     db.insert_vm_host(name, ssh_host, platform=platform, os=detected_os)
     typer.echo(f"VM host '{name}' added ({ssh_host})")
@@ -87,7 +88,7 @@ def remove_vm_host(db: Database, name: str, *, force: bool = False) -> None:
         for vm in db.list_vms():
             if vm.vm_host_name == name:
                 db.update_vm_host_ref(vm.name, None)
-        typer.echo(f"Warning: cleared VM host reference on {vm_count} VM(s)", err=True)
+        warn(f"cleared VM host reference on {vm_count} VM(s)")
 
     db.delete_vm_host(name)
     typer.echo(f"VM host '{name}' removed")

@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 import typer
 
 from agentworks.ssh import ssh_target_for_vm
+from agentworks.output import warn
 from agentworks.workspaces.tmuxinator import console_session_name, generate_config
 
 if TYPE_CHECKING:
@@ -158,7 +159,7 @@ def delete_vm_workspace(
         session = console_session_name(ws_name)
         ssh_run(target, f"rm -f ~/.config/tmuxinator/{session}.yml", check=False, timeout=10, logger=lg)
     except SSHError as e:
-        typer.echo(f"Warning: remote cleanup failed: {e}", err=True)
+        warn(f"remote cleanup failed: {e}")
 
 
 def generate_vscode_workspace(
