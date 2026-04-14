@@ -1220,3 +1220,19 @@ def config_sync_ssh_config() -> None:
     from agentworks.ssh_config import sync_ssh_config
 
     sync_ssh_config(load_config(), _get_db())
+
+
+
+# -- Entrypoint ------------------------------------------------------------
+
+
+def main() -> None:
+    """CLI entrypoint. Wraps the typer app to catch ConfigError cleanly."""
+    from agentworks.config import ConfigError
+
+    try:
+        app()
+    except ConfigError as e:
+        typer.echo(f"Configuration error: {e}", err=True)
+        raise SystemExit(1) from None
+

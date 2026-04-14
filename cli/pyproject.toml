@@ -12,7 +12,7 @@ dependencies = [
 ]
 
 [project.scripts]
-agentworks = "agentworks.cli:app"
+agentworks = "agentworks.cli:main"
 
 [build-system]
 requires = ["hatchling"]
