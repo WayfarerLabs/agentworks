@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import warnings
 from pathlib import Path
 from textwrap import dedent
 
@@ -125,7 +124,7 @@ def test_invalid_git_credential_type(tmp_path: Path) -> None:
         load_config(config_file)
 
 
-def test_unexpected_top_level_keys_warns(tmp_path: Path) -> None:
+def test_unexpected_top_level_keys_warns(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     """Bare keys before any section header land at top level."""
     pub = tmp_path / "id.pub"
     priv = tmp_path / "id"
@@ -143,14 +142,12 @@ def test_unexpected_top_level_keys_warns(tmp_path: Path) -> None:
         ssh_private_key = "{priv}"
     """)
     )
-    with warnings.catch_warnings(record=True) as w:
-        warnings.simplefilter("always")
-        load_config(config_file)
-        assert len(w) == 1
-        assert "oops" in str(w[0].message)
+    load_config(config_file)
+    captured = capsys.readouterr()
+    assert "oops" in captured.err
 
 
-def test_orphaned_key_under_commented_section(tmp_path: Path) -> None:
+def test_orphaned_key_under_commented_section(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     """Keys under commented-out section headers land in the previous section."""
     pub = tmp_path / "id.pub"
     priv = tmp_path / "id"
@@ -168,12 +165,10 @@ def test_orphaned_key_under_commented_section(tmp_path: Path) -> None:
         platform = "lima"     # orphaned in [operator], not [defaults]
     """)
     )
-    with warnings.catch_warnings(record=True) as w:
-        warnings.simplefilter("always")
-        cfg = load_config(config_file)
-        assert len(w) == 1
-        assert "platform" in str(w[0].message)
-        assert "operator" in str(w[0].message).lower()
+    cfg = load_config(config_file)
+    captured = capsys.readouterr()
+    assert "platform" in captured.err
+    assert "operator" in captured.err.lower()
     # The orphaned key means defaults.platform stays at default (None)
     assert cfg.defaults.platform is None
 

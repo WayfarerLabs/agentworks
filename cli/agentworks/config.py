@@ -271,14 +271,12 @@ def _warn_unexpected_keys(
     """
     unexpected = set(raw.keys()) - known
     if unexpected:
-        import warnings
+        import sys
 
         keys = ", ".join(sorted(unexpected))
-        warnings.warn(
-            f"Unexpected keys in [{section}]: {keys}. "
-            "This usually means a [section] header is commented out "
-            "but keys beneath it are not.",
-            stacklevel=3,
+        print(
+            f"Warning: unexpected keys in [{section}]: {keys}",
+            file=sys.stderr,
         )
 
 
@@ -770,14 +768,12 @@ def _warn_unexpected_top_level_keys(data: dict[str, object]) -> None:
     """
     unexpected = set(data.keys()) - EXPECTED_TOP_LEVEL_KEYS
     if unexpected:
-        import warnings
+        import sys
 
         keys = ", ".join(sorted(unexpected))
-        warnings.warn(
-            f"Unexpected top-level keys in config: {keys}. "
-            "This usually means a [section] header is commented out "
-            "but keys beneath it are not.",
-            stacklevel=2,
+        print(
+            f"Warning: unexpected top-level keys in config: {keys}",
+            file=sys.stderr,
         )
 
 
