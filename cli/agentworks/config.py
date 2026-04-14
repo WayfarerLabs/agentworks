@@ -91,6 +91,10 @@ class OperatorConfig:
     extra_ssh_public_keys: list[Path] = field(default_factory=list)
 
 
+#: Backward-compatible alias; prefer ``OperatorConfig``.
+UserConfig = OperatorConfig
+
+
 @dataclass(frozen=True)
 class PathsConfig:
     local_workspaces: Path = field(default_factory=lambda: Path.home() / "workspaces")
@@ -292,18 +296,28 @@ _OPERATOR_KEYS = {
 
 def _load_operator(data: dict[str, object]) -> OperatorConfig:
     raw = data.get("operator")
+    section_name = "operator"
     if not isinstance(raw, dict):
-        raise ConfigError("[operator] section is required")
+        # Accept [user] as a deprecated alias for [operator]
+        raw = data.get("user")
+        if isinstance(raw, dict):
+            print(
+                "WARNING: config [user] section is deprecated; rename it to [operator].",
+                file=sys.stderr,
+            )
+            section_name = "user"
+        else:
+            raise ConfigError("[operator] section is required")
 
-    _warn_unexpected_keys(raw, _OPERATOR_KEYS, "operator")
+    _warn_unexpected_keys(raw, _OPERATOR_KEYS, section_name)
 
-    pub = _expand(str(_require(raw, "ssh_public_key", "operator")))
-    priv = _expand(str(_require(raw, "ssh_private_key", "operator")))
+    pub = _expand(str(_require(raw, "ssh_public_key", section_name)))
+    priv = _expand(str(_require(raw, "ssh_private_key", section_name)))
 
     if not pub.exists():
-        raise ConfigError(f"operator.ssh_public_key does not exist: {pub}")
+        raise ConfigError(f"{section_name}.ssh_public_key does not exist: {pub}")
     if not priv.exists():
-        raise ConfigError(f"operator.ssh_private_key does not exist: {priv}")
+        raise ConfigError(f"{section_name}.ssh_private_key does not exist: {priv}")
 
     ssh_config = Path.home() / ".ssh" / "config"
     if "ssh_config" in raw:
@@ -313,13 +327,13 @@ def _load_operator(data: dict[str, object]) -> OperatorConfig:
     for entry in raw.get("extra_ssh_public_keys", []):
         p = _expand(str(entry))
         if not p.exists():
-            raise ConfigError(f"operator.extra_ssh_public_keys: file does not exist: {p}")
+            raise ConfigError(f"{section_name}.extra_ssh_public_keys: file does not exist: {p}")
         extra_keys.append(p)
 
     host_prefix = str(raw.get("ssh_host_prefix", "awvm--"))
     if not SSH_HOST_PREFIX_RE.match(host_prefix):
         raise ConfigError(
-            f"operator.ssh_host_prefix must be alphanumeric with hyphens, underscores, "
+            f"{section_name}.ssh_host_prefix must be alphanumeric with hyphens, underscores, "
             f"or dots (no whitespace or special characters), got: {host_prefix!r}"
         )
 

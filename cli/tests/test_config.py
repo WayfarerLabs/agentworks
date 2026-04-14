@@ -346,3 +346,27 @@ def test_proxmox_config(tmp_path: Path, case: dict) -> None:
 def test_proxmox_section_absent(config_dir: Path) -> None:
     cfg = load_config(config_dir)
     assert cfg.proxmox is None
+
+
+def test_user_section_deprecated_alias(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """[user] section is accepted as a deprecated alias for [operator]."""
+    pub = tmp_path / "id.pub"
+    priv = tmp_path / "id"
+    pub.write_text("key")
+    priv.write_text("key")
+
+    config_file = tmp_path / "config.toml"
+    config_file.write_text(
+        dedent(f"""\
+        [user]
+        ssh_public_key = "{pub}"
+        ssh_private_key = "{priv}"
+    """)
+    )
+
+    cfg = load_config(config_file)
+    assert cfg.operator.ssh_public_key == pub
+    assert cfg.operator.ssh_private_key == priv
+    captured = capsys.readouterr()
+    assert "deprecated" in captured.err.lower()
+    assert "[operator]" in captured.err
