@@ -20,7 +20,7 @@ PROVISIONING_PACKAGES = [
 ]
 
 # System packages installed during init (every create/reinit).
-# These are always installed regardless of user config.
+# These are always installed regardless of operator config.
 INIT_SYSTEM_PACKAGES = [
     "git",
     "unzip",

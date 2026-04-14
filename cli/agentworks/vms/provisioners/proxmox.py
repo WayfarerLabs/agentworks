@@ -76,7 +76,7 @@ class ProxmoxProvisioner(VMProvisioner):
             vm_config["memory"] = memory * 1024  # GiB -> MiB
 
         # Cloud-init: user, SSH key, network
-        ssh_pub_key = config.user.ssh_public_key.read_text().strip()
+        ssh_pub_key = config.operator.ssh_public_key.read_text().strip()
         vm_config["ciuser"] = admin_username
         vm_config["sshkeys"] = urllib.parse.quote(ssh_pub_key, safe="")
         vm_config["ipconfig0"] = "ip=dhcp"
@@ -132,7 +132,7 @@ class ProxmoxProvisioner(VMProvisioner):
             ssh=SSHTarget(
                 host=host,
                 user=admin_username,
-                identity_file=config.user.ssh_private_key,
+                identity_file=config.operator.ssh_private_key,
             )
         )
 
@@ -188,8 +188,8 @@ class ProxmoxProvisioner(VMProvisioner):
 
     def exec_target(self, vm: VMRow, *, config: object | None = None) -> ExecTarget:
         identity_file = None
-        if config is not None and hasattr(config, "user"):
-            identity_file = config.user.ssh_private_key  # type: ignore[union-attr]
+        if config is not None and hasattr(config, "operator"):
+            identity_file = config.operator.ssh_private_key  # type: ignore[union-attr]
 
         host = vm.tailscale_host or "unknown"
 

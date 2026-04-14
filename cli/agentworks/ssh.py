@@ -1,7 +1,7 @@
 """SSH execution primitive.
 
 All remote operations use native ssh/scp subprocess calls, respecting
-the user's SSH config and agent.
+the operator's SSH config and agent.
 """
 
 from __future__ import annotations
@@ -49,7 +49,7 @@ def ssh_target_for_vm(vm: VMRow, config: Config) -> SSHTarget:
     return SSHTarget(
         host=vm.tailscale_host,
         user=vm.admin_username,
-        identity_file=config.user.ssh_private_key,
+        identity_file=config.operator.ssh_private_key,
         force_tty=sys.platform == "win32",
     )
 

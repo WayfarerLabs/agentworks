@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import warnings
 from pathlib import Path
 from textwrap import dedent
 
@@ -22,7 +21,7 @@ def config_dir(tmp_path: Path) -> Path:
 
     config_file.write_text(
         dedent(f"""\
-        [user]
+        [operator]
         ssh_public_key = "{pub}"
         ssh_private_key = "{priv}"
 
@@ -89,7 +88,7 @@ def test_cycle_detection(tmp_path: Path) -> None:
     config_file = tmp_path / "config.toml"
     config_file.write_text(
         dedent(f"""\
-        [user]
+        [operator]
         ssh_public_key = "{pub}"
         ssh_private_key = "{priv}"
 
@@ -113,7 +112,7 @@ def test_invalid_git_credential_type(tmp_path: Path) -> None:
     config_file = tmp_path / "config.toml"
     config_file.write_text(
         dedent(f"""\
-        [user]
+        [operator]
         ssh_public_key = "{pub}"
         ssh_private_key = "{priv}"
 
@@ -125,7 +124,7 @@ def test_invalid_git_credential_type(tmp_path: Path) -> None:
         load_config(config_file)
 
 
-def test_unexpected_top_level_keys_warns(tmp_path: Path) -> None:
+def test_unexpected_top_level_keys_warns(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     """Bare keys before any section header land at top level."""
     pub = tmp_path / "id.pub"
     priv = tmp_path / "id"
@@ -138,19 +137,17 @@ def test_unexpected_top_level_keys_warns(tmp_path: Path) -> None:
         dedent(f"""\
         oops = true
 
-        [user]
+        [operator]
         ssh_public_key = "{pub}"
         ssh_private_key = "{priv}"
     """)
     )
-    with warnings.catch_warnings(record=True) as w:
-        warnings.simplefilter("always")
-        load_config(config_file)
-        assert len(w) == 1
-        assert "oops" in str(w[0].message)
+    load_config(config_file)
+    captured = capsys.readouterr()
+    assert "oops" in captured.err
 
 
-def test_orphaned_key_under_commented_section(tmp_path: Path) -> None:
+def test_orphaned_key_under_commented_section(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     """Keys under commented-out section headers land in the previous section."""
     pub = tmp_path / "id.pub"
     priv = tmp_path / "id"
@@ -160,20 +157,18 @@ def test_orphaned_key_under_commented_section(tmp_path: Path) -> None:
     config_file = tmp_path / "config.toml"
     config_file.write_text(
         dedent(f"""\
-        [user]
+        [operator]
         ssh_public_key = "{pub}"
         ssh_private_key = "{priv}"
 
         # [defaults]          <-- commented out!
-        platform = "lima"     # orphaned in [user], not [defaults]
+        platform = "lima"     # orphaned in [operator], not [defaults]
     """)
     )
-    with warnings.catch_warnings(record=True) as w:
-        warnings.simplefilter("always")
-        cfg = load_config(config_file)
-        assert len(w) == 1
-        assert "platform" in str(w[0].message)
-        assert "user" in str(w[0].message).lower()
+    cfg = load_config(config_file)
+    captured = capsys.readouterr()
+    assert "platform" in captured.err
+    assert "operator" in captured.err.lower()
     # The orphaned key means defaults.platform stays at default (None)
     assert cfg.defaults.platform is None
 
@@ -191,16 +186,16 @@ def test_extra_ssh_public_keys(tmp_path: Path) -> None:
     config_file = tmp_path / "config.toml"
     config_file.write_text(
         dedent(f"""\
-        [user]
+        [operator]
         ssh_public_key = "{pub}"
         ssh_private_key = "{priv}"
         extra_ssh_public_keys = ["{extra1}", "{extra2}"]
     """)
     )
     cfg = load_config(config_file)
-    assert len(cfg.user.extra_ssh_public_keys) == 2
-    assert cfg.user.extra_ssh_public_keys[0] == extra1
-    assert cfg.user.extra_ssh_public_keys[1] == extra2
+    assert len(cfg.operator.extra_ssh_public_keys) == 2
+    assert cfg.operator.extra_ssh_public_keys[0] == extra1
+    assert cfg.operator.extra_ssh_public_keys[1] == extra2
 
 
 def test_extra_ssh_public_keys_missing_file(tmp_path: Path) -> None:
@@ -212,7 +207,7 @@ def test_extra_ssh_public_keys_missing_file(tmp_path: Path) -> None:
     config_file = tmp_path / "config.toml"
     config_file.write_text(
         dedent(f"""\
-        [user]
+        [operator]
         ssh_public_key = "{pub}"
         ssh_private_key = "{priv}"
         extra_ssh_public_keys = ["/nonexistent/key.pub"]
@@ -224,7 +219,7 @@ def test_extra_ssh_public_keys_missing_file(tmp_path: Path) -> None:
 
 def test_extra_ssh_public_keys_defaults_empty(config_dir: Path) -> None:
     cfg = load_config(config_dir)
-    assert cfg.user.extra_ssh_public_keys == []
+    assert cfg.operator.extra_ssh_public_keys == []
 
 
 # -- Proxmox config tests (table-driven) --------------------------------------
@@ -333,7 +328,7 @@ def test_proxmox_config(tmp_path: Path, case: dict) -> None:
 
     config_file = tmp_path / "config.toml"
     config_file.write_text(dedent(f"""\
-        [user]
+        [operator]
         ssh_public_key = "{pub}"
         ssh_private_key = "{priv}"
 
@@ -351,3 +346,27 @@ def test_proxmox_config(tmp_path: Path, case: dict) -> None:
 def test_proxmox_section_absent(config_dir: Path) -> None:
     cfg = load_config(config_dir)
     assert cfg.proxmox is None
+
+
+def test_user_section_deprecated_alias(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """[user] section is accepted as a deprecated alias for [operator]."""
+    pub = tmp_path / "id.pub"
+    priv = tmp_path / "id"
+    pub.write_text("key")
+    priv.write_text("key")
+
+    config_file = tmp_path / "config.toml"
+    config_file.write_text(
+        dedent(f"""\
+        [user]
+        ssh_public_key = "{pub}"
+        ssh_private_key = "{priv}"
+    """)
+    )
+
+    cfg = load_config(config_file)
+    assert cfg.operator.ssh_public_key == pub
+    assert cfg.operator.ssh_private_key == priv
+    captured = capsys.readouterr()
+    assert "deprecated" in captured.err.lower()
+    assert "[operator]" in captured.err

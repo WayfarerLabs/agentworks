@@ -55,7 +55,7 @@ def ssh_host_alias(vm_name: str, prefix: str = "awvm--") -> str:
 
 def sync_ssh_config(config: Config, db: Database) -> None:
     """Rebuild SSH config from current DB state."""
-    if config.user.ssh_config_dir:
+    if config.operator.ssh_config_dir:
         _rebuild_config_dir(config, db)
     else:
         _legacy_rebuild(config, db)
@@ -64,9 +64,9 @@ def sync_ssh_config(config: Config, db: Database) -> None:
 
 def _legacy_rebuild(config: Config, db: Database) -> None:
     """Legacy: rebuild the managed section from all VMs in DB."""
-    ssh_config = config.user.ssh_config
+    ssh_config = config.operator.ssh_config
     user_section, _old_entries = _read_managed(ssh_config)
-    prefix = config.user.ssh_host_prefix
+    prefix = config.operator.ssh_host_prefix
 
     entries: dict[str, str] = {}
     for vm in db.list_vms():
@@ -77,7 +77,7 @@ def _legacy_rebuild(config: Config, db: Database) -> None:
             alias=alias,
             hostname=vm.tailscale_host,
             user=vm.admin_username,
-            identity_file=config.user.ssh_private_key,
+            identity_file=config.operator.ssh_private_key,
         )
     _write_legacy(ssh_config, user_section, entries)
 
@@ -92,10 +92,10 @@ def _rebuild_config_dir(config: Config, db: Database) -> None:
     hosts. Ensures the Include directive is present in ~/.ssh/config.
     Also cleans up any legacy managed section on first encounter.
     """
-    ssh_config = config.user.ssh_config
+    ssh_config = config.operator.ssh_config
     config_d = ssh_config.parent / _CONFIG_DIR_NAME
     config_d.mkdir(parents=True, exist_ok=True)
-    prefix = config.user.ssh_host_prefix
+    prefix = config.operator.ssh_host_prefix
 
     # Ensure Include directive at top of ssh_config
     _ensure_include(ssh_config)
@@ -114,7 +114,7 @@ def _rebuild_config_dir(config: Config, db: Database) -> None:
                 alias=alias,
                 hostname=vm.tailscale_host,
                 user=vm.admin_username,
-                identity_file=config.user.ssh_private_key,
+                identity_file=config.operator.ssh_private_key,
             )
         )
 
@@ -199,7 +199,7 @@ def _atomic_write(path: Path, content: str) -> None:
 
 
 def _read_managed(ssh_config: Path) -> tuple[str, dict[str, str]]:
-    """Read the SSH config, splitting into user section and managed entries."""
+    """Read the SSH config, splitting into operator-managed section and auto-managed entries."""
     entries: dict[str, str] = {}
 
     if not ssh_config.exists():
@@ -237,7 +237,7 @@ def _write_legacy(
     user_section: str,
     entries: dict[str, str],
 ) -> None:
-    """Write the SSH config file with user section + managed section."""
+    """Write the SSH config file with operator-managed section + agentworks-managed section."""
     ssh_config.parent.mkdir(parents=True, exist_ok=True)
 
     parts = [user_section.rstrip("\n")]

@@ -329,7 +329,7 @@ def _run_mise_install(
 
 AUTHORIZED_KEYS_HEADER = """\
 # Managed by agentworks -- manual edits will be overwritten on reinit.
-# To add keys, use user.extra_ssh_public_keys in your agentworks config.
+# To add keys, use operator.extra_ssh_public_keys in your agentworks config.
 """
 
 
@@ -347,8 +347,8 @@ def _reconcile_authorized_keys(
     """
     logger.step("SSH authorized keys")
 
-    keys: list[str] = [config.user.ssh_public_key.read_text().strip()]
-    for path in config.user.extra_ssh_public_keys:
+    keys: list[str] = [config.operator.ssh_public_key.read_text().strip()]
+    for path in config.operator.extra_ssh_public_keys:
         keys.append(path.read_text().strip())
 
     extra_count = len(keys) - 1
@@ -965,7 +965,7 @@ def _phase_a_bootstrap(
         ssh=SSHTarget(
             host=tailscale_ip,
             user=admin_username,
-            identity_file=config.user.ssh_private_key,
+            identity_file=config.operator.ssh_private_key,
             force_tty=sys.platform == "win32",
         ),
         default_timeout=60,
@@ -1015,7 +1015,7 @@ def _run_bootstrap_script(
     # Resolve Tailscale auth key
     ts_auth_key = _resolve_tailscale_auth_key(tailscale_auth_key)
 
-    ssh_public_key = config.user.ssh_public_key.read_text().strip()
+    ssh_public_key = config.operator.ssh_public_key.read_text().strip()
     # Determine platform for hostname. Look up the VM record for the actual
     # platform; fall back to transport-based detection.
     platform = "wsl2" if is_wsl2 else "unknown"

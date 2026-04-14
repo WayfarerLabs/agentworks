@@ -2,7 +2,7 @@
 
 The catalog provides named entries for apt sources, apt packages, system
 install commands, and user install commands. A built-in catalog ships with
-the package; user config entries override built-in entries on name collision.
+the package; custom config entries override built-in entries on name collision.
 """
 
 from __future__ import annotations
@@ -210,30 +210,30 @@ def _parse_catalog(data: dict[str, object]) -> ResolvedCatalog:
 
 
 def load_catalog(config: Config) -> ResolvedCatalog:
-    """Load and merge built-in + user-defined catalog entries.
+    """Load and merge built-in + custom catalog entries.
 
-    User entries override built-in entries with the same name.
+    Custom entries override built-in entries with the same name.
     Cross-references (apt_sources in apt_packages) are validated.
     """
     builtin = load_builtin_catalog()
 
-    # Parse user-defined entries (raw dicts from config) into typed entries
-    user_apt_sources = _load_apt_sources(config.apt_sources)
-    user_apt_packages = _load_apt_packages(config.apt_packages)
-    user_system_cmds = _load_system_commands(config.system_install_commands)
-    user_user_cmds = _load_user_commands(config.user_install_commands)
+    # Parse custom entries (raw dicts from config) into typed entries
+    custom_apt_sources = _load_apt_sources(config.apt_sources)
+    custom_apt_packages = _load_apt_packages(config.apt_packages)
+    custom_system_cmds = _load_system_commands(config.system_install_commands)
+    custom_user_install_cmds = _load_user_commands(config.user_install_commands)
 
-    # Merge: user wins on name collision
-    apt_sources = {**builtin.apt_sources, **user_apt_sources}
-    apt_packages = {**builtin.apt_packages, **user_apt_packages}
-    system_cmds = {**builtin.system_install_commands, **user_system_cmds}
-    user_cmds = {**builtin.user_install_commands, **user_user_cmds}
+    # Merge: custom wins on name collision
+    apt_sources = {**builtin.apt_sources, **custom_apt_sources}
+    apt_packages = {**builtin.apt_packages, **custom_apt_packages}
+    system_cmds = {**builtin.system_install_commands, **custom_system_cmds}
+    user_install_cmds = {**builtin.user_install_commands, **custom_user_install_cmds}
 
     catalog = ResolvedCatalog(
         apt_sources=apt_sources,
         apt_packages=apt_packages,
         system_install_commands=system_cmds,
-        user_install_commands=user_cmds,
+        user_install_commands=user_install_cmds,
     )
 
     _validate_references(catalog)

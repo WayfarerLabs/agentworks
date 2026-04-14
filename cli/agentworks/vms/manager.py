@@ -417,8 +417,8 @@ def shell_vm(db: Database, config: Config, name: str) -> None:
         raise typer.Exit(1)
 
     ssh_cmd = ["ssh", "-t"]
-    if config.user.ssh_private_key:
-        ssh_cmd.extend(["-i", str(config.user.ssh_private_key)])
+    if config.operator.ssh_private_key:
+        ssh_cmd.extend(["-i", str(config.operator.ssh_private_key)])
     ssh_cmd.append(f"{vm.admin_username}@{vm.tailscale_host}")
 
     sys.exit(subprocess.call(ssh_cmd))
@@ -916,8 +916,8 @@ def port_forward_vm(
 
     # Build SSH command with -L flags for each forward
     ssh_cmd = ["ssh", "-N", "-o", "StrictHostKeyChecking=accept-new"]
-    if config.user.ssh_private_key:
-        ssh_cmd.extend(["-i", str(config.user.ssh_private_key)])
+    if config.operator.ssh_private_key:
+        ssh_cmd.extend(["-i", str(config.operator.ssh_private_key)])
     for local_port, remote_port in forwards:
         ssh_cmd.extend(["-L", f"{address}:{local_port}:localhost:{remote_port}"])
     if verbose:

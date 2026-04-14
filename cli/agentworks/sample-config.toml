@@ -17,7 +17,7 @@
 # --- Operator identity ---
 # These settings identify you (the operator) to agentworks and your VMs.
 
-[user]
+[operator]
 ssh_public_key = "~/.ssh/id_ed25519.pub"    # required: used to authorize access to VMs
 ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connections to VMs
 # ssh_config = "~/.ssh/config"               # SSH config file for VM host entries
@@ -236,11 +236,11 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # Catalog extensions
 # =============================================================================
 #
-# User-defined entries extend the built-in catalog. Entries with the same name
+# Operator-defined entries extend the built-in catalog. Entries with the same name
 # as a built-in entry override it. Run `agentworks installer list` to see all
-# available entries (built-in and user-defined).
+# available entries (built-in and operator-defined).
 
-# --- User-defined apt sources ---
+# --- Custom apt sources ---
 # Third-party apt repositories.
 # Use {arch} as a placeholder for the VM architecture (amd64 or arm64).
 
@@ -251,7 +251,7 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # source = "deb [arch={arch} signed-by=/etc/apt/keyrings/my-repo.gpg] https://apt.example.com/debian bookworm main"
 # source_file = "my-repo.list"
 
-# --- User-defined apt packages ---
+# --- Custom apt packages ---
 # Named package sets with optional apt source dependencies.
 
 # [apt_packages.my-tool]
@@ -259,7 +259,7 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # apt_sources = ["my-repo"]
 # apt = ["my-tool"]
 
-# --- User-defined system install commands ---
+# --- Custom system install commands ---
 # Shell commands that install system-wide tooling (run during vm init/reinit).
 # These may be re-run (e.g. during reinit) so they should be idempotent.
 # Optional checks short-circuit installation if the tool is already present.
@@ -270,7 +270,7 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # command = "curl -fsSL https://example.com/install.sh | sudo bash"
 # test_exec = "my-system-tool"            # skip if command is on PATH
 
-# --- User-defined user install commands ---
+# --- Custom user install commands ---
 # Shell commands that install per-user tooling (run for admin and agents).
 # These may be re-run so they should be idempotent.
 # Use only one of: test_exec, test_file, or test_dir.

@@ -133,7 +133,7 @@ class AzureProvisioner(VMProvisioner):
         if config.vm.swap > 0:
             typer.echo(f"  Swap: {config.vm.swap} GiB")
 
-        ssh_pub_key = config.user.ssh_public_key.read_text().strip()
+        ssh_pub_key = config.operator.ssh_public_key.read_text().strip()
 
         # Generate the same bootstrap script used by Lima, wrapped in
         # cloud-init write_files + runcmd for delivery via Azure custom_data.
@@ -297,7 +297,7 @@ class AzureProvisioner(VMProvisioner):
             ssh=SSHTarget(
                 host=public_ip,
                 user=admin_username,
-                identity_file=config.user.ssh_private_key,
+                identity_file=config.operator.ssh_private_key,
                 force_tty=sys.platform == "win32",
             )
         )

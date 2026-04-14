@@ -130,8 +130,8 @@ def run_doctor() -> None:
             ok("Config is valid")
 
             # SSH keys
-            _check_ssh_key(config.user.ssh_public_key, "public", ok, warn, fail)
-            _check_ssh_key(config.user.ssh_private_key, "private", ok, warn, fail)
+            _check_ssh_key(config.operator.ssh_public_key, "public", ok, warn, fail)
+            _check_ssh_key(config.operator.ssh_private_key, "private", ok, warn, fail)
 
             # Dotfiles
             if config.admin.dotfiles_source:
