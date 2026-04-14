@@ -49,7 +49,7 @@ class CommandSpec:
 #   "workspaces"      -> agentworks workspace list
 #   "ws_templates"    -> [workspace_templates.*] sections in config.toml
 #   "git_credentials" -> [git_credentials.*] sections in config.toml
-#   "catalog_entries" -> all entry names from built-in + operator-defined catalog
+#   "catalog_entries" -> all entry names from built-in + custom catalog
 #   "sessions"        -> agentworks session list --no-status
 #   "session_templates" -> [session_templates.*] sections in config.toml
 #   "agents"          -> agentworks agent list

@@ -983,10 +983,10 @@ _TYPE_CHOICES = click.Choice(["apt-source", "apt-package", "system-install-cmd",
 def installer_list(
     type_filter: Annotated[str | None, typer.Option("--type", help="Filter by type", click_type=_TYPE_CHOICES)] = None,
     source_filter: Annotated[
-        str | None, typer.Option("--source", help="Filter by source", click_type=click.Choice(["builtin", "user"]))
+        str | None, typer.Option("--source", help="Filter by source", click_type=click.Choice(["builtin", "custom"]))
     ] = None,
 ) -> None:
-    """List available installers from the built-in and operator-defined catalog."""
+    """List available installers from the built-in and custom catalog."""
     from agentworks.catalog import load_builtin_catalog, load_catalog
     from agentworks.config import load_config
 
@@ -1003,16 +1003,16 @@ def installer_list(
     ) -> None:
         for name, entry in sorted(merged_entries.items()):
             is_builtin = name in builtin_entries
-            is_user = name in getattr(config, _CONFIG_ATTR[type_label], {})
-            if is_user:
-                source = "user"
+            is_custom = name in getattr(config, _CONFIG_ATTR[type_label], {})
+            if is_custom:
+                source = "custom"
             elif is_builtin:
                 source = "built-in"
             else:
                 source = "built-in"
             if source_filter == "builtin" and source != "built-in":
                 continue
-            if source_filter == "user" and source != "user":
+            if source_filter == "custom" and source != "custom":
                 continue
             rows.append((type_label, name, source, entry.description))
 
@@ -1092,9 +1092,9 @@ def installer_describe(
             continue
 
         entry = merged_entries[name]
-        is_user = name in getattr(config, config_attr, {})
-        source = "user" if is_user else "built-in"
-        overrides = name in builtin_entries and is_user
+        is_custom = name in getattr(config, config_attr, {})
+        source = "custom" if is_custom else "built-in"
+        overrides = name in builtin_entries and is_custom
 
         typer.echo(f"Name:        {name}")
         typer.echo(f"Type:        {type_label}")

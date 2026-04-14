@@ -188,7 +188,7 @@ class ProxmoxProvisioner(VMProvisioner):
 
     def exec_target(self, vm: VMRow, *, config: object | None = None) -> ExecTarget:
         identity_file = None
-        if config is not None and hasattr(config, "user"):
+        if config is not None and hasattr(config, "operator"):
             identity_file = config.operator.ssh_private_key  # type: ignore[union-attr]
 
         host = vm.tailscale_host or "unknown"

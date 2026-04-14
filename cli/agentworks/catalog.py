@@ -2,7 +2,7 @@
 
 The catalog provides named entries for apt sources, apt packages, system
 install commands, and user install commands. A built-in catalog ships with
-the package; operator config entries override built-in entries on name collision.
+the package; custom config entries override built-in entries on name collision.
 """
 
 from __future__ import annotations
