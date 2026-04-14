@@ -26,6 +26,11 @@ def warn(message: str) -> None:
     _warn_handler(message)
 
 
+def get_warn_handler() -> WarnHandler:
+    """Return the current warning handler."""
+    return _warn_handler
+
+
 def set_warn_handler(handler: WarnHandler) -> None:
     """Replace the global warning handler.
 

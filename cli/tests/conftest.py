@@ -22,16 +22,17 @@ def db(tmp_path: Path) -> Generator[Database, None, None]:
 def warnings() -> Generator[list[str], None, None]:
     """Capture warnings emitted via ``agentworks.output.warn``.
 
-    Installs a list-based handler before the test and restores the default
-    after. Usage::
+    Installs a list-based handler before the test and restores the previous
+    handler after. Usage::
 
         def test_something(warnings):
             do_something_that_warns()
             assert any("expected text" in w for w in warnings)
     """
-    from agentworks.output import _default_warn, set_warn_handler
+    from agentworks.output import get_warn_handler, set_warn_handler
 
+    previous = get_warn_handler()
     captured: list[str] = []
     set_warn_handler(captured.append)
     yield captured
-    set_warn_handler(_default_warn)
+    set_warn_handler(previous)
