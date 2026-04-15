@@ -8,8 +8,8 @@ from typing import TYPE_CHECKING
 
 import typer
 
-from agentworks.ssh import ssh_target_for_vm
 from agentworks.output import warn
+from agentworks.ssh import ssh_target_for_vm
 from agentworks.workspaces.tmuxinator import console_session_name, generate_config
 
 if TYPE_CHECKING:
@@ -70,7 +70,9 @@ def create_vm_workspace(
             # have SGID so new files (including atomic writes) get the right group
             run_as_root(target, f"chgrp -R {ws_group} {workspace_path}", logger=lg)
             import shlex
-            run_as_root(target, f"find {shlex.quote(workspace_path)} -type d -exec chmod g+s {{}} +", timeout=120, logger=lg)
+
+            sgid_cmd = f"find {shlex.quote(workspace_path)} -type d -exec chmod g+s {{}} +"
+            run_as_root(target, sgid_cmd, timeout=120, logger=lg)
         except Exception:
             if template.repo.startswith("git@"):
                 typer.echo(

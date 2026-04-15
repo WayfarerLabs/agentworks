@@ -7,8 +7,8 @@ from typing import TYPE_CHECKING
 import typer
 
 from agentworks.config import VALID_PLATFORMS, validate_admin_username, validate_name
-from agentworks.output import warn
 from agentworks.db import InitStatus, ProvisioningStatus, VMStatus
+from agentworks.output import warn
 from agentworks.vms.initializer import (
     initialize_vm,
     rejoin_tailscale,
@@ -40,7 +40,6 @@ def get_provisioner(platform: str, vm_host_ssh: str | None = None) -> VMProvisio
 
         return WSL2Provisioner()
     elif platform == "proxmox":
-        from agentworks.vms.provisioners.proxmox import ProxmoxProvisioner
 
         # ProxmoxProvisioner requires config; caller must use create_vm flow
         raise ValueError("Use create_vm for proxmox provisioning")

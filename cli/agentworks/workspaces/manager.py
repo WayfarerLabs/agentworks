@@ -9,8 +9,8 @@ from typing import TYPE_CHECKING
 import typer
 
 from agentworks.config import validate_name
-from agentworks.output import warn
 from agentworks.db import InitStatus, VMStatus
+from agentworks.output import warn
 from agentworks.workspaces.templates import ResolvedTemplate, resolve_template
 
 if TYPE_CHECKING:
@@ -627,7 +627,8 @@ def _rehome_vm(
         typer.echo("Setting permissions...")
         run_as_root(target, f"chown {vm.admin_username}:{ws_group} {new_path}", logger=ssh_logger)
         run_as_root(target, f"chmod 2770 {new_path}", logger=ssh_logger)
-        run_as_root(target, f"find {shlex.quote(new_path)} -type d -exec chmod g+s {{}} +", timeout=120, logger=ssh_logger)
+        sgid_cmd = f"find {shlex.quote(new_path)} -type d -exec chmod g+s {{}} +"
+        run_as_root(target, sgid_cmd, timeout=120, logger=ssh_logger)
         try:
             run_as_root(
                 target,
@@ -816,9 +817,9 @@ def delete_workspace(
         if vm is not None and vm.tailscale_host is not None:
             from functools import partial
 
-            from agentworks.ssh import run, ssh_target_for_vm
             from agentworks.sessions.manager import _effective_socket_path
             from agentworks.sessions.tmux import kill_session
+            from agentworks.ssh import run, ssh_target_for_vm
 
             target = ssh_target_for_vm(vm, config)
             run_command = partial(run, target, logger=ssh_logger)
