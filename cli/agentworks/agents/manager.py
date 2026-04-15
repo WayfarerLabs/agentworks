@@ -189,9 +189,9 @@ def delete_agent(
     if agent_sessions:
         from functools import partial
 
-        from agentworks.ssh import run, ssh_target_for_vm
         from agentworks.sessions.manager import _effective_socket_path
         from agentworks.sessions.tmux import kill_session
+        from agentworks.ssh import run, ssh_target_for_vm
 
         target = ssh_target_for_vm(vm, config)
         run_command = partial(run, target, logger=ssh_logger)

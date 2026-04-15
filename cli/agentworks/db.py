@@ -340,8 +340,12 @@ MIGRATIONS: dict[int, str] = {
             socket_path       TEXT,
             FOREIGN KEY (workspace_name) REFERENCES workspaces(name)
         );
-        INSERT INTO sessions (name, workspace_name, template, mode, status, created_at, updated_at, agent_name, created_workspace)
-            SELECT workspace_name || '--' || name, workspace_name, template, mode, status, created_at, updated_at, agent_name, created_workspace
+        INSERT INTO sessions
+            (name, workspace_name, template, mode, status,
+             created_at, updated_at, agent_name, created_workspace)
+            SELECT workspace_name || '--' || name, workspace_name,
+                   template, mode, status, created_at, updated_at,
+                   agent_name, created_workspace
             FROM tasks;
         DROP TABLE tasks;
     """,
