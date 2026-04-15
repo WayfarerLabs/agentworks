@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 import typer
 
 from agentworks.config import validate_name
+from agentworks.output import warn
 from agentworks.db import InitStatus, VMStatus
 from agentworks.workspaces.templates import ResolvedTemplate, resolve_template
 
@@ -361,7 +362,7 @@ def repair_workspace(
         else:
             typer.echo("  OK: acl package")
     except SSHError as e:
-        typer.echo(f"  Warning: acl package check failed: {e}", err=True)
+        warn(f"acl package check failed: {e}")
 
     # 1. Ensure workspace group exists (with correct naming)
     try:
@@ -384,7 +385,7 @@ def repair_workspace(
         else:
             typer.echo(f"  OK: group {ws_group} exists")
     except SSHError as e:
-        typer.echo(f"  Warning: group check failed: {e}", err=True)
+        warn(f"group check failed: {e}")
 
     # 2. Ensure admin is in the group
     try:
@@ -400,7 +401,7 @@ def repair_workspace(
         else:
             typer.echo(f"  OK: admin in {ws_group}")
     except SSHError as e:
-        typer.echo(f"  Warning: admin group check failed: {e}", err=True)
+        warn(f"admin group check failed: {e}")
 
     # 3. Fix directory permissions (recursive chgrp so ACLs apply correctly)
     try:
@@ -416,7 +417,7 @@ def repair_workspace(
         )
         typer.echo("  OK: directory ownership and permissions")
     except SSHError as e:
-        typer.echo(f"  Warning: permission fix failed: {e}", err=True)
+        warn(f"permission fix failed: {e}")
 
     # 4. Fix ACLs
     # Default ACLs only apply to directories; use find to avoid warnings on files.
@@ -434,7 +435,7 @@ def repair_workspace(
         )
         typer.echo("  OK: ACLs")
     except SSHError as e:
-        typer.echo(f"  Warning: ACL fix failed: {e}", err=True)
+        warn(f"ACL fix failed: {e}")
 
     # 5. Fix parent directory traversal
     try:
@@ -444,7 +445,7 @@ def repair_workspace(
         )
         typer.echo("  OK: parent traversal")
     except SSHError as e:
-        typer.echo(f"  Warning: parent traversal fix failed: {e}", err=True)
+        warn(f"parent traversal fix failed: {e}")
 
     # 6. Reconcile agent group membership
     # Get agents that SHOULD be in the group (have any grant)
@@ -480,7 +481,7 @@ def repair_workspace(
         if not to_add and not to_remove:
             typer.echo(f"  OK: agent group membership ({len(current_members)} agent(s))")
     except SSHError as e:
-        typer.echo(f"  Warning: agent membership check failed: {e}", err=True)
+        warn(f"agent membership check failed: {e}")
 
     if fixes > 0:
         typer.echo(f"\nRepaired {fixes} issue(s)")
@@ -641,7 +642,7 @@ def _rehome_vm(
                 logger=ssh_logger,
             )
         except SSHError as e:
-            typer.echo(f"  Warning: ACL setup failed: {e}", err=True)
+            warn(f"ACL setup failed: {e}")
 
         # Fix parent directory traversal
         run_as_root(

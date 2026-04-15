@@ -1229,6 +1229,10 @@ def config_sync_ssh_config() -> None:
 def main() -> None:
     """CLI entrypoint. Wraps the typer app to catch ConfigError cleanly."""
     from agentworks.config import ConfigError
+    from agentworks.output import set_warn_handler
+
+    # Route warnings through typer so they render consistently with other output
+    set_warn_handler(lambda msg: typer.echo(f"Warning: {msg}", err=True))
 
     try:
         app()

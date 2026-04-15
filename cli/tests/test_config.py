@@ -124,7 +124,7 @@ def test_invalid_git_credential_type(tmp_path: Path) -> None:
         load_config(config_file)
 
 
-def test_unexpected_top_level_keys_warns(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_unexpected_top_level_keys_warns(tmp_path: Path, warnings: list[str]) -> None:
     """Bare keys before any section header land at top level."""
     pub = tmp_path / "id.pub"
     priv = tmp_path / "id"
@@ -143,11 +143,10 @@ def test_unexpected_top_level_keys_warns(tmp_path: Path, capsys: pytest.CaptureF
     """)
     )
     load_config(config_file)
-    captured = capsys.readouterr()
-    assert "oops" in captured.err
+    assert any("oops" in w for w in warnings)
 
 
-def test_orphaned_key_under_commented_section(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_orphaned_key_under_commented_section(tmp_path: Path, warnings: list[str]) -> None:
     """Keys under commented-out section headers land in the previous section."""
     pub = tmp_path / "id.pub"
     priv = tmp_path / "id"
@@ -166,9 +165,8 @@ def test_orphaned_key_under_commented_section(tmp_path: Path, capsys: pytest.Cap
     """)
     )
     cfg = load_config(config_file)
-    captured = capsys.readouterr()
-    assert "platform" in captured.err
-    assert "operator" in captured.err.lower()
+    assert any("platform" in w for w in warnings)
+    assert any("operator" in w.lower() for w in warnings)
     # The orphaned key means defaults.platform stays at default (None)
     assert cfg.defaults.platform is None
 

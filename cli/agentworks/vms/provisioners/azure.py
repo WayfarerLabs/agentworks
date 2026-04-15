@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Protocol
 import typer
 
 from agentworks.db import VMStatus
+from agentworks.output import warn
 from agentworks.ssh import ExecTarget, SSHError, SSHTarget
 from agentworks.vms.base import ProvisionResult, VMProvisioner
 from agentworks.vms.bootstrap_script import generate_bootstrap_script, vm_hostname
@@ -338,7 +339,7 @@ class AzureProvisioner(VMProvisioner):
                 break
             except SSHError:
                 if attempt == 29:
-                    typer.echo("  Warning: SSH not available, deferring bootstrap to Phase A", err=True)
+                    warn("SSH not available, deferring bootstrap to Phase A")
                     return None
                 time.sleep(10)
 
@@ -351,7 +352,7 @@ class AzureProvisioner(VMProvisioner):
                 timeout=600,
             )
         except SSHError as e:
-            typer.echo(f"  Warning: cloud-init wait failed: {e}", err=True)
+            warn(f"cloud-init wait failed: {e}")
             typer.echo("  Deferring bootstrap to Phase A", err=True)
             return None
 
@@ -362,7 +363,7 @@ class AzureProvisioner(VMProvisioner):
             typer.echo(f"  Tailscale IP: {tailscale_ip}")
             return tailscale_ip
         except SSHError as e:
-            typer.echo(f"  Warning: could not retrieve Tailscale IP: {e}", err=True)
+            warn(f"could not retrieve Tailscale IP: {e}")
             return None
 
     def start(self, vm: VMRow) -> None:
@@ -390,7 +391,7 @@ class AzureProvisioner(VMProvisioner):
     def delete(self, vm: VMRow) -> None:
         typer.echo(f"Deleting Azure VM '{vm.name}'...")
         if vm.azure_resource_id is None:
-            typer.echo("Warning: no Azure resource ID, skipping Azure cleanup")
+            warn("no Azure resource ID, skipping Azure cleanup")
             return
 
         rg, name, az_cfg = _parse_resource_id(vm.azure_resource_id)

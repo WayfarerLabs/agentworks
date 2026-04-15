@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 import typer
 
 from agentworks.db import VMStatus
+from agentworks.output import warn
 from agentworks.ssh import ExecTarget, SSHTarget
 from agentworks.vms.base import ProvisionResult, VMProvisioner
 from agentworks.vms.bootstrap_script import generate_bootstrap_script, vm_hostname
@@ -271,7 +272,7 @@ class ProxmoxProvisioner(VMProvisioner):
         )
 
         if result is None:
-            typer.echo("  Warning: bootstrap timed out", err=True)
+            warn("bootstrap timed out")
             return None
 
         exit_code = result.get("exitcode", -1)

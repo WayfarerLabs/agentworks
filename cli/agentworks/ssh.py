@@ -12,6 +12,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from agentworks.output import warn
+
 if TYPE_CHECKING:
     from collections.abc import Callable
 
@@ -702,6 +704,6 @@ def wait_for_reconnect(target: ExecTarget, *, max_attempts: int = 16) -> bool:
             return True
         except SSHError:
             if attempt == max_attempts - 1:
-                typer.echo("  Warning: Tailscale SSH did not reconnect after ~240s, proceeding anyway", err=True)
+                warn("Tailscale SSH did not reconnect after ~240s, proceeding anyway")
             time.sleep(5)
     return False
