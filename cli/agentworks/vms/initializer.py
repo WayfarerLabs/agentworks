@@ -1349,6 +1349,7 @@ def _build_nerf_claude_plugin(
     try:
         try:
             from nerftools import BUILTIN_MANIFESTS_DIR  # type: ignore[import-untyped]
+            from nerftools.config import load_config, resolve_claude_plugin_meta  # type: ignore[import-untyped]
             from nerftools.formats import build_claude_plugin  # type: ignore[import-untyped]
             from nerftools.manifest import (  # type: ignore[import-untyped]
                 ManifestError,
@@ -1370,9 +1371,21 @@ def _build_nerf_claude_plugin(
         except ManifestError as e:
             raise RuntimeError(f"nerf manifest error: {e}") from e
 
+        # Plugin metadata from agentworks config with date-based version.
+        # Each build gets a unique version so Claude detects changes when
+        # manifests are added/removed or nerftools is upgraded.
+        from dataclasses import replace as dc_replace
+        from datetime import UTC, datetime
+
+        nerf_config_path = Path(__file__).resolve().parent.parent / "nerf-config.yaml"
+        nerf_config = load_config(nerf_config_path)
+        plugin_meta, marketplace_meta = resolve_claude_plugin_meta(nerf_config)
+        build_version = datetime.now(UTC).strftime("0.1.%Y%m%d%H%M")
+        plugin_meta = dc_replace(plugin_meta, version=build_version)
+
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
-            build_claude_plugin(manifests, tmp_path)
+            build_claude_plugin(manifests, tmp_path, plugin_meta, marketplace_meta=marketplace_meta)
 
             # Clean and create remote dir
             _run_logged(ts_target, f"rm -rf {shlex.quote(plugin_dir)}", logger, as_root=True)
@@ -1395,6 +1408,27 @@ def _build_nerf_claude_plugin(
                 f"find {shlex.quote(plugin_dir)} -name 'nerf-*' -o -name 'nerfctl-*' | xargs -r chmod a+x",
                 logger,
             )
+
+        # Write an install helper with the plugin/marketplace names baked in
+        # so _install_nerf_claude_plugin_for_user can call it without parsing JSON.
+        p_name = shlex.quote(plugin_meta.name)
+        m_name = shlex.quote(marketplace_meta.name if marketplace_meta else plugin_meta.name)
+        install_script = (
+            "#!/usr/bin/env bash\n"
+            "set -euo pipefail\n"
+            'PLUGIN_DIR="$(cd "$(dirname "$0")/.." && pwd)"\n'
+            'claude plugin marketplace add "$PLUGIN_DIR"\n'
+            f"claude plugin install {p_name}@{m_name} --scope user\n"
+        )
+        install_path = f"{plugin_dir}/scripts/install-plugin"
+        scripts_dir = shlex.quote(plugin_dir + "/scripts")
+        quoted_script = shlex.quote(install_script)
+        quoted_path = shlex.quote(install_path)
+        _run_logged(
+            ts_target,
+            f"mkdir -p {scripts_dir} && printf '%s' {quoted_script} > {quoted_path} && chmod a+x {quoted_path}",
+            logger,
+        )
 
         typer.echo(f"  Nerf Claude plugin built to {plugin_dir}")
 
@@ -1427,10 +1461,10 @@ def _install_nerf_claude_plugin_for_user(
     logger.step("Nerf plugin install")
 
     try:
-        # Check that the plugin and install script exist via the system env var
+        # Check that the plugin and install helper exist via the system env var
         check_result = _run_logged(
             target,
-            f"{shell} -lc 'test -x $AGENTWORKS_NERF_HOME/claude-plugin/scripts/nerfctl-install-plugin'",
+            f"{shell} -lc 'test -x $AGENTWORKS_NERF_HOME/claude-plugin/scripts/install-plugin'",
             logger,
             check=False,
         )
@@ -1445,7 +1479,7 @@ def _install_nerf_claude_plugin_for_user(
         typer.echo("  Installing nerf Claude plugin...")
         _run_logged(
             target,
-            f"{shell} -lc '$AGENTWORKS_NERF_HOME/claude-plugin/scripts/nerfctl-install-plugin'",
+            f"{shell} -lc '$AGENTWORKS_NERF_HOME/claude-plugin/scripts/install-plugin'",
             logger,
             timeout=30,
         )
