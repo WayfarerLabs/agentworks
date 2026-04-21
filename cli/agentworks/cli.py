@@ -942,7 +942,9 @@ def session_restart(
 @session_app.command("restart-all")
 def session_restart_all(
     vm: Annotated[str | None, typer.Option("--vm", help="Only restart sessions on this VM")] = None,
-    workspace: Annotated[str | None, typer.Option("--workspace", help="Only restart sessions in this workspace")] = None,
+    workspace: Annotated[
+        str | None, typer.Option("--workspace", help="Only restart sessions in this workspace")
+    ] = None,
     include_running: Annotated[bool, typer.Option("--include-running", help="Also restart running sessions")] = False,
 ) -> None:
     """Restart all stopped sessions."""
