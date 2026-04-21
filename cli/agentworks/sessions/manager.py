@@ -461,6 +461,52 @@ def restart_session(
     add_session_to_console(name, run_command=run_command, socket_path=new_sock)
 
 
+def restart_all_sessions(
+    db: Database,
+    config: Config,
+    *,
+    vm_name: str | None = None,
+    workspace_name: str | None = None,
+    include_running: bool = False,
+) -> None:
+    """Restart all stopped sessions, optionally filtered by VM or workspace.
+
+    If include_running is True, running sessions are killed and restarted too.
+    """
+    sessions = db.list_sessions(workspace_name=workspace_name)
+
+    # Filter by VM if requested (requires workspace -> VM lookup)
+    if vm_name is not None:
+        vm_workspaces = {ws.name for ws in db.list_workspaces(vm_name=vm_name)}
+        sessions = [s for s in sessions if s.workspace_name in vm_workspaces]
+
+    # Filter by status
+    if not include_running:
+        sessions = [s for s in sessions if s.status == SessionStatus.STOPPED.value]
+
+    if not sessions:
+        typer.echo("No matching sessions to restart.")
+        return
+
+    typer.echo(f"Restarting {len(sessions)} session(s)...")
+    failed: list[tuple[str, str]] = []
+    for session in sessions:
+        try:
+            restart_session(
+                db,
+                config,
+                name=session.name,
+                force=include_running,
+            )
+        except Exception as exc:
+            failed.append((session.name, str(exc)))
+            typer.echo(f"  Error restarting '{session.name}': {exc}", err=True)
+
+    if failed:
+        typer.echo(f"\n{len(failed)} session(s) failed to restart.", err=True)
+        raise typer.Exit(1)
+
+
 def delete_session(
     db: Database,
     config: Config,

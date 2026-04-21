@@ -33,10 +33,29 @@ def agent_socket_path(linux_user: str, session_name: str) -> str:
 def ensure_agent_socket_root(run_command: RunCommand, admin_username: str) -> None:
     """Create the agent tmux socket root directory and group (idempotent).
 
+    Fast-paths when the directory already exists with the correct group and
+    permissions (single SSH round-trip).  Falls back to the full setup
+    otherwise.
+
     Each command is a separate call so that callers wrapping with sudo (e.g.
     ``run_as_root``) apply privilege to every command individually.
     """
     grp = shlex.quote(AGENT_SOCKET_GROUP)
+    q_root = shlex.quote(AGENT_SOCKET_ROOT)
+
+    # Fast path: directory exists, owned by the right group, correct perms.
+    probe = run_command(
+        f'test -d {q_root} && stat -c "%G %a" {q_root} 2>/dev/null',
+        check=False,
+    )
+    stdout = (getattr(probe, "stdout", "") or "").strip()
+    if stdout == f"{AGENT_SOCKET_GROUP} 2771":
+        return
+
+    from agentworks.output import warn
+
+    warn(f"Socket root {AGENT_SOCKET_ROOT} missing or misconfigured, recreating")
+
     admin = shlex.quote(admin_username)
     # Two calls: getent doesn't need root but groupadd does. Keeping them
     # separate avoids the sudo scoping issue with || in a single command.
@@ -54,12 +73,29 @@ def ensure_agent_socket_root(run_command: RunCommand, admin_username: str) -> No
 def ensure_agent_socket_dir(run_command: RunCommand, linux_user: str) -> None:
     """Create a per-agent tmux socket directory (idempotent).
 
+    Fast-paths when the directory already exists with the correct owner/group
+    and permissions (single SSH round-trip).
+
     Each command is a separate call so that callers wrapping with sudo apply
     privilege to every command individually.
     """
     q_user = shlex.quote(linux_user)
     grp = shlex.quote(AGENT_SOCKET_GROUP)
     q_path = shlex.quote(f"{AGENT_SOCKET_ROOT}/{linux_user}")
+
+    # Fast path: directory exists, correct owner:group, correct perms.
+    probe = run_command(
+        f'test -d {q_path} && stat -c "%U %G %a" {q_path} 2>/dev/null',
+        check=False,
+    )
+    stdout = (getattr(probe, "stdout", "") or "").strip()
+    if stdout == f"{linux_user} {AGENT_SOCKET_GROUP} 2770":
+        return
+
+    from agentworks.output import warn
+
+    warn(f"Socket directory for {linux_user} missing or misconfigured, recreating")
+
     run_command(f"mkdir -p {q_path}")
     run_command(f"chown {q_user}:{grp} {q_path}")
     run_command(f"chmod 2770 {q_path}")
