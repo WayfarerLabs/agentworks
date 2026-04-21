@@ -192,6 +192,8 @@ def create_session(
     linux_user: str | None,
     *,
     run_command: RunCommand,
+    run_as_root: RunCommand | None = None,
+    admin_username: str | None = None,
     is_admin: bool = True,
 ) -> str | None:
     """Create a locked-down tmux session.
@@ -221,17 +223,23 @@ def create_session(
         return None
     else:
         assert linux_user is not None
+        assert run_as_root is not None, "run_as_root required for agent sessions"
+        assert admin_username is not None, "admin_username required for agent sessions"
         q_user = shlex.quote(linux_user)
         sock = agent_socket_path(linux_user, session_name)
         q_sock = shlex.quote(sock)
+
+        # Ensure the tmpfs socket directories exist (wiped on VM reboot).
+        ensure_agent_socket_root(run_as_root, admin_username)
+        ensure_agent_socket_dir(run_as_root, linux_user)
 
         # Check for an existing socket file before creating the session.
         # A stale socket (no server) is removed to start clean. An active
         # socket (server running) is an error -- something else is using it.
         sock_exists = run_command(f"test -e {q_sock}", check=False)
         if getattr(sock_exists, "ok", False):
-            server_alive = run_command(
-                f"sudo -n tmux -S {q_sock} list-sessions 2>/dev/null",
+            server_alive = run_as_root(
+                f"tmux -S {q_sock} list-sessions 2>/dev/null",
                 check=False,
             )
             if getattr(server_alive, "ok", False):
@@ -243,7 +251,7 @@ def create_session(
             import typer as _typer
 
             _typer.echo(f"  Removing stale socket: {sock}")
-            run_command(f"sudo rm -f {q_sock}", check=False)
+            run_as_root(f"rm -f {q_sock}", check=False)
 
         # Build the pane command.  sudo --login gives the agent a proper
         # login environment; tmux then starts the pane shell as that user.
@@ -264,7 +272,7 @@ def create_session(
 
         # Fix socket permissions (tmux creates sockets mode 0700).
         # Socket is owned by the agent user, so sudo is needed.
-        run_command(f"sudo chmod g+rwx {q_sock}")
+        run_as_root(f"chmod g+rwx {q_sock}")
 
         # Grant tmux server-access to all socket-group members
         _grant_server_access(run_command, linux_user, sock)
