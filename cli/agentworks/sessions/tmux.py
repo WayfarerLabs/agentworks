@@ -33,10 +33,29 @@ def agent_socket_path(linux_user: str, session_name: str) -> str:
 def ensure_agent_socket_root(run_command: RunCommand, admin_username: str) -> None:
     """Create the agent tmux socket root directory and group (idempotent).
 
+    Fast-paths when the directory already exists with the correct group and
+    permissions (single SSH round-trip).  Falls back to the full setup
+    otherwise.
+
     Each command is a separate call so that callers wrapping with sudo (e.g.
     ``run_as_root``) apply privilege to every command individually.
     """
     grp = shlex.quote(AGENT_SOCKET_GROUP)
+    q_root = shlex.quote(AGENT_SOCKET_ROOT)
+
+    # Fast path: directory exists, owned by the right group, correct perms.
+    probe = run_command(
+        f'test -d {q_root} && stat -c "%G %a" {q_root} 2>/dev/null',
+        check=False,
+    )
+    stdout = (getattr(probe, "stdout", "") or "").strip()
+    if stdout == f"{AGENT_SOCKET_GROUP} 2771":
+        return
+
+    from agentworks.output import warn
+
+    warn(f"Socket root {AGENT_SOCKET_ROOT} missing or misconfigured, recreating")
+
     admin = shlex.quote(admin_username)
     # Two calls: getent doesn't need root but groupadd does. Keeping them
     # separate avoids the sudo scoping issue with || in a single command.
@@ -54,12 +73,29 @@ def ensure_agent_socket_root(run_command: RunCommand, admin_username: str) -> No
 def ensure_agent_socket_dir(run_command: RunCommand, linux_user: str) -> None:
     """Create a per-agent tmux socket directory (idempotent).
 
+    Fast-paths when the directory already exists with the correct owner/group
+    and permissions (single SSH round-trip).
+
     Each command is a separate call so that callers wrapping with sudo apply
     privilege to every command individually.
     """
     q_user = shlex.quote(linux_user)
     grp = shlex.quote(AGENT_SOCKET_GROUP)
     q_path = shlex.quote(f"{AGENT_SOCKET_ROOT}/{linux_user}")
+
+    # Fast path: directory exists, correct owner:group, correct perms.
+    probe = run_command(
+        f'test -d {q_path} && stat -c "%U %G %a" {q_path} 2>/dev/null',
+        check=False,
+    )
+    stdout = (getattr(probe, "stdout", "") or "").strip()
+    if stdout == f"{linux_user} {AGENT_SOCKET_GROUP} 2770":
+        return
+
+    from agentworks.output import warn
+
+    warn(f"Socket directory for {linux_user} missing or misconfigured, recreating")
+
     run_command(f"mkdir -p {q_path}")
     run_command(f"chown {q_user}:{grp} {q_path}")
     run_command(f"chmod 2770 {q_path}")
@@ -192,6 +228,8 @@ def create_session(
     linux_user: str | None,
     *,
     run_command: RunCommand,
+    run_as_root: RunCommand | None = None,
+    admin_username: str | None = None,
     is_admin: bool = True,
 ) -> str | None:
     """Create a locked-down tmux session.
@@ -221,17 +259,23 @@ def create_session(
         return None
     else:
         assert linux_user is not None
+        assert run_as_root is not None, "run_as_root required for agent sessions"
+        assert admin_username is not None, "admin_username required for agent sessions"
         q_user = shlex.quote(linux_user)
         sock = agent_socket_path(linux_user, session_name)
         q_sock = shlex.quote(sock)
+
+        # Ensure the tmpfs socket directories exist (wiped on VM reboot).
+        ensure_agent_socket_root(run_as_root, admin_username)
+        ensure_agent_socket_dir(run_as_root, linux_user)
 
         # Check for an existing socket file before creating the session.
         # A stale socket (no server) is removed to start clean. An active
         # socket (server running) is an error -- something else is using it.
         sock_exists = run_command(f"test -e {q_sock}", check=False)
         if getattr(sock_exists, "ok", False):
-            server_alive = run_command(
-                f"sudo -n tmux -S {q_sock} list-sessions 2>/dev/null",
+            server_alive = run_as_root(
+                f"tmux -S {q_sock} list-sessions 2>/dev/null",
                 check=False,
             )
             if getattr(server_alive, "ok", False):
@@ -243,7 +287,7 @@ def create_session(
             import typer as _typer
 
             _typer.echo(f"  Removing stale socket: {sock}")
-            run_command(f"sudo rm -f {q_sock}", check=False)
+            run_as_root(f"rm -f {q_sock}", check=False)
 
         # Build the pane command.  sudo --login gives the agent a proper
         # login environment; tmux then starts the pane shell as that user.
@@ -264,7 +308,7 @@ def create_session(
 
         # Fix socket permissions (tmux creates sockets mode 0700).
         # Socket is owned by the agent user, so sudo is needed.
-        run_command(f"sudo chmod g+rwx {q_sock}")
+        run_as_root(f"chmod g+rwx {q_sock}")
 
         # Grant tmux server-access to all socket-group members
         _grant_server_access(run_command, linux_user, sock)

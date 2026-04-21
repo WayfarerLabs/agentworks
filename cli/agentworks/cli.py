@@ -939,6 +939,27 @@ def session_restart(
     restart_session(_get_db(), load_config(), name=name, force=force)
 
 
+@session_app.command("restart-all")
+def session_restart_all(
+    vm: Annotated[str | None, typer.Option("--vm", help="Only restart sessions on this VM")] = None,
+    workspace: Annotated[
+        str | None, typer.Option("--workspace", help="Only restart sessions in this workspace")
+    ] = None,
+    include_running: Annotated[bool, typer.Option("--include-running", help="Also restart running sessions")] = False,
+) -> None:
+    """Restart all stopped sessions."""
+    from agentworks.config import load_config
+    from agentworks.sessions.manager import restart_all_sessions
+
+    restart_all_sessions(
+        _get_db(),
+        load_config(),
+        vm_name=vm,
+        workspace_name=workspace,
+        include_running=include_running,
+    )
+
+
 @session_app.command("attach")
 def session_attach(
     name: Annotated[str, typer.Argument(help="Session name")],
