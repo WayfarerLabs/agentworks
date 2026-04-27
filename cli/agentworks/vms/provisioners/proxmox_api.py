@@ -197,8 +197,9 @@ class ProxmoxAPI:
             "GET", f"/nodes/{node}/qemu/{vmid}/agent/network-get-interfaces"
         )
         if result and "result" in result:
-            return result["result"]  # type: ignore[no-any-return]
-        return result or []
+            data = result["result"]
+            return data if isinstance(data, list) else []
+        return []
 
     def guest_agent_exec_wait(
         self,
