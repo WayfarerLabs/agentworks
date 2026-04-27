@@ -25,7 +25,8 @@ built-in catalog that ships with agentworks, and adds CLI discoverability for av
 
 - Cleanly separate system-level setup (apt sources, apt packages, and system install commands) from
   per-user install commands
-- Ship a built-in catalog of common tools so users can easily incorporate them by name without having to define the details
+- Ship a built-in catalog of common tools so users can easily incorporate them by name
+  without having to define the details
 - Allow users to define custom entries and override built-in ones
 - Support third-party apt sources with idempotent GPG key and source list management
 - Make all operations safe to re-run via `vm reinit`
@@ -141,9 +142,9 @@ Agent config selects from per-user install commands only:
 
 ### R4: Built-in Catalog
 
-Agentworks must ship a built-in catalog file (TOML) containing common apt sources, apt packages,
-system install commands, and per-user install commands. The catalog is read-only and bundled with the
-package.
+Agentworks must ship a built-in catalog file (TOML) containing common apt sources, apt
+packages, system install commands, and per-user install commands. The catalog is read-only
+and bundled with the package.
 
 Resolution order: user config entries take precedence over built-in catalog entries with the same
 name.

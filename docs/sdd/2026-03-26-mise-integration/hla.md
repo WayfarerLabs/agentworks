@@ -13,7 +13,7 @@ include a `~/.config/mise/config.toml`). Lockfiles are user-provided, not genera
 
 ## Component Overview
 
-```
+```text
 agentworks config (TOML)
     |
     |  mise_packages = ["jq@1.8.1", "adr-tools@3.0.0"]
@@ -105,6 +105,7 @@ The ordering of mise-related steps within `_phase_b_setup()` is:
 8. User install commands (existing step, may depend on mise-installed tools)
 
 This ordering ensures:
+
 - Agentworks-written mise config is in place before dotfiles, so dotfiles can override it.
 - Git credentials are available before lockfile repo clone.
 - Dotfiles can provide their own mise config and/or lockfile.

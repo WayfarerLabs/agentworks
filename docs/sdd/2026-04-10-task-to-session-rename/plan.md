@@ -220,5 +220,5 @@ the socket path will be computed and persisted.
 ### VM-side config file rename
 
 `/opt/agentworks/tmux-task.conf` becomes `/opt/agentworks/tmux-session.conf`. This is deployed on
-session create/restart, so it will be updated naturally. The old file can be left in place (harmless)
-or cleaned up during reinit.
+session create/restart, so it will be updated naturally. The old file can be left in
+place (harmless) or cleaned up during reinit.

@@ -4,7 +4,8 @@ Date: 2026-03-08
 
 ## Status
 
-Superseded by [10. VM-scoped agents with workspace grants](0010-vm-scoped-agents-with-workspace-grants.md)
+Superseded by [10. VM-scoped agents with workspace
+grants](0010-vm-scoped-agents-with-workspace-grants.md)
 
 ## Context
 

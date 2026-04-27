@@ -77,6 +77,7 @@ mise_install_before = "7d"
 ```
 
 Note the renames:
+
 - `admin_shell` -> `shell`
 - `admin_install_commands` -> `user_install_commands`
 - `admin_username` moved here from `[vm.config]` as `username`
@@ -116,7 +117,7 @@ cpus = 16
 memory = 64
 ```
 
-```
+```bash
 agentworks vm create --template heavy
 ```
 
@@ -170,15 +171,16 @@ git_credentials = []
 mise_packages = []
 ```
 
-```
+```bash
 agentworks agent create myagent --vm myvm --template restricted
 ```
 
 ## Mise catalog entries removed
 
-Mise packages are no longer defined as catalog entries (`[mise_packages.*]` sections). Instead, use
-`mise_packages` in `[admin.config]` or `[agent_templates.*]` with `name@version` strings, and provide
-lockfiles via `mise_lockfile` for integrity verification.
+Mise packages are no longer defined as catalog entries (`[mise_packages.*]` sections).
+Instead, use `mise_packages` in `[admin.config]` or `[agent_templates.*]` with
+`name@version` strings, and provide lockfiles via `mise_lockfile` for integrity
+verification.
 
 **Before:**
 
@@ -205,9 +207,10 @@ See [Using mise](mise.md) for how to generate and manage lockfiles.
 
 ## Agents are now VM-scoped
 
-Agents are no longer scoped to a single workspace. They are now VM-scoped Linux users (`agt--<name>`)
-that access workspaces through a grant system. See [ADR-0010](../adrs/0010-vm-scoped-agents-with-workspace-grants.md)
-for the full rationale.
+Agents are no longer scoped to a single workspace. They are now VM-scoped Linux users
+(`agt--<name>`) that access workspaces through a grant system. See
+[ADR-0010](../adrs/0010-vm-scoped-agents-with-workspace-grants.md) for the full
+rationale.
 
 **CLI changes:**
 

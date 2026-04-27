@@ -12,7 +12,7 @@ membership enforces file access at the OS level.
 
 The `workspace_name` column is replaced by `vm_name`. The `linux_user` derivation changes.
 
-```
+```text
 agents:
   name TEXT
   vm_name TEXT           -- NEW (was workspace_name)
@@ -26,7 +26,7 @@ Foreign key changes from `workspaces(name)` to `vms(name)` with cascade delete.
 
 ### New: agent_workspace_grants table
 
-```
+```text
 agent_workspace_grants:
   agent_name TEXT
   vm_name TEXT
@@ -100,6 +100,7 @@ When creating a task with `--agent` in a workspace the agent doesn't have access
 - New: `agt--<agent>` (e.g., `agt--coder`)
 
 The `agt--` prefix:
+
 - Avoids collision with system users
 - Is immediately identifiable in process listings, logs, and audit trails
 - Follows the existing double-hyphen naming convention

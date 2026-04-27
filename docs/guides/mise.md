@@ -1,8 +1,8 @@
 # Using mise with agentworks
 
 [mise](https://mise.jdx.dev/) is a polyglot tool version manager that agentworks installs by
-default on all VMs. It provides a unified way to install CLI tools (terraform, adr-tools, node, python,
-etc.) with optional integrity verification via lockfiles.
+default on all VMs. It provides a unified way to install CLI tools (terraform, adr-tools,
+node, python, etc.) with optional integrity verification via lockfiles.
 
 ## How it works
 
@@ -125,6 +125,7 @@ Understanding the init ordering matters if your dotfiles also configure mise:
 4. **Mise install** -- runs with the final config + lockfile state
 
 This means:
+
 - If your dotfiles provide a complete `~/.config/mise/config.toml`, you can omit `mise_packages`.
 - If your dotfiles provide a `~/.config/mise/mise.lock` and you have no `mise_lockfile` set, the
   dotfiles lockfile is used as-is.

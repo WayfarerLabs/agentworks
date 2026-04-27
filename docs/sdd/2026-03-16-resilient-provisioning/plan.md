@@ -41,7 +41,7 @@ bootstrap (before tmux or other tools are installed).
 
 A helper function that encapsulates the nohup + poll pattern:
 
-```
+```python
 def run_detached(target, command, output_file, pid_file, *, poll_interval=5, timeout=600):
     """Run a command detached on a remote host, polling for completion.
 
@@ -88,8 +88,8 @@ Simulated SSH drop (stop polling, resume) picks up where it left off.
 - [x] Stale state handled by `run_detached()` (reads status file if process finished)
 - [x] Local mode unchanged
 
-**Definition of done:** `limactl create` and `limactl start` survive workstation SSH drops. Re-running
-`vm create` while limactl is still running resumes instead of failing.
+**Definition of done:** `limactl create` and `limactl start` survive workstation SSH
+drops. Re-running `vm create` while limactl is still running resumes instead of failing.
 
 ### 1.3 Update vm create Flow
 

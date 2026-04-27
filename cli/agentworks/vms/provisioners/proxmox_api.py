@@ -159,7 +159,7 @@ class ProxmoxAPI:
         result = self._request(
             "GET", f"/nodes/{node}/qemu/{vmid}/status/current"
         )
-        return result  # type: ignore[return-value]
+        return result  # type: ignore[no-any-return]
 
     # -- Tasks -----------------------------------------------------------------
 
@@ -198,7 +198,7 @@ class ProxmoxAPI:
         )
         if result and "result" in result:
             return result["result"]  # type: ignore[no-any-return]
-        return result or []  # type: ignore[return-value]
+        return result or []
 
     def guest_agent_exec_wait(
         self,
@@ -237,7 +237,7 @@ class ProxmoxAPI:
                 f"/nodes/{node}/qemu/{vmid}/agent/exec-status?pid={pid}",
             )
             if status and status.get("exited"):
-                return status  # type: ignore[return-value]
+                return status  # type: ignore[no-any-return]
             time.sleep(2)
 
         return None
