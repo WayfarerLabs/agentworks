@@ -189,9 +189,9 @@ def delete_agent(
     if agent_sessions:
         from functools import partial
 
-        from agentworks.ssh import run, ssh_target_for_vm
         from agentworks.sessions.manager import _effective_socket_path
         from agentworks.sessions.tmux import kill_session
+        from agentworks.ssh import run, ssh_target_for_vm
 
         target = ssh_target_for_vm(vm, config)
         run_command = partial(run, target, logger=ssh_logger)
@@ -766,7 +766,7 @@ def _install_nerf_claude_plugin_for_agent(
         check = _run_as_agent(
             target,
             linux_user,
-            f"{shell} -lc 'test -x $AGENTWORKS_NERF_HOME/claude-plugin/scripts/nerfctl-install-plugin'",
+            f"{shell} -lc 'test -x $AGENTWORKS_NERF_HOME/claude-plugin/scripts/install-plugin'",
             check=False,
         )
         if not check.ok:
@@ -781,7 +781,7 @@ def _install_nerf_claude_plugin_for_agent(
         _run_as_agent(
             target,
             linux_user,
-            f"{shell} -lc '$AGENTWORKS_NERF_HOME/claude-plugin/scripts/nerfctl-install-plugin'",
+            f"{shell} -lc '$AGENTWORKS_NERF_HOME/claude-plugin/scripts/install-plugin'",
             timeout=30,
         )
         typer.echo("  Nerf Claude plugin installed for agent")

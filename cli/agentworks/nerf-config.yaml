@@ -1,0 +1,15 @@
+# Agentworks default nerftools plugin config.
+# Used when building the Claude Code plugin during VM init.
+# Version is injected at build time as a date-based stamp (0.1.YYYYMMDDHHMM).
+
+package:
+  name: nerftools
+  description: "Nerf tools: scoped, safety-constrained CLI wrappers for AI agents"
+
+targets:
+  claude-plugin:
+    marketplace:
+      name: agentworks-nerftools-local
+      description: "Agentworks local nerftools marketplace"
+      owner:
+        name: Agentworks

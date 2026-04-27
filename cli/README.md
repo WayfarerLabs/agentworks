@@ -555,6 +555,11 @@ The plugin provides skills that document available tools, and operator commands 
 permissions (`/nerftools:nerfctl-grant-allow`, `/nerftools:nerfctl-grant-deny`, etc.). Custom tool
 manifests can be added via `nerf_addl_manifests`.
 
+Plugin identity (name, marketplace metadata) is defined in agentworks' own `nerf-config.yaml` and
+loaded via the nerftools config API. The version is a date-based build stamp that changes on each
+reinit. The build always emits an embedded marketplace so the plugin directory is installable
+standalone via `claude plugin marketplace add`.
+
 ### Built-in Catalog
 
 Agentworks ships a built-in catalog of common tools (apt sources, apt packages, system install

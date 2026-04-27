@@ -22,9 +22,9 @@ _KNOWN_TEMPLATE_VARS = {"session_name", "workspace_name"}
 if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database, SessionRow, VMRow, WorkspaceRow
-    from agentworks.ssh import SSHLogger
     from agentworks.sessions.templates import ResolvedSessionTemplate
     from agentworks.sessions.tmux import RunCommand
+    from agentworks.ssh import SSHLogger
 
 
 # -- Helpers ---------------------------------------------------------------
@@ -41,7 +41,11 @@ def _resolve_session_linux_user(db: Database, session: SessionRow, vm: VMRow) ->
     if session.agent_name:
         agent = db.get_agent(session.agent_name)
         if agent is None:
-            typer.echo(f"Error: agent '{session.agent_name}' not found (referenced by session '{session.name}')", err=True)
+            typer.echo(
+                f"Error: agent '{session.agent_name}' not found "
+                f"(referenced by session '{session.name}')",
+                err=True,
+            )
             raise typer.Exit(1)
         return agent.linux_user
     return vm.admin_username
@@ -133,7 +137,8 @@ def _prepare_vm(
 
     If operation is set, creates an SSHLogger and binds it into both callables.
     """
-    from agentworks.ssh import SSHLogger, run, run_as_root as ssh_run_as_root
+    from agentworks.ssh import SSHLogger, run
+    from agentworks.ssh import run_as_root as ssh_run_as_root
 
     ws = _require_workspace(db, workspace_name)
     vm = _require_vm_for_workspace(db, ws)
@@ -276,6 +281,8 @@ def create_session(
     from agentworks.config import validate_name
     from agentworks.sessions.tmux import (
         create_session as create_tmux_session,
+    )
+    from agentworks.sessions.tmux import (
         deploy_restricted_config,
     )
 
@@ -406,6 +413,8 @@ def restart_session(
     """Restart a session. Errors if running unless --force is passed."""
     from agentworks.sessions.tmux import (
         create_session as create_tmux_session,
+    )
+    from agentworks.sessions.tmux import (
         deploy_restricted_config,
     )
 
@@ -566,7 +575,8 @@ def delete_session(
             )
         elif not yes:
             if typer.confirm(
-                f"  Workspace '{session.workspace_name}' was created with this session and has no other sessions. Delete it?",
+                f"  Workspace '{session.workspace_name}' was created with this session "
+                f"and has no other sessions. Delete it?",
             ):
                 from agentworks.workspaces.manager import delete_workspace
 
@@ -683,8 +693,8 @@ def attach_session(
     name: str,
 ) -> None:
     """Attach to a session's tmux session (interactive)."""
-    from agentworks.ssh import interactive
     from agentworks.sessions.tmux import session_exists, tmux_cmd
+    from agentworks.ssh import interactive
 
     session = _require_session(db, name)
     _ws, vm, run_command, _ = _prepare_vm(db, config, session.workspace_name, operation="session-attach")
