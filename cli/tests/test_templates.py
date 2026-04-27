@@ -22,8 +22,8 @@ def config(tmp_path: Path):  # type: ignore[no-untyped-def]
     config_file.write_text(
         dedent(f"""\
         [operator]
-        ssh_public_key = "{pub}"
-        ssh_private_key = "{priv}"
+        ssh_public_key = "{pub.as_posix()}"
+        ssh_private_key = "{priv.as_posix()}"
 
         [workspace_templates.default]
 
@@ -80,8 +80,8 @@ def test_builtin_fallback(tmp_path: Path) -> None:
     config_file.write_text(
         dedent(f"""\
         [operator]
-        ssh_public_key = "{pub}"
-        ssh_private_key = "{priv}"
+        ssh_public_key = "{pub.as_posix()}"
+        ssh_private_key = "{priv.as_posix()}"
     """)
     )
     cfg = load_config(config_file)

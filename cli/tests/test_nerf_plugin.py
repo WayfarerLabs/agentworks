@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import shlex
+import sys
 from pathlib import Path
 
 import pytest
@@ -116,6 +117,10 @@ def test_plugin_has_nerfctl_scripts(built_plugin: Path) -> None:
     assert "nerfctl-grant-by-threat" in script_names
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="Windows does not represent Unix execute bits; plugin runs on Linux VMs",
+)
 def test_plugin_tool_scripts_are_executable(built_plugin: Path) -> None:
     """Every nerf-* script in skills should be executable."""
     for script in built_plugin.rglob("nerf-*"):
