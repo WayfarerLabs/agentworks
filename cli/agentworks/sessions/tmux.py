@@ -30,7 +30,12 @@ def agent_socket_path(linux_user: str, session_name: str) -> str:
     return f"{AGENT_SOCKET_ROOT}/{linux_user}/{session_name}.sock"
 
 
-def ensure_agent_socket_root(run_command: RunCommand, admin_username: str) -> None:
+def ensure_agent_socket_root(
+    run_command: RunCommand,
+    admin_username: str,
+    *,
+    warn_if_missing: bool = True,
+) -> None:
     """Create the agent tmux socket root directory and group (idempotent).
 
     Fast-paths when the directory already exists with the correct group and
@@ -39,11 +44,18 @@ def ensure_agent_socket_root(run_command: RunCommand, admin_username: str) -> No
 
     Each command is a separate call so that callers wrapping with sudo (e.g.
     ``run_as_root``) apply privilege to every command individually.
+
+    Pass ``warn_if_missing=False`` when the caller already knows the directory
+    won't exist (e.g. first-time VM init), to avoid a misleading warning.
+    Misconfiguration (directory exists with wrong group/perms) always warns,
+    regardless of ``warn_if_missing`` -- that's a real anomaly worth surfacing.
     """
     grp = shlex.quote(AGENT_SOCKET_GROUP)
     q_root = shlex.quote(AGENT_SOCKET_ROOT)
 
     # Fast path: directory exists, owned by the right group, correct perms.
+    # Empty stdout => `test -d` failed => directory is absent.
+    # Non-empty, non-matching stdout => directory exists but is misconfigured.
     probe = run_command(
         f'test -d {q_root} && stat -c "%G %a" {q_root} 2>/dev/null',
         check=False,
@@ -52,9 +64,12 @@ def ensure_agent_socket_root(run_command: RunCommand, admin_username: str) -> No
     if stdout == f"{AGENT_SOCKET_GROUP} 2771":
         return
 
-    from agentworks.output import warn
+    exists = bool(stdout)
+    if exists or warn_if_missing:
+        from agentworks.output import warn
 
-    warn(f"Socket root {AGENT_SOCKET_ROOT} missing or misconfigured, recreating")
+        state = "misconfigured" if exists else "missing"
+        warn(f"Socket root {AGENT_SOCKET_ROOT} {state}, recreating")
 
     admin = shlex.quote(admin_username)
     # Two calls: getent doesn't need root but groupadd does. Keeping them

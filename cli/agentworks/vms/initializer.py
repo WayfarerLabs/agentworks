@@ -861,6 +861,7 @@ def initialize_vm(
         admin_username,
         logger,
         git_tokens=git_tokens,
+        is_first_init=True,
     )
 
 
@@ -875,11 +876,14 @@ def run_initialization(
     logger: SSHLogger,
     *,
     git_tokens: dict[str, str] | None = None,
+    is_first_init: bool = False,
 ) -> None:
     """Run Phase B (initialization) with status tracking and event logging.
 
     This is called both from initialize_vm() after provisioning and
-    from reinit_vm() for repeatable re-initialization.
+    from reinit_vm() for repeatable re-initialization. Pass
+    ``is_first_init=True`` from initialize_vm so steps that expect prior
+    state (e.g. tmux socket dirs) can skip warnings on missing state.
     """
     db.insert_vm_event(vm_name, "init_started")
 
@@ -894,6 +898,7 @@ def run_initialization(
             admin_username,
             logger,
             git_tokens=git_tokens,
+            is_first_init=is_first_init,
         )
     except Exception as e:
         db.update_vm_init_status(vm_name, InitStatus.FAILED)
@@ -1120,6 +1125,7 @@ def _phase_b_setup(
     logger: SSHLogger,
     *,
     git_tokens: dict[str, str] | None = None,
+    is_first_init: bool = False,
 ) -> None:
     """Phase B: Setup (over Tailscale SSH). Non-fatal steps warn and continue."""
     from agentworks.catalog import load_catalog, validate_selections
@@ -1230,7 +1236,7 @@ def _phase_b_setup(
         def _root_cmd(command: str, *, check: bool = True) -> object:
             return _run_logged(ts_target, command, logger, as_root=True, check=check)
 
-        ensure_agent_socket_root(_root_cmd, admin_username)
+        ensure_agent_socket_root(_root_cmd, admin_username, warn_if_missing=not is_first_init)
         for agent in db.list_agents(vm_name):
             ensure_agent_socket_dir(_root_cmd, agent.linux_user)
             removed = cleanup_stale_sockets(_root_cmd, agent.linux_user)
