@@ -137,7 +137,8 @@ def _prepare_vm(
 
     If operation is set, creates an SSHLogger and binds it into both callables.
     """
-    from agentworks.ssh import SSHLogger, run, run_as_root as ssh_run_as_root
+    from agentworks.ssh import SSHLogger, run
+    from agentworks.ssh import run_as_root as ssh_run_as_root
 
     ws = _require_workspace(db, workspace_name)
     vm = _require_vm_for_workspace(db, ws)

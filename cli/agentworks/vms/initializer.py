@@ -1403,11 +1403,11 @@ def _build_nerf_claude_plugin(
                 as_root=True,
             )
             # Fix execute bits on scripts (Windows tarballs lose them, a+rX only sets x on dirs)
-            _run_logged(
-                ts_target,
-                f"find {shlex.quote(plugin_dir)} -name 'nerf-*' -o -name 'nerfctl-*' | xargs -r chmod a+x",
-                logger,
+            find_cmd = (
+                f"find {shlex.quote(plugin_dir)} -type f"
+                r" \( -name 'nerf-*' -o -name 'nerfctl-*' \) -exec chmod a+x {} +"
             )
+            _run_logged(ts_target, find_cmd, logger)
 
         # Write an install helper with the plugin/marketplace names baked in
         # so _install_nerf_claude_plugin_for_user can call it without parsing JSON.
