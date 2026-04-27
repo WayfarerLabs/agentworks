@@ -198,7 +198,9 @@ class ProxmoxAPI:
         )
         if result and "result" in result:
             data = result["result"]
-            return data if isinstance(data, list) else []
+            if isinstance(data, list):
+                return data
+            raise ProxmoxAPIError(f"unexpected network-get-interfaces shape: {type(data).__name__}")
         return []
 
     def guest_agent_exec_wait(
