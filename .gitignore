@@ -12,8 +12,7 @@ build/
 .venv/
 venv/
 
-# uv
-uv.lock
+# uv (cli/uv.lock is committed for reproducible CI builds)
 
 # IDE
 .idea/
@@ -27,7 +26,6 @@ rulesync.local.jsonc
 rulesync.lock
 
 # Rulesync - generated output (regenerate with: npx rulesync generate)
-# Note that we only use Github for Coplot, so we can ignore the entire .github directory for now.
 CLAUDE.md
 .claude
 .claudeignore
@@ -35,7 +33,8 @@ CLAUDE.md
 .cursor/
 .cursorrules
 .cursorignore
-.github
+.github/*
+!.github/workflows
 .copilotignore
 AGENTS.md
 GEMINI.md

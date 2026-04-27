@@ -20,7 +20,8 @@ sessions are the primary interactive surface, they should have globally unique n
 Every user-visible reference to "task" must become "session":
 
 - CLI command group: `agentworks task` becomes `agentworks session`
-- All subcommands: `task create`, `task attach`, etc. become `session create`, `session attach`, etc.
+- All subcommands: `task create`, `task attach`, etc. become
+  `session create`, `session attach`, etc.
 - CLI help text and error messages
 - Config sections: `[task.config]`, `[task_templates.*]` become `[session.config]`,
   `[session_templates.*]`

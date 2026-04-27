@@ -14,7 +14,7 @@ install commands) with a built-in catalog and CLI discoverability.
 
 ## Component Overview
 
-```
+```text
 ~/.config/agentworks/config.toml     cli/agentworks/catalog.toml
          (user-defined)                    (built-in, read-only)
                 \                          /
@@ -41,7 +41,7 @@ install commands) with a built-in catalog and CLI discoverability.
 
 The built-in catalog is a single TOML file shipped alongside the Python package:
 
-```
+```text
 cli/agentworks/catalog.toml
 ```
 
@@ -128,7 +128,7 @@ A new module `cli/agentworks/catalog.py` handles loading and merging:
 
 Pseudocode:
 
-```
+```python
 def load_catalog(config: Config) -> ResolvedCatalog:
     builtin = load_toml("catalog.toml")
     user = extract_catalog_sections(config)
@@ -234,7 +234,8 @@ Current `vm reinit` arguments that are removed:
 
 After this change:
 
-- `vm create [--name] [--platform] [--vm-host] [--cpus] [--memory] [--disk] [--azure-vm-size] [--vm-user]`
+- `vm create [--name] [--platform] [--vm-host] [--cpus] [--memory]`
+  `[--disk] [--azure-vm-size] [--vm-user]`
 - `vm reinit <name>` (no options)
 
 ### Future: VM Templates
@@ -282,12 +283,13 @@ The new order restructures steps 1 and 5:
 
 Currently agent install commands are not wired up. The new flow:
 
-1. Run commands from `agent.config.user_install_commands` for the agent user (in agent's login shell)
+1. Run commands from `agent.config.user_install_commands` for the agent user
+   (in agent's login shell)
 2. Write PATH additions from those commands to agent's `~/.agentworks-path.sh`
 
 ### Apt Source Idempotency
 
-```
+```text
 for source in required_apt_sources:
     if key_path exists on VM:
         log "apt source {name} already configured, skipping"
@@ -311,8 +313,10 @@ This value is cached for the duration of the init run.
 
 A new `installer` command group:
 
-```
-agentworks installer list [--type apt-source|apt-package|system-install-cmd|user-install-cmd] [--source builtin|user]
+```text
+agentworks installer list \
+  [--type apt-source|apt-package|system-install-cmd|user-install-cmd] \
+  [--source builtin|user]
 agentworks installer describe <name>
 ```
 
@@ -320,7 +324,7 @@ agentworks installer describe <name>
 
 Displays a table of all available entries across all four types:
 
-```
+```text
 TYPE              NAME           SOURCE    DESCRIPTION
 apt-source        github-cli     built-in  GitHub CLI official apt repository
 apt-source        docker         built-in  Docker official apt repository
@@ -339,7 +343,7 @@ Filterable by `--type` and `--source`.
 
 Shows the full definition of a single entry:
 
-```
+```text
 $ agentworks installer describe gh
 
 Name:        gh

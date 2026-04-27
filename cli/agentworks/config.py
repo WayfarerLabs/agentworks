@@ -743,7 +743,7 @@ def _load_proxmox(data: dict[str, object]) -> ProxmoxConfig | None:
         api_url=str(_require(raw, "api_url", "proxmox")),
         node=str(_require(raw, "node", "proxmox")),
         token_id=str(_require(raw, "token_id", "proxmox")),
-        template_vmid=int(_require(raw, "template_vmid", "proxmox")),
+        template_vmid=int(str(_require(raw, "template_vmid", "proxmox"))),
         storage=str(raw.get("storage", "local-lvm")),
         bridge=str(raw.get("bridge", "vmbr0")),
         pool=str(raw.get("pool", "agentworks")),

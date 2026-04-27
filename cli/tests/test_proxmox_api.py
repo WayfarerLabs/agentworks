@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import urllib.error
-from http.client import HTTPResponse
 from io import BytesIO
 from typing import Any
 from unittest.mock import MagicMock, patch

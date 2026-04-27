@@ -380,6 +380,7 @@ def _transfer_with_progress(
                 last_report = time.monotonic()
 
         if proc.returncode != 0:
+            assert proc.stderr is not None
             stderr = (proc.stderr.read() or b"").decode("utf-8", errors="replace").strip()
             raise SSHError(f"scp failed: {stderr}")
 

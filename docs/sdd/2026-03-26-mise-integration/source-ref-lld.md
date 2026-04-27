@@ -13,7 +13,7 @@ dotfiles, nerf manifests) that need to fetch content from local or remote source
 
 A source reference is a string with an optional scheme prefix:
 
-```
+```text
 # Local file (no prefix, or explicit file:: prefix)
 ~/.config/agentworks/mise.lock
 file::~/.config/agentworks/mise.lock
@@ -81,6 +81,7 @@ def fetch_file(
 ## Validation
 
 `parse_source_ref()` validates:
+
 - Git URLs must start with `https://` or `git@` (after `git::` prefix).
 - Subpath must not contain `..` (directory traversal).
 - Ref must be alphanumeric with hyphens, dots, underscores, and slashes (branch names).

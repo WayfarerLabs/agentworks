@@ -190,7 +190,7 @@ class ProxmoxProvisioner(VMProvisioner):
     def exec_target(self, vm: VMRow, *, config: object | None = None) -> ExecTarget:
         identity_file = None
         if config is not None and hasattr(config, "operator"):
-            identity_file = config.operator.ssh_private_key  # type: ignore[union-attr]
+            identity_file = config.operator.ssh_private_key
 
         host = vm.tailscale_host or "unknown"
 
@@ -242,7 +242,7 @@ class ProxmoxProvisioner(VMProvisioner):
                         if addr.get("ip-address-type") == "ipv4":
                             ip = addr["ip-address"]
                             if not ip.startswith("127."):
-                                return ip
+                                return str(ip)
             except ProxmoxAPIError:
                 pass  # guest agent not ready yet
             time.sleep(3)
