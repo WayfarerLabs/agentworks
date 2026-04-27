@@ -1413,10 +1413,13 @@ def _build_nerf_claude_plugin(
         # so _install_nerf_claude_plugin_for_user can call it without parsing JSON.
         p_name = shlex.quote(plugin_meta.name)
         m_name = shlex.quote(marketplace_meta.name if marketplace_meta else plugin_meta.name)
+        # Drop the pre-1.0 marketplace name if a previous build registered it,
+        # otherwise `marketplace add` no-ops on the same path under the old name.
         install_script = (
             "#!/usr/bin/env bash\n"
             "set -euo pipefail\n"
             'PLUGIN_DIR="$(cd "$(dirname "$0")/.." && pwd)"\n'
+            "claude plugin marketplace remove agentworks-nerf-local >/dev/null 2>&1 || true\n"
             'claude plugin marketplace add "$PLUGIN_DIR"\n'
             f"claude plugin install {p_name}@{m_name} --scope user\n"
         )

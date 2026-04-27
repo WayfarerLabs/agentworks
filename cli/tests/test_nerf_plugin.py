@@ -136,12 +136,14 @@ def test_install_script_content() -> None:
         "#!/usr/bin/env bash\n"
         "set -euo pipefail\n"
         'PLUGIN_DIR="$(cd "$(dirname "$0")/.." && pwd)"\n'
+        "claude plugin marketplace remove agentworks-nerf-local >/dev/null 2>&1 || true\n"
         'claude plugin marketplace add "$PLUGIN_DIR"\n'
         f"claude plugin install {p_name}@{m_name} --scope user\n"
     )
 
     assert install_script.startswith("#!/usr/bin/env bash\n")
     assert "set -euo pipefail" in install_script
+    assert "claude plugin marketplace remove agentworks-nerf-local" in install_script
     assert "claude plugin marketplace add" in install_script
     assert "claude plugin install nerftools@agentworks-nerftools-local --scope user" in install_script
 
