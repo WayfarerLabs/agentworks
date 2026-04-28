@@ -729,7 +729,7 @@ def _create_agent_on_vm(
                 # Local source: copy as admin then chown
                 exec_target = admin_exec_target(vm, config)
                 tmp_dotfiles = f"/tmp/agentworks-{linux_user}-dotfiles"
-                exec_target.run(f"rm -rf {tmp_dotfiles}", check=False)
+                exec_target.run_new(f"rm -rf {tmp_dotfiles}", check=False)
                 from agentworks.sources import fetch_dir
 
                 fetch_dir(ref, exec_target, tmp_dotfiles)

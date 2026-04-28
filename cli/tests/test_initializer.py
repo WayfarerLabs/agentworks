@@ -81,7 +81,7 @@ def _make_target(*, key_exists: bool = False) -> MagicMock:
     key_result = MagicMock()
     key_result.returncode = 0 if key_exists else 1
 
-    def run_side_effect(cmd, **kwargs):
+    def run_new_side_effect(cmd, **kwargs):
         if "dpkg --print-architecture" in cmd:
             return arch_result
         if cmd.startswith("test -f"):
@@ -91,6 +91,7 @@ def _make_target(*, key_exists: bool = False) -> MagicMock:
             # Determine which source file is being read and return matching content.
             result = MagicMock()
             result.returncode = 0
+            result.ok = True
             result.stderr = ""
             if "test.list" in cmd:
                 result.stdout = (
@@ -107,10 +108,10 @@ def _make_target(*, key_exists: bool = False) -> MagicMock:
         result.stdout = ""
         result.stderr = ""
         result.returncode = 0
+        result.ok = True
         return result
 
-    target.run.side_effect = run_side_effect
-    target.run_as_root.return_value = MagicMock(stdout="", stderr="", returncode=0)
+    target.run_new.side_effect = run_new_side_effect
     return target
 
 
@@ -133,11 +134,11 @@ def test_configure_apt_sources_installs_key(tmp_path) -> None:
 
     _configure_apt_sources(target, config, catalog, logger)
 
-    # Should have called curl to download the key
-    curl_calls = [c for c in target.run_as_root.call_args_list if "curl" in str(c)]
+    # Should have called curl to download the key (now via run_new with sudo=True)
+    curl_calls = [c for c in target.run_new.call_args_list if "curl" in str(c)]
     assert len(curl_calls) >= 1
     # Should have run apt-get update
-    update_calls = [c for c in target.run_as_root.call_args_list if "apt-get update" in str(c)]
+    update_calls = [c for c in target.run_new.call_args_list if "apt-get update" in str(c)]
     assert len(update_calls) == 1
 
 
@@ -151,7 +152,7 @@ def test_configure_apt_sources_skips_existing(tmp_path) -> None:
     _configure_apt_sources(target, config, catalog, logger)
 
     # Should not have run apt-get update (nothing new configured)
-    update_calls = [c for c in target.run_as_root.call_args_list if "apt-get update" in str(c)]
+    update_calls = [c for c in target.run_new.call_args_list if "apt-get update" in str(c)]
     assert len(update_calls) == 0
 
 
@@ -164,8 +165,7 @@ def test_configure_apt_sources_no_packages() -> None:
     _configure_apt_sources(target, config, catalog, logger)
 
     # No calls at all
-    target.run.assert_not_called()
-    target.run_as_root.assert_not_called()
+    target.run_new.assert_not_called()
 
 
 def test_configure_apt_sources_resolves_arch() -> None:
@@ -178,7 +178,7 @@ def test_configure_apt_sources_resolves_arch() -> None:
     _configure_apt_sources(target, config, catalog, logger)
 
     # The source line written should have arm64, not {arch}
-    write_calls = [str(c) for c in target.run_as_root.call_args_list if "sources.list.d" in str(c)]
+    write_calls = [str(c) for c in target.run_new.call_args_list if "sources.list.d" in str(c)]
     assert any("arm64" in c for c in write_calls)
     assert not any("{arch}" in c for c in write_calls)
 
@@ -188,7 +188,7 @@ def test_configure_apt_sources_resolves_arch() -> None:
 
 def test_install_apt_packages_combines_sources() -> None:
     target = MagicMock()
-    target.run_as_root.return_value = MagicMock(stdout="", stderr="", returncode=0)
+    target.run_new.return_value = MagicMock(stdout="", stderr="", returncode=0, ok=True)
     config = _make_config(apt=["vim", "curl"], apt_packages=["test-pkg"])
     catalog = _make_catalog()
     logger = MagicMock()
@@ -197,7 +197,7 @@ def test_install_apt_packages_combines_sources() -> None:
     _install_apt_packages(target, config, catalog, logger)
 
     # Should have a single apt-get install with all packages
-    install_calls = [str(c) for c in target.run_as_root.call_args_list if "apt-get install" in str(c)]
+    install_calls = [str(c) for c in target.run_new.call_args_list if "apt-get install" in str(c)]
     assert len(install_calls) == 1
     assert "vim" in install_calls[0]
     assert "curl" in install_calls[0]
@@ -212,7 +212,7 @@ def test_install_apt_packages_empty() -> None:
 
     _install_apt_packages(target, config, catalog, logger)
 
-    target.run_as_root.assert_not_called()
+    target.run_new.assert_not_called()
 
 
 # -- Catalog command tests --
@@ -220,7 +220,7 @@ def test_install_apt_packages_empty() -> None:
 
 def test_run_catalog_commands_returns_path() -> None:
     target = MagicMock()
-    target.run.return_value = MagicMock(stdout="", stderr="", returncode=0)
+    target.run_new.return_value = MagicMock(stdout="", stderr="", returncode=0, ok=True)
     catalog = _make_catalog()
     logger = MagicMock()
     logger.has_warnings = False
@@ -271,14 +271,14 @@ def test_run_catalog_commands_empty() -> None:
     )
 
     assert result == []
-    target.run.assert_not_called()
+    target.run_new.assert_not_called()
 
 
 def test_run_catalog_commands_skips_when_test_exec_found() -> None:
     """When test_exec command exists, install is skipped but PATH additions are kept."""
     target = MagicMock()
     # command -v returns 0 (command found)
-    target.run.return_value = MagicMock(stdout="", stderr="", returncode=0)
+    target.run_new.return_value = MagicMock(stdout="", stderr="", returncode=0, ok=True)
 
     entries = {
         "my-tool": UserInstallCommandEntry(
@@ -304,7 +304,7 @@ def test_run_catalog_commands_skips_when_test_exec_found() -> None:
     # PATH additions should still be returned
     assert result == ["~/.my-tool/bin"]
     # The install command itself should NOT have been run (only command -v was run)
-    run_calls = [str(c) for c in target.run.call_args_list]
+    run_calls = [str(c) for c in target.run_new.call_args_list]
     assert any("command -v" in c for c in run_calls)
     assert not any("curl" in c for c in run_calls)
 
@@ -313,15 +313,16 @@ def test_run_catalog_commands_runs_when_test_exec_missing() -> None:
     """When test_exec command is not found, install runs normally."""
     target = MagicMock()
 
-    def run_side_effect(cmd, **kwargs):
+    def run_new_side_effect(cmd, **kwargs):
         result = MagicMock()
         result.stdout = ""
         result.stderr = ""
         # command -v fails (not found), everything else succeeds
         result.returncode = 1 if "command -v" in cmd else 0
+        result.ok = result.returncode == 0
         return result
 
-    target.run.side_effect = run_side_effect
+    target.run_new.side_effect = run_new_side_effect
 
     entries = {
         "my-tool": UserInstallCommandEntry(
@@ -346,14 +347,14 @@ def test_run_catalog_commands_runs_when_test_exec_missing() -> None:
 
     assert result == ["~/.my-tool/bin"]
     # The install command should have been run
-    run_calls = [str(c) for c in target.run.call_args_list]
+    run_calls = [str(c) for c in target.run_new.call_args_list]
     assert any("curl" in c for c in run_calls)
 
 
 def test_run_catalog_commands_no_test_always_runs() -> None:
     """When no test is set, command always runs."""
     target = MagicMock()
-    target.run.return_value = MagicMock(stdout="", stderr="", returncode=0)
+    target.run_new.return_value = MagicMock(stdout="", stderr="", returncode=0, ok=True)
 
     entries = {
         "my-tool": UserInstallCommandEntry(
@@ -378,7 +379,7 @@ def test_run_catalog_commands_no_test_always_runs() -> None:
 
     assert result == ["~/.my-tool/bin"]
     # Should NOT have run any test check
-    run_calls = [str(c) for c in target.run.call_args_list]
+    run_calls = [str(c) for c in target.run_new.call_args_list]
     assert not any("command -v" in c for c in run_calls)
     assert not any("test -f" in c for c in run_calls)
     assert not any("test -d" in c for c in run_calls)
@@ -389,7 +390,7 @@ def test_run_catalog_commands_no_test_always_runs() -> None:
 def test_run_catalog_commands_skips_when_test_file_found() -> None:
     """When test_file path exists, install is skipped but PATH additions are kept."""
     target = MagicMock()
-    target.run.return_value = MagicMock(stdout="", stderr="", returncode=0)
+    target.run_new.return_value = MagicMock(stdout="", stderr="", returncode=0, ok=True)
 
     entries = {
         "nvm": UserInstallCommandEntry(
@@ -413,7 +414,7 @@ def test_run_catalog_commands_skips_when_test_file_found() -> None:
     )
 
     assert result == ["~/.nvm/bin"]
-    run_calls = [str(c) for c in target.run.call_args_list]
+    run_calls = [str(c) for c in target.run_new.call_args_list]
     assert any("test -f" in c for c in run_calls)
     assert any("/home/agentworks/.nvm/nvm.sh" in c for c in run_calls)
     assert not any("curl" in c for c in run_calls)
@@ -423,14 +424,15 @@ def test_run_catalog_commands_runs_when_test_file_missing() -> None:
     """When test_file path does not exist, install runs normally."""
     target = MagicMock()
 
-    def run_side_effect(cmd, **kwargs):
+    def run_new_side_effect(cmd, **kwargs):
         result = MagicMock()
         result.stdout = ""
         result.stderr = ""
         result.returncode = 1 if "test -f" in cmd else 0
+        result.ok = result.returncode == 0
         return result
 
-    target.run.side_effect = run_side_effect
+    target.run_new.side_effect = run_new_side_effect
 
     entries = {
         "nvm": UserInstallCommandEntry(
@@ -454,14 +456,14 @@ def test_run_catalog_commands_runs_when_test_file_missing() -> None:
     )
 
     assert result == ["~/.nvm/bin"]
-    run_calls = [str(c) for c in target.run.call_args_list]
+    run_calls = [str(c) for c in target.run_new.call_args_list]
     assert any("curl" in c for c in run_calls)
 
 
 def test_run_catalog_commands_skips_when_test_dir_found() -> None:
     """When test_dir path exists, install is skipped but PATH additions are kept."""
     target = MagicMock()
-    target.run.return_value = MagicMock(stdout="", stderr="", returncode=0)
+    target.run_new.return_value = MagicMock(stdout="", stderr="", returncode=0, ok=True)
 
     entries = {
         "oh-my-zsh": UserInstallCommandEntry(
@@ -485,7 +487,7 @@ def test_run_catalog_commands_skips_when_test_dir_found() -> None:
     )
 
     assert result == []
-    run_calls = [str(c) for c in target.run.call_args_list]
+    run_calls = [str(c) for c in target.run_new.call_args_list]
     assert any("test -d" in c for c in run_calls)
     assert any("/home/agentworks/.oh-my-zsh" in c for c in run_calls)
     assert not any("sh -c" in c for c in run_calls)
@@ -495,14 +497,15 @@ def test_run_catalog_commands_runs_when_test_dir_missing() -> None:
     """When test_dir path does not exist, install runs normally."""
     target = MagicMock()
 
-    def run_side_effect(cmd, **kwargs):
+    def run_new_side_effect(cmd, **kwargs):
         result = MagicMock()
         result.stdout = ""
         result.stderr = ""
         result.returncode = 1 if "test -d" in cmd else 0
+        result.ok = result.returncode == 0
         return result
 
-    target.run.side_effect = run_side_effect
+    target.run_new.side_effect = run_new_side_effect
 
     entries = {
         "oh-my-zsh": UserInstallCommandEntry(
@@ -526,5 +529,5 @@ def test_run_catalog_commands_runs_when_test_dir_missing() -> None:
     )
 
     assert result == []
-    run_calls = [str(c) for c in target.run.call_args_list]
+    run_calls = [str(c) for c in target.run_new.call_args_list]
     assert any("sh -c" in c for c in run_calls)

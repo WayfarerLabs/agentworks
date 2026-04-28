@@ -713,11 +713,11 @@ class ExecTarget:
             tmp_path.unlink(missing_ok=True)
 
         if delete:
-            self.run(f"rm -rf {remote_path} && mkdir -p {remote_path}", timeout=timeout)
+            self.run_new(f"rm -rf {remote_path} && mkdir -p {remote_path}", timeout=timeout)
         else:
-            self.run(f"mkdir -p {remote_path}", timeout=timeout)
+            self.run_new(f"mkdir -p {remote_path}", timeout=timeout)
 
-        self.run(f"tar -xzf {remote_tmp} -C {remote_path} && rm -f {remote_tmp}", timeout=timeout)
+        self.run_new(f"tar -xzf {remote_tmp} -C {remote_path} && rm -f {remote_tmp}", timeout=timeout)
 
     def write_file(self, remote_path: str, content: str, *, mode: str | None = None) -> None:
         """Write string content to a remote file safely.
@@ -742,7 +742,7 @@ class ExecTarget:
         finally:
             Path(tmp_path).unlink(missing_ok=True)
         if mode:
-            self.run(f"chmod {mode} {remote_path}")
+            self.run_new(f"chmod {mode} {remote_path}")
 
 
 def wait_for_reconnect(target: ExecTarget, *, max_attempts: int = 16) -> bool:
@@ -761,11 +761,11 @@ def wait_for_reconnect(target: ExecTarget, *, max_attempts: int = 16) -> bool:
     typer.echo("  Waiting for Tailscale to reconnect (this may take several minutes)...")
     for attempt in range(max_attempts):
         try:
-            target.run("echo ok", timeout=10)
+            target.run_new("echo ok", timeout=10)
             # One success isn't enough; the network can flap.
             if attempt > 0:
                 time.sleep(2)
-                target.run("echo ok", timeout=10)
+                target.run_new("echo ok", timeout=10)
             typer.echo("  Tailscale SSH reconnected")
             return True
         except SSHError:

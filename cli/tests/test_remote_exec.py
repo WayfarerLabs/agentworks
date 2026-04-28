@@ -19,20 +19,24 @@ def _mock_target(
     target = MagicMock()
     poll_count = 0
 
-    def run_side_effect(cmd, *, check=True, timeout=None):
+    def run_new_side_effect(cmd, *, check=True, timeout=None, sudo=False, tty=None):
         nonlocal poll_count
         result = MagicMock()
         result.stdout = ""
         result.stderr = ""
         result.returncode = 0
+        result.ok = True
 
         if cmd.startswith("test -f") and ".pid" in cmd:
             result.returncode = 0 if pid_exists else 1
+            result.ok = result.returncode == 0
         elif cmd.startswith("test -f") and ".status" in cmd:
             poll_count += 1
             result.returncode = 0 if poll_count > status_exists_after else 1
+            result.ok = result.returncode == 0
         elif cmd.startswith("ps -p"):
             result.returncode = 0 if process_alive else 1
+            result.ok = result.returncode == 0
         elif cmd.startswith("tail -c"):
             result.stdout = output_content
         elif cmd.startswith("cat") and ".status" in cmd:
@@ -43,15 +47,14 @@ def _mock_target(
             pass
         return result
 
-    target.run.side_effect = run_side_effect
-    target.run_as_root.side_effect = run_side_effect
+    target.run_new.side_effect = run_new_side_effect
     target.write_file = MagicMock()
     return target
 
 
 def test_is_running_no_pid_file() -> None:
     target = MagicMock()
-    target.run.return_value = MagicMock(returncode=1)
+    target.run_new.return_value = MagicMock(returncode=1, ok=False)
     assert _is_running(target, "/tmp/test.pid") is False
 
 
@@ -59,32 +62,33 @@ def test_is_running_dead_process() -> None:
     target = MagicMock()
     call_count = 0
 
-    def run_side_effect(cmd, **kwargs):
+    def run_new_side_effect(cmd, **kwargs):
         nonlocal call_count
         call_count += 1
         result = MagicMock()
         result.returncode = 0 if call_count == 1 else 1  # pid exists, but ps -p fails
+        result.ok = result.returncode == 0
         return result
 
-    target.run.side_effect = run_side_effect
+    target.run_new.side_effect = run_new_side_effect
     assert _is_running(target, "/tmp/test.pid") is False
 
 
 def test_read_exit_code() -> None:
     target = MagicMock()
-    target.run.return_value = MagicMock(stdout="0\n", returncode=0)
+    target.run_new.return_value = MagicMock(stdout="0\n", returncode=0, ok=True)
     assert _read_exit_code(target, "/tmp/test.status") == 0
 
 
 def test_read_exit_code_nonzero() -> None:
     target = MagicMock()
-    target.run.return_value = MagicMock(stdout="42\n", returncode=0)
+    target.run_new.return_value = MagicMock(stdout="42\n", returncode=0, ok=True)
     assert _read_exit_code(target, "/tmp/test.status") == 42
 
 
 def test_read_exit_code_missing() -> None:
     target = MagicMock()
-    target.run.return_value = MagicMock(stdout="", returncode=1)
+    target.run_new.return_value = MagicMock(stdout="", returncode=1, ok=False)
     assert _read_exit_code(target, "/tmp/test.status") == 1
 
 
@@ -184,92 +188,64 @@ def test_run_detached_as_root(mock_time: MagicMock) -> None:
     )
 
     assert result.exit_code == 0
-    # The rm and nohup commands should go through run_as_root
-    assert target.run_as_root.call_count > 0
+    # The nohup command should be called with sudo=True
+    sudo_calls = [c for c in target.run_new.call_args_list if c.kwargs.get("sudo")]
+    assert len(sudo_calls) > 0
 
 
 @patch("agentworks.remote_exec.time")
 def test_run_detached_disables_force_tty_for_nohup_launch(mock_time: MagicMock) -> None:
     """When the target's SSH has force_tty=True (Windows), the nohup launch
-    must run on a target copy with force_tty=False. Otherwise SIGHUP from the
-    closing SSH PTY kills the detached process before it can run.
+    must pass tty=False to run_new so the PTY is not allocated. Otherwise
+    SIGHUP from the closing SSH PTY kills the detached process.
     """
-    from dataclasses import dataclass, field
-
     mock_time.monotonic.return_value = 0
     mock_time.sleep = MagicMock()
 
-    @dataclass
-    class _SSH:
-        host: str = "vm"
-        force_tty: bool = True
+    # Track the tty kwarg on nohup calls
+    nohup_tty_values: list[bool | None] = []
 
-    @dataclass
-    class _Target:
-        ssh: _SSH
-        run: MagicMock = field(default_factory=MagicMock)
-        run_as_root: MagicMock = field(default_factory=MagicMock)
-        write_file: MagicMock = field(default_factory=MagicMock)
-
-    # Track the force_tty value on whichever target each command ran against.
-    nohup_force_tty: list[bool] = []
-
-    # Simulate a successful detached run: status file appears after first poll,
-    # exit code 0, some output captured.
-    status_exists_after = 1
+    target = MagicMock()
     poll_count = 0
+    status_exists_after = 1
 
-    def make_side_effect(owner: _Target) -> MagicMock:
-        def side_effect(cmd: str, *, check: bool = True, timeout: int | None = None):
-            nonlocal poll_count
-            if "nohup" in cmd:
-                nohup_force_tty.append(owner.ssh.force_tty)
-            result = MagicMock()
-            result.stdout = ""
-            result.returncode = 0
-            if cmd.startswith("test -f") and ".status" in cmd:
-                poll_count += 1
-                result.returncode = 0 if poll_count > status_exists_after else 1
-            elif cmd.startswith("test -f") and ".pid" in cmd:
-                result.returncode = 1  # No existing PID -> fresh start
-            elif cmd.startswith("tail -c") or (cmd.startswith("cat") and ".out" in cmd):
-                result.stdout = "done\n"
-            elif cmd.startswith("cat") and ".status" in cmd:
-                result.stdout = "0"
-            return result
-
-        return MagicMock(side_effect=side_effect)
-
-    target = _Target(ssh=_SSH(force_tty=True))
-    target.run = make_side_effect(target)
-    target.run_as_root = make_side_effect(target)
-
-    # Intercept replace() so the replaced copy gets its own mocks that record
-    # calls made against it.
-    import dataclasses as _dc
-
-    real_replace = _dc.replace
-
-    def tracked_replace(obj, **changes):  # type: ignore[no-untyped-def]
-        result = real_replace(obj, **changes)
-        if isinstance(result, _Target):
-            result.run = make_side_effect(result)
-            result.run_as_root = make_side_effect(result)
+    def run_new_side_effect(
+        cmd: str, *, check: bool = True, timeout: int | None = None,
+        sudo: bool = False, tty: bool | None = None,
+    ):
+        nonlocal poll_count
+        if "nohup" in cmd:
+            nohup_tty_values.append(tty)
+        result = MagicMock()
+        result.stdout = ""
+        result.returncode = 0
+        result.ok = True
+        if cmd.startswith("test -f") and ".status" in cmd:
+            poll_count += 1
+            result.returncode = 0 if poll_count > status_exists_after else 1
+            result.ok = result.returncode == 0
+        elif cmd.startswith("test -f") and ".pid" in cmd:
+            result.returncode = 1  # No existing PID -> fresh start
+            result.ok = False
+        elif cmd.startswith("tail -c") or (cmd.startswith("cat") and ".out" in cmd):
+            result.stdout = "done\n"
+        elif cmd.startswith("cat") and ".status" in cmd:
+            result.stdout = "0"
         return result
 
-    with patch.object(_dc, "replace", side_effect=tracked_replace):
-        result = run_detached(
-            target,
-            "tar cf /tmp/x.tar .",
-            base_path="/tmp/agentworks-test",
-            poll_interval=0,
-            as_root=True,
-        )
+    target.run_new.side_effect = run_new_side_effect
+    target.write_file = MagicMock()
 
-    # The nohup command must have run on a target where force_tty=False
-    assert nohup_force_tty == [False]
-    # Original target unchanged
-    assert target.ssh.force_tty is True
+    result = run_detached(
+        target,
+        "tar cf /tmp/x.tar .",
+        base_path="/tmp/agentworks-test",
+        poll_interval=0,
+        as_root=True,
+    )
+
+    # The nohup command must have been called with tty=False
+    assert nohup_tty_values == [False]
     # And the overall run succeeded
     assert result.exit_code == 0
 
@@ -294,13 +270,18 @@ def test_run_detached_timeout_kills_and_returns_partial(mock_time: MagicMock) ->
 
     target = MagicMock()
 
-    def run_side_effect(cmd: str, *, check: bool = True, timeout: int | None = None):
+    def run_new_side_effect(
+        cmd: str, *, check: bool = True, timeout: int | None = None,
+        sudo: bool = False, tty: bool | None = None,
+    ):
         result = MagicMock()
         result.stdout = ""
         result.returncode = 0
+        result.ok = True
         # Status file never exists (process never finishes on its own)
         if cmd.startswith("test -f") and ".status" in cmd:
             result.returncode = 1
+            result.ok = False
         elif cmd.startswith("test -f") and ".pid" in cmd:
             result.returncode = 0  # PID file exists
         if "kill $(cat" in cmd:
@@ -311,10 +292,10 @@ def test_run_detached_timeout_kills_and_returns_partial(mock_time: MagicMock) ->
             # Status file doesn't exist, cat fails
             result.stdout = ""
             result.returncode = 1
+            result.ok = False
         return result
 
-    target.run.side_effect = run_side_effect
-    target.run_as_root.side_effect = run_side_effect
+    target.run_new.side_effect = run_new_side_effect
     target.write_file = MagicMock()
 
     result = run_detached(

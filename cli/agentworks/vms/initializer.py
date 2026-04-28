@@ -99,10 +99,8 @@ def _write_agentworks_profile(
         # Source from ~/.profile (bash/sh) and ~/.zprofile (zsh)
         source_line = f". $HOME/{AGENTWORKS_PROFILE}"
         for rc in ("$HOME/.profile", "$HOME/.zprofile"):
-            _run_logged(
-                target,
+            target.run_new(
                 f"grep -q {AGENTWORKS_PROFILE} {rc} 2>/dev/null || printf '%s\\n' '{source_line}' >> {rc}",
-                logger,
             )
     except SSHError as e:
         msg = f"shell profile write failed: {e}"
@@ -132,10 +130,8 @@ def _write_agentworks_rc(
         # Source from ~/.bashrc and ~/.zshrc
         source_line = f". $HOME/{AGENTWORKS_RC}"
         for rc in ("$HOME/.bashrc", "$HOME/.zshrc"):
-            _run_logged(
-                target,
+            target.run_new(
                 f"grep -q {AGENTWORKS_RC} {rc} 2>/dev/null || printf '%s\\n' '{source_line}' >> {rc}",
-                logger,
             )
     except SSHError as e:
         msg = f"shell rc write failed: {e}"
@@ -199,7 +195,7 @@ def _write_mise_config(
 
     try:
         mise_config_dir = f"{home}/.config/mise"
-        _run_logged(target, f"mkdir -p {mise_config_dir}", logger)
+        target.run_new(f"mkdir -p {mise_config_dir}")
         target.write_file(f"{mise_config_dir}/config.toml", mise_config)
     except SSHError as e:
         msg = f"mise config write failed: {e}"
@@ -222,7 +218,7 @@ def _fetch_mise_lockfile(
     try:
         ref = parse_source_ref(lockfile_source, default_filename="mise.lock")
         dest = f"{home}/.config/mise/mise.lock"
-        _run_logged(target, f"mkdir -p {home}/.config/mise", logger)
+        target.run_new(f"mkdir -p {home}/.config/mise")
         fetch_file(ref, target, dest, logger=logger)
     except SourceRefError as e:
         msg = f"mise lockfile fetch failed: {e}"
@@ -269,7 +265,7 @@ def _run_mise_install(
     lockfile_path = f"{home}/.config/mise/mise.lock"
     has_lockfile = False
     try:
-        check = target.run(f"test -f {lockfile_path}", check=False)
+        check = target.run_new(f"test -f {lockfile_path}", check=False)
         has_lockfile = check.ok
     except SSHError:
         pass
@@ -279,10 +275,8 @@ def _run_mise_install(
     if has_lockfile:
         typer.echo("  Running mise install (locked)...")
         try:
-            _run_logged(
-                target,
+            target.run_new(
                 f"{shell} -lc 'mise install -y --locked'",
-                logger,
                 timeout=300,
             )
             typer.echo("  Mise packages installed (locked)")
@@ -302,10 +296,8 @@ def _run_mise_install(
     if not installed:
         typer.echo("  Running mise install...")
         try:
-            _run_logged(
-                target,
+            target.run_new(
                 f"{shell} -lc 'mise install -y'",
-                logger,
                 timeout=300,
             )
             typer.echo("  Mise packages installed")
@@ -323,7 +315,7 @@ def _run_mise_install(
         import contextlib
 
         with contextlib.suppress(SSHError):
-            _run_logged(target, f"{shell} -lc 'mise prune -y'", logger, timeout=60)
+            target.run_new(f"{shell} -lc 'mise prune -y'", timeout=60)
 
 
 # -- SSH authorized keys ------------------------------------------------------
@@ -394,13 +386,13 @@ def _configure_apt_sources(
     logger.step("Apt sources")
 
     # Detect architecture
-    arch_result = target.run("dpkg --print-architecture", check=False)
+    arch_result = target.run_new("dpkg --print-architecture", check=False)
     arch = arch_result.stdout.strip() if arch_result.returncode == 0 else "amd64"
 
     newly_configured = False
     for name, src in required_sources.items():
         # Check if GPG key already exists
-        key_exists = target.run(f"test -f {shlex.quote(src.key_path)}", check=False).returncode == 0
+        key_exists = target.run_new(f"test -f {shlex.quote(src.key_path)}", check=False).returncode == 0
 
         if not key_exists:
             typer.echo(f"  Configuring apt source '{name}'...")
@@ -409,29 +401,25 @@ def _configure_apt_sources(
                 from pathlib import PurePosixPath
 
                 key_dir = str(PurePosixPath(src.key_path).parent)
-                _run_logged(target, f"install -m 0755 -d {shlex.quote(key_dir)}", logger, as_root=True)
+                target.run_new(f"install -m 0755 -d {shlex.quote(key_dir)}", sudo=True)
 
                 # Download GPG key
                 if src.key_dearmor:
                     # Wrap in sh -c so sudo applies to the entire pipeline,
                     # not just the curl on the left side of the pipe.
                     inner = f"curl -fsSL {shlex.quote(src.key_url)} | gpg --dearmor -o {shlex.quote(src.key_path)}"
-                    _run_logged(
-                        target,
+                    target.run_new(
                         f"sh -c {shlex.quote(inner)}",
-                        logger,
-                        as_root=True,
+                        sudo=True,
                         timeout=60,
                     )
                 else:
-                    _run_logged(
-                        target,
+                    target.run_new(
                         f"curl -fsSL {shlex.quote(src.key_url)} -o {shlex.quote(src.key_path)}",
-                        logger,
-                        as_root=True,
+                        sudo=True,
                         timeout=60,
                     )
-                _run_logged(target, f"chmod a+r {shlex.quote(src.key_path)}", logger, as_root=True)
+                target.run_new(f"chmod a+r {shlex.quote(src.key_path)}", sudo=True)
             except SSHError as exc:
                 msg = f"apt source '{name}' failed: {exc}"
                 logger.warning(msg)
@@ -443,7 +431,7 @@ def _configure_apt_sources(
         resolved_source = src.source.replace("{arch}", arch)
         source_path = f"/etc/apt/sources.list.d/{src.source_file}"
         expected = resolved_source + "\n"
-        current = target.run(f"cat {shlex.quote(source_path)}", check=False)
+        current = target.run_new(f"cat {shlex.quote(source_path)}", check=False)
         if current.returncode == 0 and current.stdout == expected:
             if key_exists:
                 typer.echo(f"  Apt source '{name}': already configured, skipping")
@@ -455,11 +443,9 @@ def _configure_apt_sources(
             logger.output(f"apt source {name}: key exists but source list needs update")
 
         try:
-            _run_logged(
-                target,
+            target.run_new(
                 f"bash -c {shlex.quote(f'printf "%s\\n" {shlex.quote(resolved_source)} > {source_path}')}",
-                logger,
-                as_root=True,
+                sudo=True,
             )
             newly_configured = True
         except SSHError as e:
@@ -470,7 +456,7 @@ def _configure_apt_sources(
     if newly_configured:
         typer.echo("  Running apt-get update...")
         try:
-            _run_logged(target, "apt-get update -qq", logger, as_root=True, timeout=120)
+            target.run_new("apt-get update -qq", sudo=True, timeout=120)
         except SSHError as e:
             msg = f"apt-get update failed after adding sources: {e}"
             logger.warning(msg)
@@ -486,15 +472,13 @@ def _install_system_packages(
 
     # Add mise apt source
     try:
-        _run_logged(
-            target,
+        target.run_new(
             f"curl -fsSL {MISE_GPG_KEY_URL} -o {MISE_GPG_KEY_PATH}",
-            logger,
-            as_root=True,
+            sudo=True,
             timeout=30,
         )
         inner = f"printf '%s\\n' '{MISE_SOURCE_LINE}' > {MISE_SOURCE_FILE}"
-        _run_logged(target, f"sh -c {shlex.quote(inner)}", logger, as_root=True)
+        target.run_new(f"sh -c {shlex.quote(inner)}", sudo=True)
     except SSHError as e:
         msg = f"mise apt source setup failed: {e}"
         logger.warning(msg)
@@ -502,7 +486,7 @@ def _install_system_packages(
 
     typer.echo("  Running apt-get update...")
     try:
-        _run_logged(target, "apt-get update -qq", logger, as_root=True, timeout=120)
+        target.run_new("apt-get update -qq", sudo=True, timeout=120)
     except SSHError as e:
         msg = f"apt-get update failed: {e}"
         logger.warning(msg)
@@ -511,11 +495,9 @@ def _install_system_packages(
     typer.echo(f"  Installing {len(INIT_SYSTEM_PACKAGES)} system packages...")
     apt_str = " ".join(shlex.quote(p) for p in INIT_SYSTEM_PACKAGES)
     try:
-        _run_logged(
-            target,
+        target.run_new(
             f"DEBIAN_FRONTEND=noninteractive apt-get install -y -qq -o Dpkg::Options::=--force-confnew {apt_str}",
-            logger,
-            as_root=True,
+            sudo=True,
             timeout=300,
         )
     except SSHError as e:
@@ -549,11 +531,9 @@ def _install_apt_packages(
     typer.echo(f"  Installing {len(all_apt)} apt packages...")
     apt_str = " ".join(shlex.quote(p) for p in all_apt)
     try:
-        _run_logged(
-            target,
+        target.run_new(
             f"DEBIAN_FRONTEND=noninteractive apt-get install -y -qq -o Dpkg::Options::=--force-confnew {apt_str}",
-            logger,
-            as_root=True,
+            sudo=True,
             timeout=300,
         )
     except SSHError as e:
@@ -613,7 +593,7 @@ def _run_catalog_commands(
         test_cmd = _build_test_command(entry, shell, home)
         if test_cmd:
             try:
-                check = target.run(test_cmd, check=False, timeout=10)
+                check = target.run_new(test_cmd, check=False, timeout=10)
                 if check.returncode == 0:
                     typer.echo(f"  {label} {i}/{total} ({name}): already installed, skipping")
                     logger.output(f"{name}: already installed ({test_cmd}), skipping")
@@ -626,7 +606,7 @@ def _run_catalog_commands(
         truncated = entry.command[:60]
         typer.echo(f"  {label} {i}/{total} ({name}): {truncated}...")
         try:
-            _run_logged(target, f"{shlex.quote(shell)} -lc {shlex.quote(entry.command)}", logger, timeout=120)
+            target.run_new(f"{shlex.quote(shell)} -lc {shlex.quote(entry.command)}", timeout=120)
         except SSHError as e:
             msg = f"{label.lower()} '{name}' failed: {truncated}... ({e})"
             logger.warning(msg)
@@ -716,8 +696,9 @@ def rejoin_tailscale(
     typer.echo("Tailscale node not reachable. Re-joining tailnet...")
 
     # Ensure Tailscale is installed (idempotent)
-    exec_target.run_as_root(
+    exec_target.run_new(
         "bash -c 'command -v tailscale >/dev/null || curl -fsSL https://tailscale.com/install.sh | sh'",
+        sudo=True,
         check=False,
     )
 
@@ -749,11 +730,11 @@ def _join_tailscale(
         ts_cmd += " --userspace-networking"
 
     if logger:
-        _run_logged(exec_target, ts_cmd, logger, as_root=True)
-        result = _run_logged(exec_target, "tailscale ip -4", logger, as_root=True)
+        exec_target.run_new(ts_cmd, sudo=True)
+        result = exec_target.run_new("tailscale ip -4", sudo=True)
     else:
-        exec_target.run_as_root(ts_cmd)
-        result = exec_target.run_as_root("tailscale ip -4")
+        exec_target.run_new(ts_cmd, sudo=True)
+        result = exec_target.run_new("tailscale ip -4", sudo=True)
 
     tailscale_ip = result.stdout.strip()
     typer.echo(f"  Tailscale IP: {tailscale_ip}")
@@ -985,7 +966,7 @@ def _phase_a_bootstrap(
 
     for attempt in range(5):
         try:
-            _run_logged(ts_target, "echo ok", logger, timeout=15)
+            ts_target.run_new("echo ok", timeout=15)
             break
         except SSHError:
             if attempt == 4:
@@ -1061,7 +1042,7 @@ def _run_bootstrap_script(
         base_path=f"/tmp/agentworks-bootstrap-{vm_name}",
         quiet=True,  # we parse the structured output ourselves
     )
-    exec_target.run_as_root(f"rm -f {remote_script}", check=False)
+    exec_target.run_new(f"rm -f {remote_script}", sudo=True, check=False)
 
     # Parse structured output
     bootstrap = parse_bootstrap_output(detached.output, detached.exit_code)
@@ -1150,7 +1131,7 @@ def _phase_b_setup(
         typer.echo(f"  Installing {len(config.vm.snap)} snap packages...")
         for pkg in config.vm.snap:
             try:
-                _run_logged(ts_target, f"snap install {shlex.quote(pkg)}", logger, as_root=True, timeout=120)
+                ts_target.run_new(f"snap install {shlex.quote(pkg)}", sudo=True, timeout=120)
             except SSHError as e:
                 msg = f"snap install '{pkg}' failed: {e}"
                 logger.warning(msg)
@@ -1165,12 +1146,10 @@ def _phase_b_setup(
         # Touch .zshrc before chsh to prevent zsh's first-run wizard
         # (zsh-newuser-install) from prompting interactively on next login
         if admin_shell == "zsh":
-            _run_logged(ts_target, f"touch {home}/.zshrc", logger, check=False)
-        _run_logged(
-            ts_target,
+            ts_target.run_new(f"touch {home}/.zshrc", check=False)
+        ts_target.run_new(
             f"usermod -s $(which {shlex.quote(admin_shell)}) {shlex.quote(admin_username)}",
-            logger,
-            as_root=True,
+            sudo=True,
         )
     except SSHError as e:
         msg = f"shell configuration failed: {e}"
@@ -1192,28 +1171,22 @@ def _phase_b_setup(
         )
     try:
         # acl is now installed as a system package in _install_system_packages
-        _run_logged(ts_target, f"mkdir -p {workspaces_dir}", logger, as_root=True)
+        ts_target.run_new(f"mkdir -p {workspaces_dir}", sudo=True)
         # Ensure all parent directories are traversable by agents
-        _run_logged(
-            ts_target,
+        ts_target.run_new(
             f'sh -c \'p={workspaces_dir}; while [ "$p" != "/" ]; do chmod a+x "$p"; p=$(dirname "$p"); done\'',
-            logger,
-            as_root=True,
+            sudo=True,
         )
         # Default ACLs on directories only (setfacl -R -d warns on files)
-        _run_logged(
-            ts_target,
+        ts_target.run_new(
             f"find {workspaces_dir} -type d -exec setfacl -d -m g::rwx -m m::rwx {{}} +",
-            logger,
-            as_root=True,
+            sudo=True,
             timeout=120,
         )
         # Access ACLs on all existing files and dirs
-        _run_logged(
-            ts_target,
+        ts_target.run_new(
             f"setfacl -R -m g::rwx -m m::rwx {workspaces_dir}",
-            logger,
-            as_root=True,
+            sudo=True,
             timeout=120,
         )
     except SSHError as e:
@@ -1234,7 +1207,7 @@ def _phase_b_setup(
         typer.echo("  Setting up agent tmux socket infrastructure...")
 
         def _root_cmd(command: str, *, check: bool = True) -> object:
-            return _run_logged(ts_target, command, logger, as_root=True, check=check)
+            return ts_target.run_new(command, sudo=True, check=check)
 
         ensure_agent_socket_root(_root_cmd, admin_username, warn_if_missing=not is_first_init)
         for agent in db.list_agents(vm_name):
@@ -1267,7 +1240,7 @@ def _phase_b_setup(
     # multi-user workspace model where agents access repos owned by admin)
     if config.admin.git_force_safe_directory:
         try:
-            _run_logged(ts_target, "git config --global --add safe.directory '*'", logger)
+            ts_target.run_new("git config --global --add safe.directory '*'")
             typer.echo("  Git safe.directory wildcard configured")
         except SSHError as e:
             msg = f"git safe.directory setup failed: {e}"
@@ -1290,7 +1263,7 @@ def _phase_b_setup(
             fetch_dir(ref, ts_target, dest, logger=logger)
 
             typer.echo(f"  Running dotfiles install: {config.admin.dotfiles_install_cmd}")
-            _run_logged(ts_target, f"cd {dest} && {config.admin.dotfiles_install_cmd}", logger, timeout=120)
+            ts_target.run_new(f"cd {dest} && {config.admin.dotfiles_install_cmd}", timeout=120)
         except (SourceRefError, Exception) as e:
             msg = f"dotfiles install failed: {e}"
             logger.warning(msg)
@@ -1306,7 +1279,7 @@ def _phase_b_setup(
         _run_mise_install(ts_target, admin_shell, home, config.admin.mise_allow_unlocked, logger, prune=prune)
     else:
         try:
-            check = ts_target.run(f"test -f {home}/.config/mise/config.toml", check=False)
+            check = ts_target.run_new(f"test -f {home}/.config/mise/config.toml", check=False)
             if check.ok:
                 _run_mise_install(ts_target, admin_shell, home, config.admin.mise_allow_unlocked, logger, prune=prune)
         except SSHError:
@@ -1394,26 +1367,24 @@ def _build_nerf_claude_plugin(
             build_claude_plugin(manifests, tmp_path, plugin_meta, marketplace_meta=marketplace_meta)
 
             # Clean and create remote dir
-            _run_logged(ts_target, f"rm -rf {shlex.quote(plugin_dir)}", logger, as_root=True)
-            _run_logged(ts_target, f"mkdir -p {shlex.quote(plugin_dir)}", logger, as_root=True)
-            _run_logged(ts_target, f"sudo chown -R $(id -un):$(id -un) {shlex.quote(plugin_dir)}", logger)
+            ts_target.run_new(f"rm -rf {shlex.quote(plugin_dir)}", sudo=True)
+            ts_target.run_new(f"mkdir -p {shlex.quote(plugin_dir)}", sudo=True)
+            ts_target.run_new(f"sudo chown -R $(id -un):$(id -un) {shlex.quote(plugin_dir)}")
 
             # Copy plugin artifacts
             ts_target.copy_dir_to(tmp_path, plugin_dir, delete=False, timeout=60)
 
             # Make the entire nerf home world-readable so all users can access the plugin
-            _run_logged(
-                ts_target,
+            ts_target.run_new(
                 f"chmod -R a+rX {shlex.quote(nerf_home)}",
-                logger,
-                as_root=True,
+                sudo=True,
             )
             # Fix execute bits on scripts (Windows tarballs lose them, a+rX only sets x on dirs)
             find_cmd = (
                 f"find {shlex.quote(plugin_dir)} -type f"
                 r" \( -name 'nerf-*' -o -name 'nerfctl-*' \) -exec chmod a+x {} +"
             )
-            _run_logged(ts_target, find_cmd, logger)
+            ts_target.run_new(find_cmd)
 
         # Write an install helper with the plugin/marketplace names baked in
         # so _install_nerf_claude_plugin_for_user can call it without parsing JSON.
@@ -1433,26 +1404,20 @@ def _build_nerf_claude_plugin(
         scripts_dir = shlex.quote(plugin_dir + "/scripts")
         quoted_script = shlex.quote(install_script)
         quoted_path = shlex.quote(install_path)
-        _run_logged(
-            ts_target,
+        ts_target.run_new(
             f"mkdir -p {scripts_dir} && printf '%s' {quoted_script} > {quoted_path} && chmod a+x {quoted_path}",
-            logger,
         )
 
         typer.echo(f"  Nerf Claude plugin built to {plugin_dir}")
 
         # System-wide env var so all users can locate nerf home
         env_line = f'export AGENTWORKS_NERF_HOME="{nerf_home}"'
-        _run_logged(
-            ts_target,
+        ts_target.run_new(
             f"printf '%s\\n' {shlex.quote(env_line)} | sudo tee /etc/profile.d/agentworks-nerf.sh > /dev/null",
-            logger,
         )
-        _run_logged(
-            ts_target,
+        ts_target.run_new(
             f"grep -qF AGENTWORKS_NERF_HOME /etc/zsh/zprofile 2>/dev/null"
             f" || printf '%s\\n' {shlex.quote(env_line)} | sudo tee -a /etc/zsh/zprofile > /dev/null",
-            logger,
         )
 
     except (SSHError, RuntimeError) as e:
@@ -1471,10 +1436,8 @@ def _install_nerf_claude_plugin_for_user(
 
     try:
         # Check that the plugin and install helper exist via the system env var
-        check_result = _run_logged(
-            target,
+        check_result = target.run_new(
             f"{shell} -lc 'test -x $AGENTWORKS_NERF_HOME/claude-plugin/scripts/install-plugin'",
-            logger,
             check=False,
         )
         if not check_result.ok:
@@ -1486,10 +1449,8 @@ def _install_nerf_claude_plugin_for_user(
             return
 
         typer.echo("  Installing nerf Claude plugin...")
-        _run_logged(
-            target,
+        target.run_new(
             f"{shell} -lc '$AGENTWORKS_NERF_HOME/claude-plugin/scripts/install-plugin'",
-            logger,
             timeout=30,
         )
         typer.echo("  Nerf Claude plugin installed")
@@ -1530,10 +1491,8 @@ def _configure_git_credentials(
     try:
         cred_content = "\n".join(credential_lines) + "\n"
         ts_target.write_file("~/.git-credentials", cred_content, mode="600")
-        _run_logged(
-            ts_target,
+        ts_target.run_new(
             "git config --global credential.helper store",
-            logger,
         )
         typer.echo(f"  Git credentials configured for {len(providers)} provider(s)")
     except SSHError as e:

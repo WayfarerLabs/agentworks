@@ -175,7 +175,7 @@ def _fetch_git(
 
     try:
         # Clean up any previous clone
-        target.run(f"rm -rf {tmp_dir}", check=False)
+        target.run_new(f"rm -rf {tmp_dir}", check=False)
 
         # Shallow clone
         clone_cmd = "git clone --depth 1"
@@ -183,24 +183,24 @@ def _fetch_git(
             clone_cmd += f" --branch {shlex.quote(source.ref)}"
         clone_cmd += f" {shlex.quote(source.path)} {tmp_dir}"
 
-        target.run(clone_cmd, timeout=60)
+        target.run_new(clone_cmd, timeout=60)
         if logger:
             logger.output(f"Cloned {source.path} (ref: {source.ref or 'default'})")
 
         # Copy the file
         src_file = f"{tmp_dir}/{source.subpath}" if source.subpath else tmp_dir
-        target.run(f"test -f {shlex.quote(src_file)}", timeout=10)
+        target.run_new(f"test -f {shlex.quote(src_file)}", timeout=10)
 
         # Use cp on the target (file is already there from clone)
         inner = f"cp {shlex.quote(src_file)} {shlex.quote(dest)}"
-        target.run(f"sh -c {shlex.quote(inner)}", timeout=10)
+        target.run_new(f"sh -c {shlex.quote(inner)}", timeout=10)
         if logger:
             logger.output(f"Copied {source.subpath or '(root)'} to {dest}")
 
     except SSHError as e:
         raise SourceRefError(f"failed to fetch from git source: {e}") from e
     finally:
-        target.run(f"rm -rf {tmp_dir}", check=False)
+        target.run_new(f"rm -rf {tmp_dir}", check=False)
 
 
 def fetch_dir(
@@ -246,10 +246,10 @@ def _fetch_local_dir(
         raise SourceRefError(f"local source is not a directory: {local_path}")
 
     # Check if destination exists and warn
-    if target.run(f"test -d {shlex.quote(dest)}", check=False).ok:
+    if target.run_new(f"test -d {shlex.quote(dest)}", check=False).ok:
         if logger:
             logger.warning(f"overwriting existing {dest}")
-        target.run(f"rm -rf {shlex.quote(dest)}", check=False)
+        target.run_new(f"rm -rf {shlex.quote(dest)}", check=False)
 
     target.copy_dir_to(local_path, dest)
     if logger:
@@ -267,9 +267,9 @@ def _fetch_git_dir(
     from agentworks.ssh import SSHError
 
     # Check if destination is already a matching clone
-    is_git = target.run(f"test -d {shlex.quote(dest)}/.git", check=False)
+    is_git = target.run_new(f"test -d {shlex.quote(dest)}/.git", check=False)
     if is_git.ok:
-        remote = target.run(
+        remote = target.run_new(
             f"git -C {shlex.quote(dest)} remote get-url origin",
             check=False,
         )
@@ -277,7 +277,7 @@ def _fetch_git_dir(
             if logger:
                 logger.output(f"Pulling {source.path} in {dest}")
             try:
-                target.run(f"git -C {shlex.quote(dest)} pull", timeout=120)
+                target.run_new(f"git -C {shlex.quote(dest)} pull", timeout=120)
             except SSHError as e:
                 raise SourceRefError(f"git pull failed in {dest}: {e}") from e
             return
@@ -285,7 +285,7 @@ def _fetch_git_dir(
         raise SourceRefError(f"{dest} exists but is a clone of {remote.stdout.strip()}, not {source.path}")
 
     # Check if destination exists but is not a git repo
-    if target.run(f"test -d {shlex.quote(dest)}", check=False).ok:
+    if target.run_new(f"test -d {shlex.quote(dest)}", check=False).ok:
         raise SourceRefError(f"{dest} exists but is not a git repo")
 
     # Fresh clone
@@ -295,7 +295,7 @@ def _fetch_git_dir(
     clone_cmd += f" {shlex.quote(source.path)} {shlex.quote(dest)}"
 
     try:
-        target.run(clone_cmd, timeout=120)
+        target.run_new(clone_cmd, timeout=120)
     except SSHError as e:
         raise SourceRefError(f"git clone failed: {e}") from e
 

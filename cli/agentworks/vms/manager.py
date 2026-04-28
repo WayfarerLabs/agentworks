@@ -669,7 +669,7 @@ def _tailscale_logout(provisioner: VMProvisioner, vm: VMRow, config: Config) -> 
         # Wait for SSH to be reachable (public IP may have just been attached)
         for attempt in range(6):
             try:
-                exec_target.run("echo ok", timeout=10)
+                exec_target.run_new("echo ok", timeout=10)
                 break
             except (_SSHError, Exception):
                 if attempt == 5:
@@ -680,8 +680,9 @@ def _tailscale_logout(provisioner: VMProvisioner, vm: VMRow, config: Config) -> 
         # on the VM, killing SSH-based transports before they get a response.
         # Lima/WSL2 use local transports and are unaffected, but the nohup
         # approach works universally.
-        exec_target.run_as_root(
+        exec_target.run_new(
             "nohup sh -c 'tailscale down && tailscale logout' >/dev/null 2>&1 &",
+            sudo=True,
             timeout=10,
         )
         typer.echo("Tailscale node deregistered")

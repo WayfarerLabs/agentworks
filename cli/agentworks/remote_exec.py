@@ -83,8 +83,6 @@ def run_detached(
     status_file = f"{base_path}.status"
     wrapper_file = f"{base_path}.sh"
 
-    run_fn = target.run_as_root if as_root else target.run
-
     # Check for a completed previous run (reconnect after process finished)
     if _status_file_exists(target, status_file):
         if not quiet:
@@ -104,7 +102,7 @@ def run_detached(
         target.write_file(wrapper_file, wrapper)
 
         # Clear any stale files from a previous run
-        run_fn(f"rm -f {output_file} {pid_file} {status_file}", check=False)
+        target.run_new(f"rm -f {output_file} {pid_file} {status_file}", sudo=as_root, check=False)
 
         # Launch detached. We need nohup on the OUTSIDE of sudo so sudo
         # itself is protected from the SIGHUP sent when the SSH shell exits.
@@ -112,25 +110,8 @@ def run_detached(
         #
         # Critical: this command must NOT run over an SSH PTY (-tt). When SSH
         # allocates a PTY (as on Windows where force_tty=True), closing it
-        # sends SIGHUP to the entire foreground process group before nohup
-        # can intercept. We temporarily disable force_tty for this one call.
-        from dataclasses import is_dataclass, replace
-
-        no_tty_target = target
-        if (
-            target.ssh is not None
-            and is_dataclass(target.ssh)
-            and getattr(target.ssh, "force_tty", False)
-        ):
-            no_tty_ssh = replace(target.ssh, force_tty=False)
-            no_tty_target = replace(target, ssh=no_tty_ssh)
-
-        if as_root:
-            nohup_cmd = f"nohup sudo -n /bin/bash {wrapper_file} </dev/null >/dev/null 2>&1 &"
-            no_tty_target.run(nohup_cmd, check=False)
-        else:
-            nohup_cmd = f"nohup /bin/bash {wrapper_file} </dev/null >/dev/null 2>&1 &"
-            no_tty_target.run(nohup_cmd, check=False)
+        nohup_cmd = f"nohup /bin/bash {wrapper_file} </dev/null >/dev/null 2>&1 &"
+        target.run_new(nohup_cmd, sudo=as_root, tty=False, check=False)
 
         # Brief pause for PID file to be written
         time.sleep(0.5)
@@ -155,7 +136,7 @@ def run_detached(
     exit_code = _read_exit_code(target, status_file)
 
     # Cleanup remote files
-    run_fn(f"rm -f {wrapper_file} {pid_file} {status_file} {output_file}", check=False)
+    target.run_new(f"rm -f {wrapper_file} {pid_file} {status_file} {output_file}", sudo=as_root, check=False)
 
     return DetachedResult(exit_code=exit_code, output=output)
 
@@ -163,17 +144,17 @@ def run_detached(
 def _is_running(target: ExecTarget, pid_file: str) -> bool:
     """Check if a detached process is still running."""
     # Check PID file exists
-    result = target.run(f"test -f {pid_file}", check=False)
+    result = target.run_new(f"test -f {pid_file}", check=False)
     if result.returncode != 0:
         return False
     # Read PID and check if process is alive (ps -p works regardless of user)
-    result = target.run(f"ps -p $(cat {pid_file}) > /dev/null 2>&1", check=False)
+    result = target.run_new(f"ps -p $(cat {pid_file}) > /dev/null 2>&1", check=False)
     return result.returncode == 0
 
 
 def _status_file_exists(target: ExecTarget, status_file: str) -> bool:
     """Check if a status file exists (process completed)."""
-    result = target.run(f"test -f {status_file}", check=False)
+    result = target.run_new(f"test -f {status_file}", check=False)
     return result.returncode == 0
 
 
@@ -204,7 +185,7 @@ def _poll_until_done(
                 f"  {label}: timed out after {timeout}s, killing remote process",
                 err=True,
             )
-            target.run(
+            target.run_new(
                 f"test -f {pid_file} && kill $(cat {pid_file}) 2>/dev/null",
                 check=False,
             )
@@ -221,7 +202,7 @@ def _poll_until_done(
             last_size += len(new_output.encode("utf-8"))
 
         # Check if process finished (status file exists)
-        status_check = target.run(f"test -f {status_file}", check=False)
+        status_check = target.run_new(f"test -f {status_file}", check=False)
         if status_check.returncode == 0:
             # Process done -- read any remaining output
             final_output = _read_new_output(target, output_file, last_size)
@@ -245,13 +226,13 @@ def _poll_until_done(
             warned_quiet = True
 
     # Read the full output for the caller
-    result = target.run(f"cat {output_file} 2>/dev/null", check=False)
+    result = target.run_new(f"cat {output_file} 2>/dev/null", check=False)
     return result.stdout
 
 
 def _read_new_output(target: ExecTarget, output_file: str, offset: int) -> str:
     """Read new bytes from the output file since the given offset."""
-    result = target.run(
+    result = target.run_new(
         f"tail -c +{offset + 1} {output_file} 2>/dev/null",
         check=False,
     )
@@ -260,7 +241,7 @@ def _read_new_output(target: ExecTarget, output_file: str, offset: int) -> str:
 
 def _read_exit_code(target: ExecTarget, status_file: str) -> int:
     """Read the exit code from the status file."""
-    result = target.run(f"cat {status_file} 2>/dev/null", check=False)
+    result = target.run_new(f"cat {status_file} 2>/dev/null", check=False)
     try:
         return int(result.stdout.strip())
     except (ValueError, AttributeError):

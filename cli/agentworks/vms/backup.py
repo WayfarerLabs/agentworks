@@ -78,7 +78,7 @@ def backup_vm(
         agent_data = asdict(agent)
 
         try:
-            result = target.run(f"id -u {shlex.quote(agent.linux_user)}", check=False)
+            result = target.run_new(f"id -u {shlex.quote(agent.linux_user)}", check=False)
             if result.ok:
                 agent_data["live_uid"] = result.stdout.strip()
             else:
@@ -99,7 +99,7 @@ def backup_vm(
         ws_group = f"ws--{ws.name}"
 
         try:
-            result = target.run(f"getent group {shlex.quote(ws_group)}", check=False)
+            result = target.run_new(f"getent group {shlex.quote(ws_group)}", check=False)
             if result.ok:
                 parts = result.stdout.strip().split(":")
                 ws_entry["live_gid"] = parts[2] if len(parts) > 2 else None
@@ -174,7 +174,7 @@ def _archive_workspaces(
     """
 
     # Create a secure temp directory (root-owned, mode 0700)
-    tmp_dir = target.run_as_root("mktemp -d /tmp/agentworks-backup-XXXXXX").stdout.strip()
+    tmp_dir = target.run_new("mktemp -d /tmp/agentworks-backup-XXXXXX", sudo=True).stdout.strip()
     q_tmp = shlex.quote(tmp_dir)
     archive = f"{tmp_dir}/workspaces.tar.zst"
     q_archive = shlex.quote(archive)
@@ -184,7 +184,7 @@ def _archive_workspaces(
         valid: list[WorkspaceRow] = []
         skipped: list[str] = []
         for ws in vm_workspaces:
-            if target.run_as_root(f"test -d {shlex.quote(ws.workspace_path)}", check=False).ok:
+            if target.run_new(f"test -d {shlex.quote(ws.workspace_path)}", sudo=True, check=False).ok:
                 valid.append(ws)
             else:
                 warn(f"path not found, skipping: {ws.workspace_path}")
@@ -195,7 +195,7 @@ def _archive_workspaces(
             raise typer.Exit(1)
 
         # Verify zstd is available
-        if not target.run("command -v zstd >/dev/null 2>&1", check=False).ok:
+        if not target.run_new("command -v zstd >/dev/null 2>&1", check=False).ok:
             typer.echo(
                 "  Error: zstd is not installed on the VM.\n"
                 "  Run 'agentworks vm reinit' to install it.",
@@ -205,7 +205,7 @@ def _archive_workspaces(
 
         # Calculate total uncompressed size
         du_paths = " ".join(shlex.quote(ws.workspace_path) for ws in valid)
-        du_result = target.run_as_root(f"du -sb {du_paths} | awk '{{s+=$1}} END {{print s}}'", check=False)
+        du_result = target.run_new(f"du -sb {du_paths} | awk '{{s+=$1}} END {{print s}}'", sudo=True, check=False)
         if du_result.ok and du_result.stdout.strip().isdigit():
             total_size = int(du_result.stdout.strip())
             typer.echo(f"  Total workspace size: {_fmt_size(total_size)} (uncompressed)")
@@ -225,10 +225,10 @@ def _archive_workspaces(
 
         # Admin can't write to root-owned temp dir, so stage via a securely
         # created temp file (mktemp creates with mode 0600), then move as root.
-        staging_paths = target.run("mktemp /tmp/_aw_paths_XXXXXX.txt").stdout.strip()
+        staging_paths = target.run_new("mktemp /tmp/_aw_paths_XXXXXX.txt").stdout.strip()
         q_staging = shlex.quote(staging_paths)
         ssh_write_file(target_ssh, staging_paths, path_content)
-        target.run_as_root(f"mv {q_staging} {q_paths_file}")
+        target.run_new(f"mv {q_staging} {q_paths_file}", sudo=True)
 
         # Use run_detached in a background thread so we can poll archive size.
         # run_detached handles nohup reliably via scp'd wrapper script.
@@ -238,7 +238,7 @@ def _archive_workspaces(
         # for run_detached's files. Can't use the root-owned tmp_dir because
         # run_detached writes its wrapper script via scp (as admin). Using
         # mktemp -d (not -u) avoids the race/symlink risks of mktemp -u.
-        detached_dir = target.run("mktemp -d /tmp/_aw_detached_XXXXXX").stdout.strip()
+        detached_dir = target.run_new("mktemp -d /tmp/_aw_detached_XXXXXX").stdout.strip()
         detached_base = f"{detached_dir}/run"
 
         import threading
@@ -278,11 +278,11 @@ def _archive_workspaces(
         except KeyboardInterrupt:
             typer.echo("\n  Interrupted. Killing remote tar and cleaning up...", err=True)
             # Read the PID that run_detached's wrapper wrote, kill the process group
-            pid_result = target.run_as_root(f"cat {shlex.quote(detached_base)}.pid", check=False)
+            pid_result = target.run_new(f"cat {shlex.quote(detached_base)}.pid", sudo=True, check=False)
             pid = pid_result.stdout.strip() if pid_result.ok else ""
             if pid.isdigit():
                 # Kill the wrapper shell's process group (tar + wrapper)
-                target.run_as_root(f"kill -TERM -{pid} 2>/dev/null", check=False)
+                target.run_new(f"kill -TERM -{pid} 2>/dev/null", sudo=True, check=False)
             raise typer.Exit(1) from None
 
         if error_holder:
@@ -313,10 +313,10 @@ def _archive_workspaces(
         # Transfer to local. Chown the temp dir and archive to the admin
         # user so scp can read it (avoids making it world-readable).
         admin = shlex.quote(target_ssh.user or "agentworks")
-        target.run_as_root(f"chown {admin} {q_tmp} {q_archive}")
+        target.run_new(f"chown {admin} {q_tmp} {q_archive}", sudo=True)
 
         # Get remote archive size for progress reporting
-        size_result = target.run_as_root(f"stat -c %s {q_archive}", check=False)
+        size_result = target.run_new(f"stat -c %s {q_archive}", sudo=True, check=False)
         remote_size = int(size_result.stdout.strip()) if size_result.ok else 0
 
         typer.echo("  Transferring remote archive to local...")
@@ -326,8 +326,8 @@ def _archive_workspaces(
         typer.echo(f"  Remote temp dir preserved for debugging: {tmp_dir}", err=True)
         raise
     else:
-        target.run_as_root(f"rm -rf {q_tmp}", check=False)
-        target.run(f"rm -rf {shlex.quote(detached_dir)}", check=False)
+        target.run_new(f"rm -rf {q_tmp}", sudo=True, check=False)
+        target.run_new(f"rm -rf {shlex.quote(detached_dir)}", check=False)
 
     return [ws.workspace_path for ws in valid], skipped
 
@@ -409,7 +409,7 @@ def _fmt_size(size_bytes: int) -> str:
 def _report_size(target: ExecTarget, remote_path: str) -> None:
     """Print the size of a remote file."""
     try:
-        result = target.run_as_root(f"stat -c %s {shlex.quote(remote_path)}", check=False)
+        result = target.run_new(f"stat -c %s {shlex.quote(remote_path)}", sudo=True, check=False)
         if result.ok:
             typer.echo(f"  Archive size: {_fmt_size(int(result.stdout.strip()))}")
     except Exception:
