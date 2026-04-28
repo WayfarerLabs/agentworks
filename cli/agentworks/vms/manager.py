@@ -650,9 +650,10 @@ def reinit_vm(
 def _tailscale_logout(provisioner: VMProvisioner, vm: VMRow, config: Config) -> None:
     """Best-effort: deregister from Tailscale via the provisioning transport.
 
-    Uses the provisioner's exec_target (not Tailscale SSH) because we can't
-    ask Tailscale to tear itself down over the connection it provides.
+    Uses the provisioner's admin_exec_target (not Tailscale SSH) because we
+    can't ask Tailscale to tear itself down over the connection it provides.
     For Azure VMs, temporarily attaches a public IP for SSH access.
+    Proxmox raises NotImplementedError (guest agent not yet wired in).
     """
     import time
 
