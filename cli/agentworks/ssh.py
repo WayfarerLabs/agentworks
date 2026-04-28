@@ -585,35 +585,7 @@ class ExecTarget:
     def _timeout(self, override: int | None) -> int | None:
         return override if override is not None else self.default_timeout
 
-    def run(self, command: str, *, check: bool = True, timeout: int | None = None) -> SSHResult:
-        t = self._timeout(timeout)
-        lg = self.logger
-        if self.ssh is not None:
-            return run(self.ssh, command, check=check, timeout=t, logger=lg)
-        if self.lima is not None:
-            return lima_run(self.lima, command, check=check, timeout=t, logger=lg)
-        if self.remote_lima is not None:
-            return remote_lima_run(self.remote_lima, command, check=check, timeout=t, logger=lg)
-        if self.wsl2 is not None:
-            return wsl2_run(self.wsl2, command, check=check, timeout=t, logger=lg)
-        msg = "ExecTarget has no target configured"
-        raise SSHError(msg)
-
-    def run_as_root(self, command: str, *, check: bool = True, timeout: int | None = None) -> SSHResult:
-        t = self._timeout(timeout)
-        lg = self.logger
-        if self.ssh is not None:
-            return run_as_root(self.ssh, command, check=check, timeout=t, logger=lg)
-        if self.lima is not None:
-            return lima_run(self.lima, f"sudo -n {command}", check=check, timeout=t, logger=lg)
-        if self.remote_lima is not None:
-            return remote_lima_run(self.remote_lima, f"sudo -n {command}", check=check, timeout=t, logger=lg)
-        if self.wsl2 is not None:
-            return wsl2_run(WSL2Target(self.wsl2.distro_name, user="root"), command, check=check, timeout=t, logger=lg)
-        msg = "ExecTarget has no target configured"
-        raise SSHError(msg)
-
-    def run_new(
+    def run(
         self,
         command: str,
         *,
@@ -713,11 +685,11 @@ class ExecTarget:
             tmp_path.unlink(missing_ok=True)
 
         if delete:
-            self.run_new(f"rm -rf {remote_path} && mkdir -p {remote_path}", timeout=timeout)
+            self.run(f"rm -rf {remote_path} && mkdir -p {remote_path}", timeout=timeout)
         else:
-            self.run_new(f"mkdir -p {remote_path}", timeout=timeout)
+            self.run(f"mkdir -p {remote_path}", timeout=timeout)
 
-        self.run_new(f"tar -xzf {remote_tmp} -C {remote_path} && rm -f {remote_tmp}", timeout=timeout)
+        self.run(f"tar -xzf {remote_tmp} -C {remote_path} && rm -f {remote_tmp}", timeout=timeout)
 
     def write_file(self, remote_path: str, content: str, *, mode: str | None = None) -> None:
         """Write string content to a remote file safely.
@@ -742,7 +714,7 @@ class ExecTarget:
         finally:
             Path(tmp_path).unlink(missing_ok=True)
         if mode:
-            self.run_new(f"chmod {mode} {remote_path}")
+            self.run(f"chmod {mode} {remote_path}")
 
 
 def wait_for_reconnect(target: ExecTarget, *, max_attempts: int = 16) -> bool:
@@ -761,11 +733,11 @@ def wait_for_reconnect(target: ExecTarget, *, max_attempts: int = 16) -> bool:
     typer.echo("  Waiting for Tailscale to reconnect (this may take several minutes)...")
     for attempt in range(max_attempts):
         try:
-            target.run_new("echo ok", timeout=10)
+            target.run("echo ok", timeout=10)
             # One success isn't enough; the network can flap.
             if attempt > 0:
                 time.sleep(2)
-                target.run_new("echo ok", timeout=10)
+                target.run("echo ok", timeout=10)
             typer.echo("  Tailscale SSH reconnected")
             return True
         except SSHError:

@@ -19,7 +19,7 @@ def _mock_target(
     target = MagicMock()
     poll_count = 0
 
-    def run_new_side_effect(cmd, *, check=True, timeout=None, sudo=False, tty=None):
+    def run_side_effect(cmd, *, check=True, timeout=None, sudo=False, tty=None):
         nonlocal poll_count
         result = MagicMock()
         result.stdout = ""
@@ -47,14 +47,14 @@ def _mock_target(
             pass
         return result
 
-    target.run_new.side_effect = run_new_side_effect
+    target.run.side_effect = run_side_effect
     target.write_file = MagicMock()
     return target
 
 
 def test_is_running_no_pid_file() -> None:
     target = MagicMock()
-    target.run_new.return_value = MagicMock(returncode=1, ok=False)
+    target.run.return_value = MagicMock(returncode=1, ok=False)
     assert _is_running(target, "/tmp/test.pid") is False
 
 
@@ -62,7 +62,7 @@ def test_is_running_dead_process() -> None:
     target = MagicMock()
     call_count = 0
 
-    def run_new_side_effect(cmd, **kwargs):
+    def run_side_effect(cmd, **kwargs):
         nonlocal call_count
         call_count += 1
         result = MagicMock()
@@ -70,25 +70,25 @@ def test_is_running_dead_process() -> None:
         result.ok = result.returncode == 0
         return result
 
-    target.run_new.side_effect = run_new_side_effect
+    target.run.side_effect = run_side_effect
     assert _is_running(target, "/tmp/test.pid") is False
 
 
 def test_read_exit_code() -> None:
     target = MagicMock()
-    target.run_new.return_value = MagicMock(stdout="0\n", returncode=0, ok=True)
+    target.run.return_value = MagicMock(stdout="0\n", returncode=0, ok=True)
     assert _read_exit_code(target, "/tmp/test.status") == 0
 
 
 def test_read_exit_code_nonzero() -> None:
     target = MagicMock()
-    target.run_new.return_value = MagicMock(stdout="42\n", returncode=0, ok=True)
+    target.run.return_value = MagicMock(stdout="42\n", returncode=0, ok=True)
     assert _read_exit_code(target, "/tmp/test.status") == 42
 
 
 def test_read_exit_code_missing() -> None:
     target = MagicMock()
-    target.run_new.return_value = MagicMock(stdout="", returncode=1, ok=False)
+    target.run.return_value = MagicMock(stdout="", returncode=1, ok=False)
     assert _read_exit_code(target, "/tmp/test.status") == 1
 
 
@@ -189,14 +189,14 @@ def test_run_detached_as_root(mock_time: MagicMock) -> None:
 
     assert result.exit_code == 0
     # The nohup command should be called with sudo=True
-    sudo_calls = [c for c in target.run_new.call_args_list if c.kwargs.get("sudo")]
+    sudo_calls = [c for c in target.run.call_args_list if c.kwargs.get("sudo")]
     assert len(sudo_calls) > 0
 
 
 @patch("agentworks.remote_exec.time")
 def test_run_detached_disables_force_tty_for_nohup_launch(mock_time: MagicMock) -> None:
     """When the target's SSH has force_tty=True (Windows), the nohup launch
-    must pass tty=False to run_new so the PTY is not allocated. Otherwise
+    must pass tty=False to run so the PTY is not allocated. Otherwise
     SIGHUP from the closing SSH PTY kills the detached process.
     """
     mock_time.monotonic.return_value = 0
@@ -209,7 +209,7 @@ def test_run_detached_disables_force_tty_for_nohup_launch(mock_time: MagicMock) 
     poll_count = 0
     status_exists_after = 1
 
-    def run_new_side_effect(
+    def run_side_effect(
         cmd: str, *, check: bool = True, timeout: int | None = None,
         sudo: bool = False, tty: bool | None = None,
     ):
@@ -233,7 +233,7 @@ def test_run_detached_disables_force_tty_for_nohup_launch(mock_time: MagicMock) 
             result.stdout = "0"
         return result
 
-    target.run_new.side_effect = run_new_side_effect
+    target.run.side_effect = run_side_effect
     target.write_file = MagicMock()
 
     result = run_detached(
@@ -270,7 +270,7 @@ def test_run_detached_timeout_kills_and_returns_partial(mock_time: MagicMock) ->
 
     target = MagicMock()
 
-    def run_new_side_effect(
+    def run_side_effect(
         cmd: str, *, check: bool = True, timeout: int | None = None,
         sudo: bool = False, tty: bool | None = None,
     ):
@@ -295,7 +295,7 @@ def test_run_detached_timeout_kills_and_returns_partial(mock_time: MagicMock) ->
             result.ok = False
         return result
 
-    target.run_new.side_effect = run_new_side_effect
+    target.run.side_effect = run_side_effect
     target.write_file = MagicMock()
 
     result = run_detached(
