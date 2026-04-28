@@ -576,7 +576,7 @@ def reinit_vm(
 
     Requires provisioning_status == complete and a valid Tailscale connection.
     """
-    from agentworks.ssh import ExecTarget, admin_exec_target
+    from agentworks.ssh import admin_exec_target
 
     vm = _require_vm(db, name)
 
@@ -615,7 +615,7 @@ def reinit_vm(
     logger = SSHLogger(name, "vm-reinit")
     for token in git_tokens.values():
         logger.add_redaction(token)
-    ts_target = ExecTarget(ssh=admin_exec_target(vm, config), default_timeout=60, logger=logger)
+    ts_target = admin_exec_target(vm, config, default_timeout=60, logger=logger)
 
     home = f"/home/{vm.admin_username}"
 
@@ -955,7 +955,7 @@ def _ensure_tailscale(
     provisioner: VMProvisioner,
 ) -> None:
     """After starting a VM, verify Tailscale connectivity and rejoin if needed."""
-    from agentworks.ssh import ExecTarget, admin_exec_target, wait_for_reconnect
+    from agentworks.ssh import admin_exec_target, wait_for_reconnect
 
     # Refresh VM row in case tailscale_host was cleared on stop
     vm = _require_vm(db, vm.name)
@@ -963,8 +963,7 @@ def _ensure_tailscale(
     # If we have a known Tailscale host, wait for it to reconnect after boot.
     # This avoids unnecessarily attaching a public IP on Azure.
     if vm.tailscale_host:
-        ts_target = ExecTarget(ssh=admin_exec_target(vm, config))
-        if wait_for_reconnect(ts_target):
+        if wait_for_reconnect(admin_exec_target(vm, config)):
             return
 
         # Tailscale didn't reconnect (ephemeral key expired, etc.)
@@ -992,12 +991,11 @@ def _ensure_tailscale(
             azure_provisioner.detach_public_ip(vm)
 
             # Wait for Tailscale SSH to reconnect after IP change
-            from agentworks.ssh import ExecTarget, admin_exec_target, wait_for_reconnect
+            from agentworks.ssh import admin_exec_target, wait_for_reconnect
 
             refreshed = db.get_vm(vm.name)
             if refreshed and refreshed.tailscale_host:
-                ts_target = ExecTarget(ssh=admin_exec_target(refreshed, config))
-                wait_for_reconnect(ts_target)
+                wait_for_reconnect(admin_exec_target(refreshed, config))
 
     # Update SSH config in case the Tailscale IP changed
     from agentworks.ssh_config import sync_ssh_config

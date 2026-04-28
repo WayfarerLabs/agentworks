@@ -31,7 +31,7 @@ def backup_vm(
 
     Returns the path to the backup archive.
     """
-    from agentworks.ssh import SSHError, SSHLogger, admin_exec_target
+    from agentworks.ssh import SSHError, SSHLogger, _unwrap_ssh, admin_exec_target
     from agentworks.workspaces.manager import _ensure_vm_running
 
     vm = db.get_vm(vm_name)
@@ -52,11 +52,7 @@ def backup_vm(
 
     ssh_logger = SSHLogger(vm_name, "vm-backup")
     ssh_logger.path = backup_dir / "backup.log"
-    target_ssh = admin_exec_target(vm, config)
-
-    from agentworks.ssh import ExecTarget
-
-    target = ExecTarget(ssh=target_ssh, logger=ssh_logger)
+    target = admin_exec_target(vm, config, logger=ssh_logger)
 
     # Log the backup event
     db.insert_vm_event(vm_name, "backup_started")
@@ -129,7 +125,7 @@ def backup_vm(
         local_archive = backup_dir / "workspaces.tar.zst"
         try:
             archived_paths, skipped_paths = _archive_workspaces(
-                target, target_ssh, vm_workspaces, local_archive,
+                target, _unwrap_ssh(target), vm_workspaces, local_archive,
             )
         except Exception:
             db.insert_vm_event(vm_name, "backup_failed")

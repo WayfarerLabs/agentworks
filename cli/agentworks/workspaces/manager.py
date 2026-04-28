@@ -916,14 +916,16 @@ def copy_workspace(
                 typer.echo(f"Error: VM '{src_vm.name}' has no Tailscale address", err=True)
                 raise typer.Exit(1)
 
-            src_target = admin_exec_target(src_vm, config)
+            src_exec = admin_exec_target(src_vm, config)
+            assert src_exec.ssh is not None
+            src_ssh = src_exec.ssh
             typer.echo(f"Packing workspace '{source_name}' from VM '{src_vm.name}'...")
 
             # Stream tar from VM to local temp file
             ssh_args = ["ssh", "-o", "StrictHostKeyChecking=accept-new", "-o", "BatchMode=yes"]
-            if src_target.identity_file is not None:
-                ssh_args.extend(["-i", str(src_target.identity_file)])
-            ssh_args.append(f"{src_target.user}@{src_target.host}")
+            if src_ssh.identity_file is not None:
+                ssh_args.extend(["-i", str(src_ssh.identity_file)])
+            ssh_args.append(f"{src_ssh.user}@{src_ssh.host}")
             ssh_args.append(f"tar czf - -C {src_ws.workspace_path} .")
 
             with open(tmp_path, "wb") as f:

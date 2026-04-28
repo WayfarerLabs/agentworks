@@ -14,14 +14,14 @@ if TYPE_CHECKING:
     from agentworks.catalog import UserInstallCommandEntry
     from agentworks.config import Config
     from agentworks.db import Database, VMRow, WorkspaceRow
-    from agentworks.ssh import SSHLogger, SSHResult, SSHTarget
+    from agentworks.ssh import ExecTarget, SSHLogger, SSHResult, SSHTarget
 
 AGENT_PREFIX = "agt--"
 WS_GROUP_PREFIX = "ws--"
 
 
 def _run_as_agent(
-    target: SSHTarget,
+    target: SSHTarget | ExecTarget,
     linux_user: str,
     command: str,
     *,
@@ -33,6 +33,9 @@ def _run_as_agent(
 
     Uses su - for a login shell so the agent's environment is set up.
     """
+    from agentworks.ssh import _unwrap_ssh
+
+    target = _unwrap_ssh(target)
     import shlex
 
     from agentworks.ssh import SSHResult, run_as_root
@@ -50,7 +53,7 @@ def _run_as_agent(
 
 
 def _write_agent_file(
-    target: SSHTarget,
+    target: SSHTarget | ExecTarget,
     linux_user: str,
     dest: str,
     content: str,
@@ -724,9 +727,7 @@ def _create_agent_on_vm(
                     _run_as_agent(target, linux_user, clone_cmd, timeout=120, logger=lg)
             else:
                 # Local source: copy as admin then chown
-                from agentworks.ssh import ExecTarget
-
-                exec_target = ExecTarget(ssh=admin_exec_target(vm, config))
+                exec_target = admin_exec_target(vm, config)
                 tmp_dotfiles = f"/tmp/agentworks-{linux_user}-dotfiles"
                 exec_target.run(f"rm -rf {tmp_dotfiles}", check=False)
                 from agentworks.sources import fetch_dir
@@ -755,7 +756,7 @@ def _create_agent_on_vm(
 
 
 def _install_nerf_claude_plugin_for_agent(
-    target: SSHTarget,
+    target: SSHTarget | ExecTarget,
     linux_user: str,
     shell: str,
 ) -> None:
@@ -973,9 +974,7 @@ def _run_agent_mise_setup(
             from agentworks.sources import SourceRefError, fetch_file, parse_source_ref
 
             ref = parse_source_ref(agent_cfg.mise_lockfile, default_filename="mise.lock")
-            from agentworks.ssh import ExecTarget
-
-            exec_target = ExecTarget(ssh=admin_exec_target(vm, config))
+            exec_target = admin_exec_target(vm, config)
             _run_as_agent(target, linux_user, f"mkdir -p {mise_config_dir}")
             # Fetch to tmp (as admin, needs network), then move to agent home
             tmp_lock = f"/tmp/agentworks-{linux_user}-mise-lock"

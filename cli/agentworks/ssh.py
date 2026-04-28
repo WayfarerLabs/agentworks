@@ -39,9 +39,14 @@ class SSHTarget:
     force_tty: bool = False
 
 
-def admin_exec_target(vm: VMRow, config: Config) -> SSHTarget:
-    """Build an SSHTarget from a VMRow and Config.
-    # TODO - this should return an ExecTarget wrapping the SSHTarget with full config of logger, timeouts, etc.
+def admin_exec_target(
+    vm: VMRow,
+    config: Config,
+    *,
+    logger: SSHLogger | None = None,
+    default_timeout: int | None = None,
+) -> ExecTarget:
+    """Build an ExecTarget for the admin user via Tailscale SSH.
 
     On Windows, forces TTY allocation to prevent zsh from hanging on
     non-interactive piped SSH commands.
@@ -49,11 +54,15 @@ def admin_exec_target(vm: VMRow, config: Config) -> SSHTarget:
     import sys
 
     assert vm.tailscale_host is not None, f"VM {vm.name} has no Tailscale host"
-    return SSHTarget(
-        host=vm.tailscale_host,
-        user=vm.admin_username,
-        identity_file=config.operator.ssh_private_key,
-        force_tty=sys.platform == "win32",
+    return ExecTarget(
+        ssh=SSHTarget(
+            host=vm.tailscale_host,
+            user=vm.admin_username,
+            identity_file=config.operator.ssh_private_key,
+            force_tty=sys.platform == "win32",
+        ),
+        logger=logger,
+        default_timeout=default_timeout,
     )
 
 
@@ -206,8 +215,16 @@ def _ssh_base_args(target: SSHTarget) -> list[str]:
     return args
 
 
+def _unwrap_ssh(target: SSHTarget | ExecTarget) -> SSHTarget:
+    """Extract SSHTarget from an ExecTarget. Temporary shim for migration."""
+    if isinstance(target, ExecTarget):
+        assert target.ssh is not None, "ExecTarget has no SSH target"
+        return target.ssh
+    return target
+
+
 def run(
-    target: SSHTarget,
+    target: SSHTarget | ExecTarget,
     command: str,
     *,
     check: bool = True,
@@ -233,6 +250,7 @@ def run(
     Returns:
         SSHResult with exit code, stdout, and stderr.
     """
+    target = _unwrap_ssh(target)
     import shlex
 
     args = _ssh_base_args(target)
@@ -278,11 +296,12 @@ def run(
     raise SSHError(msg) from last_err
 
 
-def interactive(target: SSHTarget, command: str) -> int:
+def interactive(target: SSHTarget | ExecTarget, command: str) -> int:
     """Run an interactive SSH command with a TTY (for tmux attach, etc.).
 
     Returns the process exit code. Does not raise on failure.
     """
+    target = _unwrap_ssh(target)
     # Build args without BatchMode (which rejects interactive prompts/TTY)
     args = ["ssh", "-t", "-o", "StrictHostKeyChecking=accept-new"]
     if target.port is not None:
@@ -300,7 +319,7 @@ def interactive(target: SSHTarget, command: str) -> int:
 
 
 def run_as_root(
-    target: SSHTarget,
+    target: SSHTarget | ExecTarget,
     command: str,
     *,
     check: bool = True,
@@ -308,6 +327,7 @@ def run_as_root(
     logger: SSHLogger | None = None,
 ) -> SSHResult:
     """Execute a command as root via sudo on a remote host."""
+    target = _unwrap_ssh(target)
     # NOTE: sudo -n only applies to the first command in a shell pipeline.
     # ``sudo -n cmd1 && cmd2`` runs cmd2 without privilege. If you need
     # multiple root commands, issue separate run_as_root calls.
@@ -327,13 +347,14 @@ def scp_base_args(target: SSHTarget) -> list[str]:
 
 
 def copy_to(
-    target: SSHTarget,
+    target: SSHTarget | ExecTarget,
     local_path: str | Path,
     remote_path: str,
     *,
     timeout: int | None = None,
 ) -> None:
     """Copy a file to a remote host via scp."""
+    target = _unwrap_ssh(target)
     args = scp_base_args(target)
     args.append(str(local_path))
     dest = f"{target.user}@{target.host}:{remote_path}" if target.user else f"{target.host}:{remote_path}"
@@ -363,7 +384,7 @@ def copy_from(
 
 
 def write_file(
-    target: SSHTarget,
+    target: SSHTarget | ExecTarget,
     remote_path: str,
     content: str,
     *,
@@ -377,6 +398,7 @@ def write_file(
     content in SSH command strings, which breaks on Windows due to \\r\\n
     conversion.
     """
+    target = _unwrap_ssh(target)
     with tempfile.NamedTemporaryFile(mode="wb", suffix=".tmp", delete=False) as f:
         f.write(content.encode("utf-8"))
         tmp_path = f.name
