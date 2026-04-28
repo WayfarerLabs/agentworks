@@ -39,8 +39,9 @@ class SSHTarget:
     force_tty: bool = False
 
 
-def ssh_target_for_vm(vm: VMRow, config: Config) -> SSHTarget:
+def admin_exec_target(vm: VMRow, config: Config) -> SSHTarget:
     """Build an SSHTarget from a VMRow and Config.
+    # TODO - this should return an ExecTarget wrapping the SSHTarget with full config of logger, timeouts, etc.
 
     On Windows, forces TTY allocation to prevent zsh from hanging on
     non-interactive piped SSH commands.

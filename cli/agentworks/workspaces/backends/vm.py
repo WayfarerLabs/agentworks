@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 import typer
 
 from agentworks.output import warn
-from agentworks.ssh import ssh_target_for_vm
+from agentworks.ssh import admin_exec_target
 from agentworks.workspaces.tmuxinator import console_session_name, generate_config
 
 if TYPE_CHECKING:
@@ -35,7 +35,7 @@ def create_vm_workspace(
     from agentworks.ssh import run_as_root
 
     assert vm.tailscale_host is not None
-    target = ssh_target_for_vm(vm, config)
+    target = admin_exec_target(vm, config)
     lg = logger
 
     workspace_path = f"{config.paths.vm_workspaces}/{ws_name}"
@@ -113,9 +113,9 @@ def shell_vm_workspace(
     workspace_path: str,
 ) -> None:
     """Open a plain shell into a VM workspace."""
-    from agentworks.ssh import interactive, ssh_target_for_vm
+    from agentworks.ssh import admin_exec_target, interactive
 
-    target = ssh_target_for_vm(vm, config)
+    target = admin_exec_target(vm, config)
     sys.exit(interactive(target, f"cd {workspace_path} && exec $SHELL -l"))
 
 
@@ -127,10 +127,10 @@ def console_vm_workspace(
     recreate: bool = False,
 ) -> None:
     """Open the workspace console (tmuxinator) on a VM."""
-    from agentworks.ssh import interactive, run, ssh_target_for_vm
+    from agentworks.ssh import admin_exec_target, interactive, run
 
     session = console_session_name(ws_name)
-    target = ssh_target_for_vm(vm, config)
+    target = admin_exec_target(vm, config)
 
     if recreate:
         run(target, f"tmux kill-session -t {session}", check=False, timeout=10)
@@ -151,7 +151,7 @@ def delete_vm_workspace(
     from agentworks.ssh import run as ssh_run
 
     assert vm.tailscale_host is not None
-    target = ssh_target_for_vm(vm, config)
+    target = admin_exec_target(vm, config)
     lg = logger
 
     from agentworks.ssh import run_as_root

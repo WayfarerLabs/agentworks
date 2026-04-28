@@ -31,7 +31,7 @@ def backup_vm(
 
     Returns the path to the backup archive.
     """
-    from agentworks.ssh import SSHError, SSHLogger, ssh_target_for_vm
+    from agentworks.ssh import SSHError, SSHLogger, admin_exec_target
     from agentworks.workspaces.manager import _ensure_vm_running
 
     vm = db.get_vm(vm_name)
@@ -52,7 +52,7 @@ def backup_vm(
 
     ssh_logger = SSHLogger(vm_name, "vm-backup")
     ssh_logger.path = backup_dir / "backup.log"
-    target_ssh = ssh_target_for_vm(vm, config)
+    target_ssh = admin_exec_target(vm, config)
 
     from agentworks.ssh import ExecTarget
 

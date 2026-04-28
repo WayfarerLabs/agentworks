@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 import typer
 
 from agentworks.db import SessionMode, SessionStatus
-from agentworks.ssh import ssh_target_for_vm
+from agentworks.ssh import admin_exec_target
 
 _ENV_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
@@ -151,7 +151,7 @@ def _prepare_vm(
         typer.echo(f"Error: VM '{vm.name}' has no Tailscale address", err=True)
         raise typer.Exit(1)
 
-    target = ssh_target_for_vm(vm, config)
+    target = admin_exec_target(vm, config)
     logger = SSHLogger(vm.name, operation) if operation else None
     run_command = partial(run, target, logger=logger)
     run_as_root = partial(ssh_run_as_root, target, logger=logger)
@@ -182,7 +182,7 @@ def _regenerate_tmuxinator(
     # Build effective socket paths for tmuxinator (migrated sessions have NULL socket_path)
     socket_paths = {s.name: _effective_socket_path(db, s) for s in sessions}
     config_text = generate_config(ws.name, ws.workspace_path, sessions=sessions, socket_paths=socket_paths)
-    target = ssh_target_for_vm(vm, config)
+    target = admin_exec_target(vm, config)
     write_file(target, f"{ws.workspace_path}/.tmuxinator.yml", config_text, logger=logger)
 
 
@@ -653,7 +653,7 @@ def list_sessions(
 
         from agentworks.ssh import run
 
-        target = ssh_target_for_vm(vm, config)
+        target = admin_exec_target(vm, config)
         run_command = partial(run, target)
 
         for session in ws_sessions:
@@ -707,7 +707,7 @@ def attach_session(
     # Determine which server has the session. Prefer the socket; fall back
     # to the default server for legacy sessions.
     q_session = shlex.quote(name)
-    target = ssh_target_for_vm(vm, config)
+    target = admin_exec_target(vm, config)
     if sock and session_exists(name, run_command=run_command, socket_path=sock):
         sys.exit(interactive(target, tmux_cmd(f"attach -t {q_session}", sock)))
     else:

@@ -8,7 +8,7 @@ import typer
 
 from agentworks.config import validate_name
 from agentworks.output import warn
-from agentworks.ssh import ssh_target_for_vm
+from agentworks.ssh import admin_exec_target
 
 if TYPE_CHECKING:
     from agentworks.catalog import UserInstallCommandEntry
@@ -191,9 +191,9 @@ def delete_agent(
 
         from agentworks.sessions.manager import _effective_socket_path
         from agentworks.sessions.tmux import kill_session
-        from agentworks.ssh import run, ssh_target_for_vm
+        from agentworks.ssh import admin_exec_target, run
 
-        target = ssh_target_for_vm(vm, config)
+        target = admin_exec_target(vm, config)
         run_command = partial(run, target, logger=ssh_logger)
         for session in agent_sessions:
             sock = _effective_socket_path(db, session)
@@ -383,7 +383,7 @@ def shell_agent(
 
     from agentworks.ssh import interactive
 
-    target = ssh_target_for_vm(vm, config)
+    target = admin_exec_target(vm, config)
 
     if workspace_name:
         ws = db.get_workspace(workspace_name)
@@ -530,7 +530,7 @@ def _add_to_workspace_group(
     """Add an agent user to a workspace's Linux group."""
     from agentworks.ssh import run_as_root
 
-    target = ssh_target_for_vm(vm, config)
+    target = admin_exec_target(vm, config)
     ws_grp = workspace_group(workspace_name)
     # Ensure group exists (idempotent)
     run_as_root(target, f"sh -c 'getent group {ws_grp} >/dev/null 2>&1 || /usr/sbin/groupadd {ws_grp}'", logger=logger)
@@ -548,7 +548,7 @@ def _remove_from_workspace_group(
     """Remove an agent user from a workspace's Linux group."""
     from agentworks.ssh import run_as_root
 
-    target = ssh_target_for_vm(vm, config)
+    target = admin_exec_target(vm, config)
     ws_grp = workspace_group(workspace_name)
     run_as_root(target, f"gpasswd -d {linux_user} {ws_grp}", check=False, logger=logger)
 
@@ -581,7 +581,7 @@ def _create_agent_on_vm(
     """
     from agentworks.ssh import run_as_root
 
-    target = ssh_target_for_vm(vm, config)
+    target = admin_exec_target(vm, config)
     lg = logger
 
     typer.echo(f"  Creating user '{linux_user}' on VM '{vm.name}'...")
@@ -726,7 +726,7 @@ def _create_agent_on_vm(
                 # Local source: copy as admin then chown
                 from agentworks.ssh import ExecTarget
 
-                exec_target = ExecTarget(ssh=ssh_target_for_vm(vm, config))
+                exec_target = ExecTarget(ssh=admin_exec_target(vm, config))
                 tmp_dotfiles = f"/tmp/agentworks-{linux_user}-dotfiles"
                 exec_target.run(f"rm -rf {tmp_dotfiles}", check=False)
                 from agentworks.sources import fetch_dir
@@ -799,7 +799,7 @@ def _delete_agent_on_vm(
     """Remove an agent Linux user from a VM."""
     from agentworks.ssh import SSHError, run_as_root
 
-    target = ssh_target_for_vm(vm, config)
+    target = admin_exec_target(vm, config)
     lg = logger
 
     try:
@@ -828,7 +828,7 @@ def _run_agent_install_commands(
     from agentworks.ssh import SSHError, run_as_root
 
     catalog = load_catalog(config)
-    target = ssh_target_for_vm(vm, config)
+    target = admin_exec_target(vm, config)
     shell = config.agent.shell
     path_additions: list[str] = []
     total = len(command_names)
@@ -900,7 +900,7 @@ def _run_agent_mise_setup(
     """Set up mise for an agent: shims PATH, config, lockfile, install."""
     from agentworks.ssh import SSHError, run_as_root
 
-    target = ssh_target_for_vm(vm, config)
+    target = admin_exec_target(vm, config)
     agent_cfg = config.agent
     has_packages = bool(agent_cfg.mise_packages)
     has_lockfile = bool(agent_cfg.mise_lockfile)
@@ -975,7 +975,7 @@ def _run_agent_mise_setup(
             ref = parse_source_ref(agent_cfg.mise_lockfile, default_filename="mise.lock")
             from agentworks.ssh import ExecTarget
 
-            exec_target = ExecTarget(ssh=ssh_target_for_vm(vm, config))
+            exec_target = ExecTarget(ssh=admin_exec_target(vm, config))
             _run_as_agent(target, linux_user, f"mkdir -p {mise_config_dir}")
             # Fetch to tmp (as admin, needs network), then move to agent home
             tmp_lock = f"/tmp/agentworks-{linux_user}-mise-lock"

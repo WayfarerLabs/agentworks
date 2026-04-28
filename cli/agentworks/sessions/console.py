@@ -145,9 +145,9 @@ def attach_console(
         typer.echo(f"Error: VM '{vm_name}' has no Tailscale address", err=True)
         raise typer.Exit(1)
 
-    from agentworks.ssh import interactive, run, ssh_target_for_vm
+    from agentworks.ssh import admin_exec_target, interactive, run
 
-    target = ssh_target_for_vm(vm, config)
+    target = admin_exec_target(vm, config)
     run_command = partial(run, target)
 
     # Get running sessions for this VM

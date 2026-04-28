@@ -296,7 +296,7 @@ class WSL2Provisioner(VMProvisioner):
 
         typer.echo(f"  WSL2 VM '{vm_name}' provisioned.")
         return ProvisionResult(
-            exec_target=ExecTarget(wsl2=WSL2Target(distro_name=vm_name, user=admin_username)),
+            admin_exec_target=ExecTarget(wsl2=WSL2Target(distro_name=vm_name, user=admin_username)),
             wsl_distro_name=vm_name,
         )
 
@@ -321,7 +321,7 @@ class WSL2Provisioner(VMProvisioner):
         )
         typer.echo(f"WSL2 distro '{vm.name}' deleted")
 
-    def exec_target(self, vm: VMRow, *, config: object | None = None) -> ExecTarget:
+    def admin_exec_target(self, vm: VMRow, *, config: object | None = None) -> ExecTarget:
         return ExecTarget(wsl2=WSL2Target(distro_name=vm.name, user=vm.admin_username))
 
     def status(self, vm: VMRow) -> VMStatus:
