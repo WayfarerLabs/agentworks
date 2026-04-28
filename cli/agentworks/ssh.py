@@ -613,6 +613,49 @@ class ExecTarget:
         msg = "ExecTarget has no target configured"
         raise SSHError(msg)
 
+    def run_new(
+        self,
+        command: str,
+        *,
+        sudo: bool = False,
+        tty: bool | None = None,
+        check: bool = True,
+        timeout: int | None = None,
+    ) -> SSHResult:
+        """Run a command on the target.
+
+        Args:
+            command: Shell command to execute.
+            sudo: Wrap in sudo -n bash -c '...' so the entire command runs as root.
+            tty: None = transport default, True = request TTY, False = suppress TTY.
+                 Only meaningful for SSH transport (controls -tt flag).
+            check: Raise SSHError on non-zero exit.
+            timeout: Timeout in seconds.
+        """
+        import shlex as _shlex
+
+        if sudo:
+            command = f"sudo -n bash -c {_shlex.quote(command)}"
+
+        t = self._timeout(timeout)
+        lg = self.logger
+
+        if self.ssh is not None:
+            # Resolve tty: None -> SSHTarget.force_tty, True/False override
+            effective_tty = self.ssh.force_tty if tty is None else tty
+            from dataclasses import replace as _replace
+
+            ssh = _replace(self.ssh, force_tty=effective_tty) if effective_tty != self.ssh.force_tty else self.ssh
+            return run(ssh, command, check=check, timeout=t, logger=lg)
+        if self.lima is not None:
+            return lima_run(self.lima, command, check=check, timeout=t, logger=lg)
+        if self.remote_lima is not None:
+            return remote_lima_run(self.remote_lima, command, check=check, timeout=t, logger=lg)
+        if self.wsl2 is not None:
+            return wsl2_run(self.wsl2, command, check=check, timeout=t, logger=lg)
+        msg = "ExecTarget has no target configured"
+        raise SSHError(msg)
+
     def copy_to(self, local_path: str | Path, remote_path: str, *, timeout: int | None = None) -> None:
         """Copy a local file to the target."""
         if self.ssh is not None:
