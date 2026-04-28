@@ -372,6 +372,20 @@ def vm_delete(
     delete_vm(_get_db(), load_config(), name, force=force, yes=yes)
 
 
+@vm_app.command("rekey")
+def vm_rekey(
+    name: Annotated[str, typer.Argument(help="VM name")],
+    wait_for_share: Annotated[
+        bool, typer.Option("--wait-for-share", help="Wait for operator to share VM back to their tailnet")
+    ] = False,
+) -> None:
+    """Switch a VM's Tailscale account (logout + rejoin with new key)."""
+    from agentworks.config import load_config
+    from agentworks.vms.manager import rekey_vm
+
+    rekey_vm(_get_db(), load_config(), name, wait_for_share=wait_for_share)
+
+
 @vm_app.command("reinit")
 def vm_reinit(
     name: Annotated[str, typer.Argument(help="VM name")],

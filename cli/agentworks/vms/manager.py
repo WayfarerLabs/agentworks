@@ -497,6 +497,105 @@ def stop_vm(db: Database, config: Config, name: str) -> None:
     typer.echo(f"VM '{name}' stopped")
 
 
+def rekey_vm(
+    db: Database,
+    config: Config,
+    name: str,
+    *,
+    wait_for_share: bool = False,
+) -> None:
+    """Switch a VM's Tailscale account by logging out and rejoining with a new key.
+
+    Uses the provisioner's admin_exec_target (out-of-band transport) since
+    Tailscale connectivity drops during the operation.
+    """
+    import os
+    import time
+
+    from agentworks.prompt import prompt_secret
+    from agentworks.ssh import SSHError, admin_exec_target, wait_for_reconnect
+    from agentworks.ssh_config import sync_ssh_config
+    from agentworks.vms.provisioners.azure import AzureProvisioner
+
+    vm = _require_vm(db, name)
+    _guard_failed_vm(vm)
+
+    provisioner = _get_provisioner_for_vm(db, vm, config)
+    status = provisioner.status(vm)
+    if status != VMStatus.RUNNING:
+        typer.echo(f"Error: VM '{name}' is not running (status: {status.value})", err=True)
+        raise typer.Exit(1)
+
+    # Collect new auth key
+    ts_auth_key = os.environ.get("TAILSCALE_AUTH_KEY")
+    if not ts_auth_key:
+        ts_auth_key = prompt_secret(
+            "Tailscale auth key",
+            hint="Generate a key at https://login.tailscale.com/admin/settings/keys",
+        )
+
+    typer.echo(f"Rekeying '{name}'...")
+
+    # For Azure, attach a temporary public IP for out-of-band access
+    azure_provisioner = provisioner if isinstance(provisioner, AzureProvisioner) else None
+    if azure_provisioner is not None:
+        azure_provisioner.attach_public_ip(vm)
+
+    try:
+        exec_target = provisioner.admin_exec_target(vm, config=config)
+
+        # Wait for the provisioning transport to be reachable
+        for attempt in range(6):
+            try:
+                exec_target.run("echo ok", timeout=10)
+                break
+            except (SSHError, Exception):
+                if attempt == 5:
+                    raise
+                time.sleep(5)
+
+        # Logout from current tailnet
+        typer.echo("  Logging out of current tailnet...")
+        exec_target.run("tailscale down && tailscale logout", sudo=True, tty=False)
+        time.sleep(2)  # let the logout settle
+
+        # Join new tailnet
+        typer.echo("  Joining new tailnet...")
+        exec_target.run(f"tailscale up --auth-key {ts_auth_key}", sudo=True)
+
+        # Read new IP
+        result = exec_target.run("tailscale ip -4", sudo=True)
+        new_ip = result.stdout.strip()
+        typer.echo(f"  Tailscale IP: {new_ip}")
+
+        if wait_for_share:
+            typer.echo(
+                "\nShare the VM back to your tailnet, then press Enter to verify connectivity..."
+            )
+            input()
+            typer.echo(f"  Verifying SSH to {new_ip}...")
+            # Build a Tailscale SSH target to test connectivity
+            ts_target = admin_exec_target(vm, config)
+            assert ts_target.ssh is not None
+            from dataclasses import replace
+
+            ts_target = replace(ts_target, ssh=replace(ts_target.ssh, host=new_ip))
+            if wait_for_reconnect(ts_target):
+                typer.echo("  Connectivity verified.")
+            else:
+                warn(f"could not reach {new_ip} via SSH, updating DB anyway")
+
+        # Update DB and SSH config
+        db.update_vm_tailscale(name, new_ip)
+        sync_ssh_config(config, db)
+        db.insert_vm_event(name, "rekey", f"new_ip={new_ip}")
+        typer.echo(f"VM '{name}' rekeyed. New Tailscale IP: {new_ip}")
+
+    finally:
+        if azure_provisioner is not None:
+            azure_provisioner.detach_public_ip(vm)
+
+
 def delete_vm(
     db: Database,
     config: Config,
