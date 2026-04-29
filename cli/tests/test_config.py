@@ -22,8 +22,8 @@ def config_dir(tmp_path: Path) -> Path:
     config_file.write_text(
         dedent(f"""\
         [operator]
-        ssh_public_key = "{pub}"
-        ssh_private_key = "{priv}"
+        ssh_public_key = "{pub.as_posix()}"
+        ssh_private_key = "{priv.as_posix()}"
 
         [vm_templates.default]
         apt = ["zsh", "tmux"]
@@ -89,8 +89,8 @@ def test_cycle_detection(tmp_path: Path) -> None:
     config_file.write_text(
         dedent(f"""\
         [operator]
-        ssh_public_key = "{pub}"
-        ssh_private_key = "{priv}"
+        ssh_public_key = "{pub.as_posix()}"
+        ssh_private_key = "{priv.as_posix()}"
 
         [workspace_templates.a]
         inherits = ["b"]
@@ -113,8 +113,8 @@ def test_invalid_git_credential_type(tmp_path: Path) -> None:
     config_file.write_text(
         dedent(f"""\
         [operator]
-        ssh_public_key = "{pub}"
-        ssh_private_key = "{priv}"
+        ssh_public_key = "{pub.as_posix()}"
+        ssh_private_key = "{priv.as_posix()}"
 
         [git_credentials.bad]
         type = "gitlab"
@@ -138,8 +138,8 @@ def test_unexpected_top_level_keys_warns(tmp_path: Path, warnings: list[str]) ->
         oops = true
 
         [operator]
-        ssh_public_key = "{pub}"
-        ssh_private_key = "{priv}"
+        ssh_public_key = "{pub.as_posix()}"
+        ssh_private_key = "{priv.as_posix()}"
     """)
     )
     load_config(config_file)
@@ -157,8 +157,8 @@ def test_orphaned_key_under_commented_section(tmp_path: Path, warnings: list[str
     config_file.write_text(
         dedent(f"""\
         [operator]
-        ssh_public_key = "{pub}"
-        ssh_private_key = "{priv}"
+        ssh_public_key = "{pub.as_posix()}"
+        ssh_private_key = "{priv.as_posix()}"
 
         # [defaults]          <-- commented out!
         platform = "lima"     # orphaned in [operator], not [defaults]
@@ -185,9 +185,9 @@ def test_extra_ssh_public_keys(tmp_path: Path) -> None:
     config_file.write_text(
         dedent(f"""\
         [operator]
-        ssh_public_key = "{pub}"
-        ssh_private_key = "{priv}"
-        extra_ssh_public_keys = ["{extra1}", "{extra2}"]
+        ssh_public_key = "{pub.as_posix()}"
+        ssh_private_key = "{priv.as_posix()}"
+        extra_ssh_public_keys = ["{extra1.as_posix()}", "{extra2.as_posix()}"]
     """)
     )
     cfg = load_config(config_file)
@@ -206,8 +206,8 @@ def test_extra_ssh_public_keys_missing_file(tmp_path: Path) -> None:
     config_file.write_text(
         dedent(f"""\
         [operator]
-        ssh_public_key = "{pub}"
-        ssh_private_key = "{priv}"
+        ssh_public_key = "{pub.as_posix()}"
+        ssh_private_key = "{priv.as_posix()}"
         extra_ssh_public_keys = ["/nonexistent/key.pub"]
     """)
     )
@@ -327,8 +327,8 @@ def test_proxmox_config(tmp_path: Path, case: dict) -> None:
     config_file = tmp_path / "config.toml"
     config_file.write_text(dedent(f"""\
         [operator]
-        ssh_public_key = "{pub}"
-        ssh_private_key = "{priv}"
+        ssh_public_key = "{pub.as_posix()}"
+        ssh_private_key = "{priv.as_posix()}"
 
         {dedent(case["toml"])}
     """))
@@ -357,8 +357,8 @@ def test_user_section_deprecated_alias(tmp_path: Path, capsys: pytest.CaptureFix
     config_file.write_text(
         dedent(f"""\
         [user]
-        ssh_public_key = "{pub}"
-        ssh_private_key = "{priv}"
+        ssh_public_key = "{pub.as_posix()}"
+        ssh_private_key = "{priv.as_posix()}"
     """)
     )
 

@@ -242,8 +242,11 @@ def _check_ssh_key(
 
     ok(f"SSH {label} key: {path}")
 
-    # Check permissions on private key
-    if label == "private":
+    # Check permissions on private key. Skipped on Windows: st_mode there is
+    # synthesized from the read-only attribute (typically reports 0o666) and
+    # doesn't reflect the NTFS ACLs that actually gate access. OpenSSH on
+    # Windows enforces ACL-based ownership checks of its own.
+    if label == "private" and sys.platform != "win32":
         mode = path.stat().st_mode & 0o777
         if mode & 0o077:
             warn(f"SSH private key has broad permissions ({oct(mode)}), recommend 600")

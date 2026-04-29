@@ -146,9 +146,9 @@ def test_rebuild_config_dir(tmp_path: Path) -> None:
     assert "100.64.0.2" in content
     assert "Managed by agentworks" in content
 
-    # Include directive added with absolute path
+    # Include directive added (uses ~/forward-slash form via _to_ssh_path)
     ssh_content = config.operator.ssh_config.read_text()
-    assert str(ssh_dir / "config.d") in ssh_content
+    assert _include_directive(config.operator.ssh_config) in ssh_content
 
 
 def test_rebuild_config_dir_no_vms_removes_file(tmp_path: Path) -> None:
@@ -184,16 +184,21 @@ def test_rebuild_config_dir_cleans_legacy(tmp_path: Path) -> None:
 
 
 def test_format_entry_quotes_spaces_in_identity_file(tmp_path: Path) -> None:
+    import re
+
     from agentworks.ssh_config import _format_entry
 
+    # Use Path("/home/my user/...") for the space; on Windows resolve() will
+    # prefix it with the current drive, so assert structurally rather than
+    # against an exact string.
     entry = _format_entry(
         alias="test",
         hostname="1.2.3.4",
         user="me",
         identity_file=Path("/home/my user/keys/id_ed25519"),
     )
-    assert '"' in entry
-    assert '"/home/my user/keys/id_ed25519"' in entry
+    m = re.search(r'IdentityFile "([^"]*my user[^"]*id_ed25519)"', entry)
+    assert m is not None, f"expected quoted path containing space, got: {entry!r}"
 
 
 def test_format_entry_no_quotes_without_spaces(tmp_path: Path) -> None:
