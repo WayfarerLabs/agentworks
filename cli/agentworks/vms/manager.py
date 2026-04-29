@@ -576,8 +576,12 @@ def rekey_vm(
         # control plane response that never comes). The final restart
         # fixes a Tailscale bug where the node registers but peers can't
         # reach it after rekeying to a different tailnet.
+        # Restart command varies by platform. WSL2 may not have systemd.
+        is_wsl2 = vm.platform == "wsl2"
+        restart_cmd = "service tailscaled restart" if is_wsl2 else "systemctl restart tailscaled"
+
         typer.echo("  Restarting Tailscale daemon...")
-        exec_target.run("systemctl restart tailscaled", sudo=True, timeout=15)
+        exec_target.run(restart_cmd, sudo=True, timeout=15)
         time.sleep(15)
 
         typer.echo("  Logging out of current tailnet...")
@@ -586,11 +590,14 @@ def rekey_vm(
 
         typer.echo("  Joining new tailnet...")
         quoted_key = shlex.quote(ts_auth_key)
-        exec_target.run(f"tailscale up --auth-key {quoted_key}", sudo=True, timeout=30)
+        ts_up_cmd = f"tailscale up --auth-key {quoted_key}"
+        if is_wsl2:
+            ts_up_cmd += " --userspace-networking"
+        exec_target.run(ts_up_cmd, sudo=True, timeout=30)
         time.sleep(15)
 
         typer.echo("  Restarting Tailscale daemon...")
-        exec_target.run("systemctl restart tailscaled", sudo=True, timeout=15)
+        exec_target.run(restart_cmd, sudo=True, timeout=15)
         time.sleep(15)
 
         typer.echo("  Reading new Tailscale IP...")

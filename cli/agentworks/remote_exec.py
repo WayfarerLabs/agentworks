@@ -139,8 +139,11 @@ def run_detached(
     # Read exit code
     exit_code = _read_exit_code(target, status_file)
 
-    # Cleanup remote files
-    target.run(f"rm -f {wrapper_file} {pid_file} {status_file} {output_file}", sudo=as_root, check=False)
+    # Cleanup remote files (best-effort, may fail if SSH is still recovering)
+    import contextlib
+
+    with contextlib.suppress(SSHError):
+        target.run(f"rm -f {wrapper_file} {pid_file} {status_file} {output_file}", sudo=as_root, check=False)
 
     return DetachedResult(exit_code=exit_code, output=output)
 
@@ -227,16 +230,17 @@ def _poll_until_done(
                 break
 
             # Reset SSH failure counter on success
-            if ssh_failures > 0:
+            if ssh_failures > 0 and not quiet:
                 typer.echo(f"  {label}: connection restored")
             ssh_failures = 0
 
         except SSHError:
             ssh_failures += 1
-            if ssh_failures == 1:
-                typer.echo(f"  {label}: connection lost, waiting for recovery...")
-            elif ssh_failures % 6 == 0:
-                typer.echo(f"  {label}: still waiting... ({ssh_failures * poll_interval}s)")
+            if not quiet:
+                if ssh_failures == 1:
+                    typer.echo(f"  {label}: connection lost, waiting for recovery...")
+                elif ssh_failures % 6 == 0:
+                    typer.echo(f"  {label}: still waiting... ({ssh_failures * poll_interval}s)")
             # Don't break -- the wrapper script is still running on the VM
             continue
 
@@ -249,9 +253,15 @@ def _poll_until_done(
             )
             warned_quiet = True
 
-    # Read the full output for the caller
-    result = target.run(f"cat {output_file} 2>/dev/null", check=False)
-    return result.stdout
+    # Read the full output for the caller. Retry on SSH failure since the
+    # connection may still be recovering after a transient disruption.
+    for _read_attempt in range(6):
+        try:
+            result = target.run(f"cat {output_file} 2>/dev/null", check=False)
+            return result.stdout
+        except SSHError:
+            time.sleep(5)
+    return ""  # give up after retries
 
 
 def _read_new_output(target: ExecTarget, output_file: str, offset: int) -> str:
