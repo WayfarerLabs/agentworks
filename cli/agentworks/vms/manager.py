@@ -568,11 +568,12 @@ def rekey_vm(
 
         # Read and validate new IP
         result = exec_target.run("tailscale ip -4", sudo=True)
-        new_ip = result.stdout.strip().splitlines()[0].strip() if result.stdout.strip() else ""
+        raw_ip_output = result.stdout.strip()
+        new_ip = raw_ip_output.splitlines()[0].strip() if raw_ip_output else ""
         try:
             ipaddress.IPv4Address(new_ip)
         except ValueError:
-            raise SSHError(f"tailscale ip -4 returned invalid address: {result.stdout.strip()!r}") from None
+            raise SSHError(f"tailscale ip -4 returned invalid address: {raw_ip_output!r}") from None
         typer.echo(f"  Tailscale IP: {new_ip}")
 
         if wait_for_share:
