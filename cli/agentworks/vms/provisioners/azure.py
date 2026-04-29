@@ -486,7 +486,7 @@ class AzureProvisioner(VMProvisioner):
         # via public IP, e.g., during Tailscale logout on delete)
         identity_file = None
         if config is not None:
-            identity_file = getattr(getattr(config, "user", None), "ssh_private_key", None)
+            identity_file = getattr(getattr(config, "operator", None), "ssh_private_key", None)
 
         return ExecTarget(
             ssh=SSHTarget(
