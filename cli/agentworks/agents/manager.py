@@ -607,7 +607,9 @@ def _create_agent_on_vm(
 
     _root_cmd = _partial(run_as_root, target, logger=lg)
     ensure_agent_socket_root(_root_cmd, vm.admin_username)
-    ensure_agent_socket_dir(_root_cmd, linux_user)
+    # The per-agent dir won't exist for a brand-new agent -- suppress the
+    # "missing" warning. Misconfiguration of an existing dir still warns.
+    ensure_agent_socket_dir(_root_cmd, linux_user, warn_if_missing=False)
     removed = cleanup_stale_sockets(_root_cmd, linux_user)
     if removed:
         typer.echo(f"  Cleaned up {removed} stale socket(s)")
