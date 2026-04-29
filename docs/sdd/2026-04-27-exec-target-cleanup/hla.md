@@ -32,6 +32,7 @@ escalation. The `tty` flag handles TTY allocation. Logging is built into `run()`
 `logger` field on ExecTarget -- there is no `_run_logged` helper.
 
 Before:
+
 ```python
 _run_logged(target, "apt-get update", logger, as_root=True)
 _run_logged(target, "tailscale down && tailscale logout", logger, as_root=True)
@@ -40,6 +41,7 @@ target.run("echo hello")
 ```
 
 After:
+
 ```python
 target.run("apt-get update", sudo=True)
 target.run("tailscale down && tailscale logout", sudo=True)

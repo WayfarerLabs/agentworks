@@ -145,6 +145,7 @@
     "SGID",
     "Shai",
     "shellcheck",
+    "shlex",
     "SLSA",
     "sname",
     "SPIFFE",
