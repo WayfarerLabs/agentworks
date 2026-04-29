@@ -379,7 +379,7 @@ def vm_rekey(
         bool, typer.Option("--wait-for-share", help="Wait for operator to share VM back to their tailnet")
     ] = False,
 ) -> None:
-    """Switch a VM's Tailscale account (logout + rejoin with new key)."""
+    """Assign a new Tailscale auth key to a VM (logout + rejoin)."""
     from agentworks.config import load_config
     from agentworks.vms.manager import rekey_vm
 

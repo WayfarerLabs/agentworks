@@ -504,10 +504,12 @@ def rekey_vm(
     *,
     wait_for_share: bool = False,
 ) -> None:
-    """Switch a VM's Tailscale account by logging out and rejoining with a new key.
+    """Assign a new Tailscale auth key to a VM (logout + rejoin).
 
-    Uses the provisioner's admin_exec_target (out-of-band transport) since
-    Tailscale connectivity drops during the operation.
+    Useful for rotating keys, switching tailnets, or recovering from
+    expired ephemeral keys. Uses the provisioner's admin_exec_target
+    (out-of-band transport) since Tailscale connectivity drops during
+    the operation.
     """
     import ipaddress
     import os

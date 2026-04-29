@@ -117,7 +117,8 @@ turns out to be unnecessary.
 
 ### R5: VM rekey command
 
-A new `agentworks vm rekey` command allows the operator to switch a VM's Tailscale account:
+A new `agentworks vm rekey` command assigns a new Tailscale auth key to a VM. This is useful for
+rotating keys, switching tailnets, or recovering from expired ephemeral keys.
 
 - Accepts a VM name and optional `--wait-for-share` flag.
 - Sources the new Tailscale auth key from `TAILSCALE_AUTH_KEY` env var or interactive prompt (same
