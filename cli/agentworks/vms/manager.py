@@ -542,6 +542,9 @@ def rekey_vm(
         azure_provisioner.attach_public_ip(vm)
 
     try:
+        import re
+        import shlex
+
         exec_target = provisioner.admin_exec_target(vm, config=config)
 
         # Wait for the provisioning transport to be reachable
@@ -549,7 +552,7 @@ def rekey_vm(
             try:
                 exec_target.run("echo ok", timeout=10)
                 break
-            except (SSHError, Exception):
+            except SSHError:
                 if attempt == 5:
                     raise
                 time.sleep(5)
@@ -561,11 +564,14 @@ def rekey_vm(
 
         # Join new tailnet
         typer.echo("  Joining new tailnet...")
-        exec_target.run(f"tailscale up --auth-key {ts_auth_key}", sudo=True)
+        quoted_key = shlex.quote(ts_auth_key)
+        exec_target.run(f"tailscale up --auth-key {quoted_key}", sudo=True)
 
-        # Read new IP
+        # Read and validate new IP
         result = exec_target.run("tailscale ip -4", sudo=True)
-        new_ip = result.stdout.strip()
+        new_ip = result.stdout.strip().splitlines()[0].strip() if result.stdout.strip() else ""
+        if not re.match(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$", new_ip):
+            raise SSHError(f"tailscale ip -4 returned invalid address: {result.stdout.strip()!r}")
         typer.echo(f"  Tailscale IP: {new_ip}")
 
         if wait_for_share:

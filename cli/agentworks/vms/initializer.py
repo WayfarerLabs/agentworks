@@ -697,16 +697,15 @@ def _join_tailscale(
             "  Tailscale auth key",
             hint="Generate a key at https://login.tailscale.com/admin/settings/keys",
         )
-    ts_cmd = f"tailscale up --auth-key {ts_auth_key}"
+    import shlex
+
+    quoted_key = shlex.quote(ts_auth_key)
+    ts_cmd = f"tailscale up --auth-key {quoted_key}"
     if is_wsl2:
         ts_cmd += " --userspace-networking"
 
-    if logger:
-        exec_target.run(ts_cmd, sudo=True)
-        result = exec_target.run("tailscale ip -4", sudo=True)
-    else:
-        exec_target.run(ts_cmd, sudo=True)
-        result = exec_target.run("tailscale ip -4", sudo=True)
+    exec_target.run(ts_cmd, sudo=True)
+    result = exec_target.run("tailscale ip -4", sudo=True)
 
     tailscale_ip = result.stdout.strip()
     typer.echo(f"  Tailscale IP: {tailscale_ip}")

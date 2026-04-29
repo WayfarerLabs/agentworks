@@ -104,14 +104,16 @@ def run_detached(
         # Clear any stale files from a previous run
         target.run(f"rm -f {output_file} {pid_file} {status_file}", sudo=as_root, check=False)
 
-        # Launch detached. We need nohup on the OUTSIDE of sudo so sudo
-        # itself is protected from the SIGHUP sent when the SSH shell exits.
-        # Redirect all fds so SSH returns immediately.
-        #
-        # Critical: this command must NOT run over an SSH PTY (-tt). When SSH
-        # allocates a PTY (as on Windows where force_tty=True), closing it
-        nohup_cmd = f"nohup /bin/bash {wrapper_file} </dev/null >/dev/null 2>&1 &"
-        target.run(nohup_cmd, sudo=as_root, tty=False, check=False)
+        # Launch detached. nohup must be OUTSIDE sudo so that SIGHUP (from
+        # SSH PTY teardown) hits nohup first, not sudo. tty=False is the
+        # primary protection (no PTY = no SIGHUP), but the nohup ordering
+        # provides defense-in-depth. We don't use sudo=True here because
+        # that wraps in bash -c, putting nohup inside the sudo'd shell.
+        if as_root:
+            nohup_cmd = f"nohup sudo -n /bin/bash {wrapper_file} </dev/null >/dev/null 2>&1 &"
+        else:
+            nohup_cmd = f"nohup /bin/bash {wrapper_file} </dev/null >/dev/null 2>&1 &"
+        target.run(nohup_cmd, tty=False, check=False)
 
         # Brief pause for PID file to be written
         time.sleep(0.5)
