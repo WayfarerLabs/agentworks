@@ -159,6 +159,7 @@
     "swapon",
     "syscalls",
     "tailnet",
+    "tailnets",
     "tdata",
     "tenv",
     "testkey",
