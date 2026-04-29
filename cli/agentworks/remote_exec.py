@@ -11,6 +11,7 @@ process and resumes polling instead of starting a new one.
 
 from __future__ import annotations
 
+import contextlib
 import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -136,12 +137,16 @@ def run_detached(
         quiet=quiet,
     )
 
-    # Read exit code
-    exit_code = _read_exit_code(target, status_file)
+    # Read exit code (retry on SSH failure like the output read)
+    exit_code = 1
+    for _ec_attempt in range(6):
+        try:
+            exit_code = _read_exit_code(target, status_file)
+            break
+        except SSHError:
+            time.sleep(5)
 
     # Cleanup remote files (best-effort, may fail if SSH is still recovering)
-    import contextlib
-
     with contextlib.suppress(SSHError):
         target.run(f"rm -f {wrapper_file} {pid_file} {status_file} {output_file}", sudo=as_root, check=False)
 
@@ -194,10 +199,11 @@ def _poll_until_done(
                 f"  {label}: timed out after {timeout}s, killing remote process",
                 err=True,
             )
-            target.run(
-                f"test -f {pid_file} && kill $(cat {pid_file}) 2>/dev/null",
-                check=False,
-            )
+            with contextlib.suppress(SSHError):
+                target.run(
+                    f"test -f {pid_file} && kill $(cat {pid_file}) 2>/dev/null",
+                    check=False,
+                )
             break
 
         # All polling commands go through SSH which may be temporarily
@@ -261,7 +267,8 @@ def _poll_until_done(
             return result.stdout
         except SSHError:
             time.sleep(5)
-    return ""  # give up after retries
+    typer.echo(f"  {label}: unable to retrieve remote output after repeated SSH failures", err=True)
+    return ""
 
 
 def _read_new_output(target: ExecTarget, output_file: str, offset: int) -> str:
