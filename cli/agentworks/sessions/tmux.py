@@ -56,7 +56,7 @@ def ensure_agent_socket_root(
     # Probe with explicit sentinels so each state is unambiguous:
     #   MISSING      -- `test -d` failed; directory is absent
     #   PROBE_FAILED -- directory exists but stat couldn't read it
-    #   <stat out>   -- directory exists with that owner/perms
+    #   <stat out>   -- directory exists with that group/perms
     probe = run_command(
         f'if test -d {q_root}; then stat -c "%G %a" {q_root} 2>/dev/null || echo PROBE_FAILED; '
         f"else echo MISSING; fi",
