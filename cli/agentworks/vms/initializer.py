@@ -12,6 +12,7 @@ Phase B steps are non-fatal -- failures produce warnings and a 'partial' status.
 
 from __future__ import annotations
 
+import re
 import shlex
 import subprocess
 import tempfile
@@ -697,17 +698,23 @@ def _join_tailscale(
             "  Tailscale auth key",
             hint="Generate a key at https://login.tailscale.com/admin/settings/keys",
         )
-    import shlex
-
     quoted_key = shlex.quote(ts_auth_key)
     ts_cmd = f"tailscale up --auth-key {quoted_key}"
     if is_wsl2:
         ts_cmd += " --userspace-networking"
 
+    # Redact the auth key from any attached loggers before it appears in logs
+    if exec_target.logger is not None:
+        exec_target.logger.add_redaction(ts_auth_key)
+    if logger is not None:
+        logger.add_redaction(ts_auth_key)
+
     exec_target.run(ts_cmd, sudo=True)
     result = exec_target.run("tailscale ip -4", sudo=True)
 
-    tailscale_ip = result.stdout.strip()
+    tailscale_ip = result.stdout.strip().splitlines()[0].strip() if result.stdout.strip() else ""
+    if not re.match(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$", tailscale_ip):
+        raise SSHError(f"tailscale ip -4 returned invalid address: {result.stdout.strip()!r}")
     typer.echo(f"  Tailscale IP: {tailscale_ip}")
     db.update_vm_tailscale(vm_name, tailscale_ip)
     return tailscale_ip
