@@ -1,4 +1,10 @@
-"""VM lifecycle management -- create, list, start, stop, delete."""
+"""VM lifecycle management -- create, list, start, stop, delete.
+
+TODO: typer.echo is used throughout this module for progress/status output.
+This is a layering violation (business logic should not depend on the CLI
+framework). A proper fix would introduce an output.info / output.progress
+abstraction similar to the output.warn DI mechanism. See also initializer.py.
+"""
 
 from __future__ import annotations
 
@@ -223,7 +229,7 @@ def create_vm(
             db,
             config,
             vm_name,
-            exec_target=result.exec_target,
+            exec_target=result.admin_exec_target,
             providers=providers,
             is_wsl2=(platform == "wsl2"),
             admin_username=resolved_admin_username,
@@ -426,8 +432,8 @@ def shell_vm(db: Database, config: Config, name: str) -> None:
 
 def add_git_credential(db: Database, config: Config, name: str, credential_name: str) -> None:
     """Add or update a git credential on a VM."""
+    from agentworks.ssh import admin_exec_target
     from agentworks.ssh import run as ssh_run
-    from agentworks.ssh import ssh_target_for_vm
 
     vm = _require_vm(db, name)
     _guard_failed_vm(vm)
@@ -446,7 +452,7 @@ def add_git_credential(db: Database, config: Config, name: str, credential_name:
     token = provider.obtain_token(name)
     new_lines = provider.credential_lines(token)
 
-    target = ssh_target_for_vm(vm, config)
+    target = admin_exec_target(vm, config)
 
     # Read existing credentials, filter out entries for the same host/path
     result = ssh_run(target, "cat ~/.git-credentials 2>/dev/null || true")
@@ -495,6 +501,123 @@ def stop_vm(db: Database, config: Config, name: str) -> None:
         return
     provisioner.stop(vm)
     typer.echo(f"VM '{name}' stopped")
+
+
+def rekey_vm(
+    db: Database,
+    config: Config,
+    name: str,
+    *,
+    wait_for_share: bool = False,
+    ignore_env: bool = False,
+) -> None:
+    """Assign a new Tailscale auth key to a VM (logout + rejoin).
+
+    Useful for rotating keys, switching tailnets, or recovering from
+    expired ephemeral keys. Uses the provisioner's admin_exec_target
+    (out-of-band transport) since Tailscale connectivity drops during
+    the operation.
+    """
+    import ipaddress
+    import os
+    import shlex
+    import time
+
+    from agentworks.prompt import prompt_secret
+    from agentworks.ssh import SSHError, admin_exec_target, wait_for_reconnect
+    from agentworks.ssh_config import sync_ssh_config
+    from agentworks.vms.provisioners.azure import AzureProvisioner
+
+    vm = _require_vm(db, name)
+    _guard_failed_vm(vm)
+
+    provisioner = _get_provisioner_for_vm(db, vm, config)
+    status = provisioner.status(vm)
+    if status != VMStatus.RUNNING:
+        typer.echo(f"Error: VM '{name}' is not running (status: {status.value})", err=True)
+        raise typer.Exit(1)
+
+    # Collect new auth key
+    ts_auth_key = os.environ.get("TAILSCALE_AUTH_KEY") if not ignore_env else None
+    if ts_auth_key:
+        typer.echo("  Tailscale auth key found in environment")
+    else:
+        ts_auth_key = prompt_secret(
+            "Tailscale auth key",
+            hint="Generate a key at https://login.tailscale.com/admin/settings/keys",
+        )
+
+    typer.echo(f"Rekeying '{name}'...")
+
+    # For Azure, attach a temporary public IP for out-of-band access
+    azure_provisioner = provisioner if isinstance(provisioner, AzureProvisioner) else None
+    if azure_provisioner is not None:
+        azure_provisioner.attach_public_ip(vm)
+
+    try:
+        exec_target = provisioner.admin_exec_target(vm, config=config)
+
+        # Wait for the provisioning transport to be reachable
+        for attempt in range(6):
+            try:
+                exec_target.run("echo ok", timeout=10)
+                break
+            except SSHError:
+                if attempt == 5:
+                    raise
+                time.sleep(5)
+
+        # Logout from current tailnet
+        typer.echo("  Logging out of current tailnet...")
+        exec_target.run("tailscale down && tailscale logout", sudo=True, tty=False)
+        time.sleep(2)  # let the logout settle
+
+        # Join new tailnet
+        typer.echo("  Joining new tailnet...")
+        quoted_key = shlex.quote(ts_auth_key)
+        exec_target.run(f"tailscale up --auth-key {quoted_key}", sudo=True)
+
+        # Read and validate new IP
+        result = exec_target.run("tailscale ip -4", sudo=True)
+        raw_ip_output = result.stdout.strip()
+        new_ip = raw_ip_output.splitlines()[0].strip() if raw_ip_output else ""
+        try:
+            ipaddress.IPv4Address(new_ip)
+        except ValueError:
+            raise SSHError(f"tailscale ip -4 returned invalid address: {raw_ip_output!r}") from None
+        typer.echo(f"  Tailscale IP: {new_ip}")
+
+        # Update DB and SSH config with the new IP (correct regardless of
+        # reachability -- the old IP is definitely dead after logout)
+        db.update_vm_tailscale(name, new_ip)
+        sync_ssh_config(config, db)
+        db.insert_vm_event(name, "rekey", f"new_ip={new_ip}")
+
+        # If the operator needs to share the VM back, pause before connectivity check
+        if wait_for_share:
+            typer.echo(
+                "\nShare the VM back to your tailnet, then press Enter to verify connectivity..."
+            )
+            input()
+
+        # Always verify Tailscale SSH connectivity to the new IP
+        typer.echo(f"  Verifying SSH to {new_ip}...")
+        from dataclasses import replace
+
+        ts_target = admin_exec_target(vm, config)
+        assert ts_target.ssh is not None
+        ts_target = replace(ts_target, ssh=replace(ts_target.ssh, host=new_ip))
+        if wait_for_reconnect(ts_target):
+            typer.echo(f"VM '{name}' rekeyed successfully. Tailscale IP: {new_ip}")
+        else:
+            warn(
+                f"VM '{name}' rekeyed but {new_ip} is not reachable via SSH. "
+                "Check tailnet sharing/ACLs. Run 'vm rekey' again to retry."
+            )
+
+    finally:
+        if azure_provisioner is not None:
+            azure_provisioner.detach_public_ip(vm)
 
 
 def delete_vm(
@@ -576,7 +699,7 @@ def reinit_vm(
 
     Requires provisioning_status == complete and a valid Tailscale connection.
     """
-    from agentworks.ssh import ExecTarget, ssh_target_for_vm
+    from agentworks.ssh import admin_exec_target
 
     vm = _require_vm(db, name)
 
@@ -615,7 +738,7 @@ def reinit_vm(
     logger = SSHLogger(name, "vm-reinit")
     for token in git_tokens.values():
         logger.add_redaction(token)
-    ts_target = ExecTarget(ssh=ssh_target_for_vm(vm, config), default_timeout=60, logger=logger)
+    ts_target = admin_exec_target(vm, config, default_timeout=60, logger=logger)
 
     home = f"/home/{vm.admin_username}"
 
@@ -650,9 +773,10 @@ def reinit_vm(
 def _tailscale_logout(provisioner: VMProvisioner, vm: VMRow, config: Config) -> None:
     """Best-effort: deregister from Tailscale via the provisioning transport.
 
-    Uses the provisioner's exec_target (not Tailscale SSH) because we can't
-    ask Tailscale to tear itself down over the connection it provides.
+    Uses the provisioner's admin_exec_target (not Tailscale SSH) because we
+    can't ask Tailscale to tear itself down over the connection it provides.
     For Azure VMs, temporarily attaches a public IP for SSH access.
+    Proxmox raises NotImplementedError (guest agent not yet wired in).
     """
     import time
 
@@ -664,7 +788,7 @@ def _tailscale_logout(provisioner: VMProvisioner, vm: VMRow, config: Config) -> 
         azure_provisioner = provisioner if isinstance(provisioner, AzureProvisioner) else None
         if azure_provisioner is not None:
             azure_provisioner.attach_public_ip(vm)
-        exec_target = provisioner.exec_target(vm, config=config)
+        exec_target = provisioner.admin_exec_target(vm, config=config)
 
         # Wait for SSH to be reachable (public IP may have just been attached)
         for attempt in range(6):
@@ -680,8 +804,9 @@ def _tailscale_logout(provisioner: VMProvisioner, vm: VMRow, config: Config) -> 
         # on the VM, killing SSH-based transports before they get a response.
         # Lima/WSL2 use local transports and are unaffected, but the nohup
         # approach works universally.
-        exec_target.run_as_root(
+        exec_target.run(
             "nohup sh -c 'tailscale down && tailscale logout' >/dev/null 2>&1 &",
+            sudo=True,
             timeout=10,
         )
         typer.echo("Tailscale node deregistered")
@@ -752,9 +877,9 @@ def _collect_secrets(
 
 def _query_live_resources(vm: VMRow, config: Config) -> dict[str, str] | None:
     """Query live resource usage from a VM over SSH."""
-    from agentworks.ssh import run, ssh_target_for_vm
+    from agentworks.ssh import admin_exec_target, run
 
-    target = ssh_target_for_vm(vm, config)
+    target = admin_exec_target(vm, config)
     cmd = (
         "nproc && "
         "uptime | grep -oP 'load average: \\K[^,]+' && "
@@ -955,7 +1080,7 @@ def _ensure_tailscale(
     provisioner: VMProvisioner,
 ) -> None:
     """After starting a VM, verify Tailscale connectivity and rejoin if needed."""
-    from agentworks.ssh import ExecTarget, ssh_target_for_vm, wait_for_reconnect
+    from agentworks.ssh import admin_exec_target, wait_for_reconnect
 
     # Refresh VM row in case tailscale_host was cleared on stop
     vm = _require_vm(db, vm.name)
@@ -963,8 +1088,7 @@ def _ensure_tailscale(
     # If we have a known Tailscale host, wait for it to reconnect after boot.
     # This avoids unnecessarily attaching a public IP on Azure.
     if vm.tailscale_host:
-        ts_target = ExecTarget(ssh=ssh_target_for_vm(vm, config))
-        if wait_for_reconnect(ts_target):
+        if wait_for_reconnect(admin_exec_target(vm, config)):
             return
 
         # Tailscale didn't reconnect (ephemeral key expired, etc.)
@@ -980,7 +1104,7 @@ def _ensure_tailscale(
 
     try:
         verify_tailscale_available()
-        exec_target = provisioner.exec_target(vm, config=config)
+        exec_target = provisioner.admin_exec_target(vm, config=config)
         rejoin_tailscale(
             db,
             vm.name,
@@ -992,12 +1116,11 @@ def _ensure_tailscale(
             azure_provisioner.detach_public_ip(vm)
 
             # Wait for Tailscale SSH to reconnect after IP change
-            from agentworks.ssh import ExecTarget, ssh_target_for_vm, wait_for_reconnect
+            from agentworks.ssh import admin_exec_target, wait_for_reconnect
 
             refreshed = db.get_vm(vm.name)
             if refreshed and refreshed.tailscale_host:
-                ts_target = ExecTarget(ssh=ssh_target_for_vm(refreshed, config))
-                wait_for_reconnect(ts_target)
+                wait_for_reconnect(admin_exec_target(refreshed, config))
 
     # Update SSH config in case the Tailscale IP changed
     from agentworks.ssh_config import sync_ssh_config

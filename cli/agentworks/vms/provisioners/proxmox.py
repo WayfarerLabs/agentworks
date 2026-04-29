@@ -138,7 +138,7 @@ class ProxmoxProvisioner(VMProvisioner):
         )
 
         return ProvisionResult(
-            exec_target=target,
+            admin_exec_target=target,
             proxmox_vmid=str(newid),
             bootstrap_complete=bootstrap_complete,
             tailscale_ip=tailscale_ip,
@@ -187,19 +187,11 @@ class ProxmoxProvisioner(VMProvisioner):
             return VMStatus.STOPPED
         return VMStatus.UNKNOWN
 
-    def exec_target(self, vm: VMRow, *, config: object | None = None) -> ExecTarget:
-        identity_file = None
-        if config is not None and hasattr(config, "operator"):
-            identity_file = config.operator.ssh_private_key
-
-        host = vm.tailscale_host or "unknown"
-
-        return ExecTarget(
-            ssh=SSHTarget(
-                host=host,
-                user=vm.admin_username,
-                identity_file=identity_file,
-            )
+    def admin_exec_target(self, vm: VMRow, *, config: object | None = None) -> ExecTarget:
+        raise NotImplementedError(
+            "Proxmox provisioning transport not yet implemented. "
+            "Requires QEMU guest agent exec integration. "
+            "See docs/sdd/2026-04-27-exec-target-cleanup/hla.md for details."
         )
 
     # -- Helpers ---------------------------------------------------------------

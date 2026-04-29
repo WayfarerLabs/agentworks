@@ -60,6 +60,7 @@ DYNAMIC_COMPLETIONS: dict[tuple[str, str], str] = {
     ("vm.start", "name"): "vms",
     ("vm.stop", "name"): "vms",
     ("vm.delete", "name"): "vms",
+    ("vm.rekey", "name"): "vms",
     ("vm.backup", "name"): "vms",
     ("vm.describe", "name"): "vms",
     ("vm.reinit", "name"): "vms",

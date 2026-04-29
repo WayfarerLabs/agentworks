@@ -329,7 +329,7 @@ def repair_workspace(
 ) -> None:
     """Repair workspace infrastructure: group, permissions, ACLs, agent access."""
     from agentworks.agents.manager import AGENT_PREFIX, WS_GROUP_PREFIX
-    from agentworks.ssh import SSHError, run_as_root, ssh_target_for_vm
+    from agentworks.ssh import SSHError, admin_exec_target, run_as_root
 
     ws = db.get_workspace(name)
     if ws is None:
@@ -346,7 +346,7 @@ def repair_workspace(
         typer.echo(f"Error: VM '{ws.vm_name}' not found", err=True)
         raise typer.Exit(1)
 
-    target = ssh_target_for_vm(vm, config)
+    target = admin_exec_target(vm, config)
     ws_group = f"{WS_GROUP_PREFIX}{name}"
     fixes = 0
 
@@ -558,7 +558,7 @@ def _rehome_vm(
 ) -> None:
     """Rehome a VM workspace."""
     from agentworks.agents.manager import WS_GROUP_PREFIX
-    from agentworks.ssh import SSHError, SSHLogger, run_as_root, ssh_target_for_vm
+    from agentworks.ssh import SSHError, SSHLogger, admin_exec_target, run_as_root
     from agentworks.ssh import run as ssh_run
     from agentworks.workspaces.backends.vm import generate_vscode_workspace
 
@@ -575,7 +575,7 @@ def _rehome_vm(
     _guard_vm_status(vm)
     _ensure_vm_running(db, config, vm)
 
-    target = ssh_target_for_vm(vm, config)
+    target = admin_exec_target(vm, config)
 
     # Verify source exists
     src_check = ssh_run(target, f"test -d {old_path}", check=False, timeout=10)
@@ -819,9 +819,9 @@ def delete_workspace(
 
             from agentworks.sessions.manager import _effective_socket_path
             from agentworks.sessions.tmux import kill_session
-            from agentworks.ssh import run, ssh_target_for_vm
+            from agentworks.ssh import admin_exec_target, run
 
-            target = ssh_target_for_vm(vm, config)
+            target = admin_exec_target(vm, config)
             run_command = partial(run, target, logger=ssh_logger)
             for session in db.list_sessions(workspace_name=name):
                 sock = _effective_socket_path(db, session)
@@ -874,7 +874,7 @@ def copy_workspace(
     import tempfile
     from pathlib import Path
 
-    from agentworks.ssh import ssh_target_for_vm
+    from agentworks.ssh import admin_exec_target
 
     validate_name(dest_name)
 
@@ -916,14 +916,16 @@ def copy_workspace(
                 typer.echo(f"Error: VM '{src_vm.name}' has no Tailscale address", err=True)
                 raise typer.Exit(1)
 
-            src_target = ssh_target_for_vm(src_vm, config)
+            src_exec = admin_exec_target(src_vm, config)
+            assert src_exec.ssh is not None
+            src_ssh = src_exec.ssh
             typer.echo(f"Packing workspace '{source_name}' from VM '{src_vm.name}'...")
 
             # Stream tar from VM to local temp file
             ssh_args = ["ssh", "-o", "StrictHostKeyChecking=accept-new", "-o", "BatchMode=yes"]
-            if src_target.identity_file is not None:
-                ssh_args.extend(["-i", str(src_target.identity_file)])
-            ssh_args.append(f"{src_target.user}@{src_target.host}")
+            if src_ssh.identity_file is not None:
+                ssh_args.extend(["-i", str(src_ssh.identity_file)])
+            ssh_args.append(f"{src_ssh.user}@{src_ssh.host}")
             ssh_args.append(f"tar czf - -C {src_ws.workspace_path} .")
 
             with open(tmp_path, "wb") as f:
@@ -970,7 +972,7 @@ def copy_workspace(
                 raise typer.Exit(1)
 
             lg = SSHLogger(dest_vm.name, "workspace-copy")
-            dest_target = ssh_target_for_vm(dest_vm, config)
+            dest_target = admin_exec_target(dest_vm, config)
             workspace_path = f"{config.paths.vm_workspaces}/{dest_name}"
 
             ws_group = f"ws--{dest_name}"

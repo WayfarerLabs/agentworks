@@ -313,7 +313,7 @@ class AzureProvisioner(VMProvisioner):
                 bootstrap_complete = True
 
         return ProvisionResult(
-            exec_target=exec_target,
+            admin_exec_target=exec_target,
             azure_resource_id=resource_id or None,
             bootstrap_complete=bootstrap_complete,
             tailscale_ip=tailscale_ip,
@@ -465,7 +465,7 @@ class AzureProvisioner(VMProvisioner):
         with contextlib.suppress(Exception):
             network.public_ip_addresses.begin_delete(rg, f"{name}-ip").result()
 
-    def exec_target(self, vm: VMRow, *, config: object | None = None) -> ExecTarget:
+    def admin_exec_target(self, vm: VMRow, *, config: object | None = None) -> ExecTarget:
         assert vm.azure_resource_id is not None
         rg, name, az_cfg = _parse_resource_id(vm.azure_resource_id)
         try:
@@ -486,7 +486,7 @@ class AzureProvisioner(VMProvisioner):
         # via public IP, e.g., during Tailscale logout on delete)
         identity_file = None
         if config is not None:
-            identity_file = getattr(getattr(config, "user", None), "ssh_private_key", None)
+            identity_file = getattr(getattr(config, "operator", None), "ssh_private_key", None)
 
         return ExecTarget(
             ssh=SSHTarget(
