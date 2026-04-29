@@ -53,22 +53,29 @@ def ensure_agent_socket_root(
     grp = shlex.quote(AGENT_SOCKET_GROUP)
     q_root = shlex.quote(AGENT_SOCKET_ROOT)
 
-    # Fast path: directory exists, owned by the right group, correct perms.
-    # Empty stdout => `test -d` failed => directory is absent.
-    # Non-empty, non-matching stdout => directory exists but is misconfigured.
+    # Probe with explicit sentinels so each state is unambiguous:
+    #   MISSING      -- `test -d` failed; directory is absent
+    #   PROBE_FAILED -- directory exists but stat couldn't read it
+    #   <stat out>   -- directory exists with that owner/perms
     probe = run_command(
-        f'test -d {q_root} && stat -c "%G %a" {q_root} 2>/dev/null',
+        f'if test -d {q_root}; then stat -c "%G %a" {q_root} 2>/dev/null || echo PROBE_FAILED; '
+        f"else echo MISSING; fi",
         check=False,
     )
     stdout = (getattr(probe, "stdout", "") or "").strip()
     if stdout == f"{AGENT_SOCKET_GROUP} 2771":
         return
 
-    exists = bool(stdout)
-    if exists or warn_if_missing:
+    if stdout == "MISSING":
+        should_warn, state = warn_if_missing, "missing"
+    elif stdout == "PROBE_FAILED":
+        should_warn, state = True, "probe failed"
+    else:
+        should_warn, state = True, "misconfigured"
+
+    if should_warn:
         from agentworks.output import warn
 
-        state = "misconfigured" if exists else "missing"
         warn(f"Socket root {AGENT_SOCKET_ROOT} {state}, recreating")
 
     admin = shlex.quote(admin_username)
@@ -108,22 +115,29 @@ def ensure_agent_socket_dir(
     grp = shlex.quote(AGENT_SOCKET_GROUP)
     q_path = shlex.quote(f"{AGENT_SOCKET_ROOT}/{linux_user}")
 
-    # Fast path: directory exists, correct owner:group, correct perms.
-    # Empty stdout => `test -d` failed => directory is absent.
-    # Non-empty, non-matching stdout => directory exists but is misconfigured.
+    # Probe with explicit sentinels so each state is unambiguous:
+    #   MISSING      -- `test -d` failed; directory is absent
+    #   PROBE_FAILED -- directory exists but stat couldn't read it
+    #   <stat out>   -- directory exists with that owner/group/perms
     probe = run_command(
-        f'test -d {q_path} && stat -c "%U %G %a" {q_path} 2>/dev/null',
+        f'if test -d {q_path}; then stat -c "%U %G %a" {q_path} 2>/dev/null || echo PROBE_FAILED; '
+        f"else echo MISSING; fi",
         check=False,
     )
     stdout = (getattr(probe, "stdout", "") or "").strip()
     if stdout == f"{linux_user} {AGENT_SOCKET_GROUP} 2770":
         return
 
-    exists = bool(stdout)
-    if exists or warn_if_missing:
+    if stdout == "MISSING":
+        should_warn, state = warn_if_missing, "missing"
+    elif stdout == "PROBE_FAILED":
+        should_warn, state = True, "probe failed"
+    else:
+        should_warn, state = True, "misconfigured"
+
+    if should_warn:
         from agentworks.output import warn
 
-        state = "misconfigured" if exists else "missing"
         warn(f"Socket directory for {linux_user} {state}, recreating")
 
     run_command(f"mkdir -p {q_path}")
