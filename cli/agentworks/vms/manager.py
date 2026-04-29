@@ -509,7 +509,9 @@ def rekey_vm(
     Uses the provisioner's admin_exec_target (out-of-band transport) since
     Tailscale connectivity drops during the operation.
     """
+    import ipaddress
     import os
+    import shlex
     import time
 
     from agentworks.prompt import prompt_secret
@@ -542,9 +544,6 @@ def rekey_vm(
         azure_provisioner.attach_public_ip(vm)
 
     try:
-        import ipaddress
-        import shlex
-
         exec_target = provisioner.admin_exec_target(vm, config=config)
 
         # Wait for the provisioning transport to be reachable

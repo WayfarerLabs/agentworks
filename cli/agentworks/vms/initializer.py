@@ -12,6 +12,7 @@ Phase B steps are non-fatal -- failures produce warnings and a 'partial' status.
 
 from __future__ import annotations
 
+import ipaddress
 import shlex
 import subprocess
 import tempfile
@@ -713,8 +714,6 @@ def _join_tailscale(
 
     tailscale_ip = result.stdout.strip().splitlines()[0].strip() if result.stdout.strip() else ""
     try:
-        import ipaddress
-
         ipaddress.IPv4Address(tailscale_ip)
     except ValueError:
         raise SSHError(f"tailscale ip -4 returned invalid address: {result.stdout.strip()!r}") from None
