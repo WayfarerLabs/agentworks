@@ -12,7 +12,6 @@ Phase B steps are non-fatal -- failures produce warnings and a 'partial' status.
 
 from __future__ import annotations
 
-import re
 import shlex
 import subprocess
 import tempfile
@@ -713,8 +712,12 @@ def _join_tailscale(
     result = exec_target.run("tailscale ip -4", sudo=True)
 
     tailscale_ip = result.stdout.strip().splitlines()[0].strip() if result.stdout.strip() else ""
-    if not re.match(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$", tailscale_ip):
-        raise SSHError(f"tailscale ip -4 returned invalid address: {result.stdout.strip()!r}")
+    try:
+        import ipaddress
+
+        ipaddress.IPv4Address(tailscale_ip)
+    except ValueError:
+        raise SSHError(f"tailscale ip -4 returned invalid address: {result.stdout.strip()!r}") from None
     typer.echo(f"  Tailscale IP: {tailscale_ip}")
     db.update_vm_tailscale(vm_name, tailscale_ip)
     return tailscale_ip
