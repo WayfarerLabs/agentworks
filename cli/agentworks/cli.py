@@ -378,12 +378,15 @@ def vm_rekey(
     wait_for_share: Annotated[
         bool, typer.Option("--wait-for-share", help="Wait for operator to share VM back to their tailnet")
     ] = False,
+    ignore_env: Annotated[
+        bool, typer.Option("--ignore-env", help="Ignore TAILSCALE_AUTH_KEY env var and prompt for key")
+    ] = False,
 ) -> None:
     """Assign a new Tailscale auth key to a VM (logout + rejoin)."""
     from agentworks.config import load_config
     from agentworks.vms.manager import rekey_vm
 
-    rekey_vm(_get_db(), load_config(), name, wait_for_share=wait_for_share)
+    rekey_vm(_get_db(), load_config(), name, wait_for_share=wait_for_share, ignore_env=ignore_env)
 
 
 @vm_app.command("reinit")

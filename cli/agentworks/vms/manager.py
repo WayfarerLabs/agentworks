@@ -503,6 +503,7 @@ def rekey_vm(
     name: str,
     *,
     wait_for_share: bool = False,
+    ignore_env: bool = False,
 ) -> None:
     """Assign a new Tailscale auth key to a VM (logout + rejoin).
 
@@ -531,8 +532,10 @@ def rekey_vm(
         raise typer.Exit(1)
 
     # Collect new auth key
-    ts_auth_key = os.environ.get("TAILSCALE_AUTH_KEY")
-    if not ts_auth_key:
+    ts_auth_key = os.environ.get("TAILSCALE_AUTH_KEY") if not ignore_env else None
+    if ts_auth_key:
+        typer.echo("  Tailscale auth key found in environment")
+    else:
         ts_auth_key = prompt_secret(
             "Tailscale auth key",
             hint="Generate a key at https://login.tailscale.com/admin/settings/keys",
