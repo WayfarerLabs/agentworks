@@ -85,7 +85,12 @@ def ensure_agent_socket_root(
     run_command(f"chmod 2771 {AGENT_SOCKET_ROOT}")
 
 
-def ensure_agent_socket_dir(run_command: RunCommand, linux_user: str) -> None:
+def ensure_agent_socket_dir(
+    run_command: RunCommand,
+    linux_user: str,
+    *,
+    warn_if_missing: bool = True,
+) -> None:
     """Create a per-agent tmux socket directory (idempotent).
 
     Fast-paths when the directory already exists with the correct owner/group
@@ -93,12 +98,19 @@ def ensure_agent_socket_dir(run_command: RunCommand, linux_user: str) -> None:
 
     Each command is a separate call so that callers wrapping with sudo apply
     privilege to every command individually.
+
+    Pass ``warn_if_missing=False`` when the caller already knows the directory
+    won't exist (e.g. creating a brand-new agent), to avoid a misleading
+    warning. Misconfiguration (directory exists with wrong owner/perms)
+    always warns, regardless of this flag.
     """
     q_user = shlex.quote(linux_user)
     grp = shlex.quote(AGENT_SOCKET_GROUP)
     q_path = shlex.quote(f"{AGENT_SOCKET_ROOT}/{linux_user}")
 
     # Fast path: directory exists, correct owner:group, correct perms.
+    # Empty stdout => `test -d` failed => directory is absent.
+    # Non-empty, non-matching stdout => directory exists but is misconfigured.
     probe = run_command(
         f'test -d {q_path} && stat -c "%U %G %a" {q_path} 2>/dev/null',
         check=False,
@@ -107,9 +119,12 @@ def ensure_agent_socket_dir(run_command: RunCommand, linux_user: str) -> None:
     if stdout == f"{linux_user} {AGENT_SOCKET_GROUP} 2770":
         return
 
-    from agentworks.output import warn
+    exists = bool(stdout)
+    if exists or warn_if_missing:
+        from agentworks.output import warn
 
-    warn(f"Socket directory for {linux_user} missing or misconfigured, recreating")
+        state = "misconfigured" if exists else "missing"
+        warn(f"Socket directory for {linux_user} {state}, recreating")
 
     run_command(f"mkdir -p {q_path}")
     run_command(f"chown {q_user}:{grp} {q_path}")
