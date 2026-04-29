@@ -570,14 +570,28 @@ def rekey_vm(
                 time.sleep(5)
         typer.echo("  Connected.")
 
-        # Logout and rejoin. Manual testing confirms these commands work
-        # fine over SSH without disrupting the connection.
+        # Restart, logout, login, restart. The initial restart clears any
+        # stale daemon state (a previous interrupted rekey can leave the
+        # daemon in a state where `tailscale logout` hangs waiting for a
+        # control plane response that never comes). The final restart
+        # fixes a Tailscale bug where the node registers but peers can't
+        # reach it after rekeying to a different tailnet.
+        typer.echo("  Restarting Tailscale daemon...")
+        exec_target.run("systemctl restart tailscaled", sudo=True, timeout=15)
+        time.sleep(15)
+
         typer.echo("  Logging out of current tailnet...")
         exec_target.run("tailscale logout", sudo=True, timeout=30)
+        time.sleep(15)
 
         typer.echo("  Joining new tailnet...")
         quoted_key = shlex.quote(ts_auth_key)
         exec_target.run(f"tailscale up --auth-key {quoted_key}", sudo=True, timeout=30)
+        time.sleep(15)
+
+        typer.echo("  Restarting Tailscale daemon...")
+        exec_target.run("systemctl restart tailscaled", sudo=True, timeout=15)
+        time.sleep(15)
 
         typer.echo("  Reading new Tailscale IP...")
         result = exec_target.run("tailscale ip -4", sudo=True, timeout=15)
