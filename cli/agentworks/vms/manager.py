@@ -587,28 +587,33 @@ def rekey_vm(
             raise SSHError(f"tailscale ip -4 returned invalid address: {raw_ip_output!r}") from None
         typer.echo(f"  Tailscale IP: {new_ip}")
 
+        # Update DB and SSH config with the new IP (correct regardless of
+        # reachability -- the old IP is definitely dead after logout)
+        db.update_vm_tailscale(name, new_ip)
+        sync_ssh_config(config, db)
+        db.insert_vm_event(name, "rekey", f"new_ip={new_ip}")
+
+        # If the operator needs to share the VM back, pause before connectivity check
         if wait_for_share:
             typer.echo(
                 "\nShare the VM back to your tailnet, then press Enter to verify connectivity..."
             )
             input()
-            typer.echo(f"  Verifying SSH to {new_ip}...")
-            # Build a Tailscale SSH target to test connectivity
-            ts_target = admin_exec_target(vm, config)
-            assert ts_target.ssh is not None
-            from dataclasses import replace
 
-            ts_target = replace(ts_target, ssh=replace(ts_target.ssh, host=new_ip))
-            if wait_for_reconnect(ts_target):
-                typer.echo("  Connectivity verified.")
-            else:
-                warn(f"could not reach {new_ip} via SSH, updating DB anyway")
+        # Always verify Tailscale SSH connectivity to the new IP
+        typer.echo(f"  Verifying SSH to {new_ip}...")
+        from dataclasses import replace
 
-        # Update DB and SSH config
-        db.update_vm_tailscale(name, new_ip)
-        sync_ssh_config(config, db)
-        db.insert_vm_event(name, "rekey", f"new_ip={new_ip}")
-        typer.echo(f"VM '{name}' rekeyed. New Tailscale IP: {new_ip}")
+        ts_target = admin_exec_target(vm, config)
+        assert ts_target.ssh is not None
+        ts_target = replace(ts_target, ssh=replace(ts_target.ssh, host=new_ip))
+        if wait_for_reconnect(ts_target):
+            typer.echo(f"VM '{name}' rekeyed successfully. Tailscale IP: {new_ip}")
+        else:
+            warn(
+                f"VM '{name}' rekeyed but {new_ip} is not reachable via SSH. "
+                "Check tailnet sharing/ACLs. Run 'vm rekey' again to retry."
+            )
 
     finally:
         if azure_provisioner is not None:
