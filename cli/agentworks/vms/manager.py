@@ -558,6 +558,7 @@ def rekey_vm(
         exec_target = provisioner.admin_exec_target(vm, config=config)
 
         # Wait for the provisioning transport to be reachable
+        typer.echo("  Waiting for provisioning transport...")
         for attempt in range(6):
             try:
                 exec_target.run("echo ok", timeout=10)
@@ -565,26 +566,42 @@ def rekey_vm(
             except SSHError:
                 if attempt == 5:
                     raise
+                typer.echo(f"  Retrying ({attempt + 1}/6)...")
                 time.sleep(5)
+        typer.echo("  Connected.")
 
-        # Logout from current tailnet
-        typer.echo("  Logging out of current tailnet...")
-        exec_target.run("tailscale down && tailscale logout", sudo=True, tty=False)
-        time.sleep(2)  # let the logout settle
+        # Logout and rejoin via run_detached. tailscale logout disrupts
+        # networking on SSH-based transports (Azure), so the command must
+        # survive the SSH drop. run_detached handles this via a wrapper
+        # script + nohup. Polling is resilient to transient SSH failures.
+        from agentworks.remote_exec import run_detached
 
-        # Join new tailnet
-        typer.echo("  Joining new tailnet...")
+        typer.echo("  Logging out and rejoining tailnet (detached, this may take a few minutes)...")
         quoted_key = shlex.quote(ts_auth_key)
-        exec_target.run(f"tailscale up --auth-key {quoted_key}", sudo=True)
+        rekey_cmd = f"tailscale logout && tailscale up --auth-key {quoted_key} && tailscale ip -4"
+        # 5 min timeout: tailscale logout disrupts Azure networking for 1-3
+        # minutes. run_detached polling is resilient to the SSH outage.
+        result = run_detached(
+            exec_target,
+            rekey_cmd,
+            label="Tailscale rekey",
+            base_path="/tmp/agentworks-rekey",
+            timeout=300,
+            quiet=True,
+            as_root=True,
+        )
+        if result.exit_code != 0:
+            raise SSHError(f"tailscale rekey failed (exit {result.exit_code}): {result.output}")
 
-        # Read and validate new IP
-        result = exec_target.run("tailscale ip -4", sudo=True)
-        raw_ip_output = result.stdout.strip()
-        new_ip = raw_ip_output.splitlines()[0].strip() if raw_ip_output else ""
+        # The last line of output should be the new IP from `tailscale ip -4`
+        output_lines = result.output.strip().splitlines()
+        new_ip = output_lines[-1].strip() if output_lines else ""
         try:
             ipaddress.IPv4Address(new_ip)
         except ValueError:
-            raise SSHError(f"tailscale ip -4 returned invalid address: {raw_ip_output!r}") from None
+            raise SSHError(
+                f"tailscale ip -4 returned invalid address: {new_ip!r}\nfull output: {result.output}"
+            ) from None
         typer.echo(f"  Tailscale IP: {new_ip}")
 
         # Update DB and SSH config with the new IP (correct regardless of
