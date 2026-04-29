@@ -570,37 +570,24 @@ def rekey_vm(
                 time.sleep(5)
         typer.echo("  Connected.")
 
-        # Logout and rejoin via run_detached. tailscale logout disrupts
-        # networking on SSH-based transports (Azure), so the command must
-        # survive the SSH drop. run_detached handles this via a wrapper
-        # script + nohup. Polling is resilient to transient SSH failures.
-        from agentworks.remote_exec import run_detached
+        # Logout and rejoin. Manual testing confirms these commands work
+        # fine over SSH without disrupting the connection.
+        typer.echo("  Logging out of current tailnet...")
+        exec_target.run("tailscale logout", sudo=True, timeout=30)
 
-        typer.echo("  Logging out and rejoining tailnet (detached, this may take a few minutes)...")
+        typer.echo("  Joining new tailnet...")
         quoted_key = shlex.quote(ts_auth_key)
-        rekey_cmd = f"tailscale logout && tailscale up --auth-key {quoted_key} && tailscale ip -4"
-        # 5 min timeout: tailscale logout disrupts Azure networking for 1-3
-        # minutes. run_detached polling is resilient to the SSH outage.
-        result = run_detached(
-            exec_target,
-            rekey_cmd,
-            label="Tailscale rekey",
-            base_path="/tmp/agentworks-rekey",
-            timeout=300,
-            quiet=True,
-            as_root=True,
-        )
-        if result.exit_code != 0:
-            raise SSHError(f"tailscale rekey failed (exit {result.exit_code}): {result.output}")
+        exec_target.run(f"tailscale up --auth-key {quoted_key}", sudo=True, timeout=30)
 
-        # The last line of output should be the new IP from `tailscale ip -4`
-        output_lines = result.output.strip().splitlines()
-        new_ip = output_lines[-1].strip() if output_lines else ""
+        typer.echo("  Reading new Tailscale IP...")
+        result = exec_target.run("tailscale ip -4", sudo=True, timeout=15)
+        raw_ip = result.stdout.strip()
+        new_ip = raw_ip.splitlines()[0].strip() if raw_ip else ""
         try:
             ipaddress.IPv4Address(new_ip)
         except ValueError:
             raise SSHError(
-                f"tailscale ip -4 returned invalid address: {new_ip!r}\nfull output: {result.output}"
+                f"tailscale ip -4 returned invalid address: {new_ip!r}\nfull output: {raw_ip}"
             ) from None
         typer.echo(f"  Tailscale IP: {new_ip}")
 
