@@ -1,4 +1,10 @@
-"""VM lifecycle management -- create, list, start, stop, delete."""
+"""VM lifecycle management -- create, list, start, stop, delete.
+
+TODO: typer.echo is used throughout this module for progress/status output.
+This is a layering violation (business logic should not depend on the CLI
+framework). A proper fix would introduce an output.info / output.progress
+abstraction similar to the output.warn DI mechanism. See also initializer.py.
+"""
 
 from __future__ import annotations
 
