@@ -1326,6 +1326,9 @@ def main() -> None:
 
                 raise UserAbort("interrupted") from None
 
+        def prompt(self, label: str, default: str | None = None) -> str:
+            return str(typer.prompt(label, default=default or ""))
+
         def prompt_secret(self, label: str, hint: str | None = None) -> str:
             import click
 

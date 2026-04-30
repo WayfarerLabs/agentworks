@@ -49,6 +49,7 @@ class CapturedOutput:
     progress_items: list[_CapturedProgress] = field(default_factory=list)
     prompt_bool_response: bool = True  # what confirm() returns in tests
     choose_response: int = 0  # what choose() returns in tests
+    prompt_response: str = "test-value"  # what prompt() returns in tests
     secret_response: str = "test-secret"  # what prompt_secret() returns in tests
 
 
@@ -73,6 +74,9 @@ class _TestHandler:
 
     def pause(self, message: str) -> None:
         pass  # no-op in tests
+
+    def prompt(self, label: str, default: str | None = None) -> str:
+        return self._captured.prompt_response
 
     def prompt_secret(self, label: str, hint: str | None = None) -> str:
         return self._captured.secret_response

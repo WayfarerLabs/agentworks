@@ -66,6 +66,10 @@ class OutputHandler(Protocol):
         """Wait for user acknowledgment (press Enter)."""
         ...
 
+    def prompt(self, label: str, default: str | None = None) -> str:
+        """Collect a string value. If default is provided and user enters nothing, returns default."""
+        ...
+
     def prompt_secret(self, label: str, hint: str | None = None) -> str:
         """Collect a secret value with masked input. Rejects empty values."""
         ...
@@ -147,6 +151,14 @@ class _DefaultHandler:
         except (EOFError, KeyboardInterrupt):
             raise UserAbort("interrupted") from None
 
+    def prompt(self, label: str, default: str | None = None) -> str:
+        try:
+            suffix = f" [{default}]" if default else ""
+            value = input(f"{label}{suffix}: ").strip()
+            return value if value else (default or "")
+        except (EOFError, KeyboardInterrupt):
+            raise UserAbort("interrupted") from None
+
     def prompt_secret(self, label: str, hint: str | None = None) -> str:
         import getpass
 
@@ -201,6 +213,11 @@ def choose(message: str, options: list[str]) -> int:
 def pause(message: str) -> None:
     """Wait for user acknowledgment (press Enter)."""
     _handler.pause(message)
+
+
+def prompt(label: str, default: str | None = None) -> str:
+    """Collect a string value. Returns default if user enters nothing."""
+    return _handler.prompt(label, default)
 
 
 def prompt_secret(label: str, hint: str | None = None) -> str:
