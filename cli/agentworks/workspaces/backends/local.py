@@ -48,13 +48,14 @@ def create_local_workspace(
         except subprocess.TimeoutExpired:
             raise output.WorkspaceError("git clone timed out after 5 minutes") from None
         if result.returncode != 0:
+            hint = ""
             if template.repo.startswith("https://"):
-                output.detail(
-                    "Hint: HTTPS repo URLs require credentials. "
+                hint = (
+                    "\nHint: HTTPS repo URLs require credentials. "
                     "For private repos, use an SSH URL (git@...) so "
                     "your SSH key provides authentication."
                 )
-            raise output.WorkspaceError(f"git clone failed: {result.stderr.strip()}")
+            raise output.WorkspaceError(f"git clone failed: {result.stderr.strip()}{hint}")
     else:
         workspace_dir.mkdir(parents=True)
 

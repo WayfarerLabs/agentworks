@@ -316,7 +316,7 @@ def _archive_workspaces(
         _transfer_with_progress(target_ssh, archive, local_archive, remote_size)
 
     except Exception:
-        output.detail(f"Remote temp dir preserved for debugging: {tmp_dir}")
+        output.warn(f"Remote temp dir preserved for debugging: {tmp_dir}")
         raise
     else:
         target.run(f"rm -rf {q_tmp}", sudo=True, check=False)

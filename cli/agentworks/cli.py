@@ -1319,7 +1319,12 @@ def main() -> None:
             return choice - 1
 
         def pause(self, message: str) -> None:
-            input(message)
+            try:
+                input(message)
+            except (EOFError, KeyboardInterrupt):
+                from agentworks.output import UserAbort
+
+                raise UserAbort("interrupted") from None
 
         def prompt_secret(self, label: str, hint: str | None = None) -> str:
             import click

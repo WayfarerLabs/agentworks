@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import platform
 import subprocess
-import sys
 import urllib.request
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -152,29 +151,25 @@ def _download_debian_rootfs(tarball_path: str) -> None:
     # 3. Download the rootfs layer with progress
     blob_url = f"{_DOCKER_BLOBS_URL}/{digest}"
     req = urllib.request.Request(blob_url, headers=auth_header)
-    size_mb = f" (~{total_bytes // 1024 // 1024} MB)" if total_bytes else ""
-    output.detail(f"Downloading Debian rootfs{size_mb}...")
+    p = output.progress("Downloading Debian rootfs", total=total_bytes or None)
 
     dest = Path(tarball_path)
     with _blob_opener.open(req) as resp, dest.open("wb") as f:
         downloaded = 0
         chunk_size = 256 * 1024
+        last_update = 0
         while True:
             chunk = resp.read(chunk_size)
             if not chunk:
                 break
             f.write(chunk)
             downloaded += len(chunk)
-            if total_bytes:
-                pct = downloaded * 100 // total_bytes
-                mb = downloaded // 1024 // 1024
-                total_mb = total_bytes // 1024 // 1024
-                sys.stderr.write(f"\r  Progress: {mb}/{total_mb} MB ({pct}%)")
-                sys.stderr.flush()
-        if total_bytes:
-            sys.stderr.write("\n")
+            # Update every ~1MB to avoid flooding
+            if downloaded - last_update >= 1024 * 1024:
+                p.update(downloaded)
+                last_update = downloaded
 
-    output.detail("Download complete.")
+    p.done()
 
 
 class WSL2Provisioner(VMProvisioner):

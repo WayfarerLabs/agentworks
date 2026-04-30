@@ -744,7 +744,7 @@ def reinit_vm(
         )
     except Exception:
         logger.close()
-        output.detail(f"Log: {logger.path}")
+        output.warn(f"Log: {logger.path}")
         raise
 
     logger.close()
