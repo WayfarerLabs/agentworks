@@ -21,8 +21,8 @@ from typing import TYPE_CHECKING
 
 import typer
 
+from agentworks import output
 from agentworks.db import InitStatus, ProvisioningStatus
-from agentworks.output import warn
 from agentworks.ssh import ExecTarget, SSHError, SSHLogger, SSHTarget
 from agentworks.vms.cloud_init import INIT_SYSTEM_PACKAGES, PROVISIONING_PACKAGES
 
@@ -60,7 +60,7 @@ def _write_agentworks_profile(
             unique_paths.append(p)
 
     logger.step("Shell profile")
-    typer.echo(f"  Writing agentworks profile ({len(unique_paths)} PATH entries)...")
+    output.detail(f"Writing agentworks profile ({len(unique_paths)} PATH entries)...")
 
     try:
         lines = ["# Managed by agentworks -- do not edit"]
@@ -78,7 +78,7 @@ def _write_agentworks_profile(
     except SSHError as e:
         msg = f"shell profile write failed: {e}"
         logger.warning(msg)
-        warn(msg)
+        output.warn(msg)
 
 
 def _write_agentworks_rc(
@@ -93,7 +93,7 @@ def _write_agentworks_rc(
     Always written (even if empty) so that reinit can clear previously set hooks.
     """
     logger.step("Shell rc")
-    typer.echo("  Writing agentworks rc...")
+    output.detail("Writing agentworks rc...")
 
     try:
         lines = ["# Managed by agentworks -- do not edit"]
@@ -109,7 +109,7 @@ def _write_agentworks_rc(
     except SSHError as e:
         msg = f"shell rc write failed: {e}"
         logger.warning(msg)
-        warn(msg)
+        output.warn(msg)
 
 
 # -- Mise installation ---------------------------------------------------------
@@ -152,7 +152,7 @@ def _write_mise_config(
         return
 
     logger.step("Mise config")
-    typer.echo(f"  Writing mise config with {len(packages)} package(s)...")
+    output.detail(f"Writing mise config with {len(packages)} package(s)...")
 
     settings_lines = ["[settings]", f'install_before = "{install_before}"', ""]
     tools_lines = ["[tools]"]
@@ -173,7 +173,7 @@ def _write_mise_config(
     except SSHError as e:
         msg = f"mise config write failed: {e}"
         logger.warning(msg)
-        warn(msg)
+        output.warn(msg)
 
 
 def _fetch_mise_lockfile(
@@ -186,7 +186,7 @@ def _fetch_mise_lockfile(
     from agentworks.sources import SourceRefError, fetch_file, parse_source_ref
 
     logger.step("Mise lockfile")
-    typer.echo(f"  Fetching mise lockfile from {lockfile_source}...")
+    output.detail(f"Fetching mise lockfile from {lockfile_source}...")
 
     try:
         ref = parse_source_ref(lockfile_source, default_filename="mise.lock")
@@ -196,7 +196,7 @@ def _fetch_mise_lockfile(
     except SourceRefError as e:
         msg = f"mise lockfile fetch failed: {e}"
         logger.warning(msg)
-        warn(msg)
+        output.warn(msg)
 
 
 def _parse_mise_failures(error: SSHError) -> list[str]:
@@ -246,42 +246,42 @@ def _run_mise_install(
     installed = False
 
     if has_lockfile:
-        typer.echo("  Running mise install (locked)...")
+        output.detail("Running mise install (locked)...")
         try:
             target.run(
                 f"{shell} -lc 'mise install -y --locked'",
                 timeout=300,
             )
-            typer.echo("  Mise packages installed (locked)")
+            output.detail("Mise packages installed (locked)")
             installed = True
         except SSHError as e:
             logger.warning(f"mise install --locked failed: {e}")
             failures = _parse_mise_failures(e)
             for tool in failures:
-                typer.echo(f"  Locked install failed, not in lockfile: {tool}", err=True)
+                output.warn(f"Locked install failed, not in lockfile: {tool}")
             if not failures:
-                warn("mise install --locked failed (see vm logs)")
+                output.warn("mise install --locked failed (see vm logs)")
             if not allow_unlocked:
-                typer.echo("  Hint: set mise_allow_unlocked = true to install unlocked packages", err=True)
+                output.warn("Hint: set mise_allow_unlocked = true to install unlocked packages")
                 return
-            typer.echo("  Retrying unlocked...", err=True)
+            output.warn("Retrying unlocked...")
 
     if not installed:
-        typer.echo("  Running mise install...")
+        output.detail("Running mise install...")
         try:
             target.run(
                 f"{shell} -lc 'mise install -y'",
                 timeout=300,
             )
-            typer.echo("  Mise packages installed")
+            output.detail("Mise packages installed")
             installed = True
         except SSHError as e:
             logger.warning(f"mise install failed: {e}")
             failures = _parse_mise_failures(e)
             for tool in failures:
-                typer.echo(f"  Failed: {tool}", err=True)
+                output.warn(f"Failed: {tool}")
             if not failures:
-                warn("mise install failed (see vm logs)")
+                output.warn("mise install failed (see vm logs)")
 
     # Prune stale tool versions not in the current config
     if installed and prune:
@@ -319,7 +319,7 @@ def _reconcile_authorized_keys(
 
     extra_count = len(keys) - 1
     label = f"1 primary + {extra_count} extra" if extra_count else "1 primary"
-    typer.echo(f"  Reconciling authorized_keys ({label})...")
+    output.detail(f"Reconciling authorized_keys ({label})...")
 
     content = AUTHORIZED_KEYS_HEADER + "\n".join(keys) + "\n"
     try:
@@ -327,7 +327,7 @@ def _reconcile_authorized_keys(
     except SSHError as e:
         msg = f"authorized_keys reconciliation failed: {e}"
         logger.warning(msg)
-        warn(msg)
+        output.warn(msg)
 
 
 def _configure_apt_sources(
@@ -368,7 +368,7 @@ def _configure_apt_sources(
         key_exists = target.run(f"test -f {shlex.quote(src.key_path)}", check=False).returncode == 0
 
         if not key_exists:
-            typer.echo(f"  Configuring apt source '{name}'...")
+            output.detail(f"Configuring apt source '{name}'...")
             try:
                 # Ensure parent directory for key_path exists
                 from pathlib import PurePosixPath
@@ -396,7 +396,7 @@ def _configure_apt_sources(
             except SSHError as exc:
                 msg = f"apt source '{name}' failed: {exc}"
                 logger.warning(msg)
-                warn(msg)
+                output.warn(msg)
                 continue
 
         # Always ensure the source list file has the correct content,
@@ -407,12 +407,12 @@ def _configure_apt_sources(
         current = target.run(f"cat {shlex.quote(source_path)}", check=False)
         if current.returncode == 0 and current.stdout == expected:
             if key_exists:
-                typer.echo(f"  Apt source '{name}': already configured, skipping")
+                output.detail(f"Apt source '{name}': already configured, skipping")
                 logger.output(f"apt source {name}: key and source list up to date, skipping")
             continue
 
         if key_exists:
-            typer.echo(f"  Apt source '{name}': updating source list...")
+            output.detail(f"Apt source '{name}': updating source list...")
             logger.output(f"apt source {name}: key exists but source list needs update")
 
         try:
@@ -424,16 +424,16 @@ def _configure_apt_sources(
         except SSHError as e:
             msg = f"apt source '{name}' failed: {e}"
             logger.warning(msg)
-            warn(msg)
+            output.warn(msg)
 
     if newly_configured:
-        typer.echo("  Running apt-get update...")
+        output.detail("Running apt-get update...")
         try:
             target.run("apt-get update -qq", sudo=True, timeout=120)
         except SSHError as e:
             msg = f"apt-get update failed after adding sources: {e}"
             logger.warning(msg)
-            warn(msg)
+            output.warn(msg)
 
 
 def _install_system_packages(
@@ -455,17 +455,17 @@ def _install_system_packages(
     except SSHError as e:
         msg = f"mise apt source setup failed: {e}"
         logger.warning(msg)
-        warn(msg)
+        output.warn(msg)
 
-    typer.echo("  Running apt-get update...")
+    output.detail("Running apt-get update...")
     try:
         target.run("apt-get update -qq", sudo=True, timeout=120)
     except SSHError as e:
         msg = f"apt-get update failed: {e}"
         logger.warning(msg)
-        warn(msg)
+        output.warn(msg)
 
-    typer.echo(f"  Installing {len(INIT_SYSTEM_PACKAGES)} system packages...")
+    output.detail(f"Installing {len(INIT_SYSTEM_PACKAGES)} system packages...")
     apt_str = " ".join(shlex.quote(p) for p in INIT_SYSTEM_PACKAGES)
     try:
         target.run(
@@ -476,7 +476,7 @@ def _install_system_packages(
     except SSHError as e:
         msg = f"system packages failed: {e}"
         logger.warning(msg)
-        warn(msg)
+        output.warn(msg)
 
 
 def _install_apt_packages(
@@ -501,7 +501,7 @@ def _install_apt_packages(
         return
 
     logger.step("Apt packages")
-    typer.echo(f"  Installing {len(all_apt)} apt packages...")
+    output.detail(f"Installing {len(all_apt)} apt packages...")
     apt_str = " ".join(shlex.quote(p) for p in all_apt)
     try:
         target.run(
@@ -512,7 +512,7 @@ def _install_apt_packages(
     except SSHError as e:
         msg = f"apt packages failed: {e}"
         logger.warning(msg)
-        warn(msg)
+        output.warn(msg)
 
 
 def _build_test_command(
@@ -558,7 +558,7 @@ def _run_catalog_commands(
         if entry is None:
             msg = f"{label.lower()} '{name}' not found in catalog"
             logger.warning(msg)
-            warn(msg)
+            output.warn(msg)
             continue
         logger.step(f"{label} {i}/{total}: {name}")
 
@@ -568,7 +568,7 @@ def _run_catalog_commands(
             try:
                 check = target.run(test_cmd, check=False, timeout=10)
                 if check.returncode == 0:
-                    typer.echo(f"  {label} {i}/{total} ({name}): already installed, skipping")
+                    output.detail(f"{label} {i}/{total} ({name}): already installed, skipping")
                     logger.output(f"{name}: already installed ({test_cmd}), skipping")
                     path_additions.extend(entry.path)
                     continue
@@ -577,13 +577,13 @@ def _run_catalog_commands(
                 logger.output(f"{name}: install check failed ({e}), assuming not installed")
 
         truncated = entry.command[:60]
-        typer.echo(f"  {label} {i}/{total} ({name}): {truncated}...")
+        output.detail(f"{label} {i}/{total} ({name}): {truncated}...")
         try:
             target.run(f"{shlex.quote(shell)} -lc {shlex.quote(entry.command)}", timeout=120)
         except SSHError as e:
             msg = f"{label.lower()} '{name}' failed: {truncated}... ({e})"
             logger.warning(msg)
-            warn(msg)
+            output.warn(msg)
         path_additions.extend(entry.path)
 
     return path_additions
@@ -649,7 +649,7 @@ def verify_git_credential_auth(providers: dict[str, GitCredentialProvider]) -> N
             raise typer.Exit(1)
     if providers:
         labels = [p.display_name for p in providers.values()]
-        typer.echo(f"Git credentials configured: {', '.join(labels)}")
+        output.info(f"Git credentials configured: {', '.join(labels)}")
 
 
 def rejoin_tailscale(
@@ -666,7 +666,7 @@ def rejoin_tailscale(
 
     Returns the new Tailscale IP.
     """
-    typer.echo("Tailscale node not reachable. Re-joining tailnet...")
+    output.info("Tailscale node not reachable. Re-joining tailnet...")
 
     # Ensure Tailscale is installed (idempotent)
     exec_target.run(
@@ -718,7 +718,7 @@ def _join_tailscale(
         ipaddress.IPv4Address(tailscale_ip)
     except ValueError:
         raise SSHError(f"tailscale ip -4 returned invalid address: {raw_ip_output!r}") from None
-    typer.echo(f"  Tailscale IP: {tailscale_ip}")
+    output.detail(f"Tailscale IP: {tailscale_ip}")
     db.update_vm_tailscale(vm_name, tailscale_ip)
     return tailscale_ip
 
@@ -794,7 +794,7 @@ def initialize_vm(
         db.update_vm_provisioning_status(vm_name, ProvisioningStatus.FAILED)
         db.insert_vm_event(vm_name, "provisioning_failed", str(e))
         logger.close()
-        typer.echo(f"  Log: {logger.path}", err=True)
+        output.warn(f"Log: {logger.path}")
         raise
 
     # Tailscale is up; caller can clean up provisioning-only resources
@@ -806,7 +806,7 @@ def initialize_vm(
         try:
             on_tailscale_ready()
         except Exception as e:
-            warn(f"post-provisioning cleanup failed: {e}")
+            output.warn(f"post-provisioning cleanup failed: {e}")
 
         # Wait for Tailscale SSH to reconnect after network changes
         from agentworks.ssh import wait_for_reconnect
@@ -942,7 +942,7 @@ def _phase_a_bootstrap(
 
     # Verify Tailscale SSH works (retry -- peer connection may take time)
     logger.step("Verify Tailscale SSH")
-    typer.echo("  Verifying Tailscale SSH...")
+    output.detail("Verifying Tailscale SSH...")
     import time
 
     for attempt in range(5):
@@ -952,7 +952,7 @@ def _phase_a_bootstrap(
         except SSHError:
             if attempt == 4:
                 raise
-            typer.echo(f"  Tailscale SSH not ready, retrying ({attempt + 1}/5)...")
+            output.detail(f"Tailscale SSH not ready, retrying ({attempt + 1}/5)...")
             time.sleep(3)
 
     return ts_target
@@ -978,7 +978,7 @@ def _run_bootstrap_script(
 
     from agentworks.vms.bootstrap_script import generate_bootstrap_script, parse_bootstrap_output, vm_hostname
 
-    typer.echo("Bootstrapping VM (detached)...")
+    output.info("Bootstrapping VM (detached)...")
 
     # Resolve Tailscale auth key
     ts_auth_key = _resolve_tailscale_auth_key(tailscale_auth_key)
@@ -1015,7 +1015,7 @@ def _run_bootstrap_script(
 
     from agentworks.remote_exec import run_detached
 
-    typer.echo("  Running bootstrap script...")
+    output.detail("Running bootstrap script...")
     detached = run_detached(
         exec_target,
         f"sudo -n /bin/bash {remote_script}",
@@ -1032,13 +1032,13 @@ def _run_bootstrap_script(
     for step in bootstrap.steps:
         logger.step(step.name)
         if step.success_msg:
-            typer.echo(f"  {step.name}: {step.success_msg}")
+            output.detail(f"{step.name}: {step.success_msg}")
             logger.output(step.success_msg)
         for warning in step.warnings:
-            warn(warning)
+            output.warn(warning)
             logger.warning(warning)
         if step.error:
-            typer.echo(f"  Error: {step.error}", err=True)
+            output.warn(f"Error: {step.error}")
             logger.log_error(step.error)
 
     # Log full output for troubleshooting
@@ -1054,7 +1054,7 @@ def _run_bootstrap_script(
     # Update DB with Tailscale info
     assert bootstrap.tailscale_ip is not None
     tailscale_ip = bootstrap.tailscale_ip
-    typer.echo(f"  Tailscale IP: {tailscale_ip}")
+    output.detail(f"Tailscale IP: {tailscale_ip}")
     db.update_vm_tailscale(vm_name, tailscale_ip)
     db.update_vm_provisioning_status(vm_name, ProvisioningStatus.COMPLETE)
 
@@ -1092,7 +1092,7 @@ def _phase_b_setup(
     """Phase B: Setup (over Tailscale SSH). Non-fatal steps warn and continue."""
     from agentworks.catalog import load_catalog, validate_selections
 
-    typer.echo("Initializing VM...")
+    output.info("Initializing VM...")
     db.update_vm_init_status(vm_name, InitStatus.IN_PROGRESS)
     catalog = load_catalog(config)
     validate_selections(config, catalog)
@@ -1109,20 +1109,20 @@ def _phase_b_setup(
     # Non-fatal: snap packages
     if config.vm.snap:
         logger.step("Snap packages")
-        typer.echo(f"  Installing {len(config.vm.snap)} snap packages...")
+        output.detail(f"Installing {len(config.vm.snap)} snap packages...")
         for pkg in config.vm.snap:
             try:
                 ts_target.run(f"snap install {shlex.quote(pkg)}", sudo=True, timeout=120)
             except SSHError as e:
                 msg = f"snap install '{pkg}' failed: {e}"
                 logger.warning(msg)
-                warn(msg)
+                output.warn(msg)
 
     # Non-fatal: set default shell (before install commands so installers
     # write to the correct rc file)
     logger.step("Shell configuration")
     admin_shell = config.admin.shell
-    typer.echo(f"  Setting shell to {admin_shell}...")
+    output.detail(f"Setting shell to {admin_shell}...")
     try:
         # Touch .zshrc before chsh to prevent zsh's first-run wizard
         # (zsh-newuser-install) from prompting interactively on next login
@@ -1135,7 +1135,7 @@ def _phase_b_setup(
     except SSHError as e:
         msg = f"shell configuration failed: {e}"
         logger.warning(msg)
-        warn(msg)
+        output.warn(msg)
 
     # Non-fatal: reconcile authorized_keys
     _reconcile_authorized_keys(ts_target, config, home, logger)
@@ -1145,10 +1145,9 @@ def _phase_b_setup(
     # Access ACLs fix existing files. Applied recursively to cover all workspaces.
     workspaces_dir = config.paths.vm_workspaces
     if workspaces_dir.startswith("/home/"):
-        typer.echo(
-            f"  Warning: vm_workspaces is under /home ({workspaces_dir}). "
-            "This may require the home directory to be world-traversable.",
-            err=True,
+        output.warn(
+            f"vm_workspaces is under /home ({workspaces_dir}). "
+            "This may require the home directory to be world-traversable."
         )
     try:
         # acl is now installed as a system package in _install_system_packages
@@ -1173,7 +1172,7 @@ def _phase_b_setup(
     except SSHError as e:
         msg = f"workspaces directory setup failed: {e}"
         logger.warning(msg)
-        warn(msg)
+        output.warn(msg)
 
     # Non-fatal: agent tmux socket directory infrastructure.
     # Creates the shared group, root directory, and per-agent subdirectories.
@@ -1185,7 +1184,7 @@ def _phase_b_setup(
         )
 
         logger.step("Agent tmux socket directories")
-        typer.echo("  Setting up agent tmux socket infrastructure...")
+        output.detail("Setting up agent tmux socket infrastructure...")
 
         def _root_cmd(command: str, *, check: bool = True) -> object:
             return ts_target.run(command, sudo=True, check=check)
@@ -1195,11 +1194,11 @@ def _phase_b_setup(
             ensure_agent_socket_dir(_root_cmd, agent.linux_user)
             removed = cleanup_stale_sockets(_root_cmd, agent.linux_user)
             if removed:
-                typer.echo(f"  Cleaned up {removed} stale socket(s) for {agent.linux_user}")
+                output.detail(f"Cleaned up {removed} stale socket(s) for {agent.linux_user}")
     except SSHError as e:
         msg = f"agent tmux socket setup failed: {e}"
         logger.warning(msg)
-        warn(msg)
+        output.warn(msg)
 
     # Non-fatal: system install commands
     system_path = _run_catalog_commands(
@@ -1222,11 +1221,11 @@ def _phase_b_setup(
     if config.admin.git_force_safe_directory:
         try:
             ts_target.run("git config --global --add safe.directory '*'")
-            typer.echo("  Git safe.directory wildcard configured")
+            output.detail("Git safe.directory wildcard configured")
         except SSHError as e:
             msg = f"git safe.directory setup failed: {e}"
             logger.warning(msg)
-            warn(msg)
+            output.warn(msg)
 
     # Non-fatal: git credentials (before dotfiles and mise lockfile for private repos)
     if providers:
@@ -1240,15 +1239,15 @@ def _phase_b_setup(
             from agentworks.sources import SourceRefError, fetch_dir, parse_source_ref
 
             ref = parse_source_ref(config.admin.dotfiles_source)
-            typer.echo(f"  Syncing dotfiles from {config.admin.dotfiles_source}...")
+            output.detail(f"Syncing dotfiles from {config.admin.dotfiles_source}...")
             fetch_dir(ref, ts_target, dest, logger=logger)
 
-            typer.echo(f"  Running dotfiles install: {config.admin.dotfiles_install_cmd}")
+            output.detail(f"Running dotfiles install: {config.admin.dotfiles_install_cmd}")
             ts_target.run(f"cd {dest} && {config.admin.dotfiles_install_cmd}", timeout=120)
         except (SourceRefError, Exception) as e:
             msg = f"dotfiles install failed: {e}"
             logger.warning(msg)
-            warn(msg)
+            output.warn(msg)
 
     # Non-fatal: mise lockfile (after git creds and dotfiles; overrides dotfiles lockfile)
     if config.admin.mise_lockfile:
@@ -1301,7 +1300,7 @@ def _build_nerf_claude_plugin(
 ) -> None:
     """Build the nerf Claude Code plugin locally and deploy to the VM. Non-fatal."""
     logger.step("Nerf tools (Claude plugin)")
-    typer.echo("  Building nerf Claude Code plugin...")
+    output.detail("Building nerf Claude Code plugin...")
 
     nerf_home = config.vm.nerf_home_dir
     plugin_dir = f"{nerf_home}/claude-plugin"
@@ -1389,7 +1388,7 @@ def _build_nerf_claude_plugin(
             f"mkdir -p {scripts_dir} && printf '%s' {quoted_script} > {quoted_path} && chmod a+x {quoted_path}",
         )
 
-        typer.echo(f"  Nerf Claude plugin built to {plugin_dir}")
+        output.detail(f"Nerf Claude plugin built to {plugin_dir}")
 
         # System-wide env var so all users can locate nerf home
         env_line = f'export AGENTWORKS_NERF_HOME="{nerf_home}"'
@@ -1404,7 +1403,7 @@ def _build_nerf_claude_plugin(
     except (SSHError, RuntimeError) as e:
         msg = f"nerf Claude plugin build failed: {e}"
         logger.warning(msg)
-        warn(msg)
+        output.warn(msg)
 
 
 def _install_nerf_claude_plugin_for_user(
@@ -1422,23 +1421,22 @@ def _install_nerf_claude_plugin_for_user(
             check=False,
         )
         if not check_result.ok:
-            typer.echo(
-                "  Warning: nerf Claude plugin not found on this VM. "
-                "Set nerf_build_claude_plugin = true in your VM template and reinit.",
-                err=True,
+            output.warn(
+                "nerf Claude plugin not found on this VM. "
+                "Set nerf_build_claude_plugin = true in your VM template and reinit."
             )
             return
 
-        typer.echo("  Installing nerf Claude plugin...")
+        output.detail("Installing nerf Claude plugin...")
         target.run(
             f"{shell} -lc '$AGENTWORKS_NERF_HOME/claude-plugin/scripts/install-plugin'",
             timeout=30,
         )
-        typer.echo("  Nerf Claude plugin installed")
+        output.detail("Nerf Claude plugin installed")
     except SSHError as e:
         msg = f"nerf plugin install failed: {e}"
         logger.warning(msg)
-        warn(msg)
+        output.warn(msg)
 
 
 def _configure_git_credentials(
@@ -1450,7 +1448,7 @@ def _configure_git_credentials(
 ) -> None:
     """Configure git credential store on the VM with pre-collected or prompted tokens."""
     logger.step("Git credentials")
-    typer.echo("  Configuring git credentials...")
+    output.detail("Configuring git credentials...")
 
     tokens = git_tokens or {}
 
@@ -1463,7 +1461,7 @@ def _configure_git_credentials(
         except Exception as e:
             msg = f"git credential setup failed for {name}: {e}"
             logger.warning(msg)
-            warn(msg)
+            output.warn(msg)
 
     if not credential_lines:
         return
@@ -1475,8 +1473,8 @@ def _configure_git_credentials(
         ts_target.run(
             "git config --global credential.helper store",
         )
-        typer.echo(f"  Git credentials configured for {len(providers)} provider(s)")
+        output.detail(f"Git credentials configured for {len(providers)} provider(s)")
     except SSHError as e:
         msg = f"git credential store setup failed: {e}"
         logger.warning(msg)
-        warn(msg)
+        output.warn(msg)

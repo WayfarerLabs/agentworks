@@ -1,10 +1,4 @@
-"""VM lifecycle management -- create, list, start, stop, delete.
-
-TODO: typer.echo is used throughout this module for progress/status output.
-This is a layering violation (business logic should not depend on the CLI
-framework). A proper fix would introduce an output.info / output.progress
-abstraction similar to the output.warn DI mechanism. See also initializer.py.
-"""
+"""VM lifecycle management -- create, list, start, stop, delete."""
 
 from __future__ import annotations
 
@@ -12,9 +6,9 @@ from typing import TYPE_CHECKING
 
 import typer
 
+from agentworks import output
 from agentworks.config import VALID_PLATFORMS, validate_admin_username, validate_name
 from agentworks.db import InitStatus, ProvisioningStatus, VMStatus
-from agentworks.output import warn
 from agentworks.vms.initializer import (
     initialize_vm,
     rejoin_tailscale,
@@ -198,7 +192,7 @@ def create_vm(
             msg = f"Unknown platform: {platform}"
             raise ValueError(msg)
     except Exception as e:
-        typer.echo(f"\nError: provisioning failed: {e}", err=True)
+        output.warn(f"provisioning failed: {e}")
         db.delete_vm(vm_name)
         return
 
@@ -240,35 +234,32 @@ def create_vm(
             on_tailscale_ready=_on_tailscale_ready,
         )
     except Exception as e:
-        typer.echo(f"\nError: {e}", err=True)
+        output.warn(str(e))
         # The logger inside initialize_vm already captured the details
         from agentworks.ssh import LOG_DIR
 
         logs = sorted(LOG_DIR.glob(f"{vm_name}-*-vm-create.log"), reverse=True)
         if logs:
-            typer.echo(f"Details: {logs[0]}", err=True)
+            output.detail(f"Details: {logs[0]}")
 
         vm = db.get_vm(vm_name)
         if vm is not None and vm.provisioning_status == ProvisioningStatus.FAILED.value:
             # Provisioning failed -- VM is unreachable
-            typer.echo(
-                "\nProvisioning failed. Delete VM? You can keep it for manual "
-                "troubleshooting, but agentworks cannot use or manage it.",
-                err=True,
+            output.warn(
+                "Provisioning failed. Delete VM? You can keep it for manual "
+                "troubleshooting, but agentworks cannot use or manage it."
             )
             if typer.confirm("Delete VM?", default=True):
                 delete_vm(db, config, vm_name, force=True)
             else:
-                typer.echo(
-                    f"VM '{vm_name}' kept in failed state. Only 'vm delete' is supported.",
-                    err=True,
+                output.warn(
+                    f"VM '{vm_name}' kept in failed state. Only 'vm delete' is supported."
                 )
         else:
             # Init failed but VM exists -- reinit can retry
-            typer.echo(
-                f"\nVM '{vm_name}' is in a degraded state but may still be usable.\n"
-                f"Use 'vm reinit {vm_name}' to retry initialization.",
-                err=True,
+            output.warn(
+                f"VM '{vm_name}' is in a degraded state but may still be usable. "
+                f"Use 'vm reinit {vm_name}' to retry initialization."
             )
         return
 
@@ -278,37 +269,37 @@ def create_vm(
 
         sync_ssh_config(config, db)
     except Exception as e:
-        warn(f"SSH config sync failed: {e}")
-        typer.echo("VM is likely still usable.", err=True)
+        output.warn(f"SSH config sync failed: {e}")
+        output.detail("VM is likely still usable.")
 
     # Final status is set by initialize_vm (COMPLETE or PARTIAL)
     vm = db.get_vm(vm_name)
     assert vm is not None
     if vm.init_status == InitStatus.PARTIAL.value:
-        typer.echo(f"\nVM '{vm_name}' is ready (with warnings -- see above)")
+        output.info(f"VM '{vm_name}' is ready (with warnings -- see above)")
     else:
-        typer.echo(f"\nVM '{vm_name}' is ready!")
+        output.info(f"VM '{vm_name}' is ready!")
 
 
 def list_vms(db: Database) -> None:
     """List all VMs with their init and runtime status."""
     vms = db.list_vms()
     if not vms:
-        typer.echo("No VMs registered.")
+        output.info("No VMs registered.")
         return
 
     header = (
         f"{'NAME':<20} {'PLATFORM':<10} {'TEMPLATE':<12} {'HOST':<15} {'PROV':<12} {'INIT':<12} "
         f"{'WS/AG/TS':<10} {'TAILSCALE':<20} {'CREATED'}"
     )
-    typer.echo(header)
-    typer.echo("-" * len(header))
+    output.info(header)
+    output.info("-" * len(header))
     for vm in vms:
         ws = db.count_workspaces_on_vm(vm.name)
         ag = db.count_agents_on_vm(vm.name)
         ts = db.count_sessions_on_vm(vm.name)
         counts = f"{ws}/{ag}/{ts}"
-        typer.echo(
+        output.info(
             f"{vm.name:<20} {vm.platform:<10} {vm.template or '-':<12} {vm.vm_host_name or '-':<15} "
             f"{vm.provisioning_status:<12} {vm.init_status:<12} "
             f"{counts:<10} {vm.tailscale_host or '-':<20} {vm.created_at}"
@@ -320,15 +311,15 @@ def describe_vm(db: Database, config: Config, name: str) -> None:
     vm = _require_vm(db, name)
 
     # VM details
-    typer.echo(f"Name:           {vm.name}")
-    typer.echo(f"Created:        {vm.created_at}")
-    typer.echo(f"Platform:       {vm.platform}")
-    typer.echo(f"Template:       {vm.template or '-'}")
-    typer.echo(f"VM Host:        {vm.vm_host_name or '-'}")
-    typer.echo(f"Admin User:     {vm.admin_username}")
-    typer.echo(f"Provisioning:   {vm.provisioning_status}")
-    typer.echo(f"Initialization: {vm.init_status}")
-    typer.echo(f"Tailscale IP:   {vm.tailscale_host or '-'}")
+    output.info(f"Name:           {vm.name}")
+    output.info(f"Created:        {vm.created_at}")
+    output.info(f"Platform:       {vm.platform}")
+    output.info(f"Template:       {vm.template or '-'}")
+    output.info(f"VM Host:        {vm.vm_host_name or '-'}")
+    output.info(f"Admin User:     {vm.admin_username}")
+    output.info(f"Provisioning:   {vm.provisioning_status}")
+    output.info(f"Initialization: {vm.init_status}")
+    output.info(f"Tailscale IP:   {vm.tailscale_host or '-'}")
 
     # Resources table: Initial / Current / Used (Used%)
     live = None
@@ -336,79 +327,79 @@ def describe_vm(db: Database, config: Config, name: str) -> None:
         live = _query_live_resources(vm, config)
 
     if vm.cpus is not None or live is not None:
-        typer.echo(f"\n{'Resources':<16}{'Provisioned':<14}{'Current':<14}{'Used'}")
-        typer.echo(
-            f"  {'CPU':<16}"
+        output.info(f"\n{'Resources':<16}{'Provisioned':<14}{'Current':<14}{'Used'}")
+        output.detail(
+            f"{'CPU':<16}"
             f"{str(vm.cpus) if vm.cpus else '-':<14}"
             f"{live['cpus'] if live else '-':<14}"
             f"{'load ' + live['load_avg'] if live else '-'}"
         )
-        typer.echo(
-            f"  {'Memory':<16}"
+        output.detail(
+            f"{'Memory':<16}"
             f"{str(vm.memory_gib) + 'G' if vm.memory_gib else '-':<14}"
             f"{live['mem_total'] if live else '-':<14}"
             f"{live['mem_used'] + ' (' + live['mem_pct'] + ')' if live else '-'}"
         )
-        typer.echo(
-            f"  {'Swap':<16}"
+        output.detail(
+            f"{'Swap':<16}"
             f"{str(vm.swap_gib) + 'G' if vm.swap_gib else '-':<14}"
             f"{live['swap_total'] if live else '-':<14}"
             f"{live['swap_used'] + ' (' + live['swap_pct'] + ')' if live else '-'}"
         )
-        typer.echo(
-            f"  {'Disk':<16}"
+        output.detail(
+            f"{'Disk':<16}"
             f"{str(vm.disk_gib) + 'G' if vm.disk_gib else '-':<14}"
             f"{live['disk_total'] if live else '-':<14}"
             f"{live['disk_used'] + ' (' + live['disk_pct'] + ')' if live else '-'}"
         )
 
     if vm.azure_resource_id:
-        typer.echo(f"Azure ID:       {vm.azure_resource_id}")
+        output.info(f"Azure ID:       {vm.azure_resource_id}")
     if vm.wsl_distro_name:
-        typer.echo(f"WSL Distro:     {vm.wsl_distro_name}")
+        output.info(f"WSL Distro:     {vm.wsl_distro_name}")
     if vm.proxmox_vmid:
-        typer.echo(f"Proxmox VMID:   {vm.proxmox_vmid}")
+        output.info(f"Proxmox VMID:   {vm.proxmox_vmid}")
     if vm.last_seen_at:
-        typer.echo(f"Last Seen:      {vm.last_seen_at}")
+        output.info(f"Last Seen:      {vm.last_seen_at}")
 
     # Agents on this VM
     agents = db.list_agents(vm_name=name)
-    typer.echo(f"\nAgents ({len(agents)}):")
+    output.info(f"\nAgents ({len(agents)}):")
     if agents:
         for agent in agents:
             grant_count = db.count_agent_grants(agent.name)
             grant_label = "all" if agent.grant_all else str(grant_count)
-            typer.echo(f"  {agent.name}  (user: {agent.linux_user}, grants: {grant_label})")
+            output.detail(f"{agent.name}  (user: {agent.linux_user}, grants: {grant_label})")
     else:
-        typer.echo("  (none)")
+        output.detail("(none)")
 
     # Workspaces with sessions
     workspaces = db.list_workspaces(vm_name=name)
-    typer.echo(f"\nWorkspaces ({len(workspaces)}):")
+    output.info(f"\nWorkspaces ({len(workspaces)}):")
     if workspaces:
         for ws in workspaces:
-            typer.echo(f"  {ws.name}  ({ws.workspace_path})")
+            output.detail(f"{ws.name}  ({ws.workspace_path})")
 
             sessions = db.list_sessions(workspace_name=ws.name)
             if sessions:
-                typer.echo(f"    Sessions ({len(sessions)}):")
+                output.detail(f"  Sessions ({len(sessions)}):")
                 for s in sessions:
                     mode_label = f"agent:{s.agent_name}" if s.agent_name else "admin"
-                    typer.echo(f"      {s.name}  [{s.template}]  {s.status}  {mode_label}")
+                    output.detail(f"    {s.name}  [{s.template}]  {s.status}  {mode_label}")
             else:
-                typer.echo("    (no sessions)")
+                output.detail("  (no sessions)")
     else:
-        typer.echo("  (none)")
+        output.detail("(none)")
 
     # Events
     events = db.list_vm_events(name)
-    typer.echo(f"\nEvents ({len(events)}):")
+    output.info(f"\nEvents ({len(events)}):")
     if events:
         for event in events:
-            detail = f"  {event.detail}" if event.detail else ""
-            typer.echo(f"  {event.created_at}  {event.event}{detail}")
+            evt_detail = f"  {event.detail}" if event.detail else ""
+            output.detail(f"{event.created_at}  {event.event}{evt_detail}")
     else:
-        typer.echo("  (none)")
+        output.detail("(none)")
 
 
 def shell_vm(db: Database, config: Config, name: str) -> None:
@@ -472,7 +463,7 @@ def add_git_credential(db: Database, config: Config, name: str, credential_name:
     write_file(target, "~/.git-credentials", cred_content, mode="600")
     ssh_run(target, "git config --global credential.helper store")
 
-    typer.echo(f"Git credential '{credential_name}' configured on VM '{name}'")
+    output.info(f"Git credential '{credential_name}' configured on VM '{name}'")
 
 
 def start_vm(db: Database, config: Config, name: str) -> None:
@@ -482,12 +473,12 @@ def start_vm(db: Database, config: Config, name: str) -> None:
     provisioner = _get_provisioner_for_vm(db, vm)
     status = provisioner.status(vm)
     if status == VMStatus.RUNNING:
-        typer.echo(f"VM '{name}' is already running")
+        output.info(f"VM '{name}' is already running")
     else:
         provisioner.start(vm)
 
     _ensure_tailscale(db, config, vm, provisioner)
-    typer.echo(f"VM '{name}' is ready")
+    output.info(f"VM '{name}' is ready")
 
 
 def stop_vm(db: Database, config: Config, name: str) -> None:
@@ -497,10 +488,10 @@ def stop_vm(db: Database, config: Config, name: str) -> None:
     provisioner = _get_provisioner_for_vm(db, vm)
     status = provisioner.status(vm)
     if status in (VMStatus.STOPPED, VMStatus.DEALLOCATED):
-        typer.echo(f"VM '{name}' is already stopped")
+        output.info(f"VM '{name}' is already stopped")
         return
     provisioner.stop(vm)
-    typer.echo(f"VM '{name}' stopped")
+    output.info(f"VM '{name}' stopped")
 
 
 def rekey_vm(
@@ -540,14 +531,14 @@ def rekey_vm(
     # Collect new auth key
     ts_auth_key = os.environ.get("TAILSCALE_AUTH_KEY") if not ignore_env else None
     if ts_auth_key:
-        typer.echo("  Tailscale auth key found in environment")
+        output.detail("Tailscale auth key found in environment")
     else:
         ts_auth_key = prompt_secret(
             "Tailscale auth key",
             hint="Generate a key at https://login.tailscale.com/admin/settings/keys",
         )
 
-    typer.echo(f"Rekeying '{name}'...")
+    output.info(f"Rekeying '{name}'...")
 
     # For Azure, attach a temporary public IP for out-of-band access
     azure_provisioner = provisioner if isinstance(provisioner, AzureProvisioner) else None
@@ -558,7 +549,7 @@ def rekey_vm(
         exec_target = provisioner.admin_exec_target(vm, config=config)
 
         # Wait for the provisioning transport to be reachable
-        typer.echo("  Waiting for provisioning transport...")
+        output.detail("Waiting for provisioning transport...")
         for attempt in range(6):
             try:
                 exec_target.run("echo ok", timeout=10)
@@ -566,9 +557,9 @@ def rekey_vm(
             except SSHError:
                 if attempt == 5:
                     raise
-                typer.echo(f"  Attempt {attempt + 1} failed, retrying...")
+                output.detail(f"Attempt {attempt + 1} failed, retrying...")
                 time.sleep(5)
-        typer.echo("  Connected.")
+        output.detail("Connected.")
 
         # Restart, logout, login, restart. The initial restart clears any
         # stale daemon state (a previous interrupted rekey can leave the
@@ -581,15 +572,15 @@ def rekey_vm(
         restart_cmd = "service tailscaled restart" if is_wsl2 else "systemctl restart tailscaled"
         stabilize_secs = 15  # pause between steps for daemon/network stability
 
-        typer.echo("  Restarting Tailscale daemon...")
+        output.detail("Restarting Tailscale daemon...")
         exec_target.run(restart_cmd, sudo=True, timeout=15)
         time.sleep(stabilize_secs)
 
-        typer.echo("  Logging out of current tailnet...")
+        output.detail("Logging out of current tailnet...")
         exec_target.run("tailscale logout", sudo=True, timeout=30)
         time.sleep(stabilize_secs)
 
-        typer.echo("  Joining new tailnet...")
+        output.detail("Joining new tailnet...")
         quoted_key = shlex.quote(ts_auth_key)
         ts_up_cmd = f"tailscale up --auth-key {quoted_key}"
         if is_wsl2:
@@ -597,11 +588,11 @@ def rekey_vm(
         exec_target.run(ts_up_cmd, sudo=True, timeout=30)
         time.sleep(stabilize_secs)
 
-        typer.echo("  Restarting Tailscale daemon...")
+        output.detail("Restarting Tailscale daemon...")
         exec_target.run(restart_cmd, sudo=True, timeout=15)
         time.sleep(stabilize_secs)
 
-        typer.echo("  Reading new Tailscale IP...")
+        output.detail("Reading new Tailscale IP...")
         result = exec_target.run("tailscale ip -4", sudo=True, timeout=15)
         raw_ip = result.stdout.strip()
         new_ip = raw_ip.splitlines()[0].strip() if raw_ip else ""
@@ -611,7 +602,7 @@ def rekey_vm(
             raise SSHError(
                 f"tailscale ip -4 returned invalid address: {new_ip!r}\nfull output: {raw_ip}"
             ) from None
-        typer.echo(f"  Tailscale IP: {new_ip}")
+        output.detail(f"Tailscale IP: {new_ip}")
 
         # Update DB and SSH config with the new IP (correct regardless of
         # reachability -- the old IP is definitely dead after logout)
@@ -621,22 +612,22 @@ def rekey_vm(
 
         # If the operator needs to share the VM back, pause before connectivity check
         if wait_for_share:
-            typer.echo(
-                "\nShare the VM back to your tailnet, then press Enter to verify connectivity..."
+            output.info(
+                "Share the VM back to your tailnet, then press Enter to verify connectivity..."
             )
             input()
 
         # Always verify Tailscale SSH connectivity to the new IP
-        typer.echo(f"  Verifying SSH to {new_ip}...")
+        output.detail(f"Verifying SSH to {new_ip}...")
         from dataclasses import replace
 
         ts_target = admin_exec_target(vm, config)
         assert ts_target.ssh is not None
         ts_target = replace(ts_target, ssh=replace(ts_target.ssh, host=new_ip))
         if wait_for_reconnect(ts_target):
-            typer.echo(f"VM '{name}' rekeyed successfully. Tailscale IP: {new_ip}")
+            output.info(f"VM '{name}' rekeyed successfully. Tailscale IP: {new_ip}")
         else:
-            warn(
+            output.warn(
                 f"VM '{name}' rekeyed but {new_ip} is not reachable via SSH. "
                 "Check tailnet sharing/ACLs. Run 'vm rekey' again to retry."
             )
@@ -696,7 +687,7 @@ def delete_vm(
 
         provisioner.delete(vm)
     except Exception as e:
-        warn(f"platform cleanup failed: {e}")
+        output.warn(f"platform cleanup failed: {e}")
 
     # Clean up logs
     from agentworks.ssh import LOG_DIR
@@ -705,7 +696,7 @@ def delete_vm(
     for log in vm_logs:
         log.unlink(missing_ok=True)
     if vm_logs:
-        typer.echo(f"Cleaned up {len(vm_logs)} log(s)")
+        output.info(f"Cleaned up {len(vm_logs)} log(s)")
 
     # Remove from DB (cascades workspaces and agents), then rebuild SSH config
     db.delete_vm(name)
@@ -713,7 +704,7 @@ def delete_vm(
     from agentworks.ssh_config import sync_ssh_config
 
     sync_ssh_config(config, db)
-    typer.echo(f"VM '{name}' deleted")
+    output.info(f"VM '{name}' deleted")
 
 
 def reinit_vm(
@@ -782,7 +773,7 @@ def reinit_vm(
         )
     except Exception:
         logger.close()
-        typer.echo(f"  Log: {logger.path}", err=True)
+        output.detail(f"Log: {logger.path}")
         raise
 
     logger.close()
@@ -790,10 +781,10 @@ def reinit_vm(
     refreshed_vm = db.get_vm(name)
     assert refreshed_vm is not None
     if refreshed_vm.init_status == InitStatus.PARTIAL.value:
-        typer.echo(f"\nVM '{name}' reinitialized (with warnings -- see above)")
-        typer.echo(f"  Log: {logger.path}")
+        output.info(f"VM '{name}' reinitialized (with warnings -- see above)")
+        output.detail(f"Log: {logger.path}")
     else:
-        typer.echo(f"\nVM '{name}' reinitialized successfully!")
+        output.info(f"VM '{name}' reinitialized successfully!")
 
 
 def _tailscale_logout(provisioner: VMProvisioner, vm: VMRow, config: Config) -> None:
@@ -809,7 +800,7 @@ def _tailscale_logout(provisioner: VMProvisioner, vm: VMRow, config: Config) -> 
     from agentworks.ssh import SSHError as _SSHError
     from agentworks.vms.provisioners.azure import AzureProvisioner
 
-    typer.echo("Deregistering from Tailscale...")
+    output.info("Deregistering from Tailscale...")
     try:
         azure_provisioner = provisioner if isinstance(provisioner, AzureProvisioner) else None
         if azure_provisioner is not None:
@@ -835,9 +826,9 @@ def _tailscale_logout(provisioner: VMProvisioner, vm: VMRow, config: Config) -> 
             sudo=True,
             timeout=10,
         )
-        typer.echo("Tailscale node deregistered")
+        output.info("Tailscale node deregistered")
     except Exception as e:
-        warn(f"Tailscale logout failed (node may remain in admin console): {e}")
+        output.warn(f"Tailscale logout failed (node may remain in admin console): {e}")
 
 
 def _init_log_hint(vm_name: str) -> str:
@@ -879,12 +870,12 @@ def _collect_secrets(
 
     from agentworks.prompt import prompt_secret
 
-    typer.echo("\nCollecting credentials...")
+    output.info("Collecting credentials...")
 
     # Tailscale
     ts_auth_key = os.environ.get("TAILSCALE_AUTH_KEY")
     if ts_auth_key:
-        typer.echo("  Tailscale auth key found in environment")
+        output.detail("Tailscale auth key found in environment")
     else:
         ts_auth_key = prompt_secret(
             "  Tailscale auth key",
@@ -897,7 +888,6 @@ def _collect_secrets(
         token = provider.obtain_token(vm_name)
         git_tokens[name] = token
 
-    typer.echo("")
     return ts_auth_key, git_tokens
 
 
@@ -1077,9 +1067,9 @@ def port_forward_vm(
 
     # Print forwarding info
     for local_port, remote_port in forwards:
-        typer.echo(f"Forwarding {address}:{local_port} -> {vm.tailscale_host}:{remote_port}")
+        output.info(f"Forwarding {address}:{local_port} -> {vm.tailscale_host}:{remote_port}")
     if not verbose:
-        typer.echo("Use --verbose for detailed SSH output.")
+        output.info("Use --verbose for detailed SSH output.")
 
     # Run in foreground until interrupted
     try:
@@ -1118,7 +1108,7 @@ def _ensure_tailscale(
             return
 
         # Tailscale didn't reconnect (ephemeral key expired, etc.)
-        typer.echo(f"Tailscale node {vm.tailscale_host} did not reconnect, rejoining...")
+        output.info(f"Tailscale node {vm.tailscale_host} did not reconnect, rejoining...")
         db.clear_vm_tailscale(vm.name)
 
     # For Azure, attach a temporary public IP for the rejoin

@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 import typer
 
+from agentworks import output
 from agentworks.config import validate_name
 from agentworks.output import warn
 from agentworks.ssh import admin_exec_target
@@ -147,7 +148,7 @@ def create_agent(
                 _add_to_workspace_group(vm, config, linux_user, ws.name, logger=None)
                 db.insert_agent_grant(name, ws.name, "explicit")
 
-    typer.echo(f"Agent '{name}' created on VM '{vm_name}' (user: {agent.linux_user})")
+    output.info(f"Agent '{name}' created on VM '{vm_name}' (user: {agent.linux_user})")
 
 
 def delete_agent(
@@ -204,7 +205,7 @@ def delete_agent(
                 kill_session(session.name, run_command=run_command, socket_path=sock)
             kill_session(session.name, run_command=run_command)
             db.delete_session(session.name)
-        typer.echo(f"  Deleted {len(agent_sessions)} session(s)")
+        output.detail(f"Deleted {len(agent_sessions)} session(s)")
 
     # Remove from all workspace groups
     granted_workspaces = db.list_granted_workspaces(name)
@@ -216,7 +217,7 @@ def delete_agent(
 
     db.delete_agent(name)
 
-    typer.echo(f"Agent '{name}' deleted")
+    output.info(f"Agent '{name}' deleted")
 
 
 def reinit_agent(
@@ -256,7 +257,7 @@ def reinit_agent(
         raise typer.Exit(1) from None
     ssh_logger.close()
 
-    typer.echo(f"Agent '{name}' reinitialized")
+    output.info(f"Agent '{name}' reinitialized")
 
 
 def revoke_workspace_grants(
@@ -314,14 +315,14 @@ def list_agents(
     """List agents."""
     agents = db.list_agents(vm_name=vm_name)
     if not agents:
-        typer.echo("No agents found.")
+        output.info("No agents found.")
         return
 
-    typer.echo(f"{'NAME':<20} {'VM':<15} {'TEMPLATE':<12} {'WORKSPACE GRANTS'}")
-    typer.echo("-" * 80)
+    output.info(f"{'NAME':<20} {'VM':<15} {'TEMPLATE':<12} {'WORKSPACE GRANTS'}")
+    output.info("-" * 80)
     for agent in agents:
         grants = _format_grants(db, agent.name, agent.grant_all)
-        typer.echo(f"{agent.name:<20} {agent.vm_name:<15} {agent.template or '-':<12} {grants}")
+        output.info(f"{agent.name:<20} {agent.vm_name:<15} {agent.template or '-':<12} {grants}")
 
 
 def describe_agent(
@@ -335,32 +336,32 @@ def describe_agent(
         typer.echo(f"Error: agent '{name}' not found", err=True)
         raise typer.Exit(1)
 
-    typer.echo(f"Name:       {agent.name}")
-    typer.echo(f"VM:         {agent.vm_name}")
-    typer.echo(f"Linux user: {agent.linux_user}")
-    typer.echo(f"Template:   {agent.template or '-'}")
-    typer.echo(f"Grant all:  {'yes' if agent.grant_all else 'no'}")
-    typer.echo(f"Created:    {agent.created_at}")
+    output.info(f"Name:       {agent.name}")
+    output.info(f"VM:         {agent.vm_name}")
+    output.info(f"Linux user: {agent.linux_user}")
+    output.info(f"Template:   {agent.template or '-'}")
+    output.info(f"Grant all:  {'yes' if agent.grant_all else 'no'}")
+    output.info(f"Created:    {agent.created_at}")
 
     # Explicit grants
     grants = db.list_granted_workspaces_with_types(name)
     explicit = [ws for ws, has_explicit, _ in grants if has_explicit]
-    typer.echo(f"\nExplicit grants ({len(explicit)}):")
+    output.info(f"\nExplicit grants ({len(explicit)}):")
     if explicit:
         for ws in explicit:
-            typer.echo(f"  {ws}")
+            output.detail(ws)
     else:
-        typer.echo("  (none)")
+        output.detail("(none)")
 
     # Sessions (which also show implicit grants)
     all_sessions = db.list_sessions()
     agent_sessions = [s for s in all_sessions if s.agent_name == name]
-    typer.echo(f"\nSessions ({len(agent_sessions)}):")
+    output.info(f"\nSessions ({len(agent_sessions)}):")
     if agent_sessions:
         for s in agent_sessions:
-            typer.echo(f"  {s.name}  [{s.template}]  {s.status}  workspace: {s.workspace_name}")
+            output.detail(f"{s.name}  [{s.template}]  {s.status}  workspace: {s.workspace_name}")
     else:
-        typer.echo("  (none)")
+        output.detail("(none)")
 
 
 def shell_agent(
@@ -431,7 +432,7 @@ def grant_workspaces(
             if ws.type == "vm":
                 _add_to_workspace_group(vm, config, agent.linux_user, ws.name, logger=None)
                 db.insert_agent_grant(agent_name, ws.name, "explicit")
-        typer.echo(f"Agent '{agent_name}' granted access to all workspaces")
+        output.info(f"Agent '{agent_name}' granted access to all workspaces")
         return
 
     for ws_name in workspace_names:
@@ -441,7 +442,7 @@ def grant_workspaces(
             continue
         _add_to_workspace_group(vm, config, agent.linux_user, ws_name, logger=None)
         db.insert_agent_grant(agent_name, ws_name, "explicit")
-        typer.echo(f"  Granted: {ws_name}")
+        output.detail(f"Granted: {ws_name}")
 
 
 def deny_workspaces(
@@ -471,11 +472,10 @@ def deny_workspaces(
                 remaining_implicit.append(ws_name)
             else:
                 _remove_from_workspace_group(vm, config, agent.linux_user, ws_name, logger=None)
-        typer.echo(f"All explicit grants removed for agent '{agent_name}'")
+        output.info(f"All explicit grants removed for agent '{agent_name}'")
         if remaining_implicit:
-            typer.echo(
-                f"  Note: agent still has implicit access via sessions to: {', '.join(remaining_implicit)}",
-                err=True,
+            output.warn(
+                f"agent still has implicit access via sessions to: {', '.join(remaining_implicit)}"
             )
         return
 
@@ -483,9 +483,9 @@ def deny_workspaces(
         db.delete_agent_grant(agent_name, ws_name, "explicit")
         if not db.has_any_grant(agent_name, ws_name):
             _remove_from_workspace_group(vm, config, agent.linux_user, ws_name, logger=None)
-            typer.echo(f"  Denied: {ws_name}")
+            output.detail(f"Denied: {ws_name}")
         else:
-            typer.echo(f"  Denied: {ws_name} (still has implicit access via sessions)")
+            output.detail(f"Denied: {ws_name} (still has implicit access via sessions)")
 
 
 def list_grants(
@@ -500,15 +500,15 @@ def list_grants(
         raise typer.Exit(1)
 
     if agent.grant_all:
-        typer.echo(f"Agent '{agent_name}' has grant-all enabled (access to all workspaces)")
+        output.info(f"Agent '{agent_name}' has grant-all enabled (access to all workspaces)")
 
     grants = db.list_granted_workspaces_with_types(agent_name)
     if not grants:
-        typer.echo("No workspace grants.")
+        output.info("No workspace grants.")
         return
 
-    typer.echo(f"{'WORKSPACE':<25} {'TYPE'}")
-    typer.echo("-" * 45)
+    output.info(f"{'WORKSPACE':<25} {'TYPE'}")
+    output.info("-" * 45)
     for ws_name, has_explicit, has_implicit in grants:
         if has_explicit and has_implicit:
             grant_type = "explicit + implicit"
@@ -516,7 +516,7 @@ def list_grants(
             grant_type = "explicit"
         else:
             grant_type = "implicit (via sessions)"
-        typer.echo(f"{ws_name:<25} {grant_type}")
+        output.info(f"{ws_name:<25} {grant_type}")
 
 
 # -- VM operations ---------------------------------------------------------
@@ -587,7 +587,7 @@ def _create_agent_on_vm(
     target = admin_exec_target(vm, config)
     lg = logger
 
-    typer.echo(f"  Creating user '{linux_user}' on VM '{vm.name}'...")
+    output.detail(f"Creating user '{linux_user}' on VM '{vm.name}'...")
     home = f"/home/{linux_user}"
 
     agent_cfg = config.agent
@@ -615,7 +615,7 @@ def _create_agent_on_vm(
     ensure_agent_socket_dir(_root_cmd, linux_user, warn_if_missing=False)
     removed = cleanup_stale_sockets(_root_cmd, linux_user)
     if removed:
-        typer.echo(f"  Cleaned up {removed} stale socket(s)")
+        output.detail(f"Cleaned up {removed} stale socket(s)")
 
     # Write a minimal rc file with a clear agent prompt
     if agent_shell == "zsh":
@@ -636,7 +636,7 @@ def _create_agent_on_vm(
     if config.admin.git_force_safe_directory:
         try:
             _run_as_agent(target, linux_user, "git config --global --add safe.directory '*'", logger=lg)
-            typer.echo("  Git safe.directory configured for agent")
+            output.detail("Git safe.directory configured for agent")
         except Exception as e:
             warn(f"agent git safe.directory setup failed: {e}")
 
@@ -644,7 +644,7 @@ def _create_agent_on_vm(
     if agent_cfg.git_credentials and git_tokens:
         from agentworks.vms.initializer import resolve_git_credential_providers
 
-        typer.echo("  Configuring git credentials for agent...")
+        output.detail("Configuring git credentials for agent...")
         try:
             providers = resolve_git_credential_providers(config, agent_cfg.git_credentials)
             cred_lines: list[str] = []
@@ -664,7 +664,7 @@ def _create_agent_on_vm(
 
     # Dotfiles for the agent
     if agent_cfg.dotfiles_source:
-        typer.echo(f"  Syncing agent dotfiles from {agent_cfg.dotfiles_source}...")
+        output.detail(f"Syncing agent dotfiles from {agent_cfg.dotfiles_source}...")
         try:
             from agentworks.sources import SourceRefError, fetch_dir, parse_source_ref
 
@@ -687,7 +687,7 @@ def _create_agent_on_vm(
                         check=False, logger=lg,
                     )
                     if remote.ok and remote.stdout.strip() == ref.path:
-                        typer.echo("  Dotfiles already cloned, pulling latest...")
+                        output.detail("Dotfiles already cloned, pulling latest...")
                         if ref.ref:
                             _run_as_agent(
                                 target, linux_user,
@@ -700,9 +700,8 @@ def _create_agent_on_vm(
                                 check=False, logger=lg,
                             )
                             if not checkout.ok:
-                                typer.echo(
-                                    f"  Warning: dotfiles checkout of '{ref.ref}' failed, skipping",
-                                    err=True,
+                                output.warn(
+                                    f"dotfiles checkout of '{ref.ref}' failed, skipping"
                                 )
                         else:
                             pull = _run_as_agent(
@@ -711,9 +710,8 @@ def _create_agent_on_vm(
                                 check=False, timeout=120, logger=lg,
                             )
                             if not pull.ok:
-                                typer.echo(
-                                    "  Warning: dotfiles pull failed (local changes?), skipping",
-                                    err=True,
+                                output.warn(
+                                    "dotfiles pull failed (local changes?), skipping"
                                 )
                     else:
                         raise SourceRefError(
@@ -738,7 +736,7 @@ def _create_agent_on_vm(
                 run_as_root(target, f"mv {tmp_dotfiles} {dest}", logger=lg)
                 run_as_root(target, f"chown -R {linux_user}:{linux_user} {dest}", logger=lg)
 
-            typer.echo(f"  Running agent dotfiles install: {agent_cfg.dotfiles_install_cmd}")
+            output.detail(f"Running agent dotfiles install: {agent_cfg.dotfiles_install_cmd}")
             _run_as_agent(
                 target,
                 linux_user,
@@ -773,21 +771,20 @@ def _install_nerf_claude_plugin_for_agent(
             check=False,
         )
         if not check.ok:
-            typer.echo(
-                "  Warning: nerf Claude plugin not found on this VM. "
-                "Set nerf_build_claude_plugin = true in your VM template and reinit.",
-                err=True,
+            output.warn(
+                "nerf Claude plugin not found on this VM. "
+                "Set nerf_build_claude_plugin = true in your VM template and reinit."
             )
             return
 
-        typer.echo("  Installing nerf Claude plugin for agent...")
+        output.detail("Installing nerf Claude plugin for agent...")
         _run_as_agent(
             target,
             linux_user,
             f"{shell} -lc '$AGENTWORKS_NERF_HOME/claude-plugin/scripts/install-plugin'",
             timeout=30,
         )
-        typer.echo("  Nerf Claude plugin installed for agent")
+        output.detail("Nerf Claude plugin installed for agent")
     except SSHError as e:
         warn(f"agent nerf plugin install failed: {e}")
 
@@ -847,14 +844,14 @@ def _run_agent_install_commands(
             try:
                 check = run_as_root(target, test_cmd, check=False, timeout=10)
                 if check.returncode == 0:
-                    typer.echo(f"  Agent install command {i}/{total} ({name}): already installed, skipping")
+                    output.detail(f"Agent install command {i}/{total} ({name}): already installed, skipping")
                     path_additions.extend(entry.path)
                     continue
             except SSHError as e:
                 warn(f"install check for '{name}' failed ({e}), assuming not installed")
 
         truncated = entry.command[:60]
-        typer.echo(f"  Agent install command {i}/{total} ({name}): {truncated}...")
+        output.detail(f"Agent install command {i}/{total} ({name}): {truncated}...")
         try:
             # Run as the agent user via su, in their login shell
             run_as_root(
@@ -870,7 +867,7 @@ def _run_agent_install_commands(
     if path_additions:
         from agentworks.vms.initializer import AGENTWORKS_PROFILE
 
-        typer.echo(f"  Adding {len(path_additions)} PATH entries for agent...")
+        output.detail(f"Adding {len(path_additions)} PATH entries for agent...")
         lines = ["# Managed by agentworks -- do not edit"]
         for p in path_additions:
             expanded = p.replace("~", "$HOME", 1) if p.startswith("~") else p
@@ -952,7 +949,7 @@ def _run_agent_mise_setup(
 
     # Write mise config if packages declared
     if has_packages:
-        typer.echo(f"  Writing mise config for agent ({len(agent_cfg.mise_packages)} packages)...")
+        output.detail(f"Writing mise config for agent ({len(agent_cfg.mise_packages)} packages)...")
         settings_lines = ["[settings]", f'install_before = "{agent_cfg.mise_install_before}"', ""]
         tools_lines = ["[tools]"]
         for pkg in agent_cfg.mise_packages:
@@ -971,7 +968,7 @@ def _run_agent_mise_setup(
 
     # Copy lockfile if configured
     if has_lockfile and agent_cfg.mise_lockfile:
-        typer.echo(f"  Fetching agent mise lockfile from {agent_cfg.mise_lockfile}...")
+        output.detail(f"Fetching agent mise lockfile from {agent_cfg.mise_lockfile}...")
         try:
             from agentworks.sources import SourceRefError, fetch_file, parse_source_ref
 
@@ -998,21 +995,21 @@ def _run_agent_mise_setup(
     install_flags = "-y --locked" if lockfile_exists else "-y"
     try:
         _run_as_agent(target, linux_user, f"mise install {install_flags}", timeout=300)
-        typer.echo("  Agent mise packages installed")
+        output.detail("Agent mise packages installed")
         installed = True
     except SSHError as e:
         if lockfile_exists and agent_cfg.mise_allow_unlocked:
             warn("some agent packages not in lockfile, installing unlocked...")
             try:
                 _run_as_agent(target, linux_user, "mise install -y", timeout=300)
-                typer.echo("  Agent mise packages installed (unlocked)")
+                output.detail("Agent mise packages installed (unlocked)")
                 installed = True
             except SSHError as e2:
                 warn(f"agent mise install failed: {e2}")
         else:
             warn(f"agent mise install failed: {e}")
             if lockfile_exists:
-                typer.echo("  Hint: set mise_allow_unlocked = true to install unlocked packages", err=True)
+                output.warn("set mise_allow_unlocked = true to install unlocked packages")
 
     # Prune stale tool versions not in the current config
     if installed and agent_cfg.mise_prune_on_reinit:
