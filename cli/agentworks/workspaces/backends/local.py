@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 
 import typer
 
+from agentworks import output
 from agentworks.workspaces.tmuxinator import generate_config
 
 if TYPE_CHECKING:
@@ -38,7 +39,7 @@ def create_local_workspace(
 
     # Git clone or just create directory
     if template.repo:
-        typer.echo(f"Cloning {template.repo}...")
+        output.info(f"Cloning {template.repo}...")
         try:
             result = subprocess.run(
                 ["git", "clone", template.repo, workspace_path],

@@ -6,10 +6,8 @@ import base64
 import contextlib
 from typing import TYPE_CHECKING, Protocol
 
-import typer
-
+from agentworks import output
 from agentworks.db import VMStatus
-from agentworks.output import warn
 from agentworks.ssh import ExecTarget, SSHError, SSHTarget
 from agentworks.vms.base import ProvisionResult, VMProvisioner
 from agentworks.vms.bootstrap_script import generate_bootstrap_script, vm_hostname
@@ -92,7 +90,7 @@ def _get_credential() -> object:
         cred.get_token("https://management.azure.com/.default")
         return cred
     except ClientAuthenticationError:
-        typer.echo("No Azure credentials found, opening browser for login...")
+        output.info("No Azure credentials found, opening browser for login...")
         return InteractiveBrowserCredential()
 
 
@@ -129,10 +127,10 @@ class AzureProvisioner(VMProvisioner):
         assert config.azure is not None, "Azure config is required"
         az = config.azure
 
-        typer.echo("Connecting to Azure...")
-        typer.echo(f"Provisioning Azure VM '{vm_name}' in {az.region} (size: {azure_vm_size})...")
+        output.info("Connecting to Azure...")
+        output.info(f"Provisioning Azure VM '{vm_name}' in {az.region} (size: {azure_vm_size})...")
         if config.vm.swap > 0:
-            typer.echo(f"  Swap: {config.vm.swap} GiB")
+            output.detail(f"Swap: {config.vm.swap} GiB")
 
         ssh_pub_key = config.operator.ssh_public_key.read_text().strip()
 
@@ -158,7 +156,7 @@ class AzureProvisioner(VMProvisioner):
 
         try:
             # Create public IP
-            typer.echo("  Creating public IP...")
+            output.detail("Creating public IP...")
             ip_poller = network.public_ip_addresses.begin_create_or_update(  # type: ignore[call-overload]
                 az.resource_group,
                 f"{vm_name}-ip",
@@ -173,7 +171,7 @@ class AzureProvisioner(VMProvisioner):
             public_ip = ip_result.ip_address or ""
 
             # Create NSG with SSH rule
-            typer.echo("  Creating network security group...")
+            output.detail("Creating network security group...")
             nsg_poller = network.network_security_groups.begin_create_or_update(  # type: ignore[call-overload]
                 az.resource_group,
                 f"{vm_name}-nsg",
@@ -198,7 +196,7 @@ class AzureProvisioner(VMProvisioner):
             nsg_result = nsg_poller.result()
 
             # Create NIC
-            typer.echo("  Creating network interface...")
+            output.detail("Creating network interface...")
 
             # Need a subnet -- use default VNet or create one
             vnet_name = f"{vm_name}-vnet"
@@ -240,7 +238,7 @@ class AzureProvisioner(VMProvisioner):
             nic_result = nic_poller.result()
 
             # Create VM
-            typer.echo("  Creating VM...")
+            output.detail("Creating VM...")
             vm_poller = compute.virtual_machines.begin_create_or_update(  # type: ignore[call-overload]
                 az.resource_group,
                 vm_name,
@@ -286,11 +284,11 @@ class AzureProvisioner(VMProvisioner):
             resource_id = vm_result.id or ""
 
         except Exception as exc:
-            typer.echo("  Cleaning up resources...")
+            output.detail("Cleaning up resources...")
             _cleanup_vm_resources(compute, network, az.resource_group, vm_name)
             raise _wrap_azure_error(exc) from exc
 
-        typer.echo(f"  Azure VM '{vm_name}' provisioned (IP: {public_ip}).")
+        output.detail(f"Azure VM '{vm_name}' provisioned (IP: {public_ip}).")
 
         import sys
 
@@ -329,7 +327,7 @@ class AzureProvisioner(VMProvisioner):
 
         from agentworks.ssh import run as ssh_run
 
-        typer.echo("  Waiting for cloud-init bootstrap to complete (this may take several minutes)...")
+        output.detail("Waiting for cloud-init bootstrap to complete (this may take several minutes)...")
 
         # Wait for SSH to become available
         assert exec_target.ssh is not None
@@ -339,7 +337,7 @@ class AzureProvisioner(VMProvisioner):
                 break
             except SSHError:
                 if attempt == 29:
-                    warn("SSH not available, deferring bootstrap to Phase A")
+                    output.warn("SSH not available, deferring bootstrap to Phase A")
                     return None
                 time.sleep(10)
 
@@ -352,22 +350,22 @@ class AzureProvisioner(VMProvisioner):
                 timeout=600,
             )
         except SSHError as e:
-            warn(f"cloud-init wait failed: {e}")
-            typer.echo("  Deferring bootstrap to Phase A", err=True)
+            output.warn(f"cloud-init wait failed: {e}")
+            output.warn("Deferring bootstrap to Phase A")
             return None
 
         # Get Tailscale IP
         try:
             result = ssh_run(exec_target.ssh, "sudo tailscale ip -4", check=True, timeout=15)
             tailscale_ip = result.stdout.strip()
-            typer.echo(f"  Tailscale IP: {tailscale_ip}")
+            output.detail(f"Tailscale IP: {tailscale_ip}")
             return tailscale_ip
         except SSHError as e:
-            warn(f"could not retrieve Tailscale IP: {e}")
+            output.warn(f"could not retrieve Tailscale IP: {e}")
             return None
 
     def start(self, vm: VMRow) -> None:
-        typer.echo(f"Starting Azure VM '{vm.name}'...")
+        output.info(f"Starting Azure VM '{vm.name}'...")
         assert vm.azure_resource_id is not None
         rg, name, az_cfg = _parse_resource_id(vm.azure_resource_id)
         try:
@@ -375,10 +373,10 @@ class AzureProvisioner(VMProvisioner):
             compute.virtual_machines.begin_start(rg, name).result()
         except Exception as exc:
             raise _wrap_azure_error(exc) from exc
-        typer.echo(f"Azure VM '{vm.name}' started")
+        output.info(f"Azure VM '{vm.name}' started")
 
     def stop(self, vm: VMRow) -> None:
-        typer.echo(f"Deallocating Azure VM '{vm.name}'...")
+        output.info(f"Deallocating Azure VM '{vm.name}'...")
         assert vm.azure_resource_id is not None
         rg, name, az_cfg = _parse_resource_id(vm.azure_resource_id)
         try:
@@ -386,12 +384,12 @@ class AzureProvisioner(VMProvisioner):
             compute.virtual_machines.begin_deallocate(rg, name).result()
         except Exception as exc:
             raise _wrap_azure_error(exc) from exc
-        typer.echo(f"Azure VM '{vm.name}' deallocated")
+        output.info(f"Azure VM '{vm.name}' deallocated")
 
     def delete(self, vm: VMRow) -> None:
-        typer.echo(f"Deleting Azure VM '{vm.name}'...")
+        output.info(f"Deleting Azure VM '{vm.name}'...")
         if vm.azure_resource_id is None:
-            warn("no Azure resource ID, skipping Azure cleanup")
+            output.warn("no Azure resource ID, skipping Azure cleanup")
             return
 
         rg, name, az_cfg = _parse_resource_id(vm.azure_resource_id)
@@ -404,7 +402,7 @@ class AzureProvisioner(VMProvisioner):
 
         _cleanup_vm_resources(compute, network, rg, name)
 
-        typer.echo(f"Azure VM '{vm.name}' deleted")
+        output.info(f"Azure VM '{vm.name}' deleted")
 
     def attach_public_ip(self, vm: VMRow) -> str:
         """Attach a temporary public IP to the VM's NIC. Returns the IP address."""
@@ -414,7 +412,7 @@ class AzureProvisioner(VMProvisioner):
 
         try:
             # Create (or re-create) the public IP
-            typer.echo("  Attaching temporary public IP...")
+            output.detail("Attaching temporary public IP...")
             ip_poller = network.public_ip_addresses.begin_create_or_update(  # type: ignore[call-overload]
                 rg,
                 f"{name}-ip",
@@ -449,7 +447,7 @@ class AzureProvisioner(VMProvisioner):
         rg, name, az_cfg = _parse_resource_id(vm.azure_resource_id)
         network = _network_client(az_cfg)
 
-        typer.echo("  Removing public IP...")
+        output.detail("Removing public IP...")
         # Detach from NIC
         with contextlib.suppress(Exception):
             nic = network.network_interfaces.get(rg, f"{name}-nic")

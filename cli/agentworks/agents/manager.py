@@ -8,7 +8,6 @@ import typer
 
 from agentworks import output
 from agentworks.config import validate_name
-from agentworks.output import warn
 from agentworks.ssh import admin_exec_target
 
 if TYPE_CHECKING:
@@ -438,7 +437,7 @@ def grant_workspaces(
     for ws_name in workspace_names:
         found_ws = db.get_workspace(ws_name)
         if found_ws is None:
-            warn(f"workspace '{ws_name}' not found, skipping")
+            output.warn(f"workspace '{ws_name}' not found, skipping")
             continue
         _add_to_workspace_group(vm, config, agent.linux_user, ws_name, logger=None)
         db.insert_agent_grant(agent_name, ws_name, "explicit")
@@ -625,7 +624,7 @@ def _create_agent_on_vm(
         rc_content = f"export PS1='[agent:{linux_user}] \\w\\$ '\n"
         rc_file = f"{home}/.bashrc"
     else:
-        warn(f"unsupported shell '{agent_shell}', skipping prompt configuration")
+        output.warn(f"unsupported shell '{agent_shell}', skipping prompt configuration")
         rc_content = None
         rc_file = None
 
@@ -638,7 +637,7 @@ def _create_agent_on_vm(
             _run_as_agent(target, linux_user, "git config --global --add safe.directory '*'", logger=lg)
             output.detail("Git safe.directory configured for agent")
         except Exception as e:
-            warn(f"agent git safe.directory setup failed: {e}")
+            output.warn(f"agent git safe.directory setup failed: {e}")
 
     # Git credentials for the agent (tokens collected up front)
     if agent_cfg.git_credentials and git_tokens:
@@ -657,7 +656,7 @@ def _create_agent_on_vm(
                 _write_agent_file(target, linux_user, f"{home}/.git-credentials", cred_content, mode="600", logger=lg)
                 _run_as_agent(target, linux_user, "git config --global credential.helper store", logger=lg)
         except Exception as e:
-            warn(f"agent git credential setup failed: {e}")
+            output.warn(f"agent git credential setup failed: {e}")
 
     # User install commands for the agent
     _run_agent_install_commands(vm, config, linux_user, home)
@@ -745,7 +744,7 @@ def _create_agent_on_vm(
                 logger=lg,
             )
         except (SourceRefError, Exception) as e:
-            warn(f"agent dotfiles failed: {e}")
+            output.warn(f"agent dotfiles failed: {e}")
 
     # Mise for the agent
     _run_agent_mise_setup(vm, config, linux_user, home)
@@ -786,7 +785,7 @@ def _install_nerf_claude_plugin_for_agent(
         )
         output.detail("Nerf Claude plugin installed for agent")
     except SSHError as e:
-        warn(f"agent nerf plugin install failed: {e}")
+        output.warn(f"agent nerf plugin install failed: {e}")
 
 
 def _delete_agent_on_vm(
@@ -808,7 +807,7 @@ def _delete_agent_on_vm(
         # Remove the user and their home directory
         run_as_root(target, f"userdel -r {linux_user}", logger=lg)
     except SSHError as e:
-        warn(f"remote cleanup for '{linux_user}' failed: {e}")
+        output.warn(f"remote cleanup for '{linux_user}' failed: {e}")
 
 
 def _run_agent_install_commands(
@@ -836,7 +835,7 @@ def _run_agent_install_commands(
     for i, name in enumerate(command_names, 1):
         entry = catalog.user_install_commands.get(name)
         if entry is None:
-            warn(f"install command '{name}' not found in catalog")
+            output.warn(f"install command '{name}' not found in catalog")
             continue
         # Skip if already installed for this user (short timeout)
         test_cmd = _build_agent_test_command(entry, linux_user, home)
@@ -848,7 +847,7 @@ def _run_agent_install_commands(
                     path_additions.extend(entry.path)
                     continue
             except SSHError as e:
-                warn(f"install check for '{name}' failed ({e}), assuming not installed")
+                output.warn(f"install check for '{name}' failed ({e}), assuming not installed")
 
         truncated = entry.command[:60]
         output.detail(f"Agent install command {i}/{total} ({name}): {truncated}...")
@@ -860,7 +859,7 @@ def _run_agent_install_commands(
                 timeout=120,
             )
         except SSHError as e:
-            warn(f"agent install command '{name}' failed: {e}")
+            output.warn(f"agent install command '{name}' failed: {e}")
         path_additions.extend(entry.path)
 
     # Write PATH additions for the agent
@@ -888,7 +887,7 @@ def _run_agent_install_commands(
                     f"grep -q {AGENTWORKS_PROFILE} {rc} 2>/dev/null || printf '%s\\n' '{source_line}' >> {rc}",
                 )
         except SSHError as e:
-            warn(f"agent PATH configuration failed: {e}")
+            output.warn(f"agent PATH configuration failed: {e}")
 
 
 def _run_agent_mise_setup(
@@ -927,7 +926,7 @@ def _run_agent_mise_setup(
                 f"grep -q {AGENTWORKS_PROFILE} {rc} 2>/dev/null || printf '%s\\n' '{source_line}' >> {rc}",
             )
     except SSHError as e:
-        warn(f"agent profile configuration failed: {e}")
+        output.warn(f"agent profile configuration failed: {e}")
 
     # Write mise activation to agent's rc (interactive shell hooks)
     if agent_cfg.mise_activate:
@@ -943,7 +942,7 @@ def _run_agent_mise_setup(
                     f"grep -q {AGENTWORKS_RC} {rc} 2>/dev/null || printf '%s\\n' '{source_line}' >> {rc}",
                 )
         except SSHError as e:
-            warn(f"agent rc configuration failed: {e}")
+            output.warn(f"agent rc configuration failed: {e}")
 
     mise_config_dir = f"{home}/.config/mise"
 
@@ -963,7 +962,7 @@ def _run_agent_mise_setup(
             _run_as_agent(target, linux_user, f"mkdir -p {mise_config_dir}")
             _write_agent_file(target, linux_user, f"{mise_config_dir}/config.toml", mise_config)
         except SSHError as e:
-            warn(f"agent mise config write failed: {e}")
+            output.warn(f"agent mise config write failed: {e}")
             return
 
     # Copy lockfile if configured
@@ -981,7 +980,7 @@ def _run_agent_mise_setup(
             run_as_root(target, f"mv {tmp_lock} {mise_config_dir}/mise.lock")
             run_as_root(target, f"chown {linux_user}:{linux_user} {mise_config_dir}/mise.lock")
         except (SourceRefError, SSHError) as e:
-            warn(f"agent mise lockfile fetch failed: {e}")
+            output.warn(f"agent mise lockfile fetch failed: {e}")
 
     # Run mise install as the agent user
     lockfile_exists = False
@@ -999,15 +998,15 @@ def _run_agent_mise_setup(
         installed = True
     except SSHError as e:
         if lockfile_exists and agent_cfg.mise_allow_unlocked:
-            warn("some agent packages not in lockfile, installing unlocked...")
+            output.warn("some agent packages not in lockfile, installing unlocked...")
             try:
                 _run_as_agent(target, linux_user, "mise install -y", timeout=300)
                 output.detail("Agent mise packages installed (unlocked)")
                 installed = True
             except SSHError as e2:
-                warn(f"agent mise install failed: {e2}")
+                output.warn(f"agent mise install failed: {e2}")
         else:
-            warn(f"agent mise install failed: {e}")
+            output.warn(f"agent mise install failed: {e}")
             if lockfile_exists:
                 output.warn("set mise_allow_unlocked = true to install unlocked packages")
 

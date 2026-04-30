@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 
 import typer
 
+from agentworks import output
 from agentworks.db import SessionMode, SessionStatus
 from agentworks.ssh import admin_exec_target
 
@@ -103,10 +104,9 @@ def _session_exists_any_server(
         return True
     on_default = session_exists(session_name, run_command=run_command)
     if on_default and socket_path and warn_legacy:
-        typer.echo(
-            f"  Note: agent session '{session_name}' is running on the default tmux server "
-            f"(legacy mode). Restart it to use the new per-agent socket.",
-            err=True,
+        output.warn(
+            f"agent session '{session_name}' is running on the default tmux server "
+            f"(legacy mode). Restart it to use the new per-agent socket."
         )
     return on_default
 
@@ -358,7 +358,7 @@ def create_session(
         db.update_session_socket_path(name, sock)
 
     mode_label = f"agent: {resolved_agent_name}" if resolved_agent_name else "admin"
-    typer.echo(f"Session '{name}' started ({mode_label}, template: {template.name})")
+    output.info(f"Session '{name}' started ({mode_label}, template: {template.name})")
 
     # Update tmuxinator config and add to console if it exists
     _regenerate_tmuxinator(db, config, vm, ws)
@@ -382,7 +382,7 @@ def stop_session(
     _ws, _vm, run_command, _ = _prepare_vm(db, config, session.workspace_name, operation="session-stop")
 
     if session.status == SessionStatus.STOPPED.value:
-        typer.echo(f"Session '{name}' is already stopped")
+        output.info(f"Session '{name}' is already stopped")
         return
 
     sock = _effective_socket_path(db, session)
@@ -400,7 +400,7 @@ def stop_session(
         _kill_session_any_server(name, run_command=run_command, socket_path=sock)
 
     db.update_session_status(name, SessionStatus.STOPPED)
-    typer.echo(f"Session '{name}' stopped")
+    output.info(f"Session '{name}' stopped")
 
 
 def restart_session(
@@ -462,7 +462,7 @@ def restart_session(
         db.update_session_socket_path(name, new_sock)
 
     db.update_session_status(name, SessionStatus.RUNNING)
-    typer.echo(f"Session '{name}' restarted")
+    output.info(f"Session '{name}' restarted")
 
     _regenerate_tmuxinator(db, config, vm, ws)
     from agentworks.sessions.console import add_session_to_console
@@ -494,10 +494,10 @@ def restart_all_sessions(
         sessions = [s for s in sessions if s.status == SessionStatus.STOPPED.value]
 
     if not sessions:
-        typer.echo("No matching sessions to restart.")
+        output.info("No matching sessions to restart.")
         return
 
-    typer.echo(f"Restarting {len(sessions)} session(s)...")
+    output.info(f"Restarting {len(sessions)} session(s)...")
     failed: list[tuple[str, str]] = []
     for session in sessions:
         try:
@@ -509,7 +509,7 @@ def restart_all_sessions(
             )
         except Exception as exc:
             failed.append((session.name, str(exc)))
-            typer.echo(f"  Error restarting '{session.name}': {exc}", err=True)
+            output.warn(f"Error restarting '{session.name}': {exc}")
 
     if failed:
         typer.echo(f"\n{len(failed)} session(s) failed to restart.", err=True)
@@ -541,10 +541,9 @@ def delete_session(
         from agentworks.sessions.tmux import session_exists
 
         if session_exists(name, run_command=run_command, socket_path=sock):
-            typer.echo(
-                f"  Warning: tmux session '{name}' is still running after kill. "
-                f"Socket preserved at {sock}",
-                err=True,
+            output.warn(
+                f"tmux session '{name}' is still running after kill. "
+                f"Socket preserved at {sock}"
             )
         else:
             run_command(f"sudo rm -f {shlex.quote(sock)}", check=False)
@@ -563,14 +562,14 @@ def delete_session(
                 _remove_from_workspace_group(vm, config, agent.linux_user, session.workspace_name)
 
     _regenerate_tmuxinator(db, config, vm, ws)
-    typer.echo(f"Session '{name}' deleted")
+    output.info(f"Session '{name}' deleted")
 
     # If this session created its workspace, offer to delete it
     if session.created_workspace:
         remaining = db.list_sessions(workspace_name=session.workspace_name)
         if remaining:
-            typer.echo(
-                f"  Workspace '{session.workspace_name}' was created with this session but has "
+            output.detail(
+                f"Workspace '{session.workspace_name}' was created with this session but has "
                 f"{len(remaining)} other session(s), not offering to delete."
             )
         elif not yes:
@@ -584,7 +583,7 @@ def delete_session(
         else:
             from agentworks.workspaces.manager import delete_workspace
 
-            typer.echo(f"  Deleting workspace '{session.workspace_name}' (created with this session)...")
+            output.detail(f"Deleting workspace '{session.workspace_name}' (created with this session)...")
             delete_workspace(db, config, session.workspace_name, yes=True)
 
 
@@ -605,14 +604,14 @@ def describe_session(
 
     mode_label = f"agent ({session.agent_name})" if session.agent_name else "admin"
 
-    typer.echo(f"Name:       {session.name}")
-    typer.echo(f"Workspace:  {session.workspace_name}")
-    typer.echo(f"VM:         {vm.name}")
-    typer.echo(f"Template:   {session.template}")
-    typer.echo(f"Mode:       {mode_label}")
-    typer.echo(f"Status:     {session.status}")
-    typer.echo(f"Created:    {session.created_at}")
-    typer.echo(f"Updated:    {session.updated_at}")
+    output.info(f"Name:       {session.name}")
+    output.info(f"Workspace:  {session.workspace_name}")
+    output.info(f"VM:         {vm.name}")
+    output.info(f"Template:   {session.template}")
+    output.info(f"Mode:       {mode_label}")
+    output.info(f"Status:     {session.status}")
+    output.info(f"Created:    {session.created_at}")
+    output.info(f"Updated:    {session.updated_at}")
 
 
 def list_sessions(
@@ -625,7 +624,7 @@ def list_sessions(
     """List sessions, optionally reconciling status with tmux."""
     sessions = db.list_sessions(workspace_name=workspace_name)
     if not sessions:
-        typer.echo("No sessions found.")
+        output.info("No sessions found.")
         return
 
     # Group sessions by workspace to batch SSH connections
@@ -666,7 +665,7 @@ def list_sessions(
             rows.append((session.name, ws_name, vm_name, session.template, mode_label, status))
 
     if not rows:
-        typer.echo("No sessions found.")
+        output.info("No sessions found.")
         return
 
     name_w = max(len("NAME"), max(len(r[0]) for r in rows))
@@ -678,10 +677,10 @@ def list_sessions(
     header = (
         f"{'NAME':<{name_w}}  {'WORKSPACE':<{ws_w}}  {'VM':<{vm_w}}  {'TEMPLATE':<{tpl_w}}  {'MODE':<{mode_w}}  STATUS"
     )
-    typer.echo(header)
-    typer.echo("-" * len(header))
+    output.info(header)
+    output.info("-" * len(header))
     for sname, ws_name, vm_col, tpl, mode, status in rows:
-        typer.echo(
+        output.info(
             f"{sname:<{name_w}}  {ws_name:<{ws_w}}  {vm_col:<{vm_w}}  {tpl:<{tpl_w}}  {mode:<{mode_w}}  {status}"
         )
 
@@ -732,10 +731,10 @@ def session_logs(
     if sock and not session_exists(name, run_command=run_command, socket_path=sock):
         sock = None
 
-    output = capture_output(
+    captured = capture_output(
         name,
         run_command=run_command,
         lines=lines or config.session.history_limit,
         socket_path=sock,
     )
-    typer.echo(output, nl=False)
+    typer.echo(captured, nl=False)

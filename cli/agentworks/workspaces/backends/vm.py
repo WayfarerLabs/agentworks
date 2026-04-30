@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 
 import typer
 
-from agentworks.output import warn
+from agentworks import output
 from agentworks.ssh import admin_exec_target
 from agentworks.workspaces.tmuxinator import console_session_name, generate_config
 
@@ -63,7 +63,7 @@ def create_vm_workspace(
 
     # Git clone if repo is set
     if template.repo:
-        typer.echo(f"Cloning {template.repo}...")
+        output.info(f"Cloning {template.repo}...")
         try:
             ssh_run(target, f"git clone {template.repo} {workspace_path}", timeout=300, logger=lg)
             # Ensure cloned files inherit the workspace group and subdirectories
@@ -75,16 +75,14 @@ def create_vm_workspace(
             run_as_root(target, sgid_cmd, timeout=120, logger=lg)
         except Exception:
             if template.repo.startswith("git@"):
-                typer.echo(
+                output.warn(
                     "Hint: SSH repo URLs are not supported. Use HTTPS URLs "
-                    "and configure git credentials with 'vm add-git-credential'.",
-                    err=True,
+                    "and configure git credentials with 'vm add-git-credential'."
                 )
             else:
-                typer.echo(
+                output.warn(
                     "Hint: for private repos, ensure git credentials are "
-                    "configured on the VM (see 'vm add-git-credential').",
-                    err=True,
+                    "configured on the VM (see 'vm add-git-credential')."
                 )
             raise
 
@@ -161,7 +159,7 @@ def delete_vm_workspace(
         session = console_session_name(ws_name)
         ssh_run(target, f"rm -f ~/.config/tmuxinator/{session}.yml", check=False, timeout=10, logger=lg)
     except SSHError as e:
-        warn(f"remote cleanup failed: {e}")
+        output.warn(f"remote cleanup failed: {e}")
 
 
 def generate_vscode_workspace(

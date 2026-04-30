@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 
 import typer
 
-from agentworks.output import warn
+from agentworks import output
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -57,22 +57,22 @@ def backup_vm(
     # Log the backup event
     db.insert_vm_event(vm_name, "backup_started")
 
-    typer.echo(f"Backing up VM '{vm_name}' to {backup_dir}...")
+    output.info(f"Backing up VM '{vm_name}' to {backup_dir}...")
 
     # Snapshot all DB data in a single transaction for consistency
-    typer.echo("  Reading database (consistent snapshot)...")
+    output.detail("Reading database (consistent snapshot)...")
     _vm, agents, workspaces, sessions, events, grants_by_agent = db.snapshot_vm_backup_data(vm_name)
 
     # 1. VM metadata
-    typer.echo("  Exporting VM metadata...")
+    output.detail("Exporting VM metadata...")
     _write_json(backup_dir / "vm.json", asdict(vm))
 
     # 2. Events
-    typer.echo(f"  Exporting {len(events)} VM events...")
+    output.detail(f"Exporting {len(events)} VM events...")
     _write_json(backup_dir / "events.json", [asdict(e) for e in events])
 
     # 3. Agents with grants and live UID verification
-    typer.echo(f"  Exporting {len(agents)} agents...")
+    output.detail(f"Exporting {len(agents)} agents...")
     agents_data = []
     for agent in agents:
         agent_data = asdict(agent)
@@ -83,7 +83,7 @@ def backup_vm(
                 agent_data["live_uid"] = result.stdout.strip()
             else:
                 agent_data["live_uid"] = None
-                warn(f"user '{agent.linux_user}' not found on VM")
+                output.warn(f"user '{agent.linux_user}' not found on VM")
         except SSHError:
             agent_data["live_uid"] = None
 
@@ -92,7 +92,7 @@ def backup_vm(
     _write_json(backup_dir / "agents.json", agents_data)
 
     # 4. Workspaces with live GID verification
-    typer.echo(f"  Exporting {len(workspaces)} workspaces...")
+    output.detail(f"Exporting {len(workspaces)} workspaces...")
     ws_data = []
     for ws in workspaces:
         ws_entry = asdict(ws)
@@ -105,7 +105,7 @@ def backup_vm(
                 ws_entry["live_gid"] = parts[2] if len(parts) > 2 else None
             else:
                 ws_entry["live_gid"] = None
-                warn(f"group '{ws_group}' not found on VM")
+                output.warn(f"group '{ws_group}' not found on VM")
         except SSHError:
             ws_entry["live_gid"] = None
 
@@ -113,7 +113,7 @@ def backup_vm(
     _write_json(backup_dir / "workspaces.json", ws_data)
 
     # 5. Sessions
-    typer.echo(f"  Exporting {len(sessions)} sessions...")
+    output.detail(f"Exporting {len(sessions)} sessions...")
     _write_json(backup_dir / "sessions.json", [asdict(s) for s in sessions])
 
     # 6. Workspace files -- single archive of all workspace paths
@@ -131,7 +131,7 @@ def backup_vm(
             db.insert_vm_event(vm_name, "backup_failed")
             raise
     else:
-        typer.echo("  No VM workspaces to archive.")
+        output.detail("No VM workspaces to archive.")
 
     # 7. Manifest
     manifest = {
@@ -150,7 +150,7 @@ def backup_vm(
     db.insert_vm_event(vm_name, "backup_completed", detail=str(backup_dir))
     ssh_logger.close()
 
-    typer.echo(f"\nBackup complete: {backup_dir}")
+    output.info(f"\nBackup complete: {backup_dir}")
 
     return backup_dir
 
@@ -187,7 +187,7 @@ def _archive_workspaces(
             if target.run(f"test -d {shlex.quote(ws.workspace_path)}", sudo=True, check=False).ok:
                 valid.append(ws)
             else:
-                warn(f"path not found, skipping: {ws.workspace_path}")
+                output.warn(f"path not found, skipping: {ws.workspace_path}")
                 skipped.append(ws.workspace_path)
 
         if not valid:
@@ -208,13 +208,13 @@ def _archive_workspaces(
         du_result = target.run(f"du -sb {du_paths} | awk '{{s+=$1}} END {{print s}}'", sudo=True, check=False)
         if du_result.ok and du_result.stdout.strip().isdigit():
             total_size = int(du_result.stdout.strip())
-            typer.echo(f"  Total workspace size: {_fmt_size(total_size)} (uncompressed)")
+            output.detail(f"Total workspace size: {_fmt_size(total_size)} (uncompressed)")
 
         # Use zstd at level 15 for high compression (trades CPU for smaller archive,
         # which is worthwhile since cross-workspace deduplication benefits from it).
-        typer.echo(f"  Archiving {len(valid)} workspace(s) with zstd (this may take a while)...")
-        typer.echo(f"    Remote archive: {archive}")
-        typer.echo(f"    Local archive:  {local_archive}")
+        output.detail(f"Archiving {len(valid)} workspace(s) with zstd (this may take a while)...")
+        output.detail(f"  Remote archive: {archive}")
+        output.detail(f"  Local archive:  {local_archive}")
 
         # Write paths file via scp to avoid shell escaping issues.
         paths_file = f"{tmp_dir}/paths.txt"
@@ -306,9 +306,9 @@ def _archive_workspaces(
         _report_size(target, archive)
 
         if result.output.strip():
-            typer.echo("  tar warnings:", err=True)
+            output.warn("tar warnings:")
             for line in result.output.strip().splitlines()[-10:]:
-                typer.echo(f"    {line}", err=True)
+                output.detail(f"  {line}")
 
         # Transfer to local. Chown the temp dir and archive to the admin
         # user so scp can read it (avoids making it world-readable).
@@ -319,7 +319,7 @@ def _archive_workspaces(
         size_result = target.run(f"stat -c %s {q_archive}", sudo=True, check=False)
         remote_size = int(size_result.stdout.strip()) if size_result.ok else 0
 
-        typer.echo("  Transferring remote archive to local...")
+        output.detail("Transferring remote archive to local...")
         _transfer_with_progress(target_ssh, archive, local_archive, remote_size)
 
     except Exception:
@@ -365,12 +365,12 @@ def _transfer_with_progress(
                     local_size = local_path.stat().st_size
                     if remote_size > 0:
                         pct = local_size / remote_size * 100
-                        typer.echo(
-                            f"  Transfer: {_fmt_size(local_size)} / "
+                        output.detail(
+                            f"Transfer: {_fmt_size(local_size)} / "
                             f"{_fmt_size(remote_size)} ({pct:.0f}%)"
                         )
                     else:
-                        typer.echo(f"  Transfer: {_fmt_size(local_size)}")
+                        output.detail(f"Transfer: {_fmt_size(local_size)}")
                 except FileNotFoundError:
                     pass
                 last_report = time.monotonic()
@@ -380,7 +380,7 @@ def _transfer_with_progress(
             stderr = (proc.stderr.read() or b"").decode("utf-8", errors="replace").strip()
             raise SSHError(f"scp failed: {stderr}")
 
-        typer.echo(f"  Saved: {local_path} ({_fmt_size(local_path.stat().st_size)})")
+        output.detail(f"Saved: {local_path} ({_fmt_size(local_path.stat().st_size)})")
 
     except (KeyboardInterrupt, Exception):
         proc.terminate()
@@ -411,7 +411,7 @@ def _report_size(target: ExecTarget, remote_path: str) -> None:
     try:
         result = target.run(f"stat -c %s {shlex.quote(remote_path)}", sudo=True, check=False)
         if result.ok:
-            typer.echo(f"  Archive size: {_fmt_size(int(result.stdout.strip()))}")
+            output.detail(f"Archive size: {_fmt_size(int(result.stdout.strip()))}")
     except Exception:
         pass
 

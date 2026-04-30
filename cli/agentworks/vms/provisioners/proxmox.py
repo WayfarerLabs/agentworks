@@ -7,10 +7,8 @@ import time
 import urllib.parse
 from typing import TYPE_CHECKING
 
-import typer
-
+from agentworks import output
 from agentworks.db import VMStatus
-from agentworks.output import warn
 from agentworks.ssh import ExecTarget, SSHTarget
 from agentworks.vms.base import ProvisionResult, VMProvisioner
 from agentworks.vms.bootstrap_script import generate_bootstrap_script, vm_hostname
@@ -53,21 +51,21 @@ class ProxmoxProvisioner(VMProvisioner):
         node = self._cfg.node
         template_vmid = self._cfg.template_vmid
 
-        typer.echo(f"Provisioning Proxmox VM '{vm_name}' on node {node}...")
+        output.info(f"Provisioning Proxmox VM '{vm_name}' on node {node}...")
 
         # 1. Get next VMID
         newid = self._api.next_id()
-        typer.echo(f"  Allocated VMID: {newid}")
+        output.detail(f"Allocated VMID: {newid}")
 
         # 2. Clone template into the agentworks pool
-        typer.echo(f"  Cloning template {template_vmid}...")
+        output.detail(f"Cloning template {template_vmid}...")
         upid = self._api.clone_vm(
             node, template_vmid, newid, vm_name,
             storage=self._cfg.storage,
             pool=self._cfg.pool,
         )
         self._api.wait_for_task(node, upid)
-        typer.echo("  Clone complete")
+        output.detail("Clone complete")
 
         # 3. Configure VM resources
         vm_config: dict[str, object] = {}
@@ -88,33 +86,33 @@ class ProxmoxProvisioner(VMProvisioner):
         vm_config["agent"] = "enabled=1"
         vm_config["cpu"] = "host"
 
-        typer.echo("  Configuring VM...")
+        output.detail("Configuring VM...")
         self._api.configure_vm(node, newid, **vm_config)
 
         # 4. Resize disk if requested
         if disk is not None:
-            typer.echo(f"  Resizing disk to {disk}G...")
+            output.detail(f"Resizing disk to {disk}G...")
             self._api.resize_disk(node, newid, "scsi0", f"{disk}G")
 
         # 5. Start VM
-        typer.echo("  Starting VM...")
+        output.detail("Starting VM...")
         upid = self._api.start_vm(node, newid)
         self._api.wait_for_task(node, upid)
 
         # 6. Wait for guest agent and get VM IP
-        typer.echo("  Waiting for guest agent...")
+        output.detail("Waiting for guest agent...")
         ip = self._wait_for_guest_ip(node, newid)
-        typer.echo(f"  VM IP: {ip}")
+        output.detail(f"VM IP: {ip}")
 
         # 7. Wait for cloud-init to finish (releases apt lock)
-        typer.echo("  Waiting for cloud-init...")
+        output.detail("Waiting for cloud-init...")
         self._wait_for_cloud_init(node, newid)
 
         # 8. Run bootstrap script via guest agent
         bootstrap_complete = False
         tailscale_ip: str | None = None
         if tailscale_auth_key:
-            typer.echo("  Running bootstrap via guest agent...")
+            output.detail("Running bootstrap via guest agent...")
             bootstrap = generate_bootstrap_script(
                 admin_username=admin_username,
                 ssh_public_key=ssh_pub_key,
@@ -126,7 +124,7 @@ class ProxmoxProvisioner(VMProvisioner):
             tailscale_ip = self._run_bootstrap_via_agent(node, newid, bootstrap)
             bootstrap_complete = tailscale_ip is not None
             if tailscale_ip:
-                typer.echo(f"  Tailscale IP: {tailscale_ip}")
+                output.detail(f"Tailscale IP: {tailscale_ip}")
 
         host = tailscale_ip or ip
         target = ExecTarget(
@@ -264,7 +262,7 @@ class ProxmoxProvisioner(VMProvisioner):
         )
 
         if result is None:
-            warn("bootstrap timed out")
+            output.warn("bootstrap timed out")
             return None
 
         exit_code = result.get("exitcode", -1)
@@ -276,6 +274,6 @@ class ProxmoxProvisioner(VMProvisioner):
 
         stderr = result.get("err-data", "")
         if stderr:
-            typer.echo(f"  Bootstrap stderr: {stderr[:500]}", err=True)
+            output.warn(f"Bootstrap stderr: {stderr[:500]}")
 
         return None

@@ -16,8 +16,7 @@ import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-import typer
-
+from agentworks import output
 from agentworks.ssh import SSHError
 
 if TYPE_CHECKING:
@@ -89,11 +88,11 @@ def run_detached(
     # Check for a completed previous run (reconnect after process finished)
     if _status_file_exists(target, status_file):
         if not quiet:
-            typer.echo(f"  {label}: found completed result from previous run")
+            output.detail(f"{label}: found completed result from previous run")
     # Check for an existing running process (resume scenario)
     elif _is_running(target, pid_file):
         if not quiet:
-            typer.echo(f"  {label}: resuming in-progress operation...")
+            output.detail(f"{label}: resuming in-progress operation...")
     else:
         # Write and start the wrapper script
         wrapper = _WRAPPER_TEMPLATE.format(
@@ -122,10 +121,10 @@ def run_detached(
         time.sleep(0.5)
 
         if not quiet:
-            typer.echo(f"  {label}: started (detached)")
+            output.detail(f"{label}: started (detached)")
 
     # Poll for completion
-    output = _poll_until_done(
+    captured = _poll_until_done(
         target,
         output_file,
         pid_file,
@@ -150,7 +149,7 @@ def run_detached(
     with contextlib.suppress(SSHError):
         target.run(f"rm -f {wrapper_file} {pid_file} {status_file} {output_file}", sudo=as_root, check=False)
 
-    return DetachedResult(exit_code=exit_code, output=output)
+    return DetachedResult(exit_code=exit_code, output=captured)
 
 
 def _is_running(target: ExecTarget, pid_file: str) -> bool:
@@ -195,9 +194,8 @@ def _poll_until_done(
 
         # Hard timeout -- kill the remote process to avoid orphans
         if timeout is not None and (time.monotonic() - start_time) > timeout:
-            typer.echo(
-                f"  {label}: timed out after {timeout}s, killing remote process",
-                err=True,
+            output.warn(
+                f"{label}: timed out after {timeout}s, killing remote process"
             )
             with contextlib.suppress(SSHError):
                 target.run(
@@ -217,7 +215,7 @@ def _poll_until_done(
                 warned_quiet = False
                 if not quiet:
                     for line in new_output.splitlines():
-                        typer.echo(f"  {line}")
+                        output.detail(line)
                 last_size += len(new_output.encode("utf-8"))
 
             # Check if process finished (status file exists)
@@ -227,7 +225,7 @@ def _poll_until_done(
                 final_output = _read_new_output(target, output_file, last_size)
                 if final_output and not quiet:
                     for line in final_output.splitlines():
-                        typer.echo(f"  {line}")
+                        output.detail(line)
                 break
 
             # Check if process is still alive (PID check)
@@ -237,25 +235,24 @@ def _poll_until_done(
 
             # Reset SSH failure counter on success
             if ssh_failures > 0 and not quiet:
-                typer.echo(f"  {label}: connection restored")
+                output.detail(f"{label}: connection restored")
             ssh_failures = 0
 
         except SSHError:
             ssh_failures += 1
             if not quiet:
                 if ssh_failures == 1:
-                    typer.echo(f"  {label}: connection lost, waiting for recovery...")
+                    output.detail(f"{label}: connection lost, waiting for recovery...")
                 elif ssh_failures % 6 == 0:
-                    typer.echo(f"  {label}: still waiting... ({ssh_failures * poll_interval}s)")
+                    output.detail(f"{label}: still waiting... ({ssh_failures * poll_interval}s)")
             # Don't break -- the wrapper script is still running on the VM
             continue
 
         # Warn if no output for a while
         quiet_secs = time.monotonic() - last_output_time
         if quiet_secs > quiet_timeout and not warned_quiet:
-            typer.echo(
-                f"  {label}: no output for {int(quiet_secs)}s (still running)...",
-                err=True,
+            output.warn(
+                f"{label}: no output for {int(quiet_secs)}s (still running)..."
             )
             warned_quiet = True
 
@@ -267,7 +264,7 @@ def _poll_until_done(
             return result.stdout
         except SSHError:
             time.sleep(5)
-    typer.echo(f"  {label}: unable to retrieve remote output after repeated SSH failures", err=True)
+    output.warn(f"{label}: unable to retrieve remote output after repeated SSH failures")
     return ""
 
 

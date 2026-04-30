@@ -15,8 +15,8 @@ from typing import TYPE_CHECKING
 
 import typer
 
+from agentworks import output
 from agentworks.db import SessionStatus
-from agentworks.output import warn
 from agentworks.sessions.tmux import tmux_cmd
 
 if TYPE_CHECKING:
@@ -58,7 +58,7 @@ def create_console(
     run_command(f"tmux set -t {CONSOLE_SESSION_NAME} remain-on-exit on", check=False)
 
     # Add a window for each running session
-    typer.echo(f"Adding {len(running_sessions)} session(s) to console...")
+    output.info(f"Adding {len(running_sessions)} session(s) to console...")
     for session in running_sessions:
         _add_session_window(
             session.name,
@@ -95,7 +95,7 @@ def _add_session_window(
     ok = getattr(result, "ok", True)
     stderr = getattr(result, "stderr", "")
     if not ok:
-        warn(f"failed to add window for '{session_name}': {stderr}")
+        output.warn(f"failed to add window for '{session_name}': {stderr}")
 
 
 def add_session_to_console(
