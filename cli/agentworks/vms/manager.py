@@ -566,7 +566,7 @@ def rekey_vm(
             except SSHError:
                 if attempt == 5:
                     raise
-                typer.echo(f"  Retrying ({attempt + 1}/6)...")
+                typer.echo(f"  Attempt {attempt + 1} failed, retrying...")
                 time.sleep(5)
         typer.echo("  Connected.")
 
@@ -579,14 +579,15 @@ def rekey_vm(
         # Restart command varies by platform. WSL2 may not have systemd.
         is_wsl2 = vm.platform == "wsl2"
         restart_cmd = "service tailscaled restart" if is_wsl2 else "systemctl restart tailscaled"
+        stabilize_secs = 15  # pause between steps for daemon/network stability
 
         typer.echo("  Restarting Tailscale daemon...")
         exec_target.run(restart_cmd, sudo=True, timeout=15)
-        time.sleep(15)
+        time.sleep(stabilize_secs)
 
         typer.echo("  Logging out of current tailnet...")
         exec_target.run("tailscale logout", sudo=True, timeout=30)
-        time.sleep(15)
+        time.sleep(stabilize_secs)
 
         typer.echo("  Joining new tailnet...")
         quoted_key = shlex.quote(ts_auth_key)
@@ -594,11 +595,11 @@ def rekey_vm(
         if is_wsl2:
             ts_up_cmd += " --userspace-networking"
         exec_target.run(ts_up_cmd, sudo=True, timeout=30)
-        time.sleep(15)
+        time.sleep(stabilize_secs)
 
         typer.echo("  Restarting Tailscale daemon...")
         exec_target.run(restart_cmd, sudo=True, timeout=15)
-        time.sleep(15)
+        time.sleep(stabilize_secs)
 
         typer.echo("  Reading new Tailscale IP...")
         result = exec_target.run("tailscale ip -4", sudo=True, timeout=15)
