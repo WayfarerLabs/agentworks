@@ -1266,16 +1266,58 @@ def config_sync_ssh_config() -> None:
 
 
 def main() -> None:
-    """CLI entrypoint. Wraps the typer app to catch ConfigError cleanly."""
-    from agentworks.config import ConfigError
-    from agentworks.output import set_warn_handler
+    """CLI entrypoint. Sets up output handler and catches business logic errors."""
+    import time
 
-    # Route warnings through typer so they render consistently with other output
-    set_warn_handler(lambda msg: typer.echo(f"Warning: {msg}", err=True))
+    from agentworks.config import ConfigError
+    from agentworks.output import AgentworksError, Progress, set_handler
+
+    # -- Typer output handler --------------------------------------------------
+
+    class _TyperProgress:
+        def __init__(self, label: str, total: int | None = None) -> None:
+            self._label = label
+            self._total = total
+            self._start = time.monotonic()
+
+        def update(self, current: int | None = None, message: str | None = None) -> None:
+            parts = [f"  {self._label}..."]
+            if current is not None and self._total is not None:
+                pct = current / self._total * 100
+                parts.append(f" {pct:.0f}% ({current}/{self._total})")
+            if message:
+                parts.append(f" {message}")
+            typer.echo("".join(parts))
+
+        def done(self, message: str | None = None) -> None:
+            elapsed = time.monotonic() - self._start
+            suffix = f" {message}" if message else ""
+            typer.echo(f"  {self._label} done ({elapsed:.0f}s){suffix}")
+
+    class _TyperHandler:
+        def info(self, message: str) -> None:
+            typer.echo(message)
+
+        def detail(self, message: str) -> None:
+            typer.echo(f"  {message}")
+
+        def warn(self, message: str) -> None:
+            typer.echo(f"Warning: {message}", err=True)
+
+        def progress(self, label: str, total: int | None = None) -> Progress:
+            typer.echo(f"  {label}...")
+            return _TyperProgress(label, total)
+
+    set_handler(_TyperHandler())
+
+    # -- Run app ---------------------------------------------------------------
 
     try:
         app()
     except ConfigError as e:
         typer.echo(f"Configuration error: {e}", err=True)
+        raise SystemExit(1) from None
+    except AgentworksError as e:
+        typer.echo(f"Error: {e}", err=True)
         raise SystemExit(1) from None
 
