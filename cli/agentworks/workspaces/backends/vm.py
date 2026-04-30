@@ -42,9 +42,7 @@ def create_vm_workspace(
     # Refuse to create if directory already exists
     exists = ssh_run(target, f"test -d {workspace_path}", check=False, timeout=10, logger=lg)
     if exists.ok:
-        from agentworks.output import WorkspaceError
-
-        raise WorkspaceError(
+        raise output.WorkspaceError(
             f"directory {workspace_path} already exists on the VM. "
             f"Remove it manually (ssh to the VM and 'sudo rm -rf {workspace_path}') "
             "or choose a different name."

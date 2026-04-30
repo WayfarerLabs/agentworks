@@ -116,38 +116,50 @@ class _DefaultHandler:
         print(f"Warning: {message}", file=sys.stderr)
 
     def confirm(self, message: str, default: bool = False) -> bool:
-        suffix = " [Y/n]" if default else " [y/N]"
-        response = input(message + suffix + " ").strip().lower()
-        if not response:
-            return default
-        return response in ("y", "yes")
+        try:
+            suffix = " [Y/n]" if default else " [y/N]"
+            response = input(message + suffix + " ").strip().lower()
+            if not response:
+                return default
+            return response in ("y", "yes")
+        except (EOFError, KeyboardInterrupt):
+            raise UserAbort("interrupted") from None
 
     def choose(self, message: str, options: list[str]) -> int:
-        print(message)
-        for i, option in enumerate(options, 1):
-            print(f"  {i}) {option}")
-        while True:
-            try:
-                choice = int(input("Choice: "))
-                if 1 <= choice <= len(options):
-                    return choice - 1
-            except ValueError:
-                pass
-            print(f"Invalid choice. Enter 1-{len(options)}.")
+        try:
+            print(message)
+            for i, option in enumerate(options, 1):
+                print(f"  {i}) {option}")
+            while True:
+                try:
+                    choice = int(input("Choice: "))
+                    if 1 <= choice <= len(options):
+                        return choice - 1
+                except ValueError:
+                    pass
+                print(f"Invalid choice. Enter 1-{len(options)}.")
+        except (EOFError, KeyboardInterrupt):
+            raise UserAbort("interrupted") from None
 
     def pause(self, message: str) -> None:
-        input(message)
+        try:
+            input(message)
+        except (EOFError, KeyboardInterrupt):
+            raise UserAbort("interrupted") from None
 
     def prompt_secret(self, label: str, hint: str | None = None) -> str:
         import getpass
 
-        if hint:
-            print(f"  {hint}", file=sys.stderr)
-        while True:
-            value = getpass.getpass(f"{label}: ")
-            if value.strip():
-                return value
-            print("(empty, try again)", file=sys.stderr)
+        try:
+            if hint:
+                print(f"  {hint}", file=sys.stderr)
+            while True:
+                value = getpass.getpass(f"{label}: ")
+                if value.strip():
+                    return value
+                print("(empty, try again)", file=sys.stderr)
+        except (EOFError, KeyboardInterrupt):
+            raise UserAbort("interrupted") from None
 
     def progress(self, label: str, total: int | None = None) -> Progress:
         print(f"  {label}...")

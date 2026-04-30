@@ -1313,9 +1313,9 @@ def main() -> None:
                 typer.echo(f"  {i}) {option}")
             choice = int(typer.prompt("Choice", type=int))
             if choice < 1 or choice > len(options):
-                from agentworks.output import AgentworksError
+                from agentworks.output import ValidationError
 
-                raise AgentworksError(f"invalid choice {choice}")
+                raise ValidationError(f"invalid choice {choice}")
             return choice - 1
 
         def pause(self, message: str) -> None:
