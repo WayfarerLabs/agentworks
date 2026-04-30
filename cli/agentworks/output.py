@@ -175,6 +175,14 @@ class SessionError(AgentworksError):
     """Error related to session operations."""
 
 
+class ConnectivityError(AgentworksError):
+    """Error related to network, SSH, or Tailscale connectivity."""
+
+
+class BackupError(AgentworksError):
+    """Error related to backup-specific failures."""
+
+
 # ---------------------------------------------------------------------------
 # Backward compatibility
 # ---------------------------------------------------------------------------

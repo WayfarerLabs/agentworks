@@ -42,12 +42,10 @@ def _resolve_session_linux_user(db: Database, session: SessionRow, vm: VMRow) ->
     if session.agent_name:
         agent = db.get_agent(session.agent_name)
         if agent is None:
-            typer.echo(
-                f"Error: agent '{session.agent_name}' not found "
-                f"(referenced by session '{session.name}')",
-                err=True,
+            raise output.AgentError(
+                f"agent '{session.agent_name}' not found "
+                f"(referenced by session '{session.name}')"
             )
-            raise typer.Exit(1)
         return agent.linux_user
     return vm.admin_username
 
@@ -114,19 +112,16 @@ def _session_exists_any_server(
 def _require_workspace(db: Database, name: str) -> WorkspaceRow:
     ws = db.get_workspace(name)
     if ws is None:
-        typer.echo(f"Error: workspace '{name}' not found", err=True)
-        raise typer.Exit(1)
+        raise output.WorkspaceError(f"workspace '{name}' not found")
     return ws
 
 
 def _require_vm_for_workspace(db: Database, ws: WorkspaceRow) -> VMRow:
     if ws.type != "vm":
-        typer.echo("Error: sessions are only supported on VM workspaces", err=True)
-        raise typer.Exit(1)
+        raise output.SessionError("sessions are only supported on VM workspaces")
     vm = db.get_vm(ws.vm_name)  # type: ignore[arg-type]
     if vm is None:
-        typer.echo(f"Error: VM '{ws.vm_name}' not found", err=True)
-        raise typer.Exit(1)
+        raise output.VMError(f"VM '{ws.vm_name}' not found")
     return vm
 
 
@@ -148,8 +143,7 @@ def _prepare_vm(
     _ensure_vm_running(db, config, vm)
 
     if vm.tailscale_host is None:
-        typer.echo(f"Error: VM '{vm.name}' has no Tailscale address", err=True)
-        raise typer.Exit(1)
+        raise output.VMError(f"VM '{vm.name}' has no Tailscale address")
 
     target = admin_exec_target(vm, config)
     logger = SSHLogger(vm.name, operation) if operation else None
@@ -161,8 +155,7 @@ def _prepare_vm(
 def _require_session(db: Database, name: str) -> SessionRow:
     session = db.get_session(name)
     if session is None:
-        typer.echo(f"Error: session '{name}' not found", err=True)
-        raise typer.Exit(1)
+        raise output.SessionError(f"session '{name}' not found")
     return session
 
 
@@ -193,8 +186,7 @@ def _resolve_template(config: Config, template_name: str | None) -> ResolvedSess
     try:
         return resolve_template(config, template_name)
     except ValueError as e:
-        typer.echo(f"Error: {e}", err=True)
-        raise typer.Exit(1) from None
+        raise output.SessionError(str(e)) from None
 
 
 def _substitute_template_vars(text: str, variables: dict[str, str]) -> str:
@@ -203,8 +195,7 @@ def _substitute_template_vars(text: str, variables: dict[str, str]) -> str:
     def replace(m: re.Match[str]) -> str:
         name = m.group(1)
         if name not in _KNOWN_TEMPLATE_VARS:
-            typer.echo(f"Error: unknown template variable '{{{{{name}}}}}'", err=True)
-            raise typer.Exit(1)
+            raise output.SessionError(f"unknown template variable '{{{{{name}}}}}'")
         return variables[name]
 
     return _TEMPLATE_VAR_RE.sub(replace, text)
@@ -233,8 +224,7 @@ def _build_session_command(
     parts = []
     for key, val in template.env.items():
         if not _ENV_KEY_RE.match(key):
-            typer.echo(f"Error: invalid env var name {key!r} in template '{template.name}'", err=True)
-            raise typer.Exit(1)
+            raise output.SessionError(f"invalid env var name {key!r} in template '{template.name}'")
         val = _substitute_template_vars(val, variables)
         parts.append(f"export {key}={shlex.quote(val)}")
 
@@ -290,8 +280,7 @@ def create_session(
     ws, vm, run_command, run_as_root = _prepare_vm(db, config, workspace_name, operation="session-create")
 
     if db.get_session(name) is not None:
-        typer.echo(f"Error: session '{name}' already exists", err=True)
-        raise typer.Exit(1)
+        raise output.SessionError(f"session '{name}' already exists")
 
     # Resolve mode and linux user
     resolved_agent_name: str | None = None
@@ -299,15 +288,12 @@ def create_session(
         mode = SessionMode.AGENT
         agent = db.get_agent(agent_name)
         if agent is None:
-            typer.echo(f"Error: agent '{agent_name}' not found", err=True)
-            raise typer.Exit(1)
+            raise output.AgentError(f"agent '{agent_name}' not found")
         if agent.vm_name != vm.name:
-            typer.echo(
-                f"Error: agent '{agent_name}' is on VM '{agent.vm_name}', "
-                f"but workspace '{workspace_name}' is on VM '{vm.name}'",
-                err=True,
+            raise output.SessionError(
+                f"agent '{agent_name}' is on VM '{agent.vm_name}', "
+                f"but workspace '{workspace_name}' is on VM '{vm.name}'"
             )
-            raise typer.Exit(1)
         linux_user = agent.linux_user
         resolved_agent_name = agent_name
 
@@ -424,11 +410,9 @@ def restart_session(
 
     if _session_exists_any_server(name, run_command=run_command, socket_path=sock, warn_legacy=False):
         if not force:
-            typer.echo(
-                f"Error: session '{name}' is still running. Stop it first, or use --force.",
-                err=True,
+            raise output.SessionError(
+                f"session '{name}' is still running. Stop it first, or use --force."
             )
-            raise typer.Exit(1)
         _kill_session_any_server(name, run_command=run_command, socket_path=sock)
 
     template = _resolve_template(config, session.template)
@@ -512,8 +496,7 @@ def restart_all_sessions(
             output.warn(f"Error restarting '{session.name}': {exc}")
 
     if failed:
-        typer.echo(f"\n{len(failed)} session(s) failed to restart.", err=True)
-        raise typer.Exit(1)
+        raise output.SessionError(f"{len(failed)} session(s) failed to restart.")
 
 
 def delete_session(
@@ -700,8 +683,7 @@ def attach_session(
     sock = _effective_socket_path(db, session)
 
     if not _session_exists_any_server(name, run_command=run_command, socket_path=sock):
-        typer.echo(f"Error: session '{name}' is not running", err=True)
-        raise typer.Exit(1)
+        raise output.SessionError(f"session '{name}' is not running")
 
     # Determine which server has the session. Prefer the socket; fall back
     # to the default server for legacy sessions.

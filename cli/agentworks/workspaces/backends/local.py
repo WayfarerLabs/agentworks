@@ -8,8 +8,6 @@ import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import typer
-
 from agentworks import output
 from agentworks.workspaces.tmuxinator import generate_config
 
@@ -31,11 +29,9 @@ def create_local_workspace(
     workspace_path = str(workspace_dir)
 
     if workspace_dir.exists():
-        typer.echo(
-            f"Error: directory {workspace_path} already exists.\nRemove it manually or choose a different name.",
-            err=True,
+        raise output.WorkspaceError(
+            f"directory {workspace_path} already exists.\nRemove it manually or choose a different name."
         )
-        raise typer.Exit(1)
 
     # Git clone or just create directory
     if template.repo:
@@ -50,18 +46,15 @@ def create_local_workspace(
                 timeout=300,
             )
         except subprocess.TimeoutExpired:
-            typer.echo("Error: git clone timed out after 5 minutes", err=True)
-            raise typer.Exit(1) from None
+            raise output.WorkspaceError("git clone timed out after 5 minutes") from None
         if result.returncode != 0:
-            typer.echo(f"Error: git clone failed: {result.stderr.strip()}", err=True)
             if template.repo.startswith("https://"):
-                typer.echo(
+                output.detail(
                     "Hint: HTTPS repo URLs require credentials. "
                     "For private repos, use an SSH URL (git@...) so "
-                    "your SSH key provides authentication.",
-                    err=True,
+                    "your SSH key provides authentication."
                 )
-            raise typer.Exit(1)
+            raise output.WorkspaceError(f"git clone failed: {result.stderr.strip()}")
     else:
         workspace_dir.mkdir(parents=True)
 

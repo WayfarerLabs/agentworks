@@ -19,10 +19,9 @@ import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import typer
-
 from agentworks import output
 from agentworks.db import InitStatus, ProvisioningStatus
+from agentworks.output import ConnectivityError, VMError
 from agentworks.ssh import ExecTarget, SSHError, SSHLogger, SSHTarget
 from agentworks.vms.cloud_init import INIT_SYSTEM_PACKAGES, PROVISIONING_PACKAGES
 
@@ -596,20 +595,16 @@ def verify_tailscale_available() -> None:
             ["tailscale", "status"], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10
         )
     except FileNotFoundError:
-        typer.echo("Error: 'tailscale' command not found. Install Tailscale on this machine.", err=True)
-        raise typer.Exit(1) from None
+        raise ConnectivityError("'tailscale' command not found. Install Tailscale on this machine.") from None
     except subprocess.TimeoutExpired:
-        typer.echo("Error: 'tailscale status' timed out. Is Tailscale running?", err=True)
-        raise typer.Exit(1) from None
+        raise ConnectivityError("'tailscale status' timed out. Is Tailscale running?") from None
 
     if result.returncode != 0:
-        typer.echo(
-            "Error: This machine is not connected to Tailscale. "
+        raise ConnectivityError(
+            "This machine is not connected to Tailscale. "
             "VM initialization requires Tailscale to switch from the provisioning "
-            "transport to direct SSH. Run 'tailscale up' first.",
-            err=True,
+            "transport to direct SSH. Run 'tailscale up' first."
         )
-        raise typer.Exit(1)
 
 
 def resolve_git_credential_providers(
@@ -630,8 +625,7 @@ def resolve_git_credential_providers(
     for name in names:
         cred_config = config.git_credentials.get(name)
         if cred_config is None:
-            typer.echo(f"Error: git credential '{name}' not found in config", err=True)
-            raise typer.Exit(1)
+            raise VMError(f"git credential '{name}' not found in config")
         desc = cred_config.description
         if cred_config.type == "azdo":
             assert cred_config.org is not None
@@ -645,8 +639,7 @@ def verify_git_credential_auth(providers: dict[str, GitCredentialProvider]) -> N
     """Pre-flight: verify auth for all selected git credential providers."""
     for name, provider in providers.items():
         if not provider.verify_auth():
-            typer.echo(f"Error: Authentication check failed for '{name}'. {provider.auth_hint()}", err=True)
-            raise typer.Exit(1)
+            raise VMError(f"Authentication check failed for '{name}'. {provider.auth_hint()}")
     if providers:
         labels = [p.display_name for p in providers.values()]
         output.info(f"Git credentials configured: {', '.join(labels)}")

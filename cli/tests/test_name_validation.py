@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-import click
 import pytest
 
-from agentworks.config import validate_name
+from agentworks.config import ConfigError, validate_name
 
 
 def _is_valid(name: str) -> bool:
@@ -13,7 +12,7 @@ def _is_valid(name: str) -> bool:
     try:
         validate_name(name)
         return True
-    except (SystemExit, click.exceptions.Exit):
+    except ConfigError:
         return False
 
 

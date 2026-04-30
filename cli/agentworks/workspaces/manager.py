@@ -6,8 +6,6 @@ import shlex
 import subprocess
 from typing import TYPE_CHECKING
 
-import typer
-
 from agentworks import output
 from agentworks.config import validate_name
 from agentworks.db import InitStatus, VMStatus
@@ -33,8 +31,7 @@ def create_workspace(
     validate_name(ws_name)
 
     if db.get_workspace(ws_name) is not None:
-        typer.echo(f"Error: workspace '{ws_name}' already exists", err=True)
-        raise typer.Exit(1)
+        raise output.WorkspaceError(f"workspace '{ws_name}' already exists")
 
     # Resolve template
     template = resolve_template(config, template_name)
@@ -70,16 +67,14 @@ def _create_local(
         workspace_path = create_local_workspace(config, ws_name, template)
 
         db.insert_workspace(ws_name, ws_type="local", workspace_path=workspace_path, template=template_name)
-    except SystemExit:
-        # typer.Exit -- already reported, just clean up
+    except output.AgentworksError:
         if workspace_path:
             delete_local_workspace(ws_name, workspace_path)
         raise
     except Exception as e:
-        typer.echo(f"Error creating workspace: {e}", err=True)
         if workspace_path:
             delete_local_workspace(ws_name, workspace_path)
-        raise typer.Exit(1) from None
+        raise output.WorkspaceError(f"creating workspace: {e}") from None
 
     if open_vscode:
         subprocess.run(["code", workspace_path], check=False)
@@ -138,16 +133,15 @@ def _create_vm(
             vm_name=vm.name,
             template=template_name,
         )
-    except SystemExit:
+    except output.AgentworksError:
         ssh_logger.close()
         _cleanup()
         raise
     except Exception as e:
         ssh_logger.close()
-        typer.echo(f"Error creating workspace: {e}", err=True)
-        typer.echo(f"  SSH log: {ssh_logger.path}", err=True)
+        output.detail(f"SSH log: {ssh_logger.path}")
         _cleanup()
-        raise typer.Exit(1) from None
+        raise output.WorkspaceError(f"creating workspace: {e}") from None
 
     # Add grant_all agents to the new workspace group
     grant_all_agents = db.list_agents_on_vm_with_grant_all(vm.name)
@@ -175,8 +169,7 @@ def shell_workspace(
     """Open a plain shell into a workspace."""
     ws = db.get_workspace(name)
     if ws is None:
-        typer.echo(f"Error: workspace '{name}' not found", err=True)
-        raise typer.Exit(1)
+        raise output.WorkspaceError(f"workspace '{name}' not found")
 
     if ws.type == "local":
         from agentworks.workspaces.backends.local import shell_local_workspace
@@ -186,8 +179,7 @@ def shell_workspace(
     elif ws.type == "vm":
         vm = db.get_vm(ws.vm_name)  # type: ignore[arg-type]
         if vm is None:
-            typer.echo(f"Error: VM '{ws.vm_name}' not found", err=True)
-            raise typer.Exit(1)
+            raise output.VMError(f"VM '{ws.vm_name}' not found")
 
         _guard_vm_status(vm)
         _ensure_vm_running(db, config, vm)
@@ -197,8 +189,7 @@ def shell_workspace(
 
         shell_vm_workspace(vm, config, ws.workspace_path)
     else:
-        typer.echo(f"Error: unknown workspace type '{ws.type}'", err=True)
-        raise typer.Exit(1)
+        raise output.WorkspaceError(f"unknown workspace type '{ws.type}'")
 
 
 def console_workspace(
@@ -213,19 +204,16 @@ def console_workspace(
     import os
 
     if os.environ.get("TMUX") and not allow_nesting:
-        typer.echo(
-            "Error: already inside a tmux session.\n"
+        raise output.WorkspaceError(
+            "already inside a tmux session.\n"
             "Nesting is not recommended (prefix key conflicts,\n"
             "confusing detach behavior).\n"
-            "Pass --allow-nesting to override.",
-            err=True,
+            "Pass --allow-nesting to override."
         )
-        raise typer.Exit(1)
 
     ws = db.get_workspace(name)
     if ws is None:
-        typer.echo(f"Error: workspace '{name}' not found", err=True)
-        raise typer.Exit(1)
+        raise output.WorkspaceError(f"workspace '{name}' not found")
 
     if ws.type == "local":
         from agentworks.workspaces.backends.local import console_local_workspace
@@ -235,8 +223,7 @@ def console_workspace(
     elif ws.type == "vm":
         vm = db.get_vm(ws.vm_name)  # type: ignore[arg-type]
         if vm is None:
-            typer.echo(f"Error: VM '{ws.vm_name}' not found", err=True)
-            raise typer.Exit(1)
+            raise output.VMError(f"VM '{ws.vm_name}' not found")
 
         _guard_vm_status(vm)
         _ensure_vm_running(db, config, vm)
@@ -246,8 +233,7 @@ def console_workspace(
 
         console_vm_workspace(vm, config, name, recreate=recreate)
     else:
-        typer.echo(f"Error: unknown workspace type '{ws.type}'", err=True)
-        raise typer.Exit(1)
+        raise output.WorkspaceError(f"unknown workspace type '{ws.type}'")
 
 
 def describe_workspace(
@@ -257,8 +243,7 @@ def describe_workspace(
     """Show workspace details."""
     ws = db.get_workspace(name)
     if ws is None:
-        typer.echo(f"Error: workspace '{name}' not found", err=True)
-        raise typer.Exit(1)
+        raise output.WorkspaceError(f"workspace '{name}' not found")
 
     output.info(f"Name:       {ws.name}")
     output.info(f"Type:       {ws.type}")
@@ -333,18 +318,15 @@ def repair_workspace(
 
     ws = db.get_workspace(name)
     if ws is None:
-        typer.echo(f"Error: workspace '{name}' not found", err=True)
-        raise typer.Exit(1)
+        raise output.WorkspaceError(f"workspace '{name}' not found")
 
     if ws.type != "vm":
-        typer.echo(f"Error: workspace '{name}' is local, nothing to repair", err=True)
-        raise typer.Exit(1)
+        raise output.WorkspaceError(f"workspace '{name}' is local, nothing to repair")
 
     assert ws.vm_name is not None
     vm = db.get_vm(ws.vm_name)
     if vm is None:
-        typer.echo(f"Error: VM '{ws.vm_name}' not found", err=True)
-        raise typer.Exit(1)
+        raise output.VMError(f"VM '{ws.vm_name}' not found")
 
     target = admin_exec_target(vm, config)
     ws_group = f"{WS_GROUP_PREFIX}{name}"
@@ -501,8 +483,7 @@ def rehome_workspace(
     """Move a workspace to a new directory path."""
     ws = db.get_workspace(name)
     if ws is None:
-        typer.echo(f"Error: workspace '{name}' not found", err=True)
-        raise typer.Exit(1)
+        raise output.WorkspaceError(f"workspace '{name}' not found")
 
     # Determine target path
     if target_path is not None:
@@ -522,8 +503,7 @@ def rehome_workspace(
     old_norm = old_path.rstrip("/") + "/"
     new_norm = new_path.rstrip("/") + "/"
     if new_norm.startswith(old_norm) or old_norm.startswith(new_norm):
-        typer.echo("Error: source and target paths overlap", err=True)
-        raise typer.Exit(1)
+        raise output.WorkspaceError("source and target paths overlap")
 
     # Block if workspace has running sessions
     from agentworks.db import SessionStatus
@@ -531,20 +511,17 @@ def rehome_workspace(
     sessions = db.list_sessions(workspace_name=name)
     running = [s for s in sessions if s.status == SessionStatus.RUNNING.value]
     if running:
-        typer.echo(
-            f"Error: workspace '{name}' has {len(running)} running session(s). "
-            "Stop them first with 'agentworks session stop'.",
-            err=True,
+        raise output.WorkspaceError(
+            f"workspace '{name}' has {len(running)} running session(s). "
+            "Stop them first with 'agentworks session stop'."
         )
-        raise typer.Exit(1)
 
     if ws.type == "vm":
         _rehome_vm(db, config, ws, new_path, remove_old=remove_old, yes=yes)
     elif ws.type == "local":
         _rehome_local(db, config, ws, new_path, remove_old=remove_old, yes=yes)
     else:
-        typer.echo(f"Error: unknown workspace type '{ws.type}'", err=True)
-        raise typer.Exit(1)
+        raise output.WorkspaceError(f"unknown workspace type '{ws.type}'")
 
 
 def _rehome_vm(
@@ -557,6 +534,8 @@ def _rehome_vm(
     yes: bool,
 ) -> None:
     """Rehome a VM workspace."""
+    import typer
+
     from agentworks.agents.manager import WS_GROUP_PREFIX
     from agentworks.ssh import SSHError, SSHLogger, admin_exec_target, run_as_root
     from agentworks.ssh import run as ssh_run
@@ -569,8 +548,7 @@ def _rehome_vm(
 
     vm = db.get_vm(vm_name)
     if vm is None:
-        typer.echo(f"Error: VM '{vm_name}' not found", err=True)
-        raise typer.Exit(1)
+        raise output.VMError(f"VM '{vm_name}' not found")
 
     _guard_vm_status(vm)
     _ensure_vm_running(db, config, vm)
@@ -580,14 +558,12 @@ def _rehome_vm(
     # Verify source exists
     src_check = ssh_run(target, f"test -d {old_path}", check=False, timeout=10)
     if not src_check.ok:
-        typer.echo(f"Error: source directory {old_path} does not exist on VM", err=True)
-        raise typer.Exit(1)
+        raise output.WorkspaceError(f"source directory {old_path} does not exist on VM")
 
     # Verify target does not exist
     dst_check = ssh_run(target, f"test -d {new_path}", check=False, timeout=10)
     if dst_check.ok:
-        typer.echo(f"Error: target directory {new_path} already exists on VM", err=True)
-        raise typer.Exit(1)
+        raise output.WorkspaceError(f"target directory {new_path} already exists on VM")
 
     if not yes:
         output.info(f"Rehome workspace '{ws_name}':")
@@ -618,10 +594,9 @@ def _rehome_vm(
         # Verify copy succeeded
         verify = ssh_run(target, f"test -d {new_path}", check=False, timeout=10, logger=ssh_logger)
         if not verify.ok:
-            typer.echo("Error: copy verification failed, target directory not found", err=True)
-            typer.echo(f"  SSH log: {ssh_logger.path}", err=True)
+            output.detail(f"SSH log: {ssh_logger.path}")
             ssh_logger.close()
-            raise typer.Exit(1)
+            raise output.WorkspaceError("copy verification failed, target directory not found")
 
         # Fix ownership, permissions, and ACLs on the new path
         output.info("Setting permissions...")
@@ -684,15 +659,14 @@ def _rehome_vm(
             output.info(f"\nOld directory left in place at {old_path}")
             output.info("Remove it manually when ready, or re-run with --remove-old")
 
-    except SystemExit:
+    except output.AgentworksError:
         ssh_logger.close()
         raise
     except Exception as e:
-        typer.echo(f"Error during rehome: {e}", err=True)
-        typer.echo(f"  SSH log: {ssh_logger.path}", err=True)
-        typer.echo("  The database was NOT updated. The workspace is still at the original path.", err=True)
+        output.detail(f"SSH log: {ssh_logger.path}")
+        output.detail("The database was NOT updated. The workspace is still at the original path.")
         ssh_logger.close()
-        raise typer.Exit(1) from None
+        raise output.WorkspaceError(f"during rehome: {e}") from None
 
     ssh_logger.close()
     output.info(f"\nWorkspace '{ws_name}' rehomed to {new_path}")
@@ -711,6 +685,8 @@ def _rehome_local(
     import shutil
     from pathlib import Path
 
+    import typer
+
     ws_name = ws.name
     old_path = ws.workspace_path
 
@@ -718,12 +694,10 @@ def _rehome_local(
     new_dir = Path(new_path)
 
     if not old_dir.exists():
-        typer.echo(f"Error: source directory {old_path} does not exist", err=True)
-        raise typer.Exit(1)
+        raise output.WorkspaceError(f"source directory {old_path} does not exist")
 
     if new_dir.exists():
-        typer.echo(f"Error: target directory {new_path} already exists", err=True)
-        raise typer.Exit(1)
+        raise output.WorkspaceError(f"target directory {new_path} already exists")
 
     if not yes:
         output.info(f"Rehome workspace '{ws_name}':")
@@ -742,8 +716,7 @@ def _rehome_local(
 
     # Verify
     if not new_dir.exists():
-        typer.echo("Error: copy verification failed, target directory not found", err=True)
-        raise typer.Exit(1)
+        raise output.WorkspaceError("copy verification failed, target directory not found")
 
     # Regenerate tmuxinator config at new path
     from agentworks.workspaces.tmuxinator import console_session_name, generate_config
@@ -784,19 +757,18 @@ def delete_workspace(
     yes: bool = False,
 ) -> None:
     """Delete a workspace."""
+    import typer
+
     ws = db.get_workspace(name)
     if ws is None:
-        typer.echo(f"Error: workspace '{name}' not found", err=True)
-        raise typer.Exit(1)
+        raise output.WorkspaceError(f"workspace '{name}' not found")
 
     # Check for sessions
     session_count = len(db.list_sessions(workspace_name=name))
     if session_count > 0 and not force:
-        typer.echo(
-            f"Error: workspace '{name}' has {session_count} session(s). Delete them first, or use --force.",
-            err=True,
+        raise output.WorkspaceError(
+            f"workspace '{name}' has {session_count} session(s). Delete them first, or use --force."
         )
-        raise typer.Exit(1)
 
     if not yes:
         msg = f"Delete workspace '{name}'?"
@@ -880,12 +852,10 @@ def copy_workspace(
 
     src_ws = db.get_workspace(source_name)
     if src_ws is None:
-        typer.echo(f"Error: workspace '{source_name}' not found", err=True)
-        raise typer.Exit(1)
+        raise output.WorkspaceError(f"workspace '{source_name}' not found")
 
     if db.get_workspace(dest_name) is not None:
-        typer.echo(f"Error: workspace '{dest_name}' already exists", err=True)
-        raise typer.Exit(1)
+        raise output.WorkspaceError(f"workspace '{dest_name}' already exists")
 
     # Create a temp file for the archive
     with tempfile.NamedTemporaryFile(suffix=".tgz", delete=False) as tmp:
@@ -903,18 +873,15 @@ def copy_workspace(
                 errors="replace",
             )
             if result.returncode != 0:
-                typer.echo(f"Error: tar failed: {result.stderr.strip()}", err=True)
-                raise typer.Exit(1)
+                raise output.WorkspaceError(f"tar failed: {result.stderr.strip()}")
         elif src_ws.type == "vm":
             src_vm = db.get_vm(src_ws.vm_name)  # type: ignore[arg-type]
             if src_vm is None:
-                typer.echo(f"Error: VM '{src_ws.vm_name}' not found", err=True)
-                raise typer.Exit(1)
+                raise output.VMError(f"VM '{src_ws.vm_name}' not found")
             _guard_vm_status(src_vm)
             _ensure_vm_running(db, config, src_vm)
             if src_vm.tailscale_host is None:
-                typer.echo(f"Error: VM '{src_vm.name}' has no Tailscale address", err=True)
-                raise typer.Exit(1)
+                raise output.VMError(f"VM '{src_vm.name}' has no Tailscale address")
 
             src_exec = admin_exec_target(src_vm, config)
             assert src_exec.ssh is not None
@@ -932,11 +899,9 @@ def copy_workspace(
                 proc = subprocess.run(ssh_args, stdout=f, stderr=subprocess.PIPE)
             if proc.returncode != 0:
                 stderr = proc.stderr.decode() if proc.stderr else ""
-                typer.echo(f"Error: pack failed: {stderr.strip()}", err=True)
-                raise typer.Exit(1)
+                raise output.WorkspaceError(f"pack failed: {stderr.strip()}")
         else:
-            typer.echo(f"Error: unknown workspace type '{src_ws.type}'", err=True)
-            raise typer.Exit(1)
+            raise output.WorkspaceError(f"unknown workspace type '{src_ws.type}'")
 
         # --- Unpack to destination ---
         if local:
@@ -952,8 +917,7 @@ def copy_workspace(
                 errors="replace",
             )
             if result.returncode != 0:
-                typer.echo(f"Error: tar failed: {result.stderr.strip()}", err=True)
-                raise typer.Exit(1)
+                raise output.WorkspaceError(f"tar failed: {result.stderr.strip()}")
 
             db.insert_workspace(
                 dest_name,
@@ -968,8 +932,7 @@ def copy_workspace(
             _guard_vm_status(dest_vm)
             _ensure_vm_running(db, config, dest_vm)
             if dest_vm.tailscale_host is None:
-                typer.echo(f"Error: VM '{dest_vm.name}' has no Tailscale address", err=True)
-                raise typer.Exit(1)
+                raise output.VMError(f"VM '{dest_vm.name}' has no Tailscale address")
 
             lg = SSHLogger(dest_vm.name, "workspace-copy")
             dest_target = admin_exec_target(dest_vm, config)
@@ -1046,16 +1009,13 @@ def _guard_vm_status(vm: VMRow) -> None:
     usable = {InitStatus.COMPLETE.value, InitStatus.PARTIAL.value}
     if vm.init_status not in usable:
         if vm.init_status == InitStatus.FAILED.value:
-            typer.echo(
-                f"Error: VM '{vm.name}' is in 'failed' state. Run 'vm delete' and recreate.",
-                err=True,
+            raise output.VMError(
+                f"VM '{vm.name}' is in 'failed' state. Run 'vm delete' and recreate."
             )
         else:
-            typer.echo(
-                f"Error: VM '{vm.name}' initialization is not complete (status: {vm.init_status}).",
-                err=True,
+            raise output.VMError(
+                f"VM '{vm.name}' initialization is not complete (status: {vm.init_status})."
             )
-        raise typer.Exit(1)
 
 
 def _resolve_vm(db: Database, vm_name: str | None) -> VMRow:
@@ -1063,8 +1023,7 @@ def _resolve_vm(db: Database, vm_name: str | None) -> VMRow:
     if vm_name is not None:
         vm = db.get_vm(vm_name)
         if vm is None:
-            typer.echo(f"Error: VM '{vm_name}' not found", err=True)
-            raise typer.Exit(1)
+            raise output.VMError(f"VM '{vm_name}' not found")
         return vm
 
     vms = db.list_vms()
@@ -1072,12 +1031,13 @@ def _resolve_vm(db: Database, vm_name: str | None) -> VMRow:
     usable_vms = [v for v in vms if v.init_status in usable_statuses]
 
     if len(usable_vms) == 0:
-        typer.echo("Error: no VMs available. Create one with 'agentworks vm create'.", err=True)
-        raise typer.Exit(1)
+        raise output.VMError("no VMs available. Create one with 'agentworks vm create'.")
 
     if len(usable_vms) == 1:
         output.info(f"Using VM '{usable_vms[0].name}'")
         return usable_vms[0]
+
+    import typer
 
     output.info("Select a VM:")
     for i, v in enumerate(usable_vms, 1):
@@ -1085,8 +1045,7 @@ def _resolve_vm(db: Database, vm_name: str | None) -> VMRow:
 
     choice = int(typer.prompt("VM number", type=int))
     if choice < 1 or choice > len(usable_vms):
-        typer.echo(f"Error: invalid choice {choice}", err=True)
-        raise typer.Exit(1)
+        raise output.VMError(f"invalid choice {choice}")
 
     return usable_vms[choice - 1]
 

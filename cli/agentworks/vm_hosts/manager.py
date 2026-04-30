@@ -4,10 +4,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import typer
-
 from agentworks import output
 from agentworks.config import validate_name
+from agentworks.output import VMError
 from agentworks.ssh import SSHError, SSHTarget, run
 
 if TYPE_CHECKING:
@@ -37,12 +36,10 @@ def add_vm_host(db: Database, name: str, ssh_host: str, platform: str = "lima") 
     validate_name(name)
 
     if platform != "lima":
-        typer.echo(f"Error: only 'lima' platform is supported for VM hosts, got: {platform}", err=True)
-        raise typer.Exit(1)
+        raise VMError(f"only 'lima' platform is supported for VM hosts, got: {platform}")
 
     if db.get_vm_host(name) is not None:
-        typer.echo(f"Error: VM host '{name}' already exists", err=True)
-        raise typer.Exit(1)
+        raise VMError(f"VM host '{name}' already exists")
 
     output.info(f"Detecting OS on {ssh_host}...")
     detected_os = detect_os(ssh_host)
@@ -72,16 +69,11 @@ def remove_vm_host(db: Database, name: str, *, force: bool = False) -> None:
     """Remove a VM host. Refuses if VMs reference it unless --force."""
     host = db.get_vm_host(name)
     if host is None:
-        typer.echo(f"Error: VM host '{name}' not found", err=True)
-        raise typer.Exit(1)
+        raise VMError(f"VM host '{name}' not found")
 
     vm_count = db.count_vms_on_host(name)
     if vm_count > 0 and not force:
-        typer.echo(
-            f"Error: VM host '{name}' has {vm_count} VM(s). Delete them first, or use --force.",
-            err=True,
-        )
-        raise typer.Exit(1)
+        raise VMError(f"VM host '{name}' has {vm_count} VM(s). Delete them first, or use --force.")
 
     if vm_count > 0:
         # Nullify vm_host_name on VMs referencing this host to prevent dangling FK

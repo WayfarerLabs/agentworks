@@ -10,9 +10,8 @@ from dataclasses import asdict
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-import typer
-
 from agentworks import output
+from agentworks.output import BackupError, VMError
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -36,13 +35,11 @@ def backup_vm(
 
     vm = db.get_vm(vm_name)
     if vm is None:
-        typer.echo(f"Error: VM '{vm_name}' not found", err=True)
-        raise typer.Exit(1)
+        raise VMError(f"VM '{vm_name}' not found")
     _ensure_vm_running(db, config, vm)
 
     if vm.tailscale_host is None:
-        typer.echo(f"Error: VM '{vm_name}' has no Tailscale address", err=True)
-        raise typer.Exit(1)
+        raise VMError(f"VM '{vm_name}' has no Tailscale address")
 
     # Create backup directory first so the log goes inside it
     timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
@@ -191,17 +188,13 @@ def _archive_workspaces(
                 skipped.append(ws.workspace_path)
 
         if not valid:
-            typer.echo("  Error: no workspace paths exist on the VM", err=True)
-            raise typer.Exit(1)
+            raise BackupError("no workspace paths exist on the VM")
 
         # Verify zstd is available
         if not target.run("command -v zstd >/dev/null 2>&1", check=False).ok:
-            typer.echo(
-                "  Error: zstd is not installed on the VM.\n"
-                "  Run 'agentworks vm reinit' to install it.",
-                err=True,
+            raise BackupError(
+                "zstd is not installed on the VM. Run 'agentworks vm reinit' to install it."
             )
-            raise typer.Exit(1)
 
         # Calculate total uncompressed size
         du_paths = " ".join(shlex.quote(ws.workspace_path) for ws in valid)
@@ -276,32 +269,30 @@ def _archive_workspaces(
                     _report_size(target, archive)
                     last_report = time.monotonic()
         except KeyboardInterrupt:
-            typer.echo("\n  Interrupted. Killing remote tar and cleaning up...", err=True)
+            output.warn("Interrupted. Killing remote tar and cleaning up...")
             # Read the PID that run_detached's wrapper wrote, kill the process group
             pid_result = target.run(f"cat {shlex.quote(detached_base)}.pid", sudo=True, check=False)
             pid = pid_result.stdout.strip() if pid_result.ok else ""
             if pid.isdigit():
                 # Kill the wrapper shell's process group (tar + wrapper)
                 target.run(f"kill -TERM -{pid} 2>/dev/null", sudo=True, check=False)
-            raise typer.Exit(1) from None
+            raise BackupError("backup interrupted by user") from None
 
         if error_holder:
             raise error_holder[0]
         if not result_holder:
-            typer.echo("  Error: tar did not produce a result", err=True)
-            raise typer.Exit(1)
+            raise BackupError("tar did not produce a result")
 
         result = result_holder[0]
         if result.exit_code != 0:
-            typer.echo(f"  Error: tar failed (exit {result.exit_code})", err=True)
-            typer.echo(f"  Command: {tar_cmd}", err=True)
+            output.detail(f"Command: {tar_cmd}")
             if result.output:
-                typer.echo("  tar output:", err=True)
+                output.detail("tar output:")
                 for line in result.output.strip().splitlines():
-                    typer.echo(f"    {line}", err=True)
+                    output.detail(f"  {line}")
             else:
-                typer.echo("  (no output captured)", err=True)
-            raise typer.Exit(1)
+                output.detail("(no output captured)")
+            raise BackupError(f"tar failed (exit {result.exit_code})")
 
         _report_size(target, archive)
 
@@ -323,7 +314,7 @@ def _archive_workspaces(
         _transfer_with_progress(target_ssh, archive, local_archive, remote_size)
 
     except Exception:
-        typer.echo(f"  Remote temp dir preserved for debugging: {tmp_dir}", err=True)
+        output.detail(f"Remote temp dir preserved for debugging: {tmp_dir}")
         raise
     else:
         target.run(f"rm -rf {q_tmp}", sudo=True, check=False)

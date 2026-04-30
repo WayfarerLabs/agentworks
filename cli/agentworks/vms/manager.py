@@ -9,6 +9,7 @@ import typer
 from agentworks import output
 from agentworks.config import VALID_PLATFORMS, validate_admin_username, validate_name
 from agentworks.db import InitStatus, ProvisioningStatus, VMStatus
+from agentworks.output import VMError
 from agentworks.vms.initializer import (
     initialize_vm,
     rejoin_tailscale,
@@ -77,15 +78,13 @@ def create_vm(
     # Resolve defaults
     platform = platform or config.defaults.platform or "lima"
     if platform not in VALID_PLATFORMS:
-        typer.echo(f"Error: invalid platform '{platform}'", err=True)
-        raise typer.Exit(1)
+        raise VMError(f"invalid platform '{platform}'")
 
     vm_name = name
     validate_name(vm_name)
 
     if db.get_vm(vm_name) is not None:
-        typer.echo(f"Error: VM '{vm_name}' already exists", err=True)
-        raise typer.Exit(1)
+        raise VMError(f"VM '{vm_name}' already exists")
 
     # Resolve VM host for Lima
     vm_host_ssh: str | None = None
@@ -95,19 +94,16 @@ def create_vm(
         if vm_host_name:
             host_row = db.get_vm_host(vm_host_name)
             if host_row is None:
-                typer.echo(f"Error: VM host '{vm_host_name}' not found", err=True)
-                raise typer.Exit(1)
+                raise VMError(f"VM host '{vm_host_name}' not found")
             vm_host_ssh = host_row.ssh_host
 
     # Azure config validation
     if platform == "azure" and config.azure is None:
-        typer.echo("Error: [azure] config section required for azure platform", err=True)
-        raise typer.Exit(1)
+        raise VMError("[azure] config section required for azure platform")
 
     # Proxmox config validation
     if platform == "proxmox" and config.proxmox is None:
-        typer.echo("Error: [proxmox] config section required for proxmox platform", err=True)
-        raise typer.Exit(1)
+        raise VMError("[proxmox] config section required for proxmox platform")
 
     # Resolve resource settings: CLI flag > template > built-in default
     resolved_cpus = cpus if cpus is not None else vm_tmpl.cpus
@@ -410,8 +406,7 @@ def shell_vm(db: Database, config: Config, name: str) -> None:
     vm = _require_vm(db, name)
     _guard_failed_vm(vm)
     if vm.tailscale_host is None:
-        typer.echo(f"Error: VM '{name}' has no Tailscale IP (init may not be complete)", err=True)
-        raise typer.Exit(1)
+        raise VMError(f"VM '{name}' has no Tailscale IP (init may not be complete)")
 
     ssh_cmd = ["ssh", "-t"]
     if config.operator.ssh_private_key:
@@ -429,13 +424,11 @@ def add_git_credential(db: Database, config: Config, name: str, credential_name:
     vm = _require_vm(db, name)
     _guard_failed_vm(vm)
     if vm.tailscale_host is None:
-        typer.echo(f"Error: VM '{name}' has no Tailscale IP (init may not be complete)", err=True)
-        raise typer.Exit(1)
+        raise VMError(f"VM '{name}' has no Tailscale IP (init may not be complete)")
 
     cred_config = config.git_credentials.get(credential_name)
     if cred_config is None:
-        typer.echo(f"Error: git credential '{credential_name}' not found in config", err=True)
-        raise typer.Exit(1)
+        raise VMError(f"git credential '{credential_name}' not found in config")
 
     providers = resolve_git_credential_providers(config, [credential_name])
     provider = providers[credential_name]
@@ -525,8 +518,7 @@ def rekey_vm(
     provisioner = _get_provisioner_for_vm(db, vm, config)
     status = provisioner.status(vm)
     if status != VMStatus.RUNNING:
-        typer.echo(f"Error: VM '{name}' is not running (status: {status.value})", err=True)
-        raise typer.Exit(1)
+        raise VMError(f"VM '{name}' is not running (status: {status.value})")
 
     # Collect new auth key
     ts_auth_key = os.environ.get("TAILSCALE_AUTH_KEY") if not ignore_env else None
@@ -660,11 +652,7 @@ def delete_vm(
             parts.append(f"{ag_count} agent(s)")
         if ts_count > 0:
             parts.append(f"{ts_count} session(s)")
-        typer.echo(
-            f"Error: VM '{name}' has {', '.join(parts)}. Delete them first, or use --force.",
-            err=True,
-        )
-        raise typer.Exit(1)
+        raise VMError(f"VM '{name}' has {', '.join(parts)}. Delete them first, or use --force.")
 
     if not yes and not force:
         msg = f"Delete VM '{name}'?"
@@ -729,15 +717,12 @@ def reinit_vm(
         config = _replace(config, vm=resolve_template(config, vm.template))
 
     if vm.provisioning_status != ProvisioningStatus.COMPLETE.value:
-        typer.echo(
-            f"Error: VM '{name}' provisioning is '{vm.provisioning_status}', not 'complete'. Cannot reinitialize.",
-            err=True,
+        raise VMError(
+            f"VM '{name}' provisioning is '{vm.provisioning_status}', not 'complete'. Cannot reinitialize."
         )
-        raise typer.Exit(1)
 
     if vm.tailscale_host is None:
-        typer.echo(f"Error: VM '{name}' has no Tailscale IP", err=True)
-        raise typer.Exit(1)
+        raise VMError(f"VM '{name}' has no Tailscale IP")
 
     # Pre-flight checks
     verify_tailscale_available()
@@ -844,18 +829,14 @@ def _init_log_hint(vm_name: str) -> str:
 def _guard_failed_vm(vm: VMRow) -> None:
     """Block operations on VMs with failed provisioning or initialization."""
     if vm.provisioning_status == ProvisioningStatus.FAILED.value:
-        typer.echo(
-            f"Error: VM '{vm.name}' has failed provisioning. Only 'vm delete' is supported.{_init_log_hint(vm.name)}",
-            err=True,
+        raise VMError(
+            f"VM '{vm.name}' has failed provisioning. Only 'vm delete' is supported.{_init_log_hint(vm.name)}"
         )
-        raise typer.Exit(1)
     if vm.init_status == InitStatus.FAILED.value:
-        typer.echo(
-            f"Error: VM '{vm.name}' has failed initialization. "
-            f"Use 'vm reinit' to retry or 'vm delete' to remove.{_init_log_hint(vm.name)}",
-            err=True,
+        raise VMError(
+            f"VM '{vm.name}' has failed initialization. "
+            f"Use 'vm reinit' to retry or 'vm delete' to remove.{_init_log_hint(vm.name)}"
         )
-        raise typer.Exit(1)
 
 
 def _collect_secrets(
@@ -962,8 +943,7 @@ def _human_bytes(b: int) -> str:
 def _require_vm(db: Database, name: str) -> VMRow:
     vm = db.get_vm(name)
     if vm is None:
-        typer.echo(f"Error: VM '{name}' not found", err=True)
-        raise typer.Exit(1)
+        raise VMError(f"VM '{name}' not found")
     return vm
 
 
@@ -1022,8 +1002,7 @@ def port_forward_vm(
     vm = _require_vm(db, name)
     _guard_failed_vm(vm)
     if vm.tailscale_host is None:
-        typer.echo(f"Error: VM '{name}' has no Tailscale IP (init may not be complete)", err=True)
-        raise typer.Exit(1)
+        raise VMError(f"VM '{name}' has no Tailscale IP (init may not be complete)")
 
     # Parse port specs
     forwards: list[tuple[int, int]] = []  # (local_port, remote_port)
@@ -1033,27 +1012,23 @@ def port_forward_vm(
             try:
                 port = int(parts[0])
             except ValueError:
-                typer.echo(f"Error: invalid port '{spec}'", err=True)
-                raise typer.Exit(1) from None
+                raise VMError(f"invalid port '{spec}'") from None
             forwards.append((port, port))
         elif len(parts) == 2:
             try:
                 local_port = int(parts[0])
                 remote_port = int(parts[1])
             except ValueError:
-                typer.echo(f"Error: invalid port spec '{spec}'", err=True)
-                raise typer.Exit(1) from None
+                raise VMError(f"invalid port spec '{spec}'") from None
             forwards.append((local_port, remote_port))
         else:
-            typer.echo(f"Error: invalid port spec '{spec}' (expected [LOCAL:]REMOTE)", err=True)
-            raise typer.Exit(1)
+            raise VMError(f"invalid port spec '{spec}' (expected [LOCAL:]REMOTE)")
 
     # Validate port ranges
     for local_port, remote_port in forwards:
         for label, port in [("local", local_port), ("remote", remote_port)]:
             if port < 1 or port > 65535:
-                typer.echo(f"Error: {label} port {port} out of range (1-65535)", err=True)
-                raise typer.Exit(1)
+                raise VMError(f"{label} port {port} out of range (1-65535)")
 
     # Build SSH command with -L flags for each forward
     ssh_cmd = ["ssh", "-N", "-o", "StrictHostKeyChecking=accept-new"]
@@ -1085,8 +1060,7 @@ def port_forward_vm(
         rc = proc.wait()
         sys.exit(rc)
     except OSError as e:
-        typer.echo(f"Error: failed to start SSH: {e}", err=True)
-        raise typer.Exit(1) from e
+        raise VMError(f"failed to start SSH: {e}") from e
 
 
 def _ensure_tailscale(

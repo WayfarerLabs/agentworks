@@ -9,8 +9,6 @@ import textwrap
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import typer
-
 from agentworks import output
 from agentworks.db import VMStatus
 from agentworks.ssh import ExecTarget, LimaTarget, RemoteLimaTarget, SSHError, SSHTarget, copy_to
@@ -97,12 +95,12 @@ class LimaProvisioner(VMProvisioner):
             import shutil
 
             if not shutil.which("limactl"):
-                typer.echo(
-                    "Error: 'limactl' not found. Lima is not installed on this machine.\n"
-                    "For remote Lima VMs, set defaults.vm_host in your config or pass --vm-host.",
-                    err=True,
+                from agentworks.output import VMError
+
+                raise VMError(
+                    "'limactl' not found. Lima is not installed on this machine. "
+                    "For remote Lima VMs, set defaults.vm_host in your config or pass --vm-host."
                 )
-                raise typer.Exit(1)
 
         if self.is_remote:
             output.info(f"Connecting to VM host '{self._vm_host_ssh}'...")

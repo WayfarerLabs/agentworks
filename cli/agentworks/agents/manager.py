@@ -8,6 +8,7 @@ import typer
 
 from agentworks import output
 from agentworks.config import validate_name
+from agentworks.output import AgentError, VMError
 from agentworks.ssh import admin_exec_target
 
 if TYPE_CHECKING:
@@ -108,8 +109,7 @@ def create_agent(
     validate_name(name)
 
     if db.get_agent(name) is not None:
-        typer.echo(f"Error: agent '{name}' already exists", err=True)
-        raise typer.Exit(1)
+        raise AgentError(f"agent '{name}' already exists")
 
     vm = _require_vm(db, vm_name)
     linux_user = derive_linux_user(name)
@@ -124,11 +124,10 @@ def create_agent(
         _create_agent_on_vm(vm, config, linux_user, git_tokens=git_tokens, logger=ssh_logger)
     except Exception as e:
         ssh_logger.close()
-        typer.echo(f"Error creating agent: {e}", err=True)
-        typer.echo(f"  SSH log: {ssh_logger.path}", err=True)
-        typer.echo(f"  Cleaning up user '{linux_user}'...", err=True)
+        output.detail(f"SSH log: {ssh_logger.path}")
+        output.detail(f"Cleaning up user '{linux_user}'...")
         _delete_agent_on_vm(vm, config, linux_user, logger=ssh_logger)
-        raise typer.Exit(1) from None
+        raise AgentError(f"creating agent: {e}") from None
     ssh_logger.close()
 
     agent = db.insert_agent(
@@ -161,20 +160,17 @@ def delete_agent(
     """Delete an agent from a VM."""
     agent = db.get_agent(name)
     if agent is None:
-        typer.echo(f"Error: agent '{name}' not found", err=True)
-        raise typer.Exit(1)
+        raise AgentError(f"agent '{name}' not found")
 
     # Check for sessions using this agent
     all_sessions = db.list_sessions()
     agent_sessions = [s for s in all_sessions if s.agent_name == name]
     if agent_sessions and not force:
-        typer.echo(
-            f"Error: agent '{name}' has {len(agent_sessions)} session(s). Delete them first, or use --force.",
-            err=True,
-        )
         for s in agent_sessions:
-            typer.echo(f"  {s.name}  [{s.status}]", err=True)
-        raise typer.Exit(1)
+            output.detail(f"{s.name}  [{s.status}]")
+        raise AgentError(
+            f"agent '{name}' has {len(agent_sessions)} session(s). Delete them first, or use --force."
+        )
 
     if not yes:
         msg = f"Delete agent '{name}'?"
@@ -232,8 +228,7 @@ def reinit_agent(
 
     agent = db.get_agent(name)
     if agent is None:
-        typer.echo(f"Error: agent '{name}' not found", err=True)
-        raise typer.Exit(1)
+        raise AgentError(f"agent '{name}' not found")
 
     agent_tmpl = resolve_template(config, agent.template)
     if agent.template and agent.template != "default":
@@ -251,9 +246,8 @@ def reinit_agent(
         _create_agent_on_vm(vm, config, agent.linux_user, git_tokens=git_tokens, logger=ssh_logger)
     except Exception as e:
         ssh_logger.close()
-        typer.echo(f"Error reinitializing agent: {e}", err=True)
-        typer.echo(f"  SSH log: {ssh_logger.path}", err=True)
-        raise typer.Exit(1) from None
+        output.detail(f"SSH log: {ssh_logger.path}")
+        raise AgentError(f"reinitializing agent: {e}") from None
     ssh_logger.close()
 
     output.info(f"Agent '{name}' reinitialized")
@@ -332,8 +326,7 @@ def describe_agent(
     """Show detailed information about an agent."""
     agent = db.get_agent(name)
     if agent is None:
-        typer.echo(f"Error: agent '{name}' not found", err=True)
-        raise typer.Exit(1)
+        raise AgentError(f"agent '{name}' not found")
 
     output.info(f"Name:       {agent.name}")
     output.info(f"VM:         {agent.vm_name}")
@@ -373,8 +366,7 @@ def shell_agent(
     """Open a shell as an agent user on a VM."""
     agent = db.get_agent(name)
     if agent is None:
-        typer.echo(f"Error: agent '{name}' not found", err=True)
-        raise typer.Exit(1)
+        raise AgentError(f"agent '{name}' not found")
 
     vm = _require_vm(db, agent.vm_name)
 
@@ -391,11 +383,9 @@ def shell_agent(
     if workspace_name:
         ws = db.get_workspace(workspace_name)
         if ws is None:
-            typer.echo(f"Error: workspace '{workspace_name}' not found", err=True)
-            raise typer.Exit(1)
+            raise AgentError(f"workspace '{workspace_name}' not found")
         if not db.has_any_grant(name, workspace_name):
-            typer.echo(f"Error: agent '{name}' does not have access to workspace '{workspace_name}'", err=True)
-            raise typer.Exit(1)
+            raise AgentError(f"agent '{name}' does not have access to workspace '{workspace_name}'")
         import shlex
 
         q_path = shlex.quote(ws.workspace_path)
@@ -418,8 +408,7 @@ def grant_workspaces(
     """Grant an agent explicit access to workspaces."""
     agent = db.get_agent(agent_name)
     if agent is None:
-        typer.echo(f"Error: agent '{agent_name}' not found", err=True)
-        raise typer.Exit(1)
+        raise AgentError(f"agent '{agent_name}' not found")
 
     vm = _require_vm(db, agent.vm_name)
 
@@ -455,8 +444,7 @@ def deny_workspaces(
     """Remove explicit workspace grants from an agent."""
     agent = db.get_agent(agent_name)
     if agent is None:
-        typer.echo(f"Error: agent '{agent_name}' not found", err=True)
-        raise typer.Exit(1)
+        raise AgentError(f"agent '{agent_name}' not found")
 
     vm = _require_vm(db, agent.vm_name)
 
@@ -495,8 +483,7 @@ def list_grants(
     """List workspace grants for an agent."""
     agent = db.get_agent(agent_name)
     if agent is None:
-        typer.echo(f"Error: agent '{agent_name}' not found", err=True)
-        raise typer.Exit(1)
+        raise AgentError(f"agent '{agent_name}' not found")
 
     if agent.grant_all:
         output.info(f"Agent '{agent_name}' has grant-all enabled (access to all workspaces)")
@@ -1050,16 +1037,14 @@ def _build_agent_test_command(
 def _require_vm(db: Database, vm_name: str) -> VMRow:
     vm = db.get_vm(vm_name)
     if vm is None:
-        typer.echo(f"Error: VM '{vm_name}' not found", err=True)
-        raise typer.Exit(1)
+        raise VMError(f"VM '{vm_name}' not found")
     return vm
 
 
 def _require_workspace(db: Database, workspace_name: str) -> WorkspaceRow:
     ws = db.get_workspace(workspace_name)
     if ws is None:
-        typer.echo(f"Error: workspace '{workspace_name}' not found", err=True)
-        raise typer.Exit(1)
+        raise AgentError(f"workspace '{workspace_name}' not found")
     return ws
 
 
@@ -1067,6 +1052,5 @@ def _require_vm_for_workspace(db: Database, ws: WorkspaceRow) -> VMRow:
     assert ws.vm_name is not None
     vm = db.get_vm(ws.vm_name)
     if vm is None:
-        typer.echo(f"Error: VM '{ws.vm_name}' not found", err=True)
-        raise typer.Exit(1)
+        raise VMError(f"VM '{ws.vm_name}' not found")
     return vm

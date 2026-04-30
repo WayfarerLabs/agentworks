@@ -6,8 +6,6 @@ import json
 import sys
 from typing import TYPE_CHECKING
 
-import typer
-
 from agentworks import output
 from agentworks.ssh import admin_exec_target
 from agentworks.workspaces.tmuxinator import console_session_name, generate_config
@@ -44,13 +42,13 @@ def create_vm_workspace(
     # Refuse to create if directory already exists
     exists = ssh_run(target, f"test -d {workspace_path}", check=False, timeout=10, logger=lg)
     if exists.ok:
-        typer.echo(
-            f"Error: directory {workspace_path} already exists on the VM.\n"
+        from agentworks.output import WorkspaceError
+
+        raise WorkspaceError(
+            f"directory {workspace_path} already exists on the VM. "
             f"Remove it manually (ssh to the VM and 'sudo rm -rf {workspace_path}') "
-            "or choose a different name.",
-            err=True,
+            "or choose a different name."
         )
-        raise typer.Exit(1)
 
     # Create workspace group (idempotent), add admin, and set up directory with setgid
     run_as_root(target, f"sh -c 'getent group {ws_group} >/dev/null 2>&1 || /usr/sbin/groupadd {ws_group}'", logger=lg)
