@@ -1297,12 +1297,14 @@ def main() -> None:
             typer.echo(message)
             for i, option in enumerate(options, 1):
                 typer.echo(f"  {i}) {option}")
-            choice = int(typer.prompt("Choice", type=int))
-            if choice < 1 or choice > len(options):
-                from agentworks.output import ValidationError
-
-                raise ValidationError(f"invalid choice {choice}")
-            return choice - 1
+            while True:
+                try:
+                    choice = int(typer.prompt("Choice", type=int))
+                    if 1 <= choice <= len(options):
+                        return choice - 1
+                except (ValueError, click.exceptions.Abort):
+                    pass
+                typer.echo(f"Invalid choice. Enter 1-{len(options)}.")
 
         def pause(self, message: str) -> None:
             try:
