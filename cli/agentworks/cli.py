@@ -1270,7 +1270,7 @@ def main() -> None:
     import time
 
     from agentworks.config import ConfigError
-    from agentworks.output import AgentworksError, Progress, set_handler
+    from agentworks.output import AgentworksError, Progress, UserAbort, set_handler
 
     # -- Typer output handler --------------------------------------------------
 
@@ -1304,6 +1304,9 @@ def main() -> None:
         def warn(self, message: str) -> None:
             typer.echo(f"Warning: {message}", err=True)
 
+        def confirm(self, message: str, default: bool = False) -> bool:
+            return typer.confirm(message, default=default)
+
         def progress(self, label: str, total: int | None = None) -> Progress:
             typer.echo(f"  {label}...")
             return _TyperProgress(label, total)
@@ -1316,6 +1319,9 @@ def main() -> None:
         app()
     except ConfigError as e:
         typer.echo(f"Configuration error: {e}", err=True)
+        raise SystemExit(1) from None
+    except UserAbort:
+        typer.echo("Aborted.", err=True)
         raise SystemExit(1) from None
     except AgentworksError as e:
         typer.echo(f"Error: {e}", err=True)

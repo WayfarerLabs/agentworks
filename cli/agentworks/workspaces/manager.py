@@ -534,7 +534,6 @@ def _rehome_vm(
     yes: bool,
 ) -> None:
     """Rehome a VM workspace."""
-    import typer
 
     from agentworks.agents.manager import WS_GROUP_PREFIX
     from agentworks.ssh import SSHError, SSHLogger, admin_exec_target, run_as_root
@@ -573,7 +572,8 @@ def _rehome_vm(
             output.detail("Old directory will be REMOVED after copy")
         else:
             output.detail("Old directory will be LEFT IN PLACE")
-        typer.confirm("Proceed?", abort=True)
+        if not output.confirm("Proceed?"):
+            raise output.UserAbort("rehome cancelled")
 
     ssh_logger = SSHLogger(vm.name, "workspace-rehome")
     ws_group = f"{WS_GROUP_PREFIX}{ws_name}"
@@ -685,7 +685,6 @@ def _rehome_local(
     import shutil
     from pathlib import Path
 
-    import typer
 
     ws_name = ws.name
     old_path = ws.workspace_path
@@ -707,7 +706,8 @@ def _rehome_local(
             output.detail("Old directory will be REMOVED after copy")
         else:
             output.detail("Old directory will be LEFT IN PLACE")
-        typer.confirm("Proceed?", abort=True)
+        if not output.confirm("Proceed?"):
+            raise output.UserAbort("rehome cancelled")
 
     # Copy
     output.info("Copying workspace...")
@@ -757,7 +757,6 @@ def delete_workspace(
     yes: bool = False,
 ) -> None:
     """Delete a workspace."""
-    import typer
 
     ws = db.get_workspace(name)
     if ws is None:
@@ -774,7 +773,8 @@ def delete_workspace(
         msg = f"Delete workspace '{name}'?"
         if session_count > 0:
             msg += f" ({session_count} session(s) will also be deleted)"
-        typer.confirm(msg, abort=True)
+        if not output.confirm(msg):
+            raise output.UserAbort("delete cancelled")
 
     # Create SSH logger for VM operations
     ssh_logger = None

@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import typer
-
 from agentworks import output
 from agentworks.config import VALID_PLATFORMS, validate_admin_username, validate_name
 from agentworks.db import InitStatus, ProvisioningStatus, VMStatus
@@ -652,7 +650,8 @@ def delete_vm(
             if ts_count > 0:
                 parts.append(f"{ts_count} session(s)")
             msg += f" ({', '.join(parts)} will also be deleted)"
-        typer.confirm(msg, abort=True)
+        if not output.confirm(msg):
+            raise output.UserAbort("delete cancelled")
 
     # Platform-specific cleanup (also handles Tailscale logout)
     try:

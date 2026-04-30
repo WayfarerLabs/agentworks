@@ -54,6 +54,10 @@ class OutputHandler(Protocol):
         """Non-fatal warning."""
         ...
 
+    def confirm(self, message: str, default: bool = False) -> bool:
+        """Present a yes/no question. Returns True for yes, False for no."""
+        ...
+
     def progress(self, label: str, total: int | None = None) -> Progress:
         """Start a tracked operation. Returns a Progress handle.
 
@@ -99,6 +103,13 @@ class _DefaultHandler:
     def warn(self, message: str) -> None:
         print(f"Warning: {message}", file=sys.stderr)
 
+    def confirm(self, message: str, default: bool = False) -> bool:
+        suffix = " [Y/n]" if default else " [y/N]"
+        response = input(message + suffix + " ").strip().lower()
+        if not response:
+            return default
+        return response in ("y", "yes")
+
     def progress(self, label: str, total: int | None = None) -> Progress:
         print(f"  {label}...")
         return _DefaultProgress(label, total)
@@ -124,6 +135,11 @@ def detail(message: str) -> None:
 def warn(message: str) -> None:
     """Emit a non-fatal warning."""
     _handler.warn(message)
+
+
+def confirm(message: str, default: bool = False) -> bool:
+    """Present a yes/no question. Returns True for yes, False for no."""
+    return _handler.confirm(message, default)
 
 
 def progress(label: str, total: int | None = None) -> Progress:
@@ -181,5 +197,9 @@ class ConnectivityError(AgentworksError):
 
 class BackupError(AgentworksError):
     """Error related to backup-specific failures."""
+
+
+class UserAbort(AgentworksError):
+    """Raised when the user declines a confirmation prompt."""
 
 

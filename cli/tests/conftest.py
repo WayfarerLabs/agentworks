@@ -47,6 +47,7 @@ class CapturedOutput:
     detail: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     progress_items: list[_CapturedProgress] = field(default_factory=list)
+    confirm_response: bool = True  # what confirm() returns in tests
 
 
 class _TestHandler:
@@ -61,6 +62,9 @@ class _TestHandler:
 
     def warn(self, message: str) -> None:
         self._captured.warnings.append(message)
+
+    def confirm(self, message: str, default: bool = False) -> bool:
+        return self._captured.confirm_response
 
     def progress(self, label: str, total: int | None = None) -> _CapturedProgress:
         p = _CapturedProgress(label=label)

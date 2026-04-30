@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import typer
-
 from agentworks import output
 from agentworks.config import validate_name
 from agentworks.output import AgentError, VMError
@@ -176,7 +174,8 @@ def delete_agent(
         msg = f"Delete agent '{name}'?"
         if agent_sessions:
             msg += f" ({len(agent_sessions)} session(s) will also be stopped)"
-        typer.confirm(msg, abort=True)
+        if not output.confirm(msg):
+            raise output.UserAbort("delete cancelled")
 
     vm = _require_vm(db, agent.vm_name)
 

@@ -511,8 +511,12 @@ def delete_session(
     ws, vm, run_command, _ = _prepare_vm(db, config, session.workspace_name, operation="session-delete")
     sock = _effective_socket_path(db, session)
 
-    if not yes and _session_exists_any_server(name, run_command=run_command, socket_path=sock):
-        typer.confirm(f"Session '{name}' is still running. Delete anyway?", abort=True)
+    if (
+        not yes
+        and _session_exists_any_server(name, run_command=run_command, socket_path=sock)
+        and not output.confirm(f"Session '{name}' is still running. Delete anyway?")
+    ):
+        raise output.UserAbort("delete cancelled")
 
     _kill_session_any_server(name, run_command=run_command, socket_path=sock)
 
@@ -556,8 +560,8 @@ def delete_session(
                 f"{len(remaining)} other session(s), not offering to delete."
             )
         elif not yes:
-            if typer.confirm(
-                f"  Workspace '{session.workspace_name}' was created with this session "
+            if output.confirm(
+                f"Workspace '{session.workspace_name}' was created with this session "
                 f"and has no other sessions. Delete it?",
             ):
                 from agentworks.workspaces.manager import delete_workspace
