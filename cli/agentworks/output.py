@@ -58,6 +58,18 @@ class OutputHandler(Protocol):
         """Present a yes/no question. Returns True for yes, False for no."""
         ...
 
+    def choose(self, message: str, options: list[str]) -> int:
+        """Present a list of options. Returns the index of the selected option."""
+        ...
+
+    def pause(self, message: str) -> None:
+        """Wait for user acknowledgment (press Enter)."""
+        ...
+
+    def prompt_secret(self, label: str, hint: str | None = None) -> str:
+        """Collect a secret value with masked input. Rejects empty values."""
+        ...
+
     def progress(self, label: str, total: int | None = None) -> Progress:
         """Start a tracked operation. Returns a Progress handle.
 
@@ -110,6 +122,33 @@ class _DefaultHandler:
             return default
         return response in ("y", "yes")
 
+    def choose(self, message: str, options: list[str]) -> int:
+        print(message)
+        for i, option in enumerate(options, 1):
+            print(f"  {i}) {option}")
+        while True:
+            try:
+                choice = int(input("Choice: "))
+                if 1 <= choice <= len(options):
+                    return choice - 1
+            except ValueError:
+                pass
+            print(f"Invalid choice. Enter 1-{len(options)}.")
+
+    def pause(self, message: str) -> None:
+        input(message)
+
+    def prompt_secret(self, label: str, hint: str | None = None) -> str:
+        import getpass
+
+        if hint:
+            print(f"  {hint}", file=sys.stderr)
+        while True:
+            value = getpass.getpass(f"{label}: ")
+            if value.strip():
+                return value
+            print("(empty, try again)", file=sys.stderr)
+
     def progress(self, label: str, total: int | None = None) -> Progress:
         print(f"  {label}...")
         return _DefaultProgress(label, total)
@@ -140,6 +179,21 @@ def warn(message: str) -> None:
 def confirm(message: str, default: bool = False) -> bool:
     """Present a yes/no question. Returns True for yes, False for no."""
     return _handler.confirm(message, default)
+
+
+def choose(message: str, options: list[str]) -> int:
+    """Present a list of options. Returns the index of the selected option."""
+    return _handler.choose(message, options)
+
+
+def pause(message: str) -> None:
+    """Wait for user acknowledgment (press Enter)."""
+    _handler.pause(message)
+
+
+def prompt_secret(label: str, hint: str | None = None) -> str:
+    """Collect a secret value with masked input. Rejects empty values."""
+    return _handler.prompt_secret(label, hint)
 
 
 def progress(label: str, total: int | None = None) -> Progress:

@@ -1307,6 +1307,38 @@ def main() -> None:
         def confirm(self, message: str, default: bool = False) -> bool:
             return typer.confirm(message, default=default)
 
+        def choose(self, message: str, options: list[str]) -> int:
+            typer.echo(message)
+            for i, option in enumerate(options, 1):
+                typer.echo(f"  {i}) {option}")
+            choice = int(typer.prompt("Choice", type=int))
+            if choice < 1 or choice > len(options):
+                from agentworks.output import AgentworksError
+
+                raise AgentworksError(f"invalid choice {choice}")
+            return choice - 1
+
+        def pause(self, message: str) -> None:
+            input(message)
+
+        def prompt_secret(self, label: str, hint: str | None = None) -> str:
+            import click
+
+            if hint:
+                typer.echo(f"  {hint}", err=True)
+            while True:
+                value = str(click.prompt(label, err=True, default="", hide_input=True))
+                if value.strip():
+                    break
+                typer.echo("(empty, try again)", err=True)
+            # Confirm entry with masked placeholder
+            import sys
+
+            mask = "*" * min(len(value), 20)
+            sys.stderr.write(f"\x1b[1A\r\x1b[2K{label}: {mask}\n")
+            sys.stderr.flush()
+            return value
+
         def progress(self, label: str, total: int | None = None) -> Progress:
             typer.echo(f"  {label}...")
             return _TyperProgress(label, total)

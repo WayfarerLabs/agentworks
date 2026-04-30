@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+from agentworks import output
 from agentworks.git_credentials.base import GitCredentialProvider
-from agentworks.prompt import prompt_secret
 
 
 class GitHubCredentialProvider(GitCredentialProvider):
@@ -16,7 +16,7 @@ class GitHubCredentialProvider(GitCredentialProvider):
         return "Create a PAT at https://github.com/settings/tokens (repo scope)"
 
     def _prompt_token(self, vm_name: str) -> str:
-        return prompt_secret(f"  GitHub PAT for '{self.display_name}'", hint=self.auth_hint())
+        return output.prompt_secret(f"  GitHub PAT for '{self.display_name}'", hint=self.auth_hint())
 
     def credential_lines(self, token: str) -> list[str]:
         return [f"https://x-access-token:{token}@github.com"]

@@ -685,9 +685,7 @@ def _join_tailscale(
 
     ts_auth_key = tailscale_auth_key or os.environ.get("TAILSCALE_AUTH_KEY")
     if not ts_auth_key:
-        from agentworks.prompt import prompt_secret
-
-        ts_auth_key = prompt_secret(
+        ts_auth_key = output.prompt_secret(
             "  Tailscale auth key",
             hint="Generate a key at https://login.tailscale.com/admin/settings/keys",
         )
@@ -1061,9 +1059,7 @@ def _resolve_tailscale_auth_key(tailscale_auth_key: str | None = None) -> str:
     key = tailscale_auth_key or os.environ.get("TAILSCALE_AUTH_KEY")
     if key:
         return key
-    from agentworks.prompt import prompt_secret
-
-    return prompt_secret(
+    return output.prompt_secret(
         "  Tailscale auth key",
         hint="Generate a key at https://login.tailscale.com/admin/settings/keys",
     )

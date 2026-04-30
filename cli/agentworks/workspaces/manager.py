@@ -1037,17 +1037,9 @@ def _resolve_vm(db: Database, vm_name: str | None) -> VMRow:
         output.info(f"Using VM '{usable_vms[0].name}'")
         return usable_vms[0]
 
-    import typer
-
-    output.info("Select a VM:")
-    for i, v in enumerate(usable_vms, 1):
-        output.detail(f"{i}) {v.name}  ({v.platform})")
-
-    choice = int(typer.prompt("VM number", type=int))
-    if choice < 1 or choice > len(usable_vms):
-        raise output.VMError(f"invalid choice {choice}")
-
-    return usable_vms[choice - 1]
+    options = [f"{v.name}  ({v.platform})" for v in usable_vms]
+    idx = output.choose("Select a VM:", options)
+    return usable_vms[idx]
 
 
 def _ensure_vm_running(db: Database, config: Config, vm: VMRow) -> None:

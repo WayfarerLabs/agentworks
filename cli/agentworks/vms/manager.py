@@ -494,7 +494,6 @@ def rekey_vm(
     import shlex
     import time
 
-    from agentworks.prompt import prompt_secret
     from agentworks.ssh import SSHError, admin_exec_target, wait_for_reconnect
     from agentworks.ssh_config import sync_ssh_config
     from agentworks.vms.provisioners.azure import AzureProvisioner
@@ -512,7 +511,7 @@ def rekey_vm(
     if ts_auth_key:
         output.detail("Tailscale auth key found in environment")
     else:
-        ts_auth_key = prompt_secret(
+        ts_auth_key = output.prompt_secret(
             "Tailscale auth key",
             hint="Generate a key at https://login.tailscale.com/admin/settings/keys",
         )
@@ -591,10 +590,9 @@ def rekey_vm(
 
         # If the operator needs to share the VM back, pause before connectivity check
         if wait_for_share:
-            output.info(
+            output.pause(
                 "Share the VM back to your tailnet, then press Enter to verify connectivity..."
             )
-            input()
 
         # Always verify Tailscale SSH connectivity to the new IP
         output.detail(f"Verifying SSH to {new_ip}...")
@@ -837,8 +835,6 @@ def _collect_secrets(
     """
     import os
 
-    from agentworks.prompt import prompt_secret
-
     output.info("Collecting credentials...")
 
     # Tailscale
@@ -846,7 +842,7 @@ def _collect_secrets(
     if ts_auth_key:
         output.detail("Tailscale auth key found in environment")
     else:
-        ts_auth_key = prompt_secret(
+        ts_auth_key = output.prompt_secret(
             "  Tailscale auth key",
             hint="Generate a key at https://login.tailscale.com/admin/settings/keys",
         )
