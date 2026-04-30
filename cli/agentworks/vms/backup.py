@@ -287,14 +287,10 @@ def _archive_workspaces(
 
         result = result_holder[0]
         if result.exit_code != 0:
-            output.detail(f"Command: {tar_cmd}")
+            detail = f"Command: {tar_cmd}"
             if result.output:
-                output.detail("tar output:")
-                for line in result.output.strip().splitlines():
-                    output.detail(line, indent=2)
-            else:
-                output.detail("(no output captured)")
-            raise BackupError(f"tar failed (exit {result.exit_code})")
+                detail += f"\nOutput:\n{result.output.strip()}"
+            raise BackupError(f"tar failed (exit {result.exit_code})\n{detail}")
 
         _report_size(target, archive)
 
