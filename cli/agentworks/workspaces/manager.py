@@ -571,7 +571,7 @@ def _rehome_vm(
             output.detail("Old directory will be REMOVED after copy")
         else:
             output.detail("Old directory will be LEFT IN PLACE")
-        if not output.prompt_bool("Proceed?"):
+        if not output.confirm("Proceed?"):
             raise output.UserAbort("rehome cancelled")
 
     ssh_logger = SSHLogger(vm.name, "workspace-rehome")
@@ -708,7 +708,7 @@ def _rehome_local(
             output.detail("Old directory will be REMOVED after copy")
         else:
             output.detail("Old directory will be LEFT IN PLACE")
-        if not output.prompt_bool("Proceed?"):
+        if not output.confirm("Proceed?"):
             raise output.UserAbort("rehome cancelled")
 
     # Copy
@@ -775,7 +775,7 @@ def delete_workspace(
         msg = f"Delete workspace '{name}'?"
         if session_count > 0:
             msg += f" ({session_count} session(s) will also be deleted)"
-        if not output.prompt_bool(msg):
+        if not output.confirm(msg):
             raise output.UserAbort("delete cancelled")
 
     # Create SSH logger for VM operations

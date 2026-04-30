@@ -1290,7 +1290,7 @@ def main() -> None:
         def warn(self, message: str) -> None:
             typer.echo(f"Warning: {message}", err=True)
 
-        def prompt_bool(self, message: str, default: bool = False) -> bool:
+        def confirm(self, message: str, default: bool = False) -> bool:
             return typer.confirm(message, default=default)
 
         def choose(self, message: str, options: list[str]) -> int:
@@ -1302,7 +1302,11 @@ def main() -> None:
                     choice = int(typer.prompt("Choice", type=int))
                     if 1 <= choice <= len(options):
                         return choice - 1
-                except (ValueError, click.exceptions.Abort):
+                except click.exceptions.Abort:
+                    from agentworks.output import UserAbort
+
+                    raise UserAbort("interrupted") from None
+                except ValueError:
                     pass
                 typer.echo(f"Invalid choice. Enter 1-{len(options)}.")
 
