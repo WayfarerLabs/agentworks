@@ -206,8 +206,8 @@ def _archive_workspaces(
         # Use zstd at level 15 for high compression (trades CPU for smaller archive,
         # which is worthwhile since cross-workspace deduplication benefits from it).
         output.detail(f"Archiving {len(valid)} workspace(s) with zstd (this may take a while)...")
-        output.detail(f"  Remote archive: {archive}")
-        output.detail(f"  Local archive:  {local_archive}")
+        output.detail(f"Remote archive: {archive}")
+        output.detail(f"Local archive:  {local_archive}")
 
         # Write paths file via scp to avoid shell escaping issues.
         paths_file = f"{tmp_dir}/paths.txt"
@@ -291,7 +291,7 @@ def _archive_workspaces(
             if result.output:
                 output.detail("tar output:")
                 for line in result.output.strip().splitlines():
-                    output.detail(f"  {line}")
+                    output.detail(line, indent=2)
             else:
                 output.detail("(no output captured)")
             raise BackupError(f"tar failed (exit {result.exit_code})")
@@ -301,7 +301,7 @@ def _archive_workspaces(
         if result.output.strip():
             output.warn("tar warnings:")
             for line in result.output.strip().splitlines()[-10:]:
-                output.detail(f"  {line}")
+                output.detail(line, indent=2)
 
         # Transfer to local. Chown the temp dir and archive to the admin
         # user so scp can read it (avoids making it world-readable).

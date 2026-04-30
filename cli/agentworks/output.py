@@ -46,8 +46,8 @@ class OutputHandler(Protocol):
         """One-shot status message (top-level)."""
         ...
 
-    def detail(self, message: str) -> None:
-        """Sub-step or detail message (indented under a prior info/progress)."""
+    def detail(self, message: str, indent: int = 1) -> None:
+        """Sub-step or detail message. indent controls nesting depth (1 = 2 spaces, 2 = 4, etc.)."""
         ...
 
     def warn(self, message: str) -> None:
@@ -113,8 +113,8 @@ class _DefaultHandler:
     def info(self, message: str) -> None:
         print(message)
 
-    def detail(self, message: str) -> None:
-        print(f"  {message}")
+    def detail(self, message: str, indent: int = 1) -> None:
+        print(f"{'  ' * indent}{message}")
 
     def warn(self, message: str) -> None:
         print(f"Warning: {message}", file=sys.stderr)
@@ -190,9 +190,9 @@ def info(message: str) -> None:
     _handler.info(message)
 
 
-def detail(message: str) -> None:
-    """Emit an indented detail/sub-step message."""
-    _handler.detail(message)
+def detail(message: str, indent: int = 1) -> None:
+    """Emit an indented detail/sub-step message. indent controls nesting depth."""
+    _handler.detail(message, indent)
 
 
 def warn(message: str) -> None:

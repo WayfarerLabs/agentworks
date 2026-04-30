@@ -365,12 +365,12 @@ def describe_vm(db: Database, config: Config, name: str) -> None:
 
             sessions = db.list_sessions(workspace_name=ws.name)
             if sessions:
-                output.detail(f"  Sessions ({len(sessions)}):")
+                output.detail(f"Sessions ({len(sessions)}):", indent=2)
                 for s in sessions:
                     mode_label = f"agent:{s.agent_name}" if s.agent_name else "admin"
-                    output.detail(f"    {s.name}  [{s.template}]  {s.status}  {mode_label}")
+                    output.detail(f"{s.name}  [{s.template}]  {s.status}  {mode_label}", indent=3)
             else:
-                output.detail("  (no sessions)")
+                output.detail("(no sessions)", indent=2)
     else:
         output.detail("(none)")
 

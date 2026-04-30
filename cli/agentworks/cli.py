@@ -1284,14 +1284,19 @@ def main() -> None:
         def info(self, message: str) -> None:
             typer.echo(message)
 
-        def detail(self, message: str) -> None:
-            typer.echo(f"  {message}")
+        def detail(self, message: str, indent: int = 1) -> None:
+            typer.echo(f"{'  ' * indent}{message}")
 
         def warn(self, message: str) -> None:
             typer.echo(f"Warning: {message}", err=True)
 
         def confirm(self, message: str, default: bool = False) -> bool:
-            return typer.confirm(message, default=default)
+            try:
+                return typer.confirm(message, default=default)
+            except click.exceptions.Abort:
+                from agentworks.output import UserAbort
+
+                raise UserAbort("interrupted") from None
 
         def choose(self, message: str, options: list[str]) -> int:
             typer.echo(message)
@@ -1324,14 +1329,19 @@ def main() -> None:
         def prompt_secret(self, label: str, hint: str | None = None) -> str:
             import click
 
-            if hint:
-                typer.echo(f"  {hint}", err=True)
-            while True:
-                value = str(click.prompt(label, err=True, default="", hide_input=True))
-                if value.strip():
-                    break
-                typer.echo("(empty, try again)", err=True)
-            return value
+            try:
+                if hint:
+                    typer.echo(f"  {hint}", err=True)
+                while True:
+                    value = str(click.prompt(label, err=True, default="", hide_input=True))
+                    if value.strip():
+                        break
+                    typer.echo("(empty, try again)", err=True)
+                return value
+            except click.exceptions.Abort:
+                from agentworks.output import UserAbort
+
+                raise UserAbort("interrupted") from None
 
         def progress(self, label: str, total: int | None = None) -> Progress:
             typer.echo(f"  {label}...")

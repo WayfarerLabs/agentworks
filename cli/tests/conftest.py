@@ -60,7 +60,7 @@ class _TestHandler:
     def info(self, message: str) -> None:
         self._captured.info.append(message)
 
-    def detail(self, message: str) -> None:
+    def detail(self, message: str, indent: int = 1) -> None:
         self._captured.detail.append(message)
 
     def warn(self, message: str) -> None:
