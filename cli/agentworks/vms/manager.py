@@ -648,7 +648,7 @@ def delete_vm(
             if ts_count > 0:
                 parts.append(f"{ts_count} session(s)")
             msg += f" ({', '.join(parts)} will also be deleted)"
-        if not output.confirm(msg):
+        if not output.prompt_bool(msg):
             raise output.UserAbort("delete cancelled")
 
     # Platform-specific cleanup (also handles Tailscale logout)

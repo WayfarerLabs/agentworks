@@ -1304,7 +1304,7 @@ def main() -> None:
         def warn(self, message: str) -> None:
             typer.echo(f"Warning: {message}", err=True)
 
-        def confirm(self, message: str, default: bool = False) -> bool:
+        def prompt_bool(self, message: str, default: bool = False) -> bool:
             return typer.confirm(message, default=default)
 
         def choose(self, message: str, options: list[str]) -> int:

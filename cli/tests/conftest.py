@@ -47,7 +47,7 @@ class CapturedOutput:
     detail: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     progress_items: list[_CapturedProgress] = field(default_factory=list)
-    confirm_response: bool = True  # what confirm() returns in tests
+    prompt_bool_response: bool = True  # what confirm() returns in tests
     choose_response: int = 0  # what choose() returns in tests
     secret_response: str = "test-secret"  # what prompt_secret() returns in tests
 
@@ -65,8 +65,8 @@ class _TestHandler:
     def warn(self, message: str) -> None:
         self._captured.warnings.append(message)
 
-    def confirm(self, message: str, default: bool = False) -> bool:
-        return self._captured.confirm_response
+    def prompt_bool(self, message: str, default: bool = False) -> bool:
+        return self._captured.prompt_bool_response
 
     def choose(self, message: str, options: list[str]) -> int:
         return self._captured.choose_response

@@ -172,7 +172,7 @@ def delete_agent(
         msg = f"Delete agent '{name}'?"
         if agent_sessions:
             msg += f" ({len(agent_sessions)} session(s) will also be stopped)"
-        if not output.confirm(msg):
+        if not output.prompt_bool(msg):
             raise output.UserAbort("delete cancelled")
 
     vm = _require_vm(db, agent.vm_name)

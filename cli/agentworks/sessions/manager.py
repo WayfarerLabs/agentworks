@@ -514,7 +514,7 @@ def delete_session(
     if (
         not yes
         and _session_exists_any_server(name, run_command=run_command, socket_path=sock)
-        and not output.confirm(f"Session '{name}' is still running. Delete anyway?")
+        and not output.prompt_bool(f"Session '{name}' is still running. Delete anyway?")
     ):
         raise output.UserAbort("delete cancelled")
 
@@ -560,7 +560,7 @@ def delete_session(
                 f"{len(remaining)} other session(s), not offering to delete."
             )
         elif not yes:
-            if output.confirm(
+            if output.prompt_bool(
                 f"Workspace '{session.workspace_name}' was created with this session "
                 f"and has no other sessions. Delete it?",
             ):

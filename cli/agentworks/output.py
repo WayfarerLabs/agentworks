@@ -54,7 +54,7 @@ class OutputHandler(Protocol):
         """Non-fatal warning."""
         ...
 
-    def confirm(self, message: str, default: bool = False) -> bool:
+    def prompt_bool(self, message: str, default: bool = False) -> bool:
         """Present a yes/no question. Returns True for yes, False for no."""
         ...
 
@@ -115,7 +115,7 @@ class _DefaultHandler:
     def warn(self, message: str) -> None:
         print(f"Warning: {message}", file=sys.stderr)
 
-    def confirm(self, message: str, default: bool = False) -> bool:
+    def prompt_bool(self, message: str, default: bool = False) -> bool:
         try:
             suffix = " [Y/n]" if default else " [y/N]"
             response = input(message + suffix + " ").strip().lower()
@@ -188,9 +188,9 @@ def warn(message: str) -> None:
     _handler.warn(message)
 
 
-def confirm(message: str, default: bool = False) -> bool:
+def prompt_bool(message: str, default: bool = False) -> bool:
     """Present a yes/no question. Returns True for yes, False for no."""
-    return _handler.confirm(message, default)
+    return _handler.prompt_bool(message, default)
 
 
 def choose(message: str, options: list[str]) -> int:
