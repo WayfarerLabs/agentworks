@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from agentworks.config import ConfigError, validate_name
+from agentworks.config import validate_name
+from agentworks.output import ValidationError
 
 
 def _is_valid(name: str) -> bool:
@@ -12,7 +13,7 @@ def _is_valid(name: str) -> bool:
     try:
         validate_name(name)
         return True
-    except ConfigError:
+    except ValidationError:
         return False
 
 

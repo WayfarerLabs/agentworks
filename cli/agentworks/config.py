@@ -31,19 +31,21 @@ MAX_NAME_LENGTH = 30
 
 
 def validate_name(name: str) -> None:
-    """Validate a resource name, raising ConfigError on failure.
+    """Validate a resource name, raising ValidationError on failure.
 
     Rules: lowercase alphanumeric, hyphens, underscores. Must start and end with
     alphanumeric. No consecutive hyphens (reserved for agent username separator).
     Max 30 characters (leaves room for agent username derivation within the
     32-character Linux username limit).
     """
+    from agentworks.output import ValidationError
+
     if len(name) > MAX_NAME_LENGTH:
-        raise ConfigError(
+        raise ValidationError(
             f"name '{name}' is too long ({len(name)} chars, max {MAX_NAME_LENGTH})"
         )
     if not NAME_RE.match(name) or "--" in name:
-        raise ConfigError(
+        raise ValidationError(
             f"invalid name '{name}'. Names must be lowercase alphanumeric "
             "with hyphens or underscores, must start and end with a letter or digit, "
             "and cannot contain consecutive hyphens (--)"
@@ -52,8 +54,10 @@ def validate_name(name: str) -> None:
 
 def validate_admin_username(admin_username: str) -> None:
     """Validate an admin username for shell and OS safety."""
+    from agentworks.output import ValidationError
+
     if not VM_USER_RE.match(admin_username):
-        raise ConfigError(
+        raise ValidationError(
             f"invalid admin_username '{admin_username}'. Must be a valid Linux username "
             "(lowercase, alphanumeric/hyphens/underscores, max 32 chars)"
         )

@@ -276,7 +276,9 @@ def _archive_workspaces(
             if pid.isdigit():
                 # Kill the wrapper shell's process group (tar + wrapper)
                 target.run(f"kill -TERM -{pid} 2>/dev/null", sudo=True, check=False)
-            raise BackupError("backup interrupted by user") from None
+            from agentworks.output import UserAbort
+
+            raise UserAbort("backup interrupted") from None
 
         if error_holder:
             raise error_holder[0]

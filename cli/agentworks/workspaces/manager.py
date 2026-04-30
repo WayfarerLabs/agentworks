@@ -139,9 +139,8 @@ def _create_vm(
         raise
     except Exception as e:
         ssh_logger.close()
-        output.detail(f"SSH log: {ssh_logger.path}")
         _cleanup()
-        raise output.WorkspaceError(f"creating workspace: {e}") from None
+        raise output.WorkspaceError(f"creating workspace: {e}\nSSH log: {ssh_logger.path}") from None
 
     # Add grant_all agents to the new workspace group
     grant_all_agents = db.list_agents_on_vm_with_grant_all(vm.name)
@@ -594,9 +593,10 @@ def _rehome_vm(
         # Verify copy succeeded
         verify = ssh_run(target, f"test -d {new_path}", check=False, timeout=10, logger=ssh_logger)
         if not verify.ok:
-            output.detail(f"SSH log: {ssh_logger.path}")
             ssh_logger.close()
-            raise output.WorkspaceError("copy verification failed, target directory not found")
+            raise output.WorkspaceError(
+                f"copy verification failed, target directory not found\nSSH log: {ssh_logger.path}"
+            )
 
         # Fix ownership, permissions, and ACLs on the new path
         output.info("Setting permissions...")
@@ -663,10 +663,12 @@ def _rehome_vm(
         ssh_logger.close()
         raise
     except Exception as e:
-        output.detail(f"SSH log: {ssh_logger.path}")
-        output.detail("The database was NOT updated. The workspace is still at the original path.")
         ssh_logger.close()
-        raise output.WorkspaceError(f"during rehome: {e}") from None
+        raise output.WorkspaceError(
+            f"during rehome: {e}\n"
+            f"SSH log: {ssh_logger.path}\n"
+            "The database was NOT updated. The workspace is still at the original path."
+        ) from None
 
     ssh_logger.close()
     output.info(f"\nWorkspace '{ws_name}' rehomed to {new_path}")

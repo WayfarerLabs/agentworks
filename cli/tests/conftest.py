@@ -104,16 +104,10 @@ def captured_output() -> Generator[CapturedOutput, None, None]:
 
 
 @pytest.fixture
-def warnings() -> Generator[list[str], None, None]:
+def warnings(captured_output: CapturedOutput) -> Generator[list[str], None, None]:
     """Capture warnings emitted via ``agentworks.output.warn``.
 
     Convenience wrapper for tests that only care about warnings.
-    Installs a test handler and yields just the warnings list.
+    Reuses ``captured_output`` so both fixtures can coexist safely.
     """
-    from agentworks.output import get_handler, set_handler
-
-    previous = get_handler()
-    captured = CapturedOutput()
-    set_handler(_TestHandler(captured))
-    yield captured.warnings
-    set_handler(previous)
+    yield captured_output.warnings

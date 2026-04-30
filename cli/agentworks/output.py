@@ -253,6 +253,10 @@ class BackupError(AgentworksError):
     """Error related to backup-specific failures."""
 
 
+class ValidationError(AgentworksError):
+    """Invalid user input (name, argument, etc.)."""
+
+
 class UserAbort(AgentworksError):
     """Raised when the user declines a confirmation prompt."""
 

@@ -122,10 +122,8 @@ def create_agent(
         _create_agent_on_vm(vm, config, linux_user, git_tokens=git_tokens, logger=ssh_logger)
     except Exception as e:
         ssh_logger.close()
-        output.detail(f"SSH log: {ssh_logger.path}")
-        output.detail(f"Cleaning up user '{linux_user}'...")
         _delete_agent_on_vm(vm, config, linux_user, logger=ssh_logger)
-        raise AgentError(f"creating agent: {e}") from None
+        raise AgentError(f"creating agent: {e}\nSSH log: {ssh_logger.path}") from None
     ssh_logger.close()
 
     agent = db.insert_agent(
@@ -245,8 +243,7 @@ def reinit_agent(
         _create_agent_on_vm(vm, config, agent.linux_user, git_tokens=git_tokens, logger=ssh_logger)
     except Exception as e:
         ssh_logger.close()
-        output.detail(f"SSH log: {ssh_logger.path}")
-        raise AgentError(f"reinitializing agent: {e}") from None
+        raise AgentError(f"reinitializing agent: {e}\nSSH log: {ssh_logger.path}") from None
     ssh_logger.close()
 
     output.info(f"Agent '{name}' reinitialized")

@@ -227,22 +227,22 @@ def create_vm(
             on_tailscale_ready=_on_tailscale_ready,
         )
     except Exception as e:
-        # Log details for debugging
         from agentworks.ssh import LOG_DIR
 
+        log_hint = ""
         logs = sorted(LOG_DIR.glob(f"{vm_name}-*-vm-create.log"), reverse=True)
         if logs:
-            output.detail(f"Details: {logs[0]}")
+            log_hint = f"\nDetails: {logs[0]}"
 
         vm = db.get_vm(vm_name)
         if vm is not None and vm.provisioning_status == ProvisioningStatus.FAILED.value:
             raise VMError(
-                f"provisioning failed: {e}\n"
+                f"provisioning failed: {e}{log_hint}\n"
                 f"VM '{vm_name}' is in a failed state. Use 'vm delete {vm_name}' to clean up."
             ) from e
         else:
             raise VMError(
-                f"initialization failed: {e}\n"
+                f"initialization failed: {e}{log_hint}\n"
                 f"VM '{vm_name}' may still be usable. Use 'vm reinit {vm_name}' to retry."
             ) from e
 
