@@ -206,8 +206,8 @@ def _archive_workspaces(
         # Use zstd at level 15 for high compression (trades CPU for smaller archive,
         # which is worthwhile since cross-workspace deduplication benefits from it).
         output.detail(f"Archiving {len(valid)} workspace(s) with zstd (this may take a while)...")
-        output.detail(f"Remote archive: {archive}")
-        output.detail(f"Local archive:  {local_archive}")
+        output.detail(f"Remote archive: {archive}", indent=2)
+        output.detail(f"Local archive:  {local_archive}", indent=2)
 
         # Write paths file via scp to avoid shell escaping issues.
         paths_file = f"{tmp_dir}/paths.txt"
