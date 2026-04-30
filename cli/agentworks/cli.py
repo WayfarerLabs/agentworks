@@ -1331,12 +1331,6 @@ def main() -> None:
                 if value.strip():
                     break
                 typer.echo("(empty, try again)", err=True)
-            # Confirm entry with masked placeholder
-            import sys
-
-            mask = "*" * min(len(value), 20)
-            sys.stderr.write(f"\x1b[1A\r\x1b[2K{label}: {mask}\n")
-            sys.stderr.flush()
             return value
 
         def progress(self, label: str, total: int | None = None) -> Progress:
