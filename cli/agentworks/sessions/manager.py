@@ -719,4 +719,6 @@ def session_logs(
         lines=lines or config.session.history_limit,
         socket_path=sock,
     )
+    # Raw data pipe (opaque tmux capture-pane output), not a structured message.
+    # Intentionally not routed through the output handler.
     typer.echo(captured, nl=False)
