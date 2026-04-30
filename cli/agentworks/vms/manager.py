@@ -188,9 +188,8 @@ def create_vm(
             msg = f"Unknown platform: {platform}"
             raise ValueError(msg)
     except Exception as e:
-        output.warn(f"provisioning failed: {e}")
         db.delete_vm(vm_name)
-        return
+        raise VMError(f"provisioning failed: {e}") from e
 
     # Update DB with platform-specific metadata
     if result.azure_resource_id:
@@ -230,8 +229,7 @@ def create_vm(
             on_tailscale_ready=_on_tailscale_ready,
         )
     except Exception as e:
-        output.warn(str(e))
-        # The logger inside initialize_vm already captured the details
+        # Log details for debugging
         from agentworks.ssh import LOG_DIR
 
         logs = sorted(LOG_DIR.glob(f"{vm_name}-*-vm-create.log"), reverse=True)
@@ -240,24 +238,15 @@ def create_vm(
 
         vm = db.get_vm(vm_name)
         if vm is not None and vm.provisioning_status == ProvisioningStatus.FAILED.value:
-            # Provisioning failed -- VM is unreachable
-            output.warn(
-                "Provisioning failed. Delete VM? You can keep it for manual "
-                "troubleshooting, but agentworks cannot use or manage it."
-            )
-            if typer.confirm("Delete VM?", default=True):
-                delete_vm(db, config, vm_name, force=True)
-            else:
-                output.warn(
-                    f"VM '{vm_name}' kept in failed state. Only 'vm delete' is supported."
-                )
+            raise VMError(
+                f"provisioning failed: {e}\n"
+                f"VM '{vm_name}' is in a failed state. Use 'vm delete {vm_name}' to clean up."
+            ) from e
         else:
-            # Init failed but VM exists -- reinit can retry
-            output.warn(
-                f"VM '{vm_name}' is in a degraded state but may still be usable. "
-                f"Use 'vm reinit {vm_name}' to retry initialization."
-            )
-        return
+            raise VMError(
+                f"initialization failed: {e}\n"
+                f"VM '{vm_name}' may still be usable. Use 'vm reinit {vm_name}' to retry."
+            ) from e
 
     # -- Post-init: SSH config --
     try:

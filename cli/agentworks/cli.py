@@ -1282,7 +1282,7 @@ def main() -> None:
 
         def update(self, current: int | None = None, message: str | None = None) -> None:
             parts = [f"  {self._label}..."]
-            if current is not None and self._total is not None:
+            if current is not None and self._total is not None and self._total > 0:
                 pct = current / self._total * 100
                 parts.append(f" {pct:.0f}% ({current}/{self._total})")
             if message:

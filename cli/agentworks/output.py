@@ -76,7 +76,7 @@ class _DefaultProgress:
 
     def update(self, current: int | None = None, message: str | None = None) -> None:
         parts = [f"  {self._label}..."]
-        if current is not None and self._total is not None:
+        if current is not None and self._total is not None and self._total > 0:
             pct = current / self._total * 100
             parts.append(f" {pct:.0f}% ({current}/{self._total})")
         if message:
@@ -183,30 +183,3 @@ class BackupError(AgentworksError):
     """Error related to backup-specific failures."""
 
 
-# ---------------------------------------------------------------------------
-# Backward compatibility
-# ---------------------------------------------------------------------------
-# These are deprecated but kept for the migration period so existing callers
-# of set_warn_handler / get_warn_handler continue to work. They will be
-# removed once all callers migrate to set_handler / get_handler.
-
-WarnHandler = type(lambda msg: None)  # noqa: E731
-
-
-def get_warn_handler() -> object:
-    """Deprecated: use get_handler()."""
-    return _handler
-
-
-def set_warn_handler(handler: object) -> None:
-    """Deprecated: use set_handler().
-
-    Wraps a legacy WarnHandler callable in a minimal OutputHandler that
-    routes warn() through it while using defaults for everything else.
-    """
-
-    class _LegacyWarnAdapter(_DefaultHandler):
-        def warn(self, message: str) -> None:
-            handler(message)  # type: ignore[operator]
-
-    set_handler(_LegacyWarnAdapter())
