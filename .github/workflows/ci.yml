@@ -30,6 +30,24 @@ jobs:
       - name: Mypy
         run: uv run mypy agentworks/
 
+      - name: Check typer isolation
+        run: |
+          # Business logic must not import typer -- use output module instead.
+          # Allowed: cli.py (CLI layer), doctor.py (CLI layer), completions/ (CLI layer),
+          # sessions/manager.py (raw data pipe, see comment in file).
+          violations=$(grep -rnP '^\s*(import typer|from typer)' agentworks/ --include='*.py' \
+            | grep -v '__pycache__' \
+            | grep -v 'cli\.py' \
+            | grep -v 'doctor\.py' \
+            | grep -v 'completions/' \
+            | grep -v 'sessions/manager\.py' \
+            || true)
+          if [ -n "$violations" ]; then
+            echo "ERROR: typer imported in business logic (use agentworks.output instead):"
+            echo "$violations"
+            exit 1
+          fi
+
   test:
     runs-on: ubuntu-latest
     defaults:
