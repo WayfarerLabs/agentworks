@@ -160,6 +160,7 @@
     "swapon",
     "syscalls",
     "tailnet",
+    "tailscaled",
     "tailnets",
     "tdata",
     "tenv",

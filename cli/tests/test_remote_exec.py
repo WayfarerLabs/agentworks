@@ -168,6 +168,72 @@ def test_run_detached_nonzero_exit(mock_time: MagicMock) -> None:
 
 
 @patch("agentworks.remote_exec.time")
+def test_polling_survives_transient_ssh_failures(mock_time: MagicMock) -> None:
+    """Polling retries on SSHError and recovers when SSH comes back."""
+    from agentworks.ssh import SSHError
+
+    mock_time.monotonic.return_value = 0
+    mock_time.sleep = MagicMock()
+
+    target = MagicMock()
+    target.write_file = MagicMock()
+    call_count = 0
+    ssh_fail_until = 3  # first 3 poll cycles fail with SSHError
+
+    def run_side_effect(cmd, *, check=True, timeout=None, sudo=False, tty=None):
+        nonlocal call_count
+        result = MagicMock()
+        result.stdout = ""
+        result.stderr = ""
+        result.returncode = 0
+        result.ok = True
+
+        # Let setup commands through, then fail for a few poll cycles
+        # to simulate SSH disruption during polling.
+        # Setup phase: status check, pid check, write_file, rm, nohup launch
+        if call_count == 0 and (
+            cmd.startswith("test -f")
+            or cmd.startswith("ps -p")
+            or cmd.startswith("rm -f")
+            or cmd.startswith("nohup")
+        ):
+            # First test -f calls are setup checks (no status/pid files yet)
+            result.returncode = 1
+            result.ok = False
+            return result
+
+        # After setup, simulate SSH failures for a few poll cycles
+        call_count += 1
+        if call_count <= ssh_fail_until:
+            raise SSHError("connection refused")
+
+        if cmd.startswith("test -f") and ".pid" in cmd:
+            result.returncode = 1
+            result.ok = False
+        elif cmd.startswith("test -f") and ".status" in cmd:
+            result.returncode = 0  # done
+            result.ok = True
+        elif cmd.startswith("tail -c"):
+            result.stdout = "output after recovery\n"
+        elif cmd.startswith("cat") and ".status" in cmd:
+            result.stdout = "0"
+        elif cmd.startswith("cat") and ".out" in cmd:
+            result.stdout = "output after recovery\n"
+        return result
+
+    target.run.side_effect = run_side_effect
+
+    result = run_detached(
+        target,
+        "echo test",
+        base_path="/tmp/agentworks-test",
+        poll_interval=0,
+    )
+
+    assert result.exit_code == 0
+    assert "output after recovery" in result.output
+
+@patch("agentworks.remote_exec.time")
 def test_run_detached_as_root(mock_time: MagicMock) -> None:
     mock_time.monotonic.return_value = 0
     mock_time.sleep = MagicMock()

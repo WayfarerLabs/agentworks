@@ -558,6 +558,7 @@ def rekey_vm(
         exec_target = provisioner.admin_exec_target(vm, config=config)
 
         # Wait for the provisioning transport to be reachable
+        typer.echo("  Waiting for provisioning transport...")
         for attempt in range(6):
             try:
                 exec_target.run("echo ok", timeout=10)
@@ -565,26 +566,51 @@ def rekey_vm(
             except SSHError:
                 if attempt == 5:
                     raise
+                typer.echo(f"  Attempt {attempt + 1} failed, retrying...")
                 time.sleep(5)
+        typer.echo("  Connected.")
 
-        # Logout from current tailnet
+        # Restart, logout, login, restart. The initial restart clears any
+        # stale daemon state (a previous interrupted rekey can leave the
+        # daemon in a state where `tailscale logout` hangs waiting for a
+        # control plane response that never comes). The final restart
+        # fixes a Tailscale bug where the node registers but peers can't
+        # reach it after rekeying to a different tailnet.
+        # Restart command varies by platform. WSL2 may not have systemd.
+        is_wsl2 = vm.platform == "wsl2"
+        restart_cmd = "service tailscaled restart" if is_wsl2 else "systemctl restart tailscaled"
+        stabilize_secs = 15  # pause between steps for daemon/network stability
+
+        typer.echo("  Restarting Tailscale daemon...")
+        exec_target.run(restart_cmd, sudo=True, timeout=15)
+        time.sleep(stabilize_secs)
+
         typer.echo("  Logging out of current tailnet...")
-        exec_target.run("tailscale down && tailscale logout", sudo=True, tty=False)
-        time.sleep(2)  # let the logout settle
+        exec_target.run("tailscale logout", sudo=True, timeout=30)
+        time.sleep(stabilize_secs)
 
-        # Join new tailnet
         typer.echo("  Joining new tailnet...")
         quoted_key = shlex.quote(ts_auth_key)
-        exec_target.run(f"tailscale up --auth-key {quoted_key}", sudo=True)
+        ts_up_cmd = f"tailscale up --auth-key {quoted_key}"
+        if is_wsl2:
+            ts_up_cmd += " --userspace-networking"
+        exec_target.run(ts_up_cmd, sudo=True, timeout=30)
+        time.sleep(stabilize_secs)
 
-        # Read and validate new IP
-        result = exec_target.run("tailscale ip -4", sudo=True)
-        raw_ip_output = result.stdout.strip()
-        new_ip = raw_ip_output.splitlines()[0].strip() if raw_ip_output else ""
+        typer.echo("  Restarting Tailscale daemon...")
+        exec_target.run(restart_cmd, sudo=True, timeout=15)
+        time.sleep(stabilize_secs)
+
+        typer.echo("  Reading new Tailscale IP...")
+        result = exec_target.run("tailscale ip -4", sudo=True, timeout=15)
+        raw_ip = result.stdout.strip()
+        new_ip = raw_ip.splitlines()[0].strip() if raw_ip else ""
         try:
             ipaddress.IPv4Address(new_ip)
         except ValueError:
-            raise SSHError(f"tailscale ip -4 returned invalid address: {raw_ip_output!r}") from None
+            raise SSHError(
+                f"tailscale ip -4 returned invalid address: {new_ip!r}\nfull output: {raw_ip}"
+            ) from None
         typer.echo(f"  Tailscale IP: {new_ip}")
 
         # Update DB and SSH config with the new IP (correct regardless of

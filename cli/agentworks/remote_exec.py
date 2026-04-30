@@ -11,11 +11,14 @@ process and resumes polling instead of starting a new one.
 
 from __future__ import annotations
 
+import contextlib
 import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import typer
+
+from agentworks.ssh import SSHError
 
 if TYPE_CHECKING:
     from agentworks.ssh import ExecTarget
@@ -134,11 +137,18 @@ def run_detached(
         quiet=quiet,
     )
 
-    # Read exit code
-    exit_code = _read_exit_code(target, status_file)
+    # Read exit code (retry on SSH failure like the output read)
+    exit_code = 1
+    for _ec_attempt in range(6):
+        try:
+            exit_code = _read_exit_code(target, status_file)
+            break
+        except SSHError:
+            time.sleep(5)
 
-    # Cleanup remote files
-    target.run(f"rm -f {wrapper_file} {pid_file} {status_file} {output_file}", sudo=as_root, check=False)
+    # Cleanup remote files (best-effort, may fail if SSH is still recovering)
+    with contextlib.suppress(SSHError):
+        target.run(f"rm -f {wrapper_file} {pid_file} {status_file} {output_file}", sudo=as_root, check=False)
 
     return DetachedResult(exit_code=exit_code, output=output)
 
@@ -178,6 +188,8 @@ def _poll_until_done(
     start_time = time.monotonic()
     warned_quiet = False
 
+    ssh_failures = 0
+
     while True:
         time.sleep(poll_interval)
 
@@ -187,36 +199,56 @@ def _poll_until_done(
                 f"  {label}: timed out after {timeout}s, killing remote process",
                 err=True,
             )
-            target.run(
-                f"test -f {pid_file} && kill $(cat {pid_file}) 2>/dev/null",
-                check=False,
-            )
+            with contextlib.suppress(SSHError):
+                target.run(
+                    f"test -f {pid_file} && kill $(cat {pid_file}) 2>/dev/null",
+                    check=False,
+                )
             break
 
-        # Read new output since last poll
-        new_output = _read_new_output(target, output_file, last_size)
-        if new_output:
-            last_output_time = time.monotonic()
-            warned_quiet = False
+        # All polling commands go through SSH which may be temporarily
+        # down (e.g., tailscale logout disrupts Azure networking). Catch
+        # SSHError and retry -- the wrapper script on the VM keeps running.
+        try:
+            # Read new output since last poll
+            new_output = _read_new_output(target, output_file, last_size)
+            if new_output:
+                last_output_time = time.monotonic()
+                warned_quiet = False
+                if not quiet:
+                    for line in new_output.splitlines():
+                        typer.echo(f"  {line}")
+                last_size += len(new_output.encode("utf-8"))
+
+            # Check if process finished (status file exists)
+            status_check = target.run(f"test -f {status_file}", check=False)
+            if status_check.returncode == 0:
+                # Process done -- read any remaining output
+                final_output = _read_new_output(target, output_file, last_size)
+                if final_output and not quiet:
+                    for line in final_output.splitlines():
+                        typer.echo(f"  {line}")
+                break
+
+            # Check if process is still alive (PID check)
+            if not _is_running(target, pid_file):
+                # Process gone but no status file -- unexpected termination
+                break
+
+            # Reset SSH failure counter on success
+            if ssh_failures > 0 and not quiet:
+                typer.echo(f"  {label}: connection restored")
+            ssh_failures = 0
+
+        except SSHError:
+            ssh_failures += 1
             if not quiet:
-                for line in new_output.splitlines():
-                    typer.echo(f"  {line}")
-            last_size += len(new_output.encode("utf-8"))
-
-        # Check if process finished (status file exists)
-        status_check = target.run(f"test -f {status_file}", check=False)
-        if status_check.returncode == 0:
-            # Process done -- read any remaining output
-            final_output = _read_new_output(target, output_file, last_size)
-            if final_output and not quiet:
-                for line in final_output.splitlines():
-                    typer.echo(f"  {line}")
-            break
-
-        # Check if process is still alive (PID check)
-        if not _is_running(target, pid_file):
-            # Process gone but no status file -- unexpected termination
-            break
+                if ssh_failures == 1:
+                    typer.echo(f"  {label}: connection lost, waiting for recovery...")
+                elif ssh_failures % 6 == 0:
+                    typer.echo(f"  {label}: still waiting... ({ssh_failures * poll_interval}s)")
+            # Don't break -- the wrapper script is still running on the VM
+            continue
 
         # Warn if no output for a while
         quiet_secs = time.monotonic() - last_output_time
@@ -227,9 +259,16 @@ def _poll_until_done(
             )
             warned_quiet = True
 
-    # Read the full output for the caller
-    result = target.run(f"cat {output_file} 2>/dev/null", check=False)
-    return result.stdout
+    # Read the full output for the caller. Retry on SSH failure since the
+    # connection may still be recovering after a transient disruption.
+    for _read_attempt in range(6):
+        try:
+            result = target.run(f"cat {output_file} 2>/dev/null", check=False)
+            return result.stdout
+        except SSHError:
+            time.sleep(5)
+    typer.echo(f"  {label}: unable to retrieve remote output after repeated SSH failures", err=True)
+    return ""
 
 
 def _read_new_output(target: ExecTarget, output_file: str, offset: int) -> str:
