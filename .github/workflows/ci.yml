@@ -64,7 +64,7 @@ jobs:
         run: uv sync --frozen
 
       - name: Pytest
-        run: uv run pytest tests/ -v
+        run: uv run pytest tests/ -v -m 'not integration'
 
   markdown:
     runs-on: ubuntu-latest

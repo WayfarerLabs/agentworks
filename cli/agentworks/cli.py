@@ -225,9 +225,10 @@ def completion(
 @app.command("doctor")
 def doctor() -> None:
     """Check environment, config, and dependencies."""
+    from agentworks.completions.spec import build_spec, completion_version
     from agentworks.doctor import Status, run_checks
 
-    report = run_checks()
+    report = run_checks(completion_version=completion_version(build_spec(app)))
 
     typer.echo("Checking environment...\n")
     for group in report.groups:
@@ -245,11 +246,12 @@ def doctor() -> None:
             typer.echo(f"  {label} {msg}")
         typer.echo()
 
+    c = report.counts()
     typer.echo(
-        f"Results: {report.ok_count} ok, {report.info_count} info, "
-        f"{report.warn_count} warn, {report.fail_count} fail"
+        f"Results: {c[Status.OK]} ok, {c[Status.INFO]} info, "
+        f"{c[Status.WARN]} warn, {c[Status.FAIL]} fail"
     )
-    if report.has_failures:
+    if c[Status.FAIL] > 0:
         raise typer.Exit(1)
 
 

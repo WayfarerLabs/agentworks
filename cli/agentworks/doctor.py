@@ -83,8 +83,14 @@ class HealthReport:
         return self.counts()[Status.FAIL] > 0
 
 
-def run_checks() -> HealthReport:
-    """Run all health checks and return structured results."""
+def run_checks(*, completion_version: str | None = None) -> HealthReport:
+    """Run all health checks and return structured results.
+
+    Args:
+        completion_version: current completion spec version for staleness check.
+            Computed by the CLI layer and passed in to avoid coupling doctor
+            to the CLI module. Omit to skip completion checks.
+    """
     report = HealthReport()
 
     report.groups.append(_check_python())
@@ -100,17 +106,8 @@ def run_checks() -> HealthReport:
 
     report.groups.append(_check_database())
 
-    # Completions check needs the CLI app to compute the spec version.
-    # Import here (not in _check_completions) to keep doctor decoupled.
-    try:
-        from agentworks.cli import app
-        from agentworks.completions.spec import build_spec, completion_version
-
-        report.groups.append(_check_completions(completion_version(build_spec(app))))
-    except Exception as e:
-        g = HealthGroup("Shell completions")
-        g.warn("Completions", f"could not check: {e}")
-        report.groups.append(g)
+    if completion_version is not None:
+        report.groups.append(_check_completions(completion_version))
 
     return report
 
@@ -210,8 +207,7 @@ def _check_config() -> tuple[HealthGroup, Config | None]:
     config = None
 
     if not CONFIG_PATH.exists():
-        g.fail("Config file", f"not found: {CONFIG_PATH}")
-        g.fail("Config file", "run 'agentworks config init' to create one")
+        g.fail("Config file", f"not found: {CONFIG_PATH}. Run 'agentworks config init' to create one.")
         return g, None
 
     g.ok("Config file", str(CONFIG_PATH))
