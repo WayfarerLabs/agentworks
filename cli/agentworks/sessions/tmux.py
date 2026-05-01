@@ -418,7 +418,7 @@ def batch_check_sessions(
             # Existing socket but not readable = permission error (warn + reinit).
             parts.append(
                 f"if [ ! -e {q_sock} ]; then :; "
-                f"elif [ ! -r {q_sock} ]; then echo {q_error}; "
+                f"elif [ ! -r {q_sock} ] || [ ! -w {q_sock} ]; then echo {q_error}; "
                 f"elif tmux -S {q_sock} has-session -t {q_name} 2>/dev/null; then echo {q_alive}; fi"
             )
         else:
