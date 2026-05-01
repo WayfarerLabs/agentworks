@@ -614,42 +614,60 @@ def list_sessions(
         output.info("No sessions found.")
         return
 
-    # Group sessions by workspace to batch SSH connections
-    by_workspace: dict[str, list[SessionRow]] = {}
-    for session in sessions:
-        by_workspace.setdefault(session.workspace_name, []).append(session)
+    # Build alive_map: session_name -> bool, batched by VM and parallelized
+    # across VMs. Each VM gets one SSH call with all its session checks.
+    alive_map: dict[str, bool] = {}
 
+    if not no_status:
+        from concurrent.futures import ThreadPoolExecutor
+
+        from agentworks.sessions.tmux import batch_check_sessions
+
+        # Group sessions by VM for batching
+        by_vm: dict[str, list[SessionRow]] = {}
+        vm_cache: dict[str, object] = {}  # vm_name -> VMRow
+        for session in sessions:
+            ws = db.get_workspace(session.workspace_name)
+            if ws is None or ws.type != "vm" or ws.vm_name is None:
+                continue
+            vm = vm_cache.get(ws.vm_name) or db.get_vm(ws.vm_name)
+            if vm is None or getattr(vm, "tailscale_host", None) is None:
+                continue
+            vm_cache[ws.vm_name] = vm
+            by_vm.setdefault(ws.vm_name, []).append(session)
+
+        def _check_vm(vm_name: str, vm_sessions: list[SessionRow]) -> dict[str, bool]:
+            vm = vm_cache[vm_name]
+            target = admin_exec_target(vm, config)  # type: ignore[arg-type]
+            checks = [(s.name, _effective_socket_path(db, s)) for s in vm_sessions]
+            return batch_check_sessions(target, checks)
+
+        # Hit all VMs in parallel
+        with ThreadPoolExecutor(max_workers=len(by_vm) or 1) as pool:
+            futures = {pool.submit(_check_vm, vm_name, slist): vm_name for vm_name, slist in by_vm.items()}
+            for future in futures:
+                alive_map.update(future.result())
+
+    # Build display rows, reconciling status from alive_map
     rows: list[tuple[str, str, str, str, str, str]] = []
-    for ws_name, ws_sessions in sorted(by_workspace.items()):
-        ws = db.get_workspace(ws_name)
+    for session in sessions:
+        ws = db.get_workspace(session.workspace_name)
         vm_name = ws.vm_name or "-" if ws else "-"
+        mode_label = f"agent ({session.agent_name})" if session.agent_name else "admin"
 
-        if no_status or ws is None or ws.type != "vm":
-            for session in ws_sessions:
-                mode_label = f"agent ({session.agent_name})" if session.agent_name else "admin"
-                rows.append((session.name, ws_name, vm_name, session.template, mode_label, session.status))
-            continue
+        if session.name in alive_map:
+            alive = alive_map[session.name]
+            status = session.status
+            if session.status == SessionStatus.RUNNING.value and not alive:
+                db.update_session_status(session.name, SessionStatus.STOPPED)
+                status = SessionStatus.STOPPED.value
+            elif session.status == SessionStatus.STOPPED.value and alive:
+                db.update_session_status(session.name, SessionStatus.RUNNING)
+                status = SessionStatus.RUNNING.value
+        else:
+            status = session.status
 
-        vm = db.get_vm(ws.vm_name)  # type: ignore[arg-type]
-        if vm is None or vm.tailscale_host is None:
-            for session in ws_sessions:
-                mode_label = f"agent ({session.agent_name})" if session.agent_name else "admin"
-                rows.append((session.name, ws_name, vm_name, session.template, mode_label, session.status))
-            continue
-
-        from agentworks.ssh import run
-
-        target = admin_exec_target(vm, config)
-        run_command = partial(run, target)
-
-        for session in ws_sessions:
-            status = _reconcile_status(
-                session,
-                run_command=run_command,
-                db=db,
-            )
-            mode_label = f"agent ({session.agent_name})" if session.agent_name else "admin"
-            rows.append((session.name, ws_name, vm_name, session.template, mode_label, status))
+        rows.append((session.name, session.workspace_name, vm_name, session.template, mode_label, status))
 
     if not rows:
         output.info("No sessions found.")
