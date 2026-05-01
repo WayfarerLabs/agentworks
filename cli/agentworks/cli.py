@@ -225,9 +225,24 @@ def completion(
 @app.command("doctor")
 def doctor() -> None:
     """Check environment, config, and dependencies."""
-    from agentworks.doctor import run_doctor
+    from agentworks.doctor import Status, run_checks
 
-    run_doctor()
+    report = run_checks()
+
+    typer.echo("Checking environment...\n")
+    for group in report.groups:
+        typer.echo(f"{group.name}:")
+        for check in group.checks:
+            label = {Status.OK: "[ok]  ", Status.WARN: "[warn]", Status.FAIL: "[FAIL]"}[check.status]
+            msg = check.name
+            if check.message:
+                msg += f" ({check.message})"
+            typer.echo(f"  {label} {msg}")
+        typer.echo()
+
+    typer.echo(f"Results: {report.ok_count} ok, {report.warn_count} warnings, {report.fail_count} failures")
+    if report.has_failures:
+        raise typer.Exit(1)
 
 
 # -- VM Host commands ------------------------------------------------------
