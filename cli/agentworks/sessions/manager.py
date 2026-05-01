@@ -644,7 +644,10 @@ def list_sessions(
 
         # Hit all VMs in parallel
         with ThreadPoolExecutor(max_workers=len(by_vm) or 1) as pool:
-            futures = {pool.submit(_check_vm, vm_name, slist): vm_name for vm_name, slist in by_vm.items()}
+            futures = {
+                pool.submit(_check_vm, name, vm_sessions): name
+                for name, vm_sessions in by_vm.items()
+            }
             for future in futures:
                 alive_map.update(future.result())
 
