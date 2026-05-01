@@ -420,9 +420,9 @@ def batch_check_sessions(
     if not checks:
         return {}
 
-    # Build a compound command: all checks run in parallel via &, then wait.
-    # Each subshell prints "ALIVE:<name>" on success, "ERROR:<name>" on
-    # permission/access failure. Single SSH roundtrip.
+    # Build a compound command: all checks run sequentially in one SSH call.
+    # Each prints "ALIVE:<name>" on success, "ERROR:<name>" on permission
+    # failure. The real parallelism is across VMs (ThreadPoolExecutor).
     parts: list[str] = []
     for name, sock in checks:
         q_name = shlex.quote(name)
@@ -433,17 +433,16 @@ def batch_check_sessions(
             # Missing socket = dead (normal, session was stopped and cleaned up).
             # Existing socket but not readable = permission error (warn + reinit).
             parts.append(
-                f"(if [ ! -e {q_sock} ]; then :; "
+                f"if [ ! -e {q_sock} ]; then :; "
                 f"elif [ ! -r {q_sock} ]; then echo {q_error}; "
-                f"elif tmux -S {q_sock} has-session -t {q_name} 2>/dev/null; then echo {q_alive}; fi) &"
+                f"elif tmux -S {q_sock} has-session -t {q_name} 2>/dev/null; then echo {q_alive}; fi"
             )
         else:
             parts.append(
-                f"(tmux has-session -t {q_name} 2>/dev/null && echo {q_alive}) &"
+                f"tmux has-session -t {q_name} 2>/dev/null && echo {q_alive} || true"
             )
     # Sentinel to distinguish "command ran but no sessions alive" from
     # "SSH failed and produced no output"
-    parts.append("wait")
     parts.append("echo DONE")
 
     cmd = " ".join(parts)
