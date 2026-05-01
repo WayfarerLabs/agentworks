@@ -622,9 +622,9 @@ def list_sessions(
 
         from agentworks.sessions.tmux import batch_check_sessions
 
-        # Group sessions by VM, precomputing socket paths on the main thread
-        # (DB is not thread-safe with check_same_thread=True).
-        by_vm: dict[str, list[tuple[str, str | None]]] = {}  # vm_name -> [(session_name, socket)]
+        # Group sessions by VM, precomputing socket paths and ExecTargets
+        # on the main thread (DB is not thread-safe with check_same_thread=True).
+        by_vm: dict[str, tuple[ExecTarget, list[tuple[str, str | None]]]] = {}
         for session in sessions:
             ws = _get_ws(session.workspace_name)
             if ws is None or ws.type != "vm" or ws.vm_name is None:
@@ -633,21 +633,15 @@ def list_sessions(
             if vm is None or vm.tailscale_host is None:
                 continue
             sock = _effective_socket_path(db, session)
-            by_vm.setdefault(ws.vm_name, []).append((session.name, sock))
-
-        def _check_vm(vm_name: str, checks: list[tuple[str, str | None]]) -> dict[str, bool]:
-            vm = _get_vm(vm_name)
-            if vm is None:
-                output.warn(f"VM '{vm_name}' not found, skipping status check")
-                return {}
-            target = admin_exec_target(vm, config)
-            return batch_check_sessions(target, checks)
+            if ws.vm_name not in by_vm:
+                by_vm[ws.vm_name] = (admin_exec_target(vm, config), [])
+            by_vm[ws.vm_name][1].append((session.name, sock))
 
         # Hit all VMs in parallel (cap at 8 to avoid overwhelming SSH)
-        with ThreadPoolExecutor(max_workers=min(len(by_vm), 8) or 1) as pool:
+        with ThreadPoolExecutor(max_workers=min(len(by_vm), 8)) as pool:
             futures = {
-                pool.submit(_check_vm, name, checks): name
-                for name, checks in by_vm.items()
+                pool.submit(batch_check_sessions, target, checks): name
+                for name, (target, checks) in by_vm.items()
             }
             for future in as_completed(futures):
                 try:
