@@ -716,7 +716,6 @@ def attach_session(
         raise output.SessionError(f"session '{name}' is not running")
 
     q_session = shlex.quote(name)
-    target = admin_exec_target(vm, config)
     sys.exit(interactive(target, tmux_cmd(f"attach -t {q_session}", sock)))
 
 

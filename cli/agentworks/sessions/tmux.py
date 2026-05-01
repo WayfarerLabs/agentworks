@@ -354,7 +354,7 @@ def kill_session(
     """Kill a session's tmux session. Returns True if the session existed."""
     q_session = shlex.quote(session_name)
     result = run_command(
-        tmux_cmd(f"kill-session -t {q_session}", socket_path, ),
+        tmux_cmd(f"kill-session -t {q_session}", socket_path),
         check=False,
     )
     return getattr(result, "ok", True)
@@ -369,7 +369,7 @@ def session_exists(
     """Check if a session's tmux session is alive."""
     q_session = shlex.quote(session_name)
     result = run_command(
-        tmux_cmd(f"has-session -t {q_session}", socket_path, ) + " 2>/dev/null",
+        tmux_cmd(f"has-session -t {q_session}", socket_path) + " 2>/dev/null",
         check=False,
     )
     return getattr(result, "ok", False)
@@ -404,10 +404,10 @@ def batch_check_sessions(
     if not checks:
         return {}
 
-    # Build a compound command: all checks run sequentially in one SSH call.
-    # Each prints "ALIVE:<name>" on success, "ERROR:<name>" on permission
-    # failure. The real parallelism is across VMs (ThreadPoolExecutor).
-    parts: list[str] = []
+    # Preflight: verify tmux is available. Individual has-session calls
+    # suppress stderr (2>/dev/null) so a missing tmux would silently
+    # return all sessions as dead.
+    parts: list[str] = ["command -v tmux >/dev/null || { echo NOTMUX; exit 1; }"]
     for name, sock in checks:
         q_name = shlex.quote(name)
         q_alive = shlex.quote(f"ALIVE:{name}")
@@ -433,13 +433,11 @@ def batch_check_sessions(
     except SSHError as e:
         raise BatchCheckError(f"SSH failed: {e}") from e
 
-    # Detect non-SSH failures (syntax error, missing tmux, etc.) via stderr.
-    # Normal has-session failures just produce no ALIVE line, not stderr.
-    stderr = result.stderr.strip()
-    if stderr and "has-session" not in stderr:
-        raise BatchCheckError(f"batch check failed: {stderr}")
-
     stdout = result.stdout
+
+    # Detect missing tmux (preflight check prints NOTMUX and exits)
+    if "NOTMUX" in stdout:
+        raise BatchCheckError("tmux is not installed on this VM")
 
     alive_names: set[str] = set()
     error_names: set[str] = set()
@@ -471,7 +469,7 @@ def send_keys(
     """Send keys to a session's tmux session."""
     q_session = shlex.quote(session_name)
     run_command(
-        tmux_cmd(f"send-keys -t {q_session} {keys}", socket_path, ),
+        tmux_cmd(f"send-keys -t {q_session} {keys}", socket_path),
         check=False,
     )
 
@@ -486,7 +484,7 @@ def capture_output(
     """Capture the scrollback buffer from a session."""
     q_session = shlex.quote(session_name)
     result = run_command(
-        tmux_cmd(f"capture-pane -t {q_session} -p -S -{lines}", socket_path, ),
+        tmux_cmd(f"capture-pane -t {q_session} -p -S -{lines}", socket_path),
         check=False,
     )
     return getattr(result, "stdout", "") or ""
