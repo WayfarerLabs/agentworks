@@ -407,7 +407,7 @@ def batch_check_sessions(
     # Preflight: verify tmux is available. Individual has-session calls
     # suppress stderr (2>/dev/null) so a missing tmux would silently
     # return all sessions as dead.
-    parts: list[str] = ["command -v tmux >/dev/null || { echo NOTMUX; exit 1; }"]
+    parts: list[str] = ["command -v tmux >/dev/null || { echo ERROR:TMUX_NOT_FOUND; exit 1; }"]
     for name, sock in checks:
         q_name = shlex.quote(name)
         q_alive = shlex.quote(f"ALIVE:{name}")
@@ -435,8 +435,8 @@ def batch_check_sessions(
 
     stdout = result.stdout
 
-    # Detect missing tmux (preflight check prints NOTMUX and exits)
-    if "NOTMUX" in stdout:
+    # Detect missing tmux (preflight check prints ERROR:TMUX_NOT_FOUND and exits)
+    if "ERROR:TMUX_NOT_FOUND" in stdout:
         raise BatchCheckError("tmux is not installed on this VM")
 
     alive_names: set[str] = set()

@@ -65,8 +65,15 @@ def test_missing_socket_is_dead_not_error(warnings: list[str]) -> None:
     assert len(warnings) == 0
 
 
+def test_tmux_not_found_raises_batch_error() -> None:
+    """Preflight detects missing tmux and raises BatchCheckError."""
+    target = _mock_target(stdout="ERROR:TMUX_NOT_FOUND\n")
+    with pytest.raises(BatchCheckError, match="tmux is not installed"):
+        batch_check_sessions(target, [("s1", None)])
+
+
 def test_command_includes_socket_path() -> None:
-    target = _mock_target(stdout="DONE\n")
+    target = _mock_target(stdout="")
     batch_check_sessions(target, [("s1", "/run/agent/sock")])
     cmd = target.run.call_args[0][0]
     assert "/run/agent/sock" in cmd
@@ -74,7 +81,7 @@ def test_command_includes_socket_path() -> None:
 
 
 def test_command_default_server_no_socket() -> None:
-    target = _mock_target(stdout="DONE\n")
+    target = _mock_target(stdout="")
     batch_check_sessions(target, [("s1", None)])
     cmd = target.run.call_args[0][0]
     assert "-S" not in cmd
