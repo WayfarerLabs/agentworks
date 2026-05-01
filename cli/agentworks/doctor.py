@@ -1,4 +1,7 @@
-"""Health checks for the agentworks environment."""
+"""Health checks for the agentworks environment.
+
+Returns structured results. The presentation layer decides rendering.
+"""
 
 from __future__ import annotations
 
@@ -6,52 +9,136 @@ import os
 import shutil
 import subprocess
 import sys
+from dataclasses import dataclass, field
+from enum import Enum
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-import typer
+if TYPE_CHECKING:
+    from agentworks.config import Config
 
 
-def run_doctor() -> None:
-    """Run all health checks and report results."""
-    ok_count = 0
-    warn_count = 0
-    fail_count = 0
+class Status(Enum):
+    OK = "ok"
+    INFO = "info"
+    WARN = "warn"
+    FAIL = "fail"
 
-    def ok(msg: str) -> None:
-        nonlocal ok_count
-        ok_count += 1
-        typer.echo(f"  [ok]   {msg}")
 
-    def warn(msg: str) -> None:
-        nonlocal warn_count
-        warn_count += 1
-        typer.echo(f"  [warn] {msg}")
+@dataclass
+class HealthCheck:
+    name: str
+    status: Status
+    message: str | None = None
 
-    def fail(msg: str) -> None:
-        nonlocal fail_count
-        fail_count += 1
-        typer.echo(f"  [FAIL] {msg}")
 
-    typer.echo("Checking environment...\n")
+@dataclass
+class HealthGroup:
+    name: str
+    checks: list[HealthCheck] = field(default_factory=list)
 
-    # -- Python version ------------------------------------------------
-    typer.echo("Python:")
+    def ok(self, name: str, message: str | None = None) -> None:
+        self.checks.append(HealthCheck(name=name, status=Status.OK, message=message))
+
+    def info(self, name: str, message: str | None = None) -> None:
+        self.checks.append(HealthCheck(name=name, status=Status.INFO, message=message))
+
+    def warn(self, name: str, message: str | None = None) -> None:
+        self.checks.append(HealthCheck(name=name, status=Status.WARN, message=message))
+
+    def fail(self, name: str, message: str | None = None) -> None:
+        self.checks.append(HealthCheck(name=name, status=Status.FAIL, message=message))
+
+
+@dataclass
+class HealthReport:
+    groups: list[HealthGroup] = field(default_factory=list)
+
+    def counts(self) -> dict[Status, int]:
+        """Compute all status counts in a single pass."""
+        result = {s: 0 for s in Status}
+        for g in self.groups:
+            for c in g.checks:
+                result[c.status] += 1
+        return result
+
+    @property
+    def ok_count(self) -> int:
+        return self.counts()[Status.OK]
+
+    @property
+    def info_count(self) -> int:
+        return self.counts()[Status.INFO]
+
+    @property
+    def warn_count(self) -> int:
+        return self.counts()[Status.WARN]
+
+    @property
+    def fail_count(self) -> int:
+        return self.counts()[Status.FAIL]
+
+    @property
+    def has_failures(self) -> bool:
+        return self.counts()[Status.FAIL] > 0
+
+
+def run_checks(*, completion_version: str | None = None) -> HealthReport:
+    """Run all health checks and return structured results.
+
+    Args:
+        completion_version: current completion spec version for staleness check.
+            Computed by the CLI layer and passed in to avoid coupling doctor
+            to the CLI module. Omit to skip completion checks.
+    """
+    report = HealthReport()
+
+    report.groups.append(_check_python())
+    report.groups.append(_check_required_tools())
+    report.groups.append(_check_vm_platforms())
+    report.groups.append(_check_tailscale())
+
+    config_group, config = _check_config()
+    report.groups.append(config_group)
+
+    if config is not None and config.git_credentials:
+        report.groups.append(_check_git_credentials(config))
+
+    report.groups.append(_check_database())
+
+    if completion_version is not None:
+        report.groups.append(_check_completions(completion_version))
+
+    return report
+
+
+# ---------------------------------------------------------------------------
+# Individual check groups
+# ---------------------------------------------------------------------------
+
+
+def _check_python() -> HealthGroup:
+    g = HealthGroup("Python")
     v = sys.version_info
     if v >= (3, 12):
-        ok(f"Python {v.major}.{v.minor}.{v.micro}")
+        g.ok(f"Python {v.major}.{v.minor}.{v.micro}")
     else:
-        fail(f"Python {v.major}.{v.minor}.{v.micro} (3.12+ required)")
+        g.fail(f"Python {v.major}.{v.minor}.{v.micro}", "3.12+ required")
+    return g
 
-    # -- Required CLI tools -------------------------------------------
-    typer.echo("\nRequired tools:")
+
+def _check_required_tools() -> HealthGroup:
+    g = HealthGroup("Required tools")
     for tool in ("ssh", "scp", "tailscale"):
         if shutil.which(tool):
-            ok(tool)
+            g.ok(tool)
         else:
-            fail(f"{tool} not found")
+            g.fail(tool, "not found")
+    return g
 
-    # -- VM platforms --------------------------------------------------
-    typer.echo("\nVM platforms:")
+
+def _check_vm_platforms() -> HealthGroup:
+    g = HealthGroup("VM platforms")
 
     # VM hosts (remote Lima)
     try:
@@ -64,13 +151,13 @@ def run_doctor() -> None:
             if hosts:
                 for h in hosts:
                     os_info = f", {h.os}" if h.os else ""
-                    ok(f"VM host: {h.name} ({h.ssh_host}{os_info})")
+                    g.ok(f"VM host: {h.name}", f"{h.ssh_host}{os_info}")
             else:
-                warn("No VM hosts configured (add with 'agentworks vm-host add')")
+                g.info("VM hosts", "none configured")
         else:
-            warn("No VM hosts configured (database not yet created)")
+            g.info("VM hosts", "database not yet created")
     except Exception:
-        warn("Could not check VM hosts")
+        g.warn("VM hosts", "could not check")
 
     # Local platform tools
     for tool, label in [
@@ -78,192 +165,115 @@ def run_doctor() -> None:
         ("wsl", "WSL2 (wsl)"),
     ]:
         if shutil.which(tool):
-            ok(label)
+            g.ok(label)
         else:
-            warn(f"{label} not found")
+            g.info(label, "not available")
+    return g
 
-    # -- Tailscale connectivity ----------------------------------------
-    typer.echo("\nTailscale:")
+
+def _check_tailscale() -> HealthGroup:
+    g = HealthGroup("Tailscale")
     ts = shutil.which("tailscale")
-    if ts:
-        try:
-            result = subprocess.run(
-                ["tailscale", "status"],
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=10,
-            )
-            if result.returncode == 0:
-                if os.environ.get("TAILSCALE_AUTH_KEY"):
-                    ok("Connected to tailnet (auth key env var set)")
-                else:
-                    ok("Connected to tailnet (will prompt for auth key during VM init)")
-            else:
-                fail("Not connected (run 'tailscale up')")
-        except subprocess.TimeoutExpired:
-            fail("'tailscale status' timed out")
-    else:
-        fail("tailscale not installed")
-
-    # -- Config file ---------------------------------------------------
-    typer.echo("\nConfiguration:")
-    from agentworks.config import CONFIG_PATH, ConfigError
-
-    config = None
-    if not CONFIG_PATH.exists():
-        fail(f"Config not found: {CONFIG_PATH}")
-        fail("Run 'agentworks config init' to create one")
-    else:
-        ok(f"Config exists: {CONFIG_PATH}")
-        try:
-            import warnings as _warnings
-
-            from agentworks.config import load_config
-
-            with _warnings.catch_warnings(record=True) as config_warnings:
-                _warnings.simplefilter("always")
-                config = load_config()
-            for cw in config_warnings:
-                warn(str(cw.message))
-            ok("Config is valid")
-
-            # SSH keys
-            _check_ssh_key(config.operator.ssh_public_key, "public", ok, warn, fail)
-            _check_ssh_key(config.operator.ssh_private_key, "private", ok, warn, fail)
-
-            # Dotfiles
-            if config.admin.dotfiles_source:
-                from agentworks.sources import parse_source_ref
-
-                ref = parse_source_ref(config.admin.dotfiles_source)
-                if ref.kind == "git" or Path(ref.path).expanduser().exists():
-                    ok(f"Admin dotfiles: {config.admin.dotfiles_source}")
-                else:
-                    warn(f"Admin dotfiles source missing: {config.admin.dotfiles_source}")
-
-            # Git credentials
-            if config.git_credentials:
-                typer.echo("\nGit credentials:")
-                _check_git_credentials(config, ok, warn, fail)
-
-        except ConfigError as e:
-            fail(f"Config error: {e}")
-        except SystemExit:
-            fail("Config failed to load")
-
-    # -- Database ------------------------------------------------------
-    typer.echo("\nDatabase:")
-    from agentworks.db import Database
+    if not ts:
+        g.fail("tailscale", "not installed")
+        return g
 
     try:
-        exists, current, latest = Database.check_schema()
-        if not exists:
-            ok("Database does not exist yet (will be created on first use)")
-        elif current == latest:
-            ok(f"Schema up to date (version {current})")
-            db = Database()
-            _report_db_contents(db, ok, warn)
-        elif current < latest:
-            warn(f"Schema at version {current}, latest is {latest}. Migrating...")
-            db = Database()  # auto-migrates
-            ok(f"Migrated to version {latest}")
-            _report_db_contents(db, ok, warn)
+        result = subprocess.run(
+            ["tailscale", "status"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=10,
+        )
+        if result.returncode == 0:
+            if os.environ.get("TAILSCALE_AUTH_KEY"):
+                g.ok("Connected to tailnet", "auth key env var set")
+            else:
+                g.ok("Connected to tailnet", "will prompt for auth key during VM init")
         else:
-            fail(f"Schema version {current} is newer than latest {latest} (downgrade?)")
-    except Exception as e:
-        fail(f"Database error: {e}")
-
-    # -- Shell completions ---------------------------------------------
-    typer.echo("\nShell completions:")
-    _check_completions(ok, warn, fail)
-
-    # -- Summary -------------------------------------------------------
-    typer.echo(f"\nResults: {ok_count} ok, {warn_count} warnings, {fail_count} failures")
-    if fail_count > 0:
-        raise typer.Exit(1)
+            g.fail("Not connected", "run 'tailscale up'")
+    except subprocess.TimeoutExpired:
+        g.fail("tailscale status", "timed out")
+    return g
 
 
-def _report_db_contents(
-    db: object,
-    ok: object,
-    warn: object,
-) -> None:
-    """Report DB contents and flag VMs in non-complete states."""
-    from agentworks.db import Database, InitStatus
-    from agentworks.ssh import LOG_DIR
+def _check_config() -> tuple[HealthGroup, Config | None]:
+    """Returns (group, config_or_none)."""
+    from agentworks.config import CONFIG_PATH, ConfigError
 
-    assert isinstance(db, Database)
-    assert callable(ok) and callable(warn)
+    g = HealthGroup("Configuration")
+    config = None
 
-    vms = db.list_vms()
-    ws_count = len(db.list_workspaces())
-    ok(f"{len(vms)} VMs, {ws_count} workspaces")
+    if not CONFIG_PATH.exists():
+        g.fail("Config file", f"not found: {CONFIG_PATH}. Run 'agentworks config init' to create one.")
+        return g, None
 
-    def _log_hint(vm_name: str) -> str:
-        if not LOG_DIR.exists():
-            return ""
-        logs = sorted(LOG_DIR.glob(f"{vm_name}-*.log"), reverse=True)
-        return f" Log: {logs[0]}" if logs else ""
+    g.ok("Config file", str(CONFIG_PATH))
 
-    for vm in vms:
-        if vm.init_status == InitStatus.FAILED.value:
-            warn(f"VM '{vm.name}' is in 'failed' state (only delete supported).{_log_hint(vm.name)}")
-        elif vm.init_status == InitStatus.PARTIAL.value:
-            warn(f"VM '{vm.name}' initialized with warnings.{_log_hint(vm.name)}")
-        elif vm.init_status not in (InitStatus.COMPLETE.value, InitStatus.PENDING.value):
-            warn(f"VM '{vm.name}' has unexpected init status: {vm.init_status}")
+    try:
+        import warnings as _warnings
+
+        from agentworks.config import load_config
+
+        with _warnings.catch_warnings(record=True) as config_warnings:
+            _warnings.simplefilter("always")
+            config = load_config()
+        for cw in config_warnings:
+            g.warn("Config", str(cw.message))
+        g.ok("Config is valid")
+
+        # SSH keys
+        _check_ssh_key(g, config.operator.ssh_public_key, "public")
+        _check_ssh_key(g, config.operator.ssh_private_key, "private")
+
+        # Dotfiles
+        if config.admin.dotfiles_source:
+            from agentworks.sources import parse_source_ref
+
+            ref = parse_source_ref(config.admin.dotfiles_source)
+            if ref.kind == "git" or Path(ref.path).expanduser().exists():
+                g.ok("Admin dotfiles", config.admin.dotfiles_source)
+            else:
+                g.warn("Admin dotfiles", f"source missing: {config.admin.dotfiles_source}")
+
+    except ConfigError as e:
+        g.fail("Config", str(e))
+    except SystemExit:
+        g.fail("Config", "failed to load")
+
+    return g, config
 
 
-def _check_ssh_key(
-    path: object,
-    label: str,
-    ok: object,
-    warn: object,
-    fail: object,
-) -> None:
+def _check_ssh_key(g: HealthGroup, path: object, label: str) -> None:
     """Check that an SSH key file exists and has correct permissions."""
-    from pathlib import Path
-
-    assert callable(ok) and callable(warn) and callable(fail)
-
     if not isinstance(path, Path):
-        fail(f"SSH {label} key: invalid path")
+        g.fail(f"SSH {label} key", "invalid path")
         return
-
     if not path.exists():
-        fail(f"SSH {label} key not found: {path}")
+        g.fail(f"SSH {label} key", f"not found: {path}")
         return
-
     if not os.access(path, os.R_OK):
-        fail(f"SSH {label} key not readable: {path}")
+        g.fail(f"SSH {label} key", f"not readable: {path}")
         return
 
-    ok(f"SSH {label} key: {path}")
+    g.ok(f"SSH {label} key", str(path))
 
     # Check permissions on private key. Skipped on Windows: st_mode there is
     # synthesized from the read-only attribute (typically reports 0o666) and
-    # doesn't reflect the NTFS ACLs that actually gate access. OpenSSH on
-    # Windows enforces ACL-based ownership checks of its own.
+    # doesn't reflect the NTFS ACLs that actually gate access.
     if label == "private" and sys.platform != "win32":
         mode = path.stat().st_mode & 0o777
         if mode & 0o077:
-            warn(f"SSH private key has broad permissions ({oct(mode)}), recommend 600")
+            g.warn("SSH private key permissions", f"{oct(mode)}, recommend 600")
 
 
-def _check_git_credentials(
-    config: object,
-    ok: object,
-    warn: object,
-    fail: object,
-) -> None:
+def _check_git_credentials(config: Config) -> HealthGroup:
     """Check git credential providers."""
-    from agentworks.config import Config
     from agentworks.vms.initializer import resolve_git_credential_providers
 
-    assert isinstance(config, Config)
-    assert callable(ok) and callable(warn) and callable(fail)
+    g = HealthGroup("Git credentials")
 
     # Collect all credential names from admin and agent templates
     all_cred_names: list[str] = list(config.admin.git_credentials)
@@ -276,8 +286,8 @@ def _check_git_credentials(
     try:
         providers = resolve_git_credential_providers(config, all_cred_names)
     except Exception as e:
-        warn(f"Could not resolve git credential providers: {e}")
-        return
+        g.warn("Git credentials", f"could not resolve providers: {e}")
+        return g
 
     from agentworks.git_credentials.base import env_var_for_credential
 
@@ -285,30 +295,73 @@ def _check_git_credentials(
         label = provider.display_name
         try:
             if not provider.verify_auth():
-                warn(f"{label}: auth check failed ({provider.auth_hint()})")
+                g.warn(label, f"auth check failed ({provider.auth_hint()})")
                 continue
             if os.environ.get(env_var_for_credential(name)):
-                ok(f"{label}: ready (token set via environment)")
+                g.ok(label, "ready (token set via environment)")
             else:
-                ok(f"{label}: ready (will prompt for token during VM init)")
+                g.ok(label, "ready (will prompt for token during VM init)")
         except Exception as e:
-            warn(f"{label}: auth check error: {e}")
+            g.warn(label, f"auth check error: {e}")
+
+    return g
 
 
-def _check_completions(
-    ok: object,
-    warn: object,
-    fail: object,
-) -> None:
-    """Check shell completion file freshness."""
-    assert callable(ok) and callable(warn) and callable(fail)
+def _check_database() -> HealthGroup:
+    from agentworks.db import Database
 
-    from agentworks.cli import app
-    from agentworks.completions.spec import build_spec, completion_version
+    g = HealthGroup("Database")
 
-    current_version = completion_version(build_spec(app))
+    try:
+        exists, current, latest = Database.check_schema()
+        if not exists:
+            g.ok("Database", "does not exist yet (will be created on first use)")
+        elif current == latest:
+            g.ok("Schema", f"up to date (version {current})")
+            db = Database()
+            _report_db_contents(g, db)
+        elif current < latest:
+            g.warn("Schema", f"at version {current}, latest is {latest}. Migrating...")
+            db = Database()  # auto-migrates
+            g.ok("Schema", f"migrated to version {latest}")
+            _report_db_contents(g, db)
+        else:
+            g.fail("Schema", f"version {current} is newer than latest {latest} (downgrade?)")
+    except Exception as e:
+        g.fail("Database", str(e))
 
-    # Check all shells that have completions installed
+    return g
+
+
+def _report_db_contents(g: HealthGroup, db: object) -> None:
+    """Report DB contents and flag VMs in non-complete states."""
+    from agentworks.db import Database, InitStatus
+    from agentworks.ssh import LOG_DIR
+
+    assert isinstance(db, Database)
+
+    vms = db.list_vms()
+    ws_count = len(db.list_workspaces())
+    g.ok("Contents", f"{len(vms)} VMs, {ws_count} workspaces")
+
+    def _log_hint(vm_name: str) -> str:
+        if not LOG_DIR.exists():
+            return ""
+        logs = sorted(LOG_DIR.glob(f"{vm_name}-*.log"), reverse=True)
+        return f" Log: {logs[0]}" if logs else ""
+
+    for vm in vms:
+        if vm.init_status == InitStatus.FAILED.value:
+            g.warn(f"VM '{vm.name}'", f"failed state (only delete supported).{_log_hint(vm.name)}")
+        elif vm.init_status == InitStatus.PARTIAL.value:
+            g.warn(f"VM '{vm.name}'", f"initialized with warnings.{_log_hint(vm.name)}")
+        elif vm.init_status not in (InitStatus.COMPLETE.value, InitStatus.PENDING.value):
+            g.warn(f"VM '{vm.name}'", f"unexpected init status: {vm.init_status}")
+
+
+def _check_completions(current_version: str) -> HealthGroup:
+    g = HealthGroup("Shell completions")
+
     shells = _get_completion_paths()
 
     any_found = False
@@ -319,38 +372,30 @@ def _check_completions(
             any_found = True
             installed_version = _read_completion_version(path)
             if installed_version == current_version:
-                ok(f"{shell_name}: up to date")
+                g.ok(shell_name, "up to date")
             elif installed_version is None:
-                warn(f"{shell_name}: no version stamp. See: agentworks completion {shell_name} --help")
+                g.warn(shell_name, f"no version stamp. See: agentworks completion {shell_name} --help")
             else:
-                warn(f"{shell_name}: stale. See: agentworks completion {shell_name} --help")
+                g.warn(shell_name, f"stale. See: agentworks completion {shell_name} --help")
     if not any_found:
-        ok("No completions installed (install with: agentworks completion <shell> --install)")
+        g.ok("Completions", "none installed (install with: agentworks completion <shell> --install)")
+
+    return g
 
 
 def _get_completion_paths() -> list[tuple[str, list[Path]]]:
-    """Return (shell_name, candidate_paths) for all shells.
-
-    Only includes shells where completions are actually installed,
-    so we don't warn about shells the user doesn't use.
-    """
+    """Return (shell_name, candidate_paths) for all shells."""
     home = Path.home()
     shells: list[tuple[str, list[Path]]] = []
 
     # Bash
-    shells.append(
-        (
-            "bash",
-            [
-                home / ".local" / "share" / "bash-completion" / "completions" / "agentworks",
-            ],
-        )
-    )
+    shells.append((
+        "bash",
+        [home / ".local" / "share" / "bash-completion" / "completions" / "agentworks"],
+    ))
 
     # Zsh
-    zsh_paths: list[Path] = [
-        home / ".zfunc" / "_agentworks",
-    ]
+    zsh_paths: list[Path] = [home / ".zfunc" / "_agentworks"]
     zsh_custom = os.environ.get("ZSH_CUSTOM")
     if zsh_custom:
         zsh_paths.append(Path(zsh_custom) / "completions" / "_agentworks")
@@ -359,19 +404,15 @@ def _get_completion_paths() -> list[tuple[str, list[Path]]]:
         zsh_paths.append(omz_default)
     shells.append(("zsh", zsh_paths))
 
-    # PowerShell: derive path from $PROFILE (handles OneDrive redirection etc.)
+    # PowerShell
     from agentworks.completions.install import _query_powershell_profile
 
     profile = _query_powershell_profile()
     if profile is not None:
-        shells.append(
-            (
-                "powershell",
-                [
-                    profile.parent / "Completions" / "agentworks.ps1",
-                ],
-            )
-        )
+        shells.append((
+            "powershell",
+            [profile.parent / "Completions" / "agentworks.ps1"],
+        ))
 
     return shells
 
@@ -383,7 +424,6 @@ def _read_completion_version(path: Path) -> str | None:
             for line in f:
                 if line.startswith("# agentworks-completion-version:"):
                     return line.split(":", 1)[1].strip()
-                # Only check the first few lines (skip blank lines)
                 if not line.startswith("#") and line.strip():
                     break
     except OSError:
