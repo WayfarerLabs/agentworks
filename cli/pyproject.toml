@@ -38,6 +38,7 @@ select = [
 "tests/**" = ["TCH"]
 
 [tool.pytest.ini_options]
+addopts = "-m 'not integration'"
 markers = [
     "integration: tests that probe the real environment (filesystem, subprocesses, database)",
 ]

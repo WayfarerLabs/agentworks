@@ -234,11 +234,11 @@ def doctor() -> None:
         typer.echo(f"{group.name}:")
         for check in group.checks:
             label = {
-                Status.OK: "[ok]  ",
+                Status.OK: "[ok]",
                 Status.INFO: "[info]",
                 Status.WARN: "[warn]",
                 Status.FAIL: "[FAIL]",
-            }[check.status]
+            }[check.status].ljust(6)
             msg = check.name
             if check.message:
                 msg += f" ({check.message})"

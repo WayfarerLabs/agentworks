@@ -54,25 +54,33 @@ class HealthGroup:
 class HealthReport:
     groups: list[HealthGroup] = field(default_factory=list)
 
+    def counts(self) -> dict[Status, int]:
+        """Compute all status counts in a single pass."""
+        result = {s: 0 for s in Status}
+        for g in self.groups:
+            for c in g.checks:
+                result[c.status] += 1
+        return result
+
     @property
     def ok_count(self) -> int:
-        return sum(1 for g in self.groups for c in g.checks if c.status == Status.OK)
+        return self.counts()[Status.OK]
 
     @property
     def info_count(self) -> int:
-        return sum(1 for g in self.groups for c in g.checks if c.status == Status.INFO)
+        return self.counts()[Status.INFO]
 
     @property
     def warn_count(self) -> int:
-        return sum(1 for g in self.groups for c in g.checks if c.status == Status.WARN)
+        return self.counts()[Status.WARN]
 
     @property
     def fail_count(self) -> int:
-        return sum(1 for g in self.groups for c in g.checks if c.status == Status.FAIL)
+        return self.counts()[Status.FAIL]
 
     @property
     def has_failures(self) -> bool:
-        return self.fail_count > 0
+        return self.counts()[Status.FAIL] > 0
 
 
 def run_checks() -> HealthReport:
@@ -99,9 +107,9 @@ def run_checks() -> HealthReport:
         from agentworks.completions.spec import build_spec, completion_version
 
         report.groups.append(_check_completions(completion_version(build_spec(app))))
-    except Exception:
+    except Exception as e:
         g = HealthGroup("Shell completions")
-        g.warn("Completions", "could not check (CLI import failed)")
+        g.warn("Completions", f"could not check: {e}")
         report.groups.append(g)
 
     return report
