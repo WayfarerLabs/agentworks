@@ -233,7 +233,12 @@ def doctor() -> None:
     for group in report.groups:
         typer.echo(f"{group.name}:")
         for check in group.checks:
-            label = {Status.OK: "[ok]  ", Status.WARN: "[warn]", Status.FAIL: "[FAIL]"}[check.status]
+            label = {
+                Status.OK: "[ok]  ",
+                Status.INFO: "[info]",
+                Status.WARN: "[warn]",
+                Status.FAIL: "[FAIL]",
+            }[check.status]
             msg = check.name
             if check.message:
                 msg += f" ({check.message})"

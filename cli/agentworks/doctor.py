@@ -16,6 +16,7 @@ from pathlib import Path
 
 class Status(Enum):
     OK = "ok"
+    INFO = "info"
     WARN = "warn"
     FAIL = "fail"
 
@@ -35,6 +36,9 @@ class HealthGroup:
     def ok(self, name: str, message: str | None = None) -> None:
         self.checks.append(HealthCheck(name=name, status=Status.OK, message=message))
 
+    def info(self, name: str, message: str | None = None) -> None:
+        self.checks.append(HealthCheck(name=name, status=Status.INFO, message=message))
+
     def warn(self, name: str, message: str | None = None) -> None:
         self.checks.append(HealthCheck(name=name, status=Status.WARN, message=message))
 
@@ -49,6 +53,10 @@ class HealthReport:
     @property
     def ok_count(self) -> int:
         return sum(1 for g in self.groups for c in g.checks if c.status == Status.OK)
+
+    @property
+    def info_count(self) -> int:
+        return sum(1 for g in self.groups for c in g.checks if c.status == Status.INFO)
 
     @property
     def warn_count(self) -> int:
@@ -125,9 +133,9 @@ def _check_vm_platforms() -> HealthGroup:
                     os_info = f", {h.os}" if h.os else ""
                     g.ok(f"VM host: {h.name}", f"{h.ssh_host}{os_info}")
             else:
-                g.warn("VM hosts", "none configured (add with 'agentworks vm-host add')")
+                g.info("VM hosts", "none configured")
         else:
-            g.warn("VM hosts", "database not yet created")
+            g.info("VM hosts", "database not yet created")
     except Exception:
         g.warn("VM hosts", "could not check")
 
@@ -139,7 +147,7 @@ def _check_vm_platforms() -> HealthGroup:
         if shutil.which(tool):
             g.ok(label)
         else:
-            g.warn(label, "not found")
+            g.info(label, "not available")
     return g
 
 
