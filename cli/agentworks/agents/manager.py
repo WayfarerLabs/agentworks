@@ -586,16 +586,15 @@ def _create_agent_on_vm(
     # Ensure the agent tmux socket infrastructure exists. Call
     # ensure_agent_socket_root first so this works on VMs that haven't
     # been reinited since the socket feature was added.
-    from functools import partial as _partial
-
     from agentworks.sessions.tmux import cleanup_stale_sockets, ensure_agent_socket_dir, ensure_agent_socket_root
+    from agentworks.ssh import admin_exec_target as _admin_exec_target
 
-    _root_cmd = _partial(run_as_root, target, logger=lg)
-    ensure_agent_socket_root(_root_cmd, vm.admin_username)
+    exec_target = _admin_exec_target(vm, config)
+    ensure_agent_socket_root(exec_target, vm.admin_username)
     # The per-agent dir won't exist for a brand-new agent -- suppress the
     # "missing" warning. Misconfiguration of an existing dir still warns.
-    ensure_agent_socket_dir(_root_cmd, linux_user, warn_if_missing=False)
-    removed = cleanup_stale_sockets(_root_cmd, linux_user)
+    ensure_agent_socket_dir(exec_target, linux_user, warn_if_missing=False)
+    removed = cleanup_stale_sockets(exec_target, linux_user)
     if removed:
         output.detail(f"Cleaned up {removed} stale socket(s)")
 

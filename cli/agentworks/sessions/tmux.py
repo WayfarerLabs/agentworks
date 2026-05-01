@@ -34,7 +34,7 @@ def agent_socket_path(linux_user: str, session_name: str) -> str:
 
 
 def ensure_agent_socket_root(
-    run_command: RunCommand,
+    target: ExecTarget,
     admin_username: str,
     *,
     warn_if_missing: bool = True,
@@ -42,30 +42,21 @@ def ensure_agent_socket_root(
     """Create the agent tmux socket root directory and group (idempotent).
 
     Fast-paths when the directory already exists with the correct group and
-    permissions (single SSH round-trip).  Falls back to the full setup
-    otherwise.
-
-    Each command is a separate call so that callers wrapping with sudo (e.g.
-    ``run_as_root``) apply privilege to every command individually.
+    permissions (single SSH round-trip).
 
     Pass ``warn_if_missing=False`` when the caller already knows the directory
     won't exist (e.g. first-time VM init), to avoid a misleading warning.
-    Misconfiguration (directory exists with wrong group/perms) always warns,
-    regardless of ``warn_if_missing`` -- that's a real anomaly worth surfacing.
     """
     grp = shlex.quote(AGENT_SOCKET_GROUP)
     q_root = shlex.quote(AGENT_SOCKET_ROOT)
 
-    # Probe with explicit sentinels so each state is unambiguous:
-    #   MISSING      -- `test -d` failed; directory is absent
-    #   PROBE_FAILED -- directory exists but stat couldn't read it
-    #   <stat out>   -- directory exists with that group/perms
-    probe = run_command(
+    probe = target.run(
         f'if test -d {q_root}; then stat -c "%G %a" {q_root} 2>/dev/null || echo PROBE_FAILED; '
         f"else echo MISSING; fi",
+        sudo=True,
         check=False,
     )
-    stdout = (getattr(probe, "stdout", "") or "").strip()
+    stdout = probe.stdout.strip()
     if stdout == f"{AGENT_SOCKET_GROUP} 2771":
         return
 
@@ -82,21 +73,17 @@ def ensure_agent_socket_root(
         output.warn(f"Socket root {AGENT_SOCKET_ROOT} {state}, recreating")
 
     admin = shlex.quote(admin_username)
-    # Two calls: getent doesn't need root but groupadd does. Keeping them
-    # separate avoids the sudo scoping issue with || in a single command.
-    result = run_command(f"getent group {grp} >/dev/null 2>&1", check=False)
-    if not getattr(result, "ok", True):
-        run_command(f"/usr/sbin/groupadd {grp}")
-    run_command(f"usermod -aG {grp} {admin}")
-    run_command(f"mkdir -p {AGENT_SOCKET_ROOT}")
-    run_command(f"chown root:{grp} {AGENT_SOCKET_ROOT}")
-    # 2771: SGID + rwxrwx--x. The 'other' execute bit allows agent users
-    # (who are not in the group) to traverse into their own subdirectory.
-    run_command(f"chmod 2771 {AGENT_SOCKET_ROOT}")
+    result = target.run(f"getent group {grp} >/dev/null 2>&1", check=False)
+    if not result.ok:
+        target.run(f"/usr/sbin/groupadd {grp}", sudo=True)
+    target.run(f"usermod -aG {grp} {admin}", sudo=True)
+    target.run(f"mkdir -p {AGENT_SOCKET_ROOT}", sudo=True)
+    target.run(f"chown root:{grp} {AGENT_SOCKET_ROOT}", sudo=True)
+    target.run(f"chmod 2771 {AGENT_SOCKET_ROOT}", sudo=True)
 
 
 def ensure_agent_socket_dir(
-    run_command: RunCommand,
+    target: ExecTarget,
     linux_user: str,
     *,
     warn_if_missing: bool = True,
@@ -105,29 +92,18 @@ def ensure_agent_socket_dir(
 
     Fast-paths when the directory already exists with the correct owner/group
     and permissions (single SSH round-trip).
-
-    Each command is a separate call so that callers wrapping with sudo apply
-    privilege to every command individually.
-
-    Pass ``warn_if_missing=False`` when the caller already knows the directory
-    won't exist (e.g. creating a brand-new agent), to avoid a misleading
-    warning. Misconfiguration (directory exists with wrong owner/perms)
-    always warns, regardless of this flag.
     """
     q_user = shlex.quote(linux_user)
     grp = shlex.quote(AGENT_SOCKET_GROUP)
     q_path = shlex.quote(f"{AGENT_SOCKET_ROOT}/{linux_user}")
 
-    # Probe with explicit sentinels so each state is unambiguous:
-    #   MISSING      -- `test -d` failed; directory is absent
-    #   PROBE_FAILED -- directory exists but stat couldn't read it
-    #   <stat out>   -- directory exists with that owner/group/perms
-    probe = run_command(
+    probe = target.run(
         f'if test -d {q_path}; then stat -c "%U %G %a" {q_path} 2>/dev/null || echo PROBE_FAILED; '
         f"else echo MISSING; fi",
+        sudo=True,
         check=False,
     )
-    stdout = (getattr(probe, "stdout", "") or "").strip()
+    stdout = probe.stdout.strip()
     if stdout == f"{linux_user} {AGENT_SOCKET_GROUP} 2770":
         return
 
@@ -143,36 +119,30 @@ def ensure_agent_socket_dir(
 
         output.warn(f"Socket directory for {linux_user} {state}, recreating")
 
-    run_command(f"mkdir -p {q_path}")
-    run_command(f"chown {q_user}:{grp} {q_path}")
-    run_command(f"chmod 2770 {q_path}")
+    target.run(f"mkdir -p {q_path}", sudo=True)
+    target.run(f"chown {q_user}:{grp} {q_path}", sudo=True)
+    target.run(f"chmod 2770 {q_path}", sudo=True)
 
 
-def cleanup_stale_sockets(run_command: RunCommand, linux_user: str) -> int:
+def cleanup_stale_sockets(target: ExecTarget, linux_user: str) -> int:
     """Remove socket files whose tmux server is no longer running.
 
     Returns the number of stale sockets removed.
     """
     q_dir = shlex.quote(f"{AGENT_SOCKET_ROOT}/{linux_user}")
-    # List .sock files in the agent's socket directory
-    result = run_command(f"find {q_dir} -name '*.sock' -type s 2>/dev/null", check=False)
-    stdout = getattr(result, "stdout", "") or ""
-    if not stdout.strip():
+    result = target.run(f"find {q_dir} -name '*.sock' -type s 2>/dev/null", sudo=True, check=False)
+    if not result.stdout.strip():
         return 0
 
     removed = 0
-    for sock_path in stdout.strip().splitlines():
+    for sock_path in result.stdout.strip().splitlines():
         sock_path = sock_path.strip()
         if not sock_path:
             continue
         q_sock = shlex.quote(sock_path)
-        # Check if a tmux server is running on this socket
-        check = run_command(
-            f"sudo -n tmux -S {q_sock} list-sessions 2>/dev/null",
-            check=False,
-        )
-        if not getattr(check, "ok", False):
-            run_command(f"sudo rm -f {q_sock}", check=False)
+        check = target.run(f"tmux -S {q_sock} list-sessions 2>/dev/null", check=False)
+        if not check.ok:
+            target.run(f"rm -f {q_sock}", sudo=True, check=False)
             removed += 1
     return removed
 
@@ -273,6 +243,7 @@ def create_session(
     linux_user: str | None,
     *,
     run_command: RunCommand,
+    target: ExecTarget,
     run_as_root: RunCommand | None = None,
     admin_username: str | None = None,
     is_admin: bool = True,
@@ -311,8 +282,8 @@ def create_session(
         q_sock = shlex.quote(sock)
 
         # Ensure the tmpfs socket directories exist (wiped on VM reboot).
-        ensure_agent_socket_root(run_as_root, admin_username)
-        ensure_agent_socket_dir(run_as_root, linux_user)
+        ensure_agent_socket_root(target, admin_username)
+        ensure_agent_socket_dir(target, linux_user)
 
         # Check for an existing socket file before creating the session.
         # A stale socket (no server) is removed to start clean. An active

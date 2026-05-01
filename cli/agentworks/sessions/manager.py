@@ -25,7 +25,7 @@ if TYPE_CHECKING:
     from agentworks.db import Database, SessionRow, VMRow, WorkspaceRow
     from agentworks.sessions.templates import ResolvedSessionTemplate
     from agentworks.sessions.tmux import RunCommand
-    from agentworks.ssh import SSHLogger
+    from agentworks.ssh import ExecTarget, SSHLogger
 
 
 # -- Helpers ---------------------------------------------------------------
@@ -110,10 +110,12 @@ def _require_vm_for_workspace(db: Database, ws: WorkspaceRow) -> VMRow:
 
 def _prepare_vm(
     db: Database, config: Config, workspace_name: str, *, operation: str | None = None
-) -> tuple[WorkspaceRow, VMRow, RunCommand, RunCommand]:
-    """Validate workspace/VM, ensure running, and return (ws, vm, run_command, run_as_root).
+) -> tuple[WorkspaceRow, VMRow, RunCommand, RunCommand, ExecTarget]:
+    """Validate workspace/VM, ensure running, and return (ws, vm, run_command, run_as_root, target).
 
     If operation is set, creates an SSHLogger and binds it into both callables.
+    The ExecTarget is also returned directly for callers that need it (e.g.
+    ensure_agent_socket_*, batch_check_sessions).
     """
     from agentworks.ssh import SSHLogger, run
     from agentworks.ssh import run_as_root as ssh_run_as_root
@@ -132,7 +134,7 @@ def _prepare_vm(
     logger = SSHLogger(vm.name, operation) if operation else None
     run_command = partial(run, target, logger=logger)
     run_as_root = partial(ssh_run_as_root, target, logger=logger)
-    return ws, vm, run_command, run_as_root
+    return ws, vm, run_command, run_as_root, target
 
 
 def _require_session(db: Database, name: str) -> SessionRow:
@@ -258,7 +260,7 @@ def create_session(
     )
 
     validate_name(name)
-    ws, vm, run_command, run_as_root = _prepare_vm(db, config, workspace_name, operation="session-create")
+    ws, vm, run_command, run_as_root, target = _prepare_vm(db, config, workspace_name, operation="session-create")
 
     if db.get_session(name) is not None:
         raise output.SessionError(f"session '{name}' already exists")
@@ -310,6 +312,7 @@ def create_session(
             command,
             linux_user,
             run_command=run_command,
+            target=target,
             run_as_root=run_as_root,
             admin_username=vm.admin_username,
             is_admin=(mode == SessionMode.ADMIN),
@@ -346,7 +349,7 @@ def stop_session(
     from agentworks.sessions.tmux import send_keys
 
     session = _require_session(db, name)
-    _ws, _vm, run_command, _ = _prepare_vm(db, config, session.workspace_name, operation="session-stop")
+    _ws, _vm, run_command, _, _target = _prepare_vm(db, config, session.workspace_name, operation="session-stop")
 
     if session.status == SessionStatus.STOPPED.value:
         output.info(f"Session '{name}' is already stopped")
@@ -384,7 +387,9 @@ def restart_session(
     )
 
     session = _require_session(db, name)
-    ws, vm, run_command, run_as_root = _prepare_vm(db, config, session.workspace_name, operation="session-restart")
+    ws, vm, run_command, run_as_root, target = _prepare_vm(
+        db, config, session.workspace_name, operation="session-restart",
+    )
     sock = _effective_socket_path(db, session)
 
     if _session_alive(name, run_command=run_command, socket_path=sock):
@@ -413,6 +418,7 @@ def restart_session(
         command,
         linux_user,
         run_command=run_command,
+        target=target,
         run_as_root=run_as_root,
         admin_username=vm.admin_username,
         is_admin=is_admin,
@@ -487,7 +493,7 @@ def delete_session(
 ) -> None:
     """Stop and delete a session."""
     session = _require_session(db, name)
-    ws, vm, run_command, _ = _prepare_vm(db, config, session.workspace_name, operation="session-delete")
+    ws, vm, run_command, _, target = _prepare_vm(db, config, session.workspace_name, operation="session-delete")
     sock = _effective_socket_path(db, session)
 
     if (
@@ -561,7 +567,7 @@ def describe_session(
 ) -> None:
     """Show session details."""
     session = _require_session(db, name)
-    ws, vm, run_command, _ = _prepare_vm(db, config, session.workspace_name, operation=None)
+    ws, vm, run_command, _, target = _prepare_vm(db, config, session.workspace_name, operation=None)
 
     # Reconcile status with tmux
     status = _reconcile_status(session, run_command=run_command, db=db)
@@ -703,7 +709,7 @@ def attach_session(
     from agentworks.ssh import interactive
 
     session = _require_session(db, name)
-    _ws, vm, run_command, _ = _prepare_vm(db, config, session.workspace_name, operation="session-attach")
+    _ws, vm, run_command, _, target = _prepare_vm(db, config, session.workspace_name, operation="session-attach")
     sock = _effective_socket_path(db, session)
 
     if not _session_alive(name, run_command=run_command, socket_path=sock):
@@ -725,7 +731,7 @@ def session_logs(
     from agentworks.sessions.tmux import capture_output
 
     session = _require_session(db, name)
-    _ws, _vm, run_command, _ = _prepare_vm(db, config, session.workspace_name, operation="session-logs")
+    _ws, _vm, run_command, _, _target = _prepare_vm(db, config, session.workspace_name, operation="session-logs")
     sock = _effective_socket_path(db, session)
 
     captured = capture_output(
