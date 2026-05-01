@@ -13,10 +13,8 @@ import sys
 from functools import partial
 from typing import TYPE_CHECKING
 
-import typer
-
+from agentworks import output
 from agentworks.db import SessionStatus
-from agentworks.output import warn
 from agentworks.sessions.tmux import tmux_cmd
 
 if TYPE_CHECKING:
@@ -58,7 +56,7 @@ def create_console(
     run_command(f"tmux set -t {CONSOLE_SESSION_NAME} remain-on-exit on", check=False)
 
     # Add a window for each running session
-    typer.echo(f"Adding {len(running_sessions)} session(s) to console...")
+    output.info(f"Adding {len(running_sessions)} session(s) to console...")
     for session in running_sessions:
         _add_session_window(
             session.name,
@@ -95,7 +93,7 @@ def _add_session_window(
     ok = getattr(result, "ok", True)
     stderr = getattr(result, "stderr", "")
     if not ok:
-        warn(f"failed to add window for '{session_name}': {stderr}")
+        output.warn(f"failed to add window for '{session_name}': {stderr}")
 
 
 def add_session_to_console(
@@ -123,27 +121,23 @@ def attach_console(
     import os
 
     if os.environ.get("TMUX") and not allow_nesting:
-        typer.echo(
-            "Error: already inside a tmux session.\n"
+        raise output.SessionError(
+            "already inside a tmux session.\n"
             "Nesting is not recommended (prefix key conflicts,\n"
             "confusing detach behavior).\n"
-            "Pass --allow-nesting to override.",
-            err=True,
+            "Pass --allow-nesting to override."
         )
-        raise typer.Exit(1)
 
     vm = db.get_vm(vm_name)
     if vm is None:
-        typer.echo(f"Error: VM '{vm_name}' not found", err=True)
-        raise typer.Exit(1)
+        raise output.VMError(f"VM '{vm_name}' not found")
 
     from agentworks.workspaces.manager import _ensure_vm_running
 
     _ensure_vm_running(db, config, vm)
 
     if vm.tailscale_host is None:
-        typer.echo(f"Error: VM '{vm_name}' has no Tailscale address", err=True)
-        raise typer.Exit(1)
+        raise output.VMError(f"VM '{vm_name}' has no Tailscale address")
 
     from agentworks.ssh import admin_exec_target, interactive, run
 

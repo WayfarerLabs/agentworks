@@ -50,12 +50,12 @@ class GitCredentialProvider(ABC):
 
     def obtain_token(self, vm_name: str) -> str:
         """Obtain a credential token: env var first, then prompt."""
-        import typer
+        from agentworks import output
 
         env_name = env_var_for_credential(self._config_name)
         token = os.environ.get(env_name)
         if token:
-            typer.echo(f"  Git credential '{self.display_name}' found in environment")
+            output.detail(f"Git credential '{self.display_name}' found in environment")
             return token
         return self._prompt_token(vm_name)
 

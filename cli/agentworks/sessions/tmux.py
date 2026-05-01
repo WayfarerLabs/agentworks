@@ -74,9 +74,9 @@ def ensure_agent_socket_root(
         should_warn, state = True, "misconfigured"
 
     if should_warn:
-        from agentworks.output import warn
+        from agentworks import output
 
-        warn(f"Socket root {AGENT_SOCKET_ROOT} {state}, recreating")
+        output.warn(f"Socket root {AGENT_SOCKET_ROOT} {state}, recreating")
 
     admin = shlex.quote(admin_username)
     # Two calls: getent doesn't need root but groupadd does. Keeping them
@@ -136,9 +136,9 @@ def ensure_agent_socket_dir(
         should_warn, state = True, "misconfigured"
 
     if should_warn:
-        from agentworks.output import warn
+        from agentworks import output
 
-        warn(f"Socket directory for {linux_user} {state}, recreating")
+        output.warn(f"Socket directory for {linux_user} {state}, recreating")
 
     run_command(f"mkdir -p {q_path}")
     run_command(f"chown {q_user}:{grp} {q_path}")
@@ -328,9 +328,9 @@ def create_session(
                     f"Kill it first or choose a different session name."
                 )
             # Stale socket -- remove it
-            import typer as _typer
+            from agentworks import output as _output
 
-            _typer.echo(f"  Removing stale socket: {sock}")
+            _output.detail(f"Removing stale socket: {sock}")
             run_as_root(f"rm -f {q_sock}", check=False)
 
         # Build the pane command.  sudo --login gives the agent a proper

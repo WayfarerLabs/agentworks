@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+from agentworks import output
 from agentworks.git_credentials.base import GitCredentialProvider
-from agentworks.prompt import prompt_secret
 
 
 class AzDOCredentialProvider(GitCredentialProvider):
@@ -20,7 +20,7 @@ class AzDOCredentialProvider(GitCredentialProvider):
         return f"Create a PAT at https://dev.azure.com/{self._org}/_usersSettings/tokens (Code Read & Write scope)"
 
     def _prompt_token(self, vm_name: str) -> str:
-        return prompt_secret(
+        return output.prompt_secret(
             f"  Azure DevOps PAT for '{self.display_name}'",
             hint=self.auth_hint(),
         )

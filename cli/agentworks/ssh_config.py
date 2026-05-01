@@ -15,7 +15,7 @@ import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import typer
+from agentworks import output
 
 if TYPE_CHECKING:
     from agentworks.config import Config
@@ -59,7 +59,7 @@ def sync_ssh_config(config: Config, db: Database) -> None:
         _rebuild_config_dir(config, db)
     else:
         _legacy_rebuild(config, db)
-    typer.echo("  SSH config synced")
+    output.detail("SSH config synced")
 
 
 def _legacy_rebuild(config: Config, db: Database) -> None:

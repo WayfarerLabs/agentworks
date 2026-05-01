@@ -5,13 +5,11 @@ from __future__ import annotations
 import json
 import platform
 import subprocess
-import sys
 import urllib.request
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import typer
-
+from agentworks import output
 from agentworks.db import VMStatus
 from agentworks.ssh import ExecTarget, WSL2Target
 from agentworks.vms.base import ProvisionResult, VMProvisioner
@@ -99,14 +97,14 @@ def _download_debian_rootfs(tarball_path: str) -> None:
     directly with ``wsl --import``.
     """
     # 1. Get anonymous pull token
-    typer.echo("  Authenticating with Docker Hub...")
+    output.detail("Authenticating with Docker Hub...")
     with urllib.request.urlopen(_DOCKER_AUTH_URL) as resp:
         token = json.loads(resp.read())["token"]
 
     # 2. Fetch image manifest to find the rootfs layer digest.
     #    debian:bookworm is multi-arch, so we first get the manifest list
     #    and resolve the platform-specific manifest for the host architecture.
-    typer.echo("  Fetching Debian bookworm image manifest...")
+    output.detail("Fetching Debian bookworm image manifest...")
     auth_header = {"Authorization": f"Bearer {token}"}
 
     req = urllib.request.Request(
@@ -153,29 +151,25 @@ def _download_debian_rootfs(tarball_path: str) -> None:
     # 3. Download the rootfs layer with progress
     blob_url = f"{_DOCKER_BLOBS_URL}/{digest}"
     req = urllib.request.Request(blob_url, headers=auth_header)
-    size_mb = f" (~{total_bytes // 1024 // 1024} MB)" if total_bytes else ""
-    typer.echo(f"  Downloading Debian rootfs{size_mb}...")
+    p = output.progress("Downloading Debian rootfs", total=total_bytes or None)
 
     dest = Path(tarball_path)
     with _blob_opener.open(req) as resp, dest.open("wb") as f:
         downloaded = 0
         chunk_size = 256 * 1024
+        last_update = 0
         while True:
             chunk = resp.read(chunk_size)
             if not chunk:
                 break
             f.write(chunk)
             downloaded += len(chunk)
-            if total_bytes:
-                pct = downloaded * 100 // total_bytes
-                mb = downloaded // 1024 // 1024
-                total_mb = total_bytes // 1024 // 1024
-                sys.stderr.write(f"\r  Progress: {mb}/{total_mb} MB ({pct}%)")
-                sys.stderr.flush()
-        if total_bytes:
-            sys.stderr.write("\n")
+            # Update every ~1MB to avoid flooding
+            if downloaded - last_update >= 1024 * 1024:
+                p.update(downloaded)
+                last_update = downloaded
 
-    typer.echo("  Download complete.")
+    p.done()
 
 
 class WSL2Provisioner(VMProvisioner):
@@ -188,7 +182,7 @@ class WSL2Provisioner(VMProvisioner):
         *,
         admin_username: str = "agentworks",
     ) -> ProvisionResult:
-        typer.echo(f"Provisioning WSL2 VM '{vm_name}'...")
+        output.info(f"Provisioning WSL2 VM '{vm_name}'...")
 
         install_path = f"{WSL_BASE_PATH}\\{vm_name}"
         _powershell(f"New-Item -ItemType Directory -Force -Path '{install_path}'")
@@ -202,15 +196,15 @@ class WSL2Provisioner(VMProvisioner):
         if check.lower() != "true":
             _download_debian_rootfs(tarball)
         else:
-            typer.echo("  Using cached Debian rootfs.")
+            output.detail("Using cached Debian rootfs.")
 
         # Import and configure the distro
-        typer.echo("  Importing rootfs into WSL2...")
+        output.detail("Importing rootfs into WSL2...")
         _wsl(["--import", vm_name, install_path, tarball])
 
         # The Docker rootfs is minimal. Install packages to bring it up to
         # parity with the Lima/Azure cloud images.
-        typer.echo("  Installing base packages...")
+        output.detail("Installing base packages...")
         _wsl(
             [
                 "--distribution",
@@ -234,7 +228,7 @@ class WSL2Provisioner(VMProvisioner):
         # Configure swap file
         if config.vm.swap > 0:
             swap_mb = config.vm.swap * 1024
-            typer.echo(f"  Setting up {config.vm.swap} GiB swap file...")
+            output.detail(f"Setting up {config.vm.swap} GiB swap file...")
             _wsl(
                 [
                     "--distribution",
@@ -253,7 +247,7 @@ class WSL2Provisioner(VMProvisioner):
             )
 
         # Create user account
-        typer.echo(f"  Creating user '{admin_username}'...")
+        output.detail(f"Creating user '{admin_username}'...")
         _wsl(["--distribution", vm_name, "--user", "root", "--", "useradd", "-m", "-s", "/bin/bash", admin_username])
         _wsl(["--distribution", vm_name, "--user", "root", "--", "usermod", "-aG", "sudo", admin_username])
         import shlex
@@ -273,7 +267,7 @@ class WSL2Provisioner(VMProvisioner):
         )
 
         # Configure wsl.conf: default user + systemd
-        typer.echo("  Enabling systemd...")
+        output.detail("Enabling systemd...")
         _wsl(
             [
                 "--distribution",
@@ -289,29 +283,29 @@ class WSL2Provisioner(VMProvisioner):
         )
 
         # Restart the distro so systemd takes effect
-        typer.echo("  Restarting distro...")
+        output.detail("Restarting distro...")
         _wsl(["--terminate", vm_name])
         # Run a command to trigger the distro to start with systemd
         _wsl(["--distribution", vm_name, "--user", "root", "--", "bash", "-c", "echo ok"])
 
-        typer.echo(f"  WSL2 VM '{vm_name}' provisioned.")
+        output.detail(f"WSL2 VM '{vm_name}' provisioned.")
         return ProvisionResult(
             admin_exec_target=ExecTarget(wsl2=WSL2Target(distro_name=vm_name, user=admin_username)),
             wsl_distro_name=vm_name,
         )
 
     def start(self, vm: VMRow) -> None:
-        typer.echo(f"Starting WSL2 distro '{vm.name}'...")
+        output.info(f"Starting WSL2 distro '{vm.name}'...")
         _wsl(["--distribution", vm.name, "--", "echo", "started"])
-        typer.echo(f"WSL2 distro '{vm.name}' started")
+        output.info(f"WSL2 distro '{vm.name}' started")
 
     def stop(self, vm: VMRow) -> None:
-        typer.echo(f"Terminating WSL2 distro '{vm.name}'...")
+        output.info(f"Terminating WSL2 distro '{vm.name}'...")
         _wsl(["--terminate", vm.name])
-        typer.echo(f"WSL2 distro '{vm.name}' terminated")
+        output.info(f"WSL2 distro '{vm.name}' terminated")
 
     def delete(self, vm: VMRow) -> None:
-        typer.echo(f"Unregistering WSL2 distro '{vm.name}'...")
+        output.info(f"Unregistering WSL2 distro '{vm.name}'...")
         _wsl(["--unregister", vm.name], check=False)
         # Clean up install directory
         install_path = f"{WSL_BASE_PATH}\\{vm.name}"
@@ -319,7 +313,7 @@ class WSL2Provisioner(VMProvisioner):
             f"Remove-Item -Recurse -Force -Path '{install_path}' -ErrorAction SilentlyContinue",
             check=False,
         )
-        typer.echo(f"WSL2 distro '{vm.name}' deleted")
+        output.info(f"WSL2 distro '{vm.name}' deleted")
 
     def admin_exec_target(self, vm: VMRow, *, config: object | None = None) -> ExecTarget:
         return ExecTarget(wsl2=WSL2Target(distro_name=vm.name, user=vm.admin_username))

@@ -9,10 +9,8 @@ import textwrap
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import typer
-
+from agentworks import output
 from agentworks.db import VMStatus
-from agentworks.output import warn
 from agentworks.ssh import ExecTarget, LimaTarget, RemoteLimaTarget, SSHError, SSHTarget, copy_to
 from agentworks.ssh import run as ssh_run
 from agentworks.vms.base import ProvisionResult, VMProvisioner
@@ -97,19 +95,19 @@ class LimaProvisioner(VMProvisioner):
             import shutil
 
             if not shutil.which("limactl"):
-                typer.echo(
-                    "Error: 'limactl' not found. Lima is not installed on this machine.\n"
-                    "For remote Lima VMs, set defaults.vm_host in your config or pass --vm-host.",
-                    err=True,
+                from agentworks.output import VMError
+
+                raise VMError(
+                    "'limactl' not found. Lima is not installed on this machine. "
+                    "For remote Lima VMs, set defaults.vm_host in your config or pass --vm-host."
                 )
-                raise typer.Exit(1)
 
         if self.is_remote:
-            typer.echo(f"Connecting to VM host '{self._vm_host_ssh}'...")
-        typer.echo(f"Creating Lima VM '{vm_name}' ({'remote' if self.is_remote else 'local'})...")
-        typer.echo(f"  Resources: {cpus} CPUs, {memory} GiB memory, {disk} GiB disk")
+            output.info(f"Connecting to VM host '{self._vm_host_ssh}'...")
+        output.info(f"Creating Lima VM '{vm_name}' ({'remote' if self.is_remote else 'local'})...")
+        output.detail(f"Resources: {cpus} CPUs, {memory} GiB memory, {disk} GiB disk")
         if config.vm.swap > 0:
-            typer.echo(f"  Swap: {config.vm.swap} GiB")
+            output.detail(f"Swap: {config.vm.swap} GiB")
 
         # Generate the full bootstrap script and embed in the Lima provision block.
         # This handles user creation, system packages, swap, SSH key, and Tailscale.
@@ -139,21 +137,21 @@ class LimaProvisioner(VMProvisioner):
         else:
             self._create_local(vm_name, rendered)
 
-        typer.echo(f"  Lima VM '{vm_name}' created.")
+        output.detail(f"Lima VM '{vm_name}' created.")
 
         # If Tailscale was provisioned via the provision block, extract the IP
         tailscale_ip = None
         bootstrap_complete = False
         if tailscale_auth_key:
-            typer.echo("  Retrieving Tailscale IP...")
+            output.detail("Retrieving Tailscale IP...")
             try:
                 ip_output = self._run_lima(f"limactl shell {vm_name} sudo tailscale ip -4")
                 tailscale_ip = ip_output.strip()
                 bootstrap_complete = True
-                typer.echo(f"  Tailscale IP: {tailscale_ip}")
+                output.detail(f"Tailscale IP: {tailscale_ip}")
             except SSHError as e:
-                warn(f"could not retrieve Tailscale IP: {e}")
-                typer.echo("  Tailscale will be set up during Phase A bootstrap.", err=True)
+                output.warn(f"could not retrieve Tailscale IP: {e}")
+                output.warn("Tailscale will be set up during Phase A bootstrap.")
 
         if self.is_remote:
             assert self._vm_host_ssh is not None
@@ -210,7 +208,7 @@ class LimaProvisioner(VMProvisioner):
             logger=ssh_logger,
         )
         lima_cmd = f"limactl create --name {vm_name} --tty=false {remote_template} && limactl start {vm_name}"
-        typer.echo("  Starting and provisioning VM via Lima (this may take several minutes)...")
+        output.detail("Starting and provisioning VM via Lima (this may take several minutes)...")
         result = run_detached(
             host_target,
             lima_cmd,
@@ -250,24 +248,24 @@ class LimaProvisioner(VMProvisioner):
                 bootstrap = parse_bootstrap_output(log_output, 1)
                 for step in bootstrap.steps:
                     if step.error:
-                        typer.echo(f"  Provision error ({step.name}): {step.error}", err=True)
+                        output.warn(f"Provision error ({step.name}): {step.error}")
         except SSHError:
             pass
 
     def start(self, vm: VMRow) -> None:
-        typer.echo(f"Starting Lima VM '{vm.name}'...")
+        output.info(f"Starting Lima VM '{vm.name}'...")
         self._run_lima(f"limactl start {vm.name}")
-        typer.echo(f"Lima VM '{vm.name}' started")
+        output.info(f"Lima VM '{vm.name}' started")
 
     def stop(self, vm: VMRow) -> None:
-        typer.echo(f"Stopping Lima VM '{vm.name}'...")
+        output.info(f"Stopping Lima VM '{vm.name}'...")
         self._run_lima(f"limactl stop {vm.name}")
-        typer.echo(f"Lima VM '{vm.name}' stopped")
+        output.info(f"Lima VM '{vm.name}' stopped")
 
     def delete(self, vm: VMRow) -> None:
-        typer.echo(f"Deleting Lima VM '{vm.name}'...")
+        output.info(f"Deleting Lima VM '{vm.name}'...")
         self._run_lima(f"limactl delete --force {vm.name}", check=False)
-        typer.echo(f"Lima VM '{vm.name}' deleted")
+        output.info(f"Lima VM '{vm.name}' deleted")
 
     def admin_exec_target(self, vm: VMRow, *, config: object | None = None) -> ExecTarget:
         if self.is_remote:

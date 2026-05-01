@@ -125,15 +125,19 @@ def _require_interactive(what: str) -> None:
 
 def _prompt_name(label: str, name: str | None) -> str:
     """Prompt for a name if not provided via --name, showing a random default."""
+    from agentworks import output
+
     if name is not None:
         return name
     _require_interactive("--name")
     default = _generate_name()
-    return str(typer.prompt(f"{label} name", default=default))
+    return output.prompt(f"{label} name", default=default)
 
 
 def _prompt_workspace(db: Database, workspace: str | None) -> str:
     """Prompt for a workspace if not provided, listing available workspaces."""
+    from agentworks import output
+
     if workspace is not None:
         return workspace
 
@@ -143,30 +147,28 @@ def _prompt_workspace(db: Database, workspace: str | None) -> str:
         raise typer.Exit(1)
 
     if len(workspaces) == 1:
-        typer.echo(f"Using workspace '{workspaces[0].name}'")
+        output.info(f"Using workspace '{workspaces[0].name}'")
         return workspaces[0].name
 
     _require_interactive("--workspace")
 
-    typer.echo("Select a workspace:")
-    for i, ws in enumerate(workspaces, 1):
-        label = f"  {i}) {ws.name}"
+    options = []
+    for ws in workspaces:
+        label = ws.name
         if ws.vm_name:
             label += f"  (vm: {ws.vm_name})"
         elif ws.type == "local":
             label += "  (local)"
-        typer.echo(label)
+        options.append(label)
 
-    choice = int(typer.prompt("Workspace number", type=int))
-    if choice < 1 or choice > len(workspaces):
-        typer.echo(f"Error: invalid choice {choice}", err=True)
-        raise typer.Exit(1)
-
-    return workspaces[choice - 1].name
+    idx = output.choose("Select a workspace:", options)
+    return workspaces[idx].name
 
 
 def _prompt_vm(db: Database, vm_name: str | None) -> str:
     """Prompt for a VM if not provided, listing available VMs."""
+    from agentworks import output
+
     if vm_name is not None:
         return vm_name
 
@@ -176,21 +178,14 @@ def _prompt_vm(db: Database, vm_name: str | None) -> str:
         raise typer.Exit(1)
 
     if len(vms) == 1:
-        typer.echo(f"Using VM '{vms[0].name}'")
+        output.info(f"Using VM '{vms[0].name}'")
         return vms[0].name
 
     _require_interactive("--vm")
 
-    typer.echo("Select a VM:")
-    for i, v in enumerate(vms, 1):
-        typer.echo(f"  {i}) {v.name}  ({v.platform})")
-
-    choice = int(typer.prompt("VM number", type=int))
-    if choice < 1 or choice > len(vms):
-        typer.echo(f"Error: invalid choice {choice}", err=True)
-        raise typer.Exit(1)
-
-    return vms[choice - 1].name
+    options = [f"{v.name}  ({v.platform})" for v in vms]
+    idx = output.choose("Select a VM:", options)
+    return vms[idx].name
 
 
 class _HasDescription(Protocol):
@@ -831,22 +826,16 @@ def session_create(
             vm_agents = db.list_agents(vm_name=resolved_vm)
             if vm_agents:
                 _require_interactive("--admin or --agent")
-                typer.echo("Run session as:")
-                typer.echo("  1) admin")
-                for i, a in enumerate(vm_agents, 2):
+                from agentworks import output
+
+                options = ["admin"]
+                for a in vm_agents:
                     label = f"agent: {a.name}"
                     if a.template:
                         label += f" [{a.template}]"
-                    typer.echo(f"  {i}) {label}")
-                choice = int(typer.prompt("Choice", type=int))
-                if choice == 1:
-                    resolved_agent = None
-                else:
-                    idx = choice - 2
-                    if idx < 0 or idx >= len(vm_agents):
-                        typer.echo(f"Error: invalid choice {choice}", err=True)
-                        raise typer.Exit(1)
-                    resolved_agent = vm_agents[idx].name
+                    options.append(label)
+                idx = output.choose("Run session as:", options)
+                resolved_agent = None if idx == 0 else vm_agents[idx - 1].name
 
         resolved_name = _prompt_name("Session", name)
         resolved_ws_name = resolved_workspace or f"ws-{resolved_name}"
@@ -886,6 +875,8 @@ def _prompt_session_mode(db: Database, workspace_name: str) -> str | None:
     if ws is None or ws.vm_name is None:
         return None
 
+    from agentworks import output
+
     agents = db.list_agents(vm_name=ws.vm_name)
     if not agents:
         # No agents on this VM, default to admin
@@ -893,22 +884,17 @@ def _prompt_session_mode(db: Database, workspace_name: str) -> str | None:
 
     _require_interactive("--admin or --agent")
 
-    typer.echo("Run session as:")
-    typer.echo("  1) admin")
-    for i, a in enumerate(agents, 2):
+    options = ["admin"]
+    for a in agents:
         label = f"agent: {a.name}"
         if a.template:
             label += f" [{a.template}]"
-        typer.echo(f"  {i}) {label}")
+        options.append(label)
 
-    choice = int(typer.prompt("Choice", type=int))
-    if choice == 1:
+    idx = output.choose("Run session as:", options)
+    if idx == 0:
         return None
-    idx = choice - 2
-    if idx < 0 or idx >= len(agents):
-        typer.echo(f"Error: invalid choice {choice}", err=True)
-        raise typer.Exit(1)
-    return agents[idx].name
+    return agents[idx - 1].name
 
 
 @session_app.command("describe")
@@ -1266,16 +1252,114 @@ def config_sync_ssh_config() -> None:
 
 
 def main() -> None:
-    """CLI entrypoint. Wraps the typer app to catch ConfigError cleanly."""
-    from agentworks.config import ConfigError
-    from agentworks.output import set_warn_handler
+    """CLI entrypoint. Sets up output handler and catches business logic errors."""
+    import time
 
-    # Route warnings through typer so they render consistently with other output
-    set_warn_handler(lambda msg: typer.echo(f"Warning: {msg}", err=True))
+    from agentworks.config import ConfigError
+    from agentworks.output import AgentworksError, Progress, UserAbort, set_handler
+
+    # -- Typer output handler --------------------------------------------------
+
+    class _TyperProgress:
+        def __init__(self, label: str, total: int | None = None) -> None:
+            self._label = label
+            self._total = total
+            self._start = time.monotonic()
+
+        def update(self, current: int | None = None, message: str | None = None) -> None:
+            parts = [f"  {self._label}..."]
+            if current is not None and self._total is not None and self._total > 0:
+                pct = current / self._total * 100
+                parts.append(f" {pct:.0f}% ({current}/{self._total})")
+            if message:
+                parts.append(f" {message}")
+            typer.echo("".join(parts))
+
+        def done(self, message: str | None = None) -> None:
+            elapsed = time.monotonic() - self._start
+            suffix = f" {message}" if message else ""
+            typer.echo(f"  {self._label} done ({elapsed:.0f}s){suffix}")
+
+    class _TyperHandler:
+        def info(self, message: str) -> None:
+            typer.echo(message)
+
+        def detail(self, message: str, indent: int = 1) -> None:
+            typer.echo(f"{'  ' * indent}{message}")
+
+        def warn(self, message: str) -> None:
+            typer.echo(f"Warning: {message}", err=True)
+
+        def confirm(self, message: str, default: bool = False) -> bool:
+            try:
+                return typer.confirm(message, default=default)
+            except click.exceptions.Abort:
+                from agentworks.output import UserAbort
+
+                raise UserAbort("interrupted") from None
+
+        def choose(self, message: str, options: list[str]) -> int:
+            typer.echo(message)
+            for i, option in enumerate(options, 1):
+                typer.echo(f"  {i}) {option}")
+            while True:
+                try:
+                    choice = int(typer.prompt("Choice", type=int))
+                    if 1 <= choice <= len(options):
+                        return choice - 1
+                except click.exceptions.Abort:
+                    from agentworks.output import UserAbort
+
+                    raise UserAbort("interrupted") from None
+                except ValueError:
+                    pass
+                typer.echo(f"Invalid choice. Enter 1-{len(options)}.")
+
+        def pause(self, message: str) -> None:
+            try:
+                input(message)
+            except (EOFError, KeyboardInterrupt):
+                from agentworks.output import UserAbort
+
+                raise UserAbort("interrupted") from None
+
+        def prompt(self, label: str, default: str | None = None) -> str:
+            return str(typer.prompt(label, default=default or ""))
+
+        def prompt_secret(self, label: str, hint: str | None = None) -> str:
+            import click
+
+            try:
+                if hint:
+                    typer.echo(f"  {hint}", err=True)
+                while True:
+                    value = str(click.prompt(label, err=True, default="", hide_input=True))
+                    if value.strip():
+                        break
+                    typer.echo("(empty, try again)", err=True)
+                return value
+            except click.exceptions.Abort:
+                from agentworks.output import UserAbort
+
+                raise UserAbort("interrupted") from None
+
+        def progress(self, label: str, total: int | None = None) -> Progress:
+            typer.echo(f"  {label}...")
+            return _TyperProgress(label, total)
+
+    set_handler(_TyperHandler())
+
+    # -- Run app ---------------------------------------------------------------
 
     try:
         app()
     except ConfigError as e:
         typer.echo(f"Configuration error: {e}", err=True)
+        raise SystemExit(1) from None
+    except UserAbort:
+        typer.echo("Aborted.", err=True)
+        raise SystemExit(1) from None
+    except AgentworksError as e:
+        typer.echo(f"Error: {e}", err=True)
         raise SystemExit(1) from None
 
