@@ -9,7 +9,10 @@ prefix key) while keeping a large scrollback buffer.
 from __future__ import annotations
 
 import shlex
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
+
+if TYPE_CHECKING:
+    from agentworks.ssh import ExecTarget
 
 RESTRICTED_CONFIG_PATH = "/opt/agentworks/tmux-session.conf"
 DEFAULT_HISTORY_LIMIT = 50_000
@@ -388,6 +391,54 @@ def session_exists(
         check=False,
     )
     return getattr(result, "ok", False)
+
+
+def batch_check_sessions(
+    target: ExecTarget,
+    checks: list[tuple[str, str | None]],
+) -> dict[str, bool]:
+    """Check multiple sessions in a single SSH call.
+
+    Args:
+        target: ExecTarget for the VM (admin user).
+        checks: list of (session_name, socket_path) pairs. socket_path=None
+            means check the default tmux server.
+
+    Returns:
+        dict mapping session_name to alive (True/False).
+
+    Runs as admin, who has group access to all agent sockets via
+    tmux-agent-access. No sudo required.
+    """
+    if not checks:
+        return {}
+
+    # Build a compound command: one has-session per check, printing
+    # "ALIVE:<name>" on success. All in one SSH roundtrip.
+    parts: list[str] = []
+    for name, sock in checks:
+        q_name = shlex.quote(name)
+        if sock:
+            q_sock = shlex.quote(sock)
+            parts.append(
+                f"tmux -S {q_sock} has-session -t {q_name} 2>/dev/null && echo ALIVE:{q_name}"
+            )
+        else:
+            parts.append(
+                f"tmux has-session -t {q_name} 2>/dev/null && echo ALIVE:{q_name}"
+            )
+
+    cmd = "; ".join(parts)
+    result = target.run(cmd, check=False)
+    stdout = result.stdout
+
+    alive_names = set()
+    for line in stdout.splitlines():
+        line = line.strip()
+        if line.startswith("ALIVE:"):
+            alive_names.add(line[6:])
+
+    return {name: name in alive_names for name, _ in checks}
 
 
 def send_keys(

@@ -637,17 +637,27 @@ def list_sessions(
                 rows.append((session.name, ws_name, vm_name, session.template, mode_label, session.status))
             continue
 
-        from agentworks.ssh import run
+        from agentworks.sessions.tmux import batch_check_sessions
 
         target = admin_exec_target(vm, config)
-        run_command = partial(run, target)
+
+        # Build explicit check list: (session_name, expected_socket_path)
+        checks = [(s.name, _effective_socket_path(db, s)) for s in ws_sessions]
+
+        # Single SSH call checks all sessions on their expected sockets
+        alive_map = batch_check_sessions(target, checks)
 
         for session in ws_sessions:
-            status = _reconcile_status(
-                session,
-                run_command=run_command,
-                db=db,
-            )
+            alive = alive_map.get(session.name, False)
+
+            status = session.status
+            if session.status == SessionStatus.RUNNING.value and not alive:
+                db.update_session_status(session.name, SessionStatus.STOPPED)
+                status = SessionStatus.STOPPED.value
+            elif session.status == SessionStatus.STOPPED.value and alive:
+                db.update_session_status(session.name, SessionStatus.RUNNING)
+                status = SessionStatus.RUNNING.value
+
             mode_label = f"agent ({session.agent_name})" if session.agent_name else "admin"
             rows.append((session.name, ws_name, vm_name, session.template, mode_label, status))
 
