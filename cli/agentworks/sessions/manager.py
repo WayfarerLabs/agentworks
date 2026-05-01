@@ -618,35 +618,49 @@ def list_sessions(
     # across VMs. Each VM gets one SSH call with all its session checks.
     alive_map: dict[str, bool] = {}
 
+    # Cache workspace and VM lookups (used for grouping and display)
+    ws_cache: dict[str, WorkspaceRow | None] = {}
+    vm_cache: dict[str, VMRow | None] = {}
+
+    def _get_ws(name: str) -> WorkspaceRow | None:
+        if name not in ws_cache:
+            ws_cache[name] = db.get_workspace(name)
+        return ws_cache[name]
+
+    def _get_vm(name: str) -> VMRow | None:
+        if name not in vm_cache:
+            vm_cache[name] = db.get_vm(name)
+        return vm_cache[name]
+
     if not no_status:
         from concurrent.futures import ThreadPoolExecutor
 
         from agentworks.sessions.tmux import batch_check_sessions
 
-        # Group sessions by VM for batching
-        by_vm: dict[str, list[SessionRow]] = {}
-        vm_cache: dict[str, object] = {}  # vm_name -> VMRow
+        # Group sessions by VM, precomputing socket paths on the main thread
+        # (DB is not thread-safe with check_same_thread=True).
+        by_vm: dict[str, list[tuple[str, str | None]]] = {}  # vm_name -> [(session_name, socket)]
         for session in sessions:
-            ws = db.get_workspace(session.workspace_name)
+            ws = _get_ws(session.workspace_name)
             if ws is None or ws.type != "vm" or ws.vm_name is None:
                 continue
-            vm = vm_cache.get(ws.vm_name) or db.get_vm(ws.vm_name)
-            if vm is None or getattr(vm, "tailscale_host", None) is None:
+            vm = _get_vm(ws.vm_name)
+            if vm is None or vm.tailscale_host is None:
                 continue
-            vm_cache[ws.vm_name] = vm
-            by_vm.setdefault(ws.vm_name, []).append(session)
+            sock = _effective_socket_path(db, session)
+            by_vm.setdefault(ws.vm_name, []).append((session.name, sock))
 
-        def _check_vm(vm_name: str, vm_sessions: list[SessionRow]) -> dict[str, bool]:
-            vm = vm_cache[vm_name]
-            target = admin_exec_target(vm, config)  # type: ignore[arg-type]
-            checks = [(s.name, _effective_socket_path(db, s)) for s in vm_sessions]
+        def _check_vm(vm_name: str, checks: list[tuple[str, str | None]]) -> dict[str, bool]:
+            vm = _get_vm(vm_name)
+            assert vm is not None
+            target = admin_exec_target(vm, config)
             return batch_check_sessions(target, checks)
 
         # Hit all VMs in parallel
         with ThreadPoolExecutor(max_workers=len(by_vm) or 1) as pool:
             futures = {
-                pool.submit(_check_vm, name, vm_sessions): name
-                for name, vm_sessions in by_vm.items()
+                pool.submit(_check_vm, name, checks): name
+                for name, checks in by_vm.items()
             }
             for future in futures:
                 alive_map.update(future.result())
@@ -654,8 +668,8 @@ def list_sessions(
     # Build display rows, reconciling status from alive_map
     rows: list[tuple[str, str, str, str, str, str]] = []
     for session in sessions:
-        ws = db.get_workspace(session.workspace_name)
-        vm_name = ws.vm_name or "-" if ws else "-"
+        ws = _get_ws(session.workspace_name)
+        vm_name = (ws.vm_name or "-") if ws else "-"
         mode_label = f"agent ({session.agent_name})" if session.agent_name else "admin"
 
         if session.name in alive_map:
