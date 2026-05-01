@@ -68,45 +68,28 @@ def _effective_socket_path(db: Database, session: SessionRow) -> str | None:
     return agent_socket_path(agent.linux_user, session.name)
 
 
-def _kill_session_any_server(
+def _session_alive(
+    session_name: str,
+    *,
+    run_command: RunCommand,
+    socket_path: str | None,
+) -> bool:
+    """Check if a session's tmux session is alive on its expected server."""
+    from agentworks.sessions.tmux import session_exists
+
+    return session_exists(session_name, run_command=run_command, socket_path=socket_path)
+
+
+def _kill_session(
     session_name: str,
     *,
     run_command: RunCommand,
     socket_path: str | None,
 ) -> None:
-    """Kill a session on both the agent socket and the default server.
-
-    Handles migration from the old model (agent sessions on the admin's
-    default tmux server) to the new model (per-agent sockets). Safe to call
-    even if the session exists on neither or both.
-    """
+    """Kill a session on its expected tmux server."""
     from agentworks.sessions.tmux import kill_session
 
-    if socket_path:
-        kill_session(session_name, run_command=run_command, socket_path=socket_path)
-    # Always try the default server too, to clean up legacy sessions
-    kill_session(session_name, run_command=run_command)
-
-
-def _session_exists_any_server(
-    session_name: str,
-    *,
-    run_command: RunCommand,
-    socket_path: str | None,
-    warn_legacy: bool = True,
-) -> bool:
-    """Check if a session exists on either the agent socket or the default server."""
-    from agentworks.sessions.tmux import session_exists
-
-    if socket_path and session_exists(session_name, run_command=run_command, socket_path=socket_path):
-        return True
-    on_default = session_exists(session_name, run_command=run_command)
-    if on_default and socket_path and warn_legacy:
-        output.warn(
-            f"agent session '{session_name}' is running on the default tmux server "
-            f"(legacy mode). Restart it to use the new per-agent socket."
-        )
-    return on_default
+    kill_session(session_name, run_command=run_command, socket_path=socket_path)
 
 
 def _require_workspace(db: Database, name: str) -> WorkspaceRow:
@@ -242,9 +225,7 @@ def _reconcile_status(
 ) -> str:
     """Check tmux session and reconcile session status in the DB."""
     sock = _effective_socket_path(db, session)
-    alive = _session_exists_any_server(
-        session.name, run_command=run_command, socket_path=sock,
-    )
+    alive = _session_alive(session.name, run_command=run_command, socket_path=sock)
     if session.status == SessionStatus.RUNNING.value and not alive:
         db.update_session_status(session.name, SessionStatus.STOPPED)
         return SessionStatus.STOPPED.value
@@ -382,8 +363,8 @@ def stop_session(
     time.sleep(_STOP_GRACE_SECONDS)
 
     # Kill if still alive (checks both servers for migration compatibility)
-    if _session_exists_any_server(name, run_command=run_command, socket_path=sock, warn_legacy=False):
-        _kill_session_any_server(name, run_command=run_command, socket_path=sock)
+    if _session_alive(name, run_command=run_command, socket_path=sock):
+        _kill_session(name, run_command=run_command, socket_path=sock)
 
     db.update_session_status(name, SessionStatus.STOPPED)
     output.info(f"Session '{name}' stopped")
@@ -408,12 +389,12 @@ def restart_session(
     ws, vm, run_command, run_as_root = _prepare_vm(db, config, session.workspace_name, operation="session-restart")
     sock = _effective_socket_path(db, session)
 
-    if _session_exists_any_server(name, run_command=run_command, socket_path=sock, warn_legacy=False):
+    if _session_alive(name, run_command=run_command, socket_path=sock):
         if not force:
             raise output.SessionError(
                 f"session '{name}' is still running. Stop it first, or use --force."
             )
-        _kill_session_any_server(name, run_command=run_command, socket_path=sock)
+        _kill_session(name, run_command=run_command, socket_path=sock)
 
     template = _resolve_template(config, session.template)
     deploy_restricted_config(run_command, history_limit=config.session.history_limit)
@@ -513,12 +494,12 @@ def delete_session(
 
     if (
         not yes
-        and _session_exists_any_server(name, run_command=run_command, socket_path=sock)
+        and _session_alive(name, run_command=run_command, socket_path=sock)
         and not output.confirm(f"Session '{name}' is still running. Delete anyway?")
     ):
         raise output.UserAbort("delete cancelled")
 
-    _kill_session_any_server(name, run_command=run_command, socket_path=sock)
+    _kill_session(name, run_command=run_command, socket_path=sock)
 
     # Remove stale socket file if the tmux server has exited.
     # If the kill failed, warn and leave the socket for debugging.
@@ -714,24 +695,19 @@ def attach_session(
     name: str,
 ) -> None:
     """Attach to a session's tmux session (interactive)."""
-    from agentworks.sessions.tmux import session_exists, tmux_cmd
+    from agentworks.sessions.tmux import tmux_cmd
     from agentworks.ssh import interactive
 
     session = _require_session(db, name)
     _ws, vm, run_command, _ = _prepare_vm(db, config, session.workspace_name, operation="session-attach")
     sock = _effective_socket_path(db, session)
 
-    if not _session_exists_any_server(name, run_command=run_command, socket_path=sock):
+    if not _session_alive(name, run_command=run_command, socket_path=sock):
         raise output.SessionError(f"session '{name}' is not running")
 
-    # Determine which server has the session. Prefer the socket; fall back
-    # to the default server for legacy sessions.
     q_session = shlex.quote(name)
     target = admin_exec_target(vm, config)
-    if sock and session_exists(name, run_command=run_command, socket_path=sock):
-        sys.exit(interactive(target, tmux_cmd(f"attach -t {q_session}", sock)))
-    else:
-        sys.exit(interactive(target, tmux_cmd(f"attach -t {q_session}")))
+    sys.exit(interactive(target, tmux_cmd(f"attach -t {q_session}", sock)))
 
 
 def session_logs(
