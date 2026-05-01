@@ -393,6 +393,10 @@ def session_exists(
     return getattr(result, "ok", False)
 
 
+class BatchCheckError(Exception):
+    """Raised when the batch session check command itself failed (SSH error, etc.)."""
+
+
 def batch_check_sessions(
     target: ExecTarget,
     checks: list[tuple[str, str | None]],
@@ -407,6 +411,11 @@ def batch_check_sessions(
     Returns:
         dict mapping session_name to alive (True/False).
 
+    Raises:
+        BatchCheckError: if the SSH command itself failed (connection error,
+            permission denied, etc.). Callers should warn and skip
+            reconciliation rather than marking sessions as stopped.
+
     Runs as admin, who has group access to all agent sockets via
     tmux-agent-access. No sudo required.
     """
@@ -414,35 +423,59 @@ def batch_check_sessions(
         return {}
 
     # Build a compound command: all checks run in parallel via &, then wait.
-    # Each subshell prints "ALIVE:<name>" on success. Single SSH roundtrip.
+    # Each subshell prints "ALIVE:<name>" on success, "ERROR:<name>" on
+    # permission/access failure. Single SSH roundtrip.
     parts: list[str] = []
     for name, sock in checks:
         q_name = shlex.quote(name)
-        # Use quoted name for tmux args (safe execution) but raw name in
-        # the ALIVE marker (so output matches the dict keys exactly).
-        q_marker = shlex.quote(f"ALIVE:{name}")
+        q_alive = shlex.quote(f"ALIVE:{name}")
+        q_error = shlex.quote(f"ERROR:{name}")
         if sock:
             q_sock = shlex.quote(sock)
+            # Check socket exists and is accessible before querying tmux.
             parts.append(
-                f"(tmux -S {q_sock} has-session -t {q_name} 2>/dev/null && echo {q_marker}) &"
+                f"(if [ ! -e {q_sock} ]; then echo {q_error}; "
+                f"elif tmux -S {q_sock} has-session -t {q_name} 2>/dev/null; then echo {q_alive}; fi) &"
             )
         else:
             parts.append(
-                f"(tmux has-session -t {q_name} 2>/dev/null && echo {q_marker}) &"
+                f"(tmux has-session -t {q_name} 2>/dev/null && echo {q_alive}) &"
             )
+    # Sentinel to distinguish "command ran but no sessions alive" from
+    # "SSH failed and produced no output"
     parts.append("wait")
+    parts.append("echo DONE")
 
     cmd = " ".join(parts)
-    result = target.run(cmd, check=False)
-    stdout = result.stdout
+    from agentworks.ssh import SSHError
 
-    alive_names = set()
+    try:
+        result = target.run(cmd, check=False)
+    except SSHError as e:
+        raise BatchCheckError(f"SSH failed: {e}") from e
+
+    stdout = result.stdout
+    if "DONE" not in stdout:
+        raise BatchCheckError("batch check did not complete (no DONE sentinel)")
+
+    alive_names: set[str] = set()
+    error_names: set[str] = set()
     for line in stdout.splitlines():
         line = line.strip()
         if line.startswith("ALIVE:"):
             alive_names.add(line[6:])
+        elif line.startswith("ERROR:"):
+            error_names.add(line[6:])
 
-    return {name: name in alive_names for name, _ in checks}
+    result_map: dict[str, bool] = {}
+    for name, _ in checks:
+        if name in error_names:
+            from agentworks import output
+
+            output.warn(f"session '{name}': socket not accessible (run 'vm reinit' to fix)")
+        result_map[name] = name in alive_names
+
+    return result_map
 
 
 def send_keys(

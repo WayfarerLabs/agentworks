@@ -354,10 +354,8 @@ def stop_session(
 
     sock = _effective_socket_path(db, session)
 
-    # Send C-c to the running process first (try both socket and default server)
+    # Send C-c to the running process
     send_keys(name, "C-c", run_command=run_command, socket_path=sock)
-    if sock:
-        send_keys(name, "C-c", run_command=run_command)
 
     # Wait for graceful exit
     time.sleep(_STOP_GRACE_SECONDS)
@@ -724,15 +722,11 @@ def session_logs(
     lines: int | None = None,
 ) -> None:
     """Dump the scrollback buffer for a session."""
-    from agentworks.sessions.tmux import capture_output, session_exists
+    from agentworks.sessions.tmux import capture_output
 
     session = _require_session(db, name)
     _ws, _vm, run_command, _ = _prepare_vm(db, config, session.workspace_name, operation="session-logs")
     sock = _effective_socket_path(db, session)
-
-    # For legacy sessions, fall back to the default server
-    if sock and not session_exists(name, run_command=run_command, socket_path=sock):
-        sock = None
 
     captured = capture_output(
         name,
