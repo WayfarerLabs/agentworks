@@ -245,7 +245,10 @@ def doctor() -> None:
             typer.echo(f"  {label} {msg}")
         typer.echo()
 
-    typer.echo(f"Results: {report.ok_count} ok, {report.warn_count} warnings, {report.fail_count} failures")
+    typer.echo(
+        f"Results: {report.ok_count} ok, {report.info_count} info, "
+        f"{report.warn_count} warnings, {report.fail_count} failures"
+    )
     if report.has_failures:
         raise typer.Exit(1)
 
