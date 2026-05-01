@@ -241,7 +241,7 @@ def doctor() -> None:
                 Status.FAIL: "[FAIL]",
             }[check.status].ljust(6)
             msg = check.name
-            if check.message:
+            if check.message is not None:
                 msg += f" ({check.message})"
             typer.echo(f"  {label} {msg}")
         typer.echo()
