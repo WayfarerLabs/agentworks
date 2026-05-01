@@ -432,9 +432,11 @@ def batch_check_sessions(
         q_error = shlex.quote(f"ERROR:{name}")
         if sock:
             q_sock = shlex.quote(sock)
-            # Check socket exists and is accessible before querying tmux.
+            # Missing socket = dead (normal, session was stopped and cleaned up).
+            # Existing socket but not readable = permission error (warn + reinit).
             parts.append(
-                f"(if [ ! -e {q_sock} ]; then echo {q_error}; "
+                f"(if [ ! -e {q_sock} ]; then :; "
+                f"elif [ ! -r {q_sock} ]; then echo {q_error}; "
                 f"elif tmux -S {q_sock} has-session -t {q_name} 2>/dev/null; then echo {q_alive}; fi) &"
             )
         else:

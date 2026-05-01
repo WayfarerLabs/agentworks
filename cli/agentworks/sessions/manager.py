@@ -612,7 +612,7 @@ def list_sessions(
         return vm_cache[name]
 
     if not no_status:
-        from concurrent.futures import ThreadPoolExecutor
+        from concurrent.futures import ThreadPoolExecutor, as_completed
 
         from agentworks.sessions.tmux import batch_check_sessions
 
@@ -643,7 +643,7 @@ def list_sessions(
                 pool.submit(_check_vm, name, checks): name
                 for name, checks in by_vm.items()
             }
-            for future in futures:
+            for future in as_completed(futures):
                 try:
                     alive_map.update(future.result())
                 except Exception as e:

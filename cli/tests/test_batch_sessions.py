@@ -55,11 +55,20 @@ def test_missing_sentinel_raises_batch_error() -> None:
         batch_check_sessions(target, [("s1", None)])
 
 
-def test_socket_error_warns_and_marks_dead(warnings: list[str]) -> None:
+def test_socket_permission_error_warns(warnings: list[str]) -> None:
+    """Socket exists but not readable -> ERROR marker -> warn + reinit hint."""
     target = _mock_target(stdout="ERROR:agent-session\nDONE\n")
     result = batch_check_sessions(target, [("agent-session", "/bad/socket")])
     assert result == {"agent-session": False}
     assert any("socket not accessible" in w for w in warnings)
+
+
+def test_missing_socket_is_dead_not_error(warnings: list[str]) -> None:
+    """Missing socket is normal (session stopped + cleaned up), no warning."""
+    target = _mock_target(stdout="DONE\n")
+    result = batch_check_sessions(target, [("stopped-session", "/missing/socket")])
+    assert result == {"stopped-session": False}
+    assert len(warnings) == 0
 
 
 def test_command_includes_socket_path() -> None:
