@@ -12,6 +12,10 @@ import sys
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from agentworks.config import Config
 
 
 class Status(Enum):
@@ -83,7 +87,7 @@ def run_checks() -> HealthReport:
     config_group, config = _check_config()
     report.groups.append(config_group)
 
-    if config is not None and hasattr(config, "git_credentials") and config.git_credentials:
+    if config is not None and config.git_credentials:
         report.groups.append(_check_git_credentials(config))
 
     report.groups.append(_check_database())
@@ -179,7 +183,7 @@ def _check_tailscale() -> HealthGroup:
     return g
 
 
-def _check_config() -> tuple[HealthGroup, object | None]:
+def _check_config() -> tuple[HealthGroup, Config | None]:
     """Returns (group, config_or_none)."""
     from agentworks.config import CONFIG_PATH, ConfigError
 
@@ -250,12 +254,9 @@ def _check_ssh_key(g: HealthGroup, path: object, label: str) -> None:
             g.warn("SSH private key permissions", f"{oct(mode)}, recommend 600")
 
 
-def _check_git_credentials(config: object) -> HealthGroup:
+def _check_git_credentials(config: Config) -> HealthGroup:
     """Check git credential providers."""
-    from agentworks.config import Config
     from agentworks.vms.initializer import resolve_git_credential_providers
-
-    assert isinstance(config, Config)
 
     g = HealthGroup("Git credentials")
 
