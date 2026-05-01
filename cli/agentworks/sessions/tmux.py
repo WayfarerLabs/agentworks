@@ -418,14 +418,17 @@ def batch_check_sessions(
     parts: list[str] = []
     for name, sock in checks:
         q_name = shlex.quote(name)
+        # Use quoted name for tmux args (safe execution) but raw name in
+        # the ALIVE marker (so output matches the dict keys exactly).
+        q_marker = shlex.quote(f"ALIVE:{name}")
         if sock:
             q_sock = shlex.quote(sock)
             parts.append(
-                f"(tmux -S {q_sock} has-session -t {q_name} 2>/dev/null && echo ALIVE:{q_name}) &"
+                f"(tmux -S {q_sock} has-session -t {q_name} 2>/dev/null && echo {q_marker}) &"
             )
         else:
             parts.append(
-                f"(tmux has-session -t {q_name} 2>/dev/null && echo ALIVE:{q_name}) &"
+                f"(tmux has-session -t {q_name} 2>/dev/null && echo {q_marker}) &"
             )
     parts.append("wait")
 

@@ -362,7 +362,7 @@ def stop_session(
     # Wait for graceful exit
     time.sleep(_STOP_GRACE_SECONDS)
 
-    # Kill if still alive (checks both servers for migration compatibility)
+    # Kill if still alive on the session's expected tmux server
     if _session_alive(name, run_command=run_command, socket_path=sock):
         _kill_session(name, run_command=run_command, socket_path=sock)
 
@@ -633,18 +633,24 @@ def list_sessions(
 
         def _check_vm(vm_name: str, checks: list[tuple[str, str | None]]) -> dict[str, bool]:
             vm = _get_vm(vm_name)
-            assert vm is not None
+            if vm is None:
+                output.warn(f"VM '{vm_name}' not found, skipping status check")
+                return {}
             target = admin_exec_target(vm, config)
             return batch_check_sessions(target, checks)
 
-        # Hit all VMs in parallel
-        with ThreadPoolExecutor(max_workers=len(by_vm) or 1) as pool:
+        # Hit all VMs in parallel (cap at 8 to avoid overwhelming SSH)
+        with ThreadPoolExecutor(max_workers=min(len(by_vm), 8) or 1) as pool:
             futures = {
                 pool.submit(_check_vm, name, checks): name
                 for name, checks in by_vm.items()
             }
             for future in futures:
-                alive_map.update(future.result())
+                try:
+                    alive_map.update(future.result())
+                except Exception as e:
+                    vm_name = futures[future]
+                    output.warn(f"status check failed for VM '{vm_name}': {e}")
 
     # Build display rows, reconciling status from alive_map
     rows: list[tuple[str, str, str, str, str, str]] = []
