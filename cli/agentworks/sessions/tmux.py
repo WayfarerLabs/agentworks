@@ -58,6 +58,11 @@ def ensure_agent_socket_root(
     )
     stdout = probe.stdout.strip()
     if stdout == f"{AGENT_SOCKET_GROUP} 2771":
+        # Directory is correct, but still ensure admin is in the group
+        # (needed since we no longer use sudo for runtime tmux operations).
+        admin = shlex.quote(admin_username)
+        grp = shlex.quote(AGENT_SOCKET_GROUP)
+        target.run(f"usermod -aG {grp} {admin}", sudo=True, check=False)
         return
 
     if stdout == "MISSING":
@@ -140,6 +145,14 @@ def cleanup_stale_sockets(target: ExecTarget, linux_user: str) -> int:
         if not sock_path:
             continue
         q_sock = shlex.quote(sock_path)
+        # Only remove if socket is accessible but has no running server.
+        # If we can't read the socket, it's a permissions issue -- warn, don't delete.
+        access = target.run(f"test -r {q_sock} -a -w {q_sock}", check=False)
+        if not access.ok:
+            from agentworks import output
+
+            output.warn(f"Socket {sock_path} not accessible (run 'vm reinit' to fix)")
+            continue
         check = target.run(f"tmux -S {q_sock} list-sessions 2>/dev/null", check=False)
         if not check.ok:
             target.run(f"rm -f {q_sock}", sudo=True, check=False)
@@ -419,6 +432,12 @@ def batch_check_sessions(
         result = target.run(cmd, check=False)
     except SSHError as e:
         raise BatchCheckError(f"SSH failed: {e}") from e
+
+    # Detect non-SSH failures (syntax error, missing tmux, etc.) via stderr.
+    # Normal has-session failures just produce no ALIVE line, not stderr.
+    stderr = result.stderr.strip()
+    if stderr and "has-session" not in stderr:
+        raise BatchCheckError(f"batch check failed: {stderr}")
 
     stdout = result.stdout
 

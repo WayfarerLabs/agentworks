@@ -173,8 +173,8 @@ def test_ensure_agent_socket_root_ok_fast_path_no_warning(warnings: list[str]) -
     runner = _FakeTarget(f"{AGENT_SOCKET_GROUP} 2771")
     ensure_agent_socket_root(runner, "agentworks")
     assert warnings == []
-    # Fast path: only the probe ran, no setup commands
-    assert len(runner.commands) == 1
+    # Fast path: probe + group membership check only (no full setup)
+    assert len(runner.commands) == 2
 
 
 def test_ensure_agent_socket_dir_missing_warns_by_default(warnings: list[str]) -> None:

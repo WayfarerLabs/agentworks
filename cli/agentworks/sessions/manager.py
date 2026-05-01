@@ -130,8 +130,8 @@ def _prepare_vm(
     if vm.tailscale_host is None:
         raise output.VMError(f"VM '{vm.name}' has no Tailscale address")
 
-    target = admin_exec_target(vm, config)
     logger = SSHLogger(vm.name, operation) if operation else None
+    target = admin_exec_target(vm, config, logger=logger)
     run_command = partial(run, target, logger=logger)
     run_as_root = partial(ssh_run_as_root, target, logger=logger)
     return ws, vm, run_command, run_as_root, target
