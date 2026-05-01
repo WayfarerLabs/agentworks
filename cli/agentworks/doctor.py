@@ -91,7 +91,18 @@ def run_checks() -> HealthReport:
         report.groups.append(_check_git_credentials(config))
 
     report.groups.append(_check_database())
-    report.groups.append(_check_completions())
+
+    # Completions check needs the CLI app to compute the spec version.
+    # Import here (not in _check_completions) to keep doctor decoupled.
+    try:
+        from agentworks.cli import app
+        from agentworks.completions.spec import build_spec, completion_version
+
+        report.groups.append(_check_completions(completion_version(build_spec(app))))
+    except Exception:
+        g = HealthGroup("Shell completions")
+        g.warn("Completions", "could not check (CLI import failed)")
+        report.groups.append(g)
 
     return report
 
@@ -344,14 +355,8 @@ def _report_db_contents(g: HealthGroup, db: object) -> None:
             g.warn(f"VM '{vm.name}'", f"unexpected init status: {vm.init_status}")
 
 
-def _check_completions() -> HealthGroup:
+def _check_completions(current_version: str) -> HealthGroup:
     g = HealthGroup("Shell completions")
-
-    # Lazy import to avoid circular dependency at module level
-    from agentworks.cli import app
-    from agentworks.completions.spec import build_spec, completion_version
-
-    current_version = completion_version(build_spec(app))
 
     shells = _get_completion_paths()
 

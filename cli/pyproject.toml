@@ -37,6 +37,11 @@ select = [
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["TCH"]
 
+[tool.pytest.ini_options]
+markers = [
+    "integration: tests that probe the real environment (filesystem, subprocesses, database)",
+]
+
 [tool.mypy]
 python_version = "3.12"
 strict = true

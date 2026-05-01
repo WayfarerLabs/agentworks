@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from agentworks.doctor import HealthCheck, HealthGroup, HealthReport, Status
 
 
@@ -61,8 +63,13 @@ def test_health_check_message_optional() -> None:
     assert check_with_msg.message == "details"
 
 
+@pytest.mark.integration
 def test_run_checks_returns_report() -> None:
-    """Smoke test: run_checks returns a valid HealthReport with expected groups."""
+    """Smoke test: run_checks returns a valid HealthReport with expected groups.
+
+    Marked as integration because it probes the real environment (filesystem,
+    subprocesses, database).
+    """
     from agentworks.doctor import run_checks
 
     report = run_checks()
