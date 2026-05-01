@@ -441,11 +441,7 @@ def batch_check_sessions(
             parts.append(
                 f"tmux has-session -t {q_name} 2>/dev/null && echo {q_alive} || true"
             )
-    # Sentinel to distinguish "command ran but no sessions alive" from
-    # "SSH failed and produced no output"
-    parts.append("echo DONE")
-
-    cmd = " ".join(parts)
+    cmd = "; ".join(parts)
     from agentworks.ssh import SSHError
 
     try:
@@ -454,8 +450,6 @@ def batch_check_sessions(
         raise BatchCheckError(f"SSH failed: {e}") from e
 
     stdout = result.stdout
-    if "DONE" not in stdout:
-        raise BatchCheckError("batch check did not complete (no DONE sentinel)")
 
     alive_names: set[str] = set()
     error_names: set[str] = set()
