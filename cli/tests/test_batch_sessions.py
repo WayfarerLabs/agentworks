@@ -49,12 +49,12 @@ def test_ssh_failure_raises_batch_error() -> None:
         batch_check_sessions(target, [("s1", None)])
 
 
-def test_socket_permission_error_warns(warnings: list[str]) -> None:
-    """Socket exists but not readable -> ERROR marker -> warn + reinit hint."""
-    target = _mock_target(stdout="ERROR:agent-session\n")
+def test_running_but_inaccessible_warns(warnings: list[str]) -> None:
+    """Sudo fallback detects running session with bad permissions -> ALIVE + ERROR."""
+    target = _mock_target(stdout="ALIVE:agent-session\nERROR:agent-session\n")
     result = batch_check_sessions(target, [("agent-session", "/bad/socket")])
-    assert result == {"agent-session": False}
-    assert any("socket not accessible" in w for w in warnings)
+    assert result == {"agent-session": True}
+    assert any("running but socket not accessible" in w for w in warnings)
 
 
 def test_missing_socket_is_dead_not_error(warnings: list[str]) -> None:
@@ -85,6 +85,8 @@ def test_command_includes_socket_path() -> None:
     cmd = target.run.call_args[0][0]
     assert "/run/agent/sock" in cmd
     assert "tmux -S" in cmd
+    # sudo fallback for inaccessible sockets
+    assert "sudo -n tmux -S" in cmd
 
 
 def test_command_default_server_no_socket() -> None:

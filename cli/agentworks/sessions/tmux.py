@@ -415,11 +415,15 @@ def batch_check_sessions(
         if sock:
             q_sock = shlex.quote(sock)
             # Missing socket = dead (normal, session was stopped and cleaned up).
-            # Existing socket but not readable = permission error (warn + reinit).
+            # Try without sudo first (admin has group access in the normal case).
+            # Fall back to sudo to distinguish "actually dead" from "running but
+            # inaccessible" (filesystem permissions or tmux server-access ACL).
+            # If sudo succeeds, emit both ALIVE and ERROR so callers can warn.
             parts.append(
                 f"if [ ! -e {q_sock} ]; then :; "
-                f"elif [ ! -r {q_sock} ] || [ ! -w {q_sock} ]; then echo {q_error}; "
-                f"elif tmux -S {q_sock} has-session -t {q_name} 2>/dev/null; then echo {q_alive}; fi"
+                f"elif tmux -S {q_sock} has-session -t {q_name} 2>/dev/null; then echo {q_alive}; "
+                f"elif sudo -n tmux -S {q_sock} has-session -t {q_name} 2>/dev/null; "
+                f"then echo {q_alive}; echo {q_error}; fi"
             )
         else:
             parts.append(
@@ -460,7 +464,7 @@ def batch_check_sessions(
         if name in error_names:
             from agentworks import output
 
-            output.warn(f"session '{name}': socket not accessible (run 'vm reinit' to fix)")
+            output.warn(f"session '{name}': running but socket not accessible by admin (run 'vm reinit' to fix)")
         result_map[name] = name in alive_names
 
     return result_map
