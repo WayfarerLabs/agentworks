@@ -72,6 +72,13 @@ def test_tmux_not_found_raises_batch_error() -> None:
         batch_check_sessions(target, [("s1", None)])
 
 
+def test_nonzero_exit_raises_batch_error() -> None:
+    """Non-zero exit (e.g. shell syntax error) raises instead of returning all-dead."""
+    target = _mock_target(stdout="", returncode=2)
+    with pytest.raises(BatchCheckError, match="batch check exited 2"):
+        batch_check_sessions(target, [("s1", None)])
+
+
 def test_command_includes_socket_path() -> None:
     target = _mock_target(stdout="")
     batch_check_sessions(target, [("s1", "/run/agent/sock")])

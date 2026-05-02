@@ -439,6 +439,13 @@ def batch_check_sessions(
     if "ERROR:TMUX_NOT_FOUND" in stdout:
         raise BatchCheckError("tmux is not installed on this VM")
 
+    # Non-zero exit without the TMUX_NOT_FOUND sentinel means something
+    # unexpected failed (syntax error, shell issue, etc.). Raise so callers
+    # skip reconciliation rather than marking everything as stopped.
+    if not result.ok:
+        stderr = (result.stderr or "").strip()
+        raise BatchCheckError(f"batch check exited {result.returncode}: {stderr}")
+
     alive_names: set[str] = set()
     error_names: set[str] = set()
     for line in stdout.splitlines():
