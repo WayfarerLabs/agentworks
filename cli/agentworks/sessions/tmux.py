@@ -42,7 +42,7 @@ def ensure_agent_socket_root(
     """Create the agent tmux socket root directory and group (idempotent).
 
     Fast-paths when the directory already exists with the correct group and
-    permissions (single SSH round-trip).
+    permissions (probe + group membership check).
 
     Pass ``warn_if_missing=False`` when the caller already knows the directory
     won't exist (e.g. first-time VM init), to avoid a misleading warning.
@@ -228,7 +228,8 @@ def tmux_cmd(base: str, socket_path: str | None = None) -> str:
 
     Admin has group access to agent sockets via tmux-agent-access, so sudo
     is not needed. If access fails, that indicates a permissions problem
-    that should be fixed via vm reinit.
+    (restart the session to reapply ACLs, or run vm reinit for filesystem
+    permissions).
     """
     return f"tmux -S {shlex.quote(socket_path)} {base}" if socket_path else f"tmux {base}"
 
@@ -464,7 +465,7 @@ def batch_check_sessions(
         if name in error_names:
             from agentworks import output
 
-            output.warn(f"session '{name}': running but socket not accessible by admin (run 'vm reinit' to fix)")
+            output.warn(f"session '{name}': running but socket not accessible by admin (restart session to fix)")
         result_map[name] = name in alive_names
 
     return result_map
