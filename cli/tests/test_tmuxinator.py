@@ -126,8 +126,8 @@ class _FakeResult:
     ok: bool = True
 
 
-class _FakeRunner:
-    """Fake RunCommand that returns canned output for the first probe call
+class _FakeTarget:
+    """Fake ExecTarget that returns canned output for the first probe call
     (the only call that determines warning behavior) and ignores subsequent
     setup commands."""
 
@@ -136,73 +136,73 @@ class _FakeRunner:
         self._probe_done = False
         self.commands: list[str] = []
 
-    def __call__(self, command: str, *, check: bool = True) -> object:
+    def run(self, command: str, *, check: bool = True, sudo: bool = False, tty: bool | None = None) -> _FakeResult:
         self.commands.append(command)
-        # The first call is the probe (begins with "if test -d").
-        if not self._probe_done and command.lstrip().startswith("if test -d"):
+        # The first call is the probe (contains "if test -d").
+        if not self._probe_done and "if test -d" in command:
             self._probe_done = True
             return _FakeResult(stdout=self._probe_stdout)
         return _FakeResult()
 
 
 def test_ensure_agent_socket_root_missing_warns_by_default(warnings: list[str]) -> None:
-    ensure_agent_socket_root(_FakeRunner("MISSING"), "agentworks")
+    ensure_agent_socket_root(_FakeTarget("MISSING"), "agentworks")
     assert any("missing" in w for w in warnings)
 
 
 def test_ensure_agent_socket_root_missing_silent_when_expected(warnings: list[str]) -> None:
-    ensure_agent_socket_root(_FakeRunner("MISSING"), "agentworks", warn_if_missing=False)
+    ensure_agent_socket_root(_FakeTarget("MISSING"), "agentworks", warn_if_missing=False)
     assert warnings == []
 
 
 def test_ensure_agent_socket_root_misconfigured_warns_even_when_missing_suppressed(
     warnings: list[str],
 ) -> None:
-    ensure_agent_socket_root(_FakeRunner("root 755"), "agentworks", warn_if_missing=False)
+    ensure_agent_socket_root(_FakeTarget("root 755"), "agentworks", warn_if_missing=False)
     assert any("misconfigured" in w for w in warnings)
 
 
 def test_ensure_agent_socket_root_probe_failed_warns_even_when_missing_suppressed(
     warnings: list[str],
 ) -> None:
-    ensure_agent_socket_root(_FakeRunner("PROBE_FAILED"), "agentworks", warn_if_missing=False)
+    ensure_agent_socket_root(_FakeTarget("PROBE_FAILED"), "agentworks", warn_if_missing=False)
     assert any("probe failed" in w for w in warnings)
 
 
 def test_ensure_agent_socket_root_ok_fast_path_no_warning(warnings: list[str]) -> None:
-    runner = _FakeRunner(f"{AGENT_SOCKET_GROUP} 2771")
+    runner = _FakeTarget(f"{AGENT_SOCKET_GROUP} 2771")
     ensure_agent_socket_root(runner, "agentworks")
     assert warnings == []
-    # Fast path: only the probe ran, no setup commands
-    assert len(runner.commands) == 1
+    # Fast path: probe + group membership check only (no full setup)
+    assert len(runner.commands) == 2
 
 
 def test_ensure_agent_socket_dir_missing_warns_by_default(warnings: list[str]) -> None:
-    ensure_agent_socket_dir(_FakeRunner("MISSING"), "agt--alice")
+    ensure_agent_socket_dir(_FakeTarget("MISSING"), "agt--alice")
     assert any("agt--alice" in w and "missing" in w for w in warnings)
 
 
 def test_ensure_agent_socket_dir_missing_silent_when_expected(warnings: list[str]) -> None:
-    ensure_agent_socket_dir(_FakeRunner("MISSING"), "agt--alice", warn_if_missing=False)
+    ensure_agent_socket_dir(_FakeTarget("MISSING"), "agt--alice", warn_if_missing=False)
     assert warnings == []
 
 
 def test_ensure_agent_socket_dir_misconfigured_warns_even_when_missing_suppressed(
     warnings: list[str],
 ) -> None:
-    ensure_agent_socket_dir(_FakeRunner("root root 755"), "agt--alice", warn_if_missing=False)
+    ensure_agent_socket_dir(_FakeTarget("root root 755"), "agt--alice", warn_if_missing=False)
     assert any("misconfigured" in w for w in warnings)
 
 
 def test_ensure_agent_socket_dir_probe_failed_warns_even_when_missing_suppressed(
     warnings: list[str],
 ) -> None:
-    ensure_agent_socket_dir(_FakeRunner("PROBE_FAILED"), "agt--alice", warn_if_missing=False)
+    ensure_agent_socket_dir(_FakeTarget("PROBE_FAILED"), "agt--alice", warn_if_missing=False)
     assert any("probe failed" in w for w in warnings)
 
 
 def test_ensure_agent_socket_dir_ok_fast_path_no_warning(warnings: list[str]) -> None:
-    runner = _FakeRunner(f"agt--alice {AGENT_SOCKET_GROUP} 2770")
+    runner = _FakeTarget(f"agt--alice {AGENT_SOCKET_GROUP} 2770")
     ensure_agent_socket_dir(runner, "agt--alice")
     assert warnings == []
     assert len(runner.commands) == 1
