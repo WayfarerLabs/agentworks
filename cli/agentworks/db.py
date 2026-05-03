@@ -47,9 +47,13 @@ class SessionMode(Enum):
     AGENT = "agent"
 
 
-class SessionStatus(Enum):
-    RUNNING = "running"
+class SessionHealth(Enum):
+    """Session liveness state, computed live from PID and connectivity checks."""
+
+    OK = "ok"
     STOPPED = "stopped"
+    BROKEN = "broken"
+    UNKNOWN = "unknown"
 
 
 # -- Row types -------------------------------------------------------------
@@ -132,12 +136,12 @@ class SessionRow:
     workspace_name: str
     template: str
     mode: str
-    status: str
     created_at: str
     updated_at: str
     agent_name: str | None = None
     created_workspace: bool = False
     socket_path: str | None = None
+    pid: int | None = None
 
 
 # -- Migrations ------------------------------------------------------------
@@ -392,6 +396,11 @@ MIGRATIONS: dict[int, str] = {
         INSERT INTO sessions_new SELECT * FROM sessions;
         DROP TABLE sessions;
         ALTER TABLE sessions_new RENAME TO sessions;
+    """,
+    # -- Drop cached status, add PID for live liveness checks -----------------
+    20: """
+        ALTER TABLE sessions DROP COLUMN status;
+        ALTER TABLE sessions ADD COLUMN pid INTEGER;
     """,
 }
 
@@ -874,12 +883,13 @@ class Database:
             ).fetchall()
         return [_to_session(r) for r in rows]
 
-    def update_session_status(self, name: str, status: SessionStatus) -> None:
+    def update_session_pid(self, name: str, pid: int | None) -> None:
+        """Store or clear the tmux server PID for a session."""
         self._conn.execute(
-            "UPDATE sessions SET status = ?, "
+            "UPDATE sessions SET pid = ?, "
             "updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') "
             "WHERE name = ?",
-            (status.value, name),
+            (pid, name),
         )
         self._conn.commit()
 
@@ -1034,12 +1044,12 @@ def _to_session(row: sqlite3.Row) -> SessionRow:
         workspace_name=row["workspace_name"],
         template=row["template"],
         mode=row["mode"],
-        status=row["status"],
         created_at=row["created_at"],
         updated_at=row["updated_at"],
         agent_name=row["agent_name"],
         created_workspace=bool(row["created_workspace"]),
         socket_path=row["socket_path"],
+        pid=row["pid"],
     )
 
 

@@ -364,3 +364,92 @@ def test_admin_session_allows_null_socket(db: Database) -> None:
 
     session = db.insert_session("ws-s1", "ws", "default", SessionMode.ADMIN)
     assert session.socket_path is None
+
+
+# -- PID column and migration 20 -------------------------------------------
+
+
+def _create_pre_v20_db(path: str) -> None:
+    """Create a database at schema version 19 (before PID column)."""
+    from agentworks.db import MIGRATIONS
+
+    conn = sqlite3.connect(path)
+    conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS schema_version ("
+        "    version    INTEGER NOT NULL,"
+        "    applied_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))"
+        ")"
+    )
+    for version in range(1, 20):
+        for stmt in MIGRATIONS[version].split(";"):
+            stmt = stmt.strip()
+            if stmt:
+                conn.execute(stmt)
+        conn.execute("INSERT INTO schema_version (version) VALUES (?)", (version,))
+    conn.commit()
+    conn.close()
+
+
+def test_migration_20_drops_status_adds_pid(tmp_path: pytest.TempPathFactory) -> None:
+    """Migration 20 drops the status column and adds a pid column."""
+    db_path = tmp_path / "m20.db"  # type: ignore[operator]
+    _create_pre_v20_db(str(db_path))
+
+    # Insert a session at v19 (has status column)
+    conn = sqlite3.connect(str(db_path))
+    conn.execute("INSERT INTO workspaces (name, type, workspace_path) VALUES ('ws', 'vm', '/tmp/ws')")
+    conn.execute(
+        "INSERT INTO sessions (name, workspace_name, template, mode, status) "
+        "VALUES ('s1', 'ws', 'default', 'admin', 'running')"
+    )
+    conn.commit()
+    conn.close()
+
+    # Open with Database to trigger migration 20
+    upgraded = Database(db_path)
+
+    # Session survives the migration with pid=NULL
+    session = upgraded.get_session("s1")
+    assert session is not None
+    assert session.pid is None
+
+    # Verify schema: status column gone, pid column present
+    cols = [row[1] for row in upgraded._conn.execute("PRAGMA table_info(sessions)").fetchall()]
+    assert "status" not in cols
+    assert "pid" in cols
+
+    upgraded.close()
+
+
+def test_session_pid_default_null(db: Database) -> None:
+    """New sessions get pid=NULL by default."""
+    from agentworks.db import SessionMode
+
+    db.insert_vm("dev-vm", platform="lima")
+    db.insert_workspace("ws", ws_type="vm", workspace_path="/tmp/ws", vm_name="dev-vm")
+
+    session = db.insert_session("ws-s1", "ws", "default", SessionMode.ADMIN)
+    assert session.pid is None
+
+
+def test_update_session_pid(db: Database) -> None:
+    """update_session_pid stores and clears the PID."""
+    from agentworks.db import SessionMode
+
+    db.insert_vm("dev-vm", platform="lima")
+    db.insert_workspace("ws", ws_type="vm", workspace_path="/tmp/ws", vm_name="dev-vm")
+
+    db.insert_session("ws-s1", "ws", "default", SessionMode.ADMIN)
+
+    # Store a PID
+    db.update_session_pid("ws-s1", 12345)
+    session = db.get_session("ws-s1")
+    assert session is not None
+    assert session.pid == 12345
+
+    # Clear the PID
+    db.update_session_pid("ws-s1", None)
+    session = db.get_session("ws-s1")
+    assert session is not None
+    assert session.pid is None

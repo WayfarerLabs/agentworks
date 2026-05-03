@@ -14,7 +14,6 @@ from functools import partial
 from typing import TYPE_CHECKING
 
 from agentworks import output
-from agentworks.db import SessionStatus
 from agentworks.sessions.tmux import tmux_cmd
 
 if TYPE_CHECKING:
@@ -144,8 +143,8 @@ def attach_console(
     target = admin_exec_target(vm, config)
     run_command = partial(run, target)
 
-    # Get running sessions for this VM
-    running_sessions = _get_running_sessions_for_vm(db, vm)
+    # Get sessions for this VM (console wrapper handles dead sessions)
+    running_sessions = _get_sessions_for_vm(db, vm)
 
     if recreate or not console_exists(run_command=run_command):
         create_console(
@@ -158,11 +157,10 @@ def attach_console(
     sys.exit(interactive(target, f"tmux attach -t {CONSOLE_SESSION_NAME}"))
 
 
-def _get_running_sessions_for_vm(db: Database, vm: VMRow) -> list[SessionRow]:
-    """Get all running sessions across all workspaces on a VM."""
+def _get_sessions_for_vm(db: Database, vm: VMRow) -> list[SessionRow]:
+    """Get all sessions across all workspaces on a VM."""
     workspaces = db.list_workspaces(vm_name=vm.name)
     sessions: list[SessionRow] = []
     for ws in workspaces:
-        ws_sessions = db.list_sessions(workspace_name=ws.name)
-        sessions.extend(s for s in ws_sessions if s.status == SessionStatus.RUNNING.value)
+        sessions.extend(db.list_sessions(workspace_name=ws.name))
     return sessions

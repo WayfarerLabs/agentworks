@@ -163,7 +163,7 @@ def delete_agent(
     agent_sessions = [s for s in all_sessions if s.agent_name == name]
     if agent_sessions and not force:
         for s in agent_sessions:
-            output.detail(f"{s.name}  [{s.status}]")
+            output.detail(f"{s.name}")
         raise AgentError(
             f"agent '{name}' has {len(agent_sessions)} session(s). Delete them first, or use --force."
         )
@@ -345,7 +345,7 @@ def describe_agent(
     output.info(f"\nSessions ({len(agent_sessions)}):")
     if agent_sessions:
         for s in agent_sessions:
-            output.detail(f"{s.name}  [{s.template}]  {s.status}  workspace: {s.workspace_name}")
+            output.detail(f"{s.name}  [{s.template}]  workspace: {s.workspace_name}")
     else:
         output.detail("(none)")
 

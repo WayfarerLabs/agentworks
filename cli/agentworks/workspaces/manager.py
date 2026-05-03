@@ -259,7 +259,7 @@ def describe_workspace(
     if sessions:
         for s in sessions:
             mode_label = f"agent: {s.agent_name}" if s.agent_name else "admin"
-            output.detail(f"{s.name}  [{s.template}]  {s.status}  {mode_label}")
+            output.detail(f"{s.name}  [{s.template}]  {mode_label}")
     else:
         output.detail("(none)")
 
@@ -504,15 +504,12 @@ def rehome_workspace(
     if new_norm.startswith(old_norm) or old_norm.startswith(new_norm):
         raise output.WorkspaceError("source and target paths overlap")
 
-    # Block if workspace has running sessions
-    from agentworks.db import SessionStatus
-
+    # Block if workspace has sessions (can't reliably check liveness here)
     sessions = db.list_sessions(workspace_name=name)
-    running = [s for s in sessions if s.status == SessionStatus.RUNNING.value]
-    if running:
+    if sessions:
         raise output.WorkspaceError(
-            f"workspace '{name}' has {len(running)} running session(s). "
-            "Stop them first with 'agentworks session stop'."
+            f"workspace '{name}' has {len(sessions)} session(s). "
+            "Delete them first with 'agentworks session delete'."
         )
 
     if ws.type == "vm":

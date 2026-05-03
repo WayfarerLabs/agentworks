@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 import typer
 
 from agentworks import output
-from agentworks.db import SessionMode, SessionStatus
+from agentworks.db import SessionMode
 from agentworks.ssh import admin_exec_target
 
 _ENV_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -219,24 +219,6 @@ def _build_session_command(
     return " && ".join(parts)
 
 
-def _reconcile_status(
-    session: SessionRow,
-    *,
-    run_command: RunCommand,
-    db: Database,
-) -> str:
-    """Check tmux session and reconcile session status in the DB."""
-    sock = _effective_socket_path(db, session)
-    alive = _session_alive(session.name, run_command=run_command, socket_path=sock)
-    if session.status == SessionStatus.RUNNING.value and not alive:
-        db.update_session_status(session.name, SessionStatus.STOPPED)
-        return SessionStatus.STOPPED.value
-    if session.status == SessionStatus.STOPPED.value and alive:
-        db.update_session_status(session.name, SessionStatus.RUNNING)
-        return SessionStatus.RUNNING.value
-    return session.status
-
-
 # -- Public API ------------------------------------------------------------
 
 
@@ -361,11 +343,11 @@ def stop_session(
     session = _require_session(db, name)
     _ws, _vm, run_command, _, _target = _prepare_vm(db, config, session.workspace_name, operation="session-stop")
 
-    if session.status == SessionStatus.STOPPED.value:
+    sock = _effective_socket_path(db, session)
+
+    if not _session_alive(name, run_command=run_command, socket_path=sock):
         output.info(f"Session '{name}' is already stopped")
         return
-
-    sock = _effective_socket_path(db, session)
 
     # Send C-c to the running process
     send_keys(name, "C-c", run_command=run_command, socket_path=sock)
@@ -377,7 +359,6 @@ def stop_session(
     if _session_alive(name, run_command=run_command, socket_path=sock):
         _kill_session(name, run_command=run_command, socket_path=sock)
 
-    db.update_session_status(name, SessionStatus.STOPPED)
     output.info(f"Session '{name}' stopped")
 
 
@@ -440,7 +421,6 @@ def restart_session(
     if new_sock != session.socket_path:
         db.update_session_socket_path(name, new_sock)
 
-    db.update_session_status(name, SessionStatus.RUNNING)
     output.info(f"Session '{name}' restarted")
 
     _regenerate_tmuxinator(db, config, vm, ws)
@@ -468,9 +448,9 @@ def restart_all_sessions(
         vm_workspaces = {ws.name for ws in db.list_workspaces(vm_name=vm_name)}
         sessions = [s for s in sessions if s.workspace_name in vm_workspaces]
 
-    # Filter by status
-    if not include_running:
-        sessions = [s for s in sessions if s.status == SessionStatus.STOPPED.value]
+    # When include_running is False, restart_session will skip running
+    # sessions (raises SessionError, caught below). Phase 3 will add
+    # batch PID pre-filtering.
 
     if not sessions:
         output.info("No matching sessions to restart.")
@@ -579,10 +559,9 @@ def describe_session(
     session = _require_session(db, name)
     ws, vm, run_command, _, _target = _prepare_vm(db, config, session.workspace_name, operation=None)
 
-    # Reconcile status with tmux
-    status = _reconcile_status(session, run_command=run_command, db=db)
-    if status != session.status:
-        session = _require_session(db, name)
+    sock = _effective_socket_path(db, session)
+    alive = _session_alive(session.name, run_command=run_command, socket_path=sock)
+    status = "running" if alive else "stopped"
 
     mode_label = f"agent ({session.agent_name})" if session.agent_name else "admin"
 
@@ -591,7 +570,7 @@ def describe_session(
     output.info(f"VM:         {vm.name}")
     output.info(f"Template:   {session.template}")
     output.info(f"Mode:       {mode_label}")
-    output.info(f"Status:     {session.status}")
+    output.info(f"Status:     {status}")
     output.info(f"Created:    {session.created_at}")
     output.info(f"Updated:    {session.updated_at}")
 
@@ -622,14 +601,14 @@ def list_sessions(
         if no_status or ws is None or ws.type != "vm":
             for session in ws_sessions:
                 mode_label = f"agent ({session.agent_name})" if session.agent_name else "admin"
-                rows.append((session.name, ws_name, vm_name, session.template, mode_label, session.status))
+                rows.append((session.name, ws_name, vm_name, session.template, mode_label, "-"))
             continue
 
         vm = db.get_vm(ws.vm_name)  # type: ignore[arg-type]
         if vm is None or vm.tailscale_host is None:
             for session in ws_sessions:
                 mode_label = f"agent ({session.agent_name})" if session.agent_name else "admin"
-                rows.append((session.name, ws_name, vm_name, session.template, mode_label, session.status))
+                rows.append((session.name, ws_name, vm_name, session.template, mode_label, "-"))
             continue
 
         from agentworks.ssh import run
@@ -638,11 +617,9 @@ def list_sessions(
         run_command = partial(run, target)
 
         for session in ws_sessions:
-            status = _reconcile_status(
-                session,
-                run_command=run_command,
-                db=db,
-            )
+            sock = _effective_socket_path(db, session)
+            alive = _session_alive(session.name, run_command=run_command, socket_path=sock)
+            status = "running" if alive else "stopped"
             mode_label = f"agent ({session.agent_name})" if session.agent_name else "admin"
             rows.append((session.name, ws_name, vm_name, session.template, mode_label, status))
 

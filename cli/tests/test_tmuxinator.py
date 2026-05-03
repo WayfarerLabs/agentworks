@@ -32,7 +32,7 @@ def test_generate_config_with_sessions() -> None:
             workspace_name="ws-1",
             template="default",
             mode="admin",
-            status="running",
+
             created_at="",
             updated_at="",
         ),
@@ -41,7 +41,7 @@ def test_generate_config_with_sessions() -> None:
             workspace_name="ws-1",
             template="default",
             mode="admin",
-            status="running",
+
             created_at="",
             updated_at="",
         ),
@@ -61,7 +61,7 @@ def test_generate_config_admin_window_first() -> None:
             workspace_name="ws",
             template="default",
             mode="admin",
-            status="running",
+
             created_at="",
             updated_at="",
         ),
@@ -88,7 +88,7 @@ def test_generate_config_agent_session_socket() -> None:
             workspace_name="ws",
             template="default",
             mode="agent",
-            status="running",
+
             created_at="",
             updated_at="",
             agent_name="alice",
@@ -108,7 +108,7 @@ def test_generate_config_admin_session_no_socket() -> None:
             workspace_name="ws",
             template="default",
             mode="admin",
-            status="running",
+
             created_at="",
             updated_at="",
         ),
