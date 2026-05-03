@@ -226,8 +226,11 @@ class _CleanupTarget:
         if "find" in command:
             return _FakeResult(stdout=self._sockets)
         if "list-sessions" in command:
-            # Live if any live socket path appears in the command
-            alive = any(s in command for s in self._live)
+            # Match the shlex-quoted socket path to avoid substring false positives
+            # (e.g. /path/live.sock matching /path/live.sock2).
+            import shlex
+
+            alive = any(shlex.quote(s) in command for s in self._live)
             return _FakeResult(ok=alive)
         return _FakeResult()
 
