@@ -292,6 +292,15 @@ def create_session(
 
     template = _resolve_template(config, template_name)
 
+    # Compute socket path up front (deterministic from linux_user + session name).
+    # Needed for the DB insert since the CHECK constraint requires agent sessions
+    # to have a socket_path.
+    expected_socket: str | None = None
+    if mode == SessionMode.AGENT:
+        from agentworks.sessions.tmux import agent_socket_path
+
+        expected_socket = agent_socket_path(linux_user, name)
+
     # Insert DB record first to avoid orphaned tmux sessions on crash
     db.insert_session(
         name,
@@ -300,6 +309,7 @@ def create_session(
         mode,
         agent_name=resolved_agent_name,
         created_workspace=created_workspace,
+        socket_path=expected_socket,
     )
 
     deploy_restricted_config(run_command, history_limit=config.session.history_limit)

@@ -268,3 +268,34 @@ def test_vm_delete_cascades_events(db: Database) -> None:
     db.delete_vm("dev-vm")
     # Events should be cleaned up (can't query directly since VM is gone,
     # but the delete should not raise a foreign key error)
+
+
+# -- Session socket_path constraint ------------------------------------------
+
+
+def test_agent_session_requires_socket_path(db: Database) -> None:
+    """Agent-mode sessions must have a socket_path (CHECK constraint from migration 19)."""
+    from agentworks.db import SessionMode
+
+    db.insert_vm("dev-vm", platform="lima")
+    db.insert_workspace("ws", ws_type="vm", workspace_path="/tmp/ws", vm_name="dev-vm")
+    db.insert_agent("coder", "dev-vm", "agt--coder")
+
+    # Agent session with socket_path succeeds
+    session = db.insert_session("ws-s1", "ws", "default", SessionMode.AGENT, agent_name="coder", socket_path="/sock")
+    assert session.socket_path == "/sock"
+
+    # Agent session without socket_path fails
+    with pytest.raises(sqlite3.IntegrityError, match="CHECK"):
+        db.insert_session("ws-s2", "ws", "default", SessionMode.AGENT, agent_name="coder")
+
+
+def test_admin_session_allows_null_socket(db: Database) -> None:
+    """Admin-mode sessions can have NULL socket_path."""
+    from agentworks.db import SessionMode
+
+    db.insert_vm("dev-vm", platform="lima")
+    db.insert_workspace("ws", ws_type="vm", workspace_path="/tmp/ws", vm_name="dev-vm")
+
+    session = db.insert_session("ws-s1", "ws", "default", SessionMode.ADMIN)
+    assert session.socket_path is None
