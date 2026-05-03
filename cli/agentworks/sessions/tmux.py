@@ -60,7 +60,11 @@ def ensure_agent_socket_root(
     if stdout == f"{AGENT_SOCKET_GROUP} 2771":
         # Directory is correct, but still ensure admin is in the group.
         admin = shlex.quote(admin_username)
-        target.run(f"usermod -aG {grp} {admin}", sudo=True, check=False)
+        result = target.run(f"usermod -aG {grp} {admin}", sudo=True, check=False)
+        if not result.ok:
+            from agentworks import output
+
+            output.warn(f"Failed to add {admin_username} to {AGENT_SOCKET_GROUP}, tmux socket access may fail")
         return
 
     if stdout == "MISSING":
