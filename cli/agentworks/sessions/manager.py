@@ -361,17 +361,16 @@ def stop_session(
     state = _check_session(name, target=target, socket_path=sock)
 
     if state == SessionState.INACCESSIBLE:
-        raise output.SessionError(
-            f"session '{name}' is running but socket not accessible by admin. "
-            f"Use 'session restart {name} --force' to recover."
-        )
+        from agentworks.sessions.tmux import tmux_cmd
 
-    if state != SessionState.DEAD:
+        output.warn(f"Session '{name}': socket not accessible, killing with sudo")
+        q = shlex.quote(name)
+        target.run(tmux_cmd(f"kill-session -t {q}", sock), sudo=True, check=False)
+    elif state != SessionState.DEAD:
         send_keys(name, "C-c", run_command=run_command, socket_path=sock)
         time.sleep(_STOP_GRACE_SECONDS)
-
-    if _check_session(name, target=target, socket_path=sock) != SessionState.DEAD:
-        _kill_session(name, run_command=run_command, socket_path=sock)
+        if _check_session(name, target=target, socket_path=sock) != SessionState.DEAD:
+            _kill_session(name, run_command=run_command, socket_path=sock)
 
     db.update_session_status(name, SessionStatus.STOPPED)
     output.info(f"Session '{name}' stopped")
@@ -513,12 +512,6 @@ def delete_session(
     sock = _effective_socket_path(db, session)
 
     state = _check_session(name, target=target, socket_path=sock)
-    if state == SessionState.INACCESSIBLE:
-        raise output.SessionError(
-            f"session '{name}' is running but socket not accessible by admin. "
-            f"Use 'session restart {name} --force' to recover."
-        )
-
     if (
         not yes
         and state != SessionState.DEAD
@@ -526,13 +519,18 @@ def delete_session(
     ):
         raise output.UserAbort("delete cancelled")
 
-    _kill_session(name, run_command=run_command, socket_path=sock)
+    if state == SessionState.INACCESSIBLE:
+        from agentworks.sessions.tmux import tmux_cmd
+
+        output.warn(f"Session '{name}': socket not accessible, killing with sudo")
+        q = shlex.quote(name)
+        target.run(tmux_cmd(f"kill-session -t {q}", sock), sudo=True, check=False)
+    elif state != SessionState.DEAD:
+        _kill_session(name, run_command=run_command, socket_path=sock)
 
     # Remove stale socket file if the tmux server has exited.
     # If the kill failed, warn and leave the socket for debugging.
     if sock:
-        import shlex
-
         from agentworks.sessions.tmux import session_exists
 
         if session_exists(name, run_command=run_command, socket_path=sock):
@@ -735,8 +733,8 @@ def attach_session(
         raise output.SessionError(f"session '{name}' is not running")
     if state == SessionState.INACCESSIBLE:
         raise output.SessionError(
-            f"session '{name}' is running but socket not accessible by admin "
-            f"(restart session with --force to fix)"
+            f"session '{name}' is running but socket not accessible by admin. "
+            f"Use 'session restart {name} --force' to fix."
         )
 
     q_session = shlex.quote(name)
@@ -760,18 +758,24 @@ def session_logs(
     state = _check_session(name, target=target, socket_path=sock)
     if state == SessionState.DEAD:
         raise output.SessionError(f"session '{name}' is not running")
-    if state == SessionState.INACCESSIBLE:
-        raise output.SessionError(
-            f"session '{name}' is running but socket not accessible by admin. "
-            f"Use 'session restart {name} --force' to recover."
-        )
 
-    captured = capture_output(
-        name,
-        run_command=run_command,
-        lines=lines or config.session.history_limit,
-        socket_path=sock,
-    )
+    log_lines = lines or config.session.history_limit
+    if state == SessionState.INACCESSIBLE:
+        from agentworks.sessions.tmux import tmux_cmd
+
+        output.warn(f"Session '{name}': socket not accessible, using elevated privileges")
+        q = shlex.quote(name)
+        result = target.run(
+            tmux_cmd(f"capture-pane -t {q} -p -S -{log_lines}", sock), sudo=True, check=False,
+        )
+        captured = result.stdout or ""
+    else:
+        captured = capture_output(
+            name,
+            run_command=run_command,
+            lines=log_lines,
+            socket_path=sock,
+        )
     # Raw data pipe (opaque tmux capture-pane output), not a structured message.
     # Intentionally not routed through the output handler.
     typer.echo(captured, nl=False)

@@ -498,7 +498,10 @@ def batch_check_sessions(
         if name in error_names:
             from agentworks import output
 
-            output.warn(f"session '{name}': running but socket not accessible by admin (restart session to fix)")
+            output.warn(
+                f"session '{name}': running but socket not accessible by admin "
+                f"(use 'session restart {name} --force' to fix)"
+            )
         result_map[name] = name in alive_names
 
     return result_map
