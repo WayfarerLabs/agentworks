@@ -948,12 +948,13 @@ def session_list(
 @session_app.command("stop")
 def session_stop(
     name: Annotated[str, typer.Argument(help="Session name")],
+    force: Annotated[bool, typer.Option("--force", help="Force-stop via PID kill (for broken sessions)")] = False,
 ) -> None:
     """Stop a running session."""
     from agentworks.config import load_config
     from agentworks.sessions.manager import stop_session
 
-    stop_session(_get_db(), load_config(), name=name)
+    stop_session(_get_db(), load_config(), name=name, force=force)
 
 
 @session_app.command("restart")
@@ -1003,13 +1004,14 @@ def session_attach(
 @session_app.command("delete")
 def session_delete(
     name: Annotated[str, typer.Argument(help="Session name")],
+    force: Annotated[bool, typer.Option("--force", help="Delete even if running/broken/unknown")] = False,
     yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip confirmation")] = False,
 ) -> None:
-    """Stop and delete a session."""
+    """Delete a session."""
     from agentworks.config import load_config
     from agentworks.sessions.manager import delete_session
 
-    delete_session(_get_db(), load_config(), name=name, yes=yes)
+    delete_session(_get_db(), load_config(), name=name, force=force, yes=yes)
 
 
 @session_app.command("logs")
