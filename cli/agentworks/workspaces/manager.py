@@ -800,8 +800,8 @@ def delete_workspace(
             for session in db.list_sessions(workspace_name=name):
                 sock = _effective_socket_path(db, session)
                 killed = kill_session(session.name, run_command=run_command, socket_path=sock)
-                if not killed and sock:
-                    force_kill_session(target, session.name, sock)
+                if not killed and sock and not force_kill_session(target, session.name, sock):
+                    output.warn(f"Failed to kill session '{session.name}', may still be running")
     db.delete_sessions_for_workspace(name)
 
     # Revoke agent workspace grants (agents are VM-scoped, not deleted with workspaces)

@@ -194,8 +194,8 @@ def delete_agent(
         for session in agent_sessions:
             sock = _effective_socket_path(db, session)
             killed = kill_session(session.name, run_command=run_command, socket_path=sock)
-            if not killed and sock:
-                force_kill_session(target, session.name, sock)
+            if not killed and sock and not force_kill_session(target, session.name, sock):
+                output.warn(f"Failed to kill session '{session.name}', may still be running")
             db.delete_session(session.name)
         output.detail(f"Deleted {len(agent_sessions)} session(s)")
 

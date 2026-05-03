@@ -63,7 +63,11 @@ def ensure_agent_socket_root(
         # (needed since we no longer use sudo for runtime tmux operations).
         admin = shlex.quote(admin_username)
         grp = shlex.quote(AGENT_SOCKET_GROUP)
-        target.run(f"usermod -aG {grp} {admin}", sudo=True, check=False)
+        result = target.run(f"usermod -aG {grp} {admin}", sudo=True, check=False)
+        if not result.ok:
+            from agentworks import output
+
+            output.warn(f"Failed to add {admin_username} to {AGENT_SOCKET_GROUP}, tmux operations may fail")
         return
 
     if stdout == "MISSING":
@@ -360,9 +364,12 @@ def kill_session(
 def force_kill_session(
     target: ExecTarget,
     session_name: str,
-    socket_path: str | None = None,
+    socket_path: str,
 ) -> bool:
-    """Kill a session using sudo, for when the admin lacks direct access.
+    """Kill a socket-based session using sudo, for when the admin lacks direct access.
+
+    Only meaningful for socket-based sessions (agent sessions). Without a socket
+    path, sudo tmux would target root's default server, not the admin's.
 
     Returns True if the kill succeeded, False otherwise.
     """

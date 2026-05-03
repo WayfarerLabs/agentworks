@@ -79,13 +79,3 @@ def test_force_kill_returns_false_on_failure() -> None:
     target = MagicMock()
     target.run.return_value = _fail()
     assert force_kill_session(target, "s1", "/sock") is False
-
-
-def test_force_kill_no_socket() -> None:
-    """force_kill_session works for default-server sessions too."""
-    target = MagicMock()
-    target.run.return_value = _ok()
-    assert force_kill_session(target, "s1") is True
-    cmd = target.run.call_args[0][0]
-    assert "kill-session" in cmd
-    assert "-S" not in cmd

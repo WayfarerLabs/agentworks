@@ -364,6 +364,7 @@ def stop_session(
         from agentworks.sessions.tmux import force_kill_session
 
         output.warn(f"Session '{name}': socket not accessible, killing with sudo")
+        assert sock  # INACCESSIBLE only occurs for socket-based sessions
         if not force_kill_session(target, name, sock):
             output.warn(f"Session '{name}': sudo kill failed, session may still be running")
     elif state != SessionState.DEAD:
@@ -409,6 +410,7 @@ def restart_session(
             from agentworks.sessions.tmux import force_kill_session
 
             output.warn(f"Session '{name}': socket not accessible, killing with sudo")
+            assert sock  # INACCESSIBLE only occurs for socket-based sessions
             if not force_kill_session(target, name, sock):
                 raise output.SessionError(
                     f"failed to kill inaccessible session '{name}' with sudo"
@@ -525,6 +527,7 @@ def delete_session(
         from agentworks.sessions.tmux import force_kill_session
 
         output.warn(f"Session '{name}': socket not accessible, killing with sudo")
+        assert sock  # INACCESSIBLE only occurs for socket-based sessions
         if not force_kill_session(target, name, sock):
             output.warn(f"Session '{name}': sudo kill failed, session may still be running")
     elif state != SessionState.DEAD:
