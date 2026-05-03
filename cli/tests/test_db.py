@@ -270,7 +270,72 @@ def test_vm_delete_cascades_events(db: Database) -> None:
     # but the delete should not raise a foreign key error)
 
 
-# -- Session socket_path constraint ------------------------------------------
+# -- Session socket_path constraint (migration 19) ----------------------------
+
+
+def _create_pre_v19_db(path: str) -> None:
+    """Create a database at schema version 18 (before the CHECK constraint)."""
+    from agentworks.db import MIGRATIONS
+
+    conn = sqlite3.connect(path)
+    conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS schema_version ("
+        "    version    INTEGER NOT NULL,"
+        "    applied_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))"
+        ")"
+    )
+    for version in range(1, 19):
+        for stmt in MIGRATIONS[version].split(";"):
+            stmt = stmt.strip()
+            if stmt:
+                conn.execute(stmt)
+        conn.execute("INSERT INTO schema_version (version) VALUES (?)", (version,))
+    conn.commit()
+    conn.close()
+
+
+def test_migration_19_succeeds_without_legacy_sessions(tmp_path: pytest.TempPathFactory) -> None:
+    """Migration 19 passes when no agent sessions have NULL socket_path."""
+    db_path = tmp_path / "clean.db"  # type: ignore[operator]
+    _create_pre_v19_db(str(db_path))
+
+    # Insert an agent session WITH socket_path and an admin session without
+    conn = sqlite3.connect(str(db_path))
+    conn.execute("INSERT INTO workspaces (name, type, workspace_path) VALUES ('ws', 'vm', '/tmp/ws')")
+    conn.execute(
+        "INSERT INTO sessions (name, workspace_name, template, mode, socket_path) "
+        "VALUES ('s1', 'ws', 'default', 'agent', '/sock')"
+    )
+    conn.execute(
+        "INSERT INTO sessions (name, workspace_name, template, mode) "
+        "VALUES ('s2', 'ws', 'default', 'admin')"
+    )
+    conn.commit()
+    conn.close()
+
+    # Opening with Database triggers migration 19 -- should succeed
+    upgraded = Database(db_path)
+    upgraded.close()
+
+
+def test_migration_19_fails_with_legacy_agent_session(tmp_path: pytest.TempPathFactory) -> None:
+    """Migration 19 fails when an agent session has NULL socket_path."""
+    db_path = tmp_path / "legacy.db"  # type: ignore[operator]
+    _create_pre_v19_db(str(db_path))
+
+    # Insert an agent session WITHOUT socket_path (legacy)
+    conn = sqlite3.connect(str(db_path))
+    conn.execute("INSERT INTO workspaces (name, type, workspace_path) VALUES ('ws', 'vm', '/tmp/ws')")
+    conn.execute(
+        "INSERT INTO sessions (name, workspace_name, template, mode) "
+        "VALUES ('s1', 'ws', 'default', 'agent')"
+    )
+    conn.commit()
+    conn.close()
+
+    with pytest.raises(sqlite3.IntegrityError, match="CHECK"):
+        Database(db_path)
 
 
 def test_agent_session_requires_socket_path(db: Database) -> None:

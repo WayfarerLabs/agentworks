@@ -564,7 +564,7 @@ def _create_agent_on_vm(
     """
     from agentworks.ssh import run_as_root
 
-    target = admin_exec_target(vm, config)
+    target = admin_exec_target(vm, config, logger=logger)
     lg = logger
 
     output.detail(f"Creating user '{linux_user}' on VM '{vm.name}'...")
