@@ -71,13 +71,13 @@ def _effective_socket_path(db: Database, session: SessionRow) -> str | None:
 def _session_alive(
     session_name: str,
     *,
-    run_command: RunCommand,
+    target: ExecTarget,
     socket_path: str | None,
 ) -> bool:
-    """Check if a session's tmux session is alive on its expected server."""
-    from agentworks.sessions.tmux import session_exists
+    """Check if a session's tmux session is alive, with sudo fallback."""
+    from agentworks.sessions.tmux import check_session_alive
 
-    return session_exists(session_name, run_command=run_command, socket_path=socket_path)
+    return check_session_alive(target, session_name, socket_path)
 
 
 def _kill_session(
@@ -222,12 +222,12 @@ def _build_session_command(
 def _reconcile_status(
     session: SessionRow,
     *,
-    run_command: RunCommand,
+    target: ExecTarget,
     db: Database,
 ) -> str:
     """Check tmux session and reconcile session status in the DB."""
     sock = _effective_socket_path(db, session)
-    alive = _session_alive(session.name, run_command=run_command, socket_path=sock)
+    alive = _session_alive(session.name, target=target, socket_path=sock)
     if session.status == SessionStatus.RUNNING.value and not alive:
         db.update_session_status(session.name, SessionStatus.STOPPED)
         return SessionStatus.STOPPED.value
@@ -349,7 +349,7 @@ def stop_session(
     from agentworks.sessions.tmux import send_keys
 
     session = _require_session(db, name)
-    _ws, _vm, run_command, _, _target = _prepare_vm(db, config, session.workspace_name, operation="session-stop")
+    _ws, _vm, run_command, _, target = _prepare_vm(db, config, session.workspace_name, operation="session-stop")
 
     if session.status == SessionStatus.STOPPED.value:
         output.info(f"Session '{name}' is already stopped")
@@ -364,7 +364,7 @@ def stop_session(
     time.sleep(_STOP_GRACE_SECONDS)
 
     # Kill if still alive on the session's expected tmux server
-    if _session_alive(name, run_command=run_command, socket_path=sock):
+    if _session_alive(name, target=target, socket_path=sock):
         _kill_session(name, run_command=run_command, socket_path=sock)
 
     db.update_session_status(name, SessionStatus.STOPPED)
@@ -392,7 +392,7 @@ def restart_session(
     )
     sock = _effective_socket_path(db, session)
 
-    if _session_alive(name, run_command=run_command, socket_path=sock):
+    if _session_alive(name, target=target, socket_path=sock):
         if not force:
             raise output.SessionError(
                 f"session '{name}' is still running. Stop it first, or use --force."
@@ -498,7 +498,7 @@ def delete_session(
 
     if (
         not yes
-        and _session_alive(name, run_command=run_command, socket_path=sock)
+        and _session_alive(name, target=target, socket_path=sock)
         and not output.confirm(f"Session '{name}' is still running. Delete anyway?")
     ):
         raise output.UserAbort("delete cancelled")
@@ -570,7 +570,7 @@ def describe_session(
     ws, vm, run_command, _, target = _prepare_vm(db, config, session.workspace_name, operation=None)
 
     # Reconcile status with tmux
-    status = _reconcile_status(session, run_command=run_command, db=db)
+    status = _reconcile_status(session, target=target, db=db)
     if status != session.status:
         session = _require_session(db, name)
 
@@ -706,7 +706,7 @@ def attach_session(
     _ws, vm, run_command, _, target = _prepare_vm(db, config, session.workspace_name, operation="session-attach")
     sock = _effective_socket_path(db, session)
 
-    if not _session_alive(name, run_command=run_command, socket_path=sock):
+    if not _session_alive(name, target=target, socket_path=sock):
         raise output.SessionError(f"session '{name}' is not running")
 
     q_session = shlex.quote(name)

@@ -376,6 +376,41 @@ def session_exists(
     return getattr(result, "ok", False)
 
 
+def check_session_alive(
+    target: ExecTarget,
+    session_name: str,
+    socket_path: str | None = None,
+) -> bool:
+    """Check if a session is alive, with sudo fallback for socket-based sessions.
+
+    Tries without sudo first (admin has group access in the normal case).
+    If that fails on a socket-based session, retries with sudo to distinguish
+    "actually dead" from "running but inaccessible". Warns if the session is
+    running but not accessible by admin.
+    """
+    q_session = shlex.quote(session_name)
+    cmd = tmux_cmd(f"has-session -t {q_session}", socket_path) + " 2>/dev/null"
+    result = target.run(cmd, check=False)
+    if result.ok:
+        return True
+
+    # For socket-based sessions, try sudo to detect running-but-inaccessible
+    if socket_path:
+        q_sock = shlex.quote(socket_path)
+        sudo_cmd = f"sudo -n tmux -S {q_sock} has-session -t {q_session} 2>/dev/null"
+        sudo_result = target.run(sudo_cmd, check=False)
+        if sudo_result.ok:
+            from agentworks import output
+
+            output.warn(
+                f"session '{session_name}': running but socket not accessible "
+                f"by admin (restart session to fix)"
+            )
+            return True
+
+    return False
+
+
 class BatchCheckError(Exception):
     """Raised when the batch session check command itself failed (SSH error, etc.)."""
 
