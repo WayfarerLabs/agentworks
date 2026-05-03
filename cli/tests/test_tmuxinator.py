@@ -129,15 +129,17 @@ class _FakeResult:
 class _FakeTarget:
     """Fake ExecTarget that returns canned output for the first probe call
     (the only call that determines warning behavior) and ignores subsequent
-    setup commands."""
+    setup commands. Records whether sudo was requested for each call."""
 
     def __init__(self, probe_stdout: str) -> None:
         self._probe_stdout = probe_stdout
         self._probe_done = False
         self.commands: list[str] = []
+        self.sudo_calls: list[bool] = []
 
     def run(self, command: str, *, check: bool = True, sudo: bool = False, tty: bool | None = None) -> _FakeResult:
         self.commands.append(command)
+        self.sudo_calls.append(sudo)
         # The first call is the probe (contains "if test -d").
         if not self._probe_done and "if test -d" in command:
             self._probe_done = True
@@ -146,8 +148,13 @@ class _FakeTarget:
 
 
 def test_ensure_agent_socket_root_missing_warns_by_default(warnings: list[str]) -> None:
-    ensure_agent_socket_root(_FakeTarget("MISSING"), "agentworks")
+    runner = _FakeTarget("MISSING")
+    ensure_agent_socket_root(runner, "agentworks")
     assert any("missing" in w for w in warnings)
+    # Probe uses sudo; getent does not; all setup commands use sudo
+    assert runner.sudo_calls[0] is True  # probe
+    assert runner.sudo_calls[1] is False  # getent (no root needed)
+    assert all(runner.sudo_calls[2:])  # groupadd/usermod/mkdir/chown/chmod
 
 
 def test_ensure_agent_socket_root_missing_silent_when_expected(warnings: list[str]) -> None:
@@ -175,11 +182,16 @@ def test_ensure_agent_socket_root_ok_fast_path_no_warning(warnings: list[str]) -
     assert warnings == []
     # Fast path: probe + group membership check only (no full setup)
     assert len(runner.commands) == 2
+    # Both calls must use sudo (probe needs root for stat, usermod needs root)
+    assert all(runner.sudo_calls)
 
 
 def test_ensure_agent_socket_dir_missing_warns_by_default(warnings: list[str]) -> None:
-    ensure_agent_socket_dir(_FakeTarget("MISSING"), "agt--alice")
+    runner = _FakeTarget("MISSING")
+    ensure_agent_socket_dir(runner, "agt--alice")
     assert any("agt--alice" in w and "missing" in w for w in warnings)
+    # All commands (probe + full setup) must use sudo
+    assert all(runner.sudo_calls)
 
 
 def test_ensure_agent_socket_dir_missing_silent_when_expected(warnings: list[str]) -> None:
@@ -204,5 +216,7 @@ def test_ensure_agent_socket_dir_probe_failed_warns_even_when_missing_suppressed
 def test_ensure_agent_socket_dir_ok_fast_path_no_warning(warnings: list[str]) -> None:
     runner = _FakeTarget(f"agt--alice {AGENT_SOCKET_GROUP} 2770")
     ensure_agent_socket_dir(runner, "agt--alice")
+    # Probe must use sudo
+    assert runner.sudo_calls[0] is True
     assert warnings == []
     assert len(runner.commands) == 1
