@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 import typer
 
 from agentworks import output
-from agentworks.db import SessionHealth, SessionMode
+from agentworks.db import PID_STOPPED, SessionHealth, SessionMode
 from agentworks.ssh import admin_exec_target
 
 _ENV_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -237,7 +237,7 @@ def batch_check_status(
 
     Returns {session_name: alive}. Sessions with pid=None are excluded.
     """
-    pid_sessions = [(s.name, s.pid) for s in sessions if s.pid is not None]
+    pid_sessions = [(s.name, s.pid) for s in sessions if s.pid is not None and s.pid > 0]
     if not pid_sessions:
         return {}
 
@@ -277,6 +277,8 @@ def check_session_health(
 
     if session.pid is None:
         return SessionHealth.UNKNOWN
+    if session.pid == PID_STOPPED:
+        return SessionHealth.STOPPED
 
     alive = check_session_status(session.pid, target=target)
     if not alive:
@@ -431,7 +433,7 @@ def stop_session(
             )
         assert session.pid is not None
         force_kill_tmux_server(session.pid, target=target, socket_path=session.socket_path)
-        db.update_session_pid(name, None)
+        db.update_session_pid(name, PID_STOPPED)
         output.info(f"Session '{name}' force-stopped")
         return
 
@@ -443,7 +445,7 @@ def stop_session(
     if _session_alive(name, run_command=run_command, socket_path=sock):
         _kill_session(name, run_command=run_command, socket_path=sock)
 
-    db.update_session_pid(name, None)
+    db.update_session_pid(name, PID_STOPPED)
     output.info(f"Session '{name}' stopped")
 
 
@@ -686,7 +688,7 @@ def describe_session(
     output.info(f"Template:   {session.template}")
     output.info(f"Mode:       {mode_label}")
     output.info(f"Status:     {status_label}")
-    if session.pid is not None:
+    if session.pid is not None and session.pid > 0:
         output.info(f"PID:        {session.pid}")
     output.info(f"Created:    {session.created_at}")
     output.info(f"Updated:    {session.updated_at}")
@@ -769,6 +771,8 @@ def list_sessions(
                 status = "-"
             elif session.pid is None:
                 status = "unknown"
+            elif session.pid == PID_STOPPED:
+                status = "stopped"
             elif session.name in alive_map:
                 status = "running" if alive_map[session.name] else "stopped"
             else:
@@ -887,6 +891,7 @@ def repair_session(
         db.update_session_pid(name, pid)
         output.info(f"Recovered PID {pid} for session '{name}'")
     else:
+        db.update_session_pid(name, PID_STOPPED)
         output.info(f"Session '{name}' is not running")
 
 
@@ -934,6 +939,7 @@ def repair_all_sessions(
                 output.info(f"Recovered PID {pid} for session '{session.name}'")
                 repaired += 1
             else:
+                db.update_session_pid(session.name, PID_STOPPED)
                 output.info(f"Session '{session.name}' is not running")
 
     output.info(f"Repair complete: {repaired} session(s) recovered")

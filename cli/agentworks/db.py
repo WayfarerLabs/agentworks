@@ -56,6 +56,11 @@ class SessionHealth(Enum):
     UNKNOWN = "unknown"
 
 
+# Sentinel PID value: session is known to be stopped (no process to check).
+# Distinct from NULL (never checked / pre-enhancement).
+PID_STOPPED = -1
+
+
 # -- Row types -------------------------------------------------------------
 
 

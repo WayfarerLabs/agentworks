@@ -67,6 +67,12 @@ ALTER TABLE sessions ADD COLUMN pid INTEGER;
 The `status` column is dropped; liveness is always determined live via PID checks. The `pid` column
 is nullable; existing sessions get NULL.
 
+PID column values:
+
+- `NULL` -- pre-enhancement session, never checked (UNKNOWN health)
+- `-1` -- known to be stopped (no process to check)
+- `>0` -- known PID (check `/proc/<pid>` for current liveness)
+
 ### SessionRow
 
 ```python
@@ -183,6 +189,8 @@ def check_session_health(
     """
     if session.pid is None:
         return SessionHealth.UNKNOWN
+    if session.pid == PID_STOPPED:
+        return SessionHealth.STOPPED
 
     # Step 1: is the process alive?
     alive = check_session_status(session.pid, target=target)
