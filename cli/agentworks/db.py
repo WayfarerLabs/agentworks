@@ -368,6 +368,31 @@ MIGRATIONS: dict[int, str] = {
         DROP TABLE agent_workspace_grants;
         ALTER TABLE agent_workspace_grants_new RENAME TO agent_workspace_grants;
     """,
+    # -- Enforce: agent sessions must have a socket_path ---------------------
+    # Recreate sessions table with a CHECK constraint. The INSERT will fail
+    # if any agent sessions have NULL socket_path (legacy default-server
+    # mode). If this happens, revert to the previous version and run
+    # 'session restart --force' or 'session delete' for each legacy agent
+    # session before upgrading.
+    19: """
+        CREATE TABLE sessions_new (
+            name              TEXT PRIMARY KEY,
+            workspace_name    TEXT NOT NULL,
+            template          TEXT NOT NULL,
+            mode              TEXT NOT NULL DEFAULT 'admin',
+            status            TEXT NOT NULL DEFAULT 'running',
+            created_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+            updated_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+            agent_name        TEXT REFERENCES agents(name),
+            created_workspace INTEGER NOT NULL DEFAULT 0,
+            socket_path       TEXT,
+            FOREIGN KEY (workspace_name) REFERENCES workspaces(name),
+            CHECK (mode != 'agent' OR socket_path IS NOT NULL)
+        );
+        INSERT INTO sessions_new SELECT * FROM sessions;
+        DROP TABLE sessions;
+        ALTER TABLE sessions_new RENAME TO sessions;
+    """,
 }
 
 LATEST_VERSION = max(MIGRATIONS)

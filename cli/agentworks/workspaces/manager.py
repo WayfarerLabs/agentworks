@@ -799,10 +799,7 @@ def delete_workspace(
             run_command = partial(run, target, logger=ssh_logger)
             for session in db.list_sessions(workspace_name=name):
                 sock = _effective_socket_path(db, session)
-                # Kill on both socket and default server for migration compat
-                if sock:
-                    kill_session(session.name, run_command=run_command, socket_path=sock)
-                kill_session(session.name, run_command=run_command)
+                kill_session(session.name, run_command=run_command, socket_path=sock)
     db.delete_sessions_for_workspace(name)
 
     # Revoke agent workspace grants (agents are VM-scoped, not deleted with workspaces)

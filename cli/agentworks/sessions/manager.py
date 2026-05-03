@@ -25,7 +25,7 @@ if TYPE_CHECKING:
     from agentworks.db import Database, SessionRow, VMRow, WorkspaceRow
     from agentworks.sessions.templates import ResolvedSessionTemplate
     from agentworks.sessions.tmux import RunCommand
-    from agentworks.ssh import SSHLogger
+    from agentworks.ssh import ExecTarget, SSHLogger
 
 
 # -- Helpers ---------------------------------------------------------------
@@ -68,45 +68,28 @@ def _effective_socket_path(db: Database, session: SessionRow) -> str | None:
     return agent_socket_path(agent.linux_user, session.name)
 
 
-def _kill_session_any_server(
+def _session_alive(
+    session_name: str,
+    *,
+    run_command: RunCommand,
+    socket_path: str | None,
+) -> bool:
+    """Check if a session's tmux session is alive on its expected server."""
+    from agentworks.sessions.tmux import session_exists
+
+    return session_exists(session_name, run_command=run_command, socket_path=socket_path)
+
+
+def _kill_session(
     session_name: str,
     *,
     run_command: RunCommand,
     socket_path: str | None,
 ) -> None:
-    """Kill a session on both the agent socket and the default server.
-
-    Handles migration from the old model (agent sessions on the admin's
-    default tmux server) to the new model (per-agent sockets). Safe to call
-    even if the session exists on neither or both.
-    """
+    """Kill a session on its expected tmux server."""
     from agentworks.sessions.tmux import kill_session
 
-    if socket_path:
-        kill_session(session_name, run_command=run_command, socket_path=socket_path)
-    # Always try the default server too, to clean up legacy sessions
-    kill_session(session_name, run_command=run_command)
-
-
-def _session_exists_any_server(
-    session_name: str,
-    *,
-    run_command: RunCommand,
-    socket_path: str | None,
-    warn_legacy: bool = True,
-) -> bool:
-    """Check if a session exists on either the agent socket or the default server."""
-    from agentworks.sessions.tmux import session_exists
-
-    if socket_path and session_exists(session_name, run_command=run_command, socket_path=socket_path):
-        return True
-    on_default = session_exists(session_name, run_command=run_command)
-    if on_default and socket_path and warn_legacy:
-        output.warn(
-            f"agent session '{session_name}' is running on the default tmux server "
-            f"(legacy mode). Restart it to use the new per-agent socket."
-        )
-    return on_default
+    kill_session(session_name, run_command=run_command, socket_path=socket_path)
 
 
 def _require_workspace(db: Database, name: str) -> WorkspaceRow:
@@ -127,10 +110,12 @@ def _require_vm_for_workspace(db: Database, ws: WorkspaceRow) -> VMRow:
 
 def _prepare_vm(
     db: Database, config: Config, workspace_name: str, *, operation: str | None = None
-) -> tuple[WorkspaceRow, VMRow, RunCommand, RunCommand]:
-    """Validate workspace/VM, ensure running, and return (ws, vm, run_command, run_as_root).
+) -> tuple[WorkspaceRow, VMRow, RunCommand, RunCommand, ExecTarget]:
+    """Validate workspace/VM, ensure running, and return (ws, vm, run_command, run_as_root, target).
 
     If operation is set, creates an SSHLogger and binds it into both callables.
+    The ExecTarget is also returned directly for callers that need it (e.g.
+    ensure_agent_socket_*, batch_check_sessions).
     """
     from agentworks.ssh import SSHLogger, run
     from agentworks.ssh import run_as_root as ssh_run_as_root
@@ -145,11 +130,11 @@ def _prepare_vm(
     if vm.tailscale_host is None:
         raise output.VMError(f"VM '{vm.name}' has no Tailscale address")
 
-    target = admin_exec_target(vm, config)
     logger = SSHLogger(vm.name, operation) if operation else None
+    target = admin_exec_target(vm, config, logger=logger)
     run_command = partial(run, target, logger=logger)
     run_as_root = partial(ssh_run_as_root, target, logger=logger)
-    return ws, vm, run_command, run_as_root
+    return ws, vm, run_command, run_as_root, target
 
 
 def _require_session(db: Database, name: str) -> SessionRow:
@@ -242,9 +227,7 @@ def _reconcile_status(
 ) -> str:
     """Check tmux session and reconcile session status in the DB."""
     sock = _effective_socket_path(db, session)
-    alive = _session_exists_any_server(
-        session.name, run_command=run_command, socket_path=sock,
-    )
+    alive = _session_alive(session.name, run_command=run_command, socket_path=sock)
     if session.status == SessionStatus.RUNNING.value and not alive:
         db.update_session_status(session.name, SessionStatus.STOPPED)
         return SessionStatus.STOPPED.value
@@ -277,7 +260,7 @@ def create_session(
     )
 
     validate_name(name)
-    ws, vm, run_command, run_as_root = _prepare_vm(db, config, workspace_name, operation="session-create")
+    ws, vm, run_command, run_as_root, target = _prepare_vm(db, config, workspace_name, operation="session-create")
 
     if db.get_session(name) is not None:
         raise output.SessionError(f"session '{name}' already exists")
@@ -309,6 +292,15 @@ def create_session(
 
     template = _resolve_template(config, template_name)
 
+    # Compute socket path up front (deterministic from linux_user + session name).
+    # Needed for the DB insert since the CHECK constraint requires agent sessions
+    # to have a socket_path.
+    expected_socket: str | None = None
+    if mode == SessionMode.AGENT:
+        from agentworks.sessions.tmux import agent_socket_path
+
+        expected_socket = agent_socket_path(linux_user, name)
+
     # Insert DB record first to avoid orphaned tmux sessions on crash
     db.insert_session(
         name,
@@ -317,6 +309,7 @@ def create_session(
         mode,
         agent_name=resolved_agent_name,
         created_workspace=created_workspace,
+        socket_path=expected_socket,
     )
 
     deploy_restricted_config(run_command, history_limit=config.session.history_limit)
@@ -329,6 +322,7 @@ def create_session(
             command,
             linux_user,
             run_command=run_command,
+            target=target,
             run_as_root=run_as_root,
             admin_username=vm.admin_username,
             is_admin=(mode == SessionMode.ADMIN),
@@ -365,7 +359,7 @@ def stop_session(
     from agentworks.sessions.tmux import send_keys
 
     session = _require_session(db, name)
-    _ws, _vm, run_command, _ = _prepare_vm(db, config, session.workspace_name, operation="session-stop")
+    _ws, _vm, run_command, _, _target = _prepare_vm(db, config, session.workspace_name, operation="session-stop")
 
     if session.status == SessionStatus.STOPPED.value:
         output.info(f"Session '{name}' is already stopped")
@@ -373,17 +367,15 @@ def stop_session(
 
     sock = _effective_socket_path(db, session)
 
-    # Send C-c to the running process first (try both socket and default server)
+    # Send C-c to the running process
     send_keys(name, "C-c", run_command=run_command, socket_path=sock)
-    if sock:
-        send_keys(name, "C-c", run_command=run_command)
 
     # Wait for graceful exit
     time.sleep(_STOP_GRACE_SECONDS)
 
-    # Kill if still alive (checks both servers for migration compatibility)
-    if _session_exists_any_server(name, run_command=run_command, socket_path=sock, warn_legacy=False):
-        _kill_session_any_server(name, run_command=run_command, socket_path=sock)
+    # Kill if still alive
+    if _session_alive(name, run_command=run_command, socket_path=sock):
+        _kill_session(name, run_command=run_command, socket_path=sock)
 
     db.update_session_status(name, SessionStatus.STOPPED)
     output.info(f"Session '{name}' stopped")
@@ -405,15 +397,17 @@ def restart_session(
     )
 
     session = _require_session(db, name)
-    ws, vm, run_command, run_as_root = _prepare_vm(db, config, session.workspace_name, operation="session-restart")
+    ws, vm, run_command, run_as_root, target = _prepare_vm(
+        db, config, session.workspace_name, operation="session-restart",
+    )
     sock = _effective_socket_path(db, session)
 
-    if _session_exists_any_server(name, run_command=run_command, socket_path=sock, warn_legacy=False):
+    if _session_alive(name, run_command=run_command, socket_path=sock):
         if not force:
             raise output.SessionError(
                 f"session '{name}' is still running. Stop it first, or use --force."
             )
-        _kill_session_any_server(name, run_command=run_command, socket_path=sock)
+        _kill_session(name, run_command=run_command, socket_path=sock)
 
     template = _resolve_template(config, session.template)
     deploy_restricted_config(run_command, history_limit=config.session.history_limit)
@@ -434,6 +428,7 @@ def restart_session(
         command,
         linux_user,
         run_command=run_command,
+        target=target,
         run_as_root=run_as_root,
         admin_username=vm.admin_username,
         is_admin=is_admin,
@@ -508,17 +503,17 @@ def delete_session(
 ) -> None:
     """Stop and delete a session."""
     session = _require_session(db, name)
-    ws, vm, run_command, _ = _prepare_vm(db, config, session.workspace_name, operation="session-delete")
+    ws, vm, run_command, _, _target = _prepare_vm(db, config, session.workspace_name, operation="session-delete")
     sock = _effective_socket_path(db, session)
 
     if (
         not yes
-        and _session_exists_any_server(name, run_command=run_command, socket_path=sock)
+        and _session_alive(name, run_command=run_command, socket_path=sock)
         and not output.confirm(f"Session '{name}' is still running. Delete anyway?")
     ):
         raise output.UserAbort("delete cancelled")
 
-    _kill_session_any_server(name, run_command=run_command, socket_path=sock)
+    _kill_session(name, run_command=run_command, socket_path=sock)
 
     # Remove stale socket file if the tmux server has exited.
     # If the kill failed, warn and leave the socket for debugging.
@@ -582,7 +577,7 @@ def describe_session(
 ) -> None:
     """Show session details."""
     session = _require_session(db, name)
-    ws, vm, run_command, _ = _prepare_vm(db, config, session.workspace_name, operation=None)
+    ws, vm, run_command, _, _target = _prepare_vm(db, config, session.workspace_name, operation=None)
 
     # Reconcile status with tmux
     status = _reconcile_status(session, run_command=run_command, db=db)
@@ -679,24 +674,18 @@ def attach_session(
     name: str,
 ) -> None:
     """Attach to a session's tmux session (interactive)."""
-    from agentworks.sessions.tmux import session_exists, tmux_cmd
+    from agentworks.sessions.tmux import tmux_cmd
     from agentworks.ssh import interactive
 
     session = _require_session(db, name)
-    _ws, vm, run_command, _ = _prepare_vm(db, config, session.workspace_name, operation="session-attach")
+    _ws, vm, run_command, _, target = _prepare_vm(db, config, session.workspace_name, operation="session-attach")
     sock = _effective_socket_path(db, session)
 
-    if not _session_exists_any_server(name, run_command=run_command, socket_path=sock):
+    if not _session_alive(name, run_command=run_command, socket_path=sock):
         raise output.SessionError(f"session '{name}' is not running")
 
-    # Determine which server has the session. Prefer the socket; fall back
-    # to the default server for legacy sessions.
     q_session = shlex.quote(name)
-    target = admin_exec_target(vm, config)
-    if sock and session_exists(name, run_command=run_command, socket_path=sock):
-        sys.exit(interactive(target, tmux_cmd(f"attach -t {q_session}", sock)))
-    else:
-        sys.exit(interactive(target, tmux_cmd(f"attach -t {q_session}")))
+    sys.exit(interactive(target, tmux_cmd(f"attach -t {q_session}", sock)))
 
 
 def session_logs(
@@ -707,15 +696,11 @@ def session_logs(
     lines: int | None = None,
 ) -> None:
     """Dump the scrollback buffer for a session."""
-    from agentworks.sessions.tmux import capture_output, session_exists
+    from agentworks.sessions.tmux import capture_output
 
     session = _require_session(db, name)
-    _ws, _vm, run_command, _ = _prepare_vm(db, config, session.workspace_name, operation="session-logs")
+    _ws, _vm, run_command, _, _target = _prepare_vm(db, config, session.workspace_name, operation="session-logs")
     sock = _effective_socket_path(db, session)
-
-    # For legacy sessions, fall back to the default server
-    if sock and not session_exists(name, run_command=run_command, socket_path=sock):
-        sock = None
 
     captured = capture_output(
         name,

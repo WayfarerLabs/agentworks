@@ -1175,13 +1175,10 @@ def _phase_b_setup(
         logger.step("Agent tmux socket directories")
         output.detail("Setting up agent tmux socket infrastructure...")
 
-        def _root_cmd(command: str, *, check: bool = True) -> object:
-            return ts_target.run(command, sudo=True, check=check)
-
-        ensure_agent_socket_root(_root_cmd, admin_username, warn_if_missing=not is_first_init)
+        ensure_agent_socket_root(ts_target, admin_username, warn_if_missing=not is_first_init)
         for agent in db.list_agents(vm_name):
-            ensure_agent_socket_dir(_root_cmd, agent.linux_user)
-            removed = cleanup_stale_sockets(_root_cmd, agent.linux_user)
+            ensure_agent_socket_dir(ts_target, agent.linux_user)
+            removed = cleanup_stale_sockets(ts_target, agent.linux_user)
             if removed:
                 output.detail(f"Cleaned up {removed} stale socket(s) for {agent.linux_user}")
     except SSHError as e:

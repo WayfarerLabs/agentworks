@@ -193,9 +193,7 @@ def delete_agent(
         run_command = partial(run, target, logger=ssh_logger)
         for session in agent_sessions:
             sock = _effective_socket_path(db, session)
-            if sock:
-                kill_session(session.name, run_command=run_command, socket_path=sock)
-            kill_session(session.name, run_command=run_command)
+            kill_session(session.name, run_command=run_command, socket_path=sock)
             db.delete_session(session.name)
         output.detail(f"Deleted {len(agent_sessions)} session(s)")
 
@@ -566,7 +564,7 @@ def _create_agent_on_vm(
     """
     from agentworks.ssh import run_as_root
 
-    target = admin_exec_target(vm, config)
+    target = admin_exec_target(vm, config, logger=logger)
     lg = logger
 
     output.detail(f"Creating user '{linux_user}' on VM '{vm.name}'...")
@@ -586,16 +584,13 @@ def _create_agent_on_vm(
     # Ensure the agent tmux socket infrastructure exists. Call
     # ensure_agent_socket_root first so this works on VMs that haven't
     # been reinited since the socket feature was added.
-    from functools import partial as _partial
-
     from agentworks.sessions.tmux import cleanup_stale_sockets, ensure_agent_socket_dir, ensure_agent_socket_root
 
-    _root_cmd = _partial(run_as_root, target, logger=lg)
-    ensure_agent_socket_root(_root_cmd, vm.admin_username)
+    ensure_agent_socket_root(target, vm.admin_username)
     # The per-agent dir won't exist for a brand-new agent -- suppress the
     # "missing" warning. Misconfiguration of an existing dir still warns.
-    ensure_agent_socket_dir(_root_cmd, linux_user, warn_if_missing=False)
-    removed = cleanup_stale_sockets(_root_cmd, linux_user)
+    ensure_agent_socket_dir(target, linux_user, warn_if_missing=False)
+    removed = cleanup_stale_sockets(target, linux_user)
     if removed:
         output.detail(f"Cleaned up {removed} stale socket(s)")
 
