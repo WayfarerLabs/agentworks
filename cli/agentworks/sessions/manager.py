@@ -85,20 +85,12 @@ def _kill_session(
     session_name: str,
     *,
     run_command: RunCommand,
-    target: ExecTarget,
     socket_path: str | None,
 ) -> None:
-    """Kill a session on its expected tmux server, with sudo fallback.
+    """Kill a session on its expected tmux server."""
+    from agentworks.sessions.tmux import kill_session
 
-    Tries non-sudo first. If that fails and there's a socket path,
-    retries with sudo to handle ACL/permission issues.
-    """
-    from agentworks.sessions.tmux import kill_session, tmux_cmd
-
-    killed = kill_session(session_name, run_command=run_command, socket_path=socket_path)
-    if not killed and socket_path:
-        q_session = shlex.quote(session_name)
-        target.run(tmux_cmd(f"kill-session -t {q_session}", socket_path), sudo=True, check=False)
+    kill_session(session_name, run_command=run_command, socket_path=socket_path)
 
 
 def _require_workspace(db: Database, name: str) -> WorkspaceRow:
@@ -369,15 +361,17 @@ def stop_session(
     state = _check_session(name, target=target, socket_path=sock)
 
     if state == SessionState.INACCESSIBLE:
-        output.warn(f"Session '{name}': socket not accessible by admin, killing with sudo")
-    elif state != SessionState.DEAD:
-        # Send C-c to the running process (only works if accessible)
+        raise output.SessionError(
+            f"session '{name}' is running but socket not accessible by admin. "
+            f"Use 'session restart {name} --force' to recover."
+        )
+
+    if state != SessionState.DEAD:
         send_keys(name, "C-c", run_command=run_command, socket_path=sock)
         time.sleep(_STOP_GRACE_SECONDS)
 
-    # Kill if still alive (uses sudo fallback if needed)
     if _check_session(name, target=target, socket_path=sock) != SessionState.DEAD:
-        _kill_session(name, run_command=run_command, target=target, socket_path=sock)
+        _kill_session(name, run_command=run_command, socket_path=sock)
 
     db.update_session_status(name, SessionStatus.STOPPED)
     output.info(f"Session '{name}' stopped")
@@ -410,7 +404,16 @@ def restart_session(
             raise output.SessionError(
                 f"session '{name}' is still running. Stop it first, or use --force."
             )
-        _kill_session(name, run_command=run_command, target=target, socket_path=sock)
+        if state == SessionState.INACCESSIBLE:
+            # Recovery path: sudo kill the inaccessible session, then recreate
+            # with proper ACLs via create_session -> _grant_server_access.
+            from agentworks.sessions.tmux import tmux_cmd
+
+            output.warn(f"Session '{name}': socket not accessible, killing with sudo")
+            q = shlex.quote(name)
+            target.run(tmux_cmd(f"kill-session -t {q}", sock), sudo=True, check=False)
+        else:
+            _kill_session(name, run_command=run_command, socket_path=sock)
 
     template = _resolve_template(config, session.template)
     deploy_restricted_config(run_command, history_limit=config.session.history_limit)
@@ -510,6 +513,12 @@ def delete_session(
     sock = _effective_socket_path(db, session)
 
     state = _check_session(name, target=target, socket_path=sock)
+    if state == SessionState.INACCESSIBLE:
+        raise output.SessionError(
+            f"session '{name}' is running but socket not accessible by admin. "
+            f"Use 'session restart {name} --force' to recover."
+        )
+
     if (
         not yes
         and state != SessionState.DEAD
@@ -517,7 +526,7 @@ def delete_session(
     ):
         raise output.UserAbort("delete cancelled")
 
-    _kill_session(name, run_command=run_command, target=target, socket_path=sock)
+    _kill_session(name, run_command=run_command, socket_path=sock)
 
     # Remove stale socket file if the tmux server has exited.
     # If the kill failed, warn and leave the socket for debugging.
@@ -652,17 +661,18 @@ def list_sessions(
             by_vm[ws.vm_name][1].append((session.name, sock))
 
         # Hit all VMs in parallel (cap at 8 to avoid overwhelming SSH)
-        with ThreadPoolExecutor(max_workers=min(len(by_vm), 8)) as pool:
-            futures = {
-                pool.submit(batch_check_sessions, target, checks): name
-                for name, (target, checks) in by_vm.items()
-            }
-            for future in as_completed(futures):
-                try:
-                    alive_map.update(future.result())
-                except Exception as e:
-                    vm_name = futures[future]
-                    output.warn(f"status check failed for VM '{vm_name}': {e}")
+        if by_vm:
+            with ThreadPoolExecutor(max_workers=min(len(by_vm), 8)) as pool:
+                futures = {
+                    pool.submit(batch_check_sessions, target, checks): name
+                    for name, (target, checks) in by_vm.items()
+                }
+                for future in as_completed(futures):
+                    try:
+                        alive_map.update(future.result())
+                    except Exception as e:
+                        vm_name = futures[future]
+                        output.warn(f"status check failed for VM '{vm_name}': {e}")
 
     # Build display rows, reconciling status from alive_map
     rows: list[tuple[str, str, str, str, str, str]] = []
