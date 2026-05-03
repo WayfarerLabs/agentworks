@@ -792,7 +792,7 @@ def delete_workspace(
             from functools import partial
 
             from agentworks.sessions.manager import _effective_socket_path
-            from agentworks.sessions.tmux import kill_session, tmux_cmd
+            from agentworks.sessions.tmux import force_kill_session, kill_session
             from agentworks.ssh import admin_exec_target, run
 
             target = admin_exec_target(vm, config, logger=ssh_logger)
@@ -801,8 +801,7 @@ def delete_workspace(
                 sock = _effective_socket_path(db, session)
                 killed = kill_session(session.name, run_command=run_command, socket_path=sock)
                 if not killed and sock:
-                    q = shlex.quote(session.name)
-                    target.run(tmux_cmd(f"kill-session -t {q}", sock), sudo=True, check=False)
+                    force_kill_session(target, session.name, sock)
     db.delete_sessions_for_workspace(name)
 
     # Revoke agent workspace grants (agents are VM-scoped, not deleted with workspaces)

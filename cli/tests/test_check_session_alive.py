@@ -1,10 +1,10 @@
-"""Tests for check_session_alive (sudo fallback for single-session checks)."""
+"""Tests for check_session_alive and force_kill_session."""
 
 from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-from agentworks.sessions.tmux import SessionState, check_session_alive
+from agentworks.sessions.tmux import SessionState, check_session_alive, force_kill_session
 from agentworks.ssh import SSHResult
 
 
@@ -56,3 +56,29 @@ def test_no_sudo_fallback_for_default_server() -> None:
     target.run.return_value = _fail()
     assert check_session_alive(target, "s1", None) == SessionState.DEAD
     assert target.run.call_count == 1
+
+
+# -- force_kill_session -------------------------------------------------------
+
+
+def test_force_kill_uses_sudo() -> None:
+    """force_kill_session runs tmux kill-session via sudo."""
+    target = MagicMock()
+    target.run.return_value = _ok()
+    force_kill_session(target, "s1", "/sock")
+    target.run.assert_called_once()
+    cmd, kwargs = target.run.call_args[0][0], target.run.call_args[1]
+    assert "kill-session" in cmd
+    assert "-S" in cmd
+    assert "/sock" in cmd
+    assert kwargs.get("sudo") is True
+
+
+def test_force_kill_no_socket() -> None:
+    """force_kill_session works for default-server sessions too."""
+    target = MagicMock()
+    target.run.return_value = _ok()
+    force_kill_session(target, "s1")
+    cmd = target.run.call_args[0][0]
+    assert "kill-session" in cmd
+    assert "-S" not in cmd

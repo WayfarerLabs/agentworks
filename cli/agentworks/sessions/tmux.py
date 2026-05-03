@@ -357,6 +357,16 @@ def kill_session(
     return getattr(result, "ok", True)
 
 
+def force_kill_session(
+    target: ExecTarget,
+    session_name: str,
+    socket_path: str | None = None,
+) -> None:
+    """Kill a session using sudo, for when the admin lacks direct access."""
+    q_session = shlex.quote(session_name)
+    target.run(tmux_cmd(f"kill-session -t {q_session}", socket_path), sudo=True, check=False)
+
+
 def session_exists(
     session_name: str,
     *,
@@ -424,7 +434,7 @@ def batch_check_sessions(
             means check the default tmux server.
 
     Returns:
-        dict mapping session_name to alive (True/False).
+        dict mapping session_name to SessionState.
 
     Raises:
         BatchCheckError: if the SSH command itself failed (connection error,
@@ -493,16 +503,14 @@ def batch_check_sessions(
         elif line.startswith("ERROR:"):
             error_names.add(line[6:])
 
-    result_map: dict[str, bool] = {}
+    result_map: dict[str, SessionState] = {}
     for name, _ in checks:
         if name in error_names:
-            from agentworks import output
-
-            output.warn(
-                f"session '{name}': running but socket not accessible by admin "
-                f"(use 'session restart {name} --force' to fix)"
-            )
-        result_map[name] = name in alive_names
+            result_map[name] = SessionState.INACCESSIBLE
+        elif name in alive_names:
+            result_map[name] = SessionState.ALIVE
+        else:
+            result_map[name] = SessionState.DEAD
 
     return result_map
 

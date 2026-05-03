@@ -361,11 +361,10 @@ def stop_session(
     state = _check_session(name, target=target, socket_path=sock)
 
     if state == SessionState.INACCESSIBLE:
-        from agentworks.sessions.tmux import tmux_cmd
+        from agentworks.sessions.tmux import force_kill_session
 
         output.warn(f"Session '{name}': socket not accessible, killing with sudo")
-        q = shlex.quote(name)
-        target.run(tmux_cmd(f"kill-session -t {q}", sock), sudo=True, check=False)
+        force_kill_session(target, name, sock)
     elif state != SessionState.DEAD:
         send_keys(name, "C-c", run_command=run_command, socket_path=sock)
         time.sleep(_STOP_GRACE_SECONDS)
@@ -406,11 +405,10 @@ def restart_session(
         if state == SessionState.INACCESSIBLE:
             # Recovery path: sudo kill the inaccessible session, then recreate
             # with proper ACLs via create_session -> _grant_server_access.
-            from agentworks.sessions.tmux import tmux_cmd
+            from agentworks.sessions.tmux import force_kill_session
 
             output.warn(f"Session '{name}': socket not accessible, killing with sudo")
-            q = shlex.quote(name)
-            target.run(tmux_cmd(f"kill-session -t {q}", sock), sudo=True, check=False)
+            force_kill_session(target, name, sock)
         else:
             _kill_session(name, run_command=run_command, socket_path=sock)
 
@@ -520,11 +518,10 @@ def delete_session(
         raise output.UserAbort("delete cancelled")
 
     if state == SessionState.INACCESSIBLE:
-        from agentworks.sessions.tmux import tmux_cmd
+        from agentworks.sessions.tmux import force_kill_session
 
         output.warn(f"Session '{name}': socket not accessible, killing with sudo")
-        q = shlex.quote(name)
-        target.run(tmux_cmd(f"kill-session -t {q}", sock), sudo=True, check=False)
+        force_kill_session(target, name, sock)
     elif state != SessionState.DEAD:
         _kill_session(name, run_command=run_command, socket_path=sock)
 
@@ -680,7 +677,8 @@ def list_sessions(
         mode_label = f"agent ({session.agent_name})" if session.agent_name else "admin"
 
         if session.name in alive_map:
-            alive = alive_map[session.name]
+            state = alive_map[session.name]
+            alive = state != SessionState.DEAD
             status = session.status
             if session.status == SessionStatus.RUNNING.value and not alive:
                 db.update_session_status(session.name, SessionStatus.STOPPED)
@@ -688,6 +686,11 @@ def list_sessions(
             elif session.status == SessionStatus.STOPPED.value and alive:
                 db.update_session_status(session.name, SessionStatus.RUNNING)
                 status = SessionStatus.RUNNING.value
+            if state == SessionState.INACCESSIBLE:
+                output.warn(
+                    f"session '{session.name}': running but socket not accessible "
+                    f"(use 'session restart {session.name} --force' to fix)"
+                )
         else:
             status = session.status
 

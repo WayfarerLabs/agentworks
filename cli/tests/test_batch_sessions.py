@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from agentworks.sessions.tmux import BatchCheckError, batch_check_sessions
+from agentworks.sessions.tmux import BatchCheckError, SessionState, batch_check_sessions
 from agentworks.ssh import SSHError, SSHResult
 
 
@@ -28,19 +28,19 @@ def test_empty_checks() -> None:
 def test_all_alive() -> None:
     target = _mock_target(stdout="ALIVE:session1\nALIVE:session2\n")
     result = batch_check_sessions(target, [("session1", None), ("session2", "/path/to/sock")])
-    assert result == {"session1": True, "session2": True}
+    assert result == {"session1": SessionState.ALIVE, "session2": SessionState.ALIVE}
 
 
 def test_mixed_alive_and_dead() -> None:
     target = _mock_target(stdout="ALIVE:s1\n")
     result = batch_check_sessions(target, [("s1", None), ("s2", "/sock")])
-    assert result == {"s1": True, "s2": False}
+    assert result == {"s1": SessionState.ALIVE, "s2": SessionState.DEAD}
 
 
 def test_all_dead() -> None:
     target = _mock_target(stdout="")
     result = batch_check_sessions(target, [("s1", None), ("s2", "/sock")])
-    assert result == {"s1": False, "s2": False}
+    assert result == {"s1": SessionState.DEAD, "s2": SessionState.DEAD}
 
 
 def test_ssh_failure_raises_batch_error() -> None:
@@ -49,20 +49,18 @@ def test_ssh_failure_raises_batch_error() -> None:
         batch_check_sessions(target, [("s1", None)])
 
 
-def test_running_but_inaccessible_warns(warnings: list[str]) -> None:
-    """Sudo fallback detects running session with bad permissions -> ALIVE + ERROR."""
+def test_inaccessible_returns_state() -> None:
+    """Sudo fallback detects running session with bad permissions -> INACCESSIBLE."""
     target = _mock_target(stdout="ALIVE:agent-session\nERROR:agent-session\n")
     result = batch_check_sessions(target, [("agent-session", "/bad/socket")])
-    assert result == {"agent-session": True}
-    assert any("running but socket not accessible" in w for w in warnings)
+    assert result == {"agent-session": SessionState.INACCESSIBLE}
 
 
-def test_missing_socket_is_dead_not_error(warnings: list[str]) -> None:
-    """Missing socket is normal (session stopped + cleaned up), no warning."""
+def test_missing_socket_is_dead() -> None:
+    """Missing socket is normal (session stopped + cleaned up)."""
     target = _mock_target(stdout="")
     result = batch_check_sessions(target, [("stopped-session", "/missing/socket")])
-    assert result == {"stopped-session": False}
-    assert len(warnings) == 0
+    assert result == {"stopped-session": SessionState.DEAD}
 
 
 def test_tmux_not_found_raises_batch_error() -> None:
