@@ -827,3 +827,77 @@ def session_logs(
     # Raw data pipe (opaque tmux capture-pane output), not a structured message.
     # Intentionally not routed through the output handler.
     typer.echo(captured, nl=False)
+
+
+def repair_session(
+    db: Database,
+    config: Config,
+    *,
+    name: str,
+) -> None:
+    """Recover the PID for a session from its running tmux server."""
+    from agentworks.sessions.tmux import get_tmux_server_pid
+
+    session = _require_session(db, name)
+    if session.pid is not None:
+        output.info(f"Session '{name}' already has PID {session.pid}, skipped")
+        return
+
+    _ws, _vm, _run_command, _, target = _prepare_vm(db, config, session.workspace_name, operation="session-repair")
+    sock = _effective_socket_path(db, session)
+    pid = get_tmux_server_pid(target=target, socket_path=sock)
+
+    if pid is not None:
+        db.update_session_pid(name, pid)
+        output.info(f"Recovered PID {pid} for session '{name}'")
+    else:
+        output.info(f"Session '{name}' is not running")
+
+
+def repair_all_sessions(
+    db: Database,
+    config: Config,
+    *,
+    vm_name: str | None = None,
+    workspace_name: str | None = None,
+) -> None:
+    """Batch-recover PIDs for sessions missing them."""
+    from agentworks.sessions.tmux import get_tmux_server_pid
+
+    sessions = db.list_sessions(workspace_name=workspace_name)
+    sessions = [s for s in sessions if s.pid is None]
+
+    if vm_name is not None:
+        vm_workspaces = {ws.name for ws in db.list_workspaces(vm_name=vm_name)}
+        sessions = [s for s in sessions if s.workspace_name in vm_workspaces]
+
+    if not sessions:
+        output.info("No sessions need repair.")
+        return
+
+    # Group by workspace for VM target reuse
+    by_ws: dict[str, list[SessionRow]] = {}
+    for s in sessions:
+        by_ws.setdefault(s.workspace_name, []).append(s)
+
+    repaired = 0
+    for ws_name, ws_sessions in by_ws.items():
+        ws = db.get_workspace(ws_name)
+        if not ws or ws.type != "vm" or not ws.vm_name:
+            continue
+        vm = db.get_vm(ws.vm_name)
+        if not vm or not vm.tailscale_host:
+            continue
+        target = admin_exec_target(vm, config)
+
+        for session in ws_sessions:
+            sock = _effective_socket_path(db, session)
+            pid = get_tmux_server_pid(target=target, socket_path=sock)
+            if pid is not None:
+                db.update_session_pid(session.name, pid)
+                output.info(f"Recovered PID {pid} for session '{session.name}'")
+                repaired += 1
+            else:
+                output.info(f"Session '{session.name}' is not running")
+
+    output.info(f"Repair complete: {repaired} session(s) recovered")
