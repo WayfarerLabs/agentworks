@@ -100,7 +100,7 @@ def test_batch_check_status_empty() -> None:
     assert batch_check_status([], target=_FakeTarget()) == {}
 
 
-def test_batch_check_status_no_pids() -> None:
+def test_batch_check_status_all_missing_pid() -> None:
     sessions = [_session("s1", pid=None)]
     assert batch_check_status(sessions, target=_FakeTarget()) == {}
 
