@@ -8,6 +8,7 @@ prefix key) while keeping a large scrollback buffer.
 
 from __future__ import annotations
 
+import enum
 import shlex
 from typing import TYPE_CHECKING, Protocol
 
@@ -376,23 +377,30 @@ def session_exists(
     return getattr(result, "ok", False)
 
 
+class SessionState(enum.Enum):
+    """Result of a session liveness check."""
+
+    DEAD = "dead"
+    ALIVE = "alive"
+    INACCESSIBLE = "inaccessible"  # running but admin can't reach it
+
+
 def check_session_alive(
     target: ExecTarget,
     session_name: str,
     socket_path: str | None = None,
-) -> bool:
+) -> SessionState:
     """Check if a session is alive, with sudo fallback for socket-based sessions.
 
-    Tries without sudo first (admin has group access in the normal case).
-    If that fails on a socket-based session, retries with sudo to distinguish
-    "actually dead" from "running but inaccessible". Warns if the session is
-    running but not accessible by admin.
+    Returns SessionState.ALIVE if the admin can reach the session directly,
+    SessionState.INACCESSIBLE if only reachable via sudo (ACL or permission
+    issue), or SessionState.DEAD if the session is not running.
     """
     q_session = shlex.quote(session_name)
     cmd = tmux_cmd(f"has-session -t {q_session}", socket_path) + " 2>/dev/null"
     result = target.run(cmd, check=False)
     if result.ok:
-        return True
+        return SessionState.ALIVE
 
     # For socket-based sessions, try sudo to detect running-but-inaccessible
     if socket_path:
@@ -400,15 +408,9 @@ def check_session_alive(
         sudo_cmd = f"sudo -n tmux -S {q_sock} has-session -t {q_session} 2>/dev/null"
         sudo_result = target.run(sudo_cmd, check=False)
         if sudo_result.ok:
-            from agentworks import output
+            return SessionState.INACCESSIBLE
 
-            output.warn(
-                f"session '{session_name}': running but socket not accessible "
-                f"by admin (restart session to fix)"
-            )
-            return True
-
-    return False
+    return SessionState.DEAD
 
 
 class BatchCheckError(Exception):
@@ -435,7 +437,8 @@ def batch_check_sessions(
             reconciliation rather than marking sessions as stopped.
 
     Runs as admin, who has group access to all agent sockets via
-    tmux-agent-access. No sudo required.
+    tmux-agent-access. Falls back to sudo for socket-based sessions
+    when the non-sudo check fails (ACL or permission issue).
     """
     if not checks:
         return {}

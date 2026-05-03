@@ -12,6 +12,7 @@ import typer
 
 from agentworks import output
 from agentworks.db import SessionMode, SessionStatus
+from agentworks.sessions.tmux import SessionState
 from agentworks.ssh import admin_exec_target
 
 _ENV_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -68,13 +69,13 @@ def _effective_socket_path(db: Database, session: SessionRow) -> str | None:
     return agent_socket_path(agent.linux_user, session.name)
 
 
-def _session_alive(
+def _check_session(
     session_name: str,
     *,
     target: ExecTarget,
     socket_path: str | None,
-) -> bool:
-    """Check if a session's tmux session is alive, with sudo fallback."""
+) -> SessionState:
+    """Check if a session is alive, with sudo fallback for ACL issues."""
     from agentworks.sessions.tmux import check_session_alive
 
     return check_session_alive(target, session_name, socket_path)
@@ -84,12 +85,20 @@ def _kill_session(
     session_name: str,
     *,
     run_command: RunCommand,
+    target: ExecTarget,
     socket_path: str | None,
 ) -> None:
-    """Kill a session on its expected tmux server."""
-    from agentworks.sessions.tmux import kill_session
+    """Kill a session on its expected tmux server, with sudo fallback.
 
-    kill_session(session_name, run_command=run_command, socket_path=socket_path)
+    Tries non-sudo first. If that fails and there's a socket path,
+    retries with sudo to handle ACL/permission issues.
+    """
+    from agentworks.sessions.tmux import kill_session, tmux_cmd
+
+    killed = kill_session(session_name, run_command=run_command, socket_path=socket_path)
+    if not killed and socket_path:
+        q_session = shlex.quote(session_name)
+        target.run(tmux_cmd(f"kill-session -t {q_session}", socket_path), sudo=True, check=False)
 
 
 def _require_workspace(db: Database, name: str) -> WorkspaceRow:
@@ -227,7 +236,8 @@ def _reconcile_status(
 ) -> str:
     """Check tmux session and reconcile session status in the DB."""
     sock = _effective_socket_path(db, session)
-    alive = _session_alive(session.name, target=target, socket_path=sock)
+    state = _check_session(session.name, target=target, socket_path=sock)
+    alive = state != SessionState.DEAD
     if session.status == SessionStatus.RUNNING.value and not alive:
         db.update_session_status(session.name, SessionStatus.STOPPED)
         return SessionStatus.STOPPED.value
@@ -356,16 +366,18 @@ def stop_session(
         return
 
     sock = _effective_socket_path(db, session)
+    state = _check_session(name, target=target, socket_path=sock)
 
-    # Send C-c to the running process
-    send_keys(name, "C-c", run_command=run_command, socket_path=sock)
+    if state == SessionState.INACCESSIBLE:
+        output.warn(f"Session '{name}': socket not accessible by admin, killing with sudo")
+    elif state != SessionState.DEAD:
+        # Send C-c to the running process (only works if accessible)
+        send_keys(name, "C-c", run_command=run_command, socket_path=sock)
+        time.sleep(_STOP_GRACE_SECONDS)
 
-    # Wait for graceful exit
-    time.sleep(_STOP_GRACE_SECONDS)
-
-    # Kill if still alive on the session's expected tmux server
-    if _session_alive(name, target=target, socket_path=sock):
-        _kill_session(name, run_command=run_command, socket_path=sock)
+    # Kill if still alive (uses sudo fallback if needed)
+    if _check_session(name, target=target, socket_path=sock) != SessionState.DEAD:
+        _kill_session(name, run_command=run_command, target=target, socket_path=sock)
 
     db.update_session_status(name, SessionStatus.STOPPED)
     output.info(f"Session '{name}' stopped")
@@ -392,12 +404,13 @@ def restart_session(
     )
     sock = _effective_socket_path(db, session)
 
-    if _session_alive(name, target=target, socket_path=sock):
+    state = _check_session(name, target=target, socket_path=sock)
+    if state != SessionState.DEAD:
         if not force:
             raise output.SessionError(
                 f"session '{name}' is still running. Stop it first, or use --force."
             )
-        _kill_session(name, run_command=run_command, socket_path=sock)
+        _kill_session(name, run_command=run_command, target=target, socket_path=sock)
 
     template = _resolve_template(config, session.template)
     deploy_restricted_config(run_command, history_limit=config.session.history_limit)
@@ -496,14 +509,15 @@ def delete_session(
     ws, vm, run_command, _, target = _prepare_vm(db, config, session.workspace_name, operation="session-delete")
     sock = _effective_socket_path(db, session)
 
+    state = _check_session(name, target=target, socket_path=sock)
     if (
         not yes
-        and _session_alive(name, target=target, socket_path=sock)
+        and state != SessionState.DEAD
         and not output.confirm(f"Session '{name}' is still running. Delete anyway?")
     ):
         raise output.UserAbort("delete cancelled")
 
-    _kill_session(name, run_command=run_command, socket_path=sock)
+    _kill_session(name, run_command=run_command, target=target, socket_path=sock)
 
     # Remove stale socket file if the tmux server has exited.
     # If the kill failed, warn and leave the socket for debugging.
@@ -706,8 +720,14 @@ def attach_session(
     _ws, vm, run_command, _, target = _prepare_vm(db, config, session.workspace_name, operation="session-attach")
     sock = _effective_socket_path(db, session)
 
-    if not _session_alive(name, target=target, socket_path=sock):
+    state = _check_session(name, target=target, socket_path=sock)
+    if state == SessionState.DEAD:
         raise output.SessionError(f"session '{name}' is not running")
+    if state == SessionState.INACCESSIBLE:
+        raise output.SessionError(
+            f"session '{name}' is running but socket not accessible by admin "
+            f"(restart session with --force to fix)"
+        )
 
     q_session = shlex.quote(name)
     sys.exit(interactive(target, tmux_cmd(f"attach -t {q_session}", sock)))
