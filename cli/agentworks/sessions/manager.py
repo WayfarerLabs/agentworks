@@ -544,25 +544,12 @@ def restart_all_sessions(
         vm_workspaces = {ws.name for ws in db.list_workspaces(vm_name=vm_name)}
         sessions = [s for s in sessions if s.workspace_name in vm_workspaces]
 
-    # Pre-filter by liveness when not including running sessions
+    # Pre-filter by liveness (one SSH call per VM, parallel)
     if not include_running:
-        alive_names: set[str] = set()
-        by_ws: dict[str, list[SessionRow]] = {}
-        for s in sessions:
-            by_ws.setdefault(s.workspace_name, []).append(s)
-        for ws_name, ws_sessions in by_ws.items():
-            ws = db.get_workspace(ws_name)
-            if not ws or ws.type != "vm" or not ws.vm_name:
-                continue
-            vm = db.get_vm(ws.vm_name)
-            if not vm or not vm.tailscale_host:
-                continue
-            target = admin_exec_target(vm, config)
-            alive_map = batch_check_status(ws_sessions, target=target)
-            for s in ws_sessions:
-                if s.pid is not None and alive_map.get(s.name, False):
-                    alive_names.add(s.name)
-        sessions = [s for s in sessions if s.name not in alive_names]
+        alive_map = _batch_check_all_sessions(sessions, db=db, config=config)
+        sessions = [
+            s for s in sessions if not (s.pid is not None and alive_map.get(s.name, False))
+        ]
 
     if not sessions:
         output.info("No matching sessions to restart.")
@@ -697,6 +684,50 @@ def describe_session(
     output.info(f"Updated:    {session.updated_at}")
 
 
+def _batch_check_all_sessions(
+    sessions: list[SessionRow],
+    *,
+    db: Database,
+    config: Config,
+) -> dict[str, bool]:
+    """Batch PID check grouped by VM, parallel across VMs (capped at 8).
+
+    Returns {session_name: alive}. Sessions with no reachable VM or no PID
+    are excluded from the result.
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    # Resolve each session's VM and group
+    by_vm: dict[str, list[SessionRow]] = {}
+    vm_targets: dict[str, ExecTarget] = {}
+
+    for s in sessions:
+        ws = db.get_workspace(s.workspace_name)
+        if not ws or ws.type != "vm" or not ws.vm_name:
+            continue
+        if ws.vm_name not in vm_targets:
+            vm = db.get_vm(ws.vm_name)
+            if not vm or not vm.tailscale_host:
+                continue
+            vm_targets[ws.vm_name] = admin_exec_target(vm, config)
+        by_vm.setdefault(ws.vm_name, []).append(s)
+
+    if not by_vm:
+        return {}
+
+    result_map: dict[str, bool] = {}
+
+    def _check_vm(vm_name: str) -> dict[str, bool]:
+        return batch_check_status(by_vm[vm_name], target=vm_targets[vm_name])
+
+    with ThreadPoolExecutor(max_workers=min(8, len(by_vm))) as executor:
+        futures = {executor.submit(_check_vm, name): name for name in by_vm}
+        for future in as_completed(futures):
+            result_map.update(future.result())
+
+    return result_map
+
+
 def list_sessions(
     db: Database,
     config: Config,
@@ -704,13 +735,18 @@ def list_sessions(
     workspace_name: str | None = None,
     no_status: bool = False,
 ) -> None:
-    """List sessions, optionally reconciling status with tmux."""
+    """List sessions with batch PID status checks (one SSH call per VM, parallel)."""
     sessions = db.list_sessions(workspace_name=workspace_name)
     if not sessions:
         output.info("No sessions found.")
         return
 
-    # Group sessions by workspace to batch SSH connections
+    # Batch PID check across all VMs in parallel
+    alive_map: dict[str, bool] = {}
+    if not no_status:
+        alive_map = _batch_check_all_sessions(sessions, db=db, config=config)
+
+    # Build table rows grouped by workspace
     by_workspace: dict[str, list[SessionRow]] = {}
     for session in sessions:
         by_workspace.setdefault(session.workspace_name, []).append(session)
@@ -720,24 +756,10 @@ def list_sessions(
         ws = db.get_workspace(ws_name)
         vm_name = ws.vm_name or "-" if ws else "-"
 
-        if no_status or ws is None or ws.type != "vm":
-            for session in ws_sessions:
-                mode_label = f"agent ({session.agent_name})" if session.agent_name else "admin"
-                rows.append((session.name, ws_name, vm_name, session.template, mode_label, "-"))
-            continue
-
-        vm = db.get_vm(ws.vm_name)  # type: ignore[arg-type]
-        if vm is None or vm.tailscale_host is None:
-            for session in ws_sessions:
-                mode_label = f"agent ({session.agent_name})" if session.agent_name else "admin"
-                rows.append((session.name, ws_name, vm_name, session.template, mode_label, "-"))
-            continue
-
-        target = admin_exec_target(vm, config)
-        alive_map = batch_check_status(ws_sessions, target=target)
-
         for session in ws_sessions:
-            if session.pid is None:
+            if no_status:
+                status = "-"
+            elif session.pid is None:
                 status = "unknown"
             elif session.name in alive_map:
                 status = "running" if alive_map[session.name] else "stopped"

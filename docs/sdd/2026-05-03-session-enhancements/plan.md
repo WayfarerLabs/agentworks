@@ -137,9 +137,6 @@ call per VM, completions include the new command.
 
 - **`_session_alive` retained**: kept for the normal stop path (OK health), where tmux-level
   `has-session` checks are needed after C-c. Will be removed when/if the stop path is refactored.
-- **`restart_all_sessions` batches per workspace**: groups by workspace rather than by VM. Multiple
-  workspaces on the same VM produce one SSH call each. Acceptable cost; can be optimized to batch
-  per VM later.
 - **Admin-mode `--force` warning not implemented**: the R3 table specifies warning the operator when
   `--force` on an admin session would kill the shared tmux server. Deferred -- requires listing other
   admin sessions sharing the PID, which is a query not yet implemented.
