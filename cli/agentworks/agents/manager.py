@@ -193,9 +193,7 @@ def delete_agent(
         run_command = partial(run, target, logger=ssh_logger)
         for session in agent_sessions:
             sock = _effective_socket_path(db, session)
-            if sock:
-                kill_session(session.name, run_command=run_command, socket_path=sock)
-            kill_session(session.name, run_command=run_command)
+            kill_session(session.name, run_command=run_command, socket_path=sock)
             db.delete_session(session.name)
         output.detail(f"Deleted {len(agent_sessions)} session(s)")
 
