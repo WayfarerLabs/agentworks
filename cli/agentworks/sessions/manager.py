@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 import typer
 
 from agentworks import output
-from agentworks.db import SessionMode
+from agentworks.db import SessionHealth, SessionMode
 from agentworks.ssh import admin_exec_target
 
 _ENV_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -219,6 +219,79 @@ def _build_session_command(
     return " && ".join(parts)
 
 
+# -- Liveness checks -------------------------------------------------------
+
+
+def check_session_status(pid: int, *, target: ExecTarget) -> bool:
+    """Check if a PID is alive. Returns True (alive) or False (dead)."""
+    result = target.run(f"kill -0 {pid} 2>/dev/null", check=False)
+    return result.ok
+
+
+def batch_check_status(
+    sessions: list[SessionRow],
+    *,
+    target: ExecTarget,
+) -> dict[str, bool]:
+    """Check PIDs for multiple sessions in one SSH call.
+
+    Returns {session_name: alive}. Sessions with pid=None are excluded.
+    """
+    pid_sessions = [(s.name, s.pid) for s in sessions if s.pid is not None]
+    if not pid_sessions:
+        return {}
+
+    parts = []
+    for name, pid in pid_sessions:
+        q_name = shlex.quote(name)
+        parts.append(f"kill -0 {pid} 2>/dev/null; echo \"STATUS:{q_name}:$?\"")
+    cmd = "; ".join(parts)
+
+    result = target.run(cmd, check=False)
+    stdout = getattr(result, "stdout", "") or ""
+
+    status_map: dict[str, bool] = {}
+    for line in stdout.strip().splitlines():
+        if line.startswith("STATUS:"):
+            # STATUS:<name>:<exit_code>
+            _, rest = line.split(":", 1)
+            colon = rest.rfind(":")
+            if colon > 0:
+                name = rest[:colon]
+                exit_code = rest[colon + 1 :]
+                status_map[name] = exit_code == "0"
+
+    return status_map
+
+
+def check_session_health(
+    session: SessionRow,
+    *,
+    target: ExecTarget,
+) -> SessionHealth:
+    """Full health check: PID liveness + tmux connectivity.
+
+    Pure function -- no DB side effects.
+    """
+    from agentworks.sessions.tmux import tmux_cmd
+
+    if session.pid is None:
+        return SessionHealth.UNKNOWN
+
+    alive = check_session_status(session.pid, target=target)
+    if not alive:
+        return SessionHealth.STOPPED
+
+    # Transport-specific connectivity test
+    q_session = shlex.quote(session.name)
+    cmd = tmux_cmd(f"has-session -t {q_session}", session.socket_path) + " 2>/dev/null"
+    result = target.run(cmd, check=False)
+    if result.ok:
+        return SessionHealth.OK
+
+    return SessionHealth.BROKEN
+
+
 # -- Public API ------------------------------------------------------------
 
 
@@ -298,7 +371,7 @@ def create_session(
     command = _build_session_command(template, session_name=name, workspace_name=workspace_name)
 
     try:
-        sock = create_tmux_session(
+        sock, pid = create_tmux_session(
             name,
             ws.workspace_path,
             command,
@@ -315,9 +388,10 @@ def create_session(
             db.delete_agent_grant(resolved_agent_name, workspace_name, "implicit", session_name=name)
         raise
 
-    # Persist socket path
+    # Persist socket path and PID
     if sock:
         db.update_session_socket_path(name, sock)
+    db.update_session_pid(name, pid)
 
     mode_label = f"agent: {resolved_agent_name}" if resolved_agent_name else "admin"
     output.info(f"Session '{name}' started ({mode_label}, template: {template.name})")
@@ -403,7 +477,7 @@ def restart_session(
     is_admin = session.mode == SessionMode.ADMIN.value
     linux_user = _resolve_session_linux_user(db, session, vm)
 
-    new_sock = create_tmux_session(
+    new_sock, pid = create_tmux_session(
         name,
         ws.workspace_path,
         command,
@@ -420,6 +494,7 @@ def restart_session(
     # with NULL socket_path get backfilled on restart.
     if new_sock != session.socket_path:
         db.update_session_socket_path(name, new_sock)
+    db.update_session_pid(name, pid)
 
     output.info(f"Session '{name}' restarted")
 
