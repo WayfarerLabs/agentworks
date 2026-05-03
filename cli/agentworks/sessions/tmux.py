@@ -449,13 +449,13 @@ def force_kill_tmux_server(
     time.sleep(2)
 
     # Check if still alive
-    if target.run(f"kill -0 {pid} 2>/dev/null", check=False).ok:
+    if target.run(f"test -d /proc/{pid}", check=False).ok:
         # SIGKILL
         target.run(f"kill -9 {pid}", sudo=True, check=False)
         time.sleep(1)
 
     # Final check
-    if target.run(f"kill -0 {pid} 2>/dev/null", check=False).ok:
+    if target.run(f"test -d /proc/{pid}", check=False).ok:
         return False  # process survived
 
     # Clean up stale socket

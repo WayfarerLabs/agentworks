@@ -223,8 +223,8 @@ def _build_session_command(
 
 
 def check_session_status(pid: int, *, target: ExecTarget) -> bool:
-    """Check if a PID is alive. Returns True (alive) or False (dead)."""
-    result = target.run(f"kill -0 {pid} 2>/dev/null", check=False)
+    """Check if a PID is alive via /proc. No sudo or signal permissions needed."""
+    result = target.run(f"test -d /proc/{pid}", check=False)
     return result.ok
 
 
@@ -244,7 +244,7 @@ def batch_check_status(
     parts = []
     for name, pid in pid_sessions:
         q_name = shlex.quote(name)
-        parts.append(f"kill -0 {pid} 2>/dev/null; echo \"STATUS:{q_name}:$?\"")
+        parts.append(f"test -d /proc/{pid}; echo \"STATUS:{q_name}:$?\"")
     cmd = "; ".join(parts)
 
     result = target.run(cmd, check=False)
@@ -498,17 +498,25 @@ def restart_session(
     is_admin = session.mode == SessionMode.ADMIN.value
     linux_user = _resolve_session_linux_user(db, session, vm)
 
-    new_sock, pid = create_tmux_session(
-        name,
-        ws.workspace_path,
-        command,
-        linux_user,
-        run_command=run_command,
-        target=target,
-        run_as_root=run_as_root,
-        admin_username=vm.admin_username,
-        is_admin=is_admin,
-    )
+    try:
+        new_sock, pid = create_tmux_session(
+            name,
+            ws.workspace_path,
+            command,
+            linux_user,
+            run_command=run_command,
+            target=target,
+            run_as_root=run_as_root,
+            admin_username=vm.admin_username,
+            is_admin=is_admin,
+        )
+    except RuntimeError as exc:
+        if "already has an active tmux server" in str(exc):
+            raise output.SessionError(
+                f"session '{name}' has an active tmux server that was not detected by the health check. "
+                "Use 'session stop --force' to kill it, then retry."
+            ) from exc
+        raise
 
     # Persist socket path if it differs from what's stored. Compare against
     # session.socket_path (not the derived effective path) so migrated sessions
