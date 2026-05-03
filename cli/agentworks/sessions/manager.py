@@ -783,10 +783,16 @@ def list_sessions(
     )
     output.info(header)
     output.info("-" * len(header))
+    has_unknown = False
     for sname, ws_name, vm_col, tpl, mode, status in rows:
         output.info(
             f"{sname:<{name_w}}  {ws_name:<{ws_w}}  {vm_col:<{vm_w}}  {tpl:<{tpl_w}}  {mode:<{mode_w}}  {status}"
         )
+        if status == "unknown":
+            has_unknown = True
+
+    if has_unknown:
+        output.warn("Some sessions have no PID recorded. Run 'agentworks session repair --all' to recover.")
 
 
 def attach_session(
