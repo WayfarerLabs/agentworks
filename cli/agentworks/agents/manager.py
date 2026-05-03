@@ -190,7 +190,7 @@ def delete_agent(
         from agentworks.sessions.tmux import kill_session, tmux_cmd
         from agentworks.ssh import admin_exec_target, run
 
-        target = admin_exec_target(vm, config)
+        target = admin_exec_target(vm, config, logger=ssh_logger)
         run_command = partial(run, target, logger=ssh_logger)
         for session in agent_sessions:
             sock = _effective_socket_path(db, session)

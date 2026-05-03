@@ -754,8 +754,17 @@ def session_logs(
     from agentworks.sessions.tmux import capture_output
 
     session = _require_session(db, name)
-    _ws, _vm, run_command, _, _target = _prepare_vm(db, config, session.workspace_name, operation="session-logs")
+    _ws, _vm, run_command, _, target = _prepare_vm(db, config, session.workspace_name, operation="session-logs")
     sock = _effective_socket_path(db, session)
+
+    state = _check_session(name, target=target, socket_path=sock)
+    if state == SessionState.DEAD:
+        raise output.SessionError(f"session '{name}' is not running")
+    if state == SessionState.INACCESSIBLE:
+        raise output.SessionError(
+            f"session '{name}' is running but socket not accessible by admin. "
+            f"Use 'session restart {name} --force' to recover."
+        )
 
     captured = capture_output(
         name,

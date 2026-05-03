@@ -206,3 +206,59 @@ def test_ensure_agent_socket_dir_ok_fast_path_no_warning(warnings: list[str]) ->
     ensure_agent_socket_dir(runner, "agt--alice")
     assert warnings == []
     assert len(runner.commands) == 1
+
+
+# -- cleanup_stale_sockets ---------------------------------------------------
+
+
+class _CleanupTarget:
+    """Fake ExecTarget for cleanup_stale_sockets tests."""
+
+    def __init__(self, sockets: str, live_sockets: set[str] | None = None) -> None:
+        self._sockets = sockets  # stdout from find
+        self._live = live_sockets or set()
+        self.commands: list[str] = []
+
+    def run(
+        self, command: str, *, check: bool = True, sudo: bool = False, tty: bool | None = None,
+    ) -> _FakeResult:
+        self.commands.append(command)
+        if "find" in command:
+            return _FakeResult(stdout=self._sockets)
+        if "list-sessions" in command:
+            # Live if any live socket path appears in the command
+            alive = any(s in command for s in self._live)
+            return _FakeResult(ok=alive)
+        return _FakeResult()
+
+
+def test_cleanup_stale_sockets_removes_dead() -> None:
+    from agentworks.sessions.tmux import cleanup_stale_sockets
+
+    target = _CleanupTarget("/run/sockets/agt--x/s1.sock\n/run/sockets/agt--x/s2.sock\n")
+    removed = cleanup_stale_sockets(target, "agt--x")
+    assert removed == 2
+    assert sum("rm -f" in c for c in target.commands) == 2
+
+
+def test_cleanup_stale_sockets_keeps_live() -> None:
+    from agentworks.sessions.tmux import cleanup_stale_sockets
+
+    target = _CleanupTarget(
+        "/run/sockets/agt--x/live.sock\n/run/sockets/agt--x/dead.sock\n",
+        live_sockets={"/run/sockets/agt--x/live.sock"},
+    )
+    removed = cleanup_stale_sockets(target, "agt--x")
+    assert removed == 1
+    # Only the dead socket should have rm
+    rm_cmds = [c for c in target.commands if "rm -f" in c]
+    assert len(rm_cmds) == 1
+    assert "dead.sock" in rm_cmds[0]
+
+
+def test_cleanup_stale_sockets_empty() -> None:
+    from agentworks.sessions.tmux import cleanup_stale_sockets
+
+    target = _CleanupTarget("")
+    removed = cleanup_stale_sockets(target, "agt--x")
+    assert removed == 0

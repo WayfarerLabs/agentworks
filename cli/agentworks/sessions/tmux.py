@@ -146,15 +146,10 @@ def cleanup_stale_sockets(target: ExecTarget, linux_user: str) -> int:
         if not sock_path:
             continue
         q_sock = shlex.quote(sock_path)
-        # Only remove if socket is accessible but has no running server.
-        # If we can't read the socket, it's a permissions issue -- warn, don't delete.
-        access = target.run(f"test -r {q_sock} -a -w {q_sock}", check=False)
-        if not access.ok:
-            from agentworks import output
-
-            output.warn(f"Socket {sock_path} not accessible (run 'vm reinit' to fix)")
-            continue
-        check = target.run(f"tmux -S {q_sock} list-sessions 2>/dev/null", check=False)
+        # Use sudo for the tmux check -- this is an infrastructure maintenance
+        # context (vm reinit / agent create), so we need reliable results
+        # regardless of admin's socket permissions or tmux ACLs.
+        check = target.run(f"tmux -S {q_sock} list-sessions 2>/dev/null", sudo=True, check=False)
         if not check.ok:
             target.run(f"rm -f {q_sock}", sudo=True, check=False)
             removed += 1
