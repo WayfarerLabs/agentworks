@@ -62,10 +62,10 @@ def test_no_sudo_fallback_for_default_server() -> None:
 
 
 def test_force_kill_uses_sudo() -> None:
-    """force_kill_session runs tmux kill-session via sudo."""
+    """force_kill_session runs tmux kill-session via sudo and returns True on success."""
     target = MagicMock()
     target.run.return_value = _ok()
-    force_kill_session(target, "s1", "/sock")
+    assert force_kill_session(target, "s1", "/sock") is True
     target.run.assert_called_once()
     cmd, kwargs = target.run.call_args[0][0], target.run.call_args[1]
     assert "kill-session" in cmd
@@ -74,11 +74,18 @@ def test_force_kill_uses_sudo() -> None:
     assert kwargs.get("sudo") is True
 
 
+def test_force_kill_returns_false_on_failure() -> None:
+    """force_kill_session returns False when sudo kill fails."""
+    target = MagicMock()
+    target.run.return_value = _fail()
+    assert force_kill_session(target, "s1", "/sock") is False
+
+
 def test_force_kill_no_socket() -> None:
     """force_kill_session works for default-server sessions too."""
     target = MagicMock()
     target.run.return_value = _ok()
-    force_kill_session(target, "s1")
+    assert force_kill_session(target, "s1") is True
     cmd = target.run.call_args[0][0]
     assert "kill-session" in cmd
     assert "-S" not in cmd

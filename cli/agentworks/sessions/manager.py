@@ -364,7 +364,8 @@ def stop_session(
         from agentworks.sessions.tmux import force_kill_session
 
         output.warn(f"Session '{name}': socket not accessible, killing with sudo")
-        force_kill_session(target, name, sock)
+        if not force_kill_session(target, name, sock):
+            output.warn(f"Session '{name}': sudo kill failed, session may still be running")
     elif state != SessionState.DEAD:
         send_keys(name, "C-c", run_command=run_command, socket_path=sock)
         time.sleep(_STOP_GRACE_SECONDS)
@@ -408,7 +409,10 @@ def restart_session(
             from agentworks.sessions.tmux import force_kill_session
 
             output.warn(f"Session '{name}': socket not accessible, killing with sudo")
-            force_kill_session(target, name, sock)
+            if not force_kill_session(target, name, sock):
+                raise output.SessionError(
+                    f"failed to kill inaccessible session '{name}' with sudo"
+                )
         else:
             _kill_session(name, run_command=run_command, socket_path=sock)
 
@@ -521,7 +525,8 @@ def delete_session(
         from agentworks.sessions.tmux import force_kill_session
 
         output.warn(f"Session '{name}': socket not accessible, killing with sudo")
-        force_kill_session(target, name, sock)
+        if not force_kill_session(target, name, sock):
+            output.warn(f"Session '{name}': sudo kill failed, session may still be running")
     elif state != SessionState.DEAD:
         _kill_session(name, run_command=run_command, socket_path=sock)
 
@@ -617,9 +622,9 @@ def list_sessions(
         output.info("No sessions found.")
         return
 
-    # Build alive_map: session_name -> bool, batched by VM and parallelized
-    # across VMs. Each VM gets one SSH call with all its session checks.
-    alive_map: dict[str, bool] = {}
+    # Build alive_map: session_name -> SessionState, batched by VM and
+    # parallelized across VMs. Each VM gets one SSH call with all its checks.
+    alive_map: dict[str, SessionState] = {}
 
     # Cache workspace and VM lookups (used for grouping and display)
     ws_cache: dict[str, WorkspaceRow | None] = {}

@@ -361,10 +361,14 @@ def force_kill_session(
     target: ExecTarget,
     session_name: str,
     socket_path: str | None = None,
-) -> None:
-    """Kill a session using sudo, for when the admin lacks direct access."""
+) -> bool:
+    """Kill a session using sudo, for when the admin lacks direct access.
+
+    Returns True if the kill succeeded, False otherwise.
+    """
     q_session = shlex.quote(session_name)
-    target.run(tmux_cmd(f"kill-session -t {q_session}", socket_path), sudo=True, check=False)
+    result = target.run(tmux_cmd(f"kill-session -t {q_session}", socket_path), sudo=True, check=False)
+    return result.ok
 
 
 def session_exists(
@@ -425,7 +429,7 @@ class BatchCheckError(Exception):
 def batch_check_sessions(
     target: ExecTarget,
     checks: list[tuple[str, str | None]],
-) -> dict[str, bool]:
+) -> dict[str, SessionState]:
     """Check multiple sessions in a single SSH call.
 
     Args:
