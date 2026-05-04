@@ -994,10 +994,11 @@ def session_restart(
             if running:
                 names = ", ".join(s.name for s in running[:5])
                 suffix = f" (and {len(running) - 5} more)" if len(running) > 5 else ""
-                if not output.confirm(
-                    f"{len(running)} session(s) are running and will be restarted ({names}{suffix}). "
-                    "Continue? (use --all-stopped to restart only stopped sessions)"
-                ):
+                output.warn(
+                    f"{len(running)} session(s) are running and will be restarted ({names}{suffix}).\n"
+                    "Hint: use --all-stopped to restart only stopped sessions."
+                )
+                if not output.confirm("Continue?"):
                     raise output.UserAbort("restart cancelled")
 
         restart_all_sessions(
