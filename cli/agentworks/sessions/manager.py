@@ -65,14 +65,14 @@ def _kill_session(
 
 
 def _ensure_pid(session: SessionRow, *, target: ExecTarget, db: Database) -> SessionRow:
-    """Auto-recover PID for a session with pid=NULL. Returns updated session.
+    """Auto-recover PID + boot ID for a session missing either. Returns updated session.
 
-    If the tmux server is running, stores the PID. If it's genuinely stopped
-    (no socket file), marks as PID_STOPPED. If ambiguous (socket exists but
-    tmux unreachable), leaves as NULL and warns -- the caller's UNKNOWN
-    handler will surface the error.
+    Triggers when pid is NULL or boot_id is NULL. Always writes both together.
+    If the tmux server is running, stores the PID + boot ID. If genuinely
+    stopped (no socket file), marks as PID_STOPPED. If ambiguous (socket
+    exists but tmux unreachable), leaves as NULL and warns.
     """
-    if session.pid is not None:
+    if session.pid is not None and session.boot_id is not None:
         return session
 
     from agentworks.sessions.tmux import get_tmux_server_pid, tmux_cmd
@@ -126,7 +126,7 @@ def ensure_pids_batch(sessions: list[SessionRow], *, db: Database, config: Confi
     """
     from agentworks.sessions.tmux import get_tmux_server_pid, tmux_cmd
 
-    need_repair = [s for s in sessions if s.pid is None]
+    need_repair = [s for s in sessions if s.pid is None or s.boot_id is None]
     if not need_repair:
         return sessions
 
@@ -354,10 +354,10 @@ def check_session_status(
 
     Pure function -- no DB side effects.
     """
-    if session.pid is None:
-        return SessionStatus.UNKNOWN
     if session.pid == PID_STOPPED:
         return SessionStatus.STOPPED
+    if session.pid is None or session.boot_id is None:
+        return SessionStatus.UNKNOWN
 
     if session.mode == SessionMode.AGENT.value and session.socket_path is not None:
         return _check_dedicated_agent_session(session, target=target)
@@ -407,7 +407,7 @@ def batch_check_status(
     """
     from agentworks.sessions.tmux import tmux_cmd
 
-    checkable = [s for s in sessions if s.pid is not None and s.pid > 0]
+    checkable = [s for s in sessions if s.pid is not None and s.pid > 0 and s.boot_id is not None]
     if not checkable:
         return {}
 

@@ -161,20 +161,26 @@ def test_agent_broken() -> None:
 
 def test_admin_ok() -> None:
     """Admin session: has-session succeeds -> OK."""
-    session = _session("s1", pid=42)
+    session = _session("s1", pid=42, boot_id=BOOT_CURRENT)
     target = _FakeTarget({"has-session": _FakeResult(ok=True)})
     assert check_session_status(session, target=target) == SessionStatus.OK
 
 
 def test_admin_stopped() -> None:
     """Admin session: has-session fails -> STOPPED (no PID follow-up)."""
-    session = _session("s1", pid=42)
+    session = _session("s1", pid=42, boot_id=BOOT_CURRENT)
     target = _FakeTarget({"has-session": _FakeResult(ok=False)})
     assert check_session_status(session, target=target) == SessionStatus.STOPPED
 
 
 def test_unknown_no_pid() -> None:
     session = _session("s1", pid=None)
+    assert check_session_status(session, target=_FakeTarget()) == SessionStatus.UNKNOWN
+
+
+def test_unknown_no_boot_id() -> None:
+    """PID present but boot_id missing -> UNKNOWN (triggers auto-repair)."""
+    session = _session("s1", pid=42, boot_id=None)
     assert check_session_status(session, target=_FakeTarget()) == SessionStatus.UNKNOWN
 
 
