@@ -344,12 +344,18 @@ _boot_id_cache: dict[int, str] = {}
 
 
 def _get_boot_id(target: ExecTarget) -> str:
-    """Read the current VM boot ID. Cached per target for the duration of the process."""
+    """Read the current VM boot ID. Cached per target for the duration of the process.
+
+    Returns empty string on failure (not cached, so callers can retry).
+    """
     tid = id(target)
-    if tid not in _boot_id_cache:
-        result = target.run("cat /proc/sys/kernel/random/boot_id", check=False)
-        _boot_id_cache[tid] = (getattr(result, "stdout", "") or "").strip()
-    return _boot_id_cache[tid]
+    if tid in _boot_id_cache:
+        return _boot_id_cache[tid]
+    result = target.run("cat /proc/sys/kernel/random/boot_id", check=False)
+    boot_id = (getattr(result, "stdout", "") or "").strip()
+    if boot_id:
+        _boot_id_cache[tid] = boot_id
+    return boot_id
 
 
 def check_session_status(
@@ -791,7 +797,7 @@ def restart_session(
     except RuntimeError as exc:
         if "already has an active tmux server" in str(exc):
             raise output.SessionError(
-                f"session '{name}' has an active tmux server that was not detected by the health check. "
+                f"session '{name}' has an active tmux server that was not detected by the status check. "
                 "Use 'session stop --force' to kill it, then retry."
             ) from exc
         raise
@@ -1165,7 +1171,8 @@ def list_sessions(
                     SessionStatus.UNKNOWN: "unknown",
                 }[s_status]
             else:
-                status = "-"
+                # pid/boot_id set but missing from status_map (VM unreachable, SSH failure)
+                status = "unknown"
             mode_label = f"agent ({session.agent_name})" if session.agent_name else "admin"
             rows.append((session.name, ws_name, vm_name, session.template, mode_label, status))
 

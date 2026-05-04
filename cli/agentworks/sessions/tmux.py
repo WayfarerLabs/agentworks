@@ -418,9 +418,12 @@ def _parse_pid(raw: str, context: str) -> int:
     if not pid_str:
         raise RuntimeError(f"tmux returned empty PID output ({context})")
     try:
-        return int(pid_str)
+        pid = int(pid_str)
     except ValueError:
         raise RuntimeError(f"tmux returned non-numeric PID: {pid_str!r} ({context})") from None
+    if pid <= 0:
+        raise RuntimeError(f"tmux returned invalid PID: {pid} ({context})")
+    return pid
 
 
 # -- PID-based liveness helpers --------------------------------------------
@@ -459,6 +462,8 @@ def force_kill_tmux_server(
 
     Cleans up socket file if present. Returns True if the process is dead.
     """
+    if pid <= 1:
+        raise ValueError(f"refusing to kill PID {pid} (dangerous special value)")
     import time
 
     def _log(msg: str) -> None:
