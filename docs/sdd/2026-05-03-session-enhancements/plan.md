@@ -138,8 +138,8 @@ Work discovered and completed during implementation, after the original plan was
       loop where commands say "run repair" but repair already ran.
 - [x] **`/proc` for liveness**: use `test -d /proc/<pid>` instead of `kill -0` for PID checks. The
       admin user cannot signal agent-owned processes without sudo; `/proc` has no such restriction.
-- [x] **Batch stop/restart**: `stop --all`, `restart --all-stopped`, `restart --all` with `--vm`
-      and `--workspace` filters. Replaces the old `restart-all` subcommand.
+- [x] **Batch stop/restart**: `stop --all`, `restart --all-stopped`, `restart --all` with `--vm` and
+      `--workspace` filters. Replaces the old `restart-all` subcommand.
 - [x] **Auto-repair replaces `session repair`**: NULL-PID sessions are auto-repaired on access by
       any command. No explicit repair command needed.
 
@@ -155,9 +155,9 @@ Phases 1-5 used a two-tier model: PID-based "status" (fast, batchable) and has-s
   inconsistencies between them.
 - sudo on tmux commands hid the BROKEN state instead of surfacing it.
 
-The fix: unify into a single "status" concept where `has-session` is the primary check, PID +
-boot ID are internal details for BROKEN detection and force-kill, and the check flow is dispatched
-by session type (dedicated agent socket vs shared admin server).
+The fix: unify into a single "status" concept where `has-session` is the primary check, PID + boot
+ID are internal details for BROKEN detection and force-kill, and the check flow is dispatched by
+session type (dedicated agent socket vs shared admin server).
 
 ### Code changes
 
@@ -171,8 +171,8 @@ by session type (dedicated agent socket vs shared admin server).
 - [x] Rewrite `batch_check_status`: compound has-session with inline boot_id + PID follow-up for
       agent failures, all in one SSH call per VM
 - [x] Remove `/proc`-only `check_session_status` (old PID-based binary check)
-- [x] Update `update_session_pid` signature to accept `boot_id` parameter (with COALESCE to
-      preserve boot_id when only clearing PID)
+- [x] Update `update_session_pid` signature to accept `boot_id` parameter (with COALESCE to preserve
+      boot_id when only clearing PID)
 - [x] Update `_ensure_pid` and `ensure_pids_batch` to store boot ID on recovery
 - [x] Auto-repair ambiguous case: sudo probe (`sudo tmux -S <socket> list-sessions`) to distinguish
       stale socket from live-but-unreachable server
@@ -194,10 +194,10 @@ by session type (dedicated agent socket vs shared admin server).
 ## Design deviations
 
 - **Admin-mode `--force` warning not applicable**: originally planned to warn when `--force` on an
-  admin session would kill the shared tmux server. With the unified status model, admin sessions
-  can only be OK or STOPPED (BROKEN requires socket permission drift, which doesn't apply to the
-  admin's own server). Since `--force` is exclusively for BROKEN, it is never offered for admin
-  sessions. No warning needed.
+  admin session would kill the shared tmux server. With the unified status model, admin sessions can
+  only be OK or STOPPED (BROKEN requires socket permission drift, which doesn't apply to the admin's
+  own server). Since `--force` is exclusively for BROKEN, it is never offered for admin sessions. No
+  warning needed.
 
 ## Notes
 

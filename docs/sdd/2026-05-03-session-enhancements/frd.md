@@ -178,8 +178,8 @@ sessions (those use confirmation prompts with `--yes/-y`). The escalation path:
 3. If there is a socket file and the server is dead, remove the stale socket.
 
 The force path is only reachable for BROKEN sessions, which already verified same-boot + PID alive
-during the status check. A stale boot ID means the PID is treated as PID_STOPPED (-1) -- the
-session is STOPPED, not BROKEN, so `--force` is never offered.
+during the status check. A stale boot ID means the PID is treated as PID_STOPPED (-1) -- the session
+is STOPPED, not BROKEN, so `--force` is never offered.
 
 This path does not require tmux socket access or server-access ACL membership. It works through the
 OS process management layer.
@@ -205,8 +205,8 @@ accesses a session with a NULL PID:
    (`sudo tmux -S <socket> list-sessions`) to distinguish a stale socket from a live server the
    admin can't reach.
    - Stale socket (probe fails): mark as `PID_STOPPED`.
-   - Live server, unreachable (probe succeeds): leave as NULL (UNKNOWN). Warn that permissions
-     need investigation.
+   - Live server, unreachable (probe succeeds): leave as NULL (UNKNOWN). Warn that permissions need
+     investigation.
 
 A warning is emitted so the operator knows the repair happened.
 

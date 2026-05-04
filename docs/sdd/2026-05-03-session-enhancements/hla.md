@@ -115,13 +115,14 @@ tmux has-session -t admin1 2>/dev/null; echo "S:admin1:$?";
 ```
 
 Output formats:
+
 - `S:name:0` -- has-session succeeded, OK
 - `S:name:1` -- admin session failed has-session, STOPPED
 - `S:name:1:<boot_id>:<pid_exit>` -- agent session failed has-session; caller compares boot_id
   against stored value and checks pid_exit to determine STOPPED vs BROKEN
 
-The boot ID read (`cat /proc/.../boot_id`) is the same value for the whole VM. It could be read
-once at the top of the compound command as an optimization.
+The boot ID read (`cat /proc/.../boot_id`) is the same value for the whole VM. It could be read once
+at the top of the compound command as an optimization.
 
 For N sessions across M VMs: M parallel SSH calls (one per VM).
 
@@ -338,9 +339,9 @@ the PID, and `/proc/<pid>` would exist. The boot ID (from `/proc/sys/kernel/rand
 on every boot. If the stored boot ID doesn't match the current one, the PID is stale and the session
 is STOPPED regardless of `/proc/<pid>`.
 
-When a session is stopped, the boot ID is left as-is (the last boot the session ran in). This is
-the most useful value: on the next status check, a stale boot ID immediately resolves to STOPPED
-without needing a PID check. Clearing it would lose information for no benefit.
+When a session is stopped, the boot ID is left as-is (the last boot the session ran in). This is the
+most useful value: on the next status check, a stale boot ID immediately resolves to STOPPED without
+needing a PID check. Clearing it would lose information for no benefit.
 
 ### Admin-mode sessions
 
