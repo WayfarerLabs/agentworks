@@ -185,15 +185,13 @@ def delete_agent(
     if agent_sessions:
         from functools import partial
 
-        from agentworks.sessions.manager import _effective_socket_path
         from agentworks.sessions.tmux import kill_session
         from agentworks.ssh import admin_exec_target, run
 
         target = admin_exec_target(vm, config)
         run_command = partial(run, target, logger=ssh_logger)
         for session in agent_sessions:
-            sock = _effective_socket_path(db, session)
-            kill_session(session.name, run_command=run_command, socket_path=sock)
+            kill_session(session.name, run_command=run_command, socket_path=session.socket_path)
             db.delete_session(session.name)
         output.detail(f"Deleted {len(agent_sessions)} session(s)")
 

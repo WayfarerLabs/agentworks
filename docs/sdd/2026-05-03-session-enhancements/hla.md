@@ -323,7 +323,7 @@ admin-mode sessions will get the same PID, which is correct.
 | `session_logs` | Auto-repair, then health check |
 | New: `stop_all_sessions` | Batch stop with --vm/--workspace filters |
 | New: `_ensure_pid` | Auto-repair single session with NULL PID |
-| New: `_ensure_pids_batch` | Auto-repair all NULL-PID sessions (batch commands) |
+| New: `ensure_pids_batch` | Auto-repair all NULL-PID sessions (batch commands) |
 | Removed: `restart-all` subcommand | Replaced by `restart --all-stopped` / `restart --all` |
 
 ### db.py

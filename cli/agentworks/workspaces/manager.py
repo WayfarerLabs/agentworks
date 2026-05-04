@@ -505,11 +505,11 @@ def rehome_workspace(
         raise output.WorkspaceError("source and target paths overlap")
 
     # Block if workspace has running sessions
-    from agentworks.sessions.manager import _ensure_pids_batch, batch_check_all_sessions
+    from agentworks.sessions.manager import batch_check_all_sessions, ensure_pids_batch
 
     sessions = db.list_sessions(workspace_name=name)
     if sessions:
-        sessions = _ensure_pids_batch(sessions, db=db, config=config)
+        sessions = ensure_pids_batch(sessions, db=db, config=config)
         alive_map = batch_check_all_sessions(sessions, db=db, config=config)
         running = [s for s in sessions if alive_map.get(s.name, False)]
         if running:
@@ -795,15 +795,13 @@ def delete_workspace(
         if vm is not None and vm.tailscale_host is not None:
             from functools import partial
 
-            from agentworks.sessions.manager import _effective_socket_path
             from agentworks.sessions.tmux import kill_session
             from agentworks.ssh import admin_exec_target, run
 
             target = admin_exec_target(vm, config)
             run_command = partial(run, target, logger=ssh_logger)
             for session in db.list_sessions(workspace_name=name):
-                sock = _effective_socket_path(db, session)
-                kill_session(session.name, run_command=run_command, socket_path=sock)
+                kill_session(session.name, run_command=run_command, socket_path=session.socket_path)
     db.delete_sessions_for_workspace(name)
 
     # Revoke agent workspace grants (agents are VM-scoped, not deleted with workspaces)

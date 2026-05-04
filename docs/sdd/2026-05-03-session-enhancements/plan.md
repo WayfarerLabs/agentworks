@@ -112,9 +112,9 @@ PID recovery for pre-enhancement sessions (R6/R7).
 
 - [x] ~~`repair_session` / `repair_all_sessions` / CLI command~~ -- replaced by auto-repair
 - [x] `_ensure_pid(session, target, db)` -- auto-repair single session on access
-- [x] `_ensure_pids_batch(sessions, db, config)` -- auto-repair all NULL-PID sessions for batch
+- [x] `ensure_pids_batch(sessions, db, config)` -- auto-repair all NULL-PID sessions for batch
       commands
-- [x] All commands call `_ensure_pid` / `_ensure_pids_batch` before health checks
+- [x] All commands call `_ensure_pid` / `ensure_pids_batch` before health checks
 - [x] Remove `session repair` CLI command and completions
 
 **Done when:** any command that touches a session with NULL PID auto-recovers it transparently.

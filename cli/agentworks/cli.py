@@ -997,9 +997,14 @@ def session_restart(
         # --all without --yes: prompt if there are running sessions
         if include_running and not yes:
             from agentworks import output
-            from agentworks.sessions.manager import batch_check_all_sessions, filter_sessions
+            from agentworks.sessions.manager import (
+                batch_check_all_sessions,
+                ensure_pids_batch,
+                filter_sessions,
+            )
 
             sessions = filter_sessions(db, workspace_name=workspace, vm_name=vm)
+            sessions = ensure_pids_batch(sessions, db=db, config=config)
             alive_map = batch_check_all_sessions(sessions, db=db, config=config)
             running = [s for s in sessions if s.pid and s.pid > 0 and alive_map.get(s.name, False)]
             if running:

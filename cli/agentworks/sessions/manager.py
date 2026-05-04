@@ -51,23 +51,6 @@ def _resolve_session_linux_user(db: Database, session: SessionRow, vm: VMRow) ->
     return vm.admin_username
 
 
-def _effective_socket_path(db: Database, session: SessionRow) -> str | None:
-    """Return the socket path for a session, deriving it for migrated agent sessions.
-
-    Migrated sessions have socket_path=NULL in the DB. For agent-mode sessions,
-    we can derive the path from the agent's linux_user and the session name.
-    """
-    if session.socket_path:
-        return session.socket_path
-    if not session.agent_name:
-        return None
-    from agentworks.sessions.tmux import agent_socket_path
-
-    agent = db.get_agent(session.agent_name)
-    if agent is None:
-        return None
-    return agent_socket_path(agent.linux_user, session.name)
-
 
 def _session_alive(
     session_name: str,
@@ -106,7 +89,7 @@ def _ensure_pid(session: SessionRow, *, target: ExecTarget, db: Database) -> Ses
 
     from agentworks.sessions.tmux import get_tmux_server_pid
 
-    sock = _effective_socket_path(db, session)
+    sock = session.socket_path
     pid = get_tmux_server_pid(target=target, socket_path=sock)
     if pid is not None:
         db.update_session_pid(session.name, pid)
@@ -129,8 +112,12 @@ def _ensure_pid(session: SessionRow, *, target: ExecTarget, db: Database) -> Ses
     return result
 
 
-def _ensure_pids_batch(sessions: list[SessionRow], *, db: Database, config: Config) -> list[SessionRow]:
-    """Auto-recover PIDs for all sessions with pid=NULL. Returns updated list."""
+def ensure_pids_batch(sessions: list[SessionRow], *, db: Database, config: Config) -> list[SessionRow]:
+    """Auto-recover PIDs for all sessions with pid=NULL. Returns updated list.
+
+    Same logic as _ensure_pid but for batch commands. Socket ambiguity (socket
+    exists but tmux unreachable) leaves pid=NULL so callers see UNKNOWN.
+    """
     from agentworks.sessions.tmux import get_tmux_server_pid
 
     need_repair = [s for s in sessions if s.pid is None]
@@ -142,6 +129,7 @@ def _ensure_pids_batch(sessions: list[SessionRow], *, db: Database, config: Conf
     for s in need_repair:
         by_ws.setdefault(s.workspace_name, []).append(s)
 
+    repaired_names: set[str] = set()
     for ws_name, ws_sessions in by_ws.items():
         ws = db.get_workspace(ws_name)
         if not ws or ws.type != "vm" or not ws.vm_name:
@@ -151,17 +139,33 @@ def _ensure_pids_batch(sessions: list[SessionRow], *, db: Database, config: Conf
             continue
         target = admin_exec_target(vm, config)
         for session in ws_sessions:
-            sock = _effective_socket_path(db, session)
+            sock = session.socket_path
             pid = get_tmux_server_pid(target=target, socket_path=sock)
             if pid is not None:
                 db.update_session_pid(session.name, pid)
                 output.warn(f"Recovered PID {pid} for session '{session.name}'")
+                repaired_names.add(session.name)
+            elif sock and target.run(f"test -e {shlex.quote(sock)}", check=False).ok:
+                output.warn(
+                    f"Session '{session.name}' has a socket file but tmux is unreachable. "
+                    "This may indicate a permissions issue."
+                )
             else:
                 db.update_session_pid(session.name, PID_STOPPED)
-                output.warn(f"Session '{session.name}' has no running tmux server, marked stopped")
+                output.warn(f"Session '{session.name}' is not running, marked stopped")
+                repaired_names.add(session.name)
 
-    # Re-fetch all sessions with updated PIDs
-    return db.list_sessions(workspace_name=sessions[0].workspace_name if len(by_ws) == 1 else None)
+    # Return original list with repaired sessions refreshed from DB
+    if not repaired_names:
+        return sessions
+    result = []
+    for s in sessions:
+        if s.name in repaired_names:
+            refreshed = db.get_session(s.name)
+            result.append(refreshed if refreshed else s)
+        else:
+            result.append(s)
+    return result
 
 
 def _require_workspace(db: Database, name: str) -> WorkspaceRow:
@@ -230,7 +234,7 @@ def _regenerate_tmuxinator(
 
     sessions = db.list_sessions(workspace_name=ws.name)
     # Build effective socket paths for tmuxinator (migrated sessions have NULL socket_path)
-    socket_paths = {s.name: _effective_socket_path(db, s) for s in sessions}
+    socket_paths = {s.name: s.socket_path for s in sessions}
     config_text = generate_config(ws.name, ws.workspace_path, sessions=sessions, socket_paths=socket_paths)
     target = admin_exec_target(vm, config)
     write_file(target, f"{ws.workspace_path}/.tmuxinator.yml", config_text, logger=logger)
@@ -517,7 +521,7 @@ def _execute_stop(
     # period if the 5-second wait becomes a pain point.
     output.detail("Sending C-c to stop any running commands...")
     for session, target in targets:
-        sock = _effective_socket_path(db, session)
+        sock = session.socket_path
         run_cmd = partial(run, target, logger=target.logger)
         with contextlib.suppress(Exception):
             send_keys(session.name, "C-c", run_command=run_cmd, socket_path=sock)
@@ -544,7 +548,7 @@ def _execute_stop(
         alive = survivor_map.get(session.name, False)
         if alive:
             output.detail(f"Killing session '{session.name}'")
-            sock = _effective_socket_path(db, session)
+            sock = session.socket_path
             run_cmd = partial(run, target, logger=target.logger)
             try:
                 _kill_session(session.name, run_command=run_cmd, socket_path=sock)
@@ -647,7 +651,7 @@ def restart_session(
     elif health == SessionHealth.OK:
         if not yes and not output.confirm(f"Session '{name}' is running. Restart?"):
             raise output.UserAbort("restart cancelled")
-        sock = _effective_socket_path(db, session)
+        sock = session.socket_path
         _kill_session(name, run_command=run_command, socket_path=sock)
 
     template = _resolve_template(config, session.template)
@@ -710,7 +714,7 @@ def stop_all_sessions(
     sessions = filter_sessions(db, workspace_name=workspace_name, vm_name=vm_name)
 
     # Auto-repair NULL-PID sessions, then batch check
-    sessions = _ensure_pids_batch(sessions, db=db, config=config)
+    sessions = ensure_pids_batch(sessions, db=db, config=config)
     alive_map = batch_check_all_sessions(sessions, db=db, config=config)
     alive_sessions = [
         s
@@ -763,7 +767,7 @@ def restart_all_sessions(
     sessions = filter_sessions(db, workspace_name=workspace_name, vm_name=vm_name)
 
     # Auto-repair NULL-PID sessions, then batch check
-    sessions = _ensure_pids_batch(sessions, db=db, config=config)
+    sessions = ensure_pids_batch(sessions, db=db, config=config)
     alive_map = batch_check_all_sessions(sessions, db=db, config=config)
 
     if not include_running:
@@ -815,7 +819,7 @@ def delete_session(
     if health == SessionHealth.OK:
         if not yes and not output.confirm(f"Session '{name}' is running. Delete?"):
             raise output.UserAbort("delete cancelled")
-        sock = _effective_socket_path(db, session)
+        sock = session.socket_path
         _kill_session(name, run_command=run_command, socket_path=sock)
     elif health == SessionHealth.BROKEN:
         if not force:
@@ -835,7 +839,7 @@ def delete_session(
         raise output.UserAbort("delete cancelled")
 
     # Clean up socket if present
-    sock = _effective_socket_path(db, session)
+    sock = session.socket_path
     if sock:
         run_command(f"sudo rm -f {shlex.quote(sock)}", check=False)
 
@@ -950,7 +954,11 @@ def batch_check_all_sessions(
     with ThreadPoolExecutor(max_workers=min(8, len(by_vm))) as executor:
         futures = {executor.submit(_check_vm, name): name for name in by_vm}
         for future in as_completed(futures):
-            result_map.update(future.result())
+            vm_name = futures[future]
+            try:
+                result_map.update(future.result())
+            except Exception as exc:
+                output.warn(f"Failed to check sessions on VM '{vm_name}': {exc}")
 
     return result_map
 
@@ -970,7 +978,7 @@ def list_sessions(
 
     # Auto-repair sessions with missing PIDs, then batch check
     if not no_status:
-        sessions = _ensure_pids_batch(sessions, db=db, config=config)
+        sessions = ensure_pids_batch(sessions, db=db, config=config)
     alive_map: dict[str, bool] = {}
     if not no_status:
         alive_map = batch_check_all_sessions(sessions, db=db, config=config)
@@ -1068,7 +1076,7 @@ def session_logs(
             f"session '{name}' is broken (PID alive but tmux unreachable)."
         )
 
-    sock = _effective_socket_path(db, session)
+    sock = session.socket_path
     captured = capture_output(
         name,
         run_command=run_command,
