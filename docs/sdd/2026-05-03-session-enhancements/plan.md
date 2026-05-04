@@ -110,17 +110,14 @@ VM instead of one per session.
 
 PID recovery for pre-enhancement sessions (R6/R7).
 
-- [x] `repair_session(db, config, name)` in manager.py -- single session repair
-- [x] `repair_all_sessions(db, config, vm_name=None, workspace_name=None)` -- batch repair, one SSH
-      call per VM
-- [x] `session repair <name>` CLI command
-- [x] `session repair --all [--vm <vm>] [--workspace <ws>]` CLI command
-- [x] Output messages per R7: "Recovered PID...", "...is not running", "...already has PID, skipped"
-- [x] Update shell completions for `session repair`
-- [x] Tests
+- [x] ~~`repair_session` / `repair_all_sessions` / CLI command~~ -- replaced by auto-repair
+- [x] `_ensure_pid(session, target, db)` -- auto-repair single session on access
+- [x] `_ensure_pids_batch(sessions, db, config)` -- auto-repair all NULL-PID sessions for batch
+      commands
+- [x] All commands call `_ensure_pid` / `_ensure_pids_batch` before health checks
+- [x] Remove `session repair` CLI command and completions
 
-**Done when:** `session repair` recovers PIDs from running tmux servers, batch repair uses one SSH
-call per VM, completions include the new command.
+**Done when:** any command that touches a session with NULL PID auto-recovers it transparently.
 
 ## Phase 5: Verification
 
@@ -143,8 +140,8 @@ Work discovered and completed during implementation, after the original plan was
       admin user cannot signal agent-owned processes without sudo; `/proc` has no such restriction.
 - [x] **Batch stop/restart**: `stop --all`, `restart --all-stopped`, `restart --all` with `--vm`
       and `--workspace` filters. Replaces the old `restart-all` subcommand.
-- [x] **`session list` unknown warning**: warn at the bottom of list output if any sessions have
-      unknown status, suggesting `session repair --all`.
+- [x] **Auto-repair replaces `session repair`**: NULL-PID sessions are auto-repaired on access by
+      any command. No explicit repair command needed.
 
 ## Design deviations
 

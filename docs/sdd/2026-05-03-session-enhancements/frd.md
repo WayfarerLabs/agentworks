@@ -91,13 +91,13 @@ Each session command should behave according to the session's health:
 
 | Command  | OK                             | STOPPED            | BROKEN                         | UNKNOWN (no PID)                         |
 | -------- | ------------------------------ | ------------------ | ------------------------------ | ---------------------------------------- |
-| list     | Show running                   | Show stopped       | Not detected. PID status only. | Show unknown, suggest repair             |
-| describe | Show details + health          | Show as stopped    | Show as broken, suggest repair | Show as unknown, suggest repair          |
-| stop     | Normal stop (C-c, grace, kill) | Already stopped    | Error, suggest --force         | Error, suggest repair                    |
-| restart  | Confirm, restart (-y to skip)  | Normal restart     | Error, suggest --force         | Error, suggest repair                    |
-| delete   | Confirm, delete (-y to skip)   | Confirm, delete    | Error, suggest --force         | Confirm, delete (-y to skip)             |
-| attach   | Normal attach                  | Error: not running | Error: broken, suggest repair  | Error, suggest repair                    |
-| logs     | Normal capture                 | Error: not running | Error: broken, suggest repair  | Error, suggest repair                    |
+| list     | Show running                   | Show stopped       | Not detected. PID status only. | Auto-repair, then show status            |
+| describe | Show details + health          | Show as stopped    | Show as broken                 | Auto-repair, then show health            |
+| stop     | Normal stop (C-c, grace, kill) | Already stopped    | Error, suggest --force         | Auto-repair, then stop normally          |
+| restart  | Confirm, restart (-y to skip)  | Normal restart     | Error, suggest --force         | Auto-repair, then restart normally       |
+| delete   | Confirm, delete (-y to skip)   | Confirm, delete    | Error, suggest --force         | Auto-repair, then confirm                |
+| attach   | Normal attach                  | Error: not running | Error: broken                  | Auto-repair, then attach or error        |
+| logs     | Normal capture                 | Error: not running | Error: broken                  | Auto-repair, then capture or error       |
 
 `session list` uses batch status (PID only). All other commands use health (PID + connect test) when
 they need to verify liveness.
@@ -126,8 +126,8 @@ stopped sessions. `session restart --all` restarts everything (prompts if any ar
 `--force` is passed). All batch variants accept `--vm` and `--workspace` filters and use the same
 batch PID checking infrastructure as `session list`.
 
-BROKEN sessions are warned and skipped unless `--force` is passed. UNKNOWN sessions are skipped
-(suggest repair).
+BROKEN sessions are warned and skipped unless `--force` is passed. UNKNOWN sessions are
+auto-repaired before the batch proceeds.
 
 ### R5: Force escalation pattern
 
@@ -147,42 +147,22 @@ operator use `--force` to proceed.
 For admin-mode sessions, killing the PID kills the entire admin tmux server (all admin-mode sessions
 on that server). The --force path must warn the operator before proceeding.
 
-### R6: PID repair for existing sessions
+### R6: Auto-repair for existing sessions
 
-Existing sessions created before this enhancement will not have a PID in the database. A repair
-mechanism recovers the PID from a running tmux server:
+Existing sessions created before this enhancement will not have a PID in the database. Rather than
+requiring an explicit repair command, PID recovery happens automatically when any command accesses a
+session with a NULL PID:
 
 ```shell
 tmux [-S <socket>] display-message -p '#{pid}'
 ```
 
-Repair is available in two forms:
+If the tmux server is running, the PID is stored. If not, the session is marked as stopped
+(`PID_STOPPED`). A warning is emitted so the operator knows the repair happened.
 
-1. **Explicit command**: `session repair <name>` recovers PID for one session.
-   `session repair --all [--vm <vm>] [--workspace <ws>]` repairs all sessions in a single pass (one
-   SSH call per VM).
-2. **Automatic on restart**: when a session is restarted, the new tmux server's PID is captured,
-   effectively repairing the record.
-
-Outside of repair, a missing PID means the session is unusable. Commands report this clearly and
-suggest `session repair`.
-
-### R7: Session repair command
-
-`agentworks session repair` is a new command:
-
-```shell
-agentworks session repair <name>
-agentworks session repair --all [--vm <vm>] [--workspace <ws>]
-```
-
-The command reports what it found:
-
-- "Recovered PID <pid> for session <name>" -- PID was missing, now stored
-- "Session <name> is not running" -- tmux server not found
-- "Session <name> already has PID, skipped" -- no repair needed
-
-`session repair --all` batches work per VM (one SSH call per VM) for speed.
+For batch commands (`session list`, `stop --all`, `restart --all`), all NULL-PID sessions are
+auto-repaired before the batch proceeds. On restart, the new tmux server's PID is captured,
+replacing any previous value.
 
 ## Non-goals
 
@@ -195,9 +175,6 @@ The command reports what it found:
 - **Socket permission hardening**: the root cause of BROKEN state (permission drift) is a separate
   concern. This SDD diagnoses and surfaces the problem; it does not fix the underlying permission
   model.
-- **Automatic repair on list**: `session list` does not attempt to repair missing PIDs. It reports
-  them as "unknown" and the operator uses `session repair`. This keeps list fast and
-  side-effect-free.
 - **PID reuse detection**: PIDs can be reused by the OS. The window for false positives is small
   (original process dies and a new process takes the same PID between checks). This is an acceptable
   risk for a CLI tool that runs interactively.

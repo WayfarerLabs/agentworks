@@ -11,8 +11,8 @@ in the future.
 
 Liveness is expressed as two distinct concepts: status (binary, is the process alive?) and health
 (enumerated, can we interact with the session?). A batch status mechanism makes `session list` fast
-regardless of session count. A repair command recovers PIDs for sessions created before this
-enhancement.
+regardless of session count. Sessions created before this enhancement have their PIDs auto-recovered
+on first access.
 
 ## Liveness model
 
@@ -37,7 +37,7 @@ enhancement.
 
    [UNKNOWN] (no PID in DB -- pre-enhancement session)
      |
-     | session repair
+     | auto-repair on access
      v
    [OK] or [STOPPED]
 ```
@@ -283,48 +283,14 @@ def force_kill_tmux_server(
 **Admin-mode caveat**: multiple admin-mode sessions share the same PID (the admin's default tmux
 server). Killing this PID kills all admin-mode sessions. The --force path must warn about this.
 
-## Repair mechanism
+## Auto-repair mechanism
 
-### Single session
+When any command accesses a session with `pid=NULL`, the PID is recovered automatically via
+`tmux display-message -p '#{pid}'`. If the tmux server is running, the PID is stored. If not, the
+session is marked `PID_STOPPED (-1)`. A warning is emitted.
 
-```text
-session repair <name>
-  |
-  v
-load session from DB
-  |
-  if session.pid is not None: skip
-  |
-  v
-derive socket_path (agent) or default server (admin)
-  |
-  v
-SSH: tmux [-S <socket>] display-message -p '#{pid}'
-  |
-  if success: store PID, report recovered
-  if failure: report not running
-```
-
-### Batch repair
-
-```text
-session repair --all [--vm <vm>]
-  |
-  v
-load sessions with pid=NULL (optionally filtered)
-  |
-  v
-group by VM
-  |
-  for each VM (one SSH call):
-  |   build compound command:
-  |     tmux [-S <sock1>] display-message -p '#{pid}' 2>/dev/null || echo STOPPED:<name1>;
-  |     tmux [-S <sock2>] display-message -p '#{pid}' 2>/dev/null || echo STOPPED:<name2>;
-  |     ...
-  |   |
-  |   v
-  |   parse results, update DB
-```
+For batch commands (list, stop --all, restart --all), all NULL-PID sessions are auto-repaired before
+the batch PID check. For single commands, the session is repaired before the health check.
 
 For admin-mode sessions (no socket), the repair queries the admin's default tmux server. Multiple
 admin-mode sessions will get the same PID, which is correct.
@@ -338,7 +304,7 @@ admin-mode sessions will get the same PID, which is correct.
 | `create_session` return type | `str \| None` -> `tuple[str \| None, int]` (socket, pid) |
 | New: PID retrieval after create | `tmux display-message -p '#{pid}'` |
 | New: `force_kill_tmux_server` | PID-based kill with SIGTERM/SIGKILL escalation |
-| New: `get_tmux_server_pid` | Retrieve PID from running server (for repair) |
+| New: `get_tmux_server_pid` | Retrieve PID from running server (for auto-repair) |
 
 ### sessions/manager.py
 
@@ -352,12 +318,12 @@ admin-mode sessions will get the same PID, which is correct.
 | `stop_session` | Health check; --force for BROKEN |
 | `delete_session` | Health check; prompts for running/unknown (-y to skip); --force for BROKEN |
 | `list_sessions` | Use batch status check, parallel across VMs |
-| `describe_session` | Show health, suggest repair for BROKEN/UNKNOWN |
-| `attach_session` | Use health check, clear error for BROKEN |
-| `session_logs` | Use health check, clear error for BROKEN |
+| `describe_session` | Auto-repair, then show health |
+| `attach_session` | Auto-repair, then health check |
+| `session_logs` | Auto-repair, then health check |
 | New: `stop_all_sessions` | Batch stop with --vm/--workspace filters |
-| New: `repair_session` | Recover PID for single session |
-| New: `repair_all_sessions` | Batch PID recovery |
+| New: `_ensure_pid` | Auto-repair single session with NULL PID |
+| New: `_ensure_pids_batch` | Auto-repair all NULL-PID sessions (batch commands) |
 | Removed: `restart-all` subcommand | Replaced by `restart --all-stopped` / `restart --all` |
 
 ### db.py
@@ -379,9 +345,8 @@ admin-mode sessions will get the same PID, which is correct.
 | `session stop` | Optional name or `--all` with `--vm`/`--workspace` filters |
 | `session restart` | Optional name, `--all-stopped`, or `--all` with filters |
 | Removed: `session restart-all` | Replaced by `restart --all-stopped` / `restart --all` |
-| New: `session repair` | `session repair <name>` and `session repair --all` |
-| `session list` | Status column from batch PID check |
-| `session describe` | Health display, repair suggestions |
+| `session list` | Auto-repair, then batch PID check |
+| `session describe` | Auto-repair, then health display |
 
 ## Design decisions
 
@@ -395,14 +360,13 @@ batch PID checks (one SSH call per VM) so the performance cost is negligible.
 
 The PID column is nullable with a sentinel value:
 
-- `NULL` -- pre-enhancement session, never checked (UNKNOWN health, suggest repair)
+- `NULL` -- pre-enhancement session, never checked (auto-repaired on first access)
 - `-1` (`PID_STOPPED`) -- known to be stopped (no process to check, restartable)
 - `>0` -- known PID (check `/proc/<pid>` for current liveness)
 
-NULL and -1 are distinct: NULL means "we have no information" (repair needed), while -1 means "we
-checked and the session is not running" (normal stopped state). Repair sets -1 when it finds a
-session is not running, breaking the dead-end loop where repair reports "not running" but commands
-still say "run repair."
+NULL and -1 are distinct: NULL means "we have no information" (triggers auto-repair), while -1 means
+"we checked and the session is not running" (normal stopped state). Auto-repair sets -1 when it
+finds a session is not running, so the session is immediately usable without manual intervention.
 
 ### Admin-mode PID caveat
 
@@ -410,11 +374,12 @@ Multiple admin-mode sessions share the same tmux server PID. Killing this PID ki
 sessions, not just one. The --force path warns about this. This is inherent to admin-mode's
 shared-server model and is not introduced by this enhancement.
 
-### No automatic repair on list
+### Transparent auto-repair
 
-`session list` does not auto-repair missing PIDs because: (a) repair requires tmux access, which may
-fail for the same reasons PIDs are missing; (b) list should be fast and side-effect-free; (c)
-explicit `session repair` gives the operator visibility into what changed.
+Rather than requiring an explicit `session repair` command, PID recovery happens automatically when
+any command accesses a session with a NULL PID. This eliminates dead-end error loops and makes the
+migration from pre-enhancement sessions seamless. A warning is emitted so the operator knows the
+repair happened.
 
 ### Status is process-universal, health is transport-specific
 
