@@ -439,6 +439,8 @@ def _execute_stop(
         return []
 
     # Phase 1: send C-c to all sessions (best effort)
+    names = ", ".join(s.name for s, _ in targets)
+    output.detail(f"Sending C-c to {len(targets)} session(s): {names}")
     for session, target in targets:
         sock = _effective_socket_path(db, session)
         run_cmd = partial(run, target)
@@ -446,6 +448,7 @@ def _execute_stop(
             send_keys(session.name, "C-c", run_command=run_cmd, socket_path=sock)
 
     # Phase 2: single grace period
+    output.detail(f"Waiting {_STOP_GRACE_SECONDS}s for graceful exit...")
     time.sleep(_STOP_GRACE_SECONDS)
 
     # Phase 3: check survivors per VM (reuse existing targets)
@@ -465,18 +468,20 @@ def _execute_stop(
     for session, target in targets:
         alive = survivor_map.get(session.name, False)
         if alive:
+            output.detail(f"Session '{session.name}' survived C-c, killing")
             sock = _effective_socket_path(db, session)
             run_cmd = partial(run, target)
             try:
                 _kill_session(session.name, run_command=run_cmd, socket_path=sock)
             except Exception as exc:
                 if force and session.pid and session.pid > 0:
+                    output.detail(f"tmux kill failed for '{session.name}', force-killing PID {session.pid}")
                     force_kill_tmux_server(
                         session.pid, target=target, socket_path=session.socket_path, log=output.detail,
                     )
                 else:
                     failed.append((session.name, str(exc)))
-                    output.warn(f"Error stopping '{session.name}': {exc}")
+                    output.warn(f"Failed to stop '{session.name}': {exc}")
                     continue
 
         db.update_session_pid(session.name, PID_STOPPED)
