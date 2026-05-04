@@ -94,7 +94,13 @@ def _kill_session(
 
 
 def _ensure_pid(session: SessionRow, *, target: ExecTarget, db: Database) -> SessionRow:
-    """Auto-recover PID for a session with pid=NULL. Returns updated session."""
+    """Auto-recover PID for a session with pid=NULL. Returns updated session.
+
+    If the tmux server is running, stores the PID. If it's genuinely stopped
+    (no socket file), marks as PID_STOPPED. If ambiguous (socket exists but
+    tmux unreachable), leaves as NULL and warns -- the caller's UNKNOWN
+    handler will surface the error.
+    """
     if session.pid is not None:
         return session
 
@@ -105,9 +111,18 @@ def _ensure_pid(session: SessionRow, *, target: ExecTarget, db: Database) -> Ses
     if pid is not None:
         db.update_session_pid(session.name, pid)
         output.warn(f"Recovered PID {pid} for session '{session.name}'")
+    elif sock and target.run(f"test -e {shlex.quote(sock)}", check=False).ok:
+        # Socket exists but tmux is unreachable -- could be permission drift.
+        # Leave as NULL so the caller's UNKNOWN handler surfaces the issue.
+        output.warn(
+            f"Session '{session.name}' has a socket file but tmux is unreachable. "
+            "This may indicate a permissions issue."
+        )
+        return session
     else:
+        # No socket (or admin session) and no tmux server -- genuinely stopped
         db.update_session_pid(session.name, PID_STOPPED)
-        output.warn(f"Session '{session.name}' has no running tmux server, marked stopped")
+        output.warn(f"Session '{session.name}' is not running, marked stopped")
 
     result = db.get_session(session.name)
     assert result is not None
@@ -503,7 +518,7 @@ def _execute_stop(
     output.detail("Sending C-c to stop any running commands...")
     for session, target in targets:
         sock = _effective_socket_path(db, session)
-        run_cmd = partial(run, target)
+        run_cmd = partial(run, target, logger=target.logger)
         with contextlib.suppress(Exception):
             send_keys(session.name, "C-c", run_command=run_cmd, socket_path=sock)
 
@@ -530,7 +545,7 @@ def _execute_stop(
         if alive:
             output.detail(f"Killing session '{session.name}'")
             sock = _effective_socket_path(db, session)
-            run_cmd = partial(run, target)
+            run_cmd = partial(run, target, logger=target.logger)
             try:
                 _kill_session(session.name, run_command=run_cmd, socket_path=sock)
             except Exception as exc:
@@ -570,6 +585,10 @@ def stop_session(
     if health == SessionHealth.STOPPED:
         output.info(f"Session '{name}' is already stopped")
         return
+    if health == SessionHealth.UNKNOWN:
+        raise output.SessionError(
+            f"session '{name}' has no PID and auto-recovery failed. Investigate the tmux server manually."
+        )
     if health == SessionHealth.BROKEN:
         if not force:
             raise output.SessionError(
@@ -611,6 +630,10 @@ def restart_session(
     session = _ensure_pid(session, target=target, db=db)
     health = check_session_health(session, target=target)
 
+    if health == SessionHealth.UNKNOWN:
+        raise output.SessionError(
+            f"session '{name}' has no PID and auto-recovery failed. Investigate the tmux server manually."
+        )
     if health == SessionHealth.BROKEN:
         if not force:
             raise output.SessionError(
@@ -686,7 +709,8 @@ def stop_all_sessions(
     """Stop all running sessions, optionally filtered by VM or workspace."""
     sessions = filter_sessions(db, workspace_name=workspace_name, vm_name=vm_name)
 
-    # Batch PID check to find running sessions
+    # Auto-repair NULL-PID sessions, then batch check
+    sessions = _ensure_pids_batch(sessions, db=db, config=config)
     alive_map = batch_check_all_sessions(sessions, db=db, config=config)
     alive_sessions = [
         s
@@ -737,6 +761,9 @@ def restart_all_sessions(
     if any are running, the caller should have prompted or passed yes=True.
     """
     sessions = filter_sessions(db, workspace_name=workspace_name, vm_name=vm_name)
+
+    # Auto-repair NULL-PID sessions, then batch check
+    sessions = _ensure_pids_batch(sessions, db=db, config=config)
     alive_map = batch_check_all_sessions(sessions, db=db, config=config)
 
     if not include_running:
@@ -747,8 +774,6 @@ def restart_all_sessions(
             if s.pid == PID_STOPPED
             or (s.pid is not None and s.pid > 0 and not alive_map.get(s.name, False))
         ]
-    # UNKNOWN sessions are skipped in both modes (need repair)
-    sessions = [s for s in sessions if s.pid is not None]
 
     if not sessions:
         output.info("No matching sessions to restart.")

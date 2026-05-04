@@ -505,10 +505,11 @@ def rehome_workspace(
         raise output.WorkspaceError("source and target paths overlap")
 
     # Block if workspace has running sessions
-    from agentworks.sessions.manager import batch_check_all_sessions
+    from agentworks.sessions.manager import _ensure_pids_batch, batch_check_all_sessions
 
     sessions = db.list_sessions(workspace_name=name)
     if sessions:
+        sessions = _ensure_pids_batch(sessions, db=db, config=config)
         alive_map = batch_check_all_sessions(sessions, db=db, config=config)
         running = [s for s in sessions if alive_map.get(s.name, False)]
         if running:
