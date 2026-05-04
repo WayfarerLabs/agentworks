@@ -439,8 +439,7 @@ def _execute_stop(
         return []
 
     # Phase 1: send C-c to all sessions (best effort)
-    names = ", ".join(s.name for s, _ in targets)
-    output.detail(f"Sending C-c to {len(targets)} session(s): {names}")
+    output.detail("Sending C-c to stop any running commands...")
     for session, target in targets:
         sock = _effective_socket_path(db, session)
         run_cmd = partial(run, target)
@@ -468,7 +467,7 @@ def _execute_stop(
     for session, target in targets:
         alive = survivor_map.get(session.name, False)
         if alive:
-            output.detail(f"Session '{session.name}' survived C-c, killing")
+            output.detail(f"Killing session '{session.name}'")
             sock = _effective_socket_path(db, session)
             run_cmd = partial(run, target)
             try:
