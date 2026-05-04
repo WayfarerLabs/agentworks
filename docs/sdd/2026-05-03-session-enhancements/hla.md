@@ -46,14 +46,15 @@ enhancement.
 
 | Concept | Determined by | Returns | Batch variant | Used by |
 |---------|--------------|---------|---------------|---------|
-| Status  | `kill -0 <pid>` | alive / dead | Yes (one SSH call per VM) | `session list` |
-| Health  | `kill -0 <pid>` + connectivity test | OK / STOPPED / BROKEN / UNKNOWN | No | `attach`, `describe`, pre-op checks |
+| Status  | `test -d /proc/<pid>` | alive / dead | Yes (one SSH call per VM) | `session list` |
+| Health  | `/proc` check + connectivity test | OK / STOPPED / BROKEN / UNKNOWN | No | `attach`, `describe`, pre-op checks |
 
-Status is process-level: is the PID alive? It is transport-agnostic and would work for any
-process-backed session type. Health adds a transport-specific connectivity test (currently
-`tmux has-session`). A session that is "alive" by status is either OK or BROKEN by health. Callers
-that only need to know whether the process is running use status. Callers that need to interact with
-the session use health.
+Status is process-level: is the PID alive? Checked via `/proc/<pid>` which requires no signal
+permissions (the admin can check agent-owned processes without sudo). It is transport-agnostic and
+would work for any process-backed session type. Health adds a transport-specific connectivity test
+(currently `tmux has-session`). A session that is "alive" by status is either OK or BROKEN by
+health. Callers that only need to know whether the process is running use status. Callers that need
+to interact with the session use health.
 
 ## DB schema changes
 
@@ -117,8 +118,8 @@ Defined in `sessions/health.py` or in `db.py`.
 
 ```python
 def check_session_status(pid: int, *, target: ExecTarget) -> bool:
-    """Check if a PID is alive. Returns True (alive) or False (dead)."""
-    result = target.run(f"kill -0 {pid} 2>/dev/null", check=False)
+    """Check if a PID is alive via /proc. No sudo or signal permissions needed."""
+    result = target.run(f"test -d /proc/{pid}", check=False)
     return result.ok
 ```
 
@@ -139,8 +140,8 @@ def batch_check_status(
 The compound command:
 
 ```bash
-kill -0 <pid1> 2>/dev/null; echo "STATUS:<name1>:$?";
-kill -0 <pid2> 2>/dev/null; echo "STATUS:<name2>:$?";
+test -d /proc/<pid1>; echo "STATUS:<name1>:$?";
+test -d /proc/<pid2>; echo "STATUS:<name2>:$?";
 ...
 ```
 
@@ -164,7 +165,7 @@ group by VM (workspace -> VM lookup)
   |   partition: has_pid (include) vs no_pid (report as UNKNOWN)
   |   |
   |   v
-  |   build compound kill -0 command
+  |   build compound /proc check command
   |   |
   |   v
   |   single SSH call -> parse results
@@ -258,7 +259,7 @@ When --force is used on a BROKEN or unresponsive session:
 ```text
 1. kill <pid>              (SIGTERM via sudo)
 2. sleep 2
-3. kill -0 <pid>           (check if still alive)
+3. test -d /proc/<pid>     (check if still alive)
 4. if alive: kill -9 <pid> (SIGKILL via sudo)
 5. if socket exists and server dead: rm <socket>
 6. clear PID in DB

@@ -40,8 +40,8 @@ used to reach it.
 - **Session PID**: the process ID of the session process. For admin-mode sessions, this is the admin
   user's default tmux server. For agent-mode sessions, this is the per-socket tmux server created
   for the agent.
-- **Status** (binary): whether the session process is alive, determined by `kill -0 <pid>`. Does not
-  require tmux socket access, sudo, or group membership. Answers "is the process running?"
+- **Status** (binary): whether the session process is alive, determined by checking `/proc/<pid>`.
+  Does not require tmux socket access, sudo, or group membership. Answers "is the process running?"
 - **Health** (enumerated): the full picture of session accessibility, determined by combining PID
   liveness with a transport-specific connectivity test (currently `tmux has-session`). Answers "can
   we interact with the session?"
@@ -68,8 +68,8 @@ restart, the new PID replaces the old one.
 Session liveness is expressed as two distinct concepts with separate helpers. Callers choose which
 they need.
 
-**Status** is binary: alive or dead. Determined solely by `kill -0 <pid>`. Fast, requires no tmux
-access. Has both single-session and batch variants.
+**Status** is binary: alive or dead. Determined by checking `/proc/<pid>`. Fast, requires no tmux
+access or signal permissions. Has both single-session and batch variants.
 
 **Health** is enumerated. Determined by PID liveness plus a tmux connectivity test
 (`tmux has-session`). Single-session only (no batch variant). Used when an operation needs to
@@ -110,8 +110,8 @@ confirmation prompts (running session restart, delete). These are orthogonal.
 #### Batch status checking for session list
 
 `session list` must check all sessions on a VM in a single SSH round-trip. The implementation groups
-sessions by VM, builds a compound shell command for each PID, and runs one SSH call per VM. VMs are
-queried in parallel.
+sessions by VM, builds a compound `test -d /proc/<pid>` command for each PID, and runs one SSH call
+per VM. VMs are queried in parallel.
 
 For N sessions across M VMs, this reduces status checking from N SSH calls to M parallel SSH calls.
 
@@ -201,6 +201,3 @@ The command reports what it found:
 - **PID reuse detection**: PIDs can be reused by the OS. The window for false positives is small
   (original process dies and a new process takes the same PID between checks). This is an acceptable
   risk for a CLI tool that runs interactively.
-- **Liveness check mechanism**: PID liveness is checked via `test -d /proc/<pid>` rather than
-  `kill -0 <pid>`. Both are equivalent for detecting process existence, but `/proc` does not require
-  signal permissions, so the admin user can check agent-owned processes without sudo.
