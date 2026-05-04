@@ -340,10 +340,16 @@ def _pid_alive(pid: int, *, target: ExecTarget) -> bool:
     return target.run(f"test -d /proc/{pid}", check=False).ok
 
 
+_boot_id_cache: dict[int, str] = {}
+
+
 def _get_boot_id(target: ExecTarget) -> str:
-    """Read the current VM boot ID."""
-    result = target.run("cat /proc/sys/kernel/random/boot_id", check=False)
-    return (getattr(result, "stdout", "") or "").strip()
+    """Read the current VM boot ID. Cached per target for the duration of the process."""
+    tid = id(target)
+    if tid not in _boot_id_cache:
+        result = target.run("cat /proc/sys/kernel/random/boot_id", check=False)
+        _boot_id_cache[tid] = (getattr(result, "stdout", "") or "").strip()
+    return _boot_id_cache[tid]
 
 
 def check_session_status(
@@ -378,7 +384,7 @@ def _check_dedicated_agent_session(session: SessionRow, *, target: ExecTarget) -
 
     # has-session failed -- STOPPED or BROKEN?
     assert session.pid is not None and session.pid > 0
-    if session.boot_id and session.boot_id != _get_boot_id(target):
+    if session.boot_id is not None and session.boot_id != _get_boot_id(target):
         return SessionStatus.STOPPED  # stale boot, PID is meaningless
     if not _pid_alive(session.pid, target=target):
         return SessionStatus.STOPPED  # process is dead
