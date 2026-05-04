@@ -52,28 +52,16 @@ def _resolve_session_linux_user(db: Database, session: SessionRow, vm: VMRow) ->
 
 
 
-def _session_alive(
-    session_name: str,
-    *,
-    run_command: RunCommand,
-    socket_path: str | None,
-) -> bool:
-    """Check if a session's tmux session is alive on its expected server."""
-    from agentworks.sessions.tmux import session_exists
-
-    return session_exists(session_name, run_command=run_command, socket_path=socket_path)
-
-
 def _kill_session(
     session_name: str,
     *,
     run_command: RunCommand,
     socket_path: str | None,
-) -> None:
-    """Kill a session on its expected tmux server."""
+) -> bool:
+    """Kill a session on its expected tmux server. Returns True if successful."""
     from agentworks.sessions.tmux import kill_session
 
-    kill_session(session_name, run_command=run_command, socket_path=socket_path)
+    return kill_session(session_name, run_command=run_command, socket_path=socket_path)
 
 
 def _ensure_pid(session: SessionRow, *, target: ExecTarget, db: Database) -> SessionRow:
@@ -96,7 +84,7 @@ def _ensure_pid(session: SessionRow, *, target: ExecTarget, db: Database) -> Ses
         # Important for admin-mode where multiple sessions share one server.
         q_session = shlex.quote(session.name)
         exists = target.run(
-            tmux_cmd(f"has-session -t {q_session}", sock, sudo=bool(sock)) + " 2>/dev/null", check=False,
+            tmux_cmd(f"has-session -t {q_session}", sock) + " 2>/dev/null", check=False,
         )
         if exists.ok:
             db.update_session_pid(session.name, pid)
@@ -155,7 +143,7 @@ def ensure_pids_batch(sessions: list[SessionRow], *, db: Database, config: Confi
                 # Server running -- verify this specific session exists on it
                 q_session = shlex.quote(session.name)
                 exists = target.run(
-                    tmux_cmd(f"has-session -t {q_session}", sock, sudo=bool(sock)) + " 2>/dev/null",
+                    tmux_cmd(f"has-session -t {q_session}", sock) + " 2>/dev/null",
                     check=False,
                 )
                 if exists.ok:
@@ -397,7 +385,7 @@ def check_session_health(
     # Transport-specific connectivity test (sudo for agent sockets)
     q_session = shlex.quote(session.name)
     sock = session.socket_path
-    cmd = tmux_cmd(f"has-session -t {q_session}", sock, sudo=bool(sock)) + " 2>/dev/null"
+    cmd = tmux_cmd(f"has-session -t {q_session}", sock) + " 2>/dev/null"
     result = target.run(cmd, check=False)
     if result.ok:
         return SessionHealth.OK
@@ -405,7 +393,7 @@ def check_session_health(
     # has-session failed but PID is alive. Distinguish "session exited but
     # server still running" (admin-mode shared server) from "server
     # unreachable" (permission drift / BROKEN).
-    server_cmd = tmux_cmd("display-message -p '#{pid}'", sock, sudo=bool(sock)) + " 2>/dev/null"
+    server_cmd = tmux_cmd("display-message -p '#{pid}'", sock) + " 2>/dev/null"
     if target.run(server_cmd, check=False).ok:
         return SessionHealth.STOPPED  # server connectable, session just doesn't exist
 
@@ -578,9 +566,8 @@ def _execute_stop(
             output.detail(f"Killing session '{session.name}'")
             sock = session.socket_path
             run_cmd = partial(run, target, logger=target.logger)
-            try:
-                _kill_session(session.name, run_command=run_cmd, socket_path=sock)
-            except Exception as exc:
+            killed = _kill_session(session.name, run_command=run_cmd, socket_path=sock)
+            if not killed:
                 if force and session.pid and session.pid > 0:
                     output.detail(f"tmux kill failed for '{session.name}', force-killing PID {session.pid}")
                     if not force_kill_tmux_server(
@@ -589,8 +576,8 @@ def _execute_stop(
                         failed.append((session.name, f"PID {session.pid} survived force-kill"))
                         continue
                 else:
-                    failed.append((session.name, str(exc)))
-                    output.warn(f"Failed to stop '{session.name}': {exc}")
+                    failed.append((session.name, f"tmux kill-session failed for '{session.name}'"))
+                    output.warn(f"Failed to stop '{session.name}' (tmux unreachable, use --force)")
                     continue
 
         db.update_session_pid(session.name, PID_STOPPED)

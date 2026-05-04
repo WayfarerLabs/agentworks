@@ -225,10 +225,10 @@ def deploy_restricted_config(
 def tmux_cmd(base: str, socket_path: str | None = None, *, sudo: bool = False) -> str:
     """Build a tmux command string, optionally with ``-S`` and ``sudo``.
 
-    Use ``sudo=True`` for non-interactive operations on agent sockets
-    (kill, has-session, send-keys, capture-pane) to guarantee access
-    regardless of socket file permissions. Do NOT use sudo for interactive
-    attach -- that reintroduces the use_pty resize problem.
+    Session commands (has-session, kill-session, send-keys, capture-pane) do
+    NOT use sudo -- socket access goes through group permissions, and failures
+    surface as BROKEN health. ``sudo=True`` is only for infrastructure
+    operations (e.g. cleanup_stale_sockets probing sockets during setup).
     """
     cmd = f"tmux -S {shlex.quote(socket_path)} {base}" if socket_path else f"tmux {base}"
     return f"sudo -n {cmd}" if sudo else cmd
@@ -360,7 +360,7 @@ def kill_session(
     """Kill a session's tmux session. Returns True if the session existed."""
     q_session = shlex.quote(session_name)
     result = run_command(
-        tmux_cmd(f"kill-session -t {q_session}", socket_path, sudo=bool(socket_path)),
+        tmux_cmd(f"kill-session -t {q_session}", socket_path),
         check=False,
     )
     return getattr(result, "ok", True)
@@ -375,7 +375,7 @@ def session_exists(
     """Check if a session's tmux session is alive."""
     q_session = shlex.quote(session_name)
     result = run_command(
-        tmux_cmd(f"has-session -t {q_session}", socket_path, sudo=bool(socket_path)) + " 2>/dev/null",
+        tmux_cmd(f"has-session -t {q_session}", socket_path) + " 2>/dev/null",
         check=False,
     )
     return getattr(result, "ok", False)
@@ -391,7 +391,7 @@ def send_keys(
     """Send keys to a session's tmux session."""
     q_session = shlex.quote(session_name)
     run_command(
-        tmux_cmd(f"send-keys -t {q_session} {keys}", socket_path, sudo=bool(socket_path)),
+        tmux_cmd(f"send-keys -t {q_session} {keys}", socket_path),
         check=False,
     )
 
@@ -406,7 +406,7 @@ def capture_output(
     """Capture the scrollback buffer from a session."""
     q_session = shlex.quote(session_name)
     result = run_command(
-        tmux_cmd(f"capture-pane -t {q_session} -p -S -{lines}", socket_path, sudo=bool(socket_path)),
+        tmux_cmd(f"capture-pane -t {q_session} -p -S -{lines}", socket_path),
         check=False,
     )
     return getattr(result, "stdout", "") or ""

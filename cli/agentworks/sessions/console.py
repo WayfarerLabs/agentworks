@@ -31,13 +31,13 @@ def console_exists(*, run_command: RunCommand) -> bool:
 
 
 def create_console(
-    running_sessions: list[SessionRow],
+    sessions: list[SessionRow],
     *,
     run_command: RunCommand,
     admin_username: str,
     recreate: bool = False,
 ) -> None:
-    """Create the VM console session with one window per running session.
+    """Create the VM console session with one window per session.
 
     When *recreate* is True, kills any existing console session first.
     """
@@ -55,8 +55,8 @@ def create_console(
     run_command(f"tmux set -t {CONSOLE_SESSION_NAME} remain-on-exit on", check=False)
 
     # Add a window for each running session
-    output.info(f"Adding {len(running_sessions)} session(s) to console...")
-    for session in running_sessions:
+    output.info(f"Adding {len(sessions)} session(s) to console...")
+    for session in sessions:
         _add_session_window(
             session.name,
             run_command=run_command,
@@ -144,11 +144,11 @@ def attach_console(
     run_command = partial(run, target)
 
     # Get sessions for this VM (console wrapper handles dead sessions)
-    running_sessions = _get_sessions_for_vm(db, vm)
+    vm_sessions = _get_sessions_for_vm(db, vm)
 
     if recreate or not console_exists(run_command=run_command):
         create_console(
-            running_sessions,
+            vm_sessions,
             run_command=run_command,
             admin_username=vm.admin_username,
             recreate=recreate,
