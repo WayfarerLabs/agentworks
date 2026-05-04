@@ -1000,7 +1000,10 @@ def describe_session(
     output.info(f"Mode:       {mode_label}")
     output.info(f"Status:     {status_label}")
     if session.pid is not None and session.pid > 0:
-        output.info(f"PID:        {session.pid}")
+        # Only show PID if it's from the current boot (stale PIDs are meaningless)
+        current_boot = _get_boot_id(target)
+        if not session.boot_id or session.boot_id == current_boot:
+            output.info(f"PID:        {session.pid}")
     output.info(f"Created:    {session.created_at}")
     output.info(f"Updated:    {session.updated_at}")
 
