@@ -1005,8 +1005,10 @@ def session_restart(
 
             sessions = filter_sessions(db, workspace_name=workspace, vm_name=vm)
             sessions = ensure_pids_batch(sessions, db=db, config=config)
-            alive_map = batch_check_all_sessions(sessions, db=db, config=config)
-            running = [s for s in sessions if s.pid and s.pid > 0 and alive_map.get(s.name, False)]
+            from agentworks.db import SessionStatus
+
+            status_map = batch_check_all_sessions(sessions, db=db, config=config)
+            running = [s for s in sessions if status_map.get(s.name) == SessionStatus.OK]
             if running:
                 names = ", ".join(s.name for s in running[:5])
                 suffix = f" (and {len(running) - 5} more)" if len(running) > 5 else ""

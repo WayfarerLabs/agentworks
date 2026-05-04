@@ -509,9 +509,11 @@ def rehome_workspace(
 
     sessions = db.list_sessions(workspace_name=name)
     if sessions:
+        from agentworks.db import SessionStatus
+
         sessions = ensure_pids_batch(sessions, db=db, config=config)
-        alive_map = batch_check_all_sessions(sessions, db=db, config=config)
-        running = [s for s in sessions if alive_map.get(s.name, False)]
+        status_map = batch_check_all_sessions(sessions, db=db, config=config)
+        running = [s for s in sessions if status_map.get(s.name) == SessionStatus.OK]
         if running:
             names = ", ".join(s.name for s in running)
             raise output.WorkspaceError(

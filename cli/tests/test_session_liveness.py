@@ -5,10 +5,9 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass
 
-from agentworks.db import SessionHealth, SessionRow
+from agentworks.db import SessionRow, SessionStatus
 from agentworks.sessions.manager import (
     batch_check_status,
-    check_session_health,
     check_session_status,
 )
 from agentworks.sessions.tmux import (
@@ -47,126 +46,143 @@ class _FakeTarget:
 
 
 def _session(
-    name: str, pid: int | None = None, socket_path: str | None = None
+    name: str,
+    pid: int | None = None,
+    socket_path: str | None = None,
+    mode: str = "admin",
+    boot_id: str | None = None,
 ) -> SessionRow:
     return SessionRow(
         name=name,
         workspace_name="ws",
         template="default",
-        mode="admin",
+        mode=mode,
         created_at="",
         updated_at="",
         pid=pid,
         socket_path=socket_path,
+        boot_id=boot_id,
     )
-
-
-# -- check_session_status ---------------------------------------------------
-
-
-def test_check_session_status_alive() -> None:
-    target = _FakeTarget({"test -d /proc/42": _FakeResult(ok=True)})
-    assert check_session_status(42, target=target) is True
-
-
-def test_check_session_status_dead() -> None:
-    target = _FakeTarget({"test -d /proc/99": _FakeResult(ok=False)})
-    assert check_session_status(99, target=target) is False
 
 
 # -- batch_check_status -----------------------------------------------------
 
 
-def test_batch_check_status_mixed() -> None:
+def test_batch_mixed() -> None:
+    """Batch: agent OK, admin stopped, NULL-PID excluded."""
     sessions = [
-        _session("s1", pid=100),
-        _session("s2", pid=200),
-        _session("s3", pid=None),
+        _session("a1", pid=100, socket_path="/sock1", mode="agent", boot_id="boot1"),
+        _session("s1", pid=200, mode="admin"),
+        _session("s2", pid=None),
     ]
     target = _FakeTarget(
         {
-            "test -d /proc": _FakeResult(
+            "has-session": _FakeResult(
                 ok=True,
-                stdout="STATUS:s1:0\nSTATUS:s2:1\n",
+                stdout="S:a1:0\nS:s1:1\n",
             ),
         }
     )
     result = batch_check_status(sessions, target=target)
-    assert result == {"s1": True, "s2": False}
-    assert "s3" not in result
+    assert result["a1"] == SessionStatus.OK
+    assert result["s1"] == SessionStatus.STOPPED
+    assert "s2" not in result
 
 
-def test_batch_check_status_empty() -> None:
+def test_batch_empty() -> None:
     assert batch_check_status([], target=_FakeTarget()) == {}
 
 
-def test_batch_check_status_all_missing_pid() -> None:
+def test_batch_all_missing_pid() -> None:
     sessions = [_session("s1", pid=None)]
     assert batch_check_status(sessions, target=_FakeTarget()) == {}
 
 
-def test_batch_check_status_builds_compound_command() -> None:
-    sessions = [_session("s1", pid=100), _session("s2", pid=200)]
+def test_batch_builds_compound_command() -> None:
+    """Compound command includes has-session for both agent and admin sessions."""
+    sessions = [
+        _session("a1", pid=100, socket_path="/sock", mode="agent", boot_id="b"),
+        _session("s1", pid=200, mode="admin"),
+    ]
     target = _FakeTarget(
-        {"test -d /proc": _FakeResult(ok=True, stdout="STATUS:s1:0\nSTATUS:s2:0\n")}
+        {"has-session": _FakeResult(ok=True, stdout="S:a1:0\nS:s1:0\n")}
     )
     batch_check_status(sessions, target=target)
     assert len(target.commands) == 1
-    assert "test -d /proc/100" in target.commands[0]
-    assert "test -d /proc/200" in target.commands[0]
+    assert "has-session" in target.commands[0]
 
 
-# -- check_session_health ---------------------------------------------------
+# -- check_session_status ---------------------------------------------------
+
+BOOT_CURRENT = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+BOOT_STALE = "11111111-2222-3333-4444-555555555555"
 
 
-def test_health_ok() -> None:
-    session = _session("s1", pid=42, socket_path="/sock")
-    target = _FakeTarget(
-        {
-            "test -d /proc/42": _FakeResult(ok=True),
-            "has-session": _FakeResult(ok=True),
-        }
-    )
-    assert check_session_health(session, target=target) == SessionHealth.OK
-    assert any("test -d /proc/42" in cmd for cmd in target.commands)
+def test_agent_ok() -> None:
+    """Agent session: has-session succeeds -> OK."""
+    session = _session("s1", pid=42, socket_path="/sock", mode="agent", boot_id=BOOT_CURRENT)
+    target = _FakeTarget({"has-session": _FakeResult(ok=True)})
+    assert check_session_status(session, target=target) == SessionStatus.OK
 
 
-def test_health_stopped() -> None:
+def test_agent_stopped_pid_dead() -> None:
+    """Agent session: has-session fails, PID dead -> STOPPED."""
+    session = _session("s1", pid=42, socket_path="/sock", mode="agent", boot_id=BOOT_CURRENT)
+    target = _FakeTarget({
+        "has-session": _FakeResult(ok=False),
+        "boot_id": _FakeResult(ok=True, stdout=BOOT_CURRENT + "\n"),
+        "test -d /proc/42": _FakeResult(ok=False),
+    })
+    assert check_session_status(session, target=target) == SessionStatus.STOPPED
+
+
+def test_agent_stopped_stale_boot() -> None:
+    """Agent session: has-session fails, stale boot -> STOPPED (no PID check)."""
+    session = _session("s1", pid=42, socket_path="/sock", mode="agent", boot_id=BOOT_STALE)
+    target = _FakeTarget({
+        "has-session": _FakeResult(ok=False),
+        "boot_id": _FakeResult(ok=True, stdout=BOOT_CURRENT + "\n"),
+    })
+    assert check_session_status(session, target=target) == SessionStatus.STOPPED
+    # PID should NOT be checked (stale boot short-circuits)
+    assert not any("test -d /proc" in cmd for cmd in target.commands)
+
+
+def test_agent_broken() -> None:
+    """Agent session: has-session fails, same boot, PID alive -> BROKEN."""
+    session = _session("s1", pid=42, socket_path="/sock", mode="agent", boot_id=BOOT_CURRENT)
+    target = _FakeTarget({
+        "has-session": _FakeResult(ok=False),
+        "boot_id": _FakeResult(ok=True, stdout=BOOT_CURRENT + "\n"),
+        "test -d /proc/42": _FakeResult(ok=True),
+    })
+    assert check_session_status(session, target=target) == SessionStatus.BROKEN
+
+
+def test_admin_ok() -> None:
+    """Admin session: has-session succeeds -> OK."""
     session = _session("s1", pid=42)
-    target = _FakeTarget({"test -d /proc/42": _FakeResult(ok=False)})
-    assert check_session_health(session, target=target) == SessionHealth.STOPPED
+    target = _FakeTarget({"has-session": _FakeResult(ok=True)})
+    assert check_session_status(session, target=target) == SessionStatus.OK
 
 
-def test_health_broken() -> None:
-    """PID alive, has-session fails, server probe also fails -> BROKEN."""
-    session = _session("s1", pid=42, socket_path="/sock")
-    target = _FakeTarget(
-        {
-            "test -d /proc/42": _FakeResult(ok=True),
-            "has-session": _FakeResult(ok=False),
-            "display-message": _FakeResult(ok=False),
-        }
-    )
-    assert check_session_health(session, target=target) == SessionHealth.BROKEN
-    assert any("test -d /proc/42" in cmd for cmd in target.commands)
+def test_admin_stopped() -> None:
+    """Admin session: has-session fails -> STOPPED (no PID follow-up)."""
+    session = _session("s1", pid=42)
+    target = _FakeTarget({"has-session": _FakeResult(ok=False)})
+    assert check_session_status(session, target=target) == SessionStatus.STOPPED
 
 
-def test_health_session_ended_server_alive() -> None:
-    """PID alive, has-session fails, but server IS connectable -> STOPPED (not BROKEN)."""
-    session = _session("s1", pid=42, socket_path="/sock")
-    target = _FakeTarget(
-        {
-            "test -d /proc/42": _FakeResult(ok=True),
-            "has-session": _FakeResult(ok=False),
-            "display-message": _FakeResult(ok=True, stdout="42\n"),
-        }
-    )
-    assert check_session_health(session, target=target) == SessionHealth.STOPPED
-
-
-def test_health_unknown_no_pid() -> None:
+def test_unknown_no_pid() -> None:
     session = _session("s1", pid=None)
-    assert check_session_health(session, target=_FakeTarget()) == SessionHealth.UNKNOWN
+    assert check_session_status(session, target=_FakeTarget()) == SessionStatus.UNKNOWN
+
+
+def test_stopped_pid_sentinel() -> None:
+    from agentworks.db import PID_STOPPED
+
+    session = _session("s1", pid=PID_STOPPED)
+    assert check_session_status(session, target=_FakeTarget()) == SessionStatus.STOPPED
 
 
 # -- get_tmux_server_pid ----------------------------------------------------

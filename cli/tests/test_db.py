@@ -449,8 +449,56 @@ def test_update_session_pid(db: Database) -> None:
     assert session is not None
     assert session.pid == 12345
 
-    # Clear the PID
+    # Store PID with boot ID
+    db.update_session_pid("ws-s1", 12345, boot_id="abc-123")
+    session = db.get_session("ws-s1")
+    assert session is not None
+    assert session.pid == 12345
+    assert session.boot_id == "abc-123"
+
+    # Clear the PID (boot_id preserved as last-known)
     db.update_session_pid("ws-s1", None)
     session = db.get_session("ws-s1")
     assert session is not None
     assert session.pid is None
+    assert session.boot_id == "abc-123"  # preserved, not cleared
+
+
+def test_migration_21_adds_boot_id(tmp_path: Path) -> None:
+    """Migration 21 adds a boot_id column."""
+    from agentworks.db import MIGRATIONS
+
+    db_path = tmp_path / "m21.db"
+
+    # Create DB at v20 (has pid, no boot_id)
+    conn = sqlite3.connect(str(db_path))
+    conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS schema_version ("
+        "    version    INTEGER NOT NULL,"
+        "    applied_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))"
+        ")"
+    )
+    for version in range(1, 21):
+        for stmt in MIGRATIONS[version].split(";"):
+            stmt = stmt.strip()
+            if stmt:
+                conn.execute(stmt)
+        conn.execute("INSERT INTO schema_version (version) VALUES (?)", (version,))
+    conn.execute("INSERT INTO workspaces (name, type, workspace_path) VALUES ('ws', 'vm', '/tmp/ws')")
+    conn.execute(
+        "INSERT INTO sessions (name, workspace_name, template, mode) "
+        "VALUES ('s1', 'ws', 'default', 'admin')"
+    )
+    conn.commit()
+    conn.close()
+
+    # Open with Database to trigger migration 21
+    upgraded = Database(db_path)
+    session = upgraded.get_session("s1")
+    assert session is not None
+    assert session.boot_id is None  # existing sessions get NULL
+
+    cols = [row[1] for row in upgraded._conn.execute("PRAGMA table_info(sessions)").fetchall()]
+    assert "boot_id" in cols
+    upgraded.close()

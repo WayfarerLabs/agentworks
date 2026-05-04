@@ -47,8 +47,8 @@ class SessionMode(Enum):
     AGENT = "agent"
 
 
-class SessionHealth(Enum):
-    """Session liveness state, computed live from PID and connectivity checks."""
+class SessionStatus(Enum):
+    """Session liveness state, computed live from has-session + PID/boot_id checks."""
 
     OK = "ok"
     STOPPED = "stopped"
@@ -147,6 +147,7 @@ class SessionRow:
     created_workspace: bool = False
     socket_path: str | None = None
     pid: int | None = None
+    boot_id: str | None = None
 
 
 # -- Migrations ------------------------------------------------------------
@@ -406,6 +407,10 @@ MIGRATIONS: dict[int, str] = {
     20: """
         ALTER TABLE sessions DROP COLUMN status;
         ALTER TABLE sessions ADD COLUMN pid INTEGER;
+    """,
+    # -- Add boot ID for PID staleness detection across VM reboots ----------
+    21: """
+        ALTER TABLE sessions ADD COLUMN boot_id TEXT;
     """,
 }
 
@@ -888,13 +893,17 @@ class Database:
             ).fetchall()
         return [_to_session(r) for r in rows]
 
-    def update_session_pid(self, name: str, pid: int | None) -> None:
-        """Store or clear the tmux server PID for a session."""
+    def update_session_pid(self, name: str, pid: int | None, boot_id: str | None = None) -> None:
+        """Store or clear the PID and boot ID for a session.
+
+        When boot_id is None (e.g. marking PID_STOPPED), the existing boot_id
+        is preserved (last boot the session ran in).
+        """
         self._conn.execute(
-            "UPDATE sessions SET pid = ?, "
+            "UPDATE sessions SET pid = ?, boot_id = COALESCE(?, boot_id), "
             "updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') "
             "WHERE name = ?",
-            (pid, name),
+            (pid, boot_id, name),
         )
         self._conn.commit()
 
@@ -1055,6 +1064,7 @@ def _to_session(row: sqlite3.Row) -> SessionRow:
         created_workspace=bool(row["created_workspace"]),
         socket_path=row["socket_path"],
         pid=row["pid"],
+        boot_id=row["boot_id"],
     )
 
 
