@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import re
 import shlex
 import sys
@@ -557,7 +558,16 @@ def stop_all_sessions(
     workspace_name: str | None = None,
     force: bool = False,
 ) -> None:
-    """Stop all running sessions, optionally filtered by VM or workspace."""
+    """Stop all running sessions, optionally filtered by VM or workspace.
+
+    Sends C-c to all sessions at once, waits one grace period, then kills
+    any survivors. Much faster than stopping one at a time.
+    """
+    import time
+
+    from agentworks.sessions.tmux import force_kill_tmux_server, send_keys
+    from agentworks.ssh import run
+
     sessions = _filter_sessions(db, workspace_name=workspace_name, vm_name=vm_name)
 
     # Only attempt sessions that are (or might be) running
@@ -577,19 +587,55 @@ def stop_all_sessions(
         return
 
     output.info(f"Stopping {len(targets)} session(s)...")
-    failed: list[tuple[str, str]] = []
+
+    # Resolve VM targets (reuse across sessions on the same VM)
+    vm_targets: dict[str, ExecTarget] = {}
+    for s in targets:
+        ws = db.get_workspace(s.workspace_name)
+        if ws and ws.vm_name and ws.vm_name not in vm_targets:
+            vm = db.get_vm(ws.vm_name)
+            if vm and vm.tailscale_host:
+                vm_targets[ws.vm_name] = admin_exec_target(vm, config)
+
+    def _get_target(session: SessionRow) -> ExecTarget | None:
+        ws = db.get_workspace(session.workspace_name)
+        return vm_targets.get(ws.vm_name) if ws and ws.vm_name else None
+
+    # Phase 1: send C-c to all sessions
     for session in targets:
-        try:
-            stop_session(db, config, name=session.name, force=force)
-        except output.SessionError as exc:
-            if not force and "broken" in str(exc).lower():
-                output.warn(f"Skipping '{session.name}': {exc}")
-            else:
-                failed.append((session.name, str(exc)))
-                output.warn(f"Error stopping '{session.name}': {exc}")
-        except Exception as exc:
-            failed.append((session.name, str(exc)))
-            output.warn(f"Error stopping '{session.name}': {exc}")
+        target = _get_target(session)
+        if target is None:
+            continue
+        sock = _effective_socket_path(db, session)
+        with contextlib.suppress(Exception):
+            send_keys(session.name, "C-c", run_command=partial(run, target), socket_path=sock)
+
+    # Phase 2: single grace period
+    time.sleep(_STOP_GRACE_SECONDS)
+
+    # Phase 3: batch check survivors, kill any still alive
+    survivor_map = _batch_check_all_sessions(targets, db=db, config=config)
+    failed: list[tuple[str, str]] = []
+
+    for session in targets:
+        alive = session.name in survivor_map and survivor_map[session.name]
+        if alive:
+            target = _get_target(session)
+            if target is None:
+                continue
+            sock = _effective_socket_path(db, session)
+            try:
+                _kill_session(session.name, run_command=partial(run, target), socket_path=sock)
+            except Exception as exc:
+                if force and session.pid and session.pid > 0:
+                    force_kill_tmux_server(session.pid, target=target, socket_path=session.socket_path)
+                else:
+                    failed.append((session.name, str(exc)))
+                    output.warn(f"Error stopping '{session.name}': {exc}")
+                    continue
+
+        db.update_session_pid(session.name, PID_STOPPED)
+        output.info(f"Session '{session.name}' stopped")
 
     if failed:
         raise output.SessionError(f"{len(failed)} session(s) failed to stop.")
