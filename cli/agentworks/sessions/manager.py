@@ -826,10 +826,12 @@ def stop_all_sessions(
     sessions = ensure_pids_batch(sessions, db=db, config=config)
     status_map = batch_check_all_sessions(sessions, db=db, config=config)
 
-    # Error if any sessions are still unknown after auto-repair
+    # Error if any sessions are still unknown after auto-repair.
+    # PID_STOPPED sessions are known-stopped (excluded from status_map by design).
     unknown = [
         s for s in sessions
-        if s.pid is None or s.boot_id is None or status_map.get(s.name) is None
+        if s.pid != PID_STOPPED
+        and (s.pid is None or s.boot_id is None or s.name not in status_map)
     ]
     if unknown:
         names = ", ".join(s.name for s in unknown)
@@ -896,10 +898,12 @@ def restart_all_sessions(
     sessions = ensure_pids_batch(sessions, db=db, config=config)
     status_map = batch_check_all_sessions(sessions, db=db, config=config)
 
-    # Error if any sessions are still unknown after auto-repair
+    # Error if any sessions are still unknown after auto-repair.
+    # PID_STOPPED sessions are known-stopped (excluded from status_map by design).
     unknown = [
         s for s in sessions
-        if s.pid is None or s.boot_id is None or status_map.get(s.name) is None
+        if s.pid != PID_STOPPED
+        and (s.pid is None or s.boot_id is None or s.name not in status_map)
     ]
     if unknown:
         names = ", ".join(s.name for s in unknown)

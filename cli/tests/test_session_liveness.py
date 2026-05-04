@@ -249,3 +249,32 @@ def test_force_kill_cleans_socket(monkeypatch) -> None:
     target = _FakeTarget({"test -d /proc/42": _FakeResult(ok=False)})
     force_kill_tmux_server(42, target=target, socket_path="/run/test.sock")
     assert any("rm -f" in cmd and "test.sock" in cmd for cmd in target.commands)
+
+
+# -- batch unknown detection ------------------------------------------------
+
+
+def test_batch_status_pid_stopped_not_unknown() -> None:
+    """PID_STOPPED sessions should NOT appear in batch status_map (by design)
+    and should NOT be treated as unknown by batch commands."""
+    from agentworks.db import PID_STOPPED
+
+    sessions = [
+        _session("ok1", pid=100, socket_path="/sock", mode="agent", boot_id=BOOT_CURRENT),
+        _session("stopped1", pid=PID_STOPPED, boot_id=BOOT_CURRENT),
+    ]
+    target = _FakeTarget({"has-session": _FakeResult(ok=True, stdout="S:ok1:0\n")})
+    result = batch_check_status(sessions, target=target)
+
+    # ok1 should be in the map, stopped1 should NOT (excluded by design)
+    assert result["ok1"] == SessionStatus.OK
+    assert "stopped1" not in result
+
+    # The unknown detection logic should NOT flag stopped1:
+    # s.pid == PID_STOPPED -> skip
+    unknown = [
+        s for s in sessions
+        if s.pid != PID_STOPPED
+        and (s.pid is None or s.boot_id is None or s.name not in result)
+    ]
+    assert unknown == []
