@@ -656,8 +656,13 @@ def _execute_stop(
                     output.warn(f"Failed to stop '{session.name}' (tmux unreachable, use --force)")
                     continue
 
-        # Clean up agent socket if the server is dead
-        if session.socket_path:
+        # Clean up agent socket only after confirming the server process is dead
+        if (
+            session.socket_path
+            and session.pid
+            and session.pid > 0
+            and not _pid_alive(session.pid, target=target)
+        ):
             run_cmd = partial(run, target, logger=target.logger)
             run_cmd(f"sudo rm -f {shlex.quote(session.socket_path)}", check=False)
 
@@ -815,7 +820,15 @@ def stop_all_sessions(
     sessions = ensure_pids_batch(sessions, db=db, config=config)
     status_map = batch_check_all_sessions(sessions, db=db, config=config)
 
-    # BROKEN sessions need --force; warn and skip otherwise
+    # Warn about sessions that can't be stopped normally
+    unknown = [
+        s for s in sessions
+        if s.pid is None or s.boot_id is None or status_map.get(s.name) is None
+    ]
+    if unknown:
+        names = ", ".join(s.name for s in unknown)
+        output.warn(f"Skipping {len(unknown)} session(s) with unknown status ({names}).")
+
     broken = [s for s in sessions if status_map.get(s.name) == SessionStatus.BROKEN]
     if broken and not force:
         names = ", ".join(s.name for s in broken)
