@@ -868,6 +868,7 @@ def list_sessions(
             has_unknown = True
 
     if has_unknown:
+        output.info("")
         output.warn("Some sessions have no PID recorded. Run 'agentworks session repair --all' to recover.")
 
 
