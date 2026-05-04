@@ -438,7 +438,12 @@ def _execute_stop(
     if not targets:
         return []
 
-    # Phase 1: send C-c to all sessions (best effort)
+    # Phase 1: send C-c to all sessions (best effort).
+    # This gives processes that handle SIGINT gracefully (save state, flush)
+    # a chance to clean up before we kill the session. In practice, tmux
+    # kill-session sends SIGHUP which cascades through the shell to children,
+    # so the C-c is rarely necessary. Consider removing the C-c + grace
+    # period if the 5-second wait becomes a pain point.
     output.detail("Sending C-c to stop any running commands...")
     for session, target in targets:
         sock = _effective_socket_path(db, session)
