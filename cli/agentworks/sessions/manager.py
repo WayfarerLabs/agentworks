@@ -87,13 +87,23 @@ def _ensure_pid(session: SessionRow, *, target: ExecTarget, db: Database) -> Ses
     if session.pid is not None:
         return session
 
-    from agentworks.sessions.tmux import get_tmux_server_pid
+    from agentworks.sessions.tmux import get_tmux_server_pid, tmux_cmd
 
     sock = session.socket_path
     pid = get_tmux_server_pid(target=target, socket_path=sock)
     if pid is not None:
-        db.update_session_pid(session.name, pid)
-        output.warn(f"Recovered PID {pid} for session '{session.name}'")
+        # Server is running -- verify this specific session exists on it.
+        # Important for admin-mode where multiple sessions share one server.
+        q_session = shlex.quote(session.name)
+        exists = target.run(
+            tmux_cmd(f"has-session -t {q_session}", sock, sudo=bool(sock)) + " 2>/dev/null", check=False,
+        )
+        if exists.ok:
+            db.update_session_pid(session.name, pid)
+            output.warn(f"Recovered PID {pid} for session '{session.name}'")
+        else:
+            db.update_session_pid(session.name, PID_STOPPED)
+            output.warn(f"Session '{session.name}' is not running, marked stopped")
     elif sock and target.run(f"test -e {shlex.quote(sock)}", check=False).ok:
         # Socket exists but tmux is unreachable -- could be permission drift.
         # Leave as NULL so the caller's UNKNOWN handler surfaces the issue.
@@ -118,7 +128,7 @@ def ensure_pids_batch(sessions: list[SessionRow], *, db: Database, config: Confi
     Same logic as _ensure_pid but for batch commands. Socket ambiguity (socket
     exists but tmux unreachable) leaves pid=NULL so callers see UNKNOWN.
     """
-    from agentworks.sessions.tmux import get_tmux_server_pid
+    from agentworks.sessions.tmux import get_tmux_server_pid, tmux_cmd
 
     need_repair = [s for s in sessions if s.pid is None]
     if not need_repair:
@@ -142,8 +152,18 @@ def ensure_pids_batch(sessions: list[SessionRow], *, db: Database, config: Confi
             sock = session.socket_path
             pid = get_tmux_server_pid(target=target, socket_path=sock)
             if pid is not None:
-                db.update_session_pid(session.name, pid)
-                output.warn(f"Recovered PID {pid} for session '{session.name}'")
+                # Server running -- verify this specific session exists on it
+                q_session = shlex.quote(session.name)
+                exists = target.run(
+                    tmux_cmd(f"has-session -t {q_session}", sock, sudo=bool(sock)) + " 2>/dev/null",
+                    check=False,
+                )
+                if exists.ok:
+                    db.update_session_pid(session.name, pid)
+                    output.warn(f"Recovered PID {pid} for session '{session.name}'")
+                else:
+                    db.update_session_pid(session.name, PID_STOPPED)
+                    output.warn(f"Session '{session.name}' is not running, marked stopped")
                 repaired_names.add(session.name)
             elif sock and target.run(f"test -e {shlex.quote(sock)}", check=False).ok:
                 output.warn(
@@ -374,12 +394,20 @@ def check_session_health(
     if not alive:
         return SessionHealth.STOPPED
 
-    # Transport-specific connectivity test
+    # Transport-specific connectivity test (sudo for agent sockets)
     q_session = shlex.quote(session.name)
-    cmd = tmux_cmd(f"has-session -t {q_session}", session.socket_path) + " 2>/dev/null"
+    sock = session.socket_path
+    cmd = tmux_cmd(f"has-session -t {q_session}", sock, sudo=bool(sock)) + " 2>/dev/null"
     result = target.run(cmd, check=False)
     if result.ok:
         return SessionHealth.OK
+
+    # has-session failed but PID is alive. Distinguish "session exited but
+    # server still running" (admin-mode shared server) from "server
+    # unreachable" (permission drift / BROKEN).
+    server_cmd = tmux_cmd("display-message -p '#{pid}'", sock, sudo=bool(sock)) + " 2>/dev/null"
+    if target.run(server_cmd, check=False).ok:
+        return SessionHealth.STOPPED  # server connectable, session just doesn't exist
 
     return SessionHealth.BROKEN
 
@@ -816,6 +844,10 @@ def delete_session(
     session = _ensure_pid(session, target=target, db=db)
     health = check_session_health(session, target=target)
 
+    if health == SessionHealth.UNKNOWN:
+        raise output.SessionError(
+            f"session '{name}' has no PID and auto-recovery failed. Investigate the tmux server manually."
+        )
     if health == SessionHealth.OK:
         if not yes and not output.confirm(f"Session '{name}' is running. Delete?"):
             raise output.UserAbort("delete cancelled")
@@ -838,10 +870,12 @@ def delete_session(
     ):
         raise output.UserAbort("delete cancelled")
 
-    # Clean up socket if present
+    # Clean up socket if the server is dead (don't remove a live socket)
     sock = session.socket_path
-    if sock:
+    if sock and (session.pid is None or not check_session_status(session.pid, target=target)):
         run_command(f"sudo rm -f {shlex.quote(sock)}", check=False)
+    elif sock:
+        output.warn(f"tmux server for '{name}' is still alive, socket preserved at {sock}")
 
     db.delete_session(name)
 

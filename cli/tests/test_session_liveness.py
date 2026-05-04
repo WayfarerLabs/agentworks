@@ -138,15 +138,30 @@ def test_health_stopped() -> None:
 
 
 def test_health_broken() -> None:
+    """PID alive, has-session fails, server probe also fails -> BROKEN."""
     session = _session("s1", pid=42, socket_path="/sock")
     target = _FakeTarget(
         {
             "test -d /proc/42": _FakeResult(ok=True),
             "has-session": _FakeResult(ok=False),
+            "display-message": _FakeResult(ok=False),
         }
     )
     assert check_session_health(session, target=target) == SessionHealth.BROKEN
     assert any("test -d /proc/42" in cmd for cmd in target.commands)
+
+
+def test_health_session_ended_server_alive() -> None:
+    """PID alive, has-session fails, but server IS connectable -> STOPPED (not BROKEN)."""
+    session = _session("s1", pid=42, socket_path="/sock")
+    target = _FakeTarget(
+        {
+            "test -d /proc/42": _FakeResult(ok=True),
+            "has-session": _FakeResult(ok=False),
+            "display-message": _FakeResult(ok=True, stdout="42\n"),
+        }
+    )
+    assert check_session_health(session, target=target) == SessionHealth.STOPPED
 
 
 def test_health_unknown_no_pid() -> None:

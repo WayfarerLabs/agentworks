@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+from pathlib import Path
 
 import pytest
 
@@ -295,9 +296,9 @@ def _create_pre_v19_db(path: str) -> None:
     conn.close()
 
 
-def test_migration_19_succeeds_without_legacy_sessions(tmp_path: pytest.TempPathFactory) -> None:
+def test_migration_19_succeeds_without_legacy_sessions(tmp_path: Path) -> None:
     """Migration 19 passes when no agent sessions have NULL socket_path."""
-    db_path = tmp_path / "clean.db"  # type: ignore[operator]
+    db_path = tmp_path / "clean.db"
     _create_pre_v19_db(str(db_path))
 
     # Insert an agent session WITH socket_path and an admin session without
@@ -319,9 +320,9 @@ def test_migration_19_succeeds_without_legacy_sessions(tmp_path: pytest.TempPath
     upgraded.close()
 
 
-def test_migration_19_fails_with_legacy_agent_session(tmp_path: pytest.TempPathFactory) -> None:
+def test_migration_19_fails_with_legacy_agent_session(tmp_path: Path) -> None:
     """Migration 19 fails when an agent session has NULL socket_path."""
-    db_path = tmp_path / "legacy.db"  # type: ignore[operator]
+    db_path = tmp_path / "legacy.db"
     _create_pre_v19_db(str(db_path))
 
     # Insert an agent session WITHOUT socket_path (legacy)
@@ -391,9 +392,9 @@ def _create_pre_v20_db(path: str) -> None:
     conn.close()
 
 
-def test_migration_20_drops_status_adds_pid(tmp_path: pytest.TempPathFactory) -> None:
+def test_migration_20_drops_status_adds_pid(tmp_path: Path) -> None:
     """Migration 20 drops the status column and adds a pid column."""
-    db_path = tmp_path / "m20.db"  # type: ignore[operator]
+    db_path = tmp_path / "m20.db"
     _create_pre_v20_db(str(db_path))
 
     # Insert a session at v19 (has status column)
