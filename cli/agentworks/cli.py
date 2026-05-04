@@ -1048,24 +1048,6 @@ def session_logs(
     _session_logs(_get_db(), load_config(), name=name, lines=lines)
 
 
-@session_app.command("repair")
-def session_repair(
-    name: Annotated[str | None, typer.Argument(help="Session name (omit with --all)")] = None,
-    all_sessions: Annotated[bool, typer.Option("--all", help="Repair all sessions")] = False,
-    vm: Annotated[str | None, typer.Option("--vm", help="Filter by VM (with --all)")] = None,
-    workspace: Annotated[str | None, typer.Option("--workspace", help="Filter by workspace (with --all)")] = None,
-) -> None:
-    """Recover PIDs for sessions created before the PID enhancement."""
-    from agentworks.config import load_config
-    from agentworks.sessions.manager import repair_all_sessions, repair_session
-
-    if all_sessions:
-        repair_all_sessions(_get_db(), load_config(), vm_name=vm, workspace_name=workspace)
-    elif name:
-        repair_session(_get_db(), load_config(), name=name)
-    else:
-        raise typer.BadParameter("provide a session name or use --all")
-
 
 # -- Installer catalog commands --------------------------------------------
 
