@@ -995,10 +995,10 @@ def session_restart(
                 names = ", ".join(s.name for s in running[:5])
                 suffix = f" (and {len(running) - 5} more)" if len(running) > 5 else ""
                 if not output.confirm(
-                    f"{len(running)} session(s) are running ({names}{suffix}). Restart them?"
+                    f"{len(running)} session(s) are running and will be restarted ({names}{suffix}). "
+                    "Continue? (use --all-stopped to restart only stopped sessions)"
                 ):
-                    output.info("Skipping running sessions. Use --all-stopped to restart only stopped sessions.")
-                    include_running = False
+                    raise output.UserAbort("restart cancelled")
 
         restart_all_sessions(
             db, config, vm_name=vm, workspace_name=workspace, include_running=include_running, force=force,
