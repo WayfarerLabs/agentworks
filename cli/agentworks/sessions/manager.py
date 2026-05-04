@@ -689,6 +689,7 @@ def stop_session(
             raise output.SessionError(
                 f"session '{name}' is broken (PID alive but tmux unreachable). Use --force to kill the process."
             )
+        output.warn(f"Session '{name}' is broken (tmux unreachable), force-killing via PID")
         assert session.pid is not None
         if not force_kill_tmux_server(session.pid, target=target, socket_path=session.socket_path, log=output.detail):
             raise output.SessionError(f"failed to kill PID {session.pid} for session '{name}'")
@@ -736,6 +737,7 @@ def restart_session(
             )
         from agentworks.sessions.tmux import force_kill_tmux_server
 
+        output.warn(f"Session '{name}' is broken (tmux unreachable), force-killing via PID")
         assert session.pid is not None
         if not force_kill_tmux_server(session.pid, target=target, socket_path=session.socket_path, log=output.detail):
             raise output.SessionError(f"failed to kill PID {session.pid} for session '{name}'")
@@ -929,6 +931,7 @@ def delete_session(
             )
         from agentworks.sessions.tmux import force_kill_tmux_server
 
+        output.warn(f"Session '{name}' is broken (tmux unreachable), force-killing via PID")
         assert session.pid is not None
         if not force_kill_tmux_server(session.pid, target=target, socket_path=session.socket_path, log=output.detail):
             raise output.SessionError(f"failed to kill PID {session.pid} for session '{name}'")
