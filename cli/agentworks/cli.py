@@ -1026,7 +1026,7 @@ def session_attach(
 @session_app.command("delete")
 def session_delete(
     name: Annotated[str, typer.Argument(help="Session name")],
-    force: Annotated[bool, typer.Option("--force", help="Delete even if running/broken/unknown")] = False,
+    force: Annotated[bool, typer.Option("--force", help="Force-kill broken sessions via PID")] = False,
     yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip confirmation")] = False,
 ) -> None:
     """Delete a session."""

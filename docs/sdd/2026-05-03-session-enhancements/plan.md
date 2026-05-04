@@ -78,12 +78,11 @@ Update all session commands to use the new liveness model per the R3 command beh
 
 ### Command updates (per R3 table)
 
-- [x] `stop_session`: health check; add `--force` flag; error on BROKEN unless --force (force_kill);
-      STOPPED -> "already stopped"
-- [x] `restart_session`: health check; error on OK/BROKEN unless --force; UNKNOWN -> error, suggest
-      repair; use force_kill for BROKEN
-- [x] `delete_session`: health check; error on OK/BROKEN/UNKNOWN unless --force; always confirm
-      (`--yes` to skip); use force_kill when needed
+- [x] `stop_session`: health check; `--force` for BROKEN (PID kill); STOPPED -> "already stopped"
+- [x] `restart_session`: health check; prompt for running (`-y` to skip); `--force` for BROKEN;
+      UNKNOWN -> error, suggest repair
+- [x] `delete_session`: health check; prompt for running/unknown (`-y` to skip); `--force` for
+      BROKEN; always confirm (`-y` to skip)
 - [x] `list_sessions`: replace per-session `_reconcile_status` with `batch_check_status`; group by
       VM; parallel across VMs (capped at 8); `--no-status` shows `-`
 - [x] `describe_session`: show health via `check_session_health`; suggest repair for BROKEN/UNKNOWN

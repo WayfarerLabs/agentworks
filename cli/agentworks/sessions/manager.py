@@ -655,7 +655,7 @@ def restart_all_sessions(
 
     With include_running=False (--all-stopped), only stopped sessions are
     restarted. With include_running=True (--all), all sessions are targeted;
-    if any are running, the caller should have prompted or passed force=True.
+    if any are running, the caller should have prompted or passed yes=True.
     """
     sessions = _filter_sessions(db, workspace_name=workspace_name, vm_name=vm_name)
     alive_map = _batch_check_all_sessions(sessions, db=db, config=config)

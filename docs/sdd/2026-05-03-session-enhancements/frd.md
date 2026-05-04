@@ -94,16 +94,16 @@ Each session command should behave according to the session's health:
 | list     | Show running                   | Show stopped       | Not detected. PID status only. | Show unknown, suggest repair             |
 | describe | Show details + health          | Show as stopped    | Show as broken, suggest repair | Show as unknown, suggest repair          |
 | stop     | Normal stop (C-c, grace, kill) | Already stopped    | Error, suggest --force         | Error, suggest repair                    |
-| restart  | Error, suggest --force         | Normal restart     | Error, suggest --force         | Error, suggest repair                    |
-| delete   | Error, suggest --force         | Confirm, delete    | Error, suggest --force         | Error, suggest --force                   |
+| restart  | Confirm, restart (-y to skip)  | Normal restart     | Error, suggest --force         | Error, suggest repair                    |
+| delete   | Confirm, delete (-y to skip)   | Confirm, delete    | Error, suggest --force         | Confirm, delete (-y to skip)             |
 | attach   | Normal attach                  | Error: not running | Error: broken, suggest repair  | Error, suggest repair                    |
 | logs     | Normal capture                 | Error: not running | Error: broken, suggest repair  | Error, suggest repair                    |
 
 `session list` uses batch status (PID only). All other commands use health (PID + connect test) when
 they need to verify liveness.
 
-`delete` always confirms before proceeding (`--yes/-y` to skip). This is separate from the `--force`
-health override.
+`--force` is exclusively for BROKEN sessions (PID-based kill escalation). `--yes/-y` skips
+confirmation prompts (running session restart, delete). These are orthogonal.
 
 ### R4: Batch operations
 
@@ -131,8 +131,8 @@ BROKEN sessions are warned and skipped unless `--force` is passed. UNKNOWN sessi
 
 ### R5: Force escalation pattern
 
-Commands that modify session state (stop, restart, delete) support `--force`. The escalation path
-for BROKEN sessions or when a normal stop fails:
+`--force` triggers PID-based kill escalation for BROKEN sessions. It is not used for running
+sessions (those use confirmation prompts with `--yes/-y`). The escalation path:
 
 1. Send `kill <pid>` (SIGTERM) to the tmux server process via sudo.
 2. If the PID is still alive after a grace period, send `kill -9 <pid>` (SIGKILL).

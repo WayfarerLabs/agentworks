@@ -347,9 +347,9 @@ admin-mode sessions will get the same PID, which is correct.
 | New: `batch_check_status` | Batch PID check (one SSH call per VM) |
 | New: `check_session_health` | PID + tmux connectivity (enumerated) |
 | `create_session` | Store PID after creation |
-| `restart_session` | Store new PID after restart |
-| `stop_session` | Use health check, --force for BROKEN |
-| `delete_session` | Use health check, --force for BROKEN/UNKNOWN |
+| `restart_session` | Prompts for running (-y to skip); --force for BROKEN; store new PID |
+| `stop_session` | Health check; --force for BROKEN |
+| `delete_session` | Health check; prompts for running/unknown (-y to skip); --force for BROKEN |
 | `list_sessions` | Use batch status check, parallel across VMs |
 | `describe_session` | Show health, suggest repair for BROKEN/UNKNOWN |
 | `attach_session` | Use health check, clear error for BROKEN |
