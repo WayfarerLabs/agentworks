@@ -470,8 +470,9 @@ def restart_session(
     *,
     name: str,
     force: bool = False,
+    yes: bool = False,
 ) -> None:
-    """Restart a session. Errors if running unless --force is passed."""
+    """Restart a session. Prompts if running (--yes to skip). --force for BROKEN."""
     from agentworks.sessions.tmux import (
         create_session as create_tmux_session,
     )
@@ -497,8 +498,8 @@ def restart_session(
         assert session.pid is not None
         force_kill_tmux_server(session.pid, target=target, socket_path=session.socket_path)
     elif health == SessionHealth.OK:
-        if not force:
-            raise output.SessionError(f"session '{name}' is still running. Use --force to restart.")
+        if not yes and not output.confirm(f"Session '{name}' is running. Restart?"):
+            raise output.UserAbort("restart cancelled")
         sock = _effective_socket_path(db, session)
         _kill_session(name, run_command=run_command, socket_path=sock)
 
@@ -678,7 +679,7 @@ def restart_all_sessions(
     failed: list[tuple[str, str]] = []
     for session in sessions:
         try:
-            restart_session(db, config, name=session.name, force=force)
+            restart_session(db, config, name=session.name, force=force, yes=include_running)
         except output.SessionError as exc:
             if not force and "broken" in str(exc).lower():
                 output.warn(f"Skipping '{session.name}': {exc}")

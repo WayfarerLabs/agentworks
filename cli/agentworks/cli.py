@@ -972,7 +972,8 @@ def session_restart(
     all_sessions: Annotated[bool, typer.Option("--all", help="Restart all sessions (prompts for running)")] = False,
     vm: Annotated[str | None, typer.Option("--vm", help="Filter by VM (with --all/--all-stopped)")] = None,
     workspace: Annotated[str | None, typer.Option("--workspace", help="Filter by workspace")] = None,
-    force: Annotated[bool, typer.Option("--force", help="Force restart running/broken sessions")] = False,
+    force: Annotated[bool, typer.Option("--force", help="Force-kill broken sessions via PID")] = False,
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip confirmation prompts")] = False,
 ) -> None:
     """Restart a session, or batch restart with --all-stopped / --all."""
     from agentworks.config import load_config
@@ -983,8 +984,8 @@ def session_restart(
         config = load_config()
         include_running = all_sessions
 
-        # --all without --force: prompt if there are running sessions
-        if include_running and not force:
+        # --all without --yes: prompt if there are running sessions
+        if include_running and not yes:
             from agentworks import output
             from agentworks.sessions.manager import _batch_check_all_sessions, _filter_sessions
 
@@ -1005,7 +1006,7 @@ def session_restart(
             db, config, vm_name=vm, workspace_name=workspace, include_running=include_running, force=force,
         )
     elif name:
-        restart_session(_get_db(), load_config(), name=name, force=force)
+        restart_session(_get_db(), load_config(), name=name, force=force, yes=yes)
     else:
         raise typer.BadParameter("provide a session name, --all-stopped, or --all")
 
