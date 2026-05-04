@@ -181,17 +181,29 @@ def delete_agent(
 
     ssh_logger = SSHLogger(vm.name, "agent-delete")
 
-    # Kill running sessions for this agent
+    # Kill running sessions for this agent (status-aware)
     if agent_sessions:
         from functools import partial
 
-        from agentworks.sessions.tmux import kill_session
+        from agentworks.db import SessionStatus
+        from agentworks.sessions.manager import check_session_status, ensure_pids_batch
+        from agentworks.sessions.tmux import force_kill_tmux_server, kill_session
         from agentworks.ssh import admin_exec_target, run
 
         target = admin_exec_target(vm, config)
         run_command = partial(run, target, logger=ssh_logger)
+        agent_sessions = ensure_pids_batch(agent_sessions, db=db, config=config)
         for session in agent_sessions:
-            kill_session(session.name, run_command=run_command, socket_path=session.socket_path)
+            status = check_session_status(session, target=target)
+            if status == SessionStatus.OK:
+                kill_session(session.name, run_command=run_command, socket_path=session.socket_path)
+            elif status == SessionStatus.BROKEN:
+                if session.pid and session.pid > 0:
+                    force_kill_tmux_server(session.pid, target=target, socket_path=session.socket_path)
+                else:
+                    output.warn(f"Session '{session.name}' is broken but has no PID, skipping kill")
+            elif status == SessionStatus.UNKNOWN:
+                output.warn(f"Session '{session.name}' status unknown, skipping kill")
             db.delete_session(session.name)
         output.detail(f"Deleted {len(agent_sessions)} session(s)")
 

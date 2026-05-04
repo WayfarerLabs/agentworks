@@ -210,15 +210,16 @@ create_session flow (agent mode):
   2. chmod g+rwx <socket>                               (existing)
   3. server-access -a ...                                (existing)
   4. tmux -S <socket> display-message -p '#{pid}'        (new)
-  5. cat /proc/sys/kernel/random/boot_id                 (new)
-  6. return (socket_path, pid, boot_id)                  (changed)
+  5. return (socket_path, pid)                           (changed)
 
 create_session flow (admin mode):
   1. tmux new-session -d -s <name> ...                   (existing)
   2. tmux display-message -p '#{pid}'                    (new)
-  3. cat /proc/sys/kernel/random/boot_id                 (new)
-  4. return (None, pid, boot_id)                         (changed)
+  3. return (None, pid)                                  (changed)
 ```
+
+The manager reads boot ID separately via `cat /proc/sys/kernel/random/boot_id` and stores both PID
+and boot ID together via `db.update_session_pid(name, pid, boot_id=boot_id)`.
 
 On restart, the new PID and current boot ID replace the old ones.
 
@@ -259,12 +260,12 @@ the batch status check.
 
 ### sessions/tmux.py
 
-| Change                        | Detail                                                                 |
-| ----------------------------- | ---------------------------------------------------------------------- |
-| `create_session` return type  | `str \| None` -> `tuple[str \| None, int, str]` (socket, pid, boot_id) |
-| New: PID + boot ID retrieval  | `tmux display-message` + `cat /proc/.../boot_id`                       |
-| New: `force_kill_tmux_server` | PID-based kill with SIGTERM/SIGKILL escalation                         |
-| New: `get_tmux_server_pid`    | Retrieve PID from running server (for auto-repair)                     |
+| Change                        | Detail                                                   |
+| ----------------------------- | -------------------------------------------------------- |
+| `create_session` return type  | `str \| None` -> `tuple[str \| None, int]` (socket, pid) |
+| New: PID + boot ID retrieval  | `tmux display-message` + `cat /proc/.../boot_id`         |
+| New: `force_kill_tmux_server` | PID-based kill with SIGTERM/SIGKILL escalation           |
+| New: `get_tmux_server_pid`    | Retrieve PID from running server (for auto-repair)       |
 
 ### sessions/manager.py
 

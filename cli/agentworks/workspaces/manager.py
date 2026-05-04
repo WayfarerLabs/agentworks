@@ -504,21 +504,23 @@ def rehome_workspace(
     if new_norm.startswith(old_norm) or old_norm.startswith(new_norm):
         raise output.WorkspaceError("source and target paths overlap")
 
-    # Block if workspace has running sessions
+    # Block unless all sessions are STOPPED
+    from agentworks.db import PID_STOPPED, SessionStatus
     from agentworks.sessions.manager import batch_check_all_sessions, ensure_pids_batch
 
     sessions = db.list_sessions(workspace_name=name)
     if sessions:
-        from agentworks.db import SessionStatus
-
         sessions = ensure_pids_batch(sessions, db=db, config=config)
         status_map = batch_check_all_sessions(sessions, db=db, config=config)
-        running = [s for s in sessions if status_map.get(s.name) == SessionStatus.OK]
-        if running:
-            names = ", ".join(s.name for s in running)
+        not_stopped = [
+            s for s in sessions
+            if s.pid != PID_STOPPED and status_map.get(s.name, SessionStatus.UNKNOWN) != SessionStatus.STOPPED
+        ]
+        if not_stopped:
+            names = ", ".join(s.name for s in not_stopped)
             raise output.WorkspaceError(
-                f"workspace '{name}' has {len(running)} running session(s) ({names}). "
-                "Stop them first with 'agentworks session stop'."
+                f"workspace '{name}' has {len(not_stopped)} non-stopped session(s) ({names}). "
+                "Stop or delete them first."
             )
 
     if ws.type == "vm":
@@ -791,19 +793,35 @@ def delete_workspace(
 
         ssh_logger = SSHLogger(ws.vm_name, "workspace-delete")
 
-    # Kill running sessions and delete session records
+    # Kill running sessions (status-aware) and delete session records
     if ws.type == "vm" and ws.vm_name:
         vm = db.get_vm(ws.vm_name)
         if vm is not None and vm.tailscale_host is not None:
             from functools import partial
 
-            from agentworks.sessions.tmux import kill_session
+            from agentworks.db import SessionStatus
+            from agentworks.sessions.manager import (
+                check_session_status,
+                ensure_pids_batch,
+            )
+            from agentworks.sessions.tmux import force_kill_tmux_server, kill_session
             from agentworks.ssh import admin_exec_target, run
 
             target = admin_exec_target(vm, config)
             run_command = partial(run, target, logger=ssh_logger)
-            for session in db.list_sessions(workspace_name=name):
-                kill_session(session.name, run_command=run_command, socket_path=session.socket_path)
+            sessions = db.list_sessions(workspace_name=name)
+            sessions = ensure_pids_batch(sessions, db=db, config=config)
+            for session in sessions:
+                status = check_session_status(session, target=target)
+                if status == SessionStatus.OK:
+                    kill_session(session.name, run_command=run_command, socket_path=session.socket_path)
+                elif status == SessionStatus.BROKEN:
+                    if session.pid and session.pid > 0:
+                        force_kill_tmux_server(session.pid, target=target, socket_path=session.socket_path)
+                    else:
+                        output.warn(f"Session '{session.name}' is broken but has no PID, skipping kill")
+                elif status == SessionStatus.UNKNOWN:
+                    output.warn(f"Session '{session.name}' status unknown, skipping kill")
     db.delete_sessions_for_workspace(name)
 
     # Revoke agent workspace grants (agents are VM-scoped, not deleted with workspaces)

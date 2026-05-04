@@ -89,9 +89,9 @@ def _ensure_pid(session: SessionRow, *, target: ExecTarget, db: Database) -> Ses
             db.update_session_pid(session.name, pid, boot_id=_get_boot_id(target))
             output.warn(f"Recovered PID {pid} for session '{session.name}'")
         else:
-            # has-session succeeded but display-message failed -- unusual, store PID_STOPPED
-            db.update_session_pid(session.name, PID_STOPPED)
-            output.warn(f"Session '{session.name}' is alive but PID recovery failed, marked stopped")
+            # has-session succeeded but display-message failed -- session is alive but we
+            # can't get the PID. Leave as NULL (UNKNOWN) rather than contradicting has-session.
+            output.warn(f"Session '{session.name}' is alive but PID recovery failed")
     elif sock and target.run(f"test -e {shlex.quote(sock)}", check=False).ok:
         # Socket exists but has-session failed. Probe with sudo to distinguish
         # stale socket (dead server) from live-but-unreachable server (permissions).
@@ -157,8 +157,9 @@ def ensure_pids_batch(sessions: list[SessionRow], *, db: Database, config: Confi
                     db.update_session_pid(session.name, pid, boot_id=_get_boot_id(target))
                     output.warn(f"Recovered PID {pid} for session '{session.name}'")
                 else:
-                    db.update_session_pid(session.name, PID_STOPPED)
+                    # has-session succeeded but display-message failed -- leave as UNKNOWN
                     output.warn(f"Session '{session.name}' is alive but PID recovery failed")
+                    continue
                 repaired_names.add(session.name)
             elif sock and target.run(f"test -e {shlex.quote(sock)}", check=False).ok:
                 # Socket exists, has-session failed -- sudo probe for stale vs live
@@ -414,8 +415,9 @@ def batch_check_status(
     # Build compound command: has-session with inline boot_id + PID for agent failures
     parts = []
     for s in checkable:
-        q_name = shlex.quote(s.name)
-        has_cmd = tmux_cmd(f"has-session -t {q_name}", s.socket_path)
+        q_session = shlex.quote(s.name)  # quoted for tmux -t argument
+        name = s.name  # raw for output field (names are validated, no shell-special chars)
+        has_cmd = tmux_cmd(f"has-session -t {q_session}", s.socket_path)
         if s.socket_path is not None:
             # Agent session: inline follow-up on failure
             parts.append(
@@ -423,12 +425,12 @@ def batch_check_status(
                 f"if [ $? -ne 0 ]; then "
                 f"BOOT=$(cat /proc/sys/kernel/random/boot_id); "
                 f"test -d /proc/{s.pid}; "
-                f"echo \"S:{q_name}:1:$BOOT:$?\"; "
-                f"else echo \"S:{q_name}:0\"; fi"
+                f"echo \"S:{name}:1:$BOOT:$?\"; "
+                f"else echo \"S:{name}:0\"; fi"
             )
         else:
             # Admin session: has-session only
-            parts.append(f"{has_cmd} 2>/dev/null; echo \"S:{q_name}:$?\"")
+            parts.append(f"{has_cmd} 2>/dev/null; echo \"S:{name}:$?\"")
     cmd = "; ".join(parts)
 
     result = target.run(cmd, check=False)
@@ -635,7 +637,9 @@ def _execute_stop(
             run_cmd = partial(run, target, logger=target.logger)
             killed = _kill_session(session.name, run_command=run_cmd, socket_path=sock)
             if not killed:
-                if force and session.pid and session.pid > 0:
+                # Only escalate to PID kill for agent sessions (dedicated socket).
+                # Admin sessions share a PID -- killing it would take down all admin sessions.
+                if force and session.socket_path is not None and session.pid and session.pid > 0:
                     output.detail(f"tmux kill failed for '{session.name}', force-killing PID {session.pid}")
                     if not force_kill_tmux_server(
                         session.pid, target=target, socket_path=session.socket_path, log=output.detail,
