@@ -1009,20 +1009,6 @@ def session_restart(
         raise typer.BadParameter("provide a session name, --all-stopped, or --all")
 
 
-@session_app.command("restart-all", deprecated=True, hidden=True)
-def session_restart_all(
-    vm: Annotated[str | None, typer.Option("--vm", help="Filter by VM")] = None,
-    workspace: Annotated[str | None, typer.Option("--workspace", help="Filter by workspace")] = None,
-    include_running: Annotated[bool, typer.Option("--include-running", help="Also restart running sessions")] = False,
-) -> None:
-    """Deprecated: use 'session restart --all-stopped' or 'session restart --all'."""
-    from agentworks.config import load_config
-    from agentworks.sessions.manager import restart_all_sessions
-
-    restart_all_sessions(
-        _get_db(), load_config(), vm_name=vm, workspace_name=workspace, include_running=include_running,
-    )
-
 
 @session_app.command("attach")
 def session_attach(
