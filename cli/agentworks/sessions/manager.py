@@ -631,6 +631,11 @@ def _execute_stop(
 
     for session, target in targets:
         status = survivor_map.get(session.name)
+        if status is None:
+            # Status check failed (SSH error or parse issue) -- don't assume stopped
+            failed.append((session.name, "could not verify session status after stop"))
+            output.warn(f"Could not verify status of '{session.name}', not marking as stopped")
+            continue
         if status == SessionStatus.OK or status == SessionStatus.BROKEN:
             output.detail(f"Killing session '{session.name}'")
             sock = session.socket_path
@@ -802,11 +807,17 @@ def stop_all_sessions(
     # Auto-repair NULL-PID sessions, then batch check
     sessions = ensure_pids_batch(sessions, db=db, config=config)
     status_map = batch_check_all_sessions(sessions, db=db, config=config)
-    alive_sessions = [
-        s
-        for s in sessions
-        if status_map.get(s.name) in (SessionStatus.OK, SessionStatus.BROKEN)
-    ]
+
+    # BROKEN sessions need --force; warn and skip otherwise
+    broken = [s for s in sessions if status_map.get(s.name) == SessionStatus.BROKEN]
+    if broken and not force:
+        names = ", ".join(s.name for s in broken)
+        output.warn(f"Skipping {len(broken)} broken session(s) ({names}). Use --force to kill.")
+
+    ok_statuses = {SessionStatus.OK}
+    if force:
+        ok_statuses.add(SessionStatus.BROKEN)
+    alive_sessions = [s for s in sessions if status_map.get(s.name) in ok_statuses]
 
     if not alive_sessions:
         output.info("No running sessions to stop.")

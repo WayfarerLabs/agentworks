@@ -811,6 +811,7 @@ def delete_workspace(
             run_command = partial(run, target, logger=ssh_logger)
             sessions = db.list_sessions(workspace_name=name)
             sessions = ensure_pids_batch(sessions, db=db, config=config)
+            unstoppable: list[str] = []
             for session in sessions:
                 status = check_session_status(session, target=target)
                 if status == SessionStatus.OK:
@@ -819,9 +820,14 @@ def delete_workspace(
                     if session.pid and session.pid > 0:
                         force_kill_tmux_server(session.pid, target=target, socket_path=session.socket_path)
                     else:
-                        output.warn(f"Session '{session.name}' is broken but has no PID, skipping kill")
+                        unstoppable.append(session.name)
                 elif status == SessionStatus.UNKNOWN:
-                    output.warn(f"Session '{session.name}' status unknown, skipping kill")
+                    unstoppable.append(session.name)
+            if unstoppable:
+                raise output.WorkspaceError(
+                    f"cannot delete workspace '{name}': {len(unstoppable)} session(s) could not be stopped "
+                    f"({', '.join(unstoppable)}). Resolve manually before retrying."
+                )
     db.delete_sessions_for_workspace(name)
 
     # Revoke agent workspace grants (agents are VM-scoped, not deleted with workspaces)

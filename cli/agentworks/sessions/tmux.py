@@ -227,7 +227,7 @@ def tmux_cmd(base: str, socket_path: str | None = None, *, sudo: bool = False) -
 
     Session commands (has-session, kill-session, send-keys, capture-pane) do
     NOT use sudo -- socket access goes through group permissions, and failures
-    surface as BROKEN health. ``sudo=True`` is only for infrastructure
+    surface as BROKEN status. ``sudo=True`` is only for infrastructure
     operations (e.g. cleanup_stale_sockets probing sockets during setup).
     """
     cmd = f"tmux -S {shlex.quote(socket_path)} {base}" if socket_path else f"tmux {base}"

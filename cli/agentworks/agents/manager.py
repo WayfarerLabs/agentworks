@@ -193,6 +193,7 @@ def delete_agent(
         target = admin_exec_target(vm, config)
         run_command = partial(run, target, logger=ssh_logger)
         agent_sessions = ensure_pids_batch(agent_sessions, db=db, config=config)
+        unstoppable: list[str] = []
         for session in agent_sessions:
             status = check_session_status(session, target=target)
             if status == SessionStatus.OK:
@@ -201,9 +202,15 @@ def delete_agent(
                 if session.pid and session.pid > 0:
                     force_kill_tmux_server(session.pid, target=target, socket_path=session.socket_path)
                 else:
-                    output.warn(f"Session '{session.name}' is broken but has no PID, skipping kill")
+                    unstoppable.append(session.name)
             elif status == SessionStatus.UNKNOWN:
-                output.warn(f"Session '{session.name}' status unknown, skipping kill")
+                unstoppable.append(session.name)
+        if unstoppable:
+            raise AgentError(
+                f"cannot delete agent '{name}': {len(unstoppable)} session(s) could not be stopped "
+                f"({', '.join(unstoppable)}). Resolve manually before retrying."
+            )
+        for session in agent_sessions:
             db.delete_session(session.name)
         output.detail(f"Deleted {len(agent_sessions)} session(s)")
 
