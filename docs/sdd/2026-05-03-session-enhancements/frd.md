@@ -36,23 +36,28 @@ used to reach it.
 ## Terminology
 
 - **Session process**: the process that backs a session. Today this is a tmux server, but the model
-  is defined in terms of a PID so it could apply to other process types in the future.
-- **Session PID**: the process ID of the session process. For admin-mode sessions, this is the admin
-  user's default tmux server. For agent-mode sessions, this is the per-socket tmux server created
-  for the agent.
-- **Status** (binary): whether the session process is alive, determined by checking `/proc/<pid>`.
-  Does not require tmux socket access, sudo, or group membership. Answers "is the process running?"
-- **Health** (enumerated): the full picture of session accessibility, determined by combining PID
-  liveness with a transport-specific connectivity test (currently `tmux has-session`). Answers "can
-  we interact with the session?"
+  could accommodate other session types in the future.
+- **Status**: the definitive liveness state of a session. Determined by a transport-specific
+  connectivity test (`tmux has-session`) combined with a process-level check (`/proc/<pid>`).
+  Returns one of four values: OK, STOPPED, BROKEN, UNKNOWN. This is the single concept all commands
+  use. There is no separate "health" concept.
+- **PID + boot ID**: internal implementation details stored in the database. The PID is the process
+  ID of the session's tmux server. The boot ID is the VM's boot cycle identifier
+  (`/proc/sys/kernel/random/boot_id`). Together they enable BROKEN detection (boot ID matches
+  current boot AND process alive, but tmux unreachable) and force-kill (`--force`). A stale boot ID
+  means the PID is from a previous boot and meaningless. They are never exposed to callers as a
+  standalone liveness indicator.
+- **PID_STOPPED (-1)**: sentinel value stored in the PID column to indicate the session is known to
+  be stopped. Distinct from NULL (never checked, UNKNOWN). A session with PID_STOPPED can be
+  restarted immediately without auto-repair.
 
 ## Requirements
 
-### R1: PID capture at session creation
+### R1: PID and boot ID capture at session creation
 
-When a session is created, the tmux server PID must be captured and stored in the database. For
-agent-mode sessions, the PID comes from the per-socket tmux server started during creation. For
-admin-mode sessions, the PID comes from the admin's default tmux server.
+When a session is created, the tmux server PID and the VM's boot ID must be captured and stored in
+the database. For agent-mode sessions, the PID comes from the per-socket tmux server. For admin-mode
+sessions, the PID comes from the admin's default tmux server.
 
 The PID is retrieved immediately after session creation via:
 
@@ -60,62 +65,97 @@ The PID is retrieved immediately after session creation via:
 tmux [-S <socket>] display-message -p '#{pid}'
 ```
 
-This runs in the same SSH connection used for session creation, adding negligible overhead. On
-restart, the new PID replaces the old one.
+The boot ID is read from:
 
-### R2: Two-tier liveness model (status and health)
+```shell
+cat /proc/sys/kernel/random/boot_id
+```
 
-Session liveness is expressed as two distinct concepts with separate helpers. Callers choose which
-they need.
+Both run in the same SSH connection used for session creation, adding negligible overhead. On
+restart, the new PID and current boot ID replace the old ones.
 
-**Status** is binary: alive or dead. Determined by checking `/proc/<pid>`. Fast, requires no tmux
-access or signal permissions. Has both single-session and batch variants.
+### R2: Unified status model
 
-**Health** is enumerated. Determined by PID liveness plus a tmux connectivity test
-(`tmux has-session`). Single-session only (no batch variant). Used when an operation needs to
-actually interact with the tmux server.
+Session status is a single enumerated value determined by combining a transport-specific
+connectivity test with a process-level check:
 
-| PID alive | tmux connectable | Health  | Meaning                                                 |
-| --------- | ---------------- | ------- | ------------------------------------------------------- |
-| yes       | yes              | OK      | Normal operation                                        |
-| no        | n/a              | STOPPED | Process not running                                     |
-| yes       | no               | BROKEN  | Running but admin cannot connect (permission/ACL drift) |
-| n/a       | n/a              | UNKNOWN | No PID in database                                      |
+The status check depends on how the session connects to its tmux server. Today there are two models;
+future models (e.g. admin sessions on dedicated sockets) can be added without changing the status
+values or the command behavior table.
 
-BROKEN is a diagnostic edge case that should rarely, if ever, occur in practice. It indicates
-infrastructure drift (socket permissions or tmux server-access ACL changes/misconfiguration).
+#### Dedicated socket (agent sessions)
 
-### R3: Command behavior by health
+The session has its own tmux server and socket file. The admin accesses it via group permissions.
 
-Each session command should behave according to the session's health:
+| has-session | PID alive (same boot) | Status  | Meaning                                             |
+| ----------- | --------------------- | ------- | --------------------------------------------------- |
+| succeeds    | (not checked)         | OK      | Normal operation                                    |
+| fails       | no (or stale boot)    | STOPPED | Session is not running                              |
+| fails       | yes                   | BROKEN  | Running but admin cannot connect (permission drift) |
 
-| Command  | OK                             | STOPPED            | BROKEN                         | UNKNOWN (no PID)                         |
-| -------- | ------------------------------ | ------------------ | ------------------------------ | ---------------------------------------- |
-| list     | Show running                   | Show stopped       | Not detected. PID status only. | Auto-repair, then show status            |
-| describe | Show details + health          | Show as stopped    | Show as broken                 | Auto-repair, then show health            |
-| stop     | Normal stop (C-c, grace, kill) | Already stopped    | Error, suggest --force         | Auto-repair, then stop normally          |
-| restart  | Confirm, restart (-y to skip)  | Normal restart     | Error, suggest --force         | Auto-repair, then restart normally       |
-| delete   | Confirm, delete (-y to skip)   | Confirm, delete    | Error, suggest --force         | Auto-repair, then confirm                |
-| attach   | Normal attach                  | Error: not running | Error: broken                  | Auto-repair, then attach or error        |
-| logs     | Normal capture                 | Error: not running | Error: broken                  | Auto-repair, then capture or error       |
+Check order: `has-session` first. If it fails, check boot ID (stale boot = STOPPED immediately),
+then PID (process dead = STOPPED, process alive = BROKEN). BROKEN is a diagnostic edge case
+indicating socket permission or ACL drift.
 
-`session list` uses batch status (PID only). All other commands use health (PID + connect test) when
-they need to verify liveness.
+#### Shared default server (admin sessions)
 
-`--force` is exclusively for BROKEN sessions (PID-based kill escalation). `--yes/-y` skips
-confirmation prompts (running session restart, delete). These are orthogonal.
+The session runs on the admin's default tmux server alongside other admin sessions. The admin owns
+the server, so socket permissions are not a concern.
+
+| has-session | Status  | Meaning                                |
+| ----------- | ------- | -------------------------------------- |
+| succeeds    | OK      | Normal operation                       |
+| fails       | STOPPED | Session ended (server may still be up) |
+
+Check order: `has-session` only. No PID follow-up needed. BROKEN does not apply because the admin
+owns the server.
+
+#### Pre-enhancement sessions (no PID)
+
+Sessions created before this enhancement have no PID in the database. Their status is UNKNOWN until
+auto-repaired on first access (see R6).
+
+Note that even though we could technically try the `has-session` check, we don't as we couldn't
+properly distinguish the negative case (BROKEN vs STOPPED) without a PID. Instead, we treat all
+NULL-PID sessions as UNKNOWN and auto-repair them on first access (see R6).
+
+Auto-repair resolves most UNKNOWN sessions to OK or STOPPED. In rare cases (agent session with a
+live server behind a socket the admin can't reach), auto-repair cannot determine the state and the
+session remains UNKNOWN. Commands error in this case with a message to investigate manually.
+
+### R3: Command behavior by status
+
+Each session command should behave according to the session's status:
+
+| Command  | OK                             | STOPPED            | BROKEN                 | UNKNOWN (no PID)                   |
+| -------- | ------------------------------ | ------------------ | ---------------------- | ---------------------------------- |
+| list     | Show running                   | Show stopped       | Show broken            | Auto-repair, then show status      |
+| describe | Show details + status          | Show as stopped    | Show as broken         | Auto-repair, then show status      |
+| stop     | Normal stop (C-c, grace, kill) | Already stopped    | Error, suggest --force | Auto-repair, then stop normally    |
+| restart  | Confirm, restart (-y to skip)  | Normal restart     | Error, suggest --force | Auto-repair, then restart normally |
+| delete   | Confirm, delete (-y to skip)   | Confirm, delete    | Error, suggest --force | Auto-repair, then confirm          |
+| attach   | Normal attach                  | Error: not running | Error: broken          | Auto-repair, then attach or error  |
+| logs     | Normal capture                 | Error: not running | Error: broken          | Auto-repair, then capture or error |
+
+`--force` authorizes PID-based kill if needed (for BROKEN sessions where tmux is unreachable). On
+non-BROKEN sessions, the command proceeds normally -- `--force` does not change behavior. `--yes/-y`
+skips confirmation prompts (running session restart, delete). These are orthogonal.
 
 ### R4: Batch operations
 
-#### Batch status checking for session list
+#### Batch status checking
 
-`session list` must check all sessions on a VM in a single SSH round-trip. The implementation groups
-sessions by VM, builds a compound `test -d /proc/<pid>` command for each PID, and runs one SSH call
-per VM. VMs are queried in parallel.
+All batch operations (`session list`, `stop --all`, `restart --all`) check status for all sessions
+on a VM in a single SSH round-trip. The implementation groups sessions by VM, builds a compound
+`tmux has-session` command for each session (with the appropriate socket path), and runs one SSH
+call per VM. VMs are queried in parallel.
 
 For N sessions across M VMs, this reduces status checking from N SSH calls to M parallel SSH calls.
 
-Sessions with no PID in the database are reported as "unknown" without any SSH call.
+When has-session fails for any agent session, a follow-up boot ID + PID check determines STOPPED vs
+BROKEN (boot ID first; stale = STOPPED without checking PID). The follow-up is folded into the same
+compound command so that the entire batch completes in a single SSH call per VM. Admin sessions that
+fail has-session are always STOPPED and need no follow-up.
 
 `--no-status` skips all SSH checks and shows `-` for the status column.
 
@@ -123,8 +163,7 @@ Sessions with no PID in the database are reported as "unknown" without any SSH c
 
 `session stop --all` stops all running sessions. `session restart --all-stopped` restarts all
 stopped sessions. `session restart --all` restarts everything (prompts if any are running, unless
-`--force` is passed). All batch variants accept `--vm` and `--workspace` filters and use the same
-batch PID checking infrastructure as `session list`.
+`--yes` is passed). All batch variants accept `--vm` and `--workspace` filters.
 
 BROKEN sessions are warned and skipped unless `--force` is passed. UNKNOWN sessions are
 auto-repaired before the batch proceeds.
@@ -138,43 +177,50 @@ sessions (those use confirmation prompts with `--yes/-y`). The escalation path:
 2. If the PID is still alive after a grace period, send `kill -9 <pid>` (SIGKILL).
 3. If there is a socket file and the server is dead, remove the stale socket.
 
+The force path is only reachable for BROKEN sessions, which already verified same-boot + PID alive
+during the status check. A stale boot ID means the PID is treated as PID_STOPPED (-1) -- the
+session is STOPPED, not BROKEN, so `--force` is never offered.
+
 This path does not require tmux socket access or server-access ACL membership. It works through the
 OS process management layer.
 
 Without `--force`, these commands should simply error when the session is BROKEN, suggesting the
 operator use `--force` to proceed.
 
-For admin-mode sessions, killing the PID kills the entire admin tmux server (all admin-mode sessions
-on that server). The --force path must warn the operator before proceeding.
+Note: admin-mode sessions cannot be BROKEN (the admin owns the default server, no socket permissions
+to drift). Since `--force` is exclusively for BROKEN, it is never offered for admin sessions. The
+shared-server PID kill concern does not arise.
 
 ### R6: Auto-repair for existing sessions
 
-Existing sessions created before this enhancement will not have a PID in the database. Rather than
-requiring an explicit repair command, PID recovery happens automatically when any command accesses a
-session with a NULL PID:
+Existing sessions created before this enhancement will not have a PID or boot ID in the database.
+Rather than requiring an explicit repair command, recovery happens automatically when any command
+accesses a session with a NULL PID:
 
-```shell
-tmux [-S <socket>] display-message -p '#{pid}'
-```
+1. Attempt `tmux has-session` to check if the session is alive.
+2. If alive, recover the PID via `tmux display-message -p '#{pid}'` and store it with the current
+   boot ID.
+3. If not alive (admin session, or agent session with no socket): mark as stopped (`PID_STOPPED`).
+4. If not alive (agent session with socket file present): probe the socket with sudo
+   (`sudo tmux -S <socket> list-sessions`) to distinguish a stale socket from a live server the
+   admin can't reach.
+   - Stale socket (probe fails): mark as `PID_STOPPED`.
+   - Live server, unreachable (probe succeeds): leave as NULL (UNKNOWN). Warn that permissions
+     need investigation.
 
-If the tmux server is running, the PID is stored. If not, the session is marked as stopped
-(`PID_STOPPED`). A warning is emitted so the operator knows the repair happened.
+A warning is emitted so the operator knows the repair happened.
 
 For batch commands (`session list`, `stop --all`, `restart --all`), all NULL-PID sessions are
-auto-repaired before the batch proceeds. On restart, the new tmux server's PID is captured,
-replacing any previous value.
+auto-repaired before the batch proceeds. On restart, the new tmux server's PID and boot ID are
+captured, replacing any previous values.
 
 ## Non-goals
 
-- **Non-tmux session backends**: health is specific to tmux. That said, the PID status applies to
-  any process-based session. Expanding to alternative backends (containers, systemd units) is
-  out-of-scope for this SDD but the model is designed to accommodate them in the future by adding
-  new backend-specific health checks.
+- **Non-tmux session backends**: status checking is currently tmux-specific. The model accommodates
+  future backends (containers, systemd units) by allowing backend-specific status implementations
+  that return the same OK/STOPPED/BROKEN/UNKNOWN values.
 - **Changes to session creation UX**: the `session create` command and template system are
-  unchanged. PID capture is an internal implementation detail.
+  unchanged. PID/boot ID capture is an internal implementation detail.
 - **Socket permission hardening**: the root cause of BROKEN state (permission drift) is a separate
   concern. This SDD diagnoses and surfaces the problem; it does not fix the underlying permission
   model.
-- **PID reuse detection**: PIDs can be reused by the OS. The window for false positives is small
-  (original process dies and a new process takes the same PID between checks). This is an acceptable
-  risk for a CLI tool that runs interactively.

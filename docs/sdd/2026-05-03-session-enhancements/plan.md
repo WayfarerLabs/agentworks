@@ -1,6 +1,6 @@
 # Session enhancements -- implementation plan
 
-**Status:** Complete **Branch:** `feat/session-enhancements`
+**Status:** In Progress **Branch:** `feat/session-enhancements`
 
 ## Overview
 
@@ -108,7 +108,7 @@ VM instead of one per session.
 
 ## Phase 4: Repair mechanism
 
-PID recovery for pre-enhancement sessions (R6/R7).
+PID recovery for pre-enhancement sessions (R6).
 
 - [x] ~~`repair_session` / `repair_all_sessions` / CLI command~~ -- replaced by auto-repair
 - [x] `_ensure_pid(session, target, db)` -- auto-repair single session on access
@@ -143,13 +143,60 @@ Work discovered and completed during implementation, after the original plan was
 - [x] **Auto-repair replaces `session repair`**: NULL-PID sessions are auto-repaired on access by
       any command. No explicit repair command needed.
 
+## Phase 6: Unified status model
+
+Phases 1-5 used a two-tier model: PID-based "status" (fast, batchable) and has-session-based
+"health" (accurate, single-session). Testing and review revealed this split caused problems:
+
+- PID alone can't distinguish admin sessions that ended from servers that are alive for other
+  sessions.
+- PID reuse across VM reboots creates false positives.
+- The two-tier split meant different code paths for list (PID) vs commands (health), with
+  inconsistencies between them.
+- sudo on tmux commands hid the BROKEN state instead of surfacing it.
+
+The fix: unify into a single "status" concept where `has-session` is the primary check, PID +
+boot ID are internal details for BROKEN detection and force-kill, and the check flow is dispatched
+by session type (dedicated agent socket vs shared admin server).
+
+### Code changes
+
+- [ ] Rename `SessionHealth` -> `SessionStatus` (OK/STOPPED/BROKEN/UNKNOWN)
+- [ ] Migration 21: `ALTER TABLE sessions ADD COLUMN boot_id TEXT`
+- [ ] Add `boot_id` field to `SessionRow`
+- [ ] Capture boot ID at session creation and restart
+- [ ] Rewrite `check_session_status` (was `check_session_health`): dispatch by session type
+  - [ ] `_check_dedicated_agent_session`: has-session, then boot_id + PID on failure
+  - [ ] `_check_shared_admin_session`: has-session only
+- [ ] Rewrite `batch_check_status`: compound has-session with inline boot_id + PID follow-up for
+      agent failures, all in one SSH call per VM
+- [ ] Remove `/proc`-only `check_session_status` (old PID-based binary check)
+- [ ] Update `update_session_pid` signature to accept `boot_id` parameter
+- [ ] Update `_ensure_pid` and `ensure_pids_batch` to store boot ID on recovery
+- [ ] Auto-repair ambiguous case: sudo probe (`sudo tmux -S <socket> list-sessions`) to distinguish
+      stale socket from live-but-unreachable server
+- [ ] Update all callers: `SessionHealth` -> `SessionStatus`
+- [ ] Remove `_session_alive` (dead code from Phase 1)
+- [ ] Update `_execute_stop` and `_kill_session` for has-session-based survivor check
+- [ ] Tests: update all health -> status references, add boot_id tests, add admin-mode status tests
+
+### Definition of done
+
+- `SessionHealth` is gone, `SessionStatus` is the only enum
+- `has-session` is the primary liveness check everywhere (single and batch)
+- PID + boot ID are only consulted when has-session fails for agent sessions
+- One SSH call per VM for batch status (no second call for BROKEN detection)
+- Boot ID captured at creation, checked for staleness before trusting PID
+- Admin sessions: has-session only, BROKEN never returned
+- All tests pass, lint clean
+
 ## Design deviations
 
-- **`_session_alive` retained**: kept for the normal stop path (OK health), where tmux-level
-  `has-session` checks are needed after C-c. Will be removed when/if the stop path is refactored.
-- **Admin-mode `--force` warning not implemented**: the R3 table specifies warning the operator when
-  `--force` on an admin session would kill the shared tmux server. Deferred -- requires listing other
-  admin sessions sharing the PID, which is a query not yet implemented.
+- **Admin-mode `--force` warning not applicable**: originally planned to warn when `--force` on an
+  admin session would kill the shared tmux server. With the unified status model, admin sessions
+  can only be OK or STOPPED (BROKEN requires socket permission drift, which doesn't apply to the
+  admin's own server). Since `--force` is exclusively for BROKEN, it is never offered for admin
+  sessions. No warning needed.
 
 ## Notes
 
