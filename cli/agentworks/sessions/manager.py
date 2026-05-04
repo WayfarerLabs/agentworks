@@ -656,6 +656,11 @@ def _execute_stop(
                     output.warn(f"Failed to stop '{session.name}' (tmux unreachable, use --force)")
                     continue
 
+        # Clean up agent socket if the server is dead
+        if session.socket_path:
+            run_cmd = partial(run, target, logger=target.logger)
+            run_cmd(f"sudo rm -f {shlex.quote(session.socket_path)}", check=False)
+
         db.update_session_pid(session.name, PID_STOPPED)
         output.info(f"Session '{session.name}' stopped")
 
