@@ -1127,10 +1127,29 @@ def list_sessions(
     )
     output.info(header)
     output.info("-" * len(header))
+    broken_names = []
+    unknown_names = []
     for sname, ws_name, vm_col, tpl, mode, status in rows:
         output.info(
             f"{sname:<{name_w}}  {ws_name:<{ws_w}}  {vm_col:<{vm_w}}  {tpl:<{tpl_w}}  {mode:<{mode_w}}  {status}"
         )
+        if status == "broken":
+            broken_names.append(sname)
+        elif status == "unknown":
+            unknown_names.append(sname)
+
+    if broken_names or unknown_names:
+        output.info("")
+        if broken_names:
+            output.warn(
+                f"{len(broken_names)} session(s) are broken (tmux unreachable): "
+                f"{', '.join(broken_names)}. Use --force to stop/delete."
+            )
+        if unknown_names:
+            output.warn(
+                f"{len(unknown_names)} session(s) have unknown status: "
+                f"{', '.join(unknown_names)}. Status could not be determined."
+            )
 
 
 def attach_session(
