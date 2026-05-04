@@ -820,14 +820,17 @@ def stop_all_sessions(
     sessions = ensure_pids_batch(sessions, db=db, config=config)
     status_map = batch_check_all_sessions(sessions, db=db, config=config)
 
-    # Warn about sessions that can't be stopped normally
+    # Error if any sessions are still unknown after auto-repair
     unknown = [
         s for s in sessions
         if s.pid is None or s.boot_id is None or status_map.get(s.name) is None
     ]
     if unknown:
         names = ", ".join(s.name for s in unknown)
-        output.warn(f"Skipping {len(unknown)} session(s) with unknown status ({names}).")
+        raise output.SessionError(
+            f"{len(unknown)} session(s) have unknown status after auto-repair ({names}). "
+            "Resolve manually before retrying."
+        )
 
     broken = [s for s in sessions if status_map.get(s.name) == SessionStatus.BROKEN]
     if broken and not force:
@@ -886,6 +889,18 @@ def restart_all_sessions(
     # Auto-repair NULL-PID sessions, then batch check
     sessions = ensure_pids_batch(sessions, db=db, config=config)
     status_map = batch_check_all_sessions(sessions, db=db, config=config)
+
+    # Error if any sessions are still unknown after auto-repair
+    unknown = [
+        s for s in sessions
+        if s.pid is None or s.boot_id is None or status_map.get(s.name) is None
+    ]
+    if unknown:
+        names = ", ".join(s.name for s in unknown)
+        raise output.SessionError(
+            f"{len(unknown)} session(s) have unknown status after auto-repair ({names}). "
+            "Resolve manually before retrying."
+        )
 
     if not include_running:
         # Only stopped sessions
