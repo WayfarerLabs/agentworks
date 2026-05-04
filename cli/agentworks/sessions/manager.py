@@ -702,14 +702,14 @@ def delete_session(
     force: bool = False,
     yes: bool = False,
 ) -> None:
-    """Delete a session. Requires --force if running/broken/unknown."""
+    """Delete a session. Prompts if running/unknown (--yes to skip). --force for BROKEN."""
     session = _require_session(db, name)
     ws, vm, run_command, _, target = _prepare_vm(db, config, session.workspace_name, operation="session-delete")
     health = check_session_health(session, target=target)
 
     if health == SessionHealth.OK:
-        if not force:
-            raise output.SessionError(f"session '{name}' is running. Use --force to delete.")
+        if not yes and not output.confirm(f"Session '{name}' is running. Delete?"):
+            raise output.UserAbort("delete cancelled")
         sock = _effective_socket_path(db, session)
         _kill_session(name, run_command=run_command, socket_path=sock)
     elif health == SessionHealth.BROKEN:
@@ -722,11 +722,13 @@ def delete_session(
         assert session.pid is not None
         force_kill_tmux_server(session.pid, target=target, socket_path=session.socket_path)
     elif health == SessionHealth.UNKNOWN:
-        if not force:
-            raise output.SessionError(f"session '{name}' has no PID recorded. Use --force to delete the record.")
+        if not yes and not output.confirm(f"Session '{name}' has no PID (state unknown). Delete anyway?"):
+            raise output.UserAbort("delete cancelled")
 
-    # Confirm before proceeding
-    if not yes and not output.confirm(f"Delete session '{name}'?"):
+    # Final confirmation for STOPPED/BROKEN (OK/UNKNOWN already prompted above)
+    if health in (SessionHealth.STOPPED, SessionHealth.BROKEN) and not yes and not output.confirm(
+        f"Delete session '{name}'?"
+    ):
         raise output.UserAbort("delete cancelled")
 
     # Clean up socket if present
