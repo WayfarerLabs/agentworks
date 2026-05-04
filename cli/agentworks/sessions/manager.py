@@ -447,7 +447,7 @@ def stop_session(
                 f"session '{name}' is broken (PID alive but tmux unreachable). Use --force to kill the process."
             )
         assert session.pid is not None
-        force_kill_tmux_server(session.pid, target=target, socket_path=session.socket_path)
+        force_kill_tmux_server(session.pid, target=target, socket_path=session.socket_path, log=output.detail)
         db.update_session_pid(name, PID_STOPPED)
         output.info(f"Session '{name}' force-stopped")
         return
@@ -496,7 +496,7 @@ def restart_session(
         from agentworks.sessions.tmux import force_kill_tmux_server
 
         assert session.pid is not None
-        force_kill_tmux_server(session.pid, target=target, socket_path=session.socket_path)
+        force_kill_tmux_server(session.pid, target=target, socket_path=session.socket_path, log=output.detail)
     elif health == SessionHealth.OK:
         if not yes and not output.confirm(f"Session '{name}' is running. Restart?"):
             raise output.UserAbort("restart cancelled")
@@ -629,7 +629,9 @@ def stop_all_sessions(
                 _kill_session(session.name, run_command=partial(run, target), socket_path=sock)
             except Exception as exc:
                 if force and session.pid and session.pid > 0:
-                    force_kill_tmux_server(session.pid, target=target, socket_path=session.socket_path)
+                    force_kill_tmux_server(
+                        session.pid, target=target, socket_path=session.socket_path, log=output.detail,
+                    )
                 else:
                     failed.append((session.name, str(exc)))
                     output.warn(f"Error stopping '{session.name}': {exc}")
@@ -720,7 +722,7 @@ def delete_session(
         from agentworks.sessions.tmux import force_kill_tmux_server
 
         assert session.pid is not None
-        force_kill_tmux_server(session.pid, target=target, socket_path=session.socket_path)
+        force_kill_tmux_server(session.pid, target=target, socket_path=session.socket_path, log=output.detail)
     elif health == SessionHealth.UNKNOWN:
         if not yes and not output.confirm(f"Session '{name}' has no PID (state unknown). Delete anyway?"):
             raise output.UserAbort("delete cancelled")

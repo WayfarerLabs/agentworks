@@ -12,6 +12,8 @@ import shlex
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from agentworks.ssh import ExecTarget
 
 RESTRICTED_CONFIG_PATH = "/opt/agentworks/tmux-session.conf"
@@ -437,6 +439,7 @@ def force_kill_tmux_server(
     *,
     target: ExecTarget,
     socket_path: str | None = None,
+    log: Callable[[str], None] | None = None,
 ) -> bool:
     """Kill a tmux server by PID with SIGTERM -> SIGKILL escalation.
 
@@ -444,22 +447,31 @@ def force_kill_tmux_server(
     """
     import time
 
+    def _log(msg: str) -> None:
+        if log:
+            log(msg)
+
     # SIGTERM
+    _log(f"Sending SIGTERM to PID {pid}")
     target.run(f"kill {pid}", sudo=True, check=False)
     time.sleep(2)
 
     # Check if still alive
     if target.run(f"test -d /proc/{pid}", check=False).ok:
-        # SIGKILL
+        _log(f"PID {pid} survived SIGTERM, escalating to SIGKILL")
         target.run(f"kill -9 {pid}", sudo=True, check=False)
         time.sleep(1)
 
     # Final check
     if target.run(f"test -d /proc/{pid}", check=False).ok:
+        _log(f"PID {pid} survived SIGKILL")
         return False  # process survived
+
+    _log(f"PID {pid} is dead")
 
     # Clean up stale socket
     if socket_path:
+        _log(f"Removing stale socket {socket_path}")
         target.run(f"rm -f {shlex.quote(socket_path)}", sudo=True, check=False)
 
     return True
