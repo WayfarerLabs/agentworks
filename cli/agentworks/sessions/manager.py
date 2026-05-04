@@ -1143,7 +1143,7 @@ def list_sessions(
         if broken_names:
             output.warn(
                 f"{len(broken_names)} session(s) are broken (tmux unreachable): "
-                f"{', '.join(broken_names)}. Use --force to stop/delete."
+                f"{', '.join(broken_names)}. Use restart/stop/delete --force."
             )
         if unknown_names:
             output.warn(
