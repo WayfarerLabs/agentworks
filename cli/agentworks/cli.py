@@ -947,46 +947,80 @@ def session_list(
 
 @session_app.command("stop")
 def session_stop(
-    name: Annotated[str, typer.Argument(help="Session name")],
-    force: Annotated[bool, typer.Option("--force", help="Force-stop via PID kill (for broken sessions)")] = False,
+    name: Annotated[str | None, typer.Argument(help="Session name")] = None,
+    all_sessions: Annotated[bool, typer.Option("--all", help="Stop all running sessions")] = False,
+    vm: Annotated[str | None, typer.Option("--vm", help="Filter by VM (with --all)")] = None,
+    workspace: Annotated[str | None, typer.Option("--workspace", help="Filter by workspace (with --all)")] = None,
+    force: Annotated[bool, typer.Option("--force", help="Force-stop broken sessions via PID kill")] = False,
 ) -> None:
-    """Stop a running session."""
+    """Stop a running session, or all running sessions with --all."""
     from agentworks.config import load_config
-    from agentworks.sessions.manager import stop_session
+    from agentworks.sessions.manager import stop_all_sessions, stop_session
 
-    stop_session(_get_db(), load_config(), name=name, force=force)
+    if all_sessions:
+        stop_all_sessions(_get_db(), load_config(), vm_name=vm, workspace_name=workspace, force=force)
+    elif name:
+        stop_session(_get_db(), load_config(), name=name, force=force)
+    else:
+        raise typer.BadParameter("provide a session name or use --all")
 
 
 @session_app.command("restart")
 def session_restart(
-    name: Annotated[str, typer.Argument(help="Session name")],
-    force: Annotated[bool, typer.Option("--force", help="Kill if still running")] = False,
+    name: Annotated[str | None, typer.Argument(help="Session name")] = None,
+    all_stopped: Annotated[bool, typer.Option("--all-stopped", help="Restart all stopped sessions")] = False,
+    all_sessions: Annotated[bool, typer.Option("--all", help="Restart all sessions (prompts for running)")] = False,
+    vm: Annotated[str | None, typer.Option("--vm", help="Filter by VM (with --all/--all-stopped)")] = None,
+    workspace: Annotated[str | None, typer.Option("--workspace", help="Filter by workspace")] = None,
+    force: Annotated[bool, typer.Option("--force", help="Force restart running/broken sessions")] = False,
 ) -> None:
-    """Restart a session (uses restart_command if defined in template)."""
+    """Restart a session, or batch restart with --all-stopped / --all."""
     from agentworks.config import load_config
-    from agentworks.sessions.manager import restart_session
+    from agentworks.sessions.manager import restart_all_sessions, restart_session
 
-    restart_session(_get_db(), load_config(), name=name, force=force)
+    if all_stopped or all_sessions:
+        db = _get_db()
+        config = load_config()
+        include_running = all_sessions
+
+        # --all without --force: prompt if there are running sessions
+        if include_running and not force:
+            from agentworks import output
+            from agentworks.sessions.manager import _batch_check_all_sessions, _filter_sessions
+
+            sessions = _filter_sessions(db, workspace_name=workspace, vm_name=vm)
+            alive_map = _batch_check_all_sessions(sessions, db=db, config=config)
+            running = [s for s in sessions if s.pid and s.pid > 0 and alive_map.get(s.name, False)]
+            if running:
+                names = ", ".join(s.name for s in running[:5])
+                suffix = f" (and {len(running) - 5} more)" if len(running) > 5 else ""
+                if not output.confirm(
+                    f"{len(running)} session(s) are running ({names}{suffix}). Restart them?"
+                ):
+                    output.info("Skipping running sessions. Use --all-stopped to restart only stopped sessions.")
+                    include_running = False
+
+        restart_all_sessions(
+            db, config, vm_name=vm, workspace_name=workspace, include_running=include_running, force=force,
+        )
+    elif name:
+        restart_session(_get_db(), load_config(), name=name, force=force)
+    else:
+        raise typer.BadParameter("provide a session name, --all-stopped, or --all")
 
 
-@session_app.command("restart-all")
+@session_app.command("restart-all", deprecated=True, hidden=True)
 def session_restart_all(
-    vm: Annotated[str | None, typer.Option("--vm", help="Only restart sessions on this VM")] = None,
-    workspace: Annotated[
-        str | None, typer.Option("--workspace", help="Only restart sessions in this workspace")
-    ] = None,
+    vm: Annotated[str | None, typer.Option("--vm", help="Filter by VM")] = None,
+    workspace: Annotated[str | None, typer.Option("--workspace", help="Filter by workspace")] = None,
     include_running: Annotated[bool, typer.Option("--include-running", help="Also restart running sessions")] = False,
 ) -> None:
-    """Restart all stopped sessions."""
+    """Deprecated: use 'session restart --all-stopped' or 'session restart --all'."""
     from agentworks.config import load_config
     from agentworks.sessions.manager import restart_all_sessions
 
     restart_all_sessions(
-        _get_db(),
-        load_config(),
-        vm_name=vm,
-        workspace_name=workspace,
-        include_running=include_running,
+        _get_db(), load_config(), vm_name=vm, workspace_name=workspace, include_running=include_running,
     )
 
 

@@ -164,6 +164,20 @@ def _regenerate_tmuxinator(
     write_file(target, f"{ws.workspace_path}/.tmuxinator.yml", config_text, logger=logger)
 
 
+def _filter_sessions(
+    db: Database,
+    *,
+    workspace_name: str | None = None,
+    vm_name: str | None = None,
+) -> list[SessionRow]:
+    """Load sessions with optional workspace/VM filters."""
+    sessions = db.list_sessions(workspace_name=workspace_name)
+    if vm_name is not None:
+        vm_workspaces = {ws.name for ws in db.list_workspaces(vm_name=vm_name)}
+        sessions = [s for s in sessions if s.workspace_name in vm_workspaces]
+    return sessions
+
+
 def _resolve_template(config: Config, template_name: str | None) -> ResolvedSessionTemplate:
     """Resolve a session template by name, applying inheritance."""
     from agentworks.sessions.templates import resolve_template
@@ -535,6 +549,52 @@ def restart_session(
     add_session_to_console(name, run_command=run_command, socket_path=new_sock)
 
 
+def stop_all_sessions(
+    db: Database,
+    config: Config,
+    *,
+    vm_name: str | None = None,
+    workspace_name: str | None = None,
+    force: bool = False,
+) -> None:
+    """Stop all running sessions, optionally filtered by VM or workspace."""
+    sessions = _filter_sessions(db, workspace_name=workspace_name, vm_name=vm_name)
+
+    # Only attempt sessions that are (or might be) running
+    alive_map = _batch_check_all_sessions(sessions, db=db, config=config)
+    targets = []
+    for s in sessions:
+        if s.pid is None:
+            continue  # UNKNOWN -- skip silently
+        if s.pid == PID_STOPPED:
+            continue  # already stopped
+        if s.name in alive_map and not alive_map[s.name]:
+            continue  # confirmed dead
+        targets.append(s)
+
+    if not targets:
+        output.info("No running sessions to stop.")
+        return
+
+    output.info(f"Stopping {len(targets)} session(s)...")
+    failed: list[tuple[str, str]] = []
+    for session in targets:
+        try:
+            stop_session(db, config, name=session.name, force=force)
+        except output.SessionError as exc:
+            if not force and "broken" in str(exc).lower():
+                output.warn(f"Skipping '{session.name}': {exc}")
+            else:
+                failed.append((session.name, str(exc)))
+                output.warn(f"Error stopping '{session.name}': {exc}")
+        except Exception as exc:
+            failed.append((session.name, str(exc)))
+            output.warn(f"Error stopping '{session.name}': {exc}")
+
+    if failed:
+        raise output.SessionError(f"{len(failed)} session(s) failed to stop.")
+
+
 def restart_all_sessions(
     db: Database,
     config: Config,
@@ -542,24 +602,27 @@ def restart_all_sessions(
     vm_name: str | None = None,
     workspace_name: str | None = None,
     include_running: bool = False,
+    force: bool = False,
 ) -> None:
-    """Restart all stopped sessions, optionally filtered by VM or workspace.
+    """Restart sessions, optionally filtered by VM or workspace.
 
-    If include_running is True, running sessions are killed and restarted too.
+    With include_running=False (--all-stopped), only stopped sessions are
+    restarted. With include_running=True (--all), all sessions are targeted;
+    if any are running, the caller should have prompted or passed force=True.
     """
-    sessions = db.list_sessions(workspace_name=workspace_name)
+    sessions = _filter_sessions(db, workspace_name=workspace_name, vm_name=vm_name)
+    alive_map = _batch_check_all_sessions(sessions, db=db, config=config)
 
-    # Filter by VM if requested (requires workspace -> VM lookup)
-    if vm_name is not None:
-        vm_workspaces = {ws.name for ws in db.list_workspaces(vm_name=vm_name)}
-        sessions = [s for s in sessions if s.workspace_name in vm_workspaces]
-
-    # Pre-filter by liveness (one SSH call per VM, parallel)
     if not include_running:
-        alive_map = _batch_check_all_sessions(sessions, db=db, config=config)
+        # Only stopped sessions
         sessions = [
-            s for s in sessions if not (s.pid is not None and alive_map.get(s.name, False))
+            s
+            for s in sessions
+            if s.pid == PID_STOPPED
+            or (s.pid is not None and s.pid > 0 and not alive_map.get(s.name, False))
         ]
+    # UNKNOWN sessions are skipped in both modes (need repair)
+    sessions = [s for s in sessions if s.pid is not None]
 
     if not sessions:
         output.info("No matching sessions to restart.")
@@ -569,12 +632,13 @@ def restart_all_sessions(
     failed: list[tuple[str, str]] = []
     for session in sessions:
         try:
-            restart_session(
-                db,
-                config,
-                name=session.name,
-                force=include_running,
-            )
+            restart_session(db, config, name=session.name, force=force)
+        except output.SessionError as exc:
+            if not force and "broken" in str(exc).lower():
+                output.warn(f"Skipping '{session.name}': {exc}")
+            else:
+                failed.append((session.name, str(exc)))
+                output.warn(f"Error restarting '{session.name}': {exc}")
         except Exception as exc:
             failed.append((session.name, str(exc)))
             output.warn(f"Error restarting '{session.name}': {exc}")
@@ -937,9 +1001,9 @@ def repair_all_sessions(
             if pid is not None:
                 db.update_session_pid(session.name, pid)
                 output.info(f"Recovered PID {pid} for session '{session.name}'")
-                repaired += 1
             else:
                 db.update_session_pid(session.name, PID_STOPPED)
                 output.info(f"Session '{session.name}' is not running")
+            repaired += 1
 
-    output.info(f"Repair complete: {repaired} session(s) recovered")
+    output.info(f"Repair complete: {repaired} session(s) repaired")
