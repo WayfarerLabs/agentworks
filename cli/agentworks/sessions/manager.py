@@ -983,13 +983,20 @@ def describe_session(
     ws, vm, run_command, _, target = _prepare_vm(db, config, session.workspace_name, operation=None)
     session = _ensure_pid(session, target=target, db=db)
 
-    health = check_session_status(session, target=target)
-    status_label = {
-        SessionStatus.OK: "running",
-        SessionStatus.STOPPED: "stopped",
-        SessionStatus.BROKEN: "broken (PID alive, tmux unreachable)",
-        SessionStatus.UNKNOWN: "unknown",
-    }[health]
+    status = check_session_status(session, target=target)
+
+    # Build status label with PID if running and current boot
+    if status == SessionStatus.OK and session.pid and session.pid > 0:
+        status_label = f"running (PID {session.pid})"
+    elif status == SessionStatus.BROKEN and session.pid and session.pid > 0:
+        status_label = f"broken (PID {session.pid} alive, tmux unreachable)"
+    else:
+        status_label = {
+            SessionStatus.OK: "running",
+            SessionStatus.STOPPED: "stopped",
+            SessionStatus.BROKEN: "broken",
+            SessionStatus.UNKNOWN: "unknown",
+        }[status]
 
     mode_label = f"agent ({session.agent_name})" if session.agent_name else "admin"
 
@@ -999,11 +1006,6 @@ def describe_session(
     output.info(f"Template:   {session.template}")
     output.info(f"Mode:       {mode_label}")
     output.info(f"Status:     {status_label}")
-    if session.pid is not None and session.pid > 0:
-        # Only show PID if it's from the current boot (stale PIDs are meaningless)
-        current_boot = _get_boot_id(target)
-        if not session.boot_id or session.boot_id == current_boot:
-            output.info(f"PID:        {session.pid}")
     output.info(f"Created:    {session.created_at}")
     output.info(f"Updated:    {session.updated_at}")
 
