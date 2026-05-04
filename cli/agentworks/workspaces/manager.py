@@ -817,8 +817,10 @@ def delete_workspace(
                 if status == SessionStatus.OK:
                     kill_session(session.name, run_command=run_command, socket_path=session.socket_path)
                 elif status == SessionStatus.BROKEN:
-                    if session.pid and session.pid > 0:
-                        force_kill_tmux_server(session.pid, target=target, socket_path=session.socket_path)
+                    if session.pid and session.pid > 0 and force_kill_tmux_server(
+                        session.pid, target=target, socket_path=session.socket_path,
+                    ):
+                        pass  # killed successfully
                     else:
                         unstoppable.append(session.name)
                 elif status == SessionStatus.UNKNOWN:

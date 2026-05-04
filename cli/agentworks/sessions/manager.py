@@ -119,7 +119,7 @@ def _ensure_pid(session: SessionRow, *, target: ExecTarget, db: Database) -> Ses
 
 
 def ensure_pids_batch(sessions: list[SessionRow], *, db: Database, config: Config) -> list[SessionRow]:
-    """Auto-recover PIDs for all sessions with pid=NULL. Returns updated list.
+    """Auto-recover PID + boot ID for sessions missing either. Returns updated list.
 
     Same logic as _ensure_pid but for batch commands. Socket ambiguity (socket
     exists but tmux unreachable) leaves pid=NULL so callers see UNKNOWN.
@@ -698,7 +698,7 @@ def stop_session(
         return
     if health == SessionStatus.UNKNOWN:
         raise output.SessionError(
-            f"session '{name}' has no PID and auto-recovery failed. Investigate the tmux server manually."
+            f"session '{name}' has unknown status after auto-repair. Investigate manually."
         )
     if health == SessionStatus.BROKEN:
         if not force:
@@ -744,7 +744,7 @@ def restart_session(
 
     if health == SessionStatus.UNKNOWN:
         raise output.SessionError(
-            f"session '{name}' has no PID and auto-recovery failed. Investigate the tmux server manually."
+            f"session '{name}' has unknown status after auto-repair. Investigate manually."
         )
     if health == SessionStatus.BROKEN:
         if not force:
@@ -960,7 +960,7 @@ def delete_session(
 
     if health == SessionStatus.UNKNOWN:
         raise output.SessionError(
-            f"session '{name}' has no PID and auto-recovery failed. Investigate the tmux server manually."
+            f"session '{name}' has unknown status after auto-repair. Investigate manually."
         )
     if health == SessionStatus.OK:
         if not yes and not output.confirm(f"Session '{name}' is running. Delete?"):
@@ -1152,7 +1152,7 @@ def list_sessions(
         for session in ws_sessions:
             if no_status:
                 status = "-"
-            elif session.pid is None:
+            elif session.pid is None or session.boot_id is None:
                 status = "unknown"
             elif session.pid == PID_STOPPED:
                 status = "stopped"
