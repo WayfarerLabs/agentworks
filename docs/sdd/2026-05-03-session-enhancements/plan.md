@@ -133,6 +133,20 @@ call per VM, completions include the new command.
 
 **Done when:** no dead references, all checks green.
 
+## Post-plan additions
+
+Work discovered and completed during implementation, after the original plan was written.
+
+- [x] **PID sentinel (`PID_STOPPED = -1`)**: distinguish "never checked" (NULL/UNKNOWN) from "known
+      stopped" (-1/STOPPED). Repair sets -1 when a session is not running, breaking the dead-end
+      loop where commands say "run repair" but repair already ran.
+- [x] **`/proc` for liveness**: use `test -d /proc/<pid>` instead of `kill -0` for PID checks. The
+      admin user cannot signal agent-owned processes without sudo; `/proc` has no such restriction.
+- [x] **Batch stop/restart**: `stop --all`, `restart --all-stopped`, `restart --all` with `--vm`
+      and `--workspace` filters. Replaces the old `restart-all` subcommand.
+- [x] **`session list` unknown warning**: warn at the bottom of list output if any sessions have
+      unknown status, suggesting `session repair --all`.
+
 ## Design deviations
 
 - **`_session_alive` retained**: kept for the normal stop path (OK health), where tmux-level

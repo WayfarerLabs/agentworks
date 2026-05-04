@@ -354,8 +354,10 @@ admin-mode sessions will get the same PID, which is correct.
 | `describe_session` | Show health, suggest repair for BROKEN/UNKNOWN |
 | `attach_session` | Use health check, clear error for BROKEN |
 | `session_logs` | Use health check, clear error for BROKEN |
+| New: `stop_all_sessions` | Batch stop with --vm/--workspace filters |
 | New: `repair_session` | Recover PID for single session |
 | New: `repair_all_sessions` | Batch PID recovery |
+| Removed: `restart-all` subcommand | Replaced by `restart --all-stopped` / `restart --all` |
 
 ### db.py
 
@@ -366,12 +368,16 @@ admin-mode sessions will get the same PID, which is correct.
 | Remove: `update_session_status` | No longer needed |
 | Remove: `SessionStatus` enum | No longer needed |
 | New: `update_session_pid` | Store/clear PID |
+| New: `PID_STOPPED = -1` | Sentinel: session is known to be stopped |
 | New or moved: `SessionHealth` | OK / STOPPED / BROKEN / UNKNOWN enum |
 
 ### cli.py
 
 | Change | Detail |
 |--------|--------|
+| `session stop` | Optional name or `--all` with `--vm`/`--workspace` filters |
+| `session restart` | Optional name, `--all-stopped`, or `--all` with filters |
+| Removed: `session restart-all` | Replaced by `restart --all-stopped` / `restart --all` |
 | New: `session repair` | `session repair <name>` and `session repair --all` |
 | `session list` | Status column from batch PID check |
 | `session describe` | Health display, repair suggestions |
@@ -384,11 +390,18 @@ Liveness is always determined live. The database does not store a running/stoppe
 This eliminates stale-state problems and the need for cache invalidation logic. `session list` uses
 batch PID checks (one SSH call per VM) so the performance cost is negligible.
 
-### PID column is nullable
+### PID column semantics
 
-Forcing NOT NULL would require backfilling PIDs for all existing sessions, which is impossible if
-the tmux server is no longer running. A nullable column with explicit UNKNOWN handling is the
-pragmatic choice.
+The PID column is nullable with a sentinel value:
+
+- `NULL` -- pre-enhancement session, never checked (UNKNOWN health, suggest repair)
+- `-1` (`PID_STOPPED`) -- known to be stopped (no process to check, restartable)
+- `>0` -- known PID (check `/proc/<pid>` for current liveness)
+
+NULL and -1 are distinct: NULL means "we have no information" (repair needed), while -1 means "we
+checked and the session is not running" (normal stopped state). Repair sets -1 when it finds a
+session is not running, breaking the dead-end loop where repair reports "not running" but commands
+still say "run repair."
 
 ### Admin-mode PID caveat
 

@@ -105,17 +105,29 @@ they need to verify liveness.
 `delete` always confirms before proceeding (`--yes/-y` to skip). This is separate from the `--force`
 health override.
 
-### R4: Batch status checking for session list
+### R4: Batch operations
+
+#### Batch status checking for session list
 
 `session list` must check all sessions on a VM in a single SSH round-trip. The implementation groups
-sessions by VM, builds a compound shell command with `kill -0` for each PID, and runs one SSH call
-per VM. VMs are queried in parallel.
+sessions by VM, builds a compound shell command for each PID, and runs one SSH call per VM. VMs are
+queried in parallel.
 
 For N sessions across M VMs, this reduces status checking from N SSH calls to M parallel SSH calls.
 
 Sessions with no PID in the database are reported as "unknown" without any SSH call.
 
 `--no-status` skips all SSH checks and shows `-` for the status column.
+
+#### Batch stop and restart
+
+`session stop --all` stops all running sessions. `session restart --all-stopped` restarts all
+stopped sessions. `session restart --all` restarts everything (prompts if any are running, unless
+`--force` is passed). All batch variants accept `--vm` and `--workspace` filters and use the same
+batch PID checking infrastructure as `session list`.
+
+BROKEN sessions are warned and skipped unless `--force` is passed. UNKNOWN sessions are skipped
+(suggest repair).
 
 ### R5: Force escalation pattern
 
@@ -189,3 +201,6 @@ The command reports what it found:
 - **PID reuse detection**: PIDs can be reused by the OS. The window for false positives is small
   (original process dies and a new process takes the same PID between checks). This is an acceptable
   risk for a CLI tool that runs interactively.
+- **Liveness check mechanism**: PID liveness is checked via `test -d /proc/<pid>` rather than
+  `kill -0 <pid>`. Both are equivalent for detecting process existence, but `/proc` does not require
+  signal permissions, so the admin user can check agent-owned processes without sudo.
