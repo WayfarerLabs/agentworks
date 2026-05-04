@@ -1,6 +1,6 @@
 # Session enhancements -- implementation plan
 
-**Status:** In Progress **Branch:** `feat/session-enhancements`
+**Status:** Complete **Branch:** `feat/session-enhancements`
 
 ## Overview
 
@@ -161,24 +161,25 @@ by session type (dedicated agent socket vs shared admin server).
 
 ### Code changes
 
-- [ ] Rename `SessionHealth` -> `SessionStatus` (OK/STOPPED/BROKEN/UNKNOWN)
-- [ ] Migration 21: `ALTER TABLE sessions ADD COLUMN boot_id TEXT`
-- [ ] Add `boot_id` field to `SessionRow`
-- [ ] Capture boot ID at session creation and restart
-- [ ] Rewrite `check_session_status` (was `check_session_health`): dispatch by session type
-  - [ ] `_check_dedicated_agent_session`: has-session, then boot_id + PID on failure
-  - [ ] `_check_shared_admin_session`: has-session only
-- [ ] Rewrite `batch_check_status`: compound has-session with inline boot_id + PID follow-up for
+- [x] Rename `SessionHealth` -> `SessionStatus` (OK/STOPPED/BROKEN/UNKNOWN)
+- [x] Migration 21: `ALTER TABLE sessions ADD COLUMN boot_id TEXT`
+- [x] Add `boot_id` field to `SessionRow`
+- [x] Capture boot ID at session creation and restart
+- [x] Rewrite `check_session_status` (was `check_session_health`): dispatch by session type
+  - [x] `_check_dedicated_agent_session`: has-session, then boot_id + PID on failure
+  - [x] `_check_shared_admin_session`: has-session only
+- [x] Rewrite `batch_check_status`: compound has-session with inline boot_id + PID follow-up for
       agent failures, all in one SSH call per VM
-- [ ] Remove `/proc`-only `check_session_status` (old PID-based binary check)
-- [ ] Update `update_session_pid` signature to accept `boot_id` parameter
-- [ ] Update `_ensure_pid` and `ensure_pids_batch` to store boot ID on recovery
-- [ ] Auto-repair ambiguous case: sudo probe (`sudo tmux -S <socket> list-sessions`) to distinguish
+- [x] Remove `/proc`-only `check_session_status` (old PID-based binary check)
+- [x] Update `update_session_pid` signature to accept `boot_id` parameter (with COALESCE to
+      preserve boot_id when only clearing PID)
+- [x] Update `_ensure_pid` and `ensure_pids_batch` to store boot ID on recovery
+- [x] Auto-repair ambiguous case: sudo probe (`sudo tmux -S <socket> list-sessions`) to distinguish
       stale socket from live-but-unreachable server
-- [ ] Update all callers: `SessionHealth` -> `SessionStatus`
-- [ ] Remove `_session_alive` (dead code from Phase 1)
-- [ ] Update `_execute_stop` and `_kill_session` for has-session-based survivor check
-- [ ] Tests: update all health -> status references, add boot_id tests, add admin-mode status tests
+- [x] Update all callers: `SessionHealth` -> `SessionStatus`
+- [x] Remove `_session_alive` (dead code from Phase 1)
+- [x] Update `_execute_stop` and `_kill_session` for has-session-based survivor check
+- [x] Tests: update all health -> status references, add boot_id tests, add admin-mode status tests
 
 ### Definition of done
 
