@@ -420,6 +420,71 @@ def create_session(
     add_session_to_console(name, run_command=run_command, socket_path=sock)
 
 
+def _execute_stop(
+    targets: list[tuple[SessionRow, ExecTarget]],
+    *,
+    db: Database,
+    force: bool = False,
+) -> list[tuple[str, str]]:
+    """Core stop logic: C-c all, single grace period, kill survivors.
+
+    Handles both single and batch stops. Returns list of (name, error) failures.
+    """
+    import time
+
+    from agentworks.sessions.tmux import force_kill_tmux_server, send_keys
+    from agentworks.ssh import run
+
+    if not targets:
+        return []
+
+    # Phase 1: send C-c to all sessions (best effort)
+    for session, target in targets:
+        sock = _effective_socket_path(db, session)
+        run_cmd = partial(run, target)
+        with contextlib.suppress(Exception):
+            send_keys(session.name, "C-c", run_command=run_cmd, socket_path=sock)
+
+    # Phase 2: single grace period
+    time.sleep(_STOP_GRACE_SECONDS)
+
+    # Phase 3: check survivors per VM (reuse existing targets)
+    by_target: dict[int, tuple[ExecTarget, list[SessionRow]]] = {}
+    for session, target in targets:
+        tid = id(target)
+        if tid not in by_target:
+            by_target[tid] = (target, [])
+        by_target[tid][1].append(session)
+
+    survivor_map: dict[str, bool] = {}
+    for target, group in by_target.values():
+        survivor_map.update(batch_check_status(group, target=target))
+
+    failed: list[tuple[str, str]] = []
+
+    for session, target in targets:
+        alive = survivor_map.get(session.name, False)
+        if alive:
+            sock = _effective_socket_path(db, session)
+            run_cmd = partial(run, target)
+            try:
+                _kill_session(session.name, run_command=run_cmd, socket_path=sock)
+            except Exception as exc:
+                if force and session.pid and session.pid > 0:
+                    force_kill_tmux_server(
+                        session.pid, target=target, socket_path=session.socket_path, log=output.detail,
+                    )
+                else:
+                    failed.append((session.name, str(exc)))
+                    output.warn(f"Error stopping '{session.name}': {exc}")
+                    continue
+
+        db.update_session_pid(session.name, PID_STOPPED)
+        output.info(f"Session '{session.name}' stopped")
+
+    return failed
+
+
 def stop_session(
     db: Database,
     config: Config,
@@ -428,12 +493,10 @@ def stop_session(
     force: bool = False,
 ) -> None:
     """Stop a running session. Sends C-c first, then kills after a grace period."""
-    import time
-
-    from agentworks.sessions.tmux import force_kill_tmux_server, send_keys
+    from agentworks.sessions.tmux import force_kill_tmux_server
 
     session = _require_session(db, name)
-    _ws, _vm, run_command, _, target = _prepare_vm(db, config, session.workspace_name, operation="session-stop")
+    _ws, _vm, _run_command, _, target = _prepare_vm(db, config, session.workspace_name, operation="session-stop")
     health = check_session_health(session, target=target)
 
     if health == SessionHealth.STOPPED:
@@ -452,16 +515,10 @@ def stop_session(
         output.info(f"Session '{name}' force-stopped")
         return
 
-    # Normal stop path (OK health)
-    sock = _effective_socket_path(db, session)
-    send_keys(name, "C-c", run_command=run_command, socket_path=sock)
-    time.sleep(_STOP_GRACE_SECONDS)
-
-    if _session_alive(name, run_command=run_command, socket_path=sock):
-        _kill_session(name, run_command=run_command, socket_path=sock)
-
-    db.update_session_pid(name, PID_STOPPED)
-    output.info(f"Session '{name}' stopped")
+    # OK health -- delegate to shared stop logic
+    failed = _execute_stop([(session, target)], db=db, force=force)
+    if failed:
+        raise output.SessionError(f"failed to stop session '{name}': {failed[0][1]}")
 
 
 def restart_session(
@@ -559,87 +616,40 @@ def stop_all_sessions(
     workspace_name: str | None = None,
     force: bool = False,
 ) -> None:
-    """Stop all running sessions, optionally filtered by VM or workspace.
-
-    Sends C-c to all sessions at once, waits one grace period, then kills
-    any survivors. Much faster than stopping one at a time.
-    """
-    import time
-
-    from agentworks.sessions.tmux import force_kill_tmux_server, send_keys
-    from agentworks.ssh import run
-
+    """Stop all running sessions, optionally filtered by VM or workspace."""
     sessions = _filter_sessions(db, workspace_name=workspace_name, vm_name=vm_name)
 
-    # Only attempt sessions that are (or might be) running
+    # Batch PID check to find running sessions
     alive_map = _batch_check_all_sessions(sessions, db=db, config=config)
-    targets = []
-    for s in sessions:
-        if s.pid is None:
-            continue  # UNKNOWN -- skip silently
-        if s.pid == PID_STOPPED:
-            continue  # already stopped
-        if s.name in alive_map and not alive_map[s.name]:
-            continue  # confirmed dead
-        targets.append(s)
+    alive_sessions = [
+        s
+        for s in sessions
+        if s.pid is not None and s.pid != PID_STOPPED and alive_map.get(s.name, False)
+    ]
 
-    if not targets:
+    if not alive_sessions:
         output.info("No running sessions to stop.")
         return
 
-    output.info(f"Stopping {len(targets)} session(s)...")
+    output.info(f"Stopping {len(alive_sessions)} session(s)...")
 
     # Resolve VM targets (reuse across sessions on the same VM)
     vm_targets: dict[str, ExecTarget] = {}
-    for s in targets:
+    for s in alive_sessions:
         ws = db.get_workspace(s.workspace_name)
         if ws and ws.vm_name and ws.vm_name not in vm_targets:
             vm = db.get_vm(ws.vm_name)
             if vm and vm.tailscale_host:
                 vm_targets[ws.vm_name] = admin_exec_target(vm, config)
 
-    def _get_target(session: SessionRow) -> ExecTarget | None:
-        ws = db.get_workspace(session.workspace_name)
-        return vm_targets.get(ws.vm_name) if ws and ws.vm_name else None
+    # Build (session, target) pairs for _execute_stop
+    stop_targets: list[tuple[SessionRow, ExecTarget]] = []
+    for s in alive_sessions:
+        ws = db.get_workspace(s.workspace_name)
+        if ws and ws.vm_name and ws.vm_name in vm_targets:
+            stop_targets.append((s, vm_targets[ws.vm_name]))
 
-    # Phase 1: send C-c to all sessions
-    for session in targets:
-        target = _get_target(session)
-        if target is None:
-            continue
-        sock = _effective_socket_path(db, session)
-        with contextlib.suppress(Exception):
-            send_keys(session.name, "C-c", run_command=partial(run, target), socket_path=sock)
-
-    # Phase 2: single grace period
-    time.sleep(_STOP_GRACE_SECONDS)
-
-    # Phase 3: batch check survivors, kill any still alive
-    survivor_map = _batch_check_all_sessions(targets, db=db, config=config)
-    failed: list[tuple[str, str]] = []
-
-    for session in targets:
-        alive = session.name in survivor_map and survivor_map[session.name]
-        if alive:
-            target = _get_target(session)
-            if target is None:
-                continue
-            sock = _effective_socket_path(db, session)
-            try:
-                _kill_session(session.name, run_command=partial(run, target), socket_path=sock)
-            except Exception as exc:
-                if force and session.pid and session.pid > 0:
-                    force_kill_tmux_server(
-                        session.pid, target=target, socket_path=session.socket_path, log=output.detail,
-                    )
-                else:
-                    failed.append((session.name, str(exc)))
-                    output.warn(f"Error stopping '{session.name}': {exc}")
-                    continue
-
-        db.update_session_pid(session.name, PID_STOPPED)
-        output.info(f"Session '{session.name}' stopped")
-
+    failed = _execute_stop(stop_targets, db=db, force=force)
     if failed:
         raise output.SessionError(f"{len(failed)} session(s) failed to stop.")
 
