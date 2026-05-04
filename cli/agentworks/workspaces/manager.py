@@ -504,13 +504,19 @@ def rehome_workspace(
     if new_norm.startswith(old_norm) or old_norm.startswith(new_norm):
         raise output.WorkspaceError("source and target paths overlap")
 
-    # Block if workspace has sessions (can't reliably check liveness here)
+    # Block if workspace has running sessions
+    from agentworks.sessions.manager import batch_check_all_sessions
+
     sessions = db.list_sessions(workspace_name=name)
     if sessions:
-        raise output.WorkspaceError(
-            f"workspace '{name}' has {len(sessions)} session(s). "
-            "Delete them first with 'agentworks session delete'."
-        )
+        alive_map = batch_check_all_sessions(sessions, db=db, config=config)
+        running = [s for s in sessions if alive_map.get(s.name, False)]
+        if running:
+            names = ", ".join(s.name for s in running)
+            raise output.WorkspaceError(
+                f"workspace '{name}' has {len(running)} running session(s) ({names}). "
+                "Stop them first with 'agentworks session stop'."
+            )
 
     if ws.type == "vm":
         _rehome_vm(db, config, ws, new_path, remove_old=remove_old, yes=yes)

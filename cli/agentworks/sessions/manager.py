@@ -221,7 +221,7 @@ def _regenerate_tmuxinator(
     write_file(target, f"{ws.workspace_path}/.tmuxinator.yml", config_text, logger=logger)
 
 
-def _filter_sessions(
+def filter_sessions(
     db: Database,
     *,
     workspace_name: str | None = None,
@@ -536,9 +536,11 @@ def _execute_stop(
             except Exception as exc:
                 if force and session.pid and session.pid > 0:
                     output.detail(f"tmux kill failed for '{session.name}', force-killing PID {session.pid}")
-                    force_kill_tmux_server(
+                    if not force_kill_tmux_server(
                         session.pid, target=target, socket_path=session.socket_path, log=output.detail,
-                    )
+                    ):
+                        failed.append((session.name, f"PID {session.pid} survived force-kill"))
+                        continue
                 else:
                     failed.append((session.name, str(exc)))
                     output.warn(f"Failed to stop '{session.name}': {exc}")
@@ -574,7 +576,8 @@ def stop_session(
                 f"session '{name}' is broken (PID alive but tmux unreachable). Use --force to kill the process."
             )
         assert session.pid is not None
-        force_kill_tmux_server(session.pid, target=target, socket_path=session.socket_path, log=output.detail)
+        if not force_kill_tmux_server(session.pid, target=target, socket_path=session.socket_path, log=output.detail):
+            raise output.SessionError(f"failed to kill PID {session.pid} for session '{name}'")
         db.update_session_pid(name, PID_STOPPED)
         output.info(f"Session '{name}' force-stopped")
         return
@@ -616,7 +619,8 @@ def restart_session(
         from agentworks.sessions.tmux import force_kill_tmux_server
 
         assert session.pid is not None
-        force_kill_tmux_server(session.pid, target=target, socket_path=session.socket_path, log=output.detail)
+        if not force_kill_tmux_server(session.pid, target=target, socket_path=session.socket_path, log=output.detail):
+            raise output.SessionError(f"failed to kill PID {session.pid} for session '{name}'")
     elif health == SessionHealth.OK:
         if not yes and not output.confirm(f"Session '{name}' is running. Restart?"):
             raise output.UserAbort("restart cancelled")
@@ -680,10 +684,10 @@ def stop_all_sessions(
     force: bool = False,
 ) -> None:
     """Stop all running sessions, optionally filtered by VM or workspace."""
-    sessions = _filter_sessions(db, workspace_name=workspace_name, vm_name=vm_name)
+    sessions = filter_sessions(db, workspace_name=workspace_name, vm_name=vm_name)
 
     # Batch PID check to find running sessions
-    alive_map = _batch_check_all_sessions(sessions, db=db, config=config)
+    alive_map = batch_check_all_sessions(sessions, db=db, config=config)
     alive_sessions = [
         s
         for s in sessions
@@ -732,8 +736,8 @@ def restart_all_sessions(
     restarted. With include_running=True (--all), all sessions are targeted;
     if any are running, the caller should have prompted or passed yes=True.
     """
-    sessions = _filter_sessions(db, workspace_name=workspace_name, vm_name=vm_name)
-    alive_map = _batch_check_all_sessions(sessions, db=db, config=config)
+    sessions = filter_sessions(db, workspace_name=workspace_name, vm_name=vm_name)
+    alive_map = batch_check_all_sessions(sessions, db=db, config=config)
 
     if not include_running:
         # Only stopped sessions
@@ -796,7 +800,8 @@ def delete_session(
         from agentworks.sessions.tmux import force_kill_tmux_server
 
         assert session.pid is not None
-        force_kill_tmux_server(session.pid, target=target, socket_path=session.socket_path, log=output.detail)
+        if not force_kill_tmux_server(session.pid, target=target, socket_path=session.socket_path, log=output.detail):
+            raise output.SessionError(f"failed to kill PID {session.pid} for session '{name}'")
 
     # Final confirmation for STOPPED/BROKEN (OK/UNKNOWN already prompted above)
     if health in (SessionHealth.STOPPED, SessionHealth.BROKEN) and not yes and not output.confirm(
@@ -881,7 +886,7 @@ def describe_session(
     output.info(f"Updated:    {session.updated_at}")
 
 
-def _batch_check_all_sessions(
+def batch_check_all_sessions(
     sessions: list[SessionRow],
     *,
     db: Database,
@@ -943,7 +948,7 @@ def list_sessions(
         sessions = _ensure_pids_batch(sessions, db=db, config=config)
     alive_map: dict[str, bool] = {}
     if not no_status:
-        alive_map = _batch_check_all_sessions(sessions, db=db, config=config)
+        alive_map = batch_check_all_sessions(sessions, db=db, config=config)
 
     # Build table rows grouped by workspace
     by_workspace: dict[str, list[SessionRow]] = {}

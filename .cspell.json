@@ -112,6 +112,7 @@
     "openrc",
     "pipefail",
     "pipx",
+    "pids",
     "pkgrun",
     "pkill",
     "Pkgs",

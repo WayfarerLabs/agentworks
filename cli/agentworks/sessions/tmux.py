@@ -287,7 +287,7 @@ def create_session(
             cmd += f" {shlex.quote(shell_cmd)}"
         run_command(cmd)
         pid_out = run_command("tmux display-message -p '#{pid}'")
-        pid = int(getattr(pid_out, "stdout", "").strip())
+        pid = _parse_pid(getattr(pid_out, "stdout", ""), context="after session create")
         return (None, pid)
     else:
         assert linux_user is not None
@@ -347,7 +347,7 @@ def create_session(
         _grant_server_access(run_command, linux_user, sock)
 
         pid_out = run_command(tmux_cmd("display-message -p '#{pid}'", sock))
-        pid = int(getattr(pid_out, "stdout", "").strip())
+        pid = _parse_pid(getattr(pid_out, "stdout", ""), context="after session create")
         return (sock, pid)
 
 
@@ -412,6 +412,17 @@ def capture_output(
     return getattr(result, "stdout", "") or ""
 
 
+def _parse_pid(raw: str, context: str) -> int:
+    """Parse a PID from tmux display-message output. Raises RuntimeError on failure."""
+    pid_str = raw.strip()
+    if not pid_str:
+        raise RuntimeError(f"tmux returned empty PID output ({context})")
+    try:
+        return int(pid_str)
+    except ValueError:
+        raise RuntimeError(f"tmux returned non-numeric PID: {pid_str!r} ({context})") from None
+
+
 # -- PID-based liveness helpers --------------------------------------------
 
 
@@ -431,7 +442,10 @@ def get_tmux_server_pid(
     pid_str = result.stdout.strip()
     if not pid_str:
         return None
-    return int(pid_str)
+    try:
+        return int(pid_str)
+    except ValueError:
+        return None
 
 
 def force_kill_tmux_server(

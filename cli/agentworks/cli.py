@@ -957,6 +957,10 @@ def session_stop(
     from agentworks.config import load_config
     from agentworks.sessions.manager import stop_all_sessions, stop_session
 
+    if name and all_sessions:
+        raise typer.BadParameter("provide a session name or --all, not both")
+    if (vm or workspace) and not all_sessions:
+        raise typer.BadParameter("--vm and --workspace require --all")
     if all_sessions:
         stop_all_sessions(_get_db(), load_config(), vm_name=vm, workspace_name=workspace, force=force)
     elif name:
@@ -979,6 +983,12 @@ def session_restart(
     from agentworks.config import load_config
     from agentworks.sessions.manager import restart_all_sessions, restart_session
 
+    if name and (all_stopped or all_sessions):
+        raise typer.BadParameter("provide a session name or a batch flag (--all/--all-stopped), not both")
+    if all_stopped and all_sessions:
+        raise typer.BadParameter("use --all or --all-stopped, not both")
+    if (vm or workspace) and not (all_stopped or all_sessions):
+        raise typer.BadParameter("--vm and --workspace require --all or --all-stopped")
     if all_stopped or all_sessions:
         db = _get_db()
         config = load_config()
@@ -987,10 +997,10 @@ def session_restart(
         # --all without --yes: prompt if there are running sessions
         if include_running and not yes:
             from agentworks import output
-            from agentworks.sessions.manager import _batch_check_all_sessions, _filter_sessions
+            from agentworks.sessions.manager import batch_check_all_sessions, filter_sessions
 
-            sessions = _filter_sessions(db, workspace_name=workspace, vm_name=vm)
-            alive_map = _batch_check_all_sessions(sessions, db=db, config=config)
+            sessions = filter_sessions(db, workspace_name=workspace, vm_name=vm)
+            alive_map = batch_check_all_sessions(sessions, db=db, config=config)
             running = [s for s in sessions if s.pid and s.pid > 0 and alive_map.get(s.name, False)]
             if running:
                 names = ", ".join(s.name for s in running[:5])

@@ -123,11 +123,12 @@ def test_health_ok() -> None:
     session = _session("s1", pid=42, socket_path="/sock")
     target = _FakeTarget(
         {
-            "kill -0 42": _FakeResult(ok=True),
+            "test -d /proc/42": _FakeResult(ok=True),
             "has-session": _FakeResult(ok=True),
         }
     )
     assert check_session_health(session, target=target) == SessionHealth.OK
+    assert any("test -d /proc/42" in cmd for cmd in target.commands)
 
 
 def test_health_stopped() -> None:
@@ -140,11 +141,12 @@ def test_health_broken() -> None:
     session = _session("s1", pid=42, socket_path="/sock")
     target = _FakeTarget(
         {
-            "kill -0 42": _FakeResult(ok=True),
+            "test -d /proc/42": _FakeResult(ok=True),
             "has-session": _FakeResult(ok=False),
         }
     )
     assert check_session_health(session, target=target) == SessionHealth.BROKEN
+    assert any("test -d /proc/42" in cmd for cmd in target.commands)
 
 
 def test_health_unknown_no_pid() -> None:
