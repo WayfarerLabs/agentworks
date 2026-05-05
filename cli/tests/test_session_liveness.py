@@ -218,7 +218,6 @@ def test_force_kill_sigterm_succeeds(monkeypatch) -> None:
     monkeypatch.setattr(time, "sleep", lambda _: None)
     target = _FakeTarget({"test -d /proc/42": _FakeResult(ok=False)})
     assert force_kill_tmux_server(42, target=target) is True
-    # No SIGKILL sent (process died after SIGTERM)
     assert not any("kill -9" in cmd for cmd in target.commands)
 
 
@@ -289,7 +288,6 @@ def test_agent_unknown_when_boot_id_unreadable() -> None:
     target = _FakeTarget({
         "has-session": _FakeResult(ok=False),
         "boot_id": _FakeResult(ok=False, stdout=""),
-        "test -d /proc/42": _FakeResult(ok=True),
     })
     assert check_session_status(session, target=target) == SessionStatus.UNKNOWN
 

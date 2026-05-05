@@ -337,7 +337,7 @@ def _build_session_command(
 
 
 def _pid_alive(pid: int, *, target: ExecTarget) -> bool:
-    """Check if a PID is alive via /proc. Internal helper."""
+    """Check if a PID is alive via /proc."""
     return target.run(f"test -d /proc/{pid}", check=False).ok
 
 

@@ -287,7 +287,7 @@ def create_session(
             cmd += f" {shlex.quote(shell_cmd)}"
         run_command(cmd)
         try:
-            pid_out = run_command("tmux display-message -p '#{pid}'")
+            pid_out = run_command("tmux display-message -p '#{pid}'", check=False)
             pid: int | None = _parse_pid(getattr(pid_out, "stdout", ""), context="after session create")
         except (RuntimeError, ValueError):
             pid = None  # best-effort; auto-repair will recover on next access
@@ -350,7 +350,7 @@ def create_session(
         _grant_server_access(run_command, linux_user, sock)
 
         try:
-            pid_out = run_command(tmux_cmd("display-message -p '#{pid}'", sock))
+            pid_out = run_command(tmux_cmd("display-message -p '#{pid}'", sock), check=False)
             pid = _parse_pid(getattr(pid_out, "stdout", ""), context="after session create")
         except (RuntimeError, ValueError):
             pid = None  # best-effort; auto-repair will recover on next access

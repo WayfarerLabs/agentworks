@@ -224,3 +224,10 @@ captured, replacing any previous values.
 - **Socket permission hardening**: the root cause of BROKEN state (permission drift) is a separate
   concern. This SDD diagnoses and surfaces the problem; it does not fix the underlying permission
   model.
+- **PID reuse detection within a single boot**: Linux assigns PIDs sequentially up to `pid_max`
+  (default 4,194,304 on modern kernels, check via `cat /proc/sys/kernel/pid_max`). For a PID to be
+  reused within a single boot, `pid_max` processes must start between the tmux server dying and the
+  next CLI check. On a typical VM running a handful of sessions, this is not a realistic scenario
+  for interactive CLI use. Cross-boot PID reuse is handled by the boot ID check. If process-level
+  fingerprinting is ever needed, `/proc/<pid>/stat` field 22 (starttime) combined with the PID
+  provides a unique identity within a boot without requiring sudo.
