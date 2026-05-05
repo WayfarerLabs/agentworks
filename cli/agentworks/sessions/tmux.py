@@ -446,9 +446,10 @@ def get_tmux_server_pid(
     if not pid_str:
         return None
     try:
-        return int(pid_str)
+        pid = int(pid_str)
     except ValueError:
         return None
+    return pid if pid > 0 else None
 
 
 def force_kill_tmux_server(

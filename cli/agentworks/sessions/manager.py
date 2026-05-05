@@ -340,13 +340,13 @@ def _pid_alive(pid: int, *, target: ExecTarget) -> bool:
     return target.run(f"test -d /proc/{pid}", check=False).ok
 
 
-_boot_id_cache: dict[int, str] = {}
+_boot_id_cache: dict[int, str] = {}  # id(target) -> boot_id (only non-None values cached)
 
 
-def _get_boot_id(target: ExecTarget) -> str:
+def _get_boot_id(target: ExecTarget) -> str | None:
     """Read the current VM boot ID. Cached per target for the duration of the process.
 
-    Returns empty string on failure (not cached, so callers can retry).
+    Returns None on failure (not cached, so callers can retry).
     """
     tid = id(target)
     if tid in _boot_id_cache:
@@ -355,7 +355,8 @@ def _get_boot_id(target: ExecTarget) -> str:
     boot_id = (getattr(result, "stdout", "") or "").strip()
     if boot_id:
         _boot_id_cache[tid] = boot_id
-    return boot_id
+        return boot_id
+    return None
 
 
 def check_session_status(
@@ -390,7 +391,8 @@ def _check_dedicated_agent_session(session: SessionRow, *, target: ExecTarget) -
 
     # has-session failed -- STOPPED or BROKEN?
     assert session.pid is not None and session.pid > 0
-    if session.boot_id is not None and session.boot_id != _get_boot_id(target):
+    current_boot = _get_boot_id(target)
+    if session.boot_id is not None and current_boot is not None and session.boot_id != current_boot:
         return SessionStatus.STOPPED  # stale boot, PID is meaningless
     if not _pid_alive(session.pid, target=target):
         return SessionStatus.STOPPED  # process is dead
@@ -968,28 +970,26 @@ def delete_session(
         raise output.SessionError(
             f"session '{name}' has unknown status after auto-repair. Investigate manually."
         )
+    if health == SessionStatus.BROKEN and not force:
+        raise output.SessionError(
+            f"session '{name}' is broken (PID alive but tmux unreachable). Use --force to delete."
+        )
+
+    # Confirm before any destructive action
+    if not yes and not output.confirm(f"Delete session '{name}'?"):
+        raise output.UserAbort("delete cancelled")
+
+    # Now kill if needed
     if health == SessionStatus.OK:
-        if not yes and not output.confirm(f"Session '{name}' is running. Delete?"):
-            raise output.UserAbort("delete cancelled")
         sock = session.socket_path
         _kill_session(name, run_command=run_command, socket_path=sock)
     elif health == SessionStatus.BROKEN:
-        if not force:
-            raise output.SessionError(
-                f"session '{name}' is broken (PID alive but tmux unreachable). Use --force to delete."
-            )
         from agentworks.sessions.tmux import force_kill_tmux_server
 
         output.warn(f"Session '{name}' is broken (tmux unreachable), force-killing via PID")
         assert session.pid is not None
         if not force_kill_tmux_server(session.pid, target=target, socket_path=session.socket_path, log=output.detail):
             raise output.SessionError(f"failed to kill PID {session.pid} for session '{name}'")
-
-    # Final confirmation for STOPPED/BROKEN (OK/UNKNOWN already prompted above)
-    if health in (SessionStatus.STOPPED, SessionStatus.BROKEN) and not yes and not output.confirm(
-        f"Delete session '{name}'?"
-    ):
-        raise output.UserAbort("delete cancelled")
 
     # Clean up socket if the server is dead (don't remove a live socket)
     sock = session.socket_path
