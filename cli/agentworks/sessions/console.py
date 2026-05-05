@@ -54,7 +54,7 @@ def create_console(
     # Keep windows open when attached session command exits
     run_command(f"tmux set -t {CONSOLE_SESSION_NAME} remain-on-exit on", check=False)
 
-    # Add a window for each running session
+    # Add a window for each session (wrapper loop handles ended sessions)
     output.info(f"Adding {len(sessions)} session(s) to console...")
     for session in sessions:
         _add_session_window(

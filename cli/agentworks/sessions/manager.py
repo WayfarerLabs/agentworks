@@ -65,15 +65,14 @@ def _kill_session(
 
 
 def _ensure_pid(session: SessionRow, *, target: ExecTarget, db: Database) -> SessionRow:
-    """Auto-recover PID + boot ID for a session missing either. Returns updated session.
+    """Auto-recover PID + boot ID for a session missing either.
 
-    Triggers when pid is NULL or boot_id is NULL. Always writes both together.
-    If the tmux server is running, stores the PID + boot ID. If genuinely
-    stopped (no socket file), marks as PID_STOPPED. If ambiguous (socket
-    exists but tmux unreachable), leaves as NULL and warns.
+    Strict gate: after this returns, the session is guaranteed to be either
+    PID_STOPPED or have valid PID + boot_id. Raises SessionError if the
+    session cannot be resolved.
     """
     if session.pid == PID_STOPPED:
-        return session  # definitively stopped, boot_id not required
+        return session
     if session.pid is not None and session.boot_id is not None:
         return session
 
@@ -92,20 +91,19 @@ def _ensure_pid(session: SessionRow, *, target: ExecTarget, db: Database) -> Ses
             db.update_session_pid(session.name, pid, boot_id=boot_id)
             output.warn(f"Recovered PID {pid} for session '{session.name}'")
         else:
-            # Can't fully recover (missing PID or boot ID). Leave as UNKNOWN.
-            output.warn(f"Session '{session.name}' is alive but PID recovery failed")
+            raise output.SessionError(
+                f"session '{session.name}' is alive but PID/boot ID recovery failed. "
+                "Investigate the tmux server manually."
+            )
     elif sock and target.run(f"test -e {shlex.quote(sock)}", check=False).ok:
         # Socket exists but has-session failed. Probe with sudo to distinguish
         # stale socket (dead server) from live-but-unreachable server (permissions).
         probe_cmd = tmux_cmd("list-sessions", sock, sudo=True) + " 2>/dev/null"
         if target.run(probe_cmd, check=False).ok:
-            # Server is alive but unreachable without sudo -- permission drift.
-            # Leave as NULL so the caller's UNKNOWN handler surfaces the issue.
-            output.warn(
-                f"Session '{session.name}' has a live tmux server but it is unreachable. "
-                "This may indicate a permissions issue."
+            raise output.SessionError(
+                f"session '{session.name}' has a live tmux server but it is unreachable. "
+                "This may indicate a permissions issue. Investigate manually."
             )
-            return session
         else:
             # Stale socket, server is dead
             db.update_session_pid(session.name, PID_STOPPED)
@@ -710,16 +708,13 @@ def stop_session(
     session = _require_session(db, name)
     _ws, _vm, _run_command, _, target = _prepare_vm(db, config, session.workspace_name, operation="session-stop")
     session = _ensure_pid(session, target=target, db=db)
-    health = check_session_status(session, target=target)
+    status = check_session_status(session, target=target)
 
-    if health == SessionStatus.STOPPED:
+    if status == SessionStatus.STOPPED:
         output.info(f"Session '{name}' is already stopped")
         return
-    if health == SessionStatus.UNKNOWN:
-        raise output.SessionError(
-            f"session '{name}' has unknown status after auto-repair. Investigate manually."
-        )
-    if health == SessionStatus.BROKEN:
+    # UNKNOWN is impossible here -- _ensure_pid raises on unresolvable sessions
+    if status == SessionStatus.BROKEN:
         if not force:
             raise output.BrokenSessionError(
                 f"session '{name}' is broken (PID alive but tmux unreachable). Use --force to kill the process."
@@ -732,7 +727,7 @@ def stop_session(
         output.info(f"Session '{name}' force-stopped")
         return
 
-    # OK health -- delegate to shared stop logic
+    # OK -- delegate to shared stop logic
     failed = _execute_stop([(session, target)], db=db, force=force)
     if failed:
         raise output.SessionError(f"failed to stop session '{name}': {failed[0][1]}")
@@ -759,13 +754,10 @@ def restart_session(
         db, config, session.workspace_name, operation="session-restart",
     )
     session = _ensure_pid(session, target=target, db=db)
-    health = check_session_status(session, target=target)
+    status = check_session_status(session, target=target)
 
-    if health == SessionStatus.UNKNOWN:
-        raise output.SessionError(
-            f"session '{name}' has unknown status after auto-repair. Investigate manually."
-        )
-    if health == SessionStatus.BROKEN:
+    # UNKNOWN is impossible here -- _ensure_pid raises on unresolvable sessions
+    if status == SessionStatus.BROKEN:
         if not force:
             raise output.BrokenSessionError(
                 f"session '{name}' is broken (PID alive but tmux unreachable). Use --force to restart."
@@ -776,7 +768,7 @@ def restart_session(
         assert session.pid is not None
         if not force_kill_tmux_server(session.pid, target=target, socket_path=session.socket_path, log=output.detail):
             raise output.SessionError(f"failed to kill PID {session.pid} for session '{name}'")
-    elif health == SessionStatus.OK:
+    elif status == SessionStatus.OK:
         if not yes and not output.confirm(f"Session '{name}' is running. Restart?"):
             raise output.UserAbort("restart cancelled")
         sock = session.socket_path
@@ -980,13 +972,10 @@ def delete_session(
     session = _require_session(db, name)
     ws, vm, run_command, _, target = _prepare_vm(db, config, session.workspace_name, operation="session-delete")
     session = _ensure_pid(session, target=target, db=db)
-    health = check_session_status(session, target=target)
+    status = check_session_status(session, target=target)
 
-    if health == SessionStatus.UNKNOWN:
-        raise output.SessionError(
-            f"session '{name}' has unknown status after auto-repair. Investigate manually."
-        )
-    if health == SessionStatus.BROKEN and not force:
+    # UNKNOWN is impossible here -- _ensure_pid raises on unresolvable sessions
+    if status == SessionStatus.BROKEN and not force:
         raise output.BrokenSessionError(
             f"session '{name}' is broken (PID alive but tmux unreachable). Use --force to delete."
         )
@@ -996,14 +985,14 @@ def delete_session(
         raise output.UserAbort("delete cancelled")
 
     # Now kill if needed
-    if health == SessionStatus.OK:
+    if status == SessionStatus.OK:
         sock = session.socket_path
         if not _kill_session(name, run_command=run_command, socket_path=sock):
             # Race: session may have exited between check and kill. Recheck.
             recheck = check_session_status(session, target=target)
             if recheck != SessionStatus.STOPPED:
                 raise output.SessionError(f"failed to stop session '{name}' for deletion")
-    elif health == SessionStatus.BROKEN:
+    elif status == SessionStatus.BROKEN:
         from agentworks.sessions.tmux import force_kill_tmux_server
 
         output.warn(f"Session '{name}' is broken (tmux unreachable), force-killing via PID")
@@ -1247,13 +1236,13 @@ def attach_session(
     from agentworks.ssh import interactive
 
     session = _require_session(db, name)
-    _ws, vm, _run_command, _, target = _prepare_vm(db, config, session.workspace_name, operation="session-attach")
+    _ws, _vm, _run_command, _, target = _prepare_vm(db, config, session.workspace_name, operation="session-attach")
     session = _ensure_pid(session, target=target, db=db)
-    health = check_session_status(session, target=target)
+    status = check_session_status(session, target=target)
 
-    if health == SessionStatus.STOPPED:
+    if status == SessionStatus.STOPPED:
         raise output.SessionError(f"session '{name}' is not running")
-    if health == SessionStatus.BROKEN:
+    if status == SessionStatus.BROKEN:
         raise output.SessionError(
             f"session '{name}' is broken (PID alive but tmux unreachable)."
         )
@@ -1275,11 +1264,11 @@ def session_logs(
     session = _require_session(db, name)
     _ws, _vm, run_command, _, target = _prepare_vm(db, config, session.workspace_name, operation="session-logs")
     session = _ensure_pid(session, target=target, db=db)
-    health = check_session_status(session, target=target)
+    status = check_session_status(session, target=target)
 
-    if health == SessionStatus.STOPPED:
+    if status == SessionStatus.STOPPED:
         raise output.SessionError(f"session '{name}' is not running")
-    if health == SessionStatus.BROKEN:
+    if status == SessionStatus.BROKEN:
         raise output.SessionError(
             f"session '{name}' is broken (PID alive but tmux unreachable)."
         )
