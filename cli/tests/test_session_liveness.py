@@ -246,7 +246,10 @@ def test_force_kill_escalates_to_sigkill(monkeypatch) -> None:
 def test_force_kill_cleans_socket(monkeypatch) -> None:
     monkeypatch.setattr(time, "sleep", lambda _: None)
     target = _FakeTarget({"test -d /proc/42": _FakeResult(ok=False)})
-    force_kill_tmux_server(42, target=target, socket_path="/run/test.sock")
+    from agentworks.sessions.tmux import AGENT_SOCKET_ROOT
+
+    sock = f"{AGENT_SOCKET_ROOT}/agt--test/test.sock"
+    force_kill_tmux_server(42, target=target, socket_path=sock)
     assert any("rm -f" in cmd and "test.sock" in cmd for cmd in target.commands)
 
 

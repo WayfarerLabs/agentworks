@@ -495,8 +495,8 @@ def force_kill_tmux_server(
 
     _log(f"PID {pid} is dead")
 
-    # Clean up stale socket
-    if socket_path:
+    # Clean up stale socket (validate path is under expected root)
+    if socket_path and socket_path.startswith(AGENT_SOCKET_ROOT + "/"):
         _log(f"Removing stale socket {socket_path}")
         target.run(f"rm -f {shlex.quote(socket_path)}", sudo=True, check=False)
 

@@ -13,6 +13,7 @@ import typer
 
 from agentworks import output
 from agentworks.db import PID_STOPPED, SessionMode, SessionStatus
+from agentworks.sessions.tmux import AGENT_SOCKET_ROOT
 from agentworks.ssh import admin_exec_target
 
 _ENV_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -96,7 +97,7 @@ def _repair_session_pid(
         )
 
     # Step 2: has-session failed -- determine if genuinely stopped or ambiguous
-    if sock and target.run(f"test -e {shlex.quote(sock)}", check=False).ok:
+    if sock and target.run(f"test -e {shlex.quote(sock)}", sudo=True, check=False).ok:
         # Socket exists. Probe with sudo to distinguish stale from unreachable.
         probe_cmd = tmux_cmd("list-sessions", sock, sudo=True) + " 2>/dev/null"
         if target.run(probe_cmd, check=False).ok:
@@ -669,12 +670,16 @@ def _execute_stop(
                         continue
                 else:
                     failed.append((session.name, f"tmux kill-session failed for '{session.name}'"))
-                    output.warn(f"Failed to stop '{session.name}' (tmux unreachable, use --force)")
+                    if session.socket_path is not None and session.pid and session.pid > 0:
+                        output.warn(f"Failed to stop '{session.name}' (tmux unreachable, use --force)")
+                    else:
+                        output.warn(f"Failed to stop '{session.name}' (tmux unreachable)")
                     continue
 
         # Clean up agent socket only after confirming the server process is dead
         if (
             session.socket_path
+            and session.socket_path.startswith(AGENT_SOCKET_ROOT + "/")
             and session.pid
             and session.pid > 0
             and not _pid_alive(session.pid, target=target)
@@ -998,7 +1003,7 @@ def delete_session(
 
     # Clean up socket if the server is dead (don't remove a live socket)
     sock = session.socket_path
-    if sock:
+    if sock and sock.startswith(AGENT_SOCKET_ROOT + "/"):
         post_status = check_session_status(session, target=target)
         if post_status == SessionStatus.STOPPED:
             target.run(f"rm -f {shlex.quote(sock)}", sudo=True, check=False)
