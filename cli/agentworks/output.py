@@ -274,6 +274,10 @@ class SessionError(AgentworksError):
     """Error related to session operations."""
 
 
+class BrokenSessionError(SessionError):
+    """Session is BROKEN (PID alive but tmux unreachable). Requires --force."""
+
+
 class ConnectivityError(AgentworksError):
     """Error related to network, SSH, or Tailscale connectivity."""
 

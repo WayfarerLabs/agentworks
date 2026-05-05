@@ -12,6 +12,8 @@ import shlex
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from agentworks.ssh import ExecTarget
 
 RESTRICTED_CONFIG_PATH = "/opt/agentworks/tmux-session.conf"
@@ -223,10 +225,10 @@ def deploy_restricted_config(
 def tmux_cmd(base: str, socket_path: str | None = None, *, sudo: bool = False) -> str:
     """Build a tmux command string, optionally with ``-S`` and ``sudo``.
 
-    Use ``sudo=True`` for non-interactive operations on agent sockets
-    (kill, has-session, send-keys, capture-pane) to guarantee access
-    regardless of socket file permissions. Do NOT use sudo for interactive
-    attach -- that reintroduces the use_pty resize problem.
+    Session commands (has-session, kill-session, send-keys, capture-pane) do
+    NOT use sudo -- socket access goes through group permissions, and failures
+    surface as BROKEN status. ``sudo=True`` is only for infrastructure
+    operations (e.g. cleanup_stale_sockets probing sockets during setup).
     """
     cmd = f"tmux -S {shlex.quote(socket_path)} {base}" if socket_path else f"tmux {base}"
     return f"sudo -n {cmd}" if sudo else cmd
@@ -259,7 +261,7 @@ def create_session(
     run_as_root: RunCommand | None = None,
     admin_username: str | None = None,
     is_admin: bool = True,
-) -> str | None:
+) -> tuple[str | None, int | None]:
     """Create a locked-down tmux session.
 
     For admin mode, the command runs directly on the admin's default tmux
@@ -268,7 +270,7 @@ def create_session(
     the agent's uid.  The admin gains access via group permissions on the
     socket and the tmux ``server-access`` ACL.
 
-    Returns the socket path for agent-mode sessions, None for admin-mode.
+    Returns (socket_path, tmux_server_pid). socket_path is None for admin-mode.
     """
     q_session = shlex.quote(session_name)
     q_path = shlex.quote(workspace_path)
@@ -284,7 +286,12 @@ def create_session(
         if shell_cmd:
             cmd += f" {shlex.quote(shell_cmd)}"
         run_command(cmd)
-        return None
+        try:
+            pid_out = run_command("tmux display-message -p '#{pid}'", check=False)
+            pid: int | None = _parse_pid(getattr(pid_out, "stdout", ""), context="after session create")
+        except (RuntimeError, ValueError):
+            pid = None  # best-effort; auto-repair will recover on next access
+        return (None, pid)
     else:
         assert linux_user is not None
         assert run_as_root is not None, "run_as_root required for agent sessions"
@@ -342,7 +349,12 @@ def create_session(
         # Grant tmux server-access to all socket-group members
         _grant_server_access(run_command, linux_user, sock)
 
-        return sock
+        try:
+            pid_out = run_command(tmux_cmd("display-message -p '#{pid}'", sock), check=False)
+            pid = _parse_pid(getattr(pid_out, "stdout", ""), context="after session create")
+        except (RuntimeError, ValueError):
+            pid = None  # best-effort; auto-repair will recover on next access
+        return (sock, pid)
 
 
 def kill_session(
@@ -354,7 +366,7 @@ def kill_session(
     """Kill a session's tmux session. Returns True if the session existed."""
     q_session = shlex.quote(session_name)
     result = run_command(
-        tmux_cmd(f"kill-session -t {q_session}", socket_path, sudo=bool(socket_path)),
+        tmux_cmd(f"kill-session -t {q_session}", socket_path),
         check=False,
     )
     return getattr(result, "ok", True)
@@ -369,7 +381,7 @@ def session_exists(
     """Check if a session's tmux session is alive."""
     q_session = shlex.quote(session_name)
     result = run_command(
-        tmux_cmd(f"has-session -t {q_session}", socket_path, sudo=bool(socket_path)) + " 2>/dev/null",
+        tmux_cmd(f"has-session -t {q_session}", socket_path) + " 2>/dev/null",
         check=False,
     )
     return getattr(result, "ok", False)
@@ -385,7 +397,7 @@ def send_keys(
     """Send keys to a session's tmux session."""
     q_session = shlex.quote(session_name)
     run_command(
-        tmux_cmd(f"send-keys -t {q_session} {keys}", socket_path, sudo=bool(socket_path)),
+        tmux_cmd(f"send-keys -t {q_session} {keys}", socket_path),
         check=False,
     )
 
@@ -400,7 +412,92 @@ def capture_output(
     """Capture the scrollback buffer from a session."""
     q_session = shlex.quote(session_name)
     result = run_command(
-        tmux_cmd(f"capture-pane -t {q_session} -p -S -{lines}", socket_path, sudo=bool(socket_path)),
+        tmux_cmd(f"capture-pane -t {q_session} -p -S -{lines}", socket_path),
         check=False,
     )
     return getattr(result, "stdout", "") or ""
+
+
+def _parse_pid(raw: str, context: str) -> int:
+    """Parse a PID from tmux display-message output. Raises RuntimeError on failure."""
+    pid_str = raw.strip()
+    if not pid_str:
+        raise RuntimeError(f"tmux returned empty PID output ({context})")
+    try:
+        pid = int(pid_str)
+    except ValueError:
+        raise RuntimeError(f"tmux returned non-numeric PID: {pid_str!r} ({context})") from None
+    if pid <= 0:
+        raise RuntimeError(f"tmux returned invalid PID: {pid} ({context})")
+    return pid
+
+
+# -- PID-based liveness helpers --------------------------------------------
+
+
+def get_tmux_server_pid(
+    *,
+    target: ExecTarget,
+    socket_path: str | None = None,
+) -> int | None:
+    """Retrieve the PID of a running tmux server.
+
+    Returns None if the server is not running or unreachable.
+    """
+    cmd = tmux_cmd("display-message -p '#{pid}'", socket_path) + " 2>/dev/null"
+    result = target.run(cmd, check=False)
+    if not result.ok:
+        return None
+    pid_str = result.stdout.strip()
+    if not pid_str:
+        return None
+    try:
+        pid = int(pid_str)
+    except ValueError:
+        return None
+    return pid if pid > 0 else None
+
+
+def force_kill_tmux_server(
+    pid: int,
+    *,
+    target: ExecTarget,
+    socket_path: str | None = None,
+    log: Callable[[str], None] | None = None,
+) -> bool:
+    """Kill a tmux server by PID with SIGTERM -> SIGKILL escalation.
+
+    Cleans up socket file if present. Returns True if the process is dead.
+    """
+    if pid <= 1:
+        raise ValueError(f"refusing to kill PID {pid} (dangerous special value)")
+    import time
+
+    def _log(msg: str) -> None:
+        if log:
+            log(msg)
+
+    # SIGTERM
+    _log(f"Sending SIGTERM to PID {pid}")
+    target.run(f"kill {pid}", sudo=True, check=False)
+    time.sleep(2)
+
+    # Check if still alive
+    if target.run(f"test -d /proc/{pid}", check=False).ok:
+        _log(f"PID {pid} survived SIGTERM, escalating to SIGKILL")
+        target.run(f"kill -9 {pid}", sudo=True, check=False)
+        time.sleep(1)
+
+    # Final check
+    if target.run(f"test -d /proc/{pid}", check=False).ok:
+        _log(f"PID {pid} survived SIGKILL")
+        return False  # process survived
+
+    _log(f"PID {pid} is dead")
+
+    # Clean up stale socket (validate path is under expected root)
+    if socket_path and socket_path.startswith(AGENT_SOCKET_ROOT + "/"):
+        _log(f"Removing stale socket {socket_path}")
+        target.run(f"rm -f {shlex.quote(socket_path)}", sudo=True, check=False)
+
+    return True

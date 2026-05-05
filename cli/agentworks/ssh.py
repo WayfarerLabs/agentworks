@@ -64,6 +64,10 @@ def admin_exec_target(
     )
 
 
+# SSH transport failure exit code (connection refused, host unreachable, etc.)
+SSH_TRANSPORT_ERROR = 255
+
+
 @dataclass
 class SSHResult:
     """Result of a remote command execution."""

@@ -163,7 +163,7 @@ def delete_agent(
     agent_sessions = [s for s in all_sessions if s.agent_name == name]
     if agent_sessions and not force:
         for s in agent_sessions:
-            output.detail(f"{s.name}  [{s.status}]")
+            output.detail(f"{s.name}")
         raise AgentError(
             f"agent '{name}' has {len(agent_sessions)} session(s). Delete them first, or use --force."
         )
@@ -181,19 +181,43 @@ def delete_agent(
 
     ssh_logger = SSHLogger(vm.name, "agent-delete")
 
-    # Kill running sessions for this agent
+    # Kill running sessions for this agent (status-aware)
     if agent_sessions:
         from functools import partial
 
-        from agentworks.sessions.manager import _effective_socket_path
-        from agentworks.sessions.tmux import kill_session
+        from agentworks.db import SessionStatus
+        from agentworks.sessions.manager import check_session_status, ensure_pids_batch
+        from agentworks.sessions.tmux import force_kill_tmux_server, kill_session
         from agentworks.ssh import admin_exec_target, run
 
         target = admin_exec_target(vm, config)
         run_command = partial(run, target, logger=ssh_logger)
+        agent_sessions = ensure_pids_batch(agent_sessions, db=db, config=config)
+        unstoppable: list[str] = []
         for session in agent_sessions:
-            sock = _effective_socket_path(db, session)
-            kill_session(session.name, run_command=run_command, socket_path=sock)
+            status = check_session_status(session, target=target)
+            if status == SessionStatus.OK:
+                if not kill_session(session.name, run_command=run_command, socket_path=session.socket_path):
+                    # Race: session may have exited between check and kill. Recheck.
+                    recheck = check_session_status(session, target=target)
+                    if recheck != SessionStatus.STOPPED:
+                        unstoppable.append(session.name)
+                        continue
+            elif status == SessionStatus.BROKEN:
+                if session.pid and session.pid > 0 and force_kill_tmux_server(
+                    session.pid, target=target, socket_path=session.socket_path,
+                ):
+                    pass  # killed successfully
+                else:
+                    unstoppable.append(session.name)
+            elif status == SessionStatus.UNKNOWN:
+                unstoppable.append(session.name)
+        if unstoppable:
+            raise AgentError(
+                f"cannot delete agent '{name}': {len(unstoppable)} session(s) could not be stopped "
+                f"({', '.join(unstoppable)}). Resolve manually before retrying."
+            )
+        for session in agent_sessions:
             db.delete_session(session.name)
         output.detail(f"Deleted {len(agent_sessions)} session(s)")
 
@@ -345,7 +369,7 @@ def describe_agent(
     output.info(f"\nSessions ({len(agent_sessions)}):")
     if agent_sessions:
         for s in agent_sessions:
-            output.detail(f"{s.name}  [{s.template}]  {s.status}  workspace: {s.workspace_name}")
+            output.detail(f"{s.name}  [{s.template}]  workspace: {s.workspace_name}")
     else:
         output.detail("(none)")
 

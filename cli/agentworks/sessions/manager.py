@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import re
 import shlex
 import sys
@@ -11,8 +12,9 @@ from typing import TYPE_CHECKING
 import typer
 
 from agentworks import output
-from agentworks.db import SessionMode, SessionStatus
-from agentworks.ssh import admin_exec_target
+from agentworks.db import PID_STOPPED, SessionMode, SessionStatus
+from agentworks.sessions.tmux import AGENT_SOCKET_ROOT
+from agentworks.ssh import SSH_TRANSPORT_ERROR, admin_exec_target
 
 _ENV_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
@@ -50,46 +52,142 @@ def _resolve_session_linux_user(db: Database, session: SessionRow, vm: VMRow) ->
     return vm.admin_username
 
 
-def _effective_socket_path(db: Database, session: SessionRow) -> str | None:
-    """Return the socket path for a session, deriving it for migrated agent sessions.
-
-    Migrated sessions have socket_path=NULL in the DB. For agent-mode sessions,
-    we can derive the path from the agent's linux_user and the session name.
-    """
-    if session.socket_path:
-        return session.socket_path
-    if not session.agent_name:
-        return None
-    from agentworks.sessions.tmux import agent_socket_path
-
-    agent = db.get_agent(session.agent_name)
-    if agent is None:
-        return None
-    return agent_socket_path(agent.linux_user, session.name)
-
-
-def _session_alive(
-    session_name: str,
-    *,
-    run_command: RunCommand,
-    socket_path: str | None,
-) -> bool:
-    """Check if a session's tmux session is alive on its expected server."""
-    from agentworks.sessions.tmux import session_exists
-
-    return session_exists(session_name, run_command=run_command, socket_path=socket_path)
-
 
 def _kill_session(
     session_name: str,
     *,
     run_command: RunCommand,
     socket_path: str | None,
-) -> None:
-    """Kill a session on its expected tmux server."""
+) -> bool:
+    """Kill a session on its expected tmux server. Returns True if successful."""
     from agentworks.sessions.tmux import kill_session
 
-    kill_session(session_name, run_command=run_command, socket_path=socket_path)
+    return kill_session(session_name, run_command=run_command, socket_path=socket_path)
+
+
+def _repair_session_pid(
+    session: SessionRow,
+    *,
+    target: ExecTarget,
+    db: Database,
+) -> bool:
+    """Core repair logic for a single session. Returns True if the DB was updated.
+
+    Raises SessionError if the session is alive but PID/boot_id can't be recovered,
+    or if the tmux server is unreachable (permissions issue).
+    """
+    from agentworks.sessions.tmux import get_tmux_server_pid, tmux_cmd
+
+    sock = session.socket_path
+    q_session = shlex.quote(session.name)
+
+    # Step 1: try has-session (the primary liveness check)
+    has_cmd = tmux_cmd(f"has-session -t {q_session}", sock) + " 2>/dev/null"
+    has_result = target.run(has_cmd, check=False)
+    if has_result.returncode == SSH_TRANSPORT_ERROR:
+        raise output.SessionError(f"cannot reach VM for session '{session.name}' (SSH connection failed)")
+    if has_result.ok:
+        # Session is alive -- recover PID + boot ID
+        pid = get_tmux_server_pid(target=target, socket_path=sock)
+        boot_id = _get_boot_id(target) if pid is not None else None
+        if pid is not None and boot_id is not None:
+            db.update_session_pid(session.name, pid, boot_id=boot_id)
+            output.warn(f"Recovered PID {pid} for session '{session.name}'")
+            return True
+        raise output.SessionError(
+            f"session '{session.name}' is alive but PID/boot ID recovery failed. "
+            "Investigate the tmux server manually."
+        )
+
+    # Step 2: has-session failed -- determine if genuinely stopped or ambiguous
+    if sock and target.run(f"test -e {shlex.quote(sock)}", sudo=True, check=False).ok:
+        # Socket exists. Probe with sudo to distinguish stale from unreachable.
+        probe_cmd = tmux_cmd("list-sessions", sock, sudo=True) + " 2>/dev/null"
+        if target.run(probe_cmd, check=False).ok:
+            raise output.SessionError(
+                f"session '{session.name}' has a live tmux server but it is unreachable. "
+                "This may indicate a permissions issue. Investigate manually."
+            )
+        # Stale socket, server is dead
+        db.update_session_pid(session.name, PID_STOPPED)
+        output.warn(f"Session '{session.name}' is not running, marked stopped")
+        return True
+
+    # No socket (or admin session) and has-session failed -- genuinely stopped
+    db.update_session_pid(session.name, PID_STOPPED)
+    output.warn(f"Session '{session.name}' is not running, marked stopped")
+    return True
+
+
+def _needs_repair(session: SessionRow) -> bool:
+    """True if the session is missing PID or boot_id and needs auto-repair."""
+    if session.pid == PID_STOPPED:
+        return False
+    return session.pid is None or session.boot_id is None
+
+
+def _ensure_pid(session: SessionRow, *, target: ExecTarget, db: Database) -> SessionRow:
+    """Auto-recover PID + boot ID for a session missing either.
+
+    Strict gate: after this returns, the session is guaranteed to be either
+    PID_STOPPED or have valid PID + boot_id. Raises SessionError if the
+    session cannot be resolved.
+    """
+    if not _needs_repair(session):
+        return session
+    _repair_session_pid(session, target=target, db=db)  # raises on failure
+    result = db.get_session(session.name)
+    assert result is not None
+    return result
+
+
+def ensure_pids_batch(sessions: list[SessionRow], *, db: Database, config: Config) -> list[SessionRow]:
+    """Auto-recover PID + boot ID for sessions missing either. Returns updated list."""
+    need_repair = [s for s in sessions if _needs_repair(s)]
+    if not need_repair:
+        return sessions
+
+    # Group by VM (not workspace) to reuse one ExecTarget per VM
+    by_vm: dict[str, list[SessionRow]] = {}
+    vm_cache: dict[str, ExecTarget] = {}
+    for s in need_repair:
+        ws = db.get_workspace(s.workspace_name)
+        if not ws or ws.type != "vm" or not ws.vm_name:
+            continue
+        if ws.vm_name not in vm_cache:
+            vm = db.get_vm(ws.vm_name)
+            if not vm or not vm.tailscale_host:
+                continue
+            try:
+                vm_cache[ws.vm_name] = admin_exec_target(vm, config)
+            except Exception as exc:
+                output.warn(f"Cannot reach VM '{ws.vm_name}': {exc}")
+                continue
+        by_vm.setdefault(ws.vm_name, []).append(s)
+
+    repaired_names: set[str] = set()
+    for vm_name, vm_sessions in by_vm.items():
+        target = vm_cache[vm_name]
+        for session in vm_sessions:
+            try:
+                if _repair_session_pid(session, target=target, db=db):
+                    repaired_names.add(session.name)
+            except output.SessionError as exc:
+                output.warn(str(exc))
+            except Exception as exc:
+                output.warn(f"Failed to repair session '{session.name}': {exc}")
+
+    # Return original list with repaired sessions refreshed from DB
+    if not repaired_names:
+        return sessions
+    result = []
+    for s in sessions:
+        if s.name in repaired_names:
+            refreshed = db.get_session(s.name)
+            result.append(refreshed if refreshed else s)
+        else:
+            result.append(s)
+    return result
 
 
 def _require_workspace(db: Database, name: str) -> WorkspaceRow:
@@ -157,11 +255,25 @@ def _regenerate_tmuxinator(
     from agentworks.workspaces.tmuxinator import generate_config
 
     sessions = db.list_sessions(workspace_name=ws.name)
-    # Build effective socket paths for tmuxinator (migrated sessions have NULL socket_path)
-    socket_paths = {s.name: _effective_socket_path(db, s) for s in sessions}
+    # Build socket paths for tmuxinator (admin sessions have NULL, agent sessions always set)
+    socket_paths = {s.name: s.socket_path for s in sessions}
     config_text = generate_config(ws.name, ws.workspace_path, sessions=sessions, socket_paths=socket_paths)
     target = admin_exec_target(vm, config)
     write_file(target, f"{ws.workspace_path}/.tmuxinator.yml", config_text, logger=logger)
+
+
+def filter_sessions(
+    db: Database,
+    *,
+    workspace_name: str | None = None,
+    vm_name: str | None = None,
+) -> list[SessionRow]:
+    """Load sessions with optional workspace/VM filters."""
+    sessions = db.list_sessions(workspace_name=workspace_name)
+    if vm_name is not None:
+        vm_workspaces = {ws.name for ws in db.list_workspaces(vm_name=vm_name)}
+        sessions = [s for s in sessions if s.workspace_name in vm_workspaces]
+    return sessions
 
 
 def _resolve_template(config: Config, template_name: str | None) -> ResolvedSessionTemplate:
@@ -219,22 +331,157 @@ def _build_session_command(
     return " && ".join(parts)
 
 
-def _reconcile_status(
+# -- Liveness checks -------------------------------------------------------
+
+
+def _pid_alive(pid: int, *, target: ExecTarget) -> bool:
+    """Check if a PID is alive via /proc."""
+    return target.run(f"test -d /proc/{pid}", check=False).ok
+
+
+def _get_boot_id(target: ExecTarget) -> str | None:
+    """Read the current VM boot ID. Returns None on failure."""
+    result = target.run("cat /proc/sys/kernel/random/boot_id", check=False)
+    boot_id = (getattr(result, "stdout", "") or "").strip()
+    return boot_id or None
+
+
+def check_session_status(
     session: SessionRow,
     *,
-    run_command: RunCommand,
-    db: Database,
-) -> str:
-    """Check tmux session and reconcile session status in the DB."""
-    sock = _effective_socket_path(db, session)
-    alive = _session_alive(session.name, run_command=run_command, socket_path=sock)
-    if session.status == SessionStatus.RUNNING.value and not alive:
-        db.update_session_status(session.name, SessionStatus.STOPPED)
-        return SessionStatus.STOPPED.value
-    if session.status == SessionStatus.STOPPED.value and alive:
-        db.update_session_status(session.name, SessionStatus.RUNNING)
-        return SessionStatus.RUNNING.value
-    return session.status
+    target: ExecTarget,
+) -> SessionStatus:
+    """Determine session status. Dispatches by session type.
+
+    Pure function -- no DB side effects.
+    """
+    if session.pid == PID_STOPPED:
+        return SessionStatus.STOPPED
+    if session.pid is None or session.boot_id is None:
+        return SessionStatus.UNKNOWN
+
+    if session.mode == SessionMode.AGENT.value and session.socket_path is not None:
+        return _check_dedicated_agent_session(session, target=target)
+    if session.mode == SessionMode.ADMIN.value and session.socket_path is None:
+        return _check_shared_admin_session(session, target=target)
+    raise RuntimeError(f"unexpected session config: mode={session.mode}, socket_path={session.socket_path}")
+
+
+def _check_dedicated_agent_session(session: SessionRow, *, target: ExecTarget) -> SessionStatus:
+    """Agent sessions with their own tmux server and socket."""
+    from agentworks.sessions.tmux import tmux_cmd
+
+    q_session = shlex.quote(session.name)
+    cmd = tmux_cmd(f"has-session -t {q_session}", session.socket_path) + " 2>/dev/null"
+    result = target.run(cmd, check=False)
+    if result.returncode == SSH_TRANSPORT_ERROR:
+        return SessionStatus.UNKNOWN  # SSH transport failure, not a session state
+    if result.ok:
+        return SessionStatus.OK
+
+    # has-session failed -- STOPPED or BROKEN?
+    assert session.pid is not None and session.pid > 0
+    current_boot = _get_boot_id(target)
+    if current_boot is None:
+        return SessionStatus.UNKNOWN  # can't verify boot cycle, unsafe to offer --force
+    if session.boot_id is not None and session.boot_id != current_boot:
+        return SessionStatus.STOPPED  # stale boot, PID is meaningless
+    if not _pid_alive(session.pid, target=target):
+        return SessionStatus.STOPPED  # process is dead
+    return SessionStatus.BROKEN  # same boot, process alive, socket unreachable
+
+
+def _check_shared_admin_session(session: SessionRow, *, target: ExecTarget) -> SessionStatus:
+    """Admin sessions on the default tmux server. BROKEN does not apply."""
+    from agentworks.sessions.tmux import tmux_cmd
+
+    q_session = shlex.quote(session.name)
+    cmd = tmux_cmd(f"has-session -t {q_session}") + " 2>/dev/null"
+    result = target.run(cmd, check=False)
+    if result.returncode == SSH_TRANSPORT_ERROR:
+        return SessionStatus.UNKNOWN  # SSH transport failure, not a session state
+    if result.ok:
+        return SessionStatus.OK
+    return SessionStatus.STOPPED
+
+
+def batch_check_status(
+    sessions: list[SessionRow],
+    *,
+    target: ExecTarget,
+) -> dict[str, SessionStatus]:
+    """Check status for multiple sessions in one SSH call per VM.
+
+    Returns {session_name: SessionStatus}. Sessions with pid=None or PID_STOPPED
+    are excluded (callers handle those via the enum directly).
+    """
+    from agentworks.sessions.tmux import tmux_cmd
+
+    checkable = [s for s in sessions if s.pid is not None and s.pid > 0 and s.boot_id is not None]
+    if not checkable:
+        return {}
+
+    # Build compound command: has-session with inline boot_id + PID for agent failures
+    parts = []
+    for s in checkable:
+        q_session = shlex.quote(s.name)  # quoted for tmux -t argument
+        name = s.name  # raw for output field (names are validated, no shell-special chars)
+        has_cmd = tmux_cmd(f"has-session -t {q_session}", s.socket_path)
+        if s.mode == SessionMode.AGENT.value and s.socket_path is not None:
+            # Agent session: inline follow-up on failure
+            parts.append(
+                f"{has_cmd} 2>/dev/null; "
+                f"if [ $? -ne 0 ]; then "
+                f"BOOT=$(cat /proc/sys/kernel/random/boot_id); "
+                f"test -d /proc/{s.pid}; "
+                f"echo \"S:{name}:1:$BOOT:$?\"; "
+                f"else echo \"S:{name}:0\"; fi"
+            )
+        elif s.mode == SessionMode.ADMIN.value and s.socket_path is None:
+            # Admin session: has-session only
+            parts.append(f"{has_cmd} 2>/dev/null; echo \"S:{name}:$?\"")
+        else:
+            raise RuntimeError(f"unexpected session config: mode={s.mode}, socket_path={s.socket_path}")
+    cmd = "; ".join(parts)
+
+    result = target.run(cmd, check=False)
+    stdout = getattr(result, "stdout", "") or ""
+
+    status_map: dict[str, SessionStatus] = {}
+    # Build a quick lookup for stored boot_ids
+    boot_ids = {s.name: s.boot_id for s in checkable}
+
+    for line in stdout.strip().splitlines():
+        if not line.startswith("S:"):
+            continue
+        fields = line.split(":", maxsplit=4)
+        if len(fields) < 3:
+            continue
+        name = fields[1]
+        exit_code = fields[2]
+
+        if exit_code == "0":
+            status_map[name] = SessionStatus.OK
+        elif len(fields) == 5:
+            # Agent session failure: S:name:1:<boot_id>:<pid_exit>
+            current_boot = fields[3]
+            pid_exit = fields[4]
+            if not current_boot:
+                # Boot ID read failed -- can't safely determine STOPPED vs BROKEN
+                pass  # omit from map, callers treat missing entries as unknown
+            else:
+                stored_boot = boot_ids.get(name)
+                if stored_boot and stored_boot != current_boot:
+                    status_map[name] = SessionStatus.STOPPED  # stale boot
+                elif pid_exit == "0":
+                    status_map[name] = SessionStatus.BROKEN  # PID alive, socket unreachable
+                else:
+                    status_map[name] = SessionStatus.STOPPED  # PID dead
+        else:
+            # Admin session failure
+            status_map[name] = SessionStatus.STOPPED
+
+    return status_map
 
 
 # -- Public API ------------------------------------------------------------
@@ -316,7 +563,7 @@ def create_session(
     command = _build_session_command(template, session_name=name, workspace_name=workspace_name)
 
     try:
-        sock = create_tmux_session(
+        sock, pid = create_tmux_session(
             name,
             ws.workspace_path,
             command,
@@ -333,9 +580,17 @@ def create_session(
             db.delete_agent_grant(resolved_agent_name, workspace_name, "implicit", session_name=name)
         raise
 
-    # Persist socket path
+    # Persist socket path, PID, and boot ID
     if sock:
         db.update_session_socket_path(name, sock)
+    if pid is not None:
+        boot_id = _get_boot_id(target)
+        if boot_id is not None:
+            db.update_session_pid(name, pid, boot_id=boot_id)
+        else:
+            output.warn(f"Could not read boot ID for session '{name}', PID not stored")
+    else:
+        output.warn(f"Could not capture PID for session '{name}', will auto-repair on next access")
 
     mode_label = f"agent: {resolved_agent_name}" if resolved_agent_name else "admin"
     output.info(f"Session '{name}' started ({mode_label}, template: {template.name})")
@@ -347,38 +602,141 @@ def create_session(
     add_session_to_console(name, run_command=run_command, socket_path=sock)
 
 
+def _execute_stop(
+    targets: list[tuple[SessionRow, ExecTarget]],
+    *,
+    db: Database,
+    force: bool = False,
+) -> list[tuple[str, str]]:
+    """Core stop logic: C-c all, single grace period, kill survivors.
+
+    Handles both single and batch stops. Returns list of (name, error) failures.
+    """
+    import time
+
+    from agentworks.sessions.tmux import force_kill_tmux_server, send_keys
+    from agentworks.ssh import run
+
+    if not targets:
+        return []
+
+    # Phase 1: send C-c to all sessions (best effort).
+    # This gives processes that handle SIGINT gracefully (save state, flush)
+    # a chance to clean up before we kill the session. In practice, tmux
+    # kill-session sends SIGHUP which cascades through the shell to children,
+    # so the C-c is rarely necessary. Consider removing the C-c + grace
+    # period if the 5-second wait becomes a pain point.
+    output.detail("Sending C-c to stop any running commands...")
+    for session, target in targets:
+        sock = session.socket_path
+        run_cmd = partial(run, target, logger=target.logger)
+        with contextlib.suppress(Exception):
+            send_keys(session.name, "C-c", run_command=run_cmd, socket_path=sock)
+
+    # Phase 2: single grace period
+    output.detail(f"Waiting {_STOP_GRACE_SECONDS}s for graceful exit...")
+    time.sleep(_STOP_GRACE_SECONDS)
+
+    # Phase 3: check survivors per VM (reuse existing targets)
+    by_target: dict[int, tuple[ExecTarget, list[SessionRow]]] = {}
+    for session, target in targets:
+        tid = id(target)
+        if tid not in by_target:
+            by_target[tid] = (target, [])
+        by_target[tid][1].append(session)
+
+    survivor_map: dict[str, SessionStatus] = {}
+    for target, group in by_target.values():
+        survivor_map.update(batch_check_status(group, target=target))
+
+    failed: list[tuple[str, str]] = []
+
+    for session, target in targets:
+        status = survivor_map.get(session.name)
+        if status is None:
+            # Status check failed (SSH error or parse issue) -- don't assume stopped
+            failed.append((session.name, "could not verify session status after stop"))
+            output.warn(f"Could not verify status of '{session.name}', not marking as stopped")
+            continue
+        if status == SessionStatus.OK or status == SessionStatus.BROKEN:
+            output.detail(f"Killing session '{session.name}'")
+            sock = session.socket_path
+            run_cmd = partial(run, target, logger=target.logger)
+            killed = _kill_session(session.name, run_command=run_cmd, socket_path=sock)
+            if not killed:
+                # Race condition: session may have exited between survivor check and kill.
+                # Recheck before treating as failure.
+                recheck = check_session_status(session, target=target)
+                if recheck == SessionStatus.STOPPED:
+                    pass  # session exited on its own, that's success
+                elif force and session.socket_path is not None and session.pid and session.pid > 0:
+                    # Escalate to PID kill for agent sessions only (admin shares PID)
+                    output.detail(f"tmux kill failed for '{session.name}', force-killing PID {session.pid}")
+                    if not force_kill_tmux_server(
+                        session.pid, target=target, socket_path=session.socket_path, log=output.detail,
+                    ):
+                        failed.append((session.name, f"PID {session.pid} survived force-kill"))
+                        continue
+                else:
+                    failed.append((session.name, f"tmux kill-session failed for '{session.name}'"))
+                    if session.socket_path is not None and session.pid and session.pid > 0:
+                        output.warn(f"Failed to stop '{session.name}' (tmux unreachable, use --force)")
+                    else:
+                        output.warn(f"Failed to stop '{session.name}' (tmux unreachable)")
+                    continue
+
+        # Clean up agent socket only after confirming the server process is dead
+        if (
+            session.socket_path
+            and session.socket_path.startswith(AGENT_SOCKET_ROOT + "/")
+            and session.pid
+            and session.pid > 0
+            and not _pid_alive(session.pid, target=target)
+        ):
+            target.run(f"rm -f {shlex.quote(session.socket_path)}", sudo=True, check=False)
+
+        db.update_session_pid(session.name, PID_STOPPED)
+        output.info(f"Session '{session.name}' stopped")
+
+    return failed
+
+
 def stop_session(
     db: Database,
     config: Config,
     *,
     name: str,
+    force: bool = False,
 ) -> None:
     """Stop a running session. Sends C-c first, then kills after a grace period."""
-    import time
-
-    from agentworks.sessions.tmux import send_keys
+    from agentworks.sessions.tmux import force_kill_tmux_server
 
     session = _require_session(db, name)
-    _ws, _vm, run_command, _, _target = _prepare_vm(db, config, session.workspace_name, operation="session-stop")
+    _ws, _vm, _run_command, _, target = _prepare_vm(db, config, session.workspace_name, operation="session-stop")
+    session = _ensure_pid(session, target=target, db=db)
+    status = check_session_status(session, target=target)
 
-    if session.status == SessionStatus.STOPPED.value:
+    if status == SessionStatus.STOPPED:
         output.info(f"Session '{name}' is already stopped")
         return
+    # UNKNOWN is impossible here -- _ensure_pid raises on unresolvable sessions
+    if status == SessionStatus.BROKEN:
+        if not force:
+            raise output.BrokenSessionError(
+                f"session '{name}' is broken (PID alive but tmux unreachable). Use --force to kill the process."
+            )
+        output.warn(f"Session '{name}' is broken (tmux unreachable), force-killing via PID")
+        assert session.pid is not None
+        if not force_kill_tmux_server(session.pid, target=target, socket_path=session.socket_path, log=output.detail):
+            raise output.SessionError(f"failed to kill PID {session.pid} for session '{name}'")
+        db.update_session_pid(name, PID_STOPPED)
+        output.info(f"Session '{name}' force-stopped")
+        return
 
-    sock = _effective_socket_path(db, session)
-
-    # Send C-c to the running process
-    send_keys(name, "C-c", run_command=run_command, socket_path=sock)
-
-    # Wait for graceful exit
-    time.sleep(_STOP_GRACE_SECONDS)
-
-    # Kill if still alive
-    if _session_alive(name, run_command=run_command, socket_path=sock):
-        _kill_session(name, run_command=run_command, socket_path=sock)
-
-    db.update_session_status(name, SessionStatus.STOPPED)
-    output.info(f"Session '{name}' stopped")
+    # OK -- delegate to shared stop logic
+    failed = _execute_stop([(session, target)], db=db, force=force)
+    if failed:
+        raise output.SessionError(f"failed to stop session '{name}': {failed[0][1]}")
 
 
 def restart_session(
@@ -387,8 +745,9 @@ def restart_session(
     *,
     name: str,
     force: bool = False,
+    yes: bool = False,
 ) -> None:
-    """Restart a session. Errors if running unless --force is passed."""
+    """Restart a session. Prompts if running (--yes to skip). --force for BROKEN."""
     from agentworks.sessions.tmux import (
         create_session as create_tmux_session,
     )
@@ -400,14 +759,27 @@ def restart_session(
     ws, vm, run_command, run_as_root, target = _prepare_vm(
         db, config, session.workspace_name, operation="session-restart",
     )
-    sock = _effective_socket_path(db, session)
+    session = _ensure_pid(session, target=target, db=db)
+    status = check_session_status(session, target=target)
 
-    if _session_alive(name, run_command=run_command, socket_path=sock):
+    # UNKNOWN is impossible here -- _ensure_pid raises on unresolvable sessions
+    if status == SessionStatus.BROKEN:
         if not force:
-            raise output.SessionError(
-                f"session '{name}' is still running. Stop it first, or use --force."
+            raise output.BrokenSessionError(
+                f"session '{name}' is broken (PID alive but tmux unreachable). Use --force to restart."
             )
-        _kill_session(name, run_command=run_command, socket_path=sock)
+        from agentworks.sessions.tmux import force_kill_tmux_server
+
+        output.warn(f"Session '{name}' is broken (tmux unreachable), force-killing via PID")
+        assert session.pid is not None
+        if not force_kill_tmux_server(session.pid, target=target, socket_path=session.socket_path, log=output.detail):
+            raise output.SessionError(f"failed to kill PID {session.pid} for session '{name}'")
+    elif status == SessionStatus.OK:
+        if not yes and not output.confirm(f"Session '{name}' is running. Restart?"):
+            raise output.UserAbort("restart cancelled")
+        sock = session.socket_path
+        if not _kill_session(name, run_command=run_command, socket_path=sock):
+            raise output.SessionError(f"failed to stop session '{name}' for restart")
 
     template = _resolve_template(config, session.template)
     deploy_restricted_config(run_command, history_limit=config.session.history_limit)
@@ -422,31 +794,110 @@ def restart_session(
     is_admin = session.mode == SessionMode.ADMIN.value
     linux_user = _resolve_session_linux_user(db, session, vm)
 
-    new_sock = create_tmux_session(
-        name,
-        ws.workspace_path,
-        command,
-        linux_user,
-        run_command=run_command,
-        target=target,
-        run_as_root=run_as_root,
-        admin_username=vm.admin_username,
-        is_admin=is_admin,
-    )
+    try:
+        new_sock, pid = create_tmux_session(
+            name,
+            ws.workspace_path,
+            command,
+            linux_user,
+            run_command=run_command,
+            target=target,
+            run_as_root=run_as_root,
+            admin_username=vm.admin_username,
+            is_admin=is_admin,
+        )
+    except RuntimeError as exc:
+        if "already has an active tmux server" in str(exc):
+            raise output.SessionError(
+                f"session '{name}' has an active tmux server that was not detected by the status check. "
+                "Use 'session stop --force' to kill it, then retry."
+            ) from exc
+        raise
 
-    # Persist socket path if it differs from what's stored. Compare against
-    # session.socket_path (not the derived effective path) so migrated sessions
-    # with NULL socket_path get backfilled on restart.
+    # Persist socket path if it differs from what's stored.
     if new_sock != session.socket_path:
         db.update_session_socket_path(name, new_sock)
+    if pid is not None:
+        boot_id = _get_boot_id(target)
+        if boot_id is not None:
+            db.update_session_pid(name, pid, boot_id=boot_id)
+        else:
+            output.warn(f"Could not read boot ID for session '{name}', PID not stored")
+    else:
+        output.warn(f"Could not capture PID for session '{name}', will auto-repair on next access")
 
-    db.update_session_status(name, SessionStatus.RUNNING)
     output.info(f"Session '{name}' restarted")
 
     _regenerate_tmuxinator(db, config, vm, ws)
     from agentworks.sessions.console import add_session_to_console
 
     add_session_to_console(name, run_command=run_command, socket_path=new_sock)
+
+
+def stop_all_sessions(
+    db: Database,
+    config: Config,
+    *,
+    vm_name: str | None = None,
+    workspace_name: str | None = None,
+    force: bool = False,
+) -> None:
+    """Stop all running sessions, optionally filtered by VM or workspace."""
+    sessions = filter_sessions(db, workspace_name=workspace_name, vm_name=vm_name)
+
+    # Auto-repair NULL-PID sessions, then batch check
+    sessions = ensure_pids_batch(sessions, db=db, config=config)
+    status_map = batch_check_all_sessions(sessions, db=db, config=config)
+
+    # Error if any sessions are still unknown after auto-repair.
+    # PID_STOPPED sessions are known-stopped (excluded from status_map by design).
+    unknown = [
+        s for s in sessions
+        if s.pid != PID_STOPPED
+        and (s.pid is None or s.boot_id is None or s.name not in status_map)
+    ]
+    if unknown:
+        names = ", ".join(s.name for s in unknown)
+        raise output.SessionError(
+            f"{len(unknown)} session(s) have unknown status after auto-repair ({names}). "
+            "Resolve manually before retrying."
+        )
+
+    broken = [s for s in sessions if status_map.get(s.name) == SessionStatus.BROKEN]
+    if broken and not force:
+        names = ", ".join(s.name for s in broken)
+        output.warn(f"Skipping {len(broken)} broken session(s) ({names}). Use --force to kill.")
+
+    ok_statuses = {SessionStatus.OK}
+    if force:
+        ok_statuses.add(SessionStatus.BROKEN)
+    alive_sessions = [s for s in sessions if status_map.get(s.name) in ok_statuses]
+
+    if not alive_sessions:
+        output.info("No running sessions to stop.")
+        return
+
+    output.info(f"Stopping {len(alive_sessions)} session(s)...")
+
+    # Resolve VM targets (reuse across sessions on the same VM)
+    vm_targets: dict[str, ExecTarget] = {}
+    for s in alive_sessions:
+        ws = db.get_workspace(s.workspace_name)
+        if ws and ws.vm_name and ws.vm_name not in vm_targets:
+            vm = db.get_vm(ws.vm_name)
+            if vm and vm.tailscale_host:
+                vm_targets[ws.vm_name] = admin_exec_target(vm, config)
+
+    # Build (session, target) pairs for _execute_stop
+    stop_targets: list[tuple[SessionRow, ExecTarget]] = []
+    for s in alive_sessions:
+        ws = db.get_workspace(s.workspace_name)
+        if ws and ws.vm_name and ws.vm_name in vm_targets:
+            stop_targets.append((s, vm_targets[ws.vm_name]))
+
+    failed = _execute_stop(stop_targets, db=db, force=force)
+    if failed:
+        raise output.SessionError(f"{len(failed)} session(s) failed to stop.")
 
 
 def restart_all_sessions(
@@ -456,21 +907,42 @@ def restart_all_sessions(
     vm_name: str | None = None,
     workspace_name: str | None = None,
     include_running: bool = False,
+    force: bool = False,
 ) -> None:
-    """Restart all stopped sessions, optionally filtered by VM or workspace.
+    """Restart sessions, optionally filtered by VM or workspace.
 
-    If include_running is True, running sessions are killed and restarted too.
+    With include_running=False (--all-stopped), only stopped sessions are
+    restarted. With include_running=True (--all), all sessions are targeted;
+    if any are running, the caller should have prompted or passed yes=True.
     """
-    sessions = db.list_sessions(workspace_name=workspace_name)
+    sessions = filter_sessions(db, workspace_name=workspace_name, vm_name=vm_name)
 
-    # Filter by VM if requested (requires workspace -> VM lookup)
-    if vm_name is not None:
-        vm_workspaces = {ws.name for ws in db.list_workspaces(vm_name=vm_name)}
-        sessions = [s for s in sessions if s.workspace_name in vm_workspaces]
+    # Auto-repair NULL-PID sessions, then batch check
+    sessions = ensure_pids_batch(sessions, db=db, config=config)
+    status_map = batch_check_all_sessions(sessions, db=db, config=config)
 
-    # Filter by status
+    # Error if any sessions are still unknown after auto-repair.
+    # PID_STOPPED sessions are known-stopped (excluded from status_map by design).
+    unknown = [
+        s for s in sessions
+        if s.pid != PID_STOPPED
+        and (s.pid is None or s.boot_id is None or s.name not in status_map)
+    ]
+    if unknown:
+        names = ", ".join(s.name for s in unknown)
+        raise output.SessionError(
+            f"{len(unknown)} session(s) have unknown status after auto-repair ({names}). "
+            "Resolve manually before retrying."
+        )
+
     if not include_running:
-        sessions = [s for s in sessions if s.status == SessionStatus.STOPPED.value]
+        # Only stopped sessions
+        sessions = [
+            s
+            for s in sessions
+            if s.pid == PID_STOPPED
+            or status_map.get(s.name) == SessionStatus.STOPPED
+        ]
 
     if not sessions:
         output.info("No matching sessions to restart.")
@@ -480,12 +952,16 @@ def restart_all_sessions(
     failed: list[tuple[str, str]] = []
     for session in sessions:
         try:
-            restart_session(
-                db,
-                config,
-                name=session.name,
-                force=include_running,
-            )
+            restart_session(db, config, name=session.name, force=force, yes=include_running)
+        except output.BrokenSessionError as exc:
+            if not force:
+                output.warn(f"Skipping '{session.name}': {exc}")
+            else:
+                failed.append((session.name, str(exc)))
+                output.warn(f"Error restarting '{session.name}': {exc}")
+        except output.SessionError as exc:
+            failed.append((session.name, str(exc)))
+            output.warn(f"Error restarting '{session.name}': {exc}")
         except Exception as exc:
             failed.append((session.name, str(exc)))
             output.warn(f"Error restarting '{session.name}': {exc}")
@@ -499,36 +975,49 @@ def delete_session(
     config: Config,
     *,
     name: str,
+    force: bool = False,
     yes: bool = False,
 ) -> None:
-    """Stop and delete a session."""
+    """Delete a session. Prompts if running/unknown (--yes to skip). --force for BROKEN."""
     session = _require_session(db, name)
-    ws, vm, run_command, _, _target = _prepare_vm(db, config, session.workspace_name, operation="session-delete")
-    sock = _effective_socket_path(db, session)
+    ws, vm, run_command, _, target = _prepare_vm(db, config, session.workspace_name, operation="session-delete")
+    session = _ensure_pid(session, target=target, db=db)
+    status = check_session_status(session, target=target)
 
-    if (
-        not yes
-        and _session_alive(name, run_command=run_command, socket_path=sock)
-        and not output.confirm(f"Session '{name}' is still running. Delete anyway?")
-    ):
+    # UNKNOWN is impossible here -- _ensure_pid raises on unresolvable sessions
+    if status == SessionStatus.BROKEN and not force:
+        raise output.BrokenSessionError(
+            f"session '{name}' is broken (PID alive but tmux unreachable). Use --force to delete."
+        )
+
+    # Confirm before any destructive action
+    if not yes and not output.confirm(f"Delete session '{name}'?"):
         raise output.UserAbort("delete cancelled")
 
-    _kill_session(name, run_command=run_command, socket_path=sock)
+    # Now kill if needed
+    if status == SessionStatus.OK:
+        sock = session.socket_path
+        if not _kill_session(name, run_command=run_command, socket_path=sock):
+            # Race: session may have exited between check and kill. Recheck.
+            recheck = check_session_status(session, target=target)
+            if recheck != SessionStatus.STOPPED:
+                raise output.SessionError(f"failed to stop session '{name}' for deletion")
+    elif status == SessionStatus.BROKEN:
+        from agentworks.sessions.tmux import force_kill_tmux_server
 
-    # Remove stale socket file if the tmux server has exited.
-    # If the kill failed, warn and leave the socket for debugging.
-    if sock:
-        import shlex
+        output.warn(f"Session '{name}' is broken (tmux unreachable), force-killing via PID")
+        assert session.pid is not None
+        if not force_kill_tmux_server(session.pid, target=target, socket_path=session.socket_path, log=output.detail):
+            raise output.SessionError(f"failed to kill PID {session.pid} for session '{name}'")
 
-        from agentworks.sessions.tmux import session_exists
-
-        if session_exists(name, run_command=run_command, socket_path=sock):
-            output.warn(
-                f"tmux session '{name}' is still running after kill. "
-                f"Socket preserved at {sock}"
-            )
+    # Clean up socket if the server is dead (don't remove a live socket)
+    sock = session.socket_path
+    if sock and sock.startswith(AGENT_SOCKET_ROOT + "/"):
+        post_status = check_session_status(session, target=target)
+        if post_status == SessionStatus.STOPPED:
+            target.run(f"rm -f {shlex.quote(sock)}", sudo=True, check=False)
         else:
-            run_command(f"sudo rm -f {shlex.quote(sock)}", check=False)
+            output.warn(f"Session '{name}' status is {post_status.value} after delete, socket preserved at {sock}")
 
     db.delete_session(name)
 
@@ -577,12 +1066,23 @@ def describe_session(
 ) -> None:
     """Show session details."""
     session = _require_session(db, name)
-    ws, vm, run_command, _, _target = _prepare_vm(db, config, session.workspace_name, operation=None)
+    ws, vm, run_command, _, target = _prepare_vm(db, config, session.workspace_name, operation=None)
+    session = _ensure_pid(session, target=target, db=db)
 
-    # Reconcile status with tmux
-    status = _reconcile_status(session, run_command=run_command, db=db)
-    if status != session.status:
-        session = _require_session(db, name)
+    status = check_session_status(session, target=target)
+
+    # Build status label with PID if running and current boot
+    if status == SessionStatus.OK and session.pid and session.pid > 0:
+        status_label = f"running (PID {session.pid})"
+    elif status == SessionStatus.BROKEN and session.pid and session.pid > 0:
+        status_label = f"broken (PID {session.pid} alive, tmux unreachable)"
+    else:
+        status_label = {
+            SessionStatus.OK: "running",
+            SessionStatus.STOPPED: "stopped",
+            SessionStatus.BROKEN: "broken",
+            SessionStatus.UNKNOWN: "unknown",
+        }[status]
 
     mode_label = f"agent ({session.agent_name})" if session.agent_name else "admin"
 
@@ -591,9 +1091,57 @@ def describe_session(
     output.info(f"VM:         {vm.name}")
     output.info(f"Template:   {session.template}")
     output.info(f"Mode:       {mode_label}")
-    output.info(f"Status:     {session.status}")
+    output.info(f"Status:     {status_label}")
     output.info(f"Created:    {session.created_at}")
     output.info(f"Updated:    {session.updated_at}")
+
+
+def batch_check_all_sessions(
+    sessions: list[SessionRow],
+    *,
+    db: Database,
+    config: Config,
+) -> dict[str, SessionStatus]:
+    """Batch status check grouped by VM, parallel across VMs (capped at 8).
+
+    Returns {session_name: SessionStatus}. Sessions with no reachable VM or
+    pid=None/PID_STOPPED are excluded from the result.
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    # Resolve each session's VM and group
+    by_vm: dict[str, list[SessionRow]] = {}
+    vm_targets: dict[str, ExecTarget] = {}
+
+    for s in sessions:
+        ws = db.get_workspace(s.workspace_name)
+        if not ws or ws.type != "vm" or not ws.vm_name:
+            continue
+        if ws.vm_name not in vm_targets:
+            vm = db.get_vm(ws.vm_name)
+            if not vm or not vm.tailscale_host:
+                continue
+            vm_targets[ws.vm_name] = admin_exec_target(vm, config)
+        by_vm.setdefault(ws.vm_name, []).append(s)
+
+    if not by_vm:
+        return {}
+
+    result_map: dict[str, SessionStatus] = {}
+
+    def _check_vm(vm_name: str) -> dict[str, SessionStatus]:
+        return batch_check_status(by_vm[vm_name], target=vm_targets[vm_name])
+
+    with ThreadPoolExecutor(max_workers=min(8, len(by_vm))) as executor:
+        futures = {executor.submit(_check_vm, name): name for name in by_vm}
+        for future in as_completed(futures):
+            vm_name = futures[future]
+            try:
+                result_map.update(future.result())
+            except Exception as exc:
+                output.warn(f"Failed to check sessions on VM '{vm_name}': {exc}")
+
+    return result_map
 
 
 def list_sessions(
@@ -603,13 +1151,24 @@ def list_sessions(
     workspace_name: str | None = None,
     no_status: bool = False,
 ) -> None:
-    """List sessions, optionally reconciling status with tmux."""
+    """List sessions with batched status checks (one SSH call per VM, parallel).
+
+    Status resolution is has-session-first; PID/boot_id are only used as a
+    follow-up when agent checks fail.
+    """
     sessions = db.list_sessions(workspace_name=workspace_name)
     if not sessions:
         output.info("No sessions found.")
         return
 
-    # Group sessions by workspace to batch SSH connections
+    # Auto-repair sessions with missing PIDs, then batch check
+    if not no_status:
+        sessions = ensure_pids_batch(sessions, db=db, config=config)
+    status_map: dict[str, SessionStatus] = {}
+    if not no_status:
+        status_map = batch_check_all_sessions(sessions, db=db, config=config)
+
+    # Build table rows grouped by workspace
     by_workspace: dict[str, list[SessionRow]] = {}
     for session in sessions:
         by_workspace.setdefault(session.workspace_name, []).append(session)
@@ -619,30 +1178,24 @@ def list_sessions(
         ws = db.get_workspace(ws_name)
         vm_name = ws.vm_name or "-" if ws else "-"
 
-        if no_status or ws is None or ws.type != "vm":
-            for session in ws_sessions:
-                mode_label = f"agent ({session.agent_name})" if session.agent_name else "admin"
-                rows.append((session.name, ws_name, vm_name, session.template, mode_label, session.status))
-            continue
-
-        vm = db.get_vm(ws.vm_name)  # type: ignore[arg-type]
-        if vm is None or vm.tailscale_host is None:
-            for session in ws_sessions:
-                mode_label = f"agent ({session.agent_name})" if session.agent_name else "admin"
-                rows.append((session.name, ws_name, vm_name, session.template, mode_label, session.status))
-            continue
-
-        from agentworks.ssh import run
-
-        target = admin_exec_target(vm, config)
-        run_command = partial(run, target)
-
         for session in ws_sessions:
-            status = _reconcile_status(
-                session,
-                run_command=run_command,
-                db=db,
-            )
+            if no_status:
+                status = "-"
+            elif session.pid == PID_STOPPED:
+                status = "stopped"
+            elif session.pid is None or session.boot_id is None:
+                status = "unknown"
+            elif session.name in status_map:
+                s_status = status_map[session.name]
+                status = {
+                    SessionStatus.OK: "running",
+                    SessionStatus.STOPPED: "stopped",
+                    SessionStatus.BROKEN: "broken",
+                    SessionStatus.UNKNOWN: "unknown",
+                }[s_status]
+            else:
+                # No status available (VM unreachable or SSH failure during batch check)
+                status = "-"
             mode_label = f"agent ({session.agent_name})" if session.agent_name else "admin"
             rows.append((session.name, ws_name, vm_name, session.template, mode_label, status))
 
@@ -661,10 +1214,29 @@ def list_sessions(
     )
     output.info(header)
     output.info("-" * len(header))
+    broken_names = []
+    unknown_names = []
     for sname, ws_name, vm_col, tpl, mode, status in rows:
         output.info(
             f"{sname:<{name_w}}  {ws_name:<{ws_w}}  {vm_col:<{vm_w}}  {tpl:<{tpl_w}}  {mode:<{mode_w}}  {status}"
         )
+        if status == "broken":
+            broken_names.append(sname)
+        elif status == "unknown":
+            unknown_names.append(sname)
+
+    if broken_names or unknown_names:
+        output.info("")
+        if broken_names:
+            output.warn(
+                f"{len(broken_names)} session(s) are broken (tmux unreachable): "
+                f"{', '.join(broken_names)}. Use restart/stop/delete --force."
+            )
+        if unknown_names:
+            output.warn(
+                f"{len(unknown_names)} session(s) have unknown status: "
+                f"{', '.join(unknown_names)}. Status could not be determined."
+            )
 
 
 def attach_session(
@@ -678,14 +1250,19 @@ def attach_session(
     from agentworks.ssh import interactive
 
     session = _require_session(db, name)
-    _ws, vm, run_command, _, target = _prepare_vm(db, config, session.workspace_name, operation="session-attach")
-    sock = _effective_socket_path(db, session)
+    _ws, _vm, _run_command, _, target = _prepare_vm(db, config, session.workspace_name, operation="session-attach")
+    session = _ensure_pid(session, target=target, db=db)
+    status = check_session_status(session, target=target)
 
-    if not _session_alive(name, run_command=run_command, socket_path=sock):
+    if status == SessionStatus.STOPPED:
         raise output.SessionError(f"session '{name}' is not running")
+    if status == SessionStatus.BROKEN:
+        raise output.SessionError(
+            f"session '{name}' is broken (PID alive but tmux unreachable)."
+        )
 
     q_session = shlex.quote(name)
-    sys.exit(interactive(target, tmux_cmd(f"attach -t {q_session}", sock)))
+    sys.exit(interactive(target, tmux_cmd(f"attach -t {q_session}", session.socket_path)))
 
 
 def session_logs(
@@ -699,9 +1276,18 @@ def session_logs(
     from agentworks.sessions.tmux import capture_output
 
     session = _require_session(db, name)
-    _ws, _vm, run_command, _, _target = _prepare_vm(db, config, session.workspace_name, operation="session-logs")
-    sock = _effective_socket_path(db, session)
+    _ws, _vm, run_command, _, target = _prepare_vm(db, config, session.workspace_name, operation="session-logs")
+    session = _ensure_pid(session, target=target, db=db)
+    status = check_session_status(session, target=target)
 
+    if status == SessionStatus.STOPPED:
+        raise output.SessionError(f"session '{name}' is not running")
+    if status == SessionStatus.BROKEN:
+        raise output.SessionError(
+            f"session '{name}' is broken (PID alive but tmux unreachable)."
+        )
+
+    sock = session.socket_path
     captured = capture_output(
         name,
         run_command=run_command,
@@ -711,3 +1297,5 @@ def session_logs(
     # Raw data pipe (opaque tmux capture-pane output), not a structured message.
     # Intentionally not routed through the output handler.
     typer.echo(captured, nl=False)
+
+

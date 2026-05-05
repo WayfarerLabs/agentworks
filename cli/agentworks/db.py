@@ -48,8 +48,17 @@ class SessionMode(Enum):
 
 
 class SessionStatus(Enum):
-    RUNNING = "running"
+    """Session liveness state, computed live from has-session + PID/boot_id checks."""
+
+    OK = "ok"
     STOPPED = "stopped"
+    BROKEN = "broken"
+    UNKNOWN = "unknown"
+
+
+# Sentinel PID value: session is known to be stopped (no process to check).
+# Distinct from NULL (never checked / pre-enhancement).
+PID_STOPPED = -1
 
 
 # -- Row types -------------------------------------------------------------
@@ -132,12 +141,13 @@ class SessionRow:
     workspace_name: str
     template: str
     mode: str
-    status: str
     created_at: str
     updated_at: str
     agent_name: str | None = None
     created_workspace: bool = False
     socket_path: str | None = None
+    pid: int | None = None
+    boot_id: str | None = None
 
 
 # -- Migrations ------------------------------------------------------------
@@ -392,6 +402,15 @@ MIGRATIONS: dict[int, str] = {
         INSERT INTO sessions_new SELECT * FROM sessions;
         DROP TABLE sessions;
         ALTER TABLE sessions_new RENAME TO sessions;
+    """,
+    # -- Drop cached status, add PID for live liveness checks -----------------
+    20: """
+        ALTER TABLE sessions DROP COLUMN status;
+        ALTER TABLE sessions ADD COLUMN pid INTEGER;
+    """,
+    # -- Add boot ID for PID staleness detection across VM reboots ----------
+    21: """
+        ALTER TABLE sessions ADD COLUMN boot_id TEXT;
     """,
 }
 
@@ -874,12 +893,22 @@ class Database:
             ).fetchall()
         return [_to_session(r) for r in rows]
 
-    def update_session_status(self, name: str, status: SessionStatus) -> None:
+    def update_session_pid(self, name: str, pid: int | None, boot_id: str | None = None) -> None:
+        """Store or clear the PID and boot ID for a session.
+
+        Valid pid values: None, PID_STOPPED (-1), or a positive integer.
+        When setting a positive PID, boot_id is required. When clearing
+        (PID_STOPPED or None), COALESCE preserves the existing boot_id.
+        """
+        if pid is not None and pid != PID_STOPPED and pid <= 0:
+            raise ValueError(f"invalid PID: {pid} (must be None, PID_STOPPED, or > 0)")
+        if pid is not None and pid > 0 and boot_id is None:
+            raise ValueError(f"boot_id is required when setting a positive PID ({pid})")
         self._conn.execute(
-            "UPDATE sessions SET status = ?, "
+            "UPDATE sessions SET pid = ?, boot_id = COALESCE(?, boot_id), "
             "updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') "
             "WHERE name = ?",
-            (status.value, name),
+            (pid, boot_id, name),
         )
         self._conn.commit()
 
@@ -1034,12 +1063,13 @@ def _to_session(row: sqlite3.Row) -> SessionRow:
         workspace_name=row["workspace_name"],
         template=row["template"],
         mode=row["mode"],
-        status=row["status"],
         created_at=row["created_at"],
         updated_at=row["updated_at"],
         agent_name=row["agent_name"],
         created_workspace=bool(row["created_workspace"]),
         socket_path=row["socket_path"],
+        pid=row["pid"],
+        boot_id=row["boot_id"],
     )
 
 

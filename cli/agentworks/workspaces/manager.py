@@ -259,7 +259,7 @@ def describe_workspace(
     if sessions:
         for s in sessions:
             mode_label = f"agent: {s.agent_name}" if s.agent_name else "admin"
-            output.detail(f"{s.name}  [{s.template}]  {s.status}  {mode_label}")
+            output.detail(f"{s.name}  [{s.template}]  {mode_label}")
     else:
         output.detail("(none)")
 
@@ -504,16 +504,29 @@ def rehome_workspace(
     if new_norm.startswith(old_norm) or old_norm.startswith(new_norm):
         raise output.WorkspaceError("source and target paths overlap")
 
-    # Block if workspace has running sessions
-    from agentworks.db import SessionStatus
+    # Block unless all sessions are STOPPED
+    from agentworks.db import PID_STOPPED, SessionStatus
+    from agentworks.sessions.manager import batch_check_all_sessions, ensure_pids_batch
 
     sessions = db.list_sessions(workspace_name=name)
-    running = [s for s in sessions if s.status == SessionStatus.RUNNING.value]
-    if running:
-        raise output.WorkspaceError(
-            f"workspace '{name}' has {len(running)} running session(s). "
-            "Stop them first with 'agentworks session stop'."
-        )
+    if sessions:
+        try:
+            sessions = ensure_pids_batch(sessions, db=db, config=config)
+            status_map = batch_check_all_sessions(sessions, db=db, config=config)
+        except Exception as exc:
+            raise output.WorkspaceError(
+                f"cannot verify session status for workspace '{name}' (VM may be unreachable): {exc}"
+            ) from exc
+        not_stopped = [
+            s for s in sessions
+            if s.pid != PID_STOPPED and status_map.get(s.name, SessionStatus.UNKNOWN) != SessionStatus.STOPPED
+        ]
+        if not_stopped:
+            names = ", ".join(s.name for s in not_stopped)
+            raise output.WorkspaceError(
+                f"workspace '{name}' has {len(not_stopped)} non-stopped session(s) ({names}). "
+                "Stop or delete them first."
+            )
 
     if ws.type == "vm":
         _rehome_vm(db, config, ws, new_path, remove_old=remove_old, yes=yes)
@@ -785,21 +798,48 @@ def delete_workspace(
 
         ssh_logger = SSHLogger(ws.vm_name, "workspace-delete")
 
-    # Kill running sessions and delete session records
+    # Kill running sessions (status-aware) and delete session records
     if ws.type == "vm" and ws.vm_name:
         vm = db.get_vm(ws.vm_name)
         if vm is not None and vm.tailscale_host is not None:
             from functools import partial
 
-            from agentworks.sessions.manager import _effective_socket_path
-            from agentworks.sessions.tmux import kill_session
+            from agentworks.db import SessionStatus
+            from agentworks.sessions.manager import (
+                check_session_status,
+                ensure_pids_batch,
+            )
+            from agentworks.sessions.tmux import force_kill_tmux_server, kill_session
             from agentworks.ssh import admin_exec_target, run
 
             target = admin_exec_target(vm, config)
             run_command = partial(run, target, logger=ssh_logger)
-            for session in db.list_sessions(workspace_name=name):
-                sock = _effective_socket_path(db, session)
-                kill_session(session.name, run_command=run_command, socket_path=sock)
+            sessions = db.list_sessions(workspace_name=name)
+            sessions = ensure_pids_batch(sessions, db=db, config=config)
+            unstoppable: list[str] = []
+            for session in sessions:
+                status = check_session_status(session, target=target)
+                if status == SessionStatus.OK:
+                    if not kill_session(session.name, run_command=run_command, socket_path=session.socket_path):
+                        # Race: session may have exited between check and kill. Recheck.
+                        recheck = check_session_status(session, target=target)
+                        if recheck != SessionStatus.STOPPED:
+                            unstoppable.append(session.name)
+                            continue
+                elif status == SessionStatus.BROKEN:
+                    if session.pid and session.pid > 0 and force_kill_tmux_server(
+                        session.pid, target=target, socket_path=session.socket_path,
+                    ):
+                        pass  # killed successfully
+                    else:
+                        unstoppable.append(session.name)
+                elif status == SessionStatus.UNKNOWN:
+                    unstoppable.append(session.name)
+            if unstoppable:
+                raise output.WorkspaceError(
+                    f"cannot delete workspace '{name}': {len(unstoppable)} session(s) could not be stopped "
+                    f"({', '.join(unstoppable)}). Resolve manually before retrying."
+                )
     db.delete_sessions_for_workspace(name)
 
     # Revoke agent workspace grants (agents are VM-scoped, not deleted with workspaces)
