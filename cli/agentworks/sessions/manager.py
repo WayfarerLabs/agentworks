@@ -1190,8 +1190,8 @@ def list_sessions(
                     SessionStatus.UNKNOWN: "unknown",
                 }[s_status]
             else:
-                # pid/boot_id set but missing from status_map (VM unreachable, SSH failure)
-                status = "unknown"
+                # No status available (VM unreachable or SSH failure during batch check)
+                status = "-"
             mode_label = f"agent ({session.agent_name})" if session.agent_name else "admin"
             rows.append((session.name, ws_name, vm_name, session.template, mode_label, status))
 
