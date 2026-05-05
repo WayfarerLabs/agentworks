@@ -1142,7 +1142,11 @@ def list_sessions(
     workspace_name: str | None = None,
     no_status: bool = False,
 ) -> None:
-    """List sessions with batch PID status checks (one SSH call per VM, parallel)."""
+    """List sessions with batched status checks (one SSH call per VM, parallel).
+
+    Status resolution is has-session-first; PID/boot_id are only used as a
+    follow-up when agent checks fail.
+    """
     sessions = db.list_sessions(workspace_name=workspace_name)
     if not sessions:
         output.info("No sessions found.")
