@@ -999,10 +999,10 @@ def delete_session(
     sock = session.socket_path
     if sock:
         post_status = check_session_status(session, target=target)
-        if post_status != SessionStatus.OK and post_status != SessionStatus.BROKEN:
+        if post_status == SessionStatus.STOPPED:
             target.run(f"rm -f {shlex.quote(sock)}", sudo=True, check=False)
         else:
-            output.warn(f"tmux server for '{name}' is still alive, socket preserved at {sock}")
+            output.warn(f"Session '{name}' status is {post_status.value} after delete, socket preserved at {sock}")
 
     db.delete_session(name)
 
