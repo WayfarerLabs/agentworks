@@ -420,6 +420,18 @@ def vm_reinit(
     reinit_vm(_get_db(), load_config(), name)
 
 
+@vm_app.command("exec")
+def vm_exec(
+    name: Annotated[str, typer.Argument(help="VM name")],
+    command: Annotated[str, typer.Argument(help="Command to execute")],
+) -> None:
+    """Execute a command on a VM."""
+    from agentworks.config import load_config
+    from agentworks.vms.manager import exec_vm
+
+    exec_vm(_get_db(), load_config(), name, command)
+
+
 @vm_app.command("shell")
 def vm_shell(
     name: Annotated[str, typer.Argument(help="VM name")],

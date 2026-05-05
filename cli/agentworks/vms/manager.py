@@ -403,6 +403,26 @@ def shell_vm(db: Database, config: Config, name: str) -> None:
     sys.exit(subprocess.call(ssh_cmd))
 
 
+def exec_vm(db: Database, config: Config, name: str, command: str) -> None:
+    """Execute a command on a VM (non-interactive)."""
+    import sys
+
+    from agentworks.ssh import admin_exec_target
+
+    vm = _require_vm(db, name)
+    _guard_failed_vm(vm)
+    if vm.tailscale_host is None:
+        raise VMError(f"VM '{name}' has no Tailscale IP (init may not be complete)")
+
+    target = admin_exec_target(vm, config)
+    result = target.run(command, check=False, tty=False)
+    if result.stdout:
+        sys.stdout.write(result.stdout)
+    if result.stderr:
+        sys.stderr.write(result.stderr)
+    sys.exit(result.returncode)
+
+
 def add_git_credential(db: Database, config: Config, name: str, credential_name: str) -> None:
     """Add or update a git credential on a VM."""
     from agentworks.ssh import admin_exec_target
