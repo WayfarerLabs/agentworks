@@ -20,6 +20,11 @@ from agentworks.sessions.tmux import (
 class _FakeResult:
     stdout: str = ""
     ok: bool = True
+    returncode: int = -1  # auto-set from ok in __post_init__
+
+    def __post_init__(self) -> None:
+        if self.returncode == -1:
+            self.returncode = 0 if self.ok else 1
 
 
 class _FakeTarget:

@@ -83,7 +83,10 @@ def _repair_session_pid(
 
     # Step 1: try has-session (the primary liveness check)
     has_cmd = tmux_cmd(f"has-session -t {q_session}", sock) + " 2>/dev/null"
-    if target.run(has_cmd, check=False).ok:
+    has_result = target.run(has_cmd, check=False)
+    if has_result.returncode == 255:
+        raise output.SessionError(f"cannot reach VM for session '{session.name}' (SSH connection failed)")
+    if has_result.ok:
         # Session is alive -- recover PID + boot ID
         pid = get_tmux_server_pid(target=target, socket_path=sock)
         boot_id = _get_boot_id(target) if pid is not None else None
@@ -370,7 +373,10 @@ def _check_dedicated_agent_session(session: SessionRow, *, target: ExecTarget) -
 
     q_session = shlex.quote(session.name)
     cmd = tmux_cmd(f"has-session -t {q_session}", session.socket_path) + " 2>/dev/null"
-    if target.run(cmd, check=False).ok:
+    result = target.run(cmd, check=False)
+    if result.returncode == 255:
+        return SessionStatus.UNKNOWN  # SSH transport failure, not a session state
+    if result.ok:
         return SessionStatus.OK
 
     # has-session failed -- STOPPED or BROKEN?
@@ -391,7 +397,10 @@ def _check_shared_admin_session(session: SessionRow, *, target: ExecTarget) -> S
 
     q_session = shlex.quote(session.name)
     cmd = tmux_cmd(f"has-session -t {q_session}") + " 2>/dev/null"
-    if target.run(cmd, check=False).ok:
+    result = target.run(cmd, check=False)
+    if result.returncode == 255:
+        return SessionStatus.UNKNOWN  # SSH transport failure, not a session state
+    if result.ok:
         return SessionStatus.OK
     return SessionStatus.STOPPED
 
