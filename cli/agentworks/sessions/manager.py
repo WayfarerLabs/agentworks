@@ -714,7 +714,7 @@ def stop_session(
         )
     if health == SessionStatus.BROKEN:
         if not force:
-            raise output.SessionError(
+            raise output.BrokenSessionError(
                 f"session '{name}' is broken (PID alive but tmux unreachable). Use --force to kill the process."
             )
         output.warn(f"Session '{name}' is broken (tmux unreachable), force-killing via PID")
@@ -760,7 +760,7 @@ def restart_session(
         )
     if health == SessionStatus.BROKEN:
         if not force:
-            raise output.SessionError(
+            raise output.BrokenSessionError(
                 f"session '{name}' is broken (PID alive but tmux unreachable). Use --force to restart."
             )
         from agentworks.sessions.tmux import force_kill_tmux_server
@@ -942,12 +942,15 @@ def restart_all_sessions(
     for session in sessions:
         try:
             restart_session(db, config, name=session.name, force=force, yes=include_running)
-        except output.SessionError as exc:
-            if not force and "broken" in str(exc).lower():
+        except output.BrokenSessionError as exc:
+            if not force:
                 output.warn(f"Skipping '{session.name}': {exc}")
             else:
                 failed.append((session.name, str(exc)))
                 output.warn(f"Error restarting '{session.name}': {exc}")
+        except output.SessionError as exc:
+            failed.append((session.name, str(exc)))
+            output.warn(f"Error restarting '{session.name}': {exc}")
         except Exception as exc:
             failed.append((session.name, str(exc)))
             output.warn(f"Error restarting '{session.name}': {exc}")
@@ -975,7 +978,7 @@ def delete_session(
             f"session '{name}' has unknown status after auto-repair. Investigate manually."
         )
     if health == SessionStatus.BROKEN and not force:
-        raise output.SessionError(
+        raise output.BrokenSessionError(
             f"session '{name}' is broken (PID alive but tmux unreachable). Use --force to delete."
         )
 

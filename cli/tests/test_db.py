@@ -443,13 +443,7 @@ def test_update_session_pid(db: Database) -> None:
 
     db.insert_session("ws-s1", "ws", "default", SessionMode.ADMIN)
 
-    # Store a PID
-    db.update_session_pid("ws-s1", 12345)
-    session = db.get_session("ws-s1")
-    assert session is not None
-    assert session.pid == 12345
-
-    # Store PID with boot ID
+    # Store a PID (requires boot_id)
     db.update_session_pid("ws-s1", 12345, boot_id="abc-123")
     session = db.get_session("ws-s1")
     assert session is not None

@@ -896,9 +896,12 @@ class Database:
     def update_session_pid(self, name: str, pid: int | None, boot_id: str | None = None) -> None:
         """Store or clear the PID and boot ID for a session.
 
-        When boot_id is None (e.g. marking PID_STOPPED), the existing boot_id
-        is preserved (last boot the session ran in).
+        When setting a positive PID, boot_id is required (prevents partial state
+        where pid is set but boot_id is NULL). When clearing (PID_STOPPED or None),
+        boot_id defaults to None and COALESCE preserves the existing value.
         """
+        if pid is not None and pid > 0 and boot_id is None:
+            raise ValueError(f"boot_id is required when setting a positive PID ({pid})")
         self._conn.execute(
             "UPDATE sessions SET pid = ?, boot_id = COALESCE(?, boot_id), "
             "updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') "
