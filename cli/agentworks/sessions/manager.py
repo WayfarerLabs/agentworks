@@ -257,7 +257,7 @@ def _regenerate_tmuxinator(
     from agentworks.workspaces.tmuxinator import generate_config
 
     sessions = db.list_sessions(workspace_name=ws.name)
-    # Build effective socket paths for tmuxinator (migrated sessions have NULL socket_path)
+    # Build socket paths for tmuxinator (admin sessions have NULL, agent sessions always set)
     socket_paths = {s.name: s.socket_path for s in sessions}
     config_text = generate_config(ws.name, ws.workspace_path, sessions=sessions, socket_paths=socket_paths)
     target = admin_exec_target(vm, config)
@@ -341,23 +341,11 @@ def _pid_alive(pid: int, *, target: ExecTarget) -> bool:
     return target.run(f"test -d /proc/{pid}", check=False).ok
 
 
-_boot_id_cache: dict[int, str] = {}  # id(target) -> boot_id (only non-None values cached)
-
-
 def _get_boot_id(target: ExecTarget) -> str | None:
-    """Read the current VM boot ID. Cached per target for the duration of the process.
-
-    Returns None on failure (not cached, so callers can retry).
-    """
-    tid = id(target)
-    if tid in _boot_id_cache:
-        return _boot_id_cache[tid]
+    """Read the current VM boot ID. Returns None on failure."""
     result = target.run("cat /proc/sys/kernel/random/boot_id", check=False)
     boot_id = (getattr(result, "stdout", "") or "").strip()
-    if boot_id:
-        _boot_id_cache[tid] = boot_id
-        return boot_id
-    return None
+    return boot_id or None
 
 
 def check_session_status(
@@ -697,8 +685,7 @@ def _execute_stop(
             and session.pid > 0
             and not _pid_alive(session.pid, target=target)
         ):
-            run_cmd = partial(run, target, logger=target.logger)
-            run_cmd(f"sudo rm -f {shlex.quote(session.socket_path)}", check=False)
+            target.run(f"rm -f {shlex.quote(session.socket_path)}", sudo=True, check=False)
 
         db.update_session_pid(session.name, PID_STOPPED)
         output.info(f"Session '{session.name}' stopped")
@@ -1019,7 +1006,7 @@ def delete_session(
     if sock:
         post_status = check_session_status(session, target=target)
         if post_status != SessionStatus.OK and post_status != SessionStatus.BROKEN:
-            run_command(f"sudo rm -f {shlex.quote(sock)}", check=False)
+            target.run(f"rm -f {shlex.quote(sock)}", sudo=True, check=False)
         else:
             output.warn(f"tmux server for '{name}' is still alive, socket preserved at {sock}")
 
