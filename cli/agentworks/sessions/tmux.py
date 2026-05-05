@@ -261,7 +261,7 @@ def create_session(
     run_as_root: RunCommand | None = None,
     admin_username: str | None = None,
     is_admin: bool = True,
-) -> tuple[str | None, int]:
+) -> tuple[str | None, int | None]:
     """Create a locked-down tmux session.
 
     For admin mode, the command runs directly on the admin's default tmux
@@ -286,8 +286,11 @@ def create_session(
         if shell_cmd:
             cmd += f" {shlex.quote(shell_cmd)}"
         run_command(cmd)
-        pid_out = run_command("tmux display-message -p '#{pid}'")
-        pid = _parse_pid(getattr(pid_out, "stdout", ""), context="after session create")
+        try:
+            pid_out = run_command("tmux display-message -p '#{pid}'")
+            pid: int | None = _parse_pid(getattr(pid_out, "stdout", ""), context="after session create")
+        except (RuntimeError, ValueError):
+            pid = None  # best-effort; auto-repair will recover on next access
         return (None, pid)
     else:
         assert linux_user is not None
@@ -346,8 +349,11 @@ def create_session(
         # Grant tmux server-access to all socket-group members
         _grant_server_access(run_command, linux_user, sock)
 
-        pid_out = run_command(tmux_cmd("display-message -p '#{pid}'", sock))
-        pid = _parse_pid(getattr(pid_out, "stdout", ""), context="after session create")
+        try:
+            pid_out = run_command(tmux_cmd("display-message -p '#{pid}'", sock))
+            pid = _parse_pid(getattr(pid_out, "stdout", ""), context="after session create")
+        except (RuntimeError, ValueError):
+            pid = None  # best-effort; auto-repair will recover on next access
         return (sock, pid)
 
 

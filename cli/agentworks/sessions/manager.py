@@ -435,7 +435,7 @@ def batch_check_status(
         q_session = shlex.quote(s.name)  # quoted for tmux -t argument
         name = s.name  # raw for output field (names are validated, no shell-special chars)
         has_cmd = tmux_cmd(f"has-session -t {q_session}", s.socket_path)
-        if s.socket_path is not None:
+        if s.mode == SessionMode.AGENT.value and s.socket_path is not None:
             # Agent session: inline follow-up on failure
             parts.append(
                 f"{has_cmd} 2>/dev/null; "
@@ -445,9 +445,11 @@ def batch_check_status(
                 f"echo \"S:{name}:1:$BOOT:$?\"; "
                 f"else echo \"S:{name}:0\"; fi"
             )
-        else:
+        elif s.mode == SessionMode.ADMIN.value and s.socket_path is None:
             # Admin session: has-session only
             parts.append(f"{has_cmd} 2>/dev/null; echo \"S:{name}:$?\"")
+        else:
+            raise RuntimeError(f"unexpected session config: mode={s.mode}, socket_path={s.socket_path}")
     cmd = "; ".join(parts)
 
     result = target.run(cmd, check=False)
@@ -589,11 +591,14 @@ def create_session(
     # Persist socket path, PID, and boot ID
     if sock:
         db.update_session_socket_path(name, sock)
-    boot_id = _get_boot_id(target)
-    if boot_id is not None:
-        db.update_session_pid(name, pid, boot_id=boot_id)
+    if pid is not None:
+        boot_id = _get_boot_id(target)
+        if boot_id is not None:
+            db.update_session_pid(name, pid, boot_id=boot_id)
+        else:
+            output.warn(f"Could not read boot ID for session '{name}', PID not stored")
     else:
-        output.warn(f"Could not read boot ID for session '{name}', PID not stored")
+        output.warn(f"Could not capture PID for session '{name}', will auto-repair on next access")
 
     mode_label = f"agent: {resolved_agent_name}" if resolved_agent_name else "admin"
     output.info(f"Session '{name}' started ({mode_label}, template: {template.name})")
@@ -816,11 +821,14 @@ def restart_session(
     # Persist socket path if it differs from what's stored.
     if new_sock != session.socket_path:
         db.update_session_socket_path(name, new_sock)
-    boot_id = _get_boot_id(target)
-    if boot_id is not None:
-        db.update_session_pid(name, pid, boot_id=boot_id)
+    if pid is not None:
+        boot_id = _get_boot_id(target)
+        if boot_id is not None:
+            db.update_session_pid(name, pid, boot_id=boot_id)
+        else:
+            output.warn(f"Could not read boot ID for session '{name}', PID not stored")
     else:
-        output.warn(f"Could not read boot ID for session '{name}', PID not stored")
+        output.warn(f"Could not capture PID for session '{name}', will auto-repair on next access")
 
     output.info(f"Session '{name}' restarted")
 
