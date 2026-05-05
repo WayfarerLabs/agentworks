@@ -393,11 +393,13 @@ def _check_dedicated_agent_session(session: SessionRow, *, target: ExecTarget) -
     # has-session failed -- STOPPED or BROKEN?
     assert session.pid is not None and session.pid > 0
     current_boot = _get_boot_id(target)
-    if session.boot_id is not None and current_boot is not None and session.boot_id != current_boot:
+    if current_boot is None:
+        return SessionStatus.UNKNOWN  # can't verify boot cycle, unsafe to offer --force
+    if session.boot_id is not None and session.boot_id != current_boot:
         return SessionStatus.STOPPED  # stale boot, PID is meaningless
     if not _pid_alive(session.pid, target=target):
         return SessionStatus.STOPPED  # process is dead
-    return SessionStatus.BROKEN  # process alive, socket unreachable
+    return SessionStatus.BROKEN  # same boot, process alive, socket unreachable
 
 
 def _check_shared_admin_session(session: SessionRow, *, target: ExecTarget) -> SessionStatus:
@@ -470,13 +472,17 @@ def batch_check_status(
             # Agent session failure: S:name:1:<boot_id>:<pid_exit>
             current_boot = fields[3]
             pid_exit = fields[4]
-            stored_boot = boot_ids.get(name)
-            if stored_boot and stored_boot != current_boot:
-                status_map[name] = SessionStatus.STOPPED  # stale boot
-            elif pid_exit == "0":
-                status_map[name] = SessionStatus.BROKEN  # PID alive, socket unreachable
+            if not current_boot:
+                # Boot ID read failed -- can't safely determine STOPPED vs BROKEN
+                pass  # omit from map, callers treat missing entries as unknown
             else:
-                status_map[name] = SessionStatus.STOPPED  # PID dead
+                stored_boot = boot_ids.get(name)
+                if stored_boot and stored_boot != current_boot:
+                    status_map[name] = SessionStatus.STOPPED  # stale boot
+                elif pid_exit == "0":
+                    status_map[name] = SessionStatus.BROKEN  # PID alive, socket unreachable
+                else:
+                    status_map[name] = SessionStatus.STOPPED  # PID dead
         else:
             # Admin session failure
             status_map[name] = SessionStatus.STOPPED

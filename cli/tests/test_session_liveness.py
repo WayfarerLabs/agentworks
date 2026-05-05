@@ -278,3 +278,61 @@ def test_batch_status_pid_stopped_not_unknown() -> None:
         and (s.pid is None or s.boot_id is None or s.name not in result)
     ]
     assert unknown == []
+
+
+# -- _check_dedicated_agent_session edge cases ------------------------------
+
+
+def test_agent_unknown_when_boot_id_unreadable() -> None:
+    """If boot_id can't be read, return UNKNOWN (don't offer --force on unverified PID)."""
+    session = _session("s1", pid=42, socket_path="/sock", mode="agent", boot_id=BOOT_CURRENT)
+    target = _FakeTarget({
+        "has-session": _FakeResult(ok=False),
+        "boot_id": _FakeResult(ok=False, stdout=""),
+        "test -d /proc/42": _FakeResult(ok=True),
+    })
+    assert check_session_status(session, target=target) == SessionStatus.UNKNOWN
+
+
+# -- batch_check_status edge cases ------------------------------------------
+
+
+def test_batch_empty_boot_id_omits_from_map() -> None:
+    """If boot_id read fails in compound command, session is omitted from status_map."""
+    sessions = [
+        _session("a1", pid=100, socket_path="/sock", mode="agent", boot_id=BOOT_CURRENT),
+    ]
+    # Agent failure with empty boot_id field
+    target = _FakeTarget({
+        "has-session": _FakeResult(ok=True, stdout="S:a1:1::0\n"),
+    })
+    result = batch_check_status(sessions, target=target)
+    assert "a1" not in result  # omitted, not misclassified
+
+
+# -- _ensure_pid strict gate ------------------------------------------------
+
+
+def test_ensure_pid_raises_on_unresolvable() -> None:
+    """_ensure_pid raises SessionError when PID/boot_id can't be recovered."""
+    import pytest
+
+    from agentworks.sessions.manager import _ensure_pid
+
+    session = _session("s1", pid=None, socket_path="/sock", mode="agent")
+
+    class _FailTarget:
+        def run(self, command, *, check=True, sudo=False, tty=None, timeout=None):
+            # has-session succeeds but display-message fails -> can't recover PID
+            if "has-session" in command:
+                return _FakeResult(ok=True)
+            if "display-message" in command:
+                return _FakeResult(ok=False, stdout="")
+            return _FakeResult(ok=True)
+
+    class _FakeDb:
+        def get_session(self, name):
+            return session
+
+    with pytest.raises(Exception, match="alive but PID/boot ID recovery failed"):
+        _ensure_pid(session, target=_FailTarget(), db=_FakeDb())
