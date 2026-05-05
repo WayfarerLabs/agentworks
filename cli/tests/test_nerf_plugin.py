@@ -68,10 +68,6 @@ def built_plugin(tmp_path: Path) -> Path:
     config = load_config(_NERF_CONFIG_PATH)
     plugin_meta, marketplace_meta = resolve_claude_plugin_meta(config)
 
-    from dataclasses import replace as dc_replace
-
-    plugin_meta = dc_replace(plugin_meta, version="0.1.test")
-
     build_claude_plugin(manifests, tmp_path, plugin_meta, marketplace_meta=marketplace_meta)
     return tmp_path
 
@@ -81,7 +77,7 @@ def test_plugin_json_structure(built_plugin: Path) -> None:
     assert plugin_json.exists()
     data = json.loads(plugin_json.read_text())
     assert data["name"] == "nerftools"
-    assert data["version"] == "0.1.test"
+    assert data["version"] == "0.1.0"
     assert data["skills"] == "./skills/"
 
 
@@ -166,20 +162,6 @@ def test_install_script_shell_quoting() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Version format
-# ---------------------------------------------------------------------------
-
-
-def test_version_format() -> None:
-    from datetime import UTC, datetime
-
-    version = datetime.now(UTC).strftime("0.1.%Y%m%d%H%M")
-    # Should look like 0.1.202604261530
-    assert version.startswith("0.1.20")
-    assert len(version) == 16  # "0.1." + 12 digits (YYYYMMDDHHMM)
-
-
-# ---------------------------------------------------------------------------
 # Custom manifest merge
 # ---------------------------------------------------------------------------
 
@@ -196,7 +178,7 @@ package:
   skill_group: my-tools
 tools:
   hello:
-    description: Say hello
+    description: Say hello to the world.
     threat:
       read: none
       write: none

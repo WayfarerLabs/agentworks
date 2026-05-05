@@ -1,6 +1,7 @@
 # Agentworks default nerftools plugin config.
 # Used when building the Claude Code plugin during VM init.
-# Version is injected at build time as a date-based stamp (0.1.YYYYMMDDHHMM).
+# Version uses the nerftools default (0.1.0) so the plugin path stays stable
+# across rebuilds -- Claude Code grants permissions based on absolute tool paths.
 
 package:
   name: nerftools

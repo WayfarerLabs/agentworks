@@ -1316,17 +1316,13 @@ def _build_nerf_claude_plugin(
         except ManifestError as e:
             raise RuntimeError(f"nerf manifest error: {e}") from e
 
-        # Plugin metadata from agentworks config with date-based version.
-        # Each build gets a unique version so Claude detects changes when
-        # manifests are added/removed or nerftools is upgraded.
-        from dataclasses import replace as dc_replace
-        from datetime import UTC, datetime
-
+        # Plugin metadata from agentworks nerf-config.yaml.
+        # Version is fixed (from nerftools defaults) so the plugin path stays
+        # stable across rebuilds -- important because Claude Code grants
+        # permissions based on absolute tool paths.
         nerf_config_path = Path(__file__).resolve().parent.parent / "nerf-config.yaml"
         nerf_config = load_config(nerf_config_path)
         plugin_meta, marketplace_meta = resolve_claude_plugin_meta(nerf_config)
-        build_version = datetime.now(UTC).strftime("0.1.%Y%m%d%H%M")
-        plugin_meta = dc_replace(plugin_meta, version=build_version)
 
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
