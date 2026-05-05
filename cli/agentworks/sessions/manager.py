@@ -72,6 +72,8 @@ def _ensure_pid(session: SessionRow, *, target: ExecTarget, db: Database) -> Ses
     stopped (no socket file), marks as PID_STOPPED. If ambiguous (socket
     exists but tmux unreachable), leaves as NULL and warns.
     """
+    if session.pid == PID_STOPPED:
+        return session  # definitively stopped, boot_id not required
     if session.pid is not None and session.boot_id is not None:
         return session
 
@@ -126,7 +128,7 @@ def ensure_pids_batch(sessions: list[SessionRow], *, db: Database, config: Confi
     """
     from agentworks.sessions.tmux import get_tmux_server_pid, tmux_cmd
 
-    need_repair = [s for s in sessions if s.pid is None or s.boot_id is None]
+    need_repair = [s for s in sessions if s.pid != PID_STOPPED and (s.pid is None or s.boot_id is None)]
     if not need_repair:
         return sessions
 
@@ -1176,10 +1178,10 @@ def list_sessions(
         for session in ws_sessions:
             if no_status:
                 status = "-"
-            elif session.pid is None or session.boot_id is None:
-                status = "unknown"
             elif session.pid == PID_STOPPED:
                 status = "stopped"
+            elif session.pid is None or session.boot_id is None:
+                status = "unknown"
             elif session.name in status_map:
                 s_status = status_map[session.name]
                 status = {
