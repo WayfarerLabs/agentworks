@@ -143,41 +143,46 @@ def ensure_pids_batch(sessions: list[SessionRow], *, db: Database, config: Confi
         vm = db.get_vm(ws.vm_name)
         if not vm or not vm.tailscale_host:
             continue
-        target = admin_exec_target(vm, config)
+        try:
+            target = admin_exec_target(vm, config)
+        except Exception as exc:
+            output.warn(f"Cannot reach VM '{ws.vm_name}': {exc}")
+            continue
         for session in ws_sessions:
-            sock = session.socket_path
-            q_session = shlex.quote(session.name)
+            try:
+                sock = session.socket_path
+                q_session = shlex.quote(session.name)
 
-            # Step 1: try has-session
-            has_cmd = tmux_cmd(f"has-session -t {q_session}", sock) + " 2>/dev/null"
-            if target.run(has_cmd, check=False).ok:
-                # Alive -- recover PID + boot ID
-                pid = get_tmux_server_pid(target=target, socket_path=sock)
-                boot_id = _get_boot_id(target) if pid is not None else None
-                if pid is not None and boot_id is not None:
-                    db.update_session_pid(session.name, pid, boot_id=boot_id)
-                    output.warn(f"Recovered PID {pid} for session '{session.name}'")
-                else:
-                    # Can't fully recover (missing PID or boot ID) -- leave as UNKNOWN
-                    output.warn(f"Session '{session.name}' is alive but recovery incomplete")
-                    continue
-                repaired_names.add(session.name)
-            elif sock and target.run(f"test -e {shlex.quote(sock)}", check=False).ok:
-                # Socket exists, has-session failed -- sudo probe for stale vs live
-                probe_cmd = tmux_cmd("list-sessions", sock, sudo=True) + " 2>/dev/null"
-                if target.run(probe_cmd, check=False).ok:
-                    output.warn(
-                        f"Session '{session.name}' has a live tmux server but it is unreachable. "
-                        "This may indicate a permissions issue."
-                    )
+                # Step 1: try has-session
+                has_cmd = tmux_cmd(f"has-session -t {q_session}", sock) + " 2>/dev/null"
+                if target.run(has_cmd, check=False).ok:
+                    # Alive -- recover PID + boot ID
+                    pid = get_tmux_server_pid(target=target, socket_path=sock)
+                    boot_id = _get_boot_id(target) if pid is not None else None
+                    if pid is not None and boot_id is not None:
+                        db.update_session_pid(session.name, pid, boot_id=boot_id)
+                        output.warn(f"Recovered PID {pid} for session '{session.name}'")
+                    else:
+                        output.warn(f"Session '{session.name}' is alive but recovery incomplete")
+                        continue
+                    repaired_names.add(session.name)
+                elif sock and target.run(f"test -e {shlex.quote(sock)}", check=False).ok:
+                    probe_cmd = tmux_cmd("list-sessions", sock, sudo=True) + " 2>/dev/null"
+                    if target.run(probe_cmd, check=False).ok:
+                        output.warn(
+                            f"Session '{session.name}' has a live tmux server but it is unreachable. "
+                            "This may indicate a permissions issue."
+                        )
+                    else:
+                        db.update_session_pid(session.name, PID_STOPPED)
+                        output.warn(f"Session '{session.name}' is not running, marked stopped")
+                        repaired_names.add(session.name)
                 else:
                     db.update_session_pid(session.name, PID_STOPPED)
                     output.warn(f"Session '{session.name}' is not running, marked stopped")
                     repaired_names.add(session.name)
-            else:
-                db.update_session_pid(session.name, PID_STOPPED)
-                output.warn(f"Session '{session.name}' is not running, marked stopped")
-                repaired_names.add(session.name)
+            except Exception as exc:
+                output.warn(f"Failed to repair session '{session.name}': {exc}")
 
     # Return original list with repaired sessions refreshed from DB
     if not repaired_names:

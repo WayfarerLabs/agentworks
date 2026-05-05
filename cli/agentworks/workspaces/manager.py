@@ -510,8 +510,13 @@ def rehome_workspace(
 
     sessions = db.list_sessions(workspace_name=name)
     if sessions:
-        sessions = ensure_pids_batch(sessions, db=db, config=config)
-        status_map = batch_check_all_sessions(sessions, db=db, config=config)
+        try:
+            sessions = ensure_pids_batch(sessions, db=db, config=config)
+            status_map = batch_check_all_sessions(sessions, db=db, config=config)
+        except Exception as exc:
+            raise output.WorkspaceError(
+                f"cannot verify session status for workspace '{name}' (VM may be unreachable): {exc}"
+            ) from exc
         not_stopped = [
             s for s in sessions
             if s.pid != PID_STOPPED and status_map.get(s.name, SessionStatus.UNKNOWN) != SessionStatus.STOPPED
