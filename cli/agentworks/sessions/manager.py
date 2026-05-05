@@ -764,7 +764,8 @@ def restart_session(
         if not yes and not output.confirm(f"Session '{name}' is running. Restart?"):
             raise output.UserAbort("restart cancelled")
         sock = session.socket_path
-        _kill_session(name, run_command=run_command, socket_path=sock)
+        if not _kill_session(name, run_command=run_command, socket_path=sock):
+            raise output.SessionError(f"failed to stop session '{name}' for restart")
 
     template = _resolve_template(config, session.template)
     deploy_restricted_config(run_command, history_limit=config.session.history_limit)
