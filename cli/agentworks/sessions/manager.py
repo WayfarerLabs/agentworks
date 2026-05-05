@@ -656,9 +656,13 @@ def _execute_stop(
             run_cmd = partial(run, target, logger=target.logger)
             killed = _kill_session(session.name, run_command=run_cmd, socket_path=sock)
             if not killed:
-                # Only escalate to PID kill for agent sessions (dedicated socket).
-                # Admin sessions share a PID -- killing it would take down all admin sessions.
-                if force and session.socket_path is not None and session.pid and session.pid > 0:
+                # Race condition: session may have exited between survivor check and kill.
+                # Recheck before treating as failure.
+                recheck = check_session_status(session, target=target)
+                if recheck == SessionStatus.STOPPED:
+                    pass  # session exited on its own, that's success
+                elif force and session.socket_path is not None and session.pid and session.pid > 0:
+                    # Escalate to PID kill for agent sessions only (admin shares PID)
                     output.detail(f"tmux kill failed for '{session.name}', force-killing PID {session.pid}")
                     if not force_kill_tmux_server(
                         session.pid, target=target, socket_path=session.socket_path, log=output.detail,
@@ -982,7 +986,11 @@ def delete_session(
     # Now kill if needed
     if health == SessionStatus.OK:
         sock = session.socket_path
-        _kill_session(name, run_command=run_command, socket_path=sock)
+        if not _kill_session(name, run_command=run_command, socket_path=sock):
+            # Race: session may have exited between check and kill. Recheck.
+            recheck = check_session_status(session, target=target)
+            if recheck != SessionStatus.STOPPED:
+                raise output.SessionError(f"failed to stop session '{name}' for deletion")
     elif health == SessionStatus.BROKEN:
         from agentworks.sessions.tmux import force_kill_tmux_server
 

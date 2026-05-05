@@ -198,8 +198,11 @@ def delete_agent(
             status = check_session_status(session, target=target)
             if status == SessionStatus.OK:
                 if not kill_session(session.name, run_command=run_command, socket_path=session.socket_path):
-                    unstoppable.append(session.name)
-                    continue
+                    # Race: session may have exited between check and kill. Recheck.
+                    recheck = check_session_status(session, target=target)
+                    if recheck != SessionStatus.STOPPED:
+                        unstoppable.append(session.name)
+                        continue
             elif status == SessionStatus.BROKEN:
                 if session.pid and session.pid > 0 and force_kill_tmux_server(
                     session.pid, target=target, socket_path=session.socket_path,
