@@ -14,7 +14,7 @@ import typer
 from agentworks import output
 from agentworks.db import PID_STOPPED, SessionMode, SessionStatus
 from agentworks.sessions.tmux import AGENT_SOCKET_ROOT
-from agentworks.ssh import admin_exec_target
+from agentworks.ssh import SSH_TRANSPORT_ERROR, admin_exec_target
 
 _ENV_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
@@ -84,7 +84,7 @@ def _repair_session_pid(
     # Step 1: try has-session (the primary liveness check)
     has_cmd = tmux_cmd(f"has-session -t {q_session}", sock) + " 2>/dev/null"
     has_result = target.run(has_cmd, check=False)
-    if has_result.returncode == 255:
+    if has_result.returncode == SSH_TRANSPORT_ERROR:
         raise output.SessionError(f"cannot reach VM for session '{session.name}' (SSH connection failed)")
     if has_result.ok:
         # Session is alive -- recover PID + boot ID
@@ -374,7 +374,7 @@ def _check_dedicated_agent_session(session: SessionRow, *, target: ExecTarget) -
     q_session = shlex.quote(session.name)
     cmd = tmux_cmd(f"has-session -t {q_session}", session.socket_path) + " 2>/dev/null"
     result = target.run(cmd, check=False)
-    if result.returncode == 255:
+    if result.returncode == SSH_TRANSPORT_ERROR:
         return SessionStatus.UNKNOWN  # SSH transport failure, not a session state
     if result.ok:
         return SessionStatus.OK
@@ -398,7 +398,7 @@ def _check_shared_admin_session(session: SessionRow, *, target: ExecTarget) -> S
     q_session = shlex.quote(session.name)
     cmd = tmux_cmd(f"has-session -t {q_session}") + " 2>/dev/null"
     result = target.run(cmd, check=False)
-    if result.returncode == 255:
+    if result.returncode == SSH_TRANSPORT_ERROR:
         return SessionStatus.UNKNOWN  # SSH transport failure, not a session state
     if result.ok:
         return SessionStatus.OK
