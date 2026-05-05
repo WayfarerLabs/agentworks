@@ -64,18 +64,17 @@ def _kill_session(
     return kill_session(session_name, run_command=run_command, socket_path=socket_path)
 
 
-def _ensure_pid(session: SessionRow, *, target: ExecTarget, db: Database) -> SessionRow:
-    """Auto-recover PID + boot ID for a session missing either.
+def _repair_session_pid(
+    session: SessionRow,
+    *,
+    target: ExecTarget,
+    db: Database,
+) -> bool:
+    """Core repair logic for a single session. Returns True if the DB was updated.
 
-    Strict gate: after this returns, the session is guaranteed to be either
-    PID_STOPPED or have valid PID + boot_id. Raises SessionError if the
-    session cannot be resolved.
+    Raises SessionError if the session is alive but PID/boot_id can't be recovered,
+    or if the tmux server is unreachable (permissions issue).
     """
-    if session.pid == PID_STOPPED:
-        return session
-    if session.pid is not None and session.boot_id is not None:
-        return session
-
     from agentworks.sessions.tmux import get_tmux_server_pid, tmux_cmd
 
     sock = session.socket_path
@@ -90,97 +89,87 @@ def _ensure_pid(session: SessionRow, *, target: ExecTarget, db: Database) -> Ses
         if pid is not None and boot_id is not None:
             db.update_session_pid(session.name, pid, boot_id=boot_id)
             output.warn(f"Recovered PID {pid} for session '{session.name}'")
-        else:
-            raise output.SessionError(
-                f"session '{session.name}' is alive but PID/boot ID recovery failed. "
-                "Investigate the tmux server manually."
-            )
-    elif sock and target.run(f"test -e {shlex.quote(sock)}", check=False).ok:
-        # Socket exists but has-session failed. Probe with sudo to distinguish
-        # stale socket (dead server) from live-but-unreachable server (permissions).
+            return True
+        raise output.SessionError(
+            f"session '{session.name}' is alive but PID/boot ID recovery failed. "
+            "Investigate the tmux server manually."
+        )
+
+    # Step 2: has-session failed -- determine if genuinely stopped or ambiguous
+    if sock and target.run(f"test -e {shlex.quote(sock)}", check=False).ok:
+        # Socket exists. Probe with sudo to distinguish stale from unreachable.
         probe_cmd = tmux_cmd("list-sessions", sock, sudo=True) + " 2>/dev/null"
         if target.run(probe_cmd, check=False).ok:
             raise output.SessionError(
                 f"session '{session.name}' has a live tmux server but it is unreachable. "
                 "This may indicate a permissions issue. Investigate manually."
             )
-        else:
-            # Stale socket, server is dead
-            db.update_session_pid(session.name, PID_STOPPED)
-            output.warn(f"Session '{session.name}' is not running, marked stopped")
-    else:
-        # No socket (or admin session) and has-session failed -- genuinely stopped
+        # Stale socket, server is dead
         db.update_session_pid(session.name, PID_STOPPED)
         output.warn(f"Session '{session.name}' is not running, marked stopped")
+        return True
 
+    # No socket (or admin session) and has-session failed -- genuinely stopped
+    db.update_session_pid(session.name, PID_STOPPED)
+    output.warn(f"Session '{session.name}' is not running, marked stopped")
+    return True
+
+
+def _needs_repair(session: SessionRow) -> bool:
+    """True if the session is missing PID or boot_id and needs auto-repair."""
+    if session.pid == PID_STOPPED:
+        return False
+    return session.pid is None or session.boot_id is None
+
+
+def _ensure_pid(session: SessionRow, *, target: ExecTarget, db: Database) -> SessionRow:
+    """Auto-recover PID + boot ID for a session missing either.
+
+    Strict gate: after this returns, the session is guaranteed to be either
+    PID_STOPPED or have valid PID + boot_id. Raises SessionError if the
+    session cannot be resolved.
+    """
+    if not _needs_repair(session):
+        return session
+    _repair_session_pid(session, target=target, db=db)  # raises on failure
     result = db.get_session(session.name)
     assert result is not None
     return result
 
 
 def ensure_pids_batch(sessions: list[SessionRow], *, db: Database, config: Config) -> list[SessionRow]:
-    """Auto-recover PID + boot ID for sessions missing either. Returns updated list.
-
-    Same logic as _ensure_pid but for batch commands. Socket ambiguity (socket
-    exists but tmux unreachable) leaves pid=NULL so callers see UNKNOWN.
-    """
-    from agentworks.sessions.tmux import get_tmux_server_pid, tmux_cmd
-
-    need_repair = [s for s in sessions if s.pid != PID_STOPPED and (s.pid is None or s.boot_id is None)]
+    """Auto-recover PID + boot ID for sessions missing either. Returns updated list."""
+    need_repair = [s for s in sessions if _needs_repair(s)]
     if not need_repair:
         return sessions
 
-    # Group by workspace to resolve VM targets
-    by_ws: dict[str, list[SessionRow]] = {}
+    # Group by VM (not workspace) to reuse one ExecTarget per VM
+    by_vm: dict[str, list[SessionRow]] = {}
+    vm_cache: dict[str, ExecTarget] = {}
     for s in need_repair:
-        by_ws.setdefault(s.workspace_name, []).append(s)
-
-    repaired_names: set[str] = set()
-    for ws_name, ws_sessions in by_ws.items():
-        ws = db.get_workspace(ws_name)
+        ws = db.get_workspace(s.workspace_name)
         if not ws or ws.type != "vm" or not ws.vm_name:
             continue
-        vm = db.get_vm(ws.vm_name)
-        if not vm or not vm.tailscale_host:
-            continue
-        try:
-            target = admin_exec_target(vm, config)
-        except Exception as exc:
-            output.warn(f"Cannot reach VM '{ws.vm_name}': {exc}")
-            continue
-        for session in ws_sessions:
+        if ws.vm_name not in vm_cache:
+            vm = db.get_vm(ws.vm_name)
+            if not vm or not vm.tailscale_host:
+                continue
             try:
-                sock = session.socket_path
-                q_session = shlex.quote(session.name)
+                vm_cache[ws.vm_name] = admin_exec_target(vm, config)
+            except Exception as exc:
+                output.warn(f"Cannot reach VM '{ws.vm_name}': {exc}")
+                continue
+        by_vm.setdefault(ws.vm_name, []).append(s)
 
-                # Step 1: try has-session
-                has_cmd = tmux_cmd(f"has-session -t {q_session}", sock) + " 2>/dev/null"
-                if target.run(has_cmd, check=False).ok:
-                    # Alive -- recover PID + boot ID
-                    pid = get_tmux_server_pid(target=target, socket_path=sock)
-                    boot_id = _get_boot_id(target) if pid is not None else None
-                    if pid is not None and boot_id is not None:
-                        db.update_session_pid(session.name, pid, boot_id=boot_id)
-                        output.warn(f"Recovered PID {pid} for session '{session.name}'")
-                    else:
-                        output.warn(f"Session '{session.name}' is alive but recovery incomplete")
-                        continue
+    repaired_names: set[str] = set()
+    for vm_name, vm_sessions in by_vm.items():
+        target = vm_cache[vm_name]
+        for session in vm_sessions:
+            try:
+                if _repair_session_pid(session, target=target, db=db):
                     repaired_names.add(session.name)
-                elif sock and target.run(f"test -e {shlex.quote(sock)}", check=False).ok:
-                    probe_cmd = tmux_cmd("list-sessions", sock, sudo=True) + " 2>/dev/null"
-                    if target.run(probe_cmd, check=False).ok:
-                        output.warn(
-                            f"Session '{session.name}' has a live tmux server but it is unreachable. "
-                            "This may indicate a permissions issue."
-                        )
-                    else:
-                        db.update_session_pid(session.name, PID_STOPPED)
-                        output.warn(f"Session '{session.name}' is not running, marked stopped")
-                        repaired_names.add(session.name)
-                else:
-                    db.update_session_pid(session.name, PID_STOPPED)
-                    output.warn(f"Session '{session.name}' is not running, marked stopped")
-                    repaired_names.add(session.name)
+            except output.SessionError as exc:
+                output.warn(str(exc))
             except Exception as exc:
                 output.warn(f"Failed to repair session '{session.name}': {exc}")
 
