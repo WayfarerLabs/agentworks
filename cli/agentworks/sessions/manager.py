@@ -85,12 +85,12 @@ def _ensure_pid(session: SessionRow, *, target: ExecTarget, db: Database) -> Ses
     if target.run(has_cmd, check=False).ok:
         # Session is alive -- recover PID + boot ID
         pid = get_tmux_server_pid(target=target, socket_path=sock)
-        if pid is not None:
-            db.update_session_pid(session.name, pid, boot_id=_get_boot_id(target))
+        boot_id = _get_boot_id(target) if pid is not None else None
+        if pid is not None and boot_id is not None:
+            db.update_session_pid(session.name, pid, boot_id=boot_id)
             output.warn(f"Recovered PID {pid} for session '{session.name}'")
         else:
-            # has-session succeeded but display-message failed -- session is alive but we
-            # can't get the PID. Leave as NULL (UNKNOWN) rather than contradicting has-session.
+            # Can't fully recover (missing PID or boot ID). Leave as UNKNOWN.
             output.warn(f"Session '{session.name}' is alive but PID recovery failed")
     elif sock and target.run(f"test -e {shlex.quote(sock)}", check=False).ok:
         # Socket exists but has-session failed. Probe with sudo to distinguish
@@ -153,12 +153,13 @@ def ensure_pids_batch(sessions: list[SessionRow], *, db: Database, config: Confi
             if target.run(has_cmd, check=False).ok:
                 # Alive -- recover PID + boot ID
                 pid = get_tmux_server_pid(target=target, socket_path=sock)
-                if pid is not None:
-                    db.update_session_pid(session.name, pid, boot_id=_get_boot_id(target))
+                boot_id = _get_boot_id(target) if pid is not None else None
+                if pid is not None and boot_id is not None:
+                    db.update_session_pid(session.name, pid, boot_id=boot_id)
                     output.warn(f"Recovered PID {pid} for session '{session.name}'")
                 else:
-                    # has-session succeeded but display-message failed -- leave as UNKNOWN
-                    output.warn(f"Session '{session.name}' is alive but PID recovery failed")
+                    # Can't fully recover (missing PID or boot ID) -- leave as UNKNOWN
+                    output.warn(f"Session '{session.name}' is alive but recovery incomplete")
                     continue
                 repaired_names.add(session.name)
             elif sock and target.run(f"test -e {shlex.quote(sock)}", check=False).ok:
@@ -582,7 +583,11 @@ def create_session(
     # Persist socket path, PID, and boot ID
     if sock:
         db.update_session_socket_path(name, sock)
-    db.update_session_pid(name, pid, boot_id=_get_boot_id(target))
+    boot_id = _get_boot_id(target)
+    if boot_id is not None:
+        db.update_session_pid(name, pid, boot_id=boot_id)
+    else:
+        output.warn(f"Could not read boot ID for session '{name}', PID not stored")
 
     mode_label = f"agent: {resolved_agent_name}" if resolved_agent_name else "admin"
     output.info(f"Session '{name}' started ({mode_label}, template: {template.name})")
@@ -808,12 +813,14 @@ def restart_session(
             ) from exc
         raise
 
-    # Persist socket path if it differs from what's stored. Compare against
-    # session.socket_path (not the derived effective path) so migrated sessions
-    # with NULL socket_path get backfilled on restart.
+    # Persist socket path if it differs from what's stored.
     if new_sock != session.socket_path:
         db.update_session_socket_path(name, new_sock)
-    db.update_session_pid(name, pid, boot_id=_get_boot_id(target))
+    boot_id = _get_boot_id(target)
+    if boot_id is not None:
+        db.update_session_pid(name, pid, boot_id=boot_id)
+    else:
+        output.warn(f"Could not read boot ID for session '{name}', PID not stored")
 
     output.info(f"Session '{name}' restarted")
 
