@@ -366,3 +366,62 @@ def test_user_section_deprecated_alias(tmp_path: Path, capsys: pytest.CaptureFix
     captured = capsys.readouterr()
     assert "deprecated" in captured.err.lower()
     assert "[operator]" in captured.err
+
+
+# -- Claude plugin config validation ----------------------------------------
+
+
+def _minimal_config(tmp_path: Path, extra: str = "") -> Path:
+    """Write a minimal valid config with optional extra sections."""
+    pub = tmp_path / "id.pub"
+    priv = tmp_path / "id"
+    pub.write_text("key")
+    priv.write_text("key")
+    config_file = tmp_path / "config.toml"
+    config_file.write_text(dedent(f"""\
+        [operator]
+        ssh_public_key = "{pub.as_posix()}"
+        ssh_private_key = "{priv.as_posix()}"
+
+        {dedent(extra)}
+    """))
+    return config_file
+
+
+def test_claude_plugins_require_claude_install_admin(tmp_path: Path) -> None:
+    config_file = _minimal_config(tmp_path, """
+        [admin.config]
+        claude_marketplaces = ["https://github.com/example/tools#v1"]
+        claude_plugins = ["my-plugin@my-marketplace"]
+    """)
+    cfg = load_config(config_file, warn_issues=False)
+    assert any("claude_install" in issue for issue in cfg.config_issues)
+
+
+def test_claude_plugins_no_issue_when_install_true_admin(tmp_path: Path) -> None:
+    config_file = _minimal_config(tmp_path, """
+        [admin.config]
+        claude_install = true
+        claude_marketplaces = ["https://github.com/example/tools#v1"]
+        claude_plugins = ["my-plugin@my-marketplace"]
+    """)
+    cfg = load_config(config_file, warn_issues=False)
+    assert not any("claude_install" in issue for issue in cfg.config_issues)
+
+
+def test_claude_plugins_require_claude_install_agent(tmp_path: Path) -> None:
+    config_file = _minimal_config(tmp_path, """
+        [agent_templates.claude]
+        claude_marketplaces = ["https://github.com/example/tools#v1"]
+    """)
+    cfg = load_config(config_file, warn_issues=False)
+    assert any("agent_templates.claude" in issue for issue in cfg.config_issues)
+
+
+def test_claude_marketplaces_rejects_string(tmp_path: Path) -> None:
+    config_file = _minimal_config(tmp_path, """
+        [admin.config]
+        claude_marketplaces = "https://github.com/example/tools"
+    """)
+    with pytest.raises(ConfigError, match="must be a list of strings"):
+        load_config(config_file)
