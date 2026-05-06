@@ -152,7 +152,6 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # -- Nerf tools --
 # nerf_install_claude_plugin = false           # install nerf plugin for this user
 # -- Claude Code --
-# claude_install = false                     # install claude CLI for this user
 # claude_marketplaces = ["https://github.com/WayfarerLabs/nerftools#1.2.0"]
 # claude_plugins = ["nerftools-default@nerftools"]
 
