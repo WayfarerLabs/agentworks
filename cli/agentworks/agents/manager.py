@@ -755,6 +755,15 @@ def _create_agent_on_vm(
     if config.agent.nerf_install_claude_plugin:
         _install_nerf_claude_plugin_for_agent(target, linux_user, agent_shell)
 
+    # Claude Code marketplaces and plugins for the agent
+    from agentworks.vms.initializer import install_claude_plugins
+
+    install_claude_plugins(
+        lambda cmd, timeout: _run_as_agent(target, linux_user, cmd, timeout=timeout, logger=lg),
+        config.agent.claude_marketplaces,
+        config.agent.claude_plugins,
+    )
+
 
 def _install_nerf_claude_plugin_for_agent(
     target: SSHTarget | ExecTarget,
@@ -819,7 +828,11 @@ def _run_agent_install_commands(
     home: str,
 ) -> None:
     """Run user install commands for an agent. Failures warn but do not abort."""
-    command_names = config.agent.user_install_commands
+    from agentworks.vms.initializer import prepare_install_commands
+
+    command_names = prepare_install_commands(
+        config.agent.user_install_commands, claude_install=config.agent.claude_install
+    )
     if not command_names:
         return
 

@@ -146,6 +146,10 @@ class AdminConfig:
     mise_prune_on_reinit: bool = True
     nerf_install_claude_plugin: bool = False
     git_force_safe_directory: bool = True
+    # Claude Code
+    claude_install: bool = False
+    claude_marketplaces: list[str] = field(default_factory=list)
+    claude_plugins: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -167,6 +171,9 @@ class AgentTemplate:
     mise_install_before: str | None = None
     mise_prune_on_reinit: bool | None = None
     nerf_install_claude_plugin: bool | None = None
+    claude_install: bool | None = None
+    claude_marketplaces: list[str] | None = None
+    claude_plugins: list[str] | None = None
 
 
 @dataclass(frozen=True)
@@ -242,6 +249,7 @@ class Config:
     user_install_commands: dict[str, object] = field(default_factory=dict)
     azure: AzureConfig | None = None
     proxmox: ProxmoxConfig | None = None
+    config_issues: tuple[str, ...] = ()
 
 
 # -- Loading ---------------------------------------------------------------
@@ -257,22 +265,31 @@ def _require(data: dict[str, object], key: str, context: str) -> object:
     return data[key]
 
 
+def _require_string_list(data: dict[str, object], key: str, context: str) -> list[str]:
+    """Load a key as a list of strings, raising ConfigError on type mismatch."""
+    val = data.get(key, [])
+    if not isinstance(val, list) or not all(isinstance(v, str) for v in val):
+        raise ConfigError(f"{context}.{key} must be a list of strings")
+    return val
+
+
 def _warn_unexpected_keys(
     raw: dict[str, object],
     known: set[str],
     section: str,
+    issues: list[str],
 ) -> None:
-    """Warn about unexpected keys in a config section.
+    """Record unexpected keys in a config section.
 
     This catches the common TOML pitfall where a [section] header is
-    commented out and its keys land in the previous section.
+    commented out and its keys land in the previous section, as well as
+    typos and version mismatches. Issues are collected on the Config object
+    so that doctor can report all of them without short-circuiting.
     """
     unexpected = set(raw.keys()) - known
     if unexpected:
-        from agentworks.output import warn
-
         keys = ", ".join(sorted(unexpected))
-        warn(f"unexpected keys in [{section}]: {keys}")
+        issues.append(f"unexpected keys in [{section}]: {keys}")
 
 
 _OPERATOR_KEYS = {
@@ -285,7 +302,7 @@ _OPERATOR_KEYS = {
 }
 
 
-def _load_operator(data: dict[str, object]) -> OperatorConfig:
+def _load_operator(data: dict[str, object], issues: list[str]) -> OperatorConfig:
     raw = data.get("operator")
     section_name = "operator"
     if not isinstance(raw, dict):
@@ -300,7 +317,7 @@ def _load_operator(data: dict[str, object]) -> OperatorConfig:
         else:
             raise ConfigError("[operator] section is required")
 
-    _warn_unexpected_keys(raw, _OPERATOR_KEYS, section_name)
+    _warn_unexpected_keys(raw, _OPERATOR_KEYS, section_name, issues)
 
     pub = _expand(str(_require(raw, "ssh_public_key", section_name)))
     priv = _expand(str(_require(raw, "ssh_private_key", section_name)))
@@ -358,7 +375,7 @@ def _load_paths(data: dict[str, object]) -> PathsConfig:
 _DEFAULTS_KEYS = {"platform", "vm_host"}
 
 
-def _load_defaults(data: dict[str, object]) -> DefaultsConfig:
+def _load_defaults(data: dict[str, object], issues: list[str]) -> DefaultsConfig:
     raw = data.get("defaults", {})
     if not isinstance(raw, dict):
         raise ConfigError("[defaults] must be a table")
@@ -369,7 +386,7 @@ def _load_defaults(data: dict[str, object]) -> DefaultsConfig:
             "[admin.config] and/or [agent.config]. See docs/guides/config-migration.md."
         )
 
-    _warn_unexpected_keys(raw, _DEFAULTS_KEYS, "defaults")
+    _warn_unexpected_keys(raw, _DEFAULTS_KEYS, "defaults", issues)
 
     platform = raw.get("platform")
     if platform is not None and platform not in VALID_PLATFORMS:
@@ -399,7 +416,7 @@ _VM_TEMPLATE_KEYS = {
 }
 
 
-def _load_vm_templates(data: dict[str, object]) -> dict[str, VMTemplate]:
+def _load_vm_templates(data: dict[str, object], issues: list[str]) -> dict[str, VMTemplate]:
     raw = data.get("vm_templates", {})
     if not isinstance(raw, dict):
         raise ConfigError("[vm_templates] must be a table")
@@ -413,7 +430,7 @@ def _load_vm_templates(data: dict[str, object]) -> dict[str, VMTemplate]:
     for name, tdata in raw.items():
         if not isinstance(tdata, dict):
             raise ConfigError(f"vm_templates.{name} must be a table")
-        _warn_unexpected_keys(tdata, _VM_TEMPLATE_KEYS, f"vm_templates.{name}")
+        _warn_unexpected_keys(tdata, _VM_TEMPLATE_KEYS, f"vm_templates.{name}", issues)
 
         nerf_addl = [_expand(str(m)) for m in tdata["nerf_addl_manifests"]] if "nerf_addl_manifests" in tdata else None
 
@@ -465,10 +482,13 @@ _USER_CONFIG_KEYS = {
     "mise_prune_on_reinit",
     "nerf_install_claude_plugin",
     "git_force_safe_directory",
+    "claude_install",
+    "claude_marketplaces",
+    "claude_plugins",
 }
 
 
-def _load_admin_config(data: dict[str, object]) -> AdminConfig:
+def _load_admin_config(data: dict[str, object], issues: list[str]) -> AdminConfig:
     """Load admin per-user config from [admin.config]."""
     top = data.get("admin", {})
     if not isinstance(top, dict):
@@ -477,7 +497,7 @@ def _load_admin_config(data: dict[str, object]) -> AdminConfig:
     if not isinstance(raw, dict):
         raise ConfigError("[admin.config] must be a table")
 
-    _warn_unexpected_keys(raw, _USER_CONFIG_KEYS, "admin.config")
+    _warn_unexpected_keys(raw, _USER_CONFIG_KEYS, "admin.config", issues)
 
     return AdminConfig(
         username=str(raw.get("username", "agentworks")),
@@ -495,13 +515,16 @@ def _load_admin_config(data: dict[str, object]) -> AdminConfig:
         mise_prune_on_reinit=bool(raw.get("mise_prune_on_reinit", True)),
         nerf_install_claude_plugin=bool(raw.get("nerf_install_claude_plugin", False)),
         git_force_safe_directory=bool(raw.get("git_force_safe_directory", True)),
+        claude_install=bool(raw.get("claude_install", False)),
+        claude_marketplaces=_require_string_list(raw, "claude_marketplaces", "admin.config"),
+        claude_plugins=_require_string_list(raw, "claude_plugins", "admin.config"),
     )
 
 
 _AGENT_TEMPLATE_KEYS = _USER_CONFIG_KEYS | {"inherits"}
 
 
-def _load_agent_templates(data: dict[str, object]) -> dict[str, AgentTemplate]:
+def _load_agent_templates(data: dict[str, object], issues: list[str]) -> dict[str, AgentTemplate]:
     raw = data.get("agent_templates", {})
     if not isinstance(raw, dict):
         raise ConfigError("[agent_templates] must be a table")
@@ -516,7 +539,7 @@ def _load_agent_templates(data: dict[str, object]) -> dict[str, AgentTemplate]:
     for name, tdata in raw.items():
         if not isinstance(tdata, dict):
             raise ConfigError(f"agent_templates.{name} must be a table")
-        _warn_unexpected_keys(tdata, _AGENT_TEMPLATE_KEYS, f"agent_templates.{name}")
+        _warn_unexpected_keys(tdata, _AGENT_TEMPLATE_KEYS, f"agent_templates.{name}", issues)
 
         templates[name] = AgentTemplate(
             name=name,
@@ -535,6 +558,15 @@ def _load_agent_templates(data: dict[str, object]) -> dict[str, AgentTemplate]:
             mise_prune_on_reinit=(bool(tdata["mise_prune_on_reinit"]) if "mise_prune_on_reinit" in tdata else None),
             nerf_install_claude_plugin=(
                 bool(tdata["nerf_install_claude_plugin"]) if "nerf_install_claude_plugin" in tdata else None
+            ),
+            claude_install=bool(tdata["claude_install"]) if "claude_install" in tdata else None,
+            claude_marketplaces=(
+                _require_string_list(tdata, "claude_marketplaces", f"agent_templates.{name}")
+                if "claude_marketplaces" in tdata else None
+            ),
+            claude_plugins=(
+                _require_string_list(tdata, "claude_plugins", f"agent_templates.{name}")
+                if "claude_plugins" in tdata else None
             ),
         )
 
@@ -657,7 +689,7 @@ def _load_git_credentials(data: dict[str, object]) -> dict[str, GitCredentialCon
 _SESSION_CONFIG_KEYS = {"history_limit"}
 
 
-def _load_session_config(data: dict[str, object]) -> SessionConfig:
+def _load_session_config(data: dict[str, object], issues: list[str]) -> SessionConfig:
     session_section = data.get("session", {})
     if not isinstance(session_section, dict):
         raise ConfigError("[session] must be a table")
@@ -665,7 +697,7 @@ def _load_session_config(data: dict[str, object]) -> SessionConfig:
     if not isinstance(raw, dict):
         raise ConfigError("[session.config] must be a table")
 
-    _warn_unexpected_keys(raw, _SESSION_CONFIG_KEYS, "session.config")
+    _warn_unexpected_keys(raw, _SESSION_CONFIG_KEYS, "session.config", issues)
 
     history_limit = int(raw.get("history_limit", 50_000))
     if history_limit < 1:
@@ -679,7 +711,7 @@ def _load_session_config(data: dict[str, object]) -> SessionConfig:
 _SESSION_TEMPLATE_KEYS = {"inherits", "command", "description", "restart_command", "env"}
 
 
-def _load_session_templates(data: dict[str, object]) -> dict[str, SessionTemplate]:
+def _load_session_templates(data: dict[str, object], issues: list[str]) -> dict[str, SessionTemplate]:
     raw = data.get("session_templates", {})
     if not isinstance(raw, dict):
         raise ConfigError("[session_templates] must be a table")
@@ -688,7 +720,7 @@ def _load_session_templates(data: dict[str, object]) -> dict[str, SessionTemplat
     for name, tdata in raw.items():
         if not isinstance(tdata, dict):
             raise ConfigError(f"session_templates.{name} must be a table")
-        _warn_unexpected_keys(tdata, _SESSION_TEMPLATE_KEYS, f"session_templates.{name}")
+        _warn_unexpected_keys(tdata, _SESSION_TEMPLATE_KEYS, f"session_templates.{name}", issues)
         env_raw = tdata.get("env")
         env: dict[str, str] | None = None
         if env_raw is not None:
@@ -765,25 +797,25 @@ EXPECTED_TOP_LEVEL_KEYS = {
 }
 
 
-def _warn_unexpected_top_level_keys(data: dict[str, object]) -> None:
-    """Warn about unexpected top-level keys.
+def _warn_unexpected_top_level_keys(data: dict[str, object], issues: list[str]) -> None:
+    """Record unexpected top-level keys.
 
     This catches a common TOML pitfall: uncommenting a key without its section
     header causes the key to land in the wrong (or top-level) section.
     """
     unexpected = set(data.keys()) - EXPECTED_TOP_LEVEL_KEYS
     if unexpected:
-        from agentworks.output import warn
-
         keys = ", ".join(sorted(unexpected))
-        warn(f"unexpected top-level keys in config: {keys}")
+        issues.append(f"unexpected top-level keys in config: {keys}")
 
 
-def load_config(path: Path | None = None) -> Config:
+def load_config(path: Path | None = None, *, warn_issues: bool = True) -> Config:
     """Load and validate the agentworks configuration.
 
     Args:
         path: Override config file path (default: ~/.config/agentworks/config.toml).
+        warn_issues: Emit config issues as warnings to stderr (default: True).
+            Set to False when the caller handles issues itself (e.g. doctor).
 
     Returns:
         Validated Config object.
@@ -805,7 +837,9 @@ def load_config(path: Path | None = None) -> Config:
             print(f"Error: invalid config file {config_path}: {e}", file=sys.stderr)
             raise SystemExit(1) from None
 
-    _warn_unexpected_top_level_keys(data)
+    issues: list[str] = []
+
+    _warn_unexpected_top_level_keys(data, issues)
 
     if "dotfiles" in data:
         raise ConfigError(
@@ -817,11 +851,11 @@ def load_config(path: Path | None = None) -> Config:
     git_credentials = _load_git_credentials(data)
     apt_sources, apt_packages, system_cmds, user_cmds = _load_catalog_sections(data)
 
-    session_config = _load_session_config(data)
-    session_templates = _load_session_templates(data)
+    session_config = _load_session_config(data, issues)
+    session_templates = _load_session_templates(data, issues)
 
-    loaded_vm_templates = _load_vm_templates(data)
-    loaded_agent_templates = _load_agent_templates(data)
+    loaded_vm_templates = _load_vm_templates(data, issues)
+    loaded_agent_templates = _load_agent_templates(data, issues)
 
     # Resolve default templates eagerly so config.vm / config.agent work everywhere
     from agentworks.vms.templates import resolve_from_dict as _resolve_vm
@@ -832,13 +866,24 @@ def load_config(path: Path | None = None) -> Config:
 
     resolved_agent = _resolve_agent(loaded_agent_templates)
 
-    return Config(
-        operator=_load_operator(data),
+    admin = _load_admin_config(data, issues)
+    if (admin.claude_marketplaces or admin.claude_plugins) and not admin.claude_install:
+        issues.append("[admin.config] claude_marketplaces/claude_plugins require claude_install = true")
+
+    for name in loaded_agent_templates:
+        resolved = _resolve_agent(loaded_agent_templates, name)
+        if (resolved.claude_marketplaces or resolved.claude_plugins) and not resolved.claude_install:
+            issues.append(
+                f"[agent_templates.{name}] claude_marketplaces/claude_plugins require claude_install = true"
+            )
+
+    config = Config(
+        operator=_load_operator(data, issues),
         paths=_load_paths(data),
-        defaults=_load_defaults(data),
+        defaults=_load_defaults(data, issues),
         vm_templates=loaded_vm_templates,
         vm=resolved_vm,
-        admin=_load_admin_config(data),
+        admin=admin,
         agent_templates=loaded_agent_templates,
         agent=resolved_agent,
         session=session_config,
@@ -851,4 +896,13 @@ def load_config(path: Path | None = None) -> Config:
         user_install_commands=user_cmds,
         azure=_load_azure(data),
         proxmox=_load_proxmox(data),
+        config_issues=tuple(issues),
     )
+
+    if warn_issues and config.config_issues:
+        from agentworks.output import warn
+
+        for issue in config.config_issues:
+            warn(f"Config: {issue}")
+
+    return config

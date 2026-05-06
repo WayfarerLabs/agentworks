@@ -213,35 +213,34 @@ def _check_config() -> tuple[HealthGroup, Config | None]:
     g.ok("Config file", str(CONFIG_PATH))
 
     try:
-        import warnings as _warnings
-
         from agentworks.config import load_config
 
-        with _warnings.catch_warnings(record=True) as config_warnings:
-            _warnings.simplefilter("always")
-            config = load_config()
-        for cw in config_warnings:
-            g.warn("Config", str(cw.message))
-        g.ok("Config is valid")
-
-        # SSH keys
-        _check_ssh_key(g, config.operator.ssh_public_key, "public")
-        _check_ssh_key(g, config.operator.ssh_private_key, "private")
-
-        # Dotfiles
-        if config.admin.dotfiles_source:
-            from agentworks.sources import parse_source_ref
-
-            ref = parse_source_ref(config.admin.dotfiles_source)
-            if ref.kind == "git" or Path(ref.path).expanduser().exists():
-                g.ok("Admin dotfiles", config.admin.dotfiles_source)
-            else:
-                g.warn("Admin dotfiles", f"source missing: {config.admin.dotfiles_source}")
-
+        config = load_config(warn_issues=False)
     except ConfigError as e:
         g.fail("Config", str(e))
+        return g, None
     except SystemExit:
         g.fail("Config", "failed to load")
+        return g, None
+
+    for issue in config.config_issues:
+        g.warn("Config", issue)
+    if not config.config_issues:
+        g.ok("Config is valid")
+
+    # SSH keys
+    _check_ssh_key(g, config.operator.ssh_public_key, "public")
+    _check_ssh_key(g, config.operator.ssh_private_key, "private")
+
+    # Dotfiles
+    if config.admin.dotfiles_source:
+        from agentworks.sources import parse_source_ref
+
+        ref = parse_source_ref(config.admin.dotfiles_source)
+        if ref.kind == "git" or Path(ref.path).expanduser().exists():
+            g.ok("Admin dotfiles", config.admin.dotfiles_source)
+        else:
+            g.warn("Admin dotfiles", f"source missing: {config.admin.dotfiles_source}")
 
     return g, config
 
