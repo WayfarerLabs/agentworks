@@ -420,16 +420,19 @@ def vm_reinit(
     reinit_vm(_get_db(), load_config(), name)
 
 
-@vm_app.command("exec")
+@vm_app.command("exec", context_settings={"allow_extra_args": True, "allow_interspersed_args": False})
 def vm_exec(
+    ctx: typer.Context,
     name: Annotated[str, typer.Argument(help="VM name")],
-    command: Annotated[str, typer.Argument(help="Command to execute")],
 ) -> None:
     """Execute a command on a VM."""
     from agentworks.config import load_config
     from agentworks.vms.manager import exec_vm
 
-    exec_vm(_get_db(), load_config(), name, command)
+    if not ctx.args:
+        typer.echo("Error: missing command", err=True)
+        raise typer.Exit(1)
+    exec_vm(_get_db(), load_config(), name, ctx.args)
 
 
 @vm_app.command("shell")
