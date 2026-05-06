@@ -16,6 +16,7 @@ import ipaddress
 import shlex
 import subprocess
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -26,7 +27,7 @@ from agentworks.ssh import ExecTarget, SSHError, SSHLogger, SSHTarget
 from agentworks.vms.cloud_init import INIT_SYSTEM_PACKAGES, PROVISIONING_PACKAGES
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping
+    from collections.abc import Mapping
 
     from agentworks.catalog import AptSourceEntry, SystemInstallCommandEntry, UserInstallCommandEntry
     from agentworks.config import Config
@@ -1252,7 +1253,7 @@ def _phase_b_setup(
             pass
 
     # Non-fatal: user install commands for admin user (may depend on mise tools)
-    admin_install_cmds = _prepare_install_commands(
+    admin_install_cmds = prepare_install_commands(
         config.admin.user_install_commands, claude_install=config.admin.claude_install
     )
     user_path = _run_catalog_commands(
@@ -1282,8 +1283,12 @@ def _phase_b_setup(
         _install_nerf_claude_plugin_for_user(ts_target, admin_shell, logger)
 
     # Non-fatal: Claude Code marketplaces and plugins for admin user
-    _install_claude_plugins_for_user(
-        ts_target, admin_shell, config.admin.claude_marketplaces, config.admin.claude_plugins, logger
+    def _admin_run_cmd(cmd: str, timeout: int) -> object:
+        inner = shlex.quote(cmd)
+        return ts_target.run(f"{admin_shell} -lc {inner}", timeout=timeout)
+
+    install_claude_plugins(
+        _admin_run_cmd, config.admin.claude_marketplaces, config.admin.claude_plugins, logger
     )
 
 
@@ -1429,7 +1434,7 @@ def _install_nerf_claude_plugin_for_user(
         output.warn(msg)
 
 
-def _prepare_install_commands(
+def prepare_install_commands(
     commands: list[str],
     *,
     claude_install: bool,
@@ -1452,32 +1457,41 @@ def _prepare_install_commands(
     return result
 
 
-def _install_claude_plugins_for_user(
-    target: ExecTarget,
-    shell: str,
+RunCmd = Callable[[str, int], object]
+"""Callable that runs a shell command with a timeout. Used to abstract
+admin (target.run) vs agent (_run_as_agent) execution."""
+
+
+def install_claude_plugins(
+    run_cmd: RunCmd,
     marketplaces: list[str],
     plugins: list[str],
-    logger: SSHLogger,
+    logger: SSHLogger | None = None,
 ) -> None:
-    """Register Claude Code marketplaces and install plugins for a user. Non-fatal."""
+    """Register Claude Code marketplaces and install plugins. Non-fatal.
+
+    The caller provides a run_cmd that handles shell/user context:
+    - Admin: wraps in login shell via {shell} -lc
+    - Agent: wraps in su - via _run_as_agent
+    """
     if not marketplaces and not plugins:
         return
 
-    logger.step("Claude plugins")
+    if logger:
+        logger.step("Claude plugins")
 
     try:
         for source in marketplaces:
             output.detail(f"Registering Claude marketplace: {source}")
-            inner = f"claude plugin marketplace add {shlex.quote(source)}"
-            target.run(f"{shell} -lc {shlex.quote(inner)}", timeout=60)
+            run_cmd(f"claude plugin marketplace add {shlex.quote(source)}", 60)
 
         for plugin in plugins:
             output.detail(f"Installing Claude plugin: {plugin}")
-            inner = f"claude plugin install {shlex.quote(plugin)} --scope user"
-            target.run(f"{shell} -lc {shlex.quote(inner)}", timeout=60)
+            run_cmd(f"claude plugin install {shlex.quote(plugin)} --scope user", 60)
     except SSHError as e:
         msg = f"Claude plugin install failed: {e}"
-        logger.warning(msg)
+        if logger:
+            logger.warning(msg)
         output.warn(msg)
 
 
