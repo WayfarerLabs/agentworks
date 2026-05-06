@@ -432,7 +432,7 @@ def vm_exec(
     if not ctx.args:
         typer.echo("Error: missing command", err=True)
         raise typer.Exit(1)
-    exec_vm(_get_db(), load_config(), name, ctx.args)
+    raise typer.Exit(exec_vm(_get_db(), load_config(), name, ctx.args))
 
 
 @vm_app.command("shell")
@@ -789,6 +789,21 @@ def agent_grants_list(
     from agentworks.agents.manager import list_grants
 
     list_grants(_get_db(), agent_name=name)
+
+
+@agent_app.command("exec", context_settings={"allow_extra_args": True, "allow_interspersed_args": False})
+def agent_exec(
+    ctx: typer.Context,
+    name: Annotated[str, typer.Argument(help="Agent name")],
+) -> None:
+    """Execute a command as an agent user."""
+    from agentworks.agents.manager import exec_agent
+    from agentworks.config import load_config
+
+    if not ctx.args:
+        typer.echo("Error: missing command", err=True)
+        raise typer.Exit(1)
+    raise typer.Exit(exec_agent(_get_db(), load_config(), name=name, command=ctx.args))
 
 
 @agent_app.command("shell")

@@ -412,6 +412,40 @@ def shell_agent(
         sys.exit(interactive(target, f"exec sudo su --login {agent.linux_user}"))
 
 
+def exec_agent(
+    db: Database,
+    config: Config,
+    *,
+    name: str,
+    command: list[str],
+) -> int:
+    """Execute a command as an agent user on a VM via direct SSH subprocess.
+
+    Returns the remote exit code.
+    """
+    import shlex
+    import subprocess
+
+    agent = db.get_agent(name)
+    if agent is None:
+        raise AgentError(f"agent '{name}' not found")
+
+    vm = _require_vm(db, agent.vm_name)
+    if vm.tailscale_host is None:
+        raise AgentError(f"VM '{vm.name}' has no Tailscale IP (init may not be complete)")
+
+    remote_cmd = command[0] if len(command) == 1 else shlex.join(command)
+    su_cmd = f"sudo -n su --login {agent.linux_user} -c {shlex.quote(remote_cmd)}"
+
+    ssh_cmd = ["ssh", "-T", "-o", "StrictHostKeyChecking=accept-new", "-o", "BatchMode=yes"]
+    if config.operator.ssh_private_key:
+        ssh_cmd.extend(["-i", str(config.operator.ssh_private_key)])
+    ssh_cmd.append(f"{vm.admin_username}@{vm.tailscale_host}")
+    ssh_cmd.append(su_cmd)
+
+    return subprocess.call(ssh_cmd)
+
+
 # -- VM operations ---------------------------------------------------------
 
 
