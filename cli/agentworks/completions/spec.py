@@ -64,6 +64,7 @@ DYNAMIC_COMPLETIONS: dict[tuple[str, str], str] = {
     ("vm.backup", "name"): "vms",
     ("vm.describe", "name"): "vms",
     ("vm.reinit", "name"): "vms",
+    ("vm.exec", "name"): "vms",
     ("vm.shell", "name"): "vms",
     ("vm.add-git-credential", "name"): "vms",
     ("vm.port-forward", "name"): "vms",
