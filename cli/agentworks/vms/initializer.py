@@ -1278,6 +1278,11 @@ def _phase_b_setup(
     if config.admin.nerf_install_claude_plugin:
         _install_nerf_claude_plugin_for_user(ts_target, admin_shell, logger)
 
+    # Non-fatal: Claude Code marketplaces and plugins for admin user
+    _install_claude_plugins_for_user(
+        ts_target, admin_shell, config.admin.claude_marketplaces, config.admin.claude_plugins, logger
+    )
+
 
 def _build_nerf_claude_plugin(
     ts_target: ExecTarget,
@@ -1417,6 +1422,39 @@ def _install_nerf_claude_plugin_for_user(
         output.detail("Nerf Claude plugin installed")
     except SSHError as e:
         msg = f"nerf plugin install failed: {e}"
+        logger.warning(msg)
+        output.warn(msg)
+
+
+def _install_claude_plugins_for_user(
+    target: ExecTarget,
+    shell: str,
+    marketplaces: list[str],
+    plugins: list[str],
+    logger: SSHLogger,
+) -> None:
+    """Register Claude Code marketplaces and install plugins for a user. Non-fatal."""
+    if not marketplaces and not plugins:
+        return
+
+    logger.step("Claude plugins")
+
+    try:
+        for source in marketplaces:
+            output.detail(f"Registering Claude marketplace: {source}")
+            target.run(
+                f"{shell} -lc 'claude plugin marketplace add {shlex.quote(source)}'",
+                timeout=60,
+            )
+
+        for plugin in plugins:
+            output.detail(f"Installing Claude plugin: {plugin}")
+            target.run(
+                f"{shell} -lc 'claude plugin install {shlex.quote(plugin)} --scope user'",
+                timeout=60,
+            )
+    except SSHError as e:
+        msg = f"Claude plugin install failed: {e}"
         logger.warning(msg)
         output.warn(msg)
 

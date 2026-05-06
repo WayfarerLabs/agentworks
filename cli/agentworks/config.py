@@ -146,6 +146,9 @@ class AdminConfig:
     mise_prune_on_reinit: bool = True
     nerf_install_claude_plugin: bool = False
     git_force_safe_directory: bool = True
+    # Claude Code
+    claude_marketplaces: list[str] = field(default_factory=list)
+    claude_plugins: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -167,6 +170,8 @@ class AgentTemplate:
     mise_install_before: str | None = None
     mise_prune_on_reinit: bool | None = None
     nerf_install_claude_plugin: bool | None = None
+    claude_marketplaces: list[str] | None = None
+    claude_plugins: list[str] | None = None
 
 
 @dataclass(frozen=True)
