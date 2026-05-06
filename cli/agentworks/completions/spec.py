@@ -91,6 +91,7 @@ DYNAMIC_COMPLETIONS: dict[tuple[str, str], str] = {
     ("agent.workspace-grants.grant", "name"): "agents",
     ("agent.workspace-grants.deny", "name"): "agents",
     ("agent.workspace-grants.list", "name"): "agents",
+    ("agent.exec", "name"): "agents",
     ("agent.shell", "name"): "agents",
     ("agent.shell", "workspace"): "workspaces",
     ("agent.delete", "name"): "agents",

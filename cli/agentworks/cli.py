@@ -791,6 +791,21 @@ def agent_grants_list(
     list_grants(_get_db(), agent_name=name)
 
 
+@agent_app.command("exec", context_settings={"allow_extra_args": True, "allow_interspersed_args": False})
+def agent_exec(
+    ctx: typer.Context,
+    name: Annotated[str, typer.Argument(help="Agent name")],
+) -> None:
+    """Execute a command as an agent user."""
+    from agentworks.agents.manager import exec_agent
+    from agentworks.config import load_config
+
+    if not ctx.args:
+        typer.echo("Error: missing command", err=True)
+        raise typer.Exit(1)
+    exec_agent(_get_db(), load_config(), name=name, command=ctx.args)
+
+
 @agent_app.command("shell")
 def agent_shell(
     name: Annotated[str, typer.Argument(help="Agent name")],
