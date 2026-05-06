@@ -1252,9 +1252,12 @@ def _phase_b_setup(
             pass
 
     # Non-fatal: user install commands for admin user (may depend on mise tools)
+    admin_install_cmds = _prepare_install_commands(
+        config.admin.user_install_commands, claude_install=config.admin.claude_install
+    )
     user_path = _run_catalog_commands(
         ts_target,
-        config.admin.user_install_commands,
+        admin_install_cmds,
         catalog.user_install_commands,
         admin_shell,
         home,
@@ -1424,6 +1427,29 @@ def _install_nerf_claude_plugin_for_user(
         msg = f"nerf plugin install failed: {e}"
         logger.warning(msg)
         output.warn(msg)
+
+
+def _prepare_install_commands(
+    commands: list[str],
+    *,
+    claude_install: bool,
+) -> list[str]:
+    """Build the effective install command list, handling claude_install flag.
+
+    If claude_install is true, ensures "claude" is in the list. If "claude"
+    appears in the explicit list, warns that it should be managed via
+    claude_install instead.
+    """
+    result = list(commands)
+    if "claude" in result:
+        output.warn(
+            "'claude' in user_install_commands is deprecated; "
+            "use claude_install = true instead"
+        )
+    if claude_install and "claude" not in result:
+        output.detail("Adding 'claude' to install commands (claude_install = true)")
+        result.insert(0, "claude")
+    return result
 
 
 def _install_claude_plugins_for_user(

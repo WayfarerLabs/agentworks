@@ -147,6 +147,7 @@ class AdminConfig:
     nerf_install_claude_plugin: bool = False
     git_force_safe_directory: bool = True
     # Claude Code
+    claude_install: bool = False
     claude_marketplaces: list[str] = field(default_factory=list)
     claude_plugins: list[str] = field(default_factory=list)
 
@@ -170,6 +171,7 @@ class AgentTemplate:
     mise_install_before: str | None = None
     mise_prune_on_reinit: bool | None = None
     nerf_install_claude_plugin: bool | None = None
+    claude_install: bool | None = None
     claude_marketplaces: list[str] | None = None
     claude_plugins: list[str] | None = None
 
@@ -472,6 +474,7 @@ _USER_CONFIG_KEYS = {
     "mise_prune_on_reinit",
     "nerf_install_claude_plugin",
     "git_force_safe_directory",
+    "claude_install",
     "claude_marketplaces",
     "claude_plugins",
 }
@@ -504,6 +507,7 @@ def _load_admin_config(data: dict[str, object], issues: list[str]) -> AdminConfi
         mise_prune_on_reinit=bool(raw.get("mise_prune_on_reinit", True)),
         nerf_install_claude_plugin=bool(raw.get("nerf_install_claude_plugin", False)),
         git_force_safe_directory=bool(raw.get("git_force_safe_directory", True)),
+        claude_install=bool(raw.get("claude_install", False)),
         claude_marketplaces=list(raw.get("claude_marketplaces", [])),
         claude_plugins=list(raw.get("claude_plugins", [])),
     )
@@ -547,6 +551,7 @@ def _load_agent_templates(data: dict[str, object], issues: list[str]) -> dict[st
             nerf_install_claude_plugin=(
                 bool(tdata["nerf_install_claude_plugin"]) if "nerf_install_claude_plugin" in tdata else None
             ),
+            claude_install=bool(tdata["claude_install"]) if "claude_install" in tdata else None,
             claude_marketplaces=list(tdata["claude_marketplaces"]) if "claude_marketplaces" in tdata else None,
             claude_plugins=list(tdata["claude_plugins"]) if "claude_plugins" in tdata else None,
         )
@@ -847,13 +852,24 @@ def load_config(path: Path | None = None) -> Config:
 
     resolved_agent = _resolve_agent(loaded_agent_templates)
 
+    admin = _load_admin_config(data, issues)
+    if (admin.claude_marketplaces or admin.claude_plugins) and not admin.claude_install:
+        issues.append("[admin.config] claude_marketplaces/claude_plugins require claude_install = true")
+
+    for name in loaded_agent_templates:
+        resolved = _resolve_agent(loaded_agent_templates, name)
+        if (resolved.claude_marketplaces or resolved.claude_plugins) and not resolved.claude_install:
+            issues.append(
+                f"[agent_templates.{name}] claude_marketplaces/claude_plugins require claude_install = true"
+            )
+
     return Config(
         operator=_load_operator(data, issues),
         paths=_load_paths(data),
         defaults=_load_defaults(data, issues),
         vm_templates=loaded_vm_templates,
         vm=resolved_vm,
-        admin=_load_admin_config(data, issues),
+        admin=admin,
         agent_templates=loaded_agent_templates,
         agent=resolved_agent,
         session=session_config,
