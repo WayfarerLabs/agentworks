@@ -265,6 +265,14 @@ def _require(data: dict[str, object], key: str, context: str) -> object:
     return data[key]
 
 
+def _require_string_list(data: dict[str, object], key: str, context: str) -> list[str]:
+    """Load a key as a list of strings, raising ConfigError on type mismatch."""
+    val = data.get(key, [])
+    if not isinstance(val, list) or not all(isinstance(v, str) for v in val):
+        raise ConfigError(f"{context}.{key} must be a list of strings")
+    return val
+
+
 def _warn_unexpected_keys(
     raw: dict[str, object],
     known: set[str],
@@ -508,8 +516,8 @@ def _load_admin_config(data: dict[str, object], issues: list[str]) -> AdminConfi
         nerf_install_claude_plugin=bool(raw.get("nerf_install_claude_plugin", False)),
         git_force_safe_directory=bool(raw.get("git_force_safe_directory", True)),
         claude_install=bool(raw.get("claude_install", False)),
-        claude_marketplaces=list(raw.get("claude_marketplaces", [])),
-        claude_plugins=list(raw.get("claude_plugins", [])),
+        claude_marketplaces=_require_string_list(raw, "claude_marketplaces", "admin.config"),
+        claude_plugins=_require_string_list(raw, "claude_plugins", "admin.config"),
     )
 
 
@@ -552,8 +560,14 @@ def _load_agent_templates(data: dict[str, object], issues: list[str]) -> dict[st
                 bool(tdata["nerf_install_claude_plugin"]) if "nerf_install_claude_plugin" in tdata else None
             ),
             claude_install=bool(tdata["claude_install"]) if "claude_install" in tdata else None,
-            claude_marketplaces=list(tdata["claude_marketplaces"]) if "claude_marketplaces" in tdata else None,
-            claude_plugins=list(tdata["claude_plugins"]) if "claude_plugins" in tdata else None,
+            claude_marketplaces=(
+                _require_string_list(tdata, "claude_marketplaces", f"agent_templates.{name}")
+                if "claude_marketplaces" in tdata else None
+            ),
+            claude_plugins=(
+                _require_string_list(tdata, "claude_plugins", f"agent_templates.{name}")
+                if "claude_plugins" in tdata else None
+            ),
         )
 
     for name, tmpl in templates.items():
@@ -783,18 +797,16 @@ EXPECTED_TOP_LEVEL_KEYS = {
 }
 
 
-def _warn_unexpected_top_level_keys(data: dict[str, object]) -> None:
-    """Warn about unexpected top-level keys.
+def _warn_unexpected_top_level_keys(data: dict[str, object], issues: list[str]) -> None:
+    """Record unexpected top-level keys.
 
     This catches a common TOML pitfall: uncommenting a key without its section
     header causes the key to land in the wrong (or top-level) section.
     """
     unexpected = set(data.keys()) - EXPECTED_TOP_LEVEL_KEYS
     if unexpected:
-        from agentworks.output import warn
-
         keys = ", ".join(sorted(unexpected))
-        warn(f"unexpected top-level keys in config: {keys}")
+        issues.append(f"unexpected top-level keys in config: {keys}")
 
 
 def load_config(path: Path | None = None) -> Config:
@@ -825,7 +837,7 @@ def load_config(path: Path | None = None) -> Config:
 
     issues: list[str] = []
 
-    _warn_unexpected_top_level_keys(data)
+    _warn_unexpected_top_level_keys(data, issues)
 
     if "dotfiles" in data:
         raise ConfigError(

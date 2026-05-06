@@ -757,7 +757,7 @@ def _create_agent_on_vm(
 
     # Claude Code marketplaces and plugins for the agent
     _install_claude_plugins_for_agent(
-        target, linux_user, agent_shell, config.agent.claude_marketplaces, config.agent.claude_plugins
+        target, linux_user, config.agent.claude_marketplaces, config.agent.claude_plugins
     )
 
 
@@ -798,11 +798,13 @@ def _install_nerf_claude_plugin_for_agent(
 def _install_claude_plugins_for_agent(
     target: SSHTarget | ExecTarget,
     linux_user: str,
-    shell: str,
     marketplaces: list[str],
     plugins: list[str],
 ) -> None:
-    """Register Claude Code marketplaces and install plugins for an agent. Non-fatal."""
+    """Register Claude Code marketplaces and install plugins for an agent. Non-fatal.
+
+    No shell -lc wrapper needed: _run_as_agent uses su - which provides a login shell.
+    """
     if not marketplaces and not plugins:
         return
 
@@ -814,18 +816,16 @@ def _install_claude_plugins_for_agent(
         for source in marketplaces:
             output.detail(f"Registering Claude marketplace for agent: {source}")
             _run_as_agent(
-                target,
-                linux_user,
-                f"{shell} -lc 'claude plugin marketplace add {shlex.quote(source)}'",
+                target, linux_user,
+                f"claude plugin marketplace add {shlex.quote(source)}",
                 timeout=60,
             )
 
         for plugin in plugins:
             output.detail(f"Installing Claude plugin for agent: {plugin}")
             _run_as_agent(
-                target,
-                linux_user,
-                f"{shell} -lc 'claude plugin install {shlex.quote(plugin)} --scope user'",
+                target, linux_user,
+                f"claude plugin install {shlex.quote(plugin)} --scope user",
                 timeout=60,
             )
     except SSHError as e:

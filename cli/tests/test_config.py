@@ -124,7 +124,7 @@ def test_invalid_git_credential_type(tmp_path: Path) -> None:
         load_config(config_file)
 
 
-def test_unexpected_top_level_keys_warns(tmp_path: Path, warnings: list[str]) -> None:
+def test_unexpected_top_level_keys_warns(tmp_path: Path) -> None:
     """Bare keys before any section header land at top level."""
     pub = tmp_path / "id.pub"
     priv = tmp_path / "id"
@@ -142,8 +142,8 @@ def test_unexpected_top_level_keys_warns(tmp_path: Path, warnings: list[str]) ->
         ssh_private_key = "{priv.as_posix()}"
     """)
     )
-    load_config(config_file)
-    assert any("oops" in w for w in warnings)
+    cfg = load_config(config_file)
+    assert any("oops" in issue for issue in cfg.config_issues)
 
 
 def test_orphaned_key_under_commented_section(tmp_path: Path) -> None:

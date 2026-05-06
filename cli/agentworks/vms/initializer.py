@@ -1468,17 +1468,13 @@ def _install_claude_plugins_for_user(
     try:
         for source in marketplaces:
             output.detail(f"Registering Claude marketplace: {source}")
-            target.run(
-                f"{shell} -lc 'claude plugin marketplace add {shlex.quote(source)}'",
-                timeout=60,
-            )
+            inner = f"claude plugin marketplace add {shlex.quote(source)}"
+            target.run(f"{shell} -lc {shlex.quote(inner)}", timeout=60)
 
         for plugin in plugins:
             output.detail(f"Installing Claude plugin: {plugin}")
-            target.run(
-                f"{shell} -lc 'claude plugin install {shlex.quote(plugin)} --scope user'",
-                timeout=60,
-            )
+            inner = f"claude plugin install {shlex.quote(plugin)} --scope user"
+            target.run(f"{shell} -lc {shlex.quote(inner)}", timeout=60)
     except SSHError as e:
         msg = f"Claude plugin install failed: {e}"
         logger.warning(msg)
