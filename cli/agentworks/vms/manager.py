@@ -403,14 +403,14 @@ def shell_vm(db: Database, config: Config, name: str) -> None:
     sys.exit(subprocess.call(ssh_cmd))
 
 
-def exec_vm(db: Database, config: Config, name: str, command: list[str]) -> None:
+def exec_vm(db: Database, config: Config, name: str, command: list[str]) -> int:
     """Execute a command on a VM via direct SSH subprocess.
 
     Uses inherited stdio for streaming output without buffering.
+    Returns the remote exit code.
     """
     import shlex
     import subprocess
-    import sys
 
     vm = _require_vm(db, name)
     _guard_failed_vm(vm)
@@ -423,7 +423,7 @@ def exec_vm(db: Database, config: Config, name: str, command: list[str]) -> None
     ssh_cmd.append(f"{vm.admin_username}@{vm.tailscale_host}")
     ssh_cmd.append(command[0] if len(command) == 1 else shlex.join(command))
 
-    sys.exit(subprocess.call(ssh_cmd))
+    return subprocess.call(ssh_cmd)
 
 
 def add_git_credential(db: Database, config: Config, name: str, credential_name: str) -> None:

@@ -432,7 +432,7 @@ def vm_exec(
     if not ctx.args:
         typer.echo("Error: missing command", err=True)
         raise typer.Exit(1)
-    exec_vm(_get_db(), load_config(), name, ctx.args)
+    raise typer.Exit(exec_vm(_get_db(), load_config(), name, ctx.args))
 
 
 @vm_app.command("shell")
@@ -803,7 +803,7 @@ def agent_exec(
     if not ctx.args:
         typer.echo("Error: missing command", err=True)
         raise typer.Exit(1)
-    exec_agent(_get_db(), load_config(), name=name, command=ctx.args)
+    raise typer.Exit(exec_agent(_get_db(), load_config(), name=name, command=ctx.args))
 
 
 @agent_app.command("shell")

@@ -418,11 +418,13 @@ def exec_agent(
     *,
     name: str,
     command: list[str],
-) -> None:
-    """Execute a command as an agent user on a VM via direct SSH subprocess."""
+) -> int:
+    """Execute a command as an agent user on a VM via direct SSH subprocess.
+
+    Returns the remote exit code.
+    """
     import shlex
     import subprocess
-    import sys
 
     agent = db.get_agent(name)
     if agent is None:
@@ -441,7 +443,7 @@ def exec_agent(
     ssh_cmd.append(f"{vm.admin_username}@{vm.tailscale_host}")
     ssh_cmd.append(su_cmd)
 
-    sys.exit(subprocess.call(ssh_cmd))
+    return subprocess.call(ssh_cmd)
 
 
 # -- VM operations ---------------------------------------------------------
