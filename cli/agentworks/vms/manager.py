@@ -416,7 +416,7 @@ def exec_vm(db: Database, config: Config, name: str, command: list[str]) -> None
     if vm.tailscale_host is None:
         raise VMError(f"VM '{name}' has no Tailscale IP (init may not be complete)")
 
-    ssh_cmd = ["ssh", "-T"]
+    ssh_cmd = ["ssh", "-T", "-o", "StrictHostKeyChecking=accept-new", "-o", "BatchMode=yes"]
     if config.operator.ssh_private_key:
         ssh_cmd.extend(["-i", str(config.operator.ssh_private_key)])
     ssh_cmd.append(f"{vm.admin_username}@{vm.tailscale_host}")
