@@ -146,8 +146,8 @@ def test_unexpected_top_level_keys_warns(tmp_path: Path, warnings: list[str]) ->
     assert any("oops" in w for w in warnings)
 
 
-def test_orphaned_key_under_commented_section(tmp_path: Path, warnings: list[str]) -> None:
-    """Keys under commented-out section headers land in the previous section."""
+def test_orphaned_key_under_commented_section(tmp_path: Path) -> None:
+    """Keys under commented-out section headers are recorded as config issues."""
     pub = tmp_path / "id.pub"
     priv = tmp_path / "id"
     pub.write_text("key")
@@ -165,10 +165,8 @@ def test_orphaned_key_under_commented_section(tmp_path: Path, warnings: list[str
     """)
     )
     cfg = load_config(config_file)
-    assert any("platform" in w for w in warnings)
-    assert any("operator" in w.lower() for w in warnings)
-    # The orphaned key means defaults.platform stays at default (None)
-    assert cfg.defaults.platform is None
+    assert any("platform" in issue for issue in cfg.config_issues)
+    assert any("operator" in issue for issue in cfg.config_issues)
 
 
 def test_extra_ssh_public_keys(tmp_path: Path) -> None:
