@@ -435,7 +435,7 @@ def exec_agent(
         raise AgentError(f"VM '{vm.name}' has no Tailscale IP (init may not be complete)")
 
     remote_cmd = command[0] if len(command) == 1 else shlex.join(command)
-    su_cmd = f"sudo su --login {agent.linux_user} -c {shlex.quote(remote_cmd)}"
+    su_cmd = f"sudo -n su --login {agent.linux_user} -c {shlex.quote(remote_cmd)}"
 
     ssh_cmd = ["ssh", "-T", "-o", "StrictHostKeyChecking=accept-new", "-o", "BatchMode=yes"]
     if config.operator.ssh_private_key:
