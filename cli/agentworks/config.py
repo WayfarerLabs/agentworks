@@ -809,11 +809,13 @@ def _warn_unexpected_top_level_keys(data: dict[str, object], issues: list[str]) 
         issues.append(f"unexpected top-level keys in config: {keys}")
 
 
-def load_config(path: Path | None = None) -> Config:
+def load_config(path: Path | None = None, *, warn_issues: bool = True) -> Config:
     """Load and validate the agentworks configuration.
 
     Args:
         path: Override config file path (default: ~/.config/agentworks/config.toml).
+        warn_issues: Emit config issues as warnings to stderr (default: True).
+            Set to False when the caller handles issues itself (e.g. doctor).
 
     Returns:
         Validated Config object.
@@ -875,7 +877,7 @@ def load_config(path: Path | None = None) -> Config:
                 f"[agent_templates.{name}] claude_marketplaces/claude_plugins require claude_install = true"
             )
 
-    return Config(
+    config = Config(
         operator=_load_operator(data, issues),
         paths=_load_paths(data),
         defaults=_load_defaults(data, issues),
@@ -896,3 +898,11 @@ def load_config(path: Path | None = None) -> Config:
         proxmox=_load_proxmox(data),
         config_issues=tuple(issues),
     )
+
+    if warn_issues and config.config_issues:
+        from agentworks.output import warn
+
+        for issue in config.config_issues:
+            warn(f"Config: {issue}")
+
+    return config

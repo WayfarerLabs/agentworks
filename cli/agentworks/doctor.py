@@ -215,7 +215,7 @@ def _check_config() -> tuple[HealthGroup, Config | None]:
     try:
         from agentworks.config import load_config
 
-        config = load_config()
+        config = load_config(warn_issues=False)
     except ConfigError as e:
         g.fail("Config", str(e))
         return g, None
