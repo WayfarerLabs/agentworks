@@ -408,7 +408,6 @@ def exec_vm(db: Database, config: Config, name: str, command: list[str]) -> None
 
     Uses inherited stdio for streaming output without buffering.
     """
-    import shlex
     import subprocess
     import sys
 
@@ -421,7 +420,7 @@ def exec_vm(db: Database, config: Config, name: str, command: list[str]) -> None
     if config.operator.ssh_private_key:
         ssh_cmd.extend(["-i", str(config.operator.ssh_private_key)])
     ssh_cmd.append(f"{vm.admin_username}@{vm.tailscale_host}")
-    ssh_cmd.append(shlex.join(command))
+    ssh_cmd.extend(command)
 
     sys.exit(subprocess.call(ssh_cmd))
 
