@@ -388,34 +388,27 @@ def _minimal_config(tmp_path: Path, extra: str = "") -> Path:
     return config_file
 
 
-def test_claude_plugins_require_claude_install_admin(tmp_path: Path) -> None:
+def test_claude_marketplaces_loads_cleanly(tmp_path: Path) -> None:
     config_file = _minimal_config(tmp_path, """
         [admin.config]
         claude_marketplaces = ["https://github.com/example/tools#v1"]
         claude_plugins = ["my-plugin@my-marketplace"]
     """)
     cfg = load_config(config_file, warn_issues=False)
-    assert any("claude_install" in issue for issue in cfg.config_issues)
+    assert cfg.admin.claude_marketplaces == ["https://github.com/example/tools#v1"]
+    assert cfg.admin.claude_plugins == ["my-plugin@my-marketplace"]
 
 
-def test_claude_plugins_no_issue_when_install_true_admin(tmp_path: Path) -> None:
-    config_file = _minimal_config(tmp_path, """
-        [admin.config]
-        claude_install = true
-        claude_marketplaces = ["https://github.com/example/tools#v1"]
-        claude_plugins = ["my-plugin@my-marketplace"]
-    """)
-    cfg = load_config(config_file, warn_issues=False)
-    assert not any("claude_install" in issue for issue in cfg.config_issues)
-
-
-def test_claude_plugins_require_claude_install_agent(tmp_path: Path) -> None:
+def test_claude_marketplaces_agent_template(tmp_path: Path) -> None:
     config_file = _minimal_config(tmp_path, """
         [agent_templates.claude]
         claude_marketplaces = ["https://github.com/example/tools#v1"]
+        claude_plugins = ["my-plugin@my-marketplace"]
     """)
     cfg = load_config(config_file, warn_issues=False)
-    assert any("agent_templates.claude" in issue for issue in cfg.config_issues)
+    assert cfg.agent_templates["claude"].claude_marketplaces == ["https://github.com/example/tools#v1"]
+    assert cfg.agent_templates["claude"].claude_plugins == ["my-plugin@my-marketplace"]
+    assert not cfg.config_issues
 
 
 def test_claude_marketplaces_rejects_string(tmp_path: Path) -> None:

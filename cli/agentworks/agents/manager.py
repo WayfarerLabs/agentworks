@@ -862,11 +862,7 @@ def _run_agent_install_commands(
     home: str,
 ) -> None:
     """Run user install commands for an agent. Failures warn but do not abort."""
-    from agentworks.vms.initializer import prepare_install_commands
-
-    command_names = prepare_install_commands(
-        config.agent.user_install_commands, claude_install=config.agent.claude_install
-    )
+    command_names = config.agent.user_install_commands
     if not command_names:
         return
 

@@ -1253,12 +1253,9 @@ def _phase_b_setup(
             pass
 
     # Non-fatal: user install commands for admin user (may depend on mise tools)
-    admin_install_cmds = prepare_install_commands(
-        config.admin.user_install_commands, claude_install=config.admin.claude_install
-    )
     user_path = _run_catalog_commands(
         ts_target,
-        admin_install_cmds,
+        config.admin.user_install_commands,
         catalog.user_install_commands,
         admin_shell,
         home,
@@ -1434,29 +1431,6 @@ def _install_nerf_claude_plugin_for_user(
         output.warn(msg)
 
 
-def prepare_install_commands(
-    commands: list[str],
-    *,
-    claude_install: bool,
-) -> list[str]:
-    """Build the effective install command list, handling claude_install flag.
-
-    If claude_install is true, ensures "claude" is in the list. If "claude"
-    appears in the explicit list, warns that it should be managed via
-    claude_install instead.
-    """
-    result = list(commands)
-    if "claude" in result:
-        output.warn(
-            "'claude' in user_install_commands is deprecated; "
-            "use claude_install = true instead"
-        )
-    if claude_install and "claude" not in result:
-        output.detail("Adding 'claude' to install commands (claude_install = true)")
-        result.insert(0, "claude")
-    return result
-
-
 RunCmd = Callable[[str, int], object]
 """Callable that runs a shell command with a timeout. Used to abstract
 admin (target.run) vs agent (_run_as_agent) execution."""
@@ -1479,6 +1453,19 @@ def install_claude_plugins(
 
     if logger:
         logger.step("Claude plugins")
+
+    try:
+        # Verify claude is available before attempting marketplace/plugin setup
+        run_cmd("command -v claude >/dev/null 2>&1", 10)
+    except SSHError as e:
+        msg = (
+            f"claude CLI not available; skipping marketplace/plugin setup ({e}). "
+            "Install claude (e.g. via user_install_commands or any other method) and rerun init."
+        )
+        if logger:
+            logger.warning(msg)
+        output.warn(msg)
+        return
 
     try:
         for source in marketplaces:
