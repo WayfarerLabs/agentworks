@@ -399,6 +399,18 @@ def test_claude_marketplaces_loads_cleanly(tmp_path: Path) -> None:
     assert cfg.admin.claude_plugins == ["my-plugin@my-marketplace"]
 
 
+def test_claude_marketplaces_agent_template(tmp_path: Path) -> None:
+    config_file = _minimal_config(tmp_path, """
+        [agent_templates.claude]
+        claude_marketplaces = ["https://github.com/example/tools#v1"]
+        claude_plugins = ["my-plugin@my-marketplace"]
+    """)
+    cfg = load_config(config_file, warn_issues=False)
+    assert cfg.agent_templates["claude"].claude_marketplaces == ["https://github.com/example/tools#v1"]
+    assert cfg.agent_templates["claude"].claude_plugins == ["my-plugin@my-marketplace"]
+    assert not cfg.config_issues
+
+
 def test_claude_marketplaces_rejects_string(tmp_path: Path) -> None:
     config_file = _minimal_config(tmp_path, """
         [admin.config]

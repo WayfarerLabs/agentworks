@@ -1458,10 +1458,13 @@ def install_claude_plugins(
         # Verify claude is available before attempting marketplace/plugin setup
         run_cmd("command -v claude >/dev/null 2>&1", 10)
     except SSHError:
-        output.warn(
+        msg = (
             "claude CLI not found; skipping marketplace/plugin setup. "
-            "Install claude (e.g. via user_install_commands, dotfiles, or mise) and reinit."
+            "Install claude (e.g. via user_install_commands or any other method) and rerun init."
         )
+        if logger:
+            logger.warning(msg)
+        output.warn(msg)
         return
 
     try:
