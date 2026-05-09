@@ -429,7 +429,6 @@ def exec_vm(db: Database, config: Config, name: str, command: list[str]) -> int:
 def add_git_credential(db: Database, config: Config, name: str, credential_name: str) -> None:
     """Add or update a git credential on a VM."""
     from agentworks.ssh import admin_exec_target
-    from agentworks.ssh import run as ssh_run
 
     vm = _require_vm(db, name)
     _guard_failed_vm(vm)
@@ -449,7 +448,7 @@ def add_git_credential(db: Database, config: Config, name: str, credential_name:
     target = admin_exec_target(vm, config)
 
     # Read existing credentials, filter out entries for the same host/path
-    result = ssh_run(target, "cat ~/.git-credentials 2>/dev/null || true")
+    result = target.run("cat ~/.git-credentials 2>/dev/null || true")
     existing = result.stdout.strip().splitlines() if result.stdout.strip() else []
 
     # Extract host/path from new lines for matching: "https://user:tok@host/path" -> "host/path"
@@ -459,12 +458,10 @@ def add_git_credential(db: Database, config: Config, name: str, credential_name:
     filtered = [e for e in existing if "@" not in e or e.split("@", 1)[1] not in new_hostpaths]
 
     # Write back filtered + new
-    from agentworks.ssh import write_file
-
     all_lines = filtered + new_lines
     cred_content = "\n".join(all_lines) + "\n"
-    write_file(target, "~/.git-credentials", cred_content, mode="600")
-    ssh_run(target, "git config --global credential.helper store")
+    target.write_file("~/.git-credentials", cred_content, mode="600")
+    target.run("git config --global credential.helper store")
 
     output.info(f"Git credential '{credential_name}' configured on VM '{name}'")
 

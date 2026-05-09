@@ -13,66 +13,57 @@ if TYPE_CHECKING:
     from agentworks.catalog import UserInstallCommandEntry
     from agentworks.config import Config
     from agentworks.db import Database, VMRow, WorkspaceRow
-    from agentworks.ssh import ExecTarget, SSHLogger, SSHResult, SSHTarget
+    from agentworks.ssh import ExecTarget, SSHLogger, SSHResult
 
 AGENT_PREFIX = "agt--"
 WS_GROUP_PREFIX = "ws--"
 
 
 def _run_as_agent(
-    target: SSHTarget | ExecTarget,
+    target: ExecTarget,
     linux_user: str,
     command: str,
     *,
     check: bool = True,
     timeout: int | None = None,
-    logger: SSHLogger | None = None,
 ) -> SSHResult:
     """Run a command as an agent user via su -.
 
     Uses su - for a login shell so the agent's environment is set up.
+    Logging is sourced from ``target.logger``; pass a logger-equipped
+    target to capture output.
     """
-    from agentworks.ssh import _unwrap_ssh
-
-    target = _unwrap_ssh(target)
     import shlex
 
-    from agentworks.ssh import SSHResult, run_as_root
-
     inner = shlex.quote(command)
-    result = run_as_root(
-        target,
+    return target.run(
         f"su - {shlex.quote(linux_user)} -c {inner}",
+        sudo=True,
         check=check,
         timeout=timeout,
-        logger=logger,
     )
-    assert isinstance(result, SSHResult)
-    return result
 
 
 def _write_agent_file(
-    target: SSHTarget | ExecTarget,
+    target: ExecTarget,
     linux_user: str,
     dest: str,
     content: str,
     *,
     mode: str | None = None,
-    logger: SSHLogger | None = None,
 ) -> None:
     """Write a file into an agent user's home via tmp + mv.
 
     scp runs as admin and can't write to the agent's home directly.
+    Logging is sourced from ``target.logger``.
     """
-    from agentworks.ssh import run_as_root, write_file
-
     safe_name = linux_user.replace("/", "-")
     tmp_path = f"/tmp/agentworks-{safe_name}-{dest.rsplit('/', 1)[-1]}"
-    write_file(target, tmp_path, content, logger=logger)
-    run_as_root(target, f"mv {tmp_path} {dest}", logger=logger)
-    run_as_root(target, f"chown {linux_user}:{linux_user} {dest}", logger=logger)
+    target.write_file(tmp_path, content)
+    target.run(f"mv {tmp_path} {dest}", sudo=True)
+    target.run(f"chown {linux_user}:{linux_user} {dest}", sudo=True)
     if mode:
-        run_as_root(target, f"chmod {mode} {dest}", logger=logger)
+        target.run(f"chmod {mode} {dest}", sudo=True)
 
 
 def derive_linux_user(agent_name: str) -> str:
@@ -183,21 +174,18 @@ def delete_agent(
 
     # Kill running sessions for this agent (status-aware)
     if agent_sessions:
-        from functools import partial
-
         from agentworks.db import SessionStatus
         from agentworks.sessions.manager import check_session_status, ensure_pids_batch
         from agentworks.sessions.tmux import force_kill_tmux_server, kill_session
-        from agentworks.ssh import admin_exec_target, run
+        from agentworks.ssh import admin_exec_target
 
-        target = admin_exec_target(vm, config)
-        run_command = partial(run, target, logger=ssh_logger)
+        target = admin_exec_target(vm, config, logger=ssh_logger)
         agent_sessions = ensure_pids_batch(agent_sessions, db=db, config=config)
         unstoppable: list[str] = []
         for session in agent_sessions:
             status = check_session_status(session, target=target)
             if status == SessionStatus.OK:
-                if not kill_session(session.name, run_command=run_command, socket_path=session.socket_path):
+                if not kill_session(session.name, run_command=target.run, socket_path=session.socket_path):
                     # Race: session may have exited between check and kill. Recheck.
                     recheck = check_session_status(session, target=target)
                     if recheck != SessionStatus.STOPPED:
@@ -569,13 +557,11 @@ def _add_to_workspace_group(
     logger: SSHLogger | None = None,
 ) -> None:
     """Add an agent user to a workspace's Linux group."""
-    from agentworks.ssh import run_as_root
-
-    target = admin_exec_target(vm, config)
+    target = admin_exec_target(vm, config, logger=logger)
     ws_grp = workspace_group(workspace_name)
     # Ensure group exists (idempotent)
-    run_as_root(target, f"sh -c 'getent group {ws_grp} >/dev/null 2>&1 || /usr/sbin/groupadd {ws_grp}'", logger=logger)
-    run_as_root(target, f"usermod -aG {ws_grp} {linux_user}", logger=logger)
+    target.run(f"sh -c 'getent group {ws_grp} >/dev/null 2>&1 || /usr/sbin/groupadd {ws_grp}'", sudo=True)
+    target.run(f"usermod -aG {ws_grp} {linux_user}", sudo=True)
 
 
 def _remove_from_workspace_group(
@@ -587,11 +573,9 @@ def _remove_from_workspace_group(
     logger: SSHLogger | None = None,
 ) -> None:
     """Remove an agent user from a workspace's Linux group."""
-    from agentworks.ssh import run_as_root
-
-    target = admin_exec_target(vm, config)
+    target = admin_exec_target(vm, config, logger=logger)
     ws_grp = workspace_group(workspace_name)
-    run_as_root(target, f"gpasswd -d {linux_user} {ws_grp}", check=False, logger=logger)
+    target.run(f"gpasswd -d {linux_user} {ws_grp}", sudo=True, check=False)
 
 
 def _collect_agent_credentials(config: Config) -> dict[str, str]:
@@ -620,10 +604,7 @@ def _create_agent_on_vm(
     Workspace group membership is NOT set here - it is managed by the grant
     system. This function only creates the user and configures their tools.
     """
-    from agentworks.ssh import run_as_root
-
     target = admin_exec_target(vm, config, logger=logger)
-    lg = logger
 
     output.detail(f"Creating user '{linux_user}' on VM '{vm.name}'...")
     home = f"/home/{linux_user}"
@@ -633,11 +614,11 @@ def _create_agent_on_vm(
 
     # Create user with the template's shell (idempotent: skip if exists)
     shell_path = f"/bin/{agent_shell}" if "/" not in agent_shell else agent_shell
-    user_exists = run_as_root(target, f"id {linux_user}", check=False, logger=lg)
+    user_exists = target.run(f"id {linux_user}", sudo=True, check=False)
     if not user_exists.ok:
-        run_as_root(target, f"useradd -m -s {shell_path} {linux_user}", logger=lg)
+        target.run(f"useradd -m -s {shell_path} {linux_user}", sudo=True)
     else:
-        run_as_root(target, f"usermod -s {shell_path} {linux_user}", logger=lg)
+        target.run(f"usermod -s {shell_path} {linux_user}", sudo=True)
 
     # Ensure the agent tmux socket infrastructure exists. Call
     # ensure_agent_socket_root first so this works on VMs that haven't
@@ -665,12 +646,12 @@ def _create_agent_on_vm(
         rc_file = None
 
     if rc_content and rc_file:
-        _write_agent_file(target, linux_user, rc_file, rc_content, logger=lg)
+        _write_agent_file(target, linux_user, rc_file, rc_content)
 
     # Git safe.directory wildcard (agents access repos owned by admin)
     if config.admin.git_force_safe_directory:
         try:
-            _run_as_agent(target, linux_user, "git config --global --add safe.directory '*'", logger=lg)
+            _run_as_agent(target, linux_user, "git config --global --add safe.directory '*'")
             output.detail("Git safe.directory configured for agent")
         except Exception as e:
             output.warn(f"agent git safe.directory setup failed: {e}")
@@ -689,13 +670,13 @@ def _create_agent_on_vm(
                     cred_lines.extend(provider.credential_lines(token))
             if cred_lines:
                 cred_content = "\n".join(cred_lines) + "\n"
-                _write_agent_file(target, linux_user, f"{home}/.git-credentials", cred_content, mode="600", logger=lg)
-                _run_as_agent(target, linux_user, "git config --global credential.helper store", logger=lg)
+                _write_agent_file(target, linux_user, f"{home}/.git-credentials", cred_content, mode="600")
+                _run_as_agent(target, linux_user, "git config --global credential.helper store")
         except Exception as e:
             output.warn(f"agent git credential setup failed: {e}")
 
     # User install commands for the agent
-    _run_agent_install_commands(vm, config, linux_user, home)
+    _run_agent_install_commands(vm, config, linux_user, home, logger=logger)
 
     # Dotfiles for the agent
     if agent_cfg.dotfiles_source:
@@ -713,13 +694,13 @@ def _create_agent_on_vm(
                 # If already cloned from the same repo, pull instead of clone
                 is_git = _run_as_agent(
                     target, linux_user, f"test -d {_shlex.quote(dest)}/.git",
-                    check=False, logger=lg,
+                    check=False,
                 )
                 if is_git.ok:
                     remote = _run_as_agent(
                         target, linux_user,
                         f"git -C {_shlex.quote(dest)} remote get-url origin",
-                        check=False, logger=lg,
+                        check=False,
                     )
                     if remote.ok and remote.stdout.strip() == ref.path:
                         output.detail("Dotfiles already cloned, pulling latest...")
@@ -727,12 +708,12 @@ def _create_agent_on_vm(
                             _run_as_agent(
                                 target, linux_user,
                                 f"git -C {_shlex.quote(dest)} fetch",
-                                check=False, timeout=120, logger=lg,
+                                check=False, timeout=120,
                             )
                             checkout = _run_as_agent(
                                 target, linux_user,
                                 f"git -C {_shlex.quote(dest)} checkout {_shlex.quote(ref.ref)}",
-                                check=False, logger=lg,
+                                check=False,
                             )
                             if not checkout.ok:
                                 output.warn(
@@ -742,7 +723,7 @@ def _create_agent_on_vm(
                             pull = _run_as_agent(
                                 target, linux_user,
                                 f"git -C {_shlex.quote(dest)} pull",
-                                check=False, timeout=120, logger=lg,
+                                check=False, timeout=120,
                             )
                             if not pull.ok:
                                 output.warn(
@@ -759,17 +740,16 @@ def _create_agent_on_vm(
                             f"git clone --branch {_shlex.quote(ref.ref)}"
                             f" {_shlex.quote(ref.path)} {_shlex.quote(dest)}"
                         )
-                    _run_as_agent(target, linux_user, clone_cmd, timeout=120, logger=lg)
+                    _run_as_agent(target, linux_user, clone_cmd, timeout=120)
             else:
                 # Local source: copy as admin then chown
-                exec_target = admin_exec_target(vm, config)
                 tmp_dotfiles = f"/tmp/agentworks-{linux_user}-dotfiles"
-                exec_target.run(f"rm -rf {tmp_dotfiles}", check=False)
+                target.run(f"rm -rf {tmp_dotfiles}", check=False)
                 from agentworks.sources import fetch_dir
 
-                fetch_dir(ref, exec_target, tmp_dotfiles)
-                run_as_root(target, f"mv {tmp_dotfiles} {dest}", logger=lg)
-                run_as_root(target, f"chown -R {linux_user}:{linux_user} {dest}", logger=lg)
+                fetch_dir(ref, target, tmp_dotfiles)
+                target.run(f"mv {tmp_dotfiles} {dest}", sudo=True)
+                target.run(f"chown -R {linux_user}:{linux_user} {dest}", sudo=True)
 
             output.detail(f"Running agent dotfiles install: {agent_cfg.dotfiles_install_cmd}")
             _run_as_agent(
@@ -777,13 +757,12 @@ def _create_agent_on_vm(
                 linux_user,
                 f"cd {dest} && {agent_cfg.dotfiles_install_cmd}",
                 timeout=120,
-                logger=lg,
             )
         except (SourceRefError, Exception) as e:
             output.warn(f"agent dotfiles failed: {e}")
 
     # Mise for the agent
-    _run_agent_mise_setup(vm, config, linux_user, home)
+    _run_agent_mise_setup(vm, config, linux_user, home, logger=logger)
 
     # Install nerf Claude plugin for the agent
     if config.agent.nerf_install_claude_plugin:
@@ -793,14 +772,14 @@ def _create_agent_on_vm(
     from agentworks.vms.initializer import install_claude_plugins
 
     install_claude_plugins(
-        lambda cmd, timeout: _run_as_agent(target, linux_user, cmd, timeout=timeout, logger=lg),
+        lambda cmd, timeout: _run_as_agent(target, linux_user, cmd, timeout=timeout),
         config.agent.claude_marketplaces,
         config.agent.claude_plugins,
     )
 
 
 def _install_nerf_claude_plugin_for_agent(
-    target: SSHTarget | ExecTarget,
+    target: ExecTarget,
     linux_user: str,
     shell: str,
 ) -> None:
@@ -841,16 +820,15 @@ def _delete_agent_on_vm(
     logger: SSHLogger | None = None,
 ) -> None:
     """Remove an agent Linux user from a VM."""
-    from agentworks.ssh import SSHError, run_as_root
+    from agentworks.ssh import SSHError
 
-    target = admin_exec_target(vm, config)
-    lg = logger
+    target = admin_exec_target(vm, config, logger=logger)
 
     try:
         # Kill any running processes for the user
-        run_as_root(target, f"pkill -u {linux_user}", check=False, logger=lg)
+        target.run(f"pkill -u {linux_user}", sudo=True, check=False)
         # Remove the user and their home directory
-        run_as_root(target, f"userdel -r {linux_user}", logger=lg)
+        target.run(f"userdel -r {linux_user}", sudo=True)
     except SSHError as e:
         output.warn(f"remote cleanup for '{linux_user}' failed: {e}")
 
@@ -860,6 +838,8 @@ def _run_agent_install_commands(
     config: Config,
     linux_user: str,
     home: str,
+    *,
+    logger: SSHLogger | None = None,
 ) -> None:
     """Run user install commands for an agent. Failures warn but do not abort."""
     command_names = config.agent.user_install_commands
@@ -869,10 +849,10 @@ def _run_agent_install_commands(
     import shlex
 
     from agentworks.catalog import load_catalog
-    from agentworks.ssh import SSHError, run_as_root
+    from agentworks.ssh import SSHError
 
     catalog = load_catalog(config)
-    target = admin_exec_target(vm, config)
+    target = admin_exec_target(vm, config, logger=logger)
     shell = config.agent.shell
     path_additions: list[str] = []
     total = len(command_names)
@@ -886,7 +866,7 @@ def _run_agent_install_commands(
         test_cmd = _build_agent_test_command(entry, linux_user, home)
         if test_cmd:
             try:
-                check = run_as_root(target, test_cmd, check=False, timeout=10)
+                check = target.run(test_cmd, sudo=True, check=False, timeout=10)
                 if check.returncode == 0:
                     output.detail(f"Agent install command {i}/{total} ({name}): already installed, skipping")
                     path_additions.extend(entry.path)
@@ -898,9 +878,9 @@ def _run_agent_install_commands(
         output.detail(f"Agent install command {i}/{total} ({name}): {truncated}...")
         try:
             # Run as the agent user via su, in their login shell
-            run_as_root(
-                target,
+            target.run(
                 f"su - {shlex.quote(linux_user)} -c {shlex.quote(f'{shell} -lc {shlex.quote(entry.command)}')}",
+                sudo=True,
                 timeout=120,
             )
         except SSHError as e:
@@ -940,11 +920,13 @@ def _run_agent_mise_setup(
     config: Config,
     linux_user: str,
     home: str,
+    *,
+    logger: SSHLogger | None = None,
 ) -> None:
     """Set up mise for an agent: shims PATH, config, lockfile, install."""
-    from agentworks.ssh import SSHError, run_as_root
+    from agentworks.ssh import SSHError
 
-    target = admin_exec_target(vm, config)
+    target = admin_exec_target(vm, config, logger=logger)
     agent_cfg = config.agent
     has_packages = bool(agent_cfg.mise_packages)
     has_lockfile = bool(agent_cfg.mise_lockfile)
@@ -1017,13 +999,12 @@ def _run_agent_mise_setup(
             from agentworks.sources import SourceRefError, fetch_file, parse_source_ref
 
             ref = parse_source_ref(agent_cfg.mise_lockfile, default_filename="mise.lock")
-            exec_target = admin_exec_target(vm, config)
             _run_as_agent(target, linux_user, f"mkdir -p {mise_config_dir}")
             # Fetch to tmp (as admin, needs network), then move to agent home
             tmp_lock = f"/tmp/agentworks-{linux_user}-mise-lock"
-            fetch_file(ref, exec_target, tmp_lock)
-            run_as_root(target, f"mv {tmp_lock} {mise_config_dir}/mise.lock")
-            run_as_root(target, f"chown {linux_user}:{linux_user} {mise_config_dir}/mise.lock")
+            fetch_file(ref, target, tmp_lock)
+            target.run(f"mv {tmp_lock} {mise_config_dir}/mise.lock", sudo=True)
+            target.run(f"chown {linux_user}:{linux_user} {mise_config_dir}/mise.lock", sudo=True)
         except (SourceRefError, SSHError) as e:
             output.warn(f"agent mise lockfile fetch failed: {e}")
 

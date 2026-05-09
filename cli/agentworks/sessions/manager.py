@@ -211,12 +211,11 @@ def _prepare_vm(
 ) -> tuple[WorkspaceRow, VMRow, RunCommand, RunCommand, ExecTarget]:
     """Validate workspace/VM, ensure running, and return (ws, vm, run_command, run_as_root, target).
 
-    If operation is set, creates an SSHLogger and binds it into both callables.
-    The ExecTarget is also returned directly for callers that need it (e.g.
-    ensure_agent_socket_*, batch_check_sessions).
+    If operation is set, creates an SSHLogger and attaches it to the ExecTarget
+    so all calls log automatically. run_command and run_as_root are bound from
+    the target's methods for callers that consume RunCommand callables.
     """
-    from agentworks.ssh import SSHLogger, run
-    from agentworks.ssh import run_as_root as ssh_run_as_root
+    from agentworks.ssh import SSHLogger
 
     ws = _require_workspace(db, workspace_name)
     vm = _require_vm_for_workspace(db, ws)
@@ -230,8 +229,8 @@ def _prepare_vm(
 
     logger = SSHLogger(vm.name, operation) if operation else None
     target = admin_exec_target(vm, config, logger=logger)
-    run_command = partial(run, target, logger=logger)
-    run_as_root = partial(ssh_run_as_root, target, logger=logger)
+    run_command: RunCommand = target.run
+    run_as_root: RunCommand = partial(target.run, sudo=True)
     return ws, vm, run_command, run_as_root, target
 
 
@@ -615,7 +614,6 @@ def _execute_stop(
     import time
 
     from agentworks.sessions.tmux import force_kill_tmux_server, send_keys
-    from agentworks.ssh import run
 
     if not targets:
         return []
@@ -629,9 +627,8 @@ def _execute_stop(
     output.detail("Sending C-c to stop any running commands...")
     for session, target in targets:
         sock = session.socket_path
-        run_cmd = partial(run, target, logger=target.logger)
         with contextlib.suppress(Exception):
-            send_keys(session.name, "C-c", run_command=run_cmd, socket_path=sock)
+            send_keys(session.name, "C-c", run_command=target.run, socket_path=sock)
 
     # Phase 2: single grace period
     output.detail(f"Waiting {_STOP_GRACE_SECONDS}s for graceful exit...")
@@ -661,8 +658,7 @@ def _execute_stop(
         if status == SessionStatus.OK or status == SessionStatus.BROKEN:
             output.detail(f"Killing session '{session.name}'")
             sock = session.socket_path
-            run_cmd = partial(run, target, logger=target.logger)
-            killed = _kill_session(session.name, run_command=run_cmd, socket_path=sock)
+            killed = _kill_session(session.name, run_command=target.run, socket_path=sock)
             if not killed:
                 # Race condition: session may have exited between survivor check and kill.
                 # Recheck before treating as failure.

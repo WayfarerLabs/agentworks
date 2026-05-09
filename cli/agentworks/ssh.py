@@ -328,12 +328,22 @@ def run_as_root(
     timeout: int | None = None,
     logger: SSHLogger | None = None,
 ) -> SSHResult:
-    """Execute a command as root via sudo on a remote host."""
+    """Execute a command as root via sudo on a remote host.
+
+    The entire command runs as root by wrapping in ``sudo -n bash -c '...'``,
+    so pipelines and ``&&`` chains are fully privileged. This matches
+    ``ExecTarget.run(sudo=True)``.
+    """
+    import shlex as _shlex
+
     target = _unwrap_ssh(target)
-    # NOTE: sudo -n only applies to the first command in a shell pipeline.
-    # ``sudo -n cmd1 && cmd2`` runs cmd2 without privilege. If you need
-    # multiple root commands, issue separate run_as_root calls.
-    return run(target, f"sudo -n {command}", check=check, timeout=timeout, logger=logger)
+    return run(
+        target,
+        f"sudo -n bash -c {_shlex.quote(command)}",
+        check=check,
+        timeout=timeout,
+        logger=logger,
+    )
 
 
 def scp_base_args(target: SSHTarget) -> list[str]:

@@ -313,7 +313,7 @@ def repair_workspace(
 ) -> None:
     """Repair workspace infrastructure: group, permissions, ACLs, agent access."""
     from agentworks.agents.manager import AGENT_PREFIX, WS_GROUP_PREFIX
-    from agentworks.ssh import SSHError, admin_exec_target, run_as_root
+    from agentworks.ssh import SSHError, admin_exec_target
 
     ws = db.get_workspace(name)
     if ws is None:
@@ -335,9 +335,9 @@ def repair_workspace(
 
     # 0. Ensure acl package is installed (needed for setfacl)
     try:
-        has_setfacl = run_as_root(target, "which setfacl", check=False)
+        has_setfacl = target.run("which setfacl", sudo=True, check=False)
         if not has_setfacl.ok:
-            run_as_root(target, "apt-get install -y -qq acl", timeout=60)
+            target.run("apt-get install -y -qq acl", sudo=True, timeout=60)
             output.detail("Fixed: installed acl package")
             fixes += 1
         else:
@@ -349,17 +349,17 @@ def repair_workspace(
     try:
         # Check for old-style group and rename if needed
         old_group = f"ws-{name}"
-        old_exists = run_as_root(target, f"getent group {old_group}", check=False)
-        new_exists = run_as_root(target, f"getent group {ws_group}", check=False)
+        old_exists = target.run(f"getent group {old_group}", sudo=True, check=False)
+        new_exists = target.run(f"getent group {ws_group}", sudo=True, check=False)
 
         if old_exists.ok and not new_exists.ok:
-            run_as_root(target, f"groupmod -n {ws_group} {old_group}")
+            target.run(f"groupmod -n {ws_group} {old_group}", sudo=True)
             output.detail(f"Fixed: renamed group {old_group} -> {ws_group}")
             fixes += 1
         elif not new_exists.ok:
-            run_as_root(
-                target,
+            target.run(
                 f"sh -c 'getent group {ws_group} >/dev/null 2>&1 || /usr/sbin/groupadd {ws_group}'",
+                sudo=True,
             )
             output.detail(f"Fixed: created group {ws_group}")
             fixes += 1
@@ -370,13 +370,13 @@ def repair_workspace(
 
     # 2. Ensure admin is in the group
     try:
-        in_group = run_as_root(
-            target,
+        in_group = target.run(
             f"id -nG {vm.admin_username}",
+            sudo=True,
             check=False,
         )
         if in_group.ok and ws_group not in in_group.stdout.split():
-            run_as_root(target, f"usermod -aG {ws_group} {vm.admin_username}")
+            target.run(f"usermod -aG {ws_group} {vm.admin_username}", sudo=True)
             output.detail(f"Fixed: added admin '{vm.admin_username}' to {ws_group}")
             fixes += 1
         else:
@@ -386,14 +386,14 @@ def repair_workspace(
 
     # 3. Fix directory permissions (recursive chgrp so ACLs apply correctly)
     try:
-        run_as_root(target, f"chown -R {vm.admin_username}:{ws_group} {ws.workspace_path}", timeout=120)
-        run_as_root(target, f"chmod 2770 {ws.workspace_path}")
+        target.run(f"chown -R {vm.admin_username}:{ws_group} {ws.workspace_path}", sudo=True, timeout=120)
+        target.run(f"chmod 2770 {ws.workspace_path}", sudo=True)
         # Set SGID on all subdirectories so new files inherit the workspace group.
         # This is critical for atomic-write tools (including Claude Code) that
         # create a temp file and rename it over the original.
-        run_as_root(
-            target,
+        target.run(
             f"find {shlex.quote(ws.workspace_path)} -type d -exec chmod g+s {{}} +",
+            sudo=True,
             timeout=120,
         )
         output.detail("OK: directory ownership and permissions")
@@ -404,14 +404,14 @@ def repair_workspace(
     # Default ACLs only apply to directories; use find to avoid warnings on files.
     # Effective ACLs apply to all entries and should not produce output.
     try:
-        run_as_root(
-            target,
+        target.run(
             f"find {ws.workspace_path} -type d -exec setfacl -d -m g::rwx -m m::rwx {{}} +",
+            sudo=True,
             timeout=120,
         )
-        run_as_root(
-            target,
+        target.run(
             f"setfacl -R -m g::rwx -m m::rwx {ws.workspace_path}",
+            sudo=True,
             timeout=120,
         )
         output.detail("OK: ACLs")
@@ -420,9 +420,9 @@ def repair_workspace(
 
     # 5. Fix parent directory traversal
     try:
-        run_as_root(
-            target,
+        target.run(
             f'sh -c \'p={ws.workspace_path}; while [ "$p" != "/" ]; do chmod a+x "$p"; p=$(dirname "$p"); done\'',
+            sudo=True,
         )
         output.detail("OK: parent traversal")
     except SSHError as e:
@@ -438,7 +438,7 @@ def repair_workspace(
 
     # Get agents that ARE in the group (only agt-- prefixed users)
     try:
-        group_info = run_as_root(target, f"getent group {ws_group}", check=False)
+        group_info = target.run(f"getent group {ws_group}", sudo=True, check=False)
         current_members: set[str] = set()
         if group_info.ok and ":" in group_info.stdout:
             members_str = group_info.stdout.strip().split(":")[-1]
@@ -448,14 +448,14 @@ def repair_workspace(
         # Add missing agents
         to_add = granted_agents - current_members
         for user in sorted(to_add):
-            run_as_root(target, f"usermod -aG {ws_group} {user}")
+            target.run(f"usermod -aG {ws_group} {user}", sudo=True)
             output.detail(f"Fixed: added {user} to {ws_group}")
             fixes += 1
 
         # Remove agents that shouldn't be there
         to_remove = current_members - granted_agents
         for user in sorted(to_remove):
-            run_as_root(target, f"gpasswd -d {user} {ws_group}", check=False)
+            target.run(f"gpasswd -d {user} {ws_group}", sudo=True, check=False)
             output.detail(f"Fixed: removed {user} from {ws_group}")
             fixes += 1
 
@@ -548,8 +548,7 @@ def _rehome_vm(
     """Rehome a VM workspace."""
 
     from agentworks.agents.manager import WS_GROUP_PREFIX
-    from agentworks.ssh import SSHError, SSHLogger, admin_exec_target, run_as_root
-    from agentworks.ssh import run as ssh_run
+    from agentworks.ssh import SSHError, SSHLogger, admin_exec_target
     from agentworks.workspaces.backends.vm import generate_vscode_workspace
 
     ws_name = ws.name
@@ -567,12 +566,12 @@ def _rehome_vm(
     target = admin_exec_target(vm, config)
 
     # Verify source exists
-    src_check = ssh_run(target, f"test -d {old_path}", check=False, timeout=10)
+    src_check = target.run(f"test -d {old_path}", check=False, timeout=10)
     if not src_check.ok:
         raise output.WorkspaceError(f"source directory {old_path} does not exist on VM")
 
     # Verify target does not exist
-    dst_check = ssh_run(target, f"test -d {new_path}", check=False, timeout=10)
+    dst_check = target.run(f"test -d {new_path}", check=False, timeout=10)
     if dst_check.ok:
         raise output.WorkspaceError(f"target directory {new_path} already exists on VM")
 
@@ -588,23 +587,24 @@ def _rehome_vm(
             raise output.UserAbort("rehome cancelled")
 
     ssh_logger = SSHLogger(vm.name, "workspace-rehome")
+    target = admin_exec_target(vm, config, logger=ssh_logger)
     ws_group = f"{WS_GROUP_PREFIX}{ws_name}"
 
     try:
         # Create target directory as root and chown to admin so rsync can write
-        run_as_root(target, f"mkdir -p {new_path}", logger=ssh_logger)
-        run_as_root(target, f"chown {vm.admin_username} {new_path}", logger=ssh_logger)
+        target.run(f"mkdir -p {new_path}", sudo=True)
+        target.run(f"chown {vm.admin_username} {new_path}", sudo=True)
 
         # Copy with rsync (fall back to cp -a)
         output.info("Copying workspace...")
-        has_rsync = ssh_run(target, "which rsync", check=False, timeout=10, logger=ssh_logger)
+        has_rsync = target.run("which rsync", check=False, timeout=10)
         if has_rsync.ok:
-            ssh_run(target, f"rsync -a {old_path}/ {new_path}/", timeout=600, logger=ssh_logger)
+            target.run(f"rsync -a {old_path}/ {new_path}/", timeout=600)
         else:
-            run_as_root(target, f"cp -a {old_path}/. {new_path}/", timeout=600, logger=ssh_logger)
+            target.run(f"cp -a {old_path}/. {new_path}/", sudo=True, timeout=600)
 
         # Verify copy succeeded
-        verify = ssh_run(target, f"test -d {new_path}", check=False, timeout=10, logger=ssh_logger)
+        verify = target.run(f"test -d {new_path}", check=False, timeout=10)
         if not verify.ok:
             ssh_logger.close()
             raise output.WorkspaceError(
@@ -613,46 +613,40 @@ def _rehome_vm(
 
         # Fix ownership, permissions, and ACLs on the new path
         output.info("Setting permissions...")
-        run_as_root(target, f"chown {vm.admin_username}:{ws_group} {new_path}", logger=ssh_logger)
-        run_as_root(target, f"chmod 2770 {new_path}", logger=ssh_logger)
+        target.run(f"chown {vm.admin_username}:{ws_group} {new_path}", sudo=True)
+        target.run(f"chmod 2770 {new_path}", sudo=True)
         sgid_cmd = f"find {shlex.quote(new_path)} -type d -exec chmod g+s {{}} +"
-        run_as_root(target, sgid_cmd, timeout=120, logger=ssh_logger)
+        target.run(sgid_cmd, sudo=True, timeout=120)
         try:
-            run_as_root(
-                target,
+            target.run(
                 f"find {new_path} -type d -exec setfacl -d -m g::rwx -m m::rwx {{}} +",
+                sudo=True,
                 timeout=120,
-                logger=ssh_logger,
             )
-            run_as_root(
-                target,
+            target.run(
                 f"setfacl -R -m g::rwx -m m::rwx {new_path}",
+                sudo=True,
                 timeout=120,
-                logger=ssh_logger,
             )
         except SSHError as e:
             output.warn(f"ACL setup failed: {e}")
 
         # Fix parent directory traversal
-        run_as_root(
-            target,
+        target.run(
             f'sh -c \'p={new_path}; while [ "$p" != "/" ]; do chmod a+x "$p"; p=$(dirname "$p"); done\'',
-            logger=ssh_logger,
+            sudo=True,
         )
 
         # Regenerate tmuxinator config at new path
-        from agentworks.ssh import write_file
         from agentworks.workspaces.tmuxinator import console_session_name, generate_config
 
         tmux_config = generate_config(ws_name, new_path)
-        write_file(target, f"{new_path}/.tmuxinator.yml", tmux_config, logger=ssh_logger)
+        target.write_file(f"{new_path}/.tmuxinator.yml", tmux_config)
         session = console_session_name(ws_name)
-        ssh_run(target, "mkdir -p ~/.config/tmuxinator", timeout=10, logger=ssh_logger)
-        ssh_run(
-            target,
+        target.run("mkdir -p ~/.config/tmuxinator", timeout=10)
+        target.run(
             f"ln -sf {new_path}/.tmuxinator.yml ~/.config/tmuxinator/{session}.yml",
             timeout=10,
-            logger=ssh_logger,
         )
 
         # Update database
@@ -666,7 +660,7 @@ def _rehome_vm(
         # Handle old directory
         if remove_old:
             output.info(f"Removing old directory {old_path}...")
-            run_as_root(target, f"rm -rf {old_path}", timeout=60, logger=ssh_logger)
+            target.run(f"rm -rf {old_path}", sudo=True, timeout=60)
             output.info("Old directory removed")
         else:
             output.info(f"\nOld directory left in place at {old_path}")
@@ -802,25 +796,22 @@ def delete_workspace(
     if ws.type == "vm" and ws.vm_name:
         vm = db.get_vm(ws.vm_name)
         if vm is not None and vm.tailscale_host is not None:
-            from functools import partial
-
             from agentworks.db import SessionStatus
             from agentworks.sessions.manager import (
                 check_session_status,
                 ensure_pids_batch,
             )
             from agentworks.sessions.tmux import force_kill_tmux_server, kill_session
-            from agentworks.ssh import admin_exec_target, run
+            from agentworks.ssh import admin_exec_target
 
-            target = admin_exec_target(vm, config)
-            run_command = partial(run, target, logger=ssh_logger)
+            target = admin_exec_target(vm, config, logger=ssh_logger)
             sessions = db.list_sessions(workspace_name=name)
             sessions = ensure_pids_batch(sessions, db=db, config=config)
             unstoppable: list[str] = []
             for session in sessions:
                 status = check_session_status(session, target=target)
                 if status == SessionStatus.OK:
-                    if not kill_session(session.name, run_command=run_command, socket_path=session.socket_path):
+                    if not kill_session(session.name, run_command=target.run, socket_path=session.socket_path):
                         # Race: session may have exited between check and kill. Recheck.
                         recheck = check_session_status(session, target=target)
                         if recheck != SessionStatus.STOPPED:
@@ -965,7 +956,7 @@ def copy_workspace(
                 template="copied",
             )
         else:
-            from agentworks.ssh import SSHLogger, copy_to, run, run_as_root
+            from agentworks.ssh import SSHLogger
 
             dest_vm = _resolve_vm(db, vm_name)
             _guard_vm_status(dest_vm)
@@ -974,7 +965,7 @@ def copy_workspace(
                 raise output.VMError(f"VM '{dest_vm.name}' has no Tailscale address")
 
             lg = SSHLogger(dest_vm.name, "workspace-copy")
-            dest_target = admin_exec_target(dest_vm, config)
+            dest_target = admin_exec_target(dest_vm, config, logger=lg)
             workspace_path = f"{config.paths.vm_workspaces}/{dest_name}"
 
             ws_group = f"ws--{dest_name}"
@@ -982,33 +973,30 @@ def copy_workspace(
             output.info(f"Unpacking to workspace '{dest_name}' on VM '{dest_vm.name}'...")
 
             # Set up group, directory, and permissions (same as create_vm_workspace)
-            run_as_root(
-                dest_target,
+            dest_target.run(
                 f"sh -c 'getent group {ws_group} >/dev/null 2>&1 || /usr/sbin/groupadd {ws_group}'",
-                logger=lg,
+                sudo=True,
             )
-            run_as_root(dest_target, f"usermod -aG {ws_group} {dest_vm.admin_username}", logger=lg)
-            run_as_root(dest_target, f"mkdir -p {workspace_path}", timeout=10, logger=lg)
-            run_as_root(dest_target, f"chown {dest_vm.admin_username}:{ws_group} {workspace_path}", logger=lg)
-            run_as_root(dest_target, f"chmod 2770 {workspace_path}", logger=lg)
-            run_as_root(dest_target, f"setfacl -d -m g::rwx -m m::rwx {workspace_path}", logger=lg)
+            dest_target.run(f"usermod -aG {ws_group} {dest_vm.admin_username}", sudo=True)
+            dest_target.run(f"mkdir -p {workspace_path}", sudo=True, timeout=10)
+            dest_target.run(f"chown {dest_vm.admin_username}:{ws_group} {workspace_path}", sudo=True)
+            dest_target.run(f"chmod 2770 {workspace_path}", sudo=True)
+            dest_target.run(f"setfacl -d -m g::rwx -m m::rwx {workspace_path}", sudo=True)
 
             # Unpack archive and fix ownership
             remote_tmp = f"/tmp/{dest_name}-copy.tgz"
-            copy_to(dest_target, tmp_path, remote_tmp, timeout=300)
-            run_as_root(dest_target, f"tar xzf {remote_tmp} -C {workspace_path}", timeout=120, logger=lg)
-            run(dest_target, f"rm -f {remote_tmp}", check=False, timeout=10, logger=lg)
-            run_as_root(
-                dest_target,
+            dest_target.copy_to(tmp_path, remote_tmp, timeout=300)
+            dest_target.run(f"tar xzf {remote_tmp} -C {workspace_path}", sudo=True, timeout=120)
+            dest_target.run(f"rm -f {remote_tmp}", check=False, timeout=10)
+            dest_target.run(
                 f"chown -R {dest_vm.admin_username}:{ws_group} {workspace_path}",
+                sudo=True,
                 timeout=60,
-                logger=lg,
             )
-            run_as_root(
-                dest_target,
+            dest_target.run(
                 f"find {shlex.quote(workspace_path)} -type d -exec chmod g+s {{}} +",
+                sudo=True,
                 timeout=120,
-                logger=lg,
             )
 
             db.insert_workspace(
@@ -1020,19 +1008,16 @@ def copy_workspace(
             )
 
             # Generate tmuxinator config and VS Code workspace
-            from agentworks.ssh import write_file
             from agentworks.workspaces.backends.vm import generate_vscode_workspace
             from agentworks.workspaces.tmuxinator import console_session_name, generate_config
 
             tmux_config = generate_config(dest_name, workspace_path)
-            write_file(dest_target, f"{workspace_path}/.tmuxinator.yml", tmux_config, logger=lg)
+            dest_target.write_file(f"{workspace_path}/.tmuxinator.yml", tmux_config)
             session = console_session_name(dest_name)
-            run(dest_target, "mkdir -p ~/.config/tmuxinator", timeout=10, logger=lg)
-            run(
-                dest_target,
+            dest_target.run("mkdir -p ~/.config/tmuxinator", timeout=10)
+            dest_target.run(
                 f"ln -sf {workspace_path}/.tmuxinator.yml ~/.config/tmuxinator/{session}.yml",
                 timeout=10,
-                logger=lg,
             )
             vscode_path = generate_vscode_workspace(dest_vm, config, dest_name, workspace_path)
             output.detail(f"VS Code workspace: {vscode_path}")
