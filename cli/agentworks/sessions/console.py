@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import shlex
 import sys
-from functools import partial
 from typing import TYPE_CHECKING
 
 from agentworks import output
@@ -138,18 +137,17 @@ def attach_console(
     if vm.tailscale_host is None:
         raise output.VMError(f"VM '{vm_name}' has no Tailscale address")
 
-    from agentworks.ssh import admin_exec_target, interactive, run
+    from agentworks.ssh import admin_exec_target, interactive
 
     target = admin_exec_target(vm, config)
-    run_command = partial(run, target)
 
     # Get sessions for this VM (console wrapper handles dead sessions)
     vm_sessions = _get_sessions_for_vm(db, vm)
 
-    if recreate or not console_exists(run_command=run_command):
+    if recreate or not console_exists(run_command=target.run):
         create_console(
             vm_sessions,
-            run_command=run_command,
+            run_command=target.run,
             admin_username=vm.admin_username,
             recreate=recreate,
         )

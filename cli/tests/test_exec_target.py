@@ -55,6 +55,19 @@ def test_sudo_escapes_single_quotes() -> None:
         assert "hello world" in cmd
 
 
+def test_module_run_as_root_wraps_with_bash_c() -> None:
+    """Module-level run_as_root uses the same `sudo -n bash -c '...'` wrapping
+    as ExecTarget.run(sudo=True), so pipelines run fully as root."""
+    from agentworks.ssh import run_as_root
+
+    target = SSHTarget(host="test", user="admin")
+    with patch("agentworks.ssh.run") as mock_run:
+        mock_run.return_value = SSHResult(returncode=0, stdout="", stderr="")
+        run_as_root(target, "cmd1 && cmd2")
+        cmd = mock_run.call_args[0][1]
+        assert cmd == "sudo -n bash -c 'cmd1 && cmd2'"
+
+
 # ---------------------------------------------------------------------------
 # tty resolution
 # ---------------------------------------------------------------------------

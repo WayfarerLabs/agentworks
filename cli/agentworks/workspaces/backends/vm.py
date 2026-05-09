@@ -29,18 +29,14 @@ def create_vm_workspace(
 
     Errors if the workspace directory already exists on the VM.
     """
-    from agentworks.ssh import run as ssh_run
-    from agentworks.ssh import run_as_root
-
     assert vm.tailscale_host is not None
-    target = admin_exec_target(vm, config)
-    lg = logger
+    target = admin_exec_target(vm, config, logger=logger)
 
     workspace_path = f"{config.paths.vm_workspaces}/{ws_name}"
     ws_group = f"ws--{ws_name}"
 
     # Refuse to create if directory already exists
-    exists = ssh_run(target, f"test -d {workspace_path}", check=False, timeout=10, logger=lg)
+    exists = target.run(f"test -d {workspace_path}", check=False, timeout=10)
     if exists.ok:
         raise output.WorkspaceError(
             f"directory {workspace_path} already exists on the VM. "
@@ -49,26 +45,26 @@ def create_vm_workspace(
         )
 
     # Create workspace group (idempotent), add admin, and set up directory with setgid
-    run_as_root(target, f"sh -c 'getent group {ws_group} >/dev/null 2>&1 || /usr/sbin/groupadd {ws_group}'", logger=lg)
-    run_as_root(target, f"usermod -aG {ws_group} {vm.admin_username}", logger=lg)
-    run_as_root(target, f"mkdir -p {workspace_path}", logger=lg)
-    run_as_root(target, f"chown {vm.admin_username}:{ws_group} {workspace_path}", logger=lg)
-    run_as_root(target, f"chmod 2770 {workspace_path}", logger=lg)
+    target.run(f"sh -c 'getent group {ws_group} >/dev/null 2>&1 || /usr/sbin/groupadd {ws_group}'", sudo=True)
+    target.run(f"usermod -aG {ws_group} {vm.admin_username}", sudo=True)
+    target.run(f"mkdir -p {workspace_path}", sudo=True)
+    target.run(f"chown {vm.admin_username}:{ws_group} {workspace_path}", sudo=True)
+    target.run(f"chmod 2770 {workspace_path}", sudo=True)
     # Set default ACLs so files created inside are group-writable
-    run_as_root(target, f"setfacl -d -m g::rwx -m m::rwx {workspace_path}", logger=lg)
+    target.run(f"setfacl -d -m g::rwx -m m::rwx {workspace_path}", sudo=True)
 
     # Git clone if repo is set
     if template.repo:
         output.info(f"Cloning {template.repo}...")
         try:
-            ssh_run(target, f"git clone {template.repo} {workspace_path}", timeout=300, logger=lg)
+            target.run(f"git clone {template.repo} {workspace_path}", timeout=300)
             # Ensure cloned files inherit the workspace group and subdirectories
             # have SGID so new files (including atomic writes) get the right group
-            run_as_root(target, f"chgrp -R {ws_group} {workspace_path}", logger=lg)
+            target.run(f"chgrp -R {ws_group} {workspace_path}", sudo=True)
             import shlex
 
             sgid_cmd = f"find {shlex.quote(workspace_path)} -type d -exec chmod g+s {{}} +"
-            run_as_root(target, sgid_cmd, timeout=120, logger=lg)
+            target.run(sgid_cmd, sudo=True, timeout=120)
         except Exception:
             if template.repo.startswith("git@"):
                 output.warn(
@@ -84,18 +80,14 @@ def create_vm_workspace(
 
     # Tmuxinator config (no tasks yet at workspace creation time)
     if template.tmuxinator:
-        from agentworks.ssh import write_file
-
         tmux_config = generate_config(ws_name, workspace_path)
-        write_file(target, f"{workspace_path}/.tmuxinator.yml", tmux_config, logger=lg)
+        target.write_file(f"{workspace_path}/.tmuxinator.yml", tmux_config)
         # Symlink so tmuxinator can find it by console session name
         session = console_session_name(ws_name)
-        ssh_run(target, "mkdir -p ~/.config/tmuxinator", timeout=10, logger=lg)
-        ssh_run(
-            target,
+        target.run("mkdir -p ~/.config/tmuxinator", timeout=10)
+        target.run(
             f"ln -sf {workspace_path}/.tmuxinator.yml ~/.config/tmuxinator/{session}.yml",
             timeout=10,
-            logger=lg,
         )
 
     return workspace_path
@@ -121,13 +113,13 @@ def console_vm_workspace(
     recreate: bool = False,
 ) -> None:
     """Open the workspace console (tmuxinator) on a VM."""
-    from agentworks.ssh import admin_exec_target, interactive, run
+    from agentworks.ssh import admin_exec_target, interactive
 
     session = console_session_name(ws_name)
     target = admin_exec_target(vm, config)
 
     if recreate:
-        run(target, f"tmux kill-session -t {session}", check=False, timeout=10)
+        target.run(f"tmux kill-session -t {session}", check=False, timeout=10)
 
     sys.exit(interactive(target, f"tmuxinator start {session}"))
 
@@ -142,18 +134,14 @@ def delete_vm_workspace(
 ) -> None:
     """Delete a workspace from a VM."""
     from agentworks.ssh import SSHError
-    from agentworks.ssh import run as ssh_run
 
     assert vm.tailscale_host is not None
-    target = admin_exec_target(vm, config)
-    lg = logger
-
-    from agentworks.ssh import run_as_root
+    target = admin_exec_target(vm, config, logger=logger)
 
     try:
-        run_as_root(target, f"rm -rf {workspace_path}", timeout=30, logger=lg)
+        target.run(f"rm -rf {workspace_path}", sudo=True, timeout=30)
         session = console_session_name(ws_name)
-        ssh_run(target, f"rm -f ~/.config/tmuxinator/{session}.yml", check=False, timeout=10, logger=lg)
+        target.run(f"rm -f ~/.config/tmuxinator/{session}.yml", check=False, timeout=10)
     except SSHError as e:
         output.warn(f"remote cleanup failed: {e}")
 
