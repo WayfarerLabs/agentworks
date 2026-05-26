@@ -35,6 +35,8 @@ CLAUDE.md
 .cursorignore
 .github/*
 !.github/workflows
+!.github/ISSUE_TEMPLATE
+!.github/PULL_REQUEST_TEMPLATE.md
 .copilotignore
 AGENTS.md
 GEMINI.md
