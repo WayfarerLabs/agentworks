@@ -1,0 +1,28 @@
+name: Release Please
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    env:
+      # release-please-action@v4 still declares node20; force node24 on the runner.
+      # Remove once the action publishes a node24 release (see googleapis/release-please-action#1192).
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+    steps:
+      # Use a GitHub App token so the release PR (and any subsequent pushes
+      # to its branch) trigger CI workflows. The default GITHUB_TOKEN creates
+      # events as github-actions[bot], which GitHub won't run workflows for.
+      - uses: actions/create-github-app-token@v3
+        id: app-token
+        with:
+          app-id: ${{ vars.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+
+      - uses: googleapis/release-please-action@v4
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json

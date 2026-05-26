@@ -1,0 +1,72 @@
+name: Release to PyPI
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+  id-token: write  # Required for trusted publishing via OIDC
+
+jobs:
+  verify-tag-on-main:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Verify tag is reachable from main
+        run: |
+          git fetch origin main
+          if ! git merge-base --is-ancestor "${{ github.sha }}" origin/main; then
+            echo "Error: tag ${{ github.ref_name }} is not an ancestor of main"
+            exit 1
+          fi
+
+  test:
+    needs: verify-tag-on-main
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cli
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Ruff check
+        run: uv run ruff check agentworks/ tests/
+
+      - name: Mypy
+        run: uv run mypy agentworks/
+
+      - name: Pytest
+        run: uv run pytest tests/ -v -m 'not integration'
+
+  publish:
+    needs: test
+    runs-on: ubuntu-latest
+    environment: release
+    defaults:
+      run:
+        working-directory: cli
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Build package
+        run: uv build --out-dir pypi-dist/
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: cli/pypi-dist/
