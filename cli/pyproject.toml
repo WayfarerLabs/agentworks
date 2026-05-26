@@ -3,6 +3,11 @@ name = "agentworks"
 version = "0.1.0"
 description = "CLI for orchestrating workspace lifecycle across multiple compute targets"
 requires-python = ">=3.12"
+license = "MIT"
+readme = "README.md"
+authors = [
+    { name = "Scot Hastings (Wayfarer Labs)" },
+]
 dependencies = [
     "typer>=0.24.1",
     "azure-identity>=1.25.1",
@@ -10,6 +15,11 @@ dependencies = [
     "azure-mgmt-network>=29.0.0",
     "nerftools>=1.1.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/WayfarerLabs/agentworks"
+Repository = "https://github.com/WayfarerLabs/agentworks"
+Issues = "https://github.com/WayfarerLabs/agentworks/issues"
 
 [project.scripts]
 agentworks = "agentworks.cli:main"
