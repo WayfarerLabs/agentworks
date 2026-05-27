@@ -1,6 +1,6 @@
 [project]
 name = "agentworks-cli"
-version = "0.2.0"
+version = "0.2.1"
 description = "CLI for orchestrating workspace lifecycle across multiple compute targets"
 requires-python = ">=3.12"
 license = "MIT"
