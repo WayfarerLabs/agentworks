@@ -1,5 +1,5 @@
 [project]
-name = "agentworks"
+name = "agentworks-cli"
 version = "0.2.0"
 description = "CLI for orchestrating workspace lifecycle across multiple compute targets"
 requires-python = ">=3.12"
@@ -27,6 +27,12 @@ agentworks = "agentworks.cli:main"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+# Distribution name (`agentworks-cli`) and import package name (`agentworks`) differ
+# because `agentworks` is taken on PyPI. Tell hatchling explicitly which package
+# to bundle so it doesn't try to auto-discover an `agentworks_cli/` directory.
+[tool.hatch.build.targets.wheel]
+packages = ["agentworks"]
 
 [tool.ruff]
 target-version = "py312"
