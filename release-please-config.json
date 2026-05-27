@@ -3,7 +3,7 @@
   "packages": {
     "cli": {
       "release-type": "python",
-      "package-name": "agentworks",
+      "package-name": "agentworks-cli",
       "include-component-in-tag": false,
       "changelog-path": "CHANGELOG.md",
       "bump-minor-pre-major": true

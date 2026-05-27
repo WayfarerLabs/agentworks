@@ -3,8 +3,8 @@ revision = 3
 requires-python = ">=3.12"
 
 [[package]]
-name = "agentworks"
-version = "0.1.0"
+name = "agentworks-cli"
+version = "0.2.0"
 source = { editable = "." }
 dependencies = [
     { name = "azure-identity" },
