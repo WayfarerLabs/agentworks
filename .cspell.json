@@ -203,6 +203,7 @@
   "ignorePaths": [
     "node_modules",
     "cli/.venv/**",
-    "cli/.venv64/**"
+    "cli/.venv64/**",
+    "**/CHANGELOG.md"
   ]
 }
