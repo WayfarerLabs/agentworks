@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.1](https://github.com/WayfarerLabs/agentworks/compare/v0.2.0...v0.2.1) (2026-05-27)
+
+
+### Bug Fixes
+
+* rename PyPI distribution to agentworks-cli ([3461823](https://github.com/WayfarerLabs/agentworks/commit/3461823a7f11d04fcdf1fd86dce76d6894659014))
+* rename PyPI distribution to agentworks-cli ([8b4e0a9](https://github.com/WayfarerLabs/agentworks/commit/8b4e0a90808b5e7421e71d7fc9e52e95470daff9))
+
 ## [0.2.0](https://github.com/WayfarerLabs/agentworks/compare/v0.1.0...v0.2.0) (2026-05-27)
 
 
