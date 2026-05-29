@@ -667,12 +667,13 @@ def test_attach_loop_wrapper_format() -> None:
     assert "while true" in wrapper
     assert "break" not in wrapper
     assert "Press enter" not in wrapper
-    # Entry banner: two lines (first names the session, second the action).
+    # Entry banner names the session.
     assert "Waiting for session backend to come up" in wrapper
+    # Exit notice distinguishes clean vs non-zero attach status; the post-exit
+    # banner tells the user we're waiting for a restart so the pane isn't silent.
+    assert "Session backend exited cleanly" in wrapper
+    assert "exited (status $rc)" in wrapper
     assert "Waiting for session to restart" in wrapper
-    # Exit notice distinguishes clean vs non-zero attach status.
-    assert "Session backend ended cleanly" in wrapper
-    assert "ended (status $rc)" in wrapper
     # Silent poll with 2s back-off.
     assert "sleep 2" in wrapper
     assert "sleep 1" not in wrapper
