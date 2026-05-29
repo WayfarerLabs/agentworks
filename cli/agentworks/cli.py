@@ -514,9 +514,9 @@ def vm_console(
     recreate: Annotated[bool, typer.Option("--recreate", help="Kill and rebuild the console")] = False,
     allow_nesting: Annotated[bool, typer.Option("--allow-nesting", help="Allow running inside tmux")] = False,
 ) -> None:
-    """Attach to the VM console (creates it if needed).
+    """[Deprecated] Attach to the VM console (creates it if needed).
 
-    Deprecated: prefer 'agentworks console' for curated session lists and per-window shell panes.
+    Prefer 'agentworks console' for curated session lists and per-window shell panes.
     """
     from agentworks import output
     from agentworks.config import load_config

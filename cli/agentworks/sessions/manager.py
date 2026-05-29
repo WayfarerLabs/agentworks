@@ -825,9 +825,12 @@ def restart_session(
     output.info(f"Session '{name}' restarted")
 
     _regenerate_tmuxinator(db, config, vm, ws)
-    # Don't re-add the session to the legacy vm-console here -- the existing
-    # window's attach-loop wrapper reconnects to the new tmux server when it
-    # comes back up. Adding a new window would create a duplicate.
+    # Don't re-add the session to the legacy vm-console here. The existing
+    # window's wrapper (`while has-session; do attach; sleep 0.5; done`) may
+    # or may not catch the new tmux server in its 500ms grace window -- if it
+    # doesn't, the window falls through to the "press enter to close" prompt
+    # but doesn't disappear. Either way, creating a new window here would
+    # leave a duplicate behind.
 
 
 def stop_all_sessions(
