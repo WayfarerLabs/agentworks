@@ -436,7 +436,8 @@ def repair_workspace(
         if db.has_any_grant(agent.name, name):
             granted_agents.add(agent.linux_user)
 
-    # Get agents that ARE in the group (only agt-- prefixed users)
+    # Get agents that ARE in the group. The agt- prefix check covers both
+    # current agents and legacy ones (whose names start with agt--).
     try:
         group_info = target.run(f"getent group {ws_group}", sudo=True, check=False)
         current_members: set[str] = set()

@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     from agentworks.db import Database, VMRow, WorkspaceRow
     from agentworks.ssh import ExecTarget, SSHLogger, SSHResult
 
-AGENT_PREFIX = "agt--"
+AGENT_PREFIX = "agt-"
 WS_GROUP_PREFIX = "ws--"
 
 
@@ -67,7 +67,13 @@ def _write_agent_file(
 
 
 def derive_linux_user(agent_name: str) -> str:
-    """Derive the Linux username for an agent: agt--<name>."""
+    """Derive the Linux username for a newly-created agent: agt-<name>.
+
+    Existing agents retain whatever username was stored in the database at
+    their creation time (older agents use the legacy agt-- prefix). Always
+    read agent_row.linux_user for the canonical value; this helper is only
+    used at agent-create time.
+    """
     return f"{AGENT_PREFIX}{agent_name}"
 
 
