@@ -143,6 +143,10 @@ concurrent workloads running across their VMs, workspaces, and agents. Agentwork
 operator to attach to and detach from them as needed to monitor progress or interact with the
 workload, and then to stop, restart, and delete them to manage their lifecycle.
 
+For day-to-day work across many sessions, see [Named consoles](#named-consoles) — curated tmux
+views that group the sessions you're actively focused on, optionally with extra shell panes
+pre-opened in each session's window.
+
 ## Key Principles
 
 ### Opinionated Consistency
@@ -317,7 +321,7 @@ Manage virtual machines across Lima (local or remote), Azure, and WSL2.
 | `agentworks vm reinit <name>`                    | Re-run initialization on a provisioned VM  |
 | `agentworks vm delete <name>`                    | Delete a VM (with confirmation)            |
 | `agentworks vm logs <name>`                      | Show SSH logs for a VM                     |
-| `agentworks vm console <name>`                   | Attach to the VM console                   |
+| `agentworks vm console <name>`                   | _Deprecated_: use `agentworks console`     |
 | `agentworks vm add-git-credential <name> <cred>` | Add or update a git credential             |
 
 `vm create` accepts `--name`, `--platform`, `--vm-host`, `--admin-username`, `--cpus`, `--memory`,
@@ -396,7 +400,7 @@ Manage sessions (persistent tmux sessions running in workspaces). Session names 
 | `agentworks session restart <name>`          | Restart a session              |
 | `agentworks session delete <name>`           | Stop and delete a session      |
 | `agentworks session logs <name>`             | Dump session scrollback buffer |
-| `agentworks vm console <vm-name>`            | Attach to the VM console       |
+| `agentworks console attach <name>`           | Attach to a named console      |
 
 `session create` accepts `--name`, `--workspace`, `--template`, `--admin`, and `--agent`. Workspace,
 mode (admin vs agent), and name are prompted interactively if omitted. If agents exist on the VM and
@@ -468,8 +472,9 @@ tmux pane PTY. The socket path is persisted in the database.
 
 `workspace console` uses tmuxinator to create or attach to a `ws-<name>-console` session. The
 tmuxinator config (`.tmuxinator.yml` in the workspace root) is regenerated whenever sessions change,
-so the console always reflects the current set of sessions. This is the recommended way to interact
-with sessions from within VS Code or any terminal on the VM.
+so the console always reflects the current set of sessions. Best for in-VM work scoped to a single
+workspace (e.g. inside VS Code's integrated terminal). For curated views that span workspaces, use a
+named console (`console attach <name>`).
 
 ```text
 ws-myproject-console (tmuxinator, full tmux)

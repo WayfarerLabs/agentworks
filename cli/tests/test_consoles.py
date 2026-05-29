@@ -63,7 +63,14 @@ def _seed_sessions(db: Database, names: list[str], *, workspace_name: str = "ws-
 
 
 class _StubConfig:
-    """A no-op Config stand-in for orchestration paths that never reach SSH."""
+    """A no-op Config stand-in.
+
+    Tests that don't install the ``fake_target`` fixture also use VMs seeded
+    with ``with_tailscale=False`` so ``_live_target`` returns None up front
+    and the SSH layer is never entered. If you set ``with_tailscale=True``
+    without monkey-patching ``admin_exec_target`` you will hit an
+    AttributeError on this stub -- prefer the ``fake_target`` fixture.
+    """
 
 
 # -- parse_session_spec ----------------------------------------------------
@@ -593,3 +600,330 @@ def test_list_consoles_renders_counts(
     list_consoles(db)
     rows = [m for m in captured_output.info if m.startswith("con")]
     assert any("vm1" in r and r.endswith("2") for r in rows)
+
+
+# -- Tmux orchestration (FakeTarget-mocked) --------------------------------
+
+
+class _FakeResult:
+    """Minimal stand-in for ssh.SSHResult."""
+
+    def __init__(self, returncode: int = 0, stdout: str = "", stderr: str = "") -> None:
+        self.returncode = returncode
+        self.stdout = stdout
+        self.stderr = stderr
+
+    @property
+    def ok(self) -> bool:
+        return self.returncode == 0
+
+
+class _FakeTarget:
+    """Captures the commands run against it. Supports a per-test override map
+    that lets us simulate (e.g.) `has-session` returning nonzero on first probe.
+    """
+
+    def __init__(self, responses: dict[str, _FakeResult] | None = None) -> None:
+        self.commands: list[str] = []
+        # Substring -> response. First matching substring wins; default = ok.
+        self.responses = responses or {}
+
+    def run(self, command: str, **kwargs: object) -> _FakeResult:
+        self.commands.append(command)
+        for needle, response in self.responses.items():
+            if needle in command:
+                return response
+        return _FakeResult()
+
+
+@pytest.fixture
+def fake_target(monkeypatch: pytest.MonkeyPatch) -> _FakeTarget:
+    """Install a FakeTarget for the SSH layer and stub VM-running checks."""
+    target = _FakeTarget()
+    monkeypatch.setattr(
+        "agentworks.ssh.admin_exec_target",
+        lambda vm, config, **kwargs: target,
+    )
+    monkeypatch.setattr(
+        "agentworks.workspaces.manager._ensure_vm_running",
+        lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr(
+        "agentworks.ssh.interactive",
+        lambda target, command: 0,
+    )
+    return target
+
+
+def test_attach_loop_wrapper_format() -> None:
+    """Lock the wrapper shape so issue #51's retry budget can't silently regress."""
+    from agentworks.sessions.multi_console import _attach_loop_wrapper
+
+    wrapper = _attach_loop_wrapper("backend", None)
+    # Retry-budget keywords -- if the retry loop is removed, these fail.
+    assert "attempts=0" in wrapper
+    assert "attempts + 1" in wrapper
+    assert "-ge 20" in wrapper
+    # Unset TMUX so console -> session nesting is allowed.
+    assert "unset TMUX" in wrapper
+    # Raw (not shell-quoted) name in the human-facing echo.
+    assert "echo 'Session backend has ended" in wrapper
+
+    # Socketed wrapper threads -S through both has-session and attach.
+    wrapper_sock = _attach_loop_wrapper("a", "/tmp/a.sock")
+    assert "tmux -S /tmp/a.sock has-session" in wrapper_sock
+    assert "tmux -S /tmp/a.sock attach" in wrapper_sock
+
+
+def test_attach_console_builds_initial_tmux(
+    db: Database, fake_target: _FakeTarget
+) -> None:
+    """First attach: kill any existing session, create with admin-shell window,
+    then one new-window per member in DB order. Two shells -> two split-windows
+    + a tiled select-layout."""
+    from agentworks.sessions.multi_console import attach_console
+
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["alpha", "beta"])
+    create_console(db, name="con", vm_name="vm1", session_specs=["alpha+2", "beta"])
+
+    # Simulate console not existing yet so build path runs.
+    fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=1)
+
+    with pytest.raises(SystemExit):
+        attach_console(db, _StubConfig(), name="con", allow_nesting=True)
+
+    cmds = fake_target.commands
+    # Sequence: existence probe, kill-session (rebuild), new-session, set
+    # admin window, new-window alpha, two splits, tiled, new-window beta.
+    assert any("has-session -t aw-console-con" in c for c in cmds)
+    assert any("kill-session -t aw-console-con" in c for c in cmds)
+    assert any("new-session -d -s aw-console-con -n admin-shell" in c for c in cmds)
+    new_window_indexes = [i for i, c in enumerate(cmds) if "new-window -t aw-console-con" in c]
+    assert len(new_window_indexes) == 2, cmds
+    assert "alpha" in cmds[new_window_indexes[0]]
+    assert "beta" in cmds[new_window_indexes[1]]
+    split_cmds = [c for c in cmds if "split-window -t aw-console-con" in c]
+    assert len(split_cmds) == 2, cmds  # two shells on alpha, none on beta
+    assert any("select-layout -t aw-console-con:alpha tiled" in c for c in cmds)
+
+
+def test_attach_console_reuses_existing_tmux(
+    db: Database, fake_target: _FakeTarget
+) -> None:
+    """Subsequent attach: console exists -> no rebuild commands fire."""
+    from agentworks.sessions.multi_console import attach_console
+
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["alpha"])
+    create_console(db, name="con", vm_name="vm1", session_specs=["alpha"])
+    # Console exists.
+    fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
+
+    with pytest.raises(SystemExit):
+        attach_console(db, _StubConfig(), name="con", allow_nesting=True)
+
+    cmds = fake_target.commands
+    assert not any("new-session" in c for c in cmds)
+    assert not any("new-window" in c for c in cmds)
+
+
+def test_attach_console_recreate_rebuilds_even_if_alive(
+    db: Database, fake_target: _FakeTarget
+) -> None:
+    from agentworks.sessions.multi_console import attach_console
+
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["alpha"])
+    create_console(db, name="con", vm_name="vm1", session_specs=["alpha"])
+    fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
+
+    with pytest.raises(SystemExit):
+        attach_console(db, _StubConfig(), name="con", recreate=True, allow_nesting=True)
+
+    cmds = fake_target.commands
+    assert any("kill-session -t aw-console-con" in c for c in cmds)
+    assert any("new-session -d -s aw-console-con" in c for c in cmds)
+
+
+def test_attach_console_iterates_in_position_order(
+    db: Database, fake_target: _FakeTarget
+) -> None:
+    """Even when DB positions have gaps (after a remove), iteration uses
+    ORDER BY position ASC, not insertion order or row order."""
+    from agentworks.sessions.multi_console import attach_console
+
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["a", "b", "c", "d"])
+    # Force live-sync to short-circuit so the mutations below don't issue
+    # spurious tmux commands that pollute the attach assertion.
+    fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=1)
+    create_console(db, name="con", vm_name="vm1", session_specs=["a", "b", "c"])
+    remove_sessions(db, _StubConfig(), console_name="con", session_names=["b"])
+    add_sessions(db, _StubConfig(), console_name="con", session_specs=["d"])
+    # positions are now a=0, c=2, d=3.
+
+    fake_target.commands.clear()
+    with pytest.raises(SystemExit):
+        attach_console(db, _StubConfig(), name="con", allow_nesting=True)
+
+    new_windows = [c for c in fake_target.commands if "new-window -t aw-console-con" in c]
+    names = [c.split("-n ")[1].split()[0] for c in new_windows]
+    assert names == ["a", "c", "d"]
+
+
+def test_attach_console_skips_missing_session_with_warning(
+    db: Database, fake_target: _FakeTarget, captured_output: CapturedOutput
+) -> None:
+    """Cascade should keep this from happening normally, but if a member row
+    survives without its session, we warn and continue."""
+    from agentworks.sessions.multi_console import attach_console
+
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["alpha", "ghost"])
+    create_console(db, name="con", vm_name="vm1", session_specs=["alpha", "ghost"])
+    # Delete the session directly so console_sessions still has a 'ghost' row.
+    # ON DELETE CASCADE would normally clear it; bypass via raw SQL to simulate
+    # an inconsistency.
+    db._conn.execute("PRAGMA foreign_keys = OFF")
+    db._conn.execute("DELETE FROM sessions WHERE name = 'ghost'")
+    db._conn.execute("PRAGMA foreign_keys = ON")
+    db._conn.commit()
+    fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=1)
+
+    with pytest.raises(SystemExit):
+        attach_console(db, _StubConfig(), name="con", allow_nesting=True)
+
+    assert any("ghost" in w and "no longer exists" in w for w in captured_output.warnings)
+    new_windows = [c for c in fake_target.commands if "new-window -t aw-console-con" in c]
+    # Only the surviving session gets a window.
+    assert len(new_windows) == 1
+    assert "alpha" in new_windows[0]
+
+
+def test_add_session_live_sync_skipped_when_console_absent(
+    db: Database, fake_target: _FakeTarget
+) -> None:
+    """If the console's tmux session isn't alive, no new-window command runs."""
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["a", "b"])
+    create_console(db, name="con", vm_name="vm1", session_specs=["a"])
+
+    fake_target.commands.clear()
+    fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=1)
+    add_sessions(db, _StubConfig(), console_name="con", session_specs=["b"])
+
+    assert not any("new-window" in c for c in fake_target.commands)
+
+
+def test_add_session_live_sync_adds_window_when_alive(
+    db: Database, fake_target: _FakeTarget
+) -> None:
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["a", "b"])
+    create_console(db, name="con", vm_name="vm1", session_specs=["a"])
+
+    fake_target.commands.clear()
+    fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
+    add_sessions(db, _StubConfig(), console_name="con", session_specs=["b+1"])
+
+    new_window = [c for c in fake_target.commands if "new-window -t aw-console-con" in c]
+    assert len(new_window) == 1
+    assert "-n b" in new_window[0]
+    splits = [c for c in fake_target.commands if "split-window -t aw-console-con:b" in c]
+    assert len(splits) == 1
+
+
+def test_remove_session_live_sync_kills_window(
+    db: Database, fake_target: _FakeTarget
+) -> None:
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["a", "b"])
+    create_console(db, name="con", vm_name="vm1", session_specs=["a", "b"])
+
+    fake_target.commands.clear()
+    fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
+    remove_sessions(db, _StubConfig(), console_name="con", session_names=["b"])
+
+    kill_windows = [c for c in fake_target.commands if "kill-window -t aw-console-con:b" in c]
+    assert len(kill_windows) == 1
+
+
+def test_add_shell_live_sync_splits_pane_and_tiles(
+    db: Database, fake_target: _FakeTarget
+) -> None:
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["a"])
+    create_console(db, name="con", vm_name="vm1", session_specs=["a"])
+
+    fake_target.commands.clear()
+    fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
+    add_shell(db, _StubConfig(), console_name="con", session_name="a", cwd="src", admin=True)
+
+    splits = [c for c in fake_target.commands if "split-window -t aw-console-con:a" in c]
+    assert len(splits) == 1
+    # Pane cwd reflects the relative path joined under the workspace root.
+    assert "/home/me/vm1/src" in splits[0]
+    layouts = [c for c in fake_target.commands if "select-layout -t aw-console-con:a tiled" in c]
+    assert len(layouts) == 1
+
+
+def test_delete_console_live_kills_tmux_session(
+    db: Database, fake_target: _FakeTarget
+) -> None:
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["a"])
+    create_console(db, name="con", vm_name="vm1", session_specs=["a"])
+
+    fake_target.commands.clear()
+    delete_console(db, _StubConfig(), name="con", yes=True)
+
+    kill_session = [c for c in fake_target.commands if "kill-session -t aw-console-con" in c]
+    assert len(kill_session) == 1
+    assert db.get_console("con") is None
+
+
+def test_split_shell_pane_agent_branch_uses_sudo(
+    db: Database, fake_target: _FakeTarget
+) -> None:
+    """Agent-user shells bootstrap via `sudo --login -u <user> bash -c '...'`;
+    admin-user shells skip the sudo wrapper since the console is already admin."""
+    # Build an agent + agent-mode session manually so we can exercise the
+    # session_user != admin_user branch of _split_shell_pane.
+    _seed_vm(db, with_tailscale=True)
+    db._conn.execute(
+        "INSERT INTO agents (name, vm_name, linux_user) VALUES ('bot', 'vm1', 'bot-user')",
+    )
+    db._conn.execute(
+        "INSERT INTO sessions (name, workspace_name, template, mode, agent_name, socket_path) "
+        "VALUES ('s', 'ws-vm1', 'default', 'agent', 'bot', '/tmp/s.sock')",
+    )
+    db._conn.commit()
+    create_console(db, name="con", vm_name="vm1", session_specs=["s"])
+
+    fake_target.commands.clear()
+    fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
+    add_shell(db, _StubConfig(), console_name="con", session_name="s")  # agent, workspace root
+
+    splits = [c for c in fake_target.commands if "split-window -t aw-console-con:s" in c]
+    assert len(splits) == 1
+    assert "sudo --login -u bot-user" in splits[0]
+    assert 'exec "$SHELL" -l' in splits[0]
+
+
+def test_split_shell_pane_admin_branch_no_sudo(
+    db: Database, fake_target: _FakeTarget
+) -> None:
+    """Admin shell on an admin-mode session: no sudo, just cd + login shell."""
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["a"])
+    create_console(db, name="con", vm_name="vm1", session_specs=["a"])
+
+    fake_target.commands.clear()
+    fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
+    add_shell(db, _StubConfig(), console_name="con", session_name="a")
+
+    splits = [c for c in fake_target.commands if "split-window -t aw-console-con:a" in c]
+    assert len(splits) == 1
+    assert "sudo --login" not in splits[0]
+    assert 'exec "$SHELL" -l' in splits[0]
