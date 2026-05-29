@@ -879,6 +879,65 @@ def test_attach_console_keeps_placeholder_when_all_members_fail(
     assert any("placeholder kept" in w for w in captured_output.warnings)
 
 
+def test_attach_console_announces_build_path(
+    db: Database, fake_target: _FakeTarget, captured_output: CapturedOutput
+) -> None:
+    """First attach prints a 'Building...' status."""
+    from agentworks.sessions.multi_console import attach_console
+
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["a"])
+    create_console(db, name="con", vm_name="vm1", session_specs=["a"])
+    fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=1)
+    fake_target.responses["list-windows -t aw-console-con"] = _FakeResult(
+        returncode=0, stdout="aw--placeholder\na\n"
+    )
+
+    captured_output.info.clear()
+    with pytest.raises(SystemExit):
+        attach_console(db, _StubConfig(), name="con", allow_nesting=True)
+    assert any("Building console 'con' on first attach" in m for m in captured_output.info)
+
+
+def test_attach_console_announces_attach_path(
+    db: Database, fake_target: _FakeTarget, captured_output: CapturedOutput
+) -> None:
+    """Subsequent attach (tmux already running) prints an 'Attaching...' status,
+    not a build status."""
+    from agentworks.sessions.multi_console import attach_console
+
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["a"])
+    create_console(db, name="con", vm_name="vm1", session_specs=["a"])
+    fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
+
+    captured_output.info.clear()
+    with pytest.raises(SystemExit):
+        attach_console(db, _StubConfig(), name="con", allow_nesting=True)
+    assert any("Attaching to running console 'con'" in m for m in captured_output.info)
+    assert not any("Building" in m or "Rebuilding" in m for m in captured_output.info)
+
+
+def test_attach_console_announces_recreate_path(
+    db: Database, fake_target: _FakeTarget, captured_output: CapturedOutput
+) -> None:
+    """--recreate against an alive console prints a 'Rebuilding...' status."""
+    from agentworks.sessions.multi_console import attach_console
+
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["a"])
+    create_console(db, name="con", vm_name="vm1", session_specs=["a"])
+    fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
+    fake_target.responses["list-windows -t aw-console-con"] = _FakeResult(
+        returncode=0, stdout="aw--placeholder\na\n"
+    )
+
+    captured_output.info.clear()
+    with pytest.raises(SystemExit):
+        attach_console(db, _StubConfig(), name="con", recreate=True, allow_nesting=True)
+    assert any("Rebuilding console 'con' (--recreate)" in m for m in captured_output.info)
+
+
 def test_attach_console_reuses_existing_tmux(
     db: Database, fake_target: _FakeTarget
 ) -> None:

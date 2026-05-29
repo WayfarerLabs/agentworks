@@ -728,8 +728,15 @@ def attach_console(
     console = _require_console(db, name)
     vm, target = _prepare_vm_target_for_attach(db, config, console.vm_name)
 
-    if recreate or not _console_tmux_exists(target, name):
+    exists = _console_tmux_exists(target, name)
+    if recreate and exists:
+        output.info(f"Rebuilding console '{name}' (--recreate)...")
         _build_console_tmux(target, db, console, vm)
+    elif not exists:
+        output.info(f"Building console '{name}' on first attach...")
+        _build_console_tmux(target, db, console, vm)
+    else:
+        output.info(f"Attaching to running console '{name}'.")
 
     tmux_name = tmux_session_name(name)
     sys.exit(interactive(target, f"tmux attach -t {shlex.quote(tmux_name)}"))
