@@ -179,11 +179,13 @@ def create_console(
         specs.extend(SessionSpec(name=n, shells=0) for n in extras)
 
     if not specs:
-        # fill_all on a VM with no other sessions, and no explicit specs --
-        # almost certainly a typo / misunderstanding rather than an empty console.
+        # Almost certainly a typo / misunderstanding rather than an empty console.
+        if fill_all:
+            detail = f"VM '{vm_name}' has no sessions"
+        else:
+            detail = "specify at least one session, or pass --all"
         raise output.ConsoleError(
-            f"refusing to create empty console '{name}' "
-            f"(no sessions specified, and VM '{vm_name}' has none to fill)"
+            f"refusing to create empty console '{name}' ({detail})"
         )
 
     with db.transaction():

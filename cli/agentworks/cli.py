@@ -1147,8 +1147,8 @@ def console_list(
     list_consoles(_get_db(), vm_name=vm)
 
 
-@console_app.command("show")
-def console_show(
+@console_app.command("describe")
+def console_describe(
     name: Annotated[str, typer.Argument(help="Console name")],
 ) -> None:
     """Show a console's membership and shell layout."""
