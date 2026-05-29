@@ -656,22 +656,25 @@ def fake_target(monkeypatch: pytest.MonkeyPatch) -> _FakeTarget:
 
 
 def test_attach_loop_wrapper_format() -> None:
-    """Lock the wrapper shape: holds the window open forever, polls silently
-    while waiting, shows a one-shot banner naming the session."""
+    """Lock the wrapper shape: entry banner + forever attach loop with
+    exit-status notice on session-end."""
     from agentworks.sessions.multi_console import _attach_loop_wrapper
 
     wrapper = _attach_loop_wrapper("backend", None)
     # Unset TMUX so console -> session nesting is allowed.
     assert "unset TMUX" in wrapper
-    # Forever loop with no break -- no timeout, no "press enter to close" prompt.
+    # Forever loop with no break/timeout, no "press enter to close" prompt.
     assert "while true" in wrapper
     assert "break" not in wrapper
     assert "Press enter" not in wrapper
-    # One-shot banner naming the raw (validated) session name.
+    # Entry banner for sessions that aren't up yet.
     assert "Waiting for session backend to come up" in wrapper
-    # Silent inner poll until the session comes back.
-    assert "while ! " in wrapper
-    assert "sleep 1" in wrapper
+    # Exit notice distinguishes clean vs non-zero attach status.
+    assert "Session backend ended cleanly" in wrapper
+    assert "ended (status $rc)" in wrapper
+    # Silent poll with 2s back-off.
+    assert "sleep 2" in wrapper
+    assert "sleep 1" not in wrapper
 
     # Socketed wrapper threads -S through both has-session and attach.
     wrapper_sock = _attach_loop_wrapper("a", "/tmp/a.sock")

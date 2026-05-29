@@ -428,30 +428,49 @@ def _attach_loop_wrapper(session_name: str, socket_path: str | None) -> str:
     """Build the shell snippet that holds a console window open for the given
     session.
 
-    When the session is alive, attach to it. When it's not (stopped, briefly
-    down during restart, or never started yet), show a one-shot banner and
-    poll silently until it comes up. The wrapper never exits on its own --
-    the window survives indefinitely; users dismiss dead windows with their
-    console's kill-window binding.
+    Two phases:
+    1. Entry: if the session isn't up yet, clear the pane and show a "Waiting..."
+       banner, then poll silently until the session appears.
+    2. Main loop: attach. On exit, distinguish a tmux detach (session still
+       alive -> re-attach silently next iteration) from a session-end (print
+       a one-line exit notice in-place so the last terminal content stays
+       visible for scroll-back, then poll silently for the next start).
 
-    Names are validated to [a-z0-9_-]+, so embedding the raw session_name
-    inside the single-quoted strings is safe.
+    The wrapper never exits on its own; users dismiss dead windows with their
+    console's kill-window binding. Names are validated to [a-z0-9_-]+, so
+    embedding the raw session_name inside the single-quoted strings is safe.
     """
     q = shlex.quote(session_name)
     has = tmux_cmd(f"has-session -t {q}", socket_path)
     att = tmux_cmd(f"attach -t {q}", socket_path)
-    return (
-        f"unset TMUX; "
-        f"while true; do "
-        f"if {has} 2>/dev/null; then "
-        f"clear; {att}; "
-        f"else "
-        f"clear; "
-        f"echo 'Waiting for session {session_name} to come up...'; "
-        f"while ! {has} 2>/dev/null; do sleep 1; done; "
-        f"fi; "
-        f"done"
-    )
+    return f"""\
+unset TMUX
+
+# Entry: if the session isn't up yet, show a banner and wait for it.
+if ! {has} 2>/dev/null; then
+    clear
+    echo 'Waiting for session {session_name} to come up...'
+    while ! {has} 2>/dev/null; do sleep 2; done
+fi
+
+# Main loop: attach; on exit, distinguish detach (re-attach silently) from
+# session-end (print a one-line notice, keep terminal content, then wait).
+while true; do
+    clear
+    {att}
+    rc=$?
+    if {has} 2>/dev/null; then
+        continue
+    fi
+    echo
+    if [ "$rc" -eq 0 ]; then
+        echo 'Session {session_name} ended cleanly.'
+    else
+        echo "Session {session_name} ended (status $rc)."
+    fi
+    while ! {has} 2>/dev/null; do sleep 2; done
+done
+"""
 
 
 def _console_tmux_exists(target: ExecTarget, console_name: str) -> bool:
