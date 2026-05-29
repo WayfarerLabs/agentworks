@@ -85,6 +85,7 @@ unset TMUX
 if ! {has_cmd} 2>/dev/null; then
     clear
     echo 'Waiting for session {session_name} to come up...'
+    echo 'Waiting for session to restart...'
     while ! {has_cmd} 2>/dev/null; do sleep 2; done
 fi
 
