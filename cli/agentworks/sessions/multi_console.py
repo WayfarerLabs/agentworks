@@ -151,13 +151,17 @@ def create_console(
     vm_name: str,
     session_specs: list[str],
     fill_all: bool = False,
+    add_admin_shell: bool = False,
 ) -> None:
     """Create a new console with the given sessions.
 
     Explicit *session_specs* keep their argument order. When *fill_all* is
     True, every other session on the VM is appended in alphabetical order
-    with zero shells. All inserts run in one transaction; the console is
-    not created if any step fails.
+    with zero shells. When *add_admin_shell* is True, the tmux build will
+    also include a window 0 running a login shell as the VM admin (legacy
+    vm-console behavior) -- useful when you want a top-level shell alongside
+    the curated session windows. All inserts run in one transaction; the
+    console is not created if any step fails.
     """
     validate_name(name)
 
@@ -178,23 +182,24 @@ def create_console(
         )
         specs.extend(SessionSpec(name=n, shells=0) for n in extras)
 
-    if not specs:
+    if not specs and not add_admin_shell:
         # Almost certainly a typo / misunderstanding rather than an empty console.
         detail = (
             f"VM '{vm_name}' has no sessions"
             if fill_all
-            else "specify at least one session, or pass --all"
+            else "specify at least one session, pass --all, or pass --add-admin-shell"
         )
         raise output.ConsoleError(
             f"refusing to create empty console '{name}' ({detail})"
         )
 
     with db.transaction():
-        db.insert_console(name, vm_name)
+        db.insert_console(name, vm_name, admin_shell=add_admin_shell)
         for spec in specs:
             db.add_console_session(name, spec.name, default_shells(spec.shells))
 
-    output.info(f"Console '{name}' created with {len(specs)} session(s).")
+    extras_note = " + admin shell" if add_admin_shell else ""
+    output.info(f"Console '{name}' created with {len(specs)} session(s){extras_note}.")
 
 
 def add_sessions(
@@ -388,11 +393,12 @@ def describe_console(db: Database, *, name: str) -> None:
     console = _require_console(db, name)
     members = db.list_console_sessions(name)
 
-    output.info(f"Name:     {console.name}")
-    output.info(f"VM:       {console.vm_name}")
-    output.info(f"Created:  {console.created_at}")
-    output.info(f"Updated:  {console.updated_at}")
-    output.info(f"Sessions: {len(members)}")
+    output.info(f"Name:        {console.name}")
+    output.info(f"VM:          {console.vm_name}")
+    output.info(f"Admin shell: {'yes' if console.admin_shell else 'no'}")
+    output.info(f"Created:     {console.created_at}")
+    output.info(f"Updated:     {console.updated_at}")
+    output.info(f"Sessions:    {len(members)}")
 
     if not members:
         return
@@ -578,28 +584,36 @@ def _build_console_tmux(
 ) -> None:
     """Kill any existing tmux session, then rebuild it from current DB state."""
     members = db.list_console_sessions(console.name)
-    if not members:
-        # create_console rejects empty membership; this is belt-and-suspenders
-        # in case a future caller path lands here without the same guard.
+    if not members and not console.admin_shell:
+        # create_console rejects this; belt-and-suspenders for future caller paths.
         output.warn(f"console '{console.name}' has no members; skipping tmux build")
         return
 
     tmux_name = tmux_session_name(console.name)
     q_con = shlex.quote(tmux_name)
-    # The placeholder window's name uses '--' which validate_name forbids, so
-    # it cannot collide with any user-chosen session name.
-    placeholder = "aw--placeholder"
-    q_placeholder = shlex.quote(placeholder)
 
     _kill_console_tmux(target, console.name)
 
-    # tmux requires at least one window at all times. Create a transient
-    # placeholder so we can add the real session windows, then kill it.
-    target.run(f"tmux new-session -d -s {q_con} -n {q_placeholder}")
+    if console.admin_shell:
+        # Window 0 is the admin shell -- matches legacy vm-console behavior.
+        target.run(
+            f"tmux new-session -d -s {q_con} -n admin-shell "
+            f"{shlex.quote('exec sudo su --login ' + shlex.quote(vm.admin_username))}"
+        )
+        placeholder_used = False
+        placeholder = ""
+    else:
+        # tmux requires at least one window at all times. Create a transient
+        # placeholder; '--' is forbidden by validate_name so it cannot collide
+        # with any user-chosen session.
+        placeholder = "aw--placeholder"
+        target.run(f"tmux new-session -d -s {q_con} -n {shlex.quote(placeholder)}")
+        placeholder_used = True
 
-    output.info(
-        f"Adding {len(members)} session window(s) to console '{console.name}'..."
-    )
+    if members:
+        output.info(
+            f"Adding {len(members)} session window(s) to console '{console.name}'..."
+        )
     for member in members:
         _add_session_window(
             target,
@@ -608,6 +622,9 @@ def _build_console_tmux(
             member=member,
             vm=vm,
         )
+
+    if not placeholder_used:
+        return
 
     # Drop the placeholder once at least one real session window is in.
     # If every member failed to attach (unusual), keep the placeholder so the
@@ -623,7 +640,10 @@ def _build_console_tmux(
 
     windows = [w.strip() for w in result.stdout.strip().splitlines() if w.strip()]
     if any(w != placeholder for w in windows):
-        target.run(f"tmux kill-window -t {q_con}:{q_placeholder}", check=False)
+        target.run(
+            f"tmux kill-window -t {q_con}:{shlex.quote(placeholder)}",
+            check=False,
+        )
     else:
         output.warn(
             f"console '{console.name}' has no usable session windows; "

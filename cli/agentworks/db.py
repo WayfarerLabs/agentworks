@@ -163,6 +163,7 @@ class ShellEntry(TypedDict):
 class ConsoleRow:
     name: str
     vm_name: str
+    admin_shell: bool
     created_at: str
     updated_at: str
 
@@ -454,6 +455,10 @@ MIGRATIONS: dict[int, str] = {
             UNIQUE (console_name, position)
         );
         CREATE INDEX idx_console_sessions_order ON console_sessions(console_name, position);
+    """,
+    # -- Optional admin-shell window (legacy vm-console behavior) ----------
+    23: """
+        ALTER TABLE consoles ADD COLUMN admin_shell INTEGER NOT NULL DEFAULT 0;
     """,
 }
 
@@ -1013,10 +1018,15 @@ class Database:
 
     # -- Consoles ----------------------------------------------------------
 
-    def insert_console(self, name: str, vm_name: str) -> ConsoleRow:
+    def insert_console(
+        self,
+        name: str,
+        vm_name: str,
+        admin_shell: bool = False,
+    ) -> ConsoleRow:
         self._conn.execute(
-            "INSERT INTO consoles (name, vm_name) VALUES (?, ?)",
-            (name, vm_name),
+            "INSERT INTO consoles (name, vm_name, admin_shell) VALUES (?, ?, ?)",
+            (name, vm_name, int(admin_shell)),
         )
         self._commit_unless_in_tx()
         result = self.get_console(name)
@@ -1279,6 +1289,7 @@ def _to_console(row: sqlite3.Row) -> ConsoleRow:
     return ConsoleRow(
         name=row["name"],
         vm_name=row["vm_name"],
+        admin_shell=bool(row["admin_shell"]),
         created_at=row["created_at"],
         updated_at=row["updated_at"],
     )

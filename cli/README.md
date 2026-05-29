@@ -426,11 +426,12 @@ panes you want preloaded into a session's window.
 | `agentworks console remove-session <name> <sessions...>` | Remove session windows                                            |
 | `agentworks console add-shell <name> <session>`          | Add a shell pane to a session window (accepts `--cwd`, `--admin`) |
 
-`console create` accepts `--vm` (target VM) and `--all` (include every other session on the VM
-with 0 shells, appended after the explicit specs). VM selection follows the same pattern as the
-other `--vm` flags in the CLI: if you have a single VM it's auto-picked, with multiple you're
-prompted interactively (or, in non-interactive mode, you must pass `--vm` explicitly).
-`console list` accepts `--vm` to filter.
+`console create` accepts `--vm` (target VM), `--all` (include every other session on the VM with
+0 shells, appended after the explicit specs), and `--add-admin-shell` (include a top-level
+admin-shell window as window 0, matching the legacy `vm console` behavior). VM selection follows
+the same pattern as the other `--vm` flags in the CLI: if you have a single VM it's auto-picked,
+with multiple you're prompted interactively (or, in non-interactive mode, you must pass `--vm`
+explicitly). `console list` accepts `--vm` to filter.
 
 Session specs use `name` or `name+N` shorthand, where `N` is the number of default shell panes to
 pre-open in that session's window (running as the session's agent user, cwd = workspace root):
@@ -438,6 +439,9 @@ pre-open in that session's window (running as the session's agent user, cwd = wo
 ```sh
 # A console with three sessions; the first two get extra shells.
 agentworks console create backend auth-server+2 auth-tests+1 docs
+
+# Same, but also include a top-level admin-shell window (window 0).
+agentworks console create backend auth-server+2 auth-tests+1 docs --add-admin-shell
 
 # Append everything else on the VM with 0 shells (after the explicit specs).
 agentworks console create everything auth-server+2 --all

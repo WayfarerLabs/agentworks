@@ -765,6 +765,65 @@ def test_attach_console_warns_when_list_windows_fails(
     assert not any("kill-window -t aw-console-con:aw--placeholder" in c for c in fake_target.commands)
 
 
+def test_create_console_with_admin_shell_persists_flag(db: Database) -> None:
+    _seed_vm(db)
+    _seed_sessions(db, ["a"])
+    create_console(
+        db,
+        name="con",
+        vm_name="vm1",
+        session_specs=["a"],
+        add_admin_shell=True,
+    )
+    console = db.get_console("con")
+    assert console is not None
+    assert console.admin_shell is True
+
+
+def test_create_console_admin_shell_only_allowed(db: Database) -> None:
+    """A console with admin_shell=True and no sessions is allowed (top-level shell only)."""
+    _seed_vm(db)
+    create_console(
+        db,
+        name="shell-only",
+        vm_name="vm1",
+        session_specs=[],
+        add_admin_shell=True,
+    )
+    console = db.get_console("shell-only")
+    assert console is not None
+    assert console.admin_shell is True
+    assert db.list_console_sessions("shell-only") == []
+
+
+def test_attach_console_builds_admin_shell_window_without_placeholder(
+    db: Database, fake_target: _FakeTarget
+) -> None:
+    """When admin_shell is set, window 0 is the admin-shell -- no placeholder."""
+    from agentworks.sessions.multi_console import attach_console
+
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["alpha"])
+    create_console(
+        db,
+        name="con",
+        vm_name="vm1",
+        session_specs=["alpha"],
+        add_admin_shell=True,
+    )
+    fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=1)
+
+    with pytest.raises(SystemExit):
+        attach_console(db, _StubConfig(), name="con", allow_nesting=True)
+
+    cmds = fake_target.commands
+    assert any("new-session -d -s aw-console-con -n admin-shell" in c for c in cmds)
+    assert not any("aw--placeholder" in c for c in cmds)
+    assert not any("list-windows" in c for c in cmds)
+    new_windows = [c for c in cmds if "new-window -t aw-console-con" in c]
+    assert len(new_windows) == 1 and "alpha" in new_windows[0]
+
+
 def test_attach_console_keeps_placeholder_when_all_members_fail(
     db: Database, fake_target: _FakeTarget, captured_output: CapturedOutput
 ) -> None:

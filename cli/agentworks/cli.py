@@ -1131,6 +1131,13 @@ def console_create(
             help="Fill in every other session on the VM (0 shells each, alphabetical) after the explicit specs",
         ),
     ] = False,
+    add_admin_shell: Annotated[
+        bool,
+        typer.Option(
+            "--add-admin-shell",
+            help="Include a top-level admin-shell window (legacy vm-console behavior)",
+        ),
+    ] = False,
 ) -> None:
     """Create a named console with a curated set of sessions."""
     from agentworks.sessions.multi_console import create_console
@@ -1143,6 +1150,7 @@ def console_create(
         vm_name=resolved_vm,
         session_specs=sessions or [],
         fill_all=all_sessions,
+        add_admin_shell=add_admin_shell,
     )
 
 
