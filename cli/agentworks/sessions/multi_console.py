@@ -579,18 +579,23 @@ def _build_console_tmux(
     """Kill any existing tmux session, then rebuild it from current DB state."""
     members = db.list_console_sessions(console.name)
     if not members:
-        # create_console refuses empty membership; defensive check for races.
+        # create_console rejects empty membership; this is belt-and-suspenders
+        # in case a future caller path lands here without the same guard.
         output.warn(f"console '{console.name}' has no members; skipping tmux build")
         return
 
     tmux_name = tmux_session_name(console.name)
     q_con = shlex.quote(tmux_name)
+    # The placeholder window's name uses '--' which validate_name forbids, so
+    # it cannot collide with any user-chosen session name.
+    placeholder = "aw--placeholder"
+    q_placeholder = shlex.quote(placeholder)
 
     _kill_console_tmux(target, console.name)
 
     # tmux requires at least one window at all times. Create a transient
     # placeholder so we can add the real session windows, then kill it.
-    target.run(f"tmux new-session -d -s {q_con} -n placeholder")
+    target.run(f"tmux new-session -d -s {q_con} -n {q_placeholder}")
 
     output.info(
         f"Adding {len(members)} session window(s) to console '{console.name}'..."
@@ -608,15 +613,22 @@ def _build_console_tmux(
     # If every member failed to attach (unusual), keep the placeholder so the
     # tmux session survives for investigation.
     result = target.run(f"tmux list-windows -t {q_con} -F '#W'", check=False)
-    if result.ok:
-        windows = [w.strip() for w in result.stdout.strip().splitlines() if w.strip()]
-        if any(w != "placeholder" for w in windows):
-            target.run(f"tmux kill-window -t {q_con}:placeholder", check=False)
-        else:
-            output.warn(
-                f"console '{console.name}' has no usable session windows; "
-                f"placeholder kept so the tmux session survives"
-            )
+    if not result.ok:
+        output.warn(
+            f"could not list windows in console '{console.name}' to confirm "
+            f"placeholder cleanup ({result.stderr.strip() or 'transport error'}); "
+            f"placeholder may persist until next --recreate"
+        )
+        return
+
+    windows = [w.strip() for w in result.stdout.strip().splitlines() if w.strip()]
+    if any(w != placeholder for w in windows):
+        target.run(f"tmux kill-window -t {q_con}:{q_placeholder}", check=False)
+    else:
+        output.warn(
+            f"console '{console.name}' has no usable session windows; "
+            f"placeholder kept so the tmux session survives"
+        )
 
 
 def _prepare_vm_target_for_attach(

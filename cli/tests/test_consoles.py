@@ -691,7 +691,7 @@ def test_attach_console_builds_initial_tmux(
     fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=1)
     # list-windows must report real windows so the placeholder gets killed.
     fake_target.responses["list-windows -t aw-console-con"] = _FakeResult(
-        returncode=0, stdout="placeholder\nalpha\nbeta\n"
+        returncode=0, stdout="aw--placeholder\nalpha\nbeta\n"
     )
 
     with pytest.raises(SystemExit):
@@ -700,7 +700,7 @@ def test_attach_console_builds_initial_tmux(
     cmds = fake_target.commands
     assert any("has-session -t aw-console-con" in c for c in cmds)
     assert any("kill-session -t aw-console-con" in c for c in cmds)
-    assert any("new-session -d -s aw-console-con -n placeholder" in c for c in cmds)
+    assert any("new-session -d -s aw-console-con -n aw--placeholder" in c for c in cmds)
     # No admin-shell window: named consoles only contain the curated sessions.
     assert not any("admin-shell" in c for c in cmds)
     new_window_indexes = [i for i, c in enumerate(cmds) if "new-window -t aw-console-con" in c]
@@ -711,7 +711,58 @@ def test_attach_console_builds_initial_tmux(
     assert len(split_cmds) == 2, cmds  # two shells on alpha, none on beta
     assert any("select-layout -t aw-console-con:alpha tiled" in c for c in cmds)
     # Placeholder gets killed once real windows are in.
-    assert any("kill-window -t aw-console-con:placeholder" in c for c in cmds)
+    assert any("kill-window -t aw-console-con:aw--placeholder" in c for c in cmds)
+
+
+def test_attach_console_placeholder_name_cannot_collide_with_session(
+    db: Database, fake_target: _FakeTarget
+) -> None:
+    """A user-created session literally named 'placeholder' must not be
+    accidentally killed when we drop the build placeholder. The placeholder
+    uses '--' (forbidden by validate_name) so collisions are impossible."""
+    from agentworks.sessions.multi_console import attach_console
+
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["placeholder", "real"])
+    create_console(db, name="con", vm_name="vm1", session_specs=["placeholder", "real"])
+    fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=1)
+    fake_target.responses["list-windows -t aw-console-con"] = _FakeResult(
+        returncode=0, stdout="aw--placeholder\nplaceholder\nreal\n"
+    )
+
+    with pytest.raises(SystemExit):
+        attach_console(db, _StubConfig(), name="con", allow_nesting=True)
+
+    kill_windows = [c for c in fake_target.commands if "kill-window" in c]
+    # We kill exactly the build placeholder, never the user's window.
+    assert any("aw--placeholder" in c for c in kill_windows)
+    assert not any(
+        "kill-window -t aw-console-con:placeholder" in c and "aw--placeholder" not in c
+        for c in fake_target.commands
+    )
+
+
+def test_attach_console_warns_when_list_windows_fails(
+    db: Database, fake_target: _FakeTarget, captured_output: CapturedOutput
+) -> None:
+    """If list-windows fails (SSH drop etc.), the user gets a warning so the
+    persisting placeholder isn't a silent surprise."""
+    from agentworks.sessions.multi_console import attach_console
+
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["alpha"])
+    create_console(db, name="con", vm_name="vm1", session_specs=["alpha"])
+    fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=1)
+    fake_target.responses["list-windows -t aw-console-con"] = _FakeResult(
+        returncode=255, stderr="transport failure"
+    )
+
+    with pytest.raises(SystemExit):
+        attach_console(db, _StubConfig(), name="con", allow_nesting=True)
+
+    assert any("could not list windows" in w for w in captured_output.warnings)
+    # No kill-window for the placeholder since we couldn't confirm cleanup.
+    assert not any("kill-window -t aw-console-con:aw--placeholder" in c for c in fake_target.commands)
 
 
 def test_attach_console_keeps_placeholder_when_all_members_fail(
@@ -730,13 +781,13 @@ def test_attach_console_keeps_placeholder_when_all_members_fail(
         returncode=1, stderr="simulated failure"
     )
     fake_target.responses["list-windows -t aw-console-con"] = _FakeResult(
-        returncode=0, stdout="placeholder\n"
+        returncode=0, stdout="aw--placeholder\n"
     )
 
     with pytest.raises(SystemExit):
         attach_console(db, _StubConfig(), name="con", allow_nesting=True)
 
-    assert not any("kill-window -t aw-console-con:placeholder" in c for c in fake_target.commands)
+    assert not any("kill-window -t aw-console-con:aw--placeholder" in c for c in fake_target.commands)
     assert any("placeholder kept" in w for w in captured_output.warnings)
 
 
@@ -770,7 +821,7 @@ def test_attach_console_recreate_rebuilds_even_if_alive(
     create_console(db, name="con", vm_name="vm1", session_specs=["alpha"])
     fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
     fake_target.responses["list-windows -t aw-console-con"] = _FakeResult(
-        returncode=0, stdout="placeholder\nalpha\n"
+        returncode=0, stdout="aw--placeholder\nalpha\n"
     )
 
     with pytest.raises(SystemExit):
@@ -800,7 +851,7 @@ def test_attach_console_iterates_in_position_order(
 
     fake_target.commands.clear()
     fake_target.responses["list-windows -t aw-console-con"] = _FakeResult(
-        returncode=0, stdout="placeholder\na\nc\nd\n"
+        returncode=0, stdout="aw--placeholder\na\nc\nd\n"
     )
     with pytest.raises(SystemExit):
         attach_console(db, _StubConfig(), name="con", allow_nesting=True)
@@ -829,7 +880,7 @@ def test_attach_console_skips_missing_session_with_warning(
     db._conn.commit()
     fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=1)
     fake_target.responses["list-windows -t aw-console-con"] = _FakeResult(
-        returncode=0, stdout="placeholder\nalpha\n"
+        returncode=0, stdout="aw--placeholder\nalpha\n"
     )
 
     with pytest.raises(SystemExit):
