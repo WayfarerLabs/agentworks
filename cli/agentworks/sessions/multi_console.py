@@ -180,10 +180,11 @@ def create_console(
 
     if not specs:
         # Almost certainly a typo / misunderstanding rather than an empty console.
-        if fill_all:
-            detail = f"VM '{vm_name}' has no sessions"
-        else:
-            detail = "specify at least one session, or pass --all"
+        detail = (
+            f"VM '{vm_name}' has no sessions"
+            if fill_all
+            else "specify at least one session, or pass --all"
+        )
         raise output.ConsoleError(
             f"refusing to create empty console '{name}' ({detail})"
         )
@@ -288,7 +289,7 @@ def delete_console_record(db: Database, *, name: str) -> None:
 
 
 def _validate_cwd(cwd: str | None) -> None:
-    """Reject cwds that escape the workspace root (absolute path or .. segments)."""
+    """Reject working directories that escape the workspace root (absolute path or .. segments)."""
     if cwd is None:
         return
     if not cwd:
@@ -536,11 +537,11 @@ def _add_session_window(
         return
 
     q_con = shlex.quote(tmux_session_name(console_name))
-    q_sess = shlex.quote(session.name)
+    q_session = shlex.quote(session.name)
     wrapper = _attach_loop_wrapper(session.name, session.socket_path)
 
     res = target.run(
-        f"tmux new-window -t {q_con} -n {q_sess} {shlex.quote(wrapper)}",
+        f"tmux new-window -t {q_con} -n {q_session} {shlex.quote(wrapper)}",
         check=False,
     )
     if not res.ok:
@@ -564,7 +565,7 @@ def _add_session_window(
             admin_user=vm.admin_username,
         )
     target.run(
-        f"tmux select-layout -t {q_con}:{q_sess} tiled",
+        f"tmux select-layout -t {q_con}:{q_session} tiled",
         check=False,
     )
 
