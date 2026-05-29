@@ -415,26 +415,30 @@ Named consoles are persistent, curated tmux views over sessions on a VM. Each co
 tmux session (`aw-console-<name>`) containing one window per included session, plus any extra shell
 panes you want preloaded into a session's window.
 
-| Command                                                              | Description                                                 |
-| -------------------------------------------------------------------- | ----------------------------------------------------------- |
-| `agentworks console create <name> [sessions...] [--vm <vm>] [--all]` | Create a console with the given sessions                    |
-| `agentworks console list [--vm <vm>]`                                | List consoles                                               |
-| `agentworks console describe <name>`                                 | Show membership and shell layout                            |
-| `agentworks console attach <name>`                                   | Attach (builds tmux state on first attach)                  |
-| `agentworks console delete <name>`                                   | Tear down and remove the console                            |
-| `agentworks console add-session <name> <sessions...>`                | Add session windows                                         |
-| `agentworks console remove-session <name> <sessions...>`             | Remove session windows                                      |
-| `agentworks console add-shell <name> <session>`                      | Add a shell pane to a session window (accepts `--cwd`, `--admin`) |
+| Command                                                  | Description                                                       |
+| -------------------------------------------------------- | ----------------------------------------------------------------- |
+| `agentworks console create <name> [sessions...]`         | Create a console with the given sessions                          |
+| `agentworks console list`                                | List consoles                                                     |
+| `agentworks console describe <name>`                     | Show membership and shell layout                                  |
+| `agentworks console attach <name>`                       | Attach (builds tmux state on first attach)                        |
+| `agentworks console delete <name>`                       | Tear down and remove the console                                  |
+| `agentworks console add-session <name> <sessions...>`    | Add session windows                                               |
+| `agentworks console remove-session <name> <sessions...>` | Remove session windows                                            |
+| `agentworks console add-shell <name> <session>`          | Add a shell pane to a session window (accepts `--cwd`, `--admin`) |
+
+`console create` accepts `--vm` (target VM, auto-detected when there's only one; prompted
+otherwise) and `--all` (include every other session on the VM with 0 shells, appended after the
+explicit specs). `console list` accepts `--vm` to filter.
 
 Session specs use `name` or `name+N` shorthand, where `N` is the number of default shell panes to
 pre-open in that session's window (running as the session's agent user, cwd = workspace root):
 
 ```sh
 # A console with three sessions; the first two get extra shells.
-agentworks console create backend auth-server+2 auth-tests+1 docs --vm aw-private
+agentworks console create backend auth-server+2 auth-tests+1 docs
 
-# Append everything else on the VM with 0 shells (alphabetical, after the explicit specs).
-agentworks console create everything auth-server+2 --vm aw-private --all
+# Append everything else on the VM with 0 shells (after the explicit specs).
+agentworks console create everything auth-server+2 --all
 
 # Add an admin shell rooted in a sub-path of the workspace.
 agentworks console add-shell backend auth-server --cwd src/api --admin
