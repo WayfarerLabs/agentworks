@@ -222,7 +222,10 @@ def add_sessions(
     output.info(f"Added {len(specs)} session(s) to console '{console_name}'.")
 
     with _live_best_effort(f"add-session to '{console_name}'"):
-        vm, target = _prepare_vm_target(db, config, console.vm_name)
+        live = _live_target(db, config, console.vm_name)
+        if live is None:
+            return
+        vm, target = live
         if not _console_tmux_exists(target, console_name):
             return
         for spec in specs:
@@ -257,7 +260,10 @@ def remove_sessions(
     )
 
     with _live_best_effort(f"remove-session from '{console_name}'"):
-        _vm, target = _prepare_vm_target(db, config, console.vm_name)
+        live = _live_target(db, config, console.vm_name)
+        if live is None:
+            return
+        _vm, target = live
         if not _console_tmux_exists(target, console_name):
             return
         q_con = shlex.quote(tmux_session_name(console_name))
@@ -323,7 +329,10 @@ def add_shell(
     )
 
     with _live_best_effort(f"add-shell to '{console_name}:{session_name}'"):
-        vm, target = _prepare_vm_target(db, config, console.vm_name)
+        live = _live_target(db, config, console.vm_name)
+        if live is None:
+            return
+        vm, target = live
         if not _console_tmux_exists(target, console_name):
             return
         session = db.get_session(session_name)
@@ -341,6 +350,12 @@ def add_shell(
             shell=new_shell,
             session_user=session_user,
             admin_user=vm.admin_username,
+        )
+        q_con = shlex.quote(tmux_session_name(console_name))
+        q_win = shlex.quote(session_name)
+        target.run(
+            f"tmux select-layout -t {q_con}:{q_win} tiled",
+            check=False,
         )
 
 
@@ -401,14 +416,19 @@ def _session_linux_user(db: Database, session: SessionRow, vm: VMRow) -> str:
 
 
 def _attach_loop_wrapper(session_name: str, socket_path: str | None) -> str:
-    """Build the shell snippet that re-attaches the inner session while it lives."""
+    """Build the shell snippet that re-attaches the inner session while it lives.
+
+    Names are validated to [a-z0-9_-]+, so embedding the raw session_name inside
+    the single-quoted echo is safe (and clearer than re-quoting an already
+    shell-quoted value).
+    """
     q = shlex.quote(session_name)
     has = tmux_cmd(f"has-session -t {q}", socket_path)
     att = tmux_cmd(f"attach -t {q}", socket_path)
     return (
         f"unset TMUX; "
         f"while {has} 2>/dev/null; do {att}; sleep 0.5; done; "
-        f"echo 'Session {q} has ended. Press enter to close.'; read"
+        f"echo 'Session {session_name} has ended. Press enter to close.'; read"
     )
 
 
@@ -445,15 +465,23 @@ def _split_shell_pane(
     q_win = shlex.quote(window_name)
     use_admin = shell["admin"] or session_user == admin_user
 
+    # Login shell in both branches keeps profile/aliases consistent with the
+    # session pane behavior (sessions use $SHELL -l via create_session).
+    # Diagnostic on cd failure so a missing cwd shows the actual path.
     if use_admin:
-        # Admin already owns the console pane; let tmux start the default
-        # shell with -c handling the working directory.
-        cmd = f"tmux split-window -t {q_con}:{q_win} -c {q_full}"
+        bootstrap = (
+            f'cd {q_full} || echo "cwd missing: {full_path}"; '
+            f'exec "$SHELL" -l'
+        )
+        cmd = f"tmux split-window -t {q_con}:{q_win} -c {q_full} {shlex.quote(bootstrap)}"
     else:
         q_user = shlex.quote(session_user)
+        bootstrap = (
+            f'cd {q_full} || echo "cwd missing: {full_path}"; '
+            f'exec "$SHELL" -l'
+        )
         pane_cmd = (
-            f"exec sudo --login -u {q_user} bash -c "
-            f"{shlex.quote(f'cd {q_full} && exec \"$SHELL\"')}"
+            f"exec sudo --login -u {q_user} bash -c {shlex.quote(bootstrap)}"
         )
         cmd = (
             f"tmux split-window -t {q_con}:{q_win} -c {q_full} {shlex.quote(pane_cmd)}"
@@ -546,7 +574,6 @@ def _build_console_tmux(
         f"tmux new-session -d -s {q_con} -n admin-shell "
         f"{shlex.quote('exec sudo su --login ' + shlex.quote(vm.admin_username))}"
     )
-    target.run(f"tmux set -t {q_con} remain-on-exit on", check=False)
 
     if members:
         output.info(
@@ -562,10 +589,14 @@ def _build_console_tmux(
         )
 
 
-def _prepare_vm_target(
+def _prepare_vm_target_for_attach(
     db: Database, config: Config, vm_name: str
 ) -> tuple[VMRow, ExecTarget]:
-    """Ensure the VM is reachable and return (vm, target). Raises on failure."""
+    """Ensure the VM is running (starting it if needed) and return (vm, target).
+
+    Use this only for explicit user-driven attach flows where booting a stopped
+    VM is acceptable. Raises on failure.
+    """
     from agentworks.ssh import admin_exec_target
     from agentworks.workspaces.manager import _ensure_vm_running
 
@@ -578,11 +609,31 @@ def _prepare_vm_target(
     return vm, admin_exec_target(vm, config)
 
 
+def _live_target(
+    db: Database, config: Config, vm_name: str
+) -> tuple[VMRow, ExecTarget] | None:
+    """Return (vm, target) for best-effort live sync without auto-starting the VM.
+
+    Returns None if the VM record is missing or has no Tailscale address.
+    The first SSH command will surface a transport error if the VM is offline;
+    callers should wrap that in _live_best_effort.
+    """
+    from agentworks.ssh import admin_exec_target
+
+    vm = db.get_vm(vm_name)
+    if vm is None or vm.tailscale_host is None:
+        return None
+    return vm, admin_exec_target(vm, config)
+
+
 @contextlib.contextmanager
 def _live_best_effort(action: str) -> Iterator[None]:
-    """Catch and warn on best-effort live tmux work; never propagate errors."""
+    """Wrap best-effort live tmux work. User-facing AgentworksError exceptions
+    propagate; transport-level surprises are warned and swallowed."""
     try:
         yield
+    except output.AgentworksError:
+        raise
     except Exception as exc:
         output.warn(f"live console sync failed ({action}): {exc}")
 
@@ -610,7 +661,7 @@ def attach_console(
         )
 
     console = _require_console(db, name)
-    vm, target = _prepare_vm_target(db, config, console.vm_name)
+    vm, target = _prepare_vm_target_for_attach(db, config, console.vm_name)
 
     if recreate or not _console_tmux_exists(target, name):
         _build_console_tmux(target, db, console, vm)
@@ -632,9 +683,23 @@ def delete_console(
         raise output.UserAbort("delete cancelled")
 
     # Best-effort tmux teardown. Don't block the DB delete on VM reachability.
-    with _live_best_effort(f"kill tmux session for '{name}'"):
-        _vm, target = _prepare_vm_target(db, config, console.vm_name)
-        _kill_console_tmux(target, name)
+    teardown_failed = False
+    try:
+        live = _live_target(db, config, console.vm_name)
+        if live is not None:
+            _vm, target = live
+            _kill_console_tmux(target, name)
+    except output.AgentworksError:
+        raise
+    except Exception as exc:
+        teardown_failed = True
+        output.warn(f"failed to tear down tmux session for '{name}': {exc}")
 
     db.delete_console(name)
-    output.info(f"Console '{name}' deleted.")
+    if teardown_failed:
+        output.info(
+            f"Console '{name}' removed from database. Any stale tmux session on "
+            f"the VM will be replaced on next 'aw console attach'."
+        )
+    else:
+        output.info(f"Console '{name}' deleted.")
