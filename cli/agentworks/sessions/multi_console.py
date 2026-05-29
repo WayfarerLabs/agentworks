@@ -423,13 +423,23 @@ def _attach_loop_wrapper(session_name: str, socket_path: str | None) -> str:
     Names are validated to [a-z0-9_-]+, so embedding the raw session_name inside
     the single-quoted echo is safe (and clearer than re-quoting an already
     shell-quoted value).
+
+    The retry loop tolerates ~10s of session downtime (20 * 0.5s) before
+    falling through to the "press enter to close" prompt; that absorbs the
+    SSH kill+create gap during 'aw session restart' so the console window
+    stays bound to the (re-created) session instead of dead-ending the user.
     """
     q = shlex.quote(session_name)
     has = tmux_cmd(f"has-session -t {q}", socket_path)
     att = tmux_cmd(f"attach -t {q}", socket_path)
     return (
-        f"unset TMUX; "
-        f"while {has} 2>/dev/null; do {att}; sleep 0.5; done; "
+        f"unset TMUX; attempts=0; "
+        f"while true; do "
+        f"if {has} 2>/dev/null; then {att}; attempts=0; continue; fi; "
+        f"attempts=$((attempts + 1)); "
+        f'if [ "$attempts" -ge 20 ]; then break; fi; '
+        f"sleep 0.5; "
+        f"done; "
         f"echo 'Session {session_name} has ended. Press enter to close.'; read"
     )
 

@@ -71,17 +71,21 @@ def _add_session_window(
 ) -> None:
     """Add a single session window to the console."""
     q_session = shlex.quote(session_name)
-    # Unset TMUX to allow nesting (console -> session), then loop
-    # re-attach while the session is alive.
+    # Unset TMUX to allow nesting (console -> session), then loop re-attach
+    # while the session is alive. The retry loop tolerates ~10s of downtime
+    # (20 * 0.5s) so the window stays bound across an 'aw session restart'
+    # instead of falling through to the "press enter to close" prompt.
     has_cmd = tmux_cmd(f"has-session -t {q_session}", socket_path)
     attach_cmd = tmux_cmd(f"attach -t {q_session}", socket_path)
     wrapper = (
-        f"unset TMUX; "
-        f"while {has_cmd} 2>/dev/null; do "
-        f"{attach_cmd}; "
+        f"unset TMUX; attempts=0; "
+        f"while true; do "
+        f"if {has_cmd} 2>/dev/null; then {attach_cmd}; attempts=0; continue; fi; "
+        f"attempts=$((attempts + 1)); "
+        f'if [ "$attempts" -ge 20 ]; then break; fi; '
         f"sleep 0.5; "
         f"done; "
-        f"echo 'Session {q_session} has ended. Press enter to close.'; "
+        f"echo 'Session {session_name} has ended. Press enter to close.'; "
         f"read"
     )
     result = run_command(
