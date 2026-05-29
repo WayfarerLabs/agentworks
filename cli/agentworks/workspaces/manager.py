@@ -151,7 +151,7 @@ def _create_vm(
         from agentworks.agents.manager import _add_to_workspace_group
 
         for agent in grant_all_agents:
-            _add_to_workspace_group(vm, config, agent.linux_user, ws_name, logger=ssh_logger)
+            _add_to_workspace_group(vm, config, db, agent.linux_user, ws_name, logger=ssh_logger)
             db.insert_agent_grant(agent.name, ws_name, "explicit")
         output.detail(f"Added {len(grant_all_agents)} grant-all agent(s) to workspace")
 
