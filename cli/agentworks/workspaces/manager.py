@@ -126,12 +126,15 @@ def _create_vm(
         vscode_path = generate_vscode_workspace(vm, config, ws_name, workspace_path)
         output.detail(f"VS Code workspace: {vscode_path}")
 
+        from agentworks.agents.manager import workspace_group
+
         db.insert_workspace(
             ws_name,
             ws_type="vm",
             workspace_path=workspace_path,
             vm_name=vm.name,
             template=template_name,
+            linux_group=workspace_group(ws_name),
         )
     except output.AgentworksError:
         ssh_logger.close()
@@ -312,7 +315,7 @@ def repair_workspace(
     name: str,
 ) -> None:
     """Repair workspace infrastructure: group, permissions, ACLs, agent access."""
-    from agentworks.agents.manager import AGENT_PREFIX, WS_GROUP_PREFIX
+    from agentworks.agents.manager import AGENT_PREFIX
     from agentworks.ssh import SSHError, admin_exec_target
 
     ws = db.get_workspace(name)
@@ -323,12 +326,13 @@ def repair_workspace(
         raise output.WorkspaceError(f"workspace '{name}' is local, nothing to repair")
 
     assert ws.vm_name is not None
+    assert ws.linux_group is not None, "VM workspace missing linux_group; DB migration may not have run"
     vm = db.get_vm(ws.vm_name)
     if vm is None:
         raise output.VMError(f"VM '{ws.vm_name}' not found")
 
     target = admin_exec_target(vm, config)
-    ws_group = f"{WS_GROUP_PREFIX}{name}"
+    ws_group = ws.linux_group
     fixes = 0
 
     output.info(f"Repairing workspace '{name}' on VM '{vm.name}'...")
@@ -345,18 +349,10 @@ def repair_workspace(
     except SSHError as e:
         output.warn(f"acl package check failed: {e}")
 
-    # 1. Ensure workspace group exists (with correct naming)
+    # 1. Ensure the workspace group recorded in the DB exists on the VM.
     try:
-        # Check for old-style group and rename if needed
-        old_group = f"ws-{name}"
-        old_exists = target.run(f"getent group {old_group}", sudo=True, check=False)
-        new_exists = target.run(f"getent group {ws_group}", sudo=True, check=False)
-
-        if old_exists.ok and not new_exists.ok:
-            target.run(f"groupmod -n {ws_group} {old_group}", sudo=True)
-            output.detail(f"Fixed: renamed group {old_group} -> {ws_group}")
-            fixes += 1
-        elif not new_exists.ok:
+        group_exists = target.run(f"getent group {ws_group}", sudo=True, check=False)
+        if not group_exists.ok:
             target.run(
                 f"sh -c 'getent group {ws_group} >/dev/null 2>&1 || /usr/sbin/groupadd {ws_group}'",
                 sudo=True,
@@ -548,13 +544,13 @@ def _rehome_vm(
 ) -> None:
     """Rehome a VM workspace."""
 
-    from agentworks.agents.manager import WS_GROUP_PREFIX
     from agentworks.ssh import SSHError, SSHLogger, admin_exec_target
     from agentworks.workspaces.backends.vm import generate_vscode_workspace
 
     ws_name = ws.name
     old_path = ws.workspace_path
     assert ws.vm_name is not None
+    assert ws.linux_group is not None, "VM workspace missing linux_group; DB migration may not have run"
     vm_name = ws.vm_name
 
     vm = db.get_vm(vm_name)
@@ -589,7 +585,7 @@ def _rehome_vm(
 
     ssh_logger = SSHLogger(vm.name, "workspace-rehome")
     target = admin_exec_target(vm, config, logger=ssh_logger)
-    ws_group = f"{WS_GROUP_PREFIX}{ws_name}"
+    ws_group = ws.linux_group
 
     try:
         # Create target directory as root and chown to admin so rsync can write
@@ -967,9 +963,11 @@ def copy_workspace(
 
             lg = SSHLogger(dest_vm.name, "workspace-copy")
             dest_target = admin_exec_target(dest_vm, config, logger=lg)
+            from agentworks.agents.manager import workspace_group
+
             workspace_path = f"{config.paths.vm_workspaces}/{dest_name}"
 
-            ws_group = f"ws--{dest_name}"
+            ws_group = workspace_group(dest_name)
 
             output.info(f"Unpacking to workspace '{dest_name}' on VM '{dest_vm.name}'...")
 
@@ -1006,6 +1004,7 @@ def copy_workspace(
                 vm_name=dest_vm.name,
                 workspace_path=workspace_path,
                 template="copied",
+                linux_group=ws_group,
             )
 
             # Generate tmuxinator config and VS Code workspace

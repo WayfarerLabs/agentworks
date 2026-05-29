@@ -29,11 +29,13 @@ def create_vm_workspace(
 
     Errors if the workspace directory already exists on the VM.
     """
+    from agentworks.agents.manager import workspace_group
+
     assert vm.tailscale_host is not None
     target = admin_exec_target(vm, config, logger=logger)
 
     workspace_path = f"{config.paths.vm_workspaces}/{ws_name}"
-    ws_group = f"ws--{ws_name}"
+    ws_group = workspace_group(ws_name)
 
     # Refuse to create if directory already exists
     exists = target.run(f"test -d {workspace_path}", check=False, timeout=10)

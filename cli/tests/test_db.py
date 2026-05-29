@@ -74,11 +74,13 @@ def test_roundtrip_workspace(db: Database) -> None:
         workspace_path="/home/agentworks/workspaces/ws-123",
         vm_name="dev-vm",
         template="gruntweave",
+        linux_group="ws-123",
     )
     ws = db.get_workspace("ws-123")
     assert ws is not None
     assert ws.type == "vm"
     assert ws.template == "gruntweave"
+    assert ws.linux_group == "ws-123"
 
     # local workspace
     db.insert_workspace(
@@ -86,6 +88,9 @@ def test_roundtrip_workspace(db: Database) -> None:
         ws_type="local",
         workspace_path="/Users/test/workspaces/ws-local",
     )
+    local = db.get_workspace("ws-local")
+    assert local is not None
+    assert local.linux_group is None
     all_ws = db.list_workspaces()
     assert len(all_ws) == 2
 

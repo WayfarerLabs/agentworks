@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     from agentworks.ssh import ExecTarget, SSHLogger, SSHResult
 
 AGENT_PREFIX = "agt-"
-WS_GROUP_PREFIX = "ws--"
+WS_GROUP_PREFIX = "ws-"
 
 
 def _run_as_agent(
@@ -78,7 +78,13 @@ def derive_linux_user(agent_name: str) -> str:
 
 
 def workspace_group(workspace_name: str) -> str:
-    """Derive the Linux group name for a workspace: ws--<name>."""
+    """Derive the Linux group name for a newly-created workspace: ws-<name>.
+
+    Existing workspaces retain whatever group was stored in the database at
+    their creation time (legacy workspaces use the older ws-- prefix).
+    Always read workspace_row.linux_group for the canonical value; this
+    helper is only used at workspace-create time.
+    """
     return f"{WS_GROUP_PREFIX}{workspace_name}"
 
 
