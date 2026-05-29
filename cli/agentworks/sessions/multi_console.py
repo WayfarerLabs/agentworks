@@ -142,7 +142,8 @@ def create_console(
 
     Explicit *session_specs* keep their argument order. When *fill_all* is
     True, every other session on the VM is appended in alphabetical order
-    with zero shells.
+    with zero shells. All inserts run in one transaction; the console is
+    not created if any step fails.
     """
     validate_name(name)
 
@@ -163,9 +164,18 @@ def create_console(
         )
         specs.extend(SessionSpec(name=n, shells=0) for n in extras)
 
-    db.insert_console(name, vm_name)
-    for spec in specs:
-        db.add_console_session(name, spec.name, default_shells(spec.shells))
+    if not specs:
+        # fill_all on a VM with no other sessions, and no explicit specs --
+        # almost certainly a typo / misunderstanding rather than an empty console.
+        raise output.ConsoleError(
+            f"refusing to create empty console '{name}' "
+            f"(no sessions specified, and VM '{vm_name}' has none to fill)"
+        )
+
+    with db.transaction():
+        db.insert_console(name, vm_name)
+        for spec in specs:
+            db.add_console_session(name, spec.name, default_shells(spec.shells))
 
     output.info(f"Console '{name}' created with {len(specs)} session(s).")
 
@@ -176,7 +186,7 @@ def add_sessions(
     console_name: str,
     session_specs: list[str],
 ) -> None:
-    """Append sessions to an existing console in argument order."""
+    """Append sessions to an existing console in argument order. Atomic."""
     console = _require_console(db, console_name)
     specs = [parse_session_spec(s) for s in session_specs]
     _dedupe_specs(specs)
@@ -188,8 +198,9 @@ def add_sessions(
                 f"session '{spec.name}' is already a member of console '{console_name}'"
             )
 
-    for spec in specs:
-        db.add_console_session(console_name, spec.name, default_shells(spec.shells))
+    with db.transaction():
+        for spec in specs:
+            db.add_console_session(console_name, spec.name, default_shells(spec.shells))
 
     output.info(f"Added {len(specs)} session(s) to console '{console_name}'.")
 
@@ -200,15 +211,16 @@ def remove_sessions(
     console_name: str,
     session_names: list[str],
 ) -> None:
-    """Remove sessions from a console. Raises if any are not members."""
+    """Remove sessions from a console. Raises if any are not members. Atomic."""
     _require_console(db, console_name)
     for n in session_names:
         if db.get_console_session(console_name, n) is None:
             raise output.ConsoleError(
                 f"session '{n}' is not a member of console '{console_name}'"
             )
-    for n in session_names:
-        db.remove_console_session(console_name, n)
+    with db.transaction():
+        for n in session_names:
+            db.remove_console_session(console_name, n)
     output.info(
         f"Removed {len(session_names)} session(s) from console '{console_name}'."
     )
@@ -253,15 +265,12 @@ def add_shell(
 
 def list_consoles(db: Database, *, vm_name: str | None = None) -> None:
     """Print a table of consoles, optionally filtered by VM."""
-    consoles = db.list_consoles(vm_name=vm_name)
+    consoles = db.list_consoles_with_counts(vm_name=vm_name)
     if not consoles:
         output.info("No consoles found.")
         return
 
-    rows = [
-        (c.name, c.vm_name, str(len(db.list_console_sessions(c.name))))
-        for c in consoles
-    ]
+    rows = [(c.name, c.vm_name, str(n)) for c, n in consoles]
     name_w = max(len("NAME"), max(len(r[0]) for r in rows))
     vm_w = max(len("VM"), max(len(r[1]) for r in rows))
 
@@ -287,5 +296,5 @@ def describe_console(db: Database, *, name: str) -> None:
         return
 
     output.info("")
-    for m in members:
-        output.info(f"  [{m.position}] {m.session_name}  ({_shell_summary(m.shells)})")
+    for i, m in enumerate(members):
+        output.info(f"  [{i}] {m.session_name}  ({_shell_summary(m.shells)})")
