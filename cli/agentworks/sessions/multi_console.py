@@ -425,29 +425,32 @@ def _session_linux_user(db: Database, session: SessionRow, vm: VMRow) -> str:
 
 
 def _attach_loop_wrapper(session_name: str, socket_path: str | None) -> str:
-    """Build the shell snippet that re-attaches the inner session while it lives.
+    """Build the shell snippet that holds a console window open for the given
+    session.
 
-    Names are validated to [a-z0-9_-]+, so embedding the raw session_name inside
-    the single-quoted echo is safe (and clearer than re-quoting an already
-    shell-quoted value).
+    When the session is alive, attach to it. When it's not (stopped, briefly
+    down during restart, or never started yet), show a one-shot banner and
+    poll silently until it comes up. The wrapper never exits on its own --
+    the window survives indefinitely; users dismiss dead windows with their
+    console's kill-window binding.
 
-    The retry loop tolerates ~10s of session downtime (20 * 0.5s) before
-    falling through to the "press enter to close" prompt; that absorbs the
-    SSH kill+create gap during 'aw session restart' so the console window
-    stays bound to the (re-created) session instead of dead-ending the user.
+    Names are validated to [a-z0-9_-]+, so embedding the raw session_name
+    inside the single-quoted strings is safe.
     """
     q = shlex.quote(session_name)
     has = tmux_cmd(f"has-session -t {q}", socket_path)
     att = tmux_cmd(f"attach -t {q}", socket_path)
     return (
-        f"unset TMUX; attempts=0; "
+        f"unset TMUX; "
         f"while true; do "
-        f"if {has} 2>/dev/null; then {att}; attempts=0; continue; fi; "
-        f"attempts=$((attempts + 1)); "
-        f'if [ "$attempts" -ge 20 ]; then break; fi; '
-        f"sleep 0.5; "
-        f"done; "
-        f"echo 'Session {session_name} has ended. Press enter to close.'; read"
+        f"if {has} 2>/dev/null; then "
+        f"clear; {att}; "
+        f"else "
+        f"clear; "
+        f"echo 'Waiting for session {session_name} to come up...'; "
+        f"while ! {has} 2>/dev/null; do sleep 1; done; "
+        f"fi; "
+        f"done"
     )
 
 

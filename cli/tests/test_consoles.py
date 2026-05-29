@@ -656,18 +656,22 @@ def fake_target(monkeypatch: pytest.MonkeyPatch) -> _FakeTarget:
 
 
 def test_attach_loop_wrapper_format() -> None:
-    """Lock the wrapper shape so issue #51's retry budget can't silently regress."""
+    """Lock the wrapper shape: holds the window open forever, polls silently
+    while waiting, shows a one-shot banner naming the session."""
     from agentworks.sessions.multi_console import _attach_loop_wrapper
 
     wrapper = _attach_loop_wrapper("backend", None)
-    # Retry-budget keywords -- if the retry loop is removed, these fail.
-    assert "attempts=0" in wrapper
-    assert "attempts + 1" in wrapper
-    assert "-ge 20" in wrapper
     # Unset TMUX so console -> session nesting is allowed.
     assert "unset TMUX" in wrapper
-    # Raw (not shell-quoted) name in the human-facing echo.
-    assert "echo 'Session backend has ended" in wrapper
+    # Forever loop with no break -- no timeout, no "press enter to close" prompt.
+    assert "while true" in wrapper
+    assert "break" not in wrapper
+    assert "Press enter" not in wrapper
+    # One-shot banner naming the raw (validated) session name.
+    assert "Waiting for session backend to come up" in wrapper
+    # Silent inner poll until the session comes back.
+    assert "while ! " in wrapper
+    assert "sleep 1" in wrapper
 
     # Socketed wrapper threads -S through both has-session and attach.
     wrapper_sock = _attach_loop_wrapper("a", "/tmp/a.sock")
