@@ -499,10 +499,9 @@ panes (default user = session's agent user, default cwd = workspace root; overri
 
 ```text
 aw-console-backend
-  Window 1: admin-shell                login shell for the admin user
-  Window 2: auth-server                attached session + 2 agent shells (workspace root)
-  Window 3: auth-tests                 attached session + 1 agent shell
-  Window 4: docs                       attached session only
+  Window 1: auth-server                attached session + 2 agent shells (workspace root)
+  Window 2: auth-tests                 attached session + 1 agent shell
+  Window 3: docs                       attached session only
 ```
 
 The tmux session is built lazily on first `attach` (or rebuilt with `--recreate`). Adding or
