@@ -150,6 +150,22 @@ class SessionRow:
     boot_id: str | None = None
 
 
+@dataclass
+class ConsoleRow:
+    name: str
+    vm_name: str
+    created_at: str
+    updated_at: str
+
+
+@dataclass
+class ConsoleSessionRow:
+    console_name: str
+    session_name: str
+    position: int
+    shells: list[dict]  # [{"cwd": str|None, "admin": bool}, ...]
+
+
 # -- Migrations ------------------------------------------------------------
 
 MIGRATIONS: dict[int, str] = {
@@ -412,6 +428,24 @@ MIGRATIONS: dict[int, str] = {
     21: """
         ALTER TABLE sessions ADD COLUMN boot_id TEXT;
     """,
+    # -- Multi-console support: named consoles with explicit session lists --
+    22: """
+        CREATE TABLE consoles (
+            name       TEXT PRIMARY KEY,
+            vm_name    TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+            updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+            FOREIGN KEY (vm_name) REFERENCES vms(name)
+        );
+        CREATE TABLE console_sessions (
+            console_name TEXT NOT NULL REFERENCES consoles(name) ON DELETE CASCADE,
+            session_name TEXT NOT NULL REFERENCES sessions(name) ON DELETE CASCADE,
+            position     INTEGER NOT NULL,
+            shells       TEXT NOT NULL DEFAULT '[]',
+            PRIMARY KEY (console_name, session_name)
+        );
+        CREATE INDEX idx_console_sessions_order ON console_sessions(console_name, position);
+    """,
 }
 
 LATEST_VERSION = max(MIGRATIONS)
@@ -601,6 +635,8 @@ class Database:
         self._conn.commit()
 
     def delete_vm(self, name: str) -> None:
+        # console_sessions cascade via FK when consoles are deleted
+        self._conn.execute("DELETE FROM consoles WHERE vm_name = ?", (name,))
         self._conn.execute(
             "DELETE FROM sessions WHERE workspace_name IN (SELECT name FROM workspaces WHERE vm_name = ?)",
             (name,),
@@ -938,6 +974,109 @@ class Database:
         self._conn.commit()
         return sessions
 
+    # -- Consoles ----------------------------------------------------------
+
+    def insert_console(self, name: str, vm_name: str) -> ConsoleRow:
+        self._conn.execute(
+            "INSERT INTO consoles (name, vm_name) VALUES (?, ?)",
+            (name, vm_name),
+        )
+        self._conn.commit()
+        result = self.get_console(name)
+        assert result is not None
+        return result
+
+    def get_console(self, name: str) -> ConsoleRow | None:
+        row = self._conn.execute("SELECT * FROM consoles WHERE name = ?", (name,)).fetchone()
+        return _to_console(row) if row else None
+
+    def list_consoles(self, vm_name: str | None = None) -> list[ConsoleRow]:
+        if vm_name is not None:
+            rows = self._conn.execute(
+                "SELECT * FROM consoles WHERE vm_name = ? ORDER BY name",
+                (vm_name,),
+            ).fetchall()
+        else:
+            rows = self._conn.execute("SELECT * FROM consoles ORDER BY name").fetchall()
+        return [_to_console(r) for r in rows]
+
+    def delete_console(self, name: str) -> None:
+        # console_sessions cascade via FK
+        self._conn.execute("DELETE FROM consoles WHERE name = ?", (name,))
+        self._conn.commit()
+
+    def add_console_session(
+        self,
+        console_name: str,
+        session_name: str,
+        shells: list[dict],
+    ) -> ConsoleSessionRow:
+        """Add a session to a console at position max(existing) + 1.
+
+        Raises sqlite3.IntegrityError if (console_name, session_name) already exists.
+        """
+        row = self._conn.execute(
+            "SELECT COALESCE(MAX(position), -1) + 1 FROM console_sessions WHERE console_name = ?",
+            (console_name,),
+        ).fetchone()
+        position = int(row[0])
+        self._conn.execute(
+            "INSERT INTO console_sessions (console_name, session_name, position, shells) "
+            "VALUES (?, ?, ?, ?)",
+            (console_name, session_name, position, json.dumps(shells)),
+        )
+        self._touch_console(console_name)
+        self._conn.commit()
+        result = self.get_console_session(console_name, session_name)
+        assert result is not None
+        return result
+
+    def remove_console_session(self, console_name: str, session_name: str) -> None:
+        self._conn.execute(
+            "DELETE FROM console_sessions WHERE console_name = ? AND session_name = ?",
+            (console_name, session_name),
+        )
+        self._touch_console(console_name)
+        self._conn.commit()
+
+    def get_console_session(
+        self, console_name: str, session_name: str
+    ) -> ConsoleSessionRow | None:
+        row = self._conn.execute(
+            "SELECT * FROM console_sessions WHERE console_name = ? AND session_name = ?",
+            (console_name, session_name),
+        ).fetchone()
+        return _to_console_session(row) if row else None
+
+    def list_console_sessions(self, console_name: str) -> list[ConsoleSessionRow]:
+        """Return console members ordered by position ascending."""
+        rows = self._conn.execute(
+            "SELECT * FROM console_sessions WHERE console_name = ? ORDER BY position",
+            (console_name,),
+        ).fetchall()
+        return [_to_console_session(r) for r in rows]
+
+    def update_console_shells(
+        self,
+        console_name: str,
+        session_name: str,
+        shells: list[dict],
+    ) -> None:
+        self._conn.execute(
+            "UPDATE console_sessions SET shells = ? "
+            "WHERE console_name = ? AND session_name = ?",
+            (json.dumps(shells), console_name, session_name),
+        )
+        self._touch_console(console_name)
+        self._conn.commit()
+
+    def _touch_console(self, name: str) -> None:
+        self._conn.execute(
+            "UPDATE consoles SET updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') "
+            "WHERE name = ?",
+            (name,),
+        )
+
     # -- VM Events ---------------------------------------------------------
 
     def insert_vm_event(self, vm_name: str, event: str, detail: str | None = None) -> None:
@@ -1080,4 +1219,22 @@ def _to_vm_event(row: sqlite3.Row) -> VMEventRow:
         event=row["event"],
         detail=row["detail"],
         created_at=row["created_at"],
+    )
+
+
+def _to_console(row: sqlite3.Row) -> ConsoleRow:
+    return ConsoleRow(
+        name=row["name"],
+        vm_name=row["vm_name"],
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+    )
+
+
+def _to_console_session(row: sqlite3.Row) -> ConsoleSessionRow:
+    return ConsoleSessionRow(
+        console_name=row["console_name"],
+        session_name=row["session_name"],
+        position=row["position"],
+        shells=json.loads(row["shells"]),
     )
