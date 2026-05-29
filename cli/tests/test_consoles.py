@@ -817,11 +817,36 @@ def test_attach_console_builds_admin_shell_window_without_placeholder(
         attach_console(db, _StubConfig(), name="con", allow_nesting=True)
 
     cmds = fake_target.commands
-    assert any("new-session -d -s aw-console-con -n admin-shell" in c for c in cmds)
+    new_sessions = [c for c in cmds if "new-session -d -s aw-console-con" in c]
+    assert len(new_sessions) == 1
+    # Window 0 is admin-shell, running sudo su --login <admin> -- pin the shape
+    # so quoting regressions in the bootstrap fail loudly.
+    assert "-n admin-shell" in new_sessions[0]
+    assert "sudo su --login" in new_sessions[0]
+    assert "admin" in new_sessions[0]  # the admin username from _seed_vm
     assert not any("aw--placeholder" in c for c in cmds)
     assert not any("list-windows" in c for c in cmds)
     new_windows = [c for c in cmds if "new-window -t aw-console-con" in c]
     assert len(new_windows) == 1 and "alpha" in new_windows[0]
+
+
+def test_describe_console_shows_admin_shell_state(
+    db: Database, captured_output: CapturedOutput
+) -> None:
+    _seed_vm(db)
+    _seed_sessions(db, ["a"])
+    create_console(db, name="plain", vm_name="vm1", session_specs=["a"])
+    create_console(
+        db, name="with-shell", vm_name="vm1", session_specs=["a"], add_admin_shell=True
+    )
+
+    captured_output.info.clear()
+    describe_console(db, name="plain")
+    assert any("Admin shell: no" in m for m in captured_output.info)
+
+    captured_output.info.clear()
+    describe_console(db, name="with-shell")
+    assert any("Admin shell: yes" in m for m in captured_output.info)
 
 
 def test_attach_console_keeps_placeholder_when_all_members_fail(
