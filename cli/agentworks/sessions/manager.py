@@ -530,7 +530,7 @@ def create_session(
         if not db.has_any_grant(agent_name, workspace_name):
             from agentworks.agents.manager import _add_to_workspace_group
 
-            _add_to_workspace_group(vm, config, linux_user, workspace_name)
+            _add_to_workspace_group(vm, config, db, linux_user, workspace_name)
         db.insert_agent_grant(agent_name, workspace_name, "implicit", session_name=name)
     else:
         mode = SessionMode.ADMIN
@@ -1026,7 +1026,7 @@ def delete_session(
 
             agent = db.get_agent(session.agent_name)
             if agent:
-                _remove_from_workspace_group(vm, config, agent.linux_user, session.workspace_name)
+                _remove_from_workspace_group(vm, config, db, agent.linux_user, session.workspace_name)
 
     _regenerate_tmuxinator(db, config, vm, ws)
     output.info(f"Session '{name}' deleted")

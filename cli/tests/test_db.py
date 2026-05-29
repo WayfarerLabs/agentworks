@@ -74,11 +74,13 @@ def test_roundtrip_workspace(db: Database) -> None:
         workspace_path="/home/agentworks/workspaces/ws-123",
         vm_name="dev-vm",
         template="gruntweave",
+        linux_group="ws-123",
     )
     ws = db.get_workspace("ws-123")
     assert ws is not None
     assert ws.type == "vm"
     assert ws.template == "gruntweave"
+    assert ws.linux_group == "ws-123"
 
     # local workspace
     db.insert_workspace(
@@ -86,6 +88,9 @@ def test_roundtrip_workspace(db: Database) -> None:
         ws_type="local",
         workspace_path="/Users/test/workspaces/ws-local",
     )
+    local = db.get_workspace("ws-local")
+    assert local is not None
+    assert local.linux_group is None
     all_ws = db.list_workspaces()
     assert len(all_ws) == 2
 
@@ -495,4 +500,56 @@ def test_migration_21_adds_boot_id(tmp_path: Path) -> None:
 
     cols = [row[1] for row in upgraded._conn.execute("PRAGMA table_info(sessions)").fetchall()]
     assert "boot_id" in cols
+    upgraded.close()
+
+
+def test_migration_22_adds_and_backfills_linux_group(tmp_path: Path) -> None:
+    """Migration 22 adds linux_group and backfills 'ws--<name>' for VM workspaces only."""
+    from agentworks.db import MIGRATIONS
+
+    db_path = tmp_path / "m22.db"
+
+    # Build a DB at v21 (no linux_group column yet) with mixed workspace rows.
+    conn = sqlite3.connect(str(db_path))
+    conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS schema_version ("
+        "    version    INTEGER NOT NULL,"
+        "    applied_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))"
+        ")"
+    )
+    for version in range(1, 22):
+        for stmt in MIGRATIONS[version].split(";"):
+            stmt = stmt.strip()
+            if stmt:
+                conn.execute(stmt)
+        conn.execute("INSERT INTO schema_version (version) VALUES (?)", (version,))
+    conn.execute(
+        "INSERT INTO vms (name, platform, admin_username) VALUES ('dev-vm', 'lima', 'admin')"
+    )
+    conn.execute(
+        "INSERT INTO workspaces (name, type, workspace_path, vm_name) "
+        "VALUES ('legacy-vm-ws', 'vm', '/tmp/legacy-vm-ws', 'dev-vm')"
+    )
+    conn.execute(
+        "INSERT INTO workspaces (name, type, workspace_path) "
+        "VALUES ('legacy-local-ws', 'local', '/tmp/legacy-local-ws')"
+    )
+    conn.commit()
+    conn.close()
+
+    # Open with Database to trigger migration 22.
+    upgraded = Database(db_path)
+
+    cols = [row[1] for row in upgraded._conn.execute("PRAGMA table_info(workspaces)").fetchall()]
+    assert "linux_group" in cols
+
+    vm_ws = upgraded.get_workspace("legacy-vm-ws")
+    assert vm_ws is not None
+    assert vm_ws.linux_group == "ws--legacy-vm-ws"
+
+    local_ws = upgraded.get_workspace("legacy-local-ws")
+    assert local_ws is not None
+    assert local_ws.linux_group is None
+
     upgraded.close()
