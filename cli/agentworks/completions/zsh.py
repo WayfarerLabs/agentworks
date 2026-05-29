@@ -62,6 +62,12 @@ _agentworks_agents() {
     agents=(${(f)"$(agentworks agent list 2>/dev/null | tail -n +3 | awk '{print $1}')"})
     _describe 'agent' agents
 }""",
+    "consoles": """\
+_agentworks_consoles() {
+    local -a consoles
+    consoles=(${(f)"$(agentworks console list 2>/dev/null | tail -n +3 | awk '{print $1}')"})
+    _describe 'console' consoles
+}""",
     "session_templates": """\
 _agentworks_session_templates() {
     local -a templates config_file
@@ -107,6 +113,7 @@ COMPLETER_FUNC_NAMES: dict[str, str] = {
     "vm_templates": "_agentworks_vm_templates",
     "agent_templates": "_agentworks_agent_templates",
     "agents": "_agentworks_agents",
+    "consoles": "_agentworks_consoles",
 }
 
 

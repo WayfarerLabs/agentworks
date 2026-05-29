@@ -55,6 +55,7 @@ class CommandSpec:
 #   "agents"          -> agentworks agent list
 #   "vm_templates"    -> [vm_templates.*] sections in config.toml
 #   "agent_templates" -> [agent_templates.*] sections in config.toml
+#   "consoles"        -> agentworks console list
 
 DYNAMIC_COMPLETIONS: dict[tuple[str, str], str] = {
     ("vm.start", "name"): "vms",
@@ -118,6 +119,20 @@ DYNAMIC_COMPLETIONS: dict[tuple[str, str], str] = {
 
     # VM console
     ("vm.console", "name"): "vms",
+
+    # Named consoles
+    ("console.create", "vm"): "vms",
+    ("console.create", "sessions"): "sessions",
+    ("console.list", "vm"): "vms",
+    ("console.describe", "name"): "consoles",
+    ("console.attach", "name"): "consoles",
+    ("console.delete", "name"): "consoles",
+    ("console.add-session", "name"): "consoles",
+    ("console.add-session", "sessions"): "sessions",
+    ("console.remove-session", "name"): "consoles",
+    ("console.remove-session", "sessions"): "sessions",
+    ("console.add-shell", "name"): "consoles",
+    ("console.add-shell", "session"): "sessions",
 }
 
 

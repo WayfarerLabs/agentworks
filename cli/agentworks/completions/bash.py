@@ -22,6 +22,7 @@ DYNAMIC_SNIPPETS: dict[str, str] = {
     "catalog_entries": ("$(agentworks installer list 2>/dev/null | tail -n +3 | awk '{print $2}')"),
     "sessions": ("$(agentworks session list --no-status 2>/dev/null | tail -n +3 | awk '{print $1}')"),
     "agents": ("$(agentworks agent list 2>/dev/null | tail -n +3 | awk '{print $1}')"),
+    "consoles": ("$(agentworks console list 2>/dev/null | tail -n +3 | awk '{print $1}')"),
     "session_templates": (
         "default $(sed -n 's/^\\[session_templates\\.\\([^]]*\\)\\]/\\1/p'"
         ' "$HOME/.config/agentworks/config.toml" 2>/dev/null)'
