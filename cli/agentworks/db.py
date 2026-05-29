@@ -10,7 +10,7 @@ import json
 import sqlite3
 from dataclasses import dataclass
 from enum import Enum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypedDict
 
 from agentworks.config import CONFIG_DIR
 
@@ -150,6 +150,13 @@ class SessionRow:
     boot_id: str | None = None
 
 
+class ShellEntry(TypedDict):
+    """One shell pane in a console window. cwd None = workspace root."""
+
+    cwd: str | None
+    admin: bool
+
+
 @dataclass
 class ConsoleRow:
     name: str
@@ -163,7 +170,7 @@ class ConsoleSessionRow:
     console_name: str
     session_name: str
     position: int
-    shells: list[dict]  # [{"cwd": str|None, "admin": bool}, ...]
+    shells: list[ShellEntry]
 
 
 # -- Migrations ------------------------------------------------------------
@@ -1009,7 +1016,7 @@ class Database:
         self,
         console_name: str,
         session_name: str,
-        shells: list[dict],
+        shells: list[ShellEntry],
     ) -> ConsoleSessionRow:
         """Add a session to a console at position max(existing) + 1.
 
@@ -1060,7 +1067,7 @@ class Database:
         self,
         console_name: str,
         session_name: str,
-        shells: list[dict],
+        shells: list[ShellEntry],
     ) -> None:
         self._conn.execute(
             "UPDATE console_sessions SET shells = ? "
