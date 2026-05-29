@@ -825,9 +825,9 @@ def restart_session(
     output.info(f"Session '{name}' restarted")
 
     _regenerate_tmuxinator(db, config, vm, ws)
-    from agentworks.sessions.console import add_session_to_console
-
-    add_session_to_console(name, run_command=run_command, socket_path=new_sock)
+    # Don't re-add the session to the legacy vm-console here -- the existing
+    # window's attach-loop wrapper reconnects to the new tmux server when it
+    # comes back up. Adding a new window would create a duplicate.
 
 
 def stop_all_sessions(

@@ -514,9 +514,18 @@ def vm_console(
     recreate: Annotated[bool, typer.Option("--recreate", help="Kill and rebuild the console")] = False,
     allow_nesting: Annotated[bool, typer.Option("--allow-nesting", help="Allow running inside tmux")] = False,
 ) -> None:
-    """Attach to the VM console (creates it if needed)."""
+    """Attach to the VM console (creates it if needed).
+
+    Deprecated: prefer 'agentworks console' for curated session lists and per-window shell panes.
+    """
+    from agentworks import output
     from agentworks.config import load_config
     from agentworks.sessions.console import attach_console
+
+    output.warn(
+        "'agentworks vm console' is deprecated; use 'agentworks console' "
+        "(see 'agentworks console --help'). This command will be removed in a future release."
+    )
 
     attach_console(
         _get_db(),
