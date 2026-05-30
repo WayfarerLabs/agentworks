@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 from agentworks import output
 from agentworks.config import validate_name
 from agentworks.db import InitStatus, VMStatus
-from agentworks.workspaces.templates import ResolvedTemplate, resolve_template
+from agentworks.workspaces.templates import resolve_template
 
 if TYPE_CHECKING:
     from agentworks.config import Config
@@ -22,86 +22,29 @@ def create_workspace(
     *,
     name: str,
     vm_name: str | None = None,
-    local: bool = False,
     template_name: str | None = None,
     open_vscode: bool = False,
 ) -> None:
-    """Create a workspace on a VM or locally."""
-    ws_name = name
-    validate_name(ws_name)
-
-    if db.get_workspace(ws_name) is not None:
-        raise output.WorkspaceError(f"workspace '{ws_name}' already exists")
-
-    # Resolve template
-    template = resolve_template(config, template_name)
-
-    if local:
-        _create_local(db, config, ws_name, template_name=template.name, template=template, open_vscode=open_vscode)
-    else:
-        _create_vm(
-            db,
-            config,
-            ws_name,
-            vm_name=vm_name,
-            template_name=template.name,
-            template=template,
-            open_vscode=open_vscode,
-        )
-
-
-def _create_local(
-    db: Database,
-    config: Config,
-    ws_name: str,
-    *,
-    template_name: str,
-    template: ResolvedTemplate,
-    open_vscode: bool,
-) -> None:
-    from agentworks.workspaces.backends.local import create_local_workspace, delete_local_workspace
-
-    workspace_path: str | None = None
-    try:
-        output.info(f"Creating local workspace '{ws_name}' (template: {template_name})...")
-        workspace_path = create_local_workspace(config, ws_name, template)
-
-        db.insert_workspace(ws_name, ws_type="local", workspace_path=workspace_path, template=template_name)
-    except output.AgentworksError:
-        if workspace_path:
-            delete_local_workspace(ws_name, workspace_path)
-        raise
-    except Exception as e:
-        if workspace_path:
-            delete_local_workspace(ws_name, workspace_path)
-        raise output.WorkspaceError(f"creating workspace: {e}") from None
-
-    if open_vscode:
-        subprocess.run(["code", workspace_path], check=False)
-
-    output.info(f"Workspace '{ws_name}' created at {workspace_path}")
-
-
-def _create_vm(
-    db: Database,
-    config: Config,
-    ws_name: str,
-    *,
-    vm_name: str | None,
-    template_name: str,
-    template: ResolvedTemplate,
-    open_vscode: bool,
-) -> None:
+    """Create a workspace on a VM."""
+    from agentworks.agents.manager import workspace_group
+    from agentworks.ssh import SSHLogger
     from agentworks.workspaces.backends.vm import (
         create_vm_workspace,
         delete_vm_workspace,
         generate_vscode_workspace,
     )
 
+    ws_name = name
+    validate_name(ws_name)
+
+    if db.get_workspace(ws_name) is not None:
+        raise output.WorkspaceError(f"workspace '{ws_name}' already exists")
+
+    template = resolve_template(config, template_name)
+    template_resolved_name = template.name
+
     vm = _resolve_vm(db, vm_name)
-
     _guard_vm_status(vm)
-
     _ensure_vm_running(db, config, vm)
 
     workspace_path: str | None = None
@@ -115,25 +58,20 @@ def _create_vm(
 
             Path(vscode_path).unlink(missing_ok=True)
 
-    from agentworks.ssh import SSHLogger
-
     ssh_logger = SSHLogger(vm.name, "workspace-create")
 
     try:
-        output.info(f"Creating workspace '{ws_name}' on VM '{vm.name}' (template: {template_name})...")
+        output.info(f"Creating workspace '{ws_name}' on VM '{vm.name}' (template: {template_resolved_name})...")
         workspace_path = create_vm_workspace(vm, config, ws_name, template, logger=ssh_logger)
 
         vscode_path = generate_vscode_workspace(vm, config, ws_name, workspace_path)
         output.detail(f"VS Code workspace: {vscode_path}")
 
-        from agentworks.agents.manager import workspace_group
-
         db.insert_workspace(
             ws_name,
-            ws_type="vm",
             workspace_path=workspace_path,
             vm_name=vm.name,
-            template=template_name,
+            template=template_resolved_name,
             linux_group=workspace_group(ws_name),
         )
     except output.AgentworksError:
@@ -169,29 +107,20 @@ def shell_workspace(
     name: str,
 ) -> None:
     """Open a plain shell into a workspace."""
+    from agentworks.workspaces.backends.vm import shell_vm_workspace
+
     ws = db.get_workspace(name)
     if ws is None:
         raise output.WorkspaceError(f"workspace '{name}' not found")
 
-    if ws.type == "local":
-        from agentworks.workspaces.backends.local import shell_local_workspace
+    vm = db.get_vm(ws.vm_name)
+    if vm is None:
+        raise output.VMError(f"VM '{ws.vm_name}' not found")
 
-        db.update_workspace_last_seen(name)
-        shell_local_workspace(ws.workspace_path)
-    elif ws.type == "vm":
-        vm = db.get_vm(ws.vm_name)  # type: ignore[arg-type]
-        if vm is None:
-            raise output.VMError(f"VM '{ws.vm_name}' not found")
-
-        _guard_vm_status(vm)
-        _ensure_vm_running(db, config, vm)
-        db.update_workspace_last_seen(name)
-
-        from agentworks.workspaces.backends.vm import shell_vm_workspace
-
-        shell_vm_workspace(vm, config, ws.workspace_path)
-    else:
-        raise output.WorkspaceError(f"unknown workspace type '{ws.type}'")
+    _guard_vm_status(vm)
+    _ensure_vm_running(db, config, vm)
+    db.update_workspace_last_seen(name)
+    shell_vm_workspace(vm, config, ws.workspace_path)
 
 
 def console_workspace(
@@ -205,6 +134,8 @@ def console_workspace(
     """Open the workspace console (tmuxinator session with sessions)."""
     import os
 
+    from agentworks.workspaces.backends.vm import console_vm_workspace
+
     if os.environ.get("TMUX") and not allow_nesting:
         raise output.WorkspaceError(
             "already inside a tmux session.\n"
@@ -217,25 +148,14 @@ def console_workspace(
     if ws is None:
         raise output.WorkspaceError(f"workspace '{name}' not found")
 
-    if ws.type == "local":
-        from agentworks.workspaces.backends.local import console_local_workspace
+    vm = db.get_vm(ws.vm_name)
+    if vm is None:
+        raise output.VMError(f"VM '{ws.vm_name}' not found")
 
-        db.update_workspace_last_seen(name)
-        console_local_workspace(name, recreate=recreate)
-    elif ws.type == "vm":
-        vm = db.get_vm(ws.vm_name)  # type: ignore[arg-type]
-        if vm is None:
-            raise output.VMError(f"VM '{ws.vm_name}' not found")
-
-        _guard_vm_status(vm)
-        _ensure_vm_running(db, config, vm)
-        db.update_workspace_last_seen(name)
-
-        from agentworks.workspaces.backends.vm import console_vm_workspace
-
-        console_vm_workspace(vm, config, name, recreate=recreate)
-    else:
-        raise output.WorkspaceError(f"unknown workspace type '{ws.type}'")
+    _guard_vm_status(vm)
+    _ensure_vm_running(db, config, vm)
+    db.update_workspace_last_seen(name)
+    console_vm_workspace(vm, config, name, recreate=recreate)
 
 
 def describe_workspace(
@@ -248,8 +168,7 @@ def describe_workspace(
         raise output.WorkspaceError(f"workspace '{name}' not found")
 
     output.info(f"Name:       {ws.name}")
-    output.info(f"Type:       {ws.type}")
-    output.info(f"VM:         {ws.vm_name or '-'}")
+    output.info(f"VM:         {ws.vm_name}")
     output.info(f"Template:   {ws.template or 'default'}")
     output.info(f"Path:       {ws.workspace_path}")
     output.info(f"Created:    {ws.created_at}")
@@ -266,26 +185,24 @@ def describe_workspace(
     else:
         output.detail("(none)")
 
-    # Agents with grants (VM workspaces only)
-    if ws.type == "vm" and ws.vm_name:
-        agents = db.list_agents(vm_name=ws.vm_name)
-        granted = [a for a in agents if db.has_any_grant(a.name, name)]
-        output.info(f"\nAgents with access ({len(granted)}):")
-        if granted:
-            for agent in granted:
-                output.detail(f"{agent.name}  (user: {agent.linux_user})")
-        else:
-            output.detail("(none)")
+    # Agents with grants
+    agents = db.list_agents(vm_name=ws.vm_name)
+    granted = [a for a in agents if db.has_any_grant(a.name, name)]
+    output.info(f"\nAgents with access ({len(granted)}):")
+    if granted:
+        for agent in granted:
+            output.detail(f"{agent.name}  (user: {agent.linux_user})")
+    else:
+        output.detail("(none)")
 
 
 def list_workspaces(
     db: Database,
     *,
     vm_name: str | None = None,
-    ws_type: str | None = None,
 ) -> None:
     """List workspaces."""
-    workspaces = db.list_workspaces(vm_name=vm_name, ws_type=ws_type)
+    workspaces = db.list_workspaces(vm_name=vm_name)
     if not workspaces:
         output.info("No workspaces found.")
         return
@@ -295,18 +212,17 @@ def list_workspaces(
             return "default"
         return t
 
-    rows = [(ws.name, ws.type, ws.vm_name or "-", _tpl_name(ws.template), ws.created_at) for ws in workspaces]
+    rows = [(ws.name, ws.vm_name, _tpl_name(ws.template), ws.created_at) for ws in workspaces]
 
     name_w = max(len("NAME"), max(len(r[0]) for r in rows))
-    type_w = max(len("TYPE"), max(len(r[1]) for r in rows))
-    vm_w = max(len("VM"), max(len(r[2]) for r in rows))
-    tpl_w = max(len("TEMPLATE"), max(len(r[3]) for r in rows))
+    vm_w = max(len("VM"), max(len(r[1]) for r in rows))
+    tpl_w = max(len("TEMPLATE"), max(len(r[2]) for r in rows))
 
-    header = f"{'NAME':<{name_w}}  {'TYPE':<{type_w}}  {'VM':<{vm_w}}  {'TEMPLATE':<{tpl_w}}  CREATED"
+    header = f"{'NAME':<{name_w}}  {'VM':<{vm_w}}  {'TEMPLATE':<{tpl_w}}  CREATED"
     output.info(header)
     output.info("-" * len(header))
-    for ws_name, ws_type, vm_name, tpl, created in rows:
-        output.info(f"{ws_name:<{name_w}}  {ws_type:<{type_w}}  {vm_name:<{vm_w}}  {tpl:<{tpl_w}}  {created}")
+    for ws_name, ws_vm, tpl, created in rows:
+        output.info(f"{ws_name:<{name_w}}  {ws_vm:<{vm_w}}  {tpl:<{tpl_w}}  {created}")
 
 
 def repair_workspace(
@@ -322,11 +238,6 @@ def repair_workspace(
     if ws is None:
         raise output.WorkspaceError(f"workspace '{name}' not found")
 
-    if ws.type != "vm":
-        raise output.WorkspaceError(f"workspace '{name}' is local, nothing to repair")
-
-    assert ws.vm_name is not None
-    assert ws.linux_group is not None, "VM workspace missing linux_group; DB migration may not have run"
     vm = db.get_vm(ws.vm_name)
     if vm is None:
         raise output.VMError(f"VM '{ws.vm_name}' not found")
@@ -482,12 +393,7 @@ def rehome_workspace(
         raise output.WorkspaceError(f"workspace '{name}' not found")
 
     # Determine target path
-    if target_path is not None:
-        new_path = target_path
-    elif ws.type == "vm":
-        new_path = f"{config.paths.vm_workspaces}/{name}"
-    else:
-        new_path = str(config.paths.local_workspaces / name)
+    new_path = target_path if target_path is not None else f"{config.paths.vm_workspaces}/{name}"
 
     old_path = ws.workspace_path
 
@@ -525,12 +431,7 @@ def rehome_workspace(
                 "Stop or delete them first."
             )
 
-    if ws.type == "vm":
-        _rehome_vm(db, config, ws, new_path, remove_old=remove_old, yes=yes)
-    elif ws.type == "local":
-        _rehome_local(db, config, ws, new_path, remove_old=remove_old, yes=yes)
-    else:
-        raise output.WorkspaceError(f"unknown workspace type '{ws.type}'")
+    _rehome_vm(db, config, ws, new_path, remove_old=remove_old, yes=yes)
 
 
 def _rehome_vm(
@@ -549,8 +450,6 @@ def _rehome_vm(
 
     ws_name = ws.name
     old_path = ws.workspace_path
-    assert ws.vm_name is not None
-    assert ws.linux_group is not None, "VM workspace missing linux_group; DB migration may not have run"
     vm_name = ws.vm_name
 
     vm = db.get_vm(vm_name)
@@ -678,82 +577,6 @@ def _rehome_vm(
     output.info(f"\nWorkspace '{ws_name}' rehomed to {new_path}")
 
 
-def _rehome_local(
-    db: Database,
-    config: Config,
-    ws: WorkspaceRow,
-    new_path: str,
-    *,
-    remove_old: bool,
-    yes: bool,
-) -> None:
-    """Rehome a local workspace."""
-    import shutil
-    from pathlib import Path
-
-
-    ws_name = ws.name
-    old_path = ws.workspace_path
-
-    old_dir = Path(old_path)
-    new_dir = Path(new_path)
-
-    if not old_dir.exists():
-        raise output.WorkspaceError(f"source directory {old_path} does not exist")
-
-    if new_dir.exists():
-        raise output.WorkspaceError(f"target directory {new_path} already exists")
-
-    if not yes:
-        output.info(f"Rehome workspace '{ws_name}':")
-        output.detail(f"From: {old_path}")
-        output.detail(f"To:   {new_path}")
-        if remove_old:
-            output.detail("Old directory will be REMOVED after copy")
-        else:
-            output.detail("Old directory will be LEFT IN PLACE")
-        if not output.confirm("Proceed?"):
-            raise output.UserAbort("rehome cancelled")
-
-    # Copy
-    output.info("Copying workspace...")
-    new_dir.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copytree(old_path, new_path, symlinks=True)
-
-    # Verify
-    if not new_dir.exists():
-        raise output.WorkspaceError("copy verification failed, target directory not found")
-
-    # Regenerate tmuxinator config at new path
-    from agentworks.workspaces.tmuxinator import console_session_name, generate_config
-
-    tmux_file = new_dir / ".tmuxinator.yml"
-    if tmux_file.exists() or (old_dir / ".tmuxinator.yml").exists():
-        tmux_config = generate_config(ws_name, new_path)
-        tmux_file.write_text(tmux_config)
-        session = console_session_name(ws_name)
-        tmux_config_dir = Path.home() / ".config" / "tmuxinator"
-        tmux_config_dir.mkdir(parents=True, exist_ok=True)
-        link = tmux_config_dir / f"{session}.yml"
-        link.unlink(missing_ok=True)
-        link.symlink_to(tmux_file)
-
-    # Update database
-    db.update_workspace_path(ws_name, new_path)
-    output.info(f"Database updated: workspace_path = {new_path}")
-
-    # Handle old directory
-    if remove_old:
-        output.info(f"Removing old directory {old_path}...")
-        shutil.rmtree(old_path)
-        output.info("Old directory removed")
-    else:
-        output.info(f"\nOld directory left in place at {old_path}")
-        output.info("Remove it manually when ready, or re-run with --remove-old")
-
-    output.info(f"\nWorkspace '{ws_name}' rehomed to {new_path}")
-
-
 def delete_workspace(
     db: Database,
     config: Config,
@@ -783,74 +606,63 @@ def delete_workspace(
             raise output.UserAbort("delete cancelled")
 
     # Create SSH logger for VM operations
-    ssh_logger = None
-    if ws.type == "vm" and ws.vm_name:
-        from agentworks.ssh import SSHLogger
+    from agentworks.ssh import SSHLogger
 
-        ssh_logger = SSHLogger(ws.vm_name, "workspace-delete")
+    ssh_logger = SSHLogger(ws.vm_name, "workspace-delete")
 
     # Kill running sessions (status-aware) and delete session records
-    if ws.type == "vm" and ws.vm_name:
-        vm = db.get_vm(ws.vm_name)
-        if vm is not None and vm.tailscale_host is not None:
-            from agentworks.db import SessionStatus
-            from agentworks.sessions.manager import (
-                check_session_status,
-                ensure_pids_batch,
-            )
-            from agentworks.sessions.tmux import force_kill_tmux_server, kill_session
-            from agentworks.ssh import admin_exec_target
+    vm = db.get_vm(ws.vm_name)
+    if vm is not None and vm.tailscale_host is not None:
+        from agentworks.db import SessionStatus
+        from agentworks.sessions.manager import (
+            check_session_status,
+            ensure_pids_batch,
+        )
+        from agentworks.sessions.tmux import force_kill_tmux_server, kill_session
+        from agentworks.ssh import admin_exec_target
 
-            target = admin_exec_target(vm, config, logger=ssh_logger)
-            sessions = db.list_sessions(workspace_name=name)
-            sessions = ensure_pids_batch(sessions, db=db, config=config)
-            unstoppable: list[str] = []
-            for session in sessions:
-                status = check_session_status(session, target=target)
-                if status == SessionStatus.OK:
-                    if not kill_session(session.name, run_command=target.run, socket_path=session.socket_path):
-                        # Race: session may have exited between check and kill. Recheck.
-                        recheck = check_session_status(session, target=target)
-                        if recheck != SessionStatus.STOPPED:
-                            unstoppable.append(session.name)
-                            continue
-                elif status == SessionStatus.BROKEN:
-                    if session.pid and session.pid > 0 and force_kill_tmux_server(
-                        session.pid, target=target, socket_path=session.socket_path,
-                    ):
-                        pass  # killed successfully
-                    else:
+        target = admin_exec_target(vm, config, logger=ssh_logger)
+        sessions = db.list_sessions(workspace_name=name)
+        sessions = ensure_pids_batch(sessions, db=db, config=config)
+        unstoppable: list[str] = []
+        for session in sessions:
+            status = check_session_status(session, target=target)
+            if status == SessionStatus.OK:
+                if not kill_session(session.name, run_command=target.run, socket_path=session.socket_path):
+                    # Race: session may have exited between check and kill. Recheck.
+                    recheck = check_session_status(session, target=target)
+                    if recheck != SessionStatus.STOPPED:
                         unstoppable.append(session.name)
-                elif status == SessionStatus.UNKNOWN:
+                        continue
+            elif status == SessionStatus.BROKEN:
+                if session.pid and session.pid > 0 and force_kill_tmux_server(
+                    session.pid, target=target, socket_path=session.socket_path,
+                ):
+                    pass  # killed successfully
+                else:
                     unstoppable.append(session.name)
-            if unstoppable:
-                raise output.WorkspaceError(
-                    f"cannot delete workspace '{name}': {len(unstoppable)} session(s) could not be stopped "
-                    f"({', '.join(unstoppable)}). Resolve manually before retrying."
-                )
+            elif status == SessionStatus.UNKNOWN:
+                unstoppable.append(session.name)
+        if unstoppable:
+            raise output.WorkspaceError(
+                f"cannot delete workspace '{name}': {len(unstoppable)} session(s) could not be stopped "
+                f"({', '.join(unstoppable)}). Resolve manually before retrying."
+            )
     db.delete_sessions_for_workspace(name)
 
     # Revoke agent workspace grants (agents are VM-scoped, not deleted with workspaces)
-    if ws.type == "vm" and ws.vm_name:
-        vm_for_grants = db.get_vm(ws.vm_name)
-        if vm_for_grants:
-            from agentworks.agents.manager import revoke_workspace_grants
+    vm_for_grants = db.get_vm(ws.vm_name)
+    if vm_for_grants:
+        from agentworks.agents.manager import revoke_workspace_grants
 
-            revoke_workspace_grants(db, config, name, vm_for_grants)
+        revoke_workspace_grants(db, config, name, vm_for_grants)
 
-    if ws.type == "local":
-        from agentworks.workspaces.backends.local import delete_local_workspace
+    if vm is not None:
+        from agentworks.workspaces.backends.vm import delete_vm_workspace
 
-        delete_local_workspace(name, ws.workspace_path)
-    elif ws.type == "vm" and ws.vm_name:
-        vm = db.get_vm(ws.vm_name)
-        if vm is not None:
-            from agentworks.workspaces.backends.vm import delete_vm_workspace
+        delete_vm_workspace(vm, config, name, ws.workspace_path, logger=ssh_logger)
 
-            delete_vm_workspace(vm, config, name, ws.workspace_path, logger=ssh_logger)
-
-    if ssh_logger is not None:
-        ssh_logger.close()
+    ssh_logger.close()
 
     # Remove .code-workspace file
     vscode_path = config.paths.vscode_workspaces / f"{name}.code-workspace"
@@ -867,13 +679,13 @@ def copy_workspace(
     *,
     dest_name: str,
     vm_name: str | None = None,
-    local: bool = False,
 ) -> None:
-    """Copy a workspace to a new location."""
+    """Copy a workspace to a new VM workspace."""
     import tempfile
     from pathlib import Path
 
-    from agentworks.ssh import admin_exec_target
+    from agentworks.agents.manager import workspace_group
+    from agentworks.ssh import SSHLogger, admin_exec_target
 
     validate_name(dest_name)
 
@@ -884,144 +696,102 @@ def copy_workspace(
     if db.get_workspace(dest_name) is not None:
         raise output.WorkspaceError(f"workspace '{dest_name}' already exists")
 
-    # Create a temp file for the archive
     with tempfile.NamedTemporaryFile(suffix=".tgz", delete=False) as tmp:
         tmp_path = Path(tmp.name)
 
     try:
         # --- Pack from source ---
-        if src_ws.type == "local":
-            output.info(f"Packing workspace '{source_name}'...")
-            result = subprocess.run(
-                ["tar", "czf", str(tmp_path), "-C", src_ws.workspace_path, "."],
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-            )
-            if result.returncode != 0:
-                raise output.WorkspaceError(f"tar failed: {result.stderr.strip()}")
-        elif src_ws.type == "vm":
-            src_vm = db.get_vm(src_ws.vm_name)  # type: ignore[arg-type]
-            if src_vm is None:
-                raise output.VMError(f"VM '{src_ws.vm_name}' not found")
-            _guard_vm_status(src_vm)
-            _ensure_vm_running(db, config, src_vm)
-            if src_vm.tailscale_host is None:
-                raise output.VMError(f"VM '{src_vm.name}' has no Tailscale address")
+        src_vm = db.get_vm(src_ws.vm_name)
+        if src_vm is None:
+            raise output.VMError(f"VM '{src_ws.vm_name}' not found")
+        _guard_vm_status(src_vm)
+        _ensure_vm_running(db, config, src_vm)
+        if src_vm.tailscale_host is None:
+            raise output.VMError(f"VM '{src_vm.name}' has no Tailscale address")
 
-            src_exec = admin_exec_target(src_vm, config)
-            assert src_exec.ssh is not None
-            src_ssh = src_exec.ssh
-            output.info(f"Packing workspace '{source_name}' from VM '{src_vm.name}'...")
+        src_exec = admin_exec_target(src_vm, config)
+        assert src_exec.ssh is not None
+        src_ssh = src_exec.ssh
+        output.info(f"Packing workspace '{source_name}' from VM '{src_vm.name}'...")
 
-            # Stream tar from VM to local temp file
-            ssh_args = ["ssh", "-o", "StrictHostKeyChecking=accept-new", "-o", "BatchMode=yes"]
-            if src_ssh.identity_file is not None:
-                ssh_args.extend(["-i", str(src_ssh.identity_file)])
-            ssh_args.append(f"{src_ssh.user}@{src_ssh.host}")
-            ssh_args.append(f"tar czf - -C {src_ws.workspace_path} .")
+        # Stream tar from VM to local temp file
+        ssh_args = ["ssh", "-o", "StrictHostKeyChecking=accept-new", "-o", "BatchMode=yes"]
+        if src_ssh.identity_file is not None:
+            ssh_args.extend(["-i", str(src_ssh.identity_file)])
+        ssh_args.append(f"{src_ssh.user}@{src_ssh.host}")
+        ssh_args.append(f"tar czf - -C {src_ws.workspace_path} .")
 
-            with open(tmp_path, "wb") as f:
-                proc = subprocess.run(ssh_args, stdout=f, stderr=subprocess.PIPE)
-            if proc.returncode != 0:
-                stderr = proc.stderr.decode() if proc.stderr else ""
-                raise output.WorkspaceError(f"pack failed: {stderr.strip()}")
-        else:
-            raise output.WorkspaceError(f"unknown workspace type '{src_ws.type}'")
+        with open(tmp_path, "wb") as f:
+            proc = subprocess.run(ssh_args, stdout=f, stderr=subprocess.PIPE)
+        if proc.returncode != 0:
+            stderr = proc.stderr.decode() if proc.stderr else ""
+            raise output.WorkspaceError(f"pack failed: {stderr.strip()}")
 
-        # --- Unpack to destination ---
-        if local:
-            workspace_path = str(config.paths.local_workspaces / dest_name)
-            Path(workspace_path).mkdir(parents=True, exist_ok=True)
+        # --- Unpack to destination VM ---
+        dest_vm = _resolve_vm(db, vm_name)
+        _guard_vm_status(dest_vm)
+        _ensure_vm_running(db, config, dest_vm)
+        if dest_vm.tailscale_host is None:
+            raise output.VMError(f"VM '{dest_vm.name}' has no Tailscale address")
 
-            output.info(f"Unpacking to local workspace '{dest_name}'...")
-            result = subprocess.run(
-                ["tar", "xzf", str(tmp_path), "-C", workspace_path],
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-            )
-            if result.returncode != 0:
-                raise output.WorkspaceError(f"tar failed: {result.stderr.strip()}")
+        lg = SSHLogger(dest_vm.name, "workspace-copy")
+        dest_target = admin_exec_target(dest_vm, config, logger=lg)
 
-            db.insert_workspace(
-                dest_name,
-                ws_type="local",
-                workspace_path=workspace_path,
-                template="copied",
-            )
-        else:
-            from agentworks.ssh import SSHLogger
+        workspace_path = f"{config.paths.vm_workspaces}/{dest_name}"
+        ws_group = workspace_group(dest_name)
 
-            dest_vm = _resolve_vm(db, vm_name)
-            _guard_vm_status(dest_vm)
-            _ensure_vm_running(db, config, dest_vm)
-            if dest_vm.tailscale_host is None:
-                raise output.VMError(f"VM '{dest_vm.name}' has no Tailscale address")
+        output.info(f"Unpacking to workspace '{dest_name}' on VM '{dest_vm.name}'...")
 
-            lg = SSHLogger(dest_vm.name, "workspace-copy")
-            dest_target = admin_exec_target(dest_vm, config, logger=lg)
-            from agentworks.agents.manager import workspace_group
+        # Set up group, directory, and permissions (same as create_vm_workspace)
+        dest_target.run(
+            f"sh -c 'getent group {ws_group} >/dev/null 2>&1 || /usr/sbin/groupadd {ws_group}'",
+            sudo=True,
+        )
+        dest_target.run(f"usermod -aG {ws_group} {dest_vm.admin_username}", sudo=True)
+        dest_target.run(f"mkdir -p {workspace_path}", sudo=True, timeout=10)
+        dest_target.run(f"chown {dest_vm.admin_username}:{ws_group} {workspace_path}", sudo=True)
+        dest_target.run(f"chmod 2770 {workspace_path}", sudo=True)
+        dest_target.run(f"setfacl -d -m g::rwx -m m::rwx {workspace_path}", sudo=True)
 
-            workspace_path = f"{config.paths.vm_workspaces}/{dest_name}"
+        # Unpack archive and fix ownership
+        remote_tmp = f"/tmp/{dest_name}-copy.tgz"
+        dest_target.copy_to(tmp_path, remote_tmp, timeout=300)
+        dest_target.run(f"tar xzf {remote_tmp} -C {workspace_path}", sudo=True, timeout=120)
+        dest_target.run(f"rm -f {remote_tmp}", check=False, timeout=10)
+        dest_target.run(
+            f"chown -R {dest_vm.admin_username}:{ws_group} {workspace_path}",
+            sudo=True,
+            timeout=60,
+        )
+        dest_target.run(
+            f"find {shlex.quote(workspace_path)} -type d -exec chmod g+s {{}} +",
+            sudo=True,
+            timeout=120,
+        )
 
-            ws_group = workspace_group(dest_name)
+        db.insert_workspace(
+            dest_name,
+            vm_name=dest_vm.name,
+            workspace_path=workspace_path,
+            template="copied",
+            linux_group=ws_group,
+        )
 
-            output.info(f"Unpacking to workspace '{dest_name}' on VM '{dest_vm.name}'...")
+        # Generate tmuxinator config and VS Code workspace
+        from agentworks.workspaces.backends.vm import generate_vscode_workspace
+        from agentworks.workspaces.tmuxinator import console_session_name, generate_config
 
-            # Set up group, directory, and permissions (same as create_vm_workspace)
-            dest_target.run(
-                f"sh -c 'getent group {ws_group} >/dev/null 2>&1 || /usr/sbin/groupadd {ws_group}'",
-                sudo=True,
-            )
-            dest_target.run(f"usermod -aG {ws_group} {dest_vm.admin_username}", sudo=True)
-            dest_target.run(f"mkdir -p {workspace_path}", sudo=True, timeout=10)
-            dest_target.run(f"chown {dest_vm.admin_username}:{ws_group} {workspace_path}", sudo=True)
-            dest_target.run(f"chmod 2770 {workspace_path}", sudo=True)
-            dest_target.run(f"setfacl -d -m g::rwx -m m::rwx {workspace_path}", sudo=True)
-
-            # Unpack archive and fix ownership
-            remote_tmp = f"/tmp/{dest_name}-copy.tgz"
-            dest_target.copy_to(tmp_path, remote_tmp, timeout=300)
-            dest_target.run(f"tar xzf {remote_tmp} -C {workspace_path}", sudo=True, timeout=120)
-            dest_target.run(f"rm -f {remote_tmp}", check=False, timeout=10)
-            dest_target.run(
-                f"chown -R {dest_vm.admin_username}:{ws_group} {workspace_path}",
-                sudo=True,
-                timeout=60,
-            )
-            dest_target.run(
-                f"find {shlex.quote(workspace_path)} -type d -exec chmod g+s {{}} +",
-                sudo=True,
-                timeout=120,
-            )
-
-            db.insert_workspace(
-                dest_name,
-                ws_type="vm",
-                vm_name=dest_vm.name,
-                workspace_path=workspace_path,
-                template="copied",
-                linux_group=ws_group,
-            )
-
-            # Generate tmuxinator config and VS Code workspace
-            from agentworks.workspaces.backends.vm import generate_vscode_workspace
-            from agentworks.workspaces.tmuxinator import console_session_name, generate_config
-
-            tmux_config = generate_config(dest_name, workspace_path)
-            dest_target.write_file(f"{workspace_path}/.tmuxinator.yml", tmux_config)
-            session = console_session_name(dest_name)
-            dest_target.run("mkdir -p ~/.config/tmuxinator", timeout=10)
-            dest_target.run(
-                f"ln -sf {workspace_path}/.tmuxinator.yml ~/.config/tmuxinator/{session}.yml",
-                timeout=10,
-            )
-            vscode_path = generate_vscode_workspace(dest_vm, config, dest_name, workspace_path)
-            output.detail(f"VS Code workspace: {vscode_path}")
-            lg.close()
+        tmux_config = generate_config(dest_name, workspace_path)
+        dest_target.write_file(f"{workspace_path}/.tmuxinator.yml", tmux_config)
+        session = console_session_name(dest_name)
+        dest_target.run("mkdir -p ~/.config/tmuxinator", timeout=10)
+        dest_target.run(
+            f"ln -sf {workspace_path}/.tmuxinator.yml ~/.config/tmuxinator/{session}.yml",
+            timeout=10,
+        )
+        vscode_path = generate_vscode_workspace(dest_vm, config, dest_name, workspace_path)
+        output.detail(f"VS Code workspace: {vscode_path}")
+        lg.close()
     finally:
         tmp_path.unlink(missing_ok=True)
 

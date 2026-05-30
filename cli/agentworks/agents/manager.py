@@ -139,11 +139,9 @@ def create_agent(
 
     # If grant_all, add to all existing workspace groups
     if grant_all_workspaces:
-        workspaces = db.list_workspaces(vm_name=vm_name)
-        for ws in workspaces:
-            if ws.type == "vm":
-                _add_to_workspace_group(vm, config, db, linux_user, ws.name, logger=None)
-                db.insert_agent_grant(name, ws.name, "explicit")
+        for ws in db.list_workspaces(vm_name=vm_name):
+            _add_to_workspace_group(vm, config, db, linux_user, ws.name, logger=None)
+            db.insert_agent_grant(name, ws.name, "explicit")
 
     output.info(f"Agent '{name}' created on VM '{vm_name}' (user: {agent.linux_user})")
 
@@ -466,12 +464,10 @@ def grant_workspaces(
 
     if grant_all:
         db.update_agent_grant_all(agent_name, True)
-        # Add to all existing VM workspace groups
-        workspaces = db.list_workspaces(vm_name=vm.name)
-        for ws in workspaces:
-            if ws.type == "vm":
-                _add_to_workspace_group(vm, config, db, agent.linux_user, ws.name, logger=None)
-                db.insert_agent_grant(agent_name, ws.name, "explicit")
+        # Add to all existing workspace groups on this VM
+        for ws in db.list_workspaces(vm_name=vm.name):
+            _add_to_workspace_group(vm, config, db, agent.linux_user, ws.name, logger=None)
+            db.insert_agent_grant(agent_name, ws.name, "explicit")
         output.info(f"Agent '{agent_name}' granted access to all workspaces")
         return
 

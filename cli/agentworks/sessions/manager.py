@@ -152,7 +152,7 @@ def ensure_pids_batch(sessions: list[SessionRow], *, db: Database, config: Confi
     vm_cache: dict[str, ExecTarget] = {}
     for s in need_repair:
         ws = db.get_workspace(s.workspace_name)
-        if not ws or ws.type != "vm" or not ws.vm_name:
+        if not ws:
             continue
         if ws.vm_name not in vm_cache:
             vm = db.get_vm(ws.vm_name)
@@ -198,9 +198,7 @@ def _require_workspace(db: Database, name: str) -> WorkspaceRow:
 
 
 def _require_vm_for_workspace(db: Database, ws: WorkspaceRow) -> VMRow:
-    if ws.type != "vm":
-        raise output.SessionError("sessions are only supported on VM workspaces")
-    vm = db.get_vm(ws.vm_name)  # type: ignore[arg-type]
+    vm = db.get_vm(ws.vm_name)
     if vm is None:
         raise output.VMError(f"VM '{ws.vm_name}' not found")
     return vm
@@ -1147,7 +1145,7 @@ def batch_check_all_sessions(
 
     for s in sessions:
         ws = db.get_workspace(s.workspace_name)
-        if not ws or ws.type != "vm" or not ws.vm_name:
+        if not ws:
             continue
         if ws.vm_name not in vm_targets:
             vm = db.get_vm(ws.vm_name)

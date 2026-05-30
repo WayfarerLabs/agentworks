@@ -67,44 +67,40 @@ def test_vm_resources_nullable(db: Database) -> None:
 def test_roundtrip_workspace(db: Database) -> None:
     db.insert_vm_host("mac-studio", "192.168.1.10")
     db.insert_vm("dev-vm", platform="lima", vm_host_name="mac-studio")
+    db.insert_vm("other-vm", platform="lima", vm_host_name="mac-studio")
 
     db.insert_workspace(
         "ws-123",
-        ws_type="vm",
         workspace_path="/home/agentworks/workspaces/ws-123",
         vm_name="dev-vm",
+        linux_group="ws-ws-123",
         template="gruntweave",
-        linux_group="ws-123",
     )
     ws = db.get_workspace("ws-123")
     assert ws is not None
-    assert ws.type == "vm"
+    assert ws.vm_name == "dev-vm"
     assert ws.template == "gruntweave"
-    assert ws.linux_group == "ws-123"
+    assert ws.linux_group == "ws-ws-123"
 
-    # local workspace
     db.insert_workspace(
-        "ws-local",
-        ws_type="local",
-        workspace_path="/Users/test/workspaces/ws-local",
+        "ws-other",
+        workspace_path="/home/agentworks/workspaces/ws-other",
+        vm_name="other-vm",
+        linux_group="ws-ws-other",
     )
-    local = db.get_workspace("ws-local")
-    assert local is not None
-    assert local.linux_group is None
+
     all_ws = db.list_workspaces()
     assert len(all_ws) == 2
 
     vm_ws = db.list_workspaces(vm_name="dev-vm")
     assert len(vm_ws) == 1
-
-    local_ws = db.list_workspaces(ws_type="local")
-    assert len(local_ws) == 1
+    assert vm_ws[0].name == "ws-123"
 
 
 def test_vm_delete_cascades(db: Database) -> None:
     db.insert_vm_host("mac-studio", "192.168.1.10")
     db.insert_vm("dev-vm", platform="lima", vm_host_name="mac-studio")
-    db.insert_workspace("ws-1", ws_type="vm", workspace_path="/tmp/ws-1", vm_name="dev-vm")
+    db.insert_workspace("ws-1", workspace_path="/tmp/ws-1", vm_name="dev-vm", linux_group="ws-ws-1")
 
     db.delete_vm("dev-vm")
 
@@ -115,7 +111,7 @@ def test_vm_delete_cascades(db: Database) -> None:
 def test_count_helpers(db: Database) -> None:
     db.insert_vm_host("mac-studio", "192.168.1.10")
     db.insert_vm("vm1", platform="lima", vm_host_name="mac-studio")
-    db.insert_workspace("ws-1", ws_type="vm", workspace_path="/tmp/ws-1", vm_name="vm1")
+    db.insert_workspace("ws-1", workspace_path="/tmp/ws-1", vm_name="vm1", linux_group="ws-ws-1")
 
     assert db.count_vms_on_host("mac-studio") == 1
     assert db.count_workspaces_on_vm("vm1") == 1
@@ -166,7 +162,7 @@ def test_delete_agent(db: Database) -> None:
 def test_workspace_delete_does_not_cascade_agents(db: Database) -> None:
     """Agents are VM-scoped; deleting a workspace only removes grants."""
     db.insert_vm("dev-vm", platform="lima")
-    db.insert_workspace("ws-1", ws_type="vm", workspace_path="/tmp/ws-1", vm_name="dev-vm")
+    db.insert_workspace("ws-1", workspace_path="/tmp/ws-1", vm_name="dev-vm", linux_group="ws-ws-1")
     db.insert_agent("coder", "dev-vm", "agt--coder")
     db.insert_agent_grant("coder", "ws-1", "explicit")
 
@@ -203,8 +199,8 @@ def test_agent_linux_user_unique(db: Database) -> None:
 
 def test_agent_grants(db: Database) -> None:
     db.insert_vm("dev-vm", platform="lima")
-    db.insert_workspace("ws-1", ws_type="vm", workspace_path="/tmp/ws-1", vm_name="dev-vm")
-    db.insert_workspace("ws-2", ws_type="vm", workspace_path="/tmp/ws-2", vm_name="dev-vm")
+    db.insert_workspace("ws-1", workspace_path="/tmp/ws-1", vm_name="dev-vm", linux_group="ws-ws-1")
+    db.insert_workspace("ws-2", workspace_path="/tmp/ws-2", vm_name="dev-vm", linux_group="ws-ws-2")
     db.insert_agent("coder", "dev-vm", "agt--coder")
 
     # Explicit grants
@@ -349,7 +345,7 @@ def test_agent_session_requires_socket_path(db: Database) -> None:
     from agentworks.db import SessionMode
 
     db.insert_vm("dev-vm", platform="lima")
-    db.insert_workspace("ws", ws_type="vm", workspace_path="/tmp/ws", vm_name="dev-vm")
+    db.insert_workspace("ws", workspace_path="/tmp/ws", vm_name="dev-vm", linux_group="ws-ws")
     db.insert_agent("coder", "dev-vm", "agt--coder")
 
     # Agent session with socket_path succeeds
@@ -366,7 +362,7 @@ def test_admin_session_allows_null_socket(db: Database) -> None:
     from agentworks.db import SessionMode
 
     db.insert_vm("dev-vm", platform="lima")
-    db.insert_workspace("ws", ws_type="vm", workspace_path="/tmp/ws", vm_name="dev-vm")
+    db.insert_workspace("ws", workspace_path="/tmp/ws", vm_name="dev-vm", linux_group="ws-ws")
 
     session = db.insert_session("ws-s1", "ws", "default", SessionMode.ADMIN)
     assert session.socket_path is None
@@ -402,9 +398,16 @@ def test_migration_20_drops_status_adds_pid(tmp_path: Path) -> None:
     db_path = tmp_path / "m20.db"
     _create_pre_v20_db(str(db_path))
 
-    # Insert a session at v19 (has status column)
+    # Insert a session at v19 (has status column). vm + vm-scoped workspace
+    # so the row survives the later migration 26 cleanup.
     conn = sqlite3.connect(str(db_path))
-    conn.execute("INSERT INTO workspaces (name, type, workspace_path) VALUES ('ws', 'vm', '/tmp/ws')")
+    conn.execute(
+        "INSERT INTO vms (name, platform, admin_username) VALUES ('dev-vm', 'lima', 'admin')"
+    )
+    conn.execute(
+        "INSERT INTO workspaces (name, type, workspace_path, vm_name) "
+        "VALUES ('ws', 'vm', '/tmp/ws', 'dev-vm')"
+    )
     conn.execute(
         "INSERT INTO sessions (name, workspace_name, template, mode, status) "
         "VALUES ('s1', 'ws', 'default', 'admin', 'running')"
@@ -433,7 +436,7 @@ def test_session_pid_default_null(db: Database) -> None:
     from agentworks.db import SessionMode
 
     db.insert_vm("dev-vm", platform="lima")
-    db.insert_workspace("ws", ws_type="vm", workspace_path="/tmp/ws", vm_name="dev-vm")
+    db.insert_workspace("ws", workspace_path="/tmp/ws", vm_name="dev-vm", linux_group="ws-ws")
 
     session = db.insert_session("ws-s1", "ws", "default", SessionMode.ADMIN)
     assert session.pid is None
@@ -444,7 +447,7 @@ def test_update_session_pid(db: Database) -> None:
     from agentworks.db import SessionMode
 
     db.insert_vm("dev-vm", platform="lima")
-    db.insert_workspace("ws", ws_type="vm", workspace_path="/tmp/ws", vm_name="dev-vm")
+    db.insert_workspace("ws", workspace_path="/tmp/ws", vm_name="dev-vm", linux_group="ws-ws")
 
     db.insert_session("ws-s1", "ws", "default", SessionMode.ADMIN)
 
@@ -484,7 +487,14 @@ def test_migration_21_adds_boot_id(tmp_path: Path) -> None:
             if stmt:
                 conn.execute(stmt)
         conn.execute("INSERT INTO schema_version (version) VALUES (?)", (version,))
-    conn.execute("INSERT INTO workspaces (name, type, workspace_path) VALUES ('ws', 'vm', '/tmp/ws')")
+    # vm + vm-scoped workspace so the row survives the later migration 26 cleanup.
+    conn.execute(
+        "INSERT INTO vms (name, platform, admin_username) VALUES ('dev-vm', 'lima', 'admin')"
+    )
+    conn.execute(
+        "INSERT INTO workspaces (name, type, workspace_path, vm_name) "
+        "VALUES ('ws', 'vm', '/tmp/ws', 'dev-vm')"
+    )
     conn.execute(
         "INSERT INTO sessions (name, workspace_name, template, mode) "
         "VALUES ('s1', 'ws', 'default', 'admin')"
@@ -548,9 +558,10 @@ def test_migration_22_adds_and_backfills_linux_group(tmp_path: Path) -> None:
     assert vm_ws is not None
     assert vm_ws.linux_group == "ws--legacy-vm-ws"
 
-    local_ws = upgraded.get_workspace("legacy-local-ws")
-    assert local_ws is not None
-    assert local_ws.linux_group is None
+    # The legacy local workspace was deleted by migration 26 (later in the
+    # chain), which dropped local workspaces entirely. That cleanup is
+    # exercised directly by test_migration_26_drops_local_workspaces.
+    assert upgraded.get_workspace("legacy-local-ws") is None
 
     upgraded.close()
 
@@ -599,5 +610,76 @@ def test_migration_25_adds_created_agent(tmp_path: Path) -> None:
     session = upgraded.get_session("s1")
     assert session is not None
     assert session.created_agent is False  # legacy session, defaulted to 0
+
+    upgraded.close()
+
+
+def test_migration_26_drops_local_workspaces(tmp_path: Path) -> None:
+    """Migration 26 removes local workspaces (and their sessions), drops the
+    type column, and tightens vm_name / linux_group to NOT NULL."""
+    from agentworks.db import MIGRATIONS
+
+    db_path = tmp_path / "m26.db"
+
+    conn = sqlite3.connect(str(db_path))
+    conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS schema_version ("
+        "    version    INTEGER NOT NULL,"
+        "    applied_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))"
+        ")"
+    )
+    for version in range(1, 26):
+        for stmt in MIGRATIONS[version].split(";"):
+            stmt = stmt.strip()
+            if stmt:
+                conn.execute(stmt)
+        conn.execute("INSERT INTO schema_version (version) VALUES (?)", (version,))
+    conn.execute(
+        "INSERT INTO vms (name, platform, admin_username) VALUES ('dev-vm', 'lima', 'admin')"
+    )
+    conn.execute(
+        "INSERT INTO workspaces (name, type, workspace_path, vm_name, linux_group) "
+        "VALUES ('vm-ws', 'vm', '/tmp/vm-ws', 'dev-vm', 'ws--vm-ws')"
+    )
+    conn.execute(
+        "INSERT INTO workspaces (name, type, workspace_path, linux_group) "
+        "VALUES ('local-ws', 'local', '/tmp/local-ws', NULL)"
+    )
+    conn.execute(
+        "INSERT INTO sessions (name, workspace_name, template, mode) "
+        "VALUES ('s-vm', 'vm-ws', 'default', 'admin')"
+    )
+    conn.execute(
+        "INSERT INTO sessions (name, workspace_name, template, mode) "
+        "VALUES ('s-local', 'local-ws', 'default', 'admin')"
+    )
+    conn.commit()
+    conn.close()
+
+    # Open with Database to trigger migration 26.
+    upgraded = Database(db_path)
+
+    cols = [row[1] for row in upgraded._conn.execute("PRAGMA table_info(workspaces)").fetchall()]
+    assert "type" not in cols  # column dropped
+
+    # Verify NOT NULL on vm_name and linux_group
+    not_null = {
+        row[1] for row in upgraded._conn.execute("PRAGMA table_info(workspaces)").fetchall() if row[3] == 1
+    }
+    assert "vm_name" in not_null
+    assert "linux_group" in not_null
+
+    # VM workspace survives; local workspace is gone
+    vm_ws = upgraded.get_workspace("vm-ws")
+    assert vm_ws is not None
+    assert vm_ws.vm_name == "dev-vm"
+    assert vm_ws.linux_group == "ws--vm-ws"
+
+    assert upgraded.get_workspace("local-ws") is None
+
+    # Sessions: the one in the VM workspace survives; the local one was deleted
+    assert upgraded.get_session("s-vm") is not None
+    assert upgraded.get_session("s-local") is None
 
     upgraded.close()

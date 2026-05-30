@@ -159,14 +159,7 @@ def _prompt_workspace(db: Database, workspace: str | None) -> str:
 
     _require_interactive("--workspace")
 
-    options = []
-    for ws in workspaces:
-        label = ws.name
-        if ws.vm_name:
-            label += f"  (vm: {ws.vm_name})"
-        elif ws.type == "local":
-            label += "  (local)"
-        options.append(label)
+    options = [f"{ws.name}  (vm: {ws.vm_name})" for ws in workspaces]
 
     idx = output.choose("Select a workspace:", options)
     return workspaces[idx].name
@@ -543,31 +536,22 @@ def vm_console(
 def workspace_create(
     name: Annotated[str | None, typer.Option("--name", help="Workspace name (prompted if omitted)")] = None,
     vm: Annotated[str | None, typer.Option("--vm", help="Target VM")] = None,
-    local: Annotated[bool, typer.Option("--local", help="Create a local workspace (no VM)")] = False,
     template: Annotated[str | None, typer.Option("--template", help="Workspace template")] = None,
     open_vscode: Annotated[bool, typer.Option("--open-vscode", help="Open in VS Code")] = False,
 ) -> None:
-    """Create a workspace on a VM or locally."""
+    """Create a workspace on a VM."""
     from agentworks.config import load_config
     from agentworks.workspaces.manager import create_workspace
 
-    if local and vm:
-        typer.echo("Error: --local and --vm are mutually exclusive", err=True)
-        raise typer.Exit(1)
-
     db = _get_db()
-
-    # 1. Select target (VM), 2. Name
-    if not local:
-        vm = _prompt_vm(db, vm)
+    resolved_vm = _prompt_vm(db, vm)
     resolved_name = _prompt_name("Workspace", name)
 
     create_workspace(
         db,
         load_config(),
         name=resolved_name,
-        vm_name=vm,
-        local=local,
+        vm_name=resolved_vm,
         template_name=template,
         open_vscode=open_vscode,
     )
@@ -606,17 +590,11 @@ def workspace_console(
 @workspace_app.command("list")
 def workspace_list(
     vm: Annotated[str | None, typer.Option("--vm", help="Filter by VM")] = None,
-    local: Annotated[bool, typer.Option("--local", help="Show only local workspaces")] = False,
 ) -> None:
     """List workspaces."""
     from agentworks.workspaces.manager import list_workspaces
 
-    if local and vm:
-        typer.echo("Error: --local and --vm are mutually exclusive", err=True)
-        raise typer.Exit(1)
-
-    ws_type = "local" if local else None
-    list_workspaces(_get_db(), vm_name=vm, ws_type=ws_type)
+    list_workspaces(_get_db(), vm_name=vm)
 
 
 @workspace_app.command("describe")
@@ -676,15 +654,10 @@ def workspace_copy(
     source: Annotated[str, typer.Argument(help="Source workspace name")],
     name: Annotated[str | None, typer.Option("--name", help="New workspace name (prompted if omitted)")] = None,
     vm: Annotated[str | None, typer.Option("--vm", help="Target VM")] = None,
-    local: Annotated[bool, typer.Option("--local", help="Copy to a local workspace")] = False,
 ) -> None:
-    """Copy a workspace to a new location (VM or local)."""
+    """Copy a workspace to a new VM workspace."""
     from agentworks.config import load_config
     from agentworks.workspaces.manager import copy_workspace
-
-    if local and vm:
-        typer.echo("Error: --local and --vm are mutually exclusive", err=True)
-        raise typer.Exit(1)
 
     resolved_name = _prompt_name("Workspace", name)
     copy_workspace(
@@ -693,7 +666,6 @@ def workspace_copy(
         source,
         dest_name=resolved_name,
         vm_name=vm,
-        local=local,
     )
 
 
@@ -952,12 +924,7 @@ def session_create(
         if new_agent:
             # Agents are VM-scoped; look up the workspace's VM.
             ws_row = db.get_workspace(resolved_workspace)
-            if ws_row is None or ws_row.type != "vm" or ws_row.vm_name is None:
-                typer.echo(
-                    f"Error: --new-agent requires a VM workspace; '{resolved_workspace}' is not.",
-                    err=True,
-                )
-                raise typer.Exit(1)
+            assert ws_row is not None
             resolved_vm = ws_row.vm_name
 
     if new_agent:
@@ -1528,15 +1495,13 @@ def config_sync_vscode_workspaces() -> None:
     config = load_config()
     db = _get_db()
 
-    workspaces = db.list_workspaces(ws_type="vm")
+    workspaces = db.list_workspaces()
     if not workspaces:
-        typer.echo("No VM workspaces found.")
+        typer.echo("No workspaces found.")
         return
 
     count = 0
     for ws in workspaces:
-        if ws.vm_name is None:
-            continue
         vm = db.get_vm(ws.vm_name)
         if vm is None:
             typer.echo(f"  Skipping '{ws.name}': VM '{ws.vm_name}' not found", err=True)
