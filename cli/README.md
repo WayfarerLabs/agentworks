@@ -264,8 +264,8 @@ uv run agentworks config init    # creates ~/.config/agentworks/config.toml
 Edit the config file (at minimum, set your SSH key paths), then:
 
 ```bash
-agentworks vm create          # provision + initialize a VM
-agentworks workspace create   # create a workspace on the VM
+agentworks vm create my-vm                       # provision + initialize a VM
+agentworks workspace create my-workspace         # create a workspace on the VM
 agentworks workspace shell my-workspace
 ```
 
@@ -312,7 +312,7 @@ Manage virtual machines across Lima (local or remote), Azure, and WSL2.
 
 | Command                                          | Description                                |
 | ------------------------------------------------ | ------------------------------------------ |
-| `agentworks vm create`                           | Create a new VM (provision + initialize)   |
+| `agentworks vm create <name>`                    | Create a new VM (provision + initialize)   |
 | `agentworks vm list`                             | List VMs with status and resources         |
 | `agentworks vm describe <name>`                  | Show VM details, workspaces, and event log |
 | `agentworks vm shell <name>`                     | SSH into a VM's home directory             |
@@ -324,9 +324,10 @@ Manage virtual machines across Lima (local or remote), Azure, and WSL2.
 | `agentworks vm console <name>`                   | _Deprecated_: use `agentworks console`     |
 | `agentworks vm add-git-credential <name> <cred>` | Add or update a git credential             |
 
-`vm create` accepts `--name`, `--platform`, `--vm-host`, `--admin-username`, `--cpus`, `--memory`,
-`--disk`, and `--azure-vm-size`. These are immutable provisioning parameters stored in the database.
-All initialization behavior (packages, install commands, etc.) is driven by config.
+`vm create <name>` takes the VM name as a required positional. Optional flags: `--platform`,
+`--vm-host`, `--admin-username`, `--cpus`, `--memory`, `--disk`, and `--azure-vm-size`. These are
+immutable provisioning parameters stored in the database. All initialization behavior (packages,
+install commands, etc.) is driven by config.
 
 `vm reinit` re-runs the initialization phase using the current config without reprovisioning the VM.
 Changes to config (new packages, different install commands, etc.) are picked up automatically.
@@ -340,24 +341,25 @@ Manage workspaces on VMs or locally.
 
 | Command                                | Description                          |
 | -------------------------------------- | ------------------------------------ |
-| `agentworks workspace create`          | Create a workspace (VM or `--local`) |
-| `agentworks workspace describe <name>` | Show workspace details and sessions  |
-| `agentworks workspace shell <name>`    | Open a plain shell into a workspace  |
-| `agentworks workspace console <name>`  | Open the workspace console (tmux)    |
-| `agentworks workspace list`            | List workspaces                      |
-| `agentworks workspace copy <source>`   | Copy a workspace to a new location   |
-| `agentworks workspace rehome <name>`   | Move workspace to a new path         |
-| `agentworks workspace repair <name>`   | Repair workspace infrastructure      |
-| `agentworks workspace delete <name>`   | Delete a workspace                   |
+| `agentworks workspace create <name>`        | Create a workspace (VM or `--local`) |
+| `agentworks workspace describe <name>`      | Show workspace details and sessions  |
+| `agentworks workspace shell <name>`         | Open a plain shell into a workspace  |
+| `agentworks workspace console <name>`       | Open the workspace console (tmux)    |
+| `agentworks workspace list`                 | List workspaces                      |
+| `agentworks workspace copy <source> <name>` | Copy a workspace to a new location   |
+| `agentworks workspace rehome <name>`        | Move workspace to a new path         |
+| `agentworks workspace repair <name>`        | Repair workspace infrastructure      |
+| `agentworks workspace delete <name>`        | Delete a workspace                   |
 
-`workspace create` accepts `--name`, `--vm`, `--local`, `--template`, and `--open-vscode`.
+`workspace create <name>` takes the workspace name as a required positional. Optional flags:
+`--vm`, `--local`, `--template`, and `--open-vscode`.
 
 `workspace console` opens a tmuxinator session (`ws-<name>-console`) with an admin-shell window plus
 one window per session in the workspace. Pass `--recreate` to kill and rebuild the console. This is
 the recommended way to interact with sessions from within VS Code or any terminal on the VM.
 
-`workspace copy` copies a workspace to a new location. Accepts `--name`, `--vm`, and `--local` (same
-pattern as `workspace create`). Works across VMs, VM to local, and local to VM.
+`workspace copy <source> <name>` copies a workspace to a new location. Accepts `--vm` and `--local`
+(same pattern as `workspace create`). Works across VMs, VM to local, and local to VM.
 
 `workspace delete` requires `--force` if the workspace has sessions. Running sessions are killed
 during deletion. Pass `--yes` to skip the confirmation prompt.
@@ -368,7 +370,7 @@ Manage agents (isolated Linux users) on VMs. Agents are VM-scoped and access wor
 
 | Command                                                      | Description                    |
 | ------------------------------------------------------------ | ------------------------------ |
-| `agentworks agent create [--name] [--vm]`                    | Create an agent on a VM        |
+| `agentworks agent create <name> [--vm]`                      | Create an agent on a VM        |
 | `agentworks agent list [--vm <vm>]`                          | List agents                    |
 | `agentworks agent describe <name>`                           | Show agent details and grants  |
 | `agentworks agent reinit <name>`                             | Re-run agent setup             |
@@ -380,7 +382,8 @@ Manage agents (isolated Linux users) on VMs. Agents are VM-scoped and access wor
 | `agentworks agent shell <name> [--workspace <ws>]`           | Shell into an agent            |
 | `agentworks agent delete <name>`                             | Delete an agent                |
 
-`agent create` accepts `--name`, `--vm`, `--template`, and `--grant-all-workspaces`.
+`agent create <name>` takes the agent name as a required positional. Optional flags: `--vm`,
+`--template`, and `--grant-all-workspaces`.
 
 `agent delete` requires `--force` if the agent has running sessions. Pass `--yes` to skip the
 confirmation prompt.
@@ -392,7 +395,7 @@ Manage sessions (persistent tmux sessions running in workspaces). Session names 
 
 | Command                                      | Description                    |
 | -------------------------------------------- | ------------------------------ |
-| `agentworks session create`                  | Create and start a session     |
+| `agentworks session create <name>`           | Create and start a session     |
 | `agentworks session describe <name>`         | Show session details           |
 | `agentworks session list [--workspace <ws>]` | List sessions with status      |
 | `agentworks session attach <name>`           | Attach to a running session    |
@@ -402,15 +405,17 @@ Manage sessions (persistent tmux sessions running in workspaces). Session names 
 | `agentworks session logs <name>`             | Dump session scrollback buffer |
 | `agentworks console attach <name>`           | Attach to a named console      |
 
-`session create` accepts `--name`, `--workspace`, `--template`, `--admin`, and `--agent`. Workspace,
-mode (admin vs agent), and name are prompted interactively if omitted. If agents exist on the VM and
-neither `--admin` nor `--agent` is specified, you are prompted to choose. Pass `--new-workspace` to
-create a workspace on the fly (with optional `--workspace-name`, `--workspace-template`, and
-`--vm`). Pass `--new-agent` to create a new agent for the session (with optional `--agent-name` and
-`--agent-template`); the new agent is provisioned on the workspace's VM. When a session created
-with `--new-workspace` or `--new-agent` is later deleted, you are offered the option to delete the
-workspace and/or agent as well -- the workspace if no other sessions remain on it, the agent if it
-has no other sessions and no explicit grants.
+`session create <name>` takes the session name as a required positional. Optional flags:
+`--workspace`, `--template`, `--admin`, and `--agent`. Workspace and mode (admin vs agent) are
+prompted interactively if omitted; if agents exist on the VM and neither `--admin` nor `--agent`
+is specified, you are prompted to choose. Pass `--new-workspace` to create a workspace on the fly
+(with optional `--workspace-name`, `--workspace-template`, and `--vm`; `--workspace-name` defaults
+to the session name). Pass `--new-agent` to create a new agent for the session (with optional
+`--agent-name` and `--agent-template`; `--agent-name` defaults to the session name); the new agent
+is provisioned on the workspace's VM. When a session created with `--new-workspace` or
+`--new-agent` is later deleted, you are offered the option to delete the workspace and/or agent as
+well -- the workspace if no other sessions remain on it, the agent if it has no other sessions and
+no explicit grants.
 
 ### Named consoles
 
