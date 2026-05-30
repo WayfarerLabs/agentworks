@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import secrets
 from typing import TYPE_CHECKING, Annotated, Protocol
 
 import click
@@ -114,10 +113,6 @@ def _get_db() -> Database:
     return Database()
 
 
-def _generate_name() -> str:
-    return secrets.token_hex(4)
-
-
 def _is_interactive() -> bool:
     """Check if stdin is a TTY and --non-interactive was not passed."""
     import sys
@@ -133,17 +128,6 @@ def _require_interactive(what: str) -> None:
     if not _is_interactive():
         typer.echo(f"Error: {what} is required in non-interactive mode", err=True)
         raise typer.Exit(1)
-
-
-def _prompt_name(label: str, name: str | None) -> str:
-    """Prompt for a name if not provided via --name, showing a random default."""
-    from agentworks import output
-
-    if name is not None:
-        return name
-    _require_interactive("--name")
-    default = _generate_name()
-    return output.prompt(f"{label} name", default=default)
 
 
 def _prompt_workspace(db: Database, workspace: str | None) -> str:
@@ -305,7 +289,7 @@ def vm_host_remove(
 
 @vm_app.command("create")
 def vm_create(
-    name: Annotated[str | None, typer.Option("--name", help="VM name (prompted if omitted)")] = None,
+    name: Annotated[str, typer.Argument(help="VM name")],
     template: Annotated[str | None, typer.Option("--template", help="VM template")] = None,
     platform: Annotated[
         str | None,
@@ -322,12 +306,11 @@ def vm_create(
     from agentworks.config import load_config
     from agentworks.vms.manager import create_vm
 
-    resolved_name = _prompt_name("VM", name)
     config = load_config()
     create_vm(
         _get_db(),
         config,
-        name=resolved_name,
+        name=name,
         template=template,
         platform=platform,
         vm_host=vm_host,
@@ -546,7 +529,7 @@ def vm_console(
 
 @workspace_app.command("create")
 def workspace_create(
-    name: Annotated[str | None, typer.Option("--name", help="Workspace name (prompted if omitted)")] = None,
+    name: Annotated[str, typer.Argument(help="Workspace name")],
     vm: Annotated[str | None, typer.Option("--vm", help="Target VM")] = None,
     local: Annotated[bool, typer.Option("--local", help="Create a local workspace (no VM)")] = False,
     template: Annotated[str | None, typer.Option("--template", help="Workspace template")] = None,
@@ -561,16 +544,13 @@ def workspace_create(
         raise typer.Exit(1)
 
     db = _get_db()
-
-    # 1. Select target (VM), 2. Name
     if not local:
         vm = _prompt_vm(db, vm)
-    resolved_name = _prompt_name("Workspace", name)
 
     create_workspace(
         db,
         load_config(),
-        name=resolved_name,
+        name=name,
         vm_name=vm,
         local=local,
         template_name=template,
@@ -679,7 +659,7 @@ def workspace_delete(
 @workspace_app.command("copy")
 def workspace_copy(
     source: Annotated[str, typer.Argument(help="Source workspace name")],
-    name: Annotated[str | None, typer.Option("--name", help="New workspace name (prompted if omitted)")] = None,
+    name: Annotated[str, typer.Argument(help="New workspace name")],
     vm: Annotated[str | None, typer.Option("--vm", help="Target VM")] = None,
     local: Annotated[bool, typer.Option("--local", help="Copy to a local workspace")] = False,
 ) -> None:
@@ -691,12 +671,11 @@ def workspace_copy(
         typer.echo("Error: --local and --vm are mutually exclusive", err=True)
         raise typer.Exit(1)
 
-    resolved_name = _prompt_name("Workspace", name)
     copy_workspace(
         _get_db(),
         load_config(),
         source,
-        dest_name=resolved_name,
+        dest_name=name,
         vm_name=vm,
         local=local,
     )
@@ -707,7 +686,7 @@ def workspace_copy(
 
 @agent_app.command("create")
 def agent_create(
-    name: Annotated[str | None, typer.Option("--name", help="Agent name (prompted if omitted)")] = None,
+    name: Annotated[str, typer.Argument(help="Agent name")],
     vm: Annotated[str | None, typer.Option("--vm", help="Target VM")] = None,
     template: Annotated[str | None, typer.Option("--template", help="Agent template")] = None,
     grant_all_workspaces: Annotated[
@@ -720,15 +699,12 @@ def agent_create(
     from agentworks.config import load_config
 
     db = _get_db()
-
-    # 1. Select target (VM), 2. Name
     resolved_vm = _prompt_vm(db, vm)
-    resolved_name = _prompt_name("Agent", name)
 
     create_agent(
         db,
         load_config(),
-        name=resolved_name,
+        name=name,
         vm_name=resolved_vm,
         template=template,
         grant_all_workspaces=grant_all_workspaces,
@@ -857,7 +833,7 @@ def agent_delete(
 
 @session_app.command("create")
 def session_create(
-    name: Annotated[str | None, typer.Option("--name", help="Session name (prompted if omitted)")] = None,
+    name: Annotated[str, typer.Argument(help="Session name")],
     workspace: Annotated[str | None, typer.Option("--workspace", help="Existing workspace")] = None,
     template: Annotated[str | None, typer.Option("--template", help="Session template")] = None,
     admin: Annotated[bool, typer.Option("--admin", help="Run as the VM admin user")] = False,
@@ -933,8 +909,7 @@ def session_create(
                 idx = output.choose("Run session as:", options)
                 resolved_agent = None if idx == 0 else vm_agents[idx - 1].name
 
-        resolved_name = _prompt_name("Session", name)
-        resolved_ws_name = resolved_workspace or resolved_name
+        resolved_ws_name = resolved_workspace or name
 
         create_workspace(
             db,
@@ -952,8 +927,6 @@ def session_create(
         if not admin and agent is None and not new_agent:
             resolved_agent = _prompt_session_mode(db, resolved_workspace)
 
-        resolved_name = _prompt_name("Session", name)
-
         if new_agent:
             # Agents are VM-scoped; look up the workspace's VM.
             ws_row = db.get_workspace(resolved_workspace)
@@ -969,7 +942,7 @@ def session_create(
         assert resolved_vm is not None
         from agentworks.agents.manager import create_agent
 
-        resolved_agent_name = agent_name or resolved_name
+        resolved_agent_name = agent_name or name
         create_agent(
             db,
             config,
@@ -982,7 +955,7 @@ def session_create(
     create_session(
         db,
         config,
-        name=resolved_name,
+        name=name,
         workspace_name=resolved_workspace,
         template_name=template,
         agent_name=resolved_agent,
