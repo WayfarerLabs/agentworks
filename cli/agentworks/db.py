@@ -116,6 +116,10 @@ class WorkspaceRow:
     workspace_path: str
     created_at: str
     last_seen_at: str | None
+    # Linux group on the VM. Null for local workspaces. Set at create time
+    # so legacy VM workspaces (created when the prefix was "ws--") keep
+    # their existing group even after the prefix changed to "ws-".
+    linux_group: str | None
 
 
 @dataclass
@@ -438,8 +442,14 @@ MIGRATIONS: dict[int, str] = {
     21: """
         ALTER TABLE sessions ADD COLUMN boot_id TEXT;
     """,
-    # -- Multi-console support: named consoles with explicit session lists --
+    # -- Store workspace Linux group on the row so the prefix can change ----
+    # -- without renaming existing groups on VMs. ---------------------------
     22: """
+        ALTER TABLE workspaces ADD COLUMN linux_group TEXT;
+        UPDATE workspaces SET linux_group = 'ws--' || name WHERE type = 'vm';
+    """,
+    # -- Multi-console support: named consoles with explicit session lists --
+    23: """
         CREATE TABLE consoles (
             name       TEXT PRIMARY KEY,
             vm_name    TEXT NOT NULL REFERENCES vms(name) ON DELETE CASCADE,
@@ -457,7 +467,7 @@ MIGRATIONS: dict[int, str] = {
         CREATE INDEX idx_console_sessions_order ON console_sessions(console_name, position);
     """,
     # -- Optional admin-shell window (legacy vm-console behavior) ----------
-    23: """
+    24: """
         ALTER TABLE consoles ADD COLUMN admin_shell INTEGER NOT NULL DEFAULT 0;
     """,
 }
@@ -704,10 +714,12 @@ class Database:
         workspace_path: str,
         vm_name: str | None = None,
         template: str | None = None,
+        linux_group: str | None = None,
     ) -> WorkspaceRow:
         self._conn.execute(
-            "INSERT INTO workspaces (name, type, vm_name, template, workspace_path) VALUES (?, ?, ?, ?, ?)",
-            (name, ws_type, vm_name, template, workspace_path),
+            "INSERT INTO workspaces (name, type, vm_name, template, workspace_path, linux_group) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (name, ws_type, vm_name, template, workspace_path, linux_group),
         )
         self._conn.commit()
         result = self.get_workspace(name)
@@ -1235,6 +1247,7 @@ def _to_workspace(row: sqlite3.Row) -> WorkspaceRow:
         workspace_path=row["workspace_path"],
         created_at=row["created_at"],
         last_seen_at=row["last_seen_at"],
+        linux_group=row["linux_group"],
     )
 
 

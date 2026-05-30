@@ -15,8 +15,8 @@ if TYPE_CHECKING:
     from agentworks.db import Database, VMRow, WorkspaceRow
     from agentworks.ssh import ExecTarget, SSHLogger, SSHResult
 
-AGENT_PREFIX = "agt--"
-WS_GROUP_PREFIX = "ws--"
+AGENT_PREFIX = "agt-"
+WS_GROUP_PREFIX = "ws-"
 
 
 def _run_as_agent(
@@ -67,12 +67,24 @@ def _write_agent_file(
 
 
 def derive_linux_user(agent_name: str) -> str:
-    """Derive the Linux username for an agent: agt--<name>."""
+    """Derive the Linux username for a newly-created agent: agt-<name>.
+
+    Existing agents retain whatever username was stored in the database at
+    their creation time (older agents use the legacy agt-- prefix). Always
+    read agent_row.linux_user for the canonical value; this helper is only
+    used at agent-create time.
+    """
     return f"{AGENT_PREFIX}{agent_name}"
 
 
 def workspace_group(workspace_name: str) -> str:
-    """Derive the Linux group name for a workspace: ws--<name>."""
+    """Derive the Linux group name for a newly-created workspace: ws-<name>.
+
+    Existing workspaces retain whatever group was stored in the database at
+    their creation time (legacy workspaces use the older ws-- prefix).
+    Always read workspace_row.linux_group for the canonical value; this
+    helper is only used at workspace-create time.
+    """
     return f"{WS_GROUP_PREFIX}{workspace_name}"
 
 
@@ -130,7 +142,7 @@ def create_agent(
         workspaces = db.list_workspaces(vm_name=vm_name)
         for ws in workspaces:
             if ws.type == "vm":
-                _add_to_workspace_group(vm, config, linux_user, ws.name, logger=None)
+                _add_to_workspace_group(vm, config, db, linux_user, ws.name, logger=None)
                 db.insert_agent_grant(name, ws.name, "explicit")
 
     output.info(f"Agent '{name}' created on VM '{vm_name}' (user: {agent.linux_user})")
@@ -212,7 +224,7 @@ def delete_agent(
     # Remove from all workspace groups
     granted_workspaces = db.list_granted_workspaces(name)
     for ws_name in granted_workspaces:
-        _remove_from_workspace_group(vm, config, agent.linux_user, ws_name, logger=ssh_logger)
+        _remove_from_workspace_group(vm, config, db, agent.linux_user, ws_name, logger=ssh_logger)
 
     _delete_agent_on_vm(vm, config, agent.linux_user, logger=ssh_logger)
     ssh_logger.close()
@@ -278,7 +290,7 @@ def revoke_workspace_grants(
     agents = db.list_agents(vm_name=vm.name)
     for agent in agents:
         if db.has_any_grant(agent.name, ws_name):
-            _remove_from_workspace_group(vm, config, agent.linux_user, ws_name, logger=ssh_logger)
+            _remove_from_workspace_group(vm, config, db, agent.linux_user, ws_name, logger=ssh_logger)
     ssh_logger.close()
 
 
@@ -458,7 +470,7 @@ def grant_workspaces(
         workspaces = db.list_workspaces(vm_name=vm.name)
         for ws in workspaces:
             if ws.type == "vm":
-                _add_to_workspace_group(vm, config, agent.linux_user, ws.name, logger=None)
+                _add_to_workspace_group(vm, config, db, agent.linux_user, ws.name, logger=None)
                 db.insert_agent_grant(agent_name, ws.name, "explicit")
         output.info(f"Agent '{agent_name}' granted access to all workspaces")
         return
@@ -468,7 +480,7 @@ def grant_workspaces(
         if found_ws is None:
             output.warn(f"workspace '{ws_name}' not found, skipping")
             continue
-        _add_to_workspace_group(vm, config, agent.linux_user, ws_name, logger=None)
+        _add_to_workspace_group(vm, config, db, agent.linux_user, ws_name, logger=None)
         db.insert_agent_grant(agent_name, ws_name, "explicit")
         output.detail(f"Granted: {ws_name}")
 
@@ -498,7 +510,7 @@ def deny_workspaces(
             if db.has_any_grant(agent_name, ws_name):
                 remaining_implicit.append(ws_name)
             else:
-                _remove_from_workspace_group(vm, config, agent.linux_user, ws_name, logger=None)
+                _remove_from_workspace_group(vm, config, db, agent.linux_user, ws_name, logger=None)
         output.info(f"All explicit grants removed for agent '{agent_name}'")
         if remaining_implicit:
             output.warn(
@@ -509,7 +521,7 @@ def deny_workspaces(
     for ws_name in workspace_names:
         db.delete_agent_grant(agent_name, ws_name, "explicit")
         if not db.has_any_grant(agent_name, ws_name):
-            _remove_from_workspace_group(vm, config, agent.linux_user, ws_name, logger=None)
+            _remove_from_workspace_group(vm, config, db, agent.linux_user, ws_name, logger=None)
             output.detail(f"Denied: {ws_name}")
         else:
             output.detail(f"Denied: {ws_name} (still has implicit access via sessions)")
@@ -548,9 +560,25 @@ def list_grants(
 # -- VM operations ---------------------------------------------------------
 
 
+def _resolve_ws_group(db: Database, workspace_name: str) -> str:
+    """Look up the Linux group stored for a workspace.
+
+    Callers must use the recorded group rather than re-deriving it, so
+    legacy workspaces (with the older ws-- prefix on their on-VM group)
+    keep working after the prefix change.
+    """
+    ws = db.get_workspace(workspace_name)
+    if ws is None:
+        raise AgentError(f"workspace '{workspace_name}' not found")
+    if ws.linux_group is None:
+        raise AgentError(f"workspace '{workspace_name}' has no Linux group recorded")
+    return ws.linux_group
+
+
 def _add_to_workspace_group(
     vm: VMRow,
     config: Config,
+    db: Database,
     linux_user: str,
     workspace_name: str,
     *,
@@ -558,7 +586,7 @@ def _add_to_workspace_group(
 ) -> None:
     """Add an agent user to a workspace's Linux group."""
     target = admin_exec_target(vm, config, logger=logger)
-    ws_grp = workspace_group(workspace_name)
+    ws_grp = _resolve_ws_group(db, workspace_name)
     # Ensure group exists (idempotent)
     target.run(f"sh -c 'getent group {ws_grp} >/dev/null 2>&1 || /usr/sbin/groupadd {ws_grp}'", sudo=True)
     target.run(f"usermod -aG {ws_grp} {linux_user}", sudo=True)
@@ -567,6 +595,7 @@ def _add_to_workspace_group(
 def _remove_from_workspace_group(
     vm: VMRow,
     config: Config,
+    db: Database,
     linux_user: str,
     workspace_name: str,
     *,
@@ -574,7 +603,7 @@ def _remove_from_workspace_group(
 ) -> None:
     """Remove an agent user from a workspace's Linux group."""
     target = admin_exec_target(vm, config, logger=logger)
-    ws_grp = workspace_group(workspace_name)
+    ws_grp = _resolve_ws_group(db, workspace_name)
     target.run(f"gpasswd -d {linux_user} {ws_grp}", sudo=True, check=False)
 
 

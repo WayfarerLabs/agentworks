@@ -11,6 +11,8 @@ jobs:
       # release-please-action@v4 still declares node20; force node24 on the runner.
       # Remove once the action publishes a node24 release (see googleapis/release-please-action#1192).
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+    outputs:
+      pr_branch: ${{ steps.extract.outputs.pr_branch }}
     steps:
       # Use a GitHub App token so the release PR (and any subsequent pushes
       # to its branch) trigger CI workflows. The default GITHUB_TOKEN creates
@@ -22,7 +24,57 @@ jobs:
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
 
       - uses: googleapis/release-please-action@v4
+        id: release
         with:
           token: ${{ steps.app-token.outputs.token }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+
+      - name: Extract release PR branch
+        id: extract
+        if: steps.release.outputs.pr
+        run: |
+          branch=$(echo '${{ steps.release.outputs.pr }}' | jq -r .headBranchName)
+          echo "pr_branch=$branch" >> "$GITHUB_OUTPUT"
+
+  sync-lockfile:
+    # release-please bumps cli/pyproject.toml's version but leaves the matching
+    # entry in cli/uv.lock stale. Re-lock on the release PR branch so the
+    # lockfile bump lands in the same PR. See issue #49.
+    needs: release-please
+    if: needs.release-please.outputs.pr_branch
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cli
+    steps:
+      - uses: actions/create-github-app-token@v3
+        id: app-token
+        with:
+          app-id: ${{ vars.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.release-please.outputs.pr_branch }}
+          token: ${{ steps.app-token.outputs.token }}
+          fetch-depth: 0
+
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Re-lock (preserves existing pins; only the workspace version moves)
+        run: uv lock
+
+      - name: Commit lockfile if changed
+        run: |
+          git config user.name "wf-release[bot]"
+          git config user.email "wf-release[bot]@users.noreply.github.com"
+          git add uv.lock
+          if git diff --cached --quiet; then
+            echo "Lockfile already in sync"
+          else
+            git commit -m "chore: sync uv.lock after version bump"
+            git push
+          fi

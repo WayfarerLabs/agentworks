@@ -10,9 +10,9 @@ from agentworks.agents.manager import derive_linux_user, workspace_group
 @pytest.mark.parametrize(
     "agent,expected",
     [
-        ("coder", "agt--coder"),
-        ("reviewer", "agt--reviewer"),
-        ("a", "agt--a"),
+        ("coder", "agt-coder"),
+        ("reviewer", "agt-reviewer"),
+        ("a", "agt-a"),
     ],
 )
 def test_derive_linux_user(agent: str, expected: str) -> None:
@@ -22,8 +22,8 @@ def test_derive_linux_user(agent: str, expected: str) -> None:
 @pytest.mark.parametrize(
     "ws_name,expected",
     [
-        ("myproject", "ws--myproject"),
-        ("dev", "ws--dev"),
+        ("myproject", "ws-myproject"),
+        ("dev", "ws-dev"),
     ],
 )
 def test_workspace_group(ws_name: str, expected: str) -> None:
