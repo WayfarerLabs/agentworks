@@ -31,6 +31,15 @@ def _install_bash(script: str) -> None:
     target.write_text(script)
     typer.echo(f"Installed to {target}")
 
+    # bash-completion lazy-loads completion files keyed by command name, so
+    # the `complete -F _agentworks agw` line inside the agentworks file isn't
+    # reached when typing `agw<TAB>` (bash looks for a file literally named
+    # `agw`). Drop a symlink so either command triggers the same script.
+    alias_link = target_dir / "agw"
+    alias_link.unlink(missing_ok=True)
+    alias_link.symlink_to("agentworks")
+    typer.echo(f"Linked    {alias_link} -> agentworks")
+
     # Check if bash-completion is likely available
     bashrc = Path.home() / ".bashrc"
     if bashrc.exists():

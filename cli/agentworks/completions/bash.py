@@ -46,8 +46,10 @@ def generate_bash(spec: CommandSpec, version: str) -> str:
     lines.append("# Install:")
     lines.append("#   mkdir -p ~/.local/share/bash-completion/completions")
     lines.append("#   agentworks completion bash > ~/.local/share/bash-completion/completions/agentworks")
+    lines.append("#   ln -sf agentworks ~/.local/share/bash-completion/completions/agw")
+    lines.append("#   (bash-completion is name-keyed; the symlink lets 'agw<TAB>' load the same file.)")
     lines.append("#")
-    lines.append("# Or source directly in ~/.bashrc:")
+    lines.append("# Or source directly in ~/.bashrc (no symlink needed):")
     lines.append('#   eval "$(agentworks completion bash)"')
     lines.append("")
 
@@ -68,6 +70,7 @@ def generate_bash(spec: CommandSpec, version: str) -> str:
     lines.append("}")
     lines.append("")
     lines.append("complete -F _agentworks agentworks")
+    lines.append("complete -F _agentworks agw")
     lines.append("")
 
     return "\n".join(lines)
