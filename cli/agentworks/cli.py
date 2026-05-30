@@ -1138,7 +1138,10 @@ def console_create(
         bool,
         typer.Option(
             "--all-running",
-            help="Like --all but only sessions whose last-known state is running",
+            help=(
+                "Like --all but only sessions whose live tmux state is OK "
+                "(one SSH probe; VM must be reachable)"
+            ),
         ),
     ] = False,
     add_admin_shell: Annotated[

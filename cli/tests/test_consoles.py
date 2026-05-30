@@ -404,6 +404,27 @@ def test_create_console_explicit_specs(db: Database, captured_output: CapturedOu
     ]
 
 
+def test_running_session_names_raises_on_unreachable(
+    db: Database, fake_target: _FakeTarget
+) -> None:
+    """If sessions exist with valid pid+boot_id but the probe returns nothing,
+    treat that as a transport failure and raise instead of silently reporting
+    'no running sessions'."""
+    from agentworks.sessions.multi_console import running_session_names
+
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["alpha"])
+    db._conn.execute(
+        "UPDATE sessions SET pid = 100, boot_id = 'b' WHERE name = 'alpha'"
+    )
+    db._conn.commit()
+    # Probe returns empty stdout (simulates transport failure caught by check=False).
+    fake_target.run = lambda command, **kwargs: _FakeResult(returncode=255, stdout="")  # type: ignore[assignment]
+
+    with pytest.raises(output.ConsoleError, match="could not determine running"):
+        running_session_names(db, _StubConfig(), "vm1")
+
+
 def test_running_session_names_uses_live_status_check(
     db: Database, fake_target: _FakeTarget
 ) -> None:

@@ -116,14 +116,33 @@ def running_session_names(
     """SSH-probe the VM and return names of sessions whose live tmux state is OK.
 
     Uses the same one-round-trip-per-VM check that powers ``aw session list``.
-    Returns alphabetically sorted names. Unreachable VMs produce an empty list
-    plus a warning from the underlying status checker.
+    Returns alphabetically sorted names.
+
+    Raises ConsoleError when the VM has sessions eligible to be probed (valid
+    PID + boot_id) but the probe came back empty -- almost always a transport
+    failure that we don't want to silently report as "nothing running". A VM
+    with zero eligible sessions simply returns an empty list.
     """
-    from agentworks.db import SessionStatus
+    from agentworks.db import PID_STOPPED, SessionStatus
     from agentworks.sessions.manager import batch_check_all_sessions, filter_sessions
 
     sessions = filter_sessions(db, vm_name=vm_name)
     status_map = batch_check_all_sessions(sessions, db=db, config=config)
+
+    # If we have sessions that *should* have been probed but none came back
+    # with a status, the probe almost certainly failed (e.g. SSH unreachable).
+    # batch_check_all_sessions warns on exceptions but returns silently on
+    # `check=False` non-zero exits, so we cannot rely on the warning alone.
+    checkable = [
+        s for s in sessions
+        if s.pid is not None and s.pid != PID_STOPPED and s.pid > 0 and s.boot_id
+    ]
+    if checkable and not status_map:
+        raise output.ConsoleError(
+            f"could not determine running sessions on VM '{vm_name}' "
+            f"(status probe returned no results -- check VM reachability)"
+        )
+
     return sorted(
         s.name for s in sessions if status_map.get(s.name) == SessionStatus.OK
     )
