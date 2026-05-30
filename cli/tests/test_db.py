@@ -654,6 +654,17 @@ def test_migration_26_drops_local_workspaces(tmp_path: Path) -> None:
         "INSERT INTO sessions (name, workspace_name, template, mode) "
         "VALUES ('s-local', 'local-ws', 'default', 'admin')"
     )
+    # Agent grants are normally VM-scoped, but defensively seed one against
+    # the local workspace to confirm migration 26 cleans it up before
+    # rebuilding (FKs are disabled during the migration loop, so the
+    # ON DELETE CASCADE would not fire on its own).
+    conn.execute(
+        "INSERT INTO agents (name, vm_name, linux_user) VALUES ('coder', 'dev-vm', 'agt-coder')"
+    )
+    conn.execute(
+        "INSERT INTO agent_workspace_grants (agent_name, workspace_name, grant_type) "
+        "VALUES ('coder', 'local-ws', 'explicit')"
+    )
     conn.commit()
     conn.close()
 
@@ -681,5 +692,9 @@ def test_migration_26_drops_local_workspaces(tmp_path: Path) -> None:
     # Sessions: the one in the VM workspace survives; the local one was deleted
     assert upgraded.get_session("s-vm") is not None
     assert upgraded.get_session("s-local") is None
+
+    # Agent grant against the local workspace was cleaned up (would otherwise
+    # show as an FK violation in foreign_key_check at end of migration).
+    assert upgraded.list_granted_workspaces("coder") == []
 
     upgraded.close()

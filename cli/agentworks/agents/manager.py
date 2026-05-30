@@ -566,8 +566,6 @@ def _resolve_ws_group(db: Database, workspace_name: str) -> str:
     ws = db.get_workspace(workspace_name)
     if ws is None:
         raise AgentError(f"workspace '{workspace_name}' not found")
-    if ws.linux_group is None:
-        raise AgentError(f"workspace '{workspace_name}' has no Linux group recorded")
     return ws.linux_group
 
 
@@ -1113,7 +1111,6 @@ def _require_workspace(db: Database, workspace_name: str) -> WorkspaceRow:
 
 
 def _require_vm_for_workspace(db: Database, ws: WorkspaceRow) -> VMRow:
-    assert ws.vm_name is not None
     vm = db.get_vm(ws.vm_name)
     if vm is None:
         raise VMError(f"VM '{ws.vm_name}' not found")

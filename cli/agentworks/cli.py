@@ -956,7 +956,7 @@ def session_create(
 def _prompt_session_mode(db: Database, workspace_name: str) -> str | None:
     """Prompt for admin vs agent mode. Returns agent name or None for admin."""
     ws = db.get_workspace(workspace_name)
-    if ws is None or ws.vm_name is None:
+    if ws is None:
         return None
 
     from agentworks import output

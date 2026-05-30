@@ -651,11 +651,10 @@ def delete_workspace(
     db.delete_sessions_for_workspace(name)
 
     # Revoke agent workspace grants (agents are VM-scoped, not deleted with workspaces)
-    vm_for_grants = db.get_vm(ws.vm_name)
-    if vm_for_grants:
+    if vm is not None:
         from agentworks.agents.manager import revoke_workspace_grants
 
-        revoke_workspace_grants(db, config, name, vm_for_grants)
+        revoke_workspace_grants(db, config, name, vm)
 
     if vm is not None:
         from agentworks.workspaces.backends.vm import delete_vm_workspace

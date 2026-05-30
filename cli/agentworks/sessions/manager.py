@@ -880,7 +880,7 @@ def stop_all_sessions(
     vm_targets: dict[str, ExecTarget] = {}
     for s in alive_sessions:
         ws = db.get_workspace(s.workspace_name)
-        if ws and ws.vm_name and ws.vm_name not in vm_targets:
+        if ws and ws.vm_name not in vm_targets:
             vm = db.get_vm(ws.vm_name)
             if vm and vm.tailscale_host:
                 vm_targets[ws.vm_name] = admin_exec_target(vm, config)
@@ -889,7 +889,7 @@ def stop_all_sessions(
     stop_targets: list[tuple[SessionRow, ExecTarget]] = []
     for s in alive_sessions:
         ws = db.get_workspace(s.workspace_name)
-        if ws and ws.vm_name and ws.vm_name in vm_targets:
+        if ws and ws.vm_name in vm_targets:
             stop_targets.append((s, vm_targets[ws.vm_name]))
 
     failed = _execute_stop(stop_targets, db=db, force=force)
@@ -1206,7 +1206,7 @@ def list_sessions(
     rows: list[tuple[str, str, str, str, str, str]] = []
     for ws_name, ws_sessions in sorted(by_workspace.items()):
         ws = db.get_workspace(ws_name)
-        vm_name = ws.vm_name or "-" if ws else "-"
+        vm_name = ws.vm_name if ws else "-"
 
         for session in ws_sessions:
             if no_status:

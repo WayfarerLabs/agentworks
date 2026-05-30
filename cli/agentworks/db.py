@@ -486,6 +486,10 @@ MIGRATIONS: dict[int, str] = {
             SELECT name FROM workspaces
             WHERE type != 'vm' OR vm_name IS NULL OR linux_group IS NULL
         );
+        DELETE FROM agent_workspace_grants WHERE workspace_name IN (
+            SELECT name FROM workspaces
+            WHERE type != 'vm' OR vm_name IS NULL OR linux_group IS NULL
+        );
         DELETE FROM workspaces
             WHERE type != 'vm' OR vm_name IS NULL OR linux_group IS NULL;
         CREATE TABLE workspaces_new (
@@ -593,6 +597,9 @@ class Database:
         # momentarily invalidate FK references that hold by name -- the
         # SQLite-recommended pattern is to disable FKs around the rebuild
         # and run a foreign_key_check at the end to confirm consistency.
+        # Note: sqlite3 auto-commits DDL, so a mid-loop failure can leave
+        # the DB partially migrated. The foreign_key_check is best-effort
+        # consistency verification, not a full transactional guard.
         self._conn.commit()
         self._conn.execute("PRAGMA foreign_keys = OFF")
         try:
@@ -602,12 +609,12 @@ class Database:
                     if stmt:
                         self._conn.execute(stmt)
                 self._conn.execute("INSERT INTO schema_version (version) VALUES (?)", (version,))
-            self._conn.commit()
             violations = self._conn.execute("PRAGMA foreign_key_check").fetchall()
             if violations:
                 raise sqlite3.IntegrityError(
                     f"foreign key violations after migration: {violations}"
                 )
+            self._conn.commit()
         finally:
             self._conn.execute("PRAGMA foreign_keys = ON")
 
