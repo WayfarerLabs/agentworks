@@ -151,6 +151,7 @@ class SessionRow:
     updated_at: str
     agent_name: str | None = None
     created_workspace: bool = False
+    created_agent: bool = False
     socket_path: str | None = None
     pid: int | None = None
     boot_id: str | None = None
@@ -469,6 +470,11 @@ MIGRATIONS: dict[int, str] = {
     # -- Optional admin-shell window (legacy vm-console behavior) ----------
     24: """
         ALTER TABLE consoles ADD COLUMN admin_shell INTEGER NOT NULL DEFAULT 0;
+    """,
+    # -- Track sessions that created their own agent (parallel to ----------
+    # -- created_workspace) so session delete can offer cleanup. -----------
+    25: """
+        ALTER TABLE sessions ADD COLUMN created_agent INTEGER NOT NULL DEFAULT 0;
     """,
 }
 
@@ -952,12 +958,23 @@ class Database:
         mode: SessionMode,
         agent_name: str | None = None,
         created_workspace: bool = False,
+        created_agent: bool = False,
         socket_path: str | None = None,
     ) -> SessionRow:
         self._conn.execute(
-            "INSERT INTO sessions (name, workspace_name, template, mode, agent_name, created_workspace, socket_path)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (name, workspace_name, template, mode.value, agent_name, int(created_workspace), socket_path),
+            "INSERT INTO sessions "
+            "(name, workspace_name, template, mode, agent_name, created_workspace, created_agent, socket_path)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                name,
+                workspace_name,
+                template,
+                mode.value,
+                agent_name,
+                int(created_workspace),
+                int(created_agent),
+                socket_path,
+            ),
         )
         self._conn.commit()
         result = self.get_session(name)
@@ -1282,6 +1299,7 @@ def _to_session(row: sqlite3.Row) -> SessionRow:
         updated_at=row["updated_at"],
         agent_name=row["agent_name"],
         created_workspace=bool(row["created_workspace"]),
+        created_agent=bool(row["created_agent"]),
         socket_path=row["socket_path"],
         pid=row["pid"],
         boot_id=row["boot_id"],

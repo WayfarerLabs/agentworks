@@ -553,3 +553,51 @@ def test_migration_22_adds_and_backfills_linux_group(tmp_path: Path) -> None:
     assert local_ws.linux_group is None
 
     upgraded.close()
+
+
+def test_migration_25_adds_created_agent(tmp_path: Path) -> None:
+    """Migration 25 adds created_agent to sessions, defaulting to 0 for legacy rows."""
+    from agentworks.db import MIGRATIONS
+
+    db_path = tmp_path / "m25.db"
+
+    # Build a DB at v24 (no created_agent column yet) with one session.
+    conn = sqlite3.connect(str(db_path))
+    conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS schema_version ("
+        "    version    INTEGER NOT NULL,"
+        "    applied_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))"
+        ")"
+    )
+    for version in range(1, 25):
+        for stmt in MIGRATIONS[version].split(";"):
+            stmt = stmt.strip()
+            if stmt:
+                conn.execute(stmt)
+        conn.execute("INSERT INTO schema_version (version) VALUES (?)", (version,))
+    conn.execute(
+        "INSERT INTO vms (name, platform, admin_username) VALUES ('dev-vm', 'lima', 'admin')"
+    )
+    conn.execute(
+        "INSERT INTO workspaces (name, type, workspace_path, vm_name, linux_group) "
+        "VALUES ('ws', 'vm', '/tmp/ws', 'dev-vm', 'ws-ws')"
+    )
+    conn.execute(
+        "INSERT INTO sessions (name, workspace_name, template, mode) "
+        "VALUES ('s1', 'ws', 'default', 'admin')"
+    )
+    conn.commit()
+    conn.close()
+
+    # Open with Database to trigger migration 25.
+    upgraded = Database(db_path)
+
+    cols = [row[1] for row in upgraded._conn.execute("PRAGMA table_info(sessions)").fetchall()]
+    assert "created_agent" in cols
+
+    session = upgraded.get_session("s1")
+    assert session is not None
+    assert session.created_agent is False  # legacy session, defaulted to 0
+
+    upgraded.close()

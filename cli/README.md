@@ -406,8 +406,11 @@ Manage sessions (persistent tmux sessions running in workspaces). Session names 
 mode (admin vs agent), and name are prompted interactively if omitted. If agents exist on the VM and
 neither `--admin` nor `--agent` is specified, you are prompted to choose. Pass `--new-workspace` to
 create a workspace on the fly (with optional `--workspace-name`, `--workspace-template`, and
-`--vm`). When a session created with `--new-workspace` is later deleted, you are offered the option
-to delete the workspace as well (if no other sessions remain).
+`--vm`). Pass `--new-agent` to create a new agent for the session (with optional `--agent-name` and
+`--agent-template`); the new agent is provisioned on the workspace's VM. When a session created
+with `--new-workspace` or `--new-agent` is later deleted, you are offered the option to delete the
+workspace and/or agent as well -- the workspace if no other sessions remain on it, the agent if it
+has no other sessions and no explicit grants.
 
 ### Named consoles
 
