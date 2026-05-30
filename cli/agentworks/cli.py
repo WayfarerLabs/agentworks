@@ -909,7 +909,7 @@ def session_create(
                 resolved_agent = None if idx == 0 else vm_agents[idx - 1].name
 
         resolved_name = _prompt_name("Session", name)
-        resolved_ws_name = resolved_workspace or f"ws-{resolved_name}"
+        resolved_ws_name = resolved_workspace or resolved_name
 
         create_workspace(
             db,
