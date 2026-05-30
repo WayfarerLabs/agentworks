@@ -373,11 +373,11 @@ def _check_completions(current_version: str) -> HealthGroup:
             if installed_version == current_version:
                 g.ok(shell_name, "up to date")
             elif installed_version is None:
-                g.warn(shell_name, f"no version stamp. See: agentworks completion {shell_name} --help")
+                g.warn(shell_name, f"no version stamp. Re-run: agentworks completion install --shell {shell_name}")
             else:
-                g.warn(shell_name, f"stale. See: agentworks completion {shell_name} --help")
+                g.warn(shell_name, f"stale. Re-run: agentworks completion install --shell {shell_name}")
     if not any_found:
-        g.ok("Completions", "none installed (install with: agentworks completion <shell> --install)")
+        g.ok("Completions", "none installed (install with: agentworks completion install)")
 
     return g
 

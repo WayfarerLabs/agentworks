@@ -110,6 +110,80 @@ def _vm_sessions(db: Database, vm_name: str) -> list[SessionRow]:
     return sessions
 
 
+def running_session_names(
+    db: Database, config: Config, vm_name: str
+) -> list[str]:
+    """SSH-probe the VM and return names of sessions whose live tmux state is OK.
+
+    Uses the same one-round-trip-per-VM check that powers ``aw session list``.
+    Returns alphabetically sorted names.
+
+    Raises ConsoleError when the VM has sessions eligible to be probed (valid
+    PID + boot_id) but the probe came back empty -- almost always a transport
+    failure that we don't want to silently report as "nothing running". A VM
+    with zero eligible sessions simply returns an empty list.
+    """
+    from agentworks.db import PID_STOPPED, SessionStatus
+    from agentworks.sessions.manager import batch_check_all_sessions, filter_sessions
+
+    sessions = filter_sessions(db, vm_name=vm_name)
+    status_map = batch_check_all_sessions(sessions, db=db, config=config)
+
+    # If we have sessions that *should* have been probed but none came back
+    # with a status, the probe almost certainly failed (e.g. SSH unreachable).
+    # batch_check_all_sessions warns on exceptions but returns silently on
+    # `check=False` non-zero exits, so we cannot rely on the warning alone.
+    checkable = [
+        s for s in sessions
+        if s.pid is not None and s.pid != PID_STOPPED and s.pid > 0 and s.boot_id
+    ]
+    if checkable and not status_map:
+        raise output.ConsoleError(
+            f"could not determine running sessions on VM '{vm_name}' "
+            f"(status probe returned no results -- check VM reachability)"
+        )
+
+    return sorted(
+        s.name for s in sessions if status_map.get(s.name) == SessionStatus.OK
+    )
+
+
+def infer_vm_from_session_specs(
+    db: Database, session_specs: list[str]
+) -> str | None:
+    """Return the single VM hosting all listed sessions.
+
+    - Returns None if *session_specs* is empty or none of the names resolve to
+      a known session (callers prompt for --vm or surface the not-found error
+      from create_console).
+    - Raises ConsoleError if listed sessions span more than one VM (the user
+      must disambiguate with --vm explicitly).
+    """
+    if not session_specs:
+        return None
+
+    vms: set[str] = set()
+    for spec in session_specs:
+        try:
+            session_name = parse_session_spec(spec).name
+        except output.ValidationError:
+            # Bad spec -- defer the error to create_console's own validation.
+            continue
+        session = db.get_session(session_name)
+        if session is None:
+            continue
+        ws = db.get_workspace(session.workspace_name)
+        if ws and ws.vm_name:
+            vms.add(ws.vm_name)
+
+    if len(vms) > 1:
+        raise output.ConsoleError(
+            f"sessions span multiple VMs ({', '.join(sorted(vms))}); "
+            f"pass --vm to pick one"
+        )
+    return next(iter(vms)) if vms else None
+
+
 def _verify_session_on_vm(db: Database, session_name: str, vm_name: str) -> None:
     """Raise if the session does not exist or is not on the given VM."""
     session = db.get_session(session_name)
@@ -155,13 +229,16 @@ def create_console(
 ) -> None:
     """Create a new console with the given sessions.
 
-    Explicit *session_specs* keep their argument order. When *fill_all* is
-    True, every other session on the VM is appended in alphabetical order
-    with zero shells. When *add_admin_shell* is True, the tmux build will
-    also include a window 0 running a login shell as the VM admin (legacy
+    Explicit *session_specs* keep their argument order. *fill_all* appends
+    every other session on the VM in alphabetical order with zero shells.
+    *add_admin_shell* adds a window 0 login shell as the VM admin (legacy
     vm-console behavior) -- useful when you want a top-level shell alongside
     the curated session windows. All inserts run in one transaction; the
     console is not created if any step fails.
+
+    Note: this function is DB-only. Live filtering (e.g. --all-running) is
+    resolved by the CLI layer into an explicit list of session names before
+    calling create_console.
     """
     validate_name(name)
 

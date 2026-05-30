@@ -17,8 +17,8 @@ app = typer.Typer(
     help="Orchestrate workspace lifecycle across multiple compute targets.",
     no_args_is_help=True,
     # Suppress typer's generic --install-completion / --show-completion flags
-    # in favor of the project's hand-rolled `agentworks completion <shell>`
-    # subcommand, which emits scripts with the dynamic completers (vms,
+    # in favor of the project's hand-rolled `agentworks completion show|install`
+    # subcommands, which emit scripts with the dynamic completers (vms,
     # workspaces, sessions, agents, consoles, ...).
     add_completion=False,
 )
@@ -1154,12 +1154,28 @@ def console_create(
             help="Sessions to include. Use 'name' or 'name+N' for N default shells.",
         ),
     ] = None,
-    vm: Annotated[str | None, typer.Option("--vm", help="Target VM")] = None,
+    vm: Annotated[
+        str | None,
+        typer.Option(
+            "--vm",
+            help="Target VM (inferred from listed sessions; otherwise auto-picked or prompted)",
+        ),
+    ] = None,
     all_sessions: Annotated[
         bool,
         typer.Option(
             "--all",
             help="Fill in every other session on the VM (0 shells each, alphabetical) after the explicit specs",
+        ),
+    ] = False,
+    all_running: Annotated[
+        bool,
+        typer.Option(
+            "--all-running",
+            help=(
+                "Like --all but only sessions whose live tmux state is OK "
+                "(one SSH probe; VM must be reachable)"
+            ),
         ),
     ] = False,
     add_admin_shell: Annotated[
@@ -1171,15 +1187,54 @@ def console_create(
     ] = False,
 ) -> None:
     """Create a named console with a curated set of sessions."""
-    from agentworks.sessions.multi_console import create_console
+    from agentworks.sessions.multi_console import (
+        create_console,
+        infer_vm_from_session_specs,
+        parse_session_spec,
+        running_session_names,
+    )
+
+    if all_sessions and all_running:
+        raise typer.BadParameter("use --all or --all-running, not both")
+
+    # Validate every spec up front so bad input (e.g. 'bad+nope') fails before
+    # we prompt for a VM or hit the network on --all-running.
+    specs = list(sessions or [])
+    for s in specs:
+        parse_session_spec(s)
 
     db = _get_db()
+    # Resolve target VM:
+    #   1. explicit --vm  -> validated by _prompt_vm
+    #   2. inferred from listed sessions
+    #   3. fall back to interactive/auto prompt
+    if vm is None:
+        vm = infer_vm_from_session_specs(db, specs)
     resolved_vm = _prompt_vm(db, vm)
+
+    if all_running:
+        # Live SSH probe (one round-trip per VM) so --all-running reflects
+        # reality, not stale DB state.
+        from agentworks.config import load_config
+
+        running = running_session_names(db, load_config(), resolved_vm.name)
+        explicit_names = {parse_session_spec(s).name for s in specs}
+        extras = [n for n in running if n not in explicit_names]
+        if not specs and not extras and not add_admin_shell:
+            typer.echo(
+                f"Error: no running sessions on VM '{resolved_vm.name}'. "
+                "Pass --all to include stopped sessions, list sessions explicitly, "
+                "or pass --add-admin-shell.",
+                err=True,
+            )
+            raise typer.Exit(1)
+        specs.extend(extras)
+
     create_console(
         db,
         name=name,
         vm_name=resolved_vm.name,
-        session_specs=sessions or [],
+        session_specs=specs,
         fill_all=all_sessions,
         add_admin_shell=add_admin_shell,
     )

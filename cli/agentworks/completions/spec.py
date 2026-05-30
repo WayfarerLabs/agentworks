@@ -187,13 +187,18 @@ def _build_param_spec(param: click.Parameter, command_path: str) -> ParamSpec:
     lookup_path = ".".join(command_path.split(".")[1:]) if "." in command_path else command_path
     dynamic = DYNAMIC_COMPLETIONS.get((lookup_path, param.name or ""))
 
+    # Click models variadic Arguments via `nargs=-1` (not `multiple`), and
+    # `multiple=True` on Options. Normalize both into ParamSpec.multiple so
+    # completion generators have a single "accepts more than one value" flag.
+    accepts_multi = bool(param.multiple) or (is_argument and param.nargs == -1)
+
     return ParamSpec(
         name=param.name or "",
         opts=opts,
         help=getattr(param, "help", None) or "",
         is_flag=getattr(param, "is_flag", False),
         is_argument=is_argument,
-        multiple=param.multiple,
+        multiple=accepts_multi,
         required=param.required,
         choices=choices,
         dynamic_completer=dynamic,
