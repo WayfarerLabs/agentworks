@@ -143,6 +143,10 @@ concurrent workloads running across their VMs, workspaces, and agents. Agentwork
 operator to attach to and detach from them as needed to monitor progress or interact with the
 workload, and then to stop, restart, and delete them to manage their lifecycle.
 
+For day-to-day work across many sessions, see [Named consoles](#named-consoles) — curated tmux
+views that group the sessions you're actively focused on, optionally with extra shell panes
+pre-opened in each session's window.
+
 ## Key Principles
 
 ### Opinionated Consistency
@@ -219,12 +223,16 @@ Sessions are built on [tmux](https://github.com/tmux/tmux), which provides persi
 sessions that survive disconnects and support attach/detach. Each session maps 1:1 to a tmux session
 on the VM.
 
-Agentworks provides two console layers for interacting with sessions:
+Agentworks provides several console layers for interacting with sessions:
 
 - **Workspace console** (`workspace console`): a tmuxinator-managed tmux session with one window per
-  session in the workspace, plus an admin shell. This is the recommended way to interact with
-  sessions.
-- **VM console** (`vm console`): a dynamically-built tmux session spanning all workspaces on the VM.
+  session in the workspace, plus an admin shell. Good for staying inside a single workspace.
+- **Named consoles** (`console`): persistent, named tmux sessions that aggregate a curated subset of
+  sessions across any workspaces on a VM, with optional extra shell panes per session window.
+  Recommended when you juggle sessions across workspaces or want a focused view of the few you're
+  actively working on.
+- **VM console** (`vm console`, _deprecated_): a dynamically-built tmux session spanning every
+  session on the VM. Replaced by named consoles; will be removed in a future release.
 
 Agent-mode sessions run on per-agent tmux sockets for proper process isolation and terminal resize
 propagation. See the [tmux Architecture](#tmux-architecture) section for details.
@@ -313,7 +321,7 @@ Manage virtual machines across Lima (local or remote), Azure, and WSL2.
 | `agentworks vm reinit <name>`                    | Re-run initialization on a provisioned VM  |
 | `agentworks vm delete <name>`                    | Delete a VM (with confirmation)            |
 | `agentworks vm logs <name>`                      | Show SSH logs for a VM                     |
-| `agentworks vm console <name>`                   | Attach to the VM console                   |
+| `agentworks vm console <name>`                   | _Deprecated_: use `agentworks console`     |
 | `agentworks vm add-git-credential <name> <cred>` | Add or update a git credential             |
 
 `vm create` accepts `--name`, `--platform`, `--vm-host`, `--admin-username`, `--cpus`, `--memory`,
@@ -392,7 +400,7 @@ Manage sessions (persistent tmux sessions running in workspaces). Session names 
 | `agentworks session restart <name>`          | Restart a session              |
 | `agentworks session delete <name>`           | Stop and delete a session      |
 | `agentworks session logs <name>`             | Dump session scrollback buffer |
-| `agentworks vm console <vm-name>`            | Attach to the VM console       |
+| `agentworks console attach <name>`           | Attach to a named console      |
 
 `session create` accepts `--name`, `--workspace`, `--template`, `--admin`, and `--agent`. Workspace,
 mode (admin vs agent), and name are prompted interactively if omitted. If agents exist on the VM and
@@ -401,16 +409,64 @@ create a workspace on the fly (with optional `--workspace-name`, `--workspace-te
 `--vm`). When a session created with `--new-workspace` is later deleted, you are offered the option
 to delete the workspace as well (if no other sessions remain).
 
+### Named consoles
+
+Named consoles are persistent, curated tmux views over sessions on a VM. Each console is its own
+tmux session (`aw-console-<name>`) containing one window per included session, plus any extra shell
+panes you want preloaded into a session's window.
+
+| Command                                                  | Description                                                       |
+| -------------------------------------------------------- | ----------------------------------------------------------------- |
+| `agentworks console create <name> [sessions...]`         | Create a console with the given sessions                          |
+| `agentworks console list`                                | List consoles                                                     |
+| `agentworks console describe <name>`                     | Show membership and shell layout                                  |
+| `agentworks console attach <name>`                       | Attach (builds tmux state on first attach)                        |
+| `agentworks console delete <name>`                       | Tear down and remove the console                                  |
+| `agentworks console add-session <name> <sessions...>`    | Add session windows                                               |
+| `agentworks console remove-session <name> <sessions...>` | Remove session windows                                            |
+| `agentworks console add-shell <name> <session>`          | Add a shell pane to a session window (accepts `--cwd`, `--admin`) |
+
+`console create` accepts `--vm` (target VM), `--all` (include every other session on the VM with
+0 shells, appended after the explicit specs), and `--add-admin-shell` (include a top-level
+admin-shell window as window 0, matching the legacy `vm console` behavior). VM selection follows
+the same pattern as the other `--vm` flags in the CLI: if you have a single VM it's auto-picked,
+with multiple you're prompted interactively (or, in non-interactive mode, you must pass `--vm`
+explicitly). `console list` accepts `--vm` to filter.
+
+Session specs use `name` or `name+N` shorthand, where `N` is the number of default shell panes to
+pre-open in that session's window (running as the session's agent user, cwd = workspace root):
+
+```sh
+# A console with three sessions; the first two get extra shells.
+agentworks console create backend auth-server+2 auth-tests+1 docs
+
+# Same, but also include a top-level admin-shell window (window 0).
+agentworks console create backend auth-server+2 auth-tests+1 docs --add-admin-shell
+
+# Append everything else on the VM with 0 shells (after the explicit specs).
+agentworks console create everything auth-server+2 --all
+
+# Add an admin shell rooted in a sub-path of the workspace.
+agentworks console add-shell backend auth-server --cwd src/api --admin
+```
+
+Memberships and shell layouts persist in the database. `aw console attach` builds the tmux session
+on first attach (or with `--recreate`); subsequent attaches reuse the running tmux session. Adding
+or removing sessions/shells while a console is attached updates the live tmux state immediately
+(best-effort); when the console isn't running on the VM, only the DB is updated and changes appear
+on next attach.
+
 ### tmux Architecture
 
-Each session runs in its own locked-down tmux session on the VM. There are three ways to interact
+Each session runs in its own locked-down tmux session on the VM. There are several ways to interact
 with sessions, at different scopes:
 
-| Method              | Scope          | tmux session name        | Entry point                 |
-| ------------------- | -------------- | ------------------------ | --------------------------- |
-| `session attach`    | One session    | `<session-name>`         | Operator's machine          |
-| `workspace console` | One workspace  | `ws-<workspace>-console` | On-VM or operator's machine |
-| `vm console`        | All workspaces | `vm-console`             | Operator's machine          |
+| Method                  | Scope                            | tmux session name        | Entry point                 |
+| ----------------------- | -------------------------------- | ------------------------ | --------------------------- |
+| `session attach`        | One session                      | `<session-name>`         | Operator's machine          |
+| `workspace console`     | One workspace                    | `ws-<workspace>-console` | On-VM or operator's machine |
+| `console`               | Curated subset across workspaces | `aw-console-<name>`      | Operator's machine          |
+| `vm console` (deprecated) | All sessions on the VM         | `vm-console`             | Operator's machine          |
 
 #### Session tmux sessions
 
@@ -426,8 +482,9 @@ tmux pane PTY. The socket path is persisted in the database.
 
 `workspace console` uses tmuxinator to create or attach to a `ws-<name>-console` session. The
 tmuxinator config (`.tmuxinator.yml` in the workspace root) is regenerated whenever sessions change,
-so the console always reflects the current set of sessions. This is the recommended way to interact
-with sessions from within VS Code or any terminal on the VM.
+so the console always reflects the current set of sessions. Best for in-VM work scoped to a single
+workspace (e.g. inside VS Code's integrated terminal). For curated views that span workspaces, use a
+named console (`console attach <name>`).
 
 ```text
 ws-myproject-console (tmuxinator, full tmux)
@@ -436,10 +493,32 @@ ws-myproject-console (tmuxinator, full tmux)
   Window 3: myproject-debug            attached to session
 ```
 
-#### VM console
+#### Named console
 
-`vm console` creates or attaches to the `vm-console` session, which spans all workspaces on the VM.
-This is built dynamically (not via tmuxinator) and is managed from the operator's machine.
+`console attach <name>` creates or attaches to the `aw-console-<name>` tmux session. Membership and
+per-session shell layout are stored in the database. Each member session becomes a window running
+the same wrapper used by the workspace and VM consoles, plus a configurable number of extra shell
+panes (default user = session's agent user, default cwd = workspace root; override per pane with
+`--cwd` / `--admin` on `console add-shell`).
+
+```text
+aw-console-backend
+  Window 1: auth-server                attached session + 2 agent shells (workspace root)
+  Window 2: auth-tests                 attached session + 1 agent shell
+  Window 3: docs                       attached session only
+```
+
+The tmux session is built lazily on first `attach` (or rebuilt with `--recreate`). Adding or
+removing sessions/shells while the console is attached updates tmux immediately; when offline, only
+the DB is touched and changes appear on next attach. The console does not auto-boot the VM for live
+sync — VM start happens only on explicit `attach`.
+
+#### VM console (deprecated)
+
+`vm console` creates or attaches to the `vm-console` session, which spans all sessions on the VM.
+Built dynamically (not via tmuxinator). Superseded by named consoles, which let you curate which
+sessions are in scope at any moment instead of seeing every session on the VM. Will be removed in a
+future release.
 
 #### Shells
 

@@ -8,13 +8,15 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypedDict
 
 from agentworks.config import CONFIG_DIR
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
     from pathlib import Path
 
 DB_PATH = CONFIG_DIR / "agentworks.db"
@@ -152,6 +154,30 @@ class SessionRow:
     socket_path: str | None = None
     pid: int | None = None
     boot_id: str | None = None
+
+
+class ShellEntry(TypedDict):
+    """One shell pane in a console window. cwd None = workspace root."""
+
+    cwd: str | None
+    admin: bool
+
+
+@dataclass
+class ConsoleRow:
+    name: str
+    vm_name: str
+    admin_shell: bool
+    created_at: str
+    updated_at: str
+
+
+@dataclass
+class ConsoleSessionRow:
+    console_name: str
+    session_name: str
+    position: int
+    shells: list[ShellEntry]
 
 
 # -- Migrations ------------------------------------------------------------
@@ -422,6 +448,28 @@ MIGRATIONS: dict[int, str] = {
         ALTER TABLE workspaces ADD COLUMN linux_group TEXT;
         UPDATE workspaces SET linux_group = 'ws--' || name WHERE type = 'vm';
     """,
+    # -- Multi-console support: named consoles with explicit session lists --
+    23: """
+        CREATE TABLE consoles (
+            name       TEXT PRIMARY KEY,
+            vm_name    TEXT NOT NULL REFERENCES vms(name) ON DELETE CASCADE,
+            created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+            updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+        );
+        CREATE TABLE console_sessions (
+            console_name TEXT NOT NULL REFERENCES consoles(name) ON DELETE CASCADE,
+            session_name TEXT NOT NULL REFERENCES sessions(name) ON DELETE CASCADE,
+            position     INTEGER NOT NULL,
+            shells       TEXT NOT NULL DEFAULT '[]',
+            PRIMARY KEY (console_name, session_name),
+            UNIQUE (console_name, position)
+        );
+        CREATE INDEX idx_console_sessions_order ON console_sessions(console_name, position);
+    """,
+    # -- Optional admin-shell window (legacy vm-console behavior) ----------
+    24: """
+        ALTER TABLE consoles ADD COLUMN admin_shell INTEGER NOT NULL DEFAULT 0;
+    """,
 }
 
 LATEST_VERSION = max(MIGRATIONS)
@@ -440,10 +488,38 @@ class Database:
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA foreign_keys = ON")
         self._conn.execute("PRAGMA journal_mode = WAL")
+        self._tx_depth = 0
         self._migrate()
 
     def close(self) -> None:
         self._conn.close()
+
+    @contextmanager
+    def transaction(self) -> Iterator[None]:
+        """Run multiple writes as one transaction, committing on success or
+        rolling back on exception. Nested with-blocks defer to the outermost.
+
+        Inside this context, CRUD methods skip their per-call commits and
+        defer to the enclosing transaction.
+        """
+        if self._tx_depth > 0:
+            self._tx_depth += 1
+            try:
+                yield
+            finally:
+                self._tx_depth -= 1
+            return
+        self._tx_depth = 1
+        try:
+            with self._conn:
+                yield
+        finally:
+            self._tx_depth = 0
+
+    def _commit_unless_in_tx(self) -> None:
+        """Commit pending changes unless inside an explicit transaction()."""
+        if self._tx_depth == 0:
+            self._conn.commit()
 
     @staticmethod
     def check_schema(path: Path | None = None) -> tuple[bool, int, int]:
@@ -611,6 +687,8 @@ class Database:
         self._conn.commit()
 
     def delete_vm(self, name: str) -> None:
+        # console_sessions cascade via FK when consoles are deleted
+        self._conn.execute("DELETE FROM consoles WHERE vm_name = ?", (name,))
         self._conn.execute(
             "DELETE FROM sessions WHERE workspace_name IN (SELECT name FROM workspaces WHERE vm_name = ?)",
             (name,),
@@ -950,6 +1028,130 @@ class Database:
         self._conn.commit()
         return sessions
 
+    # -- Consoles ----------------------------------------------------------
+
+    def insert_console(
+        self,
+        name: str,
+        vm_name: str,
+        admin_shell: bool = False,
+    ) -> ConsoleRow:
+        self._conn.execute(
+            "INSERT INTO consoles (name, vm_name, admin_shell) VALUES (?, ?, ?)",
+            (name, vm_name, int(admin_shell)),
+        )
+        self._commit_unless_in_tx()
+        result = self.get_console(name)
+        assert result is not None
+        return result
+
+    def get_console(self, name: str) -> ConsoleRow | None:
+        row = self._conn.execute("SELECT * FROM consoles WHERE name = ?", (name,)).fetchone()
+        return _to_console(row) if row else None
+
+    def list_consoles(self, vm_name: str | None = None) -> list[ConsoleRow]:
+        if vm_name is not None:
+            rows = self._conn.execute(
+                "SELECT * FROM consoles WHERE vm_name = ? ORDER BY name",
+                (vm_name,),
+            ).fetchall()
+        else:
+            rows = self._conn.execute("SELECT * FROM consoles ORDER BY name").fetchall()
+        return [_to_console(r) for r in rows]
+
+    def list_consoles_with_counts(
+        self, vm_name: str | None = None
+    ) -> list[tuple[ConsoleRow, int]]:
+        """Return consoles paired with session counts, one query, ORDER BY name."""
+        sql = (
+            "SELECT c.*, COUNT(cs.session_name) AS session_count "
+            "FROM consoles c "
+            "LEFT JOIN console_sessions cs ON cs.console_name = c.name "
+        )
+        params: tuple[str, ...] = ()
+        if vm_name is not None:
+            sql += "WHERE c.vm_name = ? "
+            params = (vm_name,)
+        sql += "GROUP BY c.name ORDER BY c.name"
+        rows = self._conn.execute(sql, params).fetchall()
+        return [(_to_console(r), int(r["session_count"])) for r in rows]
+
+    def delete_console(self, name: str) -> None:
+        # console_sessions cascade via FK
+        self._conn.execute("DELETE FROM consoles WHERE name = ?", (name,))
+        self._commit_unless_in_tx()
+
+    def add_console_session(
+        self,
+        console_name: str,
+        session_name: str,
+        shells: list[ShellEntry],
+    ) -> ConsoleSessionRow:
+        """Add a session to a console at position max(existing) + 1.
+
+        Position assignment is atomic (single statement). Raises
+        sqlite3.IntegrityError if (console_name, session_name) already exists
+        or two concurrent inserts collide on position.
+        """
+        self._conn.execute(
+            "INSERT INTO console_sessions (console_name, session_name, position, shells) "
+            "VALUES (?, ?, "
+            "COALESCE((SELECT MAX(position) FROM console_sessions WHERE console_name = ?), -1) + 1, "
+            "?)",
+            (console_name, session_name, console_name, json.dumps(shells)),
+        )
+        self._touch_console(console_name)
+        self._commit_unless_in_tx()
+        result = self.get_console_session(console_name, session_name)
+        assert result is not None
+        return result
+
+    def remove_console_session(self, console_name: str, session_name: str) -> None:
+        self._conn.execute(
+            "DELETE FROM console_sessions WHERE console_name = ? AND session_name = ?",
+            (console_name, session_name),
+        )
+        self._touch_console(console_name)
+        self._commit_unless_in_tx()
+
+    def get_console_session(
+        self, console_name: str, session_name: str
+    ) -> ConsoleSessionRow | None:
+        row = self._conn.execute(
+            "SELECT * FROM console_sessions WHERE console_name = ? AND session_name = ?",
+            (console_name, session_name),
+        ).fetchone()
+        return _to_console_session(row) if row else None
+
+    def list_console_sessions(self, console_name: str) -> list[ConsoleSessionRow]:
+        """Return console members ordered by position ascending."""
+        rows = self._conn.execute(
+            "SELECT * FROM console_sessions WHERE console_name = ? ORDER BY position",
+            (console_name,),
+        ).fetchall()
+        return [_to_console_session(r) for r in rows]
+
+    def update_console_shells(
+        self,
+        console_name: str,
+        session_name: str,
+        shells: list[ShellEntry],
+    ) -> None:
+        self._conn.execute(
+            "UPDATE console_sessions SET shells = ? "
+            "WHERE console_name = ? AND session_name = ?",
+            (json.dumps(shells), console_name, session_name),
+        )
+        self._touch_console(console_name)
+        self._commit_unless_in_tx()
+
+    def _touch_console(self, name: str) -> None:
+        self._conn.execute(
+            "UPDATE consoles SET updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') "
+            "WHERE name = ?",
+            (name,),
+        )
+
     # -- VM Events ---------------------------------------------------------
 
     def insert_vm_event(self, vm_name: str, event: str, detail: str | None = None) -> None:
@@ -1094,3 +1296,48 @@ def _to_vm_event(row: sqlite3.Row) -> VMEventRow:
         detail=row["detail"],
         created_at=row["created_at"],
     )
+
+
+def _to_console(row: sqlite3.Row) -> ConsoleRow:
+    return ConsoleRow(
+        name=row["name"],
+        vm_name=row["vm_name"],
+        admin_shell=bool(row["admin_shell"]),
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+    )
+
+
+def _to_console_session(row: sqlite3.Row) -> ConsoleSessionRow:
+    return ConsoleSessionRow(
+        console_name=row["console_name"],
+        session_name=row["session_name"],
+        position=row["position"],
+        shells=_parse_shells(row["shells"], row["console_name"], row["session_name"]),
+    )
+
+
+def _parse_shells(raw: str, console_name: str, session_name: str) -> list[ShellEntry]:
+    """Decode the shells JSON column and verify it matches ShellEntry shape."""
+    where = f"console_sessions[{console_name!r}, {session_name!r}].shells"
+    try:
+        decoded = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"{where}: invalid JSON ({exc})") from None
+    if not isinstance(decoded, list):
+        raise ValueError(f"{where}: expected list, got {type(decoded).__name__}")
+    for i, entry in enumerate(decoded):
+        if not isinstance(entry, dict):
+            raise ValueError(f"{where}[{i}]: expected dict, got {type(entry).__name__}")
+        extra = set(entry.keys()) - {"cwd", "admin"}
+        missing = {"cwd", "admin"} - set(entry.keys())
+        if extra or missing:
+            raise ValueError(
+                f"{where}[{i}]: keys must be exactly cwd, admin "
+                f"(extra={sorted(extra)}, missing={sorted(missing)})"
+            )
+        if entry["cwd"] is not None and not isinstance(entry["cwd"], str):
+            raise ValueError(f"{where}[{i}].cwd: expected str or null")
+        if not isinstance(entry["admin"], bool):
+            raise ValueError(f"{where}[{i}].admin: expected bool")
+    return decoded

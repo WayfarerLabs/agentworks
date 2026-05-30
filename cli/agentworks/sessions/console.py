@@ -71,19 +71,42 @@ def _add_session_window(
 ) -> None:
     """Add a single session window to the console."""
     q_session = shlex.quote(session_name)
-    # Unset TMUX to allow nesting (console -> session), then loop
-    # re-attach while the session is alive.
+    # Unset TMUX to allow nesting (console -> session). The wrapper holds the
+    # window open forever: a banner-and-wait entry phase for sessions that
+    # aren't up yet, then a main loop that attaches and shows a one-line
+    # exit notice on session-end (terminal content preserved). Users dismiss
+    # dead windows with their console's kill-window binding.
     has_cmd = tmux_cmd(f"has-session -t {q_session}", socket_path)
     attach_cmd = tmux_cmd(f"attach -t {q_session}", socket_path)
-    wrapper = (
-        f"unset TMUX; "
-        f"while {has_cmd} 2>/dev/null; do "
-        f"{attach_cmd}; "
-        f"sleep 0.5; "
-        f"done; "
-        f"echo 'Session {q_session} has ended. Press enter to close.'; "
-        f"read"
-    )
+    wrapper = f"""\
+unset TMUX
+
+# Entry: if the session isn't up yet, show a banner and wait for it.
+if ! {has_cmd} 2>/dev/null; then
+    clear
+    echo 'Waiting for session {session_name} to come up...'
+    while ! {has_cmd} 2>/dev/null; do sleep 2; done
+fi
+
+# Main loop: attach; on exit, distinguish detach (re-attach silently) from
+# session-end (print a one-line notice, keep terminal content, then wait).
+while true; do
+    clear
+    {attach_cmd}
+    rc=$?
+    if {has_cmd} 2>/dev/null; then
+        continue
+    fi
+    echo
+    if [ "$rc" -eq 0 ]; then
+        echo 'Session {session_name} exited cleanly.'
+    else
+        echo "Session {session_name} exited (status $rc)."
+    fi
+    echo 'Waiting for session to restart...'
+    while ! {has_cmd} 2>/dev/null; do sleep 2; done
+done
+"""
     result = run_command(
         f"tmux new-window -t {CONSOLE_SESSION_NAME} -n {q_session} {shlex.quote(wrapper)}",
         check=False,

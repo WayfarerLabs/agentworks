@@ -54,6 +54,11 @@ DYNAMIC_SNIPPETS: dict[str, str] = {
         " ForEach-Object { ($_ -split '\\s+')[0] } |"
         ' Where-Object { $_ -like "$wordToComplete*" })'
     ),
+    "consoles": (
+        "(agentworks console list 2>$null | Select-Object -Skip 2 |"
+        " ForEach-Object { ($_ -split '\\s+')[0] } |"
+        ' Where-Object { $_ -like "$wordToComplete*" })'
+    ),
     "session_templates": (
         "& { $builtins = @('default');"
         " $f = Join-Path $env:USERPROFILE '.config/agentworks/config.toml';"

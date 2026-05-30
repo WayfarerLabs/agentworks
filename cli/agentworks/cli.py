@@ -63,6 +63,13 @@ session_app = typer.Typer(
 )
 app.add_typer(session_app)
 
+console_app = typer.Typer(
+    name="console",
+    help="Manage named consoles (curated tmux views of VM sessions).",
+    no_args_is_help=True,
+)
+app.add_typer(console_app)
+
 installer_app = typer.Typer(
     name="installer",
     help="List and inspect available installers from the catalog.",
@@ -507,9 +514,18 @@ def vm_console(
     recreate: Annotated[bool, typer.Option("--recreate", help="Kill and rebuild the console")] = False,
     allow_nesting: Annotated[bool, typer.Option("--allow-nesting", help="Allow running inside tmux")] = False,
 ) -> None:
-    """Attach to the VM console (creates it if needed)."""
+    """[Deprecated] Attach to the VM console (creates it if needed).
+
+    Prefer 'agentworks console' for curated session lists and per-window shell panes.
+    """
+    from agentworks import output
     from agentworks.config import load_config
     from agentworks.sessions.console import attach_console
+
+    output.warn(
+        "'agentworks vm console' is deprecated; use 'agentworks console' "
+        "(see 'agentworks console --help'). This command will be removed in a future release."
+    )
 
     attach_console(
         _get_db(),
@@ -1094,6 +1110,157 @@ def session_logs(
 
     _session_logs(_get_db(), load_config(), name=name, lines=lines)
 
+
+# -- Console commands ------------------------------------------------------
+
+
+@console_app.command("create")
+def console_create(
+    name: Annotated[str, typer.Argument(help="Console name")],
+    sessions: Annotated[
+        list[str] | None,
+        typer.Argument(
+            help="Sessions to include. Use 'name' or 'name+N' for N default shells.",
+        ),
+    ] = None,
+    vm: Annotated[str | None, typer.Option("--vm", help="Target VM")] = None,
+    all_sessions: Annotated[
+        bool,
+        typer.Option(
+            "--all",
+            help="Fill in every other session on the VM (0 shells each, alphabetical) after the explicit specs",
+        ),
+    ] = False,
+    add_admin_shell: Annotated[
+        bool,
+        typer.Option(
+            "--add-admin-shell",
+            help="Include a top-level admin-shell window (legacy vm-console behavior)",
+        ),
+    ] = False,
+) -> None:
+    """Create a named console with a curated set of sessions."""
+    from agentworks.sessions.multi_console import create_console
+
+    db = _get_db()
+    resolved_vm = _prompt_vm(db, vm)
+    create_console(
+        db,
+        name=name,
+        vm_name=resolved_vm,
+        session_specs=sessions or [],
+        fill_all=all_sessions,
+        add_admin_shell=add_admin_shell,
+    )
+
+
+@console_app.command("list")
+def console_list(
+    vm: Annotated[str | None, typer.Option("--vm", help="Filter by VM")] = None,
+) -> None:
+    """List consoles."""
+    from agentworks.sessions.multi_console import list_consoles
+
+    list_consoles(_get_db(), vm_name=vm)
+
+
+@console_app.command("describe")
+def console_describe(
+    name: Annotated[str, typer.Argument(help="Console name")],
+) -> None:
+    """Show a console's membership and shell layout."""
+    from agentworks.sessions.multi_console import describe_console
+
+    describe_console(_get_db(), name=name)
+
+
+@console_app.command("attach")
+def console_attach(
+    name: Annotated[str, typer.Argument(help="Console name")],
+    recreate: Annotated[
+        bool, typer.Option("--recreate", help="Kill and rebuild the console's tmux state")
+    ] = False,
+    allow_nesting: Annotated[
+        bool, typer.Option("--allow-nesting", help="Allow attaching from inside an existing tmux")
+    ] = False,
+) -> None:
+    """Attach to a named console (creating its tmux state on first attach)."""
+    from agentworks.config import load_config
+    from agentworks.sessions.multi_console import attach_console
+
+    attach_console(
+        _get_db(),
+        load_config(),
+        name=name,
+        recreate=recreate,
+        allow_nesting=allow_nesting,
+    )
+
+
+@console_app.command("delete")
+def console_delete(
+    name: Annotated[str, typer.Argument(help="Console name")],
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip confirmation prompt")] = False,
+) -> None:
+    """Delete a console: tear down its tmux session (best-effort) and remove its DB row."""
+    from agentworks.config import load_config
+    from agentworks.sessions.multi_console import delete_console
+
+    delete_console(_get_db(), load_config(), name=name, yes=yes)
+
+
+@console_app.command("add-session")
+def console_add_session(
+    name: Annotated[str, typer.Argument(help="Console name")],
+    sessions: Annotated[
+        list[str],
+        typer.Argument(help="Sessions to add. Use 'name' or 'name+N' for N default shells."),
+    ],
+) -> None:
+    """Append sessions to an existing console."""
+    from agentworks.config import load_config
+    from agentworks.sessions.multi_console import add_sessions
+
+    add_sessions(_get_db(), load_config(), console_name=name, session_specs=sessions)
+
+
+@console_app.command("remove-session")
+def console_remove_session(
+    name: Annotated[str, typer.Argument(help="Console name")],
+    sessions: Annotated[list[str], typer.Argument(help="Session names to remove")],
+) -> None:
+    """Remove sessions from a console."""
+    from agentworks.config import load_config
+    from agentworks.sessions.multi_console import remove_sessions
+
+    remove_sessions(_get_db(), load_config(), console_name=name, session_names=sessions)
+
+
+@console_app.command("add-shell")
+def console_add_shell(
+    name: Annotated[str, typer.Argument(help="Console name")],
+    session: Annotated[str, typer.Argument(help="Session whose window gets the new pane")],
+    cwd: Annotated[
+        str | None,
+        typer.Option("--cwd", help="Path relative to the workspace root (default = workspace root)"),
+    ] = None,
+    admin: Annotated[
+        bool,
+        typer.Option("--admin", help="Run shell as the VM admin user instead of the session's agent user"),
+    ] = False,
+) -> None:
+    """Add a shell pane to a session window in a console."""
+    from agentworks.config import load_config
+    from agentworks.sessions.multi_console import add_shell
+
+    add_shell(
+        _get_db(),
+        load_config(),
+        console_name=name,
+        session_name=session,
+        cwd=cwd,
+        admin=admin,
+    )
 
 
 # -- Installer catalog commands --------------------------------------------
