@@ -12,7 +12,7 @@ def detect_shell() -> str | None:
     """Best-effort detection of the user's shell. Conservative: returns None
     when the answer isn't unambiguous so the caller can ask for --shell.
 
-    Looks at the basename of $SHELL (the operator's login shell). Recognises
+    Looks at the basename of $SHELL (the operator's login shell). Recognizes
     bash and zsh; everything else is treated as unknown.
     """
     raw = os.environ.get("SHELL")

@@ -142,9 +142,9 @@ class TestDetectShell:
 
 
 class TestResolveShell:
-    """_resolve_shell normalises aliases and reports a clean error on autodetect failure."""
+    """_resolve_shell normalizes aliases and reports a clean error on autodetect failure."""
 
-    def test_pwsh_alias_normalises(self, monkeypatch) -> None:
+    def test_pwsh_alias_normalizes(self, monkeypatch) -> None:
         from agentworks.cli import _resolve_shell
 
         assert _resolve_shell("pwsh") == "powershell"
