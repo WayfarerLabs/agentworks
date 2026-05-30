@@ -117,9 +117,9 @@ settings) can be used to control how tools behave within the context of this wor
 The Agentworks workspace mechanism fully supports any number of workspaces mapping to the same
 underlying repository. To simplify administration, each is a full independent clone.
 
-While VM workspaces are the primary supported workspace type, local workspaces can also be created
-on the operator's workstation. Local workspaces do not support agents because the isolation model
-that underpins agent execution requires Linux user management that is only available on VMs.
+Workspaces always live on a VM. An earlier iteration supported local (on-workstation) workspaces,
+but they did not support agents (which require Linux user management only available on VMs), so they
+were removed to keep the model focused.
 
 ### Agents - the Actor
 
@@ -337,29 +337,29 @@ message shows what will be deleted. Pass `--yes` to skip the prompt.
 
 ### Workspaces
 
-Manage workspaces on VMs or locally.
+Manage workspaces on VMs.
 
-| Command                                | Description                          |
-| -------------------------------------- | ------------------------------------ |
-| `agentworks workspace create <name>`        | Create a workspace (VM or `--local`) |
-| `agentworks workspace describe <name>`      | Show workspace details and sessions  |
-| `agentworks workspace shell <name>`         | Open a plain shell into a workspace  |
-| `agentworks workspace console <name>`       | Open the workspace console (tmux)    |
-| `agentworks workspace list`                 | List workspaces                      |
-| `agentworks workspace copy <source> <name>` | Copy a workspace to a new location   |
-| `agentworks workspace rehome <name>`        | Move workspace to a new path         |
-| `agentworks workspace repair <name>`        | Repair workspace infrastructure      |
-| `agentworks workspace delete <name>`        | Delete a workspace                   |
+| Command                                     | Description                         |
+| ------------------------------------------- | ----------------------------------- |
+| `agentworks workspace create <name>`        | Create a workspace on a VM          |
+| `agentworks workspace describe <name>`      | Show workspace details and sessions |
+| `agentworks workspace shell <name>`         | Open a plain shell into a workspace |
+| `agentworks workspace console <name>`       | Open the workspace console (tmux)   |
+| `agentworks workspace list`                 | List workspaces                     |
+| `agentworks workspace copy <source> <name>` | Copy a workspace to a new VM        |
+| `agentworks workspace rehome <name>`        | Move workspace to a new path        |
+| `agentworks workspace repair <name>`        | Repair workspace infrastructure     |
+| `agentworks workspace delete <name>`        | Delete a workspace                  |
 
 `workspace create <name>` takes the workspace name as a required positional. Optional flags:
-`--vm`, `--local`, `--template`, and `--open-vscode`.
+`--vm`, `--template`, and `--open-vscode`.
 
 `workspace console` opens a tmuxinator session (`ws-<name>-console`) with an admin-shell window plus
 one window per session in the workspace. Pass `--recreate` to kill and rebuild the console. This is
 the recommended way to interact with sessions from within VS Code or any terminal on the VM.
 
-`workspace copy <source> <name>` copies a workspace to a new location. Accepts `--vm` and `--local`
-(same pattern as `workspace create`). Works across VMs, VM to local, and local to VM.
+`workspace copy <source> <name>` copies a workspace to a new VM workspace. Accepts `--vm`. Source
+and destination can be the same VM (a clone) or different VMs.
 
 `workspace delete` requires `--force` if the workspace has sessions. Running sessions are killed
 during deletion. Pass `--yes` to skip the confirmation prompt.
@@ -610,7 +610,7 @@ full reference.
 Key sections:
 
 - `[operator]` -- SSH keys (required), additional authorized keys, SSH config management
-- `[paths]` -- local workspace, VM workspace, and VS Code workspace file directories
+- `[paths]` -- VM workspace and VS Code workspace file directories
 - `[defaults]` -- default platform, VM host
 - `[vm_templates.*]` -- VM resources, apt packages, system install commands, mise
 - `[admin.config]` -- admin user shell, dotfiles, git credentials, user install commands, mise
