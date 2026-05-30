@@ -443,8 +443,9 @@ panes you want preloaded into a session's window.
   if you have a single VM, prompted otherwise).
 - `--all` -- include every session on the VM with 0 shells, appended after the
   explicit specs (alphabetical).
-- `--all-running` -- like `--all` but restricted to sessions whose last-known
-  state is running. Mutually exclusive with `--all`.
+- `--all-running` -- like `--all` but restricted to sessions whose live tmux
+  state on the VM is OK (one SSH round-trip; same probe `aw session list`
+  uses). Mutually exclusive with `--all`. Requires the VM to be reachable.
 - `--add-admin-shell` -- include a top-level admin-shell window as window 0,
   matching the legacy `vm console` behavior.
 

@@ -1180,7 +1180,13 @@ def console_create(
     from agentworks.sessions.multi_console import (
         create_console,
         infer_vm_from_session_specs,
+        parse_session_spec,
+        running_session_names,
     )
+
+    if all_sessions and all_running:
+        typer.echo("Error: --all and --all-running are mutually exclusive", err=True)
+        raise typer.Exit(1)
 
     db = _get_db()
     # Prefer the user's explicit --vm. If absent, infer from the listed sessions;
@@ -1190,13 +1196,31 @@ def console_create(
     if vm is None:
         vm = _prompt_vm(db, None)
 
+    specs = list(sessions or [])
+    if all_running:
+        # Live SSH probe (one round-trip per VM) so --all-running reflects
+        # reality, not stale DB state.
+        from agentworks.config import load_config
+
+        running = running_session_names(db, load_config(), vm)
+        explicit_names = {parse_session_spec(s).name for s in specs}
+        extras = [n for n in running if n not in explicit_names]
+        if not specs and not extras and not add_admin_shell:
+            typer.echo(
+                f"Error: no running sessions on VM '{vm}'. "
+                "Pass --all to include stopped sessions, list sessions explicitly, "
+                "or pass --add-admin-shell.",
+                err=True,
+            )
+            raise typer.Exit(1)
+        specs.extend(extras)
+
     create_console(
         db,
         name=name,
         vm_name=vm,
-        session_specs=sessions or [],
+        session_specs=specs,
         fill_all=all_sessions,
-        all_running=all_running,
         add_admin_shell=add_admin_shell,
     )
 

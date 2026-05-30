@@ -404,46 +404,43 @@ def test_create_console_explicit_specs(db: Database, captured_output: CapturedOu
     ]
 
 
-def test_create_console_all_running_filters_to_pid(db: Database) -> None:
-    """--all-running picks up only sessions with a positive PID in the DB."""
-    _seed_vm(db)
-    _seed_sessions(db, ["live", "live2", "dead", "never"])
-    # 'live' and 'live2' have positive PIDs + boot_id (running). 'dead' is
-    # explicitly stopped. 'never' is left with pid=None (never started).
-    db._conn.execute("UPDATE sessions SET pid = 100, boot_id = 'x' WHERE name = 'live'")
-    db._conn.execute("UPDATE sessions SET pid = 200, boot_id = 'x' WHERE name = 'live2'")
-    db._conn.execute("UPDATE sessions SET pid = -1 WHERE name = 'dead'")
+def test_running_session_names_uses_live_status_check(
+    db: Database, fake_target: _FakeTarget
+) -> None:
+    """running_session_names SSH-probes via batch_check_all_sessions and
+    returns only sessions whose live tmux state is OK."""
+    from agentworks.sessions.multi_console import running_session_names
+
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["alpha", "beta", "gamma"])
+    # Give each session a PID so it's eligible for the batch check.
+    db._conn.execute(
+        "UPDATE sessions SET pid = 100, boot_id = 'b' WHERE name = 'alpha'"
+    )
+    db._conn.execute(
+        "UPDATE sessions SET pid = 200, boot_id = 'b' WHERE name = 'beta'"
+    )
+    db._conn.execute(
+        "UPDATE sessions SET pid = 300, boot_id = 'b' WHERE name = 'gamma'"
+    )
     db._conn.commit()
 
-    create_console(db, name="running", vm_name="vm1", session_specs=[], all_running=True)
-    members = db.list_console_sessions("running")
-    assert [m.session_name for m in members] == ["live", "live2"]
+    # batch_check_all_sessions emits one compound shell command per VM. We
+    # reply with status lines for alpha (alive) + beta (alive); gamma's line
+    # claims the session is gone.
+    def stub_run(command: str, **kwargs: object) -> _FakeResult:
+        fake_target.commands.append(command)
+        if "has-session -t alpha" in command and "has-session -t beta" in command:
+            return _FakeResult(
+                returncode=0,
+                stdout="S:alpha:0\nS:beta:0\nS:gamma:1\n",
+            )
+        return _FakeResult()
 
+    fake_target.run = stub_run  # type: ignore[assignment]
 
-def test_create_console_all_and_all_running_mutually_exclusive(db: Database) -> None:
-    _seed_vm(db)
-    _seed_sessions(db, ["a"])
-    with pytest.raises(output.ConsoleError, match="mutually exclusive"):
-        create_console(
-            db,
-            name="con",
-            vm_name="vm1",
-            session_specs=[],
-            fill_all=True,
-            all_running=True,
-        )
-
-
-def test_create_console_all_running_empty_message(db: Database) -> None:
-    _seed_vm(db)  # no sessions seeded
-    with pytest.raises(output.ConsoleError, match="no running sessions"):
-        create_console(
-            db,
-            name="empty",
-            vm_name="vm1",
-            session_specs=[],
-            all_running=True,
-        )
+    names = running_session_names(db, _StubConfig(), "vm1")
+    assert names == ["alpha", "beta"]
 
 
 def test_infer_vm_from_session_specs(db: Database) -> None:
@@ -705,9 +702,13 @@ class _FakeTarget:
 def fake_target(monkeypatch: pytest.MonkeyPatch) -> _FakeTarget:
     """Install a FakeTarget for the SSH layer and stub VM-running checks."""
     target = _FakeTarget()
+    # `agentworks.ssh.admin_exec_target` covers lazy imports in multi_console;
+    # `agentworks.sessions.manager.admin_exec_target` covers manager's eager
+    # top-level import (used by batch_check_all_sessions and friends).
+    fake_factory = lambda vm, config, **kwargs: target  # noqa: E731
+    monkeypatch.setattr("agentworks.ssh.admin_exec_target", fake_factory)
     monkeypatch.setattr(
-        "agentworks.ssh.admin_exec_target",
-        lambda vm, config, **kwargs: target,
+        "agentworks.sessions.manager.admin_exec_target", fake_factory
     )
     monkeypatch.setattr(
         "agentworks.workspaces.manager._ensure_vm_running",

@@ -110,15 +110,22 @@ def _vm_sessions(db: Database, vm_name: str) -> list[SessionRow]:
     return sessions
 
 
-def _is_running(session: SessionRow) -> bool:
-    """DB-level liveness check: a session is considered running if it has a
-    positive PID (last-known-running per the session lifecycle layer)."""
-    from agentworks.db import PID_STOPPED
+def running_session_names(
+    db: Database, config: Config, vm_name: str
+) -> list[str]:
+    """SSH-probe the VM and return names of sessions whose live tmux state is OK.
 
-    return (
-        session.pid is not None
-        and session.pid != PID_STOPPED
-        and session.pid > 0
+    Uses the same one-round-trip-per-VM check that powers ``aw session list``.
+    Returns alphabetically sorted names. Unreachable VMs produce an empty list
+    plus a warning from the underlying status checker.
+    """
+    from agentworks.db import SessionStatus
+    from agentworks.sessions.manager import batch_check_all_sessions, filter_sessions
+
+    sessions = filter_sessions(db, vm_name=vm_name)
+    status_map = batch_check_all_sessions(sessions, db=db, config=config)
+    return sorted(
+        s.name for s in sessions if status_map.get(s.name) == SessionStatus.OK
     )
 
 
@@ -199,22 +206,22 @@ def create_console(
     vm_name: str,
     session_specs: list[str],
     fill_all: bool = False,
-    all_running: bool = False,
     add_admin_shell: bool = False,
 ) -> None:
     """Create a new console with the given sessions.
 
     Explicit *session_specs* keep their argument order. *fill_all* appends
-    every other session on the VM in alphabetical order with zero shells;
-    *all_running* is the same but restricted to sessions whose last-known
-    state is running. *add_admin_shell* adds a window 0 login shell as the
-    VM admin (legacy vm-console behavior) -- useful when you want a
-    top-level shell alongside the curated session windows. All inserts run
-    in one transaction; the console is not created if any step fails.
+    every other session on the VM in alphabetical order with zero shells.
+    *add_admin_shell* adds a window 0 login shell as the VM admin (legacy
+    vm-console behavior) -- useful when you want a top-level shell alongside
+    the curated session windows. All inserts run in one transaction; the
+    console is not created if any step fails.
+
+    Note: this function is DB-only. Live filtering (e.g. --all-running) is
+    resolved by the CLI layer into an explicit list of session names before
+    calling create_console.
     """
     validate_name(name)
-    if fill_all and all_running:
-        raise output.ConsoleError("--all and --all-running are mutually exclusive")
 
     if db.get_console(name) is not None:
         raise output.ConsoleError(f"console '{name}' already exists")
@@ -226,25 +233,20 @@ def create_console(
     for spec in specs:
         _verify_session_on_vm(db, spec.name, vm_name)
 
-    if fill_all or all_running:
+    if fill_all:
         explicit_names = {s.name for s in specs}
-        candidates = _vm_sessions(db, vm_name)
-        if all_running:
-            candidates = [s for s in candidates if _is_running(s)]
-        extras = sorted(s.name for s in candidates if s.name not in explicit_names)
+        extras = sorted(
+            s.name for s in _vm_sessions(db, vm_name) if s.name not in explicit_names
+        )
         specs.extend(SessionSpec(name=n, shells=0) for n in extras)
 
     if not specs and not add_admin_shell:
         # Almost certainly a typo / misunderstanding rather than an empty console.
-        if fill_all:
-            detail = f"VM '{vm_name}' has no sessions"
-        elif all_running:
-            detail = f"VM '{vm_name}' has no running sessions"
-        else:
-            detail = (
-                "specify at least one session, "
-                "pass --all / --all-running, or pass --add-admin-shell"
-            )
+        detail = (
+            f"VM '{vm_name}' has no sessions"
+            if fill_all
+            else "specify at least one session, pass --all, or pass --add-admin-shell"
+        )
         raise output.ConsoleError(
             f"refusing to create empty console '{name}' ({detail})"
         )
