@@ -91,7 +91,6 @@ UserConfig = OperatorConfig
 
 @dataclass(frozen=True)
 class PathsConfig:
-    local_workspaces: Path = field(default_factory=lambda: Path.home() / "workspaces")
     vm_workspaces: str = "/opt/agentworks/workspaces"
     vscode_workspaces: Path = field(default_factory=lambda: Path.home() / "aw-vscode-workspaces")
     backups: Path = field(default_factory=lambda: CONFIG_DIR / "backups")
@@ -358,7 +357,6 @@ def _load_paths(data: dict[str, object]) -> PathsConfig:
     if not isinstance(raw, dict):
         raise ConfigError("[paths] must be a table")
     defaults = PathsConfig()
-    local_ws = _expand(str(raw["local_workspaces"])) if "local_workspaces" in raw else defaults.local_workspaces
     vm_ws = str(raw["vm_workspaces"]) if "vm_workspaces" in raw else defaults.vm_workspaces
     if "vscode_workspaces" in raw:
         vscode_ws = _expand(str(raw["vscode_workspaces"]))
@@ -367,7 +365,7 @@ def _load_paths(data: dict[str, object]) -> PathsConfig:
     else:
         vscode_ws = defaults.vscode_workspaces
     backups = _expand(str(raw["backups"])) if "backups" in raw else defaults.backups
-    return PathsConfig(local_workspaces=local_ws, vm_workspaces=vm_ws, vscode_workspaces=vscode_ws, backups=backups)
+    return PathsConfig(vm_workspaces=vm_ws, vscode_workspaces=vscode_ws, backups=backups)
 
 
 _DEFAULTS_KEYS = {"platform", "vm_host"}

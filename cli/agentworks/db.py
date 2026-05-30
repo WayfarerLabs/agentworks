@@ -110,16 +110,15 @@ class VMEventRow:
 @dataclass
 class WorkspaceRow:
     name: str
-    type: str
-    vm_name: str | None
+    vm_name: str
     template: str | None
     workspace_path: str
     created_at: str
     last_seen_at: str | None
-    # Linux group on the VM. Null for local workspaces. Set at create time
-    # so legacy VM workspaces (created when the prefix was "ws--") keep
-    # their existing group even after the prefix changed to "ws-".
-    linux_group: str | None
+    # Linux group on the VM. Set at create time so legacy workspaces
+    # (created when the prefix was "ws--") keep their existing group even
+    # after the prefix changed to "ws-".
+    linux_group: str
 
 
 @dataclass
@@ -476,6 +475,40 @@ MIGRATIONS: dict[int, str] = {
     25: """
         ALTER TABLE sessions ADD COLUMN created_agent INTEGER NOT NULL DEFAULT 0;
     """,
+    # -- Drop local workspaces. All workspaces are now VM-scoped. ---------
+    # -- Removes the `type` column and tightens vm_name/linux_group to ---
+    # -- NOT NULL. Any pre-existing local workspaces (and their sessions) -
+    # -- are deleted. Defensively also drops any malformed rows missing ---
+    # -- vm_name or linux_group so the rebuild's NOT NULL constraints can -
+    # -- not fail mid-migration. ------------------------------------------
+    26: """
+        DELETE FROM sessions WHERE workspace_name IN (
+            SELECT name FROM workspaces
+            WHERE type != 'vm' OR vm_name IS NULL OR linux_group IS NULL
+        );
+        DELETE FROM agent_workspace_grants WHERE workspace_name IN (
+            SELECT name FROM workspaces
+            WHERE type != 'vm' OR vm_name IS NULL OR linux_group IS NULL
+        );
+        DELETE FROM workspaces
+            WHERE type != 'vm' OR vm_name IS NULL OR linux_group IS NULL;
+        CREATE TABLE workspaces_new (
+            name           TEXT PRIMARY KEY,
+            vm_name        TEXT NOT NULL,
+            template       TEXT,
+            workspace_path TEXT NOT NULL,
+            linux_group    TEXT NOT NULL,
+            created_at     TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+            last_seen_at   TEXT,
+            FOREIGN KEY (vm_name) REFERENCES vms(name)
+        );
+        INSERT INTO workspaces_new
+            (name, vm_name, template, workspace_path, linux_group, created_at, last_seen_at)
+            SELECT name, vm_name, template, workspace_path, linux_group, created_at, last_seen_at
+            FROM workspaces;
+        DROP TABLE workspaces;
+        ALTER TABLE workspaces_new RENAME TO workspaces;
+    """,
 }
 
 LATEST_VERSION = max(MIGRATIONS)
@@ -556,13 +589,34 @@ class Database:
         row = self._conn.execute("SELECT MAX(version) FROM schema_version").fetchone()
         current = row[0] or 0
 
-        for version in range(current + 1, LATEST_VERSION + 1):
-            for stmt in MIGRATIONS[version].split(";"):
-                stmt = stmt.strip()
-                if stmt:
-                    self._conn.execute(stmt)
-            self._conn.execute("INSERT INTO schema_version (version) VALUES (?)", (version,))
+        if current >= LATEST_VERSION:
+            return
+
+        # Disable FK enforcement for the duration of the migration run.
+        # Table-rebuild migrations (CREATE _new, INSERT, DROP, RENAME) can
+        # momentarily invalidate FK references that hold by name -- the
+        # SQLite-recommended pattern is to disable FKs around the rebuild
+        # and run a foreign_key_check at the end to confirm consistency.
+        # Note: sqlite3 auto-commits DDL, so a mid-loop failure can leave
+        # the DB partially migrated. The foreign_key_check is best-effort
+        # consistency verification, not a full transactional guard.
         self._conn.commit()
+        self._conn.execute("PRAGMA foreign_keys = OFF")
+        try:
+            for version in range(current + 1, LATEST_VERSION + 1):
+                for stmt in MIGRATIONS[version].split(";"):
+                    stmt = stmt.strip()
+                    if stmt:
+                        self._conn.execute(stmt)
+                self._conn.execute("INSERT INTO schema_version (version) VALUES (?)", (version,))
+            violations = self._conn.execute("PRAGMA foreign_key_check").fetchall()
+            if violations:
+                raise sqlite3.IntegrityError(
+                    f"foreign key violations after migration: {violations}"
+                )
+            self._conn.commit()
+        finally:
+            self._conn.execute("PRAGMA foreign_keys = ON")
 
     # -- VM Hosts ----------------------------------------------------------
 
@@ -716,16 +770,15 @@ class Database:
     def insert_workspace(
         self,
         name: str,
-        ws_type: str,
         workspace_path: str,
-        vm_name: str | None = None,
+        vm_name: str,
+        linux_group: str,
         template: str | None = None,
-        linux_group: str | None = None,
     ) -> WorkspaceRow:
         self._conn.execute(
-            "INSERT INTO workspaces (name, type, vm_name, template, workspace_path, linux_group) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (name, ws_type, vm_name, template, workspace_path, linux_group),
+            "INSERT INTO workspaces (name, vm_name, template, workspace_path, linux_group) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (name, vm_name, template, workspace_path, linux_group),
         )
         self._conn.commit()
         result = self.get_workspace(name)
@@ -736,23 +789,13 @@ class Database:
         row = self._conn.execute("SELECT * FROM workspaces WHERE name = ?", (name,)).fetchone()
         return _to_workspace(row) if row else None
 
-    def list_workspaces(self, vm_name: str | None = None, ws_type: str | None = None) -> list[WorkspaceRow]:
-        query = "SELECT * FROM workspaces"
-        params: list[str] = []
-        conditions: list[str] = []
-
+    def list_workspaces(self, vm_name: str | None = None) -> list[WorkspaceRow]:
         if vm_name is not None:
-            conditions.append("vm_name = ?")
-            params.append(vm_name)
-        if ws_type is not None:
-            conditions.append("type = ?")
-            params.append(ws_type)
-
-        if conditions:
-            query += " WHERE " + " AND ".join(conditions)
-        query += " ORDER BY name"
-
-        rows = self._conn.execute(query, params).fetchall()
+            rows = self._conn.execute(
+                "SELECT * FROM workspaces WHERE vm_name = ? ORDER BY name", (vm_name,)
+            ).fetchall()
+        else:
+            rows = self._conn.execute("SELECT * FROM workspaces ORDER BY name").fetchall()
         return [_to_workspace(r) for r in rows]
 
     def update_workspace_path(self, name: str, workspace_path: str) -> None:
@@ -1258,7 +1301,6 @@ def _to_vm(row: sqlite3.Row) -> VMRow:
 def _to_workspace(row: sqlite3.Row) -> WorkspaceRow:
     return WorkspaceRow(
         name=row["name"],
-        type=row["type"],
         vm_name=row["vm_name"],
         template=row["template"],
         workspace_path=row["workspace_path"],

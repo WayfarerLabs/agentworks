@@ -94,22 +94,16 @@ def backup_vm(
     for ws in workspaces:
         ws_entry = asdict(ws)
         ws_group = ws.linux_group
-
-        if ws_group is None:
-            # Local workspace, or a VM workspace from before the linux_group
-            # column existed and somehow not backfilled. Nothing to look up.
-            ws_entry["live_gid"] = None
-        else:
-            try:
-                result = target.run(f"getent group {shlex.quote(ws_group)}", check=False)
-                if result.ok:
-                    parts = result.stdout.strip().split(":")
-                    ws_entry["live_gid"] = parts[2] if len(parts) > 2 else None
-                else:
-                    ws_entry["live_gid"] = None
-                    output.warn(f"group '{ws_group}' not found on VM")
-            except SSHError:
+        try:
+            result = target.run(f"getent group {shlex.quote(ws_group)}", check=False)
+            if result.ok:
+                parts = result.stdout.strip().split(":")
+                ws_entry["live_gid"] = parts[2] if len(parts) > 2 else None
+            else:
                 ws_entry["live_gid"] = None
+                output.warn(f"group '{ws_group}' not found on VM")
+        except SSHError:
+            ws_entry["live_gid"] = None
 
         ws_data.append(ws_entry)
     _write_json(backup_dir / "workspaces.json", ws_data)
@@ -119,15 +113,13 @@ def backup_vm(
     _write_json(backup_dir / "sessions.json", [asdict(s) for s in sessions])
 
     # 6. Workspace files -- single archive of all workspace paths
-    vm_workspaces = [ws for ws in workspaces if ws.type == "vm"]
-
     archived_paths: list[str] = []
     skipped_paths: list[str] = []
-    if vm_workspaces:
+    if workspaces:
         local_archive = backup_dir / "workspaces.tar.zst"
         try:
             archived_paths, skipped_paths = _archive_workspaces(
-                target, _unwrap_ssh(target), vm_workspaces, local_archive,
+                target, _unwrap_ssh(target), workspaces, local_archive,
             )
         except Exception:
             db.insert_vm_event(vm_name, "backup_failed")

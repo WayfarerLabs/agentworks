@@ -45,9 +45,9 @@ def _seed_vm(db: Database, vm_name: str = "vm1", *, with_tailscale: bool = False
             (f"100.64.0.{hash(vm_name) % 250}", vm_name),
         )
     db._conn.execute(
-        "INSERT INTO workspaces (name, type, vm_name, workspace_path) "
-        "VALUES (?, 'vm', ?, ?)",
-        (f"ws-{vm_name}", vm_name, f"/home/me/{vm_name}"),
+        "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group) "
+        "VALUES (?, ?, ?, ?)",
+        (f"ws-{vm_name}", vm_name, f"/home/me/{vm_name}", f"ws-ws-{vm_name}"),
     )
     db._conn.commit()
 

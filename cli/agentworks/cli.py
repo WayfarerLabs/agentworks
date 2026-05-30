@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Annotated, Protocol
 import click
 import typer
 
-from agentworks.db import Database
+from agentworks.db import Database, VMRow, WorkspaceRow
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -130,12 +130,16 @@ def _require_interactive(what: str) -> None:
         raise typer.Exit(1)
 
 
-def _prompt_workspace(db: Database, workspace: str | None) -> str:
-    """Prompt for a workspace if not provided, listing available workspaces."""
+def _prompt_workspace(db: Database, workspace: str | None) -> WorkspaceRow:
+    """Resolve a workspace, prompting if not provided and validating either way."""
     from agentworks import output
 
     if workspace is not None:
-        return workspace
+        ws = db.get_workspace(workspace)
+        if ws is None:
+            typer.echo(f"Error: workspace '{workspace}' not found.", err=True)
+            raise typer.Exit(1)
+        return ws
 
     workspaces = db.list_workspaces()
     if not workspaces:
@@ -144,29 +148,25 @@ def _prompt_workspace(db: Database, workspace: str | None) -> str:
 
     if len(workspaces) == 1:
         output.info(f"Using workspace '{workspaces[0].name}'")
-        return workspaces[0].name
+        return workspaces[0]
 
     _require_interactive("--workspace")
 
-    options = []
-    for ws in workspaces:
-        label = ws.name
-        if ws.vm_name:
-            label += f"  (vm: {ws.vm_name})"
-        elif ws.type == "local":
-            label += "  (local)"
-        options.append(label)
-
+    options = [f"{ws.name}  (vm: {ws.vm_name})" for ws in workspaces]
     idx = output.choose("Select a workspace:", options)
-    return workspaces[idx].name
+    return workspaces[idx]
 
 
-def _prompt_vm(db: Database, vm_name: str | None) -> str:
-    """Prompt for a VM if not provided, listing available VMs."""
+def _prompt_vm(db: Database, vm_name: str | None) -> VMRow:
+    """Resolve a VM, prompting if not provided and validating either way."""
     from agentworks import output
 
     if vm_name is not None:
-        return vm_name
+        vm = db.get_vm(vm_name)
+        if vm is None:
+            typer.echo(f"Error: VM '{vm_name}' not found.", err=True)
+            raise typer.Exit(1)
+        return vm
 
     vms = db.list_vms()
     if not vms:
@@ -175,13 +175,13 @@ def _prompt_vm(db: Database, vm_name: str | None) -> str:
 
     if len(vms) == 1:
         output.info(f"Using VM '{vms[0].name}'")
-        return vms[0].name
+        return vms[0]
 
     _require_interactive("--vm")
 
     options = [f"{v.name}  ({v.platform})" for v in vms]
     idx = output.choose("Select a VM:", options)
-    return vms[idx].name
+    return vms[idx]
 
 
 class _HasDescription(Protocol):
@@ -531,28 +531,21 @@ def vm_console(
 def workspace_create(
     name: Annotated[str, typer.Argument(help="Workspace name")],
     vm: Annotated[str | None, typer.Option("--vm", help="Target VM")] = None,
-    local: Annotated[bool, typer.Option("--local", help="Create a local workspace (no VM)")] = False,
     template: Annotated[str | None, typer.Option("--template", help="Workspace template")] = None,
     open_vscode: Annotated[bool, typer.Option("--open-vscode", help="Open in VS Code")] = False,
 ) -> None:
-    """Create a workspace on a VM or locally."""
+    """Create a workspace on a VM."""
     from agentworks.config import load_config
     from agentworks.workspaces.manager import create_workspace
 
-    if local and vm:
-        typer.echo("Error: --local and --vm are mutually exclusive", err=True)
-        raise typer.Exit(1)
-
     db = _get_db()
-    if not local:
-        vm = _prompt_vm(db, vm)
+    resolved_vm = _prompt_vm(db, vm)
 
     create_workspace(
         db,
         load_config(),
         name=name,
-        vm_name=vm,
-        local=local,
+        vm_name=resolved_vm.name,
         template_name=template,
         open_vscode=open_vscode,
     )
@@ -591,17 +584,11 @@ def workspace_console(
 @workspace_app.command("list")
 def workspace_list(
     vm: Annotated[str | None, typer.Option("--vm", help="Filter by VM")] = None,
-    local: Annotated[bool, typer.Option("--local", help="Show only local workspaces")] = False,
 ) -> None:
     """List workspaces."""
     from agentworks.workspaces.manager import list_workspaces
 
-    if local and vm:
-        typer.echo("Error: --local and --vm are mutually exclusive", err=True)
-        raise typer.Exit(1)
-
-    ws_type = "local" if local else None
-    list_workspaces(_get_db(), vm_name=vm, ws_type=ws_type)
+    list_workspaces(_get_db(), vm_name=vm)
 
 
 @workspace_app.command("describe")
@@ -661,15 +648,10 @@ def workspace_copy(
     source: Annotated[str, typer.Argument(help="Source workspace name")],
     name: Annotated[str, typer.Argument(help="New workspace name")],
     vm: Annotated[str | None, typer.Option("--vm", help="Target VM")] = None,
-    local: Annotated[bool, typer.Option("--local", help="Copy to a local workspace")] = False,
 ) -> None:
-    """Copy a workspace to a new location (VM or local)."""
+    """Copy a workspace to a new VM workspace."""
     from agentworks.config import load_config
     from agentworks.workspaces.manager import copy_workspace
-
-    if local and vm:
-        typer.echo("Error: --local and --vm are mutually exclusive", err=True)
-        raise typer.Exit(1)
 
     copy_workspace(
         _get_db(),
@@ -677,7 +659,6 @@ def workspace_copy(
         source,
         dest_name=name,
         vm_name=vm,
-        local=local,
     )
 
 
@@ -705,7 +686,7 @@ def agent_create(
         db,
         load_config(),
         name=name,
-        vm_name=resolved_vm,
+        vm_name=resolved_vm.name,
         template=template,
         grant_all_workspaces=grant_all_workspaces,
     )
@@ -884,7 +865,7 @@ def session_create(
     db = _get_db()
     config = load_config()
 
-    resolved_vm: str | None = None
+    resolved_vm: VMRow | None = None
 
     if new_workspace:
         resolved_vm = _prompt_vm(db, vm)
@@ -895,7 +876,7 @@ def session_create(
         resolved_agent: str | None = agent
         if not admin and agent is None and not new_agent:
             # Look up agents on the target VM
-            vm_agents = db.list_agents(vm_name=resolved_vm)
+            vm_agents = db.list_agents(vm_name=resolved_vm.name)
             if vm_agents:
                 _require_interactive("--admin or --agent")
                 from agentworks import output
@@ -915,28 +896,24 @@ def session_create(
             db,
             config,
             name=resolved_ws_name,
-            vm_name=resolved_vm,
+            vm_name=resolved_vm.name,
             template_name=workspace_template,
         )
         resolved_workspace = resolved_ws_name
     else:
-        resolved_workspace = _prompt_workspace(db, workspace)
+        ws = _prompt_workspace(db, workspace)
+        resolved_workspace = ws.name
 
         # Resolve mode. Skip the prompt when --new-agent is set.
         resolved_agent: str | None = agent  # type: ignore[no-redef]
         if not admin and agent is None and not new_agent:
-            resolved_agent = _prompt_session_mode(db, resolved_workspace)
+            resolved_agent = _prompt_session_mode(db, ws)
 
         if new_agent:
-            # Agents are VM-scoped; look up the workspace's VM.
-            ws_row = db.get_workspace(resolved_workspace)
-            if ws_row is None or ws_row.type != "vm" or ws_row.vm_name is None:
-                typer.echo(
-                    f"Error: --new-agent requires a VM workspace; '{resolved_workspace}' is not.",
-                    err=True,
-                )
-                raise typer.Exit(1)
-            resolved_vm = ws_row.vm_name
+            # Agents are VM-scoped; pick up the workspace's VM.
+            vm_row = db.get_vm(ws.vm_name)
+            assert vm_row is not None  # FK guarantees existence
+            resolved_vm = vm_row
 
     if new_agent:
         assert resolved_vm is not None
@@ -947,7 +924,7 @@ def session_create(
             db,
             config,
             name=resolved_agent_name,
-            vm_name=resolved_vm,
+            vm_name=resolved_vm.name,
             template=agent_template,
         )
         resolved_agent = resolved_agent_name
@@ -964,12 +941,8 @@ def session_create(
     )
 
 
-def _prompt_session_mode(db: Database, workspace_name: str) -> str | None:
+def _prompt_session_mode(db: Database, ws: WorkspaceRow) -> str | None:
     """Prompt for admin vs agent mode. Returns agent name or None for admin."""
-    ws = db.get_workspace(workspace_name)
-    if ws is None or ws.vm_name is None:
-        return None
-
     from agentworks import output
 
     agents = db.list_agents(vm_name=ws.vm_name)
@@ -1171,7 +1144,7 @@ def console_create(
     create_console(
         db,
         name=name,
-        vm_name=resolved_vm,
+        vm_name=resolved_vm.name,
         session_specs=sessions or [],
         fill_all=all_sessions,
         add_admin_shell=add_admin_shell,
@@ -1506,15 +1479,13 @@ def config_sync_vscode_workspaces() -> None:
     config = load_config()
     db = _get_db()
 
-    workspaces = db.list_workspaces(ws_type="vm")
+    workspaces = db.list_workspaces()
     if not workspaces:
-        typer.echo("No VM workspaces found.")
+        typer.echo("No workspaces found.")
         return
 
     count = 0
     for ws in workspaces:
-        if ws.vm_name is None:
-            continue
         vm = db.get_vm(ws.vm_name)
         if vm is None:
             typer.echo(f"  Skipping '{ws.name}': VM '{ws.vm_name}' not found", err=True)
