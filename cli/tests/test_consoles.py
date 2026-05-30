@@ -404,6 +404,89 @@ def test_create_console_explicit_specs(db: Database, captured_output: CapturedOu
     ]
 
 
+def test_running_session_names_raises_on_unreachable(
+    db: Database, fake_target: _FakeTarget
+) -> None:
+    """If sessions exist with valid pid+boot_id but the probe returns nothing,
+    treat that as a transport failure and raise instead of silently reporting
+    'no running sessions'."""
+    from agentworks.sessions.multi_console import running_session_names
+
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["alpha"])
+    db._conn.execute(
+        "UPDATE sessions SET pid = 100, boot_id = 'b' WHERE name = 'alpha'"
+    )
+    db._conn.commit()
+    # Probe returns empty stdout (simulates transport failure caught by check=False).
+    fake_target.run = lambda command, **kwargs: _FakeResult(returncode=255, stdout="")  # type: ignore[assignment]
+
+    with pytest.raises(output.ConsoleError, match="could not determine running"):
+        running_session_names(db, _StubConfig(), "vm1")
+
+
+def test_running_session_names_uses_live_status_check(
+    db: Database, fake_target: _FakeTarget
+) -> None:
+    """running_session_names SSH-probes via batch_check_all_sessions and
+    returns only sessions whose live tmux state is OK."""
+    from agentworks.sessions.multi_console import running_session_names
+
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["alpha", "beta", "gamma"])
+    # Give each session a PID so it's eligible for the batch check.
+    db._conn.execute(
+        "UPDATE sessions SET pid = 100, boot_id = 'b' WHERE name = 'alpha'"
+    )
+    db._conn.execute(
+        "UPDATE sessions SET pid = 200, boot_id = 'b' WHERE name = 'beta'"
+    )
+    db._conn.execute(
+        "UPDATE sessions SET pid = 300, boot_id = 'b' WHERE name = 'gamma'"
+    )
+    db._conn.commit()
+
+    # batch_check_all_sessions emits one compound shell command per VM. We
+    # reply with status lines for alpha (alive) + beta (alive); gamma's line
+    # claims the session is gone.
+    def stub_run(command: str, **kwargs: object) -> _FakeResult:
+        fake_target.commands.append(command)
+        if "has-session -t alpha" in command and "has-session -t beta" in command:
+            return _FakeResult(
+                returncode=0,
+                stdout="S:alpha:0\nS:beta:0\nS:gamma:1\n",
+            )
+        return _FakeResult()
+
+    fake_target.run = stub_run  # type: ignore[assignment]
+
+    names = running_session_names(db, _StubConfig(), "vm1")
+    assert names == ["alpha", "beta"]
+
+
+def test_infer_vm_from_session_specs(db: Database) -> None:
+    from agentworks.sessions.multi_console import infer_vm_from_session_specs
+
+    _seed_vm(db, "vm1")
+    _seed_vm(db, "vm2")
+    _seed_sessions(db, ["a", "b"], workspace_name="ws-vm1")
+    _seed_sessions(db, ["c"], workspace_name="ws-vm2")
+
+    # Empty list -> None (caller falls back to prompt).
+    assert infer_vm_from_session_specs(db, []) is None
+
+    # Single VM -> resolved.
+    assert infer_vm_from_session_specs(db, ["a"]) == "vm1"
+    assert infer_vm_from_session_specs(db, ["a+2", "b"]) == "vm1"
+
+    # Spans multiple VMs -> ConsoleError.
+    with pytest.raises(output.ConsoleError, match="span multiple VMs"):
+        infer_vm_from_session_specs(db, ["a", "c"])
+
+    # All-unknown sessions -> None (defer error to create_console).
+    assert infer_vm_from_session_specs(db, ["ghost", "fantom"]) is None
+
+
 def test_create_console_fill_all_appends_alphabetically(db: Database) -> None:
     _seed_vm(db)
     _seed_sessions(db, ["gamma", "alpha", "beta"])
@@ -640,9 +723,13 @@ class _FakeTarget:
 def fake_target(monkeypatch: pytest.MonkeyPatch) -> _FakeTarget:
     """Install a FakeTarget for the SSH layer and stub VM-running checks."""
     target = _FakeTarget()
+    # `agentworks.ssh.admin_exec_target` covers lazy imports in multi_console;
+    # `agentworks.sessions.manager.admin_exec_target` covers manager's eager
+    # top-level import (used by batch_check_all_sessions and friends).
+    fake_factory = lambda vm, config, **kwargs: target  # noqa: E731
+    monkeypatch.setattr("agentworks.ssh.admin_exec_target", fake_factory)
     monkeypatch.setattr(
-        "agentworks.ssh.admin_exec_target",
-        lambda vm, config, **kwargs: target,
+        "agentworks.sessions.manager.admin_exec_target", fake_factory
     )
     monkeypatch.setattr(
         "agentworks.workspaces.manager._ensure_vm_running",

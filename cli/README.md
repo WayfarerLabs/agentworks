@@ -434,25 +434,40 @@ panes you want preloaded into a session's window.
 | `agentworks console remove-session <name> <sessions...>` | Remove session windows                                            |
 | `agentworks console add-shell <name> <session>`          | Add a shell pane to a session window (accepts `--cwd`, `--admin`) |
 
-`console create` accepts `--vm` (target VM), `--all` (include every other session on the VM with
-0 shells, appended after the explicit specs), and `--add-admin-shell` (include a top-level
-admin-shell window as window 0, matching the legacy `vm console` behavior). VM selection follows
-the same pattern as the other `--vm` flags in the CLI: if you have a single VM it's auto-picked,
-with multiple you're prompted interactively (or, in non-interactive mode, you must pass `--vm`
-explicitly). `console list` accepts `--vm` to filter.
+`console create` accepts:
+
+- `--vm` -- target VM. **Inferred from the listed sessions when omitted**; if the
+  listed sessions span more than one VM, `console create` errors and asks you to
+  pick one with `--vm`. When no sessions are listed (e.g. with `--all` and no
+  explicit specs), VM selection falls back to the standard prompt (auto-picked
+  if you have a single VM, prompted otherwise).
+- `--all` -- include every session on the VM with 0 shells, appended after the
+  explicit specs (alphabetical).
+- `--all-running` -- like `--all` but restricted to sessions whose live tmux
+  state on the VM is OK (one SSH round-trip; same probe `aw session list`
+  uses). Mutually exclusive with `--all`. Requires the VM to be reachable.
+- `--add-admin-shell` -- include a top-level admin-shell window as window 0,
+  matching the legacy `vm console` behavior.
+
+`console list` accepts `--vm` to filter.
 
 Session specs use `name` or `name+N` shorthand, where `N` is the number of default shell panes to
 pre-open in that session's window (running as the session's agent user, cwd = workspace root):
 
 ```sh
 # A console with three sessions; the first two get extra shells.
+# VM is inferred from the sessions.
 agentworks console create backend auth-server+2 auth-tests+1 docs
 
 # Same, but also include a top-level admin-shell window (window 0).
 agentworks console create backend auth-server+2 auth-tests+1 docs --add-admin-shell
 
-# Append everything else on the VM with 0 shells (after the explicit specs).
-agentworks console create everything auth-server+2 --all
+# Everything currently running on the VM, after the explicit specs.
+agentworks console create live auth-server+2 --all-running
+
+# All sessions on the VM (running or not). Needs --vm since no sessions are
+# named explicitly to infer from.
+agentworks console create everything --vm aw-private --all
 
 # Add an admin shell rooted in a sub-path of the workspace.
 agentworks console add-shell backend auth-server --cwd src/api --admin

@@ -229,12 +229,18 @@ def _emit_param_completions(lines: list[str], spec: CommandSpec, token_offset: i
         lines.append(f"{indent}}}")
         lines.append("")
 
-    # Positional argument completions
-    if positional_args:
-        param = positional_args[0]
+    # Positional argument completions. Each positional emits its own handler;
+    # variadic positionals (multiple=True) match every position from theirs
+    # onward.
+    for i, param in enumerate(positional_args):
+        pos_token = token_offset + 1 + i
+        cmp_op = "-ge" if param.multiple else "-eq"
         if param.choices:
             lines.append(f"{indent}# Positional: {param.name}")
-            lines.append(f"{indent}if ($wordToComplete -notlike '-*' -and $tokenCount -eq {token_offset + 1}) {{")
+            lines.append(
+                f"{indent}if ($wordToComplete -notlike '-*' -and "
+                f"$tokenCount {cmp_op} {pos_token}) {{"
+            )
             _open_result_array(lines, f"{indent}    ")
             for choice in param.choices:
                 lines.append(
@@ -248,7 +254,10 @@ def _emit_param_completions(lines: list[str], spec: CommandSpec, token_offset: i
         elif param.dynamic_completer and param.dynamic_completer in DYNAMIC_SNIPPETS:
             snippet = DYNAMIC_SNIPPETS[param.dynamic_completer]
             lines.append(f"{indent}# Positional: {param.name}")
-            lines.append(f"{indent}if ($wordToComplete -notlike '-*' -and $tokenCount -eq {token_offset + 1}) {{")
+            lines.append(
+                f"{indent}if ($wordToComplete -notlike '-*' -and "
+                f"$tokenCount {cmp_op} {pos_token}) {{"
+            )
             lines.append(f"{indent}    {snippet}")
             lines.append(f"{indent}    return")
             lines.append(f"{indent}}}")
