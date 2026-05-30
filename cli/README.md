@@ -291,10 +291,11 @@ workspace, it is used without prompting.
 
 ### Top-level
 
-| Command                     | Description                  |
-| --------------------------- | ---------------------------- |
-| `agentworks doctor`         | Check environment and config |
-| `agentworks completion zsh` | Output zsh completion script |
+| Command                         | Description                              |
+| ------------------------------- | ---------------------------------------- |
+| `agentworks doctor`             | Check environment and config             |
+| `agentworks completion show`    | Print the completion script to stdout    |
+| `agentworks completion install` | Install the completion script in-place   |
 
 ### VM Hosts
 
@@ -679,16 +680,16 @@ log.
 ## Shell Completion
 
 ```bash
-mkdir -p ~/.zfunc
-agentworks completion zsh > ~/.zfunc/_agentworks
+agentworks completion install
 ```
 
-Add to `.zshrc`:
+The shell is autodetected from `$SHELL`; pass `--shell {bash|zsh|powershell}` to override (or
+when autodetection isn't unambiguous, e.g. on Windows). `completion install` writes the script
+to the standard location for that shell and, for zsh and PowerShell, wires up `fpath` /
+`$PROFILE` if needed.
 
-```bash
-fpath=(~/.zfunc $fpath)
-autoload -Uz compinit && compinit
-```
+To print the script without installing, use `agentworks completion show` (handy for piping
+into your own config-management flow).
 
 Completions include dynamic VM, workspace, VM host, session, and template name lookups.
 

@@ -101,3 +101,39 @@ def _assert_all_commands_present(spec, output: str) -> None:
         assert name in output, f"Command '{name}' not found in generated output"
         for sub_name in sub.subcommands:
             assert sub_name in output, f"Subcommand '{name} {sub_name}' not found in generated output"
+
+
+class TestDetectShell:
+    """detect_shell only commits to bash or zsh; everything else is unknown."""
+
+    def test_bash(self, monkeypatch) -> None:
+        from agentworks.completions import detect_shell
+
+        monkeypatch.setenv("SHELL", "/bin/bash")
+        assert detect_shell() == "bash"
+
+    def test_zsh(self, monkeypatch) -> None:
+        from agentworks.completions import detect_shell
+
+        monkeypatch.setenv("SHELL", "/usr/local/bin/zsh")
+        assert detect_shell() == "zsh"
+
+    def test_unset(self, monkeypatch) -> None:
+        from agentworks.completions import detect_shell
+
+        monkeypatch.delenv("SHELL", raising=False)
+        assert detect_shell() is None
+
+    def test_unknown(self, monkeypatch) -> None:
+        from agentworks.completions import detect_shell
+
+        monkeypatch.setenv("SHELL", "/usr/bin/fish")
+        assert detect_shell() is None
+
+    def test_powershell_is_not_autodetected(self, monkeypatch) -> None:
+        # PowerShell on Windows does not set $SHELL; if it somehow leaks in,
+        # we still refuse to commit and force the user to pass --shell.
+        from agentworks.completions import detect_shell
+
+        monkeypatch.setenv("SHELL", "pwsh")
+        assert detect_shell() is None

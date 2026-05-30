@@ -2,7 +2,28 @@
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
+
 from agentworks.completions.spec import build_spec, completion_version
+
+
+def detect_shell() -> str | None:
+    """Best-effort detection of the user's shell. Conservative: returns None
+    when the answer isn't unambiguous so the caller can ask for --shell.
+
+    Looks at the basename of $SHELL (the operator's login shell). Recognises
+    bash and zsh; everything else is treated as unknown.
+    """
+    raw = os.environ.get("SHELL")
+    if not raw:
+        return None
+    name = Path(raw).name.lower()
+    if name == "bash":
+        return "bash"
+    if name == "zsh":
+        return "zsh"
+    return None
 
 
 def generate(shell: str) -> str:
