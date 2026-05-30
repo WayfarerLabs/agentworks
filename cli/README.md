@@ -700,10 +700,10 @@ agentworks completion install
 
 The shell is autodetected from `$SHELL`; pass `--shell {bash|zsh|powershell}` to override (or
 when autodetection isn't unambiguous, e.g. on Windows). `completion install` writes the script
-to the standard location for that shell. For PowerShell it also appends a `source` line to
-`$PROFILE`. For bash and zsh, if your rc file is missing the loader (`bash-completion` for
-bash, `fpath=(~/.zfunc $fpath)` for plain zsh without a plugin manager), the installer prints
-a one-line note telling you what to add.
+to the standard location for that shell. For PowerShell it also appends a dot-source line
+(`. "..."`) to `$PROFILE`. For bash and zsh, if your rc file is missing the loader
+(`bash-completion` for bash, `fpath=(~/.zfunc $fpath)` for plain zsh without a plugin manager),
+the installer prints a one-line note telling you what to add.
 
 To print the script without installing, use `agentworks completion show` (handy for piping
 into your own config-management flow).

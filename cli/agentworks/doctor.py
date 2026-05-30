@@ -377,7 +377,10 @@ def _check_completions(current_version: str) -> HealthGroup:
             else:
                 g.warn(shell_name, f"stale. Re-run: agentworks completion install --shell {shell_name}")
     if not any_found:
-        g.ok("Completions", "none installed (install with: agentworks completion install)")
+        g.ok(
+            "Completions",
+            "none installed (install with: agentworks completion install [--shell <bash|zsh|powershell>])",
+        )
 
     return g
 
