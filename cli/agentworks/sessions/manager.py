@@ -495,6 +495,7 @@ def create_session(
     template_name: str | None = None,
     agent_name: str | None = None,
     created_workspace: bool = False,
+    created_agent: bool = False,
 ) -> None:
     """Create and start a session."""
     from agentworks.config import validate_name
@@ -555,6 +556,7 @@ def create_session(
         mode,
         agent_name=resolved_agent_name,
         created_workspace=created_workspace,
+        created_agent=created_agent,
         socket_path=expected_socket,
     )
 
@@ -1053,6 +1055,39 @@ def delete_session(
 
             output.detail(f"Deleting workspace '{session.workspace_name}' (created with this session)...")
             delete_workspace(db, config, session.workspace_name, yes=True)
+
+    # If this session created its agent, offer to delete it unless the agent
+    # is still in use elsewhere (other sessions on the agent, or any explicit
+    # workspace grants). Implicit grants are tied to sessions and were cleaned
+    # up above, so they don't count.
+    if session.created_agent and session.agent_name:
+        other_sessions = [s for s in db.list_sessions() if s.agent_name == session.agent_name]
+        explicit_grants = [
+            ws for (ws, has_explicit, _) in db.list_granted_workspaces_with_types(session.agent_name) if has_explicit
+        ]
+        if other_sessions or explicit_grants:
+            reasons: list[str] = []
+            if other_sessions:
+                reasons.append(f"{len(other_sessions)} other session(s)")
+            if explicit_grants:
+                reasons.append(f"{len(explicit_grants)} explicit grant(s)")
+            output.detail(
+                f"Agent '{session.agent_name}' was created with this session but still has "
+                f"{' and '.join(reasons)}, not offering to delete."
+            )
+        elif not yes:
+            if output.confirm(
+                f"Agent '{session.agent_name}' was created with this session "
+                f"and is not in use elsewhere. Delete it?",
+            ):
+                from agentworks.agents.manager import delete_agent
+
+                delete_agent(db, config, name=session.agent_name, yes=True)
+        else:
+            from agentworks.agents.manager import delete_agent
+
+            output.detail(f"Deleting agent '{session.agent_name}' (created with this session)...")
+            delete_agent(db, config, name=session.agent_name, yes=True)
 
 
 def describe_session(

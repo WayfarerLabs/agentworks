@@ -863,6 +863,11 @@ def session_create(
         str | None, typer.Option("--workspace-template", help="Template for new workspace")
     ] = None,
     vm: Annotated[str | None, typer.Option("--vm", help="VM for new workspace")] = None,
+    new_agent: Annotated[bool, typer.Option("--new-agent", help="Create a new agent for this session")] = False,
+    agent_name: Annotated[str | None, typer.Option("--agent-name", help="Name for new agent")] = None,
+    agent_template: Annotated[
+        str | None, typer.Option("--agent-template", help="Template for new agent")
+    ] = None,
 ) -> None:
     """Create and start a session in a workspace."""
     from agentworks.config import load_config
@@ -873,6 +878,12 @@ def session_create(
     if admin and agent:
         typer.echo("Error: --admin and --agent are mutually exclusive", err=True)
         raise typer.Exit(1)
+    if admin and new_agent:
+        typer.echo("Error: --admin and --new-agent are mutually exclusive", err=True)
+        raise typer.Exit(1)
+    if agent and new_agent:
+        typer.echo("Error: --agent and --new-agent are mutually exclusive", err=True)
+        raise typer.Exit(1)
     if workspace and new_workspace:
         typer.echo("Error: --workspace and --new-workspace are mutually exclusive", err=True)
         raise typer.Exit(1)
@@ -882,17 +893,26 @@ def session_create(
             err=True,
         )
         raise typer.Exit(1)
+    if not new_agent and (agent_name or agent_template):
+        typer.echo(
+            "Error: --agent-name and --agent-template require --new-agent",
+            err=True,
+        )
+        raise typer.Exit(1)
 
     db = _get_db()
     config = load_config()
+
+    resolved_vm: str | None = None
 
     if new_workspace:
         resolved_vm = _prompt_vm(db, vm)
         resolved_workspace = workspace_name  # may be None, resolved after session name
 
-        # Resolve mode (need VM name for agent lookup)
+        # Resolve mode (need VM name for agent lookup). Skip the prompt when
+        # --new-agent is set -- the user has already chosen to create a new agent.
         resolved_agent: str | None = agent
-        if not admin and agent is None:
+        if not admin and agent is None and not new_agent:
             # Look up agents on the target VM
             vm_agents = db.list_agents(vm_name=resolved_vm)
             if vm_agents:
@@ -922,12 +942,37 @@ def session_create(
     else:
         resolved_workspace = _prompt_workspace(db, workspace)
 
-        # Resolve mode
+        # Resolve mode. Skip the prompt when --new-agent is set.
         resolved_agent: str | None = agent  # type: ignore[no-redef]
-        if not admin and agent is None:
+        if not admin and agent is None and not new_agent:
             resolved_agent = _prompt_session_mode(db, resolved_workspace)
 
         resolved_name = _prompt_name("Session", name)
+
+        if new_agent:
+            # Agents are VM-scoped; look up the workspace's VM.
+            ws_row = db.get_workspace(resolved_workspace)
+            if ws_row is None or ws_row.type != "vm" or ws_row.vm_name is None:
+                typer.echo(
+                    f"Error: --new-agent requires a VM workspace; '{resolved_workspace}' is not.",
+                    err=True,
+                )
+                raise typer.Exit(1)
+            resolved_vm = ws_row.vm_name
+
+    if new_agent:
+        assert resolved_vm is not None
+        from agentworks.agents.manager import create_agent
+
+        resolved_agent_name = agent_name or resolved_name
+        create_agent(
+            db,
+            config,
+            name=resolved_agent_name,
+            vm_name=resolved_vm,
+            template=agent_template,
+        )
+        resolved_agent = resolved_agent_name
 
     create_session(
         db,
@@ -937,6 +982,7 @@ def session_create(
         template_name=template,
         agent_name=resolved_agent,
         created_workspace=new_workspace,
+        created_agent=new_agent,
     )
 
 
