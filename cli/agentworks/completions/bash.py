@@ -68,6 +68,7 @@ def generate_bash(spec: CommandSpec, version: str) -> str:
     lines.append("}")
     lines.append("")
     lines.append("complete -F _agentworks agentworks")
+    lines.append("complete -F _agentworks agw")
     lines.append("")
 
     return "\n".join(lines)

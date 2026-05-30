@@ -107,7 +107,7 @@ def generate_powershell(spec: CommandSpec, version: str) -> str:
     lines.append('#   agentworks completion powershell > "$dir\\agentworks.ps1"')
     lines.append('#   then add to $PROFILE: . "$dir\\agentworks.ps1"')
     lines.append("")
-    lines.append("Register-ArgumentCompleter -Native -CommandName agentworks -ScriptBlock {")
+    lines.append("Register-ArgumentCompleter -Native -CommandName agentworks, agw -ScriptBlock {")
     lines.append("    param($wordToComplete, $commandAst, $cursorPosition)")
     lines.append("")
     lines.append("    $tokens = $commandAst.ToString().Trim() -split '\\s+'")

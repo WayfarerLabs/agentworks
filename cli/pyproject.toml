@@ -23,6 +23,7 @@ Issues = "https://github.com/WayfarerLabs/agentworks/issues"
 
 [project.scripts]
 agentworks = "agentworks.cli:main"
+agw = "agentworks.cli:main"
 
 [build-system]
 requires = ["hatchling"]
