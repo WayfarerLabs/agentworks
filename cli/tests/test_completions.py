@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from agentworks.cli import app
 from agentworks.completions import generate
 from agentworks.completions.spec import DYNAMIC_COMPLETIONS, build_spec, completion_version
@@ -137,3 +139,71 @@ class TestDetectShell:
 
         monkeypatch.setenv("SHELL", "pwsh")
         assert detect_shell() is None
+
+
+class TestResolveShell:
+    """_resolve_shell normalises aliases and reports a clean error on autodetect failure."""
+
+    def test_pwsh_alias_normalises(self, monkeypatch) -> None:
+        from agentworks.cli import _resolve_shell
+
+        assert _resolve_shell("pwsh") == "powershell"
+
+    def test_explicit_shell_passed_through(self, monkeypatch) -> None:
+        from agentworks.cli import _resolve_shell
+
+        assert _resolve_shell("bash") == "bash"
+        assert _resolve_shell("zsh") == "zsh"
+        assert _resolve_shell("powershell") == "powershell"
+
+    def test_autodetect_success(self, monkeypatch) -> None:
+        from agentworks.cli import _resolve_shell
+
+        monkeypatch.setenv("SHELL", "/bin/zsh")
+        assert _resolve_shell(None) == "zsh"
+
+    def test_autodetect_failure_exits_with_message(self, monkeypatch, capsys) -> None:
+        import typer
+
+        from agentworks.cli import _resolve_shell
+
+        monkeypatch.setenv("SHELL", "/usr/bin/fish")
+        with pytest.raises(typer.Exit) as exc_info:
+            _resolve_shell(None)
+        assert exc_info.value.exit_code == 1
+        captured = capsys.readouterr()
+        assert "unable to detect the shell" in captured.err.lower()
+
+
+class TestCompletionCli:
+    """End-to-end tests of `agentworks completion show|install` via CliRunner."""
+
+    def test_show_with_explicit_shell_prints_script(self, monkeypatch) -> None:
+        from typer.testing import CliRunner
+
+        from agentworks.cli import app
+
+        result = CliRunner().invoke(app, ["completion", "show", "--shell", "zsh"])
+        assert result.exit_code == 0
+        assert "#compdef" in result.stdout
+
+    def test_show_autodetect_failure_exits_1(self, monkeypatch) -> None:
+        from typer.testing import CliRunner
+
+        from agentworks.cli import app
+
+        monkeypatch.setenv("SHELL", "/usr/bin/fish")
+        result = CliRunner().invoke(app, ["completion", "show"])
+        assert result.exit_code == 1
+        assert "unable to detect the shell" in result.stderr.lower()
+
+    def test_show_pwsh_alias_produces_powershell_script(self, monkeypatch) -> None:
+        from typer.testing import CliRunner
+
+        from agentworks.cli import app
+
+        result_pwsh = CliRunner().invoke(app, ["completion", "show", "--shell", "pwsh"])
+        result_ps = CliRunner().invoke(app, ["completion", "show", "--shell", "powershell"])
+        assert result_pwsh.exit_code == 0
+        assert result_ps.exit_code == 0
+        assert result_pwsh.stdout == result_ps.stdout
