@@ -264,8 +264,8 @@ uv run agentworks config init    # creates ~/.config/agentworks/config.toml
 Edit the config file (at minimum, set your SSH key paths), then:
 
 ```bash
-agentworks vm create          # provision + initialize a VM
-agentworks workspace create   # create a workspace on the VM
+agentworks vm create my-vm                       # provision + initialize a VM
+agentworks workspace create my-workspace         # create a workspace on the VM
 agentworks workspace shell my-workspace
 ```
 
@@ -312,7 +312,7 @@ Manage virtual machines across Lima (local or remote), Azure, and WSL2.
 
 | Command                                          | Description                                |
 | ------------------------------------------------ | ------------------------------------------ |
-| `agentworks vm create`                           | Create a new VM (provision + initialize)   |
+| `agentworks vm create <name>`                    | Create a new VM (provision + initialize)   |
 | `agentworks vm list`                             | List VMs with status and resources         |
 | `agentworks vm describe <name>`                  | Show VM details, workspaces, and event log |
 | `agentworks vm shell <name>`                     | SSH into a VM's home directory             |
