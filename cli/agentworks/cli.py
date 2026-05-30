@@ -1124,7 +1124,7 @@ def console_create(
         str | None,
         typer.Option(
             "--vm",
-            help="Target VM (inferred from sessions if omitted; required when --all is used without explicit sessions)",
+            help="Target VM (inferred from listed sessions; otherwise auto-picked or prompted)",
         ),
     ] = None,
     all_sessions: Annotated[
@@ -1161,8 +1161,13 @@ def console_create(
     )
 
     if all_sessions and all_running:
-        typer.echo("Error: --all and --all-running are mutually exclusive", err=True)
-        raise typer.Exit(1)
+        raise typer.BadParameter("use --all or --all-running, not both")
+
+    # Validate every spec up front so bad input (e.g. 'bad+nope') fails before
+    # we prompt for a VM or hit the network on --all-running.
+    specs = list(sessions or [])
+    for s in specs:
+        parse_session_spec(s)
 
     db = _get_db()
     # Resolve target VM:
@@ -1170,10 +1175,9 @@ def console_create(
     #   2. inferred from listed sessions
     #   3. fall back to interactive/auto prompt
     if vm is None:
-        vm = infer_vm_from_session_specs(db, sessions or [])
+        vm = infer_vm_from_session_specs(db, specs)
     resolved_vm = _prompt_vm(db, vm)
 
-    specs = list(sessions or [])
     if all_running:
         # Live SSH probe (one round-trip per VM) so --all-running reflects
         # reality, not stale DB state.
