@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Annotated, Protocol
 import click
 import typer
 
-from agentworks.db import Database
+from agentworks.db import Database, WorkspaceRow
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -141,12 +141,16 @@ def _prompt_name(label: str, name: str | None) -> str:
     return output.prompt(f"{label} name", default=default)
 
 
-def _prompt_workspace(db: Database, workspace: str | None) -> str:
-    """Prompt for a workspace if not provided, listing available workspaces."""
+def _prompt_workspace(db: Database, workspace: str | None) -> WorkspaceRow:
+    """Resolve a workspace, prompting if not provided and validating either way."""
     from agentworks import output
 
     if workspace is not None:
-        return workspace
+        ws = db.get_workspace(workspace)
+        if ws is None:
+            typer.echo(f"Error: workspace '{workspace}' not found.", err=True)
+            raise typer.Exit(1)
+        return ws
 
     workspaces = db.list_workspaces()
     if not workspaces:
@@ -155,14 +159,13 @@ def _prompt_workspace(db: Database, workspace: str | None) -> str:
 
     if len(workspaces) == 1:
         output.info(f"Using workspace '{workspaces[0].name}'")
-        return workspaces[0].name
+        return workspaces[0]
 
     _require_interactive("--workspace")
 
     options = [f"{ws.name}  (vm: {ws.vm_name})" for ws in workspaces]
-
     idx = output.choose("Select a workspace:", options)
-    return workspaces[idx].name
+    return workspaces[idx]
 
 
 def _prompt_vm(db: Database, vm_name: str | None) -> str:
@@ -912,20 +915,19 @@ def session_create(
         )
         resolved_workspace = resolved_ws_name
     else:
-        resolved_workspace = _prompt_workspace(db, workspace)
+        ws = _prompt_workspace(db, workspace)
+        resolved_workspace = ws.name
 
         # Resolve mode. Skip the prompt when --new-agent is set.
         resolved_agent: str | None = agent  # type: ignore[no-redef]
         if not admin and agent is None and not new_agent:
-            resolved_agent = _prompt_session_mode(db, resolved_workspace)
+            resolved_agent = _prompt_session_mode(db, ws)
 
         resolved_name = _prompt_name("Session", name)
 
         if new_agent:
-            # Agents are VM-scoped; look up the workspace's VM.
-            ws_row = db.get_workspace(resolved_workspace)
-            assert ws_row is not None
-            resolved_vm = ws_row.vm_name
+            # Agents are VM-scoped; pick up the workspace's VM.
+            resolved_vm = ws.vm_name
 
     if new_agent:
         assert resolved_vm is not None
@@ -953,12 +955,8 @@ def session_create(
     )
 
 
-def _prompt_session_mode(db: Database, workspace_name: str) -> str | None:
+def _prompt_session_mode(db: Database, ws: WorkspaceRow) -> str | None:
     """Prompt for admin vs agent mode. Returns agent name or None for admin."""
-    ws = db.get_workspace(workspace_name)
-    if ws is None:
-        return None
-
     from agentworks import output
 
     agents = db.list_agents(vm_name=ws.vm_name)
