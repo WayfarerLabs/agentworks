@@ -233,15 +233,19 @@ def _build_arguments(params: list[ParamSpec]) -> list[str]:
     for param in params:
         if param.is_argument:
             label = param.name
+            # `*` is zsh's catchall positional spec -- matches every remaining
+            # arg, which is what we want for variadic list arguments.
+            position_spec = "*" if param.multiple else str(positional_index)
             if param.choices:
                 choices_str = " ".join(param.choices)
-                args.append(f"'{positional_index}:{label}:({choices_str})'")
+                args.append(f"'{position_spec}:{label}:({choices_str})'")
             elif param.dynamic_completer and param.dynamic_completer in COMPLETER_FUNC_NAMES:
                 completer = f":{COMPLETER_FUNC_NAMES[param.dynamic_completer]}"
-                args.append(f"'{positional_index}:{label}{completer}'")
+                args.append(f"'{position_spec}:{label}{completer}'")
             else:
-                args.append(f"'{positional_index}:{label}:'")
-            positional_index += 1
+                args.append(f"'{position_spec}:{label}:'")
+            if not param.multiple:
+                positional_index += 1
         elif param.is_flag:
             escaped_help = param.help.replace("'", "'\\''")
             opt = param.opts[0] if param.opts else f"--{param.name}"

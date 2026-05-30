@@ -404,6 +404,71 @@ def test_create_console_explicit_specs(db: Database, captured_output: CapturedOu
     ]
 
 
+def test_create_console_all_running_filters_to_pid(db: Database) -> None:
+    """--all-running picks up only sessions with a positive PID in the DB."""
+    _seed_vm(db)
+    _seed_sessions(db, ["live", "live2", "dead", "never"])
+    # 'live' and 'live2' have positive PIDs + boot_id (running). 'dead' is
+    # explicitly stopped. 'never' is left with pid=None (never started).
+    db._conn.execute("UPDATE sessions SET pid = 100, boot_id = 'x' WHERE name = 'live'")
+    db._conn.execute("UPDATE sessions SET pid = 200, boot_id = 'x' WHERE name = 'live2'")
+    db._conn.execute("UPDATE sessions SET pid = -1 WHERE name = 'dead'")
+    db._conn.commit()
+
+    create_console(db, name="running", vm_name="vm1", session_specs=[], all_running=True)
+    members = db.list_console_sessions("running")
+    assert [m.session_name for m in members] == ["live", "live2"]
+
+
+def test_create_console_all_and_all_running_mutually_exclusive(db: Database) -> None:
+    _seed_vm(db)
+    _seed_sessions(db, ["a"])
+    with pytest.raises(output.ConsoleError, match="mutually exclusive"):
+        create_console(
+            db,
+            name="con",
+            vm_name="vm1",
+            session_specs=[],
+            fill_all=True,
+            all_running=True,
+        )
+
+
+def test_create_console_all_running_empty_message(db: Database) -> None:
+    _seed_vm(db)  # no sessions seeded
+    with pytest.raises(output.ConsoleError, match="no running sessions"):
+        create_console(
+            db,
+            name="empty",
+            vm_name="vm1",
+            session_specs=[],
+            all_running=True,
+        )
+
+
+def test_infer_vm_from_session_specs(db: Database) -> None:
+    from agentworks.sessions.multi_console import infer_vm_from_session_specs
+
+    _seed_vm(db, "vm1")
+    _seed_vm(db, "vm2")
+    _seed_sessions(db, ["a", "b"], workspace_name="ws-vm1")
+    _seed_sessions(db, ["c"], workspace_name="ws-vm2")
+
+    # Empty list -> None (caller falls back to prompt).
+    assert infer_vm_from_session_specs(db, []) is None
+
+    # Single VM -> resolved.
+    assert infer_vm_from_session_specs(db, ["a"]) == "vm1"
+    assert infer_vm_from_session_specs(db, ["a+2", "b"]) == "vm1"
+
+    # Spans multiple VMs -> ConsoleError.
+    with pytest.raises(output.ConsoleError, match="span multiple VMs"):
+        infer_vm_from_session_specs(db, ["a", "c"])
+
+    # All-unknown sessions -> None (defer error to create_console).
+    assert infer_vm_from_session_specs(db, ["ghost", "fantom"]) is None
+
+
 def test_create_console_fill_all_appends_alphabetically(db: Database) -> None:
     _seed_vm(db)
     _seed_sessions(db, ["gamma", "alpha", "beta"])

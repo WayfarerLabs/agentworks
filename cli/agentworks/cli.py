@@ -1147,12 +1147,25 @@ def console_create(
             help="Sessions to include. Use 'name' or 'name+N' for N default shells.",
         ),
     ] = None,
-    vm: Annotated[str | None, typer.Option("--vm", help="Target VM")] = None,
+    vm: Annotated[
+        str | None,
+        typer.Option(
+            "--vm",
+            help="Target VM (inferred from sessions if omitted; required when --all is used without explicit sessions)",
+        ),
+    ] = None,
     all_sessions: Annotated[
         bool,
         typer.Option(
             "--all",
             help="Fill in every other session on the VM (0 shells each, alphabetical) after the explicit specs",
+        ),
+    ] = False,
+    all_running: Annotated[
+        bool,
+        typer.Option(
+            "--all-running",
+            help="Like --all but only sessions whose last-known state is running",
         ),
     ] = False,
     add_admin_shell: Annotated[
@@ -1164,16 +1177,26 @@ def console_create(
     ] = False,
 ) -> None:
     """Create a named console with a curated set of sessions."""
-    from agentworks.sessions.multi_console import create_console
+    from agentworks.sessions.multi_console import (
+        create_console,
+        infer_vm_from_session_specs,
+    )
 
     db = _get_db()
-    resolved_vm = _prompt_vm(db, vm)
+    # Prefer the user's explicit --vm. If absent, infer from the listed sessions;
+    # if there are no sessions to infer from, fall back to the standard prompt.
+    if vm is None:
+        vm = infer_vm_from_session_specs(db, sessions or [])
+    if vm is None:
+        vm = _prompt_vm(db, None)
+
     create_console(
         db,
         name=name,
-        vm_name=resolved_vm,
+        vm_name=vm,
         session_specs=sessions or [],
         fill_all=all_sessions,
+        all_running=all_running,
         add_admin_shell=add_admin_shell,
     )
 

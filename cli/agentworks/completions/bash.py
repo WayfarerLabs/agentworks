@@ -155,16 +155,20 @@ def _emit_leaf_completions(lines: list[str], spec: CommandSpec, token_offset: in
             lines.append(f"{indent}        ;;")
         lines.append(f"{indent}esac")
 
-    # Positional argument completions
-    if positional_args:
-        param = positional_args[0]
+    # Positional argument completions. Each positional emits its own handler;
+    # variadic positionals (multiple=True) match every position from theirs
+    # onward (e.g. console create's "sessions" continues completing the 2nd,
+    # 3rd, ... argument).
+    for i, param in enumerate(positional_args):
+        pos_token = token_offset + i
+        cmp_op = "-ge" if param.multiple else "-eq"
         words: str | None = None
         if param.choices:
             words = " ".join(param.choices)
         elif param.dynamic_completer and param.dynamic_completer in DYNAMIC_SNIPPETS:
             words = DYNAMIC_SNIPPETS[param.dynamic_completer]
         if words:
-            lines.append(f'{indent}if [[ $cword -eq {token_offset} && "$cur" != -* ]]; then')
+            lines.append(f'{indent}if [[ $cword {cmp_op} {pos_token} && "$cur" != -* ]]; then')
             lines.append(f'{indent}    COMPREPLY=($(compgen -W "{words}" -- "$cur"))')
             lines.append(f"{indent}    return")
             lines.append(f"{indent}fi")

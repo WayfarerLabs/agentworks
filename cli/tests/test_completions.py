@@ -101,3 +101,29 @@ def _assert_all_commands_present(spec, output: str) -> None:
         assert name in output, f"Command '{name}' not found in generated output"
         for sub_name in sub.subcommands:
             assert sub_name in output, f"Subcommand '{name} {sub_name}' not found in generated output"
+
+
+class TestVariadicPositionalCompletion:
+    """Variadic Argument positionals (Click nargs=-1) must produce 'every
+    subsequent position' completion in all three shells, not just position N."""
+
+    def test_zsh_uses_star_for_variadic(self) -> None:
+        output = generate("zsh")
+        # console create's sessions positional is variadic with the sessions
+        # completer; '*:' is zsh's "remaining positions" catchall.
+        assert "'*:sessions:_agentworks_sessions'" in output
+
+    def test_bash_uses_ge_for_variadic(self) -> None:
+        output = generate("bash")
+        # Look for the console-create block specifically: 'sessions' completer
+        # snippet is `agentworks session list --no-status ...`, guarded by a
+        # -ge cword check (matches every position from the variadic's offset on).
+        assert "cword -ge" in output
+        # And the standard -eq for non-variadic positionals still works.
+        assert "cword -eq" in output
+
+    def test_powershell_uses_ge_for_variadic(self) -> None:
+        output = generate("powershell")
+        # Same idea: -ge for the variadic.
+        assert "tokenCount -ge" in output
+        assert "tokenCount -eq" in output

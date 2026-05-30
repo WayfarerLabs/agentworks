@@ -110,6 +110,54 @@ def _vm_sessions(db: Database, vm_name: str) -> list[SessionRow]:
     return sessions
 
 
+def _is_running(session: SessionRow) -> bool:
+    """DB-level liveness check: a session is considered running if it has a
+    positive PID (last-known-running per the session lifecycle layer)."""
+    from agentworks.db import PID_STOPPED
+
+    return (
+        session.pid is not None
+        and session.pid != PID_STOPPED
+        and session.pid > 0
+    )
+
+
+def infer_vm_from_session_specs(
+    db: Database, session_specs: list[str]
+) -> str | None:
+    """Return the single VM hosting all listed sessions.
+
+    - Returns None if *session_specs* is empty or none of the names resolve to
+      a known session (callers prompt for --vm or surface the not-found error
+      from create_console).
+    - Raises ConsoleError if listed sessions span more than one VM (the user
+      must disambiguate with --vm explicitly).
+    """
+    if not session_specs:
+        return None
+
+    vms: set[str] = set()
+    for spec in session_specs:
+        try:
+            session_name = parse_session_spec(spec).name
+        except output.ValidationError:
+            # Bad spec -- defer the error to create_console's own validation.
+            continue
+        session = db.get_session(session_name)
+        if session is None:
+            continue
+        ws = db.get_workspace(session.workspace_name)
+        if ws and ws.vm_name:
+            vms.add(ws.vm_name)
+
+    if len(vms) > 1:
+        raise output.ConsoleError(
+            f"sessions span multiple VMs ({', '.join(sorted(vms))}); "
+            f"pass --vm to pick one"
+        )
+    return next(iter(vms)) if vms else None
+
+
 def _verify_session_on_vm(db: Database, session_name: str, vm_name: str) -> None:
     """Raise if the session does not exist or is not on the given VM."""
     session = db.get_session(session_name)
@@ -151,19 +199,22 @@ def create_console(
     vm_name: str,
     session_specs: list[str],
     fill_all: bool = False,
+    all_running: bool = False,
     add_admin_shell: bool = False,
 ) -> None:
     """Create a new console with the given sessions.
 
-    Explicit *session_specs* keep their argument order. When *fill_all* is
-    True, every other session on the VM is appended in alphabetical order
-    with zero shells. When *add_admin_shell* is True, the tmux build will
-    also include a window 0 running a login shell as the VM admin (legacy
-    vm-console behavior) -- useful when you want a top-level shell alongside
-    the curated session windows. All inserts run in one transaction; the
-    console is not created if any step fails.
+    Explicit *session_specs* keep their argument order. *fill_all* appends
+    every other session on the VM in alphabetical order with zero shells;
+    *all_running* is the same but restricted to sessions whose last-known
+    state is running. *add_admin_shell* adds a window 0 login shell as the
+    VM admin (legacy vm-console behavior) -- useful when you want a
+    top-level shell alongside the curated session windows. All inserts run
+    in one transaction; the console is not created if any step fails.
     """
     validate_name(name)
+    if fill_all and all_running:
+        raise output.ConsoleError("--all and --all-running are mutually exclusive")
 
     if db.get_console(name) is not None:
         raise output.ConsoleError(f"console '{name}' already exists")
@@ -175,20 +226,25 @@ def create_console(
     for spec in specs:
         _verify_session_on_vm(db, spec.name, vm_name)
 
-    if fill_all:
+    if fill_all or all_running:
         explicit_names = {s.name for s in specs}
-        extras = sorted(
-            s.name for s in _vm_sessions(db, vm_name) if s.name not in explicit_names
-        )
+        candidates = _vm_sessions(db, vm_name)
+        if all_running:
+            candidates = [s for s in candidates if _is_running(s)]
+        extras = sorted(s.name for s in candidates if s.name not in explicit_names)
         specs.extend(SessionSpec(name=n, shells=0) for n in extras)
 
     if not specs and not add_admin_shell:
         # Almost certainly a typo / misunderstanding rather than an empty console.
-        detail = (
-            f"VM '{vm_name}' has no sessions"
-            if fill_all
-            else "specify at least one session, pass --all, or pass --add-admin-shell"
-        )
+        if fill_all:
+            detail = f"VM '{vm_name}' has no sessions"
+        elif all_running:
+            detail = f"VM '{vm_name}' has no running sessions"
+        else:
+            detail = (
+                "specify at least one session, "
+                "pass --all / --all-running, or pass --add-admin-shell"
+            )
         raise output.ConsoleError(
             f"refusing to create empty console '{name}' ({detail})"
         )
