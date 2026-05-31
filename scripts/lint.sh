@@ -48,9 +48,9 @@ esac
 
 # --- Resolve npm package runner once ---
 #
-# `_common.sh` provides `run_npm_package` as a shell function, but xargs runs
-# its command in a subshell that doesn't inherit shell functions, so we need
-# the runner as a plain executable here. Mirror _common.sh's detection.
+# Use an array variable so each tool invocation can splice it in cleanly.
+# Mirrors `_common.sh`'s detection (kept inline instead of using the shared
+# `run_npm_package` shell function for readability at the call sites).
 if command -v bunx >/dev/null 2>&1; then
     PKGRUN=(bunx)
 elif command -v pnpm >/dev/null 2>&1; then
