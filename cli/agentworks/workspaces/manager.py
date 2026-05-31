@@ -74,6 +74,11 @@ def create_workspace(
             template=template_resolved_name,
             linux_group=workspace_group(ws_name),
         )
+    except KeyboardInterrupt:
+        ssh_logger.close()
+        output.warn(f"Cancelling workspace create '{ws_name}'... rolling back.")
+        _cleanup()
+        raise
     except output.AgentworksError:
         ssh_logger.close()
         _cleanup()
@@ -378,6 +383,26 @@ def repair_workspace(
         output.info("\nNo issues found")
 
 
+def _rehome_partial_state_hint(
+    db: Database, ws_name: str, old_path: str, new_path: str
+) -> str:
+    """Describe the actual DB state after a rehome failure / cancellation.
+
+    The rehome flow copies files to the new path, then updates the DB. KI or
+    an exception can land before OR after the DB update, so we read the row
+    back to give the user an accurate picture rather than asserting one way.
+    """
+    ws = db.get_workspace(ws_name)
+    if ws is None:
+        return "Workspace row is missing from the DB; manual cleanup may be needed."
+    if ws.workspace_path == new_path:
+        return (
+            f"DB now points to {new_path}, but the on-VM move may be incomplete. "
+            f"Use 'workspace describe {ws_name}' and verify the directory."
+        )
+    return f"DB still points to {old_path}; the workspace was not moved."
+
+
 def rehome_workspace(
     db: Database,
     config: Config,
@@ -562,6 +587,14 @@ def _rehome_vm(
             output.info(f"\nOld directory left in place at {old_path}")
             output.info("Remove it manually when ready, or re-run with --remove-old")
 
+    except KeyboardInterrupt:
+        ssh_logger.close()
+        output.warn(
+            f"Cancelling workspace rehome '{ws_name}'. "
+            f"{_rehome_partial_state_hint(db, ws_name, old_path, new_path)} "
+            f"SSH log: {ssh_logger.path}"
+        )
+        raise
     except output.AgentworksError:
         ssh_logger.close()
         raise
@@ -570,7 +603,7 @@ def _rehome_vm(
         raise output.WorkspaceError(
             f"during rehome: {e}\n"
             f"SSH log: {ssh_logger.path}\n"
-            "The database was NOT updated. The workspace is still at the original path."
+            f"{_rehome_partial_state_hint(db, ws_name, old_path, new_path)}"
         ) from None
 
     ssh_logger.close()

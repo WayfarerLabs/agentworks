@@ -130,3 +130,121 @@ def test_main_wrapper_lets_click_exceptions_through(
     # And no error.log entry from our wrapper.
     log_path = tmp_path / "logs" / "error.log"
     assert not log_path.exists()
+
+
+def test_main_wrapper_handles_keyboard_interrupt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """KeyboardInterrupt from inside a command exits cleanly with code 130.
+
+    The Ctrl-C contract: no traceback, no error.log entry (KI isn't a bug to
+    be debugged later), conventional SIGINT exit code. Typer itself converts
+    KI to ``click.Exit(130)`` before our top-level wrapper sees it -- this
+    test pins that contract so a future framework change can't silently
+    regress it.
+    """
+    from agentworks import cli as cli_mod
+
+    test_app = typer.Typer()
+
+    @test_app.callback()
+    def _cb() -> None:
+        pass
+
+    @test_app.command("interrupt")
+    def interrupt() -> None:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(cli_mod, "app", test_app)
+    monkeypatch.setattr("agentworks.config.CONFIG_DIR", tmp_path)
+    monkeypatch.setattr("sys.argv", ["agentworks", "interrupt"])
+    monkeypatch.setenv("AGW_DEBUG", "")
+
+    with pytest.raises(SystemExit) as exc_info:
+        cli_mod.main()
+
+    assert exc_info.value.code == 130
+    # No traceback logged -- a Ctrl-C isn't a bug to debug later.
+    assert not (tmp_path / "logs" / "error.log").exists()
+
+
+def test_create_session_rolls_back_on_keyboard_interrupt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Spot-check the per-op rollback pattern: a KeyboardInterrupt raised from
+    inside the long-running SSH-driven part of ``create_session`` must trigger
+    the DB rollback (delete_session) and re-raise the KI unchanged.
+
+    Mirrors one of the six rollback sites in this PR. Future drift between
+    the KI branch and the sibling ``except Exception`` branch should fail
+    this test, not slip past code review."""
+    from agentworks.config import load_config
+    from agentworks.db import Database, SessionMode
+    from agentworks.sessions import manager as session_manager
+    from agentworks.sessions import tmux as tmux_mod
+
+    db_path = tmp_path / "test.db"
+    db = Database(db_path)
+    # Minimal fixture: VM with tailscale_host + workspace.
+    db._conn.execute(
+        "INSERT INTO vms (name, platform, admin_username, tailscale_host) "
+        "VALUES ('vm1', 'wsl', 'admin', '100.64.0.5')"
+    )
+    db._conn.execute(
+        "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group) "
+        "VALUES ('ws1', 'vm1', '/home/me/ws1', 'ws-ws1')"
+    )
+    db._conn.commit()
+
+    # Skip the VM-running probe entirely.
+    monkeypatch.setattr(
+        "agentworks.workspaces.manager._ensure_vm_running",
+        lambda *args, **kwargs: None,
+    )
+
+    class _Result:
+        ok = True
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    class _Target:
+        def run(self, *args: object, **kwargs: object) -> _Result:
+            return _Result()
+
+    monkeypatch.setattr(
+        "agentworks.ssh.admin_exec_target",
+        lambda vm, config, **kwargs: _Target(),
+    )
+    # deploy_restricted_config does its own SSH writes -- skip them.
+    monkeypatch.setattr(
+        session_manager,
+        "_build_session_command",
+        lambda *args, **kwargs: "true",
+    )
+    monkeypatch.setattr(tmux_mod, "deploy_restricted_config", lambda *args, **kwargs: None)
+
+    # The inner SSH operation raises KI mid-way through.
+    def _explode(*args: object, **kwargs: object) -> tuple[None, None]:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(tmux_mod, "create_session", _explode)
+
+    monkeypatch.setattr("agentworks.config.CONFIG_DIR", tmp_path)
+    config = load_config()
+
+    with pytest.raises(KeyboardInterrupt):
+        session_manager.create_session(
+            db,
+            config,
+            name="s1",
+            workspace_name="ws1",
+            template_name=None,
+            agent_name=None,
+        )
+
+    # Rollback ran: the session row that was inserted before create_tmux_session
+    # ran is gone.
+    assert db.get_session("s1") is None
+    db.close()
+    _ = SessionMode  # keep import non-unused for future expansion

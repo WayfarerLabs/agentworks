@@ -123,6 +123,11 @@ def create_agent(
     ssh_logger = SSHLogger(vm.name, "agent-create")
     try:
         _create_agent_on_vm(vm, config, linux_user, git_tokens=git_tokens, logger=ssh_logger)
+    except KeyboardInterrupt:
+        ssh_logger.close()
+        output.warn(f"Cancelling agent create '{name}'... rolling back.")
+        _delete_agent_on_vm(vm, config, linux_user, logger=ssh_logger)
+        raise
     except Exception as e:
         ssh_logger.close()
         _delete_agent_on_vm(vm, config, linux_user, logger=ssh_logger)
@@ -261,6 +266,13 @@ def reinit_agent(
     ssh_logger = SSHLogger(vm.name, "agent-reinit")
     try:
         _create_agent_on_vm(vm, config, agent.linux_user, git_tokens=git_tokens, logger=ssh_logger)
+    except KeyboardInterrupt:
+        ssh_logger.close()
+        output.warn(
+            f"Cancelling agent reinit '{name}'. The agent may be in a partial state -- "
+            f"re-run 'agent reinit {name}' to retry. SSH log: {ssh_logger.path}"
+        )
+        raise
     except Exception as e:
         ssh_logger.close()
         raise AgentError(f"reinitializing agent: {e}\nSSH log: {ssh_logger.path}") from None

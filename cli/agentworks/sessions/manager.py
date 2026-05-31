@@ -573,6 +573,12 @@ def create_session(
             admin_username=vm.admin_username,
             is_admin=(mode == SessionMode.ADMIN),
         )
+    except KeyboardInterrupt:
+        output.warn(f"Cancelling session create '{name}'... rolling back.")
+        db.delete_session(name)
+        if resolved_agent_name:
+            db.delete_agent_grant(resolved_agent_name, workspace_name, "implicit", session_name=name)
+        raise
     except Exception:
         db.delete_session(name)
         if resolved_agent_name:

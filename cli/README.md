@@ -294,6 +294,13 @@ third-party library failures) also get a clean single-line message, plus the ful
 appended to `~/.config/agentworks/logs/error.log` for debugging. Pass `--debug` (or set
 `AGW_DEBUG=1`) to print the traceback to stderr instead.
 
+Pressing Ctrl-C during a long-running operation triggers best-effort cleanup. Where the operation
+can roll back (e.g. `vm create` during the provisioning phase, `workspace create`, `agent create`,
+`session create`) it undoes the partial DB / on-VM state and prints `Cancelling X... rolling
+back.`. Where rollback isn't possible (`vm reinit`, `agent reinit`, the init phase of `vm create`)
+it prints a recovery hint -- the next command to run (`vm reinit`, `vm delete --force`, ...).
+Every cancellation exits with the conventional SIGINT exit code (130).
+
 ## Commands
 
 ### Top-level

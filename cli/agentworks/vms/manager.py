@@ -185,6 +185,10 @@ def create_vm(
         else:
             msg = f"Unknown platform: {platform}"
             raise ValueError(msg)
+    except KeyboardInterrupt:
+        output.warn(f"Cancelling vm create '{vm_name}'... rolling back.")
+        db.delete_vm(vm_name)
+        raise
     except Exception as e:
         db.delete_vm(vm_name)
         raise VMError(f"provisioning failed: {e}") from e
@@ -226,6 +230,13 @@ def create_vm(
             tailscale_ip=result.tailscale_ip,
             on_tailscale_ready=_on_tailscale_ready,
         )
+    except KeyboardInterrupt:
+        output.warn(
+            f"Cancelling vm create '{vm_name}' during initialization. "
+            f"The VM exists but is partially initialized -- use 'vm reinit {vm_name}' to retry, "
+            f"or 'vm delete {vm_name} --force' to remove it."
+        )
+        raise
     except Exception as e:
         from agentworks.ssh import LOG_DIR
 
@@ -762,6 +773,13 @@ def reinit_vm(
             logger,
             git_tokens=git_tokens,
         )
+    except KeyboardInterrupt:
+        logger.close()
+        output.warn(
+            f"Cancelling vm reinit '{name}'. The VM may be in a partial state -- "
+            f"re-run 'vm reinit {name}' to retry. Log: {logger.path}"
+        )
+        raise
     except Exception:
         logger.close()
         output.warn(f"Log: {logger.path}")

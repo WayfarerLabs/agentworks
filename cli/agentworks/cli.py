@@ -1744,9 +1744,17 @@ def main() -> None:
         typer.echo(f"Error: {e}", err=True)
         raise SystemExit(1) from None
     except (click.exceptions.ClickException, click.exceptions.Exit, click.exceptions.Abort):
-        # Let Click / Typer own their own rendering (usage hints, formatted
-        # parameter errors, ``raise typer.Exit(N)`` exit codes, ...).
+        # Let Click / Typer own their own rendering and exit codes. Typer
+        # converts KeyboardInterrupt to click.Exit(130) internally before this
+        # try block sees it (see typer/core.py), so ctrl-C is already handled
+        # silently with the conventional SIGINT exit code; per-op rollback
+        # handlers fire inside the command, before typer's conversion.
         raise
+    except KeyboardInterrupt:
+        # Defensive: a KI that somehow bypasses typer's internal conversion
+        # (e.g. raised during main()'s own setup, before app() runs).
+        typer.echo("Cancelled.", err=True)
+        raise SystemExit(130) from None
     except Exception as e:
         # Anything else is an unhandled error (third-party library, internal
         # bug, OSError, etc.). Print a clean one-liner, persist the full
