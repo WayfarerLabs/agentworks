@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 
 # ============================================================================
-# Shared helpers for ops scripts.
+# Shared helpers for workspace scripts.
 # Source this file, do not execute it directly.
 #
-# Usage: source "$(dirname "${BASH_SOURCE[0]}")/_common.bash"
+# Usage: source "$(dirname "${BASH_SOURCE[0]}")/_common.sh"
 # ============================================================================
 
 # Check that a supported npm package runner is available.

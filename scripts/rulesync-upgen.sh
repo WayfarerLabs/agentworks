@@ -10,15 +10,15 @@
 # does not preserve the executable bit on install or generate, so we detect
 # files with shebangs after install and propagate the bit after generate.
 #
-# Usage: ./ops/scripts/rulesync-upgen.bash
+# Usage: ./scripts/rulesync-upgen.sh
 # ============================================================================
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-source "$SCRIPT_DIR/_common.bash"
+source "$SCRIPT_DIR/_common.sh"
 require_npm_package_runner
 
 RULESYNC_VERSION=$(read_version_file .rulesync-version "" "$REPO_ROOT")
