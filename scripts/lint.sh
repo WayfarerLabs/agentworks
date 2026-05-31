@@ -119,7 +119,7 @@ fi
 echo ""
 echo "=== cspell ==="
 if "${PKGRUN[@]}" cspell@"$CSPELL_VERSION" --no-progress \
-    '**/*.md' '**/*.py' '**/*.yaml' '**/*.yml' '**/*.toml'; then
+    '**/*.md' '**/*.py' '**/*.yaml' '**/*.yml' '**/*.toml' '**/*.json' '**/*.jsonc'; then
     echo "  ok"
 else
     echo ""
