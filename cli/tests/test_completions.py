@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from agentworks.cli import app
 from agentworks.completions import generate
 from agentworks.completions.spec import DYNAMIC_COMPLETIONS, build_spec, completion_version
@@ -101,6 +103,110 @@ def _assert_all_commands_present(spec, output: str) -> None:
         assert name in output, f"Command '{name}' not found in generated output"
         for sub_name in sub.subcommands:
             assert sub_name in output, f"Subcommand '{name} {sub_name}' not found in generated output"
+
+
+class TestDetectShell:
+    """detect_shell only commits to bash or zsh; everything else is unknown."""
+
+    def test_bash(self, monkeypatch) -> None:
+        from agentworks.completions import detect_shell
+
+        monkeypatch.setenv("SHELL", "/bin/bash")
+        assert detect_shell() == "bash"
+
+    def test_zsh(self, monkeypatch) -> None:
+        from agentworks.completions import detect_shell
+
+        monkeypatch.setenv("SHELL", "/usr/local/bin/zsh")
+        assert detect_shell() == "zsh"
+
+    def test_unset(self, monkeypatch) -> None:
+        from agentworks.completions import detect_shell
+
+        monkeypatch.delenv("SHELL", raising=False)
+        assert detect_shell() is None
+
+    def test_unknown(self, monkeypatch) -> None:
+        from agentworks.completions import detect_shell
+
+        monkeypatch.setenv("SHELL", "/usr/bin/fish")
+        assert detect_shell() is None
+
+    def test_powershell_is_not_autodetected(self, monkeypatch) -> None:
+        # PowerShell on Windows does not set $SHELL; if it somehow leaks in,
+        # we still refuse to commit and force the user to pass --shell.
+        from agentworks.completions import detect_shell
+
+        monkeypatch.setenv("SHELL", "pwsh")
+        assert detect_shell() is None
+
+
+class TestResolveShell:
+    """_resolve_shell normalizes aliases and reports a clean error on autodetect failure."""
+
+    def test_pwsh_alias_normalizes(self, monkeypatch) -> None:
+        from agentworks.cli import _resolve_shell
+
+        assert _resolve_shell("pwsh") == "powershell"
+
+    def test_explicit_shell_passed_through(self, monkeypatch) -> None:
+        from agentworks.cli import _resolve_shell
+
+        assert _resolve_shell("bash") == "bash"
+        assert _resolve_shell("zsh") == "zsh"
+        assert _resolve_shell("powershell") == "powershell"
+
+    def test_autodetect_success(self, monkeypatch) -> None:
+        from agentworks.cli import _resolve_shell
+
+        monkeypatch.setenv("SHELL", "/bin/zsh")
+        assert _resolve_shell(None) == "zsh"
+
+    def test_autodetect_failure_exits_with_message(self, monkeypatch, capsys) -> None:
+        import typer
+
+        from agentworks.cli import _resolve_shell
+
+        monkeypatch.setenv("SHELL", "/usr/bin/fish")
+        with pytest.raises(typer.Exit) as exc_info:
+            _resolve_shell(None)
+        assert exc_info.value.exit_code == 1
+        captured = capsys.readouterr()
+        assert "unable to detect the shell" in captured.err.lower()
+
+
+class TestCompletionCli:
+    """End-to-end tests of `agentworks completion show|install` via CliRunner."""
+
+    def test_show_with_explicit_shell_prints_script(self, monkeypatch) -> None:
+        from typer.testing import CliRunner
+
+        from agentworks.cli import app
+
+        result = CliRunner().invoke(app, ["completion", "show", "--shell", "zsh"])
+        assert result.exit_code == 0
+        assert "#compdef" in result.stdout
+
+    def test_show_autodetect_failure_exits_1(self, monkeypatch) -> None:
+        from typer.testing import CliRunner
+
+        from agentworks.cli import app
+
+        monkeypatch.setenv("SHELL", "/usr/bin/fish")
+        result = CliRunner().invoke(app, ["completion", "show"])
+        assert result.exit_code == 1
+        assert "unable to detect the shell" in result.stderr.lower()
+
+    def test_show_pwsh_alias_produces_powershell_script(self, monkeypatch) -> None:
+        from typer.testing import CliRunner
+
+        from agentworks.cli import app
+
+        result_pwsh = CliRunner().invoke(app, ["completion", "show", "--shell", "pwsh"])
+        result_ps = CliRunner().invoke(app, ["completion", "show", "--shell", "powershell"])
+        assert result_pwsh.exit_code == 0
+        assert result_ps.exit_code == 0
+        assert result_pwsh.stdout == result_ps.stdout
 
 
 class TestVariadicPositionalCompletion:
