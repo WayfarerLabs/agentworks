@@ -1,0 +1,135 @@
+#!/usr/bin/env bash
+
+# ============================================================================
+# lint.sh -- Run all repository linters at the versions CI uses.
+#
+# Each tool is pinned in its own `.<tool>-version` file (`.cspell-version`,
+# `.markdownlint-cli2-version`, `.prettier-version`, `.rulesync-version`).
+# This script reads those same files and invokes each tool via the local
+# npm package runner.
+#
+# Usage:
+#   ./scripts/lint.sh          Check only. Mirrors CI exactly.
+#   ./scripts/lint.sh --fix    Auto-fix where each tool can, then re-check.
+#                              cspell cannot auto-fix; remaining unknown
+#                              words must be corrected by hand or added
+#                              to .cspell.json.
+# ============================================================================
+
+set -uo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+source "$SCRIPT_DIR/_common.sh"
+
+# --- Arg parsing ---
+
+FIX=0
+case "${1:-}" in
+    --fix) FIX=1 ;;
+    -h|--help)
+        sed -n '/^# Usage:/,/^# ====/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//; /^====/d'
+        exit 0
+        ;;
+    "") ;;
+    *)
+        echo "Error: unknown argument '$1'. Run with --help for usage." >&2
+        exit 1
+        ;;
+esac
+
+# --- Resolve npm package runner once ---
+#
+# `_common.sh` provides `run_npm_package` as a shell function, but xargs runs
+# its command in a subshell that doesn't inherit shell functions, so we need
+# the runner as a plain executable here. Mirror _common.sh's detection.
+if command -v bunx >/dev/null 2>&1; then
+    PKGRUN=(bunx)
+elif command -v pnpm >/dev/null 2>&1; then
+    PKGRUN=(pnpm dlx)
+elif command -v npx >/dev/null 2>&1; then
+    PKGRUN=(npx -y)
+else
+    echo "Error: no npm package runner found (tried bunx, pnpm dlx, npx)." >&2
+    echo "Install one of: bun, pnpm, or Node.js." >&2
+    exit 1
+fi
+
+cd "$REPO_ROOT"
+
+CSPELL_VERSION=$(read_version_file .cspell-version "" "$REPO_ROOT")
+MDLINT_VERSION=$(read_version_file .markdownlint-cli2-version "" "$REPO_ROOT")
+PRETTIER_VERSION=$(read_version_file .prettier-version "" "$REPO_ROOT")
+RULESYNC_VERSION=$(read_version_file .rulesync-version "" "$REPO_ROOT")
+
+FAIL=0
+
+# --- Fix pass ---
+
+if [[ $FIX -eq 1 ]]; then
+    echo "--- prettier --write ---"
+    git ls-files '*.md' | xargs -r "${PKGRUN[@]}" prettier@"$PRETTIER_VERSION" --write
+
+    echo ""
+    echo "--- markdownlint-cli2 --fix ---"
+    # markdownlint exits non-zero on unfixable issues; let the re-check pass
+    # below report them.
+    git ls-files '*.md' | xargs -r "${PKGRUN[@]}" markdownlint-cli2@"$MDLINT_VERSION" --fix || true
+
+    echo ""
+    echo "--- rulesync regenerate (committed copilot output) ---"
+    "${PKGRUN[@]}" rulesync@"$RULESYNC_VERSION" generate -t copilot
+fi
+
+# --- Check pass (always runs) ---
+
+echo ""
+echo "=== prettier --check ==="
+if git ls-files '*.md' | xargs -r "${PKGRUN[@]}" prettier@"$PRETTIER_VERSION" --check; then
+    echo "  ok"
+else
+    FAIL=1
+fi
+
+echo ""
+echo "=== markdownlint-cli2 ==="
+if git ls-files '*.md' | xargs -r "${PKGRUN[@]}" markdownlint-cli2@"$MDLINT_VERSION"; then
+    echo "  ok"
+else
+    FAIL=1
+fi
+
+echo ""
+echo "=== cspell ==="
+if git ls-files '*.md' '*.py' '*.yaml' '*.yml' '*.toml' \
+    | xargs -r "${PKGRUN[@]}" cspell@"$CSPELL_VERSION" --no-progress; then
+    echo "  ok"
+else
+    echo ""
+    echo "  cspell flags cannot be auto-fixed. For each unknown word:"
+    echo "    - correct the spelling, OR"
+    echo "    - add the word to .cspell.json's \"words\" list."
+    FAIL=1
+fi
+
+echo ""
+echo "=== rulesync drift (committed copilot output) ==="
+# Always check against the shared copilot target. A dev whose
+# rulesync.local.jsonc selects different targets is fine -- their local-only
+# output is gitignored and not part of what CI checks.
+if "${PKGRUN[@]}" rulesync@"$RULESYNC_VERSION" generate -t copilot --check; then
+    echo "  ok"
+else
+    echo ""
+    echo "  Committed copilot output is stale. Re-run: ./scripts/lint.sh --fix"
+    FAIL=1
+fi
+
+echo ""
+if [[ $FAIL -eq 0 ]]; then
+    echo "All checks passed."
+else
+    echo "One or more checks failed. See above."
+    exit 1
+fi

@@ -52,5 +52,19 @@ specification.
 ## Code Quality
 
 - **Python**: ruff (linting + formatting), mypy (type checking), pytest
-- **Markdown**: markdownlint, prettier, cspell
-- Custom dictionaries are maintained in `.cspell.json`
+- **Markdown**: markdownlint-cli2, prettier, cspell
+- Custom cspell dictionary is maintained in `.cspell.json`
+
+### Running the markdown linters
+
+The npm-based linters (cspell, markdownlint-cli2, prettier) and the rulesync drift check are pinned
+via per-tool `.<tool>-version` files. The same versions run in CI. To run them locally:
+
+```bash
+./scripts/lint.sh        # check only -- exactly what CI runs
+./scripts/lint.sh --fix  # auto-fix where each tool can; re-check; report what remains
+```
+
+`--fix` covers prettier formatting, markdownlint auto-fixable rules, and rulesync regeneration.
+cspell cannot auto-fix unknown words; the script flags them and points you at `.cspell.json` to
+either correct the spelling or add a word.
