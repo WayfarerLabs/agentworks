@@ -66,13 +66,12 @@ jobs:
       - name: Pytest
         run: uv run pytest tests/ -v -m 'not integration'
 
-  # Pinned npm-based linters. We invoke each tool directly via npx at the
-  # version recorded in its `.<tool>-version` file, rather than going through
-  # a third-party GitHub Action whose own dependency tree we cannot control.
-  # Each tool's ignore list (.cspell.json, .markdownlint-cli2.jsonc, and
-  # .prettierignore plus --ignore-path .gitignore) defines the scope.
+  # File-quality linters and the rulesync drift check both run via the same
+  # scripts contributors use locally (./scripts/lint.sh, ./scripts/rulesync-upgen.sh
+  # --check). That keeps CI and local behavior in lockstep -- the version pins,
+  # ignore lists, and exit semantics are defined exactly once.
 
-  markdown:
+  lint-files:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -81,12 +80,10 @@ jobs:
         with:
           node-version-file: .node-version
 
-      - name: markdownlint
-        run: |
-          VERSION=$(cat .markdownlint-cli2-version)
-          npx -y markdownlint-cli2@"$VERSION" '**/*.md'
+      - name: ./scripts/lint.sh
+        run: ./scripts/lint.sh
 
-  spelling:
+  rulesync-drift:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -95,43 +92,5 @@ jobs:
         with:
           node-version-file: .node-version
 
-      - name: cspell
-        run: |
-          VERSION=$(cat .cspell-version)
-          npx -y cspell@"$VERSION" --no-progress \
-            '**/*.md' '**/*.py' '**/*.yaml' '**/*.yml' '**/*.toml'
-
-  prettier:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version-file: .node-version
-
-      - name: prettier
-        # Prettier 3.x does not read .gitignore by default; pass it explicitly.
-        run: |
-          VERSION=$(cat .prettier-version)
-          npx -y prettier@"$VERSION" --check \
-            --ignore-path .gitignore --ignore-path .prettierignore \
-            '**/*.md'
-
-  rulesync:
-    # Verify the committed copilot output (.github/copilot-instructions.md
-    # plus .github/instructions/, .github/agents/, .github/skills/) is up to
-    # date with the .rulesync/ sources. CI runs without a rulesync.local.jsonc,
-    # so the shared targets: ["copilot"] from rulesync.jsonc is what's checked.
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version-file: .node-version
-
-      - name: Check rulesync output is up to date
-        run: |
-          VERSION=$(cat .rulesync-version)
-          npx -y rulesync@"$VERSION" generate --check
+      - name: ./scripts/rulesync-upgen.sh --check
+        run: ./scripts/rulesync-upgen.sh --check

@@ -75,12 +75,16 @@ FAIL=0
 # pass --ignore-path explicitly. The other tools (cspell, markdownlint-cli2)
 # have gitignore: true / useGitignore: true set in their own config files.
 PRETTIER_IGNORES=(--ignore-path .gitignore --ignore-path .prettierignore)
+# Prettier scope: markdown plus structured-config formats it natively supports.
+# Toml is intentionally omitted because prettier doesn't have a native TOML
+# parser. JSON/JSONC/YAML get the same prose-wrap-style consistency markdown gets.
+PRETTIER_GLOBS=('**/*.md' '**/*.json' '**/*.jsonc' '**/*.yaml' '**/*.yml')
 
 # --- Fix pass ---
 
 if [[ $FIX -eq 1 ]]; then
     echo "--- prettier --write ---"
-    "${PKGRUN[@]}" prettier@"$PRETTIER_VERSION" --write "${PRETTIER_IGNORES[@]}" '**/*.md'
+    "${PKGRUN[@]}" prettier@"$PRETTIER_VERSION" --write "${PRETTIER_IGNORES[@]}" "${PRETTIER_GLOBS[@]}"
 
     echo ""
     echo "--- markdownlint-cli2 --fix ---"
@@ -95,7 +99,7 @@ fi
 
 echo ""
 echo "=== prettier --check ==="
-if "${PKGRUN[@]}" prettier@"$PRETTIER_VERSION" --check "${PRETTIER_IGNORES[@]}" '**/*.md'; then
+if "${PKGRUN[@]}" prettier@"$PRETTIER_VERSION" --check "${PRETTIER_IGNORES[@]}" "${PRETTIER_GLOBS[@]}"; then
     echo "  ok"
 else
     FAIL=1
