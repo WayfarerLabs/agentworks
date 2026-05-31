@@ -176,9 +176,8 @@ def test_create_session_rolls_back_on_keyboard_interrupt(
     inside the long-running SSH-driven part of ``create_session`` must trigger
     the DB rollback (delete_session) and re-raise the KI unchanged.
 
-    Mirrors one of the six rollback sites in this PR. Future drift between
-    the KI branch and the sibling ``except Exception`` branch should fail
-    this test, not slip past code review."""
+    Future drift between the KI branch and the sibling ``except Exception``
+    branch should fail this test, not slip past code review."""
     from agentworks.db import Database, SessionMode
     from agentworks.sessions import manager as session_manager
     from agentworks.sessions import tmux as tmux_mod
