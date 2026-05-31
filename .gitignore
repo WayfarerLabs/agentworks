@@ -26,6 +26,7 @@ rulesync.local.jsonc
 rulesync.lock
 
 # Rulesync - generated output (regenerate with: npx rulesync generate)
+.agents/
 CLAUDE.md
 .claude
 .claudeignore
