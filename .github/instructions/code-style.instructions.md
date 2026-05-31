@@ -15,11 +15,11 @@ less. Files should not exceed 1000 lines unless absolutely necessary.
 Comments should generally use normal casing unless there is a conflicting convention. Use
 punctuation as appropriate (e.g. period only for complete sentences, etc.).
 
-All files should be linted and formatted when editing. The repository's npm-based linters
-(cspell, markdownlint-cli2, prettier) are pinned via per-tool `.<tool>-version` files and run
-through `./scripts/lint.sh` (use `--fix` to auto-fix where possible). CI runs the same versions.
+All files should be linted and formatted when editing. The repository's npm-based linters (cspell,
+markdownlint-cli2, prettier) are pinned via per-tool `.<tool>-version` files and run through
+`./scripts/lint.sh` (use `--fix` to auto-fix where possible). CI runs the same versions.
 
-A custom cspell dictionary is maintained at `.cspell.json`. Please feel free to add words to
-this as needed.
+A custom cspell dictionary is maintained at `.cspell.json`. Please feel free to add words to this as
+needed.
 
 Do not use em dashes, double dashes, or other special characters. Write like a programmer in an IDE.
