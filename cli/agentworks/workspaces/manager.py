@@ -522,6 +522,13 @@ def _rehome_vm(
     target = admin_exec_target(vm, config, logger=ssh_logger)
     ws_group = ws.linux_group
 
+    # Shell-quote paths once up front; both are interpolated into many shell
+    # commands below. Without this, any space or shell-special character in
+    # a workspace path breaks the command (and exposes an injection surface
+    # if a path is ever supplied by an attacker-controlled source).
+    np = shlex.quote(new_path)
+    op = shlex.quote(old_path)
+
     # Outer try/finally ensures the SSH logger is closed exactly once. Earlier
     # versions called close() in every except branch AND on the success path,
     # which double-wrote the "Finished" footer when an inner raise re-entered
@@ -529,19 +536,22 @@ def _rehome_vm(
     try:
         try:
             # Create target directory as root and chown to admin so rsync can write
-            target.run(f"mkdir -p {new_path}", sudo=True)
-            target.run(f"chown {vm.admin_username} {new_path}", sudo=True)
+            target.run(f"mkdir -p {np}", sudo=True)
+            target.run(f"chown {vm.admin_username} {np}", sudo=True)
 
-            # Copy with rsync (fall back to cp -a)
+            # Copy with rsync (fall back to cp -a). Trailing slash matters for
+            # rsync semantics ("contents of source into target"); putting it
+            # AFTER the quoted path works because adjacent quoted/unquoted
+            # tokens concatenate in shell.
             output.info("Copying workspace...")
             has_rsync = target.run("which rsync", check=False, timeout=10)
             if has_rsync.ok:
-                target.run(f"rsync -a {old_path}/ {new_path}/", timeout=600)
+                target.run(f"rsync -a {op}/ {np}/", timeout=600)
             else:
-                target.run(f"cp -a {old_path}/. {new_path}/", sudo=True, timeout=600)
+                target.run(f"cp -a {op}/. {np}/", sudo=True, timeout=600)
 
             # Verify copy succeeded
-            verify = target.run(f"test -d {new_path}", check=False, timeout=10)
+            verify = target.run(f"test -d {np}", check=False, timeout=10)
             if not verify.ok:
                 raise output.WorkspaceError(
                     f"copy verification failed, target directory not found\nSSH log: {ssh_logger.path}"
@@ -549,31 +559,35 @@ def _rehome_vm(
 
             # Fix ownership, permissions, and ACLs on the new path
             output.info("Setting permissions...")
-            target.run(f"chown {vm.admin_username}:{ws_group} {new_path}", sudo=True)
-            target.run(f"chmod 2770 {new_path}", sudo=True)
-            sgid_cmd = f"find {shlex.quote(new_path)} -type d -exec chmod g+s {{}} +"
-            target.run(sgid_cmd, sudo=True, timeout=120)
+            target.run(f"chown {vm.admin_username}:{ws_group} {np}", sudo=True)
+            target.run(f"chmod 2770 {np}", sudo=True)
+            target.run(f"find {np} -type d -exec chmod g+s {{}} +", sudo=True, timeout=120)
             try:
                 target.run(
-                    f"find {new_path} -type d -exec setfacl -d -m g::rwx -m m::rwx {{}} +",
+                    f"find {np} -type d -exec setfacl -d -m g::rwx -m m::rwx {{}} +",
                     sudo=True,
                     timeout=120,
                 )
                 target.run(
-                    f"setfacl -R -m g::rwx -m m::rwx {new_path}",
+                    f"setfacl -R -m g::rwx -m m::rwx {np}",
                     sudo=True,
                     timeout=120,
                 )
             except SSHError as e:
                 output.warn(f"ACL setup failed: {e}")
 
-            # Fix parent directory traversal
+            # Fix parent directory traversal. sudo=True already wraps the
+            # command in `sudo -n bash -c '<quoted>'`, so the script runs in
+            # a single bash context -- no extra `sh -c '...'` indirection
+            # needed (and the explicit wrapper made path quoting impossible
+            # to do safely).
             target.run(
-                f'sh -c \'p={new_path}; while [ "$p" != "/" ]; do chmod a+x "$p"; p=$(dirname "$p"); done\'',
+                f'p={np}; while [ "$p" != "/" ]; do chmod a+x "$p"; p=$(dirname "$p"); done',
                 sudo=True,
             )
 
-            # Regenerate tmuxinator config at new path
+            # Regenerate tmuxinator config at new path. write_file uses scp,
+            # not a shell, so its remote_path argument is not shell-evaluated.
             from agentworks.workspaces.tmuxinator import console_session_name, generate_config
 
             tmux_config = generate_config(ws_name, new_path)
@@ -581,7 +595,7 @@ def _rehome_vm(
             session = console_session_name(ws_name)
             target.run("mkdir -p ~/.config/tmuxinator", timeout=10)
             target.run(
-                f"ln -sf {new_path}/.tmuxinator.yml ~/.config/tmuxinator/{session}.yml",
+                f"ln -sf {np}/.tmuxinator.yml ~/.config/tmuxinator/{session}.yml",
                 timeout=10,
             )
 
@@ -596,7 +610,7 @@ def _rehome_vm(
             # Handle old directory
             if remove_old:
                 output.info(f"Removing old directory {old_path}...")
-                target.run(f"rm -rf {old_path}", sudo=True, timeout=60)
+                target.run(f"rm -rf {op}", sudo=True, timeout=60)
                 output.info("Old directory removed")
             else:
                 output.info(f"\nOld directory left in place at {old_path}")

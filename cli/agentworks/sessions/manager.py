@@ -561,23 +561,36 @@ def create_session(
     deploy_restricted_config(run_command, history_limit=config.session.history_limit)
     command = _build_session_command(template, session_name=name, workspace_name=workspace_name)
 
-    def _rollback_implicit_grant() -> None:
-        # Drop the implicit grant we inserted for this session. If the agent
-        # has no remaining grants on this workspace, also best-effort revoke
-        # their Linux group membership so the DB and on-VM authorization
-        # don't drift. Cleanup failures must not mask the original error.
+    def _rollback() -> None:
+        # Best-effort rollback. Each step runs inside its own try/except so
+        # that a cleanup failure surfaces as a warning instead of masking
+        # the KeyboardInterrupt or exception that triggered the rollback.
+        # Without this, e.g. a DB error during delete_agent_grant would
+        # replace the user's Ctrl-C with an opaque error exit.
+        try:
+            db.delete_session(name)
+        except Exception as e:
+            output.warn(f"rollback: failed to delete session row '{name}': {e}")
         if not resolved_agent_name:
             return
-        db.delete_agent_grant(resolved_agent_name, workspace_name, "implicit", session_name=name)
-        if not db.has_any_grant(resolved_agent_name, workspace_name):
+        try:
+            db.delete_agent_grant(resolved_agent_name, workspace_name, "implicit", session_name=name)
+            remaining = db.has_any_grant(resolved_agent_name, workspace_name)
+        except Exception as e:
+            output.warn(
+                f"rollback: failed to revoke implicit grant for agent "
+                f"'{resolved_agent_name}' on workspace '{workspace_name}': {e}"
+            )
+            return
+        if not remaining:
             try:
                 from agentworks.agents.manager import _remove_from_workspace_group
 
                 _remove_from_workspace_group(vm, config, db, linux_user, workspace_name, logger=None)
-            except Exception as cleanup_err:
+            except Exception as e:
                 output.warn(
-                    f"failed to remove agent '{resolved_agent_name}' from workspace "
-                    f"'{workspace_name}' group during rollback: {cleanup_err}"
+                    f"rollback: failed to remove agent '{resolved_agent_name}' from "
+                    f"workspace '{workspace_name}' group: {e}"
                 )
 
     try:
@@ -594,12 +607,10 @@ def create_session(
         )
     except KeyboardInterrupt:
         output.warn(f"Cancelling session create '{name}'... rolling back.")
-        db.delete_session(name)
-        _rollback_implicit_grant()
+        _rollback()
         raise
     except Exception:
-        db.delete_session(name)
-        _rollback_implicit_grant()
+        _rollback()
         raise
 
     # Persist socket path, PID, and boot ID
