@@ -135,6 +135,17 @@ def create_vm(
     # -- Provisioning --
     # If this fails, nothing was created on the remote host (or the remote
     # couldn't be reached), so we clean up the DB record.
+    def _safe_delete_vm_row() -> None:
+        # Best-effort rollback: a DB error here (e.g. lock contention) must
+        # not mask the KeyboardInterrupt / provisioning exception that
+        # triggered the rollback.
+        try:
+            db.delete_vm(vm_name)
+        except Exception as cleanup_err:
+            output.warn(
+                f"rollback: failed to delete DB record for vm '{vm_name}': {cleanup_err}"
+            )
+
     try:
         if platform == "lima":
             from agentworks.vms.provisioners.lima import LimaProvisioner
@@ -187,10 +198,10 @@ def create_vm(
             raise ValueError(msg)
     except KeyboardInterrupt:
         output.warn(f"Cancelling vm create '{vm_name}'... rolling back.")
-        db.delete_vm(vm_name)
+        _safe_delete_vm_row()
         raise
     except Exception as e:
-        db.delete_vm(vm_name)
+        _safe_delete_vm_row()
         raise VMError(f"provisioning failed: {e}") from e
 
     # Update DB with platform-specific metadata

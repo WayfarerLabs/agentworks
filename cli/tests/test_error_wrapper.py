@@ -178,7 +178,7 @@ def test_create_session_rolls_back_on_keyboard_interrupt(
 
     Future drift between the KI branch and the sibling ``except Exception``
     branch should fail this test, not slip past code review."""
-    from agentworks.db import Database, SessionMode
+    from agentworks.db import Database
     from agentworks.sessions import manager as session_manager
     from agentworks.sessions import tmux as tmux_mod
 
@@ -257,7 +257,6 @@ def test_create_session_rolls_back_on_keyboard_interrupt(
     # ran is gone.
     assert db.get_session("s1") is None
     db.close()
-    _ = SessionMode  # keep import non-unused for future expansion
 
 
 def test_create_session_releases_group_membership_on_keyboard_interrupt(
