@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import typer
@@ -178,7 +179,6 @@ def test_create_session_rolls_back_on_keyboard_interrupt(
     Mirrors one of the six rollback sites in this PR. Future drift between
     the KI branch and the sibling ``except Exception`` branch should fail
     this test, not slip past code review."""
-    from agentworks.config import load_config
     from agentworks.db import Database, SessionMode
     from agentworks.sessions import manager as session_manager
     from agentworks.sessions import tmux as tmux_mod
@@ -212,10 +212,11 @@ def test_create_session_rolls_back_on_keyboard_interrupt(
         def run(self, *args: object, **kwargs: object) -> _Result:
             return _Result()
 
-    monkeypatch.setattr(
-        "agentworks.ssh.admin_exec_target",
-        lambda vm, config, **kwargs: _Target(),
-    )
+    fake_factory = lambda vm, config, **kwargs: _Target()  # noqa: E731
+    # Patch both locations: manager imports admin_exec_target eagerly at module
+    # load, so the agentworks.ssh-side patch alone wouldn't take effect.
+    monkeypatch.setattr("agentworks.ssh.admin_exec_target", fake_factory)
+    monkeypatch.setattr("agentworks.sessions.manager.admin_exec_target", fake_factory)
     # deploy_restricted_config does its own SSH writes -- skip them.
     monkeypatch.setattr(
         session_manager,
@@ -230,13 +231,23 @@ def test_create_session_rolls_back_on_keyboard_interrupt(
 
     monkeypatch.setattr(tmux_mod, "create_session", _explode)
 
-    monkeypatch.setattr("agentworks.config.CONFIG_DIR", tmp_path)
-    config = load_config()
+    # Stub the template resolver so we don't need a real config on disk
+    # (CI runs without ~/.config/agentworks/config.toml).
+    class _Tmpl:
+        name = "default"
+        command = ""
+        restart_command = None
+        env: dict[str, str] = {}
+
+    monkeypatch.setattr(session_manager, "_resolve_template", lambda *a, **k: _Tmpl())
+
+    # Stand-in Config: only the few attributes the code path under test reads.
+    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
 
     with pytest.raises(KeyboardInterrupt):
         session_manager.create_session(
             db,
-            config,
+            config,  # type: ignore[arg-type]
             name="s1",
             workspace_name="ws1",
             template_name=None,
