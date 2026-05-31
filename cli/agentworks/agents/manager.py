@@ -121,6 +121,20 @@ def create_agent(
     from agentworks.ssh import SSHLogger
 
     ssh_logger = SSHLogger(vm.name, "agent-create")
+
+    def _safe_rollback() -> None:
+        # Best-effort: rollback failures must not mask the original KI or
+        # exception. Surface them as a warning and let the original error
+        # continue to propagate.
+        try:
+            _delete_agent_on_vm(vm, config, linux_user, logger=ssh_logger)
+        except Exception as cleanup_err:
+            output.warn(
+                f"rollback during agent create failed: {cleanup_err}. "
+                f"VM may have residual user/files for '{linux_user}'. "
+                f"SSH log: {ssh_logger.path}"
+            )
+
     # The logger's close() writes a "Finished" footer; defer it via finally so
     # rollback commands are logged BEFORE the footer, not after.
     try:
@@ -128,10 +142,10 @@ def create_agent(
             _create_agent_on_vm(vm, config, linux_user, git_tokens=git_tokens, logger=ssh_logger)
         except KeyboardInterrupt:
             output.warn(f"Cancelling agent create '{name}'... rolling back.")
-            _delete_agent_on_vm(vm, config, linux_user, logger=ssh_logger)
+            _safe_rollback()
             raise
         except Exception as e:
-            _delete_agent_on_vm(vm, config, linux_user, logger=ssh_logger)
+            _safe_rollback()
             raise AgentError(f"creating agent: {e}\nSSH log: {ssh_logger.path}") from None
     finally:
         ssh_logger.close()
