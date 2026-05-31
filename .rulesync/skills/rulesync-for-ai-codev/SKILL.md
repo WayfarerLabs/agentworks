@@ -1,35 +1,52 @@
 ---
 name: rulesync-for-ai-codev
-description: "Managing AI coding assistant rules and skills with Rulesync"
+description: "Managing AI coding assistant rules, skills, and subagents with Rulesync"
 targets: ["*"]
 ---
 
 # Rulesync
 
 This project uses [Rulesync](https://rulesync.dyoshikawa.com/) to maintain a single source of truth
-for AI coding assistant configuration.
+for AI coding assistant configuration across tools (Claude Code, Copilot, Codex CLI, Cursor, and so
+on).
 
 ## Structure
 
 - `.rulesync/rules/*.md` -- always-on context (loaded every session)
 - `.rulesync/skills/*/SKILL.md` -- on-demand context (invoked when needed)
-- `rulesync.jsonc` -- shared config (features, baseDirs)
-- `rulesync.local.jsonc` -- personal tool targets (gitignored)
+- `.rulesync/subagents/*.md` -- specialized assistant personas
+- `rulesync.jsonc` -- shared config; declares `targets: ["copilot"]` and the enabled features
+- `rulesync.local.jsonc` -- personal tool targets (gitignored); pick whatever you use locally
 - `.rulesync-version` -- pinned rulesync version
 
-## Generated Output
+## What gets committed
 
-Tool-specific files (`.claude/`, `.cursor/`, `CLAUDE.md`) are generated output. Never edit them
-directly. They are overwritten on regenerate.
+Copilot is the project's one shared target. Its generated output lives under `.github/`
+(`copilot-instructions.md`, `instructions/`, `agents/`, `skills/`) and **is** checked in so Copilot
+Code Review has access to the project's rules and subagents on every PR. CI runs
+`rulesync generate --check` against this output to catch drift.
 
-## Making Changes
+Generated output for any other target (`.claude/`, `.cursor/`, `CLAUDE.md`, `.codex/`, etc.) is
+gitignored. Never edit any generated output directly; rerun the generator instead.
 
-1. Edit source files under `.rulesync/`
-2. Run `./ops/scripts/rulesync-upgen.bash` to install, update, and regenerate
-3. Commit both source and generated files
+## Making changes
+
+When you edit anything under `.rulesync/`:
+
+1. **Lint first** -- `.rulesync/*.md` files go through markdownlint and prettier like any other
+   markdown. Run `./scripts/lint.sh --fix`. Prettier may reformat them.
+2. **Then regenerate** -- `./scripts/rulesync-upgen.sh` always refreshes the committed copilot
+   output regardless of your personal `rulesync.local.jsonc` targets.
+3. **Commit both source and generated files.**
+
+Doing step 2 before step 1 produces drift between the source (now reformatted by prettier) and the
+generated output (still matches the pre-reformat source). CI will fail in that case.
+
+To verify the committed copilot output is up to date without regenerating, run
+`./scripts/rulesync-upgen.sh --check`.
 
 ## Reference
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for setup instructions and the
 [Rulesync documentation](https://rulesync.dyoshikawa.com/) for full details on rules, skills,
-targets, sources, and other features.
+subagents, targets, sources, and other features.

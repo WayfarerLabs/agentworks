@@ -70,14 +70,19 @@ run them locally:
 unknown words; the script flags them and points you at `.cspell.json` to either correct the spelling
 or add a word.
 
-### Verifying rulesync output is current
+### Editing rulesync sources
 
-The committed copilot output in `.github/` must stay in sync with `.rulesync/` sources. CI runs a
-drift check. To verify locally without regenerating:
+Files under `.rulesync/` are markdown; they get linted by markdownlint and prettier just like the
+rest of the repo. **Lint before you regenerate.** Prettier may reformat the source, and running it
+after regeneration leaves the generated copilot output out of sync with the prettified source --
+CI's drift check will fail. The right order is:
 
-```bash
-./scripts/rulesync-upgen.sh --check
-```
+1. Edit the `.rulesync/` source.
+2. `./scripts/lint.sh --fix` -- prettifies the source (and the rest of the repo).
+3. `./scripts/rulesync-upgen.sh` -- regenerates the committed copilot output. Your
+   `rulesync.local.jsonc` targets can be anything; upgen always refreshes the copilot output
+   regardless.
+4. Commit both the source and the generated files.
 
-To regenerate after editing a source file, run `./scripts/rulesync-upgen.sh` (no args) and commit
-the result.
+To verify the committed copilot output is up to date without regenerating, use
+`./scripts/rulesync-upgen.sh --check`. CI runs the same check.
