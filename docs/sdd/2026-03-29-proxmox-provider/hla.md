@@ -8,8 +8,8 @@
 
 The Proxmox provider fits into the existing `VMProvisioner` interface. It communicates with the
 Proxmox VE REST API using a thin client built on stdlib `urllib.request` (no new dependencies).
-Bootstrap delivery uses the QEMU guest agent `exec` API -- no SSH to the Proxmox host is needed
-at runtime.
+Bootstrap delivery uses the QEMU guest agent `exec` API -- no SSH to the Proxmox host is needed at
+runtime.
 
 ---
 
@@ -107,8 +107,8 @@ The setup script (`scripts/proxmox-setup.sh`) creates least-privilege resources:
 - **Resource pool** (`agentworks`): all VMs are cloned into this pool
 - **Custom roles**: `AgentworksVM` (VM lifecycle), `AgentworksTemplate` (clone-only),
   `AgentworksStorage` (disk allocation), `AgentworksSDN` (network bridge)
-- **Scoped ACLs**: permissions are granted on specific paths (`/pool/agentworks`,
-  `/vms/{template}`, `/storage/{storage}`, `/sdn/zones/localnetwork`)
+- **Scoped ACLs**: permissions are granted on specific paths (`/pool/agentworks`, `/vms/{template}`,
+  `/storage/{storage}`, `/sdn/zones/localnetwork`)
 - **API token** (`--privsep=0`): inherits user permissions, which are limited to the above ACLs
 
 The token cannot manage VMs outside the pool, access other storage, take snapshots, create backups,

@@ -55,10 +55,10 @@ The guest agent serves three purposes:
 
 ### FR-6: Configuration
 
-- A `[proxmox]` section in config.toml provides: `api_url`, `node`, `token_id`, `template_vmid`,
-  and optional `storage`, `bridge`, `pool`, `verify_ssl`.
-- The API token secret is read from the `PROXMOX_TOKEN_SECRET` environment variable at API call
-  time (not stored in config).
+- A `[proxmox]` section in config.toml provides: `api_url`, `node`, `token_id`, `template_vmid`, and
+  optional `storage`, `bridge`, `pool`, `verify_ssl`.
+- The API token secret is read from the `PROXMOX_TOKEN_SECRET` environment variable at API call time
+  (not stored in config).
 
 ### FR-7: Database Tracking
 

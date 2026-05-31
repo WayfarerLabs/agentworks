@@ -16,8 +16,8 @@ subagents) across tools. If you are contributing with an AI assistant, you shoul
 
 ### Initialize your workspace
 
-First thing after cloning, copy the example local config and edit it for whatever assistant(s)
-you use, then regenerate the outputs:
+First thing after cloning, copy the example local config and edit it for whatever assistant(s) you
+use, then regenerate the outputs:
 
 ```bash
 cp rulesync.local.jsonc.example rulesync.local.jsonc
@@ -30,12 +30,12 @@ cp rulesync.local.jsonc.example rulesync.local.jsonc
 
 ### What gets committed
 
-GitHub Copilot is the one shared target (declared in `rulesync.jsonc`). Its generated output
-lives at `.github/copilot-instructions.md`, `.github/instructions/`, `.github/agents/`, and
+GitHub Copilot is the one shared target (declared in `rulesync.jsonc`). Its generated output lives
+at `.github/copilot-instructions.md`, `.github/instructions/`, `.github/agents/`, and
 `.github/skills/` and **is** checked in so Copilot Code Review can see the project's rules and
 subagents on every PR. CI verifies this output stays in sync with `.rulesync/` sources via
-`rulesync generate --check` — if you edit a source file, regenerate via the script above and
-commit the result.
+`rulesync generate --check` — if you edit a source file, regenerate via the script above and commit
+the result.
 
 Source files in `.rulesync/` are the canonical input; never edit generated output directly.
 

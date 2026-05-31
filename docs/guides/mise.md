@@ -1,8 +1,8 @@
 # Using mise with agentworks
 
-[mise](https://mise.jdx.dev/) is a polyglot tool version manager that agentworks installs by
-default on all VMs. It provides a unified way to install CLI tools (terraform, adr-tools,
-node, python, etc.) with optional integrity verification via lockfiles.
+[mise](https://mise.jdx.dev/) is a polyglot tool version manager that agentworks installs by default
+on all VMs. It provides a unified way to install CLI tools (terraform, adr-tools, node, python,
+etc.) with optional integrity verification via lockfiles.
 
 ## How it works
 
@@ -28,17 +28,17 @@ Run `agentworks vm create` or `agentworks vm reinit` and the tools will be avail
 
 ## Config reference
 
-These settings are available in `[admin.config]` (for the admin user) and `[agent_templates.*]`
-(for agents). Mise itself is always installed as a system package on every VM.
+These settings are available in `[admin.config]` (for the admin user) and `[agent_templates.*]` (for
+agents). Mise itself is always installed as a system package on every VM.
 
-| Setting | Default | Description |
-| --- | --- | --- |
-| `mise_activate` | `true` | Add `mise activate` to the user's shell profile |
-| `mise_packages` | `[]` | List of `name@version` tool declarations |
-| `mise_lockfile` | (none) | [Source reference](source-refs.md) to a `mise.lock` file |
-| `mise_allow_unlocked` | `false` | Install packages not covered by the lockfile (with warning) |
-| `mise_install_before` | `"7d"` | Reject versions published more recently than this |
-| `mise_prune_on_reinit` | `true` | Remove stale tool versions on reinit |
+| Setting                | Default | Description                                                 |
+| ---------------------- | ------- | ----------------------------------------------------------- |
+| `mise_activate`        | `true`  | Add `mise activate` to the user's shell profile             |
+| `mise_packages`        | `[]`    | List of `name@version` tool declarations                    |
+| `mise_lockfile`        | (none)  | [Source reference](source-refs.md) to a `mise.lock` file    |
+| `mise_allow_unlocked`  | `false` | Install packages not covered by the lockfile (with warning) |
+| `mise_install_before`  | `"7d"`  | Reject versions published more recently than this           |
+| `mise_prune_on_reinit` | `true`  | Remove stale tool versions on reinit                        |
 
 ### Agents
 
@@ -81,8 +81,7 @@ lockfile to see what your tools support.
 
 ### Providing a lockfile to agentworks
 
-Point `mise_lockfile` at your lockfile using a local path or a
-[source reference](source-refs.md):
+Point `mise_lockfile` at your lockfile using a local path or a [source reference](source-refs.md):
 
 ```toml
 [admin.config]
@@ -107,8 +106,8 @@ When a lockfile is present:
 - Agentworks runs `mise install --locked`.
 - If all packages are in the lockfile, everything is verified and installed.
 - If some packages are missing from the lockfile:
-  - **`mise_allow_unlocked = false`** (default): the install fails for those packages. You see
-    which ones are missing.
+  - **`mise_allow_unlocked = false`** (default): the install fails for those packages. You see which
+    ones are missing.
   - **`mise_allow_unlocked = true`**: a warning is logged for the missing packages, and they are
     installed without verification.
 
@@ -150,6 +149,6 @@ affects fuzzy version requests (e.g., `latest`, `node@20`). Explicitly pinned ve
 ## Disabling mise activation
 
 Mise is always installed as a system package. To disable shell activation (so mise tools are not
-automatically available in shells), set `mise_activate = false` in your admin or agent config.
-The `mise` binary will still be available but tools will not be on PATH unless explicitly invoked
-via `mise exec`.
+automatically available in shells), set `mise_activate = false` in your admin or agent config. The
+`mise` binary will still be available but tools will not be on PATH unless explicitly invoked via
+`mise exec`.

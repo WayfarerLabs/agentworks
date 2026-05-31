@@ -6,9 +6,9 @@ The current agentworks installer catalog supports apt packages, snap packages, a
 install commands. This covers most system tooling, but leaves a gap for tools that are not available
 via apt or snap and where a shell install command is brittle or lacks integrity verification.
 
-Tools like `adr-tools` are not packaged for Debian/Ubuntu but are available through mise, a
-polyglot tool version manager. More broadly, mise offers content-addressable integrity verification
-via lockfiles (checksums per platform) that shell install commands cannot provide. Without this, a
+Tools like `adr-tools` are not packaged for Debian/Ubuntu but are available through mise, a polyglot
+tool version manager. More broadly, mise offers content-addressable integrity verification via
+lockfiles (checksums per platform) that shell install commands cannot provide. Without this, a
 compromised upstream repository could silently inject malicious code into a pinned version.
 
 We need mise as a first-class package manager in agentworks, with an integrity story that delegates
@@ -50,8 +50,8 @@ agents.
 
 - `vm.config` gets a `mise_packages` field: an optional list of `name@version` strings to install
   for the admin user.
-- `agent.config` gets a `mise_packages` field: an optional list of `name@version` strings to
-  install for each agent user.
+- `agent.config` gets a `mise_packages` field: an optional list of `name@version` strings to install
+  for each agent user.
 - These are written to `~/.config/mise/config.toml` as tool declarations.
 - If the user's dotfiles already provide a mise config, `mise_packages` can be omitted entirely.
   Dotfiles are synced before mise packages are installed.
@@ -62,8 +62,8 @@ agents.
 Users can provide a `mise.lock` file for integrity verification.
 
 - `vm.config` / `agent.config` get a `mise_lockfile` field: a source reference that can be a local
-  file path or a git repository reference (using `git::` prefix). See source-ref-lld.md for the
-  full syntax.
+  file path or a git repository reference (using `git::` prefix). See source-ref-lld.md for the full
+  syntax.
 - Examples:
   - `mise_lockfile = "~/.config/agentworks/mise.lock"` (local file)
   - `mise_lockfile = "git::https://github.com/user/infra.git//mise/mise.lock"` (file in git repo)
@@ -71,17 +71,17 @@ Users can provide a `mise.lock` file for integrity verification.
 - Git sources are fetched after git credentials are configured, allowing private repos.
 - When a lockfile is provided, it is copied to `~/.config/mise/mise.lock` and mise runs with
   `locked = true`.
-- Users generate and maintain lockfiles using mise's own `mise lock` command, outside of
-  agentworks. This keeps mise's lockfile format as the single source of truth for integrity data.
-- Lockfiles can also come from dotfiles. Dotfiles are synced after agentworks writes its mise
-  config but before `mise install` runs, so dotfiles can provide or override the lockfile.
+- Users generate and maintain lockfiles using mise's own `mise lock` command, outside of agentworks.
+  This keeps mise's lockfile format as the single source of truth for integrity data.
+- Lockfiles can also come from dotfiles. Dotfiles are synced after agentworks writes its mise config
+  but before `mise install` runs, so dotfiles can provide or override the lockfile.
 
 ### R4: Unlocked package handling
 
 When a lockfile is present but some declared packages are not covered by it:
 
-- By default (`mise_allow_unlocked = false`), the install fails for those packages. The user is
-  told which packages are missing from the lockfile.
+- By default (`mise_allow_unlocked = false`), the install fails for those packages. The user is told
+  which packages are missing from the lockfile.
 - When `mise_allow_unlocked = true`, agentworks warns about the unlocked packages and re-runs
   `mise install` without `--locked` to install them anyway.
 
@@ -104,8 +104,8 @@ The mise settings are per-user config that happens to be applied during VM initi
 admin user. This distinction should be clear:
 
 - `install_mise` is VM-level (controls whether mise is installed system-wide).
-- `mise_packages`, `mise_lockfile`, `mise_allow_unlocked`, and `mise_install_before` are admin
-  user settings that live under `[vm.config]` alongside other admin-user init settings.
+- `mise_packages`, `mise_lockfile`, `mise_allow_unlocked`, and `mise_install_before` are admin user
+  settings that live under `[vm.config]` alongside other admin-user init settings.
 - Agent settings are separate under `[agent.config]` and default to nothing.
 
 ## Future Considerations

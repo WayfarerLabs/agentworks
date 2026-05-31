@@ -3,8 +3,8 @@
 ## Overview
 
 The security model uses standard Linux users, groups, and file permissions to control agent
-workspace access. Each agent is a VM-scoped Linux user with access to specific workspaces via
-a grant system that translates to group membership.
+workspace access. Each agent is a VM-scoped Linux user with access to specific workspaces via a
+grant system that translates to group membership.
 
 ## User and Group Topology
 
@@ -19,8 +19,8 @@ Groups:
 
 ### Admin user
 
-The operator's identity on the VM. Created during Phase A (bootstrap). Has unrestricted sudo.
-Added to all workspace groups automatically.
+The operator's identity on the VM. Created during Phase A (bootstrap). Has unrestricted sudo. Added
+to all workspace groups automatically.
 
 ### Agent users
 
@@ -51,18 +51,18 @@ Added to all workspace groups automatically.
 
 Grants are stored in the `agent_workspace_grants` table:
 
-| Column | Description |
-| --- | --- |
-| agent_name | Agent name (FK to agents) |
+| Column         | Description                                           |
+| -------------- | ----------------------------------------------------- |
+| agent_name     | Agent name (FK to agents)                             |
 | workspace_name | Workspace name (FK to workspaces, cascades on delete) |
-| grant_type | `explicit` or `implicit` |
-| task_name | NULL for explicit grants, task name for implicit |
+| grant_type     | `explicit` or `implicit`                              |
+| task_name      | NULL for explicit grants, task name for implicit      |
 
 ### Grant lifecycle
 
 - **On grant**: add agent to workspace group via `usermod -aG`
-- **On deny/task delete**: remove grant record, check if any remaining grants exist. If none,
-  remove agent from workspace group via `gpasswd -d`.
+- **On deny/task delete**: remove grant record, check if any remaining grants exist. If none, remove
+  agent from workspace group via `gpasswd -d`.
 - **On workspace create**: if agent has grant_all, auto-add to new workspace group
 - **On workspace delete**: all grants for that workspace cascade (FK)
 - **On agent delete**: all grants cascade (FK), agent removed from all workspace groups
@@ -83,10 +83,10 @@ Workspace group membership is NOT set during creation. It is managed entirely by
 
 ## Permissions Summary
 
-| Resource        | Owner      | Group          | Effect                    |
-| --------------- | ---------- | -------------- | ------------------------- |
-| Workspace dir   | admin      | ws--WORKSPACE  | Agents read/write via grant |
-| Agent home      | agent-user | agent-user     | Agent-private             |
+| Resource      | Owner      | Group         | Effect                      |
+| ------------- | ---------- | ------------- | --------------------------- |
+| Workspace dir | admin      | ws--WORKSPACE | Agents read/write via grant |
+| Agent home    | agent-user | agent-user    | Agent-private               |
 
 ## What This Model Prevents
 

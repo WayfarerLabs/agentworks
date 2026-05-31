@@ -141,6 +141,8 @@
     "PVEAPI",
     "pycodestyle",
     "pyflakes",
+    "pypa",
+    "pypi",
     "pyproject",
     "pytest",
     "pyupgrade",

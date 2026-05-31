@@ -66,25 +66,54 @@ jobs:
       - name: Pytest
         run: uv run pytest tests/ -v -m 'not integration'
 
+  # Pinned npm-based linters. We invoke each tool directly via npx at the
+  # version recorded in its `.<tool>-version` file, rather than going through
+  # a third-party GitHub Action whose own dependency tree we cannot control.
+  # `git ls-files` ensures only tracked files are scanned, mirroring what a
+  # contributor sees locally on a clean checkout.
+
   markdown:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
 
-      - name: markdownlint
-        uses: DavidAnson/markdownlint-cli2-action@v23
+      - uses: actions/setup-node@v4
         with:
-          globs: "**/*.md"
+          node-version: "20"
+
+      - name: markdownlint
+        run: |
+          VERSION=$(cat .markdownlint-cli2-version)
+          git ls-files '*.md' | xargs -r npx -y markdownlint-cli2@"$VERSION"
 
   spelling:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
 
-      - name: cspell
-        uses: streetsidesoftware/cspell-action@v8
+      - uses: actions/setup-node@v4
         with:
-          files: "**/*.{md,py,yaml,yml,toml}"
+          node-version: "20"
+
+      - name: cspell
+        run: |
+          VERSION=$(cat .cspell-version)
+          git ls-files '*.md' '*.py' '*.yaml' '*.yml' '*.toml' \
+            | xargs -r npx -y cspell@"$VERSION" --no-progress
+
+  prettier:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: prettier
+        run: |
+          VERSION=$(cat .prettier-version)
+          git ls-files '*.md' | xargs -r npx -y prettier@"$VERSION" --check
 
   rulesync:
     # Verify the committed copilot output (.github/copilot-instructions.md

@@ -2,8 +2,8 @@
 
 ## Renames
 
-| Before | After | Rationale |
-|--------|-------|-----------|
+| Before                        | After                 | Rationale                                                                                             |
+| ----------------------------- | --------------------- | ----------------------------------------------------------------------------------------------------- |
 | `VMProvisioner.exec_target()` | `admin_exec_target()` | Clarifies it returns a shell for the admin user. Leaves room for `agent_exec_target()` in the future. |
 
 ## ExecTarget after cleanup
@@ -28,8 +28,8 @@ class ExecTarget:
 ### Single method, clear parameters
 
 There is no separate `sudo_run` or `run_as_root`. The `sudo` flag on `run()` handles root
-escalation. The `tty` flag handles TTY allocation. Logging is built into `run()` via the
-`logger` field on ExecTarget -- there is no `_run_logged` helper.
+escalation. The `tty` flag handles TTY allocation. Logging is built into `run()` via the `logger`
+field on ExecTarget -- there is no `_run_logged` helper.
 
 Before:
 
@@ -70,37 +70,37 @@ tty=None   -> add -tt only if SSHTarget.force_tty is True
 ```
 
 Other transports ignore the tty parameter. `force_tty` stays on SSHTarget as a transport-level
-default for the Windows quirk. It is not exposed in the `run()` API and can be removed later
-without caller changes.
+default for the Windows quirk. It is not exposed in the `run()` API and can be removed later without
+caller changes.
 
 ### Logging
 
-ExecTarget already has a `logger: SSHLogger | None` field. The transport-level run functions
-already call `logger.log_command()` when a logger is present. This means `run()` logs
-automatically -- the `_run_logged` helper in initializer.py is redundant and will be deleted.
+ExecTarget already has a `logger: SSHLogger | None` field. The transport-level run functions already
+call `logger.log_command()` when a logger is present. This means `run()` logs automatically -- the
+`_run_logged` helper in initializer.py is redundant and will be deleted.
 
 The initializer already attaches the logger to the ExecTarget at construction time
 (`replace(exec_target, logger=logger)`), so all commands through that target are logged.
 
 ### What goes away
 
-| Removed | Replacement |
-|---------|-------------|
-| `ExecTarget.run_as_root()` | `run(command, sudo=True)` |
-| `_run_logged()` in initializer.py | `target.run()` (logging built in) |
-| `_run_logged(..., as_root=True)` | `target.run(command, sudo=True)` |
-| Standalone `run_as_root()` function in ssh.py | `run(command, sudo=True)` |
-| Manual `sudo -n` in command strings | `run(command, sudo=True)` |
-| `force_tty=False` target replacement in run_detached | `run(command, tty=False)` |
-| WSL2 `--user root` special case | `sudo -n bash -c` (same as all transports) |
+| Removed                                              | Replacement                                |
+| ---------------------------------------------------- | ------------------------------------------ |
+| `ExecTarget.run_as_root()`                           | `run(command, sudo=True)`                  |
+| `_run_logged()` in initializer.py                    | `target.run()` (logging built in)          |
+| `_run_logged(..., as_root=True)`                     | `target.run(command, sudo=True)`           |
+| Standalone `run_as_root()` function in ssh.py        | `run(command, sudo=True)`                  |
+| Manual `sudo -n` in command strings                  | `run(command, sudo=True)`                  |
+| `force_tty=False` target replacement in run_detached | `run(command, tty=False)`                  |
+| WSL2 `--user root` special case                      | `sudo -n bash -c` (same as all transports) |
 
 ### Migration strategy: run_new
 
 To avoid a big-bang refactor:
 
 1. Add `run_new()` with the clean signature (sudo, tty, logging).
-2. Migrate call sites incrementally (run, run_as_root, _run_logged -> run_new).
-3. Delete old methods (run, run_as_root, _run_logged, standalone run_as_root).
+2. Migrate call sites incrementally (run, run_as_root, \_run_logged -> run_new).
+3. Delete old methods (run, run_as_root, \_run_logged, standalone run_as_root).
 4. Rename `run_new()` -> `run()`.
 
 Tests pass at every step. Old and new coexist during migration.
@@ -116,9 +116,9 @@ ExecTarget(ssh=SSHTarget(host=vm.tailscale_host, ...))  # Wrong: Tailscale
 Should return a guest-agent-backed ExecTarget. Until implemented, raises `NotImplementedError`.
 
 The guest agent integration is straightforward: `ProxmoxAPIClient` already has
-`guest_agent_exec_wait(node, vmid, command, timeout)` which returns exitcode + stdout + stderr.
-This maps cleanly to `SSHResult`. Future work: add a `ProxmoxAgentTarget` to ExecTarget or
-wrap the API client in a callable that fits the existing dispatch pattern.
+`guest_agent_exec_wait(node, vmid, command, timeout)` which returns exitcode + stdout + stderr. This
+maps cleanly to `SSHResult`. Future work: add a `ProxmoxAgentTarget` to ExecTarget or wrap the API
+client in a callable that fits the existing dispatch pattern.
 
 ## VM rekey flow
 
@@ -147,10 +147,10 @@ Uses `provisioner.admin_exec_target()` -- the same abstraction used by `_tailsca
 
 ## Deferred: shell consistency
 
-The transports currently use different shells: SSH passes commands raw (interpreted by the
-remote user's default shell), while Lima and WSL2 explicitly use `bash -lc`. Non-interactive
-agentworks operations assume bash semantics but don't enforce it on SSH.
+The transports currently use different shells: SSH passes commands raw (interpreted by the remote
+user's default shell), while Lima and WSL2 explicitly use `bash -lc`. Non-interactive agentworks
+operations assume bash semantics but don't enforce it on SSH.
 
 This is not addressed in this cleanup. Some install commands detect the running shell and only
-configure that shell, so changing shell semantics would introduce subtle inconsistencies. This
-is a separate concern to address deliberately.
+configure that shell, so changing shell semantics would introduce subtle inconsistencies. This is a
+separate concern to address deliberately.

@@ -60,8 +60,8 @@ tools. The manifest is the single source of truth for:
 - Parameter validation rules (pattern, allow-list, deny-list)
 - Rulesync skill metadata
 
-The manifest requires no code. A package author writes YAML and gets a family of tools with
-built-in validation and documentation.
+The manifest requires no code. A package author writes YAML and gets a family of tools with built-in
+validation and documentation.
 
 ### R2: Build system
 

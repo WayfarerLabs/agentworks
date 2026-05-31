@@ -2,9 +2,9 @@
 
 ## 2026-03-31
 
-All artifacts in this feature directory (FRD, HLA, plan) were implemented and verified as of
-this date. The implementation matches the specs with the following notable design decisions made
-during development:
+All artifacts in this feature directory (FRD, HLA, plan) were implemented and verified as of this
+date. The implementation matches the specs with the following notable design decisions made during
+development:
 
 - Agent usernames use `agt--<name>` (double hyphen prefix) rather than the original
   `<workspace>--<agent>` convention from the earlier workspace-scoped model.
@@ -12,12 +12,12 @@ during development:
 - Workspace directories live under `/opt/agentworks/workspaces/` (configurable) rather than the
   admin user's home directory, with mode 2770 and default ACLs for group-writable files.
 - The grant/deny CLI was implemented as a `workspace-grants` subcommand group
-  (`agent workspace-grants grant/deny/list`) rather than top-level `agent grant-workspaces`
-  and `agent deny-workspaces` commands.
-- `workspace repair` was added to reconcile infrastructure (group naming, permissions, ACLs,
-  agent group membership) for existing workspaces created before the VM-scoped model.
-- ADR-0006 (workspace-scoped agents) was superseded by ADR-0010 (VM-scoped agents with
-  workspace grants).
+  (`agent workspace-grants grant/deny/list`) rather than top-level `agent grant-workspaces` and
+  `agent deny-workspaces` commands.
+- `workspace repair` was added to reconcile infrastructure (group naming, permissions, ACLs, agent
+  group membership) for existing workspaces created before the VM-scoped model.
+- ADR-0006 (workspace-scoped agents) was superseded by ADR-0010 (VM-scoped agents with workspace
+  grants).
 
-These specs are accurate as of this date but are now locked and will not be updated to
-reflect further changes to the implementation.
+These specs are accurate as of this date but are now locked and will not be updated to reflect
+further changes to the implementation.

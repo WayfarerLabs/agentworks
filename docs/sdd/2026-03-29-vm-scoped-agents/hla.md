@@ -2,9 +2,9 @@
 
 ## Overview
 
-Agents move from workspace-scoped (`<workspace>--<agent>`) to VM-scoped (`agt--<agent>`).
-Workspace access is controlled through a grant system stored in the database. Linux group
-membership enforces file access at the OS level.
+Agents move from workspace-scoped (`<workspace>--<agent>`) to VM-scoped (`agt--<agent>`). Workspace
+access is controlled through a grant system stored in the database. Linux group membership enforces
+file access at the OS level.
 
 ## Database Changes
 
@@ -21,8 +21,8 @@ agents:
   created_at TEXT
 ```
 
-Primary key changes from `(workspace_name, name)` to `(vm_name, name)`.
-Foreign key changes from `workspaces(name)` to `vms(name)` with cascade delete.
+Primary key changes from `(workspace_name, name)` to `(vm_name, name)`. Foreign key changes from
+`workspaces(name)` to `vms(name)` with cascade delete.
 
 ### New: agent_workspace_grants table
 
@@ -41,8 +41,8 @@ agent_workspace_grants:
 
 ### Agent record: grant_all flag
 
-A boolean `grant_all` column on the agents table. When true, the agent is automatically added to
-all workspace groups (existing and newly created).
+A boolean `grant_all` column on the agents table. When true, the agent is automatically added to all
+workspace groups (existing and newly created).
 
 ## Group Membership Flow
 
@@ -69,22 +69,22 @@ all workspace groups (existing and newly created).
 
 ### Modified commands
 
-| Command | Change |
-| --- | --- |
+| Command        | Change                                                                                     |
+| -------------- | ------------------------------------------------------------------------------------------ |
 | `agent create` | `--workspace` replaced by `--vm` (prompted if multiple). New `--grant-all-workspaces` flag |
-| `agent shell` | Default: agent home. Optional `--workspace` to cd into a workspace |
-| `agent delete` | Removes from all workspace groups, deletes all grants |
-| `agent list` | Shows VM instead of workspace. Shows grant count |
-| `agent reinit` | `--workspace` replaced by `--vm` |
+| `agent shell`  | Default: agent home. Optional `--workspace` to cd into a workspace                         |
+| `agent delete` | Removes from all workspace groups, deletes all grants                                      |
+| `agent list`   | Shows VM instead of workspace. Shows grant count                                           |
+| `agent reinit` | `--workspace` replaced by `--vm`                                                           |
 
 ### New commands
 
-| Command | Description |
-| --- | --- |
-| `agent grant-workspaces <agent> <workspaces>` | Grant explicit access to workspaces (CSV list) |
-| `agent grant-workspaces <agent> --all` | Grant access to all workspaces |
-| `agent deny-workspaces <agent> <workspaces>` | Remove explicit grants (CSV list) |
-| `agent deny-workspaces <agent> --all` | Remove all explicit grants and clear grant_all flag |
+| Command                                       | Description                                         |
+| --------------------------------------------- | --------------------------------------------------- |
+| `agent grant-workspaces <agent> <workspaces>` | Grant explicit access to workspaces (CSV list)      |
+| `agent grant-workspaces <agent> --all`        | Grant access to all workspaces                      |
+| `agent deny-workspaces <agent> <workspaces>`  | Remove explicit grants (CSV list)                   |
+| `agent deny-workspaces <agent> --all`         | Remove all explicit grants and clear grant_all flag |
 
 ### Task create changes
 

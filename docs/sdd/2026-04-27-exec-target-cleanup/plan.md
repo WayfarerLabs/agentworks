@@ -16,10 +16,10 @@
 
 ### 1.3 admin_exec_target returns ExecTarget instead of SSHTarget
 
-- [x] `cli/agentworks/ssh.py`: change `admin_exec_target()` to return `ExecTarget` wrapping
-  the SSHTarget internally. Added optional `logger` and `default_timeout` params.
-- [x] Update all call sites that manually wrapped the result in `ExecTarget(ssh=...)` to use
-  the return value directly.
+- [x] `cli/agentworks/ssh.py`: change `admin_exec_target()` to return `ExecTarget` wrapping the
+      SSHTarget internally. Added optional `logger` and `default_timeout` params.
+- [x] Update all call sites that manually wrapped the result in `ExecTarget(ssh=...)` to use the
+      return value directly.
 - [x] Added `_unwrap_ssh()` shim to standalone SSH functions for migration compatibility.
 
 ---
@@ -28,8 +28,8 @@
 
 ### 2.1 Add run (formerly run_new) to ExecTarget
 
-- [x] `cli/agentworks/ssh.py`: single `run(command, *, sudo=False, tty=None, check=True,
-  timeout=None)` method.
+- [x] `cli/agentworks/ssh.py`: single
+      `run(command, *, sudo=False, tty=None, check=True, timeout=None)` method.
 - [x] `sudo=True` wraps command in `sudo -n bash -c {shlex.quote(command)}`.
 - [x] `tty` parameter: None = transport default, True = request TTY, False = suppress TTY.
 - [x] SSH transport: resolve tty (None -> SSHTarget.force_tty, True -> always, False -> never).
