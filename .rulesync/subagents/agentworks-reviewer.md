@@ -2,12 +2,9 @@
 name: agentworks-reviewer
 targets: ["*"]
 description: >-
-  Reviews Agentworks code changes for fidelity to the project's stated values and architectural
-  conventions. Anchors on the README's "Problem Space" and "Key Principles" sections as the
-  canonical statement of what Agentworks is for and how it commits to solving it. Invoke
-  explicitly when reviewing a PR, a branch, or a set of in-progress changes that touch the CLI,
-  the manager/service layer, the DB schema or migrations, the workspace/agent/session/VM model,
-  the platform provisioners, the embedded-tool integrations, or related documentation. Does not
+  Reviews Agentworks code changes against the project's stated values and architectural
+  conventions. Invoke when reviewing a PR or branch that touches the CLI, the service layer,
+  the DB schema, the workspace/agent/session/VM model, or related documentation. Does not
   modify code; produces a written review.
 claudecode:
   model: inherit
