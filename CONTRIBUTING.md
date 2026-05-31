@@ -18,7 +18,7 @@ Source files live in `.rulesync/`. Generated output (`.claude/`, `.cursor/`, `CL
 never be edited directly. To regenerate after changes:
 
 ```bash
-./ops/scripts/rulesync-upgen.bash
+./scripts/rulesync-upgen.sh
 ```
 
 Personal tool targets go in `rulesync.local.jsonc` (gitignored). Copy the example to get started:
