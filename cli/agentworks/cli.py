@@ -1727,12 +1727,13 @@ def main() -> None:
 
     # -- Run app ---------------------------------------------------------------
 
-    # Set _debug from sys.argv/env *before* Click parses anything, so a
-    # framework-level parse error (e.g. --debug --bogus) still honors the flag.
-    # The typer callback re-sets _debug after Click parses successfully.
-    _seed_debug_from_pre_callback()
-
     try:
+        # Set _debug from sys.argv/env *before* Click parses anything, so a
+        # framework-level parse error (e.g. --debug --bogus) still honors the
+        # flag. The typer callback re-sets _debug after Click parses
+        # successfully. Inside the try so a Ctrl-C during the pre-pass still
+        # routes through our wrapper.
+        _seed_debug_from_pre_callback()
         app()
     except ConfigError as e:
         typer.echo(f"Configuration error: {e}", err=True)

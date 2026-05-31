@@ -121,18 +121,20 @@ def create_agent(
     from agentworks.ssh import SSHLogger
 
     ssh_logger = SSHLogger(vm.name, "agent-create")
+    # The logger's close() writes a "Finished" footer; defer it via finally so
+    # rollback commands are logged BEFORE the footer, not after.
     try:
-        _create_agent_on_vm(vm, config, linux_user, git_tokens=git_tokens, logger=ssh_logger)
-    except KeyboardInterrupt:
+        try:
+            _create_agent_on_vm(vm, config, linux_user, git_tokens=git_tokens, logger=ssh_logger)
+        except KeyboardInterrupt:
+            output.warn(f"Cancelling agent create '{name}'... rolling back.")
+            _delete_agent_on_vm(vm, config, linux_user, logger=ssh_logger)
+            raise
+        except Exception as e:
+            _delete_agent_on_vm(vm, config, linux_user, logger=ssh_logger)
+            raise AgentError(f"creating agent: {e}\nSSH log: {ssh_logger.path}") from None
+    finally:
         ssh_logger.close()
-        output.warn(f"Cancelling agent create '{name}'... rolling back.")
-        _delete_agent_on_vm(vm, config, linux_user, logger=ssh_logger)
-        raise
-    except Exception as e:
-        ssh_logger.close()
-        _delete_agent_on_vm(vm, config, linux_user, logger=ssh_logger)
-        raise AgentError(f"creating agent: {e}\nSSH log: {ssh_logger.path}") from None
-    ssh_logger.close()
 
     agent = db.insert_agent(
         name,
@@ -265,18 +267,18 @@ def reinit_agent(
 
     ssh_logger = SSHLogger(vm.name, "agent-reinit")
     try:
-        _create_agent_on_vm(vm, config, agent.linux_user, git_tokens=git_tokens, logger=ssh_logger)
-    except KeyboardInterrupt:
+        try:
+            _create_agent_on_vm(vm, config, agent.linux_user, git_tokens=git_tokens, logger=ssh_logger)
+        except KeyboardInterrupt:
+            output.warn(
+                f"Cancelling agent reinit '{name}'. The agent may be in a partial state -- "
+                f"re-run 'agent reinit {name}' to retry. SSH log: {ssh_logger.path}"
+            )
+            raise
+        except Exception as e:
+            raise AgentError(f"reinitializing agent: {e}\nSSH log: {ssh_logger.path}") from None
+    finally:
         ssh_logger.close()
-        output.warn(
-            f"Cancelling agent reinit '{name}'. The agent may be in a partial state -- "
-            f"re-run 'agent reinit {name}' to retry. SSH log: {ssh_logger.path}"
-        )
-        raise
-    except Exception as e:
-        ssh_logger.close()
-        raise AgentError(f"reinitializing agent: {e}\nSSH log: {ssh_logger.path}") from None
-    ssh_logger.close()
 
     output.info(f"Agent '{name}' reinitialized")
 
