@@ -561,6 +561,25 @@ def create_session(
     deploy_restricted_config(run_command, history_limit=config.session.history_limit)
     command = _build_session_command(template, session_name=name, workspace_name=workspace_name)
 
+    def _rollback_implicit_grant() -> None:
+        # Drop the implicit grant we inserted for this session. If the agent
+        # has no remaining grants on this workspace, also best-effort revoke
+        # their Linux group membership so the DB and on-VM authorization
+        # don't drift. Cleanup failures must not mask the original error.
+        if not resolved_agent_name:
+            return
+        db.delete_agent_grant(resolved_agent_name, workspace_name, "implicit", session_name=name)
+        if not db.has_any_grant(resolved_agent_name, workspace_name):
+            try:
+                from agentworks.agents.manager import _remove_from_workspace_group
+
+                _remove_from_workspace_group(vm, config, db, linux_user, workspace_name, logger=None)
+            except Exception as cleanup_err:
+                output.warn(
+                    f"failed to remove agent '{resolved_agent_name}' from workspace "
+                    f"'{workspace_name}' group during rollback: {cleanup_err}"
+                )
+
     try:
         sock, pid = create_tmux_session(
             name,
@@ -576,13 +595,11 @@ def create_session(
     except KeyboardInterrupt:
         output.warn(f"Cancelling session create '{name}'... rolling back.")
         db.delete_session(name)
-        if resolved_agent_name:
-            db.delete_agent_grant(resolved_agent_name, workspace_name, "implicit", session_name=name)
+        _rollback_implicit_grant()
         raise
     except Exception:
         db.delete_session(name)
-        if resolved_agent_name:
-            db.delete_agent_grant(resolved_agent_name, workspace_name, "implicit", session_name=name)
+        _rollback_implicit_grant()
         raise
 
     # Persist socket path, PID, and boot ID

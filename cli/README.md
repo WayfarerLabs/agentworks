@@ -298,7 +298,7 @@ Pressing Ctrl-C during a long-running operation triggers best-effort cleanup. Wh
 can roll back (e.g. `vm create` during the provisioning phase, `workspace create`, `agent create`,
 `session create`) it undoes the partial DB / on-VM state and prints `Cancelling X... rolling
 back.`. Where rollback isn't possible (`vm reinit`, `agent reinit`, the init phase of `vm create`)
-it prints a recovery hint -- the next command to run (`vm reinit`, `vm delete --force`, ...).
+it prints a recovery hint: the next command to run (`vm reinit`, `vm delete --force`, ...).
 Every cancellation exits with the conventional SIGINT exit code (130).
 
 ## Commands
