@@ -586,8 +586,12 @@ def _rehome_vm(
                 sudo=True,
             )
 
-            # Regenerate tmuxinator config at new path. write_file uses scp,
-            # not a shell, so its remote_path argument is not shell-evaluated.
+            # Regenerate tmuxinator config at new path. write_file passes
+            # remote_path to scp as a subprocess arg (not interpolated into a
+            # local shell), so f-string concatenation is safe on the client
+            # side. The remote scp/sftp handler may still interpret the path
+            # per its own rules; if a future change funnels untrusted paths
+            # through here, revisit.
             from agentworks.workspaces.tmuxinator import console_session_name, generate_config
 
             tmux_config = generate_config(ws_name, new_path)

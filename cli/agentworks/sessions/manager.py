@@ -558,9 +558,6 @@ def create_session(
         socket_path=expected_socket,
     )
 
-    deploy_restricted_config(run_command, history_limit=config.session.history_limit)
-    command = _build_session_command(template, session_name=name, workspace_name=workspace_name)
-
     def _rollback() -> None:
         # Best-effort rollback. Each step runs inside its own try/except so
         # that a cleanup failure surfaces as a warning instead of masking
@@ -594,6 +591,12 @@ def create_session(
                 )
 
     try:
+        # deploy_restricted_config + _build_session_command run inside the
+        # protected block so that a KI or exception here -- not just one
+        # from create_tmux_session -- still triggers _rollback() and clears
+        # the partial state (session row plus any implicit grant).
+        deploy_restricted_config(run_command, history_limit=config.session.history_limit)
+        command = _build_session_command(template, session_name=name, workspace_name=workspace_name)
         sock, pid = create_tmux_session(
             name,
             ws.workspace_path,
