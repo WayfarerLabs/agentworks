@@ -89,12 +89,12 @@ def test_main_wrapper_catches_unhandled_exception(
     monkeypatch.setattr("agentworks.config.CONFIG_DIR", tmp_path)
     monkeypatch.setattr("sys.argv", ["agentworks", "kaboom"])
     # Force debug off even if AGW_DEBUG happens to be set in the test env.
-    monkeypatch.delenv("AGW_DEBUG", raising=False)
+    monkeypatch.setenv("AGW_DEBUG", "")
 
-    with pytest.raises(SystemExit) as excinfo:
+    with pytest.raises(SystemExit) as exc_info:
         cli_mod.main()
 
-    assert excinfo.value.code == 1
+    assert exc_info.value.code == 1
     # The traceback should be in error.log.
     log_path = tmp_path / "logs" / "error.log"
     assert log_path.exists()
@@ -122,11 +122,11 @@ def test_main_wrapper_lets_click_exceptions_through(
     monkeypatch.setattr("agentworks.config.CONFIG_DIR", tmp_path)
     monkeypatch.setattr("sys.argv", ["agentworks", "bail"])
 
-    with pytest.raises(SystemExit) as excinfo:
+    with pytest.raises(SystemExit) as exc_info:
         cli_mod.main()
 
     # Exit code 7 propagated from typer.Exit, not 1 from our wrapper.
-    assert excinfo.value.code == 7
+    assert exc_info.value.code == 7
     # And no error.log entry from our wrapper.
     log_path = tmp_path / "logs" / "error.log"
     assert not log_path.exists()
