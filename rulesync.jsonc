@@ -1,6 +1,6 @@
 {
   "$schema": "https://raw.githubusercontent.com/dyoshikawa/rulesync/refs/heads/main/config-schema.json",
-  "features": ["rules", "skills"],
+  "features": ["rules", "skills", "subagents"],
   "baseDirs": ["."],
   "delete": true,
   "verbose": false
