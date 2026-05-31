@@ -288,9 +288,11 @@ missing values (VM selection, workspace selection, name generation) will fail wi
 indicating which flag is required. Auto-selection still works: if there is exactly one VM or
 workspace, it is used without prompting.
 
-Unhandled errors (e.g. an SSH timeout, a bug, an OS-level failure) are normally surfaced as a
-single-line message with the full traceback appended to `~/.config/agentworks/logs/error.log`
-for debugging. Pass `--debug` (or set `AGW_DEBUG=1`) to print the traceback to stderr instead.
+Domain errors (SSH timeouts, validation failures, missing resources, etc.) surface as a single
+clean line: `Error: <message>`. Truly unexpected failures (internal bugs, OS-level errors,
+third-party library failures) also get a clean single-line message, plus the full traceback
+appended to `~/.config/agentworks/logs/error.log` for debugging. Pass `--debug` (or set
+`AGW_DEBUG=1`) to print the traceback to stderr instead.
 
 ## Commands
 
