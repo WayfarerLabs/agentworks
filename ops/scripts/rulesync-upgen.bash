@@ -51,6 +51,13 @@ fi
 echo "Running rulesync generate (v$RULESYNC_VERSION)..."
 run_npm_package rulesync@"$RULESYNC_VERSION" generate
 
+# rulesync.local.jsonc's `targets` field replaces (not unions) the shared
+# config's, so when a dev's local targets exclude copilot, the committed
+# .github/ output above does not get refreshed. Force-regenerate it here so
+# the CI drift check stays green regardless of personal target choices.
+echo "Regenerating committed copilot output (v$RULESYNC_VERSION)..."
+run_npm_package rulesync@"$RULESYNC_VERSION" generate -t copilot
+
 # Workaround: rulesync generate also drops the executable bit.
 # Propagate from installed skills to generated .claude/skills output.
 echo "Propagating executable permissions to generated skill scripts..."

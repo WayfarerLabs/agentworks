@@ -85,3 +85,21 @@ jobs:
         uses: streetsidesoftware/cspell-action@v8
         with:
           files: "**/*.{md,py,yaml,yml,toml}"
+
+  rulesync:
+    # Verify the committed copilot output (.github/copilot-instructions.md
+    # plus .github/instructions/, .github/agents/, .github/skills/) is up to
+    # date with the .rulesync/ sources. CI runs without a rulesync.local.jsonc,
+    # so the shared targets: ["copilot"] from rulesync.jsonc is what's checked.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Check rulesync output is up to date
+        run: |
+          VERSION=$(cat .rulesync-version)
+          npx -y rulesync@"$VERSION" generate --check

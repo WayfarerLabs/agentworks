@@ -1,6 +1,14 @@
 {
+  // Schema URL tracks rulesync main, not the version pinned in .rulesync-version.
+  // Editor validation may show false positives if main has drifted past the pinned
+  // version; trust the pinned-version generator output, not the schema check.
   "$schema": "https://raw.githubusercontent.com/dyoshikawa/rulesync/refs/heads/main/config-schema.json",
   "features": ["rules", "skills", "subagents"],
+  // copilot is the shared target whose generated output is committed -- it
+  // gives Copilot Code Review access to the project's rules and subagents on
+  // every PR. Personal targets (claudecode, cursor, etc.) go in
+  // rulesync.local.jsonc; their outputs are gitignored.
+  "targets": ["copilot"],
   "baseDirs": ["."],
   "delete": true,
   "verbose": false
