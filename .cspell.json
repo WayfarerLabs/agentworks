@@ -224,10 +224,15 @@
   "ignoreRegExpList": [
     "`[^`\\r\\n]+`"
   ],
+  "useGitignore": true,
   "ignorePaths": [
     "node_modules",
     "cli/.venv/**",
     "cli/.venv64/**",
-    "**/CHANGELOG.md"
+    "**/CHANGELOG.md",
+    ".github/copilot-instructions.md",
+    ".github/instructions/**",
+    ".github/agents/**",
+    ".github/skills/**"
   ]
 }

@@ -69,8 +69,8 @@ jobs:
   # Pinned npm-based linters. We invoke each tool directly via npx at the
   # version recorded in its `.<tool>-version` file, rather than going through
   # a third-party GitHub Action whose own dependency tree we cannot control.
-  # `git ls-files` ensures only tracked files are scanned, mirroring what a
-  # contributor sees locally on a clean checkout.
+  # Each tool's ignore list (.cspell.json, .markdownlint-cli2.jsonc, and
+  # .prettierignore plus --ignore-path .gitignore) defines the scope.
 
   markdown:
     runs-on: ubuntu-latest
@@ -84,7 +84,7 @@ jobs:
       - name: markdownlint
         run: |
           VERSION=$(cat .markdownlint-cli2-version)
-          git ls-files '*.md' | xargs -r npx -y markdownlint-cli2@"$VERSION"
+          npx -y markdownlint-cli2@"$VERSION" '**/*.md'
 
   spelling:
     runs-on: ubuntu-latest
@@ -98,8 +98,8 @@ jobs:
       - name: cspell
         run: |
           VERSION=$(cat .cspell-version)
-          git ls-files '*.md' '*.py' '*.yaml' '*.yml' '*.toml' \
-            | xargs -r npx -y cspell@"$VERSION" --no-progress
+          npx -y cspell@"$VERSION" --no-progress \
+            '**/*.md' '**/*.py' '**/*.yaml' '**/*.yml' '**/*.toml'
 
   prettier:
     runs-on: ubuntu-latest
@@ -111,9 +111,12 @@ jobs:
           node-version-file: .node-version
 
       - name: prettier
+        # Prettier 3.x does not read .gitignore by default; pass it explicitly.
         run: |
           VERSION=$(cat .prettier-version)
-          git ls-files '*.md' | xargs -r npx -y prettier@"$VERSION" --check
+          npx -y prettier@"$VERSION" --check \
+            --ignore-path .gitignore --ignore-path .prettierignore \
+            '**/*.md'
 
   rulesync:
     # Verify the committed copilot output (.github/copilot-instructions.md

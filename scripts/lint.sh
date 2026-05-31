@@ -71,11 +71,16 @@ PRETTIER_VERSION=$(read_version_file .prettier-version "" "$REPO_ROOT")
 
 FAIL=0
 
+# Prettier 3.x does NOT respect .gitignore by default (changed in 3.0), so we
+# pass --ignore-path explicitly. The other tools (cspell, markdownlint-cli2)
+# have gitignore: true / useGitignore: true set in their own config files.
+PRETTIER_IGNORES=(--ignore-path .gitignore --ignore-path .prettierignore)
+
 # --- Fix pass ---
 
 if [[ $FIX -eq 1 ]]; then
     echo "--- prettier --write ---"
-    git ls-files '*.md' | xargs -r "${PKGRUN[@]}" prettier@"$PRETTIER_VERSION" --write
+    "${PKGRUN[@]}" prettier@"$PRETTIER_VERSION" --write "${PRETTIER_IGNORES[@]}" '**/*.md'
 
     echo ""
     echo "--- markdownlint-cli2 --fix ---"
@@ -83,14 +88,14 @@ if [[ $FIX -eq 1 ]]; then
     # rules it cannot auto-fix, and we want the script to continue to the
     # re-check pass below so the user sees the unfixable issues clearly
     # rather than failing here mid-fix.
-    git ls-files '*.md' | xargs -r "${PKGRUN[@]}" markdownlint-cli2@"$MDLINT_VERSION" --fix || true
+    "${PKGRUN[@]}" markdownlint-cli2@"$MDLINT_VERSION" --fix '**/*.md' || true
 fi
 
 # --- Check pass (always runs) ---
 
 echo ""
 echo "=== prettier --check ==="
-if git ls-files '*.md' | xargs -r "${PKGRUN[@]}" prettier@"$PRETTIER_VERSION" --check; then
+if "${PKGRUN[@]}" prettier@"$PRETTIER_VERSION" --check "${PRETTIER_IGNORES[@]}" '**/*.md'; then
     echo "  ok"
 else
     FAIL=1
@@ -98,7 +103,7 @@ fi
 
 echo ""
 echo "=== markdownlint-cli2 ==="
-if git ls-files '*.md' | xargs -r "${PKGRUN[@]}" markdownlint-cli2@"$MDLINT_VERSION"; then
+if "${PKGRUN[@]}" markdownlint-cli2@"$MDLINT_VERSION" '**/*.md'; then
     echo "  ok"
 else
     FAIL=1
@@ -106,8 +111,8 @@ fi
 
 echo ""
 echo "=== cspell ==="
-if git ls-files '*.md' '*.py' '*.yaml' '*.yml' '*.toml' \
-    | xargs -r "${PKGRUN[@]}" cspell@"$CSPELL_VERSION" --no-progress; then
+if "${PKGRUN[@]}" cspell@"$CSPELL_VERSION" --no-progress \
+    '**/*.md' '**/*.py' '**/*.yaml' '**/*.yml' '**/*.toml'; then
     echo "  ok"
 else
     echo ""
