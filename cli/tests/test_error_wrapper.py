@@ -343,3 +343,96 @@ def test_create_session_releases_group_membership_on_keyboard_interrupt(
     assert not db.has_any_grant("a1", "ws1")
     assert remove_calls == [("aw-a1", "ws1")]
     db.close()
+
+
+def test_create_session_rollback_failure_does_not_mask_keyboard_interrupt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The safe-rollback contract: if a cleanup step itself raises, the
+    original KeyboardInterrupt must still propagate, and the user must see
+    a warning about the failed cleanup. Without this, a DB lock or SSH
+    error during rollback would replace the user's Ctrl-C with an opaque
+    error exit, breaking the SIGINT exit-code contract."""
+    from agentworks.db import Database
+    from agentworks.sessions import manager as session_manager
+    from agentworks.sessions import tmux as tmux_mod
+
+    db = Database(tmp_path / "test.db")
+    db._conn.execute(
+        "INSERT INTO vms (name, platform, admin_username, tailscale_host) "
+        "VALUES ('vm1', 'wsl', 'admin', '100.64.0.5')"
+    )
+    db._conn.execute(
+        "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group) "
+        "VALUES ('ws1', 'vm1', '/home/me/ws1', 'ws-ws1')"
+    )
+    db._conn.commit()
+
+    monkeypatch.setattr(
+        "agentworks.workspaces.manager._ensure_vm_running",
+        lambda *args, **kwargs: None,
+    )
+
+    class _Result:
+        ok = True
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    class _Target:
+        def run(self, *args: object, **kwargs: object) -> _Result:
+            return _Result()
+
+    fake_factory = lambda vm, config, **kwargs: _Target()  # noqa: E731
+    monkeypatch.setattr("agentworks.ssh.admin_exec_target", fake_factory)
+    monkeypatch.setattr("agentworks.sessions.manager.admin_exec_target", fake_factory)
+    monkeypatch.setattr(
+        session_manager, "_build_session_command", lambda *args, **kwargs: "true"
+    )
+    monkeypatch.setattr(tmux_mod, "deploy_restricted_config", lambda *args, **kwargs: None)
+
+    def _explode(*args: object, **kwargs: object) -> tuple[None, None]:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(tmux_mod, "create_session", _explode)
+
+    # Poison the rollback: db.delete_session raises during cleanup.
+    cleanup_attempts: list[str] = []
+    original_delete = db.delete_session
+
+    def _failing_delete_session(name: str) -> None:
+        cleanup_attempts.append(name)
+        # Restore the original so the assertion below can observe state;
+        # in reality db.delete_session might fail repeatedly.
+        db.delete_session = original_delete  # type: ignore[method-assign]
+        raise RuntimeError("simulated DB lock during rollback")
+
+    db.delete_session = _failing_delete_session  # type: ignore[method-assign]
+
+    class _Tmpl:
+        name = "default"
+        command = ""
+        restart_command = None
+        env: dict[str, str] = {}
+
+    monkeypatch.setattr(session_manager, "_resolve_template", lambda *a, **k: _Tmpl())
+
+    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
+
+    # The KI from create_tmux_session must surface, NOT the RuntimeError
+    # from the failing rollback step. That is the masking guarantee.
+    with pytest.raises(KeyboardInterrupt):
+        session_manager.create_session(
+            db,
+            config,  # type: ignore[arg-type]
+            name="s1",
+            workspace_name="ws1",
+            template_name=None,
+            agent_name=None,
+        )
+
+    # The poisoned delete_session was called (confirming we did exercise
+    # the failing path) and then restored, but the session row was never
+    # actually removed because the first delete attempt raised.
+    assert cleanup_attempts == ["s1"]
+    db.close()

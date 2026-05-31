@@ -772,36 +772,38 @@ def reinit_vm(
 
     home = f"/home/{vm.admin_username}"
 
+    # Outer try/finally ensures the SSH logger is closed exactly once, AFTER
+    # any warning output. Matches the pattern used by agent create / reinit
+    # and workspace create / rehome.
     try:
-        run_initialization(
-            db,
-            config,
-            name,
-            ts_target,
-            providers,
-            home,
-            vm.admin_username,
-            logger,
-            git_tokens=git_tokens,
-        )
-    except KeyboardInterrupt:
+        try:
+            run_initialization(
+                db,
+                config,
+                name,
+                ts_target,
+                providers,
+                home,
+                vm.admin_username,
+                logger,
+                git_tokens=git_tokens,
+            )
+        except KeyboardInterrupt:
+            output.warn(
+                f"Cancelling vm reinit '{name}'. The VM may be in a partial state. "
+                f"Re-run 'vm reinit {name}' to retry. Log: {logger.path}"
+            )
+            raise
+        except Exception:
+            output.warn(f"Log: {logger.path}")
+            raise
+    finally:
         logger.close()
-        output.warn(
-            f"Cancelling vm reinit '{name}'. The VM may be in a partial state -- "
-            f"re-run 'vm reinit {name}' to retry. Log: {logger.path}"
-        )
-        raise
-    except Exception:
-        logger.close()
-        output.warn(f"Log: {logger.path}")
-        raise
-
-    logger.close()
 
     refreshed_vm = db.get_vm(name)
     assert refreshed_vm is not None
     if refreshed_vm.init_status == InitStatus.PARTIAL.value:
-        output.info(f"VM '{name}' reinitialized (with warnings -- see above)")
+        output.info(f"VM '{name}' reinitialized (with warnings, see above)")
         output.detail(f"Log: {logger.path}")
     else:
         output.info(f"VM '{name}' reinitialized successfully!")

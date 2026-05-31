@@ -578,7 +578,7 @@ def _rehome_vm(
 
             # Fix parent directory traversal. sudo=True already wraps the
             # command in `sudo -n bash -c '<quoted>'`, so the script runs in
-            # a single bash context -- no extra `sh -c '...'` indirection
+            # a single bash context. No extra `sh -c '...'` indirection is
             # needed (and the explicit wrapper made path quoting impossible
             # to do safely).
             target.run(
@@ -598,8 +598,10 @@ def _rehome_vm(
             target.write_file(f"{new_path}/.tmuxinator.yml", tmux_config)
             session = console_session_name(ws_name)
             target.run("mkdir -p ~/.config/tmuxinator", timeout=10)
+            # Keep ~/.config/tmuxinator/ literal so tilde expansion still
+            # happens; quote just the filename for layered defense.
             target.run(
-                f"ln -sf {np}/.tmuxinator.yml ~/.config/tmuxinator/{session}.yml",
+                f"ln -sf {np}/.tmuxinator.yml ~/.config/tmuxinator/{shlex.quote(session)}.yml",
                 timeout=10,
             )
 
