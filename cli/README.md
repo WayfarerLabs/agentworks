@@ -278,14 +278,19 @@ agentworks workspace shell my-workspace
 
 ## Global Options
 
-| Flag                | Description                     |
-| ------------------- | ------------------------------- |
-| `--non-interactive` | Disable all interactive prompts |
+| Flag                | Description                                                                  |
+| ------------------- | ---------------------------------------------------------------------------- |
+| `--non-interactive` | Disable all interactive prompts                                              |
+| `--debug`           | Print the full Python traceback on unhandled errors (also via `AGW_DEBUG=1`) |
 
 When `--non-interactive` is set (or stdin is not a TTY), commands that would normally prompt for
 missing values (VM selection, workspace selection, name generation) will fail with a clear error
 indicating which flag is required. Auto-selection still works: if there is exactly one VM or
 workspace, it is used without prompting.
+
+Unhandled errors (e.g. an SSH timeout, a bug, an OS-level failure) are normally surfaced as a
+single-line message with the full traceback appended to `~/.config/agentworks/logs/error.log`
+for debugging. Pass `--debug` (or set `AGW_DEBUG=1`) to print the traceback to stderr instead.
 
 ## Commands
 

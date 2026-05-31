@@ -12,6 +12,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from agentworks.output import AgentworksError
+
 if TYPE_CHECKING:
     from collections.abc import Callable
 
@@ -81,8 +83,14 @@ class SSHResult:
         return self.returncode == 0
 
 
-class SSHError(Exception):
-    """Raised when an SSH command fails unexpectedly."""
+class SSHError(AgentworksError):
+    """Raised when an SSH command fails unexpectedly (transport failure,
+    timeout, non-zero exit under ``check=True``).
+
+    Inherits from ``AgentworksError`` so the CLI's top-level error wrapper
+    catches SSH failures consistently with other domain errors instead of
+    leaking a traceback.
+    """
 
 
 LOG_DIR = Path.home() / ".config" / "agentworks" / "logs"

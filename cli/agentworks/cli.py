@@ -11,6 +11,7 @@ from agentworks.db import Database, VMRow, WorkspaceRow
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
+    from pathlib import Path
 
 app = typer.Typer(
     name="agentworks",
@@ -92,6 +93,7 @@ app.add_typer(config_app)
 # -- Global options --------------------------------------------------------
 
 _non_interactive = False
+_debug = False
 
 
 @app.callback()
@@ -100,10 +102,20 @@ def _global_options(
         bool,
         typer.Option("--non-interactive", help="Disable interactive prompts"),
     ] = False,
+    debug: Annotated[
+        bool,
+        typer.Option(
+            "--debug",
+            help="Print full Python traceback on unhandled errors (also via AGW_DEBUG=1)",
+        ),
+    ] = False,
 ) -> None:
     """Global options for all commands."""
-    global _non_interactive  # noqa: PLW0603
+    import os
+
+    global _non_interactive, _debug  # noqa: PLW0603
     _non_interactive = non_interactive
+    _debug = debug or os.environ.get("AGW_DEBUG") == "1"
 
 
 # -- Helpers ---------------------------------------------------------------
@@ -1676,4 +1688,48 @@ def main() -> None:
     except AgentworksError as e:
         typer.echo(f"Error: {e}", err=True)
         raise SystemExit(1) from None
+    except Exception as e:
+        # Anything else is an unhandled error (third-party library, internal
+        # bug, OSError, etc.). Print a clean one-liner, persist the full
+        # traceback to the error log for post-hoc debugging, and exit non-zero.
+        # Re-raise under --debug / AGW_DEBUG=1 so devs/CI see the traceback.
+        if _debug:
+            raise
+        log_path = _record_unhandled_error(e)
+        typer.echo(f"Error: {type(e).__name__}: {e}", err=True)
+        typer.echo(
+            f"(full traceback written to {log_path}; "
+            f"rerun with --debug or AGW_DEBUG=1 to print on stderr)",
+            err=True,
+        )
+        raise SystemExit(1) from None
+
+
+def _record_unhandled_error(exc: BaseException) -> Path:
+    """Append the traceback + invocation context to the error log. Best-effort."""
+    import datetime
+    import sys
+    import traceback
+
+    from agentworks.config import CONFIG_DIR
+
+    log_dir = CONFIG_DIR / "logs"
+    log_path = log_dir / "error.log"
+
+    ts = datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    tb = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+    argv = " ".join(sys.argv)
+    try:
+        log_dir.mkdir(parents=True, exist_ok=True)
+        with log_path.open("a", encoding="utf-8") as f:
+            f.write(f"\n{'=' * 72}\n")
+            f.write(f"{ts}\n")
+            f.write(f"argv: {argv}\n\n")
+            f.write(tb)
+    except OSError:
+        # If we can't create the log dir or write the file, fall back
+        # gracefully -- the user's one-line error is more important than
+        # the persisted traceback.
+        pass
+    return log_path
 
