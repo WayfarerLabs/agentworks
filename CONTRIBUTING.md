@@ -54,8 +54,8 @@ specification.
 - **Python**: ruff (linting + formatting), mypy (type checking), pytest
 - **Markdown structure**: markdownlint-cli2
 - **Markdown / JSON / YAML formatting**: prettier
-- **Spelling across markdown, Python, YAML, JSONC, and TOML**: cspell (custom dictionary in
-  `.cspell.json`)
+- **Spelling across markdown, Python, YAML, and TOML**: cspell (custom dictionary in
+  `.cspell.json`). JSON/JSONC are intentionally excluded; they're identifiers and config, not prose.
 
 ### Running the file-quality linters
 
