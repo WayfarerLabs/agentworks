@@ -16,4 +16,4 @@ Your swiss army knife for agentic workflows, including VMs, workspaces, tools, a
 See the [CLI README](cli/README.md) to get up and running.
 
 Contributions that meet our standards are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for
-details.
+details, including how to initialize your workspace for your preferred AI assistant.

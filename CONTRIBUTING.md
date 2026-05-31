@@ -11,21 +11,33 @@ major features.
 ## AI Coding Assistants
 
 This project is designed to be developed with AI coding assistants. We use
-[Rulesync](https://rulesync.dyoshikawa.com/) to manage shared AI configuration (rules, skills, etc.)
-across tools. If you are contributing with an AI assistant, you should too.
+[Rulesync](https://rulesync.dyoshikawa.com/) to manage shared AI configuration (rules, skills,
+subagents) across tools. If you are contributing with an AI assistant, you should too.
 
-Source files live in `.rulesync/`. Generated output (`.claude/`, `.cursor/`, `CLAUDE.md`) should
-never be edited directly. To regenerate after changes:
+### Initialize your workspace
 
-```bash
-./scripts/rulesync-upgen.sh
-```
-
-Personal tool targets go in `rulesync.local.jsonc` (gitignored). Copy the example to get started:
+First thing after cloning, copy the example local config and edit it for whatever assistant(s)
+you use, then regenerate the outputs:
 
 ```bash
 cp rulesync.local.jsonc.example rulesync.local.jsonc
+# edit rulesync.local.jsonc, setting "targets" to your tool(s)
+./scripts/rulesync-upgen.sh
 ```
+
+`rulesync.local.jsonc` is gitignored; only your local assistant's generated files (`.claude/`,
+`.cursor/`, etc.) get produced for you and stay out of the repo.
+
+### What gets committed
+
+GitHub Copilot is the one shared target (declared in `rulesync.jsonc`). Its generated output
+lives at `.github/copilot-instructions.md`, `.github/instructions/`, `.github/agents/`, and
+`.github/skills/` and **is** checked in so Copilot Code Review can see the project's rules and
+subagents on every PR. CI verifies this output stays in sync with `.rulesync/` sources via
+`rulesync generate --check` — if you edit a source file, regenerate via the script above and
+commit the result.
+
+Source files in `.rulesync/` are the canonical input; never edit generated output directly.
 
 ## Spec-Driven Development
 
