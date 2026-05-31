@@ -10,7 +10,11 @@
 # does not preserve the executable bit on install or generate, so we detect
 # files with shebangs after install and propagate the bit after generate.
 #
-# Usage: ./scripts/rulesync-upgen.sh
+# Usage:
+#   ./scripts/rulesync-upgen.sh           Install + regenerate all outputs.
+#   ./scripts/rulesync-upgen.sh --check   Verify committed copilot output is
+#                                         up to date; exit non-zero on drift.
+#                                         Does not write or install.
 # ============================================================================
 
 set -euo pipefail
@@ -27,6 +31,21 @@ INSTALLED_SKILLS_DIR="$REPO_ROOT/.rulesync/skills"
 CLAUDE_SKILLS_DIR="$REPO_ROOT/.claude/skills"
 
 cd "$REPO_ROOT"
+
+# --- Check mode ---
+#
+# Verify only the committed copilot output. Always passes -t copilot so the
+# dev's personal rulesync.local.jsonc targets don't enter the picture; only
+# the shared, committed output is what's checked here (and in CI).
+if [[ "${1:-}" == "--check" ]]; then
+    echo "Checking committed copilot output (v$RULESYNC_VERSION)..."
+    run_npm_package rulesync@"$RULESYNC_VERSION" generate -t copilot --check
+    exit $?
+elif [[ -n "${1:-}" ]]; then
+    echo "Error: unknown argument '$1'." >&2
+    echo "Usage: $0 [--check]" >&2
+    exit 1
+fi
 
 # --- Install ---
 

@@ -57,14 +57,27 @@ specification.
 
 ### Running the markdown linters
 
-The npm-based linters (cspell, markdownlint-cli2, prettier) and the rulesync drift check are pinned
-via per-tool `.<tool>-version` files. The same versions run in CI. To run them locally:
+The npm-based linters (cspell, markdownlint-cli2, prettier) are pinned via per-tool
+`.<tool>-version` files. Node itself is pinned in `.node-version`. The same versions run in CI. To
+run them locally:
 
 ```bash
 ./scripts/lint.sh        # check only -- exactly what CI runs
 ./scripts/lint.sh --fix  # auto-fix where each tool can; re-check; report what remains
 ```
 
-`--fix` covers prettier formatting, markdownlint auto-fixable rules, and rulesync regeneration.
-cspell cannot auto-fix unknown words; the script flags them and points you at `.cspell.json` to
-either correct the spelling or add a word.
+`--fix` covers prettier formatting and markdownlint auto-fixable rules. cspell cannot auto-fix
+unknown words; the script flags them and points you at `.cspell.json` to either correct the spelling
+or add a word.
+
+### Verifying rulesync output is current
+
+The committed copilot output in `.github/` must stay in sync with `.rulesync/` sources. CI runs a
+drift check. To verify locally without regenerating:
+
+```bash
+./scripts/rulesync-upgen.sh --check
+```
+
+To regenerate after editing a source file, run `./scripts/rulesync-upgen.sh` (no args) and commit
+the result.

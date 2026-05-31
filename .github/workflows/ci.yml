@@ -79,7 +79,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "24"
+          node-version-file: .node-version
 
       - name: markdownlint
         run: |
@@ -93,7 +93,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "24"
+          node-version-file: .node-version
 
       - name: cspell
         run: |
@@ -108,7 +108,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "24"
+          node-version-file: .node-version
 
       - name: prettier
         run: |
@@ -126,7 +126,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "24"
+          node-version-file: .node-version
 
       - name: Check rulesync output is up to date
         run: |

@@ -1,21 +1,28 @@
 #!/usr/bin/env bash
 
 # ============================================================================
-# lint.sh -- Run all repository linters at the versions CI uses.
+# lint.sh -- Run the repository's file-quality linters at the versions CI uses.
 #
-# Each tool is pinned in its own `.<tool>-version` file (`.cspell-version`,
-# `.markdownlint-cli2-version`, `.prettier-version`, `.rulesync-version`).
-# This script reads those same files and invokes each tool via the local
-# npm package runner.
+# Covers cspell, markdownlint-cli2, and prettier. Each is pinned in its own
+# `.<tool>-version` file (`.cspell-version`, `.markdownlint-cli2-version`,
+# `.prettier-version`). This script reads those same files and invokes each
+# tool via the local npm package runner.
+#
+# This script intentionally does NOT cover rulesync drift; that's a different
+# concern (generated artifact freshness, not file quality) and lives in
+# `./scripts/rulesync-upgen.sh --check`.
 #
 # Usage:
-#   ./scripts/lint.sh          Check only. Mirrors CI exactly.
+#   ./scripts/lint.sh          Check only. Mirrors what CI checks.
 #   ./scripts/lint.sh --fix    Auto-fix where each tool can, then re-check.
 #                              cspell cannot auto-fix; remaining unknown
 #                              words must be corrected by hand or added
 #                              to .cspell.json.
 # ============================================================================
 
+# Intentionally NOT using `set -e`: we want every checker to run so contributors
+# see every problem in one pass, then aggregate failures via $FAIL at the end.
+# Do not "fix" this to -euo pipefail without also restructuring the check loop.
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -61,7 +68,6 @@ cd "$REPO_ROOT"
 CSPELL_VERSION=$(read_version_file .cspell-version "" "$REPO_ROOT")
 MDLINT_VERSION=$(read_version_file .markdownlint-cli2-version "" "$REPO_ROOT")
 PRETTIER_VERSION=$(read_version_file .prettier-version "" "$REPO_ROOT")
-RULESYNC_VERSION=$(read_version_file .rulesync-version "" "$REPO_ROOT")
 
 FAIL=0
 
@@ -73,13 +79,11 @@ if [[ $FIX -eq 1 ]]; then
 
     echo ""
     echo "--- markdownlint-cli2 --fix ---"
-    # markdownlint exits non-zero on unfixable issues; let the re-check pass
-    # below report them.
+    # Deliberate `|| true`: markdownlint exits non-zero when it encounters
+    # rules it cannot auto-fix, and we want the script to continue to the
+    # re-check pass below so the user sees the unfixable issues clearly
+    # rather than failing here mid-fix.
     git ls-files '*.md' | xargs -r "${PKGRUN[@]}" markdownlint-cli2@"$MDLINT_VERSION" --fix || true
-
-    echo ""
-    echo "--- rulesync regenerate (committed copilot output) ---"
-    "${PKGRUN[@]}" rulesync@"$RULESYNC_VERSION" generate -t copilot
 fi
 
 # --- Check pass (always runs) ---
@@ -110,19 +114,6 @@ else
     echo "  cspell flags cannot be auto-fixed. For each unknown word:"
     echo "    - correct the spelling, OR"
     echo "    - add the word to .cspell.json's \"words\" list."
-    FAIL=1
-fi
-
-echo ""
-echo "=== rulesync drift (committed copilot output) ==="
-# Always check against the shared copilot target. A dev whose
-# rulesync.local.jsonc selects different targets is fine -- their local-only
-# output is gitignored and not part of what CI checks.
-if "${PKGRUN[@]}" rulesync@"$RULESYNC_VERSION" generate -t copilot --check; then
-    echo "  ok"
-else
-    echo ""
-    echo "  Committed copilot output is stale. Re-run: ./scripts/lint.sh --fix"
     FAIL=1
 fi
 
