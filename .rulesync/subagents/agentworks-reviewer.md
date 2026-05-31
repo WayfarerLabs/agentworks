@@ -3,9 +3,8 @@ name: agentworks-reviewer
 targets: ["*"]
 description: >-
   Reviews Agentworks code changes against the project's stated values and architectural
-  conventions. Invoke when reviewing a PR or branch that touches the CLI, the service layer,
-  the DB schema, the workspace/agent/session/VM model, or related documentation. Does not
-  modify code; produces a written review.
+  conventions. Invoke on all PRs (or branches under review). Does not modify code; produces
+  a written review.
 claudecode:
   model: inherit
 ---
