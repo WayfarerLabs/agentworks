@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 jobs:
-  lint:
+  python-checks:
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -32,7 +32,7 @@ jobs:
 
       - name: Check typer isolation
         run: |
-          # Business logic must not import typer -- use output module instead.
+          # Business logic must not import typer; use the output module instead.
           # Allowed: cli.py (CLI layer), doctor.py (CLI layer), completions/ (CLI layer),
           # sessions/manager.py (raw data pipe, see comment in file).
           violations=$(grep -rnP '^\s*(import typer|from typer)' agentworks/ --include='*.py' \
@@ -68,7 +68,7 @@ jobs:
 
   # File-quality linters and the rulesync drift check both run via the same
   # scripts contributors use locally (./scripts/lint.sh, ./scripts/rulesync-upgen.sh
-  # --check). That keeps CI and local behavior in lockstep -- the version pins,
+  # --check). That keeps CI and local behavior in lockstep; the version pins,
   # ignore lists, and exit semantics are defined exactly once.
 
   lint-files:
@@ -76,7 +76,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version-file: .node-version
 
@@ -88,7 +88,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version-file: .node-version
 
