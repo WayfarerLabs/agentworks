@@ -27,6 +27,11 @@ Code Review has access to the project's rules and subagents on every PR. CI runs
 Generated output for any other target (`.claude/`, `.cursor/`, `CLAUDE.md`, `.codex/`, etc.) is
 gitignored. Never edit any generated output directly; rerun the generator instead.
 
+The markdown linters (cspell, markdownlint, prettier) are configured to scan only rulesync _sources_
+and to skip rulesync _outputs_. This keeps rulesync and the linters from fighting: without the
+exclusion, prettier would reformat a generated file and the next `rulesync generate` would overwrite
+it, producing perpetual drift.
+
 ## Making changes
 
 When you edit anything under `.rulesync/`:
