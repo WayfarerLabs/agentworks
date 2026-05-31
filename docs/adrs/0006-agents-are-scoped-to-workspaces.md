@@ -41,5 +41,5 @@ workspaces they are explicitly added to.
 - The username convention (`<workspace>--<agent>`) makes it immediately obvious in `ps`, logs, and
   audit trails which workspace an agent belongs to.
 - Tradeoff: an agent cannot be "moved" or "shared" between workspaces. This is intentional. If you
-  need the same tool configuration in a different workspace, use agent templates. same VM resources.
-  For stronger isolation, use separate VMs.
+  need the same tool configuration in a different workspace, use agent templates. Note that agents
+  on the same VM still share that VM's resources; for stronger isolation, use separate VMs.

@@ -65,9 +65,12 @@ fi
 
 cd "$REPO_ROOT"
 
-CSPELL_VERSION=$(read_version_file .cspell-version "" "$REPO_ROOT")
-MDLINT_VERSION=$(read_version_file .markdownlint-cli2-version "" "$REPO_ROOT")
-PRETTIER_VERSION=$(read_version_file .prettier-version "" "$REPO_ROOT")
+# Without `set -e`, a failed command substitution would silently produce an empty
+# string and we'd run `prettier@""` (which resolves to whatever latest is on the
+# registry). Explicit `|| exit 1` makes a missing or empty version file fail fast.
+CSPELL_VERSION=$(read_version_file .cspell-version "" "$REPO_ROOT") || exit 1
+MDLINT_VERSION=$(read_version_file .markdownlint-cli2-version "" "$REPO_ROOT") || exit 1
+PRETTIER_VERSION=$(read_version_file .prettier-version "" "$REPO_ROOT") || exit 1
 
 FAIL=0
 

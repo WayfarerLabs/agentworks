@@ -34,7 +34,7 @@ GitHub Copilot is the one shared target (declared in `rulesync.jsonc`). Its gene
 at `.github/copilot-instructions.md`, `.github/instructions/`, `.github/agents/`, and
 `.github/skills/` and **is** checked in so Copilot Code Review can see the project's rules and
 subagents on every PR. CI verifies this output stays in sync with `.rulesync/` sources via
-`rulesync generate --check` — if you edit a source file, regenerate via the script above and commit
+`rulesync generate --check`. If you edit a source file, regenerate via the script above and commit
 the result.
 
 Source files in `.rulesync/` are the canonical input; never edit generated output directly.
@@ -64,8 +64,8 @@ The npm-based linters (cspell, markdownlint-cli2, prettier) are pinned via per-t
 described below, so what runs locally is exactly what runs in CI.
 
 ```bash
-./scripts/lint.sh        # check only -- exactly what CI runs
-./scripts/lint.sh --fix  # auto-fix where each tool can; re-check; report what remains
+./scripts/lint.sh        # check only (exactly what CI runs)
+./scripts/lint.sh --fix  # auto-fix where each tool can, re-check, report what remains
 ```
 
 `--fix` covers prettier formatting and markdownlint-cli2 auto-fixable rules. cspell cannot auto-fix
