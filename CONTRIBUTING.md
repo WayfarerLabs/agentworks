@@ -22,7 +22,7 @@ you use, then regenerate the outputs:
 ```bash
 cp rulesync.local.jsonc.example rulesync.local.jsonc
 # edit rulesync.local.jsonc, setting "targets" to your tool(s)
-./ops/scripts/rulesync-upgen.bash
+./scripts/rulesync-upgen.sh
 ```
 
 `rulesync.local.jsonc` is gitignored; only your local assistant's generated files (`.claude/`,

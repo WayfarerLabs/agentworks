@@ -11,6 +11,7 @@ from agentworks.db import Database, VMRow, WorkspaceRow
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
+    from pathlib import Path
 
 app = typer.Typer(
     name="agentworks",
@@ -92,6 +93,23 @@ app.add_typer(config_app)
 # -- Global options --------------------------------------------------------
 
 _non_interactive = False
+_debug = False
+
+
+def _seed_debug_from_pre_callback() -> None:
+    """Set ``_debug`` from sys.argv / AGW_DEBUG *before* Click parses anything.
+
+    The typer callback below also sets ``_debug``, but it only fires after
+    Click's own arg parsing succeeds. If the user passes ``--debug --bogus``,
+    Click raises BadParameter before the callback ever runs -- so without
+    this pre-pass, the user's ``--debug`` flag would be silently ineffective
+    in exactly the case they're most likely to need it.
+    """
+    import os
+    import sys
+
+    global _debug  # noqa: PLW0603
+    _debug = "--debug" in sys.argv or os.environ.get("AGW_DEBUG") == "1"
 
 
 @app.callback()
@@ -100,10 +118,20 @@ def _global_options(
         bool,
         typer.Option("--non-interactive", help="Disable interactive prompts"),
     ] = False,
+    debug: Annotated[
+        bool,
+        typer.Option(
+            "--debug",
+            help="Print full Python traceback on unhandled errors (also via AGW_DEBUG=1)",
+        ),
+    ] = False,
 ) -> None:
     """Global options for all commands."""
-    global _non_interactive  # noqa: PLW0603
+    import os
+
+    global _non_interactive, _debug  # noqa: PLW0603
     _non_interactive = non_interactive
+    _debug = debug or os.environ.get("AGW_DEBUG") == "1"
 
 
 # -- Helpers ---------------------------------------------------------------
@@ -1699,6 +1727,11 @@ def main() -> None:
 
     # -- Run app ---------------------------------------------------------------
 
+    # Set _debug from sys.argv/env *before* Click parses anything, so a
+    # framework-level parse error (e.g. --debug --bogus) still honors the flag.
+    # The typer callback re-sets _debug after Click parses successfully.
+    _seed_debug_from_pre_callback()
+
     try:
         app()
     except ConfigError as e:
@@ -1710,4 +1743,64 @@ def main() -> None:
     except AgentworksError as e:
         typer.echo(f"Error: {e}", err=True)
         raise SystemExit(1) from None
+    except (click.exceptions.ClickException, click.exceptions.Exit, click.exceptions.Abort):
+        # Let Click / Typer own their own rendering (usage hints, formatted
+        # parameter errors, ``raise typer.Exit(N)`` exit codes, ...).
+        raise
+    except Exception as e:
+        # Anything else is an unhandled error (third-party library, internal
+        # bug, OSError, etc.). Print a clean one-liner, persist the full
+        # traceback to the error log for post-hoc debugging, and exit non-zero.
+        # Re-raise under --debug / AGW_DEBUG=1 so devs/CI see the traceback.
+        if _debug:
+            raise
+        log_path = _record_unhandled_error(e)
+        typer.echo(f"Error: {type(e).__name__}: {e}", err=True)
+        if log_path is not None:
+            typer.echo(
+                f"(full traceback written to {log_path}; "
+                f"rerun with --debug or AGW_DEBUG=1 to print on stderr)",
+                err=True,
+            )
+        else:
+            typer.echo(
+                "(could not write traceback to log; "
+                "rerun with --debug or AGW_DEBUG=1 to print on stderr)",
+                err=True,
+            )
+        raise SystemExit(1) from None
+
+
+def _record_unhandled_error(exc: BaseException) -> Path | None:
+    """Append the traceback + invocation context to the error log. Best-effort.
+
+    Returns the log path on success, or None if writing failed (the user's
+    one-line error message takes precedence over the persisted traceback).
+
+    The log appends forever -- not currently rotated. Errors are rare; a few
+    MB takes years to accumulate. Add rotation later if it becomes an issue.
+    """
+    import datetime
+    import shlex
+    import sys
+    import traceback
+
+    from agentworks.config import CONFIG_DIR
+
+    log_dir = CONFIG_DIR / "logs"
+    log_path = log_dir / "error.log"
+
+    ts = datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    tb = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+    argv = shlex.join(sys.argv)
+    try:
+        log_dir.mkdir(parents=True, exist_ok=True)
+        with log_path.open("a", encoding="utf-8") as f:
+            f.write(f"\n{'=' * 72}\n")
+            f.write(f"{ts}\n")
+            f.write(f"argv: {argv}\n\n")
+            f.write(tb)
+    except OSError:
+        return None
+    return log_path
 
