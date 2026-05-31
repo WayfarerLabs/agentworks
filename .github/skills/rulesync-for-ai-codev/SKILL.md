@@ -10,12 +10,12 @@ on).
 
 ## Structure
 
-- `.rulesync/rules/*.md` -- always-on context (loaded every session)
-- `.rulesync/skills/*/SKILL.md` -- on-demand context (invoked when needed)
-- `.rulesync/subagents/*.md` -- specialized assistant personas
-- `rulesync.jsonc` -- shared config; declares `targets: ["copilot"]` and the enabled features
-- `rulesync.local.jsonc` -- personal tool targets (gitignored); pick whatever you use locally
-- `.rulesync-version` -- pinned rulesync version
+- `.rulesync/rules/*.md`: always-on context (loaded every session)
+- `.rulesync/skills/*/SKILL.md`: on-demand context (invoked when needed)
+- `.rulesync/subagents/*.md`: specialized assistant personas
+- `rulesync.jsonc`: shared config; declares `targets: ["copilot"]` and the enabled features
+- `rulesync.local.jsonc`: personal tool targets (gitignored); pick whatever you use locally
+- `.rulesync-version`: pinned rulesync version
 
 ## What gets committed
 
@@ -38,10 +38,10 @@ linters and rulesync would fight: prettier would reformat a generated file and t
 
 When you edit anything under `.rulesync/`:
 
-1. **Lint first** -- `.rulesync/**/*.md` files go through markdownlint-cli2 and prettier like any
+1. **Lint first.** `.rulesync/**/*.md` files go through markdownlint-cli2 and prettier like any
    other markdown. Run `./scripts/lint.sh --fix`. Prettier may reformat them.
-2. **Then regenerate** -- `./scripts/rulesync-upgen.sh` always refreshes the committed copilot
-   output regardless of your personal `rulesync.local.jsonc` targets.
+2. **Then regenerate.** `./scripts/rulesync-upgen.sh` always refreshes the committed copilot output
+   regardless of your personal `rulesync.local.jsonc` targets.
 3. **Commit both source and generated files.**
 
 Doing step 2 before step 1 produces drift between the source (now reformatted by prettier) and the

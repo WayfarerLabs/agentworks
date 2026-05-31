@@ -20,7 +20,7 @@ Re-read `cli/README.md`'s **"Problem Space"** and **"Key Principles"** sections 
 every review. They are the canonical statement of what Agentworks is for (security, workload
 management, consistency, control) and what we have committed to (opinionated consistency, composable
 isolation, ephemerality, declarative configuration). Every check below is derived from those
-sections — when in doubt, return to them.
+sections; when in doubt, return to them.
 
 Agentworks is an **opinionated framework**. We are not trying to be everything to everyone. We are
 offering a few really solid ways of doing things we deem important. A change that adds flexibility,
@@ -32,9 +32,9 @@ the existing way, not to widen the surface.
 1. Identify the scope: which area is touched (CLI, service-layer manager, DB schema, a specific
    platform provisioner, completion generators, docs, tests), which PR or branch, and what the
    change is trying to do.
-2. Walk the changes against each of the checks below, in order. The earlier checks carry more weight
-   — they are about _what Agentworks is_. The later checks are about _how we implement it well_. A
-   change can be implementation-clean and still fail check 1 or 2.
+2. Walk the changes against each of the checks below, in order. The earlier checks carry more
+   weight; they are about _what Agentworks is_. The later checks are about _how we implement it
+   well_. A change can be implementation-clean and still fail check 1 or 2.
 3. Produce findings grouped by severity: **Blocking** (would cause real regressions, undermine the
    project's values, or ship a footgun), **Important** (should fix before merge), **Minor** (nice to
    clean up but not urgent).
@@ -45,16 +45,16 @@ the existing way, not to widen the surface.
 
 ## Authoritative references
 
-- `cli/README.md` — the project's "Problem Space", "Key Principles", live CLI surface, configuration
+- `cli/README.md`: the project's "Problem Space", "Key Principles", live CLI surface, configuration
   shape, and conceptual model. Anchor here.
-- `docs/adrs/` — architectural decision records (VM-based infra, Debian base, Tailscale, config-
+- `docs/adrs/`: architectural decision records (VM-based infra, Debian base, Tailscale, config-
   driven init, template inheritance, VM-scoped agents, etc.). The ADRs are how the project records
   intentional commitments.
 - The active SDD under `docs/sdd/<sdd_feature_dir>/` if the change is part of an SDD effort.
-- `docs/guides/idempotency.md` — the idempotency contract for reinit-able operations.
-- `.rulesync/rules/` — always-on conventions (code style, conventional commits, etc.).
+- `docs/guides/idempotency.md`: the idempotency contract for reinit-able operations.
+- `.rulesync/rules/`: always-on conventions (code style, conventional commits, etc.).
 - Existing patterns in sibling code (other CLI commands, other manager functions, other
-  provisioners, other migrations) — for the implementation-discipline checks.
+  provisioners, other migrations), for the implementation-discipline checks.
 
 ## Checks
 
@@ -126,8 +126,8 @@ change must converge the VM to the new declared state, and re-running it without
 must be a no-op (or as close to one as physically possible). See `docs/guides/idempotency.md` for
 the contract.
 
-A small number of operations are deliberately non-idempotent as a last resort for stability reasons
-— the canonical example is that removing a package from `apt_packages` does **not** uninstall it,
+A small number of operations are deliberately non-idempotent as a last resort for stability reasons.
+The canonical example is that removing a package from `apt_packages` does **not** uninstall it,
 because retroactively uninstalling could break dependent state on a long-lived VM. These exceptions
 are rare, called out explicitly, and warrant a comment or doc reference explaining why the
 idempotent version would be unsafe. A new non-idempotent step needs the same treatment.
@@ -190,7 +190,7 @@ Look for:
 The operator chooses what runs inside a session: Claude Code, Codex CLI, Aider, a homegrown agent
 loop, or an interactive shell. The core platform must work for all of these. Optional integrations
 for any specific runtime (e.g. the `claude_plugins` / `claude_marketplaces` mechanism) are
-encouraged but must remain _optional_ — the platform's primitives stand on their own without them.
+encouraged but must remain _optional_; the platform's primitives stand on their own without them.
 
 Look for:
 
@@ -210,7 +210,7 @@ and so on, is a separate concern handled by the consistency / pattern checks.
 
 Anything an existing entity needs to know about itself should be stored on its row, not derived from
 naming conventions or recomputed from configuration. We learned this the hard way with agent Linux
-usernames and workspace Linux groups — when the prefix changed, every consumer that re-derived the
+usernames and workspace Linux groups: when the prefix changed, every consumer that re-derived the
 value from the name would have broken legacy entities.
 
 This check also covers the migration mechanics that follow from it: forward-only migrations, careful
@@ -229,7 +229,7 @@ runner.
 - **Table rebuilds follow the SQLite-recommended pattern.** Because the migration runner runs with
   `PRAGMA foreign_keys = OFF` and verifies via `PRAGMA foreign_key_check` at the end, rebuild
   migrations must explicitly delete from referencing tables (sessions, agent_workspace_grants, etc.)
-  that would otherwise leave orphan rows — `ON DELETE CASCADE` does NOT fire while FKs are off.
+  that would otherwise leave orphan rows; `ON DELETE CASCADE` does NOT fire while FKs are off.
 - **Existing entities must keep working** through any change in defaults or naming. A new convention
   applies to newly-created entities; the migration preserves the historical shape for the rest. The
   reviewer should consciously check both halves of this.
@@ -296,7 +296,7 @@ Look for:
 
 The Typer CLI is one of several potential clients (a web app and other surfaces are anticipated).
 All business logic lives in the service layer; the CLI is a thin translation layer. This is also
-where error handling discipline lives — typed exceptions are how the service layer communicates
+where error handling discipline lives; typed exceptions are how the service layer communicates
 failure to whichever client is calling it.
 
 **Service layer** (the `*manager.py` modules under `cli/agentworks/<domain>/`):
@@ -319,7 +319,7 @@ failure to whichever client is calling it.
 - Translates service exceptions into `typer.Exit(1)` plus a user-facing message.
 
 **Assertions are for internal invariants only.** `assert` strips under `python -O` and has no
-recovery message — it is never the right shape for user-input validation. Use it for preconditions
+recovery message; it is never the right shape for user-input validation. Use it for preconditions
 and postconditions that should be impossible to violate given the rest of the codebase (e.g. "the DB
 returned the row we just inserted").
 
@@ -389,9 +389,9 @@ Produce a single review document with this structure:
 - ...
 
 ## Questions
-- <file>:<line>: <unclear thing> — <what would resolve it>.
+- <file>:<line>: <unclear thing> (<what would resolve it>).
 ```
 
-If a category has no entries, say so explicitly. Keep findings concise — one to three sentences
-each. Cite paths and line numbers verbatim. Quote problematic text when the location alone is
-ambiguous. Distinguish what is wrong from what would fix it.
+If a category has no entries, say so explicitly. Keep findings concise: one to three sentences each.
+Cite paths and line numbers verbatim. Quote problematic text when the location alone is ambiguous.
+Distinguish what is wrong from what would fix it.

@@ -143,7 +143,7 @@ concurrent workloads running across their VMs, workspaces, and agents. Agentwork
 operator to attach to and detach from them as needed to monitor progress or interact with the
 workload, and then to stop, restart, and delete them to manage their lifecycle.
 
-For day-to-day work across many sessions, see [Named consoles](#named-consoles) — curated tmux views
+For day-to-day work across many sessions, see [Named consoles](#named-consoles): curated tmux views
 that group the sessions you're actively focused on, optionally with extra shell panes pre-opened in
 each session's window.
 
@@ -541,7 +541,7 @@ aw-console-backend
 The tmux session is built lazily on first `attach` (or rebuilt with `--recreate`). Adding or
 removing sessions/shells while the console is attached updates tmux immediately; when offline, only
 the DB is touched and changes appear on next attach. The console does not auto-boot the VM for live
-sync — VM start happens only on explicit `attach`.
+sync; VM start happens only on explicit `attach`.
 
 #### VM console (deprecated)
 
