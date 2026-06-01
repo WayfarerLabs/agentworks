@@ -78,7 +78,7 @@ DYNAMIC_COMPLETIONS: dict[tuple[str, str], str] = {
     ("workspace.copy", "vm"): "vms",
     ("workspace.describe", "name"): "workspaces",
     ("workspace.rehome", "name"): "workspaces",
-    ("workspace.repair", "name"): "workspaces",
+    ("workspace.reinit", "name"): "workspaces",
     ("workspace.delete", "name"): "workspaces",
     ("workspace.create", "vm"): "vms",
     ("workspace.create", "template"): "ws_templates",

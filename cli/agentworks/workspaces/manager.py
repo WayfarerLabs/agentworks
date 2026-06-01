@@ -346,12 +346,28 @@ def list_workspaces(
         output.info(f"{ws_name:<{name_w}}  {ws_vm:<{vm_w}}  {tpl:<{tpl_w}}  {created}")
 
 
-def repair_workspace(
+def reinit_workspace(
     db: Database,
     config: Config,
     name: str,
 ) -> None:
-    """Repair workspace infrastructure: group, permissions, ACLs, agent access."""
+    """Re-run workspace initialization to converge live VM state to the DB.
+
+    Idempotent and forward-only. Steps split into two shapes:
+
+    - **Detection-based** (group existence, admin membership, agent group
+      membership against the grant table): probe live state first and only
+      apply a fix when state diverges. Report `Fixed:` when a fix ran,
+      `OK:` when no change was needed.
+    - **Always-applied** (directory ownership, permissions, SGID, ACLs,
+      parent-directory traversal): re-run their canonical commands every
+      time; the underlying chown/chmod/setfacl are no-ops on already-correct
+      state. Report `OK:` on success.
+
+    Same semantic as `vm reinit` and `agent reinit`: the declared state in
+    the DB is the source of truth; this reinit converges live state to
+    match.
+    """
     from agentworks.agents.manager import AGENT_PREFIX
     from agentworks.ssh import SSHError, admin_exec_target
 
@@ -375,7 +391,7 @@ def repair_workspace(
     ws_group = ws.linux_group
     fixes = 0
 
-    output.info(f"Repairing workspace '{name}' on VM '{vm.name}'...")
+    output.info(f"Reinitializing workspace '{name}' on VM '{vm.name}'...")
 
     # 0. Ensure acl package is installed (needed for setfacl)
     try:
@@ -502,9 +518,9 @@ def repair_workspace(
         output.warn(f"agent membership check failed: {e}")
 
     if fixes > 0:
-        output.info(f"\nRepaired {fixes} issue(s)")
+        output.info(f"\nApplied {fixes} fix(es)")
     else:
-        output.info("\nNo issues found")
+        output.info("\nAlready up to date")
 
 
 def _revert_grant_on_failure(db: Database, agent_name: str, ws_name: str) -> None:

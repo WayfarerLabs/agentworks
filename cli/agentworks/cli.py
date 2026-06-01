@@ -674,15 +674,21 @@ def workspace_rehome(
     rehome_workspace(_get_db(), load_config(), name, target_path=target, remove_old=remove_old, yes=yes)
 
 
-@workspace_app.command("repair")
-def workspace_repair(
+@workspace_app.command("reinit")
+def workspace_reinit(
     name: Annotated[str, typer.Argument(help="Workspace name")],
 ) -> None:
-    """Repair workspace infrastructure: group, permissions, ACLs, agent access."""
-    from agentworks.config import load_config
-    from agentworks.workspaces.manager import repair_workspace
+    """Re-run workspace initialization: group, permissions, ACLs, agent access.
 
-    repair_workspace(_get_db(), load_config(), name)
+    Idempotent. Converges live VM state (group existence, directory ownership,
+    permissions, ACLs, parent traversal, agent group membership) to match what
+    the DB declares for this workspace. Same semantic as `vm reinit` and
+    `agent reinit`.
+    """
+    from agentworks.config import load_config
+    from agentworks.workspaces.manager import reinit_workspace
+
+    reinit_workspace(_get_db(), load_config(), name)
 
 
 @workspace_app.command("delete")
