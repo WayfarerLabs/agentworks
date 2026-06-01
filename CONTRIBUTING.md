@@ -64,8 +64,8 @@ The npm-based linters (cspell, markdownlint-cli2, prettier) are pinned via per-t
 described below, so what runs locally is exactly what runs in CI.
 
 ```bash
-./scripts/lint.sh        # check only (exactly what CI runs)
-./scripts/lint.sh --fix  # auto-fix where each tool can, re-check, report what remains
+./scripts/lint-files.sh        # check only (exactly what CI runs)
+./scripts/lint-files.sh --fix  # auto-fix where each tool can, re-check, report what remains
 ```
 
 `--fix` covers prettier formatting and markdownlint-cli2 auto-fixable rules. cspell cannot auto-fix
@@ -84,7 +84,7 @@ leaves the generated copilot output out of sync with the prettified source, so C
 fail. The right order is:
 
 1. Edit the `.rulesync/` source.
-2. `./scripts/lint.sh --fix` prettifies the source (and the rest of the repo).
+2. `./scripts/lint-files.sh --fix` prettifies the source (and the rest of the repo).
 3. `./scripts/rulesync-upgen.sh` regenerates the committed copilot output. Your
    `rulesync.local.jsonc` targets can be anything; upgen always refreshes the copilot output
    regardless.

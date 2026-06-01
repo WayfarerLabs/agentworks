@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # ============================================================================
-# lint.sh: run the repository's file-quality linters at the versions CI uses.
+# lint-files.sh: run the repository's file-quality linters at the versions CI uses.
 #
 # Covers cspell, markdownlint-cli2, and prettier. Each is pinned in its own
 # `.<tool>-version` file (`.cspell-version`, `.markdownlint-cli2-version`,
@@ -13,8 +13,8 @@
 # `./scripts/rulesync-upgen.sh --check`.
 #
 # Usage:
-#   ./scripts/lint.sh          Check only. Mirrors what CI checks.
-#   ./scripts/lint.sh --fix    Auto-fix where each tool can, then re-check.
+#   ./scripts/lint-files.sh          Check only. Mirrors what CI checks.
+#   ./scripts/lint-files.sh --fix    Auto-fix where each tool can, then re-check.
 #                              cspell cannot auto-fix; remaining unknown
 #                              words must be corrected by hand or added
 #                              to .cspell.json.

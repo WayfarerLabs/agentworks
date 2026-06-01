@@ -39,7 +39,7 @@ linters and rulesync would fight: prettier would reformat a generated file and t
 When you edit anything under `.rulesync/`:
 
 1. **Lint first.** `.rulesync/**/*.md` files go through markdownlint-cli2 and prettier like any
-   other markdown. Run `./scripts/lint.sh --fix`. Prettier may reformat them.
+   other markdown. Run `./scripts/lint-files.sh --fix`. Prettier may reformat them.
 2. **Then regenerate.** `./scripts/rulesync-upgen.sh` always refreshes the committed copilot output
    regardless of your personal `rulesync.local.jsonc` targets.
 3. **Commit both source and generated files.**

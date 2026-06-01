@@ -17,7 +17,7 @@ punctuation as appropriate (e.g. period only for complete sentences, etc.).
 
 All files should be linted and formatted when editing. The repository's npm-based linters (cspell,
 markdownlint-cli2, prettier) are pinned via per-tool `.<tool>-version` files and run through
-`./scripts/lint.sh` (use `--fix` to auto-fix where possible). CI runs the same versions.
+`./scripts/lint-files.sh` (use `--fix` to auto-fix where possible). CI runs the same versions.
 
 A custom cspell dictionary is maintained at `.cspell.json`. Please feel free to add words to this as
 needed.
