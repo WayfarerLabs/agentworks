@@ -133,6 +133,8 @@ DYNAMIC_COMPLETIONS: dict[tuple[str, str], str] = {
     ("console.remove-session", "sessions"): "sessions",
     ("console.add-shell", "name"): "consoles",
     ("console.add-shell", "session"): "sessions",
+    ("console.restore-session", "name"): "consoles",
+    ("console.restore-session", "session"): "sessions",
 }
 
 

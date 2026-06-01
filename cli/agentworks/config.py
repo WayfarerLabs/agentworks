@@ -102,6 +102,30 @@ class DefaultsConfig:
     vm_host: str | None = None
 
 
+# Valid tmux preset layouts for named-console session windows. These map
+# 1:1 to tmux's built-in select-layout names; we deliberately don't invent
+# our own names so operators can apply the same value to a window via
+# `tmux select-layout` on the fly.
+VALID_TMUX_LAYOUTS = (
+    "tiled",
+    "even-vertical",
+    "even-horizontal",
+    "main-vertical",
+    "main-horizontal",
+)
+
+
+@dataclass(frozen=True)
+class NamedConsoleConfig:
+    """Settings for the `console` subcommand group (named multi-session
+    consoles). Section is `[named_console]` in the TOML to disambiguate from
+    the legacy `vm console` and the workspace console template. Only named
+    consoles read these values today.
+    """
+
+    tmux_layout: str = "tiled"
+
+
 @dataclass(frozen=True)
 class VMTemplate:
     """VM template definition. All fields are optional (None = inherit/default)."""
@@ -231,6 +255,7 @@ class Config:
     operator: OperatorConfig
     paths: PathsConfig
     defaults: DefaultsConfig
+    named_console: NamedConsoleConfig
     vm_templates: dict[str, VMTemplate]
     vm: ResolvedVMTemplate
     admin: AdminConfig
@@ -392,6 +417,28 @@ def _load_defaults(data: dict[str, object], issues: list[str]) -> DefaultsConfig
         platform=str(platform) if platform is not None else None,
         vm_host=str(raw["vm_host"]) if "vm_host" in raw else None,
     )
+
+
+_NAMED_CONSOLE_KEYS = {"tmux_layout"}
+
+
+def _load_named_console(
+    data: dict[str, object], issues: list[str]
+) -> NamedConsoleConfig:
+    raw = data.get("named_console", {})
+    if not isinstance(raw, dict):
+        raise ConfigError("[named_console] must be a table")
+
+    _warn_unexpected_keys(raw, _NAMED_CONSOLE_KEYS, "named_console", issues)
+
+    layout = raw.get("tmux_layout", "tiled")
+    if layout not in VALID_TMUX_LAYOUTS:
+        raise ConfigError(
+            f"named_console.tmux_layout must be one of {VALID_TMUX_LAYOUTS}, "
+            f"got: {layout}"
+        )
+
+    return NamedConsoleConfig(tmux_layout=str(layout))
 
 
 _VM_TEMPLATE_KEYS = {
@@ -774,6 +821,7 @@ EXPECTED_TOP_LEVEL_KEYS = {
     "operator",
     "paths",
     "defaults",
+    "named_console",
     "vm_templates",
     "admin",
     "agent_templates",
@@ -865,6 +913,7 @@ def load_config(path: Path | None = None, *, warn_issues: bool = True) -> Config
         operator=_load_operator(data, issues),
         paths=_load_paths(data),
         defaults=_load_defaults(data, issues),
+        named_console=_load_named_console(data, issues),
         vm_templates=loaded_vm_templates,
         vm=resolved_vm,
         admin=admin,

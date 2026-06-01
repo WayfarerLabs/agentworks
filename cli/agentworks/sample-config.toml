@@ -40,6 +40,29 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # platform = "lima"                          # lima, azure, or wsl2
 # vm_host = "mac-studio"                     # default VM host for remote Lima
 
+# --- Named-console settings ---
+# Scope: this section applies only to named multi-session consoles created
+# via `agentworks console create`. The legacy `vm console` and the
+# workspace-console template generator do NOT read these values.
+#
+# tmux_layout: layout applied to every multi-pane session window in a named
+# console. Maps 1:1 to tmux's built-in select-layout names so the same value
+# can be applied on the fly via `tmux select-layout` key bindings. Re-read
+# on every build / recreate / add-shell / restore-session, so changing this
+# value and running `agentworks console attach <name> --recreate` (or
+# adding/restoring a shell on a live console) is enough to switch layouts.
+
+[named_console]
+# tmux_layout = "tiled"
+# Valid values:
+#   tiled            - roughly-equal grid (default; current behavior)
+#   even-vertical    - all panes as equal-height rows (one column)
+#   even-horizontal  - all panes as equal-width columns (one row)
+#   main-vertical    - session pane on the left, helper shells stacked right
+#   main-horizontal  - session pane on top, helper shells laid out below
+# The "main" layouts treat the first pane (the session attach itself) as
+# the primary; the remaining shell panes become the secondary stack.
+
 # --- Git credential providers ---
 # Define how to obtain git tokens. Referenced by name in admin.config and
 # agent_templates. Tokens are prompted during VM init (or read from env vars)

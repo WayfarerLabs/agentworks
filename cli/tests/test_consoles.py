@@ -11,6 +11,7 @@ import pytest
 from agentworks import output
 from agentworks.db import ConsoleRow, Database, _parse_shells
 from agentworks.sessions.multi_console import (
+    SHELL_INDEX_OPTION,
     SessionSpec,
     _validate_cwd,
     add_sessions,
@@ -23,6 +24,7 @@ from agentworks.sessions.multi_console import (
     list_consoles,
     parse_session_spec,
     remove_sessions,
+    restore_session,
     tmux_session_name,
 )
 
@@ -62,6 +64,10 @@ def _seed_sessions(db: Database, names: list[str], *, workspace_name: str = "ws-
     db._conn.commit()
 
 
+class _StubNamedConsoleConfig:
+    tmux_layout: str = "tiled"
+
+
 class _StubConfig:
     """A no-op Config stand-in.
 
@@ -70,7 +76,12 @@ class _StubConfig:
     and the SSH layer is never entered. If you set ``with_tailscale=True``
     without monkey-patching ``admin_exec_target`` you will hit an
     AttributeError on this stub -- prefer the ``fake_target`` fixture.
+
+    ``named_console`` provides only what multi_console reads from Config;
+    extend here as new fields are added to NamedConsoleConfig.
     """
+
+    named_console = _StubNamedConsoleConfig()
 
 
 # -- parse_session_spec ----------------------------------------------------
@@ -1132,6 +1143,48 @@ def test_attach_console_skips_missing_session_with_warning(
     assert "alpha" in new_windows[0]
 
 
+def test_attach_console_skips_window_when_agent_missing(
+    db: Database, fake_target: _FakeTarget, captured_output: CapturedOutput
+) -> None:
+    """If an agent-mode session's agent row is gone (FK violation under
+    foreign_keys=OFF, or post-migration inconsistency), _session_linux_user
+    raises AgentError. _add_session_window catches it, warns, and continues
+    instead of aborting the whole console build."""
+    from agentworks.sessions.multi_console import attach_console
+
+    _seed_vm(db, with_tailscale=True)
+    # Create an agent-mode session pointing at an agent row, then delete the
+    # agent row directly to simulate the inconsistency.
+    db._conn.execute(
+        "INSERT INTO agents (name, vm_name, linux_user) VALUES ('bot', 'vm1', 'bot-user')"
+    )
+    db._conn.execute(
+        "INSERT INTO sessions (name, workspace_name, template, mode, agent_name, socket_path) "
+        "VALUES ('s', 'ws-vm1', 'default', 'agent', 'bot', '/tmp/s.sock')"
+    )
+    db._conn.commit()
+    create_console(db, name="con", vm_name="vm1", session_specs=["s+1"])
+    db._conn.execute("PRAGMA foreign_keys = OFF")
+    db._conn.execute("DELETE FROM agents WHERE name = 'bot'")
+    db._conn.execute("PRAGMA foreign_keys = ON")
+    db._conn.commit()
+    fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=1)
+    fake_target.responses["list-windows -t aw-console-con"] = _FakeResult(
+        returncode=0, stdout="aw--placeholder\ns\n"
+    )
+
+    with pytest.raises(SystemExit):
+        attach_console(db, _StubConfig(), name="con", allow_nesting=True)
+
+    assert any("agent for session 's' is missing" in w for w in captured_output.warnings)
+    # The window itself was created (new-window happened before the agent check);
+    # only the split-window calls for the shell panes are skipped.
+    new_windows = [c for c in fake_target.commands if "new-window -t aw-console-con" in c]
+    assert len(new_windows) == 1
+    splits = [c for c in fake_target.commands if "split-window -t aw-console-con:s" in c]
+    assert splits == []
+
+
 def test_add_session_live_sync_skipped_when_console_absent(
     db: Database, fake_target: _FakeTarget
 ) -> None:
@@ -1258,3 +1311,336 @@ def test_split_shell_pane_admin_branch_no_sudo(
     assert len(splits) == 1
     assert "sudo --login" not in splits[0]
     assert 'exec "$SHELL" -l' in splits[0]
+
+
+# -- Pane tagging ----------------------------------------------------------
+
+
+def test_split_shell_pane_tags_new_pane_with_config_index(
+    db: Database, fake_target: _FakeTarget
+) -> None:
+    """After split-window emits the new pane id, _split_shell_pane sets
+    @agentworks-shell-index so restore-session can identify which configured
+    shell a given live pane corresponds to."""
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["a"])
+    create_console(db, name="con", vm_name="vm1", session_specs=["a"])
+
+    fake_target.commands.clear()
+    fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
+    # Simulate tmux split-window -P emitting a pane id.
+    fake_target.responses["split-window -t aw-console-con:a"] = _FakeResult(
+        stdout="%7\n"
+    )
+
+    add_shell(db, _StubConfig(), console_name="con", session_name="a")
+
+    set_options = [
+        c for c in fake_target.commands
+        if "set-option -p" in c and SHELL_INDEX_OPTION in c
+    ]
+    assert len(set_options) == 1
+    # The first shell added is config index 0 (cs.shells was empty).
+    assert f"-t %7 {SHELL_INDEX_OPTION} 0" in set_options[0]
+
+
+def test_split_shell_pane_warns_when_split_returns_no_pane_id(
+    db: Database, fake_target: _FakeTarget, captured_output: CapturedOutput
+) -> None:
+    """If split-window's stdout is empty (older tmux / weird transport), the
+    tag step is skipped and the operator gets a warning that the pane is
+    untagged. The pane is still live; restore-session just won't be able to
+    repair this window without `attach --recreate`."""
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["a"])
+    create_console(db, name="con", vm_name="vm1", session_specs=["a"])
+
+    fake_target.commands.clear()
+    fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
+    # Default _FakeResult has empty stdout, so no pane_id to tag.
+
+    add_shell(db, _StubConfig(), console_name="con", session_name="a")
+
+    set_options = [c for c in fake_target.commands if "set-option -p" in c]
+    assert set_options == []
+    # The recovery hint includes the actual console name so it can be
+    # copy/pasted verbatim.
+    assert any(
+        "couldn't capture its id" in w
+        and "untagged" in w
+        and "attach con --recreate" in w
+        for w in captured_output.warnings
+    )
+
+
+def test_split_shell_pane_warns_when_set_option_fails(
+    db: Database, fake_target: _FakeTarget, captured_output: CapturedOutput
+) -> None:
+    """If tmux split-window succeeded and emitted a pane id but the subsequent
+    set-option fails (tmux version/flags mismatch, target gone, etc.), the
+    pane is live but untagged. _split_shell_pane must surface this so the
+    operator gets a loud signal instead of restore-session breaking later."""
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["a"])
+    create_console(db, name="con", vm_name="vm1", session_specs=["a"])
+
+    fake_target.commands.clear()
+    fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
+    fake_target.responses["split-window -t aw-console-con:a"] = _FakeResult(
+        stdout="%7\n"
+    )
+    # set-option fails non-zero.
+    fake_target.responses["set-option -p"] = _FakeResult(
+        returncode=1, stderr="bad target"
+    )
+
+    add_shell(db, _StubConfig(), console_name="con", session_name="a")
+
+    assert any(
+        "tagging failed" in w and "attach con --recreate" in w
+        for w in captured_output.warnings
+    )
+
+
+# -- restore-session: argument and live-state validation -------------------
+
+
+def test_restore_session_errors_when_console_missing(db: Database) -> None:
+    """restore-session refuses unknown console name with ConsoleError."""
+    _seed_vm(db, with_tailscale=False)
+    with pytest.raises(output.ConsoleError, match="console 'nope' not found"):
+        restore_session(db, _StubConfig(), console_name="nope", session_name="a")
+
+
+def test_restore_session_errors_when_session_not_member(
+    db: Database, fake_target: _FakeTarget
+) -> None:
+    """Session must already be a member of the console; restore-session is
+    purely additive against the configured list, not a way to add sessions."""
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["a"])
+    create_console(db, name="con", vm_name="vm1", session_specs=["a"])
+
+    with pytest.raises(output.ConsoleError, match="is not a member of console"):
+        restore_session(db, _StubConfig(), console_name="con", session_name="b")
+
+
+def test_restore_session_errors_when_tmux_not_running(
+    db: Database, fake_target: _FakeTarget
+) -> None:
+    """restore-session only repairs a live console; if tmux isn't running it
+    instructs the user to attach (which builds the console from scratch)."""
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["a"])
+    create_console(db, name="con", vm_name="vm1", session_specs=["a"])
+
+    # has-session returns nonzero (default _FakeResult is ok, so override).
+    fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=1)
+    with pytest.raises(output.ConsoleError, match="has no live tmux session"):
+        restore_session(db, _StubConfig(), console_name="con", session_name="a")
+
+
+# -- restore-session: strict failure paths ---------------------------------
+
+
+def test_restore_session_strict_on_untagged_pane(
+    db: Database, fake_target: _FakeTarget
+) -> None:
+    """A window with shell panes lacking the @agentworks-shell-index tag
+    cannot be reasoned about; restore-session refuses and points at
+    `attach --recreate` to rebuild from scratch."""
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["a"])
+    create_console(db, name="con", vm_name="vm1", session_specs=["a+2"])
+
+    fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
+    fake_target.responses["list-windows -t aw-console-con"] = _FakeResult(stdout="a\n")
+    # Two shell panes (pidx 1, 2), neither tagged.
+    fake_target.responses["list-panes -t aw-console-con:a"] = _FakeResult(
+        stdout="%1|0|\n%2|1|\n%3|2|\n"
+    )
+
+    with pytest.raises(output.ConsoleError, match="no agentworks tag"):
+        restore_session(db, _StubConfig(), console_name="con", session_name="a")
+
+
+def test_restore_session_strict_on_out_of_range_tag(
+    db: Database, fake_target: _FakeTarget
+) -> None:
+    """A pane tagged with a config index past the current configured range
+    (e.g., config shrank or DB was edited) is unsafe to repair; restore-session
+    surfaces the inconsistency and points at `--recreate`."""
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["a"])
+    # Two configured shells (valid indices: 0, 1).
+    create_console(db, name="con", vm_name="vm1", session_specs=["a+2"])
+
+    fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
+    fake_target.responses["list-windows -t aw-console-con"] = _FakeResult(stdout="a\n")
+    # Three live shell panes tagged 0, 1, 2; tag 2 is out-of-range.
+    fake_target.responses["list-panes -t aw-console-con:a"] = _FakeResult(
+        stdout="%1|0|\n%2|1|0\n%3|2|1\n%4|3|2\n"
+    )
+
+    with pytest.raises(
+        output.ConsoleError,
+        match=r"tags \[2\] point past the configured range",
+    ):
+        restore_session(db, _StubConfig(), console_name="con", session_name="a")
+
+
+def test_restore_session_strict_on_duplicate_tags(
+    db: Database, fake_target: _FakeTarget
+) -> None:
+    """Two panes claiming the same config index can't both be the canonical
+    pane for that shell; surface the inconsistency rather than guessing."""
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["a"])
+    create_console(db, name="con", vm_name="vm1", session_specs=["a+2"])
+
+    fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
+    fake_target.responses["list-windows -t aw-console-con"] = _FakeResult(stdout="a\n")
+    # Two live shell panes both tagged 0 (a duplicate).
+    fake_target.responses["list-panes -t aw-console-con:a"] = _FakeResult(
+        stdout="%1|0|\n%2|1|0\n%3|2|0\n"
+    )
+
+    with pytest.raises(output.ConsoleError, match=r"duplicate tags \[0\]"):
+        restore_session(db, _StubConfig(), console_name="con", session_name="a")
+
+
+def test_restore_session_strict_message_when_configured_zero(
+    db: Database, fake_target: _FakeTarget
+) -> None:
+    """A session with zero configured shells can still have live shell panes
+    (e.g. operator ran `tmux split-window` manually then tagged via DB edit).
+    The out-of-range error message must not render the empty range as
+    `(0..-1)`; instead say the session has no configured shells."""
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["a"])
+    # Session 'a' with zero shells (no `+N`).
+    create_console(db, name="con", vm_name="vm1", session_specs=["a"])
+
+    fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
+    fake_target.responses["list-windows -t aw-console-con"] = _FakeResult(stdout="a\n")
+    # Session pane + one tagged shell pane (config index 0, but config has 0 shells).
+    fake_target.responses["list-panes -t aw-console-con:a"] = _FakeResult(
+        stdout="%1|0|\n%2|1|0\n"
+    )
+
+    with pytest.raises(
+        output.ConsoleError, match="no configured shells"
+    ) as excinfo:
+        restore_session(db, _StubConfig(), console_name="con", session_name="a")
+    assert "0..-1" not in str(excinfo.value)
+
+
+def test_restore_session_noop_when_live_matches_config(
+    db: Database, fake_target: _FakeTarget, captured_output: CapturedOutput
+) -> None:
+    """Live == configured: no tmux splits or swaps are issued."""
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["a"])
+    create_console(db, name="con", vm_name="vm1", session_specs=["a+2"])
+
+    fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
+    fake_target.responses["list-windows -t aw-console-con"] = _FakeResult(stdout="a\n")
+    fake_target.responses["list-panes -t aw-console-con:a"] = _FakeResult(
+        stdout="%1|0|\n%2|1|0\n%3|2|1\n"
+    )
+
+    fake_target.commands.clear()
+    restore_session(db, _StubConfig(), console_name="con", session_name="a")
+
+    assert not any("split-window" in c for c in fake_target.commands)
+    assert not any("swap-pane" in c for c in fake_target.commands)
+    assert any("already matches config" in m for m in captured_output.info)
+
+
+# -- restore-session: happy paths ------------------------------------------
+
+
+def test_restore_session_rebuilds_missing_window(
+    db: Database, fake_target: _FakeTarget
+) -> None:
+    """If the session's window is absent from live tmux, restore-session
+    rebuilds it via the standard _add_session_window path."""
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["a"])
+    create_console(db, name="con", vm_name="vm1", session_specs=["a"])
+
+    fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
+    # No 'a' in the listed windows; only a placeholder name.
+    fake_target.responses["list-windows -t aw-console-con"] = _FakeResult(
+        stdout="other\n"
+    )
+
+    fake_target.commands.clear()
+    restore_session(db, _StubConfig(), console_name="con", session_name="a")
+
+    new_windows = [c for c in fake_target.commands if "new-window -t aw-console-con" in c]
+    assert len(new_windows) == 1
+
+
+def test_restore_session_raises_when_split_returns_no_pane_id(
+    db: Database, fake_target: _FakeTarget
+) -> None:
+    """If tmux split-window succeeds but doesn't print a pane id, the pane
+    is created but untagged. restore-session must surface this as an error
+    so the operator doesn't see exit-0 while a window is left incomplete."""
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["a"])
+    create_console(db, name="con", vm_name="vm1", session_specs=["a+3"])
+
+    fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
+    fake_target.responses["list-windows -t aw-console-con"] = _FakeResult(stdout="a\n")
+    fake_target.responses["list-panes -t aw-console-con:a"] = _FakeResult(
+        stdout="%1|0|\n%2|1|0\n%3|2|2\n"
+    )
+    # split-window succeeds but returns no pane id; _split_shell_pane warns
+    # and returns None, which restore_session must escalate.
+    fake_target.responses["split-window -t aw-console-con:a"] = _FakeResult(
+        stdout=""
+    )
+
+    with pytest.raises(
+        output.ConsoleError, match=r"failed to create/tag config indices \[1\]"
+    ):
+        restore_session(db, _StubConfig(), console_name="con", session_name="a")
+
+
+def test_restore_session_splits_missing_config_indices_and_tags_them(
+    db: Database, fake_target: _FakeTarget
+) -> None:
+    """Live < configured: restore-session identifies missing config indices
+    by tag diff, splits each one back in with the correct tag, and applies
+    select-layout to redistribute geometry."""
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["a"])
+    # Three shells configured; index 1 ("fish") is missing live.
+    create_console(db, name="con", vm_name="vm1", session_specs=["a+3"])
+
+    fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
+    fake_target.responses["list-windows -t aw-console-con"] = _FakeResult(stdout="a\n")
+    # Live: session pane (pidx 0), tagged shells for indices 0 and 2; 1 is gone.
+    fake_target.responses["list-panes -t aw-console-con:a"] = _FakeResult(
+        stdout="%1|0|\n%2|1|0\n%3|2|2\n"
+    )
+    # split-window returns a fresh pane id so the tag step has a target.
+    fake_target.responses["split-window -t aw-console-con:a"] = _FakeResult(
+        stdout="%9\n"
+    )
+
+    fake_target.commands.clear()
+    restore_session(db, _StubConfig(), console_name="con", session_name="a")
+
+    splits = [c for c in fake_target.commands if "split-window -t aw-console-con:a" in c]
+    assert len(splits) == 1
+    set_options = [
+        c for c in fake_target.commands
+        if "set-option -p" in c and SHELL_INDEX_OPTION in c
+    ]
+    # The new pane gets tagged with config index 1 (the missing one).
+    assert any(f"-t %9 {SHELL_INDEX_OPTION} 1" in c for c in set_options)
+    layouts = [c for c in fake_target.commands if "select-layout -t aw-console-con:a tiled" in c]
+    assert len(layouts) == 1
