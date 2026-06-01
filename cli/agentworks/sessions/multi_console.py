@@ -322,7 +322,7 @@ def add_sessions(
                 console_name=console_name,
                 member=member,
                 vm=vm,
-                layout=config.console.default_layout,
+                layout=config.console.tmux_layout,
             )
 
 
@@ -446,7 +446,7 @@ def add_shell(
         )
         q_con = shlex.quote(tmux_session_name(console_name))
         q_win = shlex.quote(session_name)
-        layout = shlex.quote(config.console.default_layout)
+        layout = shlex.quote(config.console.tmux_layout)
         target.run(
             f"tmux select-layout -t {q_con}:{q_win} {layout}",
             check=False,
@@ -486,7 +486,7 @@ def restore_session(
 
     q_con = shlex.quote(tmux_session_name(console_name))
     q_win = shlex.quote(session_name)
-    layout = config.console.default_layout
+    layout = config.console.tmux_layout
     configured_count = len(member.shells)
 
     # Window present?
@@ -1084,7 +1084,7 @@ def attach_console(
     vm, target = _prepare_vm_target_for_attach(db, config, console.vm_name)
 
     exists = _console_tmux_exists(target, name)
-    layout = config.console.default_layout
+    layout = config.console.tmux_layout
     if recreate and exists:
         output.info(f"Rebuilding console '{name}' (--recreate)...")
         _build_console_tmux(target, db, console, vm, layout=layout)

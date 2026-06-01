@@ -423,34 +423,34 @@ def test_claude_marketplaces_rejects_string(tmp_path: Path) -> None:
 # -- [console] section -----------------------------------------------------
 
 
-def test_console_default_layout_default_when_section_missing(tmp_path: Path) -> None:
+def test_console_tmux_layout_default_when_section_missing(tmp_path: Path) -> None:
     """No [console] section produces the documented tiled default."""
     config_file = _minimal_config(tmp_path)
     cfg = load_config(config_file)
-    assert cfg.console.default_layout == "tiled"
+    assert cfg.console.tmux_layout == "tiled"
 
 
 @pytest.mark.parametrize(
     "layout",
     ["tiled", "even-vertical", "even-horizontal", "main-vertical", "main-horizontal"],
 )
-def test_console_default_layout_accepts_valid_presets(tmp_path: Path, layout: str) -> None:
+def test_console_tmux_layout_accepts_valid_presets(tmp_path: Path, layout: str) -> None:
     """All five tmux preset layout names are accepted verbatim."""
     config_file = _minimal_config(tmp_path, f"""
         [console]
-        default_layout = "{layout}"
+        tmux_layout = "{layout}"
     """)
     cfg = load_config(config_file)
-    assert cfg.console.default_layout == layout
+    assert cfg.console.tmux_layout == layout
 
 
-def test_console_default_layout_rejects_unknown(tmp_path: Path) -> None:
+def test_console_tmux_layout_rejects_unknown(tmp_path: Path) -> None:
     """Unknown layout names fail at load with a list of valid alternatives."""
     config_file = _minimal_config(tmp_path, """
         [console]
-        default_layout = "tabbed"
+        tmux_layout = "tabbed"
     """)
-    with pytest.raises(ConfigError, match="console.default_layout must be one of"):
+    with pytest.raises(ConfigError, match="console.tmux_layout must be one of"):
         load_config(config_file)
 
 
@@ -460,7 +460,7 @@ def test_console_section_unexpected_keys_warn(
     """Unknown keys in [console] surface as warnings, not silent ignores."""
     config_file = _minimal_config(tmp_path, """
         [console]
-        default_layout = "tiled"
+        tmux_layout = "tiled"
         unknown_key = "x"
     """)
     load_config(config_file)

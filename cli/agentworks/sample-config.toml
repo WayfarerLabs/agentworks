@@ -41,15 +41,15 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # vm_host = "mac-studio"                     # default VM host for remote Lima
 
 # --- Named-console settings ---
-# Layout applied to every multi-pane session window in a named console.
-# Maps 1:1 to tmux's built-in select-layout names so the same value can
-# be applied on the fly via `tmux select-layout` key bindings. Re-read on
-# every build / recreate / add-shell / restore-session, so changing this
+# tmux_layout: layout applied to every multi-pane session window in a named
+# console. Maps 1:1 to tmux's built-in select-layout names so the same value
+# can be applied on the fly via `tmux select-layout` key bindings. Re-read
+# on every build / recreate / add-shell / restore-session, so changing this
 # value and running `console attach --recreate` (or adding/restoring a
-# shell) is enough to switch layouts; no per-console persistence.
+# shell) is enough to switch layouts.
 
 [console]
-# default_layout = "tiled"
+# tmux_layout = "tiled"
 # Valid values:
 #   tiled            - roughly-equal grid (default; current behavior)
 #   even-vertical    - all panes as equal-height rows (one column)

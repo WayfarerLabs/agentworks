@@ -106,7 +106,7 @@ class DefaultsConfig:
 # 1:1 to tmux's built-in select-layout names; we deliberately don't invent
 # our own names so operators can apply the same value to a window via
 # `tmux select-layout` on the fly.
-VALID_CONSOLE_LAYOUTS = (
+VALID_TMUX_LAYOUTS = (
     "tiled",
     "even-vertical",
     "even-horizontal",
@@ -117,7 +117,7 @@ VALID_CONSOLE_LAYOUTS = (
 
 @dataclass(frozen=True)
 class ConsoleConfig:
-    default_layout: str = "tiled"
+    tmux_layout: str = "tiled"
 
 
 @dataclass(frozen=True)
@@ -413,7 +413,7 @@ def _load_defaults(data: dict[str, object], issues: list[str]) -> DefaultsConfig
     )
 
 
-_CONSOLE_KEYS = {"default_layout"}
+_CONSOLE_KEYS = {"tmux_layout"}
 
 
 def _load_console(data: dict[str, object], issues: list[str]) -> ConsoleConfig:
@@ -423,13 +423,13 @@ def _load_console(data: dict[str, object], issues: list[str]) -> ConsoleConfig:
 
     _warn_unexpected_keys(raw, _CONSOLE_KEYS, "console", issues)
 
-    layout = raw.get("default_layout", "tiled")
-    if layout not in VALID_CONSOLE_LAYOUTS:
+    layout = raw.get("tmux_layout", "tiled")
+    if layout not in VALID_TMUX_LAYOUTS:
         raise ConfigError(
-            f"console.default_layout must be one of {VALID_CONSOLE_LAYOUTS}, got: {layout}"
+            f"console.tmux_layout must be one of {VALID_TMUX_LAYOUTS}, got: {layout}"
         )
 
-    return ConsoleConfig(default_layout=str(layout))
+    return ConsoleConfig(tmux_layout=str(layout))
 
 
 _VM_TEMPLATE_KEYS = {

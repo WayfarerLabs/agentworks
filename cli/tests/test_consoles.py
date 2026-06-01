@@ -65,7 +65,7 @@ def _seed_sessions(db: Database, names: list[str], *, workspace_name: str = "ws-
 
 
 class _StubConsoleConfig:
-    default_layout: str = "tiled"
+    tmux_layout: str = "tiled"
 
 
 class _StubConfig:
