@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.4.0](https://github.com/WayfarerLabs/agentworks/compare/v0.3.0...v0.4.0) (2026-06-01)
+
+
+### Features
+
+* **console:** configurable layout and restore-session ([73bdf68](https://github.com/WayfarerLabs/agentworks/commit/73bdf681581825c8838398bc291839ddb8cbe82f))
+* **console:** configurable layout and restore-session for accidental shell kills ([5d5ae48](https://github.com/WayfarerLabs/agentworks/commit/5d5ae487869ac31bb82bad21f1b9bc191e0aacae))
+
+
+### Bug Fixes
+
+* **console:** include console name in untagged-pane warnings and check set-option result ([a48adf8](https://github.com/WayfarerLabs/agentworks/commit/a48adf80dfb78bb6264918b55fef1072d5898b10))
+* **console:** only mirror swap-pane into local map on success ([7f33652](https://github.com/WayfarerLabs/agentworks/commit/7f336525aa27ef4eedefd0d93c0c9a517e8c1f72))
+* **console:** pass console name through _live_best_effort and refine restore-session error messages ([eec0b62](https://github.com/WayfarerLabs/agentworks/commit/eec0b62afb14cd946ccc9234ef19266f5340a6bd))
+* **console:** restore-session raises on any partial split/tag failure ([97f72aa](https://github.com/WayfarerLabs/agentworks/commit/97f72aa32c65923ffe43ff844219b3e92ef0976d))
+* **console:** shlex-quote cd-failure diagnostic and reword restore-session help ([c0fa16b](https://github.com/WayfarerLabs/agentworks/commit/c0fa16bda5c0de0348a998b27d9e4e5c8b711fb5))
+* **console:** validate restore-session tag permutation, allowlist named_console, clean docstring and sample-config ([72d3815](https://github.com/WayfarerLabs/agentworks/commit/72d3815ea7ac6a84b13e8be175f9bc6e99a47d0d))
+
+
+### Performance Improvements
+
+* **console:** single-pass tag validation, in-memory reorder, warn on missing pane id ([c8f8362](https://github.com/WayfarerLabs/agentworks/commit/c8f8362cb6f07c45744650f5ee579fc8da605696))
+
+
+### Documentation
+
+* **console:** clarify reinit_workspace docstring on detection vs always-applied steps ([b7e548b](https://github.com/WayfarerLabs/agentworks/commit/b7e548bcf3396f3fa339551c0b93485209a20890))
+
 ## [0.3.0](https://github.com/WayfarerLabs/agentworks/compare/v0.2.1...v0.3.0) (2026-06-01)
 
 
