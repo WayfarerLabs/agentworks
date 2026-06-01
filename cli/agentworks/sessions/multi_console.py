@@ -311,7 +311,7 @@ def add_sessions(
 
     output.info(f"Added {len(specs)} session(s) to console '{console_name}'.")
 
-    with _live_best_effort(f"add-session to '{console_name}'"):
+    with _live_best_effort(f"add-session to '{console_name}'", console_name=console_name):
         live = _live_target(db, config, console.vm_name)
         if live is None:
             return
@@ -354,7 +354,9 @@ def remove_sessions(
         f"Removed {len(session_names)} session(s) from console '{console_name}'."
     )
 
-    with _live_best_effort(f"remove-session from '{console_name}'"):
+    with _live_best_effort(
+        f"remove-session from '{console_name}'", console_name=console_name
+    ):
         live = _live_target(db, config, console.vm_name)
         if live is None:
             return
@@ -423,7 +425,9 @@ def add_shell(
         f"in console '{console_name}'."
     )
 
-    with _live_best_effort(f"add-shell to '{console_name}:{session_name}'"):
+    with _live_best_effort(
+        f"add-shell to '{console_name}:{session_name}'", console_name=console_name
+    ):
         live = _live_target(db, config, console.vm_name)
         if live is None:
             return
@@ -531,11 +535,15 @@ def restore_session(
 
     untagged = [pid for pid, _pidx, cidx in shell_panes if cidx is None]
     if untagged:
+        # Untagged shell panes happen for two reasons: (a) the window predates
+        # the pane-tagging feature, or (b) the operator manually split a pane
+        # via `tmux split-window` instead of `console add-shell`. Either way,
+        # restore-session can't map the live pane back to a configured shell
+        # index, so we refuse and direct the operator to rebuild.
         raise output.ConsoleError(
             f"window '{session_name}' has {len(untagged)} shell pane(s) with "
-            f"no agentworks tag. The window was built before pane-tagging "
-            f"existed; run `agentworks console attach {console_name} --recreate` "
-            f"once to rebuild and retag everything from scratch."
+            f"no agentworks tag. Run `agentworks console attach "
+            f"{console_name} --recreate` to rebuild and retag from scratch."
         )
 
     # Validate that the tag values form a subset of 0..configured_count-1 with
@@ -557,10 +565,16 @@ def restore_session(
         if duplicates:
             parts.append(f"duplicate tags {duplicates}")
         if out_of_range:
-            parts.append(
-                f"tags {out_of_range} point past the configured range "
-                f"(0..{configured_count - 1})"
-            )
+            if configured_count == 0:
+                parts.append(
+                    f"{len(out_of_range)} tagged shell pane(s) but session has "
+                    f"no configured shells"
+                )
+            else:
+                parts.append(
+                    f"tags {out_of_range} point past the configured range "
+                    f"(0..{configured_count - 1})"
+                )
         raise output.ConsoleError(
             f"window '{session_name}' has shell panes with inconsistent tags "
             f"({'; '.join(parts)}). Run `agentworks console attach "
@@ -1086,22 +1100,24 @@ def _live_target(
 
 
 @contextlib.contextmanager
-def _live_best_effort(action: str) -> Iterator[None]:
+def _live_best_effort(action: str, *, console_name: str) -> Iterator[None]:
     """Wrap best-effort live tmux work. User-facing AgentworksError exceptions
     propagate; transport-level surprises are warned and swallowed.
 
     The DB has already mutated by the time we reach here, so any partial
     live-tmux failure leaves DB and tmux out of sync until the operator
-    reattaches with --recreate. The warning text spells this out.
+    reattaches with --recreate. The warning includes the actual console name
+    so the suggested recovery command can be copy/pasted as-is.
     """
     try:
         yield
     except output.AgentworksError:
         raise
     except Exception as exc:
+        q_name = shlex.quote(console_name)
         output.warn(
             f"live console sync failed ({action}): {exc}. "
-            f"DB state was updated; run `agentworks console attach <name> --recreate` "
+            f"DB state was updated; run `agentworks console attach {q_name} --recreate` "
             f"to rebuild tmux from the new state."
         )
 

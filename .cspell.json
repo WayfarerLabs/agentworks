@@ -58,6 +58,7 @@
     "eastus",
     "esac",
     "execdir",
+    "excinfo",
     "exitcode",
     "exitstatus",
     "fallocate",

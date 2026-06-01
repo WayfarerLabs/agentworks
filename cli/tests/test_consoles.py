@@ -1470,6 +1470,32 @@ def test_restore_session_strict_on_duplicate_tags(
         restore_session(db, _StubConfig(), console_name="con", session_name="a")
 
 
+def test_restore_session_strict_message_when_configured_zero(
+    db: Database, fake_target: _FakeTarget
+) -> None:
+    """A session with zero configured shells can still have live shell panes
+    (e.g. operator ran `tmux split-window` manually then tagged via DB edit).
+    The out-of-range error message must not render the empty range as
+    `(0..-1)`; instead say the session has no configured shells."""
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["a"])
+    # Session 'a' with zero shells (no `+N`).
+    create_console(db, name="con", vm_name="vm1", session_specs=["a"])
+
+    fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
+    fake_target.responses["list-windows -t aw-console-con"] = _FakeResult(stdout="a\n")
+    # Session pane + one tagged shell pane (config index 0, but config has 0 shells).
+    fake_target.responses["list-panes -t aw-console-con:a"] = _FakeResult(
+        stdout="%1|0|\n%2|1|0\n"
+    )
+
+    with pytest.raises(
+        output.ConsoleError, match="no configured shells"
+    ) as excinfo:
+        restore_session(db, _StubConfig(), console_name="con", session_name="a")
+    assert "0..-1" not in str(excinfo.value)
+
+
 def test_restore_session_noop_when_live_matches_config(
     db: Database, fake_target: _FakeTarget, captured_output: CapturedOutput
 ) -> None:
