@@ -244,8 +244,8 @@ def create_vm(
     except KeyboardInterrupt:
         output.warn(
             f"Cancelling vm create '{vm_name}' during initialization. "
-            f"The VM exists but is partially initialized -- use 'vm reinit {vm_name}' to retry, "
-            f"or 'vm delete {vm_name} --force' to remove it."
+            f"The VM exists but is partially initialized. "
+            f"Use 'vm reinit {vm_name}' to retry, or 'vm delete {vm_name} --force' to remove it."
         )
         raise
     except Exception as e:

@@ -285,8 +285,8 @@ def reinit_agent(
             _create_agent_on_vm(vm, config, agent.linux_user, git_tokens=git_tokens, logger=ssh_logger)
         except KeyboardInterrupt:
             output.warn(
-                f"Cancelling agent reinit '{name}'. The agent may be in a partial state -- "
-                f"re-run 'agent reinit {name}' to retry. SSH log: {ssh_logger.path}"
+                f"Cancelling agent reinit '{name}'. The agent may be in a partial state. "
+                f"Re-run 'agent reinit {name}' to retry. SSH log: {ssh_logger.path}"
             )
             raise
         except Exception as e:

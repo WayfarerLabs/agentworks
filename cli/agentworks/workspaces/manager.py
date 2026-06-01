@@ -109,6 +109,13 @@ def create_workspace(
         # per-agent failure (DB error, SSH hiccup) should not abort the
         # whole command. Surface failures as warnings and report accurate
         # counts so the user can re-grant manually with 'agent grant'.
+        #
+        # DB grant is inserted BEFORE the on-VM group add. If the order were
+        # reversed and the DB write failed after the group add, the agent
+        # would have VM-side membership with no DB grant backing it (a
+        # silent authorization drift). With this ordering, a group-add
+        # failure can be cleanly compensated by deleting the just-inserted
+        # grant row.
         grant_all_agents = db.list_agents_on_vm_with_grant_all(vm.name)
         if grant_all_agents:
             from agentworks.agents.manager import _add_to_workspace_group
@@ -117,15 +124,32 @@ def create_workspace(
             failed: list[str] = []
             for agent in grant_all_agents:
                 try:
-                    _add_to_workspace_group(vm, config, db, agent.linux_user, ws_name, logger=ssh_logger)
                     db.insert_agent_grant(agent.name, ws_name, "explicit")
+                except Exception as e:
+                    failed.append(agent.name)
+                    output.warn(
+                        f"Failed to insert grant for agent '{agent.name}' on workspace "
+                        f"'{ws_name}': {e}"
+                    )
+                    continue
+                try:
+                    _add_to_workspace_group(vm, config, db, agent.linux_user, ws_name, logger=ssh_logger)
                     added += 1
                 except Exception as e:
                     failed.append(agent.name)
                     output.warn(
-                        f"Failed to add grant-all agent '{agent.name}' to workspace "
-                        f"'{ws_name}': {e}"
+                        f"Failed to add agent '{agent.name}' to workspace '{ws_name}' "
+                        f"group: {e}. Reverting DB grant to keep state consistent."
                     )
+                    try:
+                        db.delete_agent_grant(agent.name, ws_name, "explicit")
+                    except Exception as revert_err:
+                        output.warn(
+                            f"Could not revert grant for '{agent.name}' after group-add "
+                            f"failure: {revert_err}. DB has a grant row with no VM-side "
+                            f"group membership; re-run 'agent grant {agent.name} {ws_name}' "
+                            f"or revoke explicitly."
+                        )
             if added:
                 output.detail(f"Added {added} grant-all agent(s) to workspace")
             if failed:
@@ -431,8 +455,15 @@ def _rehome_partial_state_hint(
     The rehome flow copies files to the new path, then updates the DB. KI or
     an exception can land before OR after the DB update, so we read the row
     back to give the user an accurate picture rather than asserting one way.
+
+    This is called from the KeyboardInterrupt / exception handler, so any
+    DB error here would mask the original error. Catch broadly and fall
+    back to a generic hint.
     """
-    ws = db.get_workspace(ws_name)
+    try:
+        ws = db.get_workspace(ws_name)
+    except Exception as e:
+        return f"DB state could not be read ({e}); manual inspection needed."
     if ws is None:
         return "Workspace row is missing from the DB; manual cleanup may be needed."
     if ws.workspace_path == new_path:
