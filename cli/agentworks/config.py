@@ -404,7 +404,7 @@ def _load_defaults(data: dict[str, object], issues: list[str]) -> DefaultsConfig
     if "git_credentials" in raw:
         raise ConfigError(
             "defaults.git_credentials has been removed. Move git_credentials into "
-            "[admin.config] and/or [agent.config]. See docs/guides/config-migration.md."
+            "[admin.config] and/or [agent.config]."
         )
 
     _warn_unexpected_keys(raw, _DEFAULTS_KEYS, "defaults", issues)
@@ -466,7 +466,7 @@ def _load_vm_templates(data: dict[str, object], issues: list[str]) -> dict[str, 
 
     if "vm" in data and isinstance(data["vm"], dict) and "config" in data["vm"]:
         raise ConfigError(
-            "[vm.config] has been replaced by [vm_templates.default]. See docs/guides/config-migration.md for details."
+            "[vm.config] has been replaced by [vm_templates.default]."
         )
 
     templates: dict[str, VMTemplate] = {}
@@ -572,8 +572,7 @@ def _load_agent_templates(data: dict[str, object], issues: list[str]) -> dict[st
 
     if "agent" in data and isinstance(data["agent"], dict) and "config" in data["agent"]:
         raise ConfigError(
-            "[agent.config] has been replaced by [agent_templates.default]. "
-            "See docs/guides/config-migration.md for details."
+            "[agent.config] has been replaced by [agent_templates.default]."
         )
 
     templates: dict[str, AgentTemplate] = {}
@@ -885,8 +884,7 @@ def load_config(path: Path | None = None, *, warn_issues: bool = True) -> Config
     if "dotfiles" in data:
         raise ConfigError(
             "[dotfiles] section has been removed. Move dotfiles settings into "
-            "[admin.config] (dotfiles_source, dotfiles_destination, dotfiles_install_cmd). "
-            "See docs/guides/config-migration.md for details."
+            "[admin.config] (dotfiles_source, dotfiles_destination, dotfiles_install_cmd)."
         )
 
     git_credentials = _load_git_credentials(data)

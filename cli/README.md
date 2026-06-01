@@ -383,19 +383,18 @@ during deletion. Pass `--yes` to skip the confirmation prompt.
 
 Manage agents (isolated Linux users) on VMs. Agents are VM-scoped and access workspaces via grants.
 
-| Command                                                      | Description                    |
-| ------------------------------------------------------------ | ------------------------------ |
-| `agentworks agent create <name> [--vm]`                      | Create an agent on a VM        |
-| `agentworks agent list [--vm <vm>]`                          | List agents                    |
-| `agentworks agent describe <name>`                           | Show agent details and grants  |
-| `agentworks agent reinit <name>`                             | Re-run agent setup             |
-| `agentworks agent workspace-grants grant <name> <ws>[,<ws>]` | Grant workspace access         |
-| `agentworks agent workspace-grants grant <name> --all`       | Grant access to all workspaces |
-| `agentworks agent workspace-grants deny <name> <ws>[,<ws>]`  | Remove workspace access        |
-| `agentworks agent workspace-grants deny <name> --all`        | Remove all explicit grants     |
-| `agentworks agent workspace-grants list <name>`              | List workspace grants          |
-| `agentworks agent shell <name> [--workspace <ws>]`           | Shell into an agent            |
-| `agentworks agent delete <name>`                             | Delete an agent                |
+| Command                                            | Description                    |
+| -------------------------------------------------- | ------------------------------ |
+| `agentworks agent create <name> [--vm]`            | Create an agent on a VM        |
+| `agentworks agent list [--vm <vm>]`                | List agents                    |
+| `agentworks agent describe <name>`                 | Show agent details and grants  |
+| `agentworks agent reinit <name>`                   | Re-run agent setup             |
+| `agentworks agent grant-workspace <name> <ws>...`  | Grant workspace access         |
+| `agentworks agent grant-workspace <name> --all`    | Grant access to all workspaces |
+| `agentworks agent revoke-workspace <name> <ws>...` | Revoke workspace access        |
+| `agentworks agent revoke-workspace <name> --all`   | Revoke all explicit grants     |
+| `agentworks agent shell <name> [--workspace <ws>]` | Shell into an agent            |
+| `agentworks agent delete <name>`                   | Delete an agent                |
 
 `agent create <name>` takes the agent name as a required positional. Optional flags: `--vm`,
 `--template`, and `--grant-all-workspaces`.

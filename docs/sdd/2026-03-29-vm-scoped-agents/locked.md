@@ -21,3 +21,11 @@ development:
 
 These specs are accurate as of this date but are now locked and will not be updated to reflect
 further changes to the implementation.
+
+## 2026-06-01
+
+The grant/deny CLI shape described above was flattened. The `agent workspace-grants` subgroup is
+gone; commands now sit directly on `agent` as `agent grant-workspace` and `agent revoke-workspace`,
+matching the resource/verb-object pattern used elsewhere in the CLI. The `list` subcommand was
+dropped since `agent describe` already shows grants. Service-layer rename: `deny_workspaces` is now
+`revoke_workspaces`. See PR #74 and the `.rulesync/rules/cli-conventions.md` rule it introduced.

@@ -484,6 +484,12 @@ def grant_workspaces(
     grant_all: bool = False,
 ) -> None:
     """Grant an agent explicit access to workspaces."""
+    if not grant_all and not workspace_names:
+        raise AgentError(
+            f"grant for '{agent_name}' needs at least one workspace name "
+            f"or workspace_names empty + grant_all=True"
+        )
+
     agent = db.get_agent(agent_name)
     if agent is None:
         raise AgentError(f"agent '{agent_name}' not found")
@@ -509,22 +515,28 @@ def grant_workspaces(
         output.detail(f"Granted: {ws_name}")
 
 
-def deny_workspaces(
+def revoke_workspaces(
     db: Database,
     config: Config,
     *,
     agent_name: str,
     workspace_names: list[str],
-    deny_all: bool = False,
+    revoke_all: bool = False,
 ) -> None:
-    """Remove explicit workspace grants from an agent."""
+    """Revoke explicit workspace grants from an agent."""
+    if not revoke_all and not workspace_names:
+        raise AgentError(
+            f"revoke for '{agent_name}' needs at least one workspace name "
+            f"or workspace_names empty + revoke_all=True"
+        )
+
     agent = db.get_agent(agent_name)
     if agent is None:
         raise AgentError(f"agent '{agent_name}' not found")
 
     vm = _require_vm(db, agent.vm_name)
 
-    if deny_all:
+    if revoke_all:
         db.update_agent_grant_all(agent_name, False)
         db.delete_explicit_grants(agent_name)
         # Remove from groups where no implicit grants remain
@@ -535,7 +547,7 @@ def deny_workspaces(
                 remaining_implicit.append(ws_name)
             else:
                 _remove_from_workspace_group(vm, config, db, agent.linux_user, ws_name, logger=None)
-        output.info(f"All explicit grants removed for agent '{agent_name}'")
+        output.info(f"All explicit grants revoked for agent '{agent_name}'")
         if remaining_implicit:
             output.warn(
                 f"agent still has implicit access via sessions to: {', '.join(remaining_implicit)}"
@@ -546,39 +558,9 @@ def deny_workspaces(
         db.delete_agent_grant(agent_name, ws_name, "explicit")
         if not db.has_any_grant(agent_name, ws_name):
             _remove_from_workspace_group(vm, config, db, agent.linux_user, ws_name, logger=None)
-            output.detail(f"Denied: {ws_name}")
+            output.detail(f"Revoked: {ws_name}")
         else:
-            output.detail(f"Denied: {ws_name} (still has implicit access via sessions)")
-
-
-def list_grants(
-    db: Database,
-    *,
-    agent_name: str,
-) -> None:
-    """List workspace grants for an agent."""
-    agent = db.get_agent(agent_name)
-    if agent is None:
-        raise AgentError(f"agent '{agent_name}' not found")
-
-    if agent.grant_all:
-        output.info(f"Agent '{agent_name}' has grant-all enabled (access to all workspaces)")
-
-    grants = db.list_granted_workspaces_with_types(agent_name)
-    if not grants:
-        output.info("No workspace grants.")
-        return
-
-    output.info(f"{'WORKSPACE':<25} {'TYPE'}")
-    output.info("-" * 45)
-    for ws_name, has_explicit, has_implicit in grants:
-        if has_explicit and has_implicit:
-            grant_type = "explicit + implicit"
-        elif has_explicit:
-            grant_type = "explicit"
-        else:
-            grant_type = "implicit (via sessions)"
-        output.info(f"{ws_name:<25} {grant_type}")
+            output.detail(f"Revoked: {ws_name} (still has implicit access via sessions)")
 
 
 # -- VM operations ---------------------------------------------------------
