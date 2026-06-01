@@ -538,26 +538,46 @@ def restore_session(
             f"once to rebuild and retag everything from scratch."
         )
 
-    live_count = len(shell_panes)
-    if live_count > configured_count:
+    # Validate that the tag values form a subset of 0..configured_count-1 with
+    # no duplicates. Three corruptions are caught here, all of which restore-
+    # session can't safely repair:
+    #   - duplicates: two panes claim the same config index
+    #   - out-of-range: a pane references a config index that no longer exists
+    #     (e.g. config shrank or DB was edited)
+    #   - implied "too many panes": pigeonhole says any live_count >
+    #     configured_count must trigger one of the two above (since untagged
+    #     panes are already rejected by the strict check earlier)
+    tag_values = [cidx for _pid, _pidx, cidx in shell_panes if cidx is not None]
+    duplicates = sorted({v for v in tag_values if tag_values.count(v) > 1})
+    out_of_range = sorted(
+        {v for v in tag_values if v < 0 or v >= configured_count}
+    )
+    if duplicates or out_of_range:
+        parts: list[str] = []
+        if duplicates:
+            parts.append(f"duplicate tags {duplicates}")
+        if out_of_range:
+            parts.append(
+                f"tags {out_of_range} point past the configured range "
+                f"(0..{configured_count - 1})"
+            )
         raise output.ConsoleError(
-            f"window '{session_name}' has {live_count} shell pane(s) but "
-            f"config has {configured_count}. Refusing to remove panes; "
-            f"either kill the extras and re-run, or use "
-            f"`agentworks console attach {console_name} --recreate` to "
-            f"fully rebuild from config."
+            f"window '{session_name}' has shell panes with inconsistent tags "
+            f"({'; '.join(parts)}). Run `agentworks console attach "
+            f"{console_name} --recreate` to rebuild and retag from scratch."
         )
-    if live_count == configured_count:
+
+    # tag_values is now a subset of 0..configured_count-1 with no duplicates,
+    # so len(tag_values) <= configured_count.
+    if len(tag_values) == configured_count:
         output.info(
             f"session '{session_name}' already matches config "
-            f"({live_count} shell pane(s)); nothing to do."
+            f"({len(tag_values)} shell pane(s)); nothing to do."
         )
         return
 
-    # live_count < configured_count: figure out which config indices are
-    # missing and split them back in.
-    live_indices = {cidx for _pid, _pidx, cidx in shell_panes if cidx is not None}
-    missing = [i for i in range(configured_count) if i not in live_indices]
+    # Strict subset: figure out which config indices are missing.
+    missing = sorted(set(range(configured_count)) - set(tag_values))
 
     session = db.get_session(session_name)
     if session is None:

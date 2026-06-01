@@ -119,7 +119,7 @@ VALID_TMUX_LAYOUTS = (
 class NamedConsoleConfig:
     """Settings for the `console` subcommand group (named multi-session
     consoles). Section is `[named_console]` in the TOML to disambiguate from
-    the legacy `vm console` and the workspace console template — only named
+    the legacy `vm console` and the workspace console template. Only named
     consoles read these values today.
     """
 
@@ -821,6 +821,7 @@ EXPECTED_TOP_LEVEL_KEYS = {
     "operator",
     "paths",
     "defaults",
+    "named_console",
     "vm_templates",
     "admin",
     "agent_templates",

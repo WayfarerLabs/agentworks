@@ -1425,24 +1425,48 @@ def test_restore_session_strict_on_untagged_pane(
         restore_session(db, _StubConfig(), console_name="con", session_name="a")
 
 
-def test_restore_session_strict_on_too_many_panes(
+def test_restore_session_strict_on_out_of_range_tag(
     db: Database, fake_target: _FakeTarget
 ) -> None:
-    """Live > configured means the user added panes by hand; restore-session
-    refuses to remove them and directs them to the heavier `--recreate`."""
+    """A pane tagged with a config index past the current configured range
+    (e.g., config shrank or DB was edited) is unsafe to repair; restore-session
+    surfaces the inconsistency and points at `--recreate`."""
     _seed_vm(db, with_tailscale=True)
     _seed_sessions(db, ["a"])
-    # Two configured shells.
+    # Two configured shells (valid indices: 0, 1).
     create_console(db, name="con", vm_name="vm1", session_specs=["a+2"])
 
     fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
     fake_target.responses["list-windows -t aw-console-con"] = _FakeResult(stdout="a\n")
-    # Three live shell panes (one extra) all properly tagged.
+    # Three live shell panes tagged 0, 1, 2; tag 2 is out-of-range.
     fake_target.responses["list-panes -t aw-console-con:a"] = _FakeResult(
         stdout="%1|0|\n%2|1|0\n%3|2|1\n%4|3|2\n"
     )
 
-    with pytest.raises(output.ConsoleError, match="Refusing to remove panes"):
+    with pytest.raises(
+        output.ConsoleError,
+        match=r"tags \[2\] point past the configured range",
+    ):
+        restore_session(db, _StubConfig(), console_name="con", session_name="a")
+
+
+def test_restore_session_strict_on_duplicate_tags(
+    db: Database, fake_target: _FakeTarget
+) -> None:
+    """Two panes claiming the same config index can't both be the canonical
+    pane for that shell; surface the inconsistency rather than guessing."""
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["a"])
+    create_console(db, name="con", vm_name="vm1", session_specs=["a+2"])
+
+    fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
+    fake_target.responses["list-windows -t aw-console-con"] = _FakeResult(stdout="a\n")
+    # Two live shell panes both tagged 0 (a duplicate).
+    fake_target.responses["list-panes -t aw-console-con:a"] = _FakeResult(
+        stdout="%1|0|\n%2|1|0\n%3|2|0\n"
+    )
+
+    with pytest.raises(output.ConsoleError, match=r"duplicate tags \[0\]"):
         restore_session(db, _StubConfig(), console_name="con", session_name="a")
 
 

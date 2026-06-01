@@ -49,8 +49,8 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # console. Maps 1:1 to tmux's built-in select-layout names so the same value
 # can be applied on the fly via `tmux select-layout` key bindings. Re-read
 # on every build / recreate / add-shell / restore-session, so changing this
-# value and running `console attach --recreate` (or adding/restoring a
-# shell) is enough to switch layouts.
+# value and running `agentworks console attach <name> --recreate` (or
+# adding/restoring a shell on a live console) is enough to switch layouts.
 
 [named_console]
 # tmux_layout = "tiled"
