@@ -383,10 +383,10 @@ directory. With `HOME` set correctly, `nerf-gh-*` tools see this session automat
 ### SSH (git operations)
 
 Git push/pull over SSH uses the SSH agent socket at `/run/agentworks/ssh-agent.sock`. Agent users do
-not have direct access to this socket (it is `0600 agentworks:agentworks`). Instead,
-`nerfrun` sets `SSH_AUTH_SOCK` to this path in the constructed environment when running as the user
-account via SUID. The SSH agent daemon (from the user-based security model) has the VM's private key
-loaded -- `ssh` never needs to read the key file directly.
+not have direct access to this socket (it is `0600 agentworks:agentworks`). Instead, `nerfrun` sets
+`SSH_AUTH_SOCK` to this path in the constructed environment when running as the user account via
+SUID. The SSH agent daemon (from the user-based security model) has the VM's private key loaded --
+`ssh` never needs to read the key file directly.
 
 This means all git push/pull operations are gated through nerfed commands. An agent cannot bypass
 RBAC by running `git push` directly -- it would fail because the agent has no SSH key and no access

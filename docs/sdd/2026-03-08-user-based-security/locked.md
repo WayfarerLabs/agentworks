@@ -2,8 +2,8 @@
 
 ## Summary
 
-The user-based security model is implemented. This SDD was substantially rewritten on 2026-03-29
-to reflect the actual implementation, which diverged significantly from the original design.
+The user-based security model is implemented. This SDD was substantially rewritten on 2026-03-29 to
+reflect the actual implementation, which diverged significantly from the original design.
 
 ### What was implemented
 

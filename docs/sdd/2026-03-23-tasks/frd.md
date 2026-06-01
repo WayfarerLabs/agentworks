@@ -27,8 +27,8 @@ console. May run tasks as themselves (admin user) or as an agent user.
 
 An isolated Linux user scoped to a workspace. Agents have their own home directory, PATH, and
 installed tools. Agents exist independently of tasks -- they are created and managed via
-`agentworks agent create --workspace <ws>`. Tasks can optionally run in agent mode to use an
-agent's identity and environment.
+`agentworks agent create --workspace <ws>`. Tasks can optionally run in agent mode to use an agent's
+identity and environment.
 
 ## Domain Model
 
@@ -36,8 +36,8 @@ agent's identity and environment.
 
 A task is a named work stream with the following properties:
 
-- **Name**: unique within its workspace. Must conform to tmux session naming constraints (no dots
-  or colons). The tmux session name on the VM is `<workspace>--<task>`, using the workspace as a
+- **Name**: unique within its workspace. Must conform to tmux session naming constraints (no dots or
+  colons). The tmux session name on the VM is `<workspace>--<task>`, using the workspace as a
   namespace (consistent with the existing `--` separator convention for agent linux usernames).
 - **Workspace**: the workspace the task is rooted in. The task's working directory is the
   workspace's path.
@@ -45,9 +45,9 @@ A task is a named work stream with the following properties:
   - **Admin mode** (default): the task runs as the VM's admin user. No agent is required. This is
     the simple path for operators who want to run tools in a workspace without the complexity of
     agent isolation.
-  - **Agent mode**: the task runs as a specific agent's Linux user (via login shell). The agent
-    must already exist in the workspace. This provides full isolation -- the task inherits the
-    agent's home directory, PATH, installed tools, and permissions.
+  - **Agent mode**: the task runs as a specific agent's Linux user (via login shell). The agent must
+    already exist in the workspace. This provides full isolation -- the task inherits the agent's
+    home directory, PATH, installed tools, and permissions.
 - **Template**: determines what command the task runs (e.g., "claude"). See Task Templates below.
 - **Status**: reflects whether the task is running, stopped, or failed.
 
@@ -68,8 +68,8 @@ files).
 
 ### Console
 
-The console is a VM-level tmux session that provides a unified view of all tasks running on that
-VM. It is a convenience layer, not a requirement.
+The console is a VM-level tmux session that provides a unified view of all tasks running on that VM.
+It is a convenience layer, not a requirement.
 
 - Full tmux controls (split panes, create windows, rearrange layout).
 - Each task appears as a window in the console, attached to the task's own tmux session.
@@ -89,8 +89,8 @@ An operator can create, stop, restart, and delete tasks.
   template command).
 - **Stop** sends a signal to the running command. If the command does not exit within a grace
   period, the tmux session is killed.
-- **Restart** re-runs the task. If the template defines a `restart_command`, that is used instead
-  of `command` (e.g., `claude --resume` instead of `claude --name`). Errors if the task is still
+- **Restart** re-runs the task. If the template defines a `restart_command`, that is used instead of
+  `command` (e.g., `claude --resume` instead of `claude --name`). Errors if the task is still
   running unless `--force` is passed, which kills the existing session first.
 - **Delete** stops the task if running (with confirmation), then removes it from the database.
 
@@ -114,8 +114,8 @@ processes that would outlive or escape the task lifecycle.
 
 ### R3: Task templates
 
-A task template defines the command that a task runs. Templates are defined in the agentworks
-config file.
+A task template defines the command that a task runs. Templates are defined in the agentworks config
+file.
 
 - Each template has a name and a command (string or list).
 - The command is run in the workspace directory as the task's user.
@@ -135,18 +135,18 @@ The console is a VM-level tmux session that aggregates tasks.
 - If the console does not exist when a task starts, the task still runs; the console is not
   required.
 - The console can be recreated on demand (`--recreate`), which kills the existing console and
-  rebuilds it from all currently running tasks. Useful if the console gets into a bad state or
-  the operator wants a fresh layout.
+  rebuilds it from all currently running tasks. Useful if the console gets into a bad state or the
+  operator wants a fresh layout.
 
 ### R5: CLI surface
 
 New command group `agentworks task`:
 
 - `task create [--workspace <ws>] [--name <name>] [--template <tpl>] [--agent <agent>]` -- create
-  and start a task. Name and workspace are prompted if omitted. Runs in admin mode by default.
-  Pass `--agent` to run in agent mode as the specified agent user.
-  Pass `--new-workspace` to create a workspace on the fly (with optional `--workspace-name`,
-  `--workspace-template`, and `--vm`). Mutually exclusive with `--workspace`.
+  and start a task. Name and workspace are prompted if omitted. Runs in admin mode by default. Pass
+  `--agent` to run in agent mode as the specified agent user. Pass `--new-workspace` to create a
+  workspace on the fly (with optional `--workspace-name`, `--workspace-template`, and `--vm`).
+  Mutually exclusive with `--workspace`.
 - `task list [--workspace <ws>]` -- list tasks, showing status.
 - `task stop <name> --workspace <ws>` -- stop a running task.
 - `task restart <name> --workspace <ws> [--force]` -- restart a task. Uses `restart_command` if
@@ -158,13 +158,13 @@ New command group `agentworks task`:
 
 New commands for the console:
 
-- `vm console <vm-name>` -- attach to the VM console, creating it if it does not exist. Creates
-  one window per currently running task. Refuses to run inside an existing tmux session unless
+- `vm console <vm-name>` -- attach to the VM console, creating it if it does not exist. Creates one
+  window per currently running task. Refuses to run inside an existing tmux session unless
   `--allow-nesting` is passed.
 - `vm console <vm-name> --recreate` -- kill the existing console (if any), rebuild it from the
   current set of running tasks, and attach.
-- `vm console <vm-name> --allow-nesting` -- allow running inside an existing tmux session
-  (not recommended due to prefix key conflicts).
+- `vm console <vm-name> --allow-nesting` -- allow running inside an existing tmux session (not
+  recommended due to prefix key conflicts).
 
 ### R6: Database
 
@@ -179,17 +179,17 @@ Tasks are stored in the local SQLite database with:
 Tasks and agents are complementary but independent:
 
 - **Agents** are workspace-scoped Linux users that provide isolation (own home directory, PATH,
-  installed tools). They are created and deleted independently via `agentworks agent` commands.
-  An agent's existence does not imply any running process.
-- **Tasks** are workspace-scoped running processes with lifecycle management. A task always runs
-  as some Linux user, but that user can be either the VM admin or an agent.
+  installed tools). They are created and deleted independently via `agentworks agent` commands. An
+  agent's existence does not imply any running process.
+- **Tasks** are workspace-scoped running processes with lifecycle management. A task always runs as
+  some Linux user, but that user can be either the VM admin or an agent.
 - **Admin mode** (default): the task runs as the VM's admin user. No agent is needed. This is the
   simple path -- the operator runs a tool in a workspace as themselves.
 - **Agent mode**: the task runs as a specific agent's Linux user via login shell, inheriting the
   agent's full environment. The agent must already exist in the same workspace. This provides
   process isolation on top of the user isolation that the agent already provides.
-- An agent can have zero, one, or many tasks running as it. A task in agent mode references
-  exactly one agent.
+- An agent can have zero, one, or many tasks running as it. A task in agent mode references exactly
+  one agent.
 - The existing agent create/delete workflow is unchanged.
 - The tmuxinator-based session management is replaced by tasks and the console.
 

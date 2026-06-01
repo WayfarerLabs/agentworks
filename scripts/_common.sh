@@ -52,7 +52,13 @@ read_version_file() {
 
     while [[ "$dir" != "/" ]]; do
         if [[ -f "$dir/$filename" ]]; then
-            head -1 "$dir/$filename" | tr -d '[:space:]'
+            local content
+            content=$(head -1 "$dir/$filename" | tr -d '[:space:]')
+            if [[ -z "$content" ]]; then
+                echo "Error: $dir/$filename is empty." >&2
+                return 1
+            fi
+            echo "$content"
             return 0
         fi
         dir="$(dirname "$dir")"

@@ -28,12 +28,12 @@ bootstrap (before tmux or other tools are installed).
 ### Key Design Decisions
 
 - **Fire-and-poll, not stream**: the workstation does not stream stdout over SSH. Instead it
-  periodically reads the output file. This means a dropped connection has zero impact on the
-  running operation.
-- **PID file for resume**: the remote process writes its PID to a known file. The workstation
-  checks `kill -0 $pid` to see if it's still running.
-- **Structured output unchanged**: the bootstrap script's `##STEP##`/`##SUCCESS##` markers work
-  fine in an output file. The workstation parses them the same way.
+  periodically reads the output file. This means a dropped connection has zero impact on the running
+  operation.
+- **PID file for resume**: the remote process writes its PID to a known file. The workstation checks
+  `kill -0 $pid` to see if it's still running.
+- **Structured output unchanged**: the bootstrap script's `##STEP##`/`##SUCCESS##` markers work fine
+  in an output file. The workstation parses them the same way.
 - **Timeout with progress**: if no new output appears for N seconds, warn the user rather than
   killing the operation. The remote process has its own timeout.
 
@@ -82,25 +82,24 @@ Simulated SSH drop (stop polling, resume) picks up where it left off.
 ### 1.2 Wire into Lima Provisioner
 
 - [x] Update Lima provisioner remote create to use `run_detached()` for combined
-  `limactl create && limactl start` as a single detached operation
+      `limactl create && limactl start` as a single detached operation
   - Base path: `/tmp/agentworks-lima-<vm_name>`
 - [x] Resume handled by `run_detached()` (detects existing PID, resumes polling)
 - [x] Stale state handled by `run_detached()` (reads status file if process finished)
 - [x] Local mode unchanged
 
-**Definition of done:** `limactl create` and `limactl start` survive workstation SSH
-drops. Re-running `vm create` while limactl is still running resumes instead of failing.
+**Definition of done:** `limactl create` and `limactl start` survive workstation SSH drops.
+Re-running `vm create` while limactl is still running resumes instead of failing.
 
 ### 1.3 Update vm create Flow
 
 - [ ] (Future) Update `create_vm()` in `manager.py` to handle resume scenario
   - If DB record exists with provisioning_status "in_progress", attempt resume
-  - Currently: `run_detached()` handles resume at the nohup level within a single
-    `vm create` invocation. A full CLI-level resume (re-running `vm create` after a crash)
-    is deferred.
+  - Currently: `run_detached()` handles resume at the nohup level within a single `vm create`
+    invocation. A full CLI-level resume (re-running `vm create` after a crash) is deferred.
 
-**Definition of done:** Interrupted `vm create` can be re-run to resume. Clear messaging about
-what is happening.
+**Definition of done:** Interrupted `vm create` can be re-run to resume. Clear messaging about what
+is happening.
 
 ---
 
@@ -117,8 +116,8 @@ connection drops.
 - [x] Parse bootstrap output from detached result (same `##STEP##` markers)
 - [x] Resume handled by `run_detached()`
 
-**Definition of done:** Bootstrap script survives SSH drops. Output is captured and parsed the
-same way.
+**Definition of done:** Bootstrap script survives SSH drops. Output is captured and parsed the same
+way.
 
 ---
 
@@ -135,8 +134,8 @@ Make Phase B init (over Tailscale SSH) resilient to connection drops.
 - [ ] Wrap long-running Phase B steps in `run_detached()` where beneficial
 - [ ] Handle resume for partially-completed Phase B
 
-**Definition of done:** Long-running init steps survive Tailscale SSH drops. `vm reinit` can
-resume a partially-completed initialization.
+**Definition of done:** Long-running init steps survive Tailscale SSH drops. `vm reinit` can resume
+a partially-completed initialization.
 
 ---
 

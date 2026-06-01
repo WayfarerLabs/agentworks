@@ -283,8 +283,8 @@ The new order restructures steps 1 and 5:
 
 Currently agent install commands are not wired up. The new flow:
 
-1. Run commands from `agent.config.user_install_commands` for the agent user
-   (in agent's login shell)
+1. Run commands from `agent.config.user_install_commands` for the agent user (in agent's login
+   shell)
 2. Write PATH additions from those commands to agent's `~/.agentworks-path.sh`
 
 ### Apt Source Idempotency
@@ -358,17 +358,17 @@ Apt:         gh
 
 ## File Changes
 
-| File | Change |
-| --- | --- |
-| `cli/agentworks/catalog.toml` | New: built-in catalog file |
-| `cli/agentworks/catalog.py` | New: catalog loading, merging, resolution |
-| `cli/agentworks/config.py` | Add `apt_sources`, `apt_packages`, `system_install_commands`, `user_install_commands` sections; rename `vm.config.install_commands` to `admin_user_install_commands`; rename `agent.config.install_commands` to `user_install_commands` |
-| `cli/agentworks/vms/initializer.py` | Restructure Phase B to use resolved catalog; add apt source setup step |
-| `cli/agentworks/agents/manager.py` | Wire up agent install commands using catalog |
-| `cli/agentworks/cli.py` | Add `installer` command group; remove `--extra-packages` and `--git-credentials` from `vm create`; remove `--git-credentials` from `vm reinit` |
-| `cli/agentworks/vms/manager.py` | Remove `extra_packages` and `git_credentials` params from create/reinit; read from config directly |
-| `cli/agentworks/sample-config.toml` | Update to reflect new structure |
-| `cli/agentworks/completions/` | Add `installer` group completions |
-| `cli/README.md` | Document new config structure, commands, and catalog |
-| `cli/tests/test_catalog.py` | New: catalog loading, merging, resolution tests |
-| `cli/tests/test_config.py` | Update for new config sections |
+| File                                | Change                                                                                                                                                                                                                                  |
+| ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `cli/agentworks/catalog.toml`       | New: built-in catalog file                                                                                                                                                                                                              |
+| `cli/agentworks/catalog.py`         | New: catalog loading, merging, resolution                                                                                                                                                                                               |
+| `cli/agentworks/config.py`          | Add `apt_sources`, `apt_packages`, `system_install_commands`, `user_install_commands` sections; rename `vm.config.install_commands` to `admin_user_install_commands`; rename `agent.config.install_commands` to `user_install_commands` |
+| `cli/agentworks/vms/initializer.py` | Restructure Phase B to use resolved catalog; add apt source setup step                                                                                                                                                                  |
+| `cli/agentworks/agents/manager.py`  | Wire up agent install commands using catalog                                                                                                                                                                                            |
+| `cli/agentworks/cli.py`             | Add `installer` command group; remove `--extra-packages` and `--git-credentials` from `vm create`; remove `--git-credentials` from `vm reinit`                                                                                          |
+| `cli/agentworks/vms/manager.py`     | Remove `extra_packages` and `git_credentials` params from create/reinit; read from config directly                                                                                                                                      |
+| `cli/agentworks/sample-config.toml` | Update to reflect new structure                                                                                                                                                                                                         |
+| `cli/agentworks/completions/`       | Add `installer` group completions                                                                                                                                                                                                       |
+| `cli/README.md`                     | Document new config structure, commands, and catalog                                                                                                                                                                                    |
+| `cli/tests/test_catalog.py`         | New: catalog loading, merging, resolution tests                                                                                                                                                                                         |
+| `cli/tests/test_config.py`          | Update for new config sections                                                                                                                                                                                                          |

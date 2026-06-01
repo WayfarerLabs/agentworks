@@ -14,9 +14,9 @@
 
 - [x] Create workspace group during workspace creation (not just agent creation)
 - [x] Set workspace directory group to `ws-<name>` with setgid (`chgrp ws-<name> <dir>`,
-  `chmod 2770 <dir>`) so files created by any agent are group-accessible to other agents
-- [x] Ensure cloned repo files inherit the workspace group (setgid handles new files; initial
-  clone needs `chgrp -R`)
+      `chmod 2770 <dir>`) so files created by any agent are group-accessible to other agents
+- [x] Ensure cloned repo files inherit the workspace group (setgid handles new files; initial clone
+      needs `chgrp -R`)
 
 ## Not Planned (future SDDs)
 

@@ -2,10 +2,10 @@
 
 ## Overview
 
-A nerf package is a YAML manifest that defines a family of scoped tool wrappers. A standalone
-Python CLI reads manifests and generates self-contained shell scripts -- one per tool -- and
-rulesync skill files. Those scripts are placed in a directory on the agent's PATH. The AI coding
-framework's permission model controls which scripts the agent can invoke.
+A nerf package is a YAML manifest that defines a family of scoped tool wrappers. A standalone Python
+CLI reads manifests and generates self-contained shell scripts -- one per tool -- and rulesync skill
+files. Those scripts are placed in a directory on the agent's PATH. The AI coding framework's
+permission model controls which scripts the agent can invoke.
 
 There is no runtime dependency on the manifest, no compiled binary, no SUID, no shared library.
 Generated scripts are fully self-contained and human-readable.
@@ -26,9 +26,9 @@ agentworks CLI                  thin wrapper -- controls nerf install on VMs via
 
 ## Manifest Format
 
-Each package has a `manifest.yaml` that defines a family of related scoped tools. YAML is used
-over TOML or JSON because inline comments and multiline strings (for skill intro blocks) matter
-for a file that operators write by hand.
+Each package has a `manifest.yaml` that defines a family of related scoped tools. YAML is used over
+TOML or JSON because inline comments and multiline strings (for skill intro blocks) matter for a
+file that operators write by hand.
 
 ### Package metadata
 
@@ -114,16 +114,16 @@ tools:
 
 #### Parameter fields
 
-| Field        | Type           | Description                                                          |
-| ------------ | -------------- | -------------------------------------------------------------------- |
-| `flag`       | string         | Named flag (e.g. `--remote`). Mutually exclusive with `positional`.  |
-| `positional` | bool           | If true, passed as a positional arg in declaration order.            |
-| `description`| string         | Human-readable. Used in `--help` output and skill generation.        |
-| `required`   | bool           | Defaults to false.                                                   |
-| `pattern`    | string (regex) | Value must match this pattern.                                       |
-| `allow`      | string[]       | Explicit allow-list. Value must be in this list.                     |
-| `deny`       | string[]       | Explicit deny-list. Value must not be in this list.                  |
-| `default`    | string         | Default value when not required and not provided.                    |
+| Field         | Type           | Description                                                         |
+| ------------- | -------------- | ------------------------------------------------------------------- |
+| `flag`        | string         | Named flag (e.g. `--remote`). Mutually exclusive with `positional`. |
+| `positional`  | bool           | If true, passed as a positional arg in declaration order.           |
+| `description` | string         | Human-readable. Used in `--help` output and skill generation.       |
+| `required`    | bool           | Defaults to false.                                                  |
+| `pattern`     | string (regex) | Value must match this pattern.                                      |
+| `allow`       | string[]       | Explicit allow-list. Value must be in this list.                    |
+| `deny`        | string[]       | Explicit deny-list. Value must not be in this list.                 |
+| `default`     | string         | Default value when not required and not provided.                   |
 
 `pattern`, `allow`, and `deny` can be combined. All that apply are checked. `allow` and `deny`
 cannot both be set on the same parameter.
@@ -132,10 +132,10 @@ cannot both be set on the same parameter.
 
 ### Overview
 
-`nerf` is a standalone Python CLI that lives in the agentworks repo but is usable independently.
-It reads one or more manifests, merges them, and generates shell scripts and/or rulesync skills.
-It runs on the operator's workstation; generated artifacts (scripts, skills) are deployed to VMs
-via rsync. There is no Python or pipx dependency on the VM.
+`nerf` is a standalone Python CLI that lives in the agentworks repo but is usable independently. It
+reads one or more manifests, merges them, and generates shell scripts and/or rulesync skills. It
+runs on the operator's workstation; generated artifacts (scripts, skills) are deployed to VMs via
+rsync. There is no Python or pipx dependency on the VM.
 
 ### Built-in catalog
 
@@ -145,9 +145,9 @@ default; the agentworks VM config controls whether nerf is installed at all (opt
 
 ### Manifest merging
 
-Users can provide additional manifests on top of the built-in catalog. Merging is last-wins by
-tool name: if two manifests define `nerf-git-push-origin`, the last one on the command line wins.
-This makes it easy to override a built-in tool definition with a customized version.
+Users can provide additional manifests on top of the built-in catalog. Merging is last-wins by tool
+name: if two manifests define `nerf-git-push-origin`, the last one on the command line wins. This
+makes it easy to override a built-in tool definition with a customized version.
 
 ```text
 nerf build [--outdir <dir>] [--no-default] [--keep-existing] [<manifest> ...]
@@ -175,9 +175,9 @@ Build fails with a clear error message on the first violation. No partial output
 ### Generated scripts
 
 Each generated script is self-contained: all argument parsing, validation, help text, and error
-formatting is inlined. There is no shared library and no sourcing. Scripts behave identically to
-the underlying tool from the perspective of exit codes and signal handling -- the final instruction
-is always `exec`, which replaces the shell process with the target command.
+formatting is inlined. There is no shared library and no sourcing. Scripts behave identically to the
+underlying tool from the perspective of exit codes and signal handling -- the final instruction is
+always `exec`, which replaces the shell process with the target command.
 
 Example for `nerf-git-push-remote`:
 
@@ -259,29 +259,26 @@ nerfctl-claude-list         [--settings <path>]
 
 ### Operations
 
-| Command                         | Effect                                                                   |
-| ------------------------------- | ------------------------------------------------------------------------ |
-| `nerfctl-claude-grant <tool>`   | Add `Bash(<tool>)` to `permissions.allow`, remove from `deny` if present |
-| `nerfctl-claude-deny <tool>`    | Add `Bash(<tool>)` to `permissions.deny`, remove from `allow` if present |
-| `nerfctl-claude-reset <tool>`   | Remove `Bash(<tool>)` from both `allow` and `deny`                       |
-| `nerfctl-claude-list`           | Print all `Bash(nerf-*)` and `Bash(nerfctl-*)` entries from both lists   |
+| Command                       | Effect                                                                   |
+| ----------------------------- | ------------------------------------------------------------------------ |
+| `nerfctl-claude-grant <tool>` | Add `Bash(<tool>)` to `permissions.allow`, remove from `deny` if present |
+| `nerfctl-claude-deny <tool>`  | Add `Bash(<tool>)` to `permissions.deny`, remove from `allow` if present |
+| `nerfctl-claude-reset <tool>` | Remove `Bash(<tool>)` from both `allow` and `deny`                       |
+| `nerfctl-claude-list`         | Print all `Bash(nerf-*)` and `Bash(nerfctl-*)` entries from both lists   |
 
 ### Settings file format
 
 ```json
 {
   "permissions": {
-    "allow": [
-      "Bash(nerf-git-push-origin)",
-      "Bash(nerf-git-push-remote --remote *)"
-    ],
+    "allow": ["Bash(nerf-git-push-origin)", "Bash(nerf-git-push-remote --remote *)"],
     "deny": []
   }
 }
 ```
 
-For tools with parameters, `grant` writes the pattern with a wildcard for each parameter position
-so that any valid argument passes. The nerf tool itself enforces parameter validation at runtime.
+For tools with parameters, `grant` writes the pattern with a wildcard for each parameter position so
+that any valid argument passes. The nerf tool itself enforces parameter validation at runtime.
 
 ### `--settings` flag
 
@@ -307,8 +304,8 @@ The manifest captures everything needed to generate a complete skill without add
 
 ### Generated skill structure
 
-`nerf skill` generates one `<skill_group>/SKILL.md` per package (rulesync skill directory
-format). The file has YAML frontmatter followed by the skill content:
+`nerf skill` generates one `<skill_group>/SKILL.md` per package (rulesync skill directory format).
+The file has YAML frontmatter followed by the skill content:
 
 ```markdown
 ---
@@ -339,8 +336,8 @@ Push the current branch to a non-origin remote.
 
 **Arguments:**
 
-- `--remote` (required): Name of the remote to push to. Cannot be `origin`.
-  Must match `^[a-z0-9_-]+$`.
+- `--remote` (required): Name of the remote to push to. Cannot be `origin`. Must match
+  `^[a-z0-9_-]+$`.
 
 **Example:** `nerf-git-push-remote --remote upstream`
 ```
@@ -355,16 +352,16 @@ files in the workspace's rulesync source based on which nerf packages are instal
 The agentworks CLI does not own the nerf build process -- it exposes VM-level configuration that
 controls how `nerf build` is invoked when provisioning or updating a VM.
 
-Nerf tool installation is opt-in: disabled by default, enabled via `vm.config.install_nerf_tools =
-true`. When enabled, VM config specifies:
+Nerf tool installation is opt-in: disabled by default, enabled via
+`vm.config.install_nerf_tools = true`. When enabled, VM config specifies:
 
 - Whether to include the default catalog (`skip_nerf_defaults`)
 - Any additional user manifests to merge in (`nerf_addl_manifests`)
 - Whether to preserve files not regenerated by this run (`nerf_keep_existing`, default false)
 
 **Build and deploy model:** `nerf build` and `nerf skill` run on the operator's workstation (where
-the agentworks CLI runs). Agentworks rsyncs the output directories to the VM. There is no Python
-or pipx dependency on the VM -- only bash and the generated shell scripts.
+the agentworks CLI runs). Agentworks rsyncs the output directories to the VM. There is no Python or
+pipx dependency on the VM -- only bash and the generated shell scripts.
 
 Executables are installed to `/opt/agentworks/nerf/bin/` (added to the agent PATH). Skills are
 installed to `/opt/agentworks/nerf/skills/` (rulesync sources from this path). Custom output
@@ -372,9 +369,9 @@ locations can be specified via `nerf_bin_dir` and `nerf_skills_dir` in VM config
 
 ### PATH configuration
 
-Nerf tools live under `/opt/...` and must be available to all users on the VM, including agent
-users created after init. The user-level `~/.agentworks-path.sh` mechanism used for install
-commands is not sufficient here.
+Nerf tools live under `/opt/...` and must be available to all users on the VM, including agent users
+created after init. The user-level `~/.agentworks-path.sh` mechanism used for install commands is
+not sufficient here.
 
 Agentworks writes `/etc/profile.d/agentworks-nerf.sh` (via sudo) with:
 
@@ -416,16 +413,16 @@ default, so agent tool invocations pick up the PATH correctly.
 ## Relationship to the Old Nerfed Commands Design
 
 The `2026-03-08-nerfed-commands` design is superseded by this one. See
-[its lockfile](../2026-03-08-nerfed-commands/locked.md) for the rationale. OS-level SUID
-enforcement may appear as a separate future mechanism but is not part of this design.
+[its lockfile](../2026-03-08-nerfed-commands/locked.md) for the rationale. OS-level SUID enforcement
+may appear as a separate future mechanism but is not part of this design.
 
-| Aspect              | Old design (nerfrun)            | This design                           |
-| ------------------- | ------------------------------- | ------------------------------------- |
-| Enforcement         | OS-level SUID                   | Application permission model          |
-| Compiled binary     | Required (Go or Rust)           | None                                  |
-| Generated artifacts | Symlinks to nerfrun             | Self-contained shell scripts          |
-| Credential access   | Inherited via SUID              | Agent's own access (injection: future)|
-| RBAC                | rbac.toml checked by nerfrun    | Framework settings.json               |
-| Bigred              | Lockfile checked by nerfrun     | Not in v1                             |
-| Discovery (wcid)    | Built into nerfrun              | Not in v1                             |
-| Audit logging       | nerfrun logs every invocation   | Not in v1                             |
+| Aspect              | Old design (nerfrun)          | This design                            |
+| ------------------- | ----------------------------- | -------------------------------------- |
+| Enforcement         | OS-level SUID                 | Application permission model           |
+| Compiled binary     | Required (Go or Rust)         | None                                   |
+| Generated artifacts | Symlinks to nerfrun           | Self-contained shell scripts           |
+| Credential access   | Inherited via SUID            | Agent's own access (injection: future) |
+| RBAC                | rbac.toml checked by nerfrun  | Framework settings.json                |
+| Bigred              | Lockfile checked by nerfrun   | Not in v1                              |
+| Discovery (wcid)    | Built into nerfrun            | Not in v1                              |
+| Audit logging       | nerfrun logs every invocation | Not in v1                              |

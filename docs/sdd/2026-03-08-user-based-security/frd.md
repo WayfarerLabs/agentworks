@@ -19,9 +19,9 @@ workspaces via the CLI. Has unrestricted sudo.
 
 ### AI agent
 
-Operates inside workspaces via an AI coding tool (Claude Code, Cursor, Codex, etc.). Has access
-to specific workspaces via grant-based permissions. Cannot sudo or access workspaces it has not
-been granted access to.
+Operates inside workspaces via an AI coding tool (Claude Code, Cursor, Codex, etc.). Has access to
+specific workspaces via grant-based permissions. Cannot sudo or access workspaces it has not been
+granted access to.
 
 ## Requirements
 
@@ -50,10 +50,9 @@ Agent users:
 
 Agents access workspaces via a grant system:
 
-- Explicit grants: managed by the operator via `agent grant-workspaces` and
-  `agent deny-workspaces`
-- Implicit grants: automatically created when a task is created for an agent in a workspace,
-  removed when the task is deleted
+- Explicit grants: managed by the operator via `agent grant-workspaces` and `agent deny-workspaces`
+- Implicit grants: automatically created when a task is created for an agent in a workspace, removed
+  when the task is deleted
 - Grant-all flag: agent is automatically added to all workspaces
 - Grants translate to Linux group membership for file access enforcement
 

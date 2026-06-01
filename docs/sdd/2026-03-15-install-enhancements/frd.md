@@ -13,8 +13,7 @@ are referenced by name from `vm.config` and `agent.config`. This works but has s
    per-user install commands (tools that install into `$HOME`).
 2. Every command must be defined in the user's config file, even for common tools (bun, claude, gh).
    This creates boilerplate and makes it easy to get definitions wrong.
-3. There is no automated support for third-party apt sources (GitHub CLI, Docker, HashiCorp,
-   etc.).
+3. There is no automated support for third-party apt sources (GitHub CLI, Docker, HashiCorp, etc.).
 
 This effort restructures install-time operations into clearly separated concepts, introduces a
 built-in catalog that ships with agentworks, and adds CLI discoverability for available commands.
@@ -25,8 +24,8 @@ built-in catalog that ships with agentworks, and adds CLI discoverability for av
 
 - Cleanly separate system-level setup (apt sources, apt packages, and system install commands) from
   per-user install commands
-- Ship a built-in catalog of common tools so users can easily incorporate them by name
-  without having to define the details
+- Ship a built-in catalog of common tools so users can easily incorporate them by name without
+  having to define the details
 - Allow users to define custom entries and override built-in ones
 - Support third-party apt sources with idempotent GPG key and source list management
 - Make all operations safe to re-run via `vm reinit`
@@ -142,9 +141,9 @@ Agent config selects from per-user install commands only:
 
 ### R4: Built-in Catalog
 
-Agentworks must ship a built-in catalog file (TOML) containing common apt sources, apt
-packages, system install commands, and per-user install commands. The catalog is read-only
-and bundled with the package.
+Agentworks must ship a built-in catalog file (TOML) containing common apt sources, apt packages,
+system install commands, and per-user install commands. The catalog is read-only and bundled with
+the package.
 
 Resolution order: user config entries take precedence over built-in catalog entries with the same
 name.
@@ -171,16 +170,16 @@ correct value (`amd64`, `arm64`) at install time based on the target VM.
 
 VM initialization must be fully driven by config. CLI arguments that override initialization
 behavior (`--extra-packages`, `--git-credentials` on `vm create`; `--git-credentials` on
-`vm reinit`) are removed. The config file is the single source of truth for what gets installed
-and configured during initialization.
+`vm reinit`) are removed. The config file is the single source of truth for what gets installed and
+configured during initialization.
 
-`vm create` retains only immutable provisioning parameters that describe the VM's shape:
-`--name`, `--platform`, `--vm-host`, `--cpus`, `--memory`, `--disk`, `--azure-vm-size`,
-`--vm-user`. These are set once at creation time and persisted in the VM database record. They
-cannot be changed after creation.
+`vm create` retains only immutable provisioning parameters that describe the VM's shape: `--name`,
+`--platform`, `--vm-host`, `--cpus`, `--memory`, `--disk`, `--azure-vm-size`, `--vm-user`. These are
+set once at creation time and persisted in the VM database record. They cannot be changed after
+creation.
 
-`vm reinit` takes only the VM name. It re-runs initialization using the current config. Any
-changes to the config (new packages, different install commands, etc.) are picked up automatically.
+`vm reinit` takes only the VM name. It re-runs initialization using the current config. Any changes
+to the config (new packages, different install commands, etc.) are picked up automatically.
 
 Future work: VM templates will allow different VM configurations to be defined as named profiles in
 config. The selected template name would be another immutable provisioning parameter.

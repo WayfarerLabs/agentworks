@@ -57,9 +57,8 @@ git::https://github.com/user/infra.git?ref=abc123def
 
 ## Private repositories
 
-Git source references are fetched on the VM after git credentials are configured. This means
-private repos work as long as the appropriate `[git_credentials.*]` are set up in your agentworks
-config.
+Git source references are fetched on the VM after git credentials are configured. This means private
+repos work as long as the appropriate `[git_credentials.*]` are set up in your agentworks config.
 
 ## Examples
 

@@ -2,11 +2,11 @@
 
 ## Overview
 
-A task is a named tmux session running a single command in a workspace directory. Each task runs
-in one of two modes: **admin mode** (as the VM's admin user) or **agent mode** (as a specific
-agent's Linux user via login shell). Task sessions are locked down (no splits, no new windows,
-no prefix key). A separate VM-level console tmux session provides the operator with a
-multi-window view of all tasks, with full tmux controls.
+A task is a named tmux session running a single command in a workspace directory. Each task runs in
+one of two modes: **admin mode** (as the VM's admin user) or **agent mode** (as a specific agent's
+Linux user via login shell). Task sessions are locked down (no splits, no new windows, no prefix
+key). A separate VM-level console tmux session provides the operator with a multi-window view of all
+tasks, with full tmux controls.
 
 All task state is stored in the local SQLite database. tmux is the execution engine -- the CLI
 creates, inspects, and destroys tmux sessions over SSH.
@@ -29,10 +29,10 @@ VM (remote)
 
 ### Task Sessions
 
-Each task gets its own tmux session. The session name follows the pattern
-`<workspace>--<task>`, using the workspace as a namespace on the VM (consistent with the `--`
-separator used for agent linux usernames). The session is created with a restricted tmux config
-that disables all interactive session management.
+Each task gets its own tmux session. The session name follows the pattern `<workspace>--<task>`,
+using the workspace as a namespace on the VM (consistent with the `--` separator used for agent
+linux usernames). The session is created with a restricted tmux config that disables all interactive
+session management.
 
 ```text
 tmux new-session -d -s <workspace>--<task> -c <workspace-path> \
@@ -85,8 +85,8 @@ There are two levels of console:
 **VM console** (`vm-console`): A regular tmux session (default config, full controls) at the VM
 level. Each task window attaches to a task's tmux session (with `$TMUX` unset to allow nesting).
 Since the task session's management keys are selectively unbound, the console's prefix key works
-without conflict. Task windows use a wrapper that re-attaches if the connection drops and shows
-a message when the task session ends.
+without conflict. Task windows use a wrapper that re-attaches if the connection drops and shows a
+message when the task session ends.
 
 ```text
 vm-console (full tmux)
@@ -106,8 +106,8 @@ ws-myproject-console (tmuxinator, full tmux)
   Window 1: "myproject--claude-1"  ->  attached to task session (locked-down)
 ```
 
-The `vm console` and `workspace console` commands refuse to run inside an existing tmux session
-to avoid confusing prefix key conflicts. Pass `--allow-nesting` to override this check.
+The `vm console` and `workspace console` commands refuse to run inside an existing tmux session to
+avoid confusing prefix key conflicts. Pass `--allow-nesting` to override this check.
 
 When a task stops, its console window shows a message indicating the session has ended
 (`remain-on-exit` is enabled on the console session).
@@ -132,8 +132,8 @@ description = "Claude Code interactive session"
 restart_command = "claude --continue --name {{task_name}}"
 ```
 
-The single built-in template is "default", which runs a login shell with an empty command. Users
-can override it by defining `[task_templates.default]` in their config. When `--template` is not
+The single built-in template is "default", which runs a login shell with an empty command. Users can
+override it by defining `[task_templates.default]` in their config. When `--template` is not
 specified, the "default" template is used.
 
 Template resolution (same pattern as workspace templates):
@@ -149,8 +149,8 @@ syntax consistent with nerftools manifests. Available variables:
 - `{{task_name}}` -- the task name
 - `{{workspace_name}}` -- the workspace name
 
-For example, a claude template can use `claude --name {{task_name}}` so that the Claude session
-name is tied to the task, giving the operator a consistent name across task restarts.
+For example, a claude template can use `claude --name {{task_name}}` so that the Claude session name
+is tied to the task, giving the operator a consistent name across task restarts.
 
 ### Command execution
 
@@ -158,9 +158,8 @@ The command is executed via a login shell to pick up the user's profile, PATH, a
 
 - **Admin mode**: the tmux session runs as the admin user (who owns the SSH connection). The
   template command runs directly in the session.
-- **Agent mode**: the tmux session wraps the command in `su --login <linux-user>` to get a
-  proper login shell as the agent user, inheriting the agent's home directory, PATH, and
-  installed tools.
+- **Agent mode**: the tmux session wraps the command in `su --login <linux-user>` to get a proper
+  login shell as the agent user, inheriting the agent's home directory, PATH, and installed tools.
 
 ### Restart command
 
@@ -206,8 +205,8 @@ Status is determined by a combination of database state and tmux session existen
 
 ## SSH Execution
 
-All tmux commands are executed over SSH using the existing `agentworks.ssh` module. The pattern
-is the same as current tmuxinator management:
+All tmux commands are executed over SSH using the existing `agentworks.ssh` module. The pattern is
+the same as current tmuxinator management:
 
 ```python
 session = f"{workspace_name}--{task_name}"
@@ -223,8 +222,8 @@ For attaching (interactive), the CLI uses `ssh -t` to allocate a TTY and runs
 ## Restricted tmux Config Deployment
 
 The restricted tmux config file is deployed to the VM during initialization (or on first task
-create). It lives at a fixed path (e.g., `/opt/agentworks/tmux-task.conf`). This avoids
-regenerating it per task.
+create). It lives at a fixed path (e.g., `/opt/agentworks/tmux-task.conf`). This avoids regenerating
+it per task.
 
 ## Migration from tmuxinator
 

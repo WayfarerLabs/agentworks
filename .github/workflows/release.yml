@@ -6,7 +6,7 @@ on:
 
 permissions:
   contents: read
-  id-token: write  # Required for trusted publishing via OIDC
+  id-token: write # Required for trusted publishing via OIDC
 
 jobs:
   verify-tag-on-main:

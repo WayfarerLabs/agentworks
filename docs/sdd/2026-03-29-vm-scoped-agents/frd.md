@@ -2,8 +2,8 @@
 
 ## Problem Statement
 
-Agents are currently scoped to workspaces: each agent is created within a specific workspace and
-can only access that workspace. This prevents "personal assistant" style agents that work across
+Agents are currently scoped to workspaces: each agent is created within a specific workspace and can
+only access that workspace. This prevents "personal assistant" style agents that work across
 multiple workspaces on the same VM. An agent helping with a refactoring that spans two repos needs
 to be duplicated across both workspaces with separate tool installations, credentials, and dotfiles.
 
@@ -31,8 +31,8 @@ Operators can explicitly grant or deny workspace access for agents.
 - `agent grant-workspaces <agent> <workspace>[,<workspace>,...]` grants access to specific
   workspaces
 - `agent grant-workspaces <agent> --all` grants access to all current and future workspaces
-- `agent deny-workspaces <agent> <workspace>[,<workspace>,...]` removes explicit grants for
-  specific workspaces
+- `agent deny-workspaces <agent> <workspace>[,<workspace>,...]` removes explicit grants for specific
+  workspaces
 - `agent deny-workspaces <agent> --all` removes all explicit grants
 - Grants are stored in the database, not in config (they reference runtime workspace names)
 - Granting workspace access adds the agent to the `ws--<workspace>` Linux group

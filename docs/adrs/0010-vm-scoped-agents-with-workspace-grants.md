@@ -17,8 +17,8 @@ duplicated with separate tool installations, credentials, and dotfiles.
 
 ## Decision
 
-Agents are now VM-scoped. An agent is created on a VM (`agt--<name>`) and granted access to
-specific workspaces through a permission grant system.
+Agents are now VM-scoped. An agent is created on a VM (`agt--<name>`) and granted access to specific
+workspaces through a permission grant system.
 
 - **Explicit grants**: operator manages via `agent grant-workspaces` and `agent deny-workspaces`
 - **Implicit grants**: automatically created when a task is created for an agent in a workspace,
@@ -37,5 +37,5 @@ specific workspaces through a permission grant system.
   works without explicit grant management.
 - Workspace group naming changed from `ws-<name>` to `ws--<name>` for consistency with the
   `agt--<name>` convention.
-- Tradeoff: more complex permission model than workspace-scoped agents. Mitigated by implicit
-  grants handling the common case automatically.
+- Tradeoff: more complex permission model than workspace-scoped agents. Mitigated by implicit grants
+  handling the common case automatically.

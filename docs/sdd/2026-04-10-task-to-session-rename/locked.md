@@ -4,30 +4,30 @@ Locked: 2026-04-12
 
 ## Summary
 
-Renamed the "task" concept to "session" across the entire agentworks codebase. Session names are
-now globally unique (no longer scoped to a workspace), simplifying the CLI, tmux integration, and
+Renamed the "task" concept to "session" across the entire agentworks codebase. Session names are now
+globally unique (no longer scoped to a workspace), simplifying the CLI, tmux integration, and
 internal code.
 
 ## Key decisions
 
-- **Globally unique session names** instead of workspace-scoped task names. The session name IS
-  the tmux session name -- no compound key derivation. Most CLI commands take just a session name
-  with no `--workspace` flag.
-- **`--` separator in migration** for existing tasks (`<workspace>--<task>`). This is
-  collision-free (disallowed in names) and matches the existing tmux session and socket naming,
-  so migrated names work immediately with no legacy fallback.
+- **Globally unique session names** instead of workspace-scoped task names. The session name IS the
+  tmux session name -- no compound key derivation. Most CLI commands take just a session name with
+  no `--workspace` flag.
+- **`--` separator in migration** for existing tasks (`<workspace>--<task>`). This is collision-free
+  (disallowed in names) and matches the existing tmux session and socket naming, so migrated names
+  work immediately with no legacy fallback.
 - **`socket_path` persisted in DB** rather than derived at runtime. Decouples naming conventions
   from socket location. `_effective_socket_path()` derives the path as a fallback for migrated
   sessions with NULL `socket_path`.
-- **Clean break on config** -- no backward compatibility for `[task.*]` keys. Users must update
-  to `[session.*]`.
+- **Clean break on config** -- no backward compatibility for `[task.*]` keys. Users must update to
+  `[session.*]`.
 - **Socket lifecycle hardened**: pre-create check (remove stale, fail on active), post-delete
   cleanup (remove if server exited, warn if still running), bulk cleanup on vm/agent reinit.
 - **SGID on workspace subdirectories** fixed during this work -- `workspace create`, `repair`,
   `rehome`, and `copy` now set SGID on all subdirectories so files created by atomic-write tools
   (including Claude Code) inherit the workspace group.
-- **README rewritten** with four-concept domain model (Operator, VM, Workspace, Agent, Session),
-  Key Principles section, and Tightly Integrated Tools (SSH, Tailscale, Tmux).
+- **README rewritten** with four-concept domain model (Operator, VM, Workspace, Agent, Session), Key
+  Principles section, and Tightly Integrated Tools (SSH, Tailscale, Tmux).
 
 ## Files changed
 
