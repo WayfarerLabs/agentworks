@@ -62,11 +62,16 @@ def create_workspace(
 
     def _safe_cleanup() -> None:
         # Rollback failures must not mask the original KI/exception. Surface
-        # them as a warning and continue propagating the original error.
+        # them as a warning (with workspace name and SSH log path for the
+        # user to follow up on) and continue propagating the original error.
         try:
             _cleanup()
         except Exception as cleanup_err:
-            output.warn(f"rollback during workspace create failed: {cleanup_err}")
+            output.warn(
+                f"rollback during workspace create '{ws_name}' failed: {cleanup_err}. "
+                f"VM may have residual files or VS Code workspace file. "
+                f"SSH log: {ssh_logger.path}"
+            )
 
     # Outer try/finally ensures the SSH logger is closed exactly once, AFTER
     # any rollback commands have been logged. Closing earlier would write the
