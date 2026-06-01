@@ -225,7 +225,11 @@ def _dedupe_specs(specs: list[SessionSpec]) -> None:
     seen: set[str] = set()
     for spec in specs:
         if spec.name in seen:
-            raise ValidationError(f"session '{spec.name}' listed more than once")
+            raise ValidationError(
+                f"session '{spec.name}' listed more than once",
+                entity_kind="session",
+                entity_name=spec.name,
+            )
         seen.add(spec.name)
 
 

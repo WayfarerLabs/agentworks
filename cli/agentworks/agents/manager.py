@@ -163,7 +163,7 @@ def create_agent(
                 entity_kind="agent",
                 entity_name=name,
                 hint=f"SSH log: {ssh_logger.path}",
-            ) from None
+            ) from e
     finally:
         ssh_logger.close()
 
@@ -326,7 +326,7 @@ def reinit_agent(
                 entity_kind="agent",
                 entity_name=name,
                 hint=f"SSH log: {ssh_logger.path}",
-            ) from None
+            ) from e
     finally:
         ssh_logger.close()
 

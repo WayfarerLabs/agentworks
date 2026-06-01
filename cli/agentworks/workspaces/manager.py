@@ -120,7 +120,7 @@ def create_workspace(
                 entity_kind="workspace",
                 entity_name=ws_name,
                 hint=f"SSH log: {ssh_logger.path}",
-            ) from None
+            ) from e
 
         # Add grant_all agents to the new workspace group. Best-effort: the
         # workspace itself was already created and inserted above, so a
@@ -585,7 +585,11 @@ def rehome_workspace(
     old_norm = old_path.rstrip("/") + "/"
     new_norm = new_path.rstrip("/") + "/"
     if new_norm.startswith(old_norm) or old_norm.startswith(new_norm):
-        raise ValidationError("source and target paths overlap")
+        raise ValidationError(
+            "source and target paths overlap",
+            entity_kind="workspace",
+            entity_name=name,
+        )
 
     # Block unless all sessions are STOPPED
     from agentworks.db import PID_STOPPED, SessionStatus
@@ -803,7 +807,7 @@ def _rehome_vm(
                     f"SSH log: {ssh_logger.path}. "
                     f"{_rehome_partial_state_hint(db, ws_name, old_path, new_path)}"
                 ),
-            ) from None
+            ) from e
     finally:
         ssh_logger.close()
 

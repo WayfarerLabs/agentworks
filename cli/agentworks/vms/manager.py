@@ -1122,23 +1122,39 @@ def port_forward_vm(
             try:
                 port = int(parts[0])
             except ValueError:
-                raise ValidationError(f"invalid port '{spec}'") from None
+                raise ValidationError(
+                    f"invalid port '{spec}'",
+                    entity_kind="vm",
+                    entity_name=name,
+                ) from None
             forwards.append((port, port))
         elif len(parts) == 2:
             try:
                 local_port = int(parts[0])
                 remote_port = int(parts[1])
             except ValueError:
-                raise ValidationError(f"invalid port spec '{spec}'") from None
+                raise ValidationError(
+                    f"invalid port spec '{spec}'",
+                    entity_kind="vm",
+                    entity_name=name,
+                ) from None
             forwards.append((local_port, remote_port))
         else:
-            raise ValidationError(f"invalid port spec '{spec}' (expected [LOCAL:]REMOTE)")
+            raise ValidationError(
+                f"invalid port spec '{spec}' (expected [LOCAL:]REMOTE)",
+                entity_kind="vm",
+                entity_name=name,
+            )
 
     # Validate port ranges
     for local_port, remote_port in forwards:
         for label, port in [("local", local_port), ("remote", remote_port)]:
             if port < 1 or port > 65535:
-                raise ValidationError(f"{label} port {port} out of range (1-65535)")
+                raise ValidationError(
+                    f"{label} port {port} out of range (1-65535)",
+                    entity_kind="vm",
+                    entity_name=name,
+                )
 
     # Build SSH command with -L flags for each forward
     ssh_cmd = ["ssh", "-N", "-o", "StrictHostKeyChecking=accept-new"]
