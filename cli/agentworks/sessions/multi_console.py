@@ -942,6 +942,7 @@ def _split_shell_pane(
         )
         return None
 
+    q_console = shlex.quote(console_name)
     pane_id = res.stdout.strip()
     if not pane_id:
         # tmux is supposed to print the new pane id on stdout under `-P -F`;
@@ -951,15 +952,27 @@ def _split_shell_pane(
         output.warn(
             f"added shell pane in '{window_name}' but couldn't capture its id; "
             f"the pane is untagged. restore-session won't be able to repair "
-            f"this window; use `agentworks console attach --recreate` if "
-            f"you need clean tag state."
+            f"this window; use `agentworks console attach {q_console} "
+            f"--recreate` if you need clean tag state."
         )
         return None
     q_pane = shlex.quote(pane_id)
-    target.run(
+    tag_res = target.run(
         f"tmux set-option -p -t {q_pane} {SHELL_INDEX_OPTION} {config_index}",
         check=False,
     )
+    if not tag_res.ok:
+        # The split happened (the pane is live) but tagging failed. Treat this
+        # as a failure: callers like restore_session must know the pane is
+        # untagged so the operator gets a loud signal rather than a future
+        # untagged-pane error on the next restore-session.
+        output.warn(
+            f"added shell pane in '{window_name}' but tagging failed "
+            f"({tag_res.stderr.strip() or 'tmux refused set-option'}); "
+            f"the pane is untagged. Use `agentworks console attach "
+            f"{q_console} --recreate` to rebuild and retag from scratch."
+        )
+        return None
     return pane_id
 
 

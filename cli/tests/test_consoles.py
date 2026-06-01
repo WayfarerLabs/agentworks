@@ -1363,8 +1363,41 @@ def test_split_shell_pane_warns_when_split_returns_no_pane_id(
 
     set_options = [c for c in fake_target.commands if "set-option -p" in c]
     assert set_options == []
+    # The recovery hint includes the actual console name so it can be
+    # copy/pasted verbatim.
     assert any(
-        "couldn't capture its id" in w and "untagged" in w
+        "couldn't capture its id" in w
+        and "untagged" in w
+        and "attach con --recreate" in w
+        for w in captured_output.warnings
+    )
+
+
+def test_split_shell_pane_warns_when_set_option_fails(
+    db: Database, fake_target: _FakeTarget, captured_output: CapturedOutput
+) -> None:
+    """If tmux split-window succeeded and emitted a pane id but the subsequent
+    set-option fails (tmux version/flags mismatch, target gone, etc.), the
+    pane is live but untagged. _split_shell_pane must surface this so the
+    operator gets a loud signal instead of restore-session breaking later."""
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["a"])
+    create_console(db, name="con", vm_name="vm1", session_specs=["a"])
+
+    fake_target.commands.clear()
+    fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
+    fake_target.responses["split-window -t aw-console-con:a"] = _FakeResult(
+        stdout="%7\n"
+    )
+    # set-option fails non-zero.
+    fake_target.responses["set-option -p"] = _FakeResult(
+        returncode=1, stderr="bad target"
+    )
+
+    add_shell(db, _StubConfig(), console_name="con", session_name="a")
+
+    assert any(
+        "tagging failed" in w and "attach con --recreate" in w
         for w in captured_output.warnings
     )
 
