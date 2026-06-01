@@ -316,7 +316,11 @@ def _resolve_template(config: Config, template_name: str | None) -> ResolvedSess
     try:
         return resolve_template(config, template_name)
     except ValueError as e:
-        raise ValidationError(str(e)) from None
+        raise ValidationError(
+            str(e),
+            entity_kind="session-template",
+            entity_name=template_name,
+        ) from None
 
 
 def _substitute_template_vars(text: str, variables: dict[str, str]) -> str:

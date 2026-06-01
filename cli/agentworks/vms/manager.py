@@ -1186,7 +1186,11 @@ def port_forward_vm(
         rc = proc.wait()
         sys.exit(rc)
     except OSError as e:
-        raise ConnectivityError(f"failed to start SSH: {e}") from e
+        raise ConnectivityError(
+            f"failed to start SSH: {e}",
+            entity_kind="vm",
+            entity_name=name,
+        ) from e
 
 
 def _ensure_tailscale(
