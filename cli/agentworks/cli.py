@@ -1377,6 +1377,29 @@ def console_add_shell(
     )
 
 
+@console_app.command("restore-session")
+def console_restore_session(
+    name: Annotated[str, typer.Argument(help="Console name")],
+    session: Annotated[str, typer.Argument(help="Session whose window to restore")],
+) -> None:
+    """Reconcile a session window's live shell panes against the configured list.
+
+    Re-adds any panes you killed (e.g. accidentally), restoring each one to
+    its original position. Refuses to remove panes if you have more live than
+    configured; for that, use `console attach --recreate`. Pre-tagging consoles
+    require `attach --recreate` once to retag from scratch.
+    """
+    from agentworks.config import load_config
+    from agentworks.sessions.multi_console import restore_session
+
+    restore_session(
+        _get_db(),
+        load_config(),
+        console_name=name,
+        session_name=session,
+    )
+
+
 # -- Installer catalog commands --------------------------------------------
 
 _TYPE_CHOICES = click.Choice(["apt-source", "apt-package", "system-install-cmd", "user-install-cmd"])

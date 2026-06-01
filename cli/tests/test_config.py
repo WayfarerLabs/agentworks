@@ -418,3 +418,51 @@ def test_claude_marketplaces_rejects_string(tmp_path: Path) -> None:
     """)
     with pytest.raises(ConfigError, match="must be a list of strings"):
         load_config(config_file)
+
+
+# -- [console] section -----------------------------------------------------
+
+
+def test_console_default_layout_default_when_section_missing(tmp_path: Path) -> None:
+    """No [console] section produces the documented tiled default."""
+    config_file = _minimal_config(tmp_path)
+    cfg = load_config(config_file)
+    assert cfg.console.default_layout == "tiled"
+
+
+@pytest.mark.parametrize(
+    "layout",
+    ["tiled", "even-vertical", "even-horizontal", "main-vertical", "main-horizontal"],
+)
+def test_console_default_layout_accepts_valid_presets(tmp_path: Path, layout: str) -> None:
+    """All five tmux preset layout names are accepted verbatim."""
+    config_file = _minimal_config(tmp_path, f"""
+        [console]
+        default_layout = "{layout}"
+    """)
+    cfg = load_config(config_file)
+    assert cfg.console.default_layout == layout
+
+
+def test_console_default_layout_rejects_unknown(tmp_path: Path) -> None:
+    """Unknown layout names fail at load with a list of valid alternatives."""
+    config_file = _minimal_config(tmp_path, """
+        [console]
+        default_layout = "tabbed"
+    """)
+    with pytest.raises(ConfigError, match="console.default_layout must be one of"):
+        load_config(config_file)
+
+
+def test_console_section_unexpected_keys_warn(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Unknown keys in [console] surface as warnings, not silent ignores."""
+    config_file = _minimal_config(tmp_path, """
+        [console]
+        default_layout = "tiled"
+        unknown_key = "x"
+    """)
+    load_config(config_file)
+    captured = capsys.readouterr()
+    assert "unknown_key" in captured.err or "unknown_key" in captured.out

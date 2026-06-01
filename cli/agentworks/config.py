@@ -102,6 +102,24 @@ class DefaultsConfig:
     vm_host: str | None = None
 
 
+# Valid tmux preset layouts for named-console session windows. These map
+# 1:1 to tmux's built-in select-layout names; we deliberately don't invent
+# our own names so operators can apply the same value to a window via
+# `tmux select-layout` on the fly.
+VALID_CONSOLE_LAYOUTS = (
+    "tiled",
+    "even-vertical",
+    "even-horizontal",
+    "main-vertical",
+    "main-horizontal",
+)
+
+
+@dataclass(frozen=True)
+class ConsoleConfig:
+    default_layout: str = "tiled"
+
+
 @dataclass(frozen=True)
 class VMTemplate:
     """VM template definition. All fields are optional (None = inherit/default)."""
@@ -231,6 +249,7 @@ class Config:
     operator: OperatorConfig
     paths: PathsConfig
     defaults: DefaultsConfig
+    console: ConsoleConfig
     vm_templates: dict[str, VMTemplate]
     vm: ResolvedVMTemplate
     admin: AdminConfig
@@ -392,6 +411,25 @@ def _load_defaults(data: dict[str, object], issues: list[str]) -> DefaultsConfig
         platform=str(platform) if platform is not None else None,
         vm_host=str(raw["vm_host"]) if "vm_host" in raw else None,
     )
+
+
+_CONSOLE_KEYS = {"default_layout"}
+
+
+def _load_console(data: dict[str, object], issues: list[str]) -> ConsoleConfig:
+    raw = data.get("console", {})
+    if not isinstance(raw, dict):
+        raise ConfigError("[console] must be a table")
+
+    _warn_unexpected_keys(raw, _CONSOLE_KEYS, "console", issues)
+
+    layout = raw.get("default_layout", "tiled")
+    if layout not in VALID_CONSOLE_LAYOUTS:
+        raise ConfigError(
+            f"console.default_layout must be one of {VALID_CONSOLE_LAYOUTS}, got: {layout}"
+        )
+
+    return ConsoleConfig(default_layout=str(layout))
 
 
 _VM_TEMPLATE_KEYS = {
@@ -865,6 +903,7 @@ def load_config(path: Path | None = None, *, warn_issues: bool = True) -> Config
         operator=_load_operator(data, issues),
         paths=_load_paths(data),
         defaults=_load_defaults(data, issues),
+        console=_load_console(data, issues),
         vm_templates=loaded_vm_templates,
         vm=resolved_vm,
         admin=admin,
