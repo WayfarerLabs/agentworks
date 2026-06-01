@@ -1,5 +1,69 @@
 # Changelog
 
+## [0.3.0](https://github.com/WayfarerLabs/agentworks/compare/v0.2.1...v0.3.0) (2026-06-01)
+
+
+### ⚠ BREAKING CHANGES
+
+* split completion command into show/install with shell autodetection
+* drop local workspaces; all workspaces are VM-scoped
+
+### Features
+
+* **cli:** add 'aw console' command group ([dc833bd](https://github.com/WayfarerLabs/agentworks/commit/dc833bdc55ee02bb8e36c24a5e0b08fb91bdd0e6))
+* **cli:** Ctrl-C triggers per-op rollback; clean SIGINT exit ([0648b16](https://github.com/WayfarerLabs/agentworks/commit/0648b16f9d98c686c63a59eb1b2cac2cad9f8625))
+* **cli:** Ctrl-C triggers per-op rollback; clean SIGINT exit ([03ab4d0](https://github.com/WayfarerLabs/agentworks/commit/03ab4d0cf7ea4a6a7287443e6e79af6b8b97242c))
+* **cli:** ship 'agw' as a short-name alias for the agentworks binary ([c99c044](https://github.com/WayfarerLabs/agentworks/commit/c99c044ed0073308cc427aaa13f3cb31b82567f5))
+* **completions:** wire console commands for zsh/bash/powershell ([6181cb7](https://github.com/WayfarerLabs/agentworks/commit/6181cb751cc633333eac39b7e10d802507ef313c))
+* **consoles:** add --add-admin-shell flag for legacy vm-console behavior ([f337f38](https://github.com/WayfarerLabs/agentworks/commit/f337f38eba60b7dea78c315dcddf4e01f82940a4))
+* **consoles:** add 'Waiting for session to restart...' status line ([8fc20a7](https://github.com/WayfarerLabs/agentworks/commit/8fc20a7bdbac58f1894e301688f7dbd82b7249b4))
+* **consoles:** announce attach/build/rebuild path in console attach ([17d14aa](https://github.com/WayfarerLabs/agentworks/commit/17d14aa26451aa49ec5f7e592a8835c1d0c1c5d4))
+* **consoles:** hold windows open indefinitely; silent poll with banner when session is down ([10c002c](https://github.com/WayfarerLabs/agentworks/commit/10c002c410646ebe97f678f824eec69c64c92339))
+* **consoles:** infer --vm from sessions, add --all-running, fix variadic positional completions ([11c5742](https://github.com/WayfarerLabs/agentworks/commit/11c574210f00aed8e67ddef6ff91063dd46d9d5b))
+* **consoles:** infer --vm from sessions, add --all-running, fix variadic positional completions ([6bf8308](https://github.com/WayfarerLabs/agentworks/commit/6bf8308f467f5359b23a748d0454d9de56287c43))
+* **consoles:** show 'Waiting for session to restart...' after exit; use 'exited' ([780373b](https://github.com/WayfarerLabs/agentworks/commit/780373b6fe2e39a319c24a6f0bf6c61e73d14ca9))
+* **consoles:** tmux orchestration with shell panes and live sync ([1ebc1b1](https://github.com/WayfarerLabs/agentworks/commit/1ebc1b19d27714bdbfc39eec1951ee8d460c7cd8))
+* **db:** add consoles and console_sessions tables ([f255397](https://github.com/WayfarerLabs/agentworks/commit/f255397310f4e92cb96c82383a8c75baa211dfe0))
+* named consoles with curated session lists ([d7a36c2](https://github.com/WayfarerLabs/agentworks/commit/d7a36c2d8d37fef835deb62f791794c690c26035))
+* **sessions:** add multi_console core orchestration ([a0adfc8](https://github.com/WayfarerLabs/agentworks/commit/a0adfc8dbfea7485639b5fcdb34cdd68ddc8ecee))
+* ship 'agw' as a short-name alias for the agentworks CLI ([32be51a](https://github.com/WayfarerLabs/agentworks/commit/32be51a29e9d34551aa45650b83522ef810d0096))
+* support creating a new agent as part of session create ([f50b7a8](https://github.com/WayfarerLabs/agentworks/commit/f50b7a8b572199306532c75ac9a0530dd028c467))
+* support creating a new agent as part of session create ([7502755](https://github.com/WayfarerLabs/agentworks/commit/7502755e72d345a664d7415214166453bd9db52b))
+
+
+### Bug Fixes
+
+* _rehome_partial_state_hint mentions partial-copy possibility ([d31e55a](https://github.com/WayfarerLabs/agentworks/commit/d31e55af665e4b7fff44ff4188926e0260887e62))
+* accurate install path and dot-source wording in powershell script header ([cf8fa14](https://github.com/WayfarerLabs/agentworks/commit/cf8fa14b19d95b447b60bdef7a2f1773bda42524))
+* clean up agent grants for local workspaces in migration 26 and drop now-dead defensive code ([78b2254](https://github.com/WayfarerLabs/agentworks/commit/78b225420692174276875c22fbbaf5b57b6264e4))
+* **completions:** symlink bash completion under 'agw' so lazy-loading works ([9b32c82](https://github.com/WayfarerLabs/agentworks/commit/9b32c8293bb3d5284d82dabea1ab2b1ff32b58c9))
+* **consoles:** detect probe failure on --all-running; update help/docstring ([b411955](https://github.com/WayfarerLabs/agentworks/commit/b411955c05425530fe746c925bf384d0ffb6a896))
+* **consoles:** drop auto admin-shell window from named consoles ([44d9f37](https://github.com/WayfarerLabs/agentworks/commit/44d9f373fa130d2be2d74808f25eb7f57bb478c0))
+* **consoles:** make placeholder window name collision-proof; warn on list-windows failure ([6d387e1](https://github.com/WayfarerLabs/agentworks/commit/6d387e1931fbd8bc3a0587caca1c4ff9f90d9f0c))
+* **consoles:** retry attach loop with ~10s grace to survive session restart (closes [#51](https://github.com/WayfarerLabs/agentworks/issues/51)) ([98f4354](https://github.com/WayfarerLabs/agentworks/commit/98f43544b04c361cfbc3f17ac4eea16556f6e431))
+* cspell -- Americanize 'normalises'/'Recognises' and allow 'delenv'/'autodetection' ([3432f7d](https://github.com/WayfarerLabs/agentworks/commit/3432f7db1578424be986076d31b3de66024ef856))
+* point grant-recovery hints at the real CLI command ([a2c8189](https://github.com/WayfarerLabs/agentworks/commit/a2c81890f1fa87e149ba1b0c49f2a088643fd025))
+* revert grant-all DB grant on Ctrl-C during group add ([cb7f15b](https://github.com/WayfarerLabs/agentworks/commit/cb7f15bde65c331a65b44144d85f020743be25c5))
+* revert grant-all DB grant on Ctrl-C during the insert too ([1f52b5b](https://github.com/WayfarerLabs/agentworks/commit/1f52b5b6199009cbc47f436e7e7e6f96054c02fc))
+* route group membership through stored linux_group, add migration 22 test ([d0f8dbb](https://github.com/WayfarerLabs/agentworks/commit/d0f8dbbcb80fd53c2495183a0c1542824ca434e7))
+* **sessions:** stop creating duplicate console windows on restart; deprecate 'aw vm console' ([1874426](https://github.com/WayfarerLabs/agentworks/commit/18744269a34120568bd3d8aa1572db5cbf758f2c))
+* surface --shell hint in doctor and call PowerShell wiring a dot-source line ([e3e1672](https://github.com/WayfarerLabs/agentworks/commit/e3e167270db22f8894cf9e45ff1c231ff4093351))
+
+
+### Documentation
+
+* **consoles:** clarify --vm selection matches existing CLI conventions ([8940709](https://github.com/WayfarerLabs/agentworks/commit/8940709138ad4f27a9ab2ea0309fd1923541f653))
+* **consoles:** de-emphasize --vm in primary examples (auto-detected) ([d97e99a](https://github.com/WayfarerLabs/agentworks/commit/d97e99ac453512455f5c3e66fde0b8d3af262d43))
+* **consoles:** soften restart comment and surface deprecation in vm --help ([b658c46](https://github.com/WayfarerLabs/agentworks/commit/b658c46b1a3b6c4c678c10061002e51ce96a162f))
+* distinguish domain-error vs unexpected-error paths in --debug section ([065801e](https://github.com/WayfarerLabs/agentworks/commit/065801e33b55420080149a5ea67de03754d3d71f))
+* name-positional examples in Getting Started and VM command table ([27fe300](https://github.com/WayfarerLabs/agentworks/commit/27fe3009cf43b9743f5bc84ba5adebf798e3c294))
+
+
+### Code Refactoring
+
+* drop local workspaces; all workspaces are VM-scoped ([e6236e6](https://github.com/WayfarerLabs/agentworks/commit/e6236e6c2969cd56efc9bd3cde35bfc37eceb9fc))
+* split completion command into show/install with shell autodetection ([a6d1af4](https://github.com/WayfarerLabs/agentworks/commit/a6d1af4d8bfac4973765f99040f190fcc24dd9fc))
+
 ## [0.2.1](https://github.com/WayfarerLabs/agentworks/compare/v0.2.0...v0.2.1) (2026-05-27)
 
 
