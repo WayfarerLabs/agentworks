@@ -316,11 +316,16 @@ def reinit_workspace(
 ) -> None:
     """Re-run workspace initialization to converge live VM state to the DB.
 
-    Idempotent. Forward-only: each step checks the live VM state for this
-    workspace (group existence, directory ownership and permissions, ACLs,
-    parent-directory traversal, agent group membership against the grant
-    table) and applies whatever fix is needed. Steps that are already
-    correct are reported as `OK:` and skipped.
+    Idempotent and forward-only. Steps split into two shapes:
+
+    - **Detection-based** (group existence, admin membership, agent group
+      membership against the grant table): probe live state first and only
+      apply a fix when state diverges. Report `Fixed:` when a fix ran,
+      `OK:` when no change was needed.
+    - **Always-applied** (directory ownership, permissions, SGID, ACLs,
+      parent-directory traversal): re-run their canonical commands every
+      time; the underlying chown/chmod/setfacl are no-ops on already-correct
+      state. Report `OK:` on success.
 
     Same semantic as `vm reinit` and `agent reinit`: the declared state in
     the DB is the source of truth; this reinit converges live state to
