@@ -68,12 +68,12 @@ console_app = typer.Typer(
 )
 app.add_typer(console_app)
 
-installer_app = typer.Typer(
-    name="installer",
-    help="List and inspect available installers from the catalog.",
+catalog_app = typer.Typer(
+    name="catalog",
+    help="List and inspect catalog entries (apt sources, apt packages, install commands).",
     no_args_is_help=True,
 )
-app.add_typer(installer_app)
+app.add_typer(catalog_app)
 
 config_app = typer.Typer(
     name="config",
@@ -1395,14 +1395,17 @@ def console_restore_session(
 _TYPE_CHOICES = click.Choice(["apt-source", "apt-package", "system-install-cmd", "user-install-cmd"])
 
 
-@installer_app.command("list")
-def installer_list(
+@catalog_app.command("list")
+def catalog_list(
     type_filter: Annotated[str | None, typer.Option("--type", help="Filter by type", click_type=_TYPE_CHOICES)] = None,
     source_filter: Annotated[
-        str | None, typer.Option("--source", help="Filter by source", click_type=click.Choice(["builtin", "custom"]))
+        str | None,
+        typer.Option(
+            "--source", help="Filter by source", click_type=click.Choice(["built-in", "custom"])
+        ),
     ] = None,
 ) -> None:
-    """List available installers from the built-in and custom catalog."""
+    """List catalog entries from the built-in and custom catalog."""
     from agentworks.catalog import load_builtin_catalog, load_catalog
     from agentworks.config import load_config
 
@@ -1426,9 +1429,7 @@ def installer_list(
                 source = "built-in"
             else:
                 source = "built-in"
-            if source_filter == "builtin" and source != "built-in":
-                continue
-            if source_filter == "custom" and source != "custom":
+            if source_filter is not None and source != source_filter:
                 continue
             rows.append((type_label, name, source, entry.description))
 
@@ -1466,8 +1467,8 @@ _CONFIG_ATTR = {
 }
 
 
-@installer_app.command("describe")
-def installer_describe(
+@catalog_app.command("describe")
+def catalog_describe(
     name: Annotated[str, typer.Argument(help="Entry name")],
 ) -> None:
     """Show details of a catalog entry."""

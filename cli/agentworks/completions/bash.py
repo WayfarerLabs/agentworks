@@ -19,7 +19,7 @@ DYNAMIC_SNIPPETS: dict[str, str] = {
     "git_credentials": (
         "$(sed -n 's/^\\[git_credentials\\.\\([^]]*\\)\\]/\\1/p' \"$HOME/.config/agentworks/config.toml\" 2>/dev/null)"
     ),
-    "catalog_entries": ("$(agentworks installer list 2>/dev/null | tail -n +3 | awk '{print $2}')"),
+    "catalog_entries": ("$(agentworks catalog list 2>/dev/null | tail -n +3 | awk '{print $2}')"),
     "sessions": ("$(agentworks session list --no-status 2>/dev/null | tail -n +3 | awk '{print $1}')"),
     "agents": ("$(agentworks agent list 2>/dev/null | tail -n +3 | awk '{print $1}')"),
     "consoles": ("$(agentworks console list 2>/dev/null | tail -n +3 | awk '{print $1}')"),
