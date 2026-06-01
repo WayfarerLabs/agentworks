@@ -363,7 +363,7 @@ Manage workspaces on VMs.
 | `agentworks workspace list`                 | List workspaces                     |
 | `agentworks workspace copy <source> <name>` | Copy a workspace to a new VM        |
 | `agentworks workspace rehome <name>`        | Move workspace to a new path        |
-| `agentworks workspace repair <name>`        | Repair workspace infrastructure     |
+| `agentworks workspace reinit <name>`        | Reinit workspace infrastructure     |
 | `agentworks workspace delete <name>`        | Delete a workspace                  |
 
 `workspace create <name>` takes the workspace name as a required positional. Optional flags: `--vm`,

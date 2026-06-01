@@ -29,3 +29,9 @@ gone; commands now sit directly on `agent` as `agent grant-workspace` and `agent
 matching the resource/verb-object pattern used elsewhere in the CLI. The `list` subcommand was
 dropped since `agent describe` already shows grants. Service-layer rename: `deny_workspaces` is now
 `revoke_workspaces`. See PR #74 and the `.rulesync/rules/cli-conventions.md` rule it introduced.
+
+The `workspace repair` command described above was renamed to `workspace reinit` to match the
+existing `vm reinit` / `agent reinit` shape. The behavior is unchanged (idempotent forward-only
+reconciliation of live VM state against the DB); the rename reflects that this is the same
+declarative-reinit semantic the rest of the platform already uses. Service-layer rename:
+`repair_workspace` is now `reinit_workspace`.
