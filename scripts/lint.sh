@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # ============================================================================
-# lint.sh -- Run the repository's file-quality linters at the versions CI uses.
+# lint.sh: run the repository's file-quality linters at the versions CI uses.
 #
 # Covers cspell, markdownlint-cli2, and prettier. Each is pinned in its own
 # `.<tool>-version` file (`.cspell-version`, `.markdownlint-cli2-version`,
@@ -33,18 +33,20 @@ source "$SCRIPT_DIR/_common.sh"
 # --- Arg parsing ---
 
 FIX=0
-case "${1:-}" in
-    --fix) FIX=1 ;;
-    -h|--help)
-        sed -n '/^# Usage:/,/^# ====/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//; /^====/d'
-        exit 0
-        ;;
-    "") ;;
-    *)
-        echo "Error: unknown argument '$1'. Run with --help for usage." >&2
-        exit 1
-        ;;
-esac
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --fix) FIX=1 ;;
+        -h|--help)
+            sed -n '/^# Usage:/,/^# ====/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//; /^====/d'
+            exit 0
+            ;;
+        *)
+            echo "Error: unknown argument '$1'. Run with --help for usage." >&2
+            exit 1
+            ;;
+    esac
+    shift
+done
 
 # --- Resolve npm package runner once ---
 #
