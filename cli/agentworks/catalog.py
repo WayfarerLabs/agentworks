@@ -13,11 +13,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from agentworks.errors import ExternalError
+
 if TYPE_CHECKING:
     from agentworks.config import Config
 
 
-class CatalogError(Exception):
+class CatalogError(ExternalError):
     """Raised when the catalog is invalid."""
 
 

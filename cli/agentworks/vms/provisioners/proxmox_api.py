@@ -14,8 +14,10 @@ import urllib.parse
 import urllib.request
 from typing import Any
 
+from agentworks.errors import ProvisionerError
 
-class ProxmoxAPIError(RuntimeError):
+
+class ProxmoxAPIError(ProvisionerError):
     """A Proxmox API call failed."""
 
 

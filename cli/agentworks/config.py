@@ -12,6 +12,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
+# ConfigError is defined in agentworks.errors and re-exported here for backward
+# compatibility with existing `from agentworks.config import ConfigError` users.
+# The `X as X` shape marks the name as an explicit re-export for mypy strict mode.
+from agentworks.errors import ConfigError as ConfigError
+
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
@@ -66,10 +71,6 @@ def validate_admin_username(admin_username: str) -> None:
 # Valid values for enum-like fields
 VALID_PLATFORMS = ("lima", "azure", "wsl2", "proxmox")
 VALID_GIT_CREDENTIAL_TYPES = ("azdo", "github")
-
-
-class ConfigError(Exception):
-    """Raised when configuration is invalid."""
 
 
 # -- Data classes ----------------------------------------------------------

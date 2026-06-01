@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Protocol
 
 from agentworks import output
 from agentworks.db import VMStatus
+from agentworks.errors import ProvisionerError
 from agentworks.ssh import ExecTarget, SSHError, SSHTarget
 from agentworks.vms.base import ProvisionResult, VMProvisioner
 from agentworks.vms.bootstrap_script import generate_bootstrap_script, vm_hostname
@@ -28,7 +29,7 @@ class _HasSubscriptionId(Protocol):
     def subscription_id(self) -> str: ...
 
 
-class AzureError(RuntimeError):
+class AzureError(ProvisionerError):
     """An Azure API operation failed.
 
     Attributes:
