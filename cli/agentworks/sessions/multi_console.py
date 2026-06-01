@@ -716,14 +716,19 @@ def _reorder_shell_panes(
             (pid for pid, pidx in pidx_by_pid.items() if pidx == target_pidx),
             None,
         )
-        target.run(
+        res = target.run(
             f"tmux swap-pane -s {shlex.quote(src_pid)} "
             f"-t {q_con}:{q_win}.{target_pidx}",
             check=False,
         )
-        pidx_by_pid[src_pid] = target_pidx
-        if displaced_pid is not None:
-            pidx_by_pid[displaced_pid] = src_pidx
+        # Only mirror the swap into the local map on success; a failed swap-pane
+        # leaves tmux state unchanged, so the previous mapping is still correct.
+        # Compounding stale state into subsequent iterations would target the
+        # wrong panes and could scramble order further.
+        if res.ok:
+            pidx_by_pid[src_pid] = target_pidx
+            if displaced_pid is not None:
+                pidx_by_pid[displaced_pid] = src_pidx
 
 
 # -- Read-side helpers ----------------------------------------------------
