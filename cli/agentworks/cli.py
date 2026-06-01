@@ -54,13 +54,6 @@ agent_app = typer.Typer(
 )
 app.add_typer(agent_app)
 
-agent_grants_app = typer.Typer(
-    name="workspace-grants",
-    help="Manage agent workspace access grants.",
-    no_args_is_help=True,
-)
-agent_app.add_typer(agent_grants_app)
-
 session_app = typer.Typer(
     name="session",
     help="Manage sessions.",
@@ -785,50 +778,52 @@ def agent_reinit(
     reinit_agent(_get_db(), load_config(), name=name)
 
 
-@agent_grants_app.command("grant")
-def agent_grants_grant(
+@agent_app.command("grant-workspace")
+def agent_grant_workspace(
     name: Annotated[str, typer.Argument(help="Agent name")],
-    workspaces: Annotated[str | None, typer.Argument(help="Workspace names (comma-separated)")] = None,
-    all_workspaces: Annotated[bool, typer.Option("--all", help="Grant access to all workspaces")] = False,
+    workspaces: Annotated[
+        list[str] | None,
+        typer.Argument(help="One or more workspace names"),
+    ] = None,
+    all_workspaces: Annotated[
+        bool, typer.Option("--all", help="Grant access to all workspaces")
+    ] = False,
 ) -> None:
     """Grant an agent explicit access to workspaces."""
     from agentworks.agents.manager import grant_workspaces
     from agentworks.config import load_config
 
-    if not all_workspaces and not workspaces:
-        typer.echo("Error: specify workspace names or --all", err=True)
-        raise typer.Exit(1)
+    grant_workspaces(
+        _get_db(),
+        load_config(),
+        agent_name=name,
+        workspace_names=list(workspaces or []),
+        grant_all=all_workspaces,
+    )
 
-    ws_list = [w.strip() for w in workspaces.split(",")] if workspaces else []
-    grant_workspaces(_get_db(), load_config(), agent_name=name, workspace_names=ws_list, grant_all=all_workspaces)
 
-
-@agent_grants_app.command("deny")
-def agent_grants_deny(
+@agent_app.command("revoke-workspace")
+def agent_revoke_workspace(
     name: Annotated[str, typer.Argument(help="Agent name")],
-    workspaces: Annotated[str | None, typer.Argument(help="Workspace names (comma-separated)")] = None,
-    all_workspaces: Annotated[bool, typer.Option("--all", help="Remove all explicit grants")] = False,
+    workspaces: Annotated[
+        list[str] | None,
+        typer.Argument(help="One or more workspace names"),
+    ] = None,
+    all_workspaces: Annotated[
+        bool, typer.Option("--all", help="Remove all explicit grants")
+    ] = False,
 ) -> None:
-    """Remove explicit workspace grants from an agent."""
-    from agentworks.agents.manager import deny_workspaces
+    """Revoke explicit workspace grants from an agent."""
+    from agentworks.agents.manager import revoke_workspaces
     from agentworks.config import load_config
 
-    if not all_workspaces and not workspaces:
-        typer.echo("Error: specify workspace names or --all", err=True)
-        raise typer.Exit(1)
-
-    ws_list = [w.strip() for w in workspaces.split(",")] if workspaces else []
-    deny_workspaces(_get_db(), load_config(), agent_name=name, workspace_names=ws_list, deny_all=all_workspaces)
-
-
-@agent_grants_app.command("list")
-def agent_grants_list(
-    name: Annotated[str, typer.Argument(help="Agent name")],
-) -> None:
-    """List workspace grants for an agent."""
-    from agentworks.agents.manager import list_grants
-
-    list_grants(_get_db(), agent_name=name)
+    revoke_workspaces(
+        _get_db(),
+        load_config(),
+        agent_name=name,
+        workspace_names=list(workspaces or []),
+        revoke_all=all_workspaces,
+    )
 
 
 @agent_app.command("exec", context_settings={"allow_extra_args": True, "allow_interspersed_args": False})
