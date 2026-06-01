@@ -1727,12 +1727,13 @@ def main() -> None:
 
     # -- Run app ---------------------------------------------------------------
 
-    # Set _debug from sys.argv/env *before* Click parses anything, so a
-    # framework-level parse error (e.g. --debug --bogus) still honors the flag.
-    # The typer callback re-sets _debug after Click parses successfully.
-    _seed_debug_from_pre_callback()
-
     try:
+        # Set _debug from sys.argv/env *before* Click parses anything, so a
+        # framework-level parse error (e.g. --debug --bogus) still honors the
+        # flag. The typer callback re-sets _debug after Click parses
+        # successfully. Inside the try so a Ctrl-C during the pre-pass still
+        # routes through our wrapper.
+        _seed_debug_from_pre_callback()
         app()
     except ConfigError as e:
         typer.echo(f"Configuration error: {e}", err=True)
@@ -1744,9 +1745,17 @@ def main() -> None:
         typer.echo(f"Error: {e}", err=True)
         raise SystemExit(1) from None
     except (click.exceptions.ClickException, click.exceptions.Exit, click.exceptions.Abort):
-        # Let Click / Typer own their own rendering (usage hints, formatted
-        # parameter errors, ``raise typer.Exit(N)`` exit codes, ...).
+        # Let Click / Typer own their own rendering and exit codes. Typer
+        # converts KeyboardInterrupt to click.Exit(130) internally before this
+        # try block sees it (see typer/core.py), so ctrl-C is already handled
+        # silently with the conventional SIGINT exit code; per-op rollback
+        # handlers fire inside the command, before typer's conversion.
         raise
+    except KeyboardInterrupt:
+        # Defensive: a KI that somehow bypasses typer's internal conversion
+        # (e.g. raised during main()'s own setup, before app() runs).
+        typer.echo("Cancelled.", err=True)
+        raise SystemExit(130) from None
     except Exception as e:
         # Anything else is an unhandled error (third-party library, internal
         # bug, OSError, etc.). Print a clean one-liner, persist the full

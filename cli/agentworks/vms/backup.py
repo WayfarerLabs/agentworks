@@ -122,6 +122,9 @@ def backup_vm(
                 target, _unwrap_ssh(target), workspaces, local_archive,
             )
         except Exception:
+            # _archive_workspaces catches its own KeyboardInterrupt during the
+            # long tar phase and converts to UserAbort (an AgentworksError);
+            # we don't need a separate KI branch here.
             db.insert_vm_event(vm_name, "backup_failed")
             raise
     else:

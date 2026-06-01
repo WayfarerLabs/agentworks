@@ -50,52 +50,136 @@ def create_workspace(
     workspace_path: str | None = None
     vscode_path: str | None = None
 
+    ssh_logger = SSHLogger(vm.name, "workspace-create")
+
     def _cleanup() -> None:
         if workspace_path:
-            delete_vm_workspace(vm, config, ws_name, workspace_path)
+            delete_vm_workspace(vm, config, ws_name, workspace_path, logger=ssh_logger)
         if vscode_path:
             from pathlib import Path
 
             Path(vscode_path).unlink(missing_ok=True)
 
-    ssh_logger = SSHLogger(vm.name, "workspace-create")
+    def _safe_cleanup() -> None:
+        # Rollback failures must not mask the original KI/exception. Surface
+        # them as a warning (with workspace name and SSH log path for the
+        # user to follow up on) and continue propagating the original error.
+        try:
+            _cleanup()
+        except Exception as cleanup_err:
+            output.warn(
+                f"rollback during workspace create '{ws_name}' failed: {cleanup_err}. "
+                f"VM may have residual files or VS Code workspace file. "
+                f"SSH log: {ssh_logger.path}"
+            )
 
+    # Outer try/finally ensures the SSH logger is closed exactly once, AFTER
+    # any rollback commands have been logged. Closing earlier would write the
+    # "Finished" footer before the rollback section, making the log misleading.
     try:
-        output.info(f"Creating workspace '{ws_name}' on VM '{vm.name}' (template: {template_resolved_name})...")
-        workspace_path = create_vm_workspace(vm, config, ws_name, template, logger=ssh_logger)
+        try:
+            output.info(
+                f"Creating workspace '{ws_name}' on VM '{vm.name}' (template: {template_resolved_name})..."
+            )
+            workspace_path = create_vm_workspace(vm, config, ws_name, template, logger=ssh_logger)
 
-        vscode_path = generate_vscode_workspace(vm, config, ws_name, workspace_path)
-        output.detail(f"VS Code workspace: {vscode_path}")
+            vscode_path = generate_vscode_workspace(vm, config, ws_name, workspace_path)
+            output.detail(f"VS Code workspace: {vscode_path}")
 
-        db.insert_workspace(
-            ws_name,
-            workspace_path=workspace_path,
-            vm_name=vm.name,
-            template=template_resolved_name,
-            linux_group=workspace_group(ws_name),
-        )
-    except output.AgentworksError:
+            db.insert_workspace(
+                ws_name,
+                workspace_path=workspace_path,
+                vm_name=vm.name,
+                template=template_resolved_name,
+                linux_group=workspace_group(ws_name),
+            )
+        except KeyboardInterrupt:
+            output.warn(f"Cancelling workspace create '{ws_name}'... rolling back.")
+            _safe_cleanup()
+            raise
+        except output.AgentworksError:
+            _safe_cleanup()
+            raise
+        except Exception as e:
+            _safe_cleanup()
+            raise output.WorkspaceError(f"creating workspace: {e}\nSSH log: {ssh_logger.path}") from None
+
+        # Add grant_all agents to the new workspace group. Best-effort: the
+        # workspace itself was already created and inserted above, so a
+        # per-agent failure (DB error, SSH hiccup) should not abort the
+        # whole command. Surface failures as warnings and report accurate
+        # counts so the user can re-grant manually with
+        # 'agent workspace-grants grant'.
+        #
+        # DB grant is inserted BEFORE the on-VM group add. If the order were
+        # reversed and the DB write failed after the group add, the agent
+        # would have VM-side membership with no DB grant backing it (a
+        # silent authorization drift). With this ordering, a group-add
+        # failure can be cleanly compensated by deleting the just-inserted
+        # grant row.
+        grant_all_agents = db.list_agents_on_vm_with_grant_all(vm.name)
+        if grant_all_agents:
+            from agentworks.agents.manager import _add_to_workspace_group
+
+            added = 0
+            failed: list[str] = []
+            for agent in grant_all_agents:
+                try:
+                    db.insert_agent_grant(agent.name, ws_name, "explicit")
+                except KeyboardInterrupt:
+                    # sqlite commits inside a C call; KI can surface after
+                    # the commit but before we move on, leaving an inserted
+                    # row. Best-effort revert and re-raise to preserve the
+                    # SIGINT contract.
+                    output.warn(
+                        f"Cancelled while inserting grant for agent '{agent.name}' on "
+                        f"workspace '{ws_name}'. Reverting in case the insert committed."
+                    )
+                    _revert_grant_on_failure(db, agent.name, ws_name)
+                    raise
+                except Exception as e:
+                    failed.append(agent.name)
+                    output.warn(
+                        f"Failed to insert grant for agent '{agent.name}' on workspace "
+                        f"'{ws_name}': {e}"
+                    )
+                    continue
+                try:
+                    _add_to_workspace_group(vm, config, db, agent.linux_user, ws_name, logger=ssh_logger)
+                    added += 1
+                except KeyboardInterrupt:
+                    # KI is a BaseException and slips past `except Exception`,
+                    # so it needs its own branch. Without this, Ctrl-C during
+                    # the SSH call would leave a committed grant row with no
+                    # VM-side group membership (silent authorization drift).
+                    output.warn(
+                        f"Cancelled while adding agent '{agent.name}' to workspace "
+                        f"'{ws_name}' group. Reverting just-inserted DB grant."
+                    )
+                    _revert_grant_on_failure(db, agent.name, ws_name)
+                    raise
+                except Exception as e:
+                    failed.append(agent.name)
+                    output.warn(
+                        f"Failed to add agent '{agent.name}' to workspace '{ws_name}' "
+                        f"group: {e}. Reverting DB grant to keep state consistent."
+                    )
+                    _revert_grant_on_failure(db, agent.name, ws_name)
+            if added:
+                output.detail(f"Added {added} grant-all agent(s) to workspace")
+            if failed:
+                output.warn(
+                    f"Grant-all agents not added: {', '.join(failed)}. "
+                    f"Re-grant manually with 'agent workspace-grants grant <name> {ws_name}'."
+                )
+    finally:
         ssh_logger.close()
-        _cleanup()
-        raise
-    except Exception as e:
-        ssh_logger.close()
-        _cleanup()
-        raise output.WorkspaceError(f"creating workspace: {e}\nSSH log: {ssh_logger.path}") from None
-
-    # Add grant_all agents to the new workspace group
-    grant_all_agents = db.list_agents_on_vm_with_grant_all(vm.name)
-    if grant_all_agents:
-        from agentworks.agents.manager import _add_to_workspace_group
-
-        for agent in grant_all_agents:
-            _add_to_workspace_group(vm, config, db, agent.linux_user, ws_name, logger=ssh_logger)
-            db.insert_agent_grant(agent.name, ws_name, "explicit")
-        output.detail(f"Added {len(grant_all_agents)} grant-all agent(s) to workspace")
-
-    ssh_logger.close()
 
     if open_vscode:
+        # vscode_path was assigned inside the inner try before any rollback
+        # could occur; reaching here means the try block completed without
+        # raising, so vscode_path is set. Assert for the type-checker.
+        assert vscode_path is not None
         subprocess.run(["code", vscode_path], check=False)
 
     output.info(f"Workspace '{ws_name}' created")
@@ -378,6 +462,53 @@ def repair_workspace(
         output.info("\nNo issues found")
 
 
+def _revert_grant_on_failure(db: Database, agent_name: str, ws_name: str) -> None:
+    """Best-effort: drop a just-inserted explicit grant after the on-VM
+    group add failed (or was cancelled). Used by the grant-all loop in
+    create_workspace to keep DB and VM authorization aligned. A failure
+    to revert is logged but does not raise, so it never masks the
+    caller's original exception (or KeyboardInterrupt)."""
+    try:
+        db.delete_agent_grant(agent_name, ws_name, "explicit")
+    except Exception as revert_err:
+        output.warn(
+            f"Could not revert grant for '{agent_name}' on workspace '{ws_name}': "
+            f"{revert_err}. DB has a grant row with no VM-side group membership; "
+            f"re-run 'agent workspace-grants grant {agent_name} {ws_name}' or "
+            f"revoke explicitly."
+        )
+
+
+def _rehome_partial_state_hint(
+    db: Database, ws_name: str, old_path: str, new_path: str
+) -> str:
+    """Describe the actual DB state after a rehome failure / cancellation.
+
+    The rehome flow copies files to the new path, then updates the DB. KI or
+    an exception can land before OR after the DB update, so we read the row
+    back to give the user an accurate picture rather than asserting one way.
+
+    This is called from the KeyboardInterrupt / exception handler, so any
+    DB error here would mask the original error. Catch broadly and fall
+    back to a generic hint.
+    """
+    try:
+        ws = db.get_workspace(ws_name)
+    except Exception as e:
+        return f"DB state could not be read ({e}); manual inspection needed."
+    if ws is None:
+        return "Workspace row is missing from the DB; manual cleanup may be needed."
+    if ws.workspace_path == new_path:
+        return (
+            f"DB now points to {new_path}, but the on-VM move may be incomplete. "
+            f"Use 'workspace describe {ws_name}' and verify the directory."
+        )
+    return (
+        f"DB still points to {old_path}. A partial copy of the workspace may exist "
+        f"at {new_path}; verify and clean up if needed."
+    )
+
+
 def rehome_workspace(
     db: Database,
     config: Config,
@@ -486,94 +617,124 @@ def _rehome_vm(
     target = admin_exec_target(vm, config, logger=ssh_logger)
     ws_group = ws.linux_group
 
+    # Shell-quote paths once up front; both are interpolated into many shell
+    # commands below. Without this, any space or shell-special character in
+    # a workspace path breaks the command (and exposes an injection surface
+    # if a path is ever supplied by an attacker-controlled source).
+    np = shlex.quote(new_path)
+    op = shlex.quote(old_path)
+
+    # Outer try/finally ensures the SSH logger is closed exactly once. Earlier
+    # versions called close() in every except branch AND on the success path,
+    # which double-wrote the "Finished" footer when an inner raise re-entered
+    # an outer except.
     try:
-        # Create target directory as root and chown to admin so rsync can write
-        target.run(f"mkdir -p {new_path}", sudo=True)
-        target.run(f"chown {vm.admin_username} {new_path}", sudo=True)
-
-        # Copy with rsync (fall back to cp -a)
-        output.info("Copying workspace...")
-        has_rsync = target.run("which rsync", check=False, timeout=10)
-        if has_rsync.ok:
-            target.run(f"rsync -a {old_path}/ {new_path}/", timeout=600)
-        else:
-            target.run(f"cp -a {old_path}/. {new_path}/", sudo=True, timeout=600)
-
-        # Verify copy succeeded
-        verify = target.run(f"test -d {new_path}", check=False, timeout=10)
-        if not verify.ok:
-            ssh_logger.close()
-            raise output.WorkspaceError(
-                f"copy verification failed, target directory not found\nSSH log: {ssh_logger.path}"
-            )
-
-        # Fix ownership, permissions, and ACLs on the new path
-        output.info("Setting permissions...")
-        target.run(f"chown {vm.admin_username}:{ws_group} {new_path}", sudo=True)
-        target.run(f"chmod 2770 {new_path}", sudo=True)
-        sgid_cmd = f"find {shlex.quote(new_path)} -type d -exec chmod g+s {{}} +"
-        target.run(sgid_cmd, sudo=True, timeout=120)
         try:
+            # Create target directory as root and chown to admin so rsync can write
+            target.run(f"mkdir -p {np}", sudo=True)
+            target.run(f"chown {vm.admin_username} {np}", sudo=True)
+
+            # Copy with rsync (fall back to cp -a). Trailing slash matters for
+            # rsync semantics ("contents of source into target"); putting it
+            # AFTER the quoted path works because adjacent quoted/unquoted
+            # tokens concatenate in shell.
+            output.info("Copying workspace...")
+            has_rsync = target.run("which rsync", check=False, timeout=10)
+            if has_rsync.ok:
+                target.run(f"rsync -a {op}/ {np}/", timeout=600)
+            else:
+                target.run(f"cp -a {op}/. {np}/", sudo=True, timeout=600)
+
+            # Verify copy succeeded
+            verify = target.run(f"test -d {np}", check=False, timeout=10)
+            if not verify.ok:
+                raise output.WorkspaceError(
+                    f"copy verification failed, target directory not found\nSSH log: {ssh_logger.path}"
+                )
+
+            # Fix ownership, permissions, and ACLs on the new path
+            output.info("Setting permissions...")
+            target.run(f"chown {vm.admin_username}:{ws_group} {np}", sudo=True)
+            target.run(f"chmod 2770 {np}", sudo=True)
+            target.run(f"find {np} -type d -exec chmod g+s {{}} +", sudo=True, timeout=120)
+            try:
+                target.run(
+                    f"find {np} -type d -exec setfacl -d -m g::rwx -m m::rwx {{}} +",
+                    sudo=True,
+                    timeout=120,
+                )
+                target.run(
+                    f"setfacl -R -m g::rwx -m m::rwx {np}",
+                    sudo=True,
+                    timeout=120,
+                )
+            except SSHError as e:
+                output.warn(f"ACL setup failed: {e}")
+
+            # Fix parent directory traversal. sudo=True already wraps the
+            # command in `sudo -n bash -c '<quoted>'`, so the script runs in
+            # a single bash context. No extra `sh -c '...'` indirection is
+            # needed (and the explicit wrapper made path quoting impossible
+            # to do safely).
             target.run(
-                f"find {new_path} -type d -exec setfacl -d -m g::rwx -m m::rwx {{}} +",
+                f'p={np}; while [ "$p" != "/" ]; do chmod a+x "$p"; p=$(dirname "$p"); done',
                 sudo=True,
-                timeout=120,
             )
+
+            # Regenerate tmuxinator config at new path. write_file passes
+            # remote_path to scp as a subprocess arg (not interpolated into a
+            # local shell), so f-string concatenation is safe on the client
+            # side. The remote scp/sftp handler may still interpret the path
+            # per its own rules; if a future change funnels untrusted paths
+            # through here, revisit.
+            from agentworks.workspaces.tmuxinator import console_session_name, generate_config
+
+            tmux_config = generate_config(ws_name, new_path)
+            target.write_file(f"{new_path}/.tmuxinator.yml", tmux_config)
+            session = console_session_name(ws_name)
+            target.run("mkdir -p ~/.config/tmuxinator", timeout=10)
+            # Keep ~/.config/tmuxinator/ literal so tilde expansion still
+            # happens; quote just the filename for layered defense.
             target.run(
-                f"setfacl -R -m g::rwx -m m::rwx {new_path}",
-                sudo=True,
-                timeout=120,
+                f"ln -sf {np}/.tmuxinator.yml ~/.config/tmuxinator/{shlex.quote(session)}.yml",
+                timeout=10,
             )
-        except SSHError as e:
-            output.warn(f"ACL setup failed: {e}")
 
-        # Fix parent directory traversal
-        target.run(
-            f'sh -c \'p={new_path}; while [ "$p" != "/" ]; do chmod a+x "$p"; p=$(dirname "$p"); done\'',
-            sudo=True,
-        )
+            # Update database
+            db.update_workspace_path(ws_name, new_path)
+            output.info(f"Database updated: workspace_path = {new_path}")
 
-        # Regenerate tmuxinator config at new path
-        from agentworks.workspaces.tmuxinator import console_session_name, generate_config
+            # Regenerate VS Code workspace file
+            vscode_path = generate_vscode_workspace(vm, config, ws_name, new_path)
+            output.info(f"VS Code workspace updated: {vscode_path}")
 
-        tmux_config = generate_config(ws_name, new_path)
-        target.write_file(f"{new_path}/.tmuxinator.yml", tmux_config)
-        session = console_session_name(ws_name)
-        target.run("mkdir -p ~/.config/tmuxinator", timeout=10)
-        target.run(
-            f"ln -sf {new_path}/.tmuxinator.yml ~/.config/tmuxinator/{session}.yml",
-            timeout=10,
-        )
+            # Handle old directory
+            if remove_old:
+                output.info(f"Removing old directory {old_path}...")
+                target.run(f"rm -rf {op}", sudo=True, timeout=60)
+                output.info("Old directory removed")
+            else:
+                output.info(f"\nOld directory left in place at {old_path}")
+                output.info("Remove it manually when ready, or re-run with --remove-old")
 
-        # Update database
-        db.update_workspace_path(ws_name, new_path)
-        output.info(f"Database updated: workspace_path = {new_path}")
-
-        # Regenerate VS Code workspace file
-        vscode_path = generate_vscode_workspace(vm, config, ws_name, new_path)
-        output.info(f"VS Code workspace updated: {vscode_path}")
-
-        # Handle old directory
-        if remove_old:
-            output.info(f"Removing old directory {old_path}...")
-            target.run(f"rm -rf {old_path}", sudo=True, timeout=60)
-            output.info("Old directory removed")
-        else:
-            output.info(f"\nOld directory left in place at {old_path}")
-            output.info("Remove it manually when ready, or re-run with --remove-old")
-
-    except output.AgentworksError:
+        except KeyboardInterrupt:
+            output.warn(
+                f"Cancelling workspace rehome '{ws_name}'. "
+                f"{_rehome_partial_state_hint(db, ws_name, old_path, new_path)} "
+                f"SSH log: {ssh_logger.path}"
+            )
+            raise
+        except output.AgentworksError:
+            raise
+        except Exception as e:
+            raise output.WorkspaceError(
+                f"during rehome: {e}\n"
+                f"SSH log: {ssh_logger.path}\n"
+                f"{_rehome_partial_state_hint(db, ws_name, old_path, new_path)}"
+            ) from None
+    finally:
         ssh_logger.close()
-        raise
-    except Exception as e:
-        ssh_logger.close()
-        raise output.WorkspaceError(
-            f"during rehome: {e}\n"
-            f"SSH log: {ssh_logger.path}\n"
-            "The database was NOT updated. The workspace is still at the original path."
-        ) from None
 
-    ssh_logger.close()
     output.info(f"\nWorkspace '{ws_name}' rehomed to {new_path}")
 
 

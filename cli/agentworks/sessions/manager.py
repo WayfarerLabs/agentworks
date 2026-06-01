@@ -510,7 +510,7 @@ def create_session(
     if db.get_session(name) is not None:
         raise output.SessionError(f"session '{name}' already exists")
 
-    # Resolve mode and linux user
+    # Resolve mode and linux user (no side effects; safe outside the try).
     resolved_agent_name: str | None = None
     if agent_name is not None:
         mode = SessionMode.AGENT
@@ -524,13 +524,6 @@ def create_session(
             )
         linux_user = agent.linux_user
         resolved_agent_name = agent_name
-
-        # Auto-grant implicit workspace access if needed
-        if not db.has_any_grant(agent_name, workspace_name):
-            from agentworks.agents.manager import _add_to_workspace_group
-
-            _add_to_workspace_group(vm, config, db, linux_user, workspace_name)
-        db.insert_agent_grant(agent_name, workspace_name, "implicit", session_name=name)
     else:
         mode = SessionMode.ADMIN
         linux_user = vm.admin_username
@@ -546,22 +539,72 @@ def create_session(
 
         expected_socket = agent_socket_path(linux_user, name)
 
-    # Insert DB record first to avoid orphaned tmux sessions on crash
-    db.insert_session(
-        name,
-        workspace_name,
-        template.name,
-        mode,
-        agent_name=resolved_agent_name,
-        created_workspace=created_workspace,
-        created_agent=created_agent,
-        socket_path=expected_socket,
-    )
+    def _rollback() -> None:
+        # Best-effort rollback. Each step runs inside its own try/except so
+        # that a cleanup failure surfaces as a warning instead of masking
+        # the KeyboardInterrupt or exception that triggered the rollback.
+        # Without this, e.g. a DB error during delete_agent_grant would
+        # replace the user's Ctrl-C with an opaque error exit. Each step
+        # is also idempotent / safe-when-partial: a no-op delete is fine,
+        # has_any_grant accurately decides group removal even if the
+        # implicit-grant insert never ran.
+        try:
+            db.delete_session(name)
+        except Exception as e:
+            output.warn(f"rollback: failed to delete session row '{name}': {e}")
+        if not resolved_agent_name:
+            return
+        try:
+            db.delete_agent_grant(resolved_agent_name, workspace_name, "implicit", session_name=name)
+            remaining = db.has_any_grant(resolved_agent_name, workspace_name)
+        except Exception as e:
+            output.warn(
+                f"rollback: failed to revoke implicit grant for agent "
+                f"'{resolved_agent_name}' on workspace '{workspace_name}': {e}"
+            )
+            return
+        if not remaining:
+            try:
+                from agentworks.agents.manager import _remove_from_workspace_group
 
-    deploy_restricted_config(run_command, history_limit=config.session.history_limit)
-    command = _build_session_command(template, session_name=name, workspace_name=workspace_name)
+                _remove_from_workspace_group(vm, config, db, linux_user, workspace_name, logger=None)
+            except Exception as e:
+                output.warn(
+                    f"rollback: failed to remove agent '{resolved_agent_name}' from "
+                    f"workspace '{workspace_name}' group: {e}"
+                )
 
     try:
+        # Everything that creates partial state (on-VM group membership,
+        # implicit-grant row, session row, restricted-config write, tmux
+        # session) runs inside this block so a KI / exception anywhere here
+        # triggers _rollback(). Without this, a Ctrl-C between the
+        # auto-grant insert and the session insert would leak both a grant
+        # row and a Linux group membership with no session to anchor them.
+        if resolved_agent_name is not None:
+            # Auto-grant implicit workspace access if the agent has no
+            # existing grant on this workspace.
+            if not db.has_any_grant(resolved_agent_name, workspace_name):
+                from agentworks.agents.manager import _add_to_workspace_group
+
+                _add_to_workspace_group(vm, config, db, linux_user, workspace_name)
+            db.insert_agent_grant(resolved_agent_name, workspace_name, "implicit", session_name=name)
+
+        # Insert DB record before any tmux work so a crash mid-create leaves
+        # a recoverable row (and _rollback can find it to delete).
+        db.insert_session(
+            name,
+            workspace_name,
+            template.name,
+            mode,
+            agent_name=resolved_agent_name,
+            created_workspace=created_workspace,
+            created_agent=created_agent,
+            socket_path=expected_socket,
+        )
+
+        deploy_restricted_config(run_command, history_limit=config.session.history_limit)
+        command = _build_session_command(template, session_name=name, workspace_name=workspace_name)
         sock, pid = create_tmux_session(
             name,
             ws.workspace_path,
@@ -573,10 +616,12 @@ def create_session(
             admin_username=vm.admin_username,
             is_admin=(mode == SessionMode.ADMIN),
         )
+    except KeyboardInterrupt:
+        output.warn(f"Cancelling session create '{name}'... rolling back.")
+        _rollback()
+        raise
     except Exception:
-        db.delete_session(name)
-        if resolved_agent_name:
-            db.delete_agent_grant(resolved_agent_name, workspace_name, "implicit", session_name=name)
+        _rollback()
         raise
 
     # Persist socket path, PID, and boot ID

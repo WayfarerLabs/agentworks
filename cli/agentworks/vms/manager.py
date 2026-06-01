@@ -135,6 +135,17 @@ def create_vm(
     # -- Provisioning --
     # If this fails, nothing was created on the remote host (or the remote
     # couldn't be reached), so we clean up the DB record.
+    def _safe_delete_vm_row() -> None:
+        # Best-effort rollback: a DB error here (e.g. lock contention) must
+        # not mask the KeyboardInterrupt / provisioning exception that
+        # triggered the rollback.
+        try:
+            db.delete_vm(vm_name)
+        except Exception as cleanup_err:
+            output.warn(
+                f"rollback: failed to delete DB record for vm '{vm_name}': {cleanup_err}"
+            )
+
     try:
         if platform == "lima":
             from agentworks.vms.provisioners.lima import LimaProvisioner
@@ -185,8 +196,12 @@ def create_vm(
         else:
             msg = f"Unknown platform: {platform}"
             raise ValueError(msg)
+    except KeyboardInterrupt:
+        output.warn(f"Cancelling vm create '{vm_name}'... rolling back.")
+        _safe_delete_vm_row()
+        raise
     except Exception as e:
-        db.delete_vm(vm_name)
+        _safe_delete_vm_row()
         raise VMError(f"provisioning failed: {e}") from e
 
     # Update DB with platform-specific metadata
@@ -226,6 +241,13 @@ def create_vm(
             tailscale_ip=result.tailscale_ip,
             on_tailscale_ready=_on_tailscale_ready,
         )
+    except KeyboardInterrupt:
+        output.warn(
+            f"Cancelling vm create '{vm_name}' during initialization. "
+            f"The VM exists but is partially initialized. "
+            f"Use 'vm reinit {vm_name}' to retry, or 'vm delete {vm_name} --force' to remove it."
+        )
+        raise
     except Exception as e:
         from agentworks.ssh import LOG_DIR
 
@@ -750,29 +772,38 @@ def reinit_vm(
 
     home = f"/home/{vm.admin_username}"
 
+    # Outer try/finally ensures the SSH logger is closed exactly once, AFTER
+    # any warning output. Matches the pattern used by agent create / reinit
+    # and workspace create / rehome.
     try:
-        run_initialization(
-            db,
-            config,
-            name,
-            ts_target,
-            providers,
-            home,
-            vm.admin_username,
-            logger,
-            git_tokens=git_tokens,
-        )
-    except Exception:
+        try:
+            run_initialization(
+                db,
+                config,
+                name,
+                ts_target,
+                providers,
+                home,
+                vm.admin_username,
+                logger,
+                git_tokens=git_tokens,
+            )
+        except KeyboardInterrupt:
+            output.warn(
+                f"Cancelling vm reinit '{name}'. The VM may be in a partial state. "
+                f"Re-run 'vm reinit {name}' to retry. Log: {logger.path}"
+            )
+            raise
+        except Exception:
+            output.warn(f"Log: {logger.path}")
+            raise
+    finally:
         logger.close()
-        output.warn(f"Log: {logger.path}")
-        raise
-
-    logger.close()
 
     refreshed_vm = db.get_vm(name)
     assert refreshed_vm is not None
     if refreshed_vm.init_status == InitStatus.PARTIAL.value:
-        output.info(f"VM '{name}' reinitialized (with warnings -- see above)")
+        output.info(f"VM '{name}' reinitialized (with warnings, see above)")
         output.detail(f"Log: {logger.path}")
     else:
         output.info(f"VM '{name}' reinitialized successfully!")
