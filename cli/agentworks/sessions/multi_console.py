@@ -197,6 +197,7 @@ def infer_vm_from_session_specs(
     if len(vms) > 1:
         raise ValidationError(
             f"sessions span multiple VMs ({', '.join(sorted(vms))})",
+            entity_kind="console",
             hint="Pass --vm to pick one.",
         )
     return next(iter(vms)) if vms else None

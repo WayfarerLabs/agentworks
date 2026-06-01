@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from agentworks import output
 from agentworks.db import ConsoleRow, Database, _parse_shells
 from agentworks.errors import (
     AlreadyExistsError,
@@ -122,7 +121,7 @@ def test_parse_session_spec_ok(spec: str, expected: SessionSpec) -> None:
     ],
 )
 def test_parse_session_spec_rejects_bad_input(bad: str) -> None:
-    with pytest.raises(output.ValidationError):
+    with pytest.raises(ValidationError):
         parse_session_spec(bad)
 
 
@@ -160,7 +159,7 @@ def test_validate_cwd_accepts_relative(cwd: str | None) -> None:
     ],
 )
 def test_validate_cwd_rejects_escapes(bad: str) -> None:
-    with pytest.raises(output.ValidationError):
+    with pytest.raises(ValidationError):
         _validate_cwd(bad)
 
 
@@ -647,7 +646,7 @@ def test_add_shell_rejects_bad_cwd(db: Database) -> None:
     _seed_vm(db)
     _seed_sessions(db, ["a"])
     create_console(db, name="con", vm_name="vm1", session_specs=["a"])
-    with pytest.raises(output.ValidationError):
+    with pytest.raises(ValidationError):
         add_shell(db, _StubConfig(), console_name="con", session_name="a", cwd="/etc")
 
 
@@ -1156,7 +1155,7 @@ def test_attach_console_skips_window_when_agent_missing(
 ) -> None:
     """If an agent-mode session's agent row is gone (FK violation under
     foreign_keys=OFF, or post-migration inconsistency), _session_linux_user
-    raises AgentError. _add_session_window catches it, warns, and continues
+    raises NotFoundError. _add_session_window catches it, warns, and continues
     instead of aborting the whole console build."""
     from agentworks.sessions.multi_console import attach_console
 

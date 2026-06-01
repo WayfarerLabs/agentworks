@@ -1065,6 +1065,11 @@ def restart_all_sessions(
     for session in sessions:
         try:
             restart_session(db, config, name=session.name, force=force, yes=include_running)
+        except UserAbort:
+            # A confirm-cancellation aborts the whole batch operation, not
+            # just this one session. Propagate so the outer wrapper renders
+            # "Aborted." once and exits.
+            raise
         except BrokenStateError as exc:
             if not force:
                 output.warn(f"Skipping '{session.name}': {exc}")

@@ -1695,8 +1695,6 @@ def main() -> None:
             try:
                 return typer.confirm(message, default=default)
             except click.exceptions.Abort:
-                from agentworks.errors import UserAbort
-
                 raise UserAbort("interrupted") from None
 
         def choose(self, message: str, options: list[str]) -> int:
@@ -1709,8 +1707,6 @@ def main() -> None:
                     if 1 <= choice <= len(options):
                         return choice - 1
                 except click.exceptions.Abort:
-                    from agentworks.errors import UserAbort
-
                     raise UserAbort("interrupted") from None
                 except ValueError:
                     pass
@@ -1720,8 +1716,6 @@ def main() -> None:
             try:
                 input(message)
             except (EOFError, KeyboardInterrupt):
-                from agentworks.errors import UserAbort
-
                 raise UserAbort("interrupted") from None
 
         def prompt(self, label: str, default: str | None = None) -> str:
@@ -1740,8 +1734,6 @@ def main() -> None:
                     typer.echo("(empty, try again)", err=True)
                 return value
             except click.exceptions.Abort:
-                from agentworks.errors import UserAbort
-
                 raise UserAbort("interrupted") from None
 
         def progress(self, label: str, total: int | None = None) -> Progress:

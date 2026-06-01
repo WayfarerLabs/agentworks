@@ -471,10 +471,10 @@ def shell_agent(
         ws = db.get_workspace(workspace_name)
         if ws is None:
             raise NotFoundError(
-            f"workspace '{workspace_name}' not found",
-            entity_kind="workspace",
-            entity_name=workspace_name,
-        )
+                f"workspace '{workspace_name}' not found",
+                entity_kind="workspace",
+                entity_name=workspace_name,
+            )
         if not db.has_any_grant(name, workspace_name):
             raise StateError(
                 f"agent '{name}' does not have access to workspace '{workspace_name}'",
