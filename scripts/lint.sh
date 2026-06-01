@@ -65,9 +65,9 @@ fi
 
 cd "$REPO_ROOT"
 
-# Without `set -e`, a failed command substitution would silently produce an empty
-# string and we'd run `prettier@""` (which resolves to whatever latest is on the
-# registry). Explicit `|| exit 1` makes a missing or empty version file fail fast.
+# read_version_file errors on missing OR empty files; explicit `|| exit 1` makes
+# the failure propagate without `set -e` (we deliberately don't use -e so that all
+# checks below can run and aggregate failures in $FAIL).
 CSPELL_VERSION=$(read_version_file .cspell-version "" "$REPO_ROOT") || exit 1
 MDLINT_VERSION=$(read_version_file .markdownlint-cli2-version "" "$REPO_ROOT") || exit 1
 PRETTIER_VERSION=$(read_version_file .prettier-version "" "$REPO_ROOT") || exit 1
