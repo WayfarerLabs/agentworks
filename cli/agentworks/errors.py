@@ -88,11 +88,18 @@ class BackupError(ExternalError):
 
 
 class ConfigError(AgentworksError):
-    """Config file is missing, malformed, or contains invalid values."""
+    """Config file is missing, malformed, or contains invalid values.
+
+    Named for its source rather than its kind: it carries a distinct "Configuration
+    error:" rendering at the top level, which is why it survives as its own type
+    rather than collapsing into ValidationError. Treat as a special case of the
+    kind-based taxonomy, not a parallel "by source" axis.
+    """
 
 
 class UserAbort(AgentworksError):
-    """User declined a confirmation prompt or sent Ctrl-C at an interactive prompt.
+    """User signaled they want to stop: declined a confirmation, hit Ctrl-C at an
+    interactive prompt, or closed stdin (EOF).
 
     Not really an error -- a control flow signal. Caught separately so the
     renderer can use a neutral phrasing instead of "Error: ...".

@@ -14,46 +14,39 @@ import sys
 import time
 from typing import Protocol
 
-# Re-export the kind-based exception hierarchy from agentworks.errors. Existing
-# code imports types like AgentworksError, UserAbort, ValidationError, etc.
-# from agentworks.output; new code should prefer agentworks.errors directly.
-# The `X as X` pattern marks these as explicit re-exports for mypy strict mode.
+# Re-export the kind-based exception hierarchy from agentworks.errors so existing
+# `from agentworks.output import X` users keep working. New code should prefer
+# importing from agentworks.errors directly. The __all__ below marks these
+# names as explicit re-exports for mypy strict (no_implicit_reexport).
 from agentworks.errors import (
-    AgentworksError as AgentworksError,
+    AgentworksError,
+    AlreadyExistsError,
+    BackupError,
+    BrokenStateError,
+    ConfigError,
+    ConnectivityError,
+    ExternalError,
+    NotFoundError,
+    ProvisionerError,
+    StateError,
+    UserAbort,
+    ValidationError,
 )
-from agentworks.errors import (
-    AlreadyExistsError as AlreadyExistsError,
-)
-from agentworks.errors import (
-    BackupError as BackupError,
-)
-from agentworks.errors import (
-    BrokenStateError as BrokenStateError,
-)
-from agentworks.errors import (
-    ConfigError as ConfigError,
-)
-from agentworks.errors import (
-    ConnectivityError as ConnectivityError,
-)
-from agentworks.errors import (
-    ExternalError as ExternalError,
-)
-from agentworks.errors import (
-    NotFoundError as NotFoundError,
-)
-from agentworks.errors import (
-    ProvisionerError as ProvisionerError,
-)
-from agentworks.errors import (
-    StateError as StateError,
-)
-from agentworks.errors import (
-    UserAbort as UserAbort,
-)
-from agentworks.errors import (
-    ValidationError as ValidationError,
-)
+
+__all__ = [
+    "AgentworksError",
+    "AlreadyExistsError",
+    "BackupError",
+    "BrokenStateError",
+    "ConfigError",
+    "ConnectivityError",
+    "ExternalError",
+    "NotFoundError",
+    "ProvisionerError",
+    "StateError",
+    "UserAbort",
+    "ValidationError",
+]
 
 # ---------------------------------------------------------------------------
 # Progress handle
@@ -325,6 +318,13 @@ class BrokenSessionError(BrokenStateError, SessionError):
     Inherits from both BrokenStateError (the new kind) and SessionError
     (this file's deprecated alias) so existing `except BrokenSessionError`
     catch sites and `except SessionError` catch sites both keep working.
+
+    Catch-order constraint: BrokenSessionError must be caught BEFORE
+    SessionError in any try/except chain, since BrokenSessionError is a
+    subclass of SessionError (via the StateError diamond) and an earlier
+    SessionError clause would swallow it. The one existing branching site
+    at sessions/manager.py:998 gets the order right; PR B raise-site
+    migrations must preserve it.
     """
 
 

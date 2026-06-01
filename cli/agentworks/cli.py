@@ -1781,8 +1781,10 @@ def main() -> None:
     except (ConnectivityError, ExternalError) as e:
         # External-system failures: render the one-liner AND persist the
         # full traceback to the error log so postmortem diagnosis can see
-        # the underlying SSH command, provisioner response, etc.
-        typer.echo(f"Error: {e}", err=True)
+        # the underlying SSH command, provisioner response, etc. Type-qualify
+        # the message (Error: SSHError: ...) since these often have messages
+        # that don't carry the failure category in their text.
+        typer.echo(f"Error: {type(e).__name__}: {e}", err=True)
         _echo_hint(e)
         if _debug:
             raise
@@ -1791,6 +1793,12 @@ def main() -> None:
             typer.echo(
                 f"(full traceback written to {log_path}; "
                 f"rerun with --debug or AGW_DEBUG=1 to print on stderr)",
+                err=True,
+            )
+        else:
+            typer.echo(
+                "(could not write traceback to log; "
+                "rerun with --debug or AGW_DEBUG=1 to print on stderr)",
                 err=True,
             )
         raise SystemExit(1) from None
