@@ -143,9 +143,9 @@ concurrent workloads running across their VMs, workspaces, and agents. Agentwork
 operator to attach to and detach from them as needed to monitor progress or interact with the
 workload, and then to stop, restart, and delete them to manage their lifecycle.
 
-For day-to-day work across many sessions, see [Named consoles](#named-consoles) — curated tmux
-views that group the sessions you're actively focused on, optionally with extra shell panes
-pre-opened in each session's window.
+For day-to-day work across many sessions, see [Named consoles](#named-consoles): curated tmux views
+that group the sessions you're actively focused on, optionally with extra shell panes pre-opened in
+each session's window.
 
 ## Key Principles
 
@@ -288,28 +288,28 @@ missing values (VM selection, workspace selection, name generation) will fail wi
 indicating which flag is required. Auto-selection still works: if there is exactly one VM or
 workspace, it is used without prompting.
 
-Domain errors (SSH timeouts, validation failures, missing resources, etc.) surface as a single
-clean line: `Error: <message>`. Truly unexpected failures (internal bugs, OS-level errors,
-third-party library failures) also get a clean single-line message, plus the full traceback
-appended to `~/.config/agentworks/logs/error.log` for debugging. Pass `--debug` (or set
-`AGW_DEBUG=1`) to print the traceback to stderr instead.
+Domain errors (SSH timeouts, validation failures, missing resources, etc.) surface as a single clean
+line: `Error: <message>`. Truly unexpected failures (internal bugs, OS-level errors, third-party
+library failures) also get a clean single-line message, plus the full traceback appended to
+`~/.config/agentworks/logs/error.log` for debugging. Pass `--debug` (or set `AGW_DEBUG=1`) to print
+the traceback to stderr instead.
 
 Pressing Ctrl-C during a long-running operation triggers best-effort cleanup. Where the operation
 can roll back (e.g. `vm create` during the provisioning phase, `workspace create`, `agent create`,
-`session create`) it undoes the partial DB / on-VM state and prints
-`Cancelling X... rolling back.`. Where rollback isn't possible (`vm reinit`, `agent reinit`, the
-init phase of `vm create`) it prints a recovery hint: the next command to run (`vm reinit`,
-`vm delete --force`, ...). Every cancellation exits with the conventional SIGINT exit code (130).
+`session create`) it undoes the partial DB / on-VM state and prints `Cancelling X... rolling back.`.
+Where rollback isn't possible (`vm reinit`, `agent reinit`, the init phase of `vm create`) it prints
+a recovery hint: the next command to run (`vm reinit`, `vm delete --force`, ...). Every cancellation
+exits with the conventional SIGINT exit code (130).
 
 ## Commands
 
 ### Top-level
 
-| Command                         | Description                              |
-| ------------------------------- | ---------------------------------------- |
-| `agentworks doctor`             | Check environment and config             |
-| `agentworks completion show`    | Print the completion script to stdout    |
-| `agentworks completion install` | Install the completion script in-place   |
+| Command                         | Description                            |
+| ------------------------------- | -------------------------------------- |
+| `agentworks doctor`             | Check environment and config           |
+| `agentworks completion show`    | Print the completion script to stdout  |
+| `agentworks completion install` | Install the completion script in-place |
 
 ### VM Hosts
 
@@ -366,8 +366,8 @@ Manage workspaces on VMs.
 | `agentworks workspace repair <name>`        | Repair workspace infrastructure     |
 | `agentworks workspace delete <name>`        | Delete a workspace                  |
 
-`workspace create <name>` takes the workspace name as a required positional. Optional flags:
-`--vm`, `--template`, and `--open-vscode`.
+`workspace create <name>` takes the workspace name as a required positional. Optional flags: `--vm`,
+`--template`, and `--open-vscode`.
 
 `workspace console` opens a tmuxinator session (`ws-<name>-console`) with an admin-shell window plus
 one window per session in the workspace. Pass `--recreate` to kill and rebuild the console. This is
@@ -422,15 +422,15 @@ Manage sessions (persistent tmux sessions running in workspaces). Session names 
 
 `session create <name>` takes the session name as a required positional. Optional flags:
 `--workspace`, `--template`, `--admin`, and `--agent`. Workspace and mode (admin vs agent) are
-prompted interactively if omitted; if agents exist on the VM and neither `--admin` nor `--agent`
-is specified, you are prompted to choose. Pass `--new-workspace` to create a workspace on the fly
-(with optional `--workspace-name`, `--workspace-template`, and `--vm`; `--workspace-name` defaults
-to the session name). Pass `--new-agent` to create a new agent for the session (with optional
+prompted interactively if omitted; if agents exist on the VM and neither `--admin` nor `--agent` is
+specified, you are prompted to choose. Pass `--new-workspace` to create a workspace on the fly (with
+optional `--workspace-name`, `--workspace-template`, and `--vm`; `--workspace-name` defaults to the
+session name). Pass `--new-agent` to create a new agent for the session (with optional
 `--agent-name` and `--agent-template`; `--agent-name` defaults to the session name); the new agent
-is provisioned on the workspace's VM. When a session created with `--new-workspace` or
-`--new-agent` is later deleted, you are offered the option to delete the workspace and/or agent as
-well -- the workspace if no other sessions remain on it, the agent if it has no other sessions and
-no explicit grants.
+is provisioned on the workspace's VM. When a session created with `--new-workspace` or `--new-agent`
+is later deleted, you are offered the option to delete the workspace and/or agent as well -- the
+workspace if no other sessions remain on it, the agent if it has no other sessions and no explicit
+grants.
 
 ### Named consoles
 
@@ -451,18 +451,17 @@ panes you want preloaded into a session's window.
 
 `console create` accepts:
 
-- `--vm` -- target VM. **Inferred from the listed sessions when omitted**; if the
-  listed sessions span more than one VM, `console create` errors and asks you to
-  pick one with `--vm`. When no sessions are listed (e.g. with `--all` and no
-  explicit specs), VM selection falls back to the standard prompt (auto-picked
-  if you have a single VM, prompted otherwise).
-- `--all` -- include every session on the VM with 0 shells, appended after the
-  explicit specs (alphabetical).
-- `--all-running` -- like `--all` but restricted to sessions whose live tmux
-  state on the VM is OK (one SSH round-trip; same probe `aw session list`
-  uses). Mutually exclusive with `--all`. Requires the VM to be reachable.
-- `--add-admin-shell` -- include a top-level admin-shell window as window 0,
-  matching the legacy `vm console` behavior.
+- `--vm` -- target VM. **Inferred from the listed sessions when omitted**; if the listed sessions
+  span more than one VM, `console create` errors and asks you to pick one with `--vm`. When no
+  sessions are listed (e.g. with `--all` and no explicit specs), VM selection falls back to the
+  standard prompt (auto-picked if you have a single VM, prompted otherwise).
+- `--all` -- include every session on the VM with 0 shells, appended after the explicit specs
+  (alphabetical).
+- `--all-running` -- like `--all` but restricted to sessions whose live tmux state on the VM is OK
+  (one SSH round-trip; same probe `aw session list` uses). Mutually exclusive with `--all`. Requires
+  the VM to be reachable.
+- `--add-admin-shell` -- include a top-level admin-shell window as window 0, matching the legacy
+  `vm console` behavior.
 
 `console list` accepts `--vm` to filter.
 
@@ -499,12 +498,12 @@ on next attach.
 Each session runs in its own locked-down tmux session on the VM. There are several ways to interact
 with sessions, at different scopes:
 
-| Method                  | Scope                            | tmux session name        | Entry point                 |
-| ----------------------- | -------------------------------- | ------------------------ | --------------------------- |
-| `session attach`        | One session                      | `<session-name>`         | Operator's machine          |
-| `workspace console`     | One workspace                    | `ws-<workspace>-console` | On-VM or operator's machine |
-| `console`               | Curated subset across workspaces | `aw-console-<name>`      | Operator's machine          |
-| `vm console` (deprecated) | All sessions on the VM         | `vm-console`             | Operator's machine          |
+| Method                    | Scope                            | tmux session name        | Entry point                 |
+| ------------------------- | -------------------------------- | ------------------------ | --------------------------- |
+| `session attach`          | One session                      | `<session-name>`         | Operator's machine          |
+| `workspace console`       | One workspace                    | `ws-<workspace>-console` | On-VM or operator's machine |
+| `console`                 | Curated subset across workspaces | `aw-console-<name>`      | Operator's machine          |
+| `vm console` (deprecated) | All sessions on the VM           | `vm-console`             | Operator's machine          |
 
 #### Session tmux sessions
 
@@ -549,7 +548,7 @@ aw-console-backend
 The tmux session is built lazily on first `attach` (or rebuilt with `--recreate`). Adding or
 removing sessions/shells while the console is attached updates tmux immediately; when offline, only
 the DB is touched and changes appear on next attach. The console does not auto-boot the VM for live
-sync — VM start happens only on explicit `attach`.
+sync; VM start happens only on explicit `attach`.
 
 #### VM console (deprecated)
 
@@ -712,15 +711,15 @@ log.
 agentworks completion install
 ```
 
-The shell is autodetected from `$SHELL`; pass `--shell {bash|zsh|powershell}` to override (or
-when autodetection isn't unambiguous, e.g. on Windows). `completion install` writes the script
-to the standard location for that shell. For PowerShell it also appends a dot-source line
-(`. "..."`) to `$PROFILE`. For bash and zsh, if your rc file is missing the loader
-(`bash-completion` for bash, `fpath=(~/.zfunc $fpath)` for plain zsh without a plugin manager),
-the installer prints a one-line note telling you what to add.
+The shell is autodetected from `$SHELL`; pass `--shell {bash|zsh|powershell}` to override (or when
+autodetection isn't unambiguous, e.g. on Windows). `completion install` writes the script to the
+standard location for that shell. For PowerShell it also appends a dot-source line (`. "..."`) to
+`$PROFILE`. For bash and zsh, if your rc file is missing the loader (`bash-completion` for bash,
+`fpath=(~/.zfunc $fpath)` for plain zsh without a plugin manager), the installer prints a one-line
+note telling you what to add.
 
-To print the script without installing, use `agentworks completion show` (handy for piping
-into your own config-management flow).
+To print the script without installing, use `agentworks completion show` (handy for piping into your
+own config-management flow).
 
 Completions include dynamic VM, workspace, VM host, session, and template name lookups.
 

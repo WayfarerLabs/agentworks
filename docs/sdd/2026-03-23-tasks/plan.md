@@ -25,7 +25,7 @@
 - [x] Add `TaskRow` dataclass to `db.py`
 - [x] Add `TaskStatus` and `TaskMode` enums
 - [x] Add DB methods: insert_task, get_task, list_tasks, update_task_status, delete_task,
-  delete_tasks_for_workspace
+      delete_tasks_for_workspace
 - [x] Add schema migration 8 (create tasks table)
 - [x] Add cascade deletes for tasks in delete_vm and delete_workspace
 
@@ -38,8 +38,8 @@
   - `generate_restricted_config(history_limit)` -- returns the locked-down tmux config content
   - `deploy_restricted_config(run_command)` -- writes config to `/opt/agentworks/tmux-task.conf`
   - `derive_session_name(workspace_name, task_name)` -- returns `<workspace>--<task>`
-  - `create_task_session(workspace_name, task_name, workspace_path, command, linux_user,
-    run_command)` -- starts the locked-down tmux session
+  - `create_task_session(workspace_name, task_name, workspace_path, command, linux_user, run_command)`
+    -- starts the locked-down tmux session
   - `kill_task_session(workspace_name, task_name, run_command)` -- kills the session
   - `session_exists(workspace_name, task_name, run_command)` -- checks if the tmux session is alive
   - `capture_output(workspace_name, task_name, lines, run_command)` -- captures scrollback buffer

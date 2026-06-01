@@ -37,8 +37,8 @@ All entity types use the same template pattern:
 - Operators learn one templating model and apply it everywhere. No per-entity-type quirks.
 - The implicit default means config files start minimal. Only define what you need to override.
 - Inheritance enables composition: a "heavy" VM template can inherit from "default" and only
-  override resource fields. A child that adds `apt = ["python3-dev"]` gets the parent's apt
-  packages plus python3-dev, not a replacement.
+  override resource fields. A child that adds `apt = ["python3-dev"]` gets the parent's apt packages
+  plus python3-dev, not a replacement.
 - Map fields (like task template `env`) merge naturally: a parent can define base environment
   variables and children can add or override specific keys.
 - The resolution code is nearly identical across entity types, making it easy to add new template

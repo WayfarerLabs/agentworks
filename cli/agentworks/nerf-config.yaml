@@ -4,13 +4,13 @@
 # across rebuilds -- Claude Code grants permissions based on absolute tool paths.
 
 package:
-  name: nerftools
-  description: "Nerf tools: scoped, safety-constrained CLI wrappers for AI agents"
+    name: nerftools
+    description: "Nerf tools: scoped, safety-constrained CLI wrappers for AI agents"
 
 targets:
-  claude-plugin:
-    marketplace:
-      name: agentworks-nerftools-local
-      description: "Agentworks local nerftools marketplace"
-      owner:
-        name: Agentworks
+    claude-plugin:
+        marketplace:
+            name: agentworks-nerftools-local
+            description: "Agentworks local nerftools marketplace"
+            owner:
+                name: Agentworks

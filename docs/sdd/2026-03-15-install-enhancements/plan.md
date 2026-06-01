@@ -46,9 +46,9 @@ pass.
 - [x] Add `apt_sources` section loader in `config.py` (same schema as catalog apt sources)
 - [x] Add `apt_packages` section loader in `config.py` (same schema as catalog apt packages)
 - [x] Add `system_install_commands` section loader in `config.py` (same schema as catalog system
-  commands)
+      commands)
 - [x] Add `user_install_commands` section loader in `config.py` (same schema as catalog user install
-  commands)
+      commands)
 - [x] Add `vm.config.apt_packages` list (references apt package set names)
 - [x] Add `vm.config.system_install_commands` list (references system install command names)
 - [x] Add `vm.config.admin_user_install_commands` list (references user install command names)
@@ -56,11 +56,11 @@ pass.
 - [x] Rename `agent.config.install_commands` to `agent.config.user_install_commands`
 - [x] Validate that all references in `vm.config.apt_packages` resolve in the merged catalog
 - [x] Validate that all references in `vm.config.system_install_commands` resolve in the merged
-  catalog
+      catalog
 - [x] Validate that all references in `vm.config.admin_user_install_commands` resolve in the merged
-  catalog
+      catalog
 - [x] Validate that all references in `agent.config.user_install_commands` resolve in the merged
-  catalog
+      catalog
 - [x] Update `sample-config.toml` to reflect new structure
 - [x] Update tests in `cli/tests/test_config.py`
 
@@ -118,7 +118,7 @@ Wire the resolved catalog into VM initialization.
 ### 3.2 Apt Packages in Phase B
 
 - [x] Update Phase B apt package step to collect packages from both `vm.config.apt` (direct list)
-  and resolved `vm.config.apt_packages` catalog entries
+      and resolved `vm.config.apt_packages` catalog entries
 - [x] Ensure apt sources required by apt package entries are included in the apt source step
 - [x] Single `apt-get install` call for all apt packages
 
@@ -131,8 +131,8 @@ configured and `gh` package being installed.
 - [x] Run shell commands from `vm.config.system_install_commands` in the admin user's login shell
 - [x] PATH additions from system install commands combined with user command PATH additions
 
-**Definition of done:** `vm.config.system_install_commands = ["az-cli"]` results in the az CLI
-being installed system-wide.
+**Definition of done:** `vm.config.system_install_commands = ["az-cli"]` results in the az CLI being
+installed system-wide.
 
 ### 3.4 Per-User Install Commands in Phase B
 
@@ -150,7 +150,7 @@ Wire per-user install commands into agent creation.
 ### 4.1 Agent Install Command Execution
 
 - [x] In `agents/manager.py`, after creating the agent Linux user, run install commands from
-  `agent.config.user_install_commands` in the agent's login shell (via `su`)
+      `agent.config.user_install_commands` in the agent's login shell (via `su`)
 - [x] Write PATH additions to agent's `~/.agentworks-path.sh`
 - [x] Source from agent's shell profiles (.profile and .bashrc)
 - [x] Handle failures as non-fatal warnings (agent still usable, just missing a tool)

@@ -31,16 +31,16 @@ git::https://github.com/user/infra.git//path/to/file?ref=v1.0
 - **URL/path**: The repository URL or local file path.
 - **Subpath** (git only): `//path/to/file` after the URL. Specifies a file within the repo. If
   omitted, defaults to `mise.lock` (the caller can specify a different default).
-- **Query parameters** (git only): `?ref=<branch|tag|commit>` to pin a specific ref. Defaults to
-  the repo's default branch.
+- **Query parameters** (git only): `?ref=<branch|tag|commit>` to pin a specific ref. Defaults to the
+  repo's default branch.
 
 ### Parsing rules
 
 1. If the string starts with `git::`, parse as a git source.
 2. If the string starts with `file::`, strip the prefix and treat as a local path.
 3. Otherwise, treat as a local path.
-4. For git sources, split on `//` to separate URL from subpath. Split on `?` to extract query
-   params from the URL portion.
+4. For git sources, split on `//` to separate URL from subpath. Split on `?` to extract query params
+   from the URL portion.
 
 ## Data Model
 
@@ -69,8 +69,8 @@ def fetch_file(
 
 - **File sources**: Copy the local file to `dest` on the target via `ExecTarget.copy_to()`. If
   `dest` is a directory, uses the source filename (or `default_filename`).
-- **Git sources**: Clone the repo (or `git pull` on reinit) to a temporary directory on the
-  target, then copy the subpath file to `dest`. The clone uses `--depth 1` for efficiency and
+- **Git sources**: Clone the repo (or `git pull` on reinit) to a temporary directory on the target,
+  then copy the subpath file to `dest`. The clone uses `--depth 1` for efficiency and
   `--branch <ref>` if a ref is specified. The temporary clone is cleaned up after the file is
   copied.
 

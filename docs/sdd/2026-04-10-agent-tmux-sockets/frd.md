@@ -26,9 +26,9 @@ agent's shell connects directly to the tmux pane PTY with no intermediary `sudo`
 
 ### R2: Admin can attach to agent tmux sessions
 
-The admin user must be able to attach to, inspect, send keys to, capture output from, and kill
-agent tmux sessions. This is required for the VM console, workspace console, task management CLI,
-and operational tooling.
+The admin user must be able to attach to, inspect, send keys to, capture output from, and kill agent
+tmux sessions. This is required for the VM console, workspace console, task management CLI, and
+operational tooling.
 
 ### R3: Terminal resize works for agent sessions
 

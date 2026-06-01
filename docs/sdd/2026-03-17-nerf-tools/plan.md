@@ -4,12 +4,12 @@
 
 - `nerf build` reads YAML manifests and produces standalone, executable shell scripts
 - `nerf skill` reads the same manifests and produces rulesync skill markdown files
-- `nerf build --install-nerfctl claude` installs the nerfctl-claude-* permission management scripts
+- `nerf build --install-nerfctl claude` installs the nerfctl-claude-\* permission management scripts
 - Built-in nerf-git manifest ships with the package; all built-ins included by default (opt-out)
 - `nerf build` clears outdir by default; `--keep-existing` preserves unmanaged files
-- All nerfctl-claude-* scripts are tested
-- Agentworks CLI integration is config-driven only; nerf runs locally and artifacts are
-  rsynced to VMs
+- All nerfctl-claude-\* scripts are tested
+- Agentworks CLI integration is config-driven only; nerf runs locally and artifacts are rsynced to
+  VMs
 - VM config supports flat nerf fields in `[vm.config]`
 - Tests pass with mypy strict and ruff clean
 
@@ -87,7 +87,7 @@
   - `nerf-git-log`: short one-line log (no params)
 - [x] Verify built-in manifest loads and validates cleanly
 
-## Phase 5: nerfctl-claude-* Scripts
+## Phase 5: nerfctl-claude-\* Scripts
 
 - [x] Write `nerftools/nerftools/nerfctl/claude/grant.sh`
   - Accepts `<tool> [--settings <path>]`
@@ -123,8 +123,8 @@ Notes:
   - `nerf_keep_existing: bool` (default false; rsync without --delete when true)
   - `nerf_bin_dir: str` (default `/opt/agentworks/nerf/bin`)
   - `nerf_skills_dir: str` (default `/opt/agentworks/nerf/skills`)
-- [x] Remove `nerf_pkg_source` from `VMConfig`, `_VM_CONFIG_KEYS`,
-  `_load_vm_config`, and `sample-config.toml`
+- [x] Remove `nerf_pkg_source` from `VMConfig`, `_VM_CONFIG_KEYS`, `_load_vm_config`, and
+      `sample-config.toml`
 - [x] No separate `agentworks nerf` command group -- nerf is driven entirely by vm.config
 - [x] Rework VM init sequence: local build + rsync (replaces pipx install on VM)
   - Run `nerf build --outdir <tmp>` locally with configured options
@@ -161,8 +161,8 @@ Notes:
   - `FlagSpec`: required by default, auto-derived flag name from key (`--flag-name`), `short` for
     single-char aliases, `boolean` for value-less flags
   - `ArgSpec`: optional by default, `variadic` to collect `"$@"` into array
-  - `GuardSpec`: pre-flight check with `command` or `script` (mutually exclusive); fires (exit 1)
-    on non-zero exit; `{{param}}` placeholders substituted in both forms
+  - `GuardSpec`: pre-flight check with `command` or `script` (mutually exclusive); fires (exit 1) on
+    non-zero exit; `{{param}}` placeholders substituted in both forms
 - [x] Update `builder.py` for new dataclasses and features
   - Boolean flags use `shift 1` and expand as `${VAR:+"--flag-string"}`
   - Short flags included in `case "$1" in` pattern: `--remote|-r)`

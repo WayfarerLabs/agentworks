@@ -177,10 +177,9 @@ agentworks agent create myagent --vm myvm --template restricted
 
 ## Mise catalog entries removed
 
-Mise packages are no longer defined as catalog entries (`[mise_packages.*]` sections).
-Instead, use `mise_packages` in `[admin.config]` or `[agent_templates.*]` with
-`name@version` strings, and provide lockfiles via `mise_lockfile` for integrity
-verification.
+Mise packages are no longer defined as catalog entries (`[mise_packages.*]` sections). Instead, use
+`mise_packages` in `[admin.config]` or `[agent_templates.*]` with `name@version` strings, and
+provide lockfiles via `mise_lockfile` for integrity verification.
 
 **Before:**
 
@@ -209,8 +208,7 @@ See [Using mise](mise.md) for how to generate and manage lockfiles.
 
 Agents are no longer scoped to a single workspace. They are now VM-scoped Linux users
 (`agt--<name>`) that access workspaces through a grant system. See
-[ADR-0010](../adrs/0010-vm-scoped-agents-with-workspace-grants.md) for the full
-rationale.
+[ADR-0010](../adrs/0010-vm-scoped-agents-with-workspace-grants.md) for the full rationale.
 
 **CLI changes:**
 

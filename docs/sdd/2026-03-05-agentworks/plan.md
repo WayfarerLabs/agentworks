@@ -378,9 +378,9 @@ verified.
 
 These items have architectural room in the current design but are not scheduled for implementation.
 
-- ~~**VM templates**: named VM configurations (packages, install commands,
-  shell) that can be selected at `vm create` time, replacing the current
-  single implicit default in `[vm.config]`~~ (implemented)
+- ~~**VM templates**: named VM configurations (packages, install commands, shell) that can be
+  selected at `vm create` time, replacing the current single implicit default in `[vm.config]`~~
+  (implemented)
 - **VM initialization plugins**: named install commands (`[install_commands.*]`) partially replace
   this concept. Full plugins would go further with structured, version-aware building blocks (e.g.
   `install.bun` installs bun, writes `.bun-version`, and verifies the installation)
