@@ -473,7 +473,10 @@ def _rehome_partial_state_hint(
             f"DB now points to {new_path}, but the on-VM move may be incomplete. "
             f"Use 'workspace describe {ws_name}' and verify the directory."
         )
-    return f"DB still points to {old_path}; the workspace was not moved."
+    return (
+        f"DB still points to {old_path}. A partial copy of the workspace may exist "
+        f"at {new_path}; verify and clean up if needed."
+    )
 
 
 def rehome_workspace(
