@@ -8,8 +8,15 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from agentworks import output
 from agentworks.db import ConsoleRow, Database, _parse_shells
+from agentworks.errors import (
+    AlreadyExistsError,
+    ConnectivityError,
+    ExternalError,
+    NotFoundError,
+    StateError,
+    ValidationError,
+)
 from agentworks.sessions.multi_console import (
     SHELL_INDEX_OPTION,
     SessionSpec,
@@ -114,7 +121,7 @@ def test_parse_session_spec_ok(spec: str, expected: SessionSpec) -> None:
     ],
 )
 def test_parse_session_spec_rejects_bad_input(bad: str) -> None:
-    with pytest.raises(output.ValidationError):
+    with pytest.raises(ValidationError):
         parse_session_spec(bad)
 
 
@@ -152,7 +159,7 @@ def test_validate_cwd_accepts_relative(cwd: str | None) -> None:
     ],
 )
 def test_validate_cwd_rejects_escapes(bad: str) -> None:
-    with pytest.raises(output.ValidationError):
+    with pytest.raises(ValidationError):
         _validate_cwd(bad)
 
 
@@ -432,7 +439,7 @@ def test_running_session_names_raises_on_unreachable(
     # Probe returns empty stdout (simulates transport failure caught by check=False).
     fake_target.run = lambda command, **kwargs: _FakeResult(returncode=255, stdout="")  # type: ignore[assignment]
 
-    with pytest.raises(output.ConsoleError, match="could not determine running"):
+    with pytest.raises(ConnectivityError, match="could not determine running"):
         running_session_names(db, _StubConfig(), "vm1")
 
 
@@ -490,8 +497,8 @@ def test_infer_vm_from_session_specs(db: Database) -> None:
     assert infer_vm_from_session_specs(db, ["a"]) == "vm1"
     assert infer_vm_from_session_specs(db, ["a+2", "b"]) == "vm1"
 
-    # Spans multiple VMs -> ConsoleError.
-    with pytest.raises(output.ConsoleError, match="span multiple VMs"):
+    # Spans multiple VMs -> ValidationError (user must disambiguate with --vm).
+    with pytest.raises(ValidationError, match="span multiple VMs"):
         infer_vm_from_session_specs(db, ["a", "c"])
 
     # All-unknown sessions -> None (defer error to create_console).
@@ -519,13 +526,13 @@ def test_create_console_fill_all_appends_alphabetically(db: Database) -> None:
 def test_create_console_rejects_empty_without_all(db: Database) -> None:
     _seed_vm(db)
     _seed_sessions(db, ["a"])
-    with pytest.raises(output.ConsoleError, match="specify at least one session"):
+    with pytest.raises(ValidationError, match="specify at least one session"):
         create_console(db, name="empty", vm_name="vm1", session_specs=[])
 
 
 def test_create_console_rejects_empty_fill_all(db: Database) -> None:
     _seed_vm(db)  # no sessions seeded
-    with pytest.raises(output.ConsoleError, match="VM 'vm1' has no sessions"):
+    with pytest.raises(ValidationError, match="VM 'vm1' has no sessions"):
         create_console(db, name="empty", vm_name="vm1", session_specs=[], fill_all=True)
 
 
@@ -533,18 +540,18 @@ def test_create_console_rejects_duplicate_name(db: Database) -> None:
     _seed_vm(db)
     _seed_sessions(db, ["a"])
     create_console(db, name="con", vm_name="vm1", session_specs=["a"])
-    with pytest.raises(output.ConsoleError, match="already exists"):
+    with pytest.raises(AlreadyExistsError, match="already exists"):
         create_console(db, name="con", vm_name="vm1", session_specs=["a"])
 
 
 def test_create_console_rejects_unknown_vm(db: Database) -> None:
-    with pytest.raises(output.VMError, match="not found"):
+    with pytest.raises(NotFoundError, match="not found"):
         create_console(db, name="con", vm_name="ghost", session_specs=["a"])
 
 
 def test_create_console_rejects_unknown_session(db: Database) -> None:
     _seed_vm(db)
-    with pytest.raises(output.SessionError, match="not found"):
+    with pytest.raises(NotFoundError, match="not found"):
         create_console(db, name="con", vm_name="vm1", session_specs=["ghost"])
 
 
@@ -552,14 +559,14 @@ def test_create_console_rejects_cross_vm_session(db: Database) -> None:
     _seed_vm(db, "vm1")
     _seed_vm(db, "vm2")
     _seed_sessions(db, ["a"], workspace_name="ws-vm2")
-    with pytest.raises(output.ConsoleError, match="is not on VM 'vm1'"):
+    with pytest.raises(ValidationError, match="is not on VM 'vm1'"):
         create_console(db, name="con", vm_name="vm1", session_specs=["a"])
 
 
 def test_create_console_rejects_dup_in_args(db: Database) -> None:
     _seed_vm(db)
     _seed_sessions(db, ["a"])
-    with pytest.raises(output.ConsoleError, match="listed more than once"):
+    with pytest.raises(ValidationError, match="listed more than once"):
         create_console(db, name="con", vm_name="vm1", session_specs=["a", "a+1"])
 
 
@@ -568,7 +575,7 @@ def test_create_console_rolls_back_on_failure(db: Database) -> None:
     _seed_vm(db)
     _seed_sessions(db, ["a"])
     db.insert_console("con", "vm1")
-    with pytest.raises(output.ConsoleError, match="already exists"):
+    with pytest.raises(AlreadyExistsError, match="already exists"):
         create_console(db, name="con", vm_name="vm1", session_specs=["a"])
     assert db.list_console_sessions("con") == []
 
@@ -593,7 +600,7 @@ def test_add_sessions_rejects_duplicate(db: Database) -> None:
     _seed_vm(db)
     _seed_sessions(db, ["a"])
     create_console(db, name="con", vm_name="vm1", session_specs=["a"])
-    with pytest.raises(output.ConsoleError, match="already a member"):
+    with pytest.raises(AlreadyExistsError, match="already a member"):
         add_sessions(db, _StubConfig(), console_name="con", session_specs=["a"])
 
 
@@ -610,7 +617,7 @@ def test_remove_sessions_rejects_non_member(db: Database) -> None:
     _seed_vm(db)
     _seed_sessions(db, ["a", "b"])
     create_console(db, name="con", vm_name="vm1", session_specs=["a"])
-    with pytest.raises(output.ConsoleError, match="not a member"):
+    with pytest.raises(NotFoundError, match="not a member"):
         remove_sessions(db, _StubConfig(), console_name="con", session_names=["b"])
 
 
@@ -631,7 +638,7 @@ def test_add_shell_rejects_non_member(db: Database) -> None:
     _seed_vm(db)
     _seed_sessions(db, ["a", "b"])
     create_console(db, name="con", vm_name="vm1", session_specs=["a"])
-    with pytest.raises(output.ConsoleError, match="not a member"):
+    with pytest.raises(NotFoundError, match="not a member"):
         add_shell(db, _StubConfig(), console_name="con", session_name="b")
 
 
@@ -639,7 +646,7 @@ def test_add_shell_rejects_bad_cwd(db: Database) -> None:
     _seed_vm(db)
     _seed_sessions(db, ["a"])
     create_console(db, name="con", vm_name="vm1", session_specs=["a"])
-    with pytest.raises(output.ValidationError):
+    with pytest.raises(ValidationError):
         add_shell(db, _StubConfig(), console_name="con", session_name="a", cwd="/etc")
 
 
@@ -1148,7 +1155,7 @@ def test_attach_console_skips_window_when_agent_missing(
 ) -> None:
     """If an agent-mode session's agent row is gone (FK violation under
     foreign_keys=OFF, or post-migration inconsistency), _session_linux_user
-    raises AgentError. _add_session_window catches it, warns, and continues
+    raises NotFoundError. _add_session_window catches it, warns, and continues
     instead of aborting the whole console build."""
     from agentworks.sessions.multi_console import attach_console
 
@@ -1406,9 +1413,9 @@ def test_split_shell_pane_warns_when_set_option_fails(
 
 
 def test_restore_session_errors_when_console_missing(db: Database) -> None:
-    """restore-session refuses unknown console name with ConsoleError."""
+    """restore-session refuses unknown console name with NotFoundError."""
     _seed_vm(db, with_tailscale=False)
-    with pytest.raises(output.ConsoleError, match="console 'nope' not found"):
+    with pytest.raises(NotFoundError, match="console 'nope' not found"):
         restore_session(db, _StubConfig(), console_name="nope", session_name="a")
 
 
@@ -1421,7 +1428,7 @@ def test_restore_session_errors_when_session_not_member(
     _seed_sessions(db, ["a"])
     create_console(db, name="con", vm_name="vm1", session_specs=["a"])
 
-    with pytest.raises(output.ConsoleError, match="is not a member of console"):
+    with pytest.raises(NotFoundError, match="is not a member of console"):
         restore_session(db, _StubConfig(), console_name="con", session_name="b")
 
 
@@ -1436,7 +1443,7 @@ def test_restore_session_errors_when_tmux_not_running(
 
     # has-session returns nonzero (default _FakeResult is ok, so override).
     fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=1)
-    with pytest.raises(output.ConsoleError, match="has no live tmux session"):
+    with pytest.raises(StateError, match="has no live tmux session"):
         restore_session(db, _StubConfig(), console_name="con", session_name="a")
 
 
@@ -1460,7 +1467,7 @@ def test_restore_session_strict_on_untagged_pane(
         stdout="%1|0|\n%2|1|\n%3|2|\n"
     )
 
-    with pytest.raises(output.ConsoleError, match="no agentworks tag"):
+    with pytest.raises(StateError, match="no agentworks tag"):
         restore_session(db, _StubConfig(), console_name="con", session_name="a")
 
 
@@ -1483,7 +1490,7 @@ def test_restore_session_strict_on_out_of_range_tag(
     )
 
     with pytest.raises(
-        output.ConsoleError,
+        StateError,
         match=r"tags \[2\] point past the configured range",
     ):
         restore_session(db, _StubConfig(), console_name="con", session_name="a")
@@ -1505,7 +1512,7 @@ def test_restore_session_strict_on_duplicate_tags(
         stdout="%1|0|\n%2|1|0\n%3|2|0\n"
     )
 
-    with pytest.raises(output.ConsoleError, match=r"duplicate tags \[0\]"):
+    with pytest.raises(StateError, match=r"duplicate tags \[0\]"):
         restore_session(db, _StubConfig(), console_name="con", session_name="a")
 
 
@@ -1529,7 +1536,7 @@ def test_restore_session_strict_message_when_configured_zero(
     )
 
     with pytest.raises(
-        output.ConsoleError, match="no configured shells"
+        StateError, match="no configured shells"
     ) as excinfo:
         restore_session(db, _StubConfig(), console_name="con", session_name="a")
     assert "0..-1" not in str(excinfo.value)
@@ -1604,7 +1611,7 @@ def test_restore_session_raises_when_split_returns_no_pane_id(
     )
 
     with pytest.raises(
-        output.ConsoleError, match=r"failed to create/tag config indices \[1\]"
+        ExternalError, match=r"failed to create/tag config indices \[1\]"
     ):
         restore_session(db, _StubConfig(), console_name="con", session_name="a")
 

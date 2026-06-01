@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.db import InitStatus, ProvisioningStatus
-from agentworks.output import ConnectivityError, VMError
+from agentworks.errors import ConnectivityError, ExternalError, NotFoundError
 from agentworks.ssh import ExecTarget, SSHError, SSHLogger, SSHTarget
 from agentworks.vms.cloud_init import INIT_SYSTEM_PACKAGES, PROVISIONING_PACKAGES
 
@@ -626,7 +626,11 @@ def resolve_git_credential_providers(
     for name in names:
         cred_config = config.git_credentials.get(name)
         if cred_config is None:
-            raise VMError(f"git credential '{name}' not found in config")
+            raise NotFoundError(
+                f"git credential '{name}' not found in config",
+                entity_kind="git-credential",
+                entity_name=name,
+            )
         desc = cred_config.description
         if cred_config.type == "azdo":
             assert cred_config.org is not None
@@ -640,7 +644,12 @@ def verify_git_credential_auth(providers: dict[str, GitCredentialProvider]) -> N
     """Pre-flight: verify auth for all selected git credential providers."""
     for name, provider in providers.items():
         if not provider.verify_auth():
-            raise VMError(f"Authentication check failed for '{name}'. {provider.auth_hint()}")
+            raise ExternalError(
+                f"Authentication check failed for '{name}'.",
+                entity_kind="git-credential",
+                entity_name=name,
+                hint=provider.auth_hint(),
+            )
     if providers:
         labels = [p.display_name for p in providers.values()]
         output.info(f"Git credentials configured: {', '.join(labels)}")

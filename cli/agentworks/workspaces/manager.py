@@ -9,6 +9,15 @@ from typing import TYPE_CHECKING
 from agentworks import output
 from agentworks.config import validate_name
 from agentworks.db import InitStatus, VMStatus
+from agentworks.errors import (
+    AgentworksError,
+    AlreadyExistsError,
+    ExternalError,
+    NotFoundError,
+    StateError,
+    UserAbort,
+    ValidationError,
+)
 from agentworks.workspaces.templates import resolve_template
 
 if TYPE_CHECKING:
@@ -38,7 +47,11 @@ def create_workspace(
     validate_name(ws_name)
 
     if db.get_workspace(ws_name) is not None:
-        raise output.WorkspaceError(f"workspace '{ws_name}' already exists")
+        raise AlreadyExistsError(
+            f"workspace '{ws_name}' already exists",
+            entity_kind="workspace",
+            entity_name=ws_name,
+        )
 
     template = resolve_template(config, template_name)
     template_resolved_name = template.name
@@ -97,12 +110,17 @@ def create_workspace(
             output.warn(f"Cancelling workspace create '{ws_name}'... rolling back.")
             _safe_cleanup()
             raise
-        except output.AgentworksError:
+        except AgentworksError:
             _safe_cleanup()
             raise
         except Exception as e:
             _safe_cleanup()
-            raise output.WorkspaceError(f"creating workspace: {e}\nSSH log: {ssh_logger.path}") from None
+            raise ExternalError(
+                f"creating workspace: {e}",
+                entity_kind="workspace",
+                entity_name=ws_name,
+                hint=f"SSH log: {ssh_logger.path}",
+            ) from e
 
         # Add grant_all agents to the new workspace group. Best-effort: the
         # workspace itself was already created and inserted above, so a
@@ -195,11 +213,19 @@ def shell_workspace(
 
     ws = db.get_workspace(name)
     if ws is None:
-        raise output.WorkspaceError(f"workspace '{name}' not found")
+        raise NotFoundError(
+            f"workspace '{name}' not found",
+            entity_kind="workspace",
+            entity_name=name,
+        )
 
     vm = db.get_vm(ws.vm_name)
     if vm is None:
-        raise output.VMError(f"VM '{ws.vm_name}' not found")
+        raise NotFoundError(
+            f"VM '{ws.vm_name}' not found",
+            entity_kind="vm",
+            entity_name=ws.vm_name,
+        )
 
     _guard_vm_status(vm)
     _ensure_vm_running(db, config, vm)
@@ -221,20 +247,27 @@ def console_workspace(
     from agentworks.workspaces.backends.vm import console_vm_workspace
 
     if os.environ.get("TMUX") and not allow_nesting:
-        raise output.WorkspaceError(
-            "already inside a tmux session.\n"
-            "Nesting is not recommended (prefix key conflicts,\n"
-            "confusing detach behavior).\n"
-            "Pass --allow-nesting to override."
+        raise StateError(
+            "already inside a tmux session. Nesting is not recommended "
+            "(prefix key conflicts, confusing detach behavior).",
+            hint="Pass --allow-nesting to override.",
         )
 
     ws = db.get_workspace(name)
     if ws is None:
-        raise output.WorkspaceError(f"workspace '{name}' not found")
+        raise NotFoundError(
+            f"workspace '{name}' not found",
+            entity_kind="workspace",
+            entity_name=name,
+        )
 
     vm = db.get_vm(ws.vm_name)
     if vm is None:
-        raise output.VMError(f"VM '{ws.vm_name}' not found")
+        raise NotFoundError(
+            f"VM '{ws.vm_name}' not found",
+            entity_kind="vm",
+            entity_name=ws.vm_name,
+        )
 
     _guard_vm_status(vm)
     _ensure_vm_running(db, config, vm)
@@ -249,7 +282,11 @@ def describe_workspace(
     """Show workspace details."""
     ws = db.get_workspace(name)
     if ws is None:
-        raise output.WorkspaceError(f"workspace '{name}' not found")
+        raise NotFoundError(
+            f"workspace '{name}' not found",
+            entity_kind="workspace",
+            entity_name=name,
+        )
 
     output.info(f"Name:       {ws.name}")
     output.info(f"VM:         {ws.vm_name}")
@@ -320,11 +357,19 @@ def repair_workspace(
 
     ws = db.get_workspace(name)
     if ws is None:
-        raise output.WorkspaceError(f"workspace '{name}' not found")
+        raise NotFoundError(
+            f"workspace '{name}' not found",
+            entity_kind="workspace",
+            entity_name=name,
+        )
 
     vm = db.get_vm(ws.vm_name)
     if vm is None:
-        raise output.VMError(f"VM '{ws.vm_name}' not found")
+        raise NotFoundError(
+            f"VM '{ws.vm_name}' not found",
+            entity_kind="vm",
+            entity_name=ws.vm_name,
+        )
 
     target = admin_exec_target(vm, config)
     ws_group = ws.linux_group
@@ -521,7 +566,11 @@ def rehome_workspace(
     """Move a workspace to a new directory path."""
     ws = db.get_workspace(name)
     if ws is None:
-        raise output.WorkspaceError(f"workspace '{name}' not found")
+        raise NotFoundError(
+            f"workspace '{name}' not found",
+            entity_kind="workspace",
+            entity_name=name,
+        )
 
     # Determine target path
     new_path = target_path if target_path is not None else f"{config.paths.vm_workspaces}/{name}"
@@ -536,7 +585,11 @@ def rehome_workspace(
     old_norm = old_path.rstrip("/") + "/"
     new_norm = new_path.rstrip("/") + "/"
     if new_norm.startswith(old_norm) or old_norm.startswith(new_norm):
-        raise output.WorkspaceError("source and target paths overlap")
+        raise ValidationError(
+            "source and target paths overlap",
+            entity_kind="workspace",
+            entity_name=name,
+        )
 
     # Block unless all sessions are STOPPED
     from agentworks.db import PID_STOPPED, SessionStatus
@@ -548,8 +601,10 @@ def rehome_workspace(
             sessions = ensure_pids_batch(sessions, db=db, config=config)
             status_map = batch_check_all_sessions(sessions, db=db, config=config)
         except Exception as exc:
-            raise output.WorkspaceError(
-                f"cannot verify session status for workspace '{name}' (VM may be unreachable): {exc}"
+            raise ExternalError(
+                f"cannot verify session status for workspace '{name}' (VM may be unreachable): {exc}",
+                entity_kind="workspace",
+                entity_name=name,
             ) from exc
         not_stopped = [
             s for s in sessions
@@ -557,9 +612,11 @@ def rehome_workspace(
         ]
         if not_stopped:
             names = ", ".join(s.name for s in not_stopped)
-            raise output.WorkspaceError(
-                f"workspace '{name}' has {len(not_stopped)} non-stopped session(s) ({names}). "
-                "Stop or delete them first."
+            raise StateError(
+                f"workspace '{name}' has {len(not_stopped)} non-stopped session(s) ({names}).",
+                entity_kind="workspace",
+                entity_name=name,
+                hint="Stop or delete the listed sessions first.",
             )
 
     _rehome_vm(db, config, ws, new_path, remove_old=remove_old, yes=yes)
@@ -585,7 +642,11 @@ def _rehome_vm(
 
     vm = db.get_vm(vm_name)
     if vm is None:
-        raise output.VMError(f"VM '{vm_name}' not found")
+        raise NotFoundError(
+            f"VM '{vm_name}' not found",
+            entity_kind="vm",
+            entity_name=vm_name,
+        )
 
     _guard_vm_status(vm)
     _ensure_vm_running(db, config, vm)
@@ -595,12 +656,20 @@ def _rehome_vm(
     # Verify source exists
     src_check = target.run(f"test -d {old_path}", check=False, timeout=10)
     if not src_check.ok:
-        raise output.WorkspaceError(f"source directory {old_path} does not exist on VM")
+        raise StateError(
+            f"source directory {old_path} does not exist on VM",
+            entity_kind="workspace",
+            entity_name=ws_name,
+        )
 
     # Verify target does not exist
     dst_check = target.run(f"test -d {new_path}", check=False, timeout=10)
     if dst_check.ok:
-        raise output.WorkspaceError(f"target directory {new_path} already exists on VM")
+        raise StateError(
+            f"target directory {new_path} already exists on VM",
+            entity_kind="workspace",
+            entity_name=ws_name,
+        )
 
     if not yes:
         output.info(f"Rehome workspace '{ws_name}':")
@@ -611,7 +680,7 @@ def _rehome_vm(
         else:
             output.detail("Old directory will be LEFT IN PLACE")
         if not output.confirm("Proceed?"):
-            raise output.UserAbort("rehome cancelled")
+            raise UserAbort("rehome cancelled")
 
     ssh_logger = SSHLogger(vm.name, "workspace-rehome")
     target = admin_exec_target(vm, config, logger=ssh_logger)
@@ -648,8 +717,11 @@ def _rehome_vm(
             # Verify copy succeeded
             verify = target.run(f"test -d {np}", check=False, timeout=10)
             if not verify.ok:
-                raise output.WorkspaceError(
-                    f"copy verification failed, target directory not found\nSSH log: {ssh_logger.path}"
+                raise ExternalError(
+                    "copy verification failed, target directory not found",
+                    entity_kind="workspace",
+                    entity_name=ws_name,
+                    hint=f"SSH log: {ssh_logger.path}",
                 )
 
             # Fix ownership, permissions, and ACLs on the new path
@@ -724,14 +796,18 @@ def _rehome_vm(
                 f"SSH log: {ssh_logger.path}"
             )
             raise
-        except output.AgentworksError:
+        except AgentworksError:
             raise
         except Exception as e:
-            raise output.WorkspaceError(
-                f"during rehome: {e}\n"
-                f"SSH log: {ssh_logger.path}\n"
-                f"{_rehome_partial_state_hint(db, ws_name, old_path, new_path)}"
-            ) from None
+            raise ExternalError(
+                f"during rehome: {e}",
+                entity_kind="workspace",
+                entity_name=ws_name,
+                hint=(
+                    f"SSH log: {ssh_logger.path}. "
+                    f"{_rehome_partial_state_hint(db, ws_name, old_path, new_path)}"
+                ),
+            ) from e
     finally:
         ssh_logger.close()
 
@@ -750,13 +826,20 @@ def delete_workspace(
 
     ws = db.get_workspace(name)
     if ws is None:
-        raise output.WorkspaceError(f"workspace '{name}' not found")
+        raise NotFoundError(
+            f"workspace '{name}' not found",
+            entity_kind="workspace",
+            entity_name=name,
+        )
 
     # Check for sessions
     session_count = len(db.list_sessions(workspace_name=name))
     if session_count > 0 and not force:
-        raise output.WorkspaceError(
-            f"workspace '{name}' has {session_count} session(s). Delete them first, or use --force."
+        raise StateError(
+            f"workspace '{name}' has {session_count} session(s).",
+            entity_kind="workspace",
+            entity_name=name,
+            hint="Delete the sessions first, or pass --force to also delete them.",
         )
 
     if not yes:
@@ -764,7 +847,7 @@ def delete_workspace(
         if session_count > 0:
             msg += f" ({session_count} session(s) will also be deleted)"
         if not output.confirm(msg):
-            raise output.UserAbort("delete cancelled")
+            raise UserAbort("delete cancelled")
 
     # Create SSH logger for VM operations
     from agentworks.ssh import SSHLogger
@@ -805,9 +888,12 @@ def delete_workspace(
             elif status == SessionStatus.UNKNOWN:
                 unstoppable.append(session.name)
         if unstoppable:
-            raise output.WorkspaceError(
+            raise StateError(
                 f"cannot delete workspace '{name}': {len(unstoppable)} session(s) could not be stopped "
-                f"({', '.join(unstoppable)}). Resolve manually before retrying."
+                f"({', '.join(unstoppable)}).",
+                entity_kind="workspace",
+                entity_name=name,
+                hint="Resolve the stuck sessions manually before retrying.",
             )
     db.delete_sessions_for_workspace(name)
 
@@ -851,10 +937,18 @@ def copy_workspace(
 
     src_ws = db.get_workspace(source_name)
     if src_ws is None:
-        raise output.WorkspaceError(f"workspace '{source_name}' not found")
+        raise NotFoundError(
+            f"workspace '{source_name}' not found",
+            entity_kind="workspace",
+            entity_name=source_name,
+        )
 
     if db.get_workspace(dest_name) is not None:
-        raise output.WorkspaceError(f"workspace '{dest_name}' already exists")
+        raise AlreadyExistsError(
+            f"workspace '{dest_name}' already exists",
+            entity_kind="workspace",
+            entity_name=dest_name,
+        )
 
     with tempfile.NamedTemporaryFile(suffix=".tgz", delete=False) as tmp:
         tmp_path = Path(tmp.name)
@@ -863,11 +957,19 @@ def copy_workspace(
         # --- Pack from source ---
         src_vm = db.get_vm(src_ws.vm_name)
         if src_vm is None:
-            raise output.VMError(f"VM '{src_ws.vm_name}' not found")
+            raise NotFoundError(
+                f"VM '{src_ws.vm_name}' not found",
+                entity_kind="vm",
+                entity_name=src_ws.vm_name,
+            )
         _guard_vm_status(src_vm)
         _ensure_vm_running(db, config, src_vm)
         if src_vm.tailscale_host is None:
-            raise output.VMError(f"VM '{src_vm.name}' has no Tailscale address")
+            raise StateError(
+                f"VM '{src_vm.name}' has no Tailscale address",
+                entity_kind="vm",
+                entity_name=src_vm.name,
+            )
 
         src_exec = admin_exec_target(src_vm, config)
         assert src_exec.ssh is not None
@@ -885,14 +987,22 @@ def copy_workspace(
             proc = subprocess.run(ssh_args, stdout=f, stderr=subprocess.PIPE)
         if proc.returncode != 0:
             stderr = proc.stderr.decode() if proc.stderr else ""
-            raise output.WorkspaceError(f"pack failed: {stderr.strip()}")
+            raise ExternalError(
+                f"pack failed: {stderr.strip()}",
+                entity_kind="workspace",
+                entity_name=source_name,
+            )
 
         # --- Unpack to destination VM ---
         dest_vm = _resolve_vm(db, vm_name)
         _guard_vm_status(dest_vm)
         _ensure_vm_running(db, config, dest_vm)
         if dest_vm.tailscale_host is None:
-            raise output.VMError(f"VM '{dest_vm.name}' has no Tailscale address")
+            raise StateError(
+                f"VM '{dest_vm.name}' has no Tailscale address",
+                entity_kind="vm",
+                entity_name=dest_vm.name,
+            )
 
         lg = SSHLogger(dest_vm.name, "workspace-copy")
         dest_target = admin_exec_target(dest_vm, config, logger=lg)
@@ -963,12 +1073,17 @@ def _guard_vm_status(vm: VMRow) -> None:
     usable = {InitStatus.COMPLETE.value, InitStatus.PARTIAL.value}
     if vm.init_status not in usable:
         if vm.init_status == InitStatus.FAILED.value:
-            raise output.VMError(
-                f"VM '{vm.name}' is in 'failed' state. Run 'vm delete' and recreate."
+            raise StateError(
+                f"VM '{vm.name}' is in 'failed' state.",
+                entity_kind="vm",
+                entity_name=vm.name,
+                hint="Run 'vm delete' and recreate.",
             )
         else:
-            raise output.VMError(
-                f"VM '{vm.name}' initialization is not complete (status: {vm.init_status})."
+            raise StateError(
+                f"VM '{vm.name}' initialization is not complete (status: {vm.init_status}).",
+                entity_kind="vm",
+                entity_name=vm.name,
             )
 
 
@@ -977,7 +1092,11 @@ def _resolve_vm(db: Database, vm_name: str | None) -> VMRow:
     if vm_name is not None:
         vm = db.get_vm(vm_name)
         if vm is None:
-            raise output.VMError(f"VM '{vm_name}' not found")
+            raise NotFoundError(
+                f"VM '{vm_name}' not found",
+                entity_kind="vm",
+                entity_name=vm_name,
+            )
         return vm
 
     vms = db.list_vms()
@@ -985,7 +1104,11 @@ def _resolve_vm(db: Database, vm_name: str | None) -> VMRow:
     usable_vms = [v for v in vms if v.init_status in usable_statuses]
 
     if len(usable_vms) == 0:
-        raise output.VMError("no VMs available. Create one with 'agentworks vm create'.")
+        raise NotFoundError(
+            "no VMs available.",
+            entity_kind="vm",
+            hint="Create one with 'agentworks vm create'.",
+        )
 
     if len(usable_vms) == 1:
         output.info(f"Using VM '{usable_vms[0].name}'")

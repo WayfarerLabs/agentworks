@@ -13,6 +13,7 @@ import sys
 from typing import TYPE_CHECKING
 
 from agentworks import output
+from agentworks.errors import NotFoundError, StateError
 from agentworks.sessions.tmux import tmux_cmd
 
 if TYPE_CHECKING:
@@ -142,23 +143,30 @@ def attach_console(
     import os
 
     if os.environ.get("TMUX") and not allow_nesting:
-        raise output.SessionError(
-            "already inside a tmux session.\n"
-            "Nesting is not recommended (prefix key conflicts,\n"
-            "confusing detach behavior).\n"
-            "Pass --allow-nesting to override."
+        raise StateError(
+            "already inside a tmux session. Nesting is not recommended "
+            "(prefix key conflicts, confusing detach behavior).",
+            hint="Pass --allow-nesting to override.",
         )
 
     vm = db.get_vm(vm_name)
     if vm is None:
-        raise output.VMError(f"VM '{vm_name}' not found")
+        raise NotFoundError(
+            f"VM '{vm_name}' not found",
+            entity_kind="vm",
+            entity_name=vm_name,
+        )
 
     from agentworks.workspaces.manager import _ensure_vm_running
 
     _ensure_vm_running(db, config, vm)
 
     if vm.tailscale_host is None:
-        raise output.VMError(f"VM '{vm_name}' has no Tailscale address")
+        raise StateError(
+            f"VM '{vm_name}' has no Tailscale address",
+            entity_kind="vm",
+            entity_name=vm_name,
+        )
 
     from agentworks.ssh import admin_exec_target, interactive
 

@@ -95,11 +95,18 @@ class LimaProvisioner(VMProvisioner):
             import shutil
 
             if not shutil.which("limactl"):
-                from agentworks.output import VMError
+                from agentworks.errors import ConnectivityError
 
-                raise VMError(
-                    "'limactl' not found. Lima is not installed on this machine. "
-                    "For remote Lima VMs, set defaults.vm_host in your config or pass --vm-host."
+                # Mirrors the 'tailscale' / 'tailscale status' precedent in
+                # initializer.py: a required local CLI tool is missing or
+                # unreachable, which is a transport-level problem rather
+                # than a state mismatch on a managed entity.
+                raise ConnectivityError(
+                    "'limactl' not found. Lima is not installed on this machine.",
+                    hint=(
+                        "For remote Lima VMs, set defaults.vm_host in your "
+                        "config or pass --vm-host."
+                    ),
                 )
 
         if self.is_remote:

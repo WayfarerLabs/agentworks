@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.config import validate_name
-from agentworks.output import VMError
+from agentworks.errors import AlreadyExistsError, NotFoundError, StateError, ValidationError
 from agentworks.ssh import SSHError, SSHTarget, run
 
 if TYPE_CHECKING:
@@ -36,10 +36,18 @@ def add_vm_host(db: Database, name: str, ssh_host: str, platform: str = "lima") 
     validate_name(name)
 
     if platform != "lima":
-        raise VMError(f"only 'lima' platform is supported for VM hosts, got: {platform}")
+        raise ValidationError(
+            f"only 'lima' platform is supported for VM hosts, got: {platform}",
+            entity_kind="vm-host",
+            entity_name=name,
+        )
 
     if db.get_vm_host(name) is not None:
-        raise VMError(f"VM host '{name}' already exists")
+        raise AlreadyExistsError(
+            f"VM host '{name}' already exists",
+            entity_kind="vm-host",
+            entity_name=name,
+        )
 
     output.info(f"Detecting OS on {ssh_host}...")
     detected_os = detect_os(ssh_host)
@@ -69,11 +77,20 @@ def remove_vm_host(db: Database, name: str, *, force: bool = False) -> None:
     """Remove a VM host. Refuses if VMs reference it unless --force."""
     host = db.get_vm_host(name)
     if host is None:
-        raise VMError(f"VM host '{name}' not found")
+        raise NotFoundError(
+            f"VM host '{name}' not found",
+            entity_kind="vm-host",
+            entity_name=name,
+        )
 
     vm_count = db.count_vms_on_host(name)
     if vm_count > 0 and not force:
-        raise VMError(f"VM host '{name}' has {vm_count} VM(s). Delete them first, or use --force.")
+        raise StateError(
+            f"VM host '{name}' has {vm_count} VM(s).",
+            entity_kind="vm-host",
+            entity_name=name,
+            hint="Delete the VMs first, or pass --force to clear the host reference and remove.",
+        )
 
     if vm_count > 0:
         # Nullify vm_host_name on VMs referencing this host to prevent dangling FK
