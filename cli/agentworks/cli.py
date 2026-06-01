@@ -1390,7 +1390,7 @@ def console_restore_session(
     )
 
 
-# -- Installer catalog commands --------------------------------------------
+# -- Catalog commands ------------------------------------------------------
 
 _TYPE_CHOICES = click.Choice(["apt-source", "apt-package", "system-install-cmd", "user-install-cmd"])
 
@@ -1406,11 +1406,10 @@ def catalog_list(
     ] = None,
 ) -> None:
     """List catalog entries from the built-in and custom catalog."""
-    from agentworks.catalog import load_builtin_catalog, load_catalog
+    from agentworks.catalog import load_catalog
     from agentworks.config import load_config
 
     config = load_config()
-    builtin = load_builtin_catalog()
     merged = load_catalog(config)
 
     rows: list[tuple[str, str, str, str]] = []  # (type, name, source, description)
@@ -1418,29 +1417,26 @@ def catalog_list(
     def _add_entries(
         type_label: str,
         merged_entries: Mapping[str, _HasDescription],
-        builtin_entries: Mapping[str, _HasDescription],
     ) -> None:
         for name, entry in sorted(merged_entries.items()):
-            is_builtin = name in builtin_entries
+            # An entry is "custom" if it's declared in the user's config under
+            # the matching section; otherwise it came from the built-in
+            # catalog. The user's section overrides the built-in entry for
+            # the same name (resolved during catalog merge).
             is_custom = name in getattr(config, _CONFIG_ATTR[type_label], {})
-            if is_custom:
-                source = "custom"
-            elif is_builtin:
-                source = "built-in"
-            else:
-                source = "built-in"
+            source = "custom" if is_custom else "built-in"
             if source_filter is not None and source != source_filter:
                 continue
             rows.append((type_label, name, source, entry.description))
 
     if type_filter is None or type_filter == "apt-source":
-        _add_entries("apt-source", merged.apt_sources, builtin.apt_sources)
+        _add_entries("apt-source", merged.apt_sources)
     if type_filter is None or type_filter == "apt-package":
-        _add_entries("apt-package", merged.apt_packages, builtin.apt_packages)
+        _add_entries("apt-package", merged.apt_packages)
     if type_filter is None or type_filter == "system-install-cmd":
-        _add_entries("system-install-cmd", merged.system_install_commands, builtin.system_install_commands)
+        _add_entries("system-install-cmd", merged.system_install_commands)
     if type_filter is None or type_filter == "user-install-cmd":
-        _add_entries("user-install-cmd", merged.user_install_commands, builtin.user_install_commands)
+        _add_entries("user-install-cmd", merged.user_install_commands)
 
     if not rows:
         typer.echo("No entries found.")

@@ -593,7 +593,7 @@ Template commands support `{{session_name}}` and `{{workspace_name}}` variable s
 by `session restart` -- useful for tools like Claude Code where `--resume` picks up the previous
 conversation. If omitted, the regular `command` is used.
 
-### Installers
+### Catalog
 
 Browse and inspect the built-in catalog of installable tools.
 
