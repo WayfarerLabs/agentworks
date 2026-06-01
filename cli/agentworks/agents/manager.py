@@ -486,8 +486,8 @@ def grant_workspaces(
     """Grant an agent explicit access to workspaces."""
     if not grant_all and not workspace_names:
         raise AgentError(
-            f"grant-workspace for '{agent_name}' needs at least one workspace name "
-            f"or --all"
+            f"grant for '{agent_name}' needs at least one workspace name "
+            f"or workspace_names empty + grant_all=True"
         )
 
     agent = db.get_agent(agent_name)
@@ -526,8 +526,8 @@ def revoke_workspaces(
     """Revoke explicit workspace grants from an agent."""
     if not revoke_all and not workspace_names:
         raise AgentError(
-            f"revoke-workspace for '{agent_name}' needs at least one workspace name "
-            f"or --all"
+            f"revoke for '{agent_name}' needs at least one workspace name "
+            f"or workspace_names empty + revoke_all=True"
         )
 
     agent = db.get_agent(agent_name)

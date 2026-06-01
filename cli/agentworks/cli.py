@@ -783,7 +783,7 @@ def agent_grant_workspace(
     name: Annotated[str, typer.Argument(help="Agent name")],
     workspaces: Annotated[
         list[str] | None,
-        typer.Argument(help="One or more workspace names"),
+        typer.Argument(help="Workspace names (omit when using --all)"),
     ] = None,
     all_workspaces: Annotated[
         bool, typer.Option("--all", help="Grant access to all workspaces")
@@ -807,7 +807,7 @@ def agent_revoke_workspace(
     name: Annotated[str, typer.Argument(help="Agent name")],
     workspaces: Annotated[
         list[str] | None,
-        typer.Argument(help="One or more workspace names"),
+        typer.Argument(help="Workspace names (omit when using --all)"),
     ] = None,
     all_workspaces: Annotated[
         bool, typer.Option("--all", help="Remove all explicit grants")

@@ -55,8 +55,10 @@ surrounding command provides the context for what "all" applies to.
 CLI command bodies should be thin: argv to kwargs, then call the service-layer function on the
 relevant manager. Validation, error shaping, and business logic live in the manager. If the CLI
 finds itself re-implementing a check the manager already does (e.g. "refuse empty input"), let the
-manager raise and propagate. See [[code-style]] and the `agentworks-reviewer` subagent's check on
-service-layer authority for the full rule.
+manager raise and propagate. The contract: service-layer functions raise typed `AgentworksError`
+subclasses (`AgentError`, `ConsoleError`, `VMError`, etc.); the CLI catches and renders them; no
+`typer.echo`, `print`, or `typer.Exit` from manager modules. See the `agentworks-reviewer` rubric
+for the full check.
 
 ## When in doubt
 
