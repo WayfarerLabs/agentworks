@@ -1386,8 +1386,9 @@ def console_restore_session(
 
     Re-adds any panes you killed (e.g. accidentally), restoring each one to
     its original position. Refuses to remove panes if you have more live than
-    configured; for that, use `console attach --recreate`. Pre-tagging consoles
-    require `attach --recreate` once to retag from scratch.
+    configured; for that, use `console attach --recreate`. Consoles created
+    before pane-tagging existed require `attach --recreate` once to retag from
+    scratch.
     """
     from agentworks.config import load_config
     from agentworks.sessions.multi_console import restore_session

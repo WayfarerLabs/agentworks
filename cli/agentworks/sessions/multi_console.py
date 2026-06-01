@@ -824,11 +824,14 @@ def _split_shell_pane(
     # Login shell in both branches keeps profile/aliases consistent with the
     # session pane behavior (sessions use $SHELL -l via create_session).
     # Diagnostic on cd failure so a missing cwd shows the actual path.
-    # -P -F '#{pane_id}' makes split-window print the new pane's ID to stdout
-    # so we can target set-option at that exact pane immediately after.
+    # The echo argument is shlex.quoted so paths containing shell metacharacters
+    # (quotes, $(...), backticks) print literally rather than triggering
+    # expansion. -P -F '#{pane_id}' makes split-window print the new pane's ID
+    # to stdout so we can target set-option at that exact pane immediately after.
+    q_diag = shlex.quote(f"cwd missing: {full_path}")
     if use_admin:
         bootstrap = (
-            f'cd {q_full} || echo "cwd missing: {full_path}"; '
+            f'cd {q_full} || echo {q_diag}; '
             f'exec "$SHELL" -l'
         )
         cmd = (
@@ -838,7 +841,7 @@ def _split_shell_pane(
     else:
         q_user = shlex.quote(session_user)
         bootstrap = (
-            f'cd {q_full} || echo "cwd missing: {full_path}"; '
+            f'cd {q_full} || echo {q_diag}; '
             f'exec "$SHELL" -l'
         )
         pane_cmd = (
