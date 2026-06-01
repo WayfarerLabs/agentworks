@@ -67,7 +67,7 @@ jobs:
         run: uv run pytest tests/ -v -m 'not integration'
 
   # File-quality linters and the rulesync drift check both run via the same
-  # scripts contributors use locally (./scripts/lint.sh, ./scripts/rulesync-upgen.sh
+  # scripts contributors use locally (./scripts/lint-files.sh, ./scripts/rulesync-upgen.sh
   # --check). That keeps CI and local behavior in lockstep; the version pins,
   # ignore lists, and exit semantics are defined exactly once.
 
@@ -80,8 +80,8 @@ jobs:
         with:
           node-version-file: .node-version
 
-      - name: ./scripts/lint.sh
-        run: ./scripts/lint.sh
+      - name: ./scripts/lint-files.sh
+        run: ./scripts/lint-files.sh
 
   rulesync-drift:
     runs-on: ubuntu-latest
