@@ -104,19 +104,43 @@ def create_workspace(
             _safe_cleanup()
             raise output.WorkspaceError(f"creating workspace: {e}\nSSH log: {ssh_logger.path}") from None
 
-        # Add grant_all agents to the new workspace group
+        # Add grant_all agents to the new workspace group. Best-effort: the
+        # workspace itself was already created and inserted above, so a
+        # per-agent failure (DB error, SSH hiccup) should not abort the
+        # whole command. Surface failures as warnings and report accurate
+        # counts so the user can re-grant manually with 'agent grant'.
         grant_all_agents = db.list_agents_on_vm_with_grant_all(vm.name)
         if grant_all_agents:
             from agentworks.agents.manager import _add_to_workspace_group
 
+            added = 0
+            failed: list[str] = []
             for agent in grant_all_agents:
-                _add_to_workspace_group(vm, config, db, agent.linux_user, ws_name, logger=ssh_logger)
-                db.insert_agent_grant(agent.name, ws_name, "explicit")
-            output.detail(f"Added {len(grant_all_agents)} grant-all agent(s) to workspace")
+                try:
+                    _add_to_workspace_group(vm, config, db, agent.linux_user, ws_name, logger=ssh_logger)
+                    db.insert_agent_grant(agent.name, ws_name, "explicit")
+                    added += 1
+                except Exception as e:
+                    failed.append(agent.name)
+                    output.warn(
+                        f"Failed to add grant-all agent '{agent.name}' to workspace "
+                        f"'{ws_name}': {e}"
+                    )
+            if added:
+                output.detail(f"Added {added} grant-all agent(s) to workspace")
+            if failed:
+                output.warn(
+                    f"Grant-all agents not added: {', '.join(failed)}. "
+                    f"Re-grant manually with 'agent grant <name> {ws_name}'."
+                )
     finally:
         ssh_logger.close()
 
     if open_vscode:
+        # vscode_path was assigned inside the inner try before any rollback
+        # could occur; reaching here means the try block completed without
+        # raising, so vscode_path is set. Assert for the type-checker.
+        assert vscode_path is not None
         subprocess.run(["code", vscode_path], check=False)
 
     output.info(f"Workspace '{ws_name}' created")
