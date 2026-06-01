@@ -126,6 +126,17 @@ def create_workspace(
             for agent in grant_all_agents:
                 try:
                     db.insert_agent_grant(agent.name, ws_name, "explicit")
+                except KeyboardInterrupt:
+                    # sqlite commits inside a C call; KI can surface after
+                    # the commit but before we move on, leaving an inserted
+                    # row. Best-effort revert and re-raise to preserve the
+                    # SIGINT contract.
+                    output.warn(
+                        f"Cancelled while inserting grant for agent '{agent.name}' on "
+                        f"workspace '{ws_name}'. Reverting in case the insert committed."
+                    )
+                    _revert_grant_on_failure(db, agent.name, ws_name)
+                    raise
                 except Exception as e:
                     failed.append(agent.name)
                     output.warn(
