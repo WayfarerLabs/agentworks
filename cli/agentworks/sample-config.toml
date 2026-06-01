@@ -41,6 +41,10 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # vm_host = "mac-studio"                     # default VM host for remote Lima
 
 # --- Named-console settings ---
+# Scope: this section applies only to named multi-session consoles created
+# via `agentworks console create`. The legacy `vm console` and the
+# workspace-console template generator do NOT read these values.
+#
 # tmux_layout: layout applied to every multi-pane session window in a named
 # console. Maps 1:1 to tmux's built-in select-layout names so the same value
 # can be applied on the fly via `tmux select-layout` key bindings. Re-read
@@ -48,7 +52,7 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # value and running `console attach --recreate` (or adding/restoring a
 # shell) is enough to switch layouts.
 
-[console]
+[named_console]
 # tmux_layout = "tiled"
 # Valid values:
 #   tiled            - roughly-equal grid (default; current behavior)

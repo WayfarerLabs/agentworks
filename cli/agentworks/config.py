@@ -116,7 +116,13 @@ VALID_TMUX_LAYOUTS = (
 
 
 @dataclass(frozen=True)
-class ConsoleConfig:
+class NamedConsoleConfig:
+    """Settings for the `console` subcommand group (named multi-session
+    consoles). Section is `[named_console]` in the TOML to disambiguate from
+    the legacy `vm console` and the workspace console template — only named
+    consoles read these values today.
+    """
+
     tmux_layout: str = "tiled"
 
 
@@ -249,7 +255,7 @@ class Config:
     operator: OperatorConfig
     paths: PathsConfig
     defaults: DefaultsConfig
-    console: ConsoleConfig
+    named_console: NamedConsoleConfig
     vm_templates: dict[str, VMTemplate]
     vm: ResolvedVMTemplate
     admin: AdminConfig
@@ -413,23 +419,26 @@ def _load_defaults(data: dict[str, object], issues: list[str]) -> DefaultsConfig
     )
 
 
-_CONSOLE_KEYS = {"tmux_layout"}
+_NAMED_CONSOLE_KEYS = {"tmux_layout"}
 
 
-def _load_console(data: dict[str, object], issues: list[str]) -> ConsoleConfig:
-    raw = data.get("console", {})
+def _load_named_console(
+    data: dict[str, object], issues: list[str]
+) -> NamedConsoleConfig:
+    raw = data.get("named_console", {})
     if not isinstance(raw, dict):
-        raise ConfigError("[console] must be a table")
+        raise ConfigError("[named_console] must be a table")
 
-    _warn_unexpected_keys(raw, _CONSOLE_KEYS, "console", issues)
+    _warn_unexpected_keys(raw, _NAMED_CONSOLE_KEYS, "named_console", issues)
 
     layout = raw.get("tmux_layout", "tiled")
     if layout not in VALID_TMUX_LAYOUTS:
         raise ConfigError(
-            f"console.tmux_layout must be one of {VALID_TMUX_LAYOUTS}, got: {layout}"
+            f"named_console.tmux_layout must be one of {VALID_TMUX_LAYOUTS}, "
+            f"got: {layout}"
         )
 
-    return ConsoleConfig(tmux_layout=str(layout))
+    return NamedConsoleConfig(tmux_layout=str(layout))
 
 
 _VM_TEMPLATE_KEYS = {
@@ -903,7 +912,7 @@ def load_config(path: Path | None = None, *, warn_issues: bool = True) -> Config
         operator=_load_operator(data, issues),
         paths=_load_paths(data),
         defaults=_load_defaults(data, issues),
-        console=_load_console(data, issues),
+        named_console=_load_named_console(data, issues),
         vm_templates=loaded_vm_templates,
         vm=resolved_vm,
         admin=admin,

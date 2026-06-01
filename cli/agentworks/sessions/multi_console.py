@@ -261,11 +261,16 @@ def create_console(
 
     if not specs and not add_admin_shell:
         # Almost certainly a typo / misunderstanding rather than an empty console.
-        detail = (
-            f"VM '{vm_name}' has no sessions"
-            if fill_all
-            else "specify at least one session, pass --all, or pass --add-admin-shell"
-        )
+        # fill_all (--all) and --all-running both go through specs expansion before
+        # reaching here, so an empty specs list means the expansion turned up
+        # nothing or no flags were passed at all.
+        if fill_all:
+            detail = f"VM '{vm_name}' has no sessions"
+        else:
+            detail = (
+                "specify at least one session, pass --all (or --all-running for "
+                "live sessions only), or pass --add-admin-shell"
+            )
         raise output.ConsoleError(
             f"refusing to create empty console '{name}' ({detail})"
         )
@@ -322,7 +327,7 @@ def add_sessions(
                 console_name=console_name,
                 member=member,
                 vm=vm,
-                layout=config.console.tmux_layout,
+                layout=config.named_console.tmux_layout,
             )
 
 
@@ -446,7 +451,7 @@ def add_shell(
         )
         q_con = shlex.quote(tmux_session_name(console_name))
         q_win = shlex.quote(session_name)
-        layout = shlex.quote(config.console.tmux_layout)
+        layout = shlex.quote(config.named_console.tmux_layout)
         target.run(
             f"tmux select-layout -t {q_con}:{q_win} {layout}",
             check=False,
@@ -486,7 +491,7 @@ def restore_session(
 
     q_con = shlex.quote(tmux_session_name(console_name))
     q_win = shlex.quote(session_name)
-    layout = config.console.tmux_layout
+    layout = config.named_console.tmux_layout
     configured_count = len(member.shells)
 
     # Window present?
@@ -915,7 +920,18 @@ def _add_session_window(
     if not member.shells:
         return
 
-    session_user = _session_linux_user(db, session, vm)
+    # _session_linux_user raises AgentError if the session points at an agent
+    # row that's gone (FK violation under PRAGMA foreign_keys = OFF, or stale
+    # state from a migration). Match the missing-session / missing-workspace
+    # handling above: warn and skip rather than abort the whole console build.
+    try:
+        session_user = _session_linux_user(db, session, vm)
+    except output.AgentError as exc:
+        output.warn(
+            f"agent for session '{session.name}' is missing ({exc}); "
+            f"skipping shell panes for this window"
+        )
+        return
     for config_index, shell in enumerate(member.shells):
         _split_shell_pane(
             target,
@@ -1052,13 +1068,22 @@ def _live_target(
 @contextlib.contextmanager
 def _live_best_effort(action: str) -> Iterator[None]:
     """Wrap best-effort live tmux work. User-facing AgentworksError exceptions
-    propagate; transport-level surprises are warned and swallowed."""
+    propagate; transport-level surprises are warned and swallowed.
+
+    The DB has already mutated by the time we reach here, so any partial
+    live-tmux failure leaves DB and tmux out of sync until the operator
+    reattaches with --recreate. The warning text spells this out.
+    """
     try:
         yield
     except output.AgentworksError:
         raise
     except Exception as exc:
-        output.warn(f"live console sync failed ({action}): {exc}")
+        output.warn(
+            f"live console sync failed ({action}): {exc}. "
+            f"DB state was updated; run `agentworks console attach <name> --recreate` "
+            f"to rebuild tmux from the new state."
+        )
 
 
 # -- High-level entrypoints ------------------------------------------------
@@ -1087,7 +1112,7 @@ def attach_console(
     vm, target = _prepare_vm_target_for_attach(db, config, console.vm_name)
 
     exists = _console_tmux_exists(target, name)
-    layout = config.console.tmux_layout
+    layout = config.named_console.tmux_layout
     if recreate and exists:
         output.info(f"Rebuilding console '{name}' (--recreate)...")
         _build_console_tmux(target, db, console, vm, layout=layout)

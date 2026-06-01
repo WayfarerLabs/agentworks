@@ -547,8 +547,9 @@ aw-console-backend
 
 The tmux session is built lazily on first `attach` (or rebuilt with `--recreate`). Adding or
 removing sessions/shells while the console is attached updates tmux immediately; when offline, only
-the DB is touched and changes appear on next attach. The console does not auto-boot the VM for live
-sync; VM start happens only on explicit `attach`.
+the DB is touched and changes appear on next attach. The mutation commands (`add-session`,
+`remove-session`, `add-shell`) never auto-boot the VM; the explicit attach/repair commands
+(`attach`, `restore-session`) do start a stopped VM, since their job is to bring live state up.
 
 #### VM console (deprecated)
 

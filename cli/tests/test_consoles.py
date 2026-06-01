@@ -64,7 +64,7 @@ def _seed_sessions(db: Database, names: list[str], *, workspace_name: str = "ws-
     db._conn.commit()
 
 
-class _StubConsoleConfig:
+class _StubNamedConsoleConfig:
     tmux_layout: str = "tiled"
 
 
@@ -77,11 +77,11 @@ class _StubConfig:
     without monkey-patching ``admin_exec_target`` you will hit an
     AttributeError on this stub -- prefer the ``fake_target`` fixture.
 
-    ``console`` provides only what multi_console reads from Config; extend
-    here as new fields are added to ConsoleConfig.
+    ``named_console`` provides only what multi_console reads from Config;
+    extend here as new fields are added to NamedConsoleConfig.
     """
 
-    console = _StubConsoleConfig()
+    named_console = _StubNamedConsoleConfig()
 
 
 # -- parse_session_spec ----------------------------------------------------
@@ -1141,6 +1141,48 @@ def test_attach_console_skips_missing_session_with_warning(
     # Only the surviving session gets a window.
     assert len(new_windows) == 1
     assert "alpha" in new_windows[0]
+
+
+def test_attach_console_skips_window_when_agent_missing(
+    db: Database, fake_target: _FakeTarget, captured_output: CapturedOutput
+) -> None:
+    """If an agent-mode session's agent row is gone (FK violation under
+    foreign_keys=OFF, or post-migration inconsistency), _session_linux_user
+    raises AgentError. _add_session_window catches it, warns, and continues
+    instead of aborting the whole console build."""
+    from agentworks.sessions.multi_console import attach_console
+
+    _seed_vm(db, with_tailscale=True)
+    # Create an agent-mode session pointing at an agent row, then delete the
+    # agent row directly to simulate the inconsistency.
+    db._conn.execute(
+        "INSERT INTO agents (name, vm_name, linux_user) VALUES ('bot', 'vm1', 'bot-user')"
+    )
+    db._conn.execute(
+        "INSERT INTO sessions (name, workspace_name, template, mode, agent_name, socket_path) "
+        "VALUES ('s', 'ws-vm1', 'default', 'agent', 'bot', '/tmp/s.sock')"
+    )
+    db._conn.commit()
+    create_console(db, name="con", vm_name="vm1", session_specs=["s+1"])
+    db._conn.execute("PRAGMA foreign_keys = OFF")
+    db._conn.execute("DELETE FROM agents WHERE name = 'bot'")
+    db._conn.execute("PRAGMA foreign_keys = ON")
+    db._conn.commit()
+    fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=1)
+    fake_target.responses["list-windows -t aw-console-con"] = _FakeResult(
+        returncode=0, stdout="aw--placeholder\ns\n"
+    )
+
+    with pytest.raises(SystemExit):
+        attach_console(db, _StubConfig(), name="con", allow_nesting=True)
+
+    assert any("agent for session 's' is missing" in w for w in captured_output.warnings)
+    # The window itself was created (new-window happened before the agent check);
+    # only the split-window calls for the shell panes are skipped.
+    new_windows = [c for c in fake_target.commands if "new-window -t aw-console-con" in c]
+    assert len(new_windows) == 1
+    splits = [c for c in fake_target.commands if "split-window -t aw-console-con:s" in c]
+    assert splits == []
 
 
 def test_add_session_live_sync_skipped_when_console_absent(

@@ -1242,20 +1242,14 @@ def console_create(
 
     if all_running:
         # Live SSH probe (one round-trip per VM) so --all-running reflects
-        # reality, not stale DB state.
+        # reality, not stale DB state. If the probe finds nothing and the
+        # operator didn't list sessions or pass --add-admin-shell,
+        # create_console below raises the canonical "empty console" error.
         from agentworks.config import load_config
 
         running = running_session_names(db, load_config(), resolved_vm.name)
         explicit_names = {parse_session_spec(s).name for s in specs}
         extras = [n for n in running if n not in explicit_names]
-        if not specs and not extras and not add_admin_shell:
-            typer.echo(
-                f"Error: no running sessions on VM '{resolved_vm.name}'. "
-                "Pass --all to include stopped sessions, list sessions explicitly, "
-                "or pass --add-admin-shell.",
-                err=True,
-            )
-            raise typer.Exit(1)
         specs.extend(extras)
 
     create_console(
