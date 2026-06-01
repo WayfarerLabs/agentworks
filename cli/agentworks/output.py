@@ -21,6 +21,7 @@ from typing import Protocol
 from agentworks.errors import (
     AgentworksError,
     AlreadyExistsError,
+    AuthorizationError,
     BackupError,
     BrokenStateError,
     ConfigError,
@@ -36,6 +37,7 @@ from agentworks.errors import (
 __all__ = [
     "AgentworksError",
     "AlreadyExistsError",
+    "AuthorizationError",
     "BackupError",
     "BrokenStateError",
     "ConfigError",

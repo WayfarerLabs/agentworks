@@ -57,11 +57,11 @@ relevant manager. Validation, error shaping, and business logic live in the mana
 finds itself re-implementing a check the manager already does (e.g. "refuse empty input"), let the
 manager raise and propagate. The contract: service-layer functions raise typed `AgentworksError`
 subclasses from `agentworks.errors`, organized by _kind_ of error (`NotFoundError`,
-`AlreadyExistsError`, `ValidationError`, `StateError`, `ConnectivityError`, `ExternalError`,
-`ConfigError`, `UserAbort`); the entity dimension (vm, workspace, agent, session, console) is
-carried as the `entity_kind` / `entity_name` attributes on the exception, not as the type. The CLI
-catches and renders them; no `typer.echo`, `print`, or `typer.Exit` from manager modules. See the
-`agentworks-reviewer` rubric for the full check.
+`AlreadyExistsError`, `ValidationError`, `StateError`, `AuthorizationError`, `ConnectivityError`,
+`ExternalError`, `ConfigError`, `UserAbort`); the entity dimension (vm, workspace, agent, session,
+console) is carried as the `entity_kind` / `entity_name` attributes on the exception, not as the
+type. The CLI catches and renders them; no `typer.echo`, `print`, or `typer.Exit` from manager
+modules. See the `agentworks-reviewer` rubric for the full check.
 
 ## When in doubt
 

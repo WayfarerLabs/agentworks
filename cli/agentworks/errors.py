@@ -2,8 +2,9 @@
 
 Errors are categorized by *kind* (what went wrong) rather than by source module:
 
-- NotFoundError, AlreadyExistsError, ValidationError, StateError: clean domain
-  errors that render as a one-liner with no traceback.
+- NotFoundError, AlreadyExistsError, ValidationError, StateError,
+  AuthorizationError: clean domain errors that render as a one-liner with no
+  traceback.
 - ConnectivityError, ExternalError: failures in external systems where the
   full traceback is preserved to the error log for diagnosis.
 - ConfigError: config file validation; rendered cleanly.
@@ -55,6 +56,16 @@ class StateError(AgentworksError):
 
     Examples: VM not running when attaching a session, session not running
     when sending input, console requires --force because a pane is locked.
+    """
+
+
+class AuthorizationError(AgentworksError):
+    """Operation refused because the actor lacks permission for the target.
+
+    Distinct from NotFoundError (the target exists and is reachable) and
+    StateError (the target's state is fine; the relationship between actor
+    and target is what's missing). Example: an agent that hasn't been
+    granted access to a workspace.
     """
 
 

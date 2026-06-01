@@ -1649,6 +1649,7 @@ def main() -> None:
     from agentworks.errors import (
         AgentworksError,
         AlreadyExistsError,
+        AuthorizationError,
         ConfigError,
         ConnectivityError,
         ExternalError,
@@ -1761,7 +1762,7 @@ def main() -> None:
     except UserAbort:
         typer.echo("Aborted.", err=True)
         raise SystemExit(1) from None
-    except (NotFoundError, AlreadyExistsError, ValidationError, StateError) as e:
+    except (NotFoundError, AlreadyExistsError, ValidationError, StateError, AuthorizationError) as e:
         # Clean domain errors: render as a one-liner with no traceback. These
         # are user-facing and a traceback adds noise without diagnostic value.
         typer.echo(f"Error: {e}", err=True)

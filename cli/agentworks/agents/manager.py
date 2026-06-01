@@ -8,6 +8,7 @@ from agentworks import output
 from agentworks.config import validate_name
 from agentworks.errors import (
     AlreadyExistsError,
+    AuthorizationError,
     ExternalError,
     NotFoundError,
     StateError,
@@ -476,7 +477,7 @@ def shell_agent(
                 entity_name=workspace_name,
             )
         if not db.has_any_grant(name, workspace_name):
-            raise StateError(
+            raise AuthorizationError(
                 f"agent '{name}' does not have access to workspace '{workspace_name}'",
                 entity_kind="agent",
                 entity_name=name,
