@@ -136,22 +136,24 @@ def create_workspace(
                 try:
                     _add_to_workspace_group(vm, config, db, agent.linux_user, ws_name, logger=ssh_logger)
                     added += 1
+                except KeyboardInterrupt:
+                    # KI is a BaseException and slips past `except Exception`,
+                    # so it needs its own branch. Without this, Ctrl-C during
+                    # the SSH call would leave a committed grant row with no
+                    # VM-side group membership (silent authorization drift).
+                    output.warn(
+                        f"Cancelled while adding agent '{agent.name}' to workspace "
+                        f"'{ws_name}' group. Reverting just-inserted DB grant."
+                    )
+                    _revert_grant_on_failure(db, agent.name, ws_name)
+                    raise
                 except Exception as e:
                     failed.append(agent.name)
                     output.warn(
                         f"Failed to add agent '{agent.name}' to workspace '{ws_name}' "
                         f"group: {e}. Reverting DB grant to keep state consistent."
                     )
-                    try:
-                        db.delete_agent_grant(agent.name, ws_name, "explicit")
-                    except Exception as revert_err:
-                        output.warn(
-                            f"Could not revert grant for '{agent.name}' after group-add "
-                            f"failure: {revert_err}. DB has a grant row with no VM-side "
-                            f"group membership; re-run "
-                            f"'agent workspace-grants grant {agent.name} {ws_name}' "
-                            f"or revoke explicitly."
-                        )
+                    _revert_grant_on_failure(db, agent.name, ws_name)
             if added:
                 output.detail(f"Added {added} grant-all agent(s) to workspace")
             if failed:
@@ -447,6 +449,23 @@ def repair_workspace(
         output.info(f"\nRepaired {fixes} issue(s)")
     else:
         output.info("\nNo issues found")
+
+
+def _revert_grant_on_failure(db: Database, agent_name: str, ws_name: str) -> None:
+    """Best-effort: drop a just-inserted explicit grant after the on-VM
+    group add failed (or was cancelled). Used by the grant-all loop in
+    create_workspace to keep DB and VM authorization aligned. A failure
+    to revert is logged but does not raise, so it never masks the
+    caller's original exception (or KeyboardInterrupt)."""
+    try:
+        db.delete_agent_grant(agent_name, ws_name, "explicit")
+    except Exception as revert_err:
+        output.warn(
+            f"Could not revert grant for '{agent_name}' on workspace '{ws_name}': "
+            f"{revert_err}. DB has a grant row with no VM-side group membership; "
+            f"re-run 'agent workspace-grants grant {agent_name} {ws_name}' or "
+            f"revoke explicitly."
+        )
 
 
 def _rehome_partial_state_hint(
