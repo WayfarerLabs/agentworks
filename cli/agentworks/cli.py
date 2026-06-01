@@ -1117,7 +1117,9 @@ def session_restart(
                     "Hint: use --all-stopped to restart only stopped sessions."
                 )
                 if not output.confirm("Continue?"):
-                    raise output.UserAbort("restart cancelled")
+                    from agentworks.errors import UserAbort
+
+                    raise UserAbort("restart cancelled")
 
         restart_all_sessions(
             db, config, vm_name=vm, workspace_name=workspace, include_running=include_running, force=force,
@@ -1693,7 +1695,7 @@ def main() -> None:
             try:
                 return typer.confirm(message, default=default)
             except click.exceptions.Abort:
-                from agentworks.output import UserAbort
+                from agentworks.errors import UserAbort
 
                 raise UserAbort("interrupted") from None
 
@@ -1707,7 +1709,7 @@ def main() -> None:
                     if 1 <= choice <= len(options):
                         return choice - 1
                 except click.exceptions.Abort:
-                    from agentworks.output import UserAbort
+                    from agentworks.errors import UserAbort
 
                     raise UserAbort("interrupted") from None
                 except ValueError:
@@ -1718,7 +1720,7 @@ def main() -> None:
             try:
                 input(message)
             except (EOFError, KeyboardInterrupt):
-                from agentworks.output import UserAbort
+                from agentworks.errors import UserAbort
 
                 raise UserAbort("interrupted") from None
 
@@ -1738,7 +1740,7 @@ def main() -> None:
                     typer.echo("(empty, try again)", err=True)
                 return value
             except click.exceptions.Abort:
-                from agentworks.output import UserAbort
+                from agentworks.errors import UserAbort
 
                 raise UserAbort("interrupted") from None
 
@@ -1798,11 +1800,12 @@ def main() -> None:
             )
         raise SystemExit(1) from None
     except AgentworksError as e:
-        # Catch-all for AgentworksError subclasses not handled above. In PR A,
-        # this covers the deprecated by-manager classes (VMError, WorkspaceError,
-        # AgentError, SessionError, ConsoleError) that still directly extend
-        # AgentworksError. PR B will reclassify their raise sites and this
-        # catch will go away.
+        # Safety net for any AgentworksError subclass that doesn't match the
+        # specific clauses above. Should not normally fire (every raise site
+        # uses a kind-based type), but keeps an accidental
+        # `raise AgentworksError(...)` from falling into the generic Exception
+        # traceback path. Renders as the same clean one-liner the domain
+        # categories use.
         typer.echo(f"Error: {e}", err=True)
         _echo_hint(e)
         raise SystemExit(1) from None

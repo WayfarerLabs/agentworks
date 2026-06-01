@@ -95,11 +95,14 @@ class LimaProvisioner(VMProvisioner):
             import shutil
 
             if not shutil.which("limactl"):
-                from agentworks.output import VMError
+                from agentworks.errors import StateError
 
-                raise VMError(
-                    "'limactl' not found. Lima is not installed on this machine. "
-                    "For remote Lima VMs, set defaults.vm_host in your config or pass --vm-host."
+                raise StateError(
+                    "'limactl' not found. Lima is not installed on this machine.",
+                    hint=(
+                        "For remote Lima VMs, set defaults.vm_host in your config "
+                        "or pass --vm-host."
+                    ),
                 )
 
         if self.is_remote:

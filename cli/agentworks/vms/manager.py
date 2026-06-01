@@ -7,7 +7,17 @@ from typing import TYPE_CHECKING
 from agentworks import output
 from agentworks.config import VALID_PLATFORMS, validate_admin_username, validate_name
 from agentworks.db import InitStatus, ProvisioningStatus, VMStatus
-from agentworks.output import VMError
+from agentworks.errors import (
+    AlreadyExistsError,
+    ConfigError,
+    ConnectivityError,
+    ExternalError,
+    NotFoundError,
+    ProvisionerError,
+    StateError,
+    UserAbort,
+    ValidationError,
+)
 from agentworks.vms.initializer import (
     initialize_vm,
     rejoin_tailscale,
@@ -76,13 +86,17 @@ def create_vm(
     # Resolve defaults
     platform = platform or config.defaults.platform or "lima"
     if platform not in VALID_PLATFORMS:
-        raise VMError(f"invalid platform '{platform}'")
+        raise ValidationError(f"invalid platform '{platform}'", entity_kind="vm")
 
     vm_name = name
     validate_name(vm_name)
 
     if db.get_vm(vm_name) is not None:
-        raise VMError(f"VM '{vm_name}' already exists")
+        raise AlreadyExistsError(
+            f"VM '{vm_name}' already exists",
+            entity_kind="vm",
+            entity_name=vm_name,
+        )
 
     # Resolve VM host for Lima
     vm_host_ssh: str | None = None
@@ -92,16 +106,20 @@ def create_vm(
         if vm_host_name:
             host_row = db.get_vm_host(vm_host_name)
             if host_row is None:
-                raise VMError(f"VM host '{vm_host_name}' not found")
+                raise NotFoundError(
+                    f"VM host '{vm_host_name}' not found",
+                    entity_kind="vm-host",
+                    entity_name=vm_host_name,
+                )
             vm_host_ssh = host_row.ssh_host
 
     # Azure config validation
     if platform == "azure" and config.azure is None:
-        raise VMError("[azure] config section required for azure platform")
+        raise ConfigError("[azure] config section required for azure platform")
 
     # Proxmox config validation
     if platform == "proxmox" and config.proxmox is None:
-        raise VMError("[proxmox] config section required for proxmox platform")
+        raise ConfigError("[proxmox] config section required for proxmox platform")
 
     # Resolve resource settings: CLI flag > template > built-in default
     resolved_cpus = cpus if cpus is not None else vm_tmpl.cpus
@@ -202,7 +220,11 @@ def create_vm(
         raise
     except Exception as e:
         _safe_delete_vm_row()
-        raise VMError(f"provisioning failed: {e}") from e
+        raise ProvisionerError(
+            f"provisioning failed: {e}",
+            entity_kind="vm",
+            entity_name=vm_name,
+        ) from e
 
     # Update DB with platform-specific metadata
     if result.azure_resource_id:
@@ -258,14 +280,18 @@ def create_vm(
 
         vm = db.get_vm(vm_name)
         if vm is not None and vm.provisioning_status == ProvisioningStatus.FAILED.value:
-            raise VMError(
-                f"provisioning failed: {e}{log_hint}\n"
-                f"VM '{vm_name}' is in a failed state. Use 'vm delete {vm_name}' to clean up."
+            raise ProvisionerError(
+                f"provisioning failed: {e}{log_hint}",
+                entity_kind="vm",
+                entity_name=vm_name,
+                hint=f"VM '{vm_name}' is in a failed state. Use 'vm delete {vm_name}' to clean up.",
             ) from e
         else:
-            raise VMError(
-                f"initialization failed: {e}{log_hint}\n"
-                f"VM '{vm_name}' may still be usable. Use 'vm reinit {vm_name}' to retry."
+            raise ExternalError(
+                f"initialization failed: {e}{log_hint}",
+                entity_kind="vm",
+                entity_name=vm_name,
+                hint=f"VM '{vm_name}' may still be usable. Use 'vm reinit {vm_name}' to retry.",
             ) from e
 
     # -- Post-init: SSH config --
@@ -415,7 +441,12 @@ def shell_vm(db: Database, config: Config, name: str) -> None:
     vm = _require_vm(db, name)
     _guard_failed_vm(vm)
     if vm.tailscale_host is None:
-        raise VMError(f"VM '{name}' has no Tailscale IP (init may not be complete)")
+        raise StateError(
+            f"VM '{name}' has no Tailscale IP",
+            entity_kind="vm",
+            entity_name=name,
+            hint="VM init may not be complete. Check 'vm describe' for status.",
+        )
 
     ssh_cmd = ["ssh", "-t"]
     if config.operator.ssh_private_key:
@@ -437,7 +468,12 @@ def exec_vm(db: Database, config: Config, name: str, command: list[str]) -> int:
     vm = _require_vm(db, name)
     _guard_failed_vm(vm)
     if vm.tailscale_host is None:
-        raise VMError(f"VM '{name}' has no Tailscale IP (init may not be complete)")
+        raise StateError(
+            f"VM '{name}' has no Tailscale IP",
+            entity_kind="vm",
+            entity_name=name,
+            hint="VM init may not be complete. Check 'vm describe' for status.",
+        )
 
     ssh_cmd = ["ssh", "-T", "-o", "StrictHostKeyChecking=accept-new", "-o", "BatchMode=yes"]
     if config.operator.ssh_private_key:
@@ -455,11 +491,20 @@ def add_git_credential(db: Database, config: Config, name: str, credential_name:
     vm = _require_vm(db, name)
     _guard_failed_vm(vm)
     if vm.tailscale_host is None:
-        raise VMError(f"VM '{name}' has no Tailscale IP (init may not be complete)")
+        raise StateError(
+            f"VM '{name}' has no Tailscale IP",
+            entity_kind="vm",
+            entity_name=name,
+            hint="VM init may not be complete. Check 'vm describe' for status.",
+        )
 
     cred_config = config.git_credentials.get(credential_name)
     if cred_config is None:
-        raise VMError(f"git credential '{credential_name}' not found in config")
+        raise NotFoundError(
+            f"git credential '{credential_name}' not found in config",
+            entity_kind="git-credential",
+            entity_name=credential_name,
+        )
 
     providers = resolve_git_credential_providers(config, [credential_name])
     provider = providers[credential_name]
@@ -546,7 +591,11 @@ def rekey_vm(
     provisioner = _get_provisioner_for_vm(db, vm, config)
     status = provisioner.status(vm)
     if status != VMStatus.RUNNING:
-        raise VMError(f"VM '{name}' is not running (status: {status.value})")
+        raise StateError(
+            f"VM '{name}' is not running (status: {status.value})",
+            entity_kind="vm",
+            entity_name=name,
+        )
 
     # Collect new auth key
     ts_auth_key = os.environ.get("TAILSCALE_AUTH_KEY") if not ignore_env else None
@@ -679,7 +728,12 @@ def delete_vm(
             parts.append(f"{ag_count} agent(s)")
         if ts_count > 0:
             parts.append(f"{ts_count} session(s)")
-        raise VMError(f"VM '{name}' has {', '.join(parts)}. Delete them first, or use --force.")
+        raise StateError(
+            f"VM '{name}' has {', '.join(parts)}.",
+            entity_kind="vm",
+            entity_name=name,
+            hint="Delete them first, or pass --force to also delete the children.",
+        )
 
     if not yes and not force:
         msg = f"Delete VM '{name}'?"
@@ -691,7 +745,7 @@ def delete_vm(
                 parts.append(f"{ts_count} session(s)")
             msg += f" ({', '.join(parts)} will also be deleted)"
         if not output.confirm(msg):
-            raise output.UserAbort("delete cancelled")
+            raise UserAbort("delete cancelled")
 
     # Platform-specific cleanup (also handles Tailscale logout)
     try:
@@ -745,12 +799,19 @@ def reinit_vm(
         config = _replace(config, vm=resolve_template(config, vm.template))
 
     if vm.provisioning_status != ProvisioningStatus.COMPLETE.value:
-        raise VMError(
-            f"VM '{name}' provisioning is '{vm.provisioning_status}', not 'complete'. Cannot reinitialize."
+        raise StateError(
+            f"VM '{name}' provisioning is '{vm.provisioning_status}', not 'complete'. "
+            f"Cannot reinitialize.",
+            entity_kind="vm",
+            entity_name=name,
         )
 
     if vm.tailscale_host is None:
-        raise VMError(f"VM '{name}' has no Tailscale IP")
+        raise StateError(
+            f"VM '{name}' has no Tailscale IP",
+            entity_kind="vm",
+            entity_name=name,
+        )
 
     # Pre-flight checks
     verify_tailscale_available()
@@ -866,13 +927,18 @@ def _init_log_hint(vm_name: str) -> str:
 def _guard_failed_vm(vm: VMRow) -> None:
     """Block operations on VMs with failed provisioning or initialization."""
     if vm.provisioning_status == ProvisioningStatus.FAILED.value:
-        raise VMError(
-            f"VM '{vm.name}' has failed provisioning. Only 'vm delete' is supported.{_init_log_hint(vm.name)}"
+        raise StateError(
+            f"VM '{vm.name}' has failed provisioning.{_init_log_hint(vm.name)}",
+            entity_kind="vm",
+            entity_name=vm.name,
+            hint="Only 'vm delete' is supported on a failed-provisioning VM.",
         )
     if vm.init_status == InitStatus.FAILED.value:
-        raise VMError(
-            f"VM '{vm.name}' has failed initialization. "
-            f"Use 'vm reinit' to retry or 'vm delete' to remove.{_init_log_hint(vm.name)}"
+        raise StateError(
+            f"VM '{vm.name}' has failed initialization.{_init_log_hint(vm.name)}",
+            entity_kind="vm",
+            entity_name=vm.name,
+            hint="Use 'vm reinit' to retry or 'vm delete' to remove.",
         )
 
 
@@ -978,7 +1044,11 @@ def _human_bytes(b: int) -> str:
 def _require_vm(db: Database, name: str) -> VMRow:
     vm = db.get_vm(name)
     if vm is None:
-        raise VMError(f"VM '{name}' not found")
+        raise NotFoundError(
+            f"VM '{name}' not found",
+            entity_kind="vm",
+            entity_name=name,
+        )
     return vm
 
 
@@ -1037,7 +1107,12 @@ def port_forward_vm(
     vm = _require_vm(db, name)
     _guard_failed_vm(vm)
     if vm.tailscale_host is None:
-        raise VMError(f"VM '{name}' has no Tailscale IP (init may not be complete)")
+        raise StateError(
+            f"VM '{name}' has no Tailscale IP",
+            entity_kind="vm",
+            entity_name=name,
+            hint="VM init may not be complete. Check 'vm describe' for status.",
+        )
 
     # Parse port specs
     forwards: list[tuple[int, int]] = []  # (local_port, remote_port)
@@ -1047,23 +1122,23 @@ def port_forward_vm(
             try:
                 port = int(parts[0])
             except ValueError:
-                raise VMError(f"invalid port '{spec}'") from None
+                raise ValidationError(f"invalid port '{spec}'") from None
             forwards.append((port, port))
         elif len(parts) == 2:
             try:
                 local_port = int(parts[0])
                 remote_port = int(parts[1])
             except ValueError:
-                raise VMError(f"invalid port spec '{spec}'") from None
+                raise ValidationError(f"invalid port spec '{spec}'") from None
             forwards.append((local_port, remote_port))
         else:
-            raise VMError(f"invalid port spec '{spec}' (expected [LOCAL:]REMOTE)")
+            raise ValidationError(f"invalid port spec '{spec}' (expected [LOCAL:]REMOTE)")
 
     # Validate port ranges
     for local_port, remote_port in forwards:
         for label, port in [("local", local_port), ("remote", remote_port)]:
             if port < 1 or port > 65535:
-                raise VMError(f"{label} port {port} out of range (1-65535)")
+                raise ValidationError(f"{label} port {port} out of range (1-65535)")
 
     # Build SSH command with -L flags for each forward
     ssh_cmd = ["ssh", "-N", "-o", "StrictHostKeyChecking=accept-new"]
@@ -1095,7 +1170,7 @@ def port_forward_vm(
         rc = proc.wait()
         sys.exit(rc)
     except OSError as e:
-        raise VMError(f"failed to start SSH: {e}") from e
+        raise ConnectivityError(f"failed to start SSH: {e}") from e
 
 
 def _ensure_tailscale(

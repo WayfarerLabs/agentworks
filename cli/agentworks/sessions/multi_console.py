@@ -20,6 +20,16 @@ from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.config import validate_name
+from agentworks.errors import (
+    AgentworksError,
+    AlreadyExistsError,
+    ConnectivityError,
+    ExternalError,
+    NotFoundError,
+    StateError,
+    UserAbort,
+    ValidationError,
+)
 from agentworks.sessions.tmux import tmux_cmd
 
 if TYPE_CHECKING:
@@ -70,21 +80,21 @@ def parse_session_spec(spec: str) -> SessionSpec:
         try:
             shells = int(parts[1])
         except ValueError:
-            raise output.ValidationError(
+            raise ValidationError(
                 f"invalid session spec '{spec}': shell count must be a non-negative integer"
             ) from None
         if shells < 0:
-            raise output.ValidationError(
+            raise ValidationError(
                 f"invalid session spec '{spec}': shell count must be >= 0"
             )
     else:
-        raise output.ValidationError(
+        raise ValidationError(
             f"invalid session spec '{spec}': use 'name' or 'name+N'"
         )
     try:
         validate_name(name)
-    except output.ValidationError as exc:
-        raise output.ValidationError(f"invalid session spec '{spec}': {exc}") from None
+    except ValidationError as exc:
+        raise ValidationError(f"invalid session spec '{spec}': {exc}") from None
     return SessionSpec(name=name, shells=shells)
 
 
@@ -99,7 +109,11 @@ def default_shells(count: int) -> list[ShellEntry]:
 def _require_console(db: Database, name: str) -> ConsoleRow:
     console = db.get_console(name)
     if console is None:
-        raise output.ConsoleError(f"console '{name}' not found")
+        raise NotFoundError(
+            f"console '{name}' not found",
+            entity_kind="console",
+            entity_name=name,
+        )
     return console
 
 
@@ -119,10 +133,10 @@ def running_session_names(
     Uses the same one-round-trip-per-VM check that powers ``aw session list``.
     Returns alphabetically sorted names.
 
-    Raises ConsoleError when the VM has sessions eligible to be probed (valid
-    PID + boot_id) but the probe came back empty -- almost always a transport
-    failure that we don't want to silently report as "nothing running". A VM
-    with zero eligible sessions simply returns an empty list.
+    Raises ConnectivityError when the VM has sessions eligible to be probed
+    (valid PID + boot_id) but the probe came back empty -- almost always a
+    transport failure that we don't want to silently report as "nothing
+    running". A VM with zero eligible sessions simply returns an empty list.
     """
     from agentworks.db import PID_STOPPED, SessionStatus
     from agentworks.sessions.manager import batch_check_all_sessions, filter_sessions
@@ -139,9 +153,12 @@ def running_session_names(
         if s.pid is not None and s.pid != PID_STOPPED and s.pid > 0 and s.boot_id
     ]
     if checkable and not status_map:
-        raise output.ConsoleError(
+        raise ConnectivityError(
             f"could not determine running sessions on VM '{vm_name}' "
-            f"(status probe returned no results -- check VM reachability)"
+            f"(status probe returned no results)",
+            entity_kind="vm",
+            entity_name=vm_name,
+            hint="Check VM reachability.",
         )
 
     return sorted(
@@ -157,8 +174,8 @@ def infer_vm_from_session_specs(
     - Returns None if *session_specs* is empty or none of the names resolve to
       a known session (callers prompt for --vm or surface the not-found error
       from create_console).
-    - Raises ConsoleError if listed sessions span more than one VM (the user
-      must disambiguate with --vm explicitly).
+    - Raises ValidationError if listed sessions span more than one VM (the
+      user must disambiguate with --vm explicitly).
     """
     if not session_specs:
         return None
@@ -167,7 +184,7 @@ def infer_vm_from_session_specs(
     for spec in session_specs:
         try:
             session_name = parse_session_spec(spec).name
-        except output.ValidationError:
+        except ValidationError:
             # Bad spec -- defer the error to create_console's own validation.
             continue
         session = db.get_session(session_name)
@@ -178,9 +195,9 @@ def infer_vm_from_session_specs(
             vms.add(ws.vm_name)
 
     if len(vms) > 1:
-        raise output.ConsoleError(
-            f"sessions span multiple VMs ({', '.join(sorted(vms))}); "
-            f"pass --vm to pick one"
+        raise ValidationError(
+            f"sessions span multiple VMs ({', '.join(sorted(vms))})",
+            hint="Pass --vm to pick one.",
         )
     return next(iter(vms)) if vms else None
 
@@ -189,11 +206,17 @@ def _verify_session_on_vm(db: Database, session_name: str, vm_name: str) -> None
     """Raise if the session does not exist or is not on the given VM."""
     session = db.get_session(session_name)
     if session is None:
-        raise output.SessionError(f"session '{session_name}' not found")
+        raise NotFoundError(
+            f"session '{session_name}' not found",
+            entity_kind="session",
+            entity_name=session_name,
+        )
     ws = db.get_workspace(session.workspace_name)
     if ws is None or ws.vm_name != vm_name:
-        raise output.ConsoleError(
-            f"session '{session_name}' is not on VM '{vm_name}'"
+        raise ValidationError(
+            f"session '{session_name}' is not on VM '{vm_name}'",
+            entity_kind="session",
+            entity_name=session_name,
         )
 
 
@@ -201,7 +224,7 @@ def _dedupe_specs(specs: list[SessionSpec]) -> None:
     seen: set[str] = set()
     for spec in specs:
         if spec.name in seen:
-            raise output.ConsoleError(f"session '{spec.name}' listed more than once")
+            raise ValidationError(f"session '{spec.name}' listed more than once")
         seen.add(spec.name)
 
 
@@ -244,9 +267,17 @@ def create_console(
     validate_name(name)
 
     if db.get_console(name) is not None:
-        raise output.ConsoleError(f"console '{name}' already exists")
+        raise AlreadyExistsError(
+            f"console '{name}' already exists",
+            entity_kind="console",
+            entity_name=name,
+        )
     if db.get_vm(vm_name) is None:
-        raise output.VMError(f"VM '{vm_name}' not found")
+        raise NotFoundError(
+            f"VM '{vm_name}' not found",
+            entity_kind="vm",
+            entity_name=vm_name,
+        )
 
     specs = [parse_session_spec(s) for s in session_specs]
     _dedupe_specs(specs)
@@ -272,8 +303,10 @@ def create_console(
                 "specify at least one session, pass --all (or --all-running for "
                 "live sessions only), or pass --add-admin-shell"
             )
-        raise output.ConsoleError(
-            f"refusing to create empty console '{name}' ({detail})"
+        raise ValidationError(
+            f"refusing to create empty console '{name}' ({detail})",
+            entity_kind="console",
+            entity_name=name,
         )
 
     with db.transaction():
@@ -302,8 +335,10 @@ def add_sessions(
     for spec in specs:
         _verify_session_on_vm(db, spec.name, console.vm_name)
         if db.get_console_session(console_name, spec.name) is not None:
-            raise output.ConsoleError(
-                f"session '{spec.name}' is already a member of console '{console_name}'"
+            raise AlreadyExistsError(
+                f"session '{spec.name}' is already a member of console '{console_name}'",
+                entity_kind="console-member",
+                entity_name=spec.name,
             )
 
     with db.transaction():
@@ -345,8 +380,10 @@ def remove_sessions(
     console = _require_console(db, console_name)
     for n in session_names:
         if db.get_console_session(console_name, n) is None:
-            raise output.ConsoleError(
-                f"session '{n}' is not a member of console '{console_name}'"
+            raise NotFoundError(
+                f"session '{n}' is not a member of console '{console_name}'",
+                entity_kind="console-member",
+                entity_name=n,
             )
     with db.transaction():
         for n in session_names:
@@ -388,13 +425,13 @@ def _validate_cwd(cwd: str | None) -> None:
     if cwd is None:
         return
     if not cwd:
-        raise output.ValidationError("cwd may not be empty (omit it for workspace root)")
+        raise ValidationError("cwd may not be empty (omit it for workspace root)")
     if cwd.startswith("/"):
-        raise output.ValidationError(
+        raise ValidationError(
             f"cwd '{cwd}' must be relative to the workspace root, not absolute"
         )
     if ".." in cwd.split("/"):
-        raise output.ValidationError(
+        raise ValidationError(
             f"cwd '{cwd}' may not contain '..' segments"
         )
 
@@ -414,8 +451,10 @@ def add_shell(
     console = _require_console(db, console_name)
     cs = db.get_console_session(console_name, session_name)
     if cs is None:
-        raise output.ConsoleError(
-            f"session '{session_name}' is not a member of console '{console_name}'"
+        raise NotFoundError(
+            f"session '{session_name}' is not a member of console '{console_name}'",
+            entity_kind="console-member",
+            entity_name=session_name,
         )
     new_shell: ShellEntry = {"cwd": cwd, "admin": admin}
     new_shells = [*cs.shells, new_shell]
@@ -482,16 +521,23 @@ def restore_session(
     console = _require_console(db, console_name)
     member = db.get_console_session(console_name, session_name)
     if member is None:
-        raise output.ConsoleError(
-            f"session '{session_name}' is not a member of console '{console_name}'"
+        raise NotFoundError(
+            f"session '{session_name}' is not a member of console '{console_name}'",
+            entity_kind="console-member",
+            entity_name=session_name,
         )
 
     vm, target = _prepare_vm_target_for_attach(db, config, console.vm_name)
     if not _console_tmux_exists(target, console_name):
-        raise output.ConsoleError(
+        raise StateError(
             f"console '{console_name}' has no live tmux session on VM "
-            f"'{console.vm_name}'. Run `agentworks console attach {console_name}` "
-            f"to build it; restore-session only repairs an already-running console."
+            f"'{console.vm_name}'.",
+            entity_kind="console",
+            entity_name=console_name,
+            hint=(
+                f"Run `agentworks console attach {console_name}` to build it; "
+                f"restore-session only repairs an already-running console."
+            ),
         )
 
     q_con = shlex.quote(tmux_session_name(console_name))
@@ -505,9 +551,11 @@ def restore_session(
         check=False,
     )
     if not res.ok:
-        raise output.ConsoleError(
+        raise ExternalError(
             f"failed to list windows for console '{console_name}': "
-            f"{res.stderr.strip()}"
+            f"{res.stderr.strip()}",
+            entity_kind="console",
+            entity_name=console_name,
         )
     windows = res.stdout.strip().splitlines()
     if session_name not in windows:
@@ -530,8 +578,10 @@ def restore_session(
     # gets an @agentworks-shell-index tag.
     shell_panes = _list_shell_panes(target, q_con, q_win)
     if shell_panes is None:
-        raise output.ConsoleError(
-            f"failed to list panes for window '{session_name}'"
+        raise ExternalError(
+            f"failed to list panes for window '{session_name}'",
+            entity_kind="console",
+            entity_name=console_name,
         )
 
     untagged = [pid for pid, _pidx, cidx in shell_panes if cidx is None]
@@ -541,10 +591,15 @@ def restore_session(
         # via `tmux split-window` instead of `console add-shell`. Either way,
         # restore-session can't map the live pane back to a configured shell
         # index, so we refuse and direct the operator to rebuild.
-        raise output.ConsoleError(
+        raise StateError(
             f"window '{session_name}' has {len(untagged)} shell pane(s) with "
-            f"no agentworks tag. Run `agentworks console attach "
-            f"{console_name} --recreate` to rebuild and retag from scratch."
+            f"no agentworks tag.",
+            entity_kind="console",
+            entity_name=console_name,
+            hint=(
+                f"Run `agentworks console attach {console_name} --recreate` "
+                f"to rebuild and retag from scratch."
+            ),
         )
 
     # Validate that the tag values form a subset of 0..configured_count-1 with
@@ -578,10 +633,15 @@ def restore_session(
                     f"tags {out_of_range} point past the configured range "
                     f"(0..{configured_count - 1})"
                 )
-        raise output.ConsoleError(
+        raise StateError(
             f"window '{session_name}' has shell panes with inconsistent tags "
-            f"({'; '.join(parts)}). Run `agentworks console attach "
-            f"{console_name} --recreate` to rebuild and retag from scratch."
+            f"({'; '.join(parts)}).",
+            entity_kind="console",
+            entity_name=console_name,
+            hint=(
+                f"Run `agentworks console attach {console_name} --recreate` "
+                f"to rebuild and retag from scratch."
+            ),
         )
 
     # tag_values is now a subset of 0..configured_count-1 with no duplicates,
@@ -598,15 +658,18 @@ def restore_session(
 
     session = db.get_session(session_name)
     if session is None:
-        raise output.ConsoleError(
-            f"session '{session_name}' no longer exists in the database; "
-            f"remove it from the console first."
+        raise StateError(
+            f"session '{session_name}' no longer exists in the database",
+            entity_kind="session",
+            entity_name=session_name,
+            hint="Remove the session from the console first.",
         )
     workspace_path = _resolve_workspace_path(db, session)
     if workspace_path is None:
-        raise output.ConsoleError(
-            f"workspace for session '{session_name}' is missing; "
-            f"cannot restore."
+        raise StateError(
+            f"workspace for session '{session_name}' is missing; cannot restore.",
+            entity_kind="session",
+            entity_name=session_name,
         )
     session_user = _session_linux_user(db, session, vm)
 
@@ -631,11 +694,15 @@ def restore_session(
         if pane_id is None:
             failed.append(cidx)
     if failed:
-        raise output.ConsoleError(
+        raise ExternalError(
             f"restore-session left '{session_name}' incomplete: failed to "
-            f"create/tag config indices {failed} (see warnings above). "
-            f"Run `agentworks console attach {console_name} --recreate` to "
-            f"rebuild from scratch."
+            f"create/tag config indices {failed} (see warnings above).",
+            entity_kind="console",
+            entity_name=console_name,
+            hint=(
+                f"Run `agentworks console attach {console_name} --recreate` "
+                f"to rebuild from scratch."
+            ),
         )
 
     # New panes land at the tail; reorder so visual pane_index matches
@@ -799,9 +866,11 @@ def _session_linux_user(db: Database, session: SessionRow, vm: VMRow) -> str:
     if session.agent_name:
         agent = db.get_agent(session.agent_name)
         if agent is None:
-            raise output.AgentError(
+            raise NotFoundError(
                 f"agent '{session.agent_name}' not found "
-                f"(referenced by session '{session.name}')"
+                f"(referenced by session '{session.name}')",
+                entity_kind="agent",
+                entity_name=session.agent_name,
             )
         return agent.linux_user
     return vm.admin_username
@@ -1023,13 +1092,13 @@ def _add_session_window(
     if not member.shells:
         return
 
-    # _session_linux_user raises AgentError if the session points at an agent
+    # _session_linux_user raises NotFoundError if the session points at an agent
     # row that's gone (FK violation under PRAGMA foreign_keys = OFF, or stale
     # state from a migration). Match the missing-session / missing-workspace
     # handling above: warn and skip rather than abort the whole console build.
     try:
         session_user = _session_linux_user(db, session, vm)
-    except output.AgentError as exc:
+    except NotFoundError as exc:
         output.warn(
             f"agent for session '{session.name}' is missing ({exc}); "
             f"skipping shell panes for this window"
@@ -1144,10 +1213,18 @@ def _prepare_vm_target_for_attach(
 
     vm = db.get_vm(vm_name)
     if vm is None:
-        raise output.VMError(f"VM '{vm_name}' not found")
+        raise NotFoundError(
+            f"VM '{vm_name}' not found",
+            entity_kind="vm",
+            entity_name=vm_name,
+        )
     _ensure_vm_running(db, config, vm)
     if vm.tailscale_host is None:
-        raise output.VMError(f"VM '{vm.name}' has no Tailscale address")
+        raise StateError(
+            f"VM '{vm.name}' has no Tailscale address",
+            entity_kind="vm",
+            entity_name=vm.name,
+        )
     return vm, admin_exec_target(vm, config)
 
 
@@ -1180,7 +1257,7 @@ def _live_best_effort(action: str, *, console_name: str) -> Iterator[None]:
     """
     try:
         yield
-    except output.AgentworksError:
+    except AgentworksError:
         raise
     except Exception as exc:
         q_name = shlex.quote(console_name)
@@ -1206,11 +1283,10 @@ def attach_console(
     from agentworks.ssh import interactive
 
     if os.environ.get("TMUX") and not allow_nesting:
-        raise output.ConsoleError(
-            "already inside a tmux session.\n"
-            "Nesting is not recommended (prefix key conflicts, "
-            "confusing detach behavior).\n"
-            "Pass --allow-nesting to override."
+        raise StateError(
+            "already inside a tmux session. Nesting is not recommended "
+            "(prefix key conflicts, confusing detach behavior).",
+            hint="Pass --allow-nesting to override.",
         )
 
     console = _require_console(db, name)
@@ -1241,7 +1317,7 @@ def delete_console(
     """Delete a console: tear down its tmux session (best-effort), then DB row."""
     console = _require_console(db, name)
     if not yes and not output.confirm(f"Delete console '{name}'?"):
-        raise output.UserAbort("delete cancelled")
+        raise UserAbort("delete cancelled")
 
     # Best-effort tmux teardown. Don't block the DB delete on VM reachability.
     teardown_failed = False
@@ -1250,7 +1326,7 @@ def delete_console(
         if live is not None:
             _vm, target = live
             _kill_console_tmux(target, name)
-    except output.AgentworksError:
+    except AgentworksError:
         raise
     except Exception as exc:
         teardown_failed = True

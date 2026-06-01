@@ -6,7 +6,14 @@ from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.config import validate_name
-from agentworks.output import AgentError, VMError
+from agentworks.errors import (
+    AlreadyExistsError,
+    ExternalError,
+    NotFoundError,
+    StateError,
+    UserAbort,
+    ValidationError,
+)
 from agentworks.ssh import admin_exec_target
 
 if TYPE_CHECKING:
@@ -110,7 +117,11 @@ def create_agent(
     validate_name(name)
 
     if db.get_agent(name) is not None:
-        raise AgentError(f"agent '{name}' already exists")
+        raise AlreadyExistsError(
+            f"agent '{name}' already exists",
+            entity_kind="agent",
+            entity_name=name,
+        )
 
     vm = _require_vm(db, vm_name)
     linux_user = derive_linux_user(name)
@@ -146,7 +157,12 @@ def create_agent(
             raise
         except Exception as e:
             _safe_rollback()
-            raise AgentError(f"creating agent: {e}\nSSH log: {ssh_logger.path}") from None
+            raise ExternalError(
+                f"creating agent: {e}",
+                entity_kind="agent",
+                entity_name=name,
+                hint=f"SSH log: {ssh_logger.path}",
+            ) from None
     finally:
         ssh_logger.close()
 
@@ -178,7 +194,11 @@ def delete_agent(
     """Delete an agent from a VM."""
     agent = db.get_agent(name)
     if agent is None:
-        raise AgentError(f"agent '{name}' not found")
+        raise NotFoundError(
+            f"agent '{name}' not found",
+            entity_kind="agent",
+            entity_name=name,
+        )
 
     # Check for sessions using this agent
     all_sessions = db.list_sessions()
@@ -186,8 +206,11 @@ def delete_agent(
     if agent_sessions and not force:
         for s in agent_sessions:
             output.detail(f"{s.name}")
-        raise AgentError(
-            f"agent '{name}' has {len(agent_sessions)} session(s). Delete them first, or use --force."
+        raise StateError(
+            f"agent '{name}' has {len(agent_sessions)} session(s).",
+            entity_kind="agent",
+            entity_name=name,
+            hint="Delete the sessions first, or pass --force to also stop them.",
         )
 
     if not yes:
@@ -195,7 +218,7 @@ def delete_agent(
         if agent_sessions:
             msg += f" ({len(agent_sessions)} session(s) will also be stopped)"
         if not output.confirm(msg):
-            raise output.UserAbort("delete cancelled")
+            raise UserAbort("delete cancelled")
 
     vm = _require_vm(db, agent.vm_name)
 
@@ -232,9 +255,12 @@ def delete_agent(
             elif status == SessionStatus.UNKNOWN:
                 unstoppable.append(session.name)
         if unstoppable:
-            raise AgentError(
+            raise StateError(
                 f"cannot delete agent '{name}': {len(unstoppable)} session(s) could not be stopped "
-                f"({', '.join(unstoppable)}). Resolve manually before retrying."
+                f"({', '.join(unstoppable)}).",
+                entity_kind="agent",
+                entity_name=name,
+                hint="Resolve the stuck sessions manually before retrying.",
             )
         for session in agent_sessions:
             db.delete_session(session.name)
@@ -266,7 +292,11 @@ def reinit_agent(
 
     agent = db.get_agent(name)
     if agent is None:
-        raise AgentError(f"agent '{name}' not found")
+        raise NotFoundError(
+            f"agent '{name}' not found",
+            entity_kind="agent",
+            entity_name=name,
+        )
 
     agent_tmpl = resolve_template(config, agent.template)
     if agent.template and agent.template != "default":
@@ -290,7 +320,12 @@ def reinit_agent(
             )
             raise
         except Exception as e:
-            raise AgentError(f"reinitializing agent: {e}\nSSH log: {ssh_logger.path}") from None
+            raise ExternalError(
+                f"reinitializing agent: {e}",
+                entity_kind="agent",
+                entity_name=name,
+                hint=f"SSH log: {ssh_logger.path}",
+            ) from None
     finally:
         ssh_logger.close()
 
@@ -370,7 +405,11 @@ def describe_agent(
     """Show detailed information about an agent."""
     agent = db.get_agent(name)
     if agent is None:
-        raise AgentError(f"agent '{name}' not found")
+        raise NotFoundError(
+            f"agent '{name}' not found",
+            entity_kind="agent",
+            entity_name=name,
+        )
 
     output.info(f"Name:       {agent.name}")
     output.info(f"VM:         {agent.vm_name}")
@@ -410,7 +449,11 @@ def shell_agent(
     """Open a shell as an agent user on a VM."""
     agent = db.get_agent(name)
     if agent is None:
-        raise AgentError(f"agent '{name}' not found")
+        raise NotFoundError(
+            f"agent '{name}' not found",
+            entity_kind="agent",
+            entity_name=name,
+        )
 
     vm = _require_vm(db, agent.vm_name)
 
@@ -427,9 +470,18 @@ def shell_agent(
     if workspace_name:
         ws = db.get_workspace(workspace_name)
         if ws is None:
-            raise AgentError(f"workspace '{workspace_name}' not found")
+            raise NotFoundError(
+            f"workspace '{workspace_name}' not found",
+            entity_kind="workspace",
+            entity_name=workspace_name,
+        )
         if not db.has_any_grant(name, workspace_name):
-            raise AgentError(f"agent '{name}' does not have access to workspace '{workspace_name}'")
+            raise StateError(
+                f"agent '{name}' does not have access to workspace '{workspace_name}'",
+                entity_kind="agent",
+                entity_name=name,
+                hint=f"Run 'agent grant-workspace {name} {workspace_name}' to grant access.",
+            )
         import shlex
 
         q_path = shlex.quote(ws.workspace_path)
@@ -454,11 +506,20 @@ def exec_agent(
 
     agent = db.get_agent(name)
     if agent is None:
-        raise AgentError(f"agent '{name}' not found")
+        raise NotFoundError(
+            f"agent '{name}' not found",
+            entity_kind="agent",
+            entity_name=name,
+        )
 
     vm = _require_vm(db, agent.vm_name)
     if vm.tailscale_host is None:
-        raise AgentError(f"VM '{vm.name}' has no Tailscale IP (init may not be complete)")
+        raise StateError(
+            f"VM '{vm.name}' has no Tailscale IP",
+            entity_kind="vm",
+            entity_name=vm.name,
+            hint="VM init may not be complete. Check 'vm describe' for status.",
+        )
 
     remote_cmd = command[0] if len(command) == 1 else shlex.join(command)
     su_cmd = f"sudo -n su --login {agent.linux_user} -c {shlex.quote(remote_cmd)}"
@@ -485,14 +546,20 @@ def grant_workspaces(
 ) -> None:
     """Grant an agent explicit access to workspaces."""
     if not grant_all and not workspace_names:
-        raise AgentError(
+        raise ValidationError(
             f"grant for '{agent_name}' needs at least one workspace name "
-            f"or workspace_names empty + grant_all=True"
+            f"or workspace_names empty + grant_all=True",
+            entity_kind="agent",
+            entity_name=agent_name,
         )
 
     agent = db.get_agent(agent_name)
     if agent is None:
-        raise AgentError(f"agent '{agent_name}' not found")
+        raise NotFoundError(
+            f"agent '{agent_name}' not found",
+            entity_kind="agent",
+            entity_name=agent_name,
+        )
 
     vm = _require_vm(db, agent.vm_name)
 
@@ -525,14 +592,20 @@ def revoke_workspaces(
 ) -> None:
     """Revoke explicit workspace grants from an agent."""
     if not revoke_all and not workspace_names:
-        raise AgentError(
+        raise ValidationError(
             f"revoke for '{agent_name}' needs at least one workspace name "
-            f"or workspace_names empty + revoke_all=True"
+            f"or workspace_names empty + revoke_all=True",
+            entity_kind="agent",
+            entity_name=agent_name,
         )
 
     agent = db.get_agent(agent_name)
     if agent is None:
-        raise AgentError(f"agent '{agent_name}' not found")
+        raise NotFoundError(
+            f"agent '{agent_name}' not found",
+            entity_kind="agent",
+            entity_name=agent_name,
+        )
 
     vm = _require_vm(db, agent.vm_name)
 
@@ -575,7 +648,11 @@ def _resolve_ws_group(db: Database, workspace_name: str) -> str:
     """
     ws = db.get_workspace(workspace_name)
     if ws is None:
-        raise AgentError(f"workspace '{workspace_name}' not found")
+        raise NotFoundError(
+            f"workspace '{workspace_name}' not found",
+            entity_kind="workspace",
+            entity_name=workspace_name,
+        )
     return ws.linux_group
 
 
@@ -1109,19 +1186,31 @@ def _build_agent_test_command(
 def _require_vm(db: Database, vm_name: str) -> VMRow:
     vm = db.get_vm(vm_name)
     if vm is None:
-        raise VMError(f"VM '{vm_name}' not found")
+        raise NotFoundError(
+            f"VM '{vm_name}' not found",
+            entity_kind="vm",
+            entity_name=vm_name,
+        )
     return vm
 
 
 def _require_workspace(db: Database, workspace_name: str) -> WorkspaceRow:
     ws = db.get_workspace(workspace_name)
     if ws is None:
-        raise AgentError(f"workspace '{workspace_name}' not found")
+        raise NotFoundError(
+            f"workspace '{workspace_name}' not found",
+            entity_kind="workspace",
+            entity_name=workspace_name,
+        )
     return ws
 
 
 def _require_vm_for_workspace(db: Database, ws: WorkspaceRow) -> VMRow:
     vm = db.get_vm(ws.vm_name)
     if vm is None:
-        raise VMError(f"VM '{ws.vm_name}' not found")
+        raise NotFoundError(
+            f"VM '{ws.vm_name}' not found",
+            entity_kind="vm",
+            entity_name=ws.vm_name,
+        )
     return vm

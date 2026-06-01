@@ -7,6 +7,7 @@ import sys
 from typing import TYPE_CHECKING
 
 from agentworks import output
+from agentworks.errors import AlreadyExistsError
 from agentworks.ssh import admin_exec_target
 from agentworks.workspaces.tmuxinator import console_session_name, generate_config
 
@@ -40,10 +41,14 @@ def create_vm_workspace(
     # Refuse to create if directory already exists
     exists = target.run(f"test -d {workspace_path}", check=False, timeout=10)
     if exists.ok:
-        raise output.WorkspaceError(
-            f"directory {workspace_path} already exists on the VM. "
-            f"Remove it manually (ssh to the VM and 'sudo rm -rf {workspace_path}') "
-            "or choose a different name."
+        raise AlreadyExistsError(
+            f"directory {workspace_path} already exists on the VM.",
+            entity_kind="workspace",
+            entity_name=ws_name,
+            hint=(
+                f"Remove it manually (ssh to the VM and 'sudo rm -rf {workspace_path}') "
+                "or choose a different name."
+            ),
         )
 
     # Create workspace group (idempotent), add admin, and set up directory with setgid

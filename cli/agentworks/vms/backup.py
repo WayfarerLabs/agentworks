@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from agentworks import output
-from agentworks.output import BackupError, VMError
+from agentworks.errors import BackupError, NotFoundError, StateError
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -35,11 +35,19 @@ def backup_vm(
 
     vm = db.get_vm(vm_name)
     if vm is None:
-        raise VMError(f"VM '{vm_name}' not found")
+        raise NotFoundError(
+            f"VM '{vm_name}' not found",
+            entity_kind="vm",
+            entity_name=vm_name,
+        )
     _ensure_vm_running(db, config, vm)
 
     if vm.tailscale_host is None:
-        raise VMError(f"VM '{vm_name}' has no Tailscale address")
+        raise StateError(
+            f"VM '{vm_name}' has no Tailscale address",
+            entity_kind="vm",
+            entity_name=vm_name,
+        )
 
     # Create backup directory first so the log goes inside it
     timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
@@ -193,7 +201,8 @@ def _archive_workspaces(
         # Verify zstd is available
         if not target.run("command -v zstd >/dev/null 2>&1", check=False).ok:
             raise BackupError(
-                "zstd is not installed on the VM. Run 'agentworks vm reinit' to install it."
+                "zstd is not installed on the VM.",
+                hint="Run 'agentworks vm reinit' to install it.",
             )
 
         # Calculate total uncompressed size
@@ -276,7 +285,7 @@ def _archive_workspaces(
             if pid.isdigit():
                 # Kill the wrapper shell's process group (tar + wrapper)
                 target.run(f"kill -TERM -{pid} 2>/dev/null", sudo=True, check=False)
-            from agentworks.output import UserAbort
+            from agentworks.errors import UserAbort
 
             raise UserAbort("backup interrupted") from None
 

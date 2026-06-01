@@ -11,7 +11,7 @@ from agentworks.agents.manager import (
     workspace_group,
 )
 from agentworks.db import Database
-from agentworks.output import AgentError
+from agentworks.errors import ValidationError
 
 
 @pytest.mark.parametrize(
@@ -46,7 +46,7 @@ def test_workspace_group(ws_name: str, expected: str) -> None:
 
 
 def test_grant_workspaces_rejects_empty_request(db: Database) -> None:
-    with pytest.raises(AgentError, match="needs at least one workspace name"):
+    with pytest.raises(ValidationError, match="needs at least one workspace name"):
         grant_workspaces(
             db,
             config=None,  # type: ignore[arg-type]
@@ -57,7 +57,7 @@ def test_grant_workspaces_rejects_empty_request(db: Database) -> None:
 
 
 def test_revoke_workspaces_rejects_empty_request(db: Database) -> None:
-    with pytest.raises(AgentError, match="needs at least one workspace name"):
+    with pytest.raises(ValidationError, match="needs at least one workspace name"):
         revoke_workspaces(
             db,
             config=None,  # type: ignore[arg-type]
