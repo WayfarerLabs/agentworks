@@ -1649,8 +1649,18 @@ def main() -> None:
     """CLI entrypoint. Sets up output handler and catches business logic errors."""
     import time
 
-    from agentworks.config import ConfigError
-    from agentworks.output import AgentworksError, Progress, UserAbort, set_handler
+    from agentworks.errors import (
+        AgentworksError,
+        AlreadyExistsError,
+        ConfigError,
+        ConnectivityError,
+        ExternalError,
+        NotFoundError,
+        StateError,
+        UserAbort,
+        ValidationError,
+    )
+    from agentworks.output import Progress, set_handler
 
     # -- Typer output handler --------------------------------------------------
 
@@ -1754,13 +1764,44 @@ def main() -> None:
         _seed_debug_from_pre_callback()
         app()
     except ConfigError as e:
+        # Config errors get their own label since the user is looking at the
+        # wrong file, not at a runtime state problem.
         typer.echo(f"Configuration error: {e}", err=True)
+        _echo_hint(e)
         raise SystemExit(1) from None
     except UserAbort:
         typer.echo("Aborted.", err=True)
         raise SystemExit(1) from None
-    except AgentworksError as e:
+    except (NotFoundError, AlreadyExistsError, ValidationError, StateError) as e:
+        # Clean domain errors: render as a one-liner with no traceback. These
+        # are user-facing and a traceback adds noise without diagnostic value.
         typer.echo(f"Error: {e}", err=True)
+        _echo_hint(e)
+        raise SystemExit(1) from None
+    except (ConnectivityError, ExternalError) as e:
+        # External-system failures: render the one-liner AND persist the
+        # full traceback to the error log so postmortem diagnosis can see
+        # the underlying SSH command, provisioner response, etc.
+        typer.echo(f"Error: {e}", err=True)
+        _echo_hint(e)
+        if _debug:
+            raise
+        log_path = _record_unhandled_error(e)
+        if log_path is not None:
+            typer.echo(
+                f"(full traceback written to {log_path}; "
+                f"rerun with --debug or AGW_DEBUG=1 to print on stderr)",
+                err=True,
+            )
+        raise SystemExit(1) from None
+    except AgentworksError as e:
+        # Catch-all for AgentworksError subclasses not handled above. In PR A,
+        # this covers the deprecated by-manager classes (VMError, WorkspaceError,
+        # AgentError, SessionError, ConsoleError) that still directly extend
+        # AgentworksError. PR B will reclassify their raise sites and this
+        # catch will go away.
+        typer.echo(f"Error: {e}", err=True)
+        _echo_hint(e)
         raise SystemExit(1) from None
     except (click.exceptions.ClickException, click.exceptions.Exit, click.exceptions.Abort):
         # Let Click / Typer own their own rendering and exit codes. Typer
@@ -1796,6 +1837,13 @@ def main() -> None:
                 err=True,
             )
         raise SystemExit(1) from None
+
+
+def _echo_hint(exc: BaseException) -> None:
+    """Render an AgentworksError's hint attribute on a second line if set."""
+    hint = getattr(exc, "hint", None)
+    if hint:
+        typer.echo(f"  Hint: {hint}", err=True)
 
 
 def _record_unhandled_error(exc: BaseException) -> Path | None:

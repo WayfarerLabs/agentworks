@@ -12,6 +12,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
+from agentworks.errors import ConfigError
+
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
@@ -68,8 +70,10 @@ VALID_PLATFORMS = ("lima", "azure", "wsl2", "proxmox")
 VALID_GIT_CREDENTIAL_TYPES = ("azdo", "github")
 
 
-class ConfigError(Exception):
-    """Raised when configuration is invalid."""
+# ConfigError is defined in agentworks.errors and re-exported at the top of
+# this module for backward compatibility with existing
+# `from agentworks.config import ConfigError` users.
+__all__ = ["ConfigError"]
 
 
 # -- Data classes ----------------------------------------------------------

@@ -1,0 +1,99 @@
+"""Exception hierarchy for agentworks business logic.
+
+Errors are categorized by *kind* (what went wrong) rather than by source module:
+
+- NotFoundError, AlreadyExistsError, ValidationError, StateError: clean domain
+  errors that render as a one-liner with no traceback.
+- ConnectivityError, ExternalError: failures in external systems where the
+  full traceback is preserved to the error log for diagnosis.
+- ConfigError: config file validation; rendered cleanly.
+- UserAbort: control flow signal when the user declines a confirmation.
+
+The optional entity_kind and entity_name attributes carry the "which entity"
+dimension (vm, workspace, agent, session, console, ...) without making it part
+of the type. The optional hint attribute provides remediation text rendered
+on a second line.
+
+The presentation layer (cli.py:_main) catches these and decides how to render.
+Business logic must never import typer, call sys.exit, or format output.
+"""
+
+from __future__ import annotations
+
+
+class AgentworksError(Exception):
+    """Base exception for all agentworks business logic errors."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        entity_kind: str | None = None,
+        entity_name: str | None = None,
+        hint: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.entity_kind = entity_kind
+        self.entity_name = entity_name
+        self.hint = hint
+
+
+class NotFoundError(AgentworksError):
+    """A named entity does not exist (e.g. workspace, vm, session)."""
+
+
+class AlreadyExistsError(AgentworksError):
+    """A create operation collided with an existing entity of the same name."""
+
+
+class ValidationError(AgentworksError):
+    """Invalid user input (bad name, bad spec, value out of range, etc.)."""
+
+
+class StateError(AgentworksError):
+    """Entity exists but is not in a state that supports this operation.
+
+    Examples: VM not running when attaching a session, session not running
+    when sending input, console requires --force because a pane is locked.
+    """
+
+
+class BrokenStateError(StateError):
+    """Entity is in an irrecoverable state that requires explicit --force.
+
+    Today's sole user is the session manager: a session whose PID is alive
+    but whose tmux server is unreachable. Catch separately from StateError
+    to surface the --force hint.
+    """
+
+
+class ConnectivityError(AgentworksError):
+    """Network or transport-level failure (SSH, Tailscale, host unreachable)."""
+
+
+class ExternalError(AgentworksError):
+    """An external system failed in a non-connectivity way.
+
+    Examples: a provisioner API rejected a request, tar exited nonzero, a
+    catalog file was malformed, a source ref could not be resolved.
+    """
+
+
+class ProvisionerError(ExternalError):
+    """A VM provisioner (Azure, Proxmox, Lima) failed."""
+
+
+class BackupError(ExternalError):
+    """A backup operation failed (tar, scp, snapshot)."""
+
+
+class ConfigError(AgentworksError):
+    """Config file is missing, malformed, or contains invalid values."""
+
+
+class UserAbort(AgentworksError):
+    """User declined a confirmation prompt or sent Ctrl-C at an interactive prompt.
+
+    Not really an error -- a control flow signal. Caught separately so the
+    renderer can use a neutral phrasing instead of "Error: ...".
+    """

@@ -20,11 +20,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from agentworks.errors import ExternalError
+
 if TYPE_CHECKING:
     from agentworks.ssh import ExecTarget, SSHLogger
 
 
-class SourceRefError(Exception):
+class SourceRefError(ExternalError):
     """Raised when a source reference is invalid."""
 
 

@@ -14,6 +14,47 @@ import sys
 import time
 from typing import Protocol
 
+# Re-export the kind-based exception hierarchy from agentworks.errors. Existing
+# code imports types like AgentworksError, UserAbort, ValidationError, etc.
+# from agentworks.output; new code should prefer agentworks.errors directly.
+# The `X as X` pattern marks these as explicit re-exports for mypy strict mode.
+from agentworks.errors import (
+    AgentworksError as AgentworksError,
+)
+from agentworks.errors import (
+    AlreadyExistsError as AlreadyExistsError,
+)
+from agentworks.errors import (
+    BackupError as BackupError,
+)
+from agentworks.errors import (
+    BrokenStateError as BrokenStateError,
+)
+from agentworks.errors import (
+    ConfigError as ConfigError,
+)
+from agentworks.errors import (
+    ConnectivityError as ConnectivityError,
+)
+from agentworks.errors import (
+    ExternalError as ExternalError,
+)
+from agentworks.errors import (
+    NotFoundError as NotFoundError,
+)
+from agentworks.errors import (
+    ProvisionerError as ProvisionerError,
+)
+from agentworks.errors import (
+    StateError as StateError,
+)
+from agentworks.errors import (
+    UserAbort as UserAbort,
+)
+from agentworks.errors import (
+    ValidationError as ValidationError,
+)
+
 # ---------------------------------------------------------------------------
 # Progress handle
 # ---------------------------------------------------------------------------
@@ -246,55 +287,48 @@ def get_handler() -> OutputHandler:
 
 
 # ---------------------------------------------------------------------------
-# Exception hierarchy
+# Deprecated by-manager error aliases
 # ---------------------------------------------------------------------------
-
-
-class AgentworksError(Exception):
-    """Base exception for all agentworks business logic errors.
-
-    The presentation layer catches this (and subclasses) at the entrypoint
-    and decides how to render the error.
-    """
+#
+# These by-manager subclasses (VMError, WorkspaceError, AgentError, SessionError,
+# BrokenSessionError, ConsoleError) are DEPRECATED. They survive only so existing
+# raise sites compile while PR B migrates them to the kind-based types in
+# agentworks.errors (NotFoundError, AlreadyExistsError, ValidationError,
+# StateError, etc.). New code should not raise or catch them.
 
 
 class VMError(AgentworksError):
-    """Error related to VM operations."""
+    """Deprecated. Use a kind-based type from agentworks.errors."""
 
 
 class WorkspaceError(AgentworksError):
-    """Error related to workspace operations."""
+    """Deprecated. Use a kind-based type from agentworks.errors."""
 
 
 class AgentError(AgentworksError):
-    """Error related to agent operations."""
+    """Deprecated. Use a kind-based type from agentworks.errors."""
 
 
-class SessionError(AgentworksError):
-    """Error related to session operations."""
+class SessionError(StateError):
+    """Deprecated. Use StateError (or another kind-based type) from agentworks.errors.
+
+    Re-parented under StateError so the one real branching site (catching
+    BrokenSessionError separately from SessionError) keeps its semantics:
+    BrokenSessionError is now a BrokenStateError, which is itself a StateError,
+    which is what SessionError now is.
+    """
 
 
-class BrokenSessionError(SessionError):
-    """Session is BROKEN (PID alive but tmux unreachable). Requires --force."""
+class BrokenSessionError(BrokenStateError, SessionError):
+    """Deprecated. Use BrokenStateError from agentworks.errors.
+
+    Inherits from both BrokenStateError (the new kind) and SessionError
+    (this file's deprecated alias) so existing `except BrokenSessionError`
+    catch sites and `except SessionError` catch sites both keep working.
+    """
 
 
 class ConsoleError(AgentworksError):
-    """Error related to console operations."""
-
-
-class ConnectivityError(AgentworksError):
-    """Error related to network, SSH, or Tailscale connectivity."""
-
-
-class BackupError(AgentworksError):
-    """Error related to backup-specific failures."""
-
-
-class ValidationError(AgentworksError):
-    """Invalid user input (name, argument, etc.)."""
-
-
-class UserAbort(AgentworksError):
-    """Raised when the user declines a confirmation prompt."""
+    """Deprecated. Use a kind-based type from agentworks.errors."""
 
 
