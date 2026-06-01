@@ -1344,11 +1344,13 @@ def test_split_shell_pane_tags_new_pane_with_config_index(
     assert f"-t %7 {SHELL_INDEX_OPTION} 0" in set_options[0]
 
 
-def test_split_shell_pane_omits_tag_when_split_returns_no_pane_id(
-    db: Database, fake_target: _FakeTarget
+def test_split_shell_pane_warns_when_split_returns_no_pane_id(
+    db: Database, fake_target: _FakeTarget, captured_output: CapturedOutput
 ) -> None:
-    """If split-window's stdout is empty (older tmux / parse failure), the
-    tag step is skipped rather than emitting a set-option with no target."""
+    """If split-window's stdout is empty (older tmux / weird transport), the
+    tag step is skipped and the operator gets a warning that the pane is
+    untagged. The pane is still live; restore-session just won't be able to
+    repair this window without `attach --recreate`."""
     _seed_vm(db, with_tailscale=True)
     _seed_sessions(db, ["a"])
     create_console(db, name="con", vm_name="vm1", session_specs=["a"])
@@ -1361,6 +1363,10 @@ def test_split_shell_pane_omits_tag_when_split_returns_no_pane_id(
 
     set_options = [c for c in fake_target.commands if "set-option -p" in c]
     assert set_options == []
+    assert any(
+        "couldn't capture its id" in w and "untagged" in w
+        for w in captured_output.warnings
+    )
 
 
 # -- restore-session: argument and live-state validation -------------------

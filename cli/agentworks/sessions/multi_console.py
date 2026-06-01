@@ -14,6 +14,7 @@ import os
 import posixpath
 import shlex
 import sys
+from collections import Counter
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -556,10 +557,12 @@ def restore_session(
     #     configured_count must trigger one of the two above (since untagged
     #     panes are already rejected by the strict check earlier)
     tag_values = [cidx for _pid, _pidx, cidx in shell_panes if cidx is not None]
-    duplicates = sorted({v for v in tag_values if tag_values.count(v) > 1})
-    out_of_range = sorted(
-        {v for v in tag_values if v < 0 or v >= configured_count}
-    )
+    # Single-pass O(n) duplicate + out-of-range detection. The naive
+    # tag_values.count(v) in a comprehension would be O(n^2); not a concern at
+    # typical shell counts (1-5) but free to do correctly.
+    counts = Counter(tag_values)
+    duplicates = sorted(v for v, n in counts.items() if n > 1)
+    out_of_range = sorted(v for v in counts if v < 0 or v >= configured_count)
     if duplicates or out_of_range:
         parts: list[str] = []
         if duplicates:
@@ -682,28 +685,45 @@ def _reorder_shell_panes(
     @agentworks-shell-index N. Shell panes live at pane_index >= 1 (the
     session pane occupies pane_index 0).
 
-    Uses selection-sort-style swaps; one tmux list-panes round trip per
-    iteration. For typical configured_count (1-3) this is trivially cheap.
-    Best-effort: if a swap fails, we keep going and let select-layout
-    handle the geometry.
+    One tmux list-panes round trip up front, then we track positions in
+    memory across swaps: pane_ids are stable, so after each `swap-pane` we
+    just exchange the pane_index values of the two affected entries in
+    our local map. Best-effort: if a swap fails, we keep going and let
+    select-layout handle the geometry.
     """
+    panes = _list_shell_panes(target, q_con, q_win)
+    if panes is None:
+        return
+    # pane_index by pane_id; mutated as we issue swaps so the next iteration
+    # sees the current layout without another SSH round trip.
+    pidx_by_pid: dict[str, int] = {pid: pidx for pid, pidx, _cidx in panes}
+    pid_by_cidx: dict[int, str] = {
+        cidx: pid for pid, _pidx, cidx in panes if cidx is not None
+    }
+
     for target_cidx in range(configured_count):
         target_pidx = target_cidx + 1
-        panes = _list_shell_panes(target, q_con, q_win)
-        if panes is None:
-            return
-        # Locate the pane that should sit at target_pidx.
-        src = next(((pid, pidx) for pid, pidx, cidx in panes if cidx == target_cidx), None)
-        if src is None:
+        src_pid = pid_by_cidx.get(target_cidx)
+        if src_pid is None:
             continue
-        src_pid, src_pidx = src
+        src_pidx = pidx_by_pid[src_pid]
         if src_pidx == target_pidx:
             continue
+        # Find the pane currently sitting at target_pidx so we can update its
+        # in-memory pane_index after the swap. There must be one (panes at
+        # pane_index 1..N are all shell panes by construction).
+        displaced_pid = next(
+            (pid for pid, pidx in pidx_by_pid.items() if pidx == target_pidx),
+            None,
+        )
         target.run(
             f"tmux swap-pane -s {shlex.quote(src_pid)} "
             f"-t {q_con}:{q_win}.{target_pidx}",
             check=False,
         )
+        pidx_by_pid[src_pid] = target_pidx
+        if displaced_pid is not None:
+            pidx_by_pid[displaced_pid] = src_pidx
 
 
 # -- Read-side helpers ----------------------------------------------------
@@ -899,12 +919,23 @@ def _split_shell_pane(
         return
 
     pane_id = res.stdout.strip()
-    if pane_id:
-        q_pane = shlex.quote(pane_id)
-        target.run(
-            f"tmux set-option -p -t {q_pane} {SHELL_INDEX_OPTION} {config_index}",
-            check=False,
+    if not pane_id:
+        # tmux is supposed to print the new pane id on stdout under `-P -F`;
+        # an empty stdout means we lost the handle and can't tag the pane.
+        # The pane is live but invisible to restore-session, which will
+        # later refuse to repair this window (untagged-pane strict check).
+        output.warn(
+            f"added shell pane in '{window_name}' but couldn't capture its id; "
+            f"the pane is untagged. restore-session won't be able to repair "
+            f"this window; use `agentworks console attach --recreate` if "
+            f"you need clean tag state."
         )
+        return
+    q_pane = shlex.quote(pane_id)
+    target.run(
+        f"tmux set-option -p -t {q_pane} {SHELL_INDEX_OPTION} {config_index}",
+        check=False,
+    )
 
 
 def _add_session_window(
