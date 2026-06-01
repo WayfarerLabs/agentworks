@@ -21,6 +21,7 @@
     "batchable",
     "BIGRED",
     "buildx",
+    "callsite",
     "bunx",
     "capsys",
     "chgrp",

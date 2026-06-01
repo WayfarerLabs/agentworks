@@ -39,7 +39,7 @@ DYNAMIC_SNIPPETS: dict[str, str] = {
         ' | Where-Object { $_ -like "$wordToComplete*" } } }'
     ),
     "catalog_entries": (
-        "& { agentworks installer list 2>$null"
+        "& { agentworks catalog list 2>$null"
         " | Select-Object -Skip 2"
         " | ForEach-Object { ($_ -split '\\s+')[1] }"
         ' | Where-Object { $_ -like "$wordToComplete*" } }'

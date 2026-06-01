@@ -593,17 +593,17 @@ Template commands support `{{session_name}}` and `{{workspace_name}}` variable s
 by `session restart` -- useful for tools like Claude Code where `--resume` picks up the previous
 conversation. If omitted, the regular `command` is used.
 
-### Installers
+### Catalog
 
 Browse and inspect the built-in catalog of installable tools.
 
-| Command                                | Description                        |
-| -------------------------------------- | ---------------------------------- |
-| `agentworks installer list`            | List all available catalog entries |
-| `agentworks installer describe <name>` | Show details of a catalog entry    |
+| Command                              | Description                        |
+| ------------------------------------ | ---------------------------------- |
+| `agentworks catalog list`            | List all available catalog entries |
+| `agentworks catalog describe <name>` | Show details of a catalog entry    |
 
-`installer list` accepts `--type` (apt-source, apt-package, system-install-cmd, user-install-cmd)
-and `--source` (builtin, user) filters.
+`catalog list` accepts `--type` (apt-source, apt-package, system-install-cmd, user-install-cmd) and
+`--source` (built-in, custom) filters.
 
 ### Config
 
@@ -679,7 +679,7 @@ standalone via `claude plugin marketplace add`.
 ### Built-in Catalog
 
 Agentworks ships a built-in catalog of common tools (apt sources, apt packages, system install
-commands, and user install commands). Run `agentworks installer list` to see what is available.
+commands, and user install commands). Run `agentworks catalog list` to see what is available.
 Reference catalog entries by name in `vm_templates`, `admin.config`, and `agent_templates`.
 User-defined entries in your config override built-in entries with the same name.
 

@@ -19,6 +19,47 @@ def _walk_commands(spec, path: str = "") -> dict[str, object]:
     return result
 
 
+class TestTopLevelGroups:
+    """Pin the set of top-level command groups so an accidental rename or
+    removal surfaces as a test failure rather than silent CLI drift. The
+    canonical example: when the `installer` group became `catalog`, this
+    test would have caught a half-renamed callsite by failing to find the
+    expected group in `app.subcommands`.
+
+    Update the expected set deliberately when adding or renaming a group.
+    """
+
+    EXPECTED_GROUPS = frozenset(
+        {
+            "agent",
+            "catalog",
+            "completion",
+            "config",
+            "console",
+            "session",
+            "vm",
+            "vm-host",
+            "workspace",
+        }
+    )
+
+    def test_expected_top_level_groups_match(self) -> None:
+        spec = build_spec(app)
+        # spec.subcommands includes both groups and direct commands (e.g.
+        # `agentworks doctor`); subcommands whose own `subcommands` dict is
+        # non-empty are groups.
+        actual_groups = {
+            name for name, sub in spec.subcommands.items() if sub.subcommands
+        }
+        missing = self.EXPECTED_GROUPS - actual_groups
+        unexpected = actual_groups - self.EXPECTED_GROUPS
+        assert not missing and not unexpected, (
+            f"top-level command group drift: missing={sorted(missing)}, "
+            f"unexpected={sorted(unexpected)}. Update EXPECTED_GROUPS in this "
+            f"test if the change is intentional."
+        )
+
+
 class TestDynamicCompletionsMapping:
     """Verify DYNAMIC_COMPLETIONS keys match real Typer commands and params."""
 

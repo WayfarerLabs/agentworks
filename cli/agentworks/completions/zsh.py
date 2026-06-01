@@ -47,8 +47,8 @@ _agentworks_git_credentials() {
     "catalog_entries": """\
 _agentworks_catalog_entries() {
     local -a entries
-    entries=(${(f)"$(agentworks installer list 2>/dev/null | tail -n +3 | awk '{print $2}')"})
-    _describe 'installer' entries
+    entries=(${(f)"$(agentworks catalog list 2>/dev/null | tail -n +3 | awk '{print $2}')"})
+    _describe 'catalog entry' entries
 }""",
     "sessions": """\
 _agentworks_sessions() {
