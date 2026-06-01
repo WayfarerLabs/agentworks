@@ -1549,6 +1549,33 @@ def test_restore_session_rebuilds_missing_window(
     assert len(new_windows) == 1
 
 
+def test_restore_session_raises_when_split_returns_no_pane_id(
+    db: Database, fake_target: _FakeTarget
+) -> None:
+    """If tmux split-window succeeds but doesn't print a pane id, the pane
+    is created but untagged. restore-session must surface this as an error
+    so the operator doesn't see exit-0 while a window is left incomplete."""
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["a"])
+    create_console(db, name="con", vm_name="vm1", session_specs=["a+3"])
+
+    fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
+    fake_target.responses["list-windows -t aw-console-con"] = _FakeResult(stdout="a\n")
+    fake_target.responses["list-panes -t aw-console-con:a"] = _FakeResult(
+        stdout="%1|0|\n%2|1|0\n%3|2|2\n"
+    )
+    # split-window succeeds but returns no pane id; _split_shell_pane warns
+    # and returns None, which restore_session must escalate.
+    fake_target.responses["split-window -t aw-console-con:a"] = _FakeResult(
+        stdout=""
+    )
+
+    with pytest.raises(
+        output.ConsoleError, match=r"failed to create/tag config indices \[1\]"
+    ):
+        restore_session(db, _StubConfig(), console_name="con", session_name="a")
+
+
 def test_restore_session_splits_missing_config_indices_and_tags_them(
     db: Database, fake_target: _FakeTarget
 ) -> None:

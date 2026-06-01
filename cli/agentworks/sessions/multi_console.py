@@ -614,8 +614,11 @@ def restore_session(
         f"Restoring {len(missing)} shell pane(s) in '{session_name}': "
         f"config indices {missing}."
     )
+    # Collect each split's outcome so a partial failure becomes a loud error
+    # rather than a silent exit-0 leaving panes missing or untagged.
+    failed: list[int] = []
     for cidx in missing:
-        _split_shell_pane(
+        pane_id = _split_shell_pane(
             target,
             console_name=console_name,
             window_name=session_name,
@@ -624,6 +627,15 @@ def restore_session(
             session_user=session_user,
             admin_user=vm.admin_username,
             config_index=cidx,
+        )
+        if pane_id is None:
+            failed.append(cidx)
+    if failed:
+        raise output.ConsoleError(
+            f"restore-session left '{session_name}' incomplete: failed to "
+            f"create/tag config indices {failed} (see warnings above). "
+            f"Run `agentworks console attach {console_name} --recreate` to "
+            f"rebuild from scratch."
         )
 
     # New panes land at the tail; reorder so visual pane_index matches
@@ -873,11 +885,18 @@ def _split_shell_pane(
     session_user: str,
     admin_user: str,
     config_index: int,
-) -> None:
+) -> str | None:
     """Split off one shell pane in an existing console window and tag the new
     pane with its position in the configured shell list. The tag lets
     restore-session detect which specific shell (out of an ordered list) is
-    missing after an accidental kill."""
+    missing after an accidental kill.
+
+    Returns the new pane id on full success (split + tag both completed), or
+    None if either step failed (tmux refused the split, or the pane was created
+    but its id couldn't be captured so the tag couldn't be set). Callers in
+    best-effort paths (`add_shell`, `_add_session_window`) may ignore the
+    return value; `restore_session` checks each return so a partial restore
+    is loud rather than a silent exit-0."""
     cwd = shell["cwd"]
     full_path = posixpath.join(workspace_path, cwd) if cwd else workspace_path
     q_full = shlex.quote(full_path)
@@ -921,7 +940,7 @@ def _split_shell_pane(
         output.warn(
             f"failed to add shell pane in '{window_name}': {res.stderr.strip()}"
         )
-        return
+        return None
 
     pane_id = res.stdout.strip()
     if not pane_id:
@@ -935,12 +954,13 @@ def _split_shell_pane(
             f"this window; use `agentworks console attach --recreate` if "
             f"you need clean tag state."
         )
-        return
+        return None
     q_pane = shlex.quote(pane_id)
     target.run(
         f"tmux set-option -p -t {q_pane} {SHELL_INDEX_OPTION} {config_index}",
         check=False,
     )
+    return pane_id
 
 
 def _add_session_window(
