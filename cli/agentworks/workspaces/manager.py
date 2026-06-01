@@ -108,7 +108,8 @@ def create_workspace(
         # workspace itself was already created and inserted above, so a
         # per-agent failure (DB error, SSH hiccup) should not abort the
         # whole command. Surface failures as warnings and report accurate
-        # counts so the user can re-grant manually with 'agent grant'.
+        # counts so the user can re-grant manually with
+        # 'agent workspace-grants grant'.
         #
         # DB grant is inserted BEFORE the on-VM group add. If the order were
         # reversed and the DB write failed after the group add, the agent
@@ -147,7 +148,8 @@ def create_workspace(
                         output.warn(
                             f"Could not revert grant for '{agent.name}' after group-add "
                             f"failure: {revert_err}. DB has a grant row with no VM-side "
-                            f"group membership; re-run 'agent grant {agent.name} {ws_name}' "
+                            f"group membership; re-run "
+                            f"'agent workspace-grants grant {agent.name} {ws_name}' "
                             f"or revoke explicitly."
                         )
             if added:
@@ -155,7 +157,7 @@ def create_workspace(
             if failed:
                 output.warn(
                     f"Grant-all agents not added: {', '.join(failed)}. "
-                    f"Re-grant manually with 'agent grant <name> {ws_name}'."
+                    f"Re-grant manually with 'agent workspace-grants grant <name> {ws_name}'."
                 )
     finally:
         ssh_logger.close()
