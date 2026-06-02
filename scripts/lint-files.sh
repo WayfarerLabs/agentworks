@@ -120,8 +120,11 @@ fi
 
 echo ""
 echo "=== cspell ==="
-if "${PKGRUN[@]}" cspell@"$CSPELL_VERSION" --no-progress \
-    '**/*.md' '**/*.py' '**/*.yaml' '**/*.yml' '**/*.toml'; then
+# cspell only scans Markdown prose. Source files (Python, TOML, YAML, JSON)
+# are intentionally excluded: identifier-style "misspellings" are noisy and
+# the dictionary maintenance cost outweighs the benefit. Mirrored in
+# .cspell.json's ignorePaths so direct invocations behave the same way.
+if "${PKGRUN[@]}" cspell@"$CSPELL_VERSION" --no-progress '**/*.md'; then
     echo "  ok"
 else
     echo ""
