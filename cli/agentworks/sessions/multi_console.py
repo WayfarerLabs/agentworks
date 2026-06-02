@@ -972,7 +972,7 @@ def kill_session_windows(
     except Exception as exc:
         affected = sorted({c for c, _ in pairs})
         recovery = "; ".join(
-            f"agentworks console attach {shlex.quote(c)} --recreate" for c in affected
+            f"agw console attach {shlex.quote(c)} --recreate" for c in affected
         )
         output.warn(
             f"live console window cleanup failed: {exc}. "
