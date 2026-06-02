@@ -67,9 +67,24 @@ def _install_zsh(script: str) -> None:
     target.write_text(script)
     typer.echo(f"Installed to {target}")
 
+    # zsh's compinit autoloads completion files keyed by command name: typing
+    # `agw<TAB>` causes zsh to look for `_agw` in fpath, not `_agentworks`.
+    # The `#compdef agentworks agw` directive inside the file only registers
+    # both names AFTER the file is loaded, which never happens for `agw`
+    # without a `_agw` entry point. Drop a symlink so either command triggers
+    # the same script.
+    alias_link = target_dir / "_agw"
+    alias_link.unlink(missing_ok=True)
+    alias_link.symlink_to("_agentworks")
+    typer.echo(f"Linked    {alias_link} -> _agentworks")
+
     # Check if ~/.zfunc needs fpath setup (not needed for Oh My Zsh)
     if target_dir.name == ".zfunc":
         typer.echo("Note: ensure your .zshrc has: fpath=(~/.zfunc $fpath)")
+    typer.echo(
+        "Note: existing zsh sessions cache compinit's autoload index; "
+        "run `rm -f ~/.zcompdump* && exec zsh` or open a new terminal."
+    )
 
 
 def _install_powershell(script: str) -> None:
