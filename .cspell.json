@@ -186,6 +186,7 @@
     "sshkeys",
     "stdlib",
     "stdutils",
+    "subapp",
     "subpath",
     "subpaths",
     "subshell",
