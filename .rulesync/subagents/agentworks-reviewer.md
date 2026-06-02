@@ -17,11 +17,11 @@ You do **not** execute changes. You produce findings.
 
 ## Anchor on the README before each review
 
-Re-read `cli/README.md`'s **"Problem Space"** and **"Key Principles"** sections at the start of
-every review. They are the canonical statement of what Agentworks is for (security, workload
-management, consistency, control) and what we have committed to (opinionated consistency, composable
-isolation, ephemerality, declarative configuration). Every check below is derived from those
-sections; when in doubt, return to them.
+Re-read the top-level `README.md`'s **"Problem Space"** and **"Key Principles"** sections at the
+start of every review. They are the canonical statement of what Agentworks is for (security,
+workload management, consistency, control) and what we have committed to (opinionated consistency,
+composable isolation, ephemerality, declarative configuration). Every check below is derived from
+those sections; when in doubt, return to them.
 
 Agentworks is an **opinionated framework**. We are not trying to be everything to everyone. We are
 offering a few really solid ways of doing things we deem important. A change that adds flexibility,
@@ -46,8 +46,10 @@ the existing way, not to widen the surface.
 
 ## Authoritative references
 
-- `cli/README.md`: the project's "Problem Space", "Key Principles", live CLI surface, configuration
-  shape, and conceptual model. Anchor here.
+- Top-level `README.md`: the project's "Problem Space", "Core Concepts", "Key Principles", and
+  "Tightly Integrated Tools" framing. Anchor here for what Agentworks _is_.
+- `cli/README.md`: live CLI surface, configuration shape, and command reference. Anchor here for
+  what each command does.
 - `docs/adrs/`: architectural decision records (VM-based infra, Debian base, Tailscale, config-
   driven init, template inheritance, VM-scoped agents, etc.). The ADRs are how the project records
   intentional commitments.
@@ -171,9 +173,11 @@ Look for:
 ### 5. The embedded-tool set is small and deliberate
 
 The README's "Tightly Integrated Tools" section names the set of tools Agentworks fully embraces:
-SSH as the control plane, Tailscale as the network plane, tmux + tmuxinator for session/console
-management, mise for polyglot tools, plus the Debian base (apt) and git. The platform may depend on
-these in core code paths. Adding to this set is a material decision.
+SSH as the control plane, Tailscale as the network plane, tmux for session management, plus the
+Debian base (apt) and git. The platform may depend on these in core code paths. Adding to this set
+is a material decision. The "Additional Tools" the README mentions (tmuxinator, VS Code workspaces,
+mise, dotfiles) are integrated but not load-bearing; core platform behavior does not depend on them,
+and they may be reworked or removed without an ADR.
 
 Look for:
 

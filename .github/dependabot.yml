@@ -1,0 +1,54 @@
+# Dependabot configuration.
+#
+# Two ecosystems are covered:
+#   - "pip" for the Python CLI package in cli/ (reads cli/pyproject.toml).
+#     Caveat: this repo uses uv, and Dependabot's pip ecosystem does NOT
+#     update cli/uv.lock. Each Dependabot PR will need a follow-up
+#     `cd cli && uv lock` to refresh the lockfile before CI passes. When
+#     GitHub's native `uv` ecosystem is GA, switch package-ecosystem to
+#     "uv" and drop this caveat.
+#   - "github-actions" for the workflows under .github/workflows/.
+#
+# commit-message blocks ensure Dependabot's PRs land as valid Conventional
+# Commits (the repo enforces this via release-please).
+#
+# Major-version bumps for each are kept as standalone PRs because they
+# usually need review (release notes, breaking changes); patches and
+# minors are grouped to keep the PR queue manageable.
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: /cli
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+    labels:
+      - dependencies
+      - python
+    commit-message:
+      prefix: chore
+      include: scope
+    groups:
+      python-patch-and-minor:
+        update-types:
+          - patch
+          - minor
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+    labels:
+      - dependencies
+      - ci
+    commit-message:
+      prefix: chore
+      include: scope
+    groups:
+      actions-patch-and-minor:
+        update-types:
+          - patch
+          - minor
