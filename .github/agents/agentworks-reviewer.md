@@ -263,9 +263,8 @@ with the existing ones.
 **Established conventions:**
 
 - **Create commands** take the new entity's name as a required positional argument
-  (`agentworks workspace create <name>`, `agentworks agent create <name>`). Optional flags cover
-  context selection (`--vm`), template selection (`--template`), and side-effect toggles
-  (`--open-vscode`).
+  (`agw workspace create <name>`, `agw agent create <name>`). Optional flags cover context selection
+  (`--vm`), template selection (`--template`), and side-effect toggles (`--open-vscode`).
 - **Operate-on-existing commands** take the entity's name as a required positional
   (`vm shell <name>`, `agent describe <name>`, `workspace delete <name>`).
 - **List commands** take filter options, not positionals.

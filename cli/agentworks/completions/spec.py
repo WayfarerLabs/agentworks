@@ -44,18 +44,18 @@ class CommandSpec:
 # knows how to render into shell-specific completion functions.
 #
 # The completer identifiers and their corresponding CLI commands:
-#   "vms"             -> agentworks vm list
-#   "vm_hosts"        -> agentworks vm-host list
-#   "workspaces"      -> agentworks workspace list
+#   "vms"             -> agw vm list
+#   "vm_hosts"        -> agw vm-host list
+#   "workspaces"      -> agw workspace list
 #   "ws_templates"    -> [workspace_templates.*] sections in config.toml
 #   "git_credentials" -> [git_credentials.*] sections in config.toml
 #   "catalog_entries" -> all entry names from built-in + custom catalog
-#   "sessions"        -> agentworks session list --no-status
+#   "sessions"        -> agw session list --no-status
 #   "session_templates" -> [session_templates.*] sections in config.toml
-#   "agents"          -> agentworks agent list
+#   "agents"          -> agw agent list
 #   "vm_templates"    -> [vm_templates.*] sections in config.toml
 #   "agent_templates" -> [agent_templates.*] sections in config.toml
-#   "consoles"        -> agentworks console list
+#   "consoles"        -> agw console list
 
 DYNAMIC_COMPLETIONS: dict[tuple[str, str], str] = {
     ("vm.start", "name"): "vms",

@@ -18,7 +18,7 @@ app = typer.Typer(
     help="Orchestrate workspace lifecycle across multiple compute targets.",
     no_args_is_help=True,
     # Suppress typer's generic --install-completion / --show-completion flags
-    # in favor of the project's hand-rolled `agentworks completion show|install`
+    # in favor of the project's hand-rolled `agw completion show|install`
     # subcommands, which emit scripts with the dynamic completers (vms,
     # workspaces, sessions, agents, consoles, ...).
     add_completion=False,
@@ -164,7 +164,7 @@ def _prompt_workspace(db: Database, workspace: str | None) -> WorkspaceRow:
 
     workspaces = db.list_workspaces()
     if not workspaces:
-        typer.echo("Error: no workspaces found. Create one with 'agentworks workspace create'.", err=True)
+        typer.echo("Error: no workspaces found. Create one with 'agw workspace create'.", err=True)
         raise typer.Exit(1)
 
     if len(workspaces) == 1:
@@ -191,7 +191,7 @@ def _prompt_vm(db: Database, vm_name: str | None) -> VMRow:
 
     vms = db.list_vms()
     if not vms:
-        typer.echo("Error: no VMs found. Create one with 'agentworks vm create'.", err=True)
+        typer.echo("Error: no VMs found. Create one with 'agw vm create'.", err=True)
         raise typer.Exit(1)
 
     if len(vms) == 1:
@@ -559,15 +559,15 @@ def vm_console(
 ) -> None:
     """[Deprecated] Attach to the VM console (creates it if needed).
 
-    Prefer 'agentworks console' for curated session lists and per-window shell panes.
+    Prefer 'agw console' for curated session lists and per-window shell panes.
     """
     from agentworks import output
     from agentworks.config import load_config
     from agentworks.sessions.console import attach_console
 
     output.warn(
-        "'agentworks vm console' is deprecated; use 'agentworks console' "
-        "(see 'agentworks console --help'). This command will be removed in a future release."
+        "'agw vm console' is deprecated; use 'agw console' "
+        "(see 'agw console --help'). This command will be removed in a future release."
     )
 
     attach_console(
@@ -1564,14 +1564,14 @@ def config_init() -> None:
 
     if CONFIG_PATH.exists():
         typer.echo(f"Config already exists: {CONFIG_PATH}")
-        typer.echo("Edit it directly, or remove it and run 'agentworks config init' again.")
+        typer.echo("Edit it directly, or remove it and run 'agw config init' again.")
         return
 
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     sample = files("agentworks").joinpath("sample-config.toml")
     shutil.copy2(str(sample), CONFIG_PATH)
     typer.echo(f"Sample config written to {CONFIG_PATH}")
-    typer.echo("Edit it to match your setup, then run 'agentworks vm create' to get started.")
+    typer.echo("Edit it to match your setup, then run 'agw vm create' to get started.")
 
 
 @config_app.command("edit")
@@ -1590,7 +1590,7 @@ def config_edit() -> None:
 
     if not CONFIG_PATH.exists():
         typer.echo(f"Error: config file not found at {CONFIG_PATH}", err=True)
-        typer.echo("Run 'agentworks config init' to create one.", err=True)
+        typer.echo("Run 'agw config init' to create one.", err=True)
         raise typer.Exit(1)
 
     sys.exit(subprocess.call([editor, str(CONFIG_PATH)]))
