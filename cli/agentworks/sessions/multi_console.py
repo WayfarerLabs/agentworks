@@ -404,15 +404,9 @@ def remove_sessions(
         if live is None:
             return
         _vm, target = live
-        if not _console_tmux_exists(target, console_name):
-            return
-        q_con = shlex.quote(tmux_session_name(console_name))
-        for n in session_names:
-            q_win = shlex.quote(n)
-            target.run(
-                f"tmux kill-window -t {q_con}:{q_win}",
-                check=False,
-            )
+        kill_session_windows(
+            target, pairs=[(console_name, n) for n in session_names]
+        )
 
 
 def delete_console_record(db: Database, *, name: str) -> None:
@@ -939,6 +933,51 @@ def _console_tmux_exists(target: ExecTarget, console_name: str) -> bool:
 def _kill_console_tmux(target: ExecTarget, console_name: str) -> None:
     q = shlex.quote(tmux_session_name(console_name))
     target.run(f"tmux kill-session -t {q}", check=False)
+
+
+def kill_session_windows(
+    target: ExecTarget,
+    *,
+    pairs: list[tuple[str, str]],
+) -> None:
+    """Best-effort: kill each ``(console_name, session_name)`` window in live tmux.
+
+    Used by every code path that removes a session from a console
+    (``session delete``, ``workspace delete --force``, ``agent delete --force``,
+    ``console remove-session``). Pairs are grouped by console so we probe
+    ``has-session`` once per console rather than once per pair. ``kill-window``
+    runs with ``check=False`` so a console that's live but lacks the window
+    (operator killed it manually) doesn't fail the cleanup.
+
+    AgentworksError propagates; transport-level surprises are warned and
+    swallowed because the DB has already settled by the time we reach here.
+    """
+    if not pairs:
+        return
+    by_console: dict[str, list[str]] = {}
+    for con, sess in pairs:
+        by_console.setdefault(con, []).append(sess)
+    try:
+        for console_name, session_names in by_console.items():
+            if not _console_tmux_exists(target, console_name):
+                continue
+            q_con = shlex.quote(tmux_session_name(console_name))
+            for session_name in session_names:
+                target.run(
+                    f"tmux kill-window -t {q_con}:{shlex.quote(session_name)}",
+                    check=False,
+                )
+    except AgentworksError:
+        raise
+    except Exception as exc:
+        affected = sorted({c for c, _ in pairs})
+        recovery = "; ".join(
+            f"agentworks console attach {shlex.quote(c)} --recreate" for c in affected
+        )
+        output.warn(
+            f"live console window cleanup failed: {exc}. "
+            f"Stale windows may persist; rebuild with: {recovery}"
+        )
 
 
 def _resolve_workspace_path(db: Database, session: SessionRow) -> str | None:

@@ -236,6 +236,12 @@ def delete_agent(
 
         target = admin_exec_target(vm, config, logger=ssh_logger)
         agent_sessions = ensure_pids_batch(agent_sessions, db=db, config=config)
+        # Snapshot console memberships before db.delete_session cascades them.
+        console_pairs = [
+            (c.name, s.name)
+            for s in agent_sessions
+            for c in db.list_consoles_for_session(s.name)
+        ]
         unstoppable: list[str] = []
         for session in agent_sessions:
             status = check_session_status(session, target=target)
@@ -266,6 +272,13 @@ def delete_agent(
         for session in agent_sessions:
             db.delete_session(session.name)
         output.detail(f"Deleted {len(agent_sessions)} session(s)")
+
+        # Best-effort: take down dangling 'Waiting for session...' windows in
+        # any console that listed one of these sessions.
+        if console_pairs:
+            from agentworks.sessions.multi_console import kill_session_windows
+
+            kill_session_windows(target, pairs=console_pairs)
 
     # Remove from all workspace groups
     granted_workspaces = db.list_granted_workspaces(name)

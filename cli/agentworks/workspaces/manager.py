@@ -23,6 +23,7 @@ from agentworks.workspaces.templates import resolve_template
 if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database, VMRow, WorkspaceRow
+    from agentworks.ssh import ExecTarget
 
 
 def create_workspace(
@@ -872,6 +873,10 @@ def delete_workspace(
 
     # Kill running sessions (status-aware) and delete session records
     vm = db.get_vm(ws.vm_name)
+    # console_pairs is populated only when we have live SSH access; the
+    # post-delete cleanup is best-effort and skips when target is None.
+    target: ExecTarget | None = None
+    console_pairs: list[tuple[str, str]] = []
     if vm is not None and vm.tailscale_host is not None:
         from agentworks.db import SessionStatus
         from agentworks.sessions.manager import (
@@ -884,6 +889,12 @@ def delete_workspace(
         target = admin_exec_target(vm, config, logger=ssh_logger)
         sessions = db.list_sessions(workspace_name=name)
         sessions = ensure_pids_batch(sessions, db=db, config=config)
+        # Snapshot console memberships before the FK cascade clears them.
+        console_pairs = [
+            (c.name, s.name)
+            for s in sessions
+            for c in db.list_consoles_for_session(s.name)
+        ]
         unstoppable: list[str] = []
         for session in sessions:
             status = check_session_status(session, target=target)
@@ -912,6 +923,14 @@ def delete_workspace(
                 hint="Resolve the stuck sessions manually before retrying.",
             )
     db.delete_sessions_for_workspace(name)
+
+    # Best-effort: take down dangling 'Waiting for session...' windows in any
+    # console that listed one of these sessions. Skips when we have no live
+    # target (VM down or never had a tailnet host).
+    if target is not None and console_pairs:
+        from agentworks.sessions.multi_console import kill_session_windows
+
+        kill_session_windows(target, pairs=console_pairs)
 
     # Revoke agent workspace grants (agents are VM-scoped, not deleted with workspaces)
     if vm is not None:
