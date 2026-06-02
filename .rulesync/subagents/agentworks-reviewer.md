@@ -173,9 +173,11 @@ Look for:
 ### 5. The embedded-tool set is small and deliberate
 
 The README's "Tightly Integrated Tools" section names the set of tools Agentworks fully embraces:
-SSH as the control plane, Tailscale as the network plane, tmux + tmuxinator for session/console
-management, mise for polyglot tools, plus the Debian base (apt) and git. The platform may depend on
-these in core code paths. Adding to this set is a material decision.
+SSH as the control plane, Tailscale as the network plane, tmux for session management, plus the
+Debian base (apt) and git. The platform may depend on these in core code paths. Adding to this set
+is a material decision. The "Additional Tools" the README mentions (tmuxinator, VS Code workspaces,
+mise, dotfiles) are integrated but not load-bearing; core platform behavior does not depend on them,
+and they may be reworked or removed without an ADR.
 
 Look for:
 

@@ -2,11 +2,9 @@
 
 The operator's command-line interface for managing agentic workloads on Agentworks.
 
-For the project's "Problem Space," core concepts (Operator, VMs, Workspaces, Agents, Sessions), key
-principles (Opinionated Consistency, Composable Isolation, Ephemerality, Declarative Configuration),
-and the tightly-integrated tool set (SSH, Tailscale, tmux, mise), see the
-[top-level README](../README.md). This document covers installing the CLI, the command surface, and
-configuration.
+For the project's problem space, core concepts, key principles, and tightly-integrated tool set, see
+the [top-level README](../README.md). This document covers installing the CLI, the command surface,
+configuration, and operational details.
 
 ## Getting Started
 
@@ -17,9 +15,9 @@ uv tool install agentworks-cli
 # or:  pipx install agentworks-cli
 ```
 
-The package installs two commands that do the same thing: `agentworks` (the canonical name) and
-`agw` (a short alias for shells where you'll type it a lot). Use whichever you prefer; everything
-below uses `agentworks` for clarity.
+The package installs two entry points: `agentworks` is the canonical name (used in docs, error
+messages, and anywhere the command needs to be unambiguous); `agw` is a short alias for the
+keyboard. Use `agentworks` in writing and `agw` when you're typing.
 
 ```bash
 agentworks config init                          # creates ~/.config/agentworks/config.toml
@@ -191,6 +189,8 @@ is later deleted, you are offered the option to delete the workspace and/or agen
 workspace if no other sessions remain on it, the agent if it has no other sessions and no explicit
 grants.
 
+<!-- Linked from the top-level README; rename only if you also update README.md. -->
+
 ### Named consoles
 
 Named consoles are persistent, curated tmux views over sessions on a VM. Each console is its own
@@ -251,6 +251,8 @@ on first attach (or with `--recreate`); subsequent attaches reuse the running tm
 or removing sessions/shells while a console is attached updates the live tmux state immediately
 (best-effort); when the console isn't running on the VM, only the DB is updated and changes appear
 on next attach.
+
+<!-- Linked from the top-level README; rename only if you also update README.md. -->
 
 ### tmux Architecture
 

@@ -270,9 +270,9 @@ uv tool install agentworks-cli
 # or:  pipx install agentworks-cli
 ```
 
-The package installs two commands that do the same thing: `agentworks` (the canonical name) and
-`agw` (a short alias for shells where you'll type it a lot). Examples in the docs use `agentworks`;
-everything below works identically as `agw`.
+The package installs two entry points: `agentworks` is the canonical name (used in docs, error
+messages, and anywhere the command needs to be unambiguous); `agw` is a short alias for the
+keyboard. Use `agentworks` in writing and `agw` when you're typing.
 
 Then:
 
@@ -289,12 +289,9 @@ The full command reference, configuration schema, and tmux architecture live in
 
 ## Components
 
-Agentworks is structured to make room for additional clients (a web UI is anticipated). Today the
-repo contains a single component:
-
-| Component    | Description                                              |
-| ------------ | -------------------------------------------------------- |
-| [cli/](cli/) | Python CLI: the operator's primary interface (this repo) |
+Today the repo contains a single component: [`cli/`](cli/), the Python CLI that is the operator's
+primary interface. The structure leaves room for additional clients (a web UI is anticipated) to
+land alongside it without relocating the CLI.
 
 ## Contributing
 
@@ -307,6 +304,4 @@ across the surface, and pairs well with AI coding assistants.
 Found a vulnerability? Please report it privately. See [SECURITY.md](SECURITY.md) for scope and
 reporting channels.
 
-## License
-
-[MIT](LICENSE).
+Licensed under [MIT](LICENSE).
