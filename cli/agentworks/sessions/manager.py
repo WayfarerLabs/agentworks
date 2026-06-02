@@ -1151,6 +1151,10 @@ def delete_session(
         else:
             output.warn(f"Session '{name}' status is {post_status.value} after delete, socket preserved at {sock}")
 
+    # Capture console memberships before delete; the FK cascade on
+    # console_sessions zeroes the join table the moment the session row goes.
+    member_consoles = [c.name for c in db.list_consoles_for_session(name)]
+
     db.delete_session(name)
 
     # Clean up implicit grant for this session
@@ -1165,6 +1169,19 @@ def delete_session(
                 _remove_from_workspace_group(vm, config, db, agent.linux_user, session.workspace_name)
 
     _regenerate_tmuxinator(db, config, vm, ws)
+
+    # Best-effort console cleanup runs after all DB / tmuxinator state has
+    # settled. Stale tmux windows are recoverable cosmetic noise; if the
+    # helper raises AgentworksError we skip the success message and any
+    # created_workspace / created_agent cleanup below -- those would re-use
+    # the same broken transport and just compound errors.
+    if member_consoles:
+        from agentworks.sessions.multi_console import kill_session_windows
+
+        kill_session_windows(
+            target, pairs=[(c, name) for c in member_consoles]
+        )
+
     output.info(f"Session '{name}' deleted")
 
     # If this session created its workspace, offer to delete it

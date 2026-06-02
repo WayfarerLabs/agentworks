@@ -1191,6 +1191,21 @@ class Database:
         ).fetchall()
         return [_to_console_session(r) for r in rows]
 
+    def list_consoles_for_session(self, session_name: str) -> list[ConsoleRow]:
+        """Return consoles that currently list *session_name* as a member.
+
+        Must be called before deleting the session row; the FK cascade on
+        console_sessions makes this query return nothing after the fact.
+        """
+        rows = self._conn.execute(
+            "SELECT c.* FROM consoles c "
+            "JOIN console_sessions cs ON cs.console_name = c.name "
+            "WHERE cs.session_name = ? "
+            "ORDER BY c.name",
+            (session_name,),
+        ).fetchall()
+        return [_to_console(r) for r in rows]
+
     def update_console_shells(
         self,
         console_name: str,

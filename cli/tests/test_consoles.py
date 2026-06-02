@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -1238,6 +1239,302 @@ def test_remove_session_live_sync_kills_window(
 
     kill_windows = [c for c in fake_target.commands if "kill-window -t aw-console-con:b" in c]
     assert len(kill_windows) == 1
+
+
+def test_list_consoles_for_session_returns_members(db: Database) -> None:
+    """Snapshot of which consoles list a given session as a member, before
+    the FK cascade fires on session delete."""
+    _seed_vm(db)
+    _seed_sessions(db, ["a", "b"])
+    db.insert_console("alpha", "vm1")
+    db.insert_console("beta", "vm1")
+    db.insert_console("gamma", "vm1")
+    db.add_console_session("alpha", "a", [])
+    db.add_console_session("alpha", "b", [])
+    db.add_console_session("beta", "a", [])
+    # gamma has no members.
+
+    assert [c.name for c in db.list_consoles_for_session("a")] == ["alpha", "beta"]
+    assert [c.name for c in db.list_consoles_for_session("b")] == ["alpha"]
+    assert db.list_consoles_for_session("nope") == []
+
+
+def test_kill_session_windows_kills_live_only(
+    db: Database, fake_target: _FakeTarget
+) -> None:
+    """Pairs are grouped by console; kill-window runs only where the console's
+    tmux session is alive."""
+    from agentworks.sessions.multi_console import kill_session_windows
+
+    fake_target.responses["has-session -t aw-console-alive"] = _FakeResult(returncode=0)
+    fake_target.responses["has-session -t aw-console-dead"] = _FakeResult(returncode=1)
+
+    kill_session_windows(
+        fake_target,  # type: ignore[arg-type]
+        pairs=[("alive", "s"), ("dead", "s")],
+    )
+
+    kill_windows = [c for c in fake_target.commands if "kill-window" in c]
+    assert kill_windows == ["tmux kill-window -t aw-console-alive:s"]
+
+
+def test_kill_session_windows_empty_is_noop(
+    fake_target: _FakeTarget,
+) -> None:
+    """No pairs -> no SSH probes, no kill-window calls."""
+    from agentworks.sessions.multi_console import kill_session_windows
+
+    kill_session_windows(
+        fake_target,  # type: ignore[arg-type]
+        pairs=[],
+    )
+    assert fake_target.commands == []
+
+
+def test_kill_session_windows_groups_by_console(
+    fake_target: _FakeTarget,
+) -> None:
+    """Multiple sessions in one console -> single has-session probe, one
+    kill-window per session."""
+    from agentworks.sessions.multi_console import kill_session_windows
+
+    fake_target.responses["has-session -t aw-console-c"] = _FakeResult(returncode=0)
+
+    kill_session_windows(
+        fake_target,  # type: ignore[arg-type]
+        pairs=[("c", "a"), ("c", "b"), ("c", "d")],
+    )
+
+    has_session = [c for c in fake_target.commands if "has-session" in c]
+    kill_windows = [c for c in fake_target.commands if "kill-window" in c]
+    assert len(has_session) == 1
+    assert kill_windows == [
+        "tmux kill-window -t aw-console-c:a",
+        "tmux kill-window -t aw-console-c:b",
+        "tmux kill-window -t aw-console-c:d",
+    ]
+
+
+def test_kill_session_windows_transport_failure_warns(
+    fake_target: _FakeTarget, captured_output: CapturedOutput
+) -> None:
+    """A raised non-Agentworks exception (transport surprise) is swallowed
+    with a warning that names the affected consoles."""
+    from agentworks.sessions.multi_console import kill_session_windows
+
+    def boom(command: str, **kwargs: object) -> _FakeResult:
+        raise RuntimeError("ssh blew up")
+
+    fake_target.run = boom  # type: ignore[assignment]
+
+    kill_session_windows(
+        fake_target,  # type: ignore[arg-type]
+        pairs=[("alpha", "s"), ("beta", "s")],
+    )
+
+    assert any(
+        "live console window cleanup failed" in w
+        and "alpha" in w
+        and "beta" in w
+        for w in captured_output.warnings
+    )
+
+
+def test_kill_session_windows_agentworks_error_propagates(
+    fake_target: _FakeTarget,
+) -> None:
+    """AgentworksError is not swallowed by the helper -- callers see it."""
+    from agentworks.sessions.multi_console import kill_session_windows
+
+    def boom(command: str, **kwargs: object) -> _FakeResult:
+        raise ConnectivityError("vm unreachable", entity_kind="vm", entity_name="vm1")
+
+    fake_target.run = boom  # type: ignore[assignment]
+
+    with pytest.raises(ConnectivityError):
+        kill_session_windows(
+            fake_target,  # type: ignore[arg-type]
+            pairs=[("alpha", "s")],
+        )
+
+
+# -- Integration: delete paths invoke kill_session_windows correctly -------
+
+
+def test_delete_session_kills_console_windows(
+    db: Database,
+    fake_target: _FakeTarget,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    """``manager.delete_session`` must snapshot console memberships *before*
+    the DB delete (FK cascade clears the join) and then dispatch to
+    ``kill_session_windows`` with one pair per member console."""
+    from agentworks.db import PID_STOPPED
+    from agentworks.sessions import manager as manager_mod
+
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["s", "other"])
+    # Mark 's' STOPPED so check_session_status short-circuits with no SSH.
+    db.update_session_pid("s", PID_STOPPED)
+    create_console(db, name="alpha", vm_name="vm1", session_specs=["s", "other"])
+    create_console(db, name="beta", vm_name="vm1", session_specs=["s"])
+    create_console(db, name="gamma", vm_name="vm1", session_specs=["other"])
+
+    monkeypatch.setattr(manager_mod, "_regenerate_tmuxinator", lambda *a, **k: None)
+
+    captured: list[list[tuple[str, str]]] = []
+
+    def spy(target: object, *, pairs: list[tuple[str, str]]) -> None:
+        captured.append(pairs)
+
+    monkeypatch.setattr(
+        "agentworks.sessions.multi_console.kill_session_windows", spy
+    )
+
+    manager_mod.delete_session(db, _StubConfig(), name="s", yes=True)
+
+    # The DB row is gone, and only the consoles that listed 's' get kills.
+    assert db.get_session("s") is None
+    assert len(captured) == 1
+    assert sorted(captured[0]) == [("alpha", "s"), ("beta", "s")]
+
+
+def test_delete_session_skips_kill_when_no_member_consoles(
+    db: Database,
+    fake_target: _FakeTarget,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    """No console membership -> no kill_session_windows call. Guards against
+    a future regression that unconditionally invokes the helper."""
+    from agentworks.db import PID_STOPPED
+    from agentworks.sessions import manager as manager_mod
+
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["lonely"])
+    db.update_session_pid("lonely", PID_STOPPED)
+
+    monkeypatch.setattr(manager_mod, "_regenerate_tmuxinator", lambda *a, **k: None)
+
+    called = False
+
+    def spy(target: object, *, pairs: list[tuple[str, str]]) -> None:
+        nonlocal called
+        called = True
+
+    monkeypatch.setattr(
+        "agentworks.sessions.multi_console.kill_session_windows", spy
+    )
+
+    manager_mod.delete_session(db, _StubConfig(), name="lonely", yes=True)
+
+    assert called is False
+
+
+def test_delete_workspace_kills_console_windows(
+    db: Database,
+    fake_target: _FakeTarget,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+    tmp_path: Path,
+) -> None:
+    """``delete_workspace --force`` must clean up windows for every deleted
+    session across every console that listed them."""
+    from agentworks.db import PID_STOPPED
+    from agentworks.workspaces import manager as ws_manager
+
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["s1", "s2"])
+    db.update_session_pid("s1", PID_STOPPED)
+    db.update_session_pid("s2", PID_STOPPED)
+    create_console(db, name="con1", vm_name="vm1", session_specs=["s1", "s2"])
+    create_console(db, name="con2", vm_name="vm1", session_specs=["s1"])
+
+    # delete_workspace shells out to delete_vm_workspace + tmuxinator regen;
+    # stub both so we don't need a live VM filesystem.
+    monkeypatch.setattr(
+        "agentworks.workspaces.backends.vm.delete_vm_workspace",
+        lambda *a, **k: None,
+    )
+    monkeypatch.setattr(
+        "agentworks.agents.manager.revoke_workspace_grants",
+        lambda *a, **k: None,
+    )
+
+    captured: list[list[tuple[str, str]]] = []
+
+    def spy(target: object, *, pairs: list[tuple[str, str]]) -> None:
+        captured.append(pairs)
+
+    monkeypatch.setattr(
+        "agentworks.sessions.multi_console.kill_session_windows", spy
+    )
+
+    # delete_workspace touches config.paths.vscode_workspaces to remove the
+    # .code-workspace file; point it at a tmp dir so the unlink is a no-op.
+    cfg = _StubConfig()
+    cfg.paths = type("P", (), {"vscode_workspaces": tmp_path})()  # type: ignore[attr-defined]
+    ws_manager.delete_workspace(db, cfg, "ws-vm1", force=True, yes=True)
+
+    assert db.get_workspace("ws-vm1") is None
+    assert db.get_session("s1") is None
+    assert db.get_session("s2") is None
+    assert len(captured) == 1
+    assert sorted(captured[0]) == [
+        ("con1", "s1"),
+        ("con1", "s2"),
+        ("con2", "s1"),
+    ]
+
+
+def test_delete_agent_kills_console_windows(
+    db: Database,
+    fake_target: _FakeTarget,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    """``delete_agent --force`` runs the same cleanup over its agent's
+    sessions."""
+    from agentworks.agents import manager as agent_manager
+    from agentworks.db import PID_STOPPED
+
+    _seed_vm(db, with_tailscale=True)
+    db._conn.execute(
+        "INSERT INTO agents (name, vm_name, linux_user) VALUES ('bot', 'vm1', 'bot-user')"
+    )
+    db._conn.execute(
+        "INSERT INTO sessions (name, workspace_name, template, mode, agent_name, socket_path, pid) "
+        "VALUES ('s1', 'ws-vm1', 'default', 'agent', 'bot', '/tmp/s1.sock', ?), "
+        "('s2', 'ws-vm1', 'default', 'agent', 'bot', '/tmp/s2.sock', ?)",
+        (PID_STOPPED, PID_STOPPED),
+    )
+    db._conn.commit()
+    create_console(db, name="con", vm_name="vm1", session_specs=["s1", "s2"])
+
+    monkeypatch.setattr(
+        "agentworks.agents.manager._remove_from_workspace_group",
+        lambda *a, **k: None,
+    )
+    monkeypatch.setattr(
+        "agentworks.agents.manager._delete_agent_on_vm",
+        lambda *a, **k: None,
+    )
+
+    captured: list[list[tuple[str, str]]] = []
+
+    def spy(target: object, *, pairs: list[tuple[str, str]]) -> None:
+        captured.append(pairs)
+
+    monkeypatch.setattr(
+        "agentworks.sessions.multi_console.kill_session_windows", spy
+    )
+
+    agent_manager.delete_agent(db, _StubConfig(), name="bot", force=True, yes=True)
+
+    assert db.get_agent("bot") is None
+    assert len(captured) == 1
+    assert sorted(captured[0]) == [("con", "s1"), ("con", "s2")]
 
 
 def test_add_shell_live_sync_splits_pane_and_tiles(
