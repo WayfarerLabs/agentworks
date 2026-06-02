@@ -250,6 +250,58 @@ class TestCompletionCli:
         assert result_pwsh.stdout == result_ps.stdout
 
 
+class TestInstall:
+    """Filesystem-level checks for `agentworks completion install`."""
+
+    def test_bash_install_drops_agw_alias_symlink(
+        self, monkeypatch, tmp_path
+    ) -> None:
+        """Bash's lazy autoload is keyed on the command name -- typing `agw`
+        looks for a file named `agw`, not `agentworks`. Install must drop a
+        symlink so both names trigger the same script."""
+        from typer.testing import CliRunner
+
+        monkeypatch.setenv("HOME", str(tmp_path))
+        result = CliRunner().invoke(
+            app, ["completion", "install", "--shell", "bash"]
+        )
+        assert result.exit_code == 0
+
+        completions_dir = (
+            tmp_path / ".local" / "share" / "bash-completion" / "completions"
+        )
+        primary = completions_dir / "agentworks"
+        alias = completions_dir / "agw"
+        assert primary.is_file()
+        assert alias.is_symlink()
+        assert alias.resolve() == primary.resolve()
+
+    def test_zsh_install_drops_agw_alias_symlink(
+        self, monkeypatch, tmp_path
+    ) -> None:
+        """zsh's compinit autoload is keyed on the command name too: typing
+        `agw<TAB>` looks for `_agw` in fpath. Without a symlink the
+        `#compdef agentworks agw` directive inside `_agentworks` is never
+        reached for the short name."""
+        from typer.testing import CliRunner
+
+        monkeypatch.setenv("HOME", str(tmp_path))
+        # Steer install away from Oh My Zsh detection so we land in ~/.zfunc.
+        monkeypatch.delenv("ZSH_CUSTOM", raising=False)
+
+        result = CliRunner().invoke(
+            app, ["completion", "install", "--shell", "zsh"]
+        )
+        assert result.exit_code == 0
+
+        zfunc = tmp_path / ".zfunc"
+        primary = zfunc / "_agentworks"
+        alias = zfunc / "_agw"
+        assert primary.is_file()
+        assert alias.is_symlink()
+        assert alias.resolve() == primary.resolve()
+
+
 class TestVariadicPositionalCompletion:
     """Variadic Argument positionals (Click nargs=-1) must produce 'every
     subsequent position' completion in all three shells, not just position N."""
