@@ -53,6 +53,9 @@ select = [
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["TCH"]
+# Import order in this file is meaningful: it controls the order command
+# groups appear in `agentworks --help`. isort would otherwise reflow it.
+"agentworks/cli/commands/__init__.py" = ["I001"]
 
 [tool.pytest.ini_options]
 markers = [

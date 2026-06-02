@@ -1,4 +1,9 @@
-"""`agentworks doctor` -- check environment, config, and dependencies."""
+"""`agentworks doctor` -- check environment, config, and dependencies.
+
+Unlike the sibling modules in `commands/`, this one does not declare its own
+Typer subapp: `doctor` is a top-level command (`agentworks doctor`), so it is
+registered directly on the root `app` via `@app.command(...)`.
+"""
 
 from __future__ import annotations
 

@@ -14,8 +14,9 @@ def main() -> None:
     """CLI entrypoint. Sets up output handler and catches business logic errors."""
     # Resolve `app` through the package namespace at call time so tests that
     # monkeypatch `agentworks.cli.app` to swap in a minimal test app actually
-    # affect the invocation. A module-level `from ._app import app` would
-    # capture the original binding and silently ignore the patch.
+    # affect the invocation. A module-level `from agentworks.cli import app`
+    # (or any other module-level import of `app`) would bind the name to the
+    # original Typer instance and silently ignore the monkeypatch.
     from agentworks import cli as _cli
     from agentworks.errors import (
         AgentworksError,

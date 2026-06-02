@@ -16,12 +16,13 @@ for backward compatibility with existing callers (tests, scripts entry).
 
 from __future__ import annotations
 
-# Trigger registration of every command group.
-from agentworks.cli import commands as _commands  # noqa: F401
-from agentworks.cli._app import app
-from agentworks.cli._entry import main
-from agentworks.cli._errors import record_unhandled_error as _record_unhandled_error
-from agentworks.cli.commands.completion import _resolve_shell
+# Side-effect import: registers every subapp onto `app`. Imported first so
+# `agentworks --help` reflects the full command surface.
+from . import commands as _commands  # noqa: F401
+from ._app import app
+from ._entry import main
+from ._errors import record_unhandled_error as _record_unhandled_error
+from .commands.completion import _resolve_shell
 
 __all__ = [
     "app",
