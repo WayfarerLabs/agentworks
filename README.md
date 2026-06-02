@@ -270,18 +270,18 @@ uv tool install agentworks-cli
 # or:  pipx install agentworks-cli
 ```
 
-The package installs two entry points: `agentworks` is the canonical name (used in docs, error
-messages, and anywhere the command needs to be unambiguous); `agw` is a short alias for the
-keyboard. Use `agentworks` in writing and `agw` when you're typing.
+The everyday command is `agw`. The longer form `agentworks` is also installed if you ever want to
+type it out (or if `agw` would be ambiguous in some context); examples throughout the docs use
+`agw`.
 
 Then:
 
 ```bash
-agentworks config init                          # creates ~/.config/agentworks/config.toml
+agw config init                          # creates ~/.config/agentworks/config.toml
 # edit the config; at minimum set your SSH key paths
-agentworks vm create my-vm                      # provision + initialize a VM
-agentworks workspace create my-workspace        # create a workspace on the VM
-agentworks workspace shell my-workspace
+agw vm create my-vm                      # provision + initialize a VM
+agw workspace create my-workspace        # create a workspace on the VM
+agw workspace shell my-workspace
 ```
 
 The full command reference, configuration schema, and tmux architecture live in

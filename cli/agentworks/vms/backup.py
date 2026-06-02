@@ -202,7 +202,7 @@ def _archive_workspaces(
         if not target.run("command -v zstd >/dev/null 2>&1", check=False).ok:
             raise BackupError(
                 "zstd is not installed on the VM.",
-                hint="Run 'agentworks vm reinit' to install it.",
+                hint="Run 'agw vm reinit' to install it.",
             )
 
         # Calculate total uncompressed size

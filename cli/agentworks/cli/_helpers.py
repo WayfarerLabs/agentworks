@@ -32,7 +32,7 @@ def prompt_workspace(db: Database, workspace: str | None) -> WorkspaceRow:
 
     workspaces = db.list_workspaces()
     if not workspaces:
-        typer.echo("Error: no workspaces found. Create one with 'agentworks workspace create'.", err=True)
+        typer.echo("Error: no workspaces found. Create one with 'agw workspace create'.", err=True)
         raise typer.Exit(1)
 
     if len(workspaces) == 1:
@@ -59,7 +59,7 @@ def prompt_vm(db: Database, vm_name: str | None) -> VMRow:
 
     vms = db.list_vms()
     if not vms:
-        typer.echo("Error: no VMs found. Create one with 'agentworks vm create'.", err=True)
+        typer.echo("Error: no VMs found. Create one with 'agw vm create'.", err=True)
         raise typer.Exit(1)
 
     if len(vms) == 1:

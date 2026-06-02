@@ -234,15 +234,15 @@ def vm_console(
 ) -> None:
     """[Deprecated] Attach to the VM console (creates it if needed).
 
-    Prefer 'agentworks console' for curated session lists and per-window shell panes.
+    Prefer 'agw console' for curated session lists and per-window shell panes.
     """
     from agentworks import output
     from agentworks.config import load_config
     from agentworks.sessions.console import attach_console
 
     output.warn(
-        "'agentworks vm console' is deprecated; use 'agentworks console' "
-        "(see 'agentworks console --help'). This command will be removed in a future release."
+        "'agw vm console' is deprecated; use 'agw console' "
+        "(see 'agw console --help'). This command will be removed in a future release."
     )
 
     attach_console(

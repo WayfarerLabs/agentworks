@@ -232,5 +232,5 @@ fi
 echo ""
 echo "Then run:"
 echo ""
-echo "  agentworks vm create --platform proxmox --name my-vm"
+echo "  agw vm create my-vm --platform proxmox"
 echo ""

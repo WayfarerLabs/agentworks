@@ -1142,7 +1142,7 @@ def _resolve_vm(db: Database, vm_name: str | None) -> VMRow:
         raise NotFoundError(
             "no VMs available.",
             entity_kind="vm",
-            hint="Create one with 'agentworks vm create'.",
+            hint="Create one with 'agw vm create'.",
         )
 
     if len(usable_vms) == 1:

@@ -207,7 +207,7 @@ def _check_config() -> tuple[HealthGroup, Config | None]:
     config = None
 
     if not CONFIG_PATH.exists():
-        g.fail("Config file", f"not found: {CONFIG_PATH}. Run 'agentworks config init' to create one.")
+        g.fail("Config file", f"not found: {CONFIG_PATH}. Run 'agw config init' to create one.")
         return g, None
 
     g.ok("Config file", str(CONFIG_PATH))
@@ -373,13 +373,13 @@ def _check_completions(current_version: str) -> HealthGroup:
             if installed_version == current_version:
                 g.ok(shell_name, "up to date")
             elif installed_version is None:
-                g.warn(shell_name, f"no version stamp. Re-run: agentworks completion install --shell {shell_name}")
+                g.warn(shell_name, f"no version stamp. Re-run: agw completion install --shell {shell_name}")
             else:
-                g.warn(shell_name, f"stale. Re-run: agentworks completion install --shell {shell_name}")
+                g.warn(shell_name, f"stale. Re-run: agw completion install --shell {shell_name}")
     if not any_found:
         g.ok(
             "Completions",
-            "none installed (install with: agentworks completion install [--shell <bash|zsh|powershell>])",
+            "none installed (install with: agw completion install [--shell <bash|zsh|powershell>])",
         )
 
     return g

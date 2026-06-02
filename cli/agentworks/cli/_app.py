@@ -18,7 +18,7 @@ app = typer.Typer(
     help="Orchestrate workspace lifecycle across multiple compute targets.",
     no_args_is_help=True,
     # Suppress typer's generic --install-completion / --show-completion flags
-    # in favor of the project's hand-rolled `agentworks completion show|install`
+    # in favor of the project's hand-rolled `agw completion show|install`
     # subcommands, which emit scripts with the dynamic completers (vms,
     # workspaces, sessions, agents, consoles, ...).
     add_completion=False,
