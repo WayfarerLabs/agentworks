@@ -24,7 +24,7 @@ Add packages to your agentworks config:
 mise_packages = ["terraform@1.14.5", "adr-tools@3.0.0"]
 ```
 
-Run `agw vm create` or `agw vm reinit` and the tools will be available.
+Run `agw vm create <name>` or `agw vm reinit <name>` and the tools will be available.
 
 ## Config reference
 
