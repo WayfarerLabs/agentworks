@@ -534,7 +534,7 @@ def restore_session(
             entity_kind="console",
             entity_name=console_name,
             hint=(
-                f"Run `agentworks console attach {console_name}` to build it; "
+                f"Run `agw console attach {console_name}` to build it; "
                 f"restore-session only repairs an already-running console."
             ),
         )
@@ -596,7 +596,7 @@ def restore_session(
             entity_kind="console",
             entity_name=console_name,
             hint=(
-                f"Run `agentworks console attach {console_name} --recreate` "
+                f"Run `agw console attach {console_name} --recreate` "
                 f"to rebuild and retag from scratch."
             ),
         )
@@ -638,7 +638,7 @@ def restore_session(
             entity_kind="console",
             entity_name=console_name,
             hint=(
-                f"Run `agentworks console attach {console_name} --recreate` "
+                f"Run `agw console attach {console_name} --recreate` "
                 f"to rebuild and retag from scratch."
             ),
         )
@@ -699,7 +699,7 @@ def restore_session(
             entity_kind="console",
             entity_name=console_name,
             hint=(
-                f"Run `agentworks console attach {console_name} --recreate` "
+                f"Run `agw console attach {console_name} --recreate` "
                 f"to rebuild from scratch."
             ),
         )
@@ -972,7 +972,7 @@ def kill_session_windows(
     except Exception as exc:
         affected = sorted({c for c, _ in pairs})
         recovery = "; ".join(
-            f"agentworks console attach {shlex.quote(c)} --recreate" for c in affected
+            f"agw console attach {shlex.quote(c)} --recreate" for c in affected
         )
         output.warn(
             f"live console window cleanup failed: {exc}. "
@@ -1065,7 +1065,7 @@ def _split_shell_pane(
         output.warn(
             f"added shell pane in '{window_name}' but couldn't capture its id; "
             f"the pane is untagged. restore-session won't be able to repair "
-            f"this window; use `agentworks console attach {q_console} "
+            f"this window; use `agw console attach {q_console} "
             f"--recreate` if you need clean tag state."
         )
         return None
@@ -1082,7 +1082,7 @@ def _split_shell_pane(
         output.warn(
             f"added shell pane in '{window_name}' but tagging failed "
             f"({tag_res.stderr.strip() or 'tmux refused set-option'}); "
-            f"the pane is untagged. Use `agentworks console attach "
+            f"the pane is untagged. Use `agw console attach "
             f"{q_console} --recreate` to rebuild and retag from scratch."
         )
         return None
@@ -1307,7 +1307,7 @@ def _live_best_effort(action: str, *, console_name: str) -> Iterator[None]:
         q_name = shlex.quote(console_name)
         output.warn(
             f"live console sync failed ({action}): {exc}. "
-            f"DB state was updated; run `agentworks console attach {q_name} --recreate` "
+            f"DB state was updated; run `agw console attach {q_name} --recreate` "
             f"to rebuild tmux from the new state."
         )
 

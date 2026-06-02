@@ -118,7 +118,7 @@ You'll likely want to add this to your shell profile or a secrets manager.
 ## Step 3: Create a VM
 
 ```bash
-agentworks vm create --platform proxmox --name test-vm
+agw vm create test-vm --platform proxmox
 ```
 
 Or set `proxmox` as your default platform:
@@ -131,15 +131,15 @@ platform = "proxmox"
 ## Lifecycle commands
 
 ```bash
-agentworks vm stop test-vm
-agentworks vm start test-vm
-agentworks vm describe test-vm
-agentworks vm delete test-vm
+agw vm stop test-vm
+agw vm start test-vm
+agw vm describe test-vm
+agw vm delete test-vm
 ```
 
 ## How it works
 
-When you run `agentworks vm create --platform proxmox`:
+When you run `agw vm create <name> --platform proxmox`:
 
 1. Clones the template into the `agentworks` pool via the Proxmox REST API
 2. Configures CPU, memory, cloud-init user/SSH keys, and DHCP networking

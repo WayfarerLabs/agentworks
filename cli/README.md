@@ -15,16 +15,15 @@ uv tool install agentworks-cli
 # or:  pipx install agentworks-cli
 ```
 
-The package installs two entry points: `agentworks` is the canonical name (used in docs, error
-messages, and anywhere the command needs to be unambiguous); `agw` is a short alias for the
-keyboard. Use `agentworks` in writing and `agw` when you're typing.
+The everyday command is `agw`. The longer form `agentworks` is also installed if you ever want to
+type it out; examples throughout this document use `agw`.
 
 ```bash
-agentworks config init                          # creates ~/.config/agentworks/config.toml
+agw config init                          # creates ~/.config/agentworks/config.toml
 # edit the config; at minimum set your SSH key paths
-agentworks vm create my-vm                      # provision + initialize a VM
-agentworks workspace create my-workspace        # create a workspace on the VM
-agentworks workspace shell my-workspace
+agw vm create my-vm                      # provision + initialize a VM
+agw workspace create my-workspace        # create a workspace on the VM
+agw workspace shell my-workspace
 ```
 
 ## Prerequisites
@@ -63,39 +62,39 @@ exits with the conventional SIGINT exit code (130).
 
 ### Top-level
 
-| Command                         | Description                            |
-| ------------------------------- | -------------------------------------- |
-| `agentworks doctor`             | Check environment and config           |
-| `agentworks completion show`    | Print the completion script to stdout  |
-| `agentworks completion install` | Install the completion script in-place |
+| Command                  | Description                            |
+| ------------------------ | -------------------------------------- |
+| `agw doctor`             | Check environment and config           |
+| `agw completion show`    | Print the completion script to stdout  |
+| `agw completion install` | Install the completion script in-place |
 
 ### VM Hosts
 
 Manage machines that host VMs (for remote Lima mode).
 
-| Command                                    | Description              |
-| ------------------------------------------ | ------------------------ |
-| `agentworks vm-host add <name> <ssh-host>` | Register a VM host       |
-| `agentworks vm-host list`                  | List registered VM hosts |
-| `agentworks vm-host remove <name>`         | Remove a VM host         |
+| Command                             | Description              |
+| ----------------------------------- | ------------------------ |
+| `agw vm-host add <name> <ssh-host>` | Register a VM host       |
+| `agw vm-host list`                  | List registered VM hosts |
+| `agw vm-host remove <name>`         | Remove a VM host         |
 
 ### VMs
 
 Manage virtual machines across Lima (local or remote), Azure, and WSL2.
 
-| Command                                          | Description                                |
-| ------------------------------------------------ | ------------------------------------------ |
-| `agentworks vm create <name>`                    | Create a new VM (provision + initialize)   |
-| `agentworks vm list`                             | List VMs with status and resources         |
-| `agentworks vm describe <name>`                  | Show VM details, workspaces, and event log |
-| `agentworks vm shell <name>`                     | SSH into a VM's home directory             |
-| `agentworks vm start <name>`                     | Start a stopped VM                         |
-| `agentworks vm stop <name>`                      | Stop a running VM                          |
-| `agentworks vm reinit <name>`                    | Re-run initialization on a provisioned VM  |
-| `agentworks vm delete <name>`                    | Delete a VM (with confirmation)            |
-| `agentworks vm logs <name>`                      | Show SSH logs for a VM                     |
-| `agentworks vm console <name>`                   | _Deprecated_: use `agentworks console`     |
-| `agentworks vm add-git-credential <name> <cred>` | Add or update a git credential             |
+| Command                                   | Description                                |
+| ----------------------------------------- | ------------------------------------------ |
+| `agw vm create <name>`                    | Create a new VM (provision + initialize)   |
+| `agw vm list`                             | List VMs with status and resources         |
+| `agw vm describe <name>`                  | Show VM details, workspaces, and event log |
+| `agw vm shell <name>`                     | SSH into a VM's home directory             |
+| `agw vm start <name>`                     | Start a stopped VM                         |
+| `agw vm stop <name>`                      | Stop a running VM                          |
+| `agw vm reinit <name>`                    | Re-run initialization on a provisioned VM  |
+| `agw vm delete <name>`                    | Delete a VM (with confirmation)            |
+| `agw vm logs <name>`                      | Show SSH logs for a VM                     |
+| `agw vm console <name>`                   | _Deprecated_: use `agw console`            |
+| `agw vm add-git-credential <name> <cred>` | Add or update a git credential             |
 
 `vm create <name>` takes the VM name as a required positional. Optional flags: `--platform`,
 `--vm-host`, `--admin-username`, `--cpus`, `--memory`, `--disk`, and `--azure-vm-size`. These are
@@ -112,17 +111,17 @@ message shows what will be deleted. Pass `--yes` to skip the prompt.
 
 Manage workspaces on VMs.
 
-| Command                                     | Description                         |
-| ------------------------------------------- | ----------------------------------- |
-| `agentworks workspace create <name>`        | Create a workspace on a VM          |
-| `agentworks workspace describe <name>`      | Show workspace details and sessions |
-| `agentworks workspace shell <name>`         | Open a plain shell into a workspace |
-| `agentworks workspace console <name>`       | Open the workspace console (tmux)   |
-| `agentworks workspace list`                 | List workspaces                     |
-| `agentworks workspace copy <source> <name>` | Copy a workspace to a new VM        |
-| `agentworks workspace rehome <name>`        | Move workspace to a new path        |
-| `agentworks workspace reinit <name>`        | Reinit workspace infrastructure     |
-| `agentworks workspace delete <name>`        | Delete a workspace                  |
+| Command                              | Description                         |
+| ------------------------------------ | ----------------------------------- |
+| `agw workspace create <name>`        | Create a workspace on a VM          |
+| `agw workspace describe <name>`      | Show workspace details and sessions |
+| `agw workspace shell <name>`         | Open a plain shell into a workspace |
+| `agw workspace console <name>`       | Open the workspace console (tmux)   |
+| `agw workspace list`                 | List workspaces                     |
+| `agw workspace copy <source> <name>` | Copy a workspace to a new VM        |
+| `agw workspace rehome <name>`        | Move workspace to a new path        |
+| `agw workspace reinit <name>`        | Reinit workspace infrastructure     |
+| `agw workspace delete <name>`        | Delete a workspace                  |
 
 `workspace create <name>` takes the workspace name as a required positional. Optional flags: `--vm`,
 `--template`, and `--open-vscode`.
@@ -141,18 +140,18 @@ during deletion. Pass `--yes` to skip the confirmation prompt.
 
 Manage agents (isolated Linux users) on VMs. Agents are VM-scoped and access workspaces via grants.
 
-| Command                                            | Description                    |
-| -------------------------------------------------- | ------------------------------ |
-| `agentworks agent create <name> [--vm]`            | Create an agent on a VM        |
-| `agentworks agent list [--vm <vm>]`                | List agents                    |
-| `agentworks agent describe <name>`                 | Show agent details and grants  |
-| `agentworks agent reinit <name>`                   | Re-run agent setup             |
-| `agentworks agent grant-workspace <name> <ws>...`  | Grant workspace access         |
-| `agentworks agent grant-workspace <name> --all`    | Grant access to all workspaces |
-| `agentworks agent revoke-workspace <name> <ws>...` | Revoke workspace access        |
-| `agentworks agent revoke-workspace <name> --all`   | Revoke all explicit grants     |
-| `agentworks agent shell <name> [--workspace <ws>]` | Shell into an agent            |
-| `agentworks agent delete <name>`                   | Delete an agent                |
+| Command                                     | Description                    |
+| ------------------------------------------- | ------------------------------ |
+| `agw agent create <name> [--vm]`            | Create an agent on a VM        |
+| `agw agent list [--vm <vm>]`                | List agents                    |
+| `agw agent describe <name>`                 | Show agent details and grants  |
+| `agw agent reinit <name>`                   | Re-run agent setup             |
+| `agw agent grant-workspace <name> <ws>...`  | Grant workspace access         |
+| `agw agent grant-workspace <name> --all`    | Grant access to all workspaces |
+| `agw agent revoke-workspace <name> <ws>...` | Revoke workspace access        |
+| `agw agent revoke-workspace <name> --all`   | Revoke all explicit grants     |
+| `agw agent shell <name> [--workspace <ws>]` | Shell into an agent            |
+| `agw agent delete <name>`                   | Delete an agent                |
 
 `agent create <name>` takes the agent name as a required positional. Optional flags: `--vm`,
 `--template`, and `--grant-all-workspaces`.
@@ -165,17 +164,17 @@ confirmation prompt.
 Manage sessions (persistent tmux sessions running in workspaces). Session names are globally unique
 -- no `--workspace` flag needed for most commands.
 
-| Command                                      | Description                    |
-| -------------------------------------------- | ------------------------------ |
-| `agentworks session create <name>`           | Create and start a session     |
-| `agentworks session describe <name>`         | Show session details           |
-| `agentworks session list [--workspace <ws>]` | List sessions with status      |
-| `agentworks session attach <name>`           | Attach to a running session    |
-| `agentworks session stop <name>`             | Stop a running session         |
-| `agentworks session restart <name>`          | Restart a session              |
-| `agentworks session delete <name>`           | Stop and delete a session      |
-| `agentworks session logs <name>`             | Dump session scrollback buffer |
-| `agentworks console attach <name>`           | Attach to a named console      |
+| Command                               | Description                    |
+| ------------------------------------- | ------------------------------ |
+| `agw session create <name>`           | Create and start a session     |
+| `agw session describe <name>`         | Show session details           |
+| `agw session list [--workspace <ws>]` | List sessions with status      |
+| `agw session attach <name>`           | Attach to a running session    |
+| `agw session stop <name>`             | Stop a running session         |
+| `agw session restart <name>`          | Restart a session              |
+| `agw session delete <name>`           | Stop and delete a session      |
+| `agw session logs <name>`             | Dump session scrollback buffer |
+| `agw console attach <name>`           | Attach to a named console      |
 
 `session create <name>` takes the session name as a required positional. Optional flags:
 `--workspace`, `--template`, `--admin`, and `--agent`. Workspace and mode (admin vs agent) are
@@ -197,16 +196,16 @@ Named consoles are persistent, curated tmux views over sessions on a VM. Each co
 tmux session (`aw-console-<name>`) containing one window per included session, plus any extra shell
 panes you want preloaded into a session's window.
 
-| Command                                                  | Description                                                       |
-| -------------------------------------------------------- | ----------------------------------------------------------------- |
-| `agentworks console create <name> [sessions...]`         | Create a console with the given sessions                          |
-| `agentworks console list`                                | List consoles                                                     |
-| `agentworks console describe <name>`                     | Show membership and shell layout                                  |
-| `agentworks console attach <name>`                       | Attach (builds tmux state on first attach)                        |
-| `agentworks console delete <name>`                       | Tear down and remove the console                                  |
-| `agentworks console add-session <name> <sessions...>`    | Add session windows                                               |
-| `agentworks console remove-session <name> <sessions...>` | Remove session windows                                            |
-| `agentworks console add-shell <name> <session>`          | Add a shell pane to a session window (accepts `--cwd`, `--admin`) |
+| Command                                           | Description                                                       |
+| ------------------------------------------------- | ----------------------------------------------------------------- |
+| `agw console create <name> [sessions...]`         | Create a console with the given sessions                          |
+| `agw console list`                                | List consoles                                                     |
+| `agw console describe <name>`                     | Show membership and shell layout                                  |
+| `agw console attach <name>`                       | Attach (builds tmux state on first attach)                        |
+| `agw console delete <name>`                       | Tear down and remove the console                                  |
+| `agw console add-session <name> <sessions...>`    | Add session windows                                               |
+| `agw console remove-session <name> <sessions...>` | Remove session windows                                            |
+| `agw console add-shell <name> <session>`          | Add a shell pane to a session window (accepts `--cwd`, `--admin`) |
 
 `console create` accepts:
 
@@ -217,8 +216,8 @@ panes you want preloaded into a session's window.
 - `--all` -- include every session on the VM with 0 shells, appended after the explicit specs
   (alphabetical).
 - `--all-running` -- like `--all` but restricted to sessions whose live tmux state on the VM is OK
-  (one SSH round-trip; same probe `aw session list` uses). Mutually exclusive with `--all`. Requires
-  the VM to be reachable.
+  (one SSH round-trip; same probe `agw session list` uses). Mutually exclusive with `--all`.
+  Requires the VM to be reachable.
 - `--add-admin-shell` -- include a top-level admin-shell window as window 0, matching the legacy
   `vm console` behavior.
 
@@ -230,23 +229,23 @@ pre-open in that session's window (running as the session's agent user, cwd = wo
 ```sh
 # A console with three sessions; the first two get extra shells.
 # VM is inferred from the sessions.
-agentworks console create backend auth-server+2 auth-tests+1 docs
+agw console create backend auth-server+2 auth-tests+1 docs
 
 # Same, but also include a top-level admin-shell window (window 0).
-agentworks console create backend auth-server+2 auth-tests+1 docs --add-admin-shell
+agw console create backend auth-server+2 auth-tests+1 docs --add-admin-shell
 
 # Everything currently running on the VM, after the explicit specs.
-agentworks console create live auth-server+2 --all-running
+agw console create live auth-server+2 --all-running
 
 # All sessions on the VM (running or not). Needs --vm since no sessions are
 # named explicitly to infer from.
-agentworks console create everything --vm aw-private --all
+agw console create everything --vm aw-private --all
 
 # Add an admin shell rooted in a sub-path of the workspace.
-agentworks console add-shell backend auth-server --cwd src/api --admin
+agw console add-shell backend auth-server --cwd src/api --admin
 ```
 
-Memberships and shell layouts persist in the database. `aw console attach` builds the tmux session
+Memberships and shell layouts persist in the database. `agw console attach` builds the tmux session
 on first attach (or with `--recreate`); subsequent attaches reuse the running tmux session. Adding
 or removing sessions/shells while a console is attached updates the live tmux state immediately
 (best-effort); when the console isn't running on the VM, only the DB is updated and changes appear
@@ -359,29 +358,29 @@ conversation. If omitted, the regular `command` is used.
 
 Browse and inspect the built-in catalog of installable tools.
 
-| Command                              | Description                        |
-| ------------------------------------ | ---------------------------------- |
-| `agentworks catalog list`            | List all available catalog entries |
-| `agentworks catalog describe <name>` | Show details of a catalog entry    |
+| Command                       | Description                        |
+| ----------------------------- | ---------------------------------- |
+| `agw catalog list`            | List all available catalog entries |
+| `agw catalog describe <name>` | Show details of a catalog entry    |
 
 `catalog list` accepts `--type` (apt-source, apt-package, system-install-cmd, user-install-cmd) and
 `--source` (built-in, custom) filters.
 
 ### Config
 
-| Command                                    | Description                                  |
-| ------------------------------------------ | -------------------------------------------- |
-| `agentworks config init`                   | Create a sample config file                  |
-| `agentworks config edit`                   | Open config in `$EDITOR`                     |
-| `agentworks config sample`                 | Print the sample config to stdout            |
-| `agentworks config sync-ssh-config`        | Rebuild SSH config entries for all VMs       |
-| `agentworks config sync-vscode-workspaces` | Regenerate .code-workspace files for all VMs |
+| Command                             | Description                                  |
+| ----------------------------------- | -------------------------------------------- |
+| `agw config init`                   | Create a sample config file                  |
+| `agw config edit`                   | Open config in `$EDITOR`                     |
+| `agw config sample`                 | Print the sample config to stdout            |
+| `agw config sync-ssh-config`        | Rebuild SSH config entries for all VMs       |
+| `agw config sync-vscode-workspaces` | Regenerate .code-workspace files for all VMs |
 
 ## Configuration
 
-Config lives at `~/.config/agentworks/config.toml`. Run `agentworks config init` to generate a
-sample with all options documented. See [sample-config.toml](agentworks/sample-config.toml) for the
-full reference.
+Config lives at `~/.config/agentworks/config.toml`. Run `agw config init` to generate a sample with
+all options documented. See [sample-config.toml](agentworks/sample-config.toml) for the full
+reference.
 
 Key sections:
 
@@ -442,9 +441,9 @@ standalone via `claude plugin marketplace add`.
 ### Built-in Catalog
 
 Agentworks ships a built-in catalog of common tools (apt sources, apt packages, system install
-commands, and user install commands). Run `agentworks catalog list` to see what is available.
-Reference catalog entries by name in `vm_templates`, `admin.config`, and `agent_templates`.
-User-defined entries in your config override built-in entries with the same name.
+commands, and user install commands). Run `agw catalog list` to see what is available. Reference
+catalog entries by name in `vm_templates`, `admin.config`, and `agent_templates`. User-defined
+entries in your config override built-in entries with the same name.
 
 ## VM Initialization
 
@@ -471,7 +470,7 @@ log.
 ## Shell Completion
 
 ```bash
-agentworks completion install
+agw completion install
 ```
 
 The shell is autodetected from `$SHELL`; pass `--shell {bash|zsh|powershell}` to override (or when
@@ -481,8 +480,8 @@ standard location for that shell. For PowerShell it also appends a dot-source li
 `fpath=(~/.zfunc $fpath)` for plain zsh without a plugin manager), the installer prints a one-line
 note telling you what to add.
 
-To print the script without installing, use `agentworks completion show` (handy for piping into your
-own config-management flow).
+To print the script without installing, use `agw completion show` (handy for piping into your own
+config-management flow).
 
 Completions include dynamic VM, workspace, VM host, session, and template name lookups.
 
