@@ -392,8 +392,10 @@ def test_list_sessions_filters(db: Database) -> None:
     db.insert_session("s-b-admin", "ws-b", "default", SessionMode.ADMIN)
     db.insert_session("s-c-admin", "ws-c", "default", SessionMode.ADMIN)
 
-    def names(rows: list[object]) -> list[str]:
-        return [r.name for r in rows]  # type: ignore[attr-defined]
+    from agentworks.db import SessionRow
+
+    def names(rows: list[SessionRow]) -> list[str]:
+        return [r.name for r in rows]
 
     # No filters: everything.
     assert names(db.list_sessions()) == ["s-a-coder", "s-a-helper", "s-b-admin", "s-b-coder", "s-c-admin"]

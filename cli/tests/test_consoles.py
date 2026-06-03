@@ -361,13 +361,17 @@ def test_list_consoles_with_counts_workspace_and_agent_filters(db: Database) -> 
     # AND composition: vm=vm1 + workspace=ws-other -> empty (ws-other is on vm2).
     assert db.list_consoles_with_counts(vm_name="vm1", workspace_name="ws-other") == []
 
-    # AND composition: workspace=ws-vm1 + agent=helper -> empty
-    # (no console has a session that is both in ws-vm1 AND run by helper).
-    # Note: this is per-console-existence, not per-session: `mixed` has helper
-    # sessions and ws-vm1 sessions but they're DIFFERENT sessions, and the
-    # EXISTS clauses fire independently. So `mixed` DOES match here.
-    results = db.list_consoles_with_counts(workspace_name="ws-vm1", agent_name="helper")
+    # Session-level filters require the SAME session to match all predicates.
+    # workspace=ws-vm1 + agent=coder -> matches `mixed` because sess-a-coder
+    # is in ws-vm1 AND run by coder (one session satisfies both).
+    results = db.list_consoles_with_counts(workspace_name="ws-vm1", agent_name="coder")
     assert [(c.name, n) for c, n in results] == [("mixed", 3)]
+
+    # workspace=ws-vm1 + agent=helper -> empty. `mixed` contains both ws-vm1
+    # sessions (sess-a-coder, sess-c-admin) and helper sessions (sess-b-helper),
+    # but no single session is both in ws-vm1 AND run by helper. The combined
+    # predicate avoids the surprise of consoles matching via unrelated sessions.
+    assert db.list_consoles_with_counts(workspace_name="ws-vm1", agent_name="helper") == []
 
 
 def test_cascade_session_delete_removes_membership(db: Database) -> None:

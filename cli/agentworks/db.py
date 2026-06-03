@@ -1151,11 +1151,18 @@ class Database:
     ) -> list[tuple[ConsoleRow, int]]:
         """Return consoles paired with session counts, one query, ORDER BY name.
 
-        `workspace_name` and `agent_name` use "any session matches" semantics:
-        a console is returned if at least one of its member sessions belongs
-        to that workspace / runs as that agent. The session count returned
-        is still the TOTAL number of sessions in the console, not just the
-        matching ones.
+        `workspace_name` and `agent_name` filter on the console's session
+        membership: a console is returned if it has at least one member session
+        that matches every session-level filter that was supplied. When both
+        filters are passed together, BOTH predicates must hold on the SAME
+        session (not on different sessions in the same console) -- this matches
+        how `list_sessions` composes filters and avoids surprising results
+        where a console matches because one session is in workspace X and a
+        completely unrelated session is run by agent Y.
+
+        The session count returned is the console's TOTAL membership, not the
+        count of matching sessions, so the displayed count always reflects the
+        full console.
         """
         sql = (
             "SELECT c.*, COUNT(cs.session_name) AS session_count "
@@ -1167,20 +1174,23 @@ class Database:
         if vm_name is not None:
             clauses.append("c.vm_name = ?")
             params.append(vm_name)
+        # Session-level filters share a single correlated EXISTS so a console
+        # only matches when one of its sessions satisfies all of them at once.
+        session_predicates: list[str] = []
         if workspace_name is not None:
+            session_predicates.append("s.workspace_name = ?")
+            params.append(workspace_name)
+        if agent_name is not None:
+            session_predicates.append("s.agent_name = ?")
+            params.append(agent_name)
+        if session_predicates:
             clauses.append(
                 "EXISTS (SELECT 1 FROM console_sessions cs2 "
                 "JOIN sessions s ON s.name = cs2.session_name "
-                "WHERE cs2.console_name = c.name AND s.workspace_name = ?)"
+                "WHERE cs2.console_name = c.name AND "
+                + " AND ".join(session_predicates)
+                + ")"
             )
-            params.append(workspace_name)
-        if agent_name is not None:
-            clauses.append(
-                "EXISTS (SELECT 1 FROM console_sessions cs3 "
-                "JOIN sessions s ON s.name = cs3.session_name "
-                "WHERE cs3.console_name = c.name AND s.agent_name = ?)"
-            )
-            params.append(agent_name)
         if clauses:
             sql += "WHERE " + " AND ".join(clauses) + " "
         sql += "GROUP BY c.name ORDER BY c.name"

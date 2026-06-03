@@ -109,16 +109,14 @@ def console_create(
 @console_app.command("list")
 def console_list(
     vm: Annotated[str | None, typer.Option("--vm", help="Filter by VM")] = None,
-    workspace: Annotated[
-        str | None,
-        typer.Option("--workspace", help="Filter by workspace (any member session matches)"),
-    ] = None,
-    agent: Annotated[
-        str | None,
-        typer.Option("--agent", help="Filter by agent (any member session matches)"),
-    ] = None,
+    workspace: Annotated[str | None, typer.Option("--workspace", help="Filter by workspace")] = None,
+    agent: Annotated[str | None, typer.Option("--agent", help="Filter by agent")] = None,
 ) -> None:
-    """List consoles. Filters compose with AND."""
+    """List consoles. Filters compose with AND.
+
+    --workspace and --agent match a console when at least one of its member
+    sessions matches. When both are passed, the SAME session must satisfy both.
+    """
     from agentworks.sessions.multi_console import list_consoles
 
     list_consoles(get_db(), vm_name=vm, workspace_name=workspace, agent_name=agent)
