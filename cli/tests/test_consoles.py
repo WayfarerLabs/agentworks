@@ -102,6 +102,11 @@ class _StubConfig:
         ("foo+0", SessionSpec(name="foo", shells=0)),
         ("foo+3", SessionSpec(name="foo", shells=3)),
         ("a-b_c+12", SessionSpec(name="a-b_c", shells=12)),
+        # Legacy <workspace>--<agent> names from before validate_name banned
+        # consecutive hyphens. Reference paths use the loose validator so
+        # operators can still attach/delete/console these.
+        ("myws--bot", SessionSpec(name="myws--bot", shells=0)),
+        ("myws--bot+2", SessionSpec(name="myws--bot", shells=2)),
     ],
 )
 def test_parse_session_spec_ok(spec: str, expected: SessionSpec) -> None:
@@ -119,6 +124,9 @@ def test_parse_session_spec_ok(spec: str, expected: SessionSpec) -> None:
         "foo+-1",        # negative
         "foo+1+2",       # multiple plus
         "",              # empty
+        "a.b",           # contains dot -- still rejected by the loose validator
+        "a/b",           # contains slash
+        "a b",           # contains space
     ],
 )
 def test_parse_session_spec_rejects_bad_input(bad: str) -> None:

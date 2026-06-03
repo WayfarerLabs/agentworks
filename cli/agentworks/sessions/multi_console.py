@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from agentworks import output
-from agentworks.config import validate_name
+from agentworks.config import validate_name, validate_name_reference
 from agentworks.errors import (
     AgentworksError,
     AlreadyExistsError,
@@ -68,8 +68,11 @@ class SessionSpec:
 def parse_session_spec(spec: str) -> SessionSpec:
     """Parse 'session' or 'session+N' into a SessionSpec.
 
-    The shell count N must be a non-negative integer. Raises ValidationError
-    on syntax errors or invalid session names; does not check existence.
+    The shell count N must be a non-negative integer. The session name is
+    validated with the loose reference rules (validate_name_reference) so
+    legacy sessions with the pre-rename ``ws--agent`` convention can still
+    be referenced; the DB is the ultimate arbiter of existence and is
+    checked downstream by the caller.
     """
     parts = spec.split("+")
     if len(parts) == 1:
@@ -92,7 +95,7 @@ def parse_session_spec(spec: str) -> SessionSpec:
             f"invalid session spec '{spec}': use 'name' or 'name+N'"
         )
     try:
-        validate_name(name)
+        validate_name_reference(name)
     except ValidationError as exc:
         raise ValidationError(f"invalid session spec '{spec}': {exc}") from None
     return SessionSpec(name=name, shells=shells)
@@ -1196,8 +1199,10 @@ def _build_console_tmux(
         placeholder = ""
     else:
         # tmux requires at least one window at all times. Create a transient
-        # placeholder; '--' is forbidden by validate_name so it cannot collide
-        # with any user-chosen session.
+        # placeholder; new sessions can't use '--' (validate_name at creation
+        # rejects it) so this can't collide with a newly-created session.
+        # Legacy sessions predating that rule can still contain '--' but won't
+        # be named exactly 'aw--placeholder'.
         placeholder = "aw--placeholder"
         target.run(f"tmux new-session -d -s {q_con} -n {shlex.quote(placeholder)}")
         placeholder_used = True
