@@ -68,8 +68,11 @@ class SessionSpec:
 def parse_session_spec(spec: str) -> SessionSpec:
     """Parse 'session' or 'session+N' into a SessionSpec.
 
-    The shell count N must be a non-negative integer. Raises ValidationError
-    on syntax errors or invalid session names; does not check existence.
+    The shell count N must be a non-negative integer. The session name uses
+    the loose reference form of validate_name (``allow_double_hyphen=True``)
+    so legacy sessions with the pre-rename ``ws--agent`` convention can
+    still be referenced; the DB is the ultimate arbiter of existence and is
+    checked downstream by the caller.
     """
     parts = spec.split("+")
     if len(parts) == 1:
@@ -92,7 +95,7 @@ def parse_session_spec(spec: str) -> SessionSpec:
             f"invalid session spec '{spec}': use 'name' or 'name+N'"
         )
     try:
-        validate_name(name)
+        validate_name(name, allow_double_hyphen=True)
     except ValidationError as exc:
         raise ValidationError(f"invalid session spec '{spec}': {exc}") from None
     return SessionSpec(name=name, shells=shells)
@@ -1196,9 +1199,13 @@ def _build_console_tmux(
         placeholder = ""
     else:
         # tmux requires at least one window at all times. Create a transient
-        # placeholder; '--' is forbidden by validate_name so it cannot collide
-        # with any user-chosen session.
-        placeholder = "aw--placeholder"
+        # placeholder whose name (leading underscore, all uppercase) is doubly
+        # impossible for any real session: validate_name requires names to
+        # start with an alphanumeric AND be lowercase, so this string can
+        # never collide with a session name, including legacy '--' names that
+        # the loose validator now allows by reference. Stands out visibly in
+        # tmux list-windows output.
+        placeholder = "_PLACEHOLDER"
         target.run(f"tmux new-session -d -s {q_con} -n {shlex.quote(placeholder)}")
         placeholder_used = True
 

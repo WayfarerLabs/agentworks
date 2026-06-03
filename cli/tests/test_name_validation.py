@@ -8,10 +8,10 @@ from agentworks.config import validate_name
 from agentworks.output import ValidationError
 
 
-def _is_valid(name: str) -> bool:
+def _is_valid(name: str, *, allow_double_hyphen: bool = False) -> bool:
     """Return True if validate_name accepts the name."""
     try:
-        validate_name(name)
+        validate_name(name, allow_double_hyphen=allow_double_hyphen)
         return True
     except ValidationError:
         return False
@@ -84,3 +84,52 @@ def test_single_hyphen() -> None:
 
 def test_single_underscore() -> None:
     assert not _is_valid("_")
+
+
+# -- allow_double_hyphen=True (reference paths) ----------------------------
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        # Everything strict-mode accepts is still accepted in loose mode.
+        "a",
+        "abc",
+        "dev-vm",
+        "my_workspace",
+        # The whole point: legacy <workspace>--<agent> names predating the
+        # strict rule must still be referenceable. The DB is the arbiter of
+        # existence; the validator only sanitizes characters.
+        "myws--bot",
+        "a--b",
+        "ws--with--multiple--dashes",
+    ],
+)
+def test_double_hyphen_allowed_when_flag_set(name: str) -> None:
+    assert _is_valid(name, allow_double_hyphen=True), (
+        f"Expected '{name}' to validate with allow_double_hyphen=True"
+    )
+
+
+@pytest.mark.parametrize(
+    "name,reason",
+    [
+        # Loose mode still rejects everything that's character-unsafe; the
+        # only relaxation is the consecutive-hyphen rule.
+        ("", "empty string"),
+        ("-abc", "starts with hyphen"),
+        ("abc-", "ends with hyphen"),
+        ("ABC", "uppercase"),
+        ("a.b", "contains dot"),
+        ("a/b", "contains slash"),
+        ("a b", "contains space"),
+        ("my@vm", "contains special character"),
+        ("a" * 31, "too long"),
+    ],
+)
+def test_double_hyphen_flag_does_not_relax_other_rules(
+    name: str, reason: str
+) -> None:
+    assert not _is_valid(name, allow_double_hyphen=True), (
+        f"Expected '{name}' to remain invalid with allow_double_hyphen=True ({reason})"
+    )
