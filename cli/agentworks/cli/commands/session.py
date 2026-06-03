@@ -188,12 +188,17 @@ def session_describe(
 def session_list(
     workspace: Annotated[str | None, typer.Option("--workspace", help="Filter by workspace")] = None,
     vm: Annotated[str | None, typer.Option("--vm", help="Filter by VM")] = None,
-    agent: Annotated[str | None, typer.Option("--agent", help="Filter by agent (excludes admin-mode sessions)")] = None,
+    agent: Annotated[str | None, typer.Option("--agent", help="Filter by agent (agent-mode sessions only)")] = None,
+    admin: Annotated[bool, typer.Option("--admin", help="Only admin-mode sessions (no agent)")] = False,
     no_status: Annotated[bool, typer.Option("--no-status", help="Skip SSH status check (faster)")] = False,
 ) -> None:
     """List sessions. Filters compose with AND."""
     from agentworks.config import load_config
     from agentworks.sessions.manager import list_sessions
+
+    if admin and agent:
+        typer.echo("Error: --admin and --agent are mutually exclusive", err=True)
+        raise typer.Exit(1)
 
     list_sessions(
         get_db(),
@@ -201,6 +206,7 @@ def session_list(
         workspace_name=workspace,
         vm_name=vm,
         agent_name=agent,
+        admin_only=admin,
         no_status=no_status,
     )
 

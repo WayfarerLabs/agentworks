@@ -180,9 +180,9 @@ Manage sessions (persistent tmux sessions running in workspaces). Session names 
 | `agw session logs <name>`     | Dump session scrollback buffer |
 | `agw console attach <name>`   | Attach to a named console      |
 
-`session list` accepts `--workspace`, `--vm`, and `--agent` to narrow the result set. Filters
-compose with AND. The `--agent` filter only matches agent-mode sessions; admin-mode sessions are
-excluded.
+`session list` accepts `--workspace`, `--vm`, `--agent`, and `--admin` to narrow the result set.
+Filters compose with AND. `--agent <name>` matches agent-mode sessions only; `--admin` matches
+admin-mode sessions only (the two are mutually exclusive).
 
 `session create <name>` takes the session name as a required positional. Optional flags:
 `--workspace`, `--template`, `--admin`, and `--agent`. Workspace and mode (admin vs agent) are

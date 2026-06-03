@@ -1037,13 +1037,18 @@ class Database:
         workspace_name: str | None = None,
         vm_name: str | None = None,
         agent_name: str | None = None,
+        admin_only: bool = False,
     ) -> list[SessionRow]:
-        """List sessions, optionally filtered by workspace, VM, and/or agent.
+        """List sessions, optionally filtered by workspace, VM, agent, or mode.
 
         `vm_name` filters via the session's workspace (sessions on workspaces
         that live on the given VM). `agent_name` matches the session's
         `agent_name` column directly; admin-mode sessions (NULL agent_name)
-        are excluded when this filter is set.
+        are excluded when this filter is set. `admin_only` restricts to
+        admin-mode sessions (agent_name IS NULL); it is the inverse of
+        `agent_name` and the two should not be passed together (the CLI
+        layer enforces the mutex; this layer accepts the combination but
+        will simply return no rows since the predicates are contradictory).
         """
         clauses: list[str] = []
         params: list[object] = []
@@ -1058,6 +1063,8 @@ class Database:
         if agent_name is not None:
             clauses.append("s.agent_name = ?")
             params.append(agent_name)
+        if admin_only:
+            clauses.append("s.agent_name IS NULL")
 
         sql = "SELECT s.* FROM sessions s"
         if clauses:

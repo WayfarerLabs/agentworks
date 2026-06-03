@@ -420,6 +420,16 @@ def test_list_sessions_filters(db: Database) -> None:
     # AND composition: incompatible filters return empty (workspace ws-c is on other-vm).
     assert db.list_sessions(workspace_name="ws-c", vm_name="dev-vm") == []
 
+    # admin_only: matches sessions with NULL agent_name (admin-mode), excluding agent-mode.
+    assert names(db.list_sessions(admin_only=True)) == ["s-b-admin", "s-c-admin"]
+
+    # admin_only composes with VM filter.
+    assert names(db.list_sessions(admin_only=True, vm_name="dev-vm")) == ["s-b-admin"]
+
+    # admin_only + agent_name is contradictory; DB returns empty rather than rejecting.
+    # (CLI layer enforces the mutex; DB stays permissive.)
+    assert db.list_sessions(admin_only=True, agent_name="coder") == []
+
 
 # -- PID column and migration 20 -------------------------------------------
 
