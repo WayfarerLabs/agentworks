@@ -93,3 +93,20 @@ jobs:
 
       - name: ./scripts/rulesync-upgen.sh --check
         run: ./scripts/rulesync-upgen.sh --check
+
+  # Umbrella job: require this single check in branch protection on main.
+  # Adding a new job to CI means adding it to `needs:` below, so the
+  # required-checks list lives in the workflow file (alongside the jobs)
+  # rather than in GitHub settings that can drift silently.
+  ci-success:
+    if: always()
+    needs: [python-checks, test, lint-files, rulesync-drift]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify all required jobs passed
+        run: |
+          if [[ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}" == "true" ]]; then
+            echo "::error::One or more required CI jobs failed or were cancelled."
+            exit 1
+          fi
+          echo "All required CI jobs passed."
