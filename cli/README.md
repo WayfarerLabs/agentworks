@@ -78,6 +78,9 @@ Manage machines that host VMs (for remote Lima mode).
 | `agw vm-host list`                  | List registered VM hosts |
 | `agw vm-host remove <name>`         | Remove a VM host         |
 
+`vm-host remove` prompts for confirmation. Pass `--yes` to skip the prompt. If the host has VMs
+registered against it, pass `--force` to clear those references and remove anyway.
+
 ### VMs
 
 Manage virtual machines across Lima (local or remote), Azure, and WSL2.
@@ -164,17 +167,21 @@ confirmation prompt.
 Manage sessions (persistent tmux sessions running in workspaces). Session names are globally unique
 -- no `--workspace` flag needed for most commands.
 
-| Command                               | Description                    |
-| ------------------------------------- | ------------------------------ |
-| `agw session create <name>`           | Create and start a session     |
-| `agw session describe <name>`         | Show session details           |
-| `agw session list [--workspace <ws>]` | List sessions with status      |
-| `agw session attach <name>`           | Attach to a running session    |
-| `agw session stop <name>`             | Stop a running session         |
-| `agw session restart <name>`          | Restart a session              |
-| `agw session delete <name>`           | Stop and delete a session      |
-| `agw session logs <name>`             | Dump session scrollback buffer |
-| `agw console attach <name>`           | Attach to a named console      |
+| Command                       | Description                    |
+| ----------------------------- | ------------------------------ |
+| `agw session create <name>`   | Create and start a session     |
+| `agw session describe <name>` | Show session details           |
+| `agw session list`            | List sessions with status      |
+| `agw session attach <name>`   | Attach to a running session    |
+| `agw session stop <name>`     | Stop a running session         |
+| `agw session restart <name>`  | Restart a session              |
+| `agw session delete <name>`   | Stop and delete a session      |
+| `agw session logs <name>`     | Dump session scrollback buffer |
+| `agw console attach <name>`   | Attach to a named console      |
+
+`session list` accepts `--workspace`, `--vm`, and `--agent` to narrow the result set. Filters
+compose with AND. The `--agent` filter only matches agent-mode sessions; admin-mode sessions are
+excluded.
 
 `session create <name>` takes the session name as a required positional. Optional flags:
 `--workspace`, `--template`, `--admin`, and `--agent`. Workspace and mode (admin vs agent) are
@@ -221,7 +228,11 @@ panes you want preloaded into a session's window.
 - `--add-admin-shell` -- include a top-level admin-shell window as window 0, matching the legacy
   `vm console` behavior.
 
-`console list` accepts `--vm` to filter.
+`console list` accepts `--vm`, `--workspace`, and `--agent` to narrow the result set. The
+`--workspace` and `--agent` filters use "any session matches" semantics: a console is listed if at
+least one of its member sessions belongs to the given workspace / runs as the given agent. The
+session count displayed is the total membership, not the count of matching sessions. Filters compose
+with AND.
 
 Session specs use `name` or `name+N` shorthand, where `N` is the number of default shell panes to
 pre-open in that session's window (running as the session's agent user, cwd = workspace root):

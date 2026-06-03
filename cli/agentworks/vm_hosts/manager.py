@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.config import validate_name
-from agentworks.errors import AlreadyExistsError, NotFoundError, StateError, ValidationError
+from agentworks.errors import AlreadyExistsError, NotFoundError, StateError, UserAbort, ValidationError
 from agentworks.ssh import SSHError, SSHTarget, run
 
 if TYPE_CHECKING:
@@ -73,7 +73,7 @@ def list_vm_hosts(db: Database) -> None:
         output.info(f"{h.name:<20} {h.ssh_host:<30} {h.platform:<10} {h.os or '-':<10} {h.last_seen_at or 'never'}")
 
 
-def remove_vm_host(db: Database, name: str, *, force: bool = False) -> None:
+def remove_vm_host(db: Database, name: str, *, force: bool = False, yes: bool = False) -> None:
     """Remove a VM host. Refuses if VMs reference it unless --force."""
     host = db.get_vm_host(name)
     if host is None:
@@ -91,6 +91,13 @@ def remove_vm_host(db: Database, name: str, *, force: bool = False) -> None:
             entity_name=name,
             hint="Delete the VMs first, or pass --force to clear the host reference and remove.",
         )
+
+    if not yes and not force:
+        msg = f"Remove VM host '{name}'?"
+        if vm_count > 0:
+            msg += f" ({vm_count} VM(s) will be unlinked from this host)"
+        if not output.confirm(msg):
+            raise UserAbort("removal cancelled")
 
     if vm_count > 0:
         # Nullify vm_host_name on VMs referencing this host to prevent dangling FK

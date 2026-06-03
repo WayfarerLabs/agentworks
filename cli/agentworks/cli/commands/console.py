@@ -109,11 +109,19 @@ def console_create(
 @console_app.command("list")
 def console_list(
     vm: Annotated[str | None, typer.Option("--vm", help="Filter by VM")] = None,
+    workspace: Annotated[
+        str | None,
+        typer.Option("--workspace", help="Filter by workspace (any member session matches)"),
+    ] = None,
+    agent: Annotated[
+        str | None,
+        typer.Option("--agent", help="Filter by agent (any member session matches)"),
+    ] = None,
 ) -> None:
-    """List consoles."""
+    """List consoles. Filters compose with AND."""
     from agentworks.sessions.multi_console import list_consoles
 
-    list_consoles(get_db(), vm_name=vm)
+    list_consoles(get_db(), vm_name=vm, workspace_name=workspace, agent_name=agent)
 
 
 @console_app.command("describe")

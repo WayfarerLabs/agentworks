@@ -1031,16 +1031,39 @@ class Database:
         ).fetchone()
         return _to_session(row) if row else None
 
-    def list_sessions(self, workspace_name: str | None = None) -> list[SessionRow]:
+    def list_sessions(
+        self,
+        workspace_name: str | None = None,
+        *,
+        vm_name: str | None = None,
+        agent_name: str | None = None,
+    ) -> list[SessionRow]:
+        """List sessions, optionally filtered by workspace, VM, and/or agent.
+
+        `vm_name` filters via the session's workspace (sessions on workspaces
+        that live on the given VM). `agent_name` matches the session's
+        `agent_name` column directly; admin-mode sessions (NULL agent_name)
+        are excluded when this filter is set.
+        """
+        clauses: list[str] = []
+        params: list[object] = []
         if workspace_name is not None:
-            rows = self._conn.execute(
-                "SELECT * FROM sessions WHERE workspace_name = ? ORDER BY name",
-                (workspace_name,),
-            ).fetchall()
-        else:
-            rows = self._conn.execute(
-                "SELECT * FROM sessions ORDER BY workspace_name, name",
-            ).fetchall()
+            clauses.append("s.workspace_name = ?")
+            params.append(workspace_name)
+        if vm_name is not None:
+            clauses.append(
+                "s.workspace_name IN (SELECT name FROM workspaces WHERE vm_name = ?)"
+            )
+            params.append(vm_name)
+        if agent_name is not None:
+            clauses.append("s.agent_name = ?")
+            params.append(agent_name)
+
+        sql = "SELECT s.* FROM sessions s"
+        if clauses:
+            sql += " WHERE " + " AND ".join(clauses)
+        sql += " ORDER BY s.workspace_name, s.name"
+        rows = self._conn.execute(sql, tuple(params)).fetchall()
         return [_to_session(r) for r in rows]
 
     def update_session_pid(self, name: str, pid: int | None, boot_id: str | None = None) -> None:
@@ -1120,20 +1143,48 @@ class Database:
         return [_to_console(r) for r in rows]
 
     def list_consoles_with_counts(
-        self, vm_name: str | None = None
+        self,
+        vm_name: str | None = None,
+        *,
+        workspace_name: str | None = None,
+        agent_name: str | None = None,
     ) -> list[tuple[ConsoleRow, int]]:
-        """Return consoles paired with session counts, one query, ORDER BY name."""
+        """Return consoles paired with session counts, one query, ORDER BY name.
+
+        `workspace_name` and `agent_name` use "any session matches" semantics:
+        a console is returned if at least one of its member sessions belongs
+        to that workspace / runs as that agent. The session count returned
+        is still the TOTAL number of sessions in the console, not just the
+        matching ones.
+        """
         sql = (
             "SELECT c.*, COUNT(cs.session_name) AS session_count "
             "FROM consoles c "
             "LEFT JOIN console_sessions cs ON cs.console_name = c.name "
         )
-        params: tuple[str, ...] = ()
+        clauses: list[str] = []
+        params: list[object] = []
         if vm_name is not None:
-            sql += "WHERE c.vm_name = ? "
-            params = (vm_name,)
+            clauses.append("c.vm_name = ?")
+            params.append(vm_name)
+        if workspace_name is not None:
+            clauses.append(
+                "EXISTS (SELECT 1 FROM console_sessions cs2 "
+                "JOIN sessions s ON s.name = cs2.session_name "
+                "WHERE cs2.console_name = c.name AND s.workspace_name = ?)"
+            )
+            params.append(workspace_name)
+        if agent_name is not None:
+            clauses.append(
+                "EXISTS (SELECT 1 FROM console_sessions cs3 "
+                "JOIN sessions s ON s.name = cs3.session_name "
+                "WHERE cs3.console_name = c.name AND s.agent_name = ?)"
+            )
+            params.append(agent_name)
+        if clauses:
+            sql += "WHERE " + " AND ".join(clauses) + " "
         sql += "GROUP BY c.name ORDER BY c.name"
-        rows = self._conn.execute(sql, params).fetchall()
+        rows = self._conn.execute(sql, tuple(params)).fetchall()
         return [(_to_console(r), int(r["session_count"])) for r in rows]
 
     def delete_console(self, name: str) -> None:

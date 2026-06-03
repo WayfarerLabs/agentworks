@@ -187,13 +187,22 @@ def session_describe(
 @session_app.command("list")
 def session_list(
     workspace: Annotated[str | None, typer.Option("--workspace", help="Filter by workspace")] = None,
+    vm: Annotated[str | None, typer.Option("--vm", help="Filter by VM")] = None,
+    agent: Annotated[str | None, typer.Option("--agent", help="Filter by agent (excludes admin-mode sessions)")] = None,
     no_status: Annotated[bool, typer.Option("--no-status", help="Skip SSH status check (faster)")] = False,
 ) -> None:
-    """List sessions."""
+    """List sessions. Filters compose with AND."""
     from agentworks.config import load_config
     from agentworks.sessions.manager import list_sessions
 
-    list_sessions(get_db(), load_config(), workspace_name=workspace, no_status=no_status)
+    list_sessions(
+        get_db(),
+        load_config(),
+        workspace_name=workspace,
+        vm_name=vm,
+        agent_name=agent,
+        no_status=no_status,
+    )
 
 
 @session_app.command("stop")

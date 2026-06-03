@@ -812,9 +812,24 @@ def _reorder_shell_panes(
 # -- Read-side helpers ----------------------------------------------------
 
 
-def list_consoles(db: Database, *, vm_name: str | None = None) -> None:
-    """Print a table of consoles, optionally filtered by VM."""
-    consoles = db.list_consoles_with_counts(vm_name=vm_name)
+def list_consoles(
+    db: Database,
+    *,
+    vm_name: str | None = None,
+    workspace_name: str | None = None,
+    agent_name: str | None = None,
+) -> None:
+    """Print a table of consoles, optionally filtered by VM, workspace, or agent.
+
+    Workspace/agent filters match a console if any of its member sessions
+    matches; see `Database.list_consoles_with_counts` for full semantics.
+    Filters compose with AND.
+    """
+    consoles = db.list_consoles_with_counts(
+        vm_name=vm_name,
+        workspace_name=workspace_name,
+        agent_name=agent_name,
+    )
     if not consoles:
         output.info("No consoles found.")
         return

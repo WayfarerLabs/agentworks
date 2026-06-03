@@ -285,6 +285,91 @@ def test_list_consoles_with_counts(db: Database) -> None:
     assert [(c.name, n) for c, n in results] == [("empty", 0), ("full", 2)]
 
 
+def test_list_consoles_with_counts_workspace_and_agent_filters(db: Database) -> None:
+    """Filters use 'any session matches' semantics; total count is preserved."""
+    _seed_vm(db, "vm1")
+    # Second workspace on the same VM, plus a second VM for the vm filter.
+    db._conn.execute(
+        "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group) "
+        "VALUES ('ws-2', 'vm1', '/home/me/ws-2', 'ws-ws-2')"
+    )
+    db._conn.execute(
+        "INSERT INTO vms (name, platform, admin_username) VALUES ('vm2', 'wsl', 'admin')"
+    )
+    db._conn.execute(
+        "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group) "
+        "VALUES ('ws-other', 'vm2', '/home/me/ws-other', 'ws-ws-other')"
+    )
+    db.insert_agent("coder", "vm1", "agt--coder")
+    db.insert_agent("helper", "vm1", "agt--helper")
+    db._conn.commit()
+
+    # Sessions:
+    #   sess-a-coder   -> ws-vm1 (default seed), agent=coder
+    #   sess-b-helper  -> ws-2,                  agent=helper
+    #   sess-c-admin   -> ws-vm1,                admin
+    #   sess-other     -> ws-other on vm2,       admin
+    from agentworks.db import SessionMode
+
+    db.insert_session(
+        "sess-a-coder", "ws-vm1", "default", SessionMode.AGENT,
+        agent_name="coder", socket_path="/sock-a",
+    )
+    db.insert_session(
+        "sess-b-helper", "ws-2", "default", SessionMode.AGENT,
+        agent_name="helper", socket_path="/sock-b",
+    )
+    db.insert_session("sess-c-admin", "ws-vm1", "default", SessionMode.ADMIN)
+    db.insert_session("sess-other", "ws-other", "default", SessionMode.ADMIN)
+
+    # Consoles:
+    #   mixed    on vm1 -> sess-a-coder, sess-b-helper, sess-c-admin (3 sessions, spans 2 workspaces, 2 agents)
+    #   single   on vm1 -> sess-c-admin only (1 session, admin)
+    #   far      on vm2 -> sess-other (1 session)
+    #   empty    on vm1 -> no sessions
+    db.insert_console("mixed", "vm1")
+    db.add_console_session("mixed", "sess-a-coder", [])
+    db.add_console_session("mixed", "sess-b-helper", [])
+    db.add_console_session("mixed", "sess-c-admin", [])
+    db.insert_console("single", "vm1")
+    db.add_console_session("single", "sess-c-admin", [])
+    db.insert_console("far", "vm2")
+    db.add_console_session("far", "sess-other", [])
+    db.insert_console("empty", "vm1")
+
+    # workspace=ws-vm1 matches both consoles that include any ws-vm1 session.
+    # The count returned is total sessions in each console, not the matching count.
+    results = db.list_consoles_with_counts(workspace_name="ws-vm1")
+    assert [(c.name, n) for c, n in results] == [("mixed", 3), ("single", 1)]
+
+    # workspace=ws-2 matches only `mixed`.
+    results = db.list_consoles_with_counts(workspace_name="ws-2")
+    assert [(c.name, n) for c, n in results] == [("mixed", 3)]
+
+    # workspace=ws-other matches only `far` (on vm2).
+    results = db.list_consoles_with_counts(workspace_name="ws-other")
+    assert [(c.name, n) for c, n in results] == [("far", 1)]
+
+    # agent=coder matches consoles with at least one coder session.
+    results = db.list_consoles_with_counts(agent_name="coder")
+    assert [(c.name, n) for c, n in results] == [("mixed", 3)]
+
+    # agent=helper matches consoles with at least one helper session.
+    results = db.list_consoles_with_counts(agent_name="helper")
+    assert [(c.name, n) for c, n in results] == [("mixed", 3)]
+
+    # AND composition: vm=vm1 + workspace=ws-other -> empty (ws-other is on vm2).
+    assert db.list_consoles_with_counts(vm_name="vm1", workspace_name="ws-other") == []
+
+    # AND composition: workspace=ws-vm1 + agent=helper -> empty
+    # (no console has a session that is both in ws-vm1 AND run by helper).
+    # Note: this is per-console-existence, not per-session: `mixed` has helper
+    # sessions and ws-vm1 sessions but they're DIFFERENT sessions, and the
+    # EXISTS clauses fire independently. So `mixed` DOES match here.
+    results = db.list_consoles_with_counts(workspace_name="ws-vm1", agent_name="helper")
+    assert [(c.name, n) for c, n in results] == [("mixed", 3)]
+
+
 def test_cascade_session_delete_removes_membership(db: Database) -> None:
     _seed_vm(db)
     _seed_sessions(db, ["a", "b"])
