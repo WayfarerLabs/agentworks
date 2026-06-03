@@ -1,8 +1,11 @@
 """Shared resolver helpers used by multiple command modules.
 
-`_get_db()`, `_prompt_vm()`, and `_prompt_workspace()` were defined alongside
-the commands in the original monolithic `cli.py`. They are pulled out here so
-the per-group command modules can import them without depending on each other.
+`get_db()`, `prompt_vm()`, and `prompt_workspace()` were defined alongside the
+commands in the original monolithic `cli.py` (as `_get_db`, `_prompt_vm`, and
+`_prompt_workspace`). They are pulled out here so the per-group command modules
+can import them without depending on each other; the underscore prefix was
+dropped because they are now imported across module boundaries rather than
+being module-private.
 """
 
 from __future__ import annotations
