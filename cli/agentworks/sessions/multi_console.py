@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from agentworks import output
-from agentworks.config import validate_name, validate_name_reference
+from agentworks.config import validate_name
 from agentworks.errors import (
     AgentworksError,
     AlreadyExistsError,
@@ -68,10 +68,10 @@ class SessionSpec:
 def parse_session_spec(spec: str) -> SessionSpec:
     """Parse 'session' or 'session+N' into a SessionSpec.
 
-    The shell count N must be a non-negative integer. The session name is
-    validated with the loose reference rules (validate_name_reference) so
-    legacy sessions with the pre-rename ``ws--agent`` convention can still
-    be referenced; the DB is the ultimate arbiter of existence and is
+    The shell count N must be a non-negative integer. The session name uses
+    the loose reference form of validate_name (``allow_double_hyphen=True``)
+    so legacy sessions with the pre-rename ``ws--agent`` convention can
+    still be referenced; the DB is the ultimate arbiter of existence and is
     checked downstream by the caller.
     """
     parts = spec.split("+")
@@ -95,7 +95,7 @@ def parse_session_spec(spec: str) -> SessionSpec:
             f"invalid session spec '{spec}': use 'name' or 'name+N'"
         )
     try:
-        validate_name_reference(name)
+        validate_name(name, allow_double_hyphen=True)
     except ValidationError as exc:
         raise ValidationError(f"invalid session spec '{spec}': {exc}") from None
     return SessionSpec(name=name, shells=shells)

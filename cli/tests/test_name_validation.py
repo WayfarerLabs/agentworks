@@ -4,23 +4,14 @@ from __future__ import annotations
 
 import pytest
 
-from agentworks.config import validate_name, validate_name_reference
+from agentworks.config import validate_name
 from agentworks.output import ValidationError
 
 
-def _is_valid(name: str) -> bool:
+def _is_valid(name: str, *, allow_double_hyphen: bool = False) -> bool:
     """Return True if validate_name accepts the name."""
     try:
-        validate_name(name)
-        return True
-    except ValidationError:
-        return False
-
-
-def _is_valid_reference(name: str) -> bool:
-    """Return True if validate_name_reference accepts the name."""
-    try:
-        validate_name_reference(name)
+        validate_name(name, allow_double_hyphen=allow_double_hyphen)
         return True
     except ValidationError:
         return False
@@ -95,34 +86,36 @@ def test_single_underscore() -> None:
     assert not _is_valid("_")
 
 
-# -- validate_name_reference (loose) ---------------------------------------
+# -- allow_double_hyphen=True (reference paths) ----------------------------
 
 
 @pytest.mark.parametrize(
     "name",
     [
-        # Everything validate_name accepts is also a valid reference.
+        # Everything strict-mode accepts is still accepted in loose mode.
         "a",
         "abc",
         "dev-vm",
         "my_workspace",
-        # The whole point: consecutive hyphens are allowed in references so
-        # legacy <workspace>--<agent> names from before validate_name banned
-        # them can still be looked up.
+        # The whole point: legacy <workspace>--<agent> names predating the
+        # strict rule must still be referenceable. The DB is the arbiter of
+        # existence; the validator only sanitizes characters.
         "myws--bot",
         "a--b",
         "ws--with--multiple--dashes",
     ],
 )
-def test_valid_reference_names(name: str) -> None:
-    assert _is_valid_reference(name), f"Expected '{name}' to be a valid reference"
+def test_double_hyphen_allowed_when_flag_set(name: str) -> None:
+    assert _is_valid(name, allow_double_hyphen=True), (
+        f"Expected '{name}' to validate with allow_double_hyphen=True"
+    )
 
 
 @pytest.mark.parametrize(
     "name,reason",
     [
-        # Everything else validate_name rejects, reference also rejects --
-        # the only relaxation is the consecutive-hyphen rule.
+        # Loose mode still rejects everything that's character-unsafe; the
+        # only relaxation is the consecutive-hyphen rule.
         ("", "empty string"),
         ("-abc", "starts with hyphen"),
         ("abc-", "ends with hyphen"),
@@ -134,7 +127,9 @@ def test_valid_reference_names(name: str) -> None:
         ("a" * 31, "too long"),
     ],
 )
-def test_invalid_reference_names(name: str, reason: str) -> None:
-    assert not _is_valid_reference(name), (
-        f"Expected '{name}' to be an invalid reference ({reason})"
+def test_double_hyphen_flag_does_not_relax_other_rules(
+    name: str, reason: str
+) -> None:
+    assert not _is_valid(name, allow_double_hyphen=True), (
+        f"Expected '{name}' to remain invalid with allow_double_hyphen=True ({reason})"
     )

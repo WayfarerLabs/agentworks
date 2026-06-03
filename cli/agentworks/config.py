@@ -35,13 +35,21 @@ SSH_HOST_PREFIX_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]*$")
 MAX_NAME_LENGTH = 30
 
 
-def validate_name(name: str) -> None:
-    """Validate a resource name for *creation*, raising ValidationError on failure.
+def validate_name(name: str, *, allow_double_hyphen: bool = False) -> None:
+    """Validate a resource name, raising ValidationError on failure.
 
-    Rules: lowercase alphanumeric, hyphens, underscores. Must start and end with
-    alphanumeric. No consecutive hyphens (reserved for agent username separator).
-    Max 30 characters (leaves room for agent username derivation within the
-    32-character Linux username limit).
+    Rules: lowercase alphanumeric, hyphens, underscores. Must start and end
+    with alphanumeric. Max 30 characters (leaves room for agent username
+    derivation within the 32-character Linux username limit).
+
+    Consecutive hyphens (``--``) are rejected by default because they are
+    reserved for the ``<workspace>--<agent>`` separator used by the legacy
+    agent-derivation scheme; new resource names need headroom for that.
+    Pass ``allow_double_hyphen=True`` only when validating a name that is
+    being used to *look up* an existing entity (the DB is the ultimate
+    arbiter of existence; the validator only sanitizes characters). Legacy
+    sessions predating the rule use ``--`` in their names and still need to
+    be deletable / attachable / addable to consoles.
     """
     from agentworks.output import ValidationError
 
@@ -49,41 +57,16 @@ def validate_name(name: str) -> None:
         raise ValidationError(
             f"name '{name}' is too long ({len(name)} chars, max {MAX_NAME_LENGTH})"
         )
-    if not NAME_RE.match(name) or "--" in name:
+    if not NAME_RE.match(name) or (not allow_double_hyphen and "--" in name):
+        suffix = (
+            ""
+            if allow_double_hyphen
+            else ", and cannot contain consecutive hyphens (--)"
+        )
         raise ValidationError(
             f"invalid name '{name}'. Names must be lowercase alphanumeric "
-            "with hyphens or underscores, must start and end with a letter or digit, "
-            "and cannot contain consecutive hyphens (--)"
-        )
-
-
-def validate_name_reference(name: str) -> None:
-    """Validate a resource name when *referencing* an existing entity.
-
-    Looser than validate_name: the DB is the ultimate arbiter of whether a
-    name resolves, so this only enforces enough to keep weird input out of
-    shell / tmux contexts (still lowercase alphanumeric + hyphens +
-    underscores, must start and end alphanumeric, length cap). The single
-    difference from validate_name is that consecutive hyphens (``--``) are
-    permitted -- legacy sessions predating the strict rule use the
-    ``<workspace>--<agent>`` convention, and users still need to delete /
-    attach / add them to consoles.
-
-    Use this in any path that takes a user-supplied name to look up an
-    existing row. Creation paths must keep using validate_name so new names
-    stay collision-safe with derived Linux usernames.
-    """
-    from agentworks.output import ValidationError
-
-    if len(name) > MAX_NAME_LENGTH:
-        raise ValidationError(
-            f"name '{name}' is too long ({len(name)} chars, max {MAX_NAME_LENGTH})"
-        )
-    if not NAME_RE.match(name):
-        raise ValidationError(
-            f"invalid name '{name}'. Names must be lowercase alphanumeric "
-            "with hyphens or underscores, and must start and end with a letter "
-            "or digit"
+            "with hyphens or underscores, must start and end with a letter or "
+            f"digit{suffix}"
         )
 
 
