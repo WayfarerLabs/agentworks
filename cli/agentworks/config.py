@@ -66,7 +66,7 @@ def validate_name(name: str, *, allow_double_hyphen: bool = False) -> None:
         raise ValidationError(
             f"invalid name '{name}'. Names must be lowercase alphanumeric "
             "with hyphens or underscores, must start and end with a letter or "
-            f"digit{suffix}"
+            f"digit{suffix}."
         )
 
 

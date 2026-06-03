@@ -1200,9 +1200,11 @@ def _build_console_tmux(
     else:
         # tmux requires at least one window at all times. Create a transient
         # placeholder whose name (leading underscore, all uppercase) is doubly
-        # impossible for any session: NAME_RE requires alphanumeric start, and
-        # the lowercase-only character class rejects uppercase outright. Stands
-        # out visibly in tmux list-windows output.
+        # impossible for any real session: validate_name requires names to
+        # start with an alphanumeric AND be lowercase, so this string can
+        # never collide with a session name, including legacy '--' names that
+        # the loose validator now allows by reference. Stands out visibly in
+        # tmux list-windows output.
         placeholder = "_PLACEHOLDER"
         target.run(f"tmux new-session -d -s {q_con} -n {shlex.quote(placeholder)}")
         placeholder_used = True
