@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Annotated
 import typer
 
 from agentworks.cli._app import app, require_interactive
-from agentworks.cli._helpers import get_db, prompt_vm, prompt_workspace
+from agentworks.cli._helpers import get_db, parse_csv_filter, prompt_vm, prompt_workspace
 
 if TYPE_CHECKING:
     from agentworks.db import Database, VMRow, WorkspaceRow
@@ -186,13 +186,25 @@ def session_describe(
 
 @session_app.command("list")
 def session_list(
-    workspace: Annotated[str | None, typer.Option("--workspace", help="Filter by workspace")] = None,
-    vm: Annotated[str | None, typer.Option("--vm", help="Filter by VM")] = None,
-    agent: Annotated[str | None, typer.Option("--agent", help="Filter by agent (agent-mode sessions only)")] = None,
+    workspace: Annotated[
+        str | None,
+        typer.Option("--workspace", help="Filter by workspace (comma-separated for multiple)"),
+    ] = None,
+    vm: Annotated[
+        str | None,
+        typer.Option("--vm", help="Filter by VM (comma-separated for multiple)"),
+    ] = None,
+    agent: Annotated[
+        str | None,
+        typer.Option(
+            "--agent",
+            help="Filter by agent (agent-mode sessions only; comma-separated for multiple)",
+        ),
+    ] = None,
     admin: Annotated[bool, typer.Option("--admin", help="Only admin-mode sessions (no agent)")] = False,
     no_status: Annotated[bool, typer.Option("--no-status", help="Skip SSH status check (faster)")] = False,
 ) -> None:
-    """List sessions. Filters compose with AND."""
+    """List sessions. Filters compose with AND; comma-separated values within a filter are OR-ed."""
     from agentworks.config import load_config
     from agentworks.sessions.manager import list_sessions
 
@@ -203,9 +215,9 @@ def session_list(
     list_sessions(
         get_db(),
         load_config(),
-        workspace_name=workspace,
-        vm_name=vm,
-        agent_name=agent,
+        workspace_name=parse_csv_filter(workspace),
+        vm_name=parse_csv_filter(vm),
+        agent_name=parse_csv_filter(agent),
         admin_only=admin,
         no_status=no_status,
     )

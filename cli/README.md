@@ -181,8 +181,10 @@ Manage sessions (persistent tmux sessions running in workspaces). Session names 
 | `agw console attach <name>`   | Attach to a named console      |
 
 `session list` accepts `--workspace`, `--vm`, `--agent`, and `--admin` to narrow the result set.
-Filters compose with AND. `--agent <name>` matches agent-mode sessions only; `--admin` matches
-admin-mode sessions only (the two are mutually exclusive).
+Filters compose with AND. The name filters (`--workspace`, `--vm`, `--agent`) accept a single value
+or a comma-separated list (`--vm vm1,vm2`); commas within a filter are OR-ed together.
+`--agent <name>` matches agent-mode sessions only; `--admin` matches admin-mode sessions only (the
+two are mutually exclusive).
 
 `session create <name>` takes the session name as a required positional. Optional flags:
 `--workspace`, `--template`, `--admin`, and `--agent`. Workspace and mode (admin vs agent) are
@@ -229,11 +231,13 @@ panes you want preloaded into a session's window.
 - `--add-admin-shell` -- include a top-level admin-shell window as window 0, matching the legacy
   `vm console` behavior.
 
-`console list` accepts `--vm`, `--workspace`, and `--agent` to narrow the result set. The
-`--workspace` and `--agent` filters use "any session matches" semantics: a console is listed if at
-least one of its member sessions belongs to the given workspace / runs as the given agent. The
-session count displayed is the total membership, not the count of matching sessions. Filters compose
-with AND.
+`console list` accepts `--vm`, `--workspace`, and `--agent` to narrow the result set. Each filter
+takes a single value or a comma-separated list (`--workspace ws1,ws2`); commas within a filter are
+OR-ed together. The `--workspace` and `--agent` filters use "any session matches" semantics: a
+console is listed if at least one of its member sessions belongs to the given workspace / runs as
+the given agent. When `--workspace` and `--agent` are both passed, the SAME session must satisfy
+both predicates. The session count displayed is the total membership, not the count of matching
+sessions. Filters compose with AND.
 
 Session specs use `name` or `name+N` shorthand, where `N` is the number of default shell panes to
 pre-open in that session's window (running as the session's agent user, cwd = workspace root):

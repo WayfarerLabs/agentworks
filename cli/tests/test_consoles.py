@@ -373,6 +373,28 @@ def test_list_consoles_with_counts_workspace_and_agent_filters(db: Database) -> 
     # predicate avoids the surprise of consoles matching via unrelated sessions.
     assert db.list_consoles_with_counts(workspace_name="ws-vm1", agent_name="helper") == []
 
+    # Multi-value (list) on workspace: OR within the filter. ws-vm1 OR ws-2 match
+    # `mixed` (one of each) and `single` (ws-vm1 only).
+    results = db.list_consoles_with_counts(workspace_name=["ws-vm1", "ws-2"])
+    assert [(c.name, n) for c, n in results] == [("mixed", 3), ("single", 1)]
+
+    # Multi-value on vm_name (console-level filter): vm1 OR vm2 returns every console.
+    results = db.list_consoles_with_counts(vm_name=["vm1", "vm2"])
+    assert [(c.name, n) for c, n in results] == [
+        ("empty", 0), ("far", 1), ("mixed", 3), ("single", 1),
+    ]
+
+    # Multi-value session filter still requires SAME session to satisfy combined predicates.
+    # agent IN (coder, helper) AND workspace = ws-2: only sess-b-helper qualifies (in ws-2),
+    # so only `mixed` matches.
+    results = db.list_consoles_with_counts(workspace_name="ws-2", agent_name=["coder", "helper"])
+    assert [(c.name, n) for c, n in results] == [("mixed", 3)]
+
+    # Single-element list behaves identically to a bare string.
+    assert db.list_consoles_with_counts(vm_name=["vm1"]) == db.list_consoles_with_counts(
+        vm_name="vm1"
+    )
+
 
 def test_cascade_session_delete_removes_membership(db: Database) -> None:
     _seed_vm(db)

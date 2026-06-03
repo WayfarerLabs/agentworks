@@ -430,6 +430,51 @@ def test_list_sessions_filters(db: Database) -> None:
     # (CLI layer enforces the mutex; DB stays permissive.)
     assert db.list_sessions(admin_only=True, agent_name="coder") == []
 
+    # Multi-value (list) filters: lists OR within a filter, filters AND across.
+    assert names(db.list_sessions(workspace_name=["ws-a", "ws-b"])) == [
+        "s-a-coder", "s-a-helper", "s-b-admin", "s-b-coder",
+    ]
+    assert names(db.list_sessions(agent_name=["coder", "helper"])) == [
+        "s-a-coder", "s-a-helper", "s-b-coder",
+    ]
+    # Multi VM: dev-vm OR other-vm = everything.
+    assert names(db.list_sessions(vm_name=["dev-vm", "other-vm"])) == [
+        "s-a-coder", "s-a-helper", "s-b-admin", "s-b-coder", "s-c-admin",
+    ]
+    # Multi-value composed with a single-value filter from another flag.
+    assert names(db.list_sessions(workspace_name=["ws-a", "ws-b"], agent_name="coder")) == [
+        "s-a-coder", "s-b-coder",
+    ]
+    # Single-element list behaves identically to a bare string.
+    assert names(db.list_sessions(workspace_name=["ws-a"])) == names(
+        db.list_sessions(workspace_name="ws-a")
+    )
+
+
+def test_list_workspaces_and_agents_multi_value(db: Database) -> None:
+    """list_workspaces and list_agents accept either a string or a list for vm_name."""
+    db.insert_vm("vm-a", platform="lima")
+    db.insert_vm("vm-b", platform="lima")
+    db.insert_vm("vm-c", platform="lima")
+    db.insert_workspace("ws-a1", workspace_path="/tmp/a1", vm_name="vm-a", linux_group="g1")
+    db.insert_workspace("ws-b1", workspace_path="/tmp/b1", vm_name="vm-b", linux_group="g2")
+    db.insert_workspace("ws-c1", workspace_path="/tmp/c1", vm_name="vm-c", linux_group="g3")
+    db.insert_agent("ag-a", "vm-a", "agt--a")
+    db.insert_agent("ag-b", "vm-b", "agt--b")
+    db.insert_agent("ag-c", "vm-c", "agt--c")
+
+    # Single string still works.
+    assert [w.name for w in db.list_workspaces(vm_name="vm-a")] == ["ws-a1"]
+    assert [a.name for a in db.list_agents(vm_name="vm-a")] == ["ag-a"]
+
+    # List of two VMs returns workspaces / agents from both.
+    assert [w.name for w in db.list_workspaces(vm_name=["vm-a", "vm-c"])] == ["ws-a1", "ws-c1"]
+    assert [a.name for a in db.list_agents(vm_name=["vm-a", "vm-c"])] == ["ag-a", "ag-c"]
+
+    # Empty list collapses to no filter (returns everything).
+    assert [w.name for w in db.list_workspaces(vm_name=[])] == ["ws-a1", "ws-b1", "ws-c1"]
+    assert [a.name for a in db.list_agents(vm_name=[])] == ["ag-a", "ag-b", "ag-c"]
+
 
 # -- PID column and migration 20 -------------------------------------------
 

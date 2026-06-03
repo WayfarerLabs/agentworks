@@ -815,9 +815,9 @@ def _reorder_shell_panes(
 def list_consoles(
     db: Database,
     *,
-    vm_name: str | None = None,
-    workspace_name: str | None = None,
-    agent_name: str | None = None,
+    vm_name: str | list[str] | None = None,
+    workspace_name: str | list[str] | None = None,
+    agent_name: str | list[str] | None = None,
 ) -> None:
     """Print a table of consoles, optionally filtered by VM, workspace, or agent.
 

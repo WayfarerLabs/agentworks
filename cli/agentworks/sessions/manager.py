@@ -298,11 +298,15 @@ def _regenerate_tmuxinator(
 def filter_sessions(
     db: Database,
     *,
-    workspace_name: str | None = None,
-    vm_name: str | None = None,
-    agent_name: str | None = None,
+    workspace_name: str | list[str] | None = None,
+    vm_name: str | list[str] | None = None,
+    agent_name: str | list[str] | None = None,
 ) -> list[SessionRow]:
-    """Load sessions with optional workspace, VM, and/or agent filters."""
+    """Load sessions with optional workspace, VM, and/or agent filters.
+
+    Each filter accepts a single name or a list of names; lists OR within
+    a filter, filters AND across the call. See `Database.list_sessions`.
+    """
     return db.list_sessions(
         workspace_name=workspace_name,
         vm_name=vm_name,
@@ -1331,9 +1335,9 @@ def list_sessions(
     db: Database,
     config: Config,
     *,
-    workspace_name: str | None = None,
-    vm_name: str | None = None,
-    agent_name: str | None = None,
+    workspace_name: str | list[str] | None = None,
+    vm_name: str | list[str] | None = None,
+    agent_name: str | list[str] | None = None,
     admin_only: bool = False,
     no_status: bool = False,
 ) -> None:

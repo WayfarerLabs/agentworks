@@ -7,7 +7,7 @@ from typing import Annotated
 import typer
 
 from agentworks.cli._app import app
-from agentworks.cli._helpers import get_db, prompt_vm
+from agentworks.cli._helpers import get_db, parse_csv_filter, prompt_vm
 
 agent_app = typer.Typer(
     name="agent",
@@ -46,12 +46,15 @@ def agent_create(
 
 @agent_app.command("list")
 def agent_list(
-    vm: Annotated[str | None, typer.Option("--vm", help="Filter by VM")] = None,
+    vm: Annotated[
+        str | None,
+        typer.Option("--vm", help="Filter by VM (comma-separated for multiple)"),
+    ] = None,
 ) -> None:
     """List agents."""
     from agentworks.agents.manager import list_agents
 
-    list_agents(get_db(), vm_name=vm)
+    list_agents(get_db(), vm_name=parse_csv_filter(vm))
 
 
 @agent_app.command("describe")

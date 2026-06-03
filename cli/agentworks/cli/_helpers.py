@@ -81,3 +81,23 @@ class HasDescription(Protocol):
 
     @property
     def description(self) -> str: ...
+
+
+def parse_csv_filter(value: str | None) -> str | list[str] | None:
+    """Parse a comma-separated CLI filter value.
+
+    Returns ``None`` when the flag was not supplied or contained only
+    whitespace and separators. Returns a bare string when exactly one name
+    is present (preserves single-value semantics for the readable case).
+    Returns a list of stripped, non-empty names when multiple values were
+    supplied. Used by every list command's CSV filter flag so multi-value
+    parsing is consistent across the surface.
+    """
+    if value is None:
+        return None
+    parts = [p.strip() for p in value.split(",") if p.strip()]
+    if not parts:
+        return None
+    if len(parts) == 1:
+        return parts[0]
+    return parts
