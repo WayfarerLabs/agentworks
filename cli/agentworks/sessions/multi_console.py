@@ -1199,11 +1199,11 @@ def _build_console_tmux(
         placeholder = ""
     else:
         # tmux requires at least one window at all times. Create a transient
-        # placeholder; new sessions can't use '--' (validate_name at creation
-        # rejects it) so this can't collide with a newly-created session.
-        # Legacy sessions predating that rule can still contain '--' but won't
-        # be named exactly 'aw--placeholder'.
-        placeholder = "aw--placeholder"
+        # placeholder with a leading underscore -- validate_name (creation
+        # and reference) requires names to start with an alphanumeric, so
+        # this string can never collide with a real session name, including
+        # legacy '--' names.
+        placeholder = "_aw_placeholder"
         target.run(f"tmux new-session -d -s {q_con} -n {shlex.quote(placeholder)}")
         placeholder_used = True
 
