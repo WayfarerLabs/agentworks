@@ -789,7 +789,7 @@ class Database:
         row = self._conn.execute("SELECT * FROM workspaces WHERE name = ?", (name,)).fetchone()
         return _to_workspace(row) if row else None
 
-    def list_workspaces(self, vm_name: str | None = None) -> list[WorkspaceRow]:
+    def list_workspaces(self, *, vm_name: str | None = None) -> list[WorkspaceRow]:
         if vm_name is not None:
             rows = self._conn.execute(
                 "SELECT * FROM workspaces WHERE vm_name = ? ORDER BY name", (vm_name,)
@@ -863,7 +863,7 @@ class Database:
         ).fetchone()
         return _to_agent(row) if row else None
 
-    def list_agents(self, vm_name: str | None = None) -> list[AgentRow]:
+    def list_agents(self, *, vm_name: str | None = None) -> list[AgentRow]:
         if vm_name is not None:
             rows = self._conn.execute(
                 "SELECT * FROM agents WHERE vm_name = ? ORDER BY name",
@@ -1033,8 +1033,8 @@ class Database:
 
     def list_sessions(
         self,
-        workspace_name: str | None = None,
         *,
+        workspace_name: str | None = None,
         vm_name: str | None = None,
         agent_name: str | None = None,
     ) -> list[SessionRow]:
@@ -1132,7 +1132,7 @@ class Database:
         row = self._conn.execute("SELECT * FROM consoles WHERE name = ?", (name,)).fetchone()
         return _to_console(row) if row else None
 
-    def list_consoles(self, vm_name: str | None = None) -> list[ConsoleRow]:
+    def list_consoles(self, *, vm_name: str | None = None) -> list[ConsoleRow]:
         if vm_name is not None:
             rows = self._conn.execute(
                 "SELECT * FROM consoles WHERE vm_name = ? ORDER BY name",
@@ -1144,8 +1144,8 @@ class Database:
 
     def list_consoles_with_counts(
         self,
-        vm_name: str | None = None,
         *,
+        vm_name: str | None = None,
         workspace_name: str | None = None,
         agent_name: str | None = None,
     ) -> list[tuple[ConsoleRow, int]]:
