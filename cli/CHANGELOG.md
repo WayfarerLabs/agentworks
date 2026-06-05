@@ -1,5 +1,45 @@
 # Changelog
 
+## [0.5.0](https://github.com/WayfarerLabs/agentworks/compare/v0.4.0...v0.5.0) (2026-06-05)
+
+
+### Features
+
+* **cli:** add --admin filter to session list (mutex with --agent) ([ed8a48c](https://github.com/WayfarerLabs/agentworks/commit/ed8a48c1358700e65b218aedfb3cacb1cdae529e))
+* **cli:** comma-separated multi-value filters on every list command ([b57a59b](https://github.com/WayfarerLabs/agentworks/commit/b57a59bbd5f3d0727bfc97428f5d36aa6563d6a1))
+* **cli:** consistent filter flags on list commands + vm-host remove --yes ([a050eb0](https://github.com/WayfarerLabs/agentworks/commit/a050eb0281a118c48d25b08af980c3bd43e7297a))
+* **cli:** consistent filter flags on list commands + vm-host remove --yes ([148a92b](https://github.com/WayfarerLabs/agentworks/commit/148a92b346b6b4e5c16d4128c1b4d96ad1977673))
+* **console:** add reorder-sessions command + pluralize variadic verbs ([ebb5b0d](https://github.com/WayfarerLabs/agentworks/commit/ebb5b0d3c7abdf57c34270e657ca06c0dc557f49))
+* **console:** add reorder-sessions command and pluralize variadic verbs ([ea677d2](https://github.com/WayfarerLabs/agentworks/commit/ea677d2d8a186ca991f34069f5c840a2cc8eabfc))
+
+
+### Bug Fixes
+
+* **cli:** address Copilot review feedback on PR [#90](https://github.com/WayfarerLabs/agentworks/issues/90) ([73c8305](https://github.com/WayfarerLabs/agentworks/commit/73c83058565102a4cae6fdf42ba80dfaa5a9b415))
+* **completion:** drop _agw symlink so zsh autoloads completions for the agw alias ([71bc0db](https://github.com/WayfarerLabs/agentworks/commit/71bc0db25718ff475770c69e6116b3f363dd8aa0))
+* **completion:** drop _agw symlink so zsh autoloads completions for the agw alias ([4d889fc](https://github.com/WayfarerLabs/agentworks/commit/4d889fcbb26f44219fedb93c4abce7cbb543c016))
+* **console:** allow legacy 'ws--agent' session names when referenced in console specs ([74ce187](https://github.com/WayfarerLabs/agentworks/commit/74ce187d59e7604e3e34ce4c82bdace4921d246d))
+* **console:** allow legacy 'ws--agent' session names when referenced in console specs ([62a9ab6](https://github.com/WayfarerLabs/agentworks/commit/62a9ab63287f664f10b6589f15c2a0093903be66))
+* **console:** clean up tmux windows when member sessions are deleted ([9d31938](https://github.com/WayfarerLabs/agentworks/commit/9d31938dc0cafede4be2288e2193b61ea2431750))
+* **console:** clean up tmux windows when member sessions are deleted ([482b482](https://github.com/WayfarerLabs/agentworks/commit/482b482dd303aad9d0a73e56e4e34d2e17ecc0bb))
+* **console:** compact reorder when windows missing + bail on dup names ([73f74b0](https://github.com/WayfarerLabs/agentworks/commit/73f74b00e421fd7ed6d126eb8a4983a6866b8239))
+* **console:** rename admin-shell window to --admin-- to prevent session collision ([4811b21](https://github.com/WayfarerLabs/agentworks/commit/4811b210215a6a563caf09df357b28c9b4a53d32))
+* **console:** use leading-underscore placeholder so legacy '--' session names cannot collide ([6a18248](https://github.com/WayfarerLabs/agentworks/commit/6a18248822360a00d06cd8743d71f0c5aa223228))
+* dont store unused host var ([f577bef](https://github.com/WayfarerLabs/agentworks/commit/f577bef5d0faf8960cb66465ebbbd1ea2cb1ac7a))
+* improve comment for case when --force is set ([44f2597](https://github.com/WayfarerLabs/agentworks/commit/44f259734b829099b97b508c4431fa413f930fae))
+
+
+### Documentation
+
+* address reviewer feedback on PR [#81](https://github.com/WayfarerLabs/agentworks/issues/81) ([c9a8219](https://github.com/WayfarerLabs/agentworks/commit/c9a8219a58e7c34404fec3bc51cf9c541faf07ee))
+* **cli:** apply final review polish to README and docstrings ([eb7483e](https://github.com/WayfarerLabs/agentworks/commit/eb7483eba9828ab2021ebf14e69b43bba2897be7))
+* **cli:** fix _helpers.py docstring to use the current function names ([2a5a0ad](https://github.com/WayfarerLabs/agentworks/commit/2a5a0ad2f8f09cda8b351c4df7c7f00a52db5ce9))
+* embrace agw as the everyday command across all operator-facing output ([c7e8f5a](https://github.com/WayfarerLabs/agentworks/commit/c7e8f5ad0c5adfaf5590c333dd571dab7c9d7ca3))
+* embrace agw as the everyday command across all operator-facing output ([ccc1844](https://github.com/WayfarerLabs/agentworks/commit/ccc1844d948385d610bd15e9241e1c475454a03c))
+* split project framing to top-level README; add dependabot config ([35f8556](https://github.com/WayfarerLabs/agentworks/commit/35f8556f583415b65cd76803ca85e822016a4c68))
+* split project framing to top-level README; add dependabot config ([9ea91a1](https://github.com/WayfarerLabs/agentworks/commit/9ea91a1a088b9bfd54273517b3edf78c5c72ade2))
+* sweep three more operator-facing agentworks-&gt;agw misses ([6e1c008](https://github.com/WayfarerLabs/agentworks/commit/6e1c0085dd1b4ffea073f2df2adc10657952f761))
+
 ## [0.4.0](https://github.com/WayfarerLabs/agentworks/compare/v0.3.0...v0.4.0) (2026-06-01)
 
 
