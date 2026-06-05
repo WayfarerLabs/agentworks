@@ -1167,9 +1167,10 @@ def _apply_aw_session_vertical_layout(
     """Build and apply a hand-computed tmux layout string for
     ``aw-session-vertical``. Two SSH round trips: one to query the
     window's width / height / pane IDs, one to apply the computed
-    layout. Failures (unreachable tmux, unparseable output, too-small
-    window) are silently swallowed -- this is best-effort and the
-    operator can rebuild via `console attach --recreate`.
+    layout. Unreachable tmux is quiet (the downstream select-layout
+    would warn on its own anyway), but a parseable-but-bad query --
+    too-small window, single-pane window, malformed output -- gets a
+    warning so an operator who sees a wrong layout has a breadcrumb.
     """
     query = target.run(
         f"tmux display-message -t {q_con}:{q_win} -p "
@@ -1181,6 +1182,11 @@ def _apply_aw_session_vertical_layout(
         return
     layout_string = _build_aw_session_vertical_layout_string(query.stdout)
     if layout_string is None:
+        output.warn(
+            f"could not build aw-session-vertical layout for "
+            f"{q_con}:{q_win} (window too small, single-pane, or "
+            f"unparseable tmux output); tmux will keep its current layout"
+        )
         return
     target.run(
         f"tmux select-layout -t {q_con}:{q_win} {shlex.quote(layout_string)}",
@@ -1201,6 +1207,10 @@ def _build_aw_session_vertical_layout_string(query_output: str) -> str | None:
       - pane 0 (session) gets the top H/2 lines
       - panes 1..N (shells) share the remaining (H/2 - 1) lines evenly,
         accounting for 1-line borders between each pair of adjacent panes
+
+    The top-level node is hard-coded as a vertical split (``[...]``); if a
+    horizontal variant is ever wanted, switch to ``{...}`` and recompute
+    geometry along the width axis.
 
     Returns None on any parse failure or when the window is too small to
     hold the layout (rare; tmux itself would refuse the layout anyway).
@@ -1223,7 +1233,7 @@ def _build_aw_session_vertical_layout_string(query_output: str) -> str | None:
             int(parts[0])
         except ValueError:
             continue
-        pane_ids.append(parts[1].lstrip("%"))
+        pane_ids.append(parts[1].removeprefix("%"))
     if not pane_ids:
         return None
     n = len(pane_ids)

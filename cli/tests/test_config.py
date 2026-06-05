@@ -424,10 +424,12 @@ def test_claude_marketplaces_rejects_string(tmp_path: Path) -> None:
 
 
 def test_named_console_tmux_layout_default_when_section_missing(tmp_path: Path) -> None:
-    """No [named_console] section produces the documented tiled default."""
+    """No [named_console] section produces the aw-session-vertical default
+    -- the layout the Named Console feature was designed around (one
+    privileged session pane on top, helper shells underneath)."""
     config_file = _minimal_config(tmp_path)
     cfg = load_config(config_file)
-    assert cfg.named_console.tmux_layout == "tiled"
+    assert cfg.named_console.tmux_layout == "aw-session-vertical"
 
 
 @pytest.mark.parametrize(

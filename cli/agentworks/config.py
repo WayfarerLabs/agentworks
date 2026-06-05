@@ -117,9 +117,11 @@ class DefaultsConfig:
 
 
 # Agentworks-specific layout: session pane (pane 0) takes the top 50% of
-# the window, shell panes stack vertically in the bottom 50%. Expanded at
-# apply-time to `select-layout even-vertical` + `resize-pane` on pane 0
-# (tmux has no preset that matches this geometry).
+# the window, shell panes stack vertically in the bottom 50% with equal
+# heights. tmux has no preset that matches this geometry, so apply-time
+# builds a custom tmux layout string from the live window dimensions and
+# pane IDs and feeds it to `tmux select-layout`. See
+# `_apply_aw_session_vertical_layout` in sessions/multi_console.py.
 AW_SESSION_VERTICAL_LAYOUT = "aw-session-vertical"
 
 # Valid layouts for named-console session windows. All values besides
@@ -144,7 +146,7 @@ class NamedConsoleConfig:
     consoles read these values today.
     """
 
-    tmux_layout: str = "tiled"
+    tmux_layout: str = AW_SESSION_VERTICAL_LAYOUT
 
 
 @dataclass(frozen=True)
@@ -452,7 +454,7 @@ def _load_named_console(
 
     _warn_unexpected_keys(raw, _NAMED_CONSOLE_KEYS, "named_console", issues)
 
-    layout = raw.get("tmux_layout", "tiled")
+    layout = raw.get("tmux_layout", AW_SESSION_VERTICAL_LAYOUT)
     if layout not in VALID_TMUX_LAYOUTS:
         raise ConfigError(
             f"named_console.tmux_layout must be one of {VALID_TMUX_LAYOUTS}, "
