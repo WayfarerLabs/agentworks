@@ -115,3 +115,67 @@ def warnings(captured_output: CapturedOutput) -> Generator[list[str], None, None
     Reuses ``captured_output`` so both fixtures can coexist safely.
     """
     yield captured_output.warnings
+
+
+# ---------------------------------------------------------------------------
+# Fake tmux target (named-console tests)
+#
+# Several test modules drive the named-console SSH layer through a stand-in
+# target that captures commands rather than actually running them on a VM.
+# Defined here so all test files that import the classes (or use the
+# fixture) share the same implementation.
+# ---------------------------------------------------------------------------
+
+
+class _FakeResult:
+    """Minimal stand-in for ssh.SSHResult."""
+
+    def __init__(self, returncode: int = 0, stdout: str = "", stderr: str = "") -> None:
+        self.returncode = returncode
+        self.stdout = stdout
+        self.stderr = stderr
+
+    @property
+    def ok(self) -> bool:
+        return self.returncode == 0
+
+
+class _FakeTarget:
+    """Captures the commands run against it. Supports a per-test override map
+    that lets us simulate (e.g.) `has-session` returning nonzero on first probe.
+    """
+
+    def __init__(self, responses: dict[str, _FakeResult] | None = None) -> None:
+        self.commands: list[str] = []
+        # Substring -> response. First matching substring wins; default = ok.
+        self.responses = responses or {}
+
+    def run(self, command: str, **kwargs: object) -> _FakeResult:
+        self.commands.append(command)
+        for needle, response in self.responses.items():
+            if needle in command:
+                return response
+        return _FakeResult()
+
+
+@pytest.fixture
+def fake_target(monkeypatch: pytest.MonkeyPatch) -> _FakeTarget:
+    """Install a FakeTarget for the SSH layer and stub VM-running checks."""
+    target = _FakeTarget()
+    # `agentworks.ssh.admin_exec_target` covers lazy imports in multi_console;
+    # `agentworks.sessions.manager.admin_exec_target` covers manager's eager
+    # top-level import (used by batch_check_all_sessions and friends).
+    fake_factory = lambda vm, config, **kwargs: target  # noqa: E731
+    monkeypatch.setattr("agentworks.ssh.admin_exec_target", fake_factory)
+    monkeypatch.setattr(
+        "agentworks.sessions.manager.admin_exec_target", fake_factory
+    )
+    monkeypatch.setattr(
+        "agentworks.workspaces.manager._ensure_vm_running",
+        lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr(
+        "agentworks.ssh.interactive",
+        lambda target, command: 0,
+    )
+    return target
