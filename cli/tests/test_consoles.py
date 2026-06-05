@@ -941,6 +941,7 @@ def test_attach_console_builds_initial_tmux(
     assert any("kill-session -t aw-console-con" in c for c in cmds)
     assert any("new-session -d -s aw-console-con -n _PLACEHOLDER" in c for c in cmds)
     # No admin-shell window: named consoles only contain the curated sessions.
+    assert not any("--admin--" in c for c in cmds)
     assert not any("admin-shell" in c for c in cmds)
     new_window_indexes = [i for i, c in enumerate(cmds) if "new-window -t aw-console-con" in c]
     assert len(new_window_indexes) == 2, cmds
@@ -1058,9 +1059,9 @@ def test_attach_console_builds_admin_shell_window_without_placeholder(
     cmds = fake_target.commands
     new_sessions = [c for c in cmds if "new-session -d -s aw-console-con" in c]
     assert len(new_sessions) == 1
-    # Window 0 is admin-shell, running sudo su --login <admin> -- pin the shape
-    # so quoting regressions in the bootstrap fail loudly.
-    assert "-n admin-shell" in new_sessions[0]
+    # Window 0 is the --admin-- window, running sudo su --login <admin> -- pin
+    # the shape so quoting regressions in the bootstrap fail loudly.
+    assert "-n --admin--" in new_sessions[0]
     assert "sudo su --login" in new_sessions[0]
     assert "admin" in new_sessions[0]  # the admin username from _seed_vm
     assert not any("_PLACEHOLDER" in c for c in cmds)
@@ -1400,12 +1401,12 @@ def test_reorder_sessions_live_sync_swaps_windows_no_admin_shell(
 def test_reorder_sessions_live_sync_holds_admin_shell_fixed(
     db: Database, fake_target: _FakeTarget
 ) -> None:
-    """The admin-shell window is identified by name and excluded from the
-    permutable slots; session reordering targets only the remaining indices."""
+    """Permutable slots are derived positively from the session set, so the
+    --admin-- window (whose name is not in the desired list) is excluded."""
     _seed_vm(db, with_tailscale=True)
     _seed_sessions(db, ["a", "b", "c"])
     # Build the console with admin_shell=True so the live layout will have
-    # 'admin-shell' at index 0 and sessions at 1+.
+    # '--admin--' at index 0 and sessions at 1+.
     db.insert_console("con", "vm1", admin_shell=True)
     for n in ["a", "b", "c"]:
         db.add_console_session("con", n, [])
@@ -1413,15 +1414,16 @@ def test_reorder_sessions_live_sync_holds_admin_shell_fixed(
     fake_target.commands.clear()
     fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
     fake_target.responses["list-windows -t aw-console-con"] = _FakeResult(
-        returncode=0, stdout="0|admin-shell\n1|a\n2|b\n3|c\n"
+        returncode=0, stdout="0|--admin--\n1|a\n2|b\n3|c\n"
     )
 
     reorder_sessions(
         db, _StubConfig(), console_name="con", session_names=["c"]
     )
 
-    # Desired order: [c, a, b]. Session slots = [1, 2, 3] (admin-shell at 0
-    # is held fixed). Starting [admin-shell, a, b, c]:
+    # Desired order: [c, a, b]. Session slots = [1, 2, 3] ('--admin--' at
+    # 0 is not in the session set, so it isn't a slot). Starting [--admin--,
+    # a, b, c]:
     #   - i=0 wants c at idx 1; c is at 3 -> swap 3<->1 -> [..., c, b, a]
     #   - i=1 wants a at idx 2; a is now at 3 -> swap 3<->2 -> [..., c, a, b]
     # The second swap is the unavoidable cost of placing one displaced
@@ -1431,9 +1433,47 @@ def test_reorder_sessions_live_sync_holds_admin_shell_fixed(
         "tmux swap-window -s aw-console-con:3 -t aw-console-con:1",
         "tmux swap-window -s aw-console-con:3 -t aw-console-con:2",
     ]
-    # admin-shell window itself was never moved.
+    # --admin-- window itself was never moved.
     assert not any(
-        "swap-window" in c and "admin-shell" in c for c in fake_target.commands
+        "swap-window" in c and "--admin--" in c for c in fake_target.commands
+    )
+
+
+def test_reorder_sessions_live_sync_ignores_stray_window(
+    db: Database, fake_target: _FakeTarget
+) -> None:
+    """A window with no matching session row (operator-created via raw
+    `tmux new-window`, leftover from a rename, etc.) is not a permutable
+    slot. The reorder operates only on windows whose names are in the
+    session set; the stray stays put."""
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["a", "b", "c"])
+    create_console(db, name="con", vm_name="vm1", session_specs=["a", "b", "c"])
+
+    fake_target.commands.clear()
+    fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
+    # Operator opened an extra window named 'scratch' at index 2; sessions
+    # live at 0, 1, 3.
+    fake_target.responses["list-windows -t aw-console-con"] = _FakeResult(
+        returncode=0, stdout="0|a\n1|b\n2|scratch\n3|c\n"
+    )
+
+    reorder_sessions(
+        db, _StubConfig(), console_name="con", session_names=["c"]
+    )
+
+    # Session slots = [0, 1, 3] (scratch at 2 is excluded). Desired order
+    # [c, a, b]:
+    #   - i=0 wants c at slot 0 (idx 0); c is at 3 -> swap 3<->0 -> [c, b, scratch, a]
+    #   - i=1 wants a at slot 1 (idx 1); a is now at 3 -> swap 3<->1 -> [c, a, scratch, b]
+    # scratch is never touched; it remains at index 2.
+    swaps = [c for c in fake_target.commands if "swap-window" in c]
+    assert swaps == [
+        "tmux swap-window -s aw-console-con:3 -t aw-console-con:0",
+        "tmux swap-window -s aw-console-con:3 -t aw-console-con:1",
+    ]
+    assert not any(
+        "swap-window" in c and "scratch" in c for c in fake_target.commands
     )
 
 

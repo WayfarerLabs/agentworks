@@ -48,6 +48,11 @@ if TYPE_CHECKING:
 
 TMUX_PREFIX = "aw-console-"
 
+# Literal tmux window name for the optional admin-shell window. Wrapped in
+# double hyphens so it cannot collide with any session name: validate_name
+# rejects leading hyphens, consecutive hyphens, and trailing hyphens.
+ADMIN_SHELL_WINDOW = "--admin--"
+
 
 def tmux_session_name(console_name: str) -> str:
     """Return the tmux session name for a console."""
@@ -422,7 +427,7 @@ def reorder_sessions(
     """Bump *session_names* to the front of a console's session order.
 
     The listed sessions become the first windows (in the order given, after
-    the admin-shell window if the console has one). Unlisted members keep
+    the ``--admin--`` window if the console has one). Unlisted members keep
     their current relative order and are pushed back.
 
     Every name in *session_names* must already be a member; duplicates and
@@ -498,7 +503,6 @@ def reorder_sessions(
         _reorder_session_windows(
             target,
             console_name=console_name,
-            admin_shell=console.admin_shell,
             ordered_session_windows=desired_order,
         )
 
@@ -907,7 +911,6 @@ def _reorder_session_windows(
     target: ExecTarget,
     *,
     console_name: str,
-    admin_shell: bool,
     ordered_session_windows: list[str],
 ) -> None:
     """Reorder session windows in a live console to match *ordered_session_windows*.
@@ -918,12 +921,13 @@ def _reorder_session_windows(
     swap doesn't abort the rest, and the local map is only mirrored on
     success so subsequent iterations target the right windows.
 
-    When *admin_shell* is True we hold the window literally named
-    ``admin-shell`` (set by ``_build_console_tmux``) out of the permutable
-    slot set. Matching by name is what makes this robust: tmux indices can
-    drift between the initial build and now (placeholder cleanup, manual
-    operator action), and a future drift case where the DB flag and the
-    live layout disagree self-heals on ``console attach --recreate``.
+    Permutable slots are derived positively from the session set: only
+    windows whose names appear in *ordered_session_windows* are candidates,
+    and the slots are taken in ascending tmux index order. Everything else
+    (the ``--admin--`` window, operator-created strays from a manual
+    ``tmux new-window``, anything that was renamed) stays put. The sentinel
+    name for the admin-shell window is rejected by validate_name, so no
+    real session name can ever collide with it.
     """
     q_con = shlex.quote(tmux_session_name(console_name))
     res = target.run(
@@ -944,12 +948,8 @@ def _reorder_session_windows(
     if not pairs:
         return
     pairs.sort(key=lambda p: p[0])
-    # Session slots: every window index that isn't admin-shell, in ascending
-    # order. The N session windows we want to permute occupy exactly these N
-    # slots; the desired order is mapped onto them positionally.
-    session_slots = [
-        idx for idx, name in pairs if not (admin_shell and name == "admin-shell")
-    ]
+    desired_set = set(ordered_session_windows)
+    session_slots = [idx for idx, name in pairs if name in desired_set]
     widx_by_name: dict[str, int] = {name: idx for idx, name in pairs}
     name_by_widx: dict[int, str] = {idx: name for idx, name in pairs}
 
@@ -1352,9 +1352,12 @@ def _build_console_tmux(
     _kill_console_tmux(target, console.name)
 
     if console.admin_shell:
-        # Window 0 is the admin shell -- matches legacy vm-console behavior.
+        # Window 0 is the admin shell. The literal tmux window name '--admin--'
+        # is impossible for any session (validate_name rejects leading hyphen,
+        # consecutive hyphens, and trailing hyphen), so we don't need extra
+        # logic to distinguish this internal window from real session windows.
         target.run(
-            f"tmux new-session -d -s {q_con} -n admin-shell "
+            f"tmux new-session -d -s {q_con} -n {shlex.quote(ADMIN_SHELL_WINDOW)} "
             f"{shlex.quote('exec sudo su --login ' + shlex.quote(vm.admin_username))}"
         )
         placeholder_used = False
