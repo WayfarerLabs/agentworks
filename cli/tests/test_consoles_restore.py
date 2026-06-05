@@ -181,6 +181,9 @@ def test_restore_session_noop_when_live_matches_config(
     assert not any("split-window" in c for c in fake_target.commands)
     assert not any("swap-pane" in c for c in fake_target.commands)
     assert any("already matches config" in m for m in captured_output.info)
+    # Post-restore landing focus on the session pane is the same regardless
+    # of whether repairs were needed.
+    assert "tmux select-pane -t aw-console-con:a.0" in fake_target.commands
 
 
 # -- restore-session: happy paths ------------------------------------------

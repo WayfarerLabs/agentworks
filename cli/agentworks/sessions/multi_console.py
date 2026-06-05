@@ -763,6 +763,9 @@ def restore_session(
                 f"session '{session_name}' already matches config "
                 f"({len(tag_values)} shell pane(s)); nothing to do."
             )
+            # Still focus the session pane on this no-op path so post-restore
+            # landing focus is consistent whether or not repairs were needed.
+            _focus_session_pane(target, q_con, q_win)
             return
 
         # Strict subset: figure out which config indices are missing.
