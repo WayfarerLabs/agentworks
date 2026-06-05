@@ -3,7 +3,10 @@
 Carved out of ``multi_console.py`` to keep that file focused on the
 public API (create_console, attach_console, add_sessions, etc.) and DB
 orchestration. The functions here all operate on a live tmux target +
-quoted console/window names; none of them touch the DB or Config.
+quoted console/window names; none of them take a Database or Config
+instance as an argument (the module does import the
+``AW_SESSION_VERTICAL_LAYOUT`` constant from config, but it doesn't
+need a runtime Config).
 
 Two clusters live here:
 
