@@ -321,7 +321,7 @@ def describe_workspace(
 def list_workspaces(
     db: Database,
     *,
-    vm_name: str | None = None,
+    vm_name: str | list[str] | None = None,
 ) -> None:
     """List workspaces."""
     workspaces = db.list_workspaces(vm_name=vm_name)

@@ -396,7 +396,7 @@ def _format_grants(db: Database, agent_name: str, grant_all: bool) -> str:
 def list_agents(
     db: Database,
     *,
-    vm_name: str | None = None,
+    vm_name: str | list[str] | None = None,
 ) -> None:
     """List agents."""
     agents = db.list_agents(vm_name=vm_name)

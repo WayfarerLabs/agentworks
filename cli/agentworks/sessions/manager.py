@@ -298,15 +298,20 @@ def _regenerate_tmuxinator(
 def filter_sessions(
     db: Database,
     *,
-    workspace_name: str | None = None,
-    vm_name: str | None = None,
+    workspace_name: str | list[str] | None = None,
+    vm_name: str | list[str] | None = None,
+    agent_name: str | list[str] | None = None,
 ) -> list[SessionRow]:
-    """Load sessions with optional workspace/VM filters."""
-    sessions = db.list_sessions(workspace_name=workspace_name)
-    if vm_name is not None:
-        vm_workspaces = {ws.name for ws in db.list_workspaces(vm_name=vm_name)}
-        sessions = [s for s in sessions if s.workspace_name in vm_workspaces]
-    return sessions
+    """Load sessions with optional workspace, VM, and/or agent filters.
+
+    Each filter accepts a single name or a list of names; lists OR within
+    a filter, filters AND across the call. See `Database.list_sessions`.
+    """
+    return db.list_sessions(
+        workspace_name=workspace_name,
+        vm_name=vm_name,
+        agent_name=agent_name,
+    )
 
 
 def _resolve_template(config: Config, template_name: str | None) -> ResolvedSessionTemplate:
@@ -1330,7 +1335,10 @@ def list_sessions(
     db: Database,
     config: Config,
     *,
-    workspace_name: str | None = None,
+    workspace_name: str | list[str] | None = None,
+    vm_name: str | list[str] | None = None,
+    agent_name: str | list[str] | None = None,
+    admin_only: bool = False,
     no_status: bool = False,
 ) -> None:
     """List sessions with batched status checks (one SSH call per VM, parallel).
@@ -1338,7 +1346,12 @@ def list_sessions(
     Status resolution is has-session-first; PID/boot_id are only used as a
     follow-up when agent checks fail.
     """
-    sessions = db.list_sessions(workspace_name=workspace_name)
+    sessions = db.list_sessions(
+        workspace_name=workspace_name,
+        vm_name=vm_name,
+        agent_name=agent_name,
+        admin_only=admin_only,
+    )
     if not sessions:
         output.info("No sessions found.")
         return
