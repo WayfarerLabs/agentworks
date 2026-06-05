@@ -65,7 +65,6 @@ def _resolve_session_linux_user(db: Database, session: SessionRow, vm: VMRow) ->
     return vm.admin_username
 
 
-
 def _kill_session(
     session_name: str,
     *,
@@ -313,6 +312,28 @@ def filter_sessions(
         vm_name=vm_name,
         agent_name=agent_name,
     )
+
+
+def _distinct_vms_for_sessions(db: Database, sessions: list[SessionRow]) -> list[VMRow]:
+    """Resolve the distinct set of VMs that host the given sessions.
+
+    Used by the batch session operations (stop_all_sessions, restart_all_sessions,
+    list_sessions) to feed `keep_vms_active` with exactly the VMs whose SSH
+    transports will be touched. Order is insertion order keyed by VM name so
+    keepalive entry messages render in a stable order.
+    """
+    distinct: list[VMRow] = []
+    seen: set[str] = set()
+    for s in sessions:
+        ws = db.get_workspace(s.workspace_name)
+        if ws is None or ws.vm_name in seen:
+            continue
+        vm = db.get_vm(ws.vm_name)
+        if vm is None:
+            continue
+        distinct.append(vm)
+        seen.add(ws.vm_name)
+    return distinct
 
 
 def _resolve_template(config: Config, template_name: str | None) -> ResolvedSessionTemplate:
@@ -976,53 +997,46 @@ def stop_all_sessions(
     """Stop all running sessions, optionally filtered by VM or workspace."""
     sessions = filter_sessions(db, workspace_name=workspace_name, vm_name=vm_name)
 
-    # Auto-repair NULL-PID sessions, then batch check
-    sessions = ensure_pids_batch(sessions, db=db, config=config)
-    status_map = batch_check_all_sessions(sessions, db=db, config=config)
-
-    # Error if any sessions are still unknown after auto-repair.
-    # PID_STOPPED sessions are known-stopped (excluded from status_map by design).
-    unknown = [
-        s for s in sessions
-        if s.pid != PID_STOPPED
-        and (s.pid is None or s.boot_id is None or s.name not in status_map)
-    ]
-    if unknown:
-        names = ", ".join(s.name for s in unknown)
-        raise StateError(
-            f"{len(unknown)} session(s) have unknown status after auto-repair ({names}).",
-            hint="Resolve the listed sessions manually before retrying.",
-        )
-
-    broken = [s for s in sessions if status_map.get(s.name) == SessionStatus.BROKEN]
-    if broken and not force:
-        names = ", ".join(s.name for s in broken)
-        output.warn(f"Skipping {len(broken)} broken session(s) ({names}). Use --force to kill.")
-
-    ok_statuses = {SessionStatus.OK}
-    if force:
-        ok_statuses.add(SessionStatus.BROKEN)
-    alive_sessions = [s for s in sessions if status_map.get(s.name) in ok_statuses]
-
-    if not alive_sessions:
-        output.info("No running sessions to stop.")
-        return
-
-    output.info(f"Stopping {len(alive_sessions)} session(s)...")
-
-    # Resolve distinct VMs and anchor each (no-op for non-WSL2) for the
-    # duration of the stop. Sessions can span multiple VMs.
-    distinct_vms = []
-    seen_vm_names: set[str] = set()
-    for s in alive_sessions:
-        ws = db.get_workspace(s.workspace_name)
-        if ws and ws.vm_name not in seen_vm_names:
-            vm = db.get_vm(ws.vm_name)
-            if vm:
-                distinct_vms.append(vm)
-                seen_vm_names.add(ws.vm_name)
-
+    # Resolve distinct VMs from the filtered session set and enter the
+    # keepalive BEFORE the SSH probes. The probes (ensure_pids_batch,
+    # batch_check_all_sessions) issue per-VM round-trips; on WSL2 they
+    # would race the idle timer without the anchor. No-op on non-WSL2.
+    distinct_vms = _distinct_vms_for_sessions(db, sessions)
     with keep_vms_active(db, config, distinct_vms):
+        # Auto-repair NULL-PID sessions, then batch check
+        sessions = ensure_pids_batch(sessions, db=db, config=config)
+        status_map = batch_check_all_sessions(sessions, db=db, config=config)
+
+        # Error if any sessions are still unknown after auto-repair.
+        # PID_STOPPED sessions are known-stopped (excluded from status_map by design).
+        unknown = [
+            s for s in sessions
+            if s.pid != PID_STOPPED
+            and (s.pid is None or s.boot_id is None or s.name not in status_map)
+        ]
+        if unknown:
+            names = ", ".join(s.name for s in unknown)
+            raise StateError(
+                f"{len(unknown)} session(s) have unknown status after auto-repair ({names}).",
+                hint="Resolve the listed sessions manually before retrying.",
+            )
+
+        broken = [s for s in sessions if status_map.get(s.name) == SessionStatus.BROKEN]
+        if broken and not force:
+            names = ", ".join(s.name for s in broken)
+            output.warn(f"Skipping {len(broken)} broken session(s) ({names}). Use --force to kill.")
+
+        ok_statuses = {SessionStatus.OK}
+        if force:
+            ok_statuses.add(SessionStatus.BROKEN)
+        alive_sessions = [s for s in sessions if status_map.get(s.name) in ok_statuses]
+
+        if not alive_sessions:
+            output.info("No running sessions to stop.")
+            return
+
+        output.info(f"Stopping {len(alive_sessions)} session(s)...")
+
         # Resolve VM targets (reuse across sessions on the same VM)
         vm_targets: dict[str, ExecTarget] = {}
         for s in alive_sessions:
@@ -1061,54 +1075,47 @@ def restart_all_sessions(
     """
     sessions = filter_sessions(db, workspace_name=workspace_name, vm_name=vm_name)
 
-    # Auto-repair NULL-PID sessions, then batch check
-    sessions = ensure_pids_batch(sessions, db=db, config=config)
-    status_map = batch_check_all_sessions(sessions, db=db, config=config)
-
-    # Error if any sessions are still unknown after auto-repair.
-    # PID_STOPPED sessions are known-stopped (excluded from status_map by design).
-    unknown = [
-        s for s in sessions
-        if s.pid != PID_STOPPED
-        and (s.pid is None or s.boot_id is None or s.name not in status_map)
-    ]
-    if unknown:
-        names = ", ".join(s.name for s in unknown)
-        raise StateError(
-            f"{len(unknown)} session(s) have unknown status after auto-repair ({names}).",
-            hint="Resolve the listed sessions manually before retrying.",
-        )
-
-    if not include_running:
-        # Only stopped sessions
-        sessions = [
-            s
-            for s in sessions
-            if s.pid == PID_STOPPED
-            or status_map.get(s.name) == SessionStatus.STOPPED
-        ]
-
-    if not sessions:
-        output.info("No matching sessions to restart.")
-        return
-
-    output.info(f"Restarting {len(sessions)} session(s)...")
-
-    # Anchor distinct VMs across the batch. Each restart_session call also
-    # wraps internally; the redundant inner wrap is a no-op on already-active
-    # VMs.
-    distinct_vms = []
-    seen_vm_names: set[str] = set()
-    for s in sessions:
-        ws = db.get_workspace(s.workspace_name)
-        if ws and ws.vm_name not in seen_vm_names:
-            vm = db.get_vm(ws.vm_name)
-            if vm:
-                distinct_vms.append(vm)
-                seen_vm_names.add(ws.vm_name)
+    # Resolve distinct VMs from the filtered set and anchor them BEFORE the
+    # SSH probes. Each restart_session call also enters its own keepalive;
+    # the redundant inner wrap is a no-op on already-active VMs and a cheap
+    # extra subprocess on WSL2 (accepted, see PR description).
+    distinct_vms = _distinct_vms_for_sessions(db, sessions)
 
     failed: list[tuple[str, str]] = []
     with keep_vms_active(db, config, distinct_vms):
+        # Auto-repair NULL-PID sessions, then batch check
+        sessions = ensure_pids_batch(sessions, db=db, config=config)
+        status_map = batch_check_all_sessions(sessions, db=db, config=config)
+
+        # Error if any sessions are still unknown after auto-repair.
+        # PID_STOPPED sessions are known-stopped (excluded from status_map by design).
+        unknown = [
+            s for s in sessions
+            if s.pid != PID_STOPPED
+            and (s.pid is None or s.boot_id is None or s.name not in status_map)
+        ]
+        if unknown:
+            names = ", ".join(s.name for s in unknown)
+            raise StateError(
+                f"{len(unknown)} session(s) have unknown status after auto-repair ({names}).",
+                hint="Resolve the listed sessions manually before retrying.",
+            )
+
+        if not include_running:
+            # Only stopped sessions
+            sessions = [
+                s
+                for s in sessions
+                if s.pid == PID_STOPPED
+                or status_map.get(s.name) == SessionStatus.STOPPED
+            ]
+
+        if not sessions:
+            output.info("No matching sessions to restart.")
+            return
+
+        output.info(f"Restarting {len(sessions)} session(s)...")
+
         for session in sessions:
             try:
                 restart_session(db, config, name=session.name, force=force, yes=include_running)
@@ -1403,18 +1410,9 @@ def list_sessions(
     # Auto-repair sessions with missing PIDs, then batch check.
     # The status path SSHes to every involved VM; anchor each one (no-op
     # on non-WSL2) so the probe doesn't lose them mid-check.
-    if no_status:
-        status_keepalive_vms: list[VMRow] = []
-    else:
-        seen: set[str] = set()
-        status_keepalive_vms = []
-        for s in sessions:
-            ws = db.get_workspace(s.workspace_name)
-            if ws and ws.vm_name not in seen:
-                vm = db.get_vm(ws.vm_name)
-                if vm:
-                    status_keepalive_vms.append(vm)
-                    seen.add(ws.vm_name)
+    status_keepalive_vms: list[VMRow] = (
+        [] if no_status else _distinct_vms_for_sessions(db, sessions)
+    )
 
     status_map: dict[str, SessionStatus] = {}
     with keep_vms_active(db, config, status_keepalive_vms):

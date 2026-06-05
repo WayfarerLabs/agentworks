@@ -742,7 +742,6 @@ def initialize_vm(
     exec_target: ExecTarget,
     providers: dict[str, GitCredentialProvider],
     *,
-    is_wsl2: bool = False,
     admin_username: str = "agentworks",
     tailscale_auth_key: str | None = None,
     git_tokens: dict[str, str] | None = None,
@@ -790,7 +789,7 @@ def initialize_vm(
                 exec_target,
                 home,
                 admin_username,
-                is_wsl2,
+                vm_for_keepalive.platform,
                 logger,
                 tailscale_auth_key=tailscale_auth_key,
                 bootstrap_complete=bootstrap_complete,
@@ -892,7 +891,7 @@ def _phase_a_bootstrap(
     exec_target: ExecTarget,
     home: str,
     admin_username: str,
-    is_wsl2: bool,
+    platform: str,
     logger: SSHLogger,
     *,
     tailscale_auth_key: str | None = None,
@@ -927,7 +926,7 @@ def _phase_a_bootstrap(
             vm_name,
             exec_target,
             admin_username,
-            is_wsl2,
+            platform,
             logger,
             tailscale_auth_key=tailscale_auth_key,
         )
@@ -971,7 +970,7 @@ def _run_bootstrap_script(
     vm_name: str,
     exec_target: ExecTarget,
     admin_username: str,
-    is_wsl2: bool,
+    platform: str,
     logger: SSHLogger,
     *,
     tailscale_auth_key: str | None = None,
@@ -985,28 +984,24 @@ def _run_bootstrap_script(
 
     from agentworks.vms.bootstrap_script import generate_bootstrap_script, parse_bootstrap_output, vm_hostname
 
-    output.info("Bootstrapping VM (detached)...")
+    output.info("Bootstrapping VM...")
 
     # Resolve Tailscale auth key
     ts_auth_key = _resolve_tailscale_auth_key(tailscale_auth_key)
 
     ssh_public_key = config.operator.ssh_public_key.read_text().strip()
-    # Determine platform for hostname. Look up the VM record for the actual
-    # platform; fall back to transport-based detection.
-    platform = "wsl2" if is_wsl2 else "unknown"
-    vm_row = db.get_vm(vm_name)
-    if vm_row is not None:
-        platform = vm_row.platform
     script = generate_bootstrap_script(
         admin_username=admin_username,
         ssh_public_key=ssh_public_key,
         provisioning_packages=PROVISIONING_PACKAGES,
         tailscale_auth_key=ts_auth_key,
         hostname=vm_hostname(platform, vm_name),
-        swap=0 if is_wsl2 else config.vm.swap,  # WSL2 provisioner handles swap
+        # WSL2 provisioner handles swap natively before bootstrap; every other
+        # platform lets the script create the swapfile.
+        swap=0 if platform == "wsl2" else config.vm.swap,
     )
 
-    # Copy script to VM and execute via detached nohup
+    # Copy script to VM and execute synchronously over the provisioning transport
     remote_script = "/tmp/agentworks-bootstrap.sh"
     with tempfile.NamedTemporaryFile(mode="wb", suffix=".sh", delete=False) as f:
         f.write(script.encode("utf-8"))

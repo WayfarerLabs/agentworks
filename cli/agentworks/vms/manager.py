@@ -298,7 +298,6 @@ def create_vm(
             vm_name,
             exec_target=result.admin_exec_target,
             providers=providers,
-            is_wsl2=(platform == "wsl2"),
             admin_username=resolved_admin_username,
             tailscale_auth_key=tailscale_auth_key,
             git_tokens=git_tokens,
@@ -595,9 +594,17 @@ def start_vm(db: Database, config: Config, name: str) -> None:
     else:
         provisioner.start(vm)
 
+    # Tailscale verification runs inside the keepalive so a freshly booted
+    # WSL2 distro doesn't idle-shut while we wait for tailscaled to come up.
     with keep_vm_active(db, config, vm):
         _ensure_tailscale(db, config, vm, provisioner)
-    output.info(f"VM '{name}' is ready")
+    # Only emit "is ready" on the path that actually started the VM. When
+    # status was already RUNNING we already said so above, and Tailscale
+    # verification is usually a no-op (handshake already valid), so an
+    # extra "is ready" line is just noise. On the real-work path it
+    # confirms tailscaled finished its handshake.
+    if status != VMStatus.RUNNING:
+        output.info(f"VM '{name}' is ready")
 
 
 def stop_vm(db: Database, config: Config, name: str) -> None:

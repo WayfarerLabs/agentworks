@@ -343,9 +343,10 @@ def _keepalive(vm: VMRow, config: Config | None) -> Iterator[None]:
     needs a few seconds for tailscaled to reattach to the tailnet after
     boot, and callers expect a ready VM.
 
-    On exit: ``terminate()`` the subprocess (SIGTERM), wait briefly, then
-    ``kill()`` if it hasn't exited. The distro is then free to idle out
-    on Windows' normal schedule.
+    On exit: ``terminate()`` the subprocess (TerminateProcess on Windows;
+    SIGTERM on POSIX, though this code path is Windows-only in practice),
+    wait briefly, then ``kill()`` if it hasn't exited. The distro is then
+    free to idle out on Windows' normal schedule.
 
     The subprocess is also assigned to a Win32 Job Object with
     ``KILL_ON_JOB_CLOSE``, so if this Python process dies in a way that
@@ -371,7 +372,11 @@ def _keepalive(vm: VMRow, config: Config | None) -> Iterator[None]:
     if h_job is not None and h_proc is not None and not _assign_process_to_job(h_job, int(h_proc)):
         _close_handle(h_job)
         h_job = None
-    if h_job is None:
+    # Only surface the orphan-risk note on Windows where Job Object SHOULD
+    # work but didn't (older Windows / unusual perms / ctypes import failed).
+    # On other platforms _kernel32 is always None by design, so the note
+    # would just be noise on every keepalive entry.
+    if h_job is None and sys.platform == "win32":
         output.detail(
             "(note: Win32 Job Object unavailable; a hard-kill of this command may leave an orphan wsl.exe.)"
         )

@@ -1170,13 +1170,20 @@ def _resolve_vm(db: Database, vm_name: str | None) -> VMRow:
 
 def _ensure_vm_running(db: Database, config: Config, vm: VMRow) -> None:
     """Auto-start a stopped/deallocated VM and verify Tailscale connectivity."""
-    from agentworks.vms.manager import _ensure_tailscale, get_provisioner_for_vm
+    from agentworks.vms.manager import _ensure_tailscale, get_provisioner_for_vm, keep_vm_active
 
     provisioner = get_provisioner_for_vm(db, vm)
     status = provisioner.status(vm)
 
     if status in (VMStatus.STOPPED, VMStatus.DEALLOCATED):
         output.info(f"VM '{vm.name}' is {status.value}. Starting...")
+        # Probe + start happen BEFORE keep_vm_active because the WSL2
+        # keepalive subprocess boots a stopped distro as a side effect; see
+        # the matching note in vms/manager.start_vm. Tailscale verification
+        # then runs inside the keepalive so a freshly booted WSL2 distro
+        # doesn't idle-shut while we wait for tailscaled to come up
+        # (handshake can exceed WSL2's default ~60s vmIdleTimeout).
         provisioner.start(vm)
         output.info(f"VM '{vm.name}' started")
-        _ensure_tailscale(db, config, vm, provisioner)
+        with keep_vm_active(db, config, vm):
+            _ensure_tailscale(db, config, vm, provisioner)
