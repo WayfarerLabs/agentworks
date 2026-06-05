@@ -65,17 +65,17 @@ def test_vm_active_spawns_keepalive_subprocess() -> None:
     with (
         patch("agentworks.vms.provisioners.wsl2.subprocess.Popen", return_value=proc) as popen,
         _job_object_mocks(),
+        WSL2Provisioner().vm_active(_fake_vm("mydistro"))
     ):
-        with WSL2Provisioner().vm_active(_fake_vm("mydistro")):
-            popen.assert_called_once()
-            args = popen.call_args[0][0]
-            assert args == ["wsl", "--distribution", "mydistro", "--", "sleep", "infinity"]
-            kwargs = popen.call_args.kwargs
-            # stdin/stdout detached so the subprocess doesn't compete for the user's terminal.
-            # stderr is piped so we can read it on a fast-fail.
-            assert kwargs["stdin"] == subprocess.DEVNULL
-            assert kwargs["stdout"] == subprocess.DEVNULL
-            assert kwargs["stderr"] == subprocess.PIPE
+        popen.assert_called_once()
+        args = popen.call_args[0][0]
+        assert args == ["wsl", "--distribution", "mydistro", "--", "sleep", "infinity"]
+        kwargs = popen.call_args.kwargs
+        # stdin/stdout detached so the subprocess doesn't compete for the user's terminal.
+        # stderr is piped so we can read it on a fast-fail.
+        assert kwargs["stdin"] == subprocess.DEVNULL
+        assert kwargs["stdout"] == subprocess.DEVNULL
+        assert kwargs["stderr"] == subprocess.PIPE
     # On clean exit: terminate then wait. No kill needed.
     proc.terminate.assert_called_once()
     # wait is called twice: once for the fast-fail probe, once after terminate.
@@ -89,10 +89,10 @@ def test_vm_active_terminates_on_exception() -> None:
     with (
         patch("agentworks.vms.provisioners.wsl2.subprocess.Popen", return_value=proc),
         _job_object_mocks(),
+        pytest.raises(RuntimeError, match="boom"),
+        WSL2Provisioner().vm_active(_fake_vm())
     ):
-        with pytest.raises(RuntimeError, match="boom"):
-            with WSL2Provisioner().vm_active(_fake_vm()):
-                raise RuntimeError("boom")
+        raise RuntimeError("boom")
     proc.terminate.assert_called_once()
     proc.wait.assert_called()
 
@@ -111,9 +111,9 @@ def test_vm_active_kills_if_terminate_doesnt_take() -> None:
     with (
         patch("agentworks.vms.provisioners.wsl2.subprocess.Popen", return_value=proc),
         _job_object_mocks(),
+        WSL2Provisioner().vm_active(_fake_vm())
     ):
-        with WSL2Provisioner().vm_active(_fake_vm()):
-            pass
+        pass
     proc.terminate.assert_called_once()
     proc.kill.assert_called_once()
 
@@ -133,10 +133,10 @@ def test_vm_active_fast_fails_if_keepalive_subprocess_dies_immediately() -> None
     with (
         patch("agentworks.vms.provisioners.wsl2.subprocess.Popen", return_value=proc),
         _job_object_mocks(),
+        pytest.raises(RuntimeError, match="exited immediately"),
+        WSL2Provisioner().vm_active(_fake_vm("missing-distro")),
     ):
-        with pytest.raises(RuntimeError, match="exited immediately"):
-            with WSL2Provisioner().vm_active(_fake_vm("missing-distro")):
-                pass
+        pass
 
 
 def test_vm_active_waits_for_tailscale_when_host_known() -> None:
@@ -196,9 +196,9 @@ def test_vm_active_assigns_subprocess_to_kill_on_close_job() -> None:
     with (
         patch("agentworks.vms.provisioners.wsl2.subprocess.Popen", return_value=proc),
         _job_object_mocks(create_returns=0xBEEF) as (create, assign, close),
+        WSL2Provisioner().vm_active(_fake_vm())
     ):
-        with WSL2Provisioner().vm_active(_fake_vm()):
-            pass
+        pass
     create.assert_called_once_with()
     assign.assert_called_once_with(0xBEEF, 0xDEAD)
     # Handle closed exactly once on the way out.
@@ -215,10 +215,10 @@ def test_vm_active_closes_job_handle_on_fast_fail() -> None:
     with (
         patch("agentworks.vms.provisioners.wsl2.subprocess.Popen", return_value=proc),
         _job_object_mocks(create_returns=0xBEEF) as (_create, _assign, close),
+        pytest.raises(RuntimeError, match="exited immediately"),
+        WSL2Provisioner().vm_active(_fake_vm()),
     ):
-        with pytest.raises(RuntimeError, match="exited immediately"):
-            with WSL2Provisioner().vm_active(_fake_vm()):
-                pass
+        pass
     close.assert_called_with(0xBEEF)
 
 
@@ -233,9 +233,9 @@ def test_vm_active_falls_back_when_job_object_unavailable() -> None:
     with (
         patch("agentworks.vms.provisioners.wsl2.subprocess.Popen", return_value=proc),
         _job_object_mocks(create_returns=None) as (create, assign, close),
+        WSL2Provisioner().vm_active(_fake_vm())
     ):
-        with WSL2Provisioner().vm_active(_fake_vm()):
-            pass
+        pass
     create.assert_called_once_with()
     assign.assert_not_called()
     # Cleanup is a no-op when the handle is None (verified by the helper itself),
@@ -252,9 +252,9 @@ def test_vm_active_releases_job_when_assignment_fails() -> None:
     with (
         patch("agentworks.vms.provisioners.wsl2.subprocess.Popen", return_value=proc),
         _job_object_mocks(create_returns=0xBEEF, assign_returns=False) as (create, assign, close),
+        WSL2Provisioner().vm_active(_fake_vm()),
     ):
-        with WSL2Provisioner().vm_active(_fake_vm()):
-            pass
+        pass
     create.assert_called_once()
     assign.assert_called_once_with(0xBEEF, 0xDEAD)
     # Closed twice: once when assignment failed (immediate cleanup), once in

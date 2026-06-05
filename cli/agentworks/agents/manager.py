@@ -501,7 +501,8 @@ def shell_agent(
             import shlex
 
             q_path = shlex.quote(ws.workspace_path)
-            sys.exit(interactive(target, f"exec sudo su --login {agent.linux_user} -c 'cd {q_path} && exec $SHELL -li'"))
+            shell_cmd = f"exec sudo su --login {agent.linux_user} -c 'cd {q_path} && exec $SHELL -li'"
+            sys.exit(interactive(target, shell_cmd))
         else:
             sys.exit(interactive(target, f"exec sudo su --login {agent.linux_user}"))
 

@@ -365,10 +365,9 @@ def _keepalive(vm: VMRow, config: Config | None) -> Iterator[None]:
     # fall back to terminate-only cleanup and warn so the operator knows
     # the orphan-on-hard-kill risk is live.
     h_job: int | None = _create_kill_on_close_job()
-    if h_job is not None:
-        if not _assign_process_to_job(h_job, int(proc._handle)):
-            _close_handle(h_job)
-            h_job = None
+    if h_job is not None and not _assign_process_to_job(h_job, int(proc._handle)):
+        _close_handle(h_job)
+        h_job = None
     if h_job is None:
         output.detail(
             "(note: Win32 Job Object unavailable; a hard-kill of this command may leave an orphan wsl.exe.)"

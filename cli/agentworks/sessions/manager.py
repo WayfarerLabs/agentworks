@@ -829,7 +829,10 @@ def stop_session(
                 )
             output.warn(f"Session '{name}' is broken (tmux unreachable), force-killing via PID")
             assert session.pid is not None
-            if not force_kill_tmux_server(session.pid, target=target, socket_path=session.socket_path, log=output.detail):
+            killed = force_kill_tmux_server(
+                session.pid, target=target, socket_path=session.socket_path, log=output.detail,
+            )
+            if not killed:
                 raise ExternalError(
                     f"failed to kill PID {session.pid} for session '{name}'",
                     entity_kind="session",
@@ -886,7 +889,10 @@ def restart_session(
 
             output.warn(f"Session '{name}' is broken (tmux unreachable), force-killing via PID")
             assert session.pid is not None
-            if not force_kill_tmux_server(session.pid, target=target, socket_path=session.socket_path, log=output.detail):
+            killed = force_kill_tmux_server(
+                session.pid, target=target, socket_path=session.socket_path, log=output.detail,
+            )
+            if not killed:
                 raise ExternalError(
                     f"failed to kill PID {session.pid} for session '{name}'",
                     entity_kind="session",
@@ -1173,7 +1179,10 @@ def delete_session(
 
             output.warn(f"Session '{name}' is broken (tmux unreachable), force-killing via PID")
             assert session.pid is not None
-            if not force_kill_tmux_server(session.pid, target=target, socket_path=session.socket_path, log=output.detail):
+            killed = force_kill_tmux_server(
+                session.pid, target=target, socket_path=session.socket_path, log=output.detail,
+            )
+            if not killed:
                 raise ExternalError(
                     f"failed to kill PID {session.pid} for session '{name}'",
                     entity_kind="session",
@@ -1251,7 +1260,9 @@ def delete_session(
         if session.created_agent and session.agent_name:
             other_sessions = [s for s in db.list_sessions() if s.agent_name == session.agent_name]
             explicit_grants = [
-                ws for (ws, has_explicit, _) in db.list_granted_workspaces_with_types(session.agent_name) if has_explicit
+                ws
+                for (ws, has_explicit, _) in db.list_granted_workspaces_with_types(session.agent_name)
+                if has_explicit
             ]
             if other_sessions or explicit_grants:
                 reasons: list[str] = []
