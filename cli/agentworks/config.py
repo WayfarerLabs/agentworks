@@ -116,9 +116,17 @@ class DefaultsConfig:
     vm_host: str | None = None
 
 
-# Valid tmux preset layouts for named-console session windows. These map
-# 1:1 to tmux's built-in select-layout names; we deliberately don't invent
-# our own names so operators can apply the same value to a window via
+# Agentworks-specific layout: session pane (pane 0) takes the top 50% of
+# the window, shell panes stack vertically in the bottom 50% with equal
+# heights. tmux has no preset that matches this geometry, so apply-time
+# builds a custom tmux layout string from the live window dimensions and
+# pane IDs and feeds it to `tmux select-layout`. See
+# `_apply_aw_session_vertical_layout` in sessions/multi_console_layout.py.
+AW_SESSION_VERTICAL_LAYOUT = "aw-session-vertical"
+
+# Valid layouts for named-console session windows. All values besides
+# AW_SESSION_VERTICAL_LAYOUT map 1:1 to tmux's built-in select-layout
+# names so operators can apply the same value to a window via
 # `tmux select-layout` on the fly.
 VALID_TMUX_LAYOUTS = (
     "tiled",
@@ -126,6 +134,7 @@ VALID_TMUX_LAYOUTS = (
     "even-horizontal",
     "main-vertical",
     "main-horizontal",
+    AW_SESSION_VERTICAL_LAYOUT,
 )
 
 
@@ -137,7 +146,7 @@ class NamedConsoleConfig:
     consoles read these values today.
     """
 
-    tmux_layout: str = "tiled"
+    tmux_layout: str = AW_SESSION_VERTICAL_LAYOUT
 
 
 @dataclass(frozen=True)
@@ -445,7 +454,7 @@ def _load_named_console(
 
     _warn_unexpected_keys(raw, _NAMED_CONSOLE_KEYS, "named_console", issues)
 
-    layout = raw.get("tmux_layout", "tiled")
+    layout = raw.get("tmux_layout", AW_SESSION_VERTICAL_LAYOUT)
     if layout not in VALID_TMUX_LAYOUTS:
         raise ConfigError(
             f"named_console.tmux_layout must be one of {VALID_TMUX_LAYOUTS}, "

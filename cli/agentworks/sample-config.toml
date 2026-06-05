@@ -46,20 +46,28 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # workspace-console template generator do NOT read these values.
 #
 # tmux_layout: layout applied to every multi-pane session window in a named
-# console. Maps 1:1 to tmux's built-in select-layout names so the same value
-# can be applied on the fly via `tmux select-layout` key bindings. Re-read
-# on every build / recreate / add-shell / restore-session, so changing this
-# value and running `agw console attach <name> --recreate` (or
-# adding/restoring a shell on a live console) is enough to switch layouts.
+# console. Most values map 1:1 to tmux's built-in select-layout names so the
+# same value can be applied on the fly via `tmux select-layout` key bindings;
+# the `aw-session-vertical` value is an agentworks-specific layout computed
+# per-window from live tmux dimensions. Re-read on every build / recreate /
+# add-shell / restore-session, so changing this value and running
+# `agw console attach <name> --recreate` (or adding/restoring a shell on a
+# live console) is enough to switch layouts.
 
 [named_console]
-# tmux_layout = "tiled"
+# tmux_layout = "aw-session-vertical"
 # Valid values:
-#   tiled            - roughly-equal grid (default; current behavior)
-#   even-vertical    - all panes as equal-height rows (one column)
-#   even-horizontal  - all panes as equal-width columns (one row)
-#   main-vertical    - session pane on the left, helper shells stacked right
-#   main-horizontal  - session pane on top, helper shells laid out below
+#   aw-session-vertical  - single column; session pane takes the top 50%
+#                          and shell panes stack vertically in the bottom 50%
+#                          with equal heights. The default -- this is the
+#                          layout the Named Console feature was designed
+#                          around (one privileged session pane, helper
+#                          shells underneath).
+#   tiled                - roughly-equal grid
+#   even-vertical        - all panes as equal-height rows (one column)
+#   even-horizontal      - all panes as equal-width columns (one row)
+#   main-vertical        - session pane on the left, helper shells stacked right
+#   main-horizontal      - session pane on top, helper shells laid out below
 # The "main" layouts treat the first pane (the session attach itself) as
 # the primary; the remaining shell panes become the secondary stack.
 

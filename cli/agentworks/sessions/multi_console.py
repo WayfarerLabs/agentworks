@@ -30,6 +30,14 @@ from agentworks.errors import (
     UserAbort,
     ValidationError,
 )
+from agentworks.sessions.multi_console_layout import (
+    SHELL_INDEX_OPTION,
+    _apply_layout,
+    _focus_session_pane,
+    _list_shell_panes,
+    _reorder_session_windows,
+    _reorder_shell_panes,
+)
 from agentworks.sessions.tmux import tmux_cmd
 from agentworks.vms.manager import keep_vm_active
 
@@ -593,11 +601,11 @@ def add_shell(
         )
         q_con = shlex.quote(tmux_session_name(console_name))
         q_win = shlex.quote(session_name)
-        layout = shlex.quote(config.named_console.tmux_layout)
-        target.run(
-            f"tmux select-layout -t {q_con}:{q_win} {layout}",
-            check=False,
-        )
+        # No _focus_session_pane here: the operator is mid-attach when they
+        # run `add-shell`; pulling focus off their current pane would be
+        # jarring. The layout still re-applies so geometry reflects the new
+        # pane count.
+        _apply_layout(target, q_con, q_win, config.named_console.tmux_layout)
 
 
 def restore_session(
@@ -755,6 +763,9 @@ def restore_session(
                 f"session '{session_name}' already matches config "
                 f"({len(tag_values)} shell pane(s)); nothing to do."
             )
+            # Still focus the session pane on this no-op path so post-restore
+            # landing focus is consistent whether or not repairs were needed.
+            _focus_session_pane(target, q_con, q_win)
             return
 
         # Strict subset: figure out which config indices are missing.
@@ -813,206 +824,12 @@ def restore_session(
         # config_index for every shell pane.
         _reorder_shell_panes(target, q_con, q_win, configured_count)
 
-        # Re-apply the layout to redistribute geometry after the splits and swaps.
-        q_layout = shlex.quote(layout)
-        target.run(
-            f"tmux select-layout -t {q_con}:{q_win} {q_layout}",
-            check=False,
-        )
-
-
-def _list_shell_panes(
-    target: ExecTarget, q_con: str, q_win: str
-) -> list[tuple[str, int, int | None]] | None:
-    """Return live shell panes for a console window as (pane_id, pane_index,
-    config_index_or_None). Excludes pane_index 0 (the session pane).
-
-    Returns None if the tmux query failed.
-    """
-    res = target.run(
-        f"tmux list-panes -t {q_con}:{q_win} "
-        f"-F '#{{pane_id}}|#{{pane_index}}|#{{{SHELL_INDEX_OPTION}}}'",
-        check=False,
-    )
-    if not res.ok:
-        return None
-    panes: list[tuple[str, int, int | None]] = []
-    for line in res.stdout.strip().splitlines():
-        parts = line.split("|", 2)
-        if len(parts) != 3:
-            continue
-        pid, pidx_s, cidx_s = parts
-        try:
-            pidx = int(pidx_s)
-        except ValueError:
-            continue
-        if pidx == 0:
-            # Session pane: not part of the configured shell list.
-            continue
-        cidx: int | None
-        if cidx_s:
-            try:
-                cidx = int(cidx_s)
-            except ValueError:
-                cidx = None
-        else:
-            cidx = None
-        panes.append((pid, pidx, cidx))
-    return panes
-
-
-def _reorder_shell_panes(
-    target: ExecTarget, q_con: str, q_win: str, configured_count: int
-) -> None:
-    """Reorder shell panes so pane_index N+1 holds the pane with
-    @agentworks-shell-index N. Shell panes live at pane_index >= 1 (the
-    session pane occupies pane_index 0).
-
-    One tmux list-panes round trip up front, then we track positions in
-    memory across swaps: pane_ids are stable, so after each `swap-pane` we
-    just exchange the pane_index values of the two affected entries in
-    our local map. Best-effort: if a swap fails, we keep going and let
-    select-layout handle the geometry.
-    """
-    panes = _list_shell_panes(target, q_con, q_win)
-    if panes is None:
-        return
-    # pane_index by pane_id; mutated as we issue swaps so the next iteration
-    # sees the current layout without another SSH round trip.
-    pidx_by_pid: dict[str, int] = {pid: pidx for pid, pidx, _cidx in panes}
-    pid_by_cidx: dict[int, str] = {
-        cidx: pid for pid, _pidx, cidx in panes if cidx is not None
-    }
-
-    for target_cidx in range(configured_count):
-        target_pidx = target_cidx + 1
-        src_pid = pid_by_cidx.get(target_cidx)
-        if src_pid is None:
-            continue
-        src_pidx = pidx_by_pid[src_pid]
-        if src_pidx == target_pidx:
-            continue
-        # Find the pane currently sitting at target_pidx so we can update its
-        # in-memory pane_index after the swap. There must be one (panes at
-        # pane_index 1..N are all shell panes by construction).
-        displaced_pid = next(
-            (pid for pid, pidx in pidx_by_pid.items() if pidx == target_pidx),
-            None,
-        )
-        res = target.run(
-            f"tmux swap-pane -s {shlex.quote(src_pid)} "
-            f"-t {q_con}:{q_win}.{target_pidx}",
-            check=False,
-        )
-        # Only mirror the swap into the local map on success; a failed swap-pane
-        # leaves tmux state unchanged, so the previous mapping is still correct.
-        # Compounding stale state into subsequent iterations would target the
-        # wrong panes and could scramble order further.
-        if res.ok:
-            pidx_by_pid[src_pid] = target_pidx
-            if displaced_pid is not None:
-                pidx_by_pid[displaced_pid] = src_pidx
-
-
-def _reorder_session_windows(
-    target: ExecTarget,
-    *,
-    console_name: str,
-    ordered_session_windows: list[str],
-) -> None:
-    """Reorder session windows in a live console to match *ordered_session_windows*.
-
-    Walks the desired order and issues ``tmux swap-window`` for each slot
-    that's out of place, tracking window indices in memory across swaps so
-    we never need a second list-windows round trip. Best-effort: a failed
-    swap doesn't abort the rest, and the local map is only mirrored on
-    success so subsequent iterations target the right windows.
-
-    Permutable slots are derived positively from the session set: only
-    windows whose names appear in *ordered_session_windows* are candidates,
-    and the slots are taken in ascending tmux index order. Everything else
-    (the ``--admin--`` window, operator-created strays from a manual
-    ``tmux new-window``, anything that was renamed) stays put. The sentinel
-    name for the admin-shell window is rejected by validate_name, so no
-    real session name can ever collide with it.
-    """
-    q_con = shlex.quote(tmux_session_name(console_name))
-    res = target.run(
-        f"tmux list-windows -t {q_con} -F '#{{window_index}}|#{{window_name}}'",
-        check=False,
-    )
-    if not res.ok:
-        return
-    pairs: list[tuple[int, str]] = []
-    for line in res.stdout.strip().splitlines():
-        parts = line.split("|", 1)
-        if len(parts) != 2:
-            continue
-        try:
-            pairs.append((int(parts[0]), parts[1]))
-        except ValueError:
-            continue
-    if not pairs:
-        return
-    pairs.sort(key=lambda p: p[0])
-    desired_set = set(ordered_session_windows)
-
-    # Duplicate window names among the session set break the swap-by-name
-    # logic (the dict below would silently retain only the last index for
-    # each name and we'd target the wrong window). tmux allows duplicates
-    # but we can't disambiguate, so bail with a recovery hint rather than
-    # scramble the layout. The DB is already updated; recreate materializes
-    # the new order from a clean slate.
-    name_counts: dict[str, int] = {}
-    for _idx, name in pairs:
-        name_counts[name] = name_counts.get(name, 0) + 1
-    duplicated = sorted(
-        n for n, c in name_counts.items() if c > 1 and n in desired_set
-    )
-    if duplicated:
-        q_console = shlex.quote(console_name)
-        output.warn(
-            f"console '{console_name}' has duplicate window name(s) "
-            f"({', '.join(duplicated)}); cannot reorder live tmux safely. "
-            f"DB order was updated; run "
-            f"`agentworks console attach {q_console} --recreate` to rebuild "
-            f"tmux from DB state."
-        )
-        return
-
-    session_slots = [idx for idx, name in pairs if name in desired_set]
-    widx_by_name: dict[str, int] = {name: idx for idx, name in pairs}
-    name_by_widx: dict[int, str] = {idx: name for idx, name in pairs}
-
-    # Filter the desired order down to windows actually live in tmux. When
-    # the operator has manually killed a session window (or tmux hasn't
-    # caught up to the DB yet), the surviving windows compact toward the
-    # front rather than each holding their original positional index --
-    # otherwise a missing entry at desired[i] would leave desired[i+1]
-    # stranded at slot i+1 with no member at slot i.
-    present_desired = [n for n in ordered_session_windows if n in widx_by_name]
-
-    for k, desired_name in enumerate(present_desired):
-        if k >= len(session_slots):
-            # Defensive: session_slots and present_desired should be the
-            # same length by construction (both filter on desired_set ∩
-            # live-names). If they ever diverge, stop rather than risk a
-            # bad swap. --recreate will reconcile.
-            break
-        target_idx = session_slots[k]
-        src_idx = widx_by_name[desired_name]
-        if src_idx == target_idx:
-            continue
-        displaced_name = name_by_widx[target_idx]
-        swap = target.run(
-            f"tmux swap-window -s {q_con}:{src_idx} -t {q_con}:{target_idx}",
-            check=False,
-        )
-        if swap.ok:
-            widx_by_name[desired_name] = target_idx
-            widx_by_name[displaced_name] = src_idx
-            name_by_widx[target_idx] = desired_name
-            name_by_widx[src_idx] = displaced_name
+        # Re-apply the layout to redistribute geometry after the splits and
+        # swaps, then land the operator on the session pane (matches attach /
+        # recreate behavior; restore-session is a repair, not an attach, but
+        # we still want consistent landing focus).
+        _apply_layout(target, q_con, q_win, layout)
+        _focus_session_pane(target, q_con, q_win)
 
 
 # -- Read-side helpers ----------------------------------------------------
@@ -1206,9 +1023,6 @@ def _resolve_workspace_path(db: Database, session: SessionRow) -> str | None:
     return ws.workspace_path if ws else None
 
 
-SHELL_INDEX_OPTION = "@agentworks-shell-index"
-
-
 def _split_shell_pane(
     target: ExecTarget,
     *,
@@ -1354,37 +1168,36 @@ def _add_session_window(
         )
         return
 
-    if not member.shells:
-        return
-
-    # _session_linux_user raises NotFoundError if the session points at an agent
-    # row that's gone (FK violation under PRAGMA foreign_keys = OFF, or stale
-    # state from a migration). Match the missing-session / missing-workspace
-    # handling above: warn and skip rather than abort the whole console build.
-    try:
-        session_user = _session_linux_user(db, session, vm)
-    except NotFoundError as exc:
-        output.warn(
-            f"agent for session '{session.name}' is missing ({exc}); "
-            f"skipping shell panes for this window"
-        )
-        return
-    for config_index, shell in enumerate(member.shells):
-        _split_shell_pane(
-            target,
-            console_name=console_name,
-            window_name=session.name,
-            workspace_path=workspace_path,
-            shell=shell,
-            session_user=session_user,
-            admin_user=vm.admin_username,
-            config_index=config_index,
-        )
-    q_layout = shlex.quote(layout)
-    target.run(
-        f"tmux select-layout -t {q_con}:{q_session} {q_layout}",
-        check=False,
-    )
+    if member.shells:
+        # _session_linux_user raises NotFoundError if the session points at an
+        # agent row that's gone (FK violation under PRAGMA foreign_keys = OFF,
+        # or stale state from a migration). Match the missing-session /
+        # missing-workspace handling above: warn and skip rather than abort
+        # the whole console build.
+        try:
+            session_user = _session_linux_user(db, session, vm)
+        except NotFoundError as exc:
+            output.warn(
+                f"agent for session '{session.name}' is missing ({exc}); "
+                f"skipping shell panes for this window"
+            )
+            return
+        for config_index, shell in enumerate(member.shells):
+            _split_shell_pane(
+                target,
+                console_name=console_name,
+                window_name=session.name,
+                workspace_path=workspace_path,
+                shell=shell,
+                session_user=session_user,
+                admin_user=vm.admin_username,
+                config_index=config_index,
+            )
+        _apply_layout(target, q_con, q_session, layout)
+    # Focus the session pane so the operator lands on the attach output
+    # rather than the most-recently-created shell pane. Done unconditionally
+    # (cheap, and consistent across windows with and without shells).
+    _focus_session_pane(target, q_con, q_session)
 
 
 def _build_console_tmux(
