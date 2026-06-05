@@ -25,7 +25,6 @@ SSH_PUBLIC_KEY={ssh_public_key}
 PROVISIONING_PACKAGES={provisioning_packages}
 TAILSCALE_AUTH_KEY={tailscale_auth_key}
 VM_HOSTNAME={vm_hostname}
-TS_EXTRA_FLAGS={ts_extra_flags}
 SWAP_GB={swap}
 
 # -- Step 1: Ensure user --
@@ -94,6 +93,19 @@ hostnamectl set-hostname "$VM_HOSTNAME" 2>/dev/null || hostname "$VM_HOSTNAME"
 echo "##SUCCESS## hostname set to $VM_HOSTNAME"
 
 # -- Step 6: Install Tailscale --
+# tailscaled is configured by its Debian package's systemd unit, which reads
+# /etc/default/tailscaled for the FLAGS env var. We leave both at their
+# package defaults across all platforms (Lima, Azure, Proxmox, WSL2) so
+# tailscaled runs in kernel-tun mode -- modern WSL2 kernels (5.10+) ship
+# /dev/net/tun, just like every other Debian-based VM we target.
+#
+# If WSL2 ever needs userspace networking (e.g. a stripped kernel without
+# tun): drop a systemd unit override that appends to FLAGS, e.g.:
+#   /etc/systemd/system/tailscaled.service.d/10-userspace.conf
+#     [Service]
+#     Environment="FLAGS=--tun=userspace-networking"
+# Do NOT overwrite /etc/default/tailscaled -- it sets PORT too, and an
+# empty PORT makes tailscaled refuse to start with INVALIDARGUMENT.
 echo "##STEP## Tailscale install"
 if command -v tailscale >/dev/null 2>&1; then
     echo "##SUCCESS## tailscale already installed"
@@ -104,8 +116,7 @@ fi
 
 # -- Step 7: Join Tailscale --
 echo "##STEP## Tailscale join"
-# shellcheck disable=SC2086
-tailscale up --auth-key "$TAILSCALE_AUTH_KEY" $TS_EXTRA_FLAGS
+tailscale up --auth-key "$TAILSCALE_AUTH_KEY"
 TS_IP=$(tailscale ip -4)
 echo "##SUCCESS## tailscale-ip=$TS_IP"
 """
@@ -124,18 +135,14 @@ def generate_bootstrap_script(
     tailscale_auth_key: str,
     hostname: str,
     swap: int = 0,
-    is_wsl2: bool = False,
 ) -> str:
     """Generate the Phase A bootstrap script with parameters baked in."""
-    ts_extra_flags = "--userspace-networking" if is_wsl2 else ""
-
     return SCRIPT_TEMPLATE.format(
         admin_username=shlex.quote(admin_username),
         ssh_public_key=shlex.quote(ssh_public_key),
         provisioning_packages=shlex.quote(" ".join(provisioning_packages)),
         tailscale_auth_key=shlex.quote(tailscale_auth_key),
         vm_hostname=shlex.quote(hostname),
-        ts_extra_flags=shlex.quote(ts_extra_flags),
         swap=swap,
     )
 

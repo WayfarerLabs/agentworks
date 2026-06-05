@@ -47,7 +47,7 @@ if TYPE_CHECKING:
 def _seed_vm(db: Database, vm_name: str = "vm1", *, with_tailscale: bool = False) -> None:
     """Insert a VM and a workspace. No tailscale host -> live-sync skips."""
     db._conn.execute(
-        "INSERT INTO vms (name, platform, admin_username) VALUES (?, 'wsl', 'admin')",
+        "INSERT INTO vms (name, platform, admin_username) VALUES (?, 'lima', 'admin')",
         (vm_name,),
     )
     if with_tailscale:
