@@ -169,21 +169,23 @@ def attach_console(
         )
 
     from agentworks.ssh import admin_exec_target, interactive
+    from agentworks.vms.manager import keep_vm_active
 
     target = admin_exec_target(vm, config)
 
     # Get sessions for this VM (console wrapper handles dead sessions)
     vm_sessions = _get_sessions_for_vm(db, vm)
 
-    if recreate or not console_exists(run_command=target.run):
-        create_console(
-            vm_sessions,
-            run_command=target.run,
-            admin_username=vm.admin_username,
-            recreate=recreate,
-        )
+    with keep_vm_active(db, config, vm):
+        if recreate or not console_exists(run_command=target.run):
+            create_console(
+                vm_sessions,
+                run_command=target.run,
+                admin_username=vm.admin_username,
+                recreate=recreate,
+            )
 
-    sys.exit(interactive(target, f"tmux attach -t {CONSOLE_SESSION_NAME}"))
+        sys.exit(interactive(target, f"tmux attach -t {CONSOLE_SESSION_NAME}"))
 
 
 def _get_sessions_for_vm(db: Database, vm: VMRow) -> list[SessionRow]:

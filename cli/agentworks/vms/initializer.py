@@ -12,7 +12,6 @@ Phase B steps are non-fatal -- failures produce warnings and a 'partial' status.
 
 from __future__ import annotations
 
-import contextlib
 import ipaddress
 import shlex
 import subprocess

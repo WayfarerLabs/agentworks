@@ -1332,6 +1332,7 @@ def attach_console(
 ) -> None:
     """Attach to a named console, building or rebuilding tmux state as needed."""
     from agentworks.ssh import interactive
+    from agentworks.vms.manager import keep_vm_active
 
     if os.environ.get("TMUX") and not allow_nesting:
         raise StateError(
@@ -1343,19 +1344,20 @@ def attach_console(
     console = _require_console(db, name)
     vm, target = _prepare_vm_target_for_attach(db, config, console.vm_name)
 
-    exists = _console_tmux_exists(target, name)
-    layout = config.named_console.tmux_layout
-    if recreate and exists:
-        output.info(f"Rebuilding console '{name}' (--recreate)...")
-        _build_console_tmux(target, db, console, vm, layout=layout)
-    elif not exists:
-        output.info(f"Building console '{name}' on first attach...")
-        _build_console_tmux(target, db, console, vm, layout=layout)
-    else:
-        output.info(f"Attaching to running console '{name}'.")
+    with keep_vm_active(db, config, vm):
+        exists = _console_tmux_exists(target, name)
+        layout = config.named_console.tmux_layout
+        if recreate and exists:
+            output.info(f"Rebuilding console '{name}' (--recreate)...")
+            _build_console_tmux(target, db, console, vm, layout=layout)
+        elif not exists:
+            output.info(f"Building console '{name}' on first attach...")
+            _build_console_tmux(target, db, console, vm, layout=layout)
+        else:
+            output.info(f"Attaching to running console '{name}'.")
 
-    tmux_name = tmux_session_name(name)
-    sys.exit(interactive(target, f"tmux attach -t {shlex.quote(tmux_name)}"))
+        tmux_name = tmux_session_name(name)
+        sys.exit(interactive(target, f"tmux attach -t {shlex.quote(tmux_name)}"))
 
 
 def delete_console(

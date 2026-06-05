@@ -31,6 +31,7 @@ def backup_vm(
     Returns the path to the backup archive.
     """
     from agentworks.ssh import SSHError, SSHLogger, _unwrap_ssh, admin_exec_target
+    from agentworks.vms.manager import keep_vm_active
     from agentworks.workspaces.manager import _ensure_vm_running
 
     vm = db.get_vm(vm_name)
@@ -49,115 +50,116 @@ def backup_vm(
             entity_name=vm_name,
         )
 
-    # Create backup directory first so the log goes inside it
-    timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-    backup_name = f"{vm_name}-{timestamp}"
-    backup_dir = config.paths.backups / backup_name
-    backup_dir.mkdir(parents=True, exist_ok=True)
+    with keep_vm_active(db, config, vm):
+        # Create backup directory first so the log goes inside it
+        timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+        backup_name = f"{vm_name}-{timestamp}"
+        backup_dir = config.paths.backups / backup_name
+        backup_dir.mkdir(parents=True, exist_ok=True)
 
-    ssh_logger = SSHLogger(vm_name, "vm-backup")
-    ssh_logger.path = backup_dir / "backup.log"
-    target = admin_exec_target(vm, config, logger=ssh_logger)
+        ssh_logger = SSHLogger(vm_name, "vm-backup")
+        ssh_logger.path = backup_dir / "backup.log"
+        target = admin_exec_target(vm, config, logger=ssh_logger)
 
-    # Log the backup event
-    db.insert_vm_event(vm_name, "backup_started")
+        # Log the backup event
+        db.insert_vm_event(vm_name, "backup_started")
 
-    output.info(f"Backing up VM '{vm_name}' to {backup_dir}...")
+        output.info(f"Backing up VM '{vm_name}' to {backup_dir}...")
 
-    # Snapshot all DB data in a single transaction for consistency
-    output.detail("Reading database (consistent snapshot)...")
-    _vm, agents, workspaces, sessions, events, grants_by_agent = db.snapshot_vm_backup_data(vm_name)
+        # Snapshot all DB data in a single transaction for consistency
+        output.detail("Reading database (consistent snapshot)...")
+        _vm, agents, workspaces, sessions, events, grants_by_agent = db.snapshot_vm_backup_data(vm_name)
 
-    # 1. VM metadata
-    output.detail("Exporting VM metadata...")
-    _write_json(backup_dir / "vm.json", asdict(vm))
+        # 1. VM metadata
+        output.detail("Exporting VM metadata...")
+        _write_json(backup_dir / "vm.json", asdict(vm))
 
-    # 2. Events
-    output.detail(f"Exporting {len(events)} VM events...")
-    _write_json(backup_dir / "events.json", [asdict(e) for e in events])
+        # 2. Events
+        output.detail(f"Exporting {len(events)} VM events...")
+        _write_json(backup_dir / "events.json", [asdict(e) for e in events])
 
-    # 3. Agents with grants and live UID verification
-    output.detail(f"Exporting {len(agents)} agents...")
-    agents_data = []
-    for agent in agents:
-        agent_data = asdict(agent)
+        # 3. Agents with grants and live UID verification
+        output.detail(f"Exporting {len(agents)} agents...")
+        agents_data = []
+        for agent in agents:
+            agent_data = asdict(agent)
 
-        try:
-            result = target.run(f"id -u {shlex.quote(agent.linux_user)}", check=False)
-            if result.ok:
-                agent_data["live_uid"] = result.stdout.strip()
-            else:
+            try:
+                result = target.run(f"id -u {shlex.quote(agent.linux_user)}", check=False)
+                if result.ok:
+                    agent_data["live_uid"] = result.stdout.strip()
+                else:
+                    agent_data["live_uid"] = None
+                    output.warn(f"user '{agent.linux_user}' not found on VM")
+            except SSHError:
                 agent_data["live_uid"] = None
-                output.warn(f"user '{agent.linux_user}' not found on VM")
-        except SSHError:
-            agent_data["live_uid"] = None
 
-        agent_data["grants"] = [asdict(g) for g in grants_by_agent.get(agent.name, [])]
-        agents_data.append(agent_data)
-    _write_json(backup_dir / "agents.json", agents_data)
+            agent_data["grants"] = [asdict(g) for g in grants_by_agent.get(agent.name, [])]
+            agents_data.append(agent_data)
+        _write_json(backup_dir / "agents.json", agents_data)
 
-    # 4. Workspaces with live GID verification
-    output.detail(f"Exporting {len(workspaces)} workspaces...")
-    ws_data = []
-    for ws in workspaces:
-        ws_entry = asdict(ws)
-        ws_group = ws.linux_group
-        try:
-            result = target.run(f"getent group {shlex.quote(ws_group)}", check=False)
-            if result.ok:
-                parts = result.stdout.strip().split(":")
-                ws_entry["live_gid"] = parts[2] if len(parts) > 2 else None
-            else:
+        # 4. Workspaces with live GID verification
+        output.detail(f"Exporting {len(workspaces)} workspaces...")
+        ws_data = []
+        for ws in workspaces:
+            ws_entry = asdict(ws)
+            ws_group = ws.linux_group
+            try:
+                result = target.run(f"getent group {shlex.quote(ws_group)}", check=False)
+                if result.ok:
+                    parts = result.stdout.strip().split(":")
+                    ws_entry["live_gid"] = parts[2] if len(parts) > 2 else None
+                else:
+                    ws_entry["live_gid"] = None
+                    output.warn(f"group '{ws_group}' not found on VM")
+            except SSHError:
                 ws_entry["live_gid"] = None
-                output.warn(f"group '{ws_group}' not found on VM")
-        except SSHError:
-            ws_entry["live_gid"] = None
 
-        ws_data.append(ws_entry)
-    _write_json(backup_dir / "workspaces.json", ws_data)
+            ws_data.append(ws_entry)
+        _write_json(backup_dir / "workspaces.json", ws_data)
 
-    # 5. Sessions
-    output.detail(f"Exporting {len(sessions)} sessions...")
-    _write_json(backup_dir / "sessions.json", [asdict(s) for s in sessions])
+        # 5. Sessions
+        output.detail(f"Exporting {len(sessions)} sessions...")
+        _write_json(backup_dir / "sessions.json", [asdict(s) for s in sessions])
 
-    # 6. Workspace files -- single archive of all workspace paths
-    archived_paths: list[str] = []
-    skipped_paths: list[str] = []
-    if workspaces:
-        local_archive = backup_dir / "workspaces.tar.zst"
-        try:
-            archived_paths, skipped_paths = _archive_workspaces(
-                target, _unwrap_ssh(target), workspaces, local_archive,
-            )
-        except Exception:
-            # _archive_workspaces catches its own KeyboardInterrupt during the
-            # long tar phase and converts to UserAbort (an AgentworksError);
-            # we don't need a separate KI branch here.
-            db.insert_vm_event(vm_name, "backup_failed")
-            raise
-    else:
-        output.detail("No VM workspaces to archive.")
+        # 6. Workspace files -- single archive of all workspace paths
+        archived_paths: list[str] = []
+        skipped_paths: list[str] = []
+        if workspaces:
+            local_archive = backup_dir / "workspaces.tar.zst"
+            try:
+                archived_paths, skipped_paths = _archive_workspaces(
+                    target, _unwrap_ssh(target), workspaces, local_archive,
+                )
+            except Exception:
+                # _archive_workspaces catches its own KeyboardInterrupt during the
+                # long tar phase and converts to UserAbort (an AgentworksError);
+                # we don't need a separate KI branch here.
+                db.insert_vm_event(vm_name, "backup_failed")
+                raise
+        else:
+            output.detail("No VM workspaces to archive.")
 
-    # 7. Manifest
-    manifest = {
-        "version": 2,
-        "vm_name": vm_name,
-        "timestamp": timestamp,
-        "agent_count": len(agents_data),
-        "workspace_count": len(ws_data),
-        "session_count": len(sessions),
-        "event_count": len(events),
-        "archived_paths": archived_paths,
-        "skipped_paths": skipped_paths,
-    }
-    _write_json(backup_dir / "manifest.json", manifest)
+        # 7. Manifest
+        manifest = {
+            "version": 2,
+            "vm_name": vm_name,
+            "timestamp": timestamp,
+            "agent_count": len(agents_data),
+            "workspace_count": len(ws_data),
+            "session_count": len(sessions),
+            "event_count": len(events),
+            "archived_paths": archived_paths,
+            "skipped_paths": skipped_paths,
+        }
+        _write_json(backup_dir / "manifest.json", manifest)
 
-    db.insert_vm_event(vm_name, "backup_completed", detail=str(backup_dir))
-    ssh_logger.close()
+        db.insert_vm_event(vm_name, "backup_completed", detail=str(backup_dir))
+        ssh_logger.close()
 
-    output.info(f"\nBackup complete: {backup_dir}")
+        output.info(f"\nBackup complete: {backup_dir}")
 
-    return backup_dir
+        return backup_dir
 
 
 def _archive_workspaces(
