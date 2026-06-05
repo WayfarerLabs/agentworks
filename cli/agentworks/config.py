@@ -116,9 +116,15 @@ class DefaultsConfig:
     vm_host: str | None = None
 
 
-# Valid tmux preset layouts for named-console session windows. These map
-# 1:1 to tmux's built-in select-layout names; we deliberately don't invent
-# our own names so operators can apply the same value to a window via
+# Agentworks-specific layout: session pane (pane 0) takes the top 50% of
+# the window, shell panes stack vertically in the bottom 50%. Expanded at
+# apply-time to `select-layout even-vertical` + `resize-pane` on pane 0
+# (tmux has no preset that matches this geometry).
+AW_SESSION_VERTICAL_LAYOUT = "aw-session-vertical"
+
+# Valid layouts for named-console session windows. All values besides
+# AW_SESSION_VERTICAL_LAYOUT map 1:1 to tmux's built-in select-layout
+# names so operators can apply the same value to a window via
 # `tmux select-layout` on the fly.
 VALID_TMUX_LAYOUTS = (
     "tiled",
@@ -126,6 +132,7 @@ VALID_TMUX_LAYOUTS = (
     "even-horizontal",
     "main-vertical",
     "main-horizontal",
+    AW_SESSION_VERTICAL_LAYOUT,
 )
 
 

@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from agentworks import output
-from agentworks.config import validate_name
+from agentworks.config import AW_SESSION_VERTICAL_LAYOUT, validate_name
 from agentworks.errors import (
     AgentworksError,
     AlreadyExistsError,
@@ -592,11 +592,11 @@ def add_shell(
         )
         q_con = shlex.quote(tmux_session_name(console_name))
         q_win = shlex.quote(session_name)
-        layout = shlex.quote(config.named_console.tmux_layout)
-        target.run(
-            f"tmux select-layout -t {q_con}:{q_win} {layout}",
-            check=False,
-        )
+        # No _focus_session_pane here: the operator is mid-attach when they
+        # run `add-shell`; pulling focus off their current pane would be
+        # jarring. The layout still re-applies so geometry reflects the new
+        # pane count.
+        _apply_layout(target, q_con, q_win, config.named_console.tmux_layout)
 
 
 def restore_session(
@@ -806,12 +806,12 @@ def restore_session(
     # config_index for every shell pane.
     _reorder_shell_panes(target, q_con, q_win, configured_count)
 
-    # Re-apply the layout to redistribute geometry after the splits and swaps.
-    q_layout = shlex.quote(layout)
-    target.run(
-        f"tmux select-layout -t {q_con}:{q_win} {q_layout}",
-        check=False,
-    )
+    # Re-apply the layout to redistribute geometry after the splits and swaps,
+    # then land the operator on the session pane (matches attach / recreate
+    # behavior; restore-session is a repair, not an attach, but we still want
+    # consistent landing focus).
+    _apply_layout(target, q_con, q_win, layout)
+    _focus_session_pane(target, q_con, q_win)
 
 
 def _list_shell_panes(
@@ -1134,6 +1134,52 @@ def _kill_console_tmux(target: ExecTarget, console_name: str) -> None:
     target.run(f"tmux kill-session -t {q}", check=False)
 
 
+def _apply_layout(
+    target: ExecTarget, q_con: str, q_win: str, layout: str
+) -> None:
+    """Apply *layout* to a single console window.
+
+    Tmux preset names (`tiled`, `main-vertical`, etc.) go through
+    `select-layout` as-is. The agentworks-specific ``aw-session-vertical``
+    has no tmux preset equivalent: it stacks all panes vertically and
+    sizes the session pane (pane 0) to occupy the top 50% of the window.
+
+    The bottom 50% is left to tmux's automatic redistribution after the
+    pane-0 resize. With one shell the split is a clean 50/50; with two
+    or more shells the per-shell heights aren't perfectly equal (tmux's
+    resize-pane delta lands on a single neighbor at a time, not the
+    whole subset). The geometry is still "session on top half, shells
+    stack below" which is the property the layout is named for; if
+    operators want pixel-equal shell rows they can run `tmux` keys to
+    rebalance after attaching.
+
+    Best-effort; the caller's surrounding code doesn't `check=True` on
+    layout failure today and we preserve that contract.
+    """
+    if layout == AW_SESSION_VERTICAL_LAYOUT:
+        target.run(
+            f"tmux select-layout -t {q_con}:{q_win} even-vertical && "
+            f"H=$(tmux display-message -t {q_con}:{q_win} -p '#{{window_height}}') && "
+            f"tmux resize-pane -t {q_con}:{q_win}.0 -y $((H/2))",
+            check=False,
+        )
+    else:
+        target.run(
+            f"tmux select-layout -t {q_con}:{q_win} {shlex.quote(layout)}",
+            check=False,
+        )
+
+
+def _focus_session_pane(target: ExecTarget, q_con: str, q_win: str) -> None:
+    """Move tmux's active pane to the session pane (pane 0) of a window.
+
+    Called after building or repairing a window so the operator lands on
+    the session output, not the most-recently-created shell pane (which
+    is whatever tmux selected after the last `split-window`).
+    """
+    target.run(f"tmux select-pane -t {q_con}:{q_win}.0", check=False)
+
+
 def kill_session_windows(
     target: ExecTarget,
     *,
@@ -1332,37 +1378,36 @@ def _add_session_window(
         )
         return
 
-    if not member.shells:
-        return
-
-    # _session_linux_user raises NotFoundError if the session points at an agent
-    # row that's gone (FK violation under PRAGMA foreign_keys = OFF, or stale
-    # state from a migration). Match the missing-session / missing-workspace
-    # handling above: warn and skip rather than abort the whole console build.
-    try:
-        session_user = _session_linux_user(db, session, vm)
-    except NotFoundError as exc:
-        output.warn(
-            f"agent for session '{session.name}' is missing ({exc}); "
-            f"skipping shell panes for this window"
-        )
-        return
-    for config_index, shell in enumerate(member.shells):
-        _split_shell_pane(
-            target,
-            console_name=console_name,
-            window_name=session.name,
-            workspace_path=workspace_path,
-            shell=shell,
-            session_user=session_user,
-            admin_user=vm.admin_username,
-            config_index=config_index,
-        )
-    q_layout = shlex.quote(layout)
-    target.run(
-        f"tmux select-layout -t {q_con}:{q_session} {q_layout}",
-        check=False,
-    )
+    if member.shells:
+        # _session_linux_user raises NotFoundError if the session points at an
+        # agent row that's gone (FK violation under PRAGMA foreign_keys = OFF,
+        # or stale state from a migration). Match the missing-session /
+        # missing-workspace handling above: warn and skip rather than abort
+        # the whole console build.
+        try:
+            session_user = _session_linux_user(db, session, vm)
+        except NotFoundError as exc:
+            output.warn(
+                f"agent for session '{session.name}' is missing ({exc}); "
+                f"skipping shell panes for this window"
+            )
+            return
+        for config_index, shell in enumerate(member.shells):
+            _split_shell_pane(
+                target,
+                console_name=console_name,
+                window_name=session.name,
+                workspace_path=workspace_path,
+                shell=shell,
+                session_user=session_user,
+                admin_user=vm.admin_username,
+                config_index=config_index,
+            )
+        _apply_layout(target, q_con, q_session, layout)
+    # Focus the session pane so the operator lands on the attach output
+    # rather than the most-recently-created shell pane. Done unconditionally
+    # (cheap, and consistent across windows with and without shells).
+    _focus_session_pane(target, q_con, q_session)
 
 
 def _build_console_tmux(

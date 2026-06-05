@@ -432,10 +432,18 @@ def test_named_console_tmux_layout_default_when_section_missing(tmp_path: Path) 
 
 @pytest.mark.parametrize(
     "layout",
-    ["tiled", "even-vertical", "even-horizontal", "main-vertical", "main-horizontal"],
+    [
+        "tiled",
+        "even-vertical",
+        "even-horizontal",
+        "main-vertical",
+        "main-horizontal",
+        "aw-session-vertical",
+    ],
 )
 def test_named_console_tmux_layout_accepts_valid_presets(tmp_path: Path, layout: str) -> None:
-    """All five tmux preset layout names are accepted verbatim."""
+    """All five tmux preset layout names plus the agentworks-specific
+    `aw-session-vertical` are accepted verbatim."""
     config_file = _minimal_config(tmp_path, f"""
         [named_console]
         tmux_layout = "{layout}"

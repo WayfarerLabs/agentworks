@@ -395,7 +395,7 @@ Key sections:
 - `[session.config]` -- session defaults (history limit)
 - `[session_templates.*]` -- session templates with variable substitution
 - `[workspace_templates.*]` -- workspace templates with inheritance
-- `[named_console]` -- named-console layout (tmux preset name)
+- `[named_console]` -- named-console layout (tmux preset names + `aw-session-vertical`)
 - `[git_credentials.*]` -- git credential providers (GitHub, Azure DevOps)
 - `[apt_sources.*]` -- user-defined third-party apt repositories
 - `[apt_packages.*]` -- user-defined named apt package sets

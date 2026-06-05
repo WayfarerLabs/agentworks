@@ -2270,3 +2270,159 @@ def test_restore_session_splits_missing_config_indices_and_tags_them(
     assert any(f"-t %9 {SHELL_INDEX_OPTION} 1" in c for c in set_options)
     layouts = [c for c in fake_target.commands if "select-layout -t aw-console-con:a tiled" in c]
     assert len(layouts) == 1
+
+
+# -- Layout: aw-session-vertical + focus_session_pane ----------------------
+
+
+class _StubVerticalLayoutConfig:
+    """Stub config whose named_console layout selects aw-session-vertical."""
+
+    class _NC:
+        tmux_layout: str = "aw-session-vertical"
+
+    named_console = _NC()
+
+
+def test_apply_layout_preset_emits_simple_select_layout(
+    fake_target: _FakeTarget,
+) -> None:
+    """Tmux preset layout names go straight to `select-layout`."""
+    from agentworks.sessions.multi_console import _apply_layout
+
+    _apply_layout(fake_target, "aw-console-con", "alpha", "tiled")  # type: ignore[arg-type]
+    assert fake_target.commands == [
+        "tmux select-layout -t aw-console-con:alpha tiled",
+    ]
+
+
+def test_apply_layout_aw_session_vertical_emits_compound(
+    fake_target: _FakeTarget,
+) -> None:
+    """`aw-session-vertical` expands to even-vertical + window-height query
+    + resize-pane on pane 0 to claim the top half."""
+    from agentworks.sessions.multi_console import _apply_layout
+
+    _apply_layout(
+        fake_target,  # type: ignore[arg-type]
+        "aw-console-con",
+        "alpha",
+        "aw-session-vertical",
+    )
+    assert len(fake_target.commands) == 1
+    cmd = fake_target.commands[0]
+    assert "tmux select-layout -t aw-console-con:alpha even-vertical" in cmd
+    assert "tmux display-message -t aw-console-con:alpha -p '#{window_height}'" in cmd
+    assert "tmux resize-pane -t aw-console-con:alpha.0 -y $((H/2))" in cmd
+
+
+def test_focus_session_pane_emits_select_pane(fake_target: _FakeTarget) -> None:
+    from agentworks.sessions.multi_console import _focus_session_pane
+
+    _focus_session_pane(fake_target, "aw-console-con", "alpha")  # type: ignore[arg-type]
+    assert fake_target.commands == [
+        "tmux select-pane -t aw-console-con:alpha.0",
+    ]
+
+
+def test_attach_console_focuses_session_pane_per_window(
+    db: Database, fake_target: _FakeTarget
+) -> None:
+    """First-attach builds windows; each window ends with select-pane on
+    pane 0 so the operator lands on the session output, not the
+    most-recently-created shell pane."""
+    from agentworks.sessions.multi_console import attach_console
+
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["alpha", "beta"])
+    create_console(
+        db, name="con", vm_name="vm1", session_specs=["alpha+1", "beta"]
+    )
+    fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=1)
+    fake_target.responses["list-windows -t aw-console-con"] = _FakeResult(
+        returncode=0, stdout="_PLACEHOLDER\nalpha\nbeta\n"
+    )
+
+    with pytest.raises(SystemExit):
+        attach_console(db, _StubConfig(), name="con", allow_nesting=True)
+
+    selects = [c for c in fake_target.commands if "select-pane" in c]
+    assert "tmux select-pane -t aw-console-con:alpha.0" in selects
+    assert "tmux select-pane -t aw-console-con:beta.0" in selects
+
+
+def test_restore_session_focuses_session_pane(
+    db: Database, fake_target: _FakeTarget
+) -> None:
+    """restore-session repair ends with the session pane focused."""
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["a"])
+    create_console(db, name="con", vm_name="vm1", session_specs=["a+2"])
+
+    fake_target.commands.clear()
+    fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
+    fake_target.responses["list-windows -t aw-console-con"] = _FakeResult(
+        returncode=0, stdout="a\n"
+    )
+    # One shell pane present (config_index=0), the second is missing.
+    fake_target.responses["list-panes -t aw-console-con:a"] = _FakeResult(
+        returncode=0, stdout="%5|0|\n%6|1|0\n"
+    )
+    # split-window must return a fresh pane id so the tag step succeeds.
+    fake_target.responses["split-window -t aw-console-con:a"] = _FakeResult(
+        stdout="%9\n"
+    )
+
+    restore_session(db, _StubConfig(), console_name="con", session_name="a")
+
+    assert "tmux select-pane -t aw-console-con:a.0" in fake_target.commands
+
+
+def test_add_shell_does_not_focus_session_pane(
+    db: Database, fake_target: _FakeTarget
+) -> None:
+    """add-shell is invoked mid-attach; pulling focus away from the
+    operator's current pane would be jarring. Layout still re-applies."""
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["a"])
+    create_console(db, name="con", vm_name="vm1", session_specs=["a"])
+
+    fake_target.commands.clear()
+    fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
+    add_shell(db, _StubConfig(), console_name="con", session_name="a")
+
+    assert not any("select-pane" in c for c in fake_target.commands)
+    # But the layout still re-applies for the new pane count.
+    assert any(
+        "select-layout -t aw-console-con:a tiled" in c
+        for c in fake_target.commands
+    )
+
+
+def test_attach_console_aw_session_vertical_layout(
+    db: Database, fake_target: _FakeTarget
+) -> None:
+    """When the config picks aw-session-vertical, the build emits the
+    compound expansion (even-vertical + display-message + resize-pane)
+    instead of a single select-layout."""
+    from agentworks.sessions.multi_console import attach_console
+
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["alpha"])
+    create_console(db, name="con", vm_name="vm1", session_specs=["alpha+1"])
+    fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=1)
+    fake_target.responses["list-windows -t aw-console-con"] = _FakeResult(
+        returncode=0, stdout="_PLACEHOLDER\nalpha\n"
+    )
+
+    with pytest.raises(SystemExit):
+        attach_console(
+            db, _StubVerticalLayoutConfig(), name="con", allow_nesting=True  # type: ignore[arg-type]
+        )
+
+    layout_cmds = [c for c in fake_target.commands if "select-layout" in c]
+    assert any(
+        "tmux select-layout -t aw-console-con:alpha even-vertical" in c
+        and "tmux resize-pane -t aw-console-con:alpha.0 -y $((H/2))" in c
+        for c in layout_cmds
+    ), layout_cmds
