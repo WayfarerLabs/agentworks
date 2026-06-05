@@ -67,11 +67,11 @@ different-flags-for-AND keeps the operator's mental model unambiguous. Repeated-
 (`--vm vm1 --vm vm2`) are intentionally not used here, because the same shape would have to mean OR
 within one flag and AND across flags, which is the inconsistency this rule exists to avoid.
 
-Note the carve-out from the variadic-positional rule above: variadic positionals are for the
-things the command is operating on (the operands); filter options narrow what a list command
-considers. Operands keep their variadic-positional form (`agent grant-workspace my-agent ws1 ws2`);
-filters take CSV. Commas cannot appear in resource names (see `validate_name` in
-`agentworks/config.py`), so CSV parsing is safe.
+Note the carve-out from the variadic-positional rule above: variadic positionals are for the things
+the command is operating on (the operands); filter options narrow what a list command considers.
+Operands keep their variadic-positional form (`agent grant-workspace my-agent ws1 ws2`); filters
+take CSV. Commas cannot appear in resource names (see `validate_name` in `agentworks/config.py`), so
+CSV parsing is safe.
 
 **Mode filters** are bare boolean flags rather than valued options. Use `--admin` on `session list`
 to narrow to admin-mode sessions, not `--mode admin`. The bare-flag shape composes naturally with
