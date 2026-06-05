@@ -1211,7 +1211,7 @@ def _phase_b_setup(
         output.detail("Setting up agent tmux socket infrastructure...")
 
         ensure_agent_socket_root(ts_target, admin_username, warn_if_missing=not is_first_init)
-        for agent in db.list_agents(vm_name):
+        for agent in db.list_agents(vm_name=vm_name):
             ensure_agent_socket_dir(ts_target, agent.linux_user)
             removed = cleanup_stale_sockets(ts_target, agent.linux_user)
             if removed:

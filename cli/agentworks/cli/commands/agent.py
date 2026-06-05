@@ -7,7 +7,7 @@ from typing import Annotated
 import typer
 
 from agentworks.cli._app import app
-from agentworks.cli._helpers import get_db, prompt_vm
+from agentworks.cli._helpers import get_db, parse_csv_filter, prompt_vm
 
 agent_app = typer.Typer(
     name="agent",
@@ -48,10 +48,10 @@ def agent_create(
 def agent_list(
     vm: Annotated[str | None, typer.Option("--vm", help="Filter by VM")] = None,
 ) -> None:
-    """List agents."""
+    """List agents. --vm accepts comma-separated values for OR-within-filter."""
     from agentworks.agents.manager import list_agents
 
-    list_agents(get_db(), vm_name=vm)
+    list_agents(get_db(), vm_name=parse_csv_filter(vm))
 
 
 @agent_app.command("describe")
@@ -75,8 +75,8 @@ def agent_reinit(
     reinit_agent(get_db(), load_config(), name=name)
 
 
-@agent_app.command("grant-workspace")
-def agent_grant_workspace(
+@agent_app.command("grant-workspaces")
+def agent_grant_workspaces(
     name: Annotated[str, typer.Argument(help="Agent name")],
     workspaces: Annotated[
         list[str] | None,
@@ -99,8 +99,8 @@ def agent_grant_workspace(
     )
 
 
-@agent_app.command("revoke-workspace")
-def agent_revoke_workspace(
+@agent_app.command("revoke-workspaces")
+def agent_revoke_workspaces(
     name: Annotated[str, typer.Argument(help="Agent name")],
     workspaces: Annotated[
         list[str] | None,

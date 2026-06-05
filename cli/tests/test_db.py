@@ -368,6 +368,114 @@ def test_admin_session_allows_null_socket(db: Database) -> None:
     assert session.socket_path is None
 
 
+def test_list_sessions_filters(db: Database) -> None:
+    """list_sessions supports workspace, VM, and agent filters that compose with AND."""
+    from agentworks.db import SessionMode
+
+    db.insert_vm("dev-vm", platform="lima")
+    db.insert_vm("other-vm", platform="lima")
+    db.insert_workspace("ws-a", workspace_path="/tmp/ws-a", vm_name="dev-vm", linux_group="ws-ws-a")
+    db.insert_workspace("ws-b", workspace_path="/tmp/ws-b", vm_name="dev-vm", linux_group="ws-ws-b")
+    db.insert_workspace("ws-c", workspace_path="/tmp/ws-c", vm_name="other-vm", linux_group="ws-ws-c")
+    db.insert_agent("coder", "dev-vm", "agt--coder")
+    db.insert_agent("helper", "dev-vm", "agt--helper")
+
+    db.insert_session(
+        "s-a-coder", "ws-a", "default", SessionMode.AGENT, agent_name="coder", socket_path="/s1"
+    )
+    db.insert_session(
+        "s-a-helper", "ws-a", "default", SessionMode.AGENT, agent_name="helper", socket_path="/s2"
+    )
+    db.insert_session(
+        "s-b-coder", "ws-b", "default", SessionMode.AGENT, agent_name="coder", socket_path="/s3"
+    )
+    db.insert_session("s-b-admin", "ws-b", "default", SessionMode.ADMIN)
+    db.insert_session("s-c-admin", "ws-c", "default", SessionMode.ADMIN)
+
+    from agentworks.db import SessionRow
+
+    def names(rows: list[SessionRow]) -> list[str]:
+        return [r.name for r in rows]
+
+    # No filters: everything.
+    assert names(db.list_sessions()) == ["s-a-coder", "s-a-helper", "s-b-admin", "s-b-coder", "s-c-admin"]
+
+    # Workspace filter (pre-existing behavior).
+    assert names(db.list_sessions(workspace_name="ws-a")) == ["s-a-coder", "s-a-helper"]
+
+    # VM filter (new) -- includes sessions on all workspaces hosted by the VM.
+    assert names(db.list_sessions(vm_name="dev-vm")) == ["s-a-coder", "s-a-helper", "s-b-admin", "s-b-coder"]
+    assert names(db.list_sessions(vm_name="other-vm")) == ["s-c-admin"]
+
+    # Agent filter (new) -- excludes admin-mode sessions.
+    assert names(db.list_sessions(agent_name="coder")) == ["s-a-coder", "s-b-coder"]
+    assert names(db.list_sessions(agent_name="helper")) == ["s-a-helper"]
+
+    # AND composition: VM + agent narrows to the agent's sessions on that VM.
+    assert names(db.list_sessions(vm_name="dev-vm", agent_name="coder")) == ["s-a-coder", "s-b-coder"]
+
+    # AND composition: workspace + agent narrows to the agent in that workspace.
+    assert names(db.list_sessions(workspace_name="ws-a", agent_name="coder")) == ["s-a-coder"]
+
+    # AND composition: incompatible filters return empty (workspace ws-c is on other-vm).
+    assert db.list_sessions(workspace_name="ws-c", vm_name="dev-vm") == []
+
+    # admin_only: matches sessions with NULL agent_name (admin-mode), excluding agent-mode.
+    assert names(db.list_sessions(admin_only=True)) == ["s-b-admin", "s-c-admin"]
+
+    # admin_only composes with VM filter.
+    assert names(db.list_sessions(admin_only=True, vm_name="dev-vm")) == ["s-b-admin"]
+
+    # admin_only + agent_name is contradictory; DB returns empty rather than rejecting.
+    # (CLI layer enforces the mutex; DB stays permissive.)
+    assert db.list_sessions(admin_only=True, agent_name="coder") == []
+
+    # Multi-value (list) filters: lists OR within a filter, filters AND across.
+    assert names(db.list_sessions(workspace_name=["ws-a", "ws-b"])) == [
+        "s-a-coder", "s-a-helper", "s-b-admin", "s-b-coder",
+    ]
+    assert names(db.list_sessions(agent_name=["coder", "helper"])) == [
+        "s-a-coder", "s-a-helper", "s-b-coder",
+    ]
+    # Multi VM: dev-vm OR other-vm = everything.
+    assert names(db.list_sessions(vm_name=["dev-vm", "other-vm"])) == [
+        "s-a-coder", "s-a-helper", "s-b-admin", "s-b-coder", "s-c-admin",
+    ]
+    # Multi-value composed with a single-value filter from another flag.
+    assert names(db.list_sessions(workspace_name=["ws-a", "ws-b"], agent_name="coder")) == [
+        "s-a-coder", "s-b-coder",
+    ]
+    # Single-element list behaves identically to a bare string.
+    assert names(db.list_sessions(workspace_name=["ws-a"])) == names(
+        db.list_sessions(workspace_name="ws-a")
+    )
+
+
+def test_list_workspaces_and_agents_multi_value(db: Database) -> None:
+    """list_workspaces and list_agents accept either a string or a list for vm_name."""
+    db.insert_vm("vm-a", platform="lima")
+    db.insert_vm("vm-b", platform="lima")
+    db.insert_vm("vm-c", platform="lima")
+    db.insert_workspace("ws-a1", workspace_path="/tmp/a1", vm_name="vm-a", linux_group="g1")
+    db.insert_workspace("ws-b1", workspace_path="/tmp/b1", vm_name="vm-b", linux_group="g2")
+    db.insert_workspace("ws-c1", workspace_path="/tmp/c1", vm_name="vm-c", linux_group="g3")
+    db.insert_agent("ag-a", "vm-a", "agt--a")
+    db.insert_agent("ag-b", "vm-b", "agt--b")
+    db.insert_agent("ag-c", "vm-c", "agt--c")
+
+    # Single string still works.
+    assert [w.name for w in db.list_workspaces(vm_name="vm-a")] == ["ws-a1"]
+    assert [a.name for a in db.list_agents(vm_name="vm-a")] == ["ag-a"]
+
+    # List of two VMs returns workspaces / agents from both.
+    assert [w.name for w in db.list_workspaces(vm_name=["vm-a", "vm-c"])] == ["ws-a1", "ws-c1"]
+    assert [a.name for a in db.list_agents(vm_name=["vm-a", "vm-c"])] == ["ag-a", "ag-c"]
+
+    # Empty list collapses to no filter (returns everything).
+    assert [w.name for w in db.list_workspaces(vm_name=[])] == ["ws-a1", "ws-b1", "ws-c1"]
+    assert [a.name for a in db.list_agents(vm_name=[])] == ["ag-a", "ag-b", "ag-c"]
+
+
 # -- PID column and migration 20 -------------------------------------------
 
 

@@ -23,12 +23,18 @@ Two shapes, depending on whether a second object is involved.
 **Operations involving a second object** make the object explicit in the verb:
 `<resource> <verb>-<object>`. Examples:
 
-- `console add-session` (verb `add` operates on `session` inside the console)
-- `console remove-session`
+- `console add-sessions` (verb `add` operates on `sessions` inside the console)
+- `console remove-sessions`
+- `console reorder-sessions`
 - `console add-shell`
 - `console restore-session`
-- `agent grant-workspace`
-- `agent revoke-workspace`
+- `agent grant-workspaces`
+- `agent revoke-workspaces`
+
+Pluralize the object when the command takes a variadic list (`add-sessions`, `remove-sessions`,
+`reorder-sessions`, `grant-workspaces`, `revoke-workspaces` all accept N items) and keep it singular
+when the command operates on one (`add-shell`, `restore-session`). The singular/plural cue tells the
+operator at a glance whether multi-arg use is expected.
 
 Do not introduce a multi-word subcommand group (e.g. `agent workspace-grants`) just to host a small
 family of related verbs. The flat `<resource> <verb>-<object>` form is more discoverable, has
@@ -40,15 +46,42 @@ naturally.
 
 - **Positional arguments** for required things: names, IDs, lists of things being operated on.
 - **Options** (`--flag` / `--key value`) for modifiers, mode switches, and optional config.
-- **Variadic positionals** for lists. `agent grant-workspace my-agent ws1 ws2 ws3`, not a single
+- **Variadic positionals** for lists. `agent grant-workspaces my-agent ws1 ws2 ws3`, not a single
   comma-separated string. This gives operators shell-completion past the first item and avoids
   quoting hazards.
 
 ## Bulk flags
 
 Bulk operations use `--all` as a single, consistent flag name, never the more verbose form. So
-`agent grant-workspace my-agent --all`, not `--all-workspaces` or `--every-workspace`. The
+`agent grant-workspaces my-agent --all`, not `--all-workspaces` or `--every-workspace`. The
 surrounding command provides the context for what "all" applies to.
+
+## Filter options on list commands
+
+List commands narrow their result set with filter options that follow two shapes depending on what
+is being filtered.
+
+**Name filters** (`--vm`, `--workspace`, `--agent`, etc.) accept either a single name or a
+comma-separated list of names:
+
+- `agw session list --vm vm1`
+- `agw session list --vm vm1,vm2 --agent claude,gemini`
+
+Values within a single flag are OR-ed; multiple flags AND together. This pairing of CSV-for-OR and
+different-flags-for-AND keeps the operator's mental model unambiguous. Repeated-flag forms
+(`--vm vm1 --vm vm2`) are intentionally not used here, because the same shape would have to mean OR
+within one flag and AND across flags, which is the inconsistency this rule exists to avoid.
+
+Note the carve-out from the variadic-positional rule above: variadic positionals are for the things
+the command is operating on (the operands); filter options narrow what a list command considers.
+Operands keep their variadic-positional form (`agent grant-workspace my-agent ws1 ws2`); filters
+take CSV. Commas cannot appear in resource names (see `validate_name` in `agentworks/config.py`), so
+CSV parsing is safe.
+
+**Mode filters** are bare boolean flags rather than valued options. Use `--admin` on `session list`
+to narrow to admin-mode sessions, not `--mode admin`. The bare-flag shape composes naturally with
+the name filters and matches how `session create --admin` already shapes the admin/agent mode
+selection elsewhere on the surface.
 
 ## Service layer is the authority
 

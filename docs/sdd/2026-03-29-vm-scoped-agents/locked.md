@@ -35,3 +35,13 @@ existing `vm reinit` / `agent reinit` shape. The behavior is unchanged (idempote
 reconciliation of live VM state against the DB); the rename reflects that this is the same
 declarative-reinit semantic the rest of the platform already uses. Service-layer rename:
 `repair_workspace` is now `reinit_workspace`.
+
+## 2026-06-03
+
+The grant/revoke verbs were pluralized back to `agent grant-workspaces` and
+`agent revoke-workspaces`. The earlier 2026-06-01 rename to singular was justified by "matching the
+resource/verb-object pattern used elsewhere," and that elsewhere-pattern (`console add-session`,
+`console remove-session`) has since been flipped to plural to honestly reflect their variadic shape.
+The cli-conventions rule now codifies "pluralize when variadic, singular when single object," and
+these two commands are variadic. Service-layer function names are unchanged (`grant_workspaces` /
+`revoke_workspaces` were always plural).

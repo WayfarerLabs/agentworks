@@ -7,7 +7,7 @@ from typing import Annotated
 import typer
 
 from agentworks.cli._app import app
-from agentworks.cli._helpers import get_db, prompt_vm
+from agentworks.cli._helpers import get_db, parse_csv_filter, prompt_vm
 
 workspace_app = typer.Typer(
     name="workspace",
@@ -75,10 +75,10 @@ def workspace_console(
 def workspace_list(
     vm: Annotated[str | None, typer.Option("--vm", help="Filter by VM")] = None,
 ) -> None:
-    """List workspaces."""
+    """List workspaces. --vm accepts comma-separated values for OR-within-filter."""
     from agentworks.workspaces.manager import list_workspaces
 
-    list_workspaces(get_db(), vm_name=vm)
+    list_workspaces(get_db(), vm_name=parse_csv_filter(vm))
 
 
 @workspace_app.command("describe")

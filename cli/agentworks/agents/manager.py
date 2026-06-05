@@ -397,7 +397,7 @@ def _format_grants(db: Database, agent_name: str, grant_all: bool) -> str:
 def list_agents(
     db: Database,
     *,
-    vm_name: str | None = None,
+    vm_name: str | list[str] | None = None,
 ) -> None:
     """List agents."""
     agents = db.list_agents(vm_name=vm_name)
@@ -496,7 +496,7 @@ def shell_agent(
                     f"agent '{name}' does not have access to workspace '{workspace_name}'",
                     entity_kind="agent",
                     entity_name=name,
-                    hint=f"Run 'agent grant-workspace {name} {workspace_name}' to grant access.",
+                    hint=f"Run 'agent grant-workspaces {name} {workspace_name}' to grant access.",
                 )
             import shlex
 
