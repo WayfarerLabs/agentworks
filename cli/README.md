@@ -82,6 +82,15 @@ Manage machines that host VMs (for remote Lima mode).
 
 Manage virtual machines across Lima (local or remote), Azure, and WSL2.
 
+> **Note on WSL2:** WSL2 distros share the Windows workstation's lifecycle.
+> They idle-shut after ~60s of no `wsl.exe` activity (`vmIdleTimeout` in
+> `.wslconfig`) and do not survive workstation shutdown or sleep. agentworks
+> holds a `wsl.exe` keepalive for the duration of each VM-touching command,
+> so individual `agw` operations work cleanly, but agents and sessions on
+> WSL2 are not suitable for unattended background workflows. Use a different
+> provisioner that provides true long-lived VMs (e.g. Lima, Azure, Proxmox,
+> etc.) if you need a VM that survives independent of your workstation.
+
 | Command                                   | Description                                |
 | ----------------------------------------- | ------------------------------------------ |
 | `agw vm create <name>`                    | Create a new VM (provision + initialize)   |

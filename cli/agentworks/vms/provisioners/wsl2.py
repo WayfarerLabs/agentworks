@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
+import os
 import platform
 import subprocess
 import urllib.request
@@ -11,15 +13,44 @@ from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.db import VMStatus
-from agentworks.ssh import ExecTarget, WSL2Target
+from agentworks.ssh import ExecTarget, WSL2Target, admin_exec_target, wait_for_reconnect
 from agentworks.vms.base import ProvisionResult, VMProvisioner
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+    from contextlib import AbstractContextManager
+
     from agentworks.config import Config
     from agentworks.db import VMRow
 
-# Default install path for WSL2 distros
-WSL_BASE_PATH = "%LOCALAPPDATA%\\agentworks\\wsl"
+
+def _local_app_data() -> Path:
+    """Return %LOCALAPPDATA% as a resolved Path.
+
+    PowerShell does not expand %VAR% syntax (that's cmd.exe), and neither does
+    wsl.exe, so we must resolve LOCALAPPDATA in Python before handing paths to
+    either tool. Falls back to ExpandEnvironmentVariables for parity with
+    Windows tooling if the env var is missing (very unusual on Windows).
+    """
+    base = os.environ.get("LOCALAPPDATA") or os.path.expandvars("%LOCALAPPDATA%")
+    if not base or base == "%LOCALAPPDATA%":
+        raise RuntimeError("LOCALAPPDATA environment variable is not set")
+    return Path(base)
+
+
+def _wsl_base_path() -> Path:
+    """Root install directory for agentworks-managed WSL2 distros."""
+    return _local_app_data() / "agentworks" / "wsl"
+
+
+def _cache_dir() -> Path:
+    """Cache directory for downloaded rootfs tarballs."""
+    return _local_app_data() / "agentworks" / "cache"
+
+
+def _ps_quote(path: Path | str) -> str:
+    """Quote a path for safe inclusion in a PowerShell single-quoted string."""
+    return "'" + str(path).replace("'", "''") + "'"
 
 # Docker Hub OCI registry endpoints for the official Debian image
 _DOCKER_AUTH_URL = "https://auth.docker.io/token?service=registry.docker.io&scope=repository:library/debian:pull"
@@ -89,7 +120,7 @@ def _powershell(script: str, *, check: bool = True, timeout: int = 120) -> str:
     return result.stdout
 
 
-def _download_debian_rootfs(tarball_path: str) -> None:
+def _download_debian_rootfs(tarball_path: Path) -> None:
     """Download the official Debian rootfs from Docker Hub OCI registry.
 
     Pulls the rootfs layer from the official debian:bookworm image without
@@ -153,8 +184,7 @@ def _download_debian_rootfs(tarball_path: str) -> None:
     req = urllib.request.Request(blob_url, headers=auth_header)
     p = output.progress("Downloading Debian rootfs", total=total_bytes or None)
 
-    dest = Path(tarball_path)
-    with _blob_opener.open(req) as resp, dest.open("wb") as f:
+    with _blob_opener.open(req) as resp, tarball_path.open("wb") as f:
         downloaded = 0
         chunk_size = 256 * 1024
         last_update = 0
@@ -172,8 +202,69 @@ def _download_debian_rootfs(tarball_path: str) -> None:
     p.done()
 
 
+@contextlib.contextmanager
+def _keepalive(vm: VMRow, config: Config | None) -> Iterator[None]:
+    """Anchor a WSL2 distro for the duration of the context.
+
+    Spawns ``wsl --distribution NAME -- sleep infinity`` as a background
+    subprocess. While that wsl.exe is attached, Windows' WSL idle timer
+    (``vmIdleTimeout`` in .wslconfig, default ~60s) doesn't fire, so the
+    distro stays up regardless of whether anything else is talking to it.
+    If the distro happens to be stopped on entry, the same subprocess
+    boots it.
+
+    When the VM has already joined Tailscale (``vm.tailscale_host`` is
+    set) AND we have a config to build an SSH target from, we wait for
+    Tailscale SSH to be reachable before yielding -- a stopped distro
+    needs a few seconds for tailscaled to reattach to the tailnet after
+    boot, and callers expect a ready VM.
+
+    On exit: ``terminate()`` the subprocess (SIGTERM), wait briefly, then
+    ``kill()`` if it hasn't exited. The distro is then free to idle out
+    on Windows' normal schedule.
+    """
+    proc = subprocess.Popen(
+        ["wsl", "--distribution", vm.name, "--", "sleep", "infinity"],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+    )
+    # Fast-fail check: if wsl.exe couldn't attach (wrong distro name, WSL
+    # service hiccup, etc.), `sleep infinity` exits within milliseconds.
+    # Without this check the keepalive silently becomes a no-op and the
+    # caller hits confusing idle-shutdown timeouts mid-operation.
+    try:
+        rc = proc.wait(timeout=0.5)
+    except subprocess.TimeoutExpired:
+        rc = None  # still running, which is what we want
+    if rc is not None:
+        stderr = (proc.stderr.read().decode("utf-8", errors="replace").strip() if proc.stderr else "")
+        raise RuntimeError(
+            f"WSL2 keepalive for distro {vm.name!r} exited immediately (rc={rc})"
+            + (f": {stderr}" if stderr else "")
+        )
+    try:
+        if vm.tailscale_host and config is not None:
+            target = admin_exec_target(vm, config)
+            wait_for_reconnect(target)
+        yield
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            with contextlib.suppress(subprocess.TimeoutExpired):
+                proc.wait(timeout=5)
+
+
 class WSL2Provisioner(VMProvisioner):
     """Provisions WSL2 Debian distributions on Windows."""
+
+    def vm_active(
+        self, vm: VMRow, *, config: Config | None = None
+    ) -> AbstractContextManager[None]:
+        return _keepalive(vm, config)
 
     def create(
         self,
@@ -184,23 +275,41 @@ class WSL2Provisioner(VMProvisioner):
     ) -> ProvisionResult:
         output.info(f"Provisioning WSL2 VM '{vm_name}'...")
 
-        install_path = f"{WSL_BASE_PATH}\\{vm_name}"
-        _powershell(f"New-Item -ItemType Directory -Force -Path '{install_path}'")
+        install_path = _wsl_base_path() / vm_name
+        _powershell(f"New-Item -ItemType Directory -Force -Path {_ps_quote(install_path)}")
 
         # Download Debian rootfs if not cached
-        cache_dir = "%LOCALAPPDATA%\\agentworks\\cache"
-        tarball = f"{cache_dir}\\debian-bookworm-{_oci_arch()}-rootfs.tar.gz"
-        _powershell(f"New-Item -ItemType Directory -Force -Path '{cache_dir}'")
+        cache_dir = _cache_dir()
+        tarball = cache_dir / f"debian-bookworm-{_oci_arch()}-rootfs.tar.gz"
+        _powershell(f"New-Item -ItemType Directory -Force -Path {_ps_quote(cache_dir)}")
 
-        check = _powershell(f"Test-Path '{tarball}'").strip()
-        if check.lower() != "true":
+        if not tarball.exists():
             _download_debian_rootfs(tarball)
         else:
             output.detail("Using cached Debian rootfs.")
 
         # Import and configure the distro
         output.detail("Importing rootfs into WSL2...")
-        _wsl(["--import", vm_name, install_path, tarball])
+        _wsl(["--import", vm_name, str(install_path), str(tarball)])
+
+        # Strip Docker-image minimization hooks before we run any apt-get.
+        # The official debian:bookworm Docker rootfs ships /usr/sbin/policy-rc.d
+        # that returns 101 to refuse all service starts during image build;
+        # without removing it, apt-installed daemons (e.g. tailscaled) never
+        # start, leaving us with an "installed but inert" service.
+        output.detail("Removing Docker minimization hooks...")
+        _wsl(
+            [
+                "--distribution",
+                vm_name,
+                "--user",
+                "root",
+                "--",
+                "rm",
+                "-f",
+                "/usr/sbin/policy-rc.d",
+            ]
+        )
 
         # The Docker rootfs is minimal. Install packages to bring it up to
         # parity with the Lima/Azure cloud images.
@@ -308,9 +417,9 @@ class WSL2Provisioner(VMProvisioner):
         output.info(f"Unregistering WSL2 distro '{vm.name}'...")
         _wsl(["--unregister", vm.name], check=False)
         # Clean up install directory
-        install_path = f"{WSL_BASE_PATH}\\{vm.name}"
+        install_path = _wsl_base_path() / vm.name
         _powershell(
-            f"Remove-Item -Recurse -Force -Path '{install_path}' -ErrorAction SilentlyContinue",
+            f"Remove-Item -Recurse -Force -Path {_ps_quote(install_path)} -ErrorAction SilentlyContinue",
             check=False,
         )
         output.info(f"WSL2 distro '{vm.name}' deleted")

@@ -12,6 +12,7 @@ Phase B steps are non-fatal -- failures produce warnings and a 'partial' status.
 
 from __future__ import annotations
 
+import contextlib
 import ipaddress
 import shlex
 import subprocess
@@ -700,9 +701,10 @@ def _join_tailscale(
             hint="Generate a key at https://login.tailscale.com/admin/settings/keys",
         )
     quoted_key = shlex.quote(ts_auth_key)
+    # Daemon-side flags (e.g. --tun=userspace-networking for WSL2) live in
+    # /etc/default/tailscaled, set during bootstrap. `tailscale up` is the
+    # client and only takes client-side flags.
     ts_cmd = f"tailscale up --auth-key {quoted_key}"
-    if is_wsl2:
-        ts_cmd += " --userspace-networking"
 
     # Redact the auth key from any attached loggers before it appears in logs
     if exec_target.logger is not None:
@@ -761,6 +763,7 @@ def initialize_vm(
     from dataclasses import replace
 
     from agentworks.ssh import SSHLogger
+    from agentworks.vms.manager import get_provisioner_for_vm
 
     home = f"/home/{admin_username}"
     logger = SSHLogger(vm_name, "vm-create")
@@ -775,57 +778,65 @@ def initialize_vm(
 
     transport = _describe_transport(exec_target)
 
-    try:
-        db.insert_vm_event(vm_name, "provisioning_started", transport)
-        ts_target = _phase_a_bootstrap(
+    # Anchor the VM in an active state for the full init span. Provisioner
+    # default is a no-op; WSL2 overrides to hold a wsl.exe subprocess open
+    # so the distro doesn't idle-shut between Phase A (wsl.exe transport)
+    # and Phase B (Tailscale SSH). Lima/Azure/Proxmox inherit the no-op.
+    vm_for_keepalive = db.get_vm(vm_name)
+    assert vm_for_keepalive is not None, "create_vm inserts the row before init"
+    provisioner = get_provisioner_for_vm(db, vm_for_keepalive, config)
+    with provisioner.vm_active(vm_for_keepalive, config=config):
+        try:
+            db.insert_vm_event(vm_name, "provisioning_started", transport)
+            ts_target = _phase_a_bootstrap(
+                db,
+                config,
+                vm_name,
+                exec_target,
+                home,
+                admin_username,
+                is_wsl2,
+                logger,
+                tailscale_auth_key=tailscale_auth_key,
+                bootstrap_complete=bootstrap_complete,
+                tailscale_ip=tailscale_ip,
+            )
+            db.insert_vm_event(vm_name, "provisioning_complete", ts_target.ssh.host if ts_target.ssh else None)
+        except Exception as e:
+            db.update_vm_provisioning_status(vm_name, ProvisioningStatus.FAILED)
+            db.insert_vm_event(vm_name, "provisioning_failed", str(e))
+            logger.close()
+            output.warn(f"Log: {logger.path}")
+            raise
+
+        # Tailscale is up; caller can clean up provisioning-only resources
+        # (e.g., detach Azure public IP since Phase B uses Tailscale SSH).
+        # Removing the public IP can destabilize the network stack briefly,
+        # so we wait for Tailscale SSH to be reliably reachable before
+        # proceeding with Phase B.
+        if on_tailscale_ready is not None:
+            try:
+                on_tailscale_ready()
+            except Exception as e:
+                output.warn(f"post-provisioning cleanup failed: {e}")
+
+            # Wait for Tailscale SSH to reconnect after network changes
+            from agentworks.ssh import wait_for_reconnect
+
+            wait_for_reconnect(ts_target)
+
+        run_initialization(
             db,
             config,
             vm_name,
-            exec_target,
+            ts_target,
+            providers,
             home,
             admin_username,
-            is_wsl2,
             logger,
-            tailscale_auth_key=tailscale_auth_key,
-            bootstrap_complete=bootstrap_complete,
-            tailscale_ip=tailscale_ip,
+            git_tokens=git_tokens,
+            is_first_init=True,
         )
-        db.insert_vm_event(vm_name, "provisioning_complete", ts_target.ssh.host if ts_target.ssh else None)
-    except Exception as e:
-        db.update_vm_provisioning_status(vm_name, ProvisioningStatus.FAILED)
-        db.insert_vm_event(vm_name, "provisioning_failed", str(e))
-        logger.close()
-        output.warn(f"Log: {logger.path}")
-        raise
-
-    # Tailscale is up; caller can clean up provisioning-only resources
-    # (e.g., detach Azure public IP since Phase B uses Tailscale SSH).
-    # Removing the public IP can destabilize the network stack briefly,
-    # so we wait for Tailscale SSH to be reliably reachable before
-    # proceeding with Phase B.
-    if on_tailscale_ready is not None:
-        try:
-            on_tailscale_ready()
-        except Exception as e:
-            output.warn(f"post-provisioning cleanup failed: {e}")
-
-        # Wait for Tailscale SSH to reconnect after network changes
-        from agentworks.ssh import wait_for_reconnect
-
-        wait_for_reconnect(ts_target)
-
-    run_initialization(
-        db,
-        config,
-        vm_name,
-        ts_target,
-        providers,
-        home,
-        admin_username,
-        logger,
-        git_tokens=git_tokens,
-        is_first_init=True,
-    )
 
 
 def run_initialization(
@@ -998,7 +1009,6 @@ def _run_bootstrap_script(
         tailscale_auth_key=ts_auth_key,
         hostname=vm_hostname(platform, vm_name),
         swap=0 if is_wsl2 else config.vm.swap,  # WSL2 provisioner handles swap
-        is_wsl2=is_wsl2,
     )
 
     # Copy script to VM and execute via detached nohup
@@ -1014,20 +1024,37 @@ def _run_bootstrap_script(
 
         os.unlink(local_script)
 
-    from agentworks.remote_exec import run_detached
-
+    # Run the bootstrap script synchronously over the platform's provisioning
+    # transport. WSL2 is the only consumer here (Lima/Azure embed the bootstrap
+    # in their native delivery mechanisms and arrive with bootstrap_complete=True),
+    # and the WSL2 transport is a local wsl.exe subprocess -- there is no
+    # network session to disconnect from, so the detached-poll pattern brings
+    # no benefit. It also actively breaks WSL2 under systemd: each `wsl.exe`
+    # invocation is its own systemd-logind user session, and the default
+    # KillUserProcesses=yes reaps every process in the session cgroup when the
+    # foreground shell exits -- nohup blocks SIGHUP, not cgroup teardown.
+    #
+    # The wrapping bits (in order) defend against terminal-related hangs:
+    #   setsid       - new session, no controlling TTY. Without this, sudo's
+    #                  default `Defaults use_pty` allocates a pty whose
+    #                  foreground PGID is sudo's monitor; any dpkg trigger
+    #                  that touches /dev/tty from a background PGID then
+    #                  SIGTTIN/SIGTTOU-stops apt mid-`dist-upgrade`.
+    #   </dev/null   - stdin = EOF, so anything that reads from stdin (rather
+    #                  than /dev/tty directly) returns immediately.
+    #   2>&1         - merge stderr into captured stdout so apt-get noise
+    #                  lands alongside the script's ##STEP## markers when
+    #                  we need to diagnose a failure.
     output.detail("Running bootstrap script...")
-    detached = run_detached(
-        exec_target,
-        f"sudo -n /bin/bash {remote_script}",
-        label="Bootstrap",
-        base_path=f"/tmp/agentworks-bootstrap-{vm_name}",
-        quiet=True,  # we parse the structured output ourselves
+    result = exec_target.run(
+        f"setsid sudo -n /bin/bash {remote_script} </dev/null 2>&1",
+        check=False,
+        timeout=900,  # 15 min hard cap; apt-get dist-upgrade is the long pole
     )
     exec_target.run(f"rm -f {remote_script}", sudo=True, check=False)
 
     # Parse structured output
-    bootstrap = parse_bootstrap_output(detached.output, detached.exit_code)
+    bootstrap = parse_bootstrap_output(result.stdout, result.returncode)
 
     # Feed results into logger and console
     for step in bootstrap.steps:
@@ -1043,13 +1070,13 @@ def _run_bootstrap_script(
             logger.log_error(step.error)
 
     # Log full output for troubleshooting
-    if detached.output:
-        logger.output(detached.output)
+    if result.stdout:
+        logger.output(result.stdout)
 
     if not bootstrap.ok:
-        msg = f"Bootstrap script failed (exit {detached.exit_code})"
-        if detached.output:
-            msg += f"\n{detached.output[-500:]}"
+        msg = f"Bootstrap script failed (exit {result.returncode})"
+        if result.stdout:
+            msg += f"\n{result.stdout[-500:]}"
         raise SSHError(msg)
 
     # Update DB with Tailscale info

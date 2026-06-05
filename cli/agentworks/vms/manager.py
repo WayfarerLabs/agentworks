@@ -537,7 +537,7 @@ def start_vm(db: Database, config: Config, name: str) -> None:
     """Start a stopped VM."""
     vm = _require_vm(db, name)
     _guard_failed_vm(vm)
-    provisioner = _get_provisioner_for_vm(db, vm)
+    provisioner = get_provisioner_for_vm(db, vm)
     status = provisioner.status(vm)
     if status == VMStatus.RUNNING:
         output.info(f"VM '{name}' is already running")
@@ -552,7 +552,7 @@ def stop_vm(db: Database, config: Config, name: str) -> None:
     """Stop a running VM."""
     vm = _require_vm(db, name)
     _guard_failed_vm(vm)
-    provisioner = _get_provisioner_for_vm(db, vm)
+    provisioner = get_provisioner_for_vm(db, vm)
     status = provisioner.status(vm)
     if status in (VMStatus.STOPPED, VMStatus.DEALLOCATED):
         output.info(f"VM '{name}' is already stopped")
@@ -588,7 +588,7 @@ def rekey_vm(
     vm = _require_vm(db, name)
     _guard_failed_vm(vm)
 
-    provisioner = _get_provisioner_for_vm(db, vm, config)
+    provisioner = get_provisioner_for_vm(db, vm, config)
     status = provisioner.status(vm)
     if status != VMStatus.RUNNING:
         raise StateError(
@@ -636,9 +636,11 @@ def rekey_vm(
         # control plane response that never comes). The final restart
         # fixes a Tailscale bug where the node registers but peers can't
         # reach it after rekeying to a different tailnet.
-        # Restart command varies by platform. WSL2 may not have systemd.
-        is_wsl2 = vm.platform == "wsl2"
-        restart_cmd = "service tailscaled restart" if is_wsl2 else "systemctl restart tailscaled"
+        # All platforms run systemd (WSL2 enables it via /etc/wsl.conf during
+        # provisioning); tailscaled is always a systemd unit. Daemon-side
+        # flags like --tun=userspace-networking live in /etc/default/tailscaled,
+        # not on `tailscale up`.
+        restart_cmd = "systemctl restart tailscaled"
         stabilize_secs = 15  # pause between steps for daemon/network stability
 
         output.detail("Restarting Tailscale daemon...")
@@ -651,10 +653,7 @@ def rekey_vm(
 
         output.detail("Joining new tailnet...")
         quoted_key = shlex.quote(ts_auth_key)
-        ts_up_cmd = f"tailscale up --auth-key {quoted_key}"
-        if is_wsl2:
-            ts_up_cmd += " --userspace-networking"
-        exec_target.run(ts_up_cmd, sudo=True, timeout=30)
+        exec_target.run(f"tailscale up --auth-key {quoted_key}", sudo=True, timeout=30)
         time.sleep(stabilize_secs)
 
         output.detail("Restarting Tailscale daemon...")
@@ -749,7 +748,7 @@ def delete_vm(
 
     # Platform-specific cleanup (also handles Tailscale logout)
     try:
-        provisioner = _get_provisioner_for_vm(db, vm)
+        provisioner = get_provisioner_for_vm(db, vm)
 
         # Tailscale logout (best-effort, via provisioning transport)
         if vm.tailscale_host:
@@ -1052,7 +1051,7 @@ def _require_vm(db: Database, name: str) -> VMRow:
     return vm
 
 
-def _get_provisioner_for_vm(db: Database, vm: VMRow, config: Config | None = None) -> VMProvisioner:
+def get_provisioner_for_vm(db: Database, vm: VMRow, config: Config | None = None) -> VMProvisioner:
     if vm.platform == "proxmox":
         from agentworks.vms.provisioners.proxmox import ProxmoxProvisioner
 
