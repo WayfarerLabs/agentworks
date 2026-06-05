@@ -28,13 +28,20 @@ def test_local_app_data_raises_when_missing(monkeypatch: pytest.MonkeyPatch) -> 
 
 
 def test_wsl_base_path_is_under_local_app_data(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Build the expected value with the same Path semantics as the
+    # implementation so the assertion is portable: on POSIX (CI) the
+    # backslashes in the env value are a single opaque component, on
+    # Windows they're separators. Either way base / "agentworks" / "wsl"
+    # must match.
     monkeypatch.setenv("LOCALAPPDATA", r"C:\Users\test\AppData\Local")
-    assert wsl2._wsl_base_path() == Path(r"C:\Users\test\AppData\Local\agentworks\wsl")
+    expected = Path(r"C:\Users\test\AppData\Local") / "agentworks" / "wsl"
+    assert wsl2._wsl_base_path() == expected
 
 
 def test_cache_dir_is_under_local_app_data(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("LOCALAPPDATA", r"C:\Users\test\AppData\Local")
-    assert wsl2._cache_dir() == Path(r"C:\Users\test\AppData\Local\agentworks\cache")
+    expected = Path(r"C:\Users\test\AppData\Local") / "agentworks" / "cache"
+    assert wsl2._cache_dir() == expected
 
 
 def test_paths_never_contain_unexpanded_percent_var(monkeypatch: pytest.MonkeyPatch) -> None:

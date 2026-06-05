@@ -1404,7 +1404,7 @@ def list_sessions(
     # The status path SSHes to every involved VM; anchor each one (no-op
     # on non-WSL2) so the probe doesn't lose them mid-check.
     if no_status:
-        status_keepalive_vms: list = []
+        status_keepalive_vms: list[VMRow] = []
     else:
         seen: set[str] = set()
         status_keepalive_vms = []
