@@ -75,8 +75,8 @@ def agent_reinit(
     reinit_agent(get_db(), load_config(), name=name)
 
 
-@agent_app.command("grant-workspace")
-def agent_grant_workspace(
+@agent_app.command("grant-workspaces")
+def agent_grant_workspaces(
     name: Annotated[str, typer.Argument(help="Agent name")],
     workspaces: Annotated[
         list[str] | None,
@@ -99,8 +99,8 @@ def agent_grant_workspace(
     )
 
 
-@agent_app.command("revoke-workspace")
-def agent_revoke_workspace(
+@agent_app.command("revoke-workspaces")
+def agent_revoke_workspaces(
     name: Annotated[str, typer.Argument(help="Agent name")],
     workspaces: Annotated[
         list[str] | None,

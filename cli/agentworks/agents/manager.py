@@ -494,7 +494,7 @@ def shell_agent(
                 f"agent '{name}' does not have access to workspace '{workspace_name}'",
                 entity_kind="agent",
                 entity_name=name,
-                hint=f"Run 'agent grant-workspace {name} {workspace_name}' to grant access.",
+                hint=f"Run 'agent grant-workspaces {name} {workspace_name}' to grant access.",
             )
         import shlex
 

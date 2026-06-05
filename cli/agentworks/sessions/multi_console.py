@@ -355,7 +355,7 @@ def add_sessions(
 
     output.info(f"Added {len(specs)} session(s) to console '{console_name}'.")
 
-    with _live_best_effort(f"add-session to '{console_name}'", console_name=console_name):
+    with _live_best_effort(f"add-sessions to '{console_name}'", console_name=console_name):
         live = _live_target(db, config, console.vm_name)
         if live is None:
             return
@@ -401,7 +401,7 @@ def remove_sessions(
     )
 
     with _live_best_effort(
-        f"remove-session from '{console_name}'", console_name=console_name
+        f"remove-sessions from '{console_name}'", console_name=console_name
     ):
         live = _live_target(db, config, console.vm_name)
         if live is None:
@@ -409,6 +409,97 @@ def remove_sessions(
         _vm, target = live
         kill_session_windows(
             target, pairs=[(console_name, n) for n in session_names]
+        )
+
+
+def reorder_sessions(
+    db: Database,
+    config: Config,
+    *,
+    console_name: str,
+    session_names: list[str],
+) -> None:
+    """Bump *session_names* to the front of a console's session order.
+
+    The listed sessions become the first windows (in the order given, after
+    the admin-shell window if the console has one). Unlisted members keep
+    their current relative order and are pushed back.
+
+    Every name in *session_names* must already be a member; duplicates and
+    an empty list are rejected (matches create_console's stance that
+    no-op-shaped input is almost certainly a typo). Atomic at the DB layer;
+    if the console's tmux session is live, also reorders the windows via
+    ``tmux swap-window`` (best-effort).
+
+    Short-circuits with an info message and no DB / tmux work when the
+    listed sessions are already in the requested order at the front.
+    """
+    console = _require_console(db, console_name)
+
+    if not session_names:
+        raise ValidationError(
+            f"refusing to reorder console '{console_name}' with no sessions "
+            f"specified (pass the member names to bump to the front)",
+            entity_kind="console",
+            entity_name=console_name,
+        )
+
+    seen: set[str] = set()
+    for name in session_names:
+        if name in seen:
+            raise ValidationError(
+                f"session '{name}' listed more than once",
+                entity_kind="session",
+                entity_name=name,
+            )
+        seen.add(name)
+
+    # One read for both membership validation and the current-order baseline,
+    # rather than N get_console_session calls.
+    current = db.list_console_sessions(console_name)
+    current_order = [m.session_name for m in current]
+    current_set = set(current_order)
+    for name in session_names:
+        if name not in current_set:
+            raise NotFoundError(
+                f"session '{name}' is not a member of console '{console_name}'",
+                entity_kind="console-member",
+                entity_name=name,
+            )
+
+    # `remaining` preserves DB-order for unlisted members regardless of
+    # where in the input list those names appeared.
+    front = list(session_names)
+    remaining = [n for n in current_order if n not in seen]
+    desired_order = front + remaining
+
+    if desired_order == current_order:
+        output.info(
+            f"Console '{console_name}' is already in the requested order; "
+            f"nothing to do."
+        )
+        return
+
+    db.reorder_console_sessions(console_name, desired_order)
+    output.info(
+        f"Reordered {len(front)} session(s) to the front of console "
+        f"'{console_name}'."
+    )
+
+    with _live_best_effort(
+        f"reorder-sessions in '{console_name}'", console_name=console_name
+    ):
+        live = _live_target(db, config, console.vm_name)
+        if live is None:
+            return
+        _vm, target = live
+        if not _console_tmux_exists(target, console_name):
+            return
+        _reorder_session_windows(
+            target,
+            console_name=console_name,
+            admin_shell=console.admin_shell,
+            ordered_session_windows=desired_order,
         )
 
 
@@ -812,6 +903,77 @@ def _reorder_shell_panes(
                 pidx_by_pid[displaced_pid] = src_pidx
 
 
+def _reorder_session_windows(
+    target: ExecTarget,
+    *,
+    console_name: str,
+    admin_shell: bool,
+    ordered_session_windows: list[str],
+) -> None:
+    """Reorder session windows in a live console to match *ordered_session_windows*.
+
+    Walks the desired order and issues ``tmux swap-window`` for each slot
+    that's out of place, tracking window indices in memory across swaps so
+    we never need a second list-windows round trip. Best-effort: a failed
+    swap doesn't abort the rest, and the local map is only mirrored on
+    success so subsequent iterations target the right windows.
+
+    When *admin_shell* is True we hold the window literally named
+    ``admin-shell`` (set by ``_build_console_tmux``) out of the permutable
+    slot set. Matching by name is what makes this robust: tmux indices can
+    drift between the initial build and now (placeholder cleanup, manual
+    operator action), and a future drift case where the DB flag and the
+    live layout disagree self-heals on ``console attach --recreate``.
+    """
+    q_con = shlex.quote(tmux_session_name(console_name))
+    res = target.run(
+        f"tmux list-windows -t {q_con} -F '#{{window_index}}|#{{window_name}}'",
+        check=False,
+    )
+    if not res.ok:
+        return
+    pairs: list[tuple[int, str]] = []
+    for line in res.stdout.strip().splitlines():
+        parts = line.split("|", 1)
+        if len(parts) != 2:
+            continue
+        try:
+            pairs.append((int(parts[0]), parts[1]))
+        except ValueError:
+            continue
+    if not pairs:
+        return
+    pairs.sort(key=lambda p: p[0])
+    # Session slots: every window index that isn't admin-shell, in ascending
+    # order. The N session windows we want to permute occupy exactly these N
+    # slots; the desired order is mapped onto them positionally.
+    session_slots = [
+        idx for idx, name in pairs if not (admin_shell and name == "admin-shell")
+    ]
+    widx_by_name: dict[str, int] = {name: idx for idx, name in pairs}
+    name_by_widx: dict[int, str] = {idx: name for idx, name in pairs}
+
+    for i, desired_name in enumerate(ordered_session_windows):
+        if i >= len(session_slots):
+            # More desired entries than live session windows -- DB ahead of
+            # tmux. The next attach --recreate reconciles. Don't try to be clever.
+            break
+        target_idx = session_slots[i]
+        src_idx = widx_by_name.get(desired_name)
+        if src_idx is None or src_idx == target_idx:
+            continue
+        displaced_name = name_by_widx[target_idx]
+        swap = target.run(
+            f"tmux swap-window -s {q_con}:{src_idx} -t {q_con}:{target_idx}",
+            check=False,
+        )
+        if swap.ok:
+            widx_by_name[desired_name] = target_idx
+            widx_by_name[displaced_name] = src_idx
+            name_by_widx[target_idx] = desired_name
+            name_by_widx[src_idx] = displaced_name
+
+
 # -- Read-side helpers ----------------------------------------------------
 
 
@@ -947,7 +1109,7 @@ def kill_session_windows(
 
     Used by every code path that removes a session from a console
     (``session delete``, ``workspace delete --force``, ``agent delete --force``,
-    ``console remove-session``). Pairs are grouped by console so we probe
+    ``console remove-sessions``). Pairs are grouped by console so we probe
     ``has-session`` once per console rather than once per pair. ``kill-window``
     runs with ``check=False`` so a console that's live but lacks the window
     (operator killed it manually) doesn't fail the cleanup.
