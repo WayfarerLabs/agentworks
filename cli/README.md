@@ -80,8 +80,8 @@ Manage machines that host VMs (for remote Lima mode).
 
 `vm-host remove` refuses if the host has VMs registered against it; pass `--force` to clear those
 VMs' `vm_host_name` reference and remove the host anyway. When the host has no VMs and you run
-without `--force` or `--yes`, the command prompts for confirmation. Both `--yes` and `--force` skip
-the prompt.
+without `--force` or `--yes`, the command prompts for confirmation. Both `--yes` and `--force` also
+bypass the confirmation prompt.
 
 ### VMs
 

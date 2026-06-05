@@ -75,7 +75,7 @@ def workspace_console(
 def workspace_list(
     vm: Annotated[str | None, typer.Option("--vm", help="Filter by VM")] = None,
 ) -> None:
-    """List workspaces. Name filters accept comma-separated values for OR-within-filter."""
+    """List workspaces. --vm accepts comma-separated values for OR-within-filter."""
     from agentworks.workspaces.manager import list_workspaces
 
     list_workspaces(get_db(), vm_name=parse_csv_filter(vm))
