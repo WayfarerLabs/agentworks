@@ -656,7 +656,7 @@ def revoke_workspaces(
                 output.detail(f"Revoked: {ws_name} (still has implicit access via sessions)")
 
 
-    # -- VM operations ---------------------------------------------------------
+# -- VM operations ---------------------------------------------------------
 
 
 def _resolve_ws_group(db: Database, workspace_name: str) -> str:

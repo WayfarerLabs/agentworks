@@ -584,13 +584,18 @@ def start_vm(db: Database, config: Config, name: str) -> None:
     vm = _require_vm(db, name)
     _guard_failed_vm(vm)
     provisioner = get_provisioner_for_vm(db, vm)
-    with keep_vm_active(db, config, vm):
-        status = provisioner.status(vm)
-        if status == VMStatus.RUNNING:
-            output.info(f"VM '{name}' is already running")
-        else:
-            provisioner.start(vm)
+    # Probe status and issue the start BEFORE entering keep_vm_active: the
+    # WSL2 keepalive subprocess boots a stopped distro as a side effect,
+    # which would make status() report RUNNING and mislabel the VM as
+    # "already running". The keepalive then anchors the (now running) VM
+    # through the Tailscale verification.
+    status = provisioner.status(vm)
+    if status == VMStatus.RUNNING:
+        output.info(f"VM '{name}' is already running")
+    else:
+        provisioner.start(vm)
 
+    with keep_vm_active(db, config, vm):
         _ensure_tailscale(db, config, vm, provisioner)
     output.info(f"VM '{name}' is ready")
 
@@ -1283,12 +1288,7 @@ def _ensure_tailscale(
     try:
         verify_tailscale_available()
         exec_target = provisioner.admin_exec_target(vm, config=config)
-        rejoin_tailscale(
-            db,
-            vm.name,
-            exec_target,
-            is_wsl2=(vm.platform == "wsl2"),
-        )
+        rejoin_tailscale(db, vm.name, exec_target)
     finally:
         if azure_provisioner is not None:
             azure_provisioner.detach_public_ip(vm)

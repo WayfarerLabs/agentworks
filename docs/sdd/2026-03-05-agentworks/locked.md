@@ -90,11 +90,14 @@ behavior is described in code (`bootstrap_script.py`, `provisioners/wsl2.py`) an
 Adds a provisioner-level hook for "hold this VM in an active, reachable state for the duration of a
 context". Base default is `nullcontext()`. WSL2 overrides to spawn
 `wsl --distribution NAME -- sleep infinity` as a background subprocess (anchoring against
-`vmIdleTimeout`), and -- if the VM has already joined Tailscale -- wait for SSH reachability before
-yielding. Currently wired into `initialize_vm` only; sweep across other VM-touching operations is
-queued. This is consistent with the two-phase lifecycle (Phase B still runs over Tailscale SSH); the
-keepalive just prevents WSL2 from idle-shutting the distro between Phase A's wsl.exe activity and
-Phase B's first Tailscale SSH call.
+`vmIdleTimeout`), bound to a Win32 Job Object with `KILL_ON_JOB_CLOSE` so a hard-killed CLI cannot
+leak an orphan anchor, and -- if the VM has already joined Tailscale -- wait for SSH reachability
+before yielding. Every manager-layer function that touches a VM wraps in this context via the
+`keep_vm_active` / `keep_vms_active` helpers in `vms/manager.py`; the deliberate exceptions
+(`stop_vm`, the `describe_*` family, multi_console best-effort ops) are documented at the
+`vm_active` docstring. This is consistent with the two-phase lifecycle (Phase B still runs over
+Tailscale SSH); the keepalive just prevents WSL2 from idle-shutting the distro while a command is
+mid-flight.
 
 ### Forward-looking note
 

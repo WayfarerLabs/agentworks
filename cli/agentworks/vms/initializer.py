@@ -659,8 +659,6 @@ def rejoin_tailscale(
     db: Database,
     vm_name: str,
     exec_target: ExecTarget,
-    *,
-    is_wsl2: bool = False,
 ) -> str:
     """Re-join Tailscale on a VM that lost its node (e.g. ephemeral key).
 
@@ -678,7 +676,7 @@ def rejoin_tailscale(
         check=False,
     )
 
-    return _join_tailscale(db, vm_name, exec_target, is_wsl2=is_wsl2)
+    return _join_tailscale(db, vm_name, exec_target)
 
 
 def _join_tailscale(
@@ -686,7 +684,6 @@ def _join_tailscale(
     vm_name: str,
     exec_target: ExecTarget,
     *,
-    is_wsl2: bool = False,
     logger: SSHLogger | None = None,
     tailscale_auth_key: str | None = None,
 ) -> str:
