@@ -7,6 +7,7 @@ import json
 import os
 import platform
 import subprocess
+import sys
 import urllib.request
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -22,6 +23,129 @@ if TYPE_CHECKING:
 
     from agentworks.config import Config
     from agentworks.db import VMRow
+
+
+# -- Win32 job-object machinery for orphan-proof subprocess cleanup ----------
+#
+# Without this, an `agw` process that gets hard-killed (SIGKILL, console
+# window closed, Python crash) leaves its `wsl.exe sleep infinity` subprocess
+# orphaned and still anchoring the WSL2 distro -- defeating the user's
+# expectation that idle-shutdown resumes after the command dies. Windows'
+# job-object KILL_ON_JOB_CLOSE flag exists exactly for this case: when the
+# last handle to the job closes (which the OS guarantees on process death,
+# however the death happens), all processes assigned to the job are killed
+# by the kernel.
+#
+# Wired up lazily on Windows; on other platforms _kernel32 stays None and
+# every helper short-circuits to a no-op. Failures during ctypes setup are
+# swallowed so that an unusual Windows configuration doesn't break WSL2
+# provisioning -- we fall back to terminate-only cleanup, accepting the
+# orphan-on-crash risk that mode brings.
+
+_kernel32 = None
+_JOBOBJECT_EXTENDED_LIMIT_INFORMATION_CLASS = None
+_JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x2000
+_JobObjectExtendedLimitInformation = 9
+
+if sys.platform == "win32":
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        _kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+
+        _kernel32.CreateJobObjectW.restype = wintypes.HANDLE
+        _kernel32.CreateJobObjectW.argtypes = [wintypes.LPVOID, wintypes.LPCWSTR]
+        _kernel32.SetInformationJobObject.restype = wintypes.BOOL
+        _kernel32.SetInformationJobObject.argtypes = [
+            wintypes.HANDLE, wintypes.DWORD, wintypes.LPVOID, wintypes.DWORD,
+        ]
+        _kernel32.AssignProcessToJobObject.restype = wintypes.BOOL
+        _kernel32.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
+        _kernel32.CloseHandle.restype = wintypes.BOOL
+        _kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+
+        class _IO_COUNTERS(ctypes.Structure):
+            _fields_ = [
+                ("ReadOperationCount", ctypes.c_ulonglong),
+                ("WriteOperationCount", ctypes.c_ulonglong),
+                ("OtherOperationCount", ctypes.c_ulonglong),
+                ("ReadTransferCount", ctypes.c_ulonglong),
+                ("WriteTransferCount", ctypes.c_ulonglong),
+                ("OtherTransferCount", ctypes.c_ulonglong),
+            ]
+
+        class _JOBOBJECT_BASIC_LIMIT_INFORMATION(ctypes.Structure):
+            _fields_ = [
+                ("PerProcessUserTimeLimit", ctypes.c_longlong),
+                ("PerJobUserTimeLimit", ctypes.c_longlong),
+                ("LimitFlags", ctypes.c_ulong),
+                ("MinimumWorkingSetSize", ctypes.c_size_t),
+                ("MaximumWorkingSetSize", ctypes.c_size_t),
+                ("ActiveProcessLimit", ctypes.c_ulong),
+                ("Affinity", ctypes.c_void_p),
+                ("PriorityClass", ctypes.c_ulong),
+                ("SchedulingClass", ctypes.c_ulong),
+            ]
+
+        class _JOBOBJECT_EXTENDED_LIMIT_INFORMATION(ctypes.Structure):
+            _fields_ = [
+                ("BasicLimitInformation", _JOBOBJECT_BASIC_LIMIT_INFORMATION),
+                ("IoInfo", _IO_COUNTERS),
+                ("ProcessMemoryLimit", ctypes.c_size_t),
+                ("JobMemoryLimit", ctypes.c_size_t),
+                ("PeakProcessMemoryUsed", ctypes.c_size_t),
+                ("PeakJobMemoryUsed", ctypes.c_size_t),
+            ]
+
+        _JOBOBJECT_EXTENDED_LIMIT_INFORMATION_CLASS = _JOBOBJECT_EXTENDED_LIMIT_INFORMATION
+    except Exception:
+        # Best-effort: any failure leaves us without orphan cleanup but does
+        # not break the rest of the provisioner.
+        _kernel32 = None
+        _JOBOBJECT_EXTENDED_LIMIT_INFORMATION_CLASS = None
+
+
+def _create_kill_on_close_job() -> int | None:
+    """Create a Win32 Job Object configured to kill its members on handle close.
+
+    Returns the HANDLE (as int) on success, None if Win32 is unavailable or
+    any call fails. The caller owns the handle and is responsible for closing
+    it via :func:`_close_handle` once the keepalive subprocess no longer
+    needs to be anchored.
+    """
+    if _kernel32 is None or _JOBOBJECT_EXTENDED_LIMIT_INFORMATION_CLASS is None:
+        return None
+    import ctypes
+
+    h_job = _kernel32.CreateJobObjectW(None, None)
+    if not h_job:
+        return None
+    info = _JOBOBJECT_EXTENDED_LIMIT_INFORMATION_CLASS()
+    info.BasicLimitInformation.LimitFlags = _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+    if not _kernel32.SetInformationJobObject(
+        h_job,
+        _JobObjectExtendedLimitInformation,
+        ctypes.byref(info),
+        ctypes.sizeof(info),
+    ):
+        _kernel32.CloseHandle(h_job)
+        return None
+    return h_job
+
+
+def _assign_process_to_job(h_job: int, h_process: int) -> bool:
+    """Assign a process HANDLE to a Job Object. Returns True on success."""
+    if _kernel32 is None:
+        return False
+    return bool(_kernel32.AssignProcessToJobObject(h_job, h_process))
+
+
+def _close_handle(h: int | None) -> None:
+    """Close a Win32 HANDLE. Safe no-op when the handle is None or Win32 is unavailable."""
+    if _kernel32 is None or not h:
+        return
+    _kernel32.CloseHandle(h)
 
 
 def _local_app_data() -> Path:
@@ -222,6 +346,11 @@ def _keepalive(vm: VMRow, config: Config | None) -> Iterator[None]:
     On exit: ``terminate()`` the subprocess (SIGTERM), wait briefly, then
     ``kill()`` if it hasn't exited. The distro is then free to idle out
     on Windows' normal schedule.
+
+    The subprocess is also assigned to a Win32 Job Object with
+    ``KILL_ON_JOB_CLOSE``, so if this Python process dies in a way that
+    skips the ``finally:`` (SIGKILL, console window closed, hard crash),
+    the kernel closes the job handle and kills the orphan for us.
     """
     proc = subprocess.Popen(
         ["wsl", "--distribution", vm.name, "--", "sleep", "infinity"],
@@ -229,6 +358,22 @@ def _keepalive(vm: VMRow, config: Config | None) -> Iterator[None]:
         stdout=subprocess.DEVNULL,
         stderr=subprocess.PIPE,
     )
+    # Bind the subprocess to a Job Object so a hard-kill of this Python
+    # process still tears down the wsl.exe orphan (the OS closes the job
+    # handle, which kills every process in the job). Best-effort: if the
+    # Win32 calls fail (older Windows / unusual perms / non-Windows), we
+    # fall back to terminate-only cleanup and warn so the operator knows
+    # the orphan-on-hard-kill risk is live.
+    h_job: int | None = _create_kill_on_close_job()
+    if h_job is not None:
+        if not _assign_process_to_job(h_job, int(proc._handle)):
+            _close_handle(h_job)
+            h_job = None
+    if h_job is None:
+        output.detail(
+            "(note: Win32 Job Object unavailable; a hard-kill of this command may leave an orphan wsl.exe.)"
+        )
+
     # Fast-fail check: if wsl.exe couldn't attach (wrong distro name, WSL
     # service hiccup, etc.), `sleep infinity` exits within milliseconds.
     # Without this check the keepalive silently becomes a no-op and the
@@ -239,6 +384,7 @@ def _keepalive(vm: VMRow, config: Config | None) -> Iterator[None]:
         rc = None  # still running, which is what we want
     if rc is not None:
         stderr = (proc.stderr.read().decode("utf-8", errors="replace").strip() if proc.stderr else "")
+        _close_handle(h_job)
         raise RuntimeError(
             f"WSL2 keepalive for distro {vm.name!r} exited immediately (rc={rc})"
             + (f": {stderr}" if stderr else "")
@@ -257,6 +403,7 @@ def _keepalive(vm: VMRow, config: Config | None) -> Iterator[None]:
             proc.kill()
             with contextlib.suppress(subprocess.TimeoutExpired):
                 proc.wait(timeout=5)
+        _close_handle(h_job)
         output.detail("Idle-shutdown prevention stopped.")
 
 
