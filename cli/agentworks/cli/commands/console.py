@@ -161,8 +161,8 @@ def console_delete(
     delete_console(get_db(), load_config(), name=name, yes=yes)
 
 
-@console_app.command("add-session")
-def console_add_session(
+@console_app.command("add-sessions")
+def console_add_sessions(
     name: Annotated[str, typer.Argument(help="Console name")],
     sessions: Annotated[
         list[str],
@@ -176,8 +176,8 @@ def console_add_session(
     add_sessions(get_db(), load_config(), console_name=name, session_specs=sessions)
 
 
-@console_app.command("remove-session")
-def console_remove_session(
+@console_app.command("remove-sessions")
+def console_remove_sessions(
     name: Annotated[str, typer.Argument(help="Console name")],
     sessions: Annotated[list[str], typer.Argument(help="Session names to remove")],
 ) -> None:
@@ -186,6 +186,29 @@ def console_remove_session(
     from agentworks.sessions.multi_console import remove_sessions
 
     remove_sessions(get_db(), load_config(), console_name=name, session_names=sessions)
+
+
+@console_app.command("reorder-sessions")
+def console_reorder_sessions(
+    name: Annotated[str, typer.Argument(help="Console name")],
+    sessions: Annotated[
+        list[str],
+        typer.Argument(
+            help=(
+                "Sessions (already members of the console) to bump to the "
+                "front, in the order they should appear after the admin-shell "
+                "window (if any)."
+            ),
+        ),
+    ],
+) -> None:
+    """Bump existing console members to the front of the session order."""
+    from agentworks.config import load_config
+    from agentworks.sessions.multi_console import reorder_sessions
+
+    reorder_sessions(
+        get_db(), load_config(), console_name=name, session_names=sessions
+    )
 
 
 @console_app.command("add-shell")

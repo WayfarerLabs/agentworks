@@ -1191,6 +1191,52 @@ class Database:
         ).fetchall()
         return [_to_console_session(r) for r in rows]
 
+    def reorder_console_sessions(
+        self, console_name: str, ordered_session_names: list[str]
+    ) -> None:
+        """Rewrite ``console_sessions.position`` to match *ordered_session_names*.
+
+        The list must contain every current member exactly once -- this is a
+        full reordering primitive, not a partial-bump helper. The manager
+        layer is responsible for computing the desired full ordering before
+        calling this (so the same primitive can serve future operations like
+        "move to back" or "swap two").
+
+        Implemented in two passes inside a transaction: first all positions
+        get bumped to negative offsets to escape the UNIQUE(console_name,
+        position) constraint during the rewrite, then each member's final
+        positive position is written. The transaction guarantees the table
+        never settles in a state that violates the unique constraint visible
+        outside the transaction.
+        """
+        with self.transaction():
+            current = self.list_console_sessions(console_name)
+            current_names = {m.session_name for m in current}
+            desired_names = set(ordered_session_names)
+            if current_names != desired_names or len(ordered_session_names) != len(current):
+                # Caller bug: positions can't be assigned if the membership set
+                # doesn't match. Manager layer must guarantee this contract.
+                raise ValueError(
+                    f"reorder_console_sessions for '{console_name}' requires the "
+                    f"full member list: given {sorted(desired_names)} does not "
+                    f"match current members {sorted(current_names)}"
+                )
+            # Phase 1: park every row at -(old_position + 1) so no UNIQUE
+            # collision can fire when phase 2 writes the new positions.
+            self._conn.execute(
+                "UPDATE console_sessions SET position = -(position + 1) "
+                "WHERE console_name = ?",
+                (console_name,),
+            )
+            # Phase 2: assign final positions in the desired order.
+            for new_pos, name in enumerate(ordered_session_names):
+                self._conn.execute(
+                    "UPDATE console_sessions SET position = ? "
+                    "WHERE console_name = ? AND session_name = ?",
+                    (new_pos, console_name, name),
+                )
+            self._touch_console(console_name)
+
     def list_consoles_for_session(self, session_name: str) -> list[ConsoleRow]:
         """Return consoles that currently list *session_name* as a member.
 

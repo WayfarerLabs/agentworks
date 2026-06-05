@@ -14,6 +14,7 @@ from __future__ import annotations
 import shlex
 from typing import TYPE_CHECKING
 
+from agentworks.sessions.multi_console import ADMIN_SHELL_WINDOW
 from agentworks.sessions.tmux import tmux_cmd
 
 if TYPE_CHECKING:
@@ -47,7 +48,9 @@ def generate_config(
         f"root: {workspace_path}",
         "on_project_start: tmux set remain-on-exit on",
         "windows:",
-        "  - admin-shell:",
+        # Quoted so YAML doesn't choke on the leading '--' (sentinel form
+        # chosen to be impossible for any session name; see ADMIN_SHELL_WINDOW).
+        f'  - "{ADMIN_SHELL_WINDOW}":',
         "      panes:",
         '        - ""',
     ]

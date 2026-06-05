@@ -140,18 +140,18 @@ during deletion. Pass `--yes` to skip the confirmation prompt.
 
 Manage agents (isolated Linux users) on VMs. Agents are VM-scoped and access workspaces via grants.
 
-| Command                                     | Description                    |
-| ------------------------------------------- | ------------------------------ |
-| `agw agent create <name> [--vm]`            | Create an agent on a VM        |
-| `agw agent list [--vm <vm>]`                | List agents                    |
-| `agw agent describe <name>`                 | Show agent details and grants  |
-| `agw agent reinit <name>`                   | Re-run agent setup             |
-| `agw agent grant-workspace <name> <ws>...`  | Grant workspace access         |
-| `agw agent grant-workspace <name> --all`    | Grant access to all workspaces |
-| `agw agent revoke-workspace <name> <ws>...` | Revoke workspace access        |
-| `agw agent revoke-workspace <name> --all`   | Revoke all explicit grants     |
-| `agw agent shell <name> [--workspace <ws>]` | Shell into an agent            |
-| `agw agent delete <name>`                   | Delete an agent                |
+| Command                                      | Description                    |
+| -------------------------------------------- | ------------------------------ |
+| `agw agent create <name> [--vm]`             | Create an agent on a VM        |
+| `agw agent list [--vm <vm>]`                 | List agents                    |
+| `agw agent describe <name>`                  | Show agent details and grants  |
+| `agw agent reinit <name>`                    | Re-run agent setup             |
+| `agw agent grant-workspaces <name> <ws>...`  | Grant workspace access         |
+| `agw agent grant-workspaces <name> --all`    | Grant access to all workspaces |
+| `agw agent revoke-workspaces <name> <ws>...` | Revoke workspace access        |
+| `agw agent revoke-workspaces <name> --all`   | Revoke all explicit grants     |
+| `agw agent shell <name> [--workspace <ws>]`  | Shell into an agent            |
+| `agw agent delete <name>`                    | Delete an agent                |
 
 `agent create <name>` takes the agent name as a required positional. Optional flags: `--vm`,
 `--template`, and `--grant-all-workspaces`.
@@ -196,16 +196,17 @@ Named consoles are persistent, curated tmux views over sessions on a VM. Each co
 tmux session (`aw-console-<name>`) containing one window per included session, plus any extra shell
 panes you want preloaded into a session's window.
 
-| Command                                           | Description                                                       |
-| ------------------------------------------------- | ----------------------------------------------------------------- |
-| `agw console create <name> [sessions...]`         | Create a console with the given sessions                          |
-| `agw console list`                                | List consoles                                                     |
-| `agw console describe <name>`                     | Show membership and shell layout                                  |
-| `agw console attach <name>`                       | Attach (builds tmux state on first attach)                        |
-| `agw console delete <name>`                       | Tear down and remove the console                                  |
-| `agw console add-session <name> <sessions...>`    | Add session windows                                               |
-| `agw console remove-session <name> <sessions...>` | Remove session windows                                            |
-| `agw console add-shell <name> <session>`          | Add a shell pane to a session window (accepts `--cwd`, `--admin`) |
+| Command                                             | Description                                                       |
+| --------------------------------------------------- | ----------------------------------------------------------------- |
+| `agw console create <name> [sessions...]`           | Create a console with the given sessions                          |
+| `agw console list`                                  | List consoles                                                     |
+| `agw console describe <name>`                       | Show membership and shell layout                                  |
+| `agw console attach <name>`                         | Attach (builds tmux state on first attach)                        |
+| `agw console delete <name>`                         | Tear down and remove the console                                  |
+| `agw console add-sessions <name> <sessions...>`     | Add session windows                                               |
+| `agw console remove-sessions <name> <sessions...>`  | Remove session windows                                            |
+| `agw console reorder-sessions <name> <sessions...>` | Bump member sessions to the front in the order given              |
+| `agw console add-shell <name> <session>`            | Add a shell pane to a session window (accepts `--cwd`, `--admin`) |
 
 `console create` accepts:
 
@@ -307,9 +308,10 @@ aw-console-backend
 
 The tmux session is built lazily on first `attach` (or rebuilt with `--recreate`). Adding or
 removing sessions/shells while the console is attached updates tmux immediately; when offline, only
-the DB is touched and changes appear on next attach. The mutation commands (`add-session`,
-`remove-session`, `add-shell`) never auto-boot the VM; the explicit attach/repair commands
-(`attach`, `restore-session`) do start a stopped VM, since their job is to bring live state up.
+the DB is touched and changes appear on next attach. The mutation commands (`add-sessions`,
+`remove-sessions`, `reorder-sessions`, `add-shell`) never auto-boot the VM; the explicit
+attach/repair commands (`attach`, `restore-session`) do start a stopped VM, since their job is to
+bring live state up.
 
 #### VM console (deprecated)
 

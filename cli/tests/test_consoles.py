@@ -32,6 +32,7 @@ from agentworks.sessions.multi_console import (
     list_consoles,
     parse_session_spec,
     remove_sessions,
+    reorder_sessions,
     restore_session,
     tmux_session_name,
 )
@@ -104,7 +105,7 @@ class _StubConfig:
         ("a-b_c+12", SessionSpec(name="a-b_c", shells=12)),
         # Legacy <workspace>--<agent> names from before validate_name banned
         # consecutive hyphens. parse_session_spec is the path that builds
-        # console specs (console create / console add-session), so it uses
+        # console specs (console create / console add-sessions), so it uses
         # the loose validator. Other reference paths (session delete, attach,
         # stop, logs) don't go through parse_session_spec at all -- they hit
         # db.get_session() directly, which has never validated names.
@@ -329,6 +330,40 @@ def test_cascade_vm_delete_removes_consoles(db: Database) -> None:
     assert db.list_consoles() == []
     rows = db._conn.execute("SELECT * FROM console_sessions").fetchall()
     assert rows == []
+
+
+def test_reorder_console_sessions_rewrites_positions(db: Database) -> None:
+    """Full-list reorder rewrites positions atomically without tripping
+    UNIQUE(console_name, position)."""
+    _seed_vm(db)
+    _seed_sessions(db, ["a", "b", "c", "d"])
+    db.insert_console("con", "vm1")
+    for n in ["a", "b", "c", "d"]:
+        db.add_console_session("con", n, [])
+
+    db.reorder_console_sessions("con", ["c", "a", "d", "b"])
+
+    members = db.list_console_sessions("con")
+    assert [m.session_name for m in members] == ["c", "a", "d", "b"]
+    assert [m.position for m in members] == [0, 1, 2, 3]
+
+
+def test_reorder_console_sessions_rejects_wrong_member_set(db: Database) -> None:
+    """The DB primitive expects the full current membership, no extras /
+    no missing -- guards against manager-layer bugs that would otherwise
+    leave the table in a half-reordered state."""
+    _seed_vm(db)
+    _seed_sessions(db, ["a", "b"])
+    db.insert_console("con", "vm1")
+    db.add_console_session("con", "a", [])
+    db.add_console_session("con", "b", [])
+
+    with pytest.raises(ValueError, match="full member list"):
+        db.reorder_console_sessions("con", ["a"])  # missing b
+    with pytest.raises(ValueError, match="full member list"):
+        db.reorder_console_sessions("con", ["a", "b", "c"])  # c not a member
+    with pytest.raises(ValueError, match="full member list"):
+        db.reorder_console_sessions("con", ["a", "a"])  # duplicate a, missing b
 
 
 # -- Transaction safety ----------------------------------------------------
@@ -633,6 +668,84 @@ def test_remove_sessions_rejects_non_member(db: Database) -> None:
         remove_sessions(db, _StubConfig(), console_name="con", session_names=["b"])
 
 
+def test_reorder_sessions_bumps_listed_to_front(db: Database) -> None:
+    """Listed sessions land in their argument order at the front; unlisted
+    members keep their current relative order behind them."""
+    _seed_vm(db)
+    _seed_sessions(db, ["a", "b", "c", "d", "e"])
+    create_console(
+        db, name="con", vm_name="vm1", session_specs=["a", "b", "c", "d", "e"]
+    )
+
+    reorder_sessions(
+        db, _StubConfig(), console_name="con", session_names=["d", "b"]
+    )
+
+    members = db.list_console_sessions("con")
+    # d, b first (argument order), then a, c, e (original relative order).
+    assert [m.session_name for m in members] == ["d", "b", "a", "c", "e"]
+
+
+def test_reorder_sessions_noop_when_already_in_requested_order(
+    db: Database, captured_output: CapturedOutput
+) -> None:
+    """Asking to bump the sessions that are already at the front in that
+    order is a clean no-op: no position writes, informational message."""
+    _seed_vm(db)
+    _seed_sessions(db, ["a", "b", "c"])
+    create_console(db, name="con", vm_name="vm1", session_specs=["a", "b", "c"])
+
+    reorder_sessions(
+        db, _StubConfig(), console_name="con", session_names=["a", "b"]
+    )
+
+    members = db.list_console_sessions("con")
+    assert [m.session_name for m in members] == ["a", "b", "c"]
+    assert any(
+        "already in the requested order" in m for m in captured_output.info
+    )
+
+
+def test_reorder_sessions_rejects_non_member(db: Database) -> None:
+    _seed_vm(db)
+    _seed_sessions(db, ["a", "b"])
+    create_console(db, name="con", vm_name="vm1", session_specs=["a"])
+    with pytest.raises(NotFoundError, match="not a member"):
+        reorder_sessions(
+            db, _StubConfig(), console_name="con", session_names=["b"]
+        )
+
+
+def test_reorder_sessions_rejects_duplicates(db: Database) -> None:
+    _seed_vm(db)
+    _seed_sessions(db, ["a", "b"])
+    create_console(db, name="con", vm_name="vm1", session_specs=["a", "b"])
+    with pytest.raises(ValidationError, match="listed more than once"):
+        reorder_sessions(
+            db, _StubConfig(), console_name="con", session_names=["a", "a"]
+        )
+
+
+def test_reorder_sessions_rejects_missing_console(db: Database) -> None:
+    _seed_vm(db)
+    with pytest.raises(NotFoundError, match="console 'nope' not found"):
+        reorder_sessions(
+            db, _StubConfig(), console_name="nope", session_names=["a"]
+        )
+
+
+def test_reorder_sessions_rejects_empty_input(db: Database) -> None:
+    """No-op-shaped input ('please reorder, but I gave you no sessions') is
+    almost certainly a typo. Match create_console's stance on this."""
+    _seed_vm(db)
+    _seed_sessions(db, ["a", "b"])
+    create_console(db, name="con", vm_name="vm1", session_specs=["a", "b"])
+    with pytest.raises(ValidationError, match="no sessions specified"):
+        reorder_sessions(
+            db, _StubConfig(), console_name="con", session_names=[]
+        )
+
+
 def test_add_shell_appends_entry(db: Database) -> None:
     _seed_vm(db)
     _seed_sessions(db, ["a"])
@@ -828,6 +941,7 @@ def test_attach_console_builds_initial_tmux(
     assert any("kill-session -t aw-console-con" in c for c in cmds)
     assert any("new-session -d -s aw-console-con -n _PLACEHOLDER" in c for c in cmds)
     # No admin-shell window: named consoles only contain the curated sessions.
+    assert not any("--admin--" in c for c in cmds)
     assert not any("admin-shell" in c for c in cmds)
     new_window_indexes = [i for i, c in enumerate(cmds) if "new-window -t aw-console-con" in c]
     assert len(new_window_indexes) == 2, cmds
@@ -945,9 +1059,9 @@ def test_attach_console_builds_admin_shell_window_without_placeholder(
     cmds = fake_target.commands
     new_sessions = [c for c in cmds if "new-session -d -s aw-console-con" in c]
     assert len(new_sessions) == 1
-    # Window 0 is admin-shell, running sudo su --login <admin> -- pin the shape
-    # so quoting regressions in the bootstrap fail loudly.
-    assert "-n admin-shell" in new_sessions[0]
+    # Window 0 is the --admin-- window, running sudo su --login <admin> -- pin
+    # the shape so quoting regressions in the bootstrap fail loudly.
+    assert "-n --admin--" in new_sessions[0]
     assert "sudo su --login" in new_sessions[0]
     assert "admin" in new_sessions[0]  # the admin username from _seed_vm
     assert not any("_PLACEHOLDER" in c for c in cmds)
@@ -1250,6 +1364,203 @@ def test_remove_session_live_sync_kills_window(
 
     kill_windows = [c for c in fake_target.commands if "kill-window -t aw-console-con:b" in c]
     assert len(kill_windows) == 1
+
+
+def test_reorder_sessions_live_sync_swaps_windows_no_admin_shell(
+    db: Database, fake_target: _FakeTarget
+) -> None:
+    """With no admin-shell window, the desired session order maps onto
+    every live window index. The helper issues one swap-window per
+    out-of-place slot, tracking indices in memory so the second iteration
+    sees the new layout without another list-windows call."""
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["a", "b", "c"])
+    create_console(db, name="con", vm_name="vm1", session_specs=["a", "b", "c"])
+
+    fake_target.commands.clear()
+    fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
+    fake_target.responses["list-windows -t aw-console-con"] = _FakeResult(
+        returncode=0, stdout="0|a\n1|b\n2|c\n"
+    )
+
+    reorder_sessions(
+        db, _StubConfig(), console_name="con", session_names=["c", "a"]
+    )
+
+    # Desired order: [c, a, b]. Starting layout [a, b, c]:
+    # - i=0 wants c at idx 0; c is at 2 -> swap 2 <-> 0 -> [c, b, a]
+    # - i=1 wants a at idx 1; a is at 2 (after the swap, our tracker knows
+    #   this without re-listing) -> swap 2 <-> 1 -> [c, a, b]
+    swaps = [c for c in fake_target.commands if "swap-window" in c]
+    assert swaps == [
+        "tmux swap-window -s aw-console-con:2 -t aw-console-con:0",
+        "tmux swap-window -s aw-console-con:2 -t aw-console-con:1",
+    ]
+
+
+def test_reorder_sessions_live_sync_holds_admin_shell_fixed(
+    db: Database, fake_target: _FakeTarget
+) -> None:
+    """Permutable slots are derived positively from the session set, so the
+    --admin-- window (whose name is not in the desired list) is excluded."""
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["a", "b", "c"])
+    # Build the console with admin_shell=True so the live layout will have
+    # '--admin--' at index 0 and sessions at 1+.
+    db.insert_console("con", "vm1", admin_shell=True)
+    for n in ["a", "b", "c"]:
+        db.add_console_session("con", n, [])
+
+    fake_target.commands.clear()
+    fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
+    fake_target.responses["list-windows -t aw-console-con"] = _FakeResult(
+        returncode=0, stdout="0|--admin--\n1|a\n2|b\n3|c\n"
+    )
+
+    reorder_sessions(
+        db, _StubConfig(), console_name="con", session_names=["c"]
+    )
+
+    # Desired order: [c, a, b]. Session slots = [1, 2, 3] ('--admin--' at
+    # 0 is not in the session set, so it isn't a slot). Starting [--admin--,
+    # a, b, c]:
+    #   - i=0 wants c at idx 1; c is at 3 -> swap 3<->1 -> [..., c, b, a]
+    #   - i=1 wants a at idx 2; a is now at 3 -> swap 3<->2 -> [..., c, a, b]
+    # The second swap is the unavoidable cost of placing one displaced
+    # window: bumping c to the front pushed a out of position.
+    swaps = [c for c in fake_target.commands if "swap-window" in c]
+    assert swaps == [
+        "tmux swap-window -s aw-console-con:3 -t aw-console-con:1",
+        "tmux swap-window -s aw-console-con:3 -t aw-console-con:2",
+    ]
+    # --admin-- window itself was never moved.
+    assert not any(
+        "swap-window" in c and "--admin--" in c for c in fake_target.commands
+    )
+
+
+def test_reorder_sessions_live_sync_ignores_stray_window(
+    db: Database, fake_target: _FakeTarget
+) -> None:
+    """A window with no matching session row (operator-created via raw
+    `tmux new-window`, leftover from a rename, etc.) is not a permutable
+    slot. The reorder operates only on windows whose names are in the
+    session set; the stray stays put."""
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["a", "b", "c"])
+    create_console(db, name="con", vm_name="vm1", session_specs=["a", "b", "c"])
+
+    fake_target.commands.clear()
+    fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
+    # Operator opened an extra window named 'scratch' at index 2; sessions
+    # live at 0, 1, 3.
+    fake_target.responses["list-windows -t aw-console-con"] = _FakeResult(
+        returncode=0, stdout="0|a\n1|b\n2|scratch\n3|c\n"
+    )
+
+    reorder_sessions(
+        db, _StubConfig(), console_name="con", session_names=["c"]
+    )
+
+    # Session slots = [0, 1, 3] (scratch at 2 is excluded). Desired order
+    # [c, a, b]:
+    #   - i=0 wants c at slot 0 (idx 0); c is at 3 -> swap 3<->0 -> [c, b, scratch, a]
+    #   - i=1 wants a at slot 1 (idx 1); a is now at 3 -> swap 3<->1 -> [c, a, scratch, b]
+    # scratch is never touched; it remains at index 2.
+    swaps = [c for c in fake_target.commands if "swap-window" in c]
+    assert swaps == [
+        "tmux swap-window -s aw-console-con:3 -t aw-console-con:0",
+        "tmux swap-window -s aw-console-con:3 -t aw-console-con:1",
+    ]
+    assert not any(
+        "swap-window" in c and "scratch" in c for c in fake_target.commands
+    )
+
+
+def test_reorder_sessions_live_sync_skipped_when_console_absent(
+    db: Database, fake_target: _FakeTarget
+) -> None:
+    """If the console's tmux session isn't alive, no swap-window calls run.
+    DB still updates."""
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["a", "b"])
+    create_console(db, name="con", vm_name="vm1", session_specs=["a", "b"])
+
+    fake_target.commands.clear()
+    fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=1)
+
+    reorder_sessions(
+        db, _StubConfig(), console_name="con", session_names=["b"]
+    )
+
+    assert not any("swap-window" in c for c in fake_target.commands)
+    # DB still reflects the new order.
+    members = db.list_console_sessions("con")
+    assert [m.session_name for m in members] == ["b", "a"]
+
+
+def test_reorder_sessions_live_sync_compacts_when_window_missing(
+    db: Database, fake_target: _FakeTarget
+) -> None:
+    """If the operator killed a session window manually, the surviving
+    windows compact toward the front instead of getting stranded at
+    later slots. Without this, desired = [c, a, b] with live = [a, b]
+    (c missing) would land 'a' at slot 1 and produce [b, a] -- wrong."""
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["a", "b", "c"])
+    create_console(db, name="con", vm_name="vm1", session_specs=["a", "b", "c"])
+
+    fake_target.commands.clear()
+    fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
+    # 'c' window is missing -- operator hit Ctrl-B & by mistake, or it
+    # exited before the wrapper-loop could catch the restart.
+    fake_target.responses["list-windows -t aw-console-con"] = _FakeResult(
+        returncode=0, stdout="0|a\n1|b\n"
+    )
+
+    reorder_sessions(
+        db, _StubConfig(), console_name="con", session_names=["c"]
+    )
+
+    # Desired order: [c, a, b]. present_desired = [a, b] (c filtered out).
+    # session_slots = [0, 1]. Map a->0 (already there, skip), b->1 (already
+    # there, skip). No swaps needed; layout stays [a, b].
+    swaps = [c for c in fake_target.commands if "swap-window" in c]
+    assert swaps == []
+    # DB still reflects the new order (DB doesn't care about tmux state).
+    members = db.list_console_sessions("con")
+    assert [m.session_name for m in members] == ["c", "a", "b"]
+
+
+def test_reorder_sessions_live_sync_bails_on_duplicate_window_names(
+    db: Database, fake_target: _FakeTarget, captured_output: CapturedOutput
+) -> None:
+    """If two windows share a name that's in the session set, we can't
+    disambiguate which one to swap. Warn with a --recreate hint and skip
+    tmux work; DB is already updated."""
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["a", "b"])
+    create_console(db, name="con", vm_name="vm1", session_specs=["a", "b"])
+
+    fake_target.commands.clear()
+    fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
+    # Two windows both named 'a' (operator renamed window 2 by accident).
+    fake_target.responses["list-windows -t aw-console-con"] = _FakeResult(
+        returncode=0, stdout="0|a\n1|b\n2|a\n"
+    )
+
+    reorder_sessions(
+        db, _StubConfig(), console_name="con", session_names=["b"]
+    )
+
+    swaps = [c for c in fake_target.commands if "swap-window" in c]
+    assert swaps == []
+    assert any(
+        "duplicate window name" in w and "--recreate" in w
+        for w in captured_output.warnings
+    )
+    members = db.list_console_sessions("con")
+    assert [m.session_name for m in members] == ["b", "a"]
 
 
 def test_list_consoles_for_session_returns_members(db: Database) -> None:
