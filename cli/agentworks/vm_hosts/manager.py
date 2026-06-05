@@ -91,9 +91,9 @@ def remove_vm_host(db: Database, name: str, *, force: bool = False, yes: bool = 
             hint="Delete the VMs first, or pass --force to clear the host reference and remove.",
         )
 
-    # By the time we get here, vm_count == 0: the StateError above catches the
-    # vm_count > 0 case when not force, so the prompt only ever fires for hosts
-    # that no VM references.
+    # The confirmation prompt only applies to the non-force path; when --force is
+    # set we skip the prompt even if VMs reference the host (they'll be unlinked
+    # below).
     if not yes and not force and not output.confirm(f"Remove VM host '{name}'?"):
         raise UserAbort("removal cancelled")
 
