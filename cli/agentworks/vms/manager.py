@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 from typing import TYPE_CHECKING
 
 from agentworks import output
@@ -28,10 +29,52 @@ from agentworks.vms.initializer import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable, Iterator
+
     from agentworks.config import Config
     from agentworks.db import Database, VMRow
     from agentworks.git_credentials.base import GitCredentialProvider
     from agentworks.vms.base import VMProvisioner
+
+
+@contextlib.contextmanager
+def keep_vm_active(db: Database, config: Config, vm: VMRow) -> Iterator[None]:
+    """Hold a VM in an active, reachable state for the duration of the context.
+
+    Dispatches to the platform provisioner's ``vm_active`` hook. Default is a
+    no-op (Lima/Azure/Proxmox VMs don't disappear on us). WSL2 spawns a
+    ``wsl --distribution NAME -- sleep infinity`` subprocess to anchor the
+    distro against ``vmIdleTimeout``, booting it if stopped, and waits for
+    Tailscale SSH to be reachable before yielding.
+
+    Wrap any manager-layer function that touches the VM (issues SSH, runs
+    tmux ops, transfers files, etc.) in this context. For commands that
+    touch more than one VM, use :func:`keep_vms_active`.
+    """
+    provisioner = get_provisioner_for_vm(db, vm, config)
+    with provisioner.vm_active(vm, config=config):
+        yield
+
+
+@contextlib.contextmanager
+def keep_vms_active(
+    db: Database, config: Config, vms: Iterable[VMRow]
+) -> Iterator[None]:
+    """Multi-VM variant of :func:`keep_vm_active`.
+
+    Enters one ``vm_active`` per VM via ``ExitStack`` so a command that
+    touches multiple VMs (``session list --status``, ``workspace copy``
+    across hosts) keeps all of them anchored for its duration. Duplicate
+    VMs are deduplicated by name.
+    """
+    seen: set[str] = set()
+    with contextlib.ExitStack() as stack:
+        for vm in vms:
+            if vm.name in seen:
+                continue
+            seen.add(vm.name)
+            stack.enter_context(keep_vm_active(db, config, vm))
+        yield
 
 
 def get_provisioner(platform: str, vm_host_ssh: str | None = None) -> VMProvisioner:
@@ -255,7 +298,6 @@ def create_vm(
             vm_name,
             exec_target=result.admin_exec_target,
             providers=providers,
-            is_wsl2=(platform == "wsl2"),
             admin_username=resolved_admin_username,
             tailscale_auth_key=tailscale_auth_key,
             git_tokens=git_tokens,
@@ -453,7 +495,8 @@ def shell_vm(db: Database, config: Config, name: str) -> None:
         ssh_cmd.extend(["-i", str(config.operator.ssh_private_key)])
     ssh_cmd.append(f"{vm.admin_username}@{vm.tailscale_host}")
 
-    sys.exit(subprocess.call(ssh_cmd))
+    with keep_vm_active(db, config, vm):
+        sys.exit(subprocess.call(ssh_cmd))
 
 
 def exec_vm(db: Database, config: Config, name: str, command: list[str]) -> int:
@@ -481,7 +524,8 @@ def exec_vm(db: Database, config: Config, name: str, command: list[str]) -> int:
     ssh_cmd.append(f"{vm.admin_username}@{vm.tailscale_host}")
     ssh_cmd.append(command[0] if len(command) == 1 else shlex.join(command))
 
-    return subprocess.call(ssh_cmd)
+    with keep_vm_active(db, config, vm):
+        return subprocess.call(ssh_cmd)
 
 
 def add_git_credential(db: Database, config: Config, name: str, credential_name: str) -> None:
@@ -512,23 +556,24 @@ def add_git_credential(db: Database, config: Config, name: str, credential_name:
     token = provider.obtain_token(name)
     new_lines = provider.credential_lines(token)
 
-    target = admin_exec_target(vm, config)
+    with keep_vm_active(db, config, vm):
+        target = admin_exec_target(vm, config)
 
-    # Read existing credentials, filter out entries for the same host/path
-    result = target.run("cat ~/.git-credentials 2>/dev/null || true")
-    existing = result.stdout.strip().splitlines() if result.stdout.strip() else []
+        # Read existing credentials, filter out entries for the same host/path
+        result = target.run("cat ~/.git-credentials 2>/dev/null || true")
+        existing = result.stdout.strip().splitlines() if result.stdout.strip() else []
 
-    # Extract host/path from new lines for matching: "https://user:tok@host/path" -> "host/path"
-    new_hostpaths = {line.split("@", 1)[1] for line in new_lines if "@" in line}
+        # Extract host/path from new lines for matching: "https://user:tok@host/path" -> "host/path"
+        new_hostpaths = {line.split("@", 1)[1] for line in new_lines if "@" in line}
 
-    # Filter out old entries whose host/path matches any new entry
-    filtered = [e for e in existing if "@" not in e or e.split("@", 1)[1] not in new_hostpaths]
+        # Filter out old entries whose host/path matches any new entry
+        filtered = [e for e in existing if "@" not in e or e.split("@", 1)[1] not in new_hostpaths]
 
-    # Write back filtered + new
-    all_lines = filtered + new_lines
-    cred_content = "\n".join(all_lines) + "\n"
-    target.write_file("~/.git-credentials", cred_content, mode="600")
-    target.run("git config --global credential.helper store")
+        # Write back filtered + new
+        all_lines = filtered + new_lines
+        cred_content = "\n".join(all_lines) + "\n"
+        target.write_file("~/.git-credentials", cred_content, mode="600")
+        target.run("git config --global credential.helper store")
 
     output.info(f"Git credential '{credential_name}' configured on VM '{name}'")
 
@@ -537,26 +582,43 @@ def start_vm(db: Database, config: Config, name: str) -> None:
     """Start a stopped VM."""
     vm = _require_vm(db, name)
     _guard_failed_vm(vm)
-    provisioner = _get_provisioner_for_vm(db, vm)
+    provisioner = get_provisioner_for_vm(db, vm)
+    # Probe status and issue the start BEFORE entering keep_vm_active: the
+    # WSL2 keepalive subprocess boots a stopped distro as a side effect,
+    # which would make status() report RUNNING and mislabel the VM as
+    # "already running". The keepalive then anchors the (now running) VM
+    # through the Tailscale verification.
     status = provisioner.status(vm)
     if status == VMStatus.RUNNING:
         output.info(f"VM '{name}' is already running")
     else:
         provisioner.start(vm)
 
-    _ensure_tailscale(db, config, vm, provisioner)
-    output.info(f"VM '{name}' is ready")
+    # Tailscale verification runs inside the keepalive so a freshly booted
+    # WSL2 distro doesn't idle-shut while we wait for tailscaled to come up.
+    with keep_vm_active(db, config, vm):
+        _ensure_tailscale(db, config, vm, provisioner)
+    # Only emit "is ready" on the path that actually started the VM. When
+    # status was already RUNNING we already said so above, and Tailscale
+    # verification is usually a no-op (handshake already valid), so an
+    # extra "is ready" line is just noise. On the real-work path it
+    # confirms tailscaled finished its handshake.
+    if status != VMStatus.RUNNING:
+        output.info(f"VM '{name}' is ready")
 
 
 def stop_vm(db: Database, config: Config, name: str) -> None:
     """Stop a running VM."""
     vm = _require_vm(db, name)
     _guard_failed_vm(vm)
-    provisioner = _get_provisioner_for_vm(db, vm)
+    provisioner = get_provisioner_for_vm(db, vm)
     status = provisioner.status(vm)
     if status in (VMStatus.STOPPED, VMStatus.DEALLOCATED):
         output.info(f"VM '{name}' is already stopped")
         return
+    # No keep_vm_active here: stop is the inverse of what the keepalive
+    # is for. The platform stop call doesn't need SSH to the VM, and
+    # holding a wsl.exe sleep subprocess open would fight `wsl --terminate`.
     provisioner.stop(vm)
     output.info(f"VM '{name}' stopped")
 
@@ -588,7 +650,7 @@ def rekey_vm(
     vm = _require_vm(db, name)
     _guard_failed_vm(vm)
 
-    provisioner = _get_provisioner_for_vm(db, vm, config)
+    provisioner = get_provisioner_for_vm(db, vm, config)
     status = provisioner.status(vm)
     if status != VMStatus.RUNNING:
         raise StateError(
@@ -609,12 +671,19 @@ def rekey_vm(
 
     output.info(f"Rekeying '{name}'...")
 
-    # For Azure, attach a temporary public IP for out-of-band access
     azure_provisioner = provisioner if isinstance(provisioner, AzureProvisioner) else None
-    if azure_provisioner is not None:
-        azure_provisioner.attach_public_ip(vm)
 
-    try:
+    with contextlib.ExitStack() as _stack:
+        # Holds the VM in an active state for the duration of the rekey.
+        # No-op for Lima/Azure/Proxmox; WSL2 anchors the distro against
+        # vmIdleTimeout so per-step `time.sleep`s can't let it idle out.
+        _stack.enter_context(keep_vm_active(db, config, vm))
+        # For Azure, attach a temporary public IP for out-of-band access;
+        # detach on exit no matter how the body unwinds.
+        if azure_provisioner is not None:
+            azure_provisioner.attach_public_ip(vm)
+            _stack.callback(azure_provisioner.detach_public_ip, vm)
+
         exec_target = provisioner.admin_exec_target(vm, config=config)
 
         # Wait for the provisioning transport to be reachable
@@ -636,9 +705,11 @@ def rekey_vm(
         # control plane response that never comes). The final restart
         # fixes a Tailscale bug where the node registers but peers can't
         # reach it after rekeying to a different tailnet.
-        # Restart command varies by platform. WSL2 may not have systemd.
-        is_wsl2 = vm.platform == "wsl2"
-        restart_cmd = "service tailscaled restart" if is_wsl2 else "systemctl restart tailscaled"
+        # All platforms run systemd (WSL2 enables it via /etc/wsl.conf during
+        # provisioning); tailscaled is always a systemd unit. Daemon-side
+        # flags like --tun=userspace-networking live in /etc/default/tailscaled,
+        # not on `tailscale up`.
+        restart_cmd = "systemctl restart tailscaled"
         stabilize_secs = 15  # pause between steps for daemon/network stability
 
         output.detail("Restarting Tailscale daemon...")
@@ -651,10 +722,7 @@ def rekey_vm(
 
         output.detail("Joining new tailnet...")
         quoted_key = shlex.quote(ts_auth_key)
-        ts_up_cmd = f"tailscale up --auth-key {quoted_key}"
-        if is_wsl2:
-            ts_up_cmd += " --userspace-networking"
-        exec_target.run(ts_up_cmd, sudo=True, timeout=30)
+        exec_target.run(f"tailscale up --auth-key {quoted_key}", sudo=True, timeout=30)
         time.sleep(stabilize_secs)
 
         output.detail("Restarting Tailscale daemon...")
@@ -699,10 +767,6 @@ def rekey_vm(
                 f"VM '{name}' rekeyed but {new_ip} is not reachable via SSH. "
                 "Check tailnet sharing/ACLs. Run 'vm rekey' again to retry."
             )
-
-    finally:
-        if azure_provisioner is not None:
-            azure_provisioner.detach_public_ip(vm)
 
 
 def delete_vm(
@@ -749,11 +813,15 @@ def delete_vm(
 
     # Platform-specific cleanup (also handles Tailscale logout)
     try:
-        provisioner = _get_provisioner_for_vm(db, vm)
+        provisioner = get_provisioner_for_vm(db, vm)
 
-        # Tailscale logout (best-effort, via provisioning transport)
+        # Tailscale logout (best-effort, via provisioning transport).
+        # Wrap only this step: the logout needs the VM alive, but
+        # provisioner.delete is the inverse and would conflict with a
+        # WSL2 keepalive subprocess.
         if vm.tailscale_host:
-            _tailscale_logout(provisioner, vm, config)
+            with keep_vm_active(db, config, vm):
+                _tailscale_logout(provisioner, vm, config)
 
         provisioner.delete(vm)
     except Exception as e:
@@ -837,27 +905,28 @@ def reinit_vm(
     # any warning output. Matches the pattern used by agent create / reinit
     # and workspace create / rehome.
     try:
-        try:
-            run_initialization(
-                db,
-                config,
-                name,
-                ts_target,
-                providers,
-                home,
-                vm.admin_username,
-                logger,
-                git_tokens=git_tokens,
-            )
-        except KeyboardInterrupt:
-            output.warn(
-                f"Cancelling vm reinit '{name}'. The VM may be in a partial state. "
-                f"Re-run 'vm reinit {name}' to retry. Log: {logger.path}"
-            )
-            raise
-        except Exception:
-            output.warn(f"Log: {logger.path}")
-            raise
+        with keep_vm_active(db, config, vm):
+            try:
+                run_initialization(
+                    db,
+                    config,
+                    name,
+                    ts_target,
+                    providers,
+                    home,
+                    vm.admin_username,
+                    logger,
+                    git_tokens=git_tokens,
+                )
+            except KeyboardInterrupt:
+                output.warn(
+                    f"Cancelling vm reinit '{name}'. The VM may be in a partial state. "
+                    f"Re-run 'vm reinit {name}' to retry. Log: {logger.path}"
+                )
+                raise
+            except Exception:
+                output.warn(f"Log: {logger.path}")
+                raise
     finally:
         logger.close()
 
@@ -1052,7 +1121,7 @@ def _require_vm(db: Database, name: str) -> VMRow:
     return vm
 
 
-def _get_provisioner_for_vm(db: Database, vm: VMRow, config: Config | None = None) -> VMProvisioner:
+def get_provisioner_for_vm(db: Database, vm: VMRow, config: Config | None = None) -> VMProvisioner:
     if vm.platform == "proxmox":
         from agentworks.vms.provisioners.proxmox import ProxmoxProvisioner
 
@@ -1173,24 +1242,25 @@ def port_forward_vm(
         output.info("Use --verbose for detailed SSH output.")
 
     # Run in foreground until interrupted
-    try:
-        proc = subprocess.Popen(ssh_cmd)
+    with keep_vm_active(db, config, vm):
+        try:
+            proc = subprocess.Popen(ssh_cmd)
 
-        # Forward SIGINT/SIGTERM to the SSH process for clean shutdown
-        def _handle_signal(sig: int, _frame: object) -> None:
-            proc.terminate()
+            # Forward SIGINT/SIGTERM to the SSH process for clean shutdown
+            def _handle_signal(sig: int, _frame: object) -> None:
+                proc.terminate()
 
-        signal.signal(signal.SIGINT, _handle_signal)
-        signal.signal(signal.SIGTERM, _handle_signal)
+            signal.signal(signal.SIGINT, _handle_signal)
+            signal.signal(signal.SIGTERM, _handle_signal)
 
-        rc = proc.wait()
-        sys.exit(rc)
-    except OSError as e:
-        raise ConnectivityError(
-            f"failed to start SSH: {e}",
-            entity_kind="vm",
-            entity_name=name,
-        ) from e
+            rc = proc.wait()
+            sys.exit(rc)
+        except OSError as e:
+            raise ConnectivityError(
+                f"failed to start SSH: {e}",
+                entity_kind="vm",
+                entity_name=name,
+            ) from e
 
 
 def _ensure_tailscale(
@@ -1225,12 +1295,7 @@ def _ensure_tailscale(
     try:
         verify_tailscale_available()
         exec_target = provisioner.admin_exec_target(vm, config=config)
-        rejoin_tailscale(
-            db,
-            vm.name,
-            exec_target,
-            is_wsl2=(vm.platform == "wsl2"),
-        )
+        rejoin_tailscale(db, vm.name, exec_target)
     finally:
         if azure_provisioner is not None:
             azure_provisioner.detach_public_ip(vm)

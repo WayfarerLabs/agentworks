@@ -78,9 +78,22 @@ Manage machines that host VMs (for remote Lima mode).
 | `agw vm-host list`                  | List registered VM hosts |
 | `agw vm-host remove <name>`         | Remove a VM host         |
 
+`vm-host remove` refuses if the host has VMs registered against it; pass `--force` to clear those
+VMs' `vm_host_name` reference and remove the host anyway. When the host has no VMs and you run
+without `--force` or `--yes`, the command prompts for confirmation. Both `--yes` and `--force` also
+bypass the confirmation prompt.
+
 ### VMs
 
 Manage virtual machines across Lima (local or remote), Azure, and WSL2.
+
+> **Note on WSL2:** WSL2 distros share the Windows workstation's lifecycle. They idle-shut after
+> ~60s of no `wsl.exe` activity (`vmIdleTimeout` in `.wslconfig`) and do not survive workstation
+> shutdown or sleep. agentworks holds a `wsl.exe` keepalive for the duration of each VM-touching
+> command, so individual `agw` operations work cleanly, but agents and sessions on WSL2 are not
+> suitable for unattended background workflows. Use a different provisioner that provides true
+> long-lived VMs (e.g. Lima, Azure, Proxmox, etc.) if you need a VM that survives independent of
+> your workstation.
 
 | Command                                   | Description                                |
 | ----------------------------------------- | ------------------------------------------ |
@@ -164,17 +177,23 @@ confirmation prompt.
 Manage sessions (persistent tmux sessions running in workspaces). Session names are globally unique
 -- no `--workspace` flag needed for most commands.
 
-| Command                               | Description                    |
-| ------------------------------------- | ------------------------------ |
-| `agw session create <name>`           | Create and start a session     |
-| `agw session describe <name>`         | Show session details           |
-| `agw session list [--workspace <ws>]` | List sessions with status      |
-| `agw session attach <name>`           | Attach to a running session    |
-| `agw session stop <name>`             | Stop a running session         |
-| `agw session restart <name>`          | Restart a session              |
-| `agw session delete <name>`           | Stop and delete a session      |
-| `agw session logs <name>`             | Dump session scrollback buffer |
-| `agw console attach <name>`           | Attach to a named console      |
+| Command                       | Description                    |
+| ----------------------------- | ------------------------------ |
+| `agw session create <name>`   | Create and start a session     |
+| `agw session describe <name>` | Show session details           |
+| `agw session list`            | List sessions with status      |
+| `agw session attach <name>`   | Attach to a running session    |
+| `agw session stop <name>`     | Stop a running session         |
+| `agw session restart <name>`  | Restart a session              |
+| `agw session delete <name>`   | Stop and delete a session      |
+| `agw session logs <name>`     | Dump session scrollback buffer |
+| `agw console attach <name>`   | Attach to a named console      |
+
+`session list` accepts `--workspace`, `--vm`, `--agent`, and `--admin` to narrow the result set.
+Filters compose with AND. The name filters (`--workspace`, `--vm`, `--agent`) accept a single value
+or a comma-separated list (`--vm vm1,vm2`); commas within a filter are OR-ed together.
+`--agent <name>` matches agent-mode sessions only; `--admin` matches admin-mode sessions only (the
+two are mutually exclusive).
 
 `session create <name>` takes the session name as a required positional. Optional flags:
 `--workspace`, `--template`, `--admin`, and `--agent`. Workspace and mode (admin vs agent) are
@@ -222,7 +241,13 @@ panes you want preloaded into a session's window.
 - `--add-admin-shell` -- include a top-level admin-shell window as window 0, matching the legacy
   `vm console` behavior.
 
-`console list` accepts `--vm` to filter.
+`console list` accepts `--vm`, `--workspace`, and `--agent` to narrow the result set. Each filter
+takes a single value or a comma-separated list (`--workspace ws1,ws2`); commas within a filter are
+OR-ed together. The `--workspace` and `--agent` filters use "any session matches" semantics: a
+console is listed if at least one of its member sessions belongs to the given workspace / runs as
+the given agent. When `--workspace` and `--agent` are both passed, the SAME session must satisfy
+both predicates. The session count displayed is the total membership, not the count of matching
+sessions. Filters compose with AND.
 
 Session specs use `name` or `name+N` shorthand, where `N` is the number of default shell panes to
 pre-open in that session's window (running as the session's agent user, cwd = workspace root):

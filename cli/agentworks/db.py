@@ -789,13 +789,15 @@ class Database:
         row = self._conn.execute("SELECT * FROM workspaces WHERE name = ?", (name,)).fetchone()
         return _to_workspace(row) if row else None
 
-    def list_workspaces(self, vm_name: str | None = None) -> list[WorkspaceRow]:
-        if vm_name is not None:
-            rows = self._conn.execute(
-                "SELECT * FROM workspaces WHERE vm_name = ? ORDER BY name", (vm_name,)
-            ).fetchall()
-        else:
-            rows = self._conn.execute("SELECT * FROM workspaces ORDER BY name").fetchall()
+    def list_workspaces(self, *, vm_name: str | list[str] | None = None) -> list[WorkspaceRow]:
+        """List workspaces, optionally filtered by VM. `vm_name` accepts a
+        single string or a list of strings; list values are OR-ed together."""
+        clause, params = _eq_or_in("vm_name", vm_name)
+        sql = "SELECT * FROM workspaces"
+        if clause:
+            sql += " WHERE " + clause
+        sql += " ORDER BY name"
+        rows = self._conn.execute(sql, params).fetchall()
         return [_to_workspace(r) for r in rows]
 
     def update_workspace_path(self, name: str, workspace_path: str) -> None:
@@ -863,16 +865,15 @@ class Database:
         ).fetchone()
         return _to_agent(row) if row else None
 
-    def list_agents(self, vm_name: str | None = None) -> list[AgentRow]:
-        if vm_name is not None:
-            rows = self._conn.execute(
-                "SELECT * FROM agents WHERE vm_name = ? ORDER BY name",
-                (vm_name,),
-            ).fetchall()
-        else:
-            rows = self._conn.execute(
-                "SELECT * FROM agents ORDER BY vm_name, name",
-            ).fetchall()
+    def list_agents(self, *, vm_name: str | list[str] | None = None) -> list[AgentRow]:
+        """List agents, optionally filtered by VM. `vm_name` accepts a
+        single string or a list of strings; list values are OR-ed together."""
+        clause, params = _eq_or_in("vm_name", vm_name)
+        sql = "SELECT * FROM agents"
+        if clause:
+            sql += " WHERE " + clause
+        sql += " ORDER BY vm_name, name"
+        rows = self._conn.execute(sql, params).fetchall()
         return [_to_agent(r) for r in rows]
 
     def delete_agent(self, name: str) -> None:
@@ -1031,16 +1032,52 @@ class Database:
         ).fetchone()
         return _to_session(row) if row else None
 
-    def list_sessions(self, workspace_name: str | None = None) -> list[SessionRow]:
-        if workspace_name is not None:
-            rows = self._conn.execute(
-                "SELECT * FROM sessions WHERE workspace_name = ? ORDER BY name",
-                (workspace_name,),
-            ).fetchall()
-        else:
-            rows = self._conn.execute(
-                "SELECT * FROM sessions ORDER BY workspace_name, name",
-            ).fetchall()
+    def list_sessions(
+        self,
+        *,
+        workspace_name: str | list[str] | None = None,
+        vm_name: str | list[str] | None = None,
+        agent_name: str | list[str] | None = None,
+        admin_only: bool = False,
+    ) -> list[SessionRow]:
+        """List sessions, optionally filtered by workspace, VM, agent, or mode.
+
+        Each name filter accepts a single string or a list of strings; list
+        values are OR-ed together within a filter, and filters AND together
+        across the call. `vm_name` filters via the session's workspace
+        (sessions on workspaces that live on the given VM). `agent_name`
+        matches the session's `agent_name` column directly; admin-mode
+        sessions (NULL agent_name) are excluded when this filter is set.
+        `admin_only` restricts to admin-mode sessions (agent_name IS NULL);
+        it is the inverse of `agent_name` and the two should not be passed
+        together (the CLI layer enforces the mutex; this layer accepts the
+        combination but will simply return no rows since the predicates are
+        contradictory).
+        """
+        clauses: list[str] = []
+        params: list[object] = []
+        ws_clause, ws_params = _eq_or_in("s.workspace_name", workspace_name)
+        if ws_clause:
+            clauses.append(ws_clause)
+            params.extend(ws_params)
+        vm_inner_clause, vm_params = _eq_or_in("vm_name", vm_name)
+        if vm_inner_clause:
+            clauses.append(
+                f"s.workspace_name IN (SELECT name FROM workspaces WHERE {vm_inner_clause})"
+            )
+            params.extend(vm_params)
+        ag_clause, ag_params = _eq_or_in("s.agent_name", agent_name)
+        if ag_clause:
+            clauses.append(ag_clause)
+            params.extend(ag_params)
+        if admin_only:
+            clauses.append("s.agent_name IS NULL")
+
+        sql = "SELECT s.* FROM sessions s"
+        if clauses:
+            sql += " WHERE " + " AND ".join(clauses)
+        sql += " ORDER BY s.workspace_name, s.name"
+        rows = self._conn.execute(sql, tuple(params)).fetchall()
         return [_to_session(r) for r in rows]
 
     def update_session_pid(self, name: str, pid: int | None, boot_id: str | None = None) -> None:
@@ -1109,31 +1146,75 @@ class Database:
         row = self._conn.execute("SELECT * FROM consoles WHERE name = ?", (name,)).fetchone()
         return _to_console(row) if row else None
 
-    def list_consoles(self, vm_name: str | None = None) -> list[ConsoleRow]:
-        if vm_name is not None:
-            rows = self._conn.execute(
-                "SELECT * FROM consoles WHERE vm_name = ? ORDER BY name",
-                (vm_name,),
-            ).fetchall()
-        else:
-            rows = self._conn.execute("SELECT * FROM consoles ORDER BY name").fetchall()
+    def list_consoles(self, *, vm_name: str | list[str] | None = None) -> list[ConsoleRow]:
+        """List consoles, optionally filtered by VM. `vm_name` accepts a
+        single string or a list of strings; list values are OR-ed together."""
+        clause, params = _eq_or_in("vm_name", vm_name)
+        sql = "SELECT * FROM consoles"
+        if clause:
+            sql += " WHERE " + clause
+        sql += " ORDER BY name"
+        rows = self._conn.execute(sql, params).fetchall()
         return [_to_console(r) for r in rows]
 
     def list_consoles_with_counts(
-        self, vm_name: str | None = None
+        self,
+        *,
+        vm_name: str | list[str] | None = None,
+        workspace_name: str | list[str] | None = None,
+        agent_name: str | list[str] | None = None,
     ) -> list[tuple[ConsoleRow, int]]:
-        """Return consoles paired with session counts, one query, ORDER BY name."""
+        """Return consoles paired with session counts, one query, ORDER BY name.
+
+        Each filter accepts a single string or a list; list values OR within
+        a filter and filters AND across the call. `workspace_name` and
+        `agent_name` filter on the console's session membership: a console
+        is returned if it has at least one member session that matches every
+        session-level filter that was supplied. When both filters are passed
+        together, BOTH predicates must hold on the SAME session (not on
+        different sessions in the same console) -- this matches how
+        `list_sessions` composes filters and avoids surprising results where
+        a console matches because one session is in workspace X and a
+        completely unrelated session is run by agent Y.
+
+        The session count returned is the console's TOTAL membership, not the
+        count of matching sessions, so the displayed count always reflects the
+        full console.
+        """
         sql = (
             "SELECT c.*, COUNT(cs.session_name) AS session_count "
             "FROM consoles c "
             "LEFT JOIN console_sessions cs ON cs.console_name = c.name "
         )
-        params: tuple[str, ...] = ()
-        if vm_name is not None:
-            sql += "WHERE c.vm_name = ? "
-            params = (vm_name,)
+        clauses: list[str] = []
+        params: list[object] = []
+        vm_clause, vm_params = _eq_or_in("c.vm_name", vm_name)
+        if vm_clause:
+            clauses.append(vm_clause)
+            params.extend(vm_params)
+        # Session-level filters share a single correlated EXISTS so a console
+        # only matches when one of its sessions satisfies all of them at once.
+        session_predicates: list[str] = []
+        ws_clause, ws_params = _eq_or_in("s.workspace_name", workspace_name)
+        if ws_clause:
+            session_predicates.append(ws_clause)
+            params.extend(ws_params)
+        ag_clause, ag_params = _eq_or_in("s.agent_name", agent_name)
+        if ag_clause:
+            session_predicates.append(ag_clause)
+            params.extend(ag_params)
+        if session_predicates:
+            clauses.append(
+                "EXISTS (SELECT 1 FROM console_sessions cs2 "
+                "JOIN sessions s ON s.name = cs2.session_name "
+                "WHERE cs2.console_name = c.name AND "
+                + " AND ".join(session_predicates)
+                + ")"
+            )
+        if clauses:
+            sql += "WHERE " + " AND ".join(clauses) + " "
         sql += "GROUP BY c.name ORDER BY c.name"
-        rows = self._conn.execute(sql, params).fetchall()
+        rows = self._conn.execute(sql, tuple(params)).fetchall()
         return [(_to_console(r), int(r["session_count"])) for r in rows]
 
     def delete_console(self, name: str) -> None:
@@ -1319,6 +1400,29 @@ class Database:
         finally:
             self._conn.execute("COMMIT")
         return vm, agents, workspaces, sessions, events, grants_by_agent
+
+
+# -- Query helpers ---------------------------------------------------------
+
+
+def _eq_or_in(column: str, value: str | list[str] | None) -> tuple[str, tuple[str, ...]]:
+    """Build a SQL WHERE-clause fragment for a singular OR list filter.
+
+    Returns ``("", ())`` when the filter is absent. Returns ``column = ?``
+    for a single string or single-element list. Returns ``column IN (?, ?, ...)``
+    for a multi-element list. Used by every ``Database.list_*`` method that
+    accepts a multi-value filter so single-value callers stay readable and
+    multi-value callers get OR-within-filter semantics from one place.
+    """
+    if value is None:
+        return "", ()
+    values = [value] if isinstance(value, str) else list(value)
+    if not values:
+        return "", ()
+    if len(values) == 1:
+        return f"{column} = ?", (values[0],)
+    placeholders = ",".join("?" * len(values))
+    return f"{column} IN ({placeholders})", tuple(values)
 
 
 # -- Row converters --------------------------------------------------------

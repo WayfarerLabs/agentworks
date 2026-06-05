@@ -7,7 +7,7 @@ from typing import Annotated
 import typer
 
 from agentworks.cli._app import app
-from agentworks.cli._helpers import get_db, prompt_vm
+from agentworks.cli._helpers import get_db, parse_csv_filter, prompt_vm
 
 console_app = typer.Typer(
     name="console",
@@ -109,11 +109,22 @@ def console_create(
 @console_app.command("list")
 def console_list(
     vm: Annotated[str | None, typer.Option("--vm", help="Filter by VM")] = None,
+    workspace: Annotated[str | None, typer.Option("--workspace", help="Filter by workspace")] = None,
+    agent: Annotated[str | None, typer.Option("--agent", help="Filter by agent")] = None,
 ) -> None:
-    """List consoles."""
+    """List consoles. Filters compose with AND; name filters accept comma-separated values for OR-within-filter.
+
+    --workspace and --agent match a console when at least one of its member
+    sessions matches. When both are passed, the SAME session must satisfy both.
+    """
     from agentworks.sessions.multi_console import list_consoles
 
-    list_consoles(get_db(), vm_name=vm)
+    list_consoles(
+        get_db(),
+        vm_name=parse_csv_filter(vm),
+        workspace_name=parse_csv_filter(workspace),
+        agent_name=parse_csv_filter(agent),
+    )
 
 
 @console_app.command("describe")

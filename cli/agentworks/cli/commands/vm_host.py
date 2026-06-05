@@ -40,8 +40,9 @@ def vm_host_list() -> None:
 def vm_host_remove(
     name: Annotated[str, typer.Argument(help="Name of the VM host to remove")],
     force: Annotated[bool, typer.Option("--force", help="Remove even if VMs reference this host")] = False,
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip confirmation")] = False,
 ) -> None:
     """Remove a VM host."""
     from agentworks.vm_hosts.manager import remove_vm_host
 
-    remove_vm_host(get_db(), name, force=force)
+    remove_vm_host(get_db(), name, force=force, yes=yes)

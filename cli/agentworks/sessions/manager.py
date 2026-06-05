@@ -25,6 +25,7 @@ from agentworks.errors import (
 )
 from agentworks.sessions.tmux import AGENT_SOCKET_ROOT
 from agentworks.ssh import SSH_TRANSPORT_ERROR, admin_exec_target
+from agentworks.vms.manager import keep_vm_active, keep_vms_active
 
 _ENV_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
@@ -62,7 +63,6 @@ def _resolve_session_linux_user(db: Database, session: SessionRow, vm: VMRow) ->
             )
         return agent.linux_user
     return vm.admin_username
-
 
 
 def _kill_session(
@@ -298,15 +298,42 @@ def _regenerate_tmuxinator(
 def filter_sessions(
     db: Database,
     *,
-    workspace_name: str | None = None,
-    vm_name: str | None = None,
+    workspace_name: str | list[str] | None = None,
+    vm_name: str | list[str] | None = None,
+    agent_name: str | list[str] | None = None,
 ) -> list[SessionRow]:
-    """Load sessions with optional workspace/VM filters."""
-    sessions = db.list_sessions(workspace_name=workspace_name)
-    if vm_name is not None:
-        vm_workspaces = {ws.name for ws in db.list_workspaces(vm_name=vm_name)}
-        sessions = [s for s in sessions if s.workspace_name in vm_workspaces]
-    return sessions
+    """Load sessions with optional workspace, VM, and/or agent filters.
+
+    Each filter accepts a single name or a list of names; lists OR within
+    a filter, filters AND across the call. See `Database.list_sessions`.
+    """
+    return db.list_sessions(
+        workspace_name=workspace_name,
+        vm_name=vm_name,
+        agent_name=agent_name,
+    )
+
+
+def _distinct_vms_for_sessions(db: Database, sessions: list[SessionRow]) -> list[VMRow]:
+    """Resolve the distinct set of VMs that host the given sessions.
+
+    Used by the batch session operations (stop_all_sessions, restart_all_sessions,
+    list_sessions) to feed `keep_vms_active` with exactly the VMs whose SSH
+    transports will be touched. Order is insertion order keyed by VM name so
+    keepalive entry messages render in a stable order.
+    """
+    distinct: list[VMRow] = []
+    seen: set[str] = set()
+    for s in sessions:
+        ws = db.get_workspace(s.workspace_name)
+        if ws is None or ws.vm_name in seen:
+            continue
+        vm = db.get_vm(ws.vm_name)
+        if vm is None:
+            continue
+        distinct.append(vm)
+        seen.add(ws.vm_name)
+    return distinct
 
 
 def _resolve_template(config: Config, template_name: str | None) -> ResolvedSessionTemplate:
@@ -546,154 +573,155 @@ def create_session(
 
     validate_name(name)
     ws, vm, run_command, run_as_root, target = _prepare_vm(db, config, workspace_name, operation="session-create")
+    with keep_vm_active(db, config, vm):
 
-    if db.get_session(name) is not None:
-        raise AlreadyExistsError(
-            f"session '{name}' already exists",
-            entity_kind="session",
-            entity_name=name,
-        )
-
-    # Resolve mode and linux user (no side effects; safe outside the try).
-    resolved_agent_name: str | None = None
-    if agent_name is not None:
-        mode = SessionMode.AGENT
-        agent = db.get_agent(agent_name)
-        if agent is None:
-            raise NotFoundError(
-                f"agent '{agent_name}' not found",
-                entity_kind="agent",
-                entity_name=agent_name,
-            )
-        if agent.vm_name != vm.name:
-            raise ValidationError(
-                f"agent '{agent_name}' is on VM '{agent.vm_name}', "
-                f"but workspace '{workspace_name}' is on VM '{vm.name}'",
+        if db.get_session(name) is not None:
+            raise AlreadyExistsError(
+                f"session '{name}' already exists",
                 entity_kind="session",
                 entity_name=name,
             )
-        linux_user = agent.linux_user
-        resolved_agent_name = agent_name
-    else:
-        mode = SessionMode.ADMIN
-        linux_user = vm.admin_username
 
-    template = _resolve_template(config, template_name)
+        # Resolve mode and linux user (no side effects; safe outside the try).
+        resolved_agent_name: str | None = None
+        if agent_name is not None:
+            mode = SessionMode.AGENT
+            agent = db.get_agent(agent_name)
+            if agent is None:
+                raise NotFoundError(
+                    f"agent '{agent_name}' not found",
+                    entity_kind="agent",
+                    entity_name=agent_name,
+                )
+            if agent.vm_name != vm.name:
+                raise ValidationError(
+                    f"agent '{agent_name}' is on VM '{agent.vm_name}', "
+                    f"but workspace '{workspace_name}' is on VM '{vm.name}'",
+                    entity_kind="session",
+                    entity_name=name,
+                )
+            linux_user = agent.linux_user
+            resolved_agent_name = agent_name
+        else:
+            mode = SessionMode.ADMIN
+            linux_user = vm.admin_username
 
-    # Compute socket path up front (deterministic from linux_user + session name).
-    # Needed for the DB insert since the CHECK constraint requires agent sessions
-    # to have a socket_path.
-    expected_socket: str | None = None
-    if mode == SessionMode.AGENT:
-        from agentworks.sessions.tmux import agent_socket_path
+        template = _resolve_template(config, template_name)
 
-        expected_socket = agent_socket_path(linux_user, name)
+        # Compute socket path up front (deterministic from linux_user + session name).
+        # Needed for the DB insert since the CHECK constraint requires agent sessions
+        # to have a socket_path.
+        expected_socket: str | None = None
+        if mode == SessionMode.AGENT:
+            from agentworks.sessions.tmux import agent_socket_path
 
-    def _rollback() -> None:
-        # Best-effort rollback. Each step runs inside its own try/except so
-        # that a cleanup failure surfaces as a warning instead of masking
-        # the KeyboardInterrupt or exception that triggered the rollback.
-        # Without this, e.g. a DB error during delete_agent_grant would
-        # replace the user's Ctrl-C with an opaque error exit. Each step
-        # is also idempotent / safe-when-partial: a no-op delete is fine,
-        # has_any_grant accurately decides group removal even if the
-        # implicit-grant insert never ran.
-        try:
-            db.delete_session(name)
-        except Exception as e:
-            output.warn(f"rollback: failed to delete session row '{name}': {e}")
-        if not resolved_agent_name:
-            return
-        try:
-            db.delete_agent_grant(resolved_agent_name, workspace_name, "implicit", session_name=name)
-            remaining = db.has_any_grant(resolved_agent_name, workspace_name)
-        except Exception as e:
-            output.warn(
-                f"rollback: failed to revoke implicit grant for agent "
-                f"'{resolved_agent_name}' on workspace '{workspace_name}': {e}"
-            )
-            return
-        if not remaining:
+            expected_socket = agent_socket_path(linux_user, name)
+
+        def _rollback() -> None:
+            # Best-effort rollback. Each step runs inside its own try/except so
+            # that a cleanup failure surfaces as a warning instead of masking
+            # the KeyboardInterrupt or exception that triggered the rollback.
+            # Without this, e.g. a DB error during delete_agent_grant would
+            # replace the user's Ctrl-C with an opaque error exit. Each step
+            # is also idempotent / safe-when-partial: a no-op delete is fine,
+            # has_any_grant accurately decides group removal even if the
+            # implicit-grant insert never ran.
             try:
-                from agentworks.agents.manager import _remove_from_workspace_group
-
-                _remove_from_workspace_group(vm, config, db, linux_user, workspace_name, logger=None)
+                db.delete_session(name)
+            except Exception as e:
+                output.warn(f"rollback: failed to delete session row '{name}': {e}")
+            if not resolved_agent_name:
+                return
+            try:
+                db.delete_agent_grant(resolved_agent_name, workspace_name, "implicit", session_name=name)
+                remaining = db.has_any_grant(resolved_agent_name, workspace_name)
             except Exception as e:
                 output.warn(
-                    f"rollback: failed to remove agent '{resolved_agent_name}' from "
-                    f"workspace '{workspace_name}' group: {e}"
+                    f"rollback: failed to revoke implicit grant for agent "
+                    f"'{resolved_agent_name}' on workspace '{workspace_name}': {e}"
                 )
+                return
+            if not remaining:
+                try:
+                    from agentworks.agents.manager import _remove_from_workspace_group
 
-    try:
-        # Everything that creates partial state (on-VM group membership,
-        # implicit-grant row, session row, restricted-config write, tmux
-        # session) runs inside this block so a KI / exception anywhere here
-        # triggers _rollback(). Without this, a Ctrl-C between the
-        # auto-grant insert and the session insert would leak both a grant
-        # row and a Linux group membership with no session to anchor them.
-        if resolved_agent_name is not None:
-            # Auto-grant implicit workspace access if the agent has no
-            # existing grant on this workspace.
-            if not db.has_any_grant(resolved_agent_name, workspace_name):
-                from agentworks.agents.manager import _add_to_workspace_group
+                    _remove_from_workspace_group(vm, config, db, linux_user, workspace_name, logger=None)
+                except Exception as e:
+                    output.warn(
+                        f"rollback: failed to remove agent '{resolved_agent_name}' from "
+                        f"workspace '{workspace_name}' group: {e}"
+                    )
 
-                _add_to_workspace_group(vm, config, db, linux_user, workspace_name)
-            db.insert_agent_grant(resolved_agent_name, workspace_name, "implicit", session_name=name)
+        try:
+            # Everything that creates partial state (on-VM group membership,
+            # implicit-grant row, session row, restricted-config write, tmux
+            # session) runs inside this block so a KI / exception anywhere here
+            # triggers _rollback(). Without this, a Ctrl-C between the
+            # auto-grant insert and the session insert would leak both a grant
+            # row and a Linux group membership with no session to anchor them.
+            if resolved_agent_name is not None:
+                # Auto-grant implicit workspace access if the agent has no
+                # existing grant on this workspace.
+                if not db.has_any_grant(resolved_agent_name, workspace_name):
+                    from agentworks.agents.manager import _add_to_workspace_group
 
-        # Insert DB record before any tmux work so a crash mid-create leaves
-        # a recoverable row (and _rollback can find it to delete).
-        db.insert_session(
-            name,
-            workspace_name,
-            template.name,
-            mode,
-            agent_name=resolved_agent_name,
-            created_workspace=created_workspace,
-            created_agent=created_agent,
-            socket_path=expected_socket,
-        )
+                    _add_to_workspace_group(vm, config, db, linux_user, workspace_name)
+                db.insert_agent_grant(resolved_agent_name, workspace_name, "implicit", session_name=name)
 
-        deploy_restricted_config(run_command, history_limit=config.session.history_limit)
-        command = _build_session_command(template, session_name=name, workspace_name=workspace_name)
-        sock, pid = create_tmux_session(
-            name,
-            ws.workspace_path,
-            command,
-            linux_user,
-            run_command=run_command,
-            target=target,
-            run_as_root=run_as_root,
-            admin_username=vm.admin_username,
-            is_admin=(mode == SessionMode.ADMIN),
-        )
-    except KeyboardInterrupt:
-        output.warn(f"Cancelling session create '{name}'... rolling back.")
-        _rollback()
-        raise
-    except Exception:
-        _rollback()
-        raise
+            # Insert DB record before any tmux work so a crash mid-create leaves
+            # a recoverable row (and _rollback can find it to delete).
+            db.insert_session(
+                name,
+                workspace_name,
+                template.name,
+                mode,
+                agent_name=resolved_agent_name,
+                created_workspace=created_workspace,
+                created_agent=created_agent,
+                socket_path=expected_socket,
+            )
 
-    # Persist socket path, PID, and boot ID
-    if sock:
-        db.update_session_socket_path(name, sock)
-    if pid is not None:
-        boot_id = _get_boot_id(target)
-        if boot_id is not None:
-            db.update_session_pid(name, pid, boot_id=boot_id)
+            deploy_restricted_config(run_command, history_limit=config.session.history_limit)
+            command = _build_session_command(template, session_name=name, workspace_name=workspace_name)
+            sock, pid = create_tmux_session(
+                name,
+                ws.workspace_path,
+                command,
+                linux_user,
+                run_command=run_command,
+                target=target,
+                run_as_root=run_as_root,
+                admin_username=vm.admin_username,
+                is_admin=(mode == SessionMode.ADMIN),
+            )
+        except KeyboardInterrupt:
+            output.warn(f"Cancelling session create '{name}'... rolling back.")
+            _rollback()
+            raise
+        except Exception:
+            _rollback()
+            raise
+
+        # Persist socket path, PID, and boot ID
+        if sock:
+            db.update_session_socket_path(name, sock)
+        if pid is not None:
+            boot_id = _get_boot_id(target)
+            if boot_id is not None:
+                db.update_session_pid(name, pid, boot_id=boot_id)
+            else:
+                output.warn(f"Could not read boot ID for session '{name}', PID not stored")
         else:
-            output.warn(f"Could not read boot ID for session '{name}', PID not stored")
-    else:
-        output.warn(f"Could not capture PID for session '{name}', will auto-repair on next access")
+            output.warn(f"Could not capture PID for session '{name}', will auto-repair on next access")
 
-    mode_label = f"agent: {resolved_agent_name}" if resolved_agent_name else "admin"
-    output.info(f"Session '{name}' started ({mode_label}, template: {template.name})")
+        mode_label = f"agent: {resolved_agent_name}" if resolved_agent_name else "admin"
+        output.info(f"Session '{name}' started ({mode_label}, template: {template.name})")
 
-    # Update tmuxinator config and add to console if it exists
-    _regenerate_tmuxinator(db, config, vm, ws)
-    from agentworks.sessions.console import add_session_to_console
+        # Update tmuxinator config and add to console if it exists
+        _regenerate_tmuxinator(db, config, vm, ws)
+        from agentworks.sessions.console import add_session_to_console
 
-    add_session_to_console(name, run_command=run_command, socket_path=sock)
+        add_session_to_console(name, run_command=run_command, socket_path=sock)
 
 
 def _execute_stop(
@@ -803,42 +831,46 @@ def stop_session(
     from agentworks.sessions.tmux import force_kill_tmux_server
 
     session = _require_session(db, name)
-    _ws, _vm, _run_command, _, target = _prepare_vm(db, config, session.workspace_name, operation="session-stop")
-    session = _ensure_pid(session, target=target, db=db)
-    status = check_session_status(session, target=target)
+    _ws, vm, _run_command, _, target = _prepare_vm(db, config, session.workspace_name, operation="session-stop")
+    with keep_vm_active(db, config, vm):
+        session = _ensure_pid(session, target=target, db=db)
+        status = check_session_status(session, target=target)
 
-    if status == SessionStatus.STOPPED:
-        output.info(f"Session '{name}' is already stopped")
-        return
-    # UNKNOWN is impossible here -- _ensure_pid raises on unresolvable sessions
-    if status == SessionStatus.BROKEN:
-        if not force:
-            raise BrokenStateError(
-                f"session '{name}' is broken (PID alive but tmux unreachable).",
-                entity_kind="session",
-                entity_name=name,
-                hint="Use --force to kill the process.",
+        if status == SessionStatus.STOPPED:
+            output.info(f"Session '{name}' is already stopped")
+            return
+        # UNKNOWN is impossible here -- _ensure_pid raises on unresolvable sessions
+        if status == SessionStatus.BROKEN:
+            if not force:
+                raise BrokenStateError(
+                    f"session '{name}' is broken (PID alive but tmux unreachable).",
+                    entity_kind="session",
+                    entity_name=name,
+                    hint="Use --force to kill the process.",
+                )
+            output.warn(f"Session '{name}' is broken (tmux unreachable), force-killing via PID")
+            assert session.pid is not None
+            killed = force_kill_tmux_server(
+                session.pid, target=target, socket_path=session.socket_path, log=output.detail,
             )
-        output.warn(f"Session '{name}' is broken (tmux unreachable), force-killing via PID")
-        assert session.pid is not None
-        if not force_kill_tmux_server(session.pid, target=target, socket_path=session.socket_path, log=output.detail):
+            if not killed:
+                raise ExternalError(
+                    f"failed to kill PID {session.pid} for session '{name}'",
+                    entity_kind="session",
+                    entity_name=name,
+                )
+            db.update_session_pid(name, PID_STOPPED)
+            output.info(f"Session '{name}' force-stopped")
+            return
+
+        # OK -- delegate to shared stop logic
+        failed = _execute_stop([(session, target)], db=db, force=force)
+        if failed:
             raise ExternalError(
-                f"failed to kill PID {session.pid} for session '{name}'",
+                f"failed to stop session '{name}': {failed[0][1]}",
                 entity_kind="session",
                 entity_name=name,
             )
-        db.update_session_pid(name, PID_STOPPED)
-        output.info(f"Session '{name}' force-stopped")
-        return
-
-    # OK -- delegate to shared stop logic
-    failed = _execute_stop([(session, target)], db=db, force=force)
-    if failed:
-        raise ExternalError(
-            f"failed to stop session '{name}': {failed[0][1]}",
-            entity_kind="session",
-            entity_name=name,
-        )
 
 
 def restart_session(
@@ -861,93 +893,97 @@ def restart_session(
     ws, vm, run_command, run_as_root, target = _prepare_vm(
         db, config, session.workspace_name, operation="session-restart",
     )
-    session = _ensure_pid(session, target=target, db=db)
-    status = check_session_status(session, target=target)
+    with keep_vm_active(db, config, vm):
+        session = _ensure_pid(session, target=target, db=db)
+        status = check_session_status(session, target=target)
 
-    # UNKNOWN is impossible here -- _ensure_pid raises on unresolvable sessions
-    if status == SessionStatus.BROKEN:
-        if not force:
-            raise BrokenStateError(
-                f"session '{name}' is broken (PID alive but tmux unreachable).",
-                entity_kind="session",
-                entity_name=name,
-                hint="Use --force to restart.",
+        # UNKNOWN is impossible here -- _ensure_pid raises on unresolvable sessions
+        if status == SessionStatus.BROKEN:
+            if not force:
+                raise BrokenStateError(
+                    f"session '{name}' is broken (PID alive but tmux unreachable).",
+                    entity_kind="session",
+                    entity_name=name,
+                    hint="Use --force to restart.",
+                )
+            from agentworks.sessions.tmux import force_kill_tmux_server
+
+            output.warn(f"Session '{name}' is broken (tmux unreachable), force-killing via PID")
+            assert session.pid is not None
+            killed = force_kill_tmux_server(
+                session.pid, target=target, socket_path=session.socket_path, log=output.detail,
             )
-        from agentworks.sessions.tmux import force_kill_tmux_server
+            if not killed:
+                raise ExternalError(
+                    f"failed to kill PID {session.pid} for session '{name}'",
+                    entity_kind="session",
+                    entity_name=name,
+                )
+        elif status == SessionStatus.OK:
+            if not yes and not output.confirm(f"Session '{name}' is running. Restart?"):
+                raise UserAbort("restart cancelled")
+            sock = session.socket_path
+            if not _kill_session(name, run_command=run_command, socket_path=sock):
+                raise ExternalError(
+                    f"failed to stop session '{name}' for restart",
+                    entity_kind="session",
+                    entity_name=name,
+                )
 
-        output.warn(f"Session '{name}' is broken (tmux unreachable), force-killing via PID")
-        assert session.pid is not None
-        if not force_kill_tmux_server(session.pid, target=target, socket_path=session.socket_path, log=output.detail):
-            raise ExternalError(
-                f"failed to kill PID {session.pid} for session '{name}'",
-                entity_kind="session",
-                entity_name=name,
-            )
-    elif status == SessionStatus.OK:
-        if not yes and not output.confirm(f"Session '{name}' is running. Restart?"):
-            raise UserAbort("restart cancelled")
-        sock = session.socket_path
-        if not _kill_session(name, run_command=run_command, socket_path=sock):
-            raise ExternalError(
-                f"failed to stop session '{name}' for restart",
-                entity_kind="session",
-                entity_name=name,
-            )
+        template = _resolve_template(config, session.template)
+        deploy_restricted_config(run_command, history_limit=config.session.history_limit)
 
-    template = _resolve_template(config, session.template)
-    deploy_restricted_config(run_command, history_limit=config.session.history_limit)
-
-    # Use restart_command if available, otherwise fall back to command
-    command = _build_session_command(
-        template,
-        session_name=name,
-        workspace_name=session.workspace_name,
-        restart=True,
-    )
-    is_admin = session.mode == SessionMode.ADMIN.value
-    linux_user = _resolve_session_linux_user(db, session, vm)
-
-    try:
-        new_sock, pid = create_tmux_session(
-            name,
-            ws.workspace_path,
-            command,
-            linux_user,
-            run_command=run_command,
-            target=target,
-            run_as_root=run_as_root,
-            admin_username=vm.admin_username,
-            is_admin=is_admin,
+        # Use restart_command if available, otherwise fall back to command
+        command = _build_session_command(
+            template,
+            session_name=name,
+            workspace_name=session.workspace_name,
+            restart=True,
         )
-    except RuntimeError as exc:
-        if "already has an active tmux server" in str(exc):
-            raise StateError(
-                f"session '{name}' has an active tmux server that was not detected by the status check.",
-                entity_kind="session",
-                entity_name=name,
-                hint="Use 'session stop --force' to kill it, then retry.",
-            ) from exc
-        raise
+        is_admin = session.mode == SessionMode.ADMIN.value
+        linux_user = _resolve_session_linux_user(db, session, vm)
 
-    # Persist socket path if it differs from what's stored.
-    if new_sock != session.socket_path:
-        db.update_session_socket_path(name, new_sock)
-    if pid is not None:
-        boot_id = _get_boot_id(target)
-        if boot_id is not None:
-            db.update_session_pid(name, pid, boot_id=boot_id)
+        try:
+            new_sock, pid = create_tmux_session(
+                name,
+                ws.workspace_path,
+                command,
+                linux_user,
+                run_command=run_command,
+                target=target,
+                run_as_root=run_as_root,
+                admin_username=vm.admin_username,
+                is_admin=is_admin,
+            )
+        except RuntimeError as exc:
+            if "already has an active tmux server" in str(exc):
+                raise StateError(
+                    f"session '{name}' has an active tmux server that was not detected by the status check.",
+                    entity_kind="session",
+                    entity_name=name,
+                    hint="Use 'session stop --force' to kill it, then retry.",
+                ) from exc
+            raise
+
+        # Persist socket path if it differs from what's stored.
+        if new_sock != session.socket_path:
+            db.update_session_socket_path(name, new_sock)
+        if pid is not None:
+            boot_id = _get_boot_id(target)
+            if boot_id is not None:
+                db.update_session_pid(name, pid, boot_id=boot_id)
+            else:
+                output.warn(f"Could not read boot ID for session '{name}', PID not stored")
         else:
-            output.warn(f"Could not read boot ID for session '{name}', PID not stored")
-    else:
-        output.warn(f"Could not capture PID for session '{name}', will auto-repair on next access")
+            output.warn(f"Could not capture PID for session '{name}', will auto-repair on next access")
 
-    output.info(f"Session '{name}' restarted")
+        output.info(f"Session '{name}' restarted")
 
-    _regenerate_tmuxinator(db, config, vm, ws)
-    # Don't re-add the session to the legacy vm-console here. The existing
-    # window's wrapper polls the session's socket indefinitely and re-attaches
-    # when the new tmux server comes back. Adding a new window here would
-    # create a duplicate.
+        _regenerate_tmuxinator(db, config, vm, ws)
+        # Don't re-add the session to the legacy vm-console here. The existing
+        # window's wrapper polls the session's socket indefinitely and re-attaches
+        # when the new tmux server comes back. Adding a new window here would
+        # create a duplicate.
 
 
 def stop_all_sessions(
@@ -961,59 +997,65 @@ def stop_all_sessions(
     """Stop all running sessions, optionally filtered by VM or workspace."""
     sessions = filter_sessions(db, workspace_name=workspace_name, vm_name=vm_name)
 
-    # Auto-repair NULL-PID sessions, then batch check
-    sessions = ensure_pids_batch(sessions, db=db, config=config)
-    status_map = batch_check_all_sessions(sessions, db=db, config=config)
+    # Resolve distinct VMs from the filtered session set and enter the
+    # keepalive BEFORE the SSH probes. The probes (ensure_pids_batch,
+    # batch_check_all_sessions) issue per-VM round-trips; on WSL2 they
+    # would race the idle timer without the anchor. No-op on non-WSL2.
+    distinct_vms = _distinct_vms_for_sessions(db, sessions)
+    with keep_vms_active(db, config, distinct_vms):
+        # Auto-repair NULL-PID sessions, then batch check
+        sessions = ensure_pids_batch(sessions, db=db, config=config)
+        status_map = batch_check_all_sessions(sessions, db=db, config=config)
 
-    # Error if any sessions are still unknown after auto-repair.
-    # PID_STOPPED sessions are known-stopped (excluded from status_map by design).
-    unknown = [
-        s for s in sessions
-        if s.pid != PID_STOPPED
-        and (s.pid is None or s.boot_id is None or s.name not in status_map)
-    ]
-    if unknown:
-        names = ", ".join(s.name for s in unknown)
-        raise StateError(
-            f"{len(unknown)} session(s) have unknown status after auto-repair ({names}).",
-            hint="Resolve the listed sessions manually before retrying.",
-        )
+        # Error if any sessions are still unknown after auto-repair.
+        # PID_STOPPED sessions are known-stopped (excluded from status_map by design).
+        unknown = [
+            s for s in sessions
+            if s.pid != PID_STOPPED
+            and (s.pid is None or s.boot_id is None or s.name not in status_map)
+        ]
+        if unknown:
+            names = ", ".join(s.name for s in unknown)
+            raise StateError(
+                f"{len(unknown)} session(s) have unknown status after auto-repair ({names}).",
+                hint="Resolve the listed sessions manually before retrying.",
+            )
 
-    broken = [s for s in sessions if status_map.get(s.name) == SessionStatus.BROKEN]
-    if broken and not force:
-        names = ", ".join(s.name for s in broken)
-        output.warn(f"Skipping {len(broken)} broken session(s) ({names}). Use --force to kill.")
+        broken = [s for s in sessions if status_map.get(s.name) == SessionStatus.BROKEN]
+        if broken and not force:
+            names = ", ".join(s.name for s in broken)
+            output.warn(f"Skipping {len(broken)} broken session(s) ({names}). Use --force to kill.")
 
-    ok_statuses = {SessionStatus.OK}
-    if force:
-        ok_statuses.add(SessionStatus.BROKEN)
-    alive_sessions = [s for s in sessions if status_map.get(s.name) in ok_statuses]
+        ok_statuses = {SessionStatus.OK}
+        if force:
+            ok_statuses.add(SessionStatus.BROKEN)
+        alive_sessions = [s for s in sessions if status_map.get(s.name) in ok_statuses]
 
-    if not alive_sessions:
-        output.info("No running sessions to stop.")
-        return
+        if not alive_sessions:
+            output.info("No running sessions to stop.")
+            return
 
-    output.info(f"Stopping {len(alive_sessions)} session(s)...")
+        output.info(f"Stopping {len(alive_sessions)} session(s)...")
 
-    # Resolve VM targets (reuse across sessions on the same VM)
-    vm_targets: dict[str, ExecTarget] = {}
-    for s in alive_sessions:
-        ws = db.get_workspace(s.workspace_name)
-        if ws and ws.vm_name not in vm_targets:
-            vm = db.get_vm(ws.vm_name)
-            if vm and vm.tailscale_host:
-                vm_targets[ws.vm_name] = admin_exec_target(vm, config)
+        # Resolve VM targets (reuse across sessions on the same VM)
+        vm_targets: dict[str, ExecTarget] = {}
+        for s in alive_sessions:
+            ws = db.get_workspace(s.workspace_name)
+            if ws and ws.vm_name not in vm_targets:
+                vm = db.get_vm(ws.vm_name)
+                if vm and vm.tailscale_host:
+                    vm_targets[ws.vm_name] = admin_exec_target(vm, config)
 
-    # Build (session, target) pairs for _execute_stop
-    stop_targets: list[tuple[SessionRow, ExecTarget]] = []
-    for s in alive_sessions:
-        ws = db.get_workspace(s.workspace_name)
-        if ws and ws.vm_name in vm_targets:
-            stop_targets.append((s, vm_targets[ws.vm_name]))
+        # Build (session, target) pairs for _execute_stop
+        stop_targets: list[tuple[SessionRow, ExecTarget]] = []
+        for s in alive_sessions:
+            ws = db.get_workspace(s.workspace_name)
+            if ws and ws.vm_name in vm_targets:
+                stop_targets.append((s, vm_targets[ws.vm_name]))
 
-    failed = _execute_stop(stop_targets, db=db, force=force)
-    if failed:
-        raise ExternalError(f"{len(failed)} session(s) failed to stop.")
+        failed = _execute_stop(stop_targets, db=db, force=force)
+        if failed:
+            raise ExternalError(f"{len(failed)} session(s) failed to stop.")
 
 
 def restart_all_sessions(
@@ -1033,59 +1075,67 @@ def restart_all_sessions(
     """
     sessions = filter_sessions(db, workspace_name=workspace_name, vm_name=vm_name)
 
-    # Auto-repair NULL-PID sessions, then batch check
-    sessions = ensure_pids_batch(sessions, db=db, config=config)
-    status_map = batch_check_all_sessions(sessions, db=db, config=config)
+    # Resolve distinct VMs from the filtered set and anchor them BEFORE the
+    # SSH probes. Each restart_session call also enters its own keepalive;
+    # the redundant inner wrap is a no-op on already-active VMs and a cheap
+    # extra subprocess on WSL2 (accepted, see PR description).
+    distinct_vms = _distinct_vms_for_sessions(db, sessions)
 
-    # Error if any sessions are still unknown after auto-repair.
-    # PID_STOPPED sessions are known-stopped (excluded from status_map by design).
-    unknown = [
-        s for s in sessions
-        if s.pid != PID_STOPPED
-        and (s.pid is None or s.boot_id is None or s.name not in status_map)
-    ]
-    if unknown:
-        names = ", ".join(s.name for s in unknown)
-        raise StateError(
-            f"{len(unknown)} session(s) have unknown status after auto-repair ({names}).",
-            hint="Resolve the listed sessions manually before retrying.",
-        )
-
-    if not include_running:
-        # Only stopped sessions
-        sessions = [
-            s
-            for s in sessions
-            if s.pid == PID_STOPPED
-            or status_map.get(s.name) == SessionStatus.STOPPED
-        ]
-
-    if not sessions:
-        output.info("No matching sessions to restart.")
-        return
-
-    output.info(f"Restarting {len(sessions)} session(s)...")
     failed: list[tuple[str, str]] = []
-    for session in sessions:
-        try:
-            restart_session(db, config, name=session.name, force=force, yes=include_running)
-        except UserAbort:
-            # A confirm-cancellation aborts the whole batch operation, not
-            # just this one session. Propagate so the outer wrapper renders
-            # "Aborted." once and exits.
-            raise
-        except BrokenStateError as exc:
-            if not force:
-                output.warn(f"Skipping '{session.name}': {exc}")
-            else:
+    with keep_vms_active(db, config, distinct_vms):
+        # Auto-repair NULL-PID sessions, then batch check
+        sessions = ensure_pids_batch(sessions, db=db, config=config)
+        status_map = batch_check_all_sessions(sessions, db=db, config=config)
+
+        # Error if any sessions are still unknown after auto-repair.
+        # PID_STOPPED sessions are known-stopped (excluded from status_map by design).
+        unknown = [
+            s for s in sessions
+            if s.pid != PID_STOPPED
+            and (s.pid is None or s.boot_id is None or s.name not in status_map)
+        ]
+        if unknown:
+            names = ", ".join(s.name for s in unknown)
+            raise StateError(
+                f"{len(unknown)} session(s) have unknown status after auto-repair ({names}).",
+                hint="Resolve the listed sessions manually before retrying.",
+            )
+
+        if not include_running:
+            # Only stopped sessions
+            sessions = [
+                s
+                for s in sessions
+                if s.pid == PID_STOPPED
+                or status_map.get(s.name) == SessionStatus.STOPPED
+            ]
+
+        if not sessions:
+            output.info("No matching sessions to restart.")
+            return
+
+        output.info(f"Restarting {len(sessions)} session(s)...")
+
+        for session in sessions:
+            try:
+                restart_session(db, config, name=session.name, force=force, yes=include_running)
+            except UserAbort:
+                # A confirm-cancellation aborts the whole batch operation, not
+                # just this one session. Propagate so the outer wrapper renders
+                # "Aborted." once and exits.
+                raise
+            except BrokenStateError as exc:
+                if not force:
+                    output.warn(f"Skipping '{session.name}': {exc}")
+                else:
+                    failed.append((session.name, str(exc)))
+                    output.warn(f"Error restarting '{session.name}': {exc}")
+            except StateError as exc:
                 failed.append((session.name, str(exc)))
                 output.warn(f"Error restarting '{session.name}': {exc}")
-        except StateError as exc:
-            failed.append((session.name, str(exc)))
-            output.warn(f"Error restarting '{session.name}': {exc}")
-        except Exception as exc:
-            failed.append((session.name, str(exc)))
-            output.warn(f"Error restarting '{session.name}': {exc}")
+            except Exception as exc:
+                failed.append((session.name, str(exc)))
+                output.warn(f"Error restarting '{session.name}': {exc}")
 
     if failed:
         raise ExternalError(f"{len(failed)} session(s) failed to restart.")
@@ -1102,142 +1152,148 @@ def delete_session(
     """Delete a session. Prompts if running/unknown (--yes to skip). --force for BROKEN."""
     session = _require_session(db, name)
     ws, vm, run_command, _, target = _prepare_vm(db, config, session.workspace_name, operation="session-delete")
-    session = _ensure_pid(session, target=target, db=db)
-    status = check_session_status(session, target=target)
+    with keep_vm_active(db, config, vm):
+        session = _ensure_pid(session, target=target, db=db)
+        status = check_session_status(session, target=target)
 
-    # UNKNOWN is impossible here -- _ensure_pid raises on unresolvable sessions
-    if status == SessionStatus.BROKEN and not force:
-        raise BrokenStateError(
-            f"session '{name}' is broken (PID alive but tmux unreachable).",
-            entity_kind="session",
-            entity_name=name,
-            hint="Use --force to delete.",
-        )
+        # UNKNOWN is impossible here -- _ensure_pid raises on unresolvable sessions
+        if status == SessionStatus.BROKEN and not force:
+            raise BrokenStateError(
+                f"session '{name}' is broken (PID alive but tmux unreachable).",
+                entity_kind="session",
+                entity_name=name,
+                hint="Use --force to delete.",
+            )
 
-    # Confirm before any destructive action
-    if not yes and not output.confirm(f"Delete session '{name}'?"):
-        raise UserAbort("delete cancelled")
+        # Confirm before any destructive action
+        if not yes and not output.confirm(f"Delete session '{name}'?"):
+            raise UserAbort("delete cancelled")
 
-    # Now kill if needed
-    if status == SessionStatus.OK:
-        sock = session.socket_path
-        if not _kill_session(name, run_command=run_command, socket_path=sock):
-            # Race: session may have exited between check and kill. Recheck.
-            recheck = check_session_status(session, target=target)
-            if recheck != SessionStatus.STOPPED:
+        # Now kill if needed
+        if status == SessionStatus.OK:
+            sock = session.socket_path
+            if not _kill_session(name, run_command=run_command, socket_path=sock):
+                # Race: session may have exited between check and kill. Recheck.
+                recheck = check_session_status(session, target=target)
+                if recheck != SessionStatus.STOPPED:
+                    raise ExternalError(
+                        f"failed to stop session '{name}' for deletion",
+                        entity_kind="session",
+                        entity_name=name,
+                    )
+        elif status == SessionStatus.BROKEN:
+            from agentworks.sessions.tmux import force_kill_tmux_server
+
+            output.warn(f"Session '{name}' is broken (tmux unreachable), force-killing via PID")
+            assert session.pid is not None
+            killed = force_kill_tmux_server(
+                session.pid, target=target, socket_path=session.socket_path, log=output.detail,
+            )
+            if not killed:
                 raise ExternalError(
-                    f"failed to stop session '{name}' for deletion",
+                    f"failed to kill PID {session.pid} for session '{name}'",
                     entity_kind="session",
                     entity_name=name,
                 )
-    elif status == SessionStatus.BROKEN:
-        from agentworks.sessions.tmux import force_kill_tmux_server
 
-        output.warn(f"Session '{name}' is broken (tmux unreachable), force-killing via PID")
-        assert session.pid is not None
-        if not force_kill_tmux_server(session.pid, target=target, socket_path=session.socket_path, log=output.detail):
-            raise ExternalError(
-                f"failed to kill PID {session.pid} for session '{name}'",
-                entity_kind="session",
-                entity_name=name,
+        # Clean up socket if the server is dead (don't remove a live socket)
+        sock = session.socket_path
+        if sock and sock.startswith(AGENT_SOCKET_ROOT + "/"):
+            post_status = check_session_status(session, target=target)
+            if post_status == SessionStatus.STOPPED:
+                target.run(f"rm -f {shlex.quote(sock)}", sudo=True, check=False)
+            else:
+                output.warn(f"Session '{name}' status is {post_status.value} after delete, socket preserved at {sock}")
+
+        # Capture console memberships before delete; the FK cascade on
+        # console_sessions zeroes the join table the moment the session row goes.
+        member_consoles = [c.name for c in db.list_consoles_for_session(name)]
+
+        db.delete_session(name)
+
+        # Clean up implicit grant for this session
+        if session.agent_name:
+            db.delete_agent_grant(session.agent_name, session.workspace_name, "implicit", session_name=name)
+            # If no grants remain, remove from workspace group
+            if not db.has_any_grant(session.agent_name, session.workspace_name):
+                from agentworks.agents.manager import _remove_from_workspace_group
+
+                agent = db.get_agent(session.agent_name)
+                if agent:
+                    _remove_from_workspace_group(vm, config, db, agent.linux_user, session.workspace_name)
+
+        _regenerate_tmuxinator(db, config, vm, ws)
+
+        # Best-effort console cleanup runs after all DB / tmuxinator state has
+        # settled. Stale tmux windows are recoverable cosmetic noise; if the
+        # helper raises AgentworksError we skip the success message and any
+        # created_workspace / created_agent cleanup below -- those would re-use
+        # the same broken transport and just compound errors.
+        if member_consoles:
+            from agentworks.sessions.multi_console import kill_session_windows
+
+            kill_session_windows(
+                target, pairs=[(c, name) for c in member_consoles]
             )
 
-    # Clean up socket if the server is dead (don't remove a live socket)
-    sock = session.socket_path
-    if sock and sock.startswith(AGENT_SOCKET_ROOT + "/"):
-        post_status = check_session_status(session, target=target)
-        if post_status == SessionStatus.STOPPED:
-            target.run(f"rm -f {shlex.quote(sock)}", sudo=True, check=False)
-        else:
-            output.warn(f"Session '{name}' status is {post_status.value} after delete, socket preserved at {sock}")
+        output.info(f"Session '{name}' deleted")
 
-    # Capture console memberships before delete; the FK cascade on
-    # console_sessions zeroes the join table the moment the session row goes.
-    member_consoles = [c.name for c in db.list_consoles_for_session(name)]
+        # If this session created its workspace, offer to delete it
+        if session.created_workspace:
+            remaining = db.list_sessions(workspace_name=session.workspace_name)
+            if remaining:
+                output.detail(
+                    f"Workspace '{session.workspace_name}' was created with this session but has "
+                    f"{len(remaining)} other session(s), not offering to delete."
+                )
+            elif not yes:
+                if output.confirm(
+                    f"Workspace '{session.workspace_name}' was created with this session "
+                    f"and has no other sessions. Delete it?",
+                ):
+                    from agentworks.workspaces.manager import delete_workspace
 
-    db.delete_session(name)
-
-    # Clean up implicit grant for this session
-    if session.agent_name:
-        db.delete_agent_grant(session.agent_name, session.workspace_name, "implicit", session_name=name)
-        # If no grants remain, remove from workspace group
-        if not db.has_any_grant(session.agent_name, session.workspace_name):
-            from agentworks.agents.manager import _remove_from_workspace_group
-
-            agent = db.get_agent(session.agent_name)
-            if agent:
-                _remove_from_workspace_group(vm, config, db, agent.linux_user, session.workspace_name)
-
-    _regenerate_tmuxinator(db, config, vm, ws)
-
-    # Best-effort console cleanup runs after all DB / tmuxinator state has
-    # settled. Stale tmux windows are recoverable cosmetic noise; if the
-    # helper raises AgentworksError we skip the success message and any
-    # created_workspace / created_agent cleanup below -- those would re-use
-    # the same broken transport and just compound errors.
-    if member_consoles:
-        from agentworks.sessions.multi_console import kill_session_windows
-
-        kill_session_windows(
-            target, pairs=[(c, name) for c in member_consoles]
-        )
-
-    output.info(f"Session '{name}' deleted")
-
-    # If this session created its workspace, offer to delete it
-    if session.created_workspace:
-        remaining = db.list_sessions(workspace_name=session.workspace_name)
-        if remaining:
-            output.detail(
-                f"Workspace '{session.workspace_name}' was created with this session but has "
-                f"{len(remaining)} other session(s), not offering to delete."
-            )
-        elif not yes:
-            if output.confirm(
-                f"Workspace '{session.workspace_name}' was created with this session "
-                f"and has no other sessions. Delete it?",
-            ):
+                    delete_workspace(db, config, session.workspace_name, yes=True)
+            else:
                 from agentworks.workspaces.manager import delete_workspace
 
+                output.detail(f"Deleting workspace '{session.workspace_name}' (created with this session)...")
                 delete_workspace(db, config, session.workspace_name, yes=True)
-        else:
-            from agentworks.workspaces.manager import delete_workspace
 
-            output.detail(f"Deleting workspace '{session.workspace_name}' (created with this session)...")
-            delete_workspace(db, config, session.workspace_name, yes=True)
+        # If this session created its agent, offer to delete it unless the agent
+        # is still in use elsewhere (other sessions on the agent, or any explicit
+        # workspace grants). Implicit grants are tied to sessions and were cleaned
+        # up above, so they don't count.
+        if session.created_agent and session.agent_name:
+            other_sessions = [s for s in db.list_sessions() if s.agent_name == session.agent_name]
+            explicit_grants = [
+                ws
+                for (ws, has_explicit, _) in db.list_granted_workspaces_with_types(session.agent_name)
+                if has_explicit
+            ]
+            if other_sessions or explicit_grants:
+                reasons: list[str] = []
+                if other_sessions:
+                    reasons.append(f"{len(other_sessions)} other session(s)")
+                if explicit_grants:
+                    reasons.append(f"{len(explicit_grants)} explicit grant(s)")
+                output.detail(
+                    f"Agent '{session.agent_name}' was created with this session but still has "
+                    f"{' and '.join(reasons)}, not offering to delete."
+                )
+            elif not yes:
+                if output.confirm(
+                    f"Agent '{session.agent_name}' was created with this session "
+                    f"and is not in use elsewhere. Delete it?",
+                ):
+                    from agentworks.agents.manager import delete_agent
 
-    # If this session created its agent, offer to delete it unless the agent
-    # is still in use elsewhere (other sessions on the agent, or any explicit
-    # workspace grants). Implicit grants are tied to sessions and were cleaned
-    # up above, so they don't count.
-    if session.created_agent and session.agent_name:
-        other_sessions = [s for s in db.list_sessions() if s.agent_name == session.agent_name]
-        explicit_grants = [
-            ws for (ws, has_explicit, _) in db.list_granted_workspaces_with_types(session.agent_name) if has_explicit
-        ]
-        if other_sessions or explicit_grants:
-            reasons: list[str] = []
-            if other_sessions:
-                reasons.append(f"{len(other_sessions)} other session(s)")
-            if explicit_grants:
-                reasons.append(f"{len(explicit_grants)} explicit grant(s)")
-            output.detail(
-                f"Agent '{session.agent_name}' was created with this session but still has "
-                f"{' and '.join(reasons)}, not offering to delete."
-            )
-        elif not yes:
-            if output.confirm(
-                f"Agent '{session.agent_name}' was created with this session "
-                f"and is not in use elsewhere. Delete it?",
-            ):
+                    delete_agent(db, config, name=session.agent_name, yes=True)
+            else:
                 from agentworks.agents.manager import delete_agent
 
+                output.detail(f"Deleting agent '{session.agent_name}' (created with this session)...")
                 delete_agent(db, config, name=session.agent_name, yes=True)
-        else:
-            from agentworks.agents.manager import delete_agent
-
-            output.detail(f"Deleting agent '{session.agent_name}' (created with this session)...")
-            delete_agent(db, config, name=session.agent_name, yes=True)
 
 
 def describe_session(
@@ -1330,7 +1386,10 @@ def list_sessions(
     db: Database,
     config: Config,
     *,
-    workspace_name: str | None = None,
+    workspace_name: str | list[str] | None = None,
+    vm_name: str | list[str] | None = None,
+    agent_name: str | list[str] | None = None,
+    admin_only: bool = False,
     no_status: bool = False,
 ) -> None:
     """List sessions with batched status checks (one SSH call per VM, parallel).
@@ -1338,17 +1397,28 @@ def list_sessions(
     Status resolution is has-session-first; PID/boot_id are only used as a
     follow-up when agent checks fail.
     """
-    sessions = db.list_sessions(workspace_name=workspace_name)
+    sessions = db.list_sessions(
+        workspace_name=workspace_name,
+        vm_name=vm_name,
+        agent_name=agent_name,
+        admin_only=admin_only,
+    )
     if not sessions:
         output.info("No sessions found.")
         return
 
-    # Auto-repair sessions with missing PIDs, then batch check
-    if not no_status:
-        sessions = ensure_pids_batch(sessions, db=db, config=config)
+    # Auto-repair sessions with missing PIDs, then batch check.
+    # The status path SSHes to every involved VM; anchor each one (no-op
+    # on non-WSL2) so the probe doesn't lose them mid-check.
+    status_keepalive_vms: list[VMRow] = (
+        [] if no_status else _distinct_vms_for_sessions(db, sessions)
+    )
+
     status_map: dict[str, SessionStatus] = {}
-    if not no_status:
-        status_map = batch_check_all_sessions(sessions, db=db, config=config)
+    with keep_vms_active(db, config, status_keepalive_vms):
+        if not no_status:
+            sessions = ensure_pids_batch(sessions, db=db, config=config)
+            status_map = batch_check_all_sessions(sessions, db=db, config=config)
 
     # Build table rows grouped by workspace
     by_workspace: dict[str, list[SessionRow]] = {}
@@ -1432,25 +1502,26 @@ def attach_session(
     from agentworks.ssh import interactive
 
     session = _require_session(db, name)
-    _ws, _vm, _run_command, _, target = _prepare_vm(db, config, session.workspace_name, operation="session-attach")
-    session = _ensure_pid(session, target=target, db=db)
-    status = check_session_status(session, target=target)
+    _ws, vm, _run_command, _, target = _prepare_vm(db, config, session.workspace_name, operation="session-attach")
+    with keep_vm_active(db, config, vm):
+        session = _ensure_pid(session, target=target, db=db)
+        status = check_session_status(session, target=target)
 
-    if status == SessionStatus.STOPPED:
-        raise StateError(
-            f"session '{name}' is not running",
-            entity_kind="session",
-            entity_name=name,
-        )
-    if status == SessionStatus.BROKEN:
-        raise BrokenStateError(
-            f"session '{name}' is broken (PID alive but tmux unreachable).",
-            entity_kind="session",
-            entity_name=name,
-        )
+        if status == SessionStatus.STOPPED:
+            raise StateError(
+                f"session '{name}' is not running",
+                entity_kind="session",
+                entity_name=name,
+            )
+        if status == SessionStatus.BROKEN:
+            raise BrokenStateError(
+                f"session '{name}' is broken (PID alive but tmux unreachable).",
+                entity_kind="session",
+                entity_name=name,
+            )
 
-    q_session = shlex.quote(name)
-    sys.exit(interactive(target, tmux_cmd(f"attach -t {q_session}", session.socket_path)))
+        q_session = shlex.quote(name)
+        sys.exit(interactive(target, tmux_cmd(f"attach -t {q_session}", session.socket_path)))
 
 
 def session_logs(
@@ -1464,32 +1535,33 @@ def session_logs(
     from agentworks.sessions.tmux import capture_output
 
     session = _require_session(db, name)
-    _ws, _vm, run_command, _, target = _prepare_vm(db, config, session.workspace_name, operation="session-logs")
-    session = _ensure_pid(session, target=target, db=db)
-    status = check_session_status(session, target=target)
+    _ws, vm, run_command, _, target = _prepare_vm(db, config, session.workspace_name, operation="session-logs")
+    with keep_vm_active(db, config, vm):
+        session = _ensure_pid(session, target=target, db=db)
+        status = check_session_status(session, target=target)
 
-    if status == SessionStatus.STOPPED:
-        raise StateError(
-            f"session '{name}' is not running",
-            entity_kind="session",
-            entity_name=name,
-        )
-    if status == SessionStatus.BROKEN:
-        raise BrokenStateError(
-            f"session '{name}' is broken (PID alive but tmux unreachable).",
-            entity_kind="session",
-            entity_name=name,
-        )
+        if status == SessionStatus.STOPPED:
+            raise StateError(
+                f"session '{name}' is not running",
+                entity_kind="session",
+                entity_name=name,
+            )
+        if status == SessionStatus.BROKEN:
+            raise BrokenStateError(
+                f"session '{name}' is broken (PID alive but tmux unreachable).",
+                entity_kind="session",
+                entity_name=name,
+            )
 
-    sock = session.socket_path
-    captured = capture_output(
-        name,
-        run_command=run_command,
-        lines=lines or config.session.history_limit,
-        socket_path=sock,
-    )
-    # Raw data pipe (opaque tmux capture-pane output), not a structured message.
-    # Intentionally not routed through the output handler.
-    typer.echo(captured, nl=False)
+        sock = session.socket_path
+        captured = capture_output(
+            name,
+            run_command=run_command,
+            lines=lines or config.session.history_limit,
+            socket_path=sock,
+        )
+        # Raw data pipe (opaque tmux capture-pane output), not a structured message.
+        # Intentionally not routed through the output handler.
+        typer.echo(captured, nl=False)
 
 

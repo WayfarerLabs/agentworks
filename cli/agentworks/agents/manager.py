@@ -16,6 +16,7 @@ from agentworks.errors import (
     ValidationError,
 )
 from agentworks.ssh import admin_exec_target
+from agentworks.vms.manager import keep_vm_active
 
 if TYPE_CHECKING:
     from agentworks.catalog import UserInstallCommandEntry
@@ -131,57 +132,57 @@ def create_agent(
     git_tokens = _collect_agent_credentials(config)
 
     from agentworks.ssh import SSHLogger
-
     ssh_logger = SSHLogger(vm.name, "agent-create")
+    with keep_vm_active(db, config, vm):
 
-    def _safe_rollback() -> None:
-        # Best-effort: rollback failures must not mask the original KI or
-        # exception. Surface them as a warning and let the original error
-        # continue to propagate.
+        def _safe_rollback() -> None:
+            # Best-effort: rollback failures must not mask the original KI or
+            # exception. Surface them as a warning and let the original error
+            # continue to propagate.
+            try:
+                _delete_agent_on_vm(vm, config, linux_user, logger=ssh_logger)
+            except Exception as cleanup_err:
+                output.warn(
+                    f"rollback during agent create failed: {cleanup_err}. "
+                    f"VM may have residual user/files for '{linux_user}'. "
+                    f"SSH log: {ssh_logger.path}"
+                )
+
+        # The logger's close() writes a "Finished" footer; defer it via finally so
+        # rollback commands are logged BEFORE the footer, not after.
         try:
-            _delete_agent_on_vm(vm, config, linux_user, logger=ssh_logger)
-        except Exception as cleanup_err:
-            output.warn(
-                f"rollback during agent create failed: {cleanup_err}. "
-                f"VM may have residual user/files for '{linux_user}'. "
-                f"SSH log: {ssh_logger.path}"
-            )
+            try:
+                _create_agent_on_vm(vm, config, linux_user, git_tokens=git_tokens, logger=ssh_logger)
+            except KeyboardInterrupt:
+                output.warn(f"Cancelling agent create '{name}'... rolling back.")
+                _safe_rollback()
+                raise
+            except Exception as e:
+                _safe_rollback()
+                raise ExternalError(
+                    f"creating agent: {e}",
+                    entity_kind="agent",
+                    entity_name=name,
+                    hint=f"SSH log: {ssh_logger.path}",
+                ) from e
+        finally:
+            ssh_logger.close()
 
-    # The logger's close() writes a "Finished" footer; defer it via finally so
-    # rollback commands are logged BEFORE the footer, not after.
-    try:
-        try:
-            _create_agent_on_vm(vm, config, linux_user, git_tokens=git_tokens, logger=ssh_logger)
-        except KeyboardInterrupt:
-            output.warn(f"Cancelling agent create '{name}'... rolling back.")
-            _safe_rollback()
-            raise
-        except Exception as e:
-            _safe_rollback()
-            raise ExternalError(
-                f"creating agent: {e}",
-                entity_kind="agent",
-                entity_name=name,
-                hint=f"SSH log: {ssh_logger.path}",
-            ) from e
-    finally:
-        ssh_logger.close()
+        agent = db.insert_agent(
+            name,
+            vm_name,
+            linux_user,
+            template=agent_tmpl.name,
+            grant_all=grant_all_workspaces,
+        )
 
-    agent = db.insert_agent(
-        name,
-        vm_name,
-        linux_user,
-        template=agent_tmpl.name,
-        grant_all=grant_all_workspaces,
-    )
+        # If grant_all, add to all existing workspace groups
+        if grant_all_workspaces:
+            for ws in db.list_workspaces(vm_name=vm_name):
+                _add_to_workspace_group(vm, config, db, linux_user, ws.name, logger=None)
+                db.insert_agent_grant(name, ws.name, "explicit")
 
-    # If grant_all, add to all existing workspace groups
-    if grant_all_workspaces:
-        for ws in db.list_workspaces(vm_name=vm_name):
-            _add_to_workspace_group(vm, config, db, linux_user, ws.name, logger=None)
-            db.insert_agent_grant(name, ws.name, "explicit")
-
-    output.info(f"Agent '{name}' created on VM '{vm_name}' (user: {agent.linux_user})")
+        output.info(f"Agent '{name}' created on VM '{vm_name}' (user: {agent.linux_user})")
 
 
 def delete_agent(
@@ -224,73 +225,73 @@ def delete_agent(
     vm = _require_vm(db, agent.vm_name)
 
     from agentworks.ssh import SSHLogger
-
     ssh_logger = SSHLogger(vm.name, "agent-delete")
+    with keep_vm_active(db, config, vm):
 
-    # Kill running sessions for this agent (status-aware)
-    if agent_sessions:
-        from agentworks.db import SessionStatus
-        from agentworks.sessions.manager import check_session_status, ensure_pids_batch
-        from agentworks.sessions.tmux import force_kill_tmux_server, kill_session
-        from agentworks.ssh import admin_exec_target
+        # Kill running sessions for this agent (status-aware)
+        if agent_sessions:
+            from agentworks.db import SessionStatus
+            from agentworks.sessions.manager import check_session_status, ensure_pids_batch
+            from agentworks.sessions.tmux import force_kill_tmux_server, kill_session
+            from agentworks.ssh import admin_exec_target
 
-        target = admin_exec_target(vm, config, logger=ssh_logger)
-        agent_sessions = ensure_pids_batch(agent_sessions, db=db, config=config)
-        # Snapshot console memberships before db.delete_session cascades them.
-        console_pairs = [
-            (c.name, s.name)
-            for s in agent_sessions
-            for c in db.list_consoles_for_session(s.name)
-        ]
-        unstoppable: list[str] = []
-        for session in agent_sessions:
-            status = check_session_status(session, target=target)
-            if status == SessionStatus.OK:
-                if not kill_session(session.name, run_command=target.run, socket_path=session.socket_path):
-                    # Race: session may have exited between check and kill. Recheck.
-                    recheck = check_session_status(session, target=target)
-                    if recheck != SessionStatus.STOPPED:
+            target = admin_exec_target(vm, config, logger=ssh_logger)
+            agent_sessions = ensure_pids_batch(agent_sessions, db=db, config=config)
+            # Snapshot console memberships before db.delete_session cascades them.
+            console_pairs = [
+                (c.name, s.name)
+                for s in agent_sessions
+                for c in db.list_consoles_for_session(s.name)
+            ]
+            unstoppable: list[str] = []
+            for session in agent_sessions:
+                status = check_session_status(session, target=target)
+                if status == SessionStatus.OK:
+                    if not kill_session(session.name, run_command=target.run, socket_path=session.socket_path):
+                        # Race: session may have exited between check and kill. Recheck.
+                        recheck = check_session_status(session, target=target)
+                        if recheck != SessionStatus.STOPPED:
+                            unstoppable.append(session.name)
+                            continue
+                elif status == SessionStatus.BROKEN:
+                    if session.pid and session.pid > 0 and force_kill_tmux_server(
+                        session.pid, target=target, socket_path=session.socket_path,
+                    ):
+                        pass  # killed successfully
+                    else:
                         unstoppable.append(session.name)
-                        continue
-            elif status == SessionStatus.BROKEN:
-                if session.pid and session.pid > 0 and force_kill_tmux_server(
-                    session.pid, target=target, socket_path=session.socket_path,
-                ):
-                    pass  # killed successfully
-                else:
+                elif status == SessionStatus.UNKNOWN:
                     unstoppable.append(session.name)
-            elif status == SessionStatus.UNKNOWN:
-                unstoppable.append(session.name)
-        if unstoppable:
-            raise StateError(
-                f"cannot delete agent '{name}': {len(unstoppable)} session(s) could not be stopped "
-                f"({', '.join(unstoppable)}).",
-                entity_kind="agent",
-                entity_name=name,
-                hint="Resolve the stuck sessions manually before retrying.",
-            )
-        for session in agent_sessions:
-            db.delete_session(session.name)
-        output.detail(f"Deleted {len(agent_sessions)} session(s)")
+            if unstoppable:
+                raise StateError(
+                    f"cannot delete agent '{name}': {len(unstoppable)} session(s) could not be stopped "
+                    f"({', '.join(unstoppable)}).",
+                    entity_kind="agent",
+                    entity_name=name,
+                    hint="Resolve the stuck sessions manually before retrying.",
+                )
+            for session in agent_sessions:
+                db.delete_session(session.name)
+            output.detail(f"Deleted {len(agent_sessions)} session(s)")
 
-        # Best-effort: take down dangling 'Waiting for session...' windows in
-        # any console that listed one of these sessions.
-        if console_pairs:
-            from agentworks.sessions.multi_console import kill_session_windows
+            # Best-effort: take down dangling 'Waiting for session...' windows in
+            # any console that listed one of these sessions.
+            if console_pairs:
+                from agentworks.sessions.multi_console import kill_session_windows
 
-            kill_session_windows(target, pairs=console_pairs)
+                kill_session_windows(target, pairs=console_pairs)
 
-    # Remove from all workspace groups
-    granted_workspaces = db.list_granted_workspaces(name)
-    for ws_name in granted_workspaces:
-        _remove_from_workspace_group(vm, config, db, agent.linux_user, ws_name, logger=ssh_logger)
+        # Remove from all workspace groups
+        granted_workspaces = db.list_granted_workspaces(name)
+        for ws_name in granted_workspaces:
+            _remove_from_workspace_group(vm, config, db, agent.linux_user, ws_name, logger=ssh_logger)
 
-    _delete_agent_on_vm(vm, config, agent.linux_user, logger=ssh_logger)
-    ssh_logger.close()
+        _delete_agent_on_vm(vm, config, agent.linux_user, logger=ssh_logger)
+        ssh_logger.close()
 
-    db.delete_agent(name)
+        db.delete_agent(name)
 
-    output.info(f"Agent '{name}' deleted")
+        output.info(f"Agent '{name}' deleted")
 
 
 def reinit_agent(
@@ -322,28 +323,28 @@ def reinit_agent(
     git_tokens = _collect_agent_credentials(config)
 
     from agentworks.ssh import SSHLogger
-
     ssh_logger = SSHLogger(vm.name, "agent-reinit")
-    try:
+    with keep_vm_active(db, config, vm):
         try:
-            _create_agent_on_vm(vm, config, agent.linux_user, git_tokens=git_tokens, logger=ssh_logger)
-        except KeyboardInterrupt:
-            output.warn(
-                f"Cancelling agent reinit '{name}'. The agent may be in a partial state. "
-                f"Re-run 'agent reinit {name}' to retry. SSH log: {ssh_logger.path}"
-            )
-            raise
-        except Exception as e:
-            raise ExternalError(
-                f"reinitializing agent: {e}",
-                entity_kind="agent",
-                entity_name=name,
-                hint=f"SSH log: {ssh_logger.path}",
-            ) from e
-    finally:
-        ssh_logger.close()
+            try:
+                _create_agent_on_vm(vm, config, agent.linux_user, git_tokens=git_tokens, logger=ssh_logger)
+            except KeyboardInterrupt:
+                output.warn(
+                    f"Cancelling agent reinit '{name}'. The agent may be in a partial state. "
+                    f"Re-run 'agent reinit {name}' to retry. SSH log: {ssh_logger.path}"
+                )
+                raise
+            except Exception as e:
+                raise ExternalError(
+                    f"reinitializing agent: {e}",
+                    entity_kind="agent",
+                    entity_name=name,
+                    hint=f"SSH log: {ssh_logger.path}",
+                ) from e
+        finally:
+            ssh_logger.close()
 
-    output.info(f"Agent '{name}' reinitialized")
+        output.info(f"Agent '{name}' reinitialized")
 
 
 def revoke_workspace_grants(
@@ -396,7 +397,7 @@ def _format_grants(db: Database, agent_name: str, grant_all: bool) -> str:
 def list_agents(
     db: Database,
     *,
-    vm_name: str | None = None,
+    vm_name: str | list[str] | None = None,
 ) -> None:
     """List agents."""
     agents = db.list_agents(vm_name=vm_name)
@@ -481,27 +482,29 @@ def shell_agent(
 
     target = admin_exec_target(vm, config)
 
-    if workspace_name:
-        ws = db.get_workspace(workspace_name)
-        if ws is None:
-            raise NotFoundError(
-                f"workspace '{workspace_name}' not found",
-                entity_kind="workspace",
-                entity_name=workspace_name,
-            )
-        if not db.has_any_grant(name, workspace_name):
-            raise AuthorizationError(
-                f"agent '{name}' does not have access to workspace '{workspace_name}'",
-                entity_kind="agent",
-                entity_name=name,
-                hint=f"Run 'agent grant-workspaces {name} {workspace_name}' to grant access.",
-            )
-        import shlex
+    with keep_vm_active(db, config, vm):
+        if workspace_name:
+            ws = db.get_workspace(workspace_name)
+            if ws is None:
+                raise NotFoundError(
+                    f"workspace '{workspace_name}' not found",
+                    entity_kind="workspace",
+                    entity_name=workspace_name,
+                )
+            if not db.has_any_grant(name, workspace_name):
+                raise AuthorizationError(
+                    f"agent '{name}' does not have access to workspace '{workspace_name}'",
+                    entity_kind="agent",
+                    entity_name=name,
+                    hint=f"Run 'agent grant-workspaces {name} {workspace_name}' to grant access.",
+                )
+            import shlex
 
-        q_path = shlex.quote(ws.workspace_path)
-        sys.exit(interactive(target, f"exec sudo su --login {agent.linux_user} -c 'cd {q_path} && exec $SHELL -li'"))
-    else:
-        sys.exit(interactive(target, f"exec sudo su --login {agent.linux_user}"))
+            q_path = shlex.quote(ws.workspace_path)
+            shell_cmd = f"exec sudo su --login {agent.linux_user} -c 'cd {q_path} && exec $SHELL -li'"
+            sys.exit(interactive(target, shell_cmd))
+        else:
+            sys.exit(interactive(target, f"exec sudo su --login {agent.linux_user}"))
 
 
 def exec_agent(
@@ -544,7 +547,8 @@ def exec_agent(
     ssh_cmd.append(f"{vm.admin_username}@{vm.tailscale_host}")
     ssh_cmd.append(su_cmd)
 
-    return subprocess.call(ssh_cmd)
+    with keep_vm_active(db, config, vm):
+        return subprocess.call(ssh_cmd)
 
 
 # -- VM operations ---------------------------------------------------------
@@ -576,24 +580,25 @@ def grant_workspaces(
         )
 
     vm = _require_vm(db, agent.vm_name)
+    with keep_vm_active(db, config, vm):
 
-    if grant_all:
-        db.update_agent_grant_all(agent_name, True)
-        # Add to all existing workspace groups on this VM
-        for ws in db.list_workspaces(vm_name=vm.name):
-            _add_to_workspace_group(vm, config, db, agent.linux_user, ws.name, logger=None)
-            db.insert_agent_grant(agent_name, ws.name, "explicit")
-        output.info(f"Agent '{agent_name}' granted access to all workspaces")
-        return
+        if grant_all:
+            db.update_agent_grant_all(agent_name, True)
+            # Add to all existing workspace groups on this VM
+            for ws in db.list_workspaces(vm_name=vm.name):
+                _add_to_workspace_group(vm, config, db, agent.linux_user, ws.name, logger=None)
+                db.insert_agent_grant(agent_name, ws.name, "explicit")
+            output.info(f"Agent '{agent_name}' granted access to all workspaces")
+            return
 
-    for ws_name in workspace_names:
-        found_ws = db.get_workspace(ws_name)
-        if found_ws is None:
-            output.warn(f"workspace '{ws_name}' not found, skipping")
-            continue
-        _add_to_workspace_group(vm, config, db, agent.linux_user, ws_name, logger=None)
-        db.insert_agent_grant(agent_name, ws_name, "explicit")
-        output.detail(f"Granted: {ws_name}")
+        for ws_name in workspace_names:
+            found_ws = db.get_workspace(ws_name)
+            if found_ws is None:
+                output.warn(f"workspace '{ws_name}' not found, skipping")
+                continue
+            _add_to_workspace_group(vm, config, db, agent.linux_user, ws_name, logger=None)
+            db.insert_agent_grant(agent_name, ws_name, "explicit")
+            output.detail(f"Granted: {ws_name}")
 
 
 def revoke_workspaces(
@@ -622,32 +627,33 @@ def revoke_workspaces(
         )
 
     vm = _require_vm(db, agent.vm_name)
+    with keep_vm_active(db, config, vm):
 
-    if revoke_all:
-        db.update_agent_grant_all(agent_name, False)
-        db.delete_explicit_grants(agent_name)
-        # Remove from groups where no implicit grants remain
-        remaining_implicit: list[str] = []
-        granted = db.list_granted_workspaces(agent_name)
-        for ws_name in granted:
-            if db.has_any_grant(agent_name, ws_name):
-                remaining_implicit.append(ws_name)
-            else:
+        if revoke_all:
+            db.update_agent_grant_all(agent_name, False)
+            db.delete_explicit_grants(agent_name)
+            # Remove from groups where no implicit grants remain
+            remaining_implicit: list[str] = []
+            granted = db.list_granted_workspaces(agent_name)
+            for ws_name in granted:
+                if db.has_any_grant(agent_name, ws_name):
+                    remaining_implicit.append(ws_name)
+                else:
+                    _remove_from_workspace_group(vm, config, db, agent.linux_user, ws_name, logger=None)
+            output.info(f"All explicit grants revoked for agent '{agent_name}'")
+            if remaining_implicit:
+                output.warn(
+                    f"agent still has implicit access via sessions to: {', '.join(remaining_implicit)}"
+                )
+            return
+
+        for ws_name in workspace_names:
+            db.delete_agent_grant(agent_name, ws_name, "explicit")
+            if not db.has_any_grant(agent_name, ws_name):
                 _remove_from_workspace_group(vm, config, db, agent.linux_user, ws_name, logger=None)
-        output.info(f"All explicit grants revoked for agent '{agent_name}'")
-        if remaining_implicit:
-            output.warn(
-                f"agent still has implicit access via sessions to: {', '.join(remaining_implicit)}"
-            )
-        return
-
-    for ws_name in workspace_names:
-        db.delete_agent_grant(agent_name, ws_name, "explicit")
-        if not db.has_any_grant(agent_name, ws_name):
-            _remove_from_workspace_group(vm, config, db, agent.linux_user, ws_name, logger=None)
-            output.detail(f"Revoked: {ws_name}")
-        else:
-            output.detail(f"Revoked: {ws_name} (still has implicit access via sessions)")
+                output.detail(f"Revoked: {ws_name}")
+            else:
+                output.detail(f"Revoked: {ws_name} (still has implicit access via sessions)")
 
 
 # -- VM operations ---------------------------------------------------------

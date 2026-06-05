@@ -56,32 +56,32 @@ def test_generate_bootstrap_script_swap_disabled() -> None:
     assert "SWAP_GB=0" in script
 
 
-def test_generate_bootstrap_script_wsl2() -> None:
-    """WSL2 mode adds --userspace-networking."""
+def test_generate_bootstrap_script_no_platform_specific_tailscale_config() -> None:
+    """The bootstrap script must not carry platform-specific Tailscale flags.
+
+    Regression guard for two stacked historical bugs:
+      1. ``--userspace-networking`` appended to ``tailscale up`` (it's a
+         daemon-only flag; the client rejects it with exit 2).
+      2. Overwriting ``/etc/default/tailscaled`` to set FLAGS, which also
+         clobbered PORT and made tailscaled refuse to start.
+    Tailscale runs in its package-default kernel-tun mode on every platform.
+    If we ever need WSL2-specific config, do it via a systemd drop-in (see
+    bootstrap_script.py comment), NOT by overwriting /etc/default/tailscaled.
+    """
     script = generate_bootstrap_script(
         admin_username="testuser",
         ssh_public_key="ssh-ed25519 AAAA testkey",
         provisioning_packages=["curl"],
         tailscale_auth_key="tskey-auth-test123",
         hostname="wsl2--myvm",
-        is_wsl2=True,
-    )
-
-    assert "--userspace-networking" in script
-
-
-def test_generate_bootstrap_script_not_wsl2() -> None:
-    """Non-WSL2 mode does not add --userspace-networking."""
-    script = generate_bootstrap_script(
-        admin_username="testuser",
-        ssh_public_key="ssh-ed25519 AAAA testkey",
-        provisioning_packages=["curl"],
-        tailscale_auth_key="tskey-auth-test123",
-        hostname="lima--myvm",
-        is_wsl2=False,
     )
 
     assert "--userspace-networking" not in script
+    # Specifically must not WRITE to /etc/default/tailscaled (the previous
+    # bug). A comment mentioning the path is fine; an output redirect is not.
+    assert "> /etc/default/tailscaled" not in script
+    assert ">> /etc/default/tailscaled" not in script
+    assert "tailscale up --auth-key" in script
 
 
 def test_parse_bootstrap_output_success() -> None:
