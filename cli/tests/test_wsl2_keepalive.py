@@ -161,6 +161,33 @@ def test_vm_active_closes_stderr_on_normal_exit() -> None:
     proc.stderr.close.assert_called_once()
 
 
+def test_vm_active_cleanup_tolerates_already_dead_subprocess() -> None:
+    """If the keepalive subprocess died on its own between the fast-fail probe
+    and context exit (WSL service reset, distro 'wsl --terminate'd by hand),
+    proc.terminate() / proc.kill() raise OSError on POSIX. Cleanup must
+    swallow those so a successful command doesn't fail on the way out and
+    a caller's exception doesn't get masked.
+    """
+    proc = MagicMock(spec=subprocess.Popen)
+    proc._handle = 0x1234
+    proc.stderr = MagicMock()
+    # Fast-fail probe sees the process still running; later terminate()
+    # races and the process is gone -- POSIX raises ProcessLookupError
+    # (an OSError subclass), Windows TerminateProcess raises OSError on
+    # bad handle.
+    proc.wait.side_effect = [subprocess.TimeoutExpired(cmd="wsl", timeout=0.5), None]
+    proc.terminate.side_effect = ProcessLookupError("no such process")
+    with (
+        patch("agentworks.vms.provisioners.wsl2.subprocess.Popen", return_value=proc),
+        _job_object_mocks(),
+        WSL2Provisioner().vm_active(_fake_vm()),
+    ):
+        pass
+    proc.terminate.assert_called_once()
+    # Even though terminate raised, the rest of the cleanup ran.
+    proc.stderr.close.assert_called_once()
+
+
 def test_vm_active_waits_for_tailscale_when_host_known() -> None:
     """If vm.tailscale_host is set AND config is provided, wait for SSH."""
     proc = _running_proc()

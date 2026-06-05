@@ -1170,7 +1170,7 @@ def _resolve_vm(db: Database, vm_name: str | None) -> VMRow:
 
 def _ensure_vm_running(db: Database, config: Config, vm: VMRow) -> None:
     """Auto-start a stopped/deallocated VM and verify Tailscale connectivity."""
-    from agentworks.vms.manager import _ensure_tailscale, get_provisioner_for_vm, keep_vm_active
+    from agentworks.vms.manager import _ensure_tailscale, get_provisioner_for_vm
 
     provisioner = get_provisioner_for_vm(db, vm)
     status = provisioner.status(vm)

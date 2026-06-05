@@ -413,11 +413,21 @@ def _keepalive(vm: VMRow, config: Config | None) -> Iterator[None]:
             wait_for_reconnect(target)
         yield
     finally:
-        proc.terminate()
+        # Cleanup is best-effort. If the wsl.exe subprocess has already
+        # exited (WSL service reset, distro `wsl --terminate`'d by hand,
+        # WSL2 vmIdleTimeout finally fired during a hang), terminate() /
+        # kill() raise OSError / ProcessLookupError on POSIX. Suppress so
+        # we don't either mask the caller's exception or turn a successful
+        # command into a failure on the way out. wait() on an already-
+        # reaped Popen just returns the cached returncode, so it doesn't
+        # need the same guard.
+        with contextlib.suppress(OSError):
+            proc.terminate()
         try:
             proc.wait(timeout=5)
         except subprocess.TimeoutExpired:
-            proc.kill()
+            with contextlib.suppress(OSError):
+                proc.kill()
             with contextlib.suppress(subprocess.TimeoutExpired):
                 proc.wait(timeout=5)
         _close_stderr()
