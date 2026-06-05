@@ -5,6 +5,8 @@ to keep the test bodies identical to how they read in-tree."""
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 
 from agentworks.db import Database
@@ -19,6 +21,9 @@ from tests.test_consoles import (
     _seed_vm,
     _StubConfig,
 )
+
+if TYPE_CHECKING:
+    from tests.conftest import CapturedOutput
 
 
 class _StubVerticalLayoutConfig:
@@ -141,6 +146,75 @@ def test_build_aw_session_vertical_layout_string_edge_cases() -> None:
         "80x4\n0 %1\n1 %2\n2 %3\n3 %4\n"
     )
     assert too_small is None
+    # Non-contiguous pane indices (missing pane 0): can't assign a session
+    # slot, so we refuse to build rather than put a shell in the top slot.
+    assert (
+        _build_aw_session_vertical_layout_string("80x36\n1 %1\n2 %2\n") is None
+    )
+
+
+def test_build_aw_session_vertical_layout_string_sorts_panes_by_index() -> None:
+    """list-panes output isn't trusted to be in pane_index order; the
+    builder must sort and use the index-0 pane as the session pane."""
+    from agentworks.sessions.multi_console_layout import (
+        _build_aw_session_vertical_layout_string,
+    )
+
+    # Reverse-order input; pane index 0 is at the bottom of the output.
+    reversed_in = _build_aw_session_vertical_layout_string(
+        "80x36\n2 %33\n1 %32\n0 %31\n"
+    )
+    sorted_in = _build_aw_session_vertical_layout_string(
+        "80x36\n0 %31\n1 %32\n2 %33\n"
+    )
+    assert reversed_in == sorted_in
+
+
+def test_apply_layout_aw_session_vertical_silent_on_single_pane(
+    fake_target: _FakeTarget, captured_output: CapturedOutput
+) -> None:
+    """A session window with zero configured shells has just the session
+    pane; nothing to lay out. The apply helper must NOT warn -- this is
+    normal, not an error."""
+    from agentworks.sessions.multi_console_layout import (
+        _apply_aw_session_vertical_layout,
+    )
+
+    fake_target.responses["display-message -t aw-console-con:alpha"] = _FakeResult(
+        returncode=0, stdout="80x36\n0 %1\n"
+    )
+
+    _apply_aw_session_vertical_layout(
+        fake_target, "aw-console-con", "alpha"  # type: ignore[arg-type]
+    )
+
+    # The query happens, but no select-layout call and no warning.
+    assert not any("select-layout" in c for c in fake_target.commands)
+    assert not any(
+        "could not build aw-session-vertical" in w for w in captured_output.warnings
+    )
+
+
+def test_apply_layout_aw_session_vertical_warns_on_genuine_failure(
+    fake_target: _FakeTarget, captured_output: CapturedOutput
+) -> None:
+    """Too-small geometry (or anything else the builder refuses) should
+    still produce a warning so an operator sees a breadcrumb."""
+    from agentworks.sessions.multi_console_layout import (
+        _apply_aw_session_vertical_layout,
+    )
+
+    fake_target.responses["display-message -t aw-console-con:alpha"] = _FakeResult(
+        returncode=0, stdout="80x4\n0 %1\n1 %2\n2 %3\n3 %4\n"
+    )
+
+    _apply_aw_session_vertical_layout(
+        fake_target, "aw-console-con", "alpha"  # type: ignore[arg-type]
+    )
+
+    assert any(
+        "could not build aw-session-vertical" in w for w in captured_output.warnings
+    )
 
 
 def test_focus_session_pane_emits_select_pane(fake_target: _FakeTarget) -> None:

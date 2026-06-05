@@ -121,7 +121,7 @@ class DefaultsConfig:
 # heights. tmux has no preset that matches this geometry, so apply-time
 # builds a custom tmux layout string from the live window dimensions and
 # pane IDs and feeds it to `tmux select-layout`. See
-# `_apply_aw_session_vertical_layout` in sessions/multi_console.py.
+# `_apply_aw_session_vertical_layout` in sessions/multi_console_layout.py.
 AW_SESSION_VERTICAL_LAYOUT = "aw-session-vertical"
 
 # Valid layouts for named-console session windows. All values besides

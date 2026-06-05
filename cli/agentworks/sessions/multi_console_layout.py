@@ -76,12 +76,17 @@ def _apply_aw_session_vertical_layout(
     target: ExecTarget, q_con: str, q_win: str
 ) -> None:
     """Build and apply a hand-computed tmux layout string for
-    ``aw-session-vertical``. Two SSH round trips: one to query the
-    window's width / height / pane IDs, one to apply the computed
-    layout. Unreachable tmux is quiet (the downstream select-layout
-    would warn on its own anyway), but a parseable-but-bad query --
-    too-small window, single-pane window, malformed output -- gets a
-    warning so an operator who sees a wrong layout has a breadcrumb.
+    ``aw-session-vertical``. Two transport round trips through the
+    ``ExecTarget`` abstraction (one ``target.run`` chains two tmux
+    commands with ``&&`` to gather the query; the second applies the
+    computed layout).
+
+    A failed query is quiet (the downstream select-layout would warn on
+    its own anyway). A single-pane window is a silent no-op -- a session
+    member with zero configured shells legitimately has nothing to lay
+    out and shouldn't trigger a warning. Genuine parse failure or
+    too-small geometry gets a warning so an operator who sees a wrong
+    layout has a breadcrumb.
     """
     query = target.run(
         f"tmux display-message -t {q_con}:{q_win} -p "
@@ -91,18 +96,34 @@ def _apply_aw_session_vertical_layout(
     )
     if not query.ok:
         return
+    pane_count = _count_panes_in_query_output(query.stdout)
+    if pane_count is not None and pane_count <= 1:
+        # Single-pane window: nothing to lay out, not an error.
+        return
     layout_string = _build_aw_session_vertical_layout_string(query.stdout)
     if layout_string is None:
         output.warn(
             f"could not build aw-session-vertical layout for "
-            f"{q_con}:{q_win} (window too small, single-pane, or "
-            f"unparseable tmux output); tmux will keep its current layout"
+            f"{q_con}:{q_win} (window too small or unparseable tmux "
+            f"output); tmux will keep its current layout"
         )
         return
     target.run(
         f"tmux select-layout -t {q_con}:{q_win} {shlex.quote(layout_string)}",
         check=False,
     )
+
+
+def _count_panes_in_query_output(query_output: str) -> int | None:
+    """Return the pane count reported by the query (lines after the
+    leading WxH line), or None if the output is malformed enough that
+    we can't tell. Lets the caller distinguish "single-pane, no work
+    needed" from "broken query".
+    """
+    lines = query_output.strip().splitlines()
+    if len(lines) < 1:
+        return None
+    return len(lines) - 1
 
 
 def _build_aw_session_vertical_layout_string(query_output: str) -> str | None:
@@ -135,18 +156,29 @@ def _build_aw_session_vertical_layout_string(query_output: str) -> str | None:
         H = int(h_str)
     except ValueError:
         return None
-    pane_ids: list[str] = []
+    # Don't trust tmux to emit list-panes output in pane_index order: parse
+    # the index, sort by it, then take pane_ids in index order. Also require
+    # the index sequence to start at 0 and be contiguous -- a missing pane 0
+    # (the session pane) means we'd put a shell into the session slot and
+    # the layout would be wrong.
+    indexed: list[tuple[int, str]] = []
     for line in lines[1:]:
         parts = line.split()
         if len(parts) != 2:
             continue
         try:
-            int(parts[0])
+            idx = int(parts[0])
         except ValueError:
             continue
-        pane_ids.append(parts[1].removeprefix("%"))
-    if not pane_ids:
+        indexed.append((idx, parts[1].removeprefix("%")))
+    if not indexed:
         return None
+    indexed.sort(key=lambda p: p[0])
+    if [idx for idx, _ in indexed] != list(range(len(indexed))):
+        # Non-contiguous or missing pane 0 -- can't build a sensible layout
+        # without knowing which pane belongs in which slot.
+        return None
+    pane_ids = [pid for _, pid in indexed]
     n = len(pane_ids)
     if n == 1:
         # Just the session pane; nothing to lay out.
