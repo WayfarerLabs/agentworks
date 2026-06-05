@@ -32,10 +32,14 @@ def _running_proc() -> MagicMock:
     """A Popen mock that models a subprocess that's still running on the
     initial fast-fail probe (raises TimeoutExpired) and exits cleanly on the
     final terminate-then-wait. ``_handle`` is set to a dummy int so the
-    job-object assignment path has something to pass to AssignProcessToJobObject."""
+    job-object assignment path has something to pass to AssignProcessToJobObject.
+    ``stderr`` is set to a MagicMock because spec=Popen doesn't auto-expose
+    it (it's an instance attribute on Popen, set in __init__) and the
+    keepalive's exit path now calls proc.stderr.close() to release the fd."""
     proc = MagicMock(spec=subprocess.Popen)
     proc.wait.side_effect = [subprocess.TimeoutExpired(cmd="wsl", timeout=0.5), None]
     proc._handle = 0x1234  # bypass spec=Popen blocking _handle attribute access
+    proc.stderr = MagicMock()
     return proc
 
 
@@ -101,6 +105,7 @@ def test_vm_active_kills_if_terminate_doesnt_take() -> None:
     """If terminate's wait times out, fall back to kill()."""
     proc = MagicMock(spec=subprocess.Popen)
     proc._handle = 0x1234
+    proc.stderr = MagicMock()  # spec=Popen hides the instance attr; see _running_proc
     # 1: fast-fail probe (still running), 2: post-terminate wait (timeout),
     # 3: post-kill wait (exits).
     proc.wait.side_effect = [
@@ -137,6 +142,23 @@ def test_vm_active_fast_fails_if_keepalive_subprocess_dies_immediately() -> None
         WSL2Provisioner().vm_active(_fake_vm("missing-distro")),
     ):
         pass
+    # The fast-fail path closes the stderr PIPE handle before raising, so a
+    # caller that retries the keepalive doesn't accumulate one leaked fd per
+    # failed attempt.
+    proc.stderr.close.assert_called_once()
+
+
+def test_vm_active_closes_stderr_on_normal_exit() -> None:
+    """On the normal exit path the stderr PIPE handle is closed too, so the
+    subprocess's fd doesn't outlive the keepalive context."""
+    proc = _running_proc()
+    with (
+        patch("agentworks.vms.provisioners.wsl2.subprocess.Popen", return_value=proc),
+        _job_object_mocks(),
+        WSL2Provisioner().vm_active(_fake_vm()),
+    ):
+        pass
+    proc.stderr.close.assert_called_once()
 
 
 def test_vm_active_waits_for_tailscale_when_host_known() -> None:

@@ -381,6 +381,15 @@ def _keepalive(vm: VMRow, config: Config | None) -> Iterator[None]:
             "(note: Win32 Job Object unavailable; a hard-kill of this command may leave an orphan wsl.exe.)"
         )
 
+    def _close_stderr() -> None:
+        # Popen with stderr=PIPE leaves a read-end fd open until the Popen
+        # object is GC'd. On the fast-fail path we already read and won't
+        # touch it again; on the normal-exit path the subprocess has been
+        # waited on so the pipe is at EOF. Either way the fd is dead weight.
+        if proc.stderr is not None:
+            with contextlib.suppress(OSError):
+                proc.stderr.close()
+
     # Fast-fail check: if wsl.exe couldn't attach (wrong distro name, WSL
     # service hiccup, etc.), `sleep infinity` exits within milliseconds.
     # Without this check the keepalive silently becomes a no-op and the
@@ -391,6 +400,7 @@ def _keepalive(vm: VMRow, config: Config | None) -> Iterator[None]:
         rc = None  # still running, which is what we want
     if rc is not None:
         stderr = (proc.stderr.read().decode("utf-8", errors="replace").strip() if proc.stderr else "")
+        _close_stderr()
         _close_handle(h_job)
         raise RuntimeError(
             f"WSL2 keepalive for distro {vm.name!r} exited immediately (rc={rc})"
@@ -410,6 +420,7 @@ def _keepalive(vm: VMRow, config: Config | None) -> Iterator[None]:
             proc.kill()
             with contextlib.suppress(subprocess.TimeoutExpired):
                 proc.wait(timeout=5)
+        _close_stderr()
         _close_handle(h_job)
         output.detail("Idle-shutdown prevention stopped.")
 
