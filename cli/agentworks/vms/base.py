@@ -67,13 +67,16 @@ class VMProvisioner(ABC):
         wait for SSH to be reachable before yielding so callers see a
         ready VM.
 
-        Currently wrapped at ``initialize_vm`` only. The design intent is
-        for every agentworks operation that touches a VM (reinit, shell,
-        exec, agent/workspace/session/console ops, multi-VM probes) to
-        wrap in this context so WSL2 idle-shutdown can't bite mid-command
-        and Tailscale readiness is verified before the operation starts.
-        That sweep is queued as a follow-up PR. For commands that touch
-        multiple VMs (e.g. ``session list --status``), enter one
-        ``vm_active`` per VM via ``ExitStack``.
+        Every manager-layer function that touches a VM wraps in this
+        context via ``keep_vm_active(db, config, vm)`` (or
+        ``keep_vms_active(...)`` for multi-VM operations) defined in
+        ``vms/manager.py``. Don't call ``vm_active`` directly outside
+        the helper; the helper handles the provisioner dispatch.
+        Exceptions to the greedy-wrap rule are deliberately not wrapped
+        and documented at their call sites: ``stop_vm`` (would fight
+        ``wsl --terminate``), all ``describe_*`` (degrade silently when
+        the VM is unreachable, or auto-boot via ``_ensure_vm_running``),
+        and the multi_console best-effort ops (forcing a boot would
+        change their semantics).
         """
         return nullcontext()

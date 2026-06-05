@@ -762,7 +762,7 @@ def initialize_vm(
     from dataclasses import replace
 
     from agentworks.ssh import SSHLogger
-    from agentworks.vms.manager import get_provisioner_for_vm
+    from agentworks.vms.manager import keep_vm_active
 
     home = f"/home/{admin_username}"
     logger = SSHLogger(vm_name, "vm-create")
@@ -777,14 +777,13 @@ def initialize_vm(
 
     transport = _describe_transport(exec_target)
 
-    # Anchor the VM in an active state for the full init span. Provisioner
-    # default is a no-op; WSL2 overrides to hold a wsl.exe subprocess open
-    # so the distro doesn't idle-shut between Phase A (wsl.exe transport)
-    # and Phase B (Tailscale SSH). Lima/Azure/Proxmox inherit the no-op.
+    # Anchor the VM in an active state for the full init span. No-op for
+    # Lima/Azure/Proxmox; WSL2 holds a wsl.exe subprocess open so the distro
+    # doesn't idle-shut between Phase A (wsl.exe transport) and Phase B
+    # (Tailscale SSH).
     vm_for_keepalive = db.get_vm(vm_name)
     assert vm_for_keepalive is not None, "create_vm inserts the row before init"
-    provisioner = get_provisioner_for_vm(db, vm_for_keepalive, config)
-    with provisioner.vm_active(vm_for_keepalive, config=config):
+    with keep_vm_active(db, config, vm_for_keepalive):
         try:
             db.insert_vm_event(vm_name, "provisioning_started", transport)
             ts_target = _phase_a_bootstrap(

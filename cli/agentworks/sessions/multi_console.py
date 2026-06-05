@@ -31,6 +31,7 @@ from agentworks.errors import (
     ValidationError,
 )
 from agentworks.sessions.tmux import tmux_cmd
+from agentworks.vms.manager import keep_vm_active
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -1332,8 +1333,6 @@ def attach_console(
 ) -> None:
     """Attach to a named console, building or rebuilding tmux state as needed."""
     from agentworks.ssh import interactive
-    from agentworks.vms.manager import keep_vm_active
-
     if os.environ.get("TMUX") and not allow_nesting:
         raise StateError(
             "already inside a tmux session. Nesting is not recommended "

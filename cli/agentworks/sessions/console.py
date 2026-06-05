@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 from agentworks import output
 from agentworks.errors import NotFoundError, StateError
 from agentworks.sessions.tmux import tmux_cmd
+from agentworks.vms.manager import keep_vm_active
 
 if TYPE_CHECKING:
     from agentworks.config import Config
@@ -169,8 +170,6 @@ def attach_console(
         )
 
     from agentworks.ssh import admin_exec_target, interactive
-    from agentworks.vms.manager import keep_vm_active
-
     target = admin_exec_target(vm, config)
 
     # Get sessions for this VM (console wrapper handles dead sessions)

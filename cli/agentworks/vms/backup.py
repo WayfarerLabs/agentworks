@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.errors import BackupError, NotFoundError, StateError
+from agentworks.vms.manager import keep_vm_active
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -31,7 +32,6 @@ def backup_vm(
     Returns the path to the backup archive.
     """
     from agentworks.ssh import SSHError, SSHLogger, _unwrap_ssh, admin_exec_target
-    from agentworks.vms.manager import keep_vm_active
     from agentworks.workspaces.manager import _ensure_vm_running
 
     vm = db.get_vm(vm_name)

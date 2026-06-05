@@ -16,6 +16,7 @@ from agentworks.errors import (
     ValidationError,
 )
 from agentworks.ssh import admin_exec_target
+from agentworks.vms.manager import keep_vm_active
 
 if TYPE_CHECKING:
     from agentworks.catalog import UserInstallCommandEntry
@@ -131,8 +132,6 @@ def create_agent(
     git_tokens = _collect_agent_credentials(config)
 
     from agentworks.ssh import SSHLogger
-    from agentworks.vms.manager import keep_vm_active
-
     ssh_logger = SSHLogger(vm.name, "agent-create")
     with keep_vm_active(db, config, vm):
 
@@ -226,8 +225,6 @@ def delete_agent(
     vm = _require_vm(db, agent.vm_name)
 
     from agentworks.ssh import SSHLogger
-    from agentworks.vms.manager import keep_vm_active
-
     ssh_logger = SSHLogger(vm.name, "agent-delete")
     with keep_vm_active(db, config, vm):
 
@@ -326,8 +323,6 @@ def reinit_agent(
     git_tokens = _collect_agent_credentials(config)
 
     from agentworks.ssh import SSHLogger
-    from agentworks.vms.manager import keep_vm_active
-
     ssh_logger = SSHLogger(vm.name, "agent-reinit")
     with keep_vm_active(db, config, vm):
         try:
@@ -477,7 +472,6 @@ def shell_agent(
 
     vm = _require_vm(db, agent.vm_name)
 
-    from agentworks.vms.manager import keep_vm_active
     from agentworks.workspaces.manager import _ensure_vm_running
 
     _ensure_vm_running(db, config, vm)
@@ -552,8 +546,6 @@ def exec_agent(
     ssh_cmd.append(f"{vm.admin_username}@{vm.tailscale_host}")
     ssh_cmd.append(su_cmd)
 
-    from agentworks.vms.manager import keep_vm_active
-
     with keep_vm_active(db, config, vm):
         return subprocess.call(ssh_cmd)
 
@@ -570,8 +562,6 @@ def grant_workspaces(
     grant_all: bool = False,
 ) -> None:
     """Grant an agent explicit access to workspaces."""
-    from agentworks.vms.manager import keep_vm_active
-
     if not grant_all and not workspace_names:
         raise ValidationError(
             f"grant for '{agent_name}' needs at least one workspace name "
@@ -619,8 +609,6 @@ def revoke_workspaces(
     revoke_all: bool = False,
 ) -> None:
     """Revoke explicit workspace grants from an agent."""
-    from agentworks.vms.manager import keep_vm_active
-
     if not revoke_all and not workspace_names:
         raise ValidationError(
             f"revoke for '{agent_name}' needs at least one workspace name "

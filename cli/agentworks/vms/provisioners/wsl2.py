@@ -257,7 +257,7 @@ def _keepalive(vm: VMRow, config: Config | None) -> Iterator[None]:
             proc.kill()
             with contextlib.suppress(subprocess.TimeoutExpired):
                 proc.wait(timeout=5)
-        output.detail("WSL2 idle-shutdown prevention stopped.")
+        output.detail("Idle-shutdown prevention stopped.")
 
 
 class WSL2Provisioner(VMProvisioner):

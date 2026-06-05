@@ -18,6 +18,7 @@ from agentworks.errors import (
     UserAbort,
     ValidationError,
 )
+from agentworks.vms.manager import keep_vm_active
 from agentworks.workspaces.templates import resolve_template
 
 if TYPE_CHECKING:
@@ -38,7 +39,6 @@ def create_workspace(
     """Create a workspace on a VM."""
     from agentworks.agents.manager import workspace_group
     from agentworks.ssh import SSHLogger
-    from agentworks.vms.manager import keep_vm_active
     from agentworks.workspaces.backends.vm import (
         create_vm_workspace,
         delete_vm_workspace,
@@ -212,7 +212,6 @@ def shell_workspace(
     name: str,
 ) -> None:
     """Open a plain shell into a workspace."""
-    from agentworks.vms.manager import keep_vm_active
     from agentworks.workspaces.backends.vm import shell_vm_workspace
 
     ws = db.get_workspace(name)
@@ -249,7 +248,6 @@ def console_workspace(
     """Open the workspace console (tmuxinator session with sessions)."""
     import os
 
-    from agentworks.vms.manager import keep_vm_active
     from agentworks.workspaces.backends.vm import console_vm_workspace
 
     if os.environ.get("TMUX") and not allow_nesting:
@@ -377,8 +375,6 @@ def reinit_workspace(
     """
     from agentworks.agents.manager import AGENT_PREFIX
     from agentworks.ssh import SSHError, admin_exec_target
-    from agentworks.vms.manager import keep_vm_active
-
     ws = db.get_workspace(name)
     if ws is None:
         raise NotFoundError(
@@ -659,7 +655,6 @@ def _rehome_vm(
     """Rehome a VM workspace."""
 
     from agentworks.ssh import SSHError, SSHLogger, admin_exec_target
-    from agentworks.vms.manager import keep_vm_active
     from agentworks.workspaces.backends.vm import generate_vscode_workspace
 
     ws_name = ws.name
@@ -880,8 +875,6 @@ def delete_workspace(
     import contextlib
 
     from agentworks.ssh import SSHLogger
-    from agentworks.vms.manager import keep_vm_active
-
     ssh_logger = SSHLogger(ws.vm_name, "workspace-delete")
 
     # Kill running sessions (status-aware) and delete session records
@@ -985,8 +978,6 @@ def copy_workspace(
 
     from agentworks.agents.manager import workspace_group
     from agentworks.ssh import SSHLogger, admin_exec_target
-    from agentworks.vms.manager import keep_vm_active
-
     validate_name(dest_name)
 
     src_ws = db.get_workspace(source_name)
