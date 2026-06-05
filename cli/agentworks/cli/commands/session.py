@@ -199,7 +199,11 @@ def session_list(
     from agentworks.config import load_config
     from agentworks.sessions.manager import list_sessions
 
-    if admin and agent:
+    # Validate against the parsed filter, not the raw flag value, so inputs
+    # that normalize to "no filter" (whitespace, lone commas) don't falsely
+    # trip the mutex.
+    parsed_agent = parse_csv_filter(agent)
+    if admin and parsed_agent is not None:
         typer.echo("Error: --admin and --agent are mutually exclusive", err=True)
         raise typer.Exit(1)
 
@@ -208,7 +212,7 @@ def session_list(
         load_config(),
         workspace_name=parse_csv_filter(workspace),
         vm_name=parse_csv_filter(vm),
-        agent_name=parse_csv_filter(agent),
+        agent_name=parsed_agent,
         admin_only=admin,
         no_status=no_status,
     )

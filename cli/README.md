@@ -78,9 +78,10 @@ Manage machines that host VMs (for remote Lima mode).
 | `agw vm-host list`                  | List registered VM hosts |
 | `agw vm-host remove <name>`         | Remove a VM host         |
 
-`vm-host remove` requires `--force` if the host has VMs registered against it; the VM rows lose
-their `vm_host_name` reference and the host is removed. The confirmation prompt shows what will
-happen. Pass `--yes` to skip the prompt.
+`vm-host remove` refuses if the host has VMs registered against it; pass `--force` to clear those
+VMs' `vm_host_name` reference and remove the host anyway. When the host has no VMs and you run
+without `--force` or `--yes`, the command prompts for confirmation. Both `--yes` and `--force` skip
+the prompt.
 
 ### VMs
 

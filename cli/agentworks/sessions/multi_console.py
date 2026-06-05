@@ -822,7 +822,7 @@ def list_consoles(
     """Print a table of consoles, optionally filtered by VM, workspace, or agent.
 
     Workspace/agent filters match a console if any of its member sessions
-    matches; see `Database.list_consoles_with_counts` for full semantics.
+    match; see `Database.list_consoles_with_counts` for full semantics.
     Filters compose with AND.
     """
     consoles = db.list_consoles_with_counts(

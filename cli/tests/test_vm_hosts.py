@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 
 
 def _seed_host_with_vm(db: Database, host_name: str = "host1", vm_name: str = "vm1") -> None:
-    db.insert_vm_host(host_name, "host1.example.com", platform="lima", os="linux")
+    db.insert_vm_host(host_name, f"{host_name}.example.com", platform="lima", os="linux")
     db._conn.execute(
         "INSERT INTO vms (name, platform, admin_username, vm_host_name) "
         "VALUES (?, 'lima', 'admin', ?)",
