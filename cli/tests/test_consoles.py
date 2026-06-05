@@ -2296,12 +2296,19 @@ def test_apply_layout_preset_emits_simple_select_layout(
     ]
 
 
-def test_apply_layout_aw_session_vertical_emits_compound(
+def test_apply_layout_aw_session_vertical_queries_then_applies_string(
     fake_target: _FakeTarget,
 ) -> None:
-    """`aw-session-vertical` expands to even-vertical + window-height query
-    + resize-pane on pane 0 to claim the top half."""
+    """`aw-session-vertical` queries window geometry + pane IDs, builds a
+    custom tmux layout string Python-side, and applies it via
+    `select-layout`. Two SSH calls: query then apply."""
     from agentworks.sessions.multi_console import _apply_layout
+
+    # First call returns geometry + pane ids; the helper builds a layout
+    # string from this and applies it via the second call.
+    fake_target.responses["display-message -t aw-console-con:alpha"] = _FakeResult(
+        returncode=0, stdout="80x36\n0 %31\n1 %32\n2 %33\n"
+    )
 
     _apply_layout(
         fake_target,  # type: ignore[arg-type]
@@ -2309,11 +2316,85 @@ def test_apply_layout_aw_session_vertical_emits_compound(
         "alpha",
         "aw-session-vertical",
     )
-    assert len(fake_target.commands) == 1
-    cmd = fake_target.commands[0]
-    assert "tmux select-layout -t aw-console-con:alpha even-vertical" in cmd
-    assert "tmux display-message -t aw-console-con:alpha -p '#{window_height}'" in cmd
-    assert "tmux resize-pane -t aw-console-con:alpha.0 -y $((H/2))" in cmd
+
+    # Expect two commands: the geometry/pane query and the select-layout apply.
+    assert len(fake_target.commands) == 2
+    query_cmd, apply_cmd = fake_target.commands
+    assert "display-message -t aw-console-con:alpha" in query_cmd
+    assert "list-panes -t aw-console-con:alpha" in query_cmd
+    # The apply command holds the computed string with a tmux checksum prefix.
+    # For 80x36 with 3 panes: session=18, shells=8+8, full geometry inside [].
+    assert (
+        "tmux select-layout -t aw-console-con:alpha "
+        "'3b1b,80x36,0,0[80x18,0,0,31,80x8,0,19,32,80x8,0,28,33]'"
+    ) in apply_cmd
+
+
+def test_tmux_layout_checksum_matches_reference() -> None:
+    """The 16-bit checksum implementation must agree with tmux's own
+    output. Reference string + expected hash from a known tmux 3.3a
+    layout (verified live)."""
+    from agentworks.sessions.multi_console import _tmux_layout_checksum
+
+    body = "269x36,0,0[269x18,0,0,28,269x4,0,19,29,269x12,0,24,30]"
+    assert f"{_tmux_layout_checksum(body):04x}" == "e088"
+
+
+def test_build_aw_session_vertical_layout_string_geometry() -> None:
+    """Builder produces exact geometry: session at H/2, shells share the
+    rest equally with per-pane border accounting."""
+    from agentworks.sessions.multi_console import (
+        _build_aw_session_vertical_layout_string,
+    )
+
+    # 1 shell: session 18, shell 17 (no internal shell borders).
+    s1 = _build_aw_session_vertical_layout_string("80x36\n0 %1\n1 %2\n")
+    assert s1 is not None
+    assert "80x18,0,0,1" in s1
+    assert "80x17,0,19,2" in s1
+
+    # 2 shells: session 18, shells 8 + 8 (1 border between them).
+    s2 = _build_aw_session_vertical_layout_string(
+        "80x36\n0 %1\n1 %2\n2 %3\n"
+    )
+    assert s2 is not None
+    assert "80x18,0,0,1" in s2
+    assert "80x8,0,19,2" in s2
+    assert "80x8,0,28,3" in s2
+
+    # 3 shells: session 18, shells 5 + 5 + 5 (2 borders).
+    s3 = _build_aw_session_vertical_layout_string(
+        "80x36\n0 %1\n1 %2\n2 %3\n3 %4\n"
+    )
+    assert s3 is not None
+    assert "80x18,0,0,1" in s3
+    assert "80x5,0,19,2" in s3
+    assert "80x5,0,25,3" in s3
+    assert "80x5,0,31,4" in s3
+
+
+def test_build_aw_session_vertical_layout_string_edge_cases() -> None:
+    """Builder returns None on parse failures, empty input, and
+    too-small windows (rare in practice but easy to handle cleanly)."""
+    from agentworks.sessions.multi_console import (
+        _build_aw_session_vertical_layout_string,
+    )
+
+    # Empty / malformed input.
+    assert _build_aw_session_vertical_layout_string("") is None
+    assert _build_aw_session_vertical_layout_string("garbage") is None
+    assert _build_aw_session_vertical_layout_string("80x36\n") is None
+    # Window dimensions unparseable.
+    assert (
+        _build_aw_session_vertical_layout_string("nox\n0 %1\n1 %2\n") is None
+    )
+    # Single pane: no layout to apply.
+    assert _build_aw_session_vertical_layout_string("80x36\n0 %1\n") is None
+    # Window too small for the geometry (4 panes can't fit in H=4).
+    too_small = _build_aw_session_vertical_layout_string(
+        "80x4\n0 %1\n1 %2\n2 %3\n3 %4\n"
+    )
+    assert too_small is None
 
 
 def test_focus_session_pane_emits_select_pane(fake_target: _FakeTarget) -> None:
@@ -2402,9 +2483,8 @@ def test_add_shell_does_not_focus_session_pane(
 def test_attach_console_aw_session_vertical_layout(
     db: Database, fake_target: _FakeTarget
 ) -> None:
-    """When the config picks aw-session-vertical, the build emits the
-    compound expansion (even-vertical + display-message + resize-pane)
-    instead of a single select-layout."""
+    """When the config picks aw-session-vertical, the build queries window
+    geometry + pane IDs, then applies a hand-computed layout string."""
     from agentworks.sessions.multi_console import attach_console
 
     _seed_vm(db, with_tailscale=True)
@@ -2414,15 +2494,20 @@ def test_attach_console_aw_session_vertical_layout(
     fake_target.responses["list-windows -t aw-console-con"] = _FakeResult(
         returncode=0, stdout="_PLACEHOLDER\nalpha\n"
     )
+    fake_target.responses["display-message -t aw-console-con:alpha"] = _FakeResult(
+        returncode=0, stdout="80x36\n0 %1\n1 %2\n"
+    )
 
     with pytest.raises(SystemExit):
         attach_console(
             db, _StubVerticalLayoutConfig(), name="con", allow_nesting=True  # type: ignore[arg-type]
         )
 
+    # One select-layout with the hand-computed string for 1-shell case
+    # (session 18, shell 17).
     layout_cmds = [c for c in fake_target.commands if "select-layout" in c]
     assert any(
-        "tmux select-layout -t aw-console-con:alpha even-vertical" in c
-        and "tmux resize-pane -t aw-console-con:alpha.0 -y $((H/2))" in c
+        "tmux select-layout -t aw-console-con:alpha "
+        "'67a5,80x36,0,0[80x18,0,0,1,80x17,0,19,2]'" in c
         for c in layout_cmds
     ), layout_cmds

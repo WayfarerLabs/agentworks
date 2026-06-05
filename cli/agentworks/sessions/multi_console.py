@@ -1142,32 +1142,130 @@ def _apply_layout(
     Tmux preset names (`tiled`, `main-vertical`, etc.) go through
     `select-layout` as-is. The agentworks-specific ``aw-session-vertical``
     has no tmux preset equivalent: it stacks all panes vertically and
-    sizes the session pane (pane 0) to occupy the top 50% of the window.
-
-    The bottom 50% is left to tmux's automatic redistribution after the
-    pane-0 resize. With one shell the split is a clean 50/50; with two
-    or more shells the per-shell heights aren't perfectly equal (tmux's
-    resize-pane delta lands on a single neighbor at a time, not the
-    whole subset). The geometry is still "session on top half, shells
-    stack below" which is the property the layout is named for; if
-    operators want pixel-equal shell rows they can run `tmux` keys to
-    rebalance after attaching.
+    sizes the session pane (pane 0) to the top 50%, with shell panes
+    sharing the bottom 50% in equal-height rows. We build a custom tmux
+    layout string with explicit per-pane heights (the
+    `select-layout even-vertical` + `resize-pane` approach can't give
+    pixel-equal shell rows because tmux's resize delta only affects a
+    single neighbor at a time).
 
     Best-effort; the caller's surrounding code doesn't `check=True` on
     layout failure today and we preserve that contract.
     """
     if layout == AW_SESSION_VERTICAL_LAYOUT:
-        target.run(
-            f"tmux select-layout -t {q_con}:{q_win} even-vertical && "
-            f"H=$(tmux display-message -t {q_con}:{q_win} -p '#{{window_height}}') && "
-            f"tmux resize-pane -t {q_con}:{q_win}.0 -y $((H/2))",
-            check=False,
-        )
+        _apply_aw_session_vertical_layout(target, q_con, q_win)
     else:
         target.run(
             f"tmux select-layout -t {q_con}:{q_win} {shlex.quote(layout)}",
             check=False,
         )
+
+
+def _apply_aw_session_vertical_layout(
+    target: ExecTarget, q_con: str, q_win: str
+) -> None:
+    """Build and apply a hand-computed tmux layout string for
+    ``aw-session-vertical``. Two SSH round trips: one to query the
+    window's width / height / pane IDs, one to apply the computed
+    layout. Failures (unreachable tmux, unparseable output, too-small
+    window) are silently swallowed -- this is best-effort and the
+    operator can rebuild via `console attach --recreate`.
+    """
+    query = target.run(
+        f"tmux display-message -t {q_con}:{q_win} -p "
+        f"'#{{window_width}}x#{{window_height}}' && "
+        f"tmux list-panes -t {q_con}:{q_win} -F '#{{pane_index}} #{{pane_id}}'",
+        check=False,
+    )
+    if not query.ok:
+        return
+    layout_string = _build_aw_session_vertical_layout_string(query.stdout)
+    if layout_string is None:
+        return
+    target.run(
+        f"tmux select-layout -t {q_con}:{q_win} {shlex.quote(layout_string)}",
+        check=False,
+    )
+
+
+def _build_aw_session_vertical_layout_string(query_output: str) -> str | None:
+    """Build a tmux custom layout string for the aw-session-vertical layout.
+
+    Input format (output of the query in _apply_aw_session_vertical_layout):
+        WxH                  (first line: window width x height)
+        pane_index pane_id   (one line per pane, in tmux index order)
+
+    Output: a complete tmux layout string `<checksum>,WxH,0,0[children]`
+    where children are leaf nodes laid out vertically:
+
+      - pane 0 (session) gets the top H/2 lines
+      - panes 1..N (shells) share the remaining (H/2 - 1) lines evenly,
+        accounting for 1-line borders between each pair of adjacent panes
+
+    Returns None on any parse failure or when the window is too small to
+    hold the layout (rare; tmux itself would refuse the layout anyway).
+    """
+    lines = query_output.strip().splitlines()
+    if len(lines) < 2:
+        return None
+    try:
+        w_str, h_str = lines[0].split("x")
+        W = int(w_str)
+        H = int(h_str)
+    except ValueError:
+        return None
+    pane_ids: list[str] = []
+    for line in lines[1:]:
+        parts = line.split()
+        if len(parts) != 2:
+            continue
+        try:
+            int(parts[0])
+        except ValueError:
+            continue
+        pane_ids.append(parts[1].lstrip("%"))
+    if not pane_ids:
+        return None
+    n = len(pane_ids)
+    if n == 1:
+        # Just the session pane; nothing to lay out.
+        return None
+    # Session takes the top H//2 lines. One border between top and
+    # bottom area; (n-2) borders between adjacent shell panes inside
+    # the bottom area. Shell heights are equal, with any leftover line
+    # given to the last shell so total reconciles to H exactly.
+    h_top = H // 2
+    bottom_panes_only = H - h_top - 1 - (n - 2)
+    if bottom_panes_only <= 0:
+        return None
+    n_shells = n - 1
+    h_shell = bottom_panes_only // n_shells
+    leftover = bottom_panes_only - h_shell * n_shells
+    if h_shell <= 0:
+        return None
+    parts = [f"{W}x{h_top},0,0,{pane_ids[0]}"]
+    y = h_top + 1
+    for i in range(1, n):
+        this_h = h_shell + (leftover if i == n - 1 else 0)
+        parts.append(f"{W}x{this_h},0,{y},{pane_ids[i]}")
+        y += this_h + 1
+    body = f"{W}x{H},0,0[{','.join(parts)}]"
+    csum = _tmux_layout_checksum(body)
+    return f"{csum:04x},{body}"
+
+
+def _tmux_layout_checksum(s: str) -> int:
+    """16-bit rotating-add checksum that prefixes a tmux layout string.
+
+    Replicates the algorithm in tmux's ``layout-custom.c`` so layout
+    strings we construct here are accepted by ``tmux select-layout``
+    without modification.
+    """
+    csum = 0
+    for ch in s:
+        csum = ((csum >> 1) + ((csum & 1) << 15)) & 0xFFFF
+        csum = (csum + ord(ch)) & 0xFFFF
+    return csum
 
 
 def _focus_session_pane(target: ExecTarget, q_con: str, q_win: str) -> None:

@@ -63,10 +63,9 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 #   main-vertical        - session pane on the left, helper shells stacked right
 #   main-horizontal      - session pane on top, helper shells laid out below
 #   aw-session-vertical  - single column; session pane takes the top 50%
-#                          and shell panes stack vertically below. Exact
-#                          50/50 with one shell; with multiple shells the
-#                          bottom rows aren't perfectly equal-height (tmux
-#                          quirk -- rebalance manually if it matters).
+#                          and shell panes stack vertically in the bottom 50%
+#                          with equal heights (custom layout computed
+#                          per-window from live tmux dimensions).
 # The "main" layouts treat the first pane (the session attach itself) as
 # the primary; the remaining shell panes become the secondary stack.
 
