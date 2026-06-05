@@ -75,8 +75,7 @@ def list_vm_hosts(db: Database) -> None:
 
 def remove_vm_host(db: Database, name: str, *, force: bool = False, yes: bool = False) -> None:
     """Remove a VM host. Refuses if VMs reference it unless --force."""
-    host = db.get_vm_host(name)
-    if host is None:
+    if db.get_vm_host(name) is None:
         raise NotFoundError(
             f"VM host '{name}' not found",
             entity_kind="vm-host",
