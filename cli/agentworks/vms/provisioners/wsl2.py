@@ -243,6 +243,7 @@ def _keepalive(vm: VMRow, config: Config | None) -> Iterator[None]:
             f"WSL2 keepalive for distro {vm.name!r} exited immediately (rc={rc})"
             + (f": {stderr}" if stderr else "")
         )
+    output.detail(f"Preventing idle-shutdown of WSL2 distro {vm.name!r} for the duration of this command...")
     try:
         if vm.tailscale_host and config is not None:
             target = admin_exec_target(vm, config)
@@ -256,6 +257,7 @@ def _keepalive(vm: VMRow, config: Config | None) -> Iterator[None]:
             proc.kill()
             with contextlib.suppress(subprocess.TimeoutExpired):
                 proc.wait(timeout=5)
+        output.detail("WSL2 idle-shutdown prevention stopped.")
 
 
 class WSL2Provisioner(VMProvisioner):
