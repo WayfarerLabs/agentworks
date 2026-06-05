@@ -43,3 +43,11 @@ def test_parse_csv_filter_all_empty_returns_none() -> None:
 def test_parse_csv_filter_single_value_after_dedup_stays_a_string() -> None:
     # Trailing comma with one real value still collapses to the bare-string form.
     assert parse_csv_filter("ws1,") == "ws1"
+
+
+def test_parse_csv_filter_preserves_duplicate_values() -> None:
+    # Duplicates are NOT collapsed; the helper preserves the operator's input
+    # verbatim. SQL IN with duplicate parameters is a harmless no-op, and
+    # collapsing here would hide a typo from a user trying to spot one.
+    assert parse_csv_filter("ws1,ws1") == ["ws1", "ws1"]
+    assert parse_csv_filter("ws1,ws2,ws1") == ["ws1", "ws2", "ws1"]

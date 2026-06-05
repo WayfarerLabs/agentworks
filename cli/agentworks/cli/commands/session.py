@@ -186,25 +186,16 @@ def session_describe(
 
 @session_app.command("list")
 def session_list(
-    workspace: Annotated[
-        str | None,
-        typer.Option("--workspace", help="Filter by workspace (comma-separated for multiple)"),
-    ] = None,
-    vm: Annotated[
-        str | None,
-        typer.Option("--vm", help="Filter by VM (comma-separated for multiple)"),
-    ] = None,
+    workspace: Annotated[str | None, typer.Option("--workspace", help="Filter by workspace")] = None,
+    vm: Annotated[str | None, typer.Option("--vm", help="Filter by VM")] = None,
     agent: Annotated[
         str | None,
-        typer.Option(
-            "--agent",
-            help="Filter by agent (agent-mode sessions only; comma-separated for multiple)",
-        ),
+        typer.Option("--agent", help="Filter by agent (agent-mode sessions only)"),
     ] = None,
     admin: Annotated[bool, typer.Option("--admin", help="Only admin-mode sessions (no agent)")] = False,
     no_status: Annotated[bool, typer.Option("--no-status", help="Skip SSH status check (faster)")] = False,
 ) -> None:
-    """List sessions. Filters compose with AND; comma-separated values within a filter are OR-ed."""
+    """List sessions. Filters compose with AND; name filters accept comma-separated values for OR-within-filter."""
     from agentworks.config import load_config
     from agentworks.sessions.manager import list_sessions
 

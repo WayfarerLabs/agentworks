@@ -1060,13 +1060,12 @@ class Database:
         if ws_clause:
             clauses.append(ws_clause)
             params.extend(ws_params)
-        if vm_name is not None:
-            vm_inner_clause, vm_params = _eq_or_in("vm_name", vm_name)
-            if vm_inner_clause:
-                clauses.append(
-                    f"s.workspace_name IN (SELECT name FROM workspaces WHERE {vm_inner_clause})"
-                )
-                params.extend(vm_params)
+        vm_inner_clause, vm_params = _eq_or_in("vm_name", vm_name)
+        if vm_inner_clause:
+            clauses.append(
+                f"s.workspace_name IN (SELECT name FROM workspaces WHERE {vm_inner_clause})"
+            )
+            params.extend(vm_params)
         ag_clause, ag_params = _eq_or_in("s.agent_name", agent_name)
         if ag_clause:
             clauses.append(ag_clause)

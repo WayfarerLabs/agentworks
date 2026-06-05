@@ -46,12 +46,9 @@ def agent_create(
 
 @agent_app.command("list")
 def agent_list(
-    vm: Annotated[
-        str | None,
-        typer.Option("--vm", help="Filter by VM (comma-separated for multiple)"),
-    ] = None,
+    vm: Annotated[str | None, typer.Option("--vm", help="Filter by VM")] = None,
 ) -> None:
-    """List agents."""
+    """List agents. Name filters accept comma-separated values for OR-within-filter."""
     from agentworks.agents.manager import list_agents
 
     list_agents(get_db(), vm_name=parse_csv_filter(vm))

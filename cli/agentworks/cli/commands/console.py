@@ -108,20 +108,11 @@ def console_create(
 
 @console_app.command("list")
 def console_list(
-    vm: Annotated[
-        str | None,
-        typer.Option("--vm", help="Filter by VM (comma-separated for multiple)"),
-    ] = None,
-    workspace: Annotated[
-        str | None,
-        typer.Option("--workspace", help="Filter by workspace (comma-separated for multiple)"),
-    ] = None,
-    agent: Annotated[
-        str | None,
-        typer.Option("--agent", help="Filter by agent (comma-separated for multiple)"),
-    ] = None,
+    vm: Annotated[str | None, typer.Option("--vm", help="Filter by VM")] = None,
+    workspace: Annotated[str | None, typer.Option("--workspace", help="Filter by workspace")] = None,
+    agent: Annotated[str | None, typer.Option("--agent", help="Filter by agent")] = None,
 ) -> None:
-    """List consoles. Filters compose with AND; comma-separated values within a filter are OR-ed.
+    """List consoles. Filters compose with AND; name filters accept comma-separated values for OR-within-filter.
 
     --workspace and --agent match a console when at least one of its member
     sessions matches. When both are passed, the SAME session must satisfy both.
