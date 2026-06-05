@@ -1499,6 +1499,70 @@ def test_reorder_sessions_live_sync_skipped_when_console_absent(
     assert [m.session_name for m in members] == ["b", "a"]
 
 
+def test_reorder_sessions_live_sync_compacts_when_window_missing(
+    db: Database, fake_target: _FakeTarget
+) -> None:
+    """If the operator killed a session window manually, the surviving
+    windows compact toward the front instead of getting stranded at
+    later slots. Without this, desired = [c, a, b] with live = [a, b]
+    (c missing) would land 'a' at slot 1 and produce [b, a] -- wrong."""
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["a", "b", "c"])
+    create_console(db, name="con", vm_name="vm1", session_specs=["a", "b", "c"])
+
+    fake_target.commands.clear()
+    fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
+    # 'c' window is missing -- operator hit Ctrl-B & by mistake, or it
+    # exited before the wrapper-loop could catch the restart.
+    fake_target.responses["list-windows -t aw-console-con"] = _FakeResult(
+        returncode=0, stdout="0|a\n1|b\n"
+    )
+
+    reorder_sessions(
+        db, _StubConfig(), console_name="con", session_names=["c"]
+    )
+
+    # Desired order: [c, a, b]. present_desired = [a, b] (c filtered out).
+    # session_slots = [0, 1]. Map a->0 (already there, skip), b->1 (already
+    # there, skip). No swaps needed; layout stays [a, b].
+    swaps = [c for c in fake_target.commands if "swap-window" in c]
+    assert swaps == []
+    # DB still reflects the new order (DB doesn't care about tmux state).
+    members = db.list_console_sessions("con")
+    assert [m.session_name for m in members] == ["c", "a", "b"]
+
+
+def test_reorder_sessions_live_sync_bails_on_duplicate_window_names(
+    db: Database, fake_target: _FakeTarget, captured_output: CapturedOutput
+) -> None:
+    """If two windows share a name that's in the session set, we can't
+    disambiguate which one to swap. Warn with a --recreate hint and skip
+    tmux work; DB is already updated."""
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["a", "b"])
+    create_console(db, name="con", vm_name="vm1", session_specs=["a", "b"])
+
+    fake_target.commands.clear()
+    fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
+    # Two windows both named 'a' (operator renamed window 2 by accident).
+    fake_target.responses["list-windows -t aw-console-con"] = _FakeResult(
+        returncode=0, stdout="0|a\n1|b\n2|a\n"
+    )
+
+    reorder_sessions(
+        db, _StubConfig(), console_name="con", session_names=["b"]
+    )
+
+    swaps = [c for c in fake_target.commands if "swap-window" in c]
+    assert swaps == []
+    assert any(
+        "duplicate window name" in w and "--recreate" in w
+        for w in captured_output.warnings
+    )
+    members = db.list_console_sessions("con")
+    assert [m.session_name for m in members] == ["b", "a"]
+
+
 def test_list_consoles_for_session_returns_members(db: Database) -> None:
     """Snapshot of which consoles list a given session as a member, before
     the FK cascade fires on session delete."""

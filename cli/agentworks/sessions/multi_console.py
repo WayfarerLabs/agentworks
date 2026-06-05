@@ -949,18 +949,52 @@ def _reorder_session_windows(
         return
     pairs.sort(key=lambda p: p[0])
     desired_set = set(ordered_session_windows)
+
+    # Duplicate window names among the session set break the swap-by-name
+    # logic (the dict below would silently retain only the last index for
+    # each name and we'd target the wrong window). tmux allows duplicates
+    # but we can't disambiguate, so bail with a recovery hint rather than
+    # scramble the layout. The DB is already updated; recreate materializes
+    # the new order from a clean slate.
+    name_counts: dict[str, int] = {}
+    for _idx, name in pairs:
+        name_counts[name] = name_counts.get(name, 0) + 1
+    duplicated = sorted(
+        n for n, c in name_counts.items() if c > 1 and n in desired_set
+    )
+    if duplicated:
+        q_console = shlex.quote(console_name)
+        output.warn(
+            f"console '{console_name}' has duplicate window name(s) "
+            f"({', '.join(duplicated)}); cannot reorder live tmux safely. "
+            f"DB order was updated; run "
+            f"`agentworks console attach {q_console} --recreate` to rebuild "
+            f"tmux from DB state."
+        )
+        return
+
     session_slots = [idx for idx, name in pairs if name in desired_set]
     widx_by_name: dict[str, int] = {name: idx for idx, name in pairs}
     name_by_widx: dict[int, str] = {idx: name for idx, name in pairs}
 
-    for i, desired_name in enumerate(ordered_session_windows):
-        if i >= len(session_slots):
-            # More desired entries than live session windows -- DB ahead of
-            # tmux. The next attach --recreate reconciles. Don't try to be clever.
+    # Filter the desired order down to windows actually live in tmux. When
+    # the operator has manually killed a session window (or tmux hasn't
+    # caught up to the DB yet), the surviving windows compact toward the
+    # front rather than each holding their original positional index --
+    # otherwise a missing entry at desired[i] would leave desired[i+1]
+    # stranded at slot i+1 with no member at slot i.
+    present_desired = [n for n in ordered_session_windows if n in widx_by_name]
+
+    for k, desired_name in enumerate(present_desired):
+        if k >= len(session_slots):
+            # Defensive: session_slots and present_desired should be the
+            # same length by construction (both filter on desired_set ∩
+            # live-names). If they ever diverge, stop rather than risk a
+            # bad swap. --recreate will reconcile.
             break
-        target_idx = session_slots[i]
-        src_idx = widx_by_name.get(desired_name)
-        if src_idx is None or src_idx == target_idx:
+        target_idx = session_slots[k]
+        src_idx = widx_by_name[desired_name]
+        if src_idx == target_idx:
             continue
         displaced_name = name_by_widx[target_idx]
         swap = target.run(
