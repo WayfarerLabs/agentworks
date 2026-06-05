@@ -51,6 +51,33 @@ Bulk operations use `--all` as a single, consistent flag name, never the more ve
 `agent grant-workspace my-agent --all`, not `--all-workspaces` or `--every-workspace`. The
 surrounding command provides the context for what "all" applies to.
 
+## Filter options on list commands
+
+List commands narrow their result set with filter options that follow two shapes depending on what
+is being filtered.
+
+**Name filters** (`--vm`, `--workspace`, `--agent`, etc.) accept either a single name or a
+comma-separated list of names:
+
+- `agw session list --vm vm1`
+- `agw session list --vm vm1,vm2 --agent claude,gemini`
+
+Values within a single flag are OR-ed; multiple flags AND together. This pairing of CSV-for-OR and
+different-flags-for-AND keeps the operator's mental model unambiguous. Repeated-flag forms
+(`--vm vm1 --vm vm2`) are intentionally not used here, because the same shape would have to mean OR
+within one flag and AND across flags, which is the inconsistency this rule exists to avoid.
+
+Note the carve-out from the variadic-positional rule above: variadic positionals are for the
+things the command is operating on (the operands); filter options narrow what a list command
+considers. Operands keep their variadic-positional form (`agent grant-workspace my-agent ws1 ws2`);
+filters take CSV. Commas cannot appear in resource names (see `validate_name` in
+`agentworks/config.py`), so CSV parsing is safe.
+
+**Mode filters** are bare boolean flags rather than valued options. Use `--admin` on `session list`
+to narrow to admin-mode sessions, not `--mode admin`. The bare-flag shape composes naturally with
+the name filters and matches how `session create --admin` already shapes the admin/agent mode
+selection elsewhere on the surface.
+
 ## Service layer is the authority
 
 CLI command bodies should be thin: argv to kwargs, then call the service-layer function on the
