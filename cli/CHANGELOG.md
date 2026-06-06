@@ -1,5 +1,35 @@
 # Changelog
 
+## [0.6.0](https://github.com/WayfarerLabs/agentworks/compare/v0.5.0...v0.6.0) (2026-06-06)
+
+
+### Features
+
+* **console:** aw-session-vertical layout + focus session pane on build ([6932505](https://github.com/WayfarerLabs/agentworks/commit/6932505f78d821d1ec2ddd45cc37d74f1cedccb5))
+* **console:** aw-session-vertical layout + focus session pane on build ([aa8270c](https://github.com/WayfarerLabs/agentworks/commit/aa8270cdf31df6512e95c450606056f48a91202d))
+* **vms:** wrap every VM-touching command in keep_vm_active ([8fa8e46](https://github.com/WayfarerLabs/agentworks/commit/8fa8e4600abc125d6f3e1fefc36202336de9c306))
+* **wsl2:** bind keepalive subprocess to Win32 Job Object for orphan-proof cleanup ([08a4833](https://github.com/WayfarerLabs/agentworks/commit/08a4833481ce2146bc784cdfd83baece39b62542))
+* **wsl2:** surface idle-shutdown prevention enter/exit on the keepalive ([f41e926](https://github.com/WayfarerLabs/agentworks/commit/f41e9263976b0267f2cbe1b400177a6dbfe8d937))
+
+
+### Bug Fixes
+
+* address Copilot review on PR [#95](https://github.com/WayfarerLabs/agentworks/issues/95) ([e45322d](https://github.com/WayfarerLabs/agentworks/commit/e45322db28b4ae9b0043699efcbbf84e4782dcc7))
+* **ci:** make WSL2 keepalive code portable to the Linux CI runner ([9de3776](https://github.com/WayfarerLabs/agentworks/commit/9de377623c3207cc13330543394b3874dfeadf23))
+* **ci:** satisfy lint-files and ruff on the WSL2 branch ([482646d](https://github.com/WayfarerLabs/agentworks/commit/482646dd42b7cd0d002ca2c4d836afe1bf2e90d4))
+* **console:** focus session pane on restore-session no-op path too ([78dad70](https://github.com/WayfarerLabs/agentworks/commit/78dad70c7ea3905eb1ffe338011b9423c078a65e))
+* **console:** hand-computed tmux layout string for exact aw-session-vertical geometry ([014613b](https://github.com/WayfarerLabs/agentworks/commit/014613ba058f4c30a8d48257eb7f00f7176209fc))
+* **console:** pane-index sort + silent single-pane no-op + doc fixes ([b14ce2c](https://github.com/WayfarerLabs/agentworks/commit/b14ce2cd781733f72accf04c8e89d1e5eaf721aa))
+* **wsl2:** address agentworks-reviewer feedback on PR [#95](https://github.com/WayfarerLabs/agentworks/issues/95) ([65c66cc](https://github.com/WayfarerLabs/agentworks/commit/65c66cc1b560ed660b56fa59b21fcf4c80003189))
+* **wsl2:** close keepalive subprocess stderr PIPE on both exit paths ([4271772](https://github.com/WayfarerLabs/agentworks/commit/42717727e0940a043eb457383acfadf7a7c3613b))
+* **wsl2:** rehabilitate broken provisioning and add platform-wide keepalive ([177edff](https://github.com/WayfarerLabs/agentworks/commit/177edffc56fa38ccb3c62b6f2e1379707dba966c))
+* **wsl2:** tolerate already-dead keepalive subprocess + drop redundant local import ([67cc239](https://github.com/WayfarerLabs/agentworks/commit/67cc239ef3fbd2888ea498f6610d357f289837a3))
+
+
+### Documentation
+
+* **console:** clarify multi_console_layout module docstring re Config dep ([6031039](https://github.com/WayfarerLabs/agentworks/commit/6031039b95f08bb55bddab211a4a72cc33c8acb5))
+
 ## [0.5.0](https://github.com/WayfarerLabs/agentworks/compare/v0.4.0...v0.5.0) (2026-06-05)
 
 
