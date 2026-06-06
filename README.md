@@ -9,6 +9,57 @@ A Swiss Army knife for managing agentic workloads: VMs, workspaces, agents, sess
 that glue them together. Built around the conviction that autonomy, security, and control are not
 mutually exclusive: a good platform makes it possible and straightforward to have it all.
 
+## Architecture at a glance
+
+The operator runs the `agw` CLI on their workstation. Agentworks VMs can live anywhere — local
+(WSL2), on a VM host running Lima, in Azure, or on a Proxmox cluster — but every VM (and the
+workstation itself) is a member of the same Tailscale tailnet. The CLI reaches them all via SSH over
+that flat overlay network, regardless of where they physically run.
+
+```mermaid
+flowchart TB
+    Op(("👤<br/>Operator"))
+
+    subgraph WS["💻 Workstation"]
+        CLI["<b>agw</b> CLI"]
+        WSL["WSL2 VM"]
+    end
+
+    subgraph VMHost["🖥️ VM Host<br/><i>(local or remote machine)</i>"]
+        Lima["Lima VM"]
+    end
+
+    subgraph Cloud["☁️ Azure"]
+        AzureVM["Azure VM"]
+    end
+
+    subgraph Pve["🗄️ Proxmox cluster"]
+        ProxmoxVM["Proxmox VM"]
+    end
+
+    Tailnet{{"🔗 Tailnet<br/><i>(Tailscale overlay)</i>"}}
+
+    Op --> CLI
+
+    CLI -. tailscaled .- Tailnet
+    WSL -. tailscaled .- Tailnet
+    Lima -. tailscaled .- Tailnet
+    AzureVM -. tailscaled .- Tailnet
+    ProxmoxVM -. tailscaled .- Tailnet
+
+    classDef vm stroke:#333,stroke-width:1.5px
+    classDef tailnet stroke:#4d8ad8,stroke-width:2px
+    class WSL,Lima,AzureVM,ProxmoxVM vm
+    class Tailnet tailnet
+
+    linkStyle 0 stroke:#444,stroke-width:1.5px
+    linkStyle 1,2,3,4,5 stroke:#4d8ad8,stroke-width:1.5px,stroke-dasharray:6 4
+```
+
+Solid lines are physical containment (this VM lives in that host); dashed blue lines are tailnet
+membership. The asymmetry is the whole point: Tailscale collapses four different physical hosting
+shapes into one flat overlay that the CLI talks to uniformly.
+
 ## The Problem Space
 
 Agentworks is an attempt to address several growing problems around agentic engineering with a
@@ -154,6 +205,67 @@ workload, and then to stop, restart, and delete them to manage their lifecycle.
 For day-to-day work across many sessions, see [Named consoles](cli/README.md#named-consoles):
 curated tmux views that group the sessions you're actively focused on, optionally with extra shell
 panes pre-opened in each session's window.
+
+The diagram below shows how the five concepts compose inside a single VM, with the operator driving
+the CLI from the workstation:
+
+```mermaid
+flowchart LR
+    subgraph WS["💻 Operator's Workstation"]
+        CLI["<b>agw</b> CLI"]
+    end
+
+    subgraph VM["🖥️ VM (Debian)"]
+        direction TB
+
+        subgraph Admin["admin user"]
+            AdminShell["admin shell<br/>(provisioning, init)"]
+        end
+
+        subgraph BackendAgent["agent: backend<br/>(Linux user)"]
+            BSess1["session: api-claude"]
+            BSess2["session: api-codex"]
+        end
+
+        subgraph FrontendAgent["agent: frontend<br/>(Linux user)"]
+            FSess["session: ui-claude"]
+        end
+
+        subgraph Workspaces["Workspaces<br/>(Linux groups + ACLs)"]
+            WSApi["ws-api/<br/>(repo clone)"]
+            WSUi["ws-ui/<br/>(repo clone)"]
+        end
+
+        subgraph Console["Named console: 'my-work'"]
+            ConsoleView["tmux view spanning<br/>api-claude + ui-claude"]
+        end
+    end
+
+    CLI -. "Tailscale SSH" .-> AdminShell
+
+    BSess1 --- WSApi
+    BSess2 --- WSApi
+    FSess --- WSUi
+
+    BSess1 -.- ConsoleView
+    FSess -.- ConsoleView
+
+    classDef agent stroke:#d4a017,stroke-width:2px
+    classDef workspace stroke:#4d8ad8,stroke-width:2px
+    classDef session stroke:#5a8a3a,stroke-width:2px
+    classDef console stroke:#b04060,stroke-width:2px
+
+    class BackendAgent,FrontendAgent agent
+    class WSApi,WSUi workspace
+    class BSess1,BSess2,FSess session
+    class ConsoleView console
+```
+
+Yellow boxes are agents (each a separate Linux user, the isolation boundary). Blue are workspaces
+(group + ACL boundaries on disk). Green are sessions (where the actual work runs, owned by their
+agent). Pink is a named console (an operator-facing tmux view that spans sessions — not an isolation
+boundary). Solid edges are filesystem access via group membership; dashed edges are looser logical
+relationships (the console is a view, not containment).
 
 ## Key Principles
 
