@@ -19,11 +19,37 @@ The everyday command is `agw`. The longer form `agentworks` is also installed if
 type it out; examples throughout this document use `agw`.
 
 ```bash
+# Initial setup
 agw config init                          # creates ~/.config/agentworks/config.toml
-# edit the config; at minimum set your SSH key paths
-agw vm create my-vm                      # provision + initialize a VM
-agw workspace create my-workspace        # create a workspace on the VM
-agw workspace shell my-workspace
+agw config edit                          # opens the config in your $EDITOR to fill in required fields
+agw doctor                               # checks connectivity, config, and credentials to all providers and tools
+
+# Create a VM, workspace, agent, and session to see how the pieces fit together
+agw vm create my-vm
+agw workspace create my-workspace --vm my-vm
+agw agent create my-agent --vm my-vm
+agw session create my-session --workspace my-workspace --agent my-agent
+
+# Attach to the session's tmux session to drive it
+agw session attach my-session    # (ctrl+b d to detach and leave it running in the background)
+agw session attach my-session    # You'll pick up right where you left off
+agw session stop my-session      # Sessions can be stopped (or can exit on their own)
+agw session list
+agw session restart my-session
+agw session attach my-session
+agw session delete my-session    # When you're done with it. Agent and workspace are preserved.
+
+# Alternatively, you can create ephemeral workspaces and agents along with your sessions
+agw session create my-ephemeral-session --vm my-vm --new-workspace --new-agent
+agw session attach my-ephemeral-session
+agw session delete my-ephemeral-session    # This will prompt you to delete the associated workspace and agent, too
+
+# Finally, create two sessions and a named console
+agw session create s1 --vm my-vm --new-workspace --new-agent
+agw session create s2 --vm my-vm --new-workspace --new-agent
+agw console create my-console s1 s2+1      # The + syntax gives you extra shells as that agent
+agw console attach my-console
+agw console delete my-console              # Extra shells are lost but sessions are preserved
 ```
 
 ## Prerequisites
@@ -31,7 +57,8 @@ agw workspace shell my-workspace
 - Python 3.12+ (uv will install one for you if needed)
 - [uv](https://docs.astral.sh/uv/) or [pipx](https://pipx.pypa.io/) for installation
 - [Tailscale](https://tailscale.com/) installed and connected (for VM workspaces)
-- One of: [Lima](https://lima-vm.io/), Azure CLI (`az`), or WSL2 (for VM provisioning)
+- One of: [Lima](https://lima-vm.io/), Azure CLI (`az`), [Proxmox](https://www.proxmox.com/), or
+  WSL2 (for VM provisioning)
 
 ## Global Options
 
@@ -287,8 +314,8 @@ with sessions, at different scopes:
 | Method                    | Scope                            | tmux session name        | Entry point                 |
 | ------------------------- | -------------------------------- | ------------------------ | --------------------------- |
 | `session attach`          | One session                      | `<session-name>`         | Operator's machine          |
-| `workspace console`       | One workspace                    | `ws-<workspace>-console` | On-VM or operator's machine |
 | `console`                 | Curated subset across workspaces | `aw-console-<name>`      | Operator's machine          |
+| `workspace console`       | One workspace                    | `ws-<workspace>-console` | On-VM or operator's machine |
 | `vm console` (deprecated) | All sessions on the VM           | `vm-console`             | Operator's machine          |
 
 #### Session tmux sessions
@@ -300,21 +327,6 @@ creation, session management, and the command prompt are selectively unbound.
 
 Agent-mode sessions run on a per-agent tmux socket so the agent's shell connects directly to the
 tmux pane PTY. The socket path is persisted in the database.
-
-#### Workspace console
-
-`workspace console` uses tmuxinator to create or attach to a `ws-<name>-console` session. The
-tmuxinator config (`.tmuxinator.yml` in the workspace root) is regenerated whenever sessions change,
-so the console always reflects the current set of sessions. Best for in-VM work scoped to a single
-workspace (e.g. inside VS Code's integrated terminal). For curated views that span workspaces, use a
-named console (`console attach <name>`).
-
-```text
-ws-myproject-console (tmuxinator, full tmux)
-  Window 1: admin-shell                login shell for the admin user
-  Window 2: myproject-claude           attached to session
-  Window 3: myproject-debug            attached to session
-```
 
 #### Named console
 
@@ -337,6 +349,21 @@ the DB is touched and changes appear on next attach. The mutation commands (`add
 `remove-sessions`, `reorder-sessions`, `add-shell`) never auto-boot the VM; the explicit
 attach/repair commands (`attach`, `restore-session`) do start a stopped VM, since their job is to
 bring live state up.
+
+#### Workspace console
+
+`workspace console` uses tmuxinator to create or attach to a `ws-<name>-console` session. The
+tmuxinator config (`.tmuxinator.yml` in the workspace root) is regenerated whenever sessions change,
+so the console always reflects the current set of sessions. Best for in-VM work scoped to a single
+workspace (e.g. inside VS Code's integrated terminal). For curated views that span workspaces, use a
+named console (`console attach <name>`).
+
+```text
+ws-myproject-console (tmuxinator, full tmux)
+  Window 1: admin-shell                login shell for the admin user
+  Window 2: myproject-claude           attached to session
+  Window 3: myproject-debug            attached to session
+```
 
 #### VM console (deprecated)
 
