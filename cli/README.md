@@ -21,8 +21,8 @@ type it out; examples throughout this document use `agw`.
 ```bash
 # Initial setup
 agw config init                          # creates ~/.config/agentworks/config.toml
-agw config edit                          # opens the config in your $EDITOR to fill in required fields
-agw doctor                               # checks connectivity, config, and credentials to all providers and tools
+agw config edit                          # opens the config in your $EDITOR (or $VISUAL) to fill in required fields
+agw doctor                               # sanity-checks installed tools, Tailscale, config validity, and the local DB
 
 # Create a VM, workspace, agent, and session to see how the pieces fit together
 agw vm create my-vm
@@ -31,7 +31,11 @@ agw agent create my-agent --vm my-vm
 agw session create my-session --workspace my-workspace --agent my-agent
 
 # Attach to the session's tmux session to drive it
-agw session attach my-session    # (ctrl+b d to detach and leave it running in the background)
+agw session attach my-session
+# New to tmux? agw doesn't trap you. Sessions load your own ~/.tmux.conf, so
+# whatever prefix you've set works. If you haven't customized tmux, the
+# default prefix is Ctrl-b -- press Ctrl-b then d to detach (the session keeps
+# running in the background). You can re-attach any time.
 agw session attach my-session    # You'll pick up right where you left off
 agw session stop my-session      # Sessions can be stopped (or can exit on their own)
 agw session list
