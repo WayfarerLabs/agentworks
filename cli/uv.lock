@@ -490,15 +490,15 @@ wheels = [
 
 [[package]]
 name = "nerftools"
-version = "1.1.0"
+version = "2.2.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "pyyaml" },
     { name = "typer" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/19/15/9c6c4f465fcf7c2b95b3a5f1aad5fcaa178ab721aab6c3d047ebcaba4d2f/nerftools-1.1.0.tar.gz", hash = "sha256:28c36935ada98a1beb7b6d5a1cee362ffc65c5a7f2efee14cf8ca4ab86dd429e", size = 200507, upload-time = "2026-05-05T18:37:35.909Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/b7/39/73cb9799142a275c1b2d3bfffd2c61b6f4045277b1deb2f761fa7d2b56f9/nerftools-2.2.0.tar.gz", hash = "sha256:e4cf7459a46f9415f2039d7723698916e224418ad4de0727759b9167940797fb", size = 381047, upload-time = "2026-06-05T05:50:00.841Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/3e/2d/b14f57ccda6bbabb3b7c6a7602186694e46c70e81cb3ae552c92c099c46c/nerftools-1.1.0-py3-none-any.whl", hash = "sha256:f2887169c40c924008f4a15fdf2a8d4b230a90ee33aef5d9773727e955e46291", size = 76194, upload-time = "2026-05-05T18:37:34.342Z" },
+    { url = "https://files.pythonhosted.org/packages/2c/c9/2878f1662e3c6420880bc0b4ee7817214a87ef65d7b3ae6cbc70472b3ddd/nerftools-2.2.0-py3-none-any.whl", hash = "sha256:0273549ddfe237b32aef3a53586687bf80ec7e364fbbfe0edccebcbd0bc77f25", size = 103654, upload-time = "2026-06-05T05:49:59.696Z" },
 ]
 
 [[package]]
