@@ -55,8 +55,8 @@ running reliably (e.g. even when you close your laptop or lose your network conn
 
 These are real challenges that impose real limits on how many agentic workloads a single operator
 can reasonably manage at once. Most devs who have leaned into this space have developed some amount
-of custom tooling to help with this problem. Solving for this at the platform layer should be a
-significant enabler and let devs and their agents ship code vs fiddling with infrastructure.
+of custom tooling to help with this problem. Solving for this at the platform layer lets devs and
+their agents focus on shipping code instead of fiddling with infrastructure.
 
 ### Consistency
 
@@ -228,8 +228,8 @@ gracefully on `vm start` by prompting for a new auth key (or using `TAILSCALE_AU
 ### Tmux
 
 [tmux](https://github.com/tmux/tmux) provides the persistence layer. Every Agentworks session maps
-1:1 to a tmux session on the VM with the same lifecycle, agent sessions run on per-agent sockets for
-isolation, and a small set of console abstractions (`console`, `workspace console`) layer over
+1:1 to a tmux session on the VM with the same lifecycle, and agent sessions run on per-agent sockets
+for isolation. A small set of console abstractions (`console`, `workspace console`) layers over
 individual sessions to support multitasking across workspaces. See
 [tmux Architecture](cli/README.md#tmux-architecture) for the full picture (per-agent sockets,
 console comparisons, key behaviors).
