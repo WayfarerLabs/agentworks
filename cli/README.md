@@ -32,10 +32,8 @@ agw session create my-session --workspace my-workspace --agent my-agent
 
 # Attach to the session's tmux session to drive it
 agw session attach my-session
-# New to tmux? agw doesn't trap you. Sessions load your own ~/.tmux.conf, so
-# whatever prefix you've set works. If you haven't customized tmux, the
-# default prefix is Ctrl-b -- press Ctrl-b then d to detach (the session keeps
-# running in the background). You can re-attach any time.
+# Ctrl-b then d to detach (tmux's default prefix; agw honors a custom prefix
+# from your ~/.tmux.conf).
 agw session attach my-session    # You'll pick up right where you left off
 agw session stop my-session      # Sessions can be stopped (or can exit on their own)
 agw session list
