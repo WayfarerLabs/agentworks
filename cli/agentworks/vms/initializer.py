@@ -688,9 +688,9 @@ def _join_tailscale(
     tailscale_auth_key: str | None = None,
 ) -> str:
     """Join Tailscale, update DB. Returns the Tailscale IP."""
-    import os
+    from agentworks.env_compat import read_env_with_legacy
 
-    ts_auth_key = tailscale_auth_key or os.environ.get("TAILSCALE_AUTH_KEY")
+    ts_auth_key = tailscale_auth_key or read_env_with_legacy("AW_TAILSCALE_AUTH_KEY", "TAILSCALE_AUTH_KEY")
     if not ts_auth_key:
         ts_auth_key = output.prompt_secret(
             "  Tailscale auth key",
@@ -1081,9 +1081,9 @@ def _run_bootstrap_script(
 
 def _resolve_tailscale_auth_key(tailscale_auth_key: str | None = None) -> str:
     """Resolve Tailscale auth key from argument, env var, or prompt."""
-    import os
+    from agentworks.env_compat import read_env_with_legacy
 
-    key = tailscale_auth_key or os.environ.get("TAILSCALE_AUTH_KEY")
+    key = tailscale_auth_key or read_env_with_legacy("AW_TAILSCALE_AUTH_KEY", "TAILSCALE_AUTH_KEY")
     if key:
         return key
     return output.prompt_secret(

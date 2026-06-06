@@ -639,7 +639,6 @@ def rekey_vm(
     the operation.
     """
     import ipaddress
-    import os
     import shlex
     import time
 
@@ -660,7 +659,9 @@ def rekey_vm(
         )
 
     # Collect new auth key
-    ts_auth_key = os.environ.get("TAILSCALE_AUTH_KEY") if not ignore_env else None
+    from agentworks.env_compat import read_env_with_legacy
+
+    ts_auth_key = read_env_with_legacy("AW_TAILSCALE_AUTH_KEY", "TAILSCALE_AUTH_KEY") if not ignore_env else None
     if ts_auth_key:
         output.detail("Tailscale auth key found in environment")
     else:
@@ -1019,12 +1020,12 @@ def _collect_secrets(
 
     Returns (tailscale_auth_key, git_tokens).
     """
-    import os
+    from agentworks.env_compat import read_env_with_legacy
 
     output.info("Collecting credentials...")
 
     # Tailscale
-    ts_auth_key = os.environ.get("TAILSCALE_AUTH_KEY")
+    ts_auth_key = read_env_with_legacy("AW_TAILSCALE_AUTH_KEY", "TAILSCALE_AUTH_KEY")
     if ts_auth_key:
         output.detail("Tailscale auth key found in environment")
     else:

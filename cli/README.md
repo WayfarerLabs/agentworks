@@ -519,7 +519,7 @@ forward-only and run automatically.
 
 ## Environment Variables
 
-| Variable                      | Description                                     |
-| ----------------------------- | ----------------------------------------------- |
-| `TAILSCALE_AUTH_KEY`          | Tailscale auth key (skips prompt)               |
-| `GIT_CREDENTIALS_<CRED_NAME>` | Git credential for `<CRED_NAME>` (skips prompt) |
+| Variable                         | Description                                                                      |
+| -------------------------------- | -------------------------------------------------------------------------------- |
+| `AW_TAILSCALE_AUTH_KEY`          | Tailscale auth key (skips prompt). `TAILSCALE_AUTH_KEY` accepted but deprecated. |
+| `AW_GIT_CREDENTIALS_<CRED_NAME>` | Git credential for `<CRED_NAME>`. `GIT_CREDENTIALS_<CRED_NAME>` accepted, warns. |

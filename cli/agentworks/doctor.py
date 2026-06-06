@@ -188,7 +188,9 @@ def _check_tailscale() -> HealthGroup:
             timeout=10,
         )
         if result.returncode == 0:
-            if os.environ.get("TAILSCALE_AUTH_KEY"):
+            from agentworks.env_compat import read_env_with_legacy
+
+            if read_env_with_legacy("AW_TAILSCALE_AUTH_KEY", "TAILSCALE_AUTH_KEY"):
                 g.ok("Connected to tailnet", "auth key env var set")
             else:
                 g.ok("Connected to tailnet", "will prompt for auth key during VM init")

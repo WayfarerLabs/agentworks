@@ -217,12 +217,13 @@ access (workspace shell, VM shell, initialization) goes over Tailscale, providin
 connectivity without exposing SSH ports to the public internet.
 
 During `vm create` (and `vm start` when re-joining), you will be prompted for a Tailscale auth key
-unless the `TAILSCALE_AUTH_KEY` environment variable is set. Generate keys at the
+unless the `AW_TAILSCALE_AUTH_KEY` environment variable is set (legacy `TAILSCALE_AUTH_KEY` is still
+read, with a deprecation warning). Generate keys at the
 [Tailscale admin console](https://login.tailscale.com/admin/settings/keys).
 
 Ephemeral auth keys (with `?ephemeral=true` appended) are fully supported. The Tailscale node is
 automatically removed from the tailnet when the VM goes offline. Agentworks handles re-joining
-gracefully on `vm start` by prompting for a new auth key (or using `TAILSCALE_AUTH_KEY`).
+gracefully on `vm start` by prompting for a new auth key (or using `AW_TAILSCALE_AUTH_KEY`).
 
 ### Tmux
 
