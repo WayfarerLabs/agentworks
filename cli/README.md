@@ -32,8 +32,8 @@ agw session create my-session --workspace my-workspace --agent my-agent
 
 # Attach to the session's tmux session to drive it
 agw session attach my-session
-# Ctrl-b then d to detach (tmux's default prefix; agw honors a custom prefix
-# from your ~/.tmux.conf).
+# Use tmux's 'detach' command (default Ctrl-b unless overridden by config) to disconnect while
+# leaving everything running on the VM.
 agw session attach my-session    # You'll pick up right where you left off
 agw session stop my-session      # Sessions can be stopped (or can exit on their own)
 agw session list
