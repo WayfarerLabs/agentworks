@@ -1,16 +1,16 @@
-# Direct target-user SSH access -- functional requirements
+# Direct target-user SSH access: FRD
 
 **Status:** Draft **Repo:** `agentworks` **Path:** `cli/agentworks/`
 
 ## Background
 
-Agentworks opens shells on VMs via SSH. Each opened shell has two characteristics that vary
-independently:
+Agentworks reaches every VM through SSH; every interaction with a VM is ultimately a shell that
+agentworks opens over SSH. Each opened shell has two characteristics that vary independently:
 
 - **Target user**: the Linux uid the shell runs as. Today either the admin user or one of the agent
   users.
-- **Purpose**: what the shell is being opened for. Three current purposes -- running a provisioning
-  script, opening an interactive shell, or creating a tmux session.
+- **Purpose**: what the shell is being opened for. Three current purposes: running a provisioning
+  script, opening an interactive shell directly, or creating a tmux session.
 
 These dimensions define a 2x3 matrix of six combinations. How agentworks reaches each combination
 today:
@@ -25,9 +25,9 @@ Tmux _attach_ operations are not in this matrix; they connect to an existing tmu
 existing socket access (established by the 2026-04-10 agent-tmux-sockets SDD) and stay unchanged by
 this work.
 
-The admin-user column is straightforward: SSH as admin, do the work. The agent-user column is not.
-It routes through admin SSH plus a `sudo --login -u <agent>` step. That detour carries real
-downstream costs:
+The admin-user column is straightforward: SSH as admin and do the work (provisioning or
+interactive). The agent-user column is not. Currently, it routes through admin SSH plus a
+`sudo --login -u <agent>` step. That detour carries real downstream costs:
 
 - **`sudo --login` strips env.** The default sudoers policy resets the environment to a near-empty
   baseline. Anything the calling shell sets is gone before the agent's process starts. Workarounds
@@ -40,7 +40,7 @@ downstream costs:
   shell-purpose decision (script / interactive / tmux) because the sudo detour applies to one axis
   but appears at every shell-opening site.
 
-The agent-user column was the path of least resistance when agents were introduced -- it sidestepped
+The agent-user column was the path of least resistance when agents were introduced. It sidestepped
 per-user SSH credential management. The costs above have accumulated since then.
 
 This SDD changes the agent-user column to **direct target-user SSH**: `ssh <agent>@vm` instead of
@@ -53,8 +53,9 @@ in-flight env-and-secrets SDD, which assumes the cleaner access model.
 ## Process visibility today
 
 Default Linux exposes process information broadly: `/proc/<pid>/cmdline` is mode 0444 and `/proc` is
-mounted with `hidepid=0`, meaning any user on the VM can read any other user's command line,
-environment, and other per-pid metadata.
+mounted with `hidepid=0` (verified on an existing agentworks VM), meaning any user on the VM can
+read any other user's command line, environment, and other per-pid metadata. Importantly, this means
+that any secrets entered at the command line are readable by any user on the VM.
 
 This is independent of the access cleanup but worth fixing in the same SDD: the threat-model surface
 is the same (controlling who can see what on the VM), the mitigation fits naturally into VM
@@ -122,15 +123,15 @@ Agent users must accept the operator's SSH public key(s) so that direct SSH as t
 is achieved by extending the existing reconciliation mechanism to agent users:
 
 - **Agent create**: after the agent's Linux user exists, write `<agent_home>/.ssh/authorized_keys`
-  with the operator's primary key (`operator.ssh_public_key`) **plus every entry** in
+  with the operator's primary key (`operator.ssh_public_key`) plus every entry in
   `operator.extra_ssh_public_keys`. Same set of keys that admin's `authorized_keys` receives at VM
   init; reuses the same `_reconcile_authorized_keys` helper.
 - **Agent reinit**: re-run the reconciliation. Picks up additions or removals to
   `operator.extra_ssh_public_keys` and applies them.
 - **Agent delete**: no special handling. `userdel --remove` (the existing path) removes the home
   directory and its authorized_keys file along with it.
-- **Operator key rotation**: operator updates config **and runs** `agent reinit` to sync each
-  affected agent. The sync is manual, not automatic -- the same pattern operators already follow for
+- **Operator key rotation**: operator updates config and runs `agent reinit` to sync each affected
+  agent. The sync is manual, not automatic. This matches the pattern operators already follow for
   admin via `vm reinit`.
 
 Authorized_keys files for agents share admin's managed-header convention, including the warning that
@@ -157,14 +158,14 @@ mode 1 (see R5).
 The following sysctls are set explicitly at VM init, defaulting to the safer value if not already
 applied:
 
-- `kernel.dmesg_restrict=1` -- restricts `dmesg` to `CAP_SYS_ADMIN`.
-- `kernel.kptr_restrict=1` -- hides kernel pointers from `/proc` and similar.
-- `kernel.yama.ptrace_scope=1` -- restricts ptrace to descendant processes (Debian default is 0
+- `kernel.dmesg_restrict=1` restricts `dmesg` to `CAP_SYS_ADMIN`.
+- `kernel.kptr_restrict=1` hides kernel pointers from `/proc` and similar.
+- `kernel.yama.ptrace_scope=1` restricts ptrace to descendant processes (Debian default is 0
   historically; this raises the baseline).
 - `fs.protected_hardlinks=1`, `fs.protected_symlinks=1`, `fs.protected_fifos=2`,
-  `fs.protected_regular=2` -- symlink/hardlink/fifo/regular-file protection against common attack
-  patterns.
-- `kernel.unprivileged_bpf_disabled=1` -- disables BPF for non-privileged users. Agentworks does not
+  `fs.protected_regular=2` provide symlink/hardlink/fifo/regular-file protection against common
+  attack patterns.
+- `kernel.unprivileged_bpf_disabled=1` disables BPF for non-privileged users. Agentworks does not
   require unprivileged BPF.
 
 These are sysctls, applied via `/etc/sysctl.d/99-agentworks.conf`, picked up at boot and on reload.
@@ -188,8 +189,8 @@ function without intervention:
 - Their tmux servers already run at the agent uid (the previous `sudo --login -u <agent>` step at
   create time placed them there). The running state on the VM is identical to what the new code
   would produce.
-- `session attach` connects via the existing socket and group permissions -- unchanged.
-- `session list` reads liveness via `test -d /proc/<pid>` -- unchanged.
+- `session attach` connects via the existing socket and group permissions (unchanged).
+- `session list` reads liveness via `test -d /proc/<pid>` (unchanged).
 - When such a session is restarted, the new code path takes over and the rebuilt session enters the
   new world naturally.
 
@@ -200,10 +201,10 @@ pick up _their_ new behavior. That is a concern of those SDDs, not this one.
 
 ## Non-goals
 
-- **Env variable propagation of any kind.** This SDD is about access patterns only. Establishing
-  standard `AGENTWORKS_*` identity vars, exposing user-defined env, propagating secrets over the SSH
-  transport -- all out of scope here. The env-and-secrets SDD (which lists this one as a
-  precondition) owns that work.
+- **Env variable propagation of any kind.** This SDD is the prerequisite for the env-and-secrets SDD
+  and is ultimately motivated by it, but it does not specify any env-related behavior itself.
+  Establishing standard `AGENTWORKS_*` identity vars, exposing user-defined env, propagating secrets
+  over the SSH transport: all owned by env-and-secrets, not here.
 - **Removing the agent-tmux-sockets infrastructure.** The group-shared sockets + `server-access` ACL
   model from the 2026-04-10 SDD continues to provide admin's access path for batch read operations
   and attaches. Direct target-user SSH is the _write_ path for agent operations; cross-user socket
