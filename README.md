@@ -5,9 +5,9 @@
 [![Python](https://img.shields.io/pypi/pyversions/agentworks-cli.svg)](https://pypi.org/project/agentworks-cli/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-A swiss army knife for managing agentic workloads: VMs, workspaces, agents, sessions, and the tools
-that glue them together. Built around the conviction that autonomy and control are not mutually
-exclusive: a good platform makes it possible and straightforward to have both.
+A Swiss Army knife for managing agentic workloads: VMs, workspaces, agents, sessions, and the tools
+that glue them together. Built around the conviction that autonomy, security, and control are not
+mutually exclusive: a good platform makes it possible and straightforward to have it all.
 
 ## The Problem Space
 
@@ -55,8 +55,8 @@ running reliably (e.g. even when you close your laptop or lose your network conn
 
 These are real challenges that impose real limits on how many agentic workloads a single operator
 can reasonably manage at once. Most devs who have leaned into this space have developed some amount
-of custom tooling to help with this problem. Solving for this at the platform layer should be a
-significant enabler to delivering value more quickly.
+of custom tooling to help with this problem. Solving for this at the platform layer lets devs and
+their agents focus on shipping code instead of fiddling with infrastructure.
 
 ### Consistency
 
@@ -66,7 +66,7 @@ scale up agentic engineering.
 
 While sometimes these differences are intentional and should be preserved (e.g. wanting Agent A to
 have different tools and permissions than Agent B), they often are accidental and introduce
-unnecessary complexity and risk.
+unnecessary complexity, friction, and risk.
 
 ### Control
 
@@ -124,22 +124,23 @@ settings) can be used to control how tools behave within the context of this wor
 The Agentworks workspace mechanism fully supports any number of workspaces mapping to the same
 underlying repository. To simplify administration, each is a full independent clone.
 
-Workspaces always live on a VM. An earlier iteration supported local (on-workstation) workspaces,
-but they did not support agents (which require Linux user management only available on VMs), so they
-were removed to keep the model focused.
-
 ### Agents - the Actor
 
-An agent defines a **security identity** on a VM. Each agent maps to its own full Linux user,
-capable of having its own processes, private files, shell environment, etc. This allows for the
-creation of different identities with different privileges and capabilities.
+An agent defines a **security identity** on a VM. Each agent maps to its own full Linux user, with
+all of the isolation and permissions that entails. Each agent is capable of having its own
+processes, private files, shell environment, etc. This allows for the creation of different
+identities with different privileges and capabilities. Agents only have the access granted to their
+user by the operator.
 
 Agents are mapped to workspaces, either explicitly via grants or implicitly via sessions (see
 below). This mapping drives standard group and filesystem permissions that control what agents are
 able to access.
 
-Agents are only supported on VM workspaces because the isolation model requires Linux user
-management (useradd, group membership).
+Note that actors really drove the choice to use VMs as the fundamental compute unit. Containers and
+local workspaces were considered but ultimately rejected because they don't provide the necessary
+isolation for multiple actors to safely coexist. With VMs, actors enjoy all the security and
+isolation benefits of separate Linux users, which is a tried-and-true model that has been proven at
+massive scale for decades.
 
 ### Sessions - the Workloads
 
@@ -226,23 +227,12 @@ gracefully on `vm start` by prompting for a new auth key (or using `TAILSCALE_AU
 
 ### Tmux
 
-Sessions are built on [tmux](https://github.com/tmux/tmux), which provides persistent terminal
-sessions that survive disconnects and support attach/detach. Each session maps 1:1 to a tmux session
-on the VM.
-
-Agentworks provides several console layers for interacting with sessions:
-
-- **Workspace console** (`workspace console`): a tmuxinator-managed tmux session with one window per
-  session in the workspace, plus an admin shell. Good for staying inside a single workspace.
-- **Named consoles** (`console`): persistent, named tmux sessions that aggregate a curated subset of
-  sessions across any workspaces on a VM, with optional extra shell panes per session window.
-  Recommended when you juggle sessions across workspaces or want a focused view of the few you're
-  actively working on.
-- **VM console** (`vm console`, _deprecated_): a dynamically-built tmux session spanning every
-  session on the VM. Replaced by named consoles; will be removed in a future release.
-
-Agent-mode sessions run on per-agent tmux sockets for proper process isolation and terminal resize
-propagation. See [tmux Architecture](cli/README.md#tmux-architecture) for details.
+[tmux](https://github.com/tmux/tmux) provides the persistence layer. Every Agentworks session maps
+1:1 to a tmux session on the VM with the same lifecycle, and agent sessions run on per-agent sockets
+for isolation. A small set of console abstractions (`console`, `workspace console`) layers over
+individual sessions to support multitasking across workspaces. See
+[tmux Architecture](cli/README.md#tmux-architecture) for the full picture (per-agent sockets,
+console comparisons, key behaviors).
 
 ### Additional Tools
 
@@ -274,18 +264,8 @@ The everyday command is `agw`. The longer form `agentworks` is also installed if
 type it out (or if `agw` would be ambiguous in some context); examples throughout the docs use
 `agw`.
 
-Then:
-
-```bash
-agw config init                          # creates ~/.config/agentworks/config.toml
-# edit the config; at minimum set your SSH key paths
-agw vm create my-vm                      # provision + initialize a VM
-agw workspace create my-workspace        # create a workspace on the VM
-agw workspace shell my-workspace
-```
-
-The full command reference, configuration schema, and tmux architecture live in
-[cli/README.md](cli/README.md).
+See [cli/README.md](cli/README.md) for a guided first session, the full command reference,
+configuration schema, and tmux architecture.
 
 ## Components
 
