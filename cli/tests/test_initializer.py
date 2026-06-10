@@ -589,3 +589,179 @@ def test_install_claude_plugins_noop_when_empty() -> None:
 
     install_claude_plugins(fake_run, marketplaces=[], plugins=[])
     assert not called
+
+
+# -- VM hardening tests --------------------------------------------------------
+
+
+def _make_hardening_target(
+    *,
+    sysctl_content: str | None = None,
+    fstab_content: str | None = None,
+) -> MagicMock:
+    """ExecTarget mock parameterized by what `cat /etc/sysctl.d/...` and `cat /etc/fstab` return.
+
+    `sysctl_content=None` simulates a missing file (cat exits non-zero).
+    """
+    target = MagicMock()
+    write_log: list[tuple[str, str]] = []
+    run_log: list[str] = []
+    target.write_log = write_log
+    target.run_log = run_log
+
+    from agentworks.vms.initializer import HARDENING_FSTAB_PATH, HARDENING_SYSCTL_PATH
+
+    def run_side_effect(cmd, **kwargs):  # noqa: ANN001 -- mock side_effect signature
+        run_log.append(cmd)
+        result = MagicMock()
+        if cmd == f"cat {HARDENING_SYSCTL_PATH}":
+            if sysctl_content is None:
+                result.returncode = 1
+                result.ok = False
+                result.stdout = ""
+            else:
+                result.returncode = 0
+                result.ok = True
+                result.stdout = sysctl_content
+        elif cmd == f"cat {HARDENING_FSTAB_PATH}":
+            if fstab_content is None:
+                result.returncode = 1
+                result.ok = False
+                result.stdout = ""
+            else:
+                result.returncode = 0
+                result.ok = True
+                result.stdout = fstab_content
+        else:
+            result.returncode = 0
+            result.ok = True
+            result.stdout = ""
+        result.stderr = ""
+        return result
+
+    target.run.side_effect = run_side_effect
+    target.write_file.side_effect = lambda path, content, **kw: write_log.append((path, content))
+    return target
+
+
+def test_sysctl_baseline_writes_when_missing() -> None:
+    from agentworks.vms.initializer import (
+        HARDENING_SYSCTL_CONTENT,
+        HARDENING_SYSCTL_PATH,
+        _apply_hardening_sysctl,
+    )
+
+    target = _make_hardening_target(sysctl_content=None)
+    logger = MagicMock()
+
+    _apply_hardening_sysctl(target, logger)
+
+    # write_file was called with the canonical content
+    assert any(content == HARDENING_SYSCTL_CONTENT for _, content in target.write_log)
+    # install -m 0644 and sysctl --system were run
+    assert any("install -m 0644" in cmd and HARDENING_SYSCTL_PATH in cmd for cmd in target.run_log)
+    assert any(cmd == "sysctl --system" for cmd in target.run_log)
+
+
+def test_sysctl_baseline_noop_when_content_matches() -> None:
+    from agentworks.vms.initializer import (
+        HARDENING_SYSCTL_CONTENT,
+        HARDENING_SYSCTL_PATH,
+        _apply_hardening_sysctl,
+    )
+
+    target = _make_hardening_target(sysctl_content=HARDENING_SYSCTL_CONTENT)
+    logger = MagicMock()
+
+    _apply_hardening_sysctl(target, logger)
+
+    # No write, no install, no sysctl reload
+    assert target.write_log == []
+    assert not any("install -m 0644" in cmd and HARDENING_SYSCTL_PATH in cmd for cmd in target.run_log)
+    assert not any(cmd == "sysctl --system" for cmd in target.run_log)
+
+
+def test_sysctl_baseline_rewrites_when_content_differs() -> None:
+    from agentworks.vms.initializer import (
+        HARDENING_SYSCTL_CONTENT,
+        HARDENING_SYSCTL_PATH,
+        _apply_hardening_sysctl,
+    )
+
+    target = _make_hardening_target(sysctl_content="# old content\n")
+    logger = MagicMock()
+
+    _apply_hardening_sysctl(target, logger)
+
+    # Writes the canonical content and reloads
+    assert any(content == HARDENING_SYSCTL_CONTENT for _, content in target.write_log)
+    assert any("install -m 0644" in cmd and HARDENING_SYSCTL_PATH in cmd for cmd in target.run_log)
+    assert any(cmd == "sysctl --system" for cmd in target.run_log)
+
+
+def test_fstab_hidepid_appends_when_missing() -> None:
+    from agentworks.vms.initializer import (
+        HARDENING_FSTAB_LINE,
+        HARDENING_FSTAB_PATH,
+        _apply_hardening_fstab,
+    )
+
+    fstab_in = "# fstab\nUUID=root  /  ext4  defaults  0  1\n"
+    target = _make_hardening_target(fstab_content=fstab_in)
+    logger = MagicMock()
+
+    _apply_hardening_fstab(target, logger)
+
+    # Should write a new fstab containing our sentinel line at the end
+    assert len(target.write_log) == 1
+    _, new_content = target.write_log[0]
+    assert HARDENING_FSTAB_LINE in new_content
+    # Original lines preserved
+    assert "UUID=root  /  ext4  defaults  0  1" in new_content
+    assert any("install -m 0644" in cmd and HARDENING_FSTAB_PATH in cmd for cmd in target.run_log)
+    assert any(cmd == "mount -o remount,hidepid=1 /proc" for cmd in target.run_log)
+
+
+def test_fstab_hidepid_noop_when_already_present() -> None:
+    from agentworks.vms.initializer import (
+        HARDENING_FSTAB_LINE,
+        HARDENING_FSTAB_PATH,
+        _apply_hardening_fstab,
+    )
+
+    fstab_in = f"# fstab\nUUID=root  /  ext4  defaults  0  1\n{HARDENING_FSTAB_LINE}\n"
+    target = _make_hardening_target(fstab_content=fstab_in)
+    logger = MagicMock()
+
+    _apply_hardening_fstab(target, logger)
+
+    # No fstab rewrite, but live remount still issued
+    assert target.write_log == []
+    assert not any("install -m 0644" in cmd and HARDENING_FSTAB_PATH in cmd for cmd in target.run_log)
+    assert any(cmd == "mount -o remount,hidepid=1 /proc" for cmd in target.run_log)
+
+
+def test_fstab_hidepid_rewrites_when_sentinel_present_but_differs() -> None:
+    from agentworks.vms.initializer import (
+        HARDENING_FSTAB_LINE,
+        HARDENING_FSTAB_PATH,
+        HARDENING_FSTAB_SENTINEL,
+        _apply_hardening_fstab,
+    )
+
+    # Same sentinel but stale options (e.g., hidepid=2)
+    stale_line = f"proc  /proc  proc  defaults,hidepid=2  0  0  {HARDENING_FSTAB_SENTINEL}"
+    fstab_in = f"# fstab\nUUID=root  /  ext4  defaults  0  1\n{stale_line}\n"
+    target = _make_hardening_target(fstab_content=fstab_in)
+    logger = MagicMock()
+
+    _apply_hardening_fstab(target, logger)
+
+    # Should rewrite the stale line to the desired one (not append; sentinel must be unique)
+    assert len(target.write_log) == 1
+    _, new_content = target.write_log[0]
+    assert HARDENING_FSTAB_LINE in new_content
+    assert stale_line not in new_content
+    # And only one sentinel line in the output (no duplication)
+    assert new_content.count(HARDENING_FSTAB_SENTINEL) == 1
+    assert any("install -m 0644" in cmd and HARDENING_FSTAB_PATH in cmd for cmd in target.run_log)

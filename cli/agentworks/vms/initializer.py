@@ -589,6 +589,114 @@ def _run_catalog_commands(
     return path_additions
 
 
+# -- VM hardening (per FRD R4a + R4b) ------------------------------------
+
+HARDENING_SYSCTL_PATH = "/etc/sysctl.d/99-agentworks.conf"
+HARDENING_SYSCTL_CONTENT = """\
+# Managed by agentworks. Do not edit; this file is rewritten on vm reinit.
+# Source: docs/sdd/2026-06-06-direct-user-ssh-access/ R4b.
+kernel.dmesg_restrict = 1
+kernel.kptr_restrict = 1
+kernel.yama.ptrace_scope = 1
+fs.protected_hardlinks = 1
+fs.protected_symlinks = 1
+fs.protected_fifos = 2
+fs.protected_regular = 2
+kernel.unprivileged_bpf_disabled = 1
+"""
+
+HARDENING_FSTAB_PATH = "/etc/fstab"
+HARDENING_FSTAB_SENTINEL = "# agentworks: hidepid"
+HARDENING_FSTAB_LINE = (
+    f"proc  /proc  proc  defaults,hidepid=1  0  0  {HARDENING_FSTAB_SENTINEL}"
+)
+
+
+def _apply_vm_hardening(target: ExecTarget, logger: SSHLogger) -> None:
+    """Apply VM hardening: sysctl baseline + /proc hidepid=1.
+
+    Idempotent: a second run is a no-op unless the on-disk content differs.
+    Called at vm create and re-applied at vm reinit. Non-fatal: failures
+    warn and continue (matches the rest of _phase_b_setup).
+    """
+    logger.step("VM hardening")
+    try:
+        _apply_hardening_sysctl(target, logger)
+    except SSHError as e:
+        msg = f"sysctl baseline failed: {e}"
+        logger.warning(msg)
+        output.warn(msg)
+    try:
+        _apply_hardening_fstab(target, logger)
+    except SSHError as e:
+        msg = f"fstab hidepid edit failed: {e}"
+        logger.warning(msg)
+        output.warn(msg)
+
+
+def _apply_hardening_sysctl(target: ExecTarget, logger: SSHLogger) -> None:
+    """Write the sysctl baseline if content differs from desired; reload if changed."""
+    existing = target.run(f"cat {HARDENING_SYSCTL_PATH}", sudo=True, check=False)
+    if (
+        getattr(existing, "ok", False)
+        and getattr(existing, "stdout", "") == HARDENING_SYSCTL_CONTENT
+    ):
+        output.detail(f"{HARDENING_SYSCTL_PATH} unchanged; no-op.")
+        return
+
+    output.detail(f"Writing {HARDENING_SYSCTL_PATH}...")
+    staging = "/tmp/agw-sysctl-99-agentworks.conf"
+    target.write_file(staging, HARDENING_SYSCTL_CONTENT)
+    target.run(
+        f"install -m 0644 -o root -g root {shlex.quote(staging)} {HARDENING_SYSCTL_PATH}",
+        sudo=True,
+    )
+    target.run(f"rm -f {shlex.quote(staging)}", check=False)
+    target.run("sysctl --system", sudo=True)
+
+
+def _apply_hardening_fstab(target: ExecTarget, logger: SSHLogger) -> None:
+    """Ensure /proc is mounted hidepid=1 in /etc/fstab via the sentinel-tagged line.
+
+    Then live-remount /proc to apply immediately.
+    """
+    result = target.run(f"cat {HARDENING_FSTAB_PATH}", sudo=True, check=False)
+    if not getattr(result, "ok", False):
+        msg = f"could not read {HARDENING_FSTAB_PATH}; skipping hidepid edit"
+        logger.warning(msg)
+        output.warn(msg)
+        return
+    current = getattr(result, "stdout", "") or ""
+
+    lines = current.splitlines()
+    sentinel_idx = next(
+        (i for i, line in enumerate(lines) if HARDENING_FSTAB_SENTINEL in line),
+        None,
+    )
+
+    if sentinel_idx is not None and lines[sentinel_idx].rstrip() == HARDENING_FSTAB_LINE:
+        output.detail(f"{HARDENING_FSTAB_PATH} hidepid entry already current; no-op.")
+    else:
+        if sentinel_idx is not None:
+            lines[sentinel_idx] = HARDENING_FSTAB_LINE
+            output.detail(f"Rewriting {HARDENING_FSTAB_PATH} hidepid entry.")
+        else:
+            lines.append(HARDENING_FSTAB_LINE)
+            output.detail(f"Adding hidepid entry to {HARDENING_FSTAB_PATH}.")
+
+        new_content = "\n".join(lines) + "\n"
+        staging = "/tmp/agw-fstab"
+        target.write_file(staging, new_content)
+        target.run(
+            f"install -m 0644 -o root -g root {shlex.quote(staging)} {HARDENING_FSTAB_PATH}",
+            sudo=True,
+        )
+        target.run(f"rm -f {shlex.quote(staging)}", check=False)
+
+    # Live remount (idempotent at kernel level: remount-to-same-options is a no-op).
+    target.run("mount -o remount,hidepid=1 /proc", sudo=True)
+
+
 def verify_tailscale_available() -> None:
     """Pre-flight: verify the local machine is on Tailscale."""
     try:
@@ -1121,6 +1229,12 @@ def _phase_b_setup(
 
     # Non-fatal: apt packages (direct list + catalog entries)
     _install_apt_packages(ts_target, config, catalog, logger)
+
+    # Non-fatal: VM hardening (sysctl baseline + /proc hidepid=1).
+    # Applied after package install so any tools we need are present, but
+    # before user-level setup so the rest of init runs under the hardened
+    # baseline. Idempotent on reinit.
+    _apply_vm_hardening(ts_target, logger)
 
     # Non-fatal: snap packages
     if config.vm.snap:
