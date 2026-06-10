@@ -944,8 +944,13 @@ def _create_agent_on_vm(
                 fetch_dir(ref, agent_target, dest)
 
             output.detail(f"Running agent dotfiles install: {agent_cfg.dotfiles_install_cmd}")
+            # Wrap in a login shell: the dotfiles install command is
+            # user-provided and likely expects the agent's interactive
+            # env (PATH additions, aliases, exported vars) to be in
+            # scope, same as if they had run it themselves.
+            inner = f"cd {_shlex.quote(dest)} && {agent_cfg.dotfiles_install_cmd}"
             agent_target.run(
-                f"cd {dest} && {agent_cfg.dotfiles_install_cmd}",
+                f"{agent_shell} -lc {_shlex.quote(inner)}",
                 timeout=120,
             )
         except (SourceRefError, Exception) as e:
@@ -958,11 +963,22 @@ def _create_agent_on_vm(
     if config.agent.nerf_install_claude_plugin:
         _install_nerf_claude_plugin_for_agent(agent_target, agent_shell)
 
-    # Claude Code marketplaces and plugins.
+    # Claude Code marketplaces and plugins. The probe (`command -v
+    # claude`) and the actual `claude plugin ...` invocations need the
+    # agent's PATH (mise shims, ~/.local/bin, etc.); a plain SSH command
+    # gets a non-interactive non-login shell that sources none of the
+    # rc / profile files. Wrap in `<shell> -lc` for parity with the
+    # admin caller in vms/initializer.py and with the install / nerf
+    # helpers above.
+    import shlex as _shlex
+
     from agentworks.vms.initializer import install_claude_plugins
 
+    def _agent_run_cmd(cmd: str, timeout: int) -> object:
+        return agent_target.run(f"{agent_shell} -lc {_shlex.quote(cmd)}", timeout=timeout)
+
     install_claude_plugins(
-        lambda cmd, timeout: agent_target.run(cmd, timeout=timeout),
+        _agent_run_cmd,
         config.agent.claude_marketplaces,
         config.agent.claude_plugins,
     )

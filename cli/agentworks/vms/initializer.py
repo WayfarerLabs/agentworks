@@ -1530,10 +1530,14 @@ def install_claude_plugins(
 ) -> None:
     """Register Claude Code marketplaces and install plugins. Non-fatal.
 
-    The caller provides a run_cmd that handles shell/user context:
-    - Admin: wraps in login shell via {shell} -lc
-    - Agent: invoked via the agent's ExecTarget so the agent's env is in
-      scope without sudo / su.
+    The caller provides a ``run_cmd`` that wraps the command in a login
+    shell (``{shell} -lc <cmd>``) so the calling user's PATH (mise shims,
+    ``~/.local/bin``, etc.) is in scope. A plain non-interactive SSH
+    invocation gets a non-login shell that sources neither ``.bashrc``
+    nor ``.profile``, so ``command -v claude`` would falsely fail. Both
+    the admin call site (``_phase_b_setup`` in this file) and the agent
+    call site (``_create_agent_on_vm`` in ``agents/manager.py``) wrap
+    accordingly; the helper itself stays transport- and user-agnostic.
     """
     if not marketplaces and not plugins:
         return
