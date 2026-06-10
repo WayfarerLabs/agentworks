@@ -21,7 +21,7 @@ from agentworks.vms.manager import keep_vm_active
 if TYPE_CHECKING:
     from agentworks.catalog import UserInstallCommandEntry
     from agentworks.config import Config
-    from agentworks.db import Database, VMRow, WorkspaceRow
+    from agentworks.db import AgentRow, Database, VMRow, WorkspaceRow
     from agentworks.ssh import ExecTarget, SSHLogger, SSHResult
 
 AGENT_PREFIX = "agt-"
@@ -95,6 +95,36 @@ def workspace_group(workspace_name: str) -> str:
     helper is only used at workspace-create time.
     """
     return f"{WS_GROUP_PREFIX}{workspace_name}"
+
+
+def _assert_agent_ssh_works(target: ExecTarget, agent: AgentRow) -> None:
+    """Probe direct agent SSH; raise an actionable error on auth rejection.
+
+    The direct-target-user-SSH rollout populates each agent's
+    ``~/.ssh/authorized_keys`` with the operator's key set at agent create /
+    reinit. Agents that existed before this rollout have a home directory
+    with no ``.ssh/authorized_keys`` for the operator, so direct SSH as the
+    agent is rejected. Catch that specific case here and turn the otherwise-
+    opaque SSH transport failure into a clear "run ``agw agent reinit``"
+    instruction.
+
+    A probe round-trip costs ~50ms over Tailscale + ControlMaster. Cheaper
+    than letting the failure surface mid-operation with partial state.
+    """
+    probe = target.run("true", check=False)
+    if probe.ok:
+        return
+    # SSH transport failures (auth rejected, host unreachable, etc.) report
+    # exit code 255. Combined with no other obvious signal, this is our
+    # best indication that direct agent SSH is not yet provisioned.
+    if probe.returncode == 255:
+        raise StateError(
+            f"agent '{agent.name}' rejected direct SSH (likely predates the "
+            "direct-target-user-SSH rollout).",
+            entity_kind="agent",
+            entity_name=agent.name,
+            hint=f"Run 'agw agent reinit {agent.name}' to populate its authorized_keys.",
+        )
 
 
 def create_agent(
@@ -502,6 +532,12 @@ def shell_agent(
     target = agent_exec_target(vm, config, agent)
 
     with keep_vm_active(db, config, vm):
+        # Probe direct agent SSH first so pre-rollout agents (whose
+        # authorized_keys was never populated) get an actionable error
+        # rather than dropping into a remote shell that immediately exits
+        # on Permission denied.
+        _assert_agent_ssh_works(target, agent)
+
         if workspace_name:
             ws = db.get_workspace(workspace_name)
             if ws is None:

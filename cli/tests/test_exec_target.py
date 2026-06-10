@@ -222,3 +222,40 @@ def test_admin_and_agent_targets_differ_only_in_user() -> None:
     # Only the SSH user differs
     assert admin.ssh.user == "agentworks"
     assert agent.ssh.user == "claude"
+
+
+# ---------------------------------------------------------------------------
+# interactive(): empty-command behavior (Phase 6)
+# ---------------------------------------------------------------------------
+
+
+def test_interactive_omits_trailing_command_when_empty() -> None:
+    """An empty command means 'interactive login shell, no remote argv'.
+
+    Phase 6 of the direct-target-user-SSH SDD relies on this: agent shell
+    runs `ssh -t <agent>@vm` with no command. Previously interactive()
+    appended an empty string as the command arg, which ran the empty
+    string and exited immediately.
+    """
+    from agentworks.ssh import interactive
+
+    target = ExecTarget(ssh=SSHTarget(host="vm1", user="agent", identity_file=None))
+    with patch("agentworks.ssh.subprocess.call") as mock_call:
+        mock_call.return_value = 0
+        interactive(target, "")
+        argv = mock_call.call_args[0][0]
+        # The argv ends with the user@host target; no trailing command arg.
+        assert argv[-1] == "agent@vm1"
+        assert "" not in argv
+
+
+def test_interactive_appends_command_when_non_empty() -> None:
+    """Non-empty command is still appended verbatim (tmux attach etc.)."""
+    from agentworks.ssh import interactive
+
+    target = ExecTarget(ssh=SSHTarget(host="vm1", user="agent", identity_file=None))
+    with patch("agentworks.ssh.subprocess.call") as mock_call:
+        mock_call.return_value = 0
+        interactive(target, "tmux attach -t foo")
+        argv = mock_call.call_args[0][0]
+        assert argv[-1] == "tmux attach -t foo"

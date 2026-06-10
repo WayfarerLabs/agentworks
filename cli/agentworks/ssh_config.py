@@ -63,7 +63,11 @@ def sync_ssh_config(config: Config, db: Database) -> None:
 
 
 def _legacy_rebuild(config: Config, db: Database) -> None:
-    """Legacy: rebuild the managed section from all VMs in DB."""
+    """Legacy: rebuild the managed section from all VMs in DB.
+
+    Emits the same per-VM admin block + per-agent blocks as
+    ``_rebuild_config_dir``; only the file layout differs.
+    """
     ssh_config = config.operator.ssh_config
     user_section, _old_entries = _read_managed(ssh_config)
     prefix = config.operator.ssh_host_prefix
@@ -72,13 +76,22 @@ def _legacy_rebuild(config: Config, db: Database) -> None:
     for vm in db.list_vms():
         if not vm.tailscale_host:
             continue
-        alias = ssh_host_alias(vm.name, prefix)
-        entries[alias] = _format_entry(
-            alias=alias,
+        vm_alias = ssh_host_alias(vm.name, prefix)
+        entries[vm_alias] = _format_entry(
+            alias=vm_alias,
             hostname=vm.tailscale_host,
             user=vm.admin_username,
             identity_file=config.operator.ssh_private_key,
         )
+        # Per-agent aliases on this VM (parity with _rebuild_config_dir).
+        for agent in db.list_agents(vm_name=vm.name):
+            agent_alias = f"{vm_alias}--{agent.linux_user}"
+            entries[agent_alias] = _format_entry(
+                alias=agent_alias,
+                hostname=vm.tailscale_host,
+                user=agent.linux_user,
+                identity_file=config.operator.ssh_private_key,
+            )
     _write_legacy(ssh_config, user_section, entries)
 
 

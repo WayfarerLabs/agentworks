@@ -681,6 +681,8 @@ def _apply_vm_hardening(target: ExecTarget, logger: SSHLogger) -> None:
 
 def _apply_hardening_sysctl(target: ExecTarget, logger: SSHLogger) -> None:
     """Write the sysctl baseline if content differs from desired; reload if changed."""
+    # sudo on the read for consistency with the fstab read below; the file
+    # itself is mode 0644 and would be world-readable when present.
     existing = target.run(f"cat {HARDENING_SYSCTL_PATH}", sudo=True, check=False)
     if (
         getattr(existing, "ok", False)
@@ -690,7 +692,10 @@ def _apply_hardening_sysctl(target: ExecTarget, logger: SSHLogger) -> None:
         return
 
     output.detail(f"Writing {HARDENING_SYSCTL_PATH}...")
-    staging = "/tmp/agw-sysctl-99-agentworks.conf"
+    mktemp_result = target.run("mktemp --tmpdir agw-sysctl.XXXXXX")
+    staging = (getattr(mktemp_result, "stdout", "") or "").strip()
+    if not staging:
+        raise SSHError("mktemp produced empty path for sysctl staging")
     target.write_file(staging, HARDENING_SYSCTL_CONTENT)
     target.run(
         f"install -m 0644 -o root -g root {shlex.quote(staging)} {HARDENING_SYSCTL_PATH}",
@@ -729,8 +734,16 @@ def _apply_hardening_fstab(target: ExecTarget, logger: SSHLogger) -> None:
             lines.append(HARDENING_FSTAB_LINE)
             output.detail(f"Adding hidepid entry to {HARDENING_FSTAB_PATH}.")
 
+        # splitlines()/join round-trip strips CRLF and normalizes the trailing
+        # newline. On a standard Linux /etc/fstab this is invisible. We
+        # accept the normalization because /etc/fstab is system-critical and
+        # consistent line endings reduce the chance of a later edit producing
+        # a malformed file.
         new_content = "\n".join(lines) + "\n"
-        staging = "/tmp/agw-fstab"
+        mktemp_result = target.run("mktemp --tmpdir agw-fstab.XXXXXX")
+        staging = (getattr(mktemp_result, "stdout", "") or "").strip()
+        if not staging:
+            raise SSHError("mktemp produced empty path for fstab staging")
         target.write_file(staging, new_content)
         target.run(
             f"install -m 0644 -o root -g root {shlex.quote(staging)} {HARDENING_FSTAB_PATH}",

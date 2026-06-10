@@ -286,3 +286,49 @@ def test_rebuild_config_dir_agent_blocks_per_vm(tmp_path: Path) -> None:
     # The agent named "a" is on vm1 only -- it must NOT appear under vm2
     assert "Host awvm--vm2--a\n" not in content
     assert "Host awvm--vm1--b\n" not in content
+
+
+# -- legacy rebuild: per-agent block parity --------------------------------
+
+
+def test_legacy_rebuild_emits_per_agent_blocks(tmp_path: Path) -> None:
+    """The legacy path (ssh_config_dir=False) emits the same per-agent
+    blocks as the config.d path. Symmetry was added as part of FRD R7."""
+    from agentworks.ssh_config import _legacy_rebuild
+
+    config, ssh_dir = _mock_config(tmp_path)
+    config.operator.ssh_config_dir = False  # legacy
+    db = MagicMock()
+    db.list_vms.return_value = [_mock_vm("vm1", "100.64.0.1")]
+    db.list_agents.return_value = [
+        _mock_agent("claude", "claude", "vm1"),
+        _mock_agent("aider", "aider", "vm1"),
+    ]
+
+    _legacy_rebuild(config, db)
+
+    content = config.operator.ssh_config.read_text()
+    # Admin block still present (existing behavior)
+    assert "Host awvm--vm1\n" in content
+    assert "User agentworks" in content
+    # Two new per-agent blocks
+    assert "Host awvm--vm1--claude\n" in content
+    assert "Host awvm--vm1--aider\n" in content
+    assert "User claude" in content
+    assert "User aider" in content
+
+
+def test_legacy_rebuild_no_agents_no_per_agent_blocks(tmp_path: Path) -> None:
+    from agentworks.ssh_config import _legacy_rebuild
+
+    config, ssh_dir = _mock_config(tmp_path)
+    config.operator.ssh_config_dir = False
+    db = MagicMock()
+    db.list_vms.return_value = [_mock_vm("solo", "100.64.0.9")]
+    db.list_agents.return_value = []
+
+    _legacy_rebuild(config, db)
+
+    content = config.operator.ssh_config.read_text()
+    assert "Host awvm--solo\n" in content
+    assert "Host awvm--solo--" not in content

@@ -632,6 +632,11 @@ def _make_hardening_target(
                 result.returncode = 0
                 result.ok = True
                 result.stdout = fstab_content
+        elif cmd.startswith("mktemp"):
+            result.returncode = 0
+            result.ok = True
+            # Return a deterministic staging path so tests can assert against it.
+            result.stdout = "/tmp/agw-fstab.AAAAAA" if "fstab" in cmd else "/tmp/agw-sysctl.AAAAAA"
         else:
             result.returncode = 0
             result.ok = True

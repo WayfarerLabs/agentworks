@@ -690,10 +690,15 @@ def create_session(
             #   socket-root setup which requires root.
             session_run_command: RunCommand
             if mode == SessionMode.AGENT:
-                assert agent is not None
+                assert agent is not None  # mypy: narrowed by mode check above
+                from agentworks.agents.manager import _assert_agent_ssh_works
                 from agentworks.ssh import agent_exec_target
 
-                session_run_command = agent_exec_target(vm, config, agent).run
+                agent_target = agent_exec_target(vm, config, agent)
+                # Surface the pre-rollout "agent has no authorized_keys" case
+                # as an actionable error before doing any tmux work.
+                _assert_agent_ssh_works(agent_target, agent)
+                session_run_command = agent_target.run
             else:
                 session_run_command = run_command
             sock, pid = create_tmux_session(
@@ -964,9 +969,14 @@ def restart_session(
             assert session.agent_name is not None
             agent = db.get_agent(session.agent_name)
             assert agent is not None, f"agent '{session.agent_name}' missing for session '{name}'"
+            from agentworks.agents.manager import _assert_agent_ssh_works
             from agentworks.ssh import agent_exec_target
 
-            session_run_command = agent_exec_target(vm, config, agent).run
+            agent_target = agent_exec_target(vm, config, agent)
+            # Surface the pre-rollout "agent has no authorized_keys" case as
+            # an actionable error rather than failing mid-restart.
+            _assert_agent_ssh_works(agent_target, agent)
+            session_run_command = agent_target.run
         else:
             session_run_command = run_command
 

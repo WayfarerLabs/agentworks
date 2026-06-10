@@ -273,7 +273,8 @@ def create_session(
     direct target-user SSH). The agent's tmux server runs under the agent's
     uid on a per-session socket. ``target=`` is still required and must be
     admin's ExecTarget: it is used for socket-root setup
-    (``/var/agentworks/run``) which needs root. Admin retains its read /
+    (``AGENT_SOCKET_ROOT``, currently `/run/agentworks/agent-tmux-sockets`)
+    which needs root. Admin retains its read /
     attach / maintenance reach into the agent's tmux server via group
     permissions on the socket and the tmux ``server-access`` ACL granted
     here (per the 2026-04-10 agent-tmux-sockets SDD; unchanged).
@@ -308,7 +309,8 @@ def create_session(
 
         # Ensure the tmpfs socket directories exist (wiped on VM reboot).
         # Uses the ADMIN target (`target=` arg); writing under
-        # /var/agentworks/run still requires root and goes through admin's
+        # AGENT_SOCKET_ROOT (/run/agentworks/agent-tmux-sockets) still
+        # requires root and goes through admin's
         # sudo path.
         assert target is not None, "target (admin's ExecTarget) required for agent sessions"
         ensure_agent_socket_root(target, admin_username)
@@ -333,7 +335,10 @@ def create_session(
                     f"Socket {sock} already has an active tmux server. "
                     f"Kill it first or choose a different session name."
                 )
-            # Stale socket -- remove it (agent owns the file).
+            # Stale socket: remove it. Agent owns the file in both the
+            # post-rollout case (this code created it as the agent) and
+            # the pre-rollout case (sudo --login -u <agent> tmux created
+            # it owned by the agent), so plain rm works in both worlds.
             from agentworks import output as _output
 
             _output.detail(f"Removing stale socket: {sock}")
