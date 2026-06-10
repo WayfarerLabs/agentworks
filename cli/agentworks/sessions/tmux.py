@@ -484,10 +484,18 @@ def force_kill_tmux_server(
     target: ExecTarget,
     socket_path: str | None = None,
     log: Callable[[str], None] | None = None,
+    use_sudo: bool = True,
 ) -> bool:
     """Kill a tmux server by PID with SIGTERM -> SIGKILL escalation.
 
     Cleans up socket file if present. Returns True if the process is dead.
+
+    ``use_sudo`` defaults True for the admin path (cross-uid kill of an
+    agent's tmux pid; admin's NOPASSWD sudo). Pass False when ``target`` is
+    the agent's own ExecTarget: the agent can kill its own pid and remove
+    its own socket without sudo. FRD R1's carve-out for admin force-kill
+    applies to batch operations; single-session agent ops go through agent
+    SSH directly (no sudo).
     """
     if pid <= 1:
         raise ValueError(f"refusing to kill PID {pid} (dangerous special value)")
@@ -499,13 +507,13 @@ def force_kill_tmux_server(
 
     # SIGTERM
     _log(f"Sending SIGTERM to PID {pid}")
-    target.run(f"kill {pid}", sudo=True, check=False)
+    target.run(f"kill {pid}", sudo=use_sudo, check=False)
     time.sleep(2)
 
     # Check if still alive
     if target.run(f"test -d /proc/{pid}", check=False).ok:
         _log(f"PID {pid} survived SIGTERM, escalating to SIGKILL")
-        target.run(f"kill -9 {pid}", sudo=True, check=False)
+        target.run(f"kill -9 {pid}", sudo=use_sudo, check=False)
         time.sleep(1)
 
     # Final check
@@ -518,6 +526,6 @@ def force_kill_tmux_server(
     # Clean up stale socket (validate path is under expected root)
     if socket_path and socket_path.startswith(AGENT_SOCKET_ROOT + "/"):
         _log(f"Removing stale socket {socket_path}")
-        target.run(f"rm -f {shlex.quote(socket_path)}", sudo=True, check=False)
+        target.run(f"rm -f {shlex.quote(socket_path)}", sudo=use_sudo, check=False)
 
     return True
