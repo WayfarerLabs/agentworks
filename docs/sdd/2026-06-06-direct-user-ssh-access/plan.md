@@ -10,28 +10,38 @@ verification is phase 1 because everything downstream assumes its result.
 Goal: confirm the kernel-semantics assumption from FRD R5 holds on the actual systems we provision
 before any other work commits to it.
 
-- [ ] Provision a lima VM with default agentworks settings.
-- [ ] Remount `/proc` with `hidepid=1`: `sudo mount -o remount,hidepid=1 /proc`.
-- [ ] Create or identify a process owned by a non-admin Linux user on the VM. Simplest path:
-      `agent create` and use its tmux server's pid. Alternatively, `sudo -u nobody sleep 300 &` as a
-      one-off.
-- [ ] As the admin user (non-root), run `test -d /proc/<other-pid>; echo $?`. Expected: `0`.
-- [ ] As the admin user (non-root), run `cat /proc/<other-pid>/cmdline; echo $?`. Expected: non-zero
-      exit (permission denied).
-- [ ] As root via sudo, both calls succeed. Confirms the sudo fallback would work if needed.
-- [ ] Repeat the test on each platform we provision (lima, azure, wsl2, proxmox). WSL2 in particular
-      runs a Microsoft-patched kernel and is the most likely platform to deviate from vanilla procfs
-      semantics.
-- [ ] Document the result in this plan file (check the box and add a one-line note with the kernel
-      version tested per platform).
-- [ ] **Decision point** (per-platform):
-  - All platforms pass: proceed with the plan as written.
-  - Specific platforms deviate: route those platforms' pid-check call sites through sudo while
-    leaving the other platforms direct. The pid-check call sites are confined enough
-    (`sessions/manager.py:_pid_alive`, `sessions/manager.py` batch status compound,
-    `sessions/tmux.py force_kill_tmux_server` two checks) that a per-platform branch on the sudo
-    decision is straightforward.
-  - Every platform fails: route all four call sites through sudo unconditionally.
+Per-platform verification. On each provisioned VM:
+
+1. Remount `/proc` with `hidepid=1`: `sudo mount -o remount,hidepid=1 /proc`.
+2. Identify a process owned by a different Linux user than the one running the check.
+3. Run the cross-uid pid-check pair:
+   - `test -d /proc/<other-pid>` -- expected exit 0 (directory still visible).
+   - `cat /proc/<other-pid>/cmdline >/dev/null` -- expected non-zero (permission denied).
+4. Revert: `sudo mount -o remount,hidepid=0 /proc`.
+
+The cross-uid framing is what matters: same-uid reads always succeed regardless of `hidepid`, so
+either drop privileges to a non-owner (`sudo -u <agent> bash -c ...`) or run the check as a user who
+is genuinely a non-owner of the target pid. Both directions (agent reading admin / admin reading
+agent) exercise the same kernel permission code path; one direction is enough per platform.
+
+Platforms to verify:
+
+- [x] **lima** -- 2026-06-10. Debian 12 bookworm, kernel `6.1.0-49-arm64`. Cross-uid agent -> admin:
+      `test -d` returned 0, `cat .../cmdline` returned 1. Result: works as expected.
+- [ ] **azure**
+- [ ] **wsl2** -- the Microsoft-patched kernel is the most likely platform to deviate from vanilla
+      procfs semantics. Worth verifying explicitly even if other platforms pass.
+- [ ] **proxmox**
+
+**Decision point** (per-platform):
+
+- All platforms pass: proceed with the plan as written.
+- Specific platforms deviate: route those platforms' pid-check call sites through sudo while leaving
+  the other platforms direct. The pid-check call sites are confined enough
+  (`sessions/manager.py:_pid_alive`, `sessions/manager.py` batch status compound,
+  `sessions/tmux.py force_kill_tmux_server` two checks) that a per-platform branch on the sudo
+  decision is straightforward.
+- Every platform fails: route all four call sites through sudo unconditionally.
 
 Definition of done: the result is documented here per platform, and the rest of the plan proceeds
 with a known sudo / no-sudo answer per platform.
