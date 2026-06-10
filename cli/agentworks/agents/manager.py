@@ -495,9 +495,11 @@ def shell_agent(
 
     import sys
 
-    from agentworks.ssh import interactive
+    from agentworks.ssh import agent_exec_target, interactive
 
-    target = admin_exec_target(vm, config)
+    # Direct agent SSH (FRD R1): no admin+sudo detour. The agent's
+    # authorized_keys (Phase 3) accepts the operator's key set.
+    target = agent_exec_target(vm, config, agent)
 
     with keep_vm_active(db, config, vm):
         if workspace_name:
@@ -518,10 +520,13 @@ def shell_agent(
             import shlex
 
             q_path = shlex.quote(ws.workspace_path)
-            shell_cmd = f"exec sudo su --login {agent.linux_user} -c 'cd {q_path} && exec $SHELL -li'"
+            # SSH as the agent, then cd into the workspace and exec an
+            # interactive login shell. No sudo / su involved.
+            shell_cmd = f"cd {q_path} && exec $SHELL -li"
             sys.exit(interactive(target, shell_cmd))
         else:
-            sys.exit(interactive(target, f"exec sudo su --login {agent.linux_user}"))
+            # SSH as the agent with no command -> interactive login shell.
+            sys.exit(interactive(target, ""))
 
 
 def exec_agent(

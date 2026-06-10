@@ -355,6 +355,10 @@ def run(
 def interactive(target: SSHTarget | ExecTarget, command: str) -> int:
     """Run an interactive SSH command with a TTY (for tmux attach, etc.).
 
+    If ``command`` is empty, opens a plain interactive login shell on the
+    target (no remote command argument at all). Otherwise runs ``command``
+    over a PTY-allocated SSH session.
+
     Returns the process exit code. Does not raise on failure.
     """
     target = _unwrap_ssh(target)
@@ -370,7 +374,8 @@ def interactive(target: SSHTarget | ExecTarget, command: str) -> int:
         args.append(f"{target.user}@{target.host}")
     else:
         args.append(target.host)
-    args.append(command)
+    if command:
+        args.append(command)
     return subprocess.call(args)
 
 
