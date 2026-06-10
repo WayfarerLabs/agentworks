@@ -39,7 +39,7 @@ class SSHTarget:
     force_tty: bool = False
 
 
-def _build_exec_target_for_user(
+def exec_target_for_user(
     vm: VMRow,
     config: Config,
     *,
@@ -49,9 +49,13 @@ def _build_exec_target_for_user(
 ) -> ExecTarget:
     """Build an ExecTarget that connects to the VM as the given Linux user.
 
-    Shared core of admin_exec_target and agent_exec_target. On Windows,
-    forces TTY allocation to prevent zsh from hanging on non-interactive
-    piped SSH commands.
+    Shared core of ``admin_exec_target`` and ``agent_exec_target``. Also
+    available directly for the rare case where the caller has a Linux
+    username but no ``AgentRow`` (e.g. mid-create when the agent isn't in
+    the DB yet but its on-VM identity already accepts the operator's key).
+
+    On Windows, forces TTY allocation to prevent zsh from hanging on
+    non-interactive piped SSH commands.
     """
     import sys
 
@@ -76,7 +80,7 @@ def admin_exec_target(
     default_timeout: int | None = None,
 ) -> ExecTarget:
     """Build an ExecTarget for the admin user via Tailscale SSH."""
-    return _build_exec_target_for_user(
+    return exec_target_for_user(
         vm,
         config,
         user=vm.admin_username,
@@ -96,12 +100,12 @@ def agent_exec_target(
     """Build an ExecTarget that connects to the VM as the agent's Linux user.
 
     Used by agent-mode operations whose target user is the agent (session
-    creation, agent shell, etc.). The agent's authorized_keys must already
-    accept the operator's SSH key (see agentworks.vms.initializer's
-    _reconcile_authorized_keys stage-and-install path, invoked at agent
-    create / reinit).
+    creation, agent shell, agent exec, etc.). The agent's authorized_keys
+    must already accept the operator's SSH key (see
+    ``agentworks.vms.initializer._reconcile_authorized_keys``'s
+    stage-and-install path, invoked at agent create / reinit).
     """
-    return _build_exec_target_for_user(
+    return exec_target_for_user(
         vm,
         config,
         user=agent.linux_user,

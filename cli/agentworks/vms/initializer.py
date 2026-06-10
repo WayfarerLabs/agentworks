@@ -1730,7 +1730,7 @@ def _install_nerf_claude_plugin_for_user(
 
 RunCmd = Callable[[str, int], object]
 """Callable that runs a shell command with a timeout. Used to abstract
-admin (target.run) vs agent (_run_as_agent) execution."""
+the choice of ExecTarget (admin vs agent) at the call site."""
 
 
 def install_claude_plugins(
@@ -1743,7 +1743,8 @@ def install_claude_plugins(
 
     The caller provides a run_cmd that handles shell/user context:
     - Admin: wraps in login shell via {shell} -lc
-    - Agent: wraps in su - via _run_as_agent
+    - Agent: invoked via the agent's ExecTarget so the agent's env is in
+      scope without sudo / su.
     """
     if not marketplaces and not plugins:
         return
