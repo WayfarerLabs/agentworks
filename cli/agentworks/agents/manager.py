@@ -1127,10 +1127,21 @@ def _run_agent_mise_setup(
     rc files directly via ``agent_target.write_file``; fetches the
     lockfile via ``fetch_file`` over the same agent transport so the
     file lands at its final path owned by the agent with no sudo step.
+
+    ``mise install`` / ``mise prune`` are wrapped in a login shell
+    (``{shell} -lc``) so the agent's PATH and any other profile-exported
+    env (mise's own activation hooks, plugin discovery paths, downstream
+    tooling like ``npm`` / ``pip`` that mise plugins shell out to during
+    install) are in scope. mise's binary is on system PATH so a plain
+    invocation would technically find it, but its behavior is shell- and
+    env-sensitive enough that the wrap is the principled default.
     """
+    import shlex
+
     from agentworks.ssh import SSHError
 
     agent_cfg = config.agent
+    agent_shell = agent_cfg.shell
     has_packages = bool(agent_cfg.mise_packages)
     has_lockfile = bool(agent_cfg.mise_lockfile)
 
@@ -1214,14 +1225,20 @@ def _run_agent_mise_setup(
     installed = False
     install_flags = "-y --locked" if lockfile_exists else "-y"
     try:
-        agent_target.run(f"mise install {install_flags}", timeout=300)
+        agent_target.run(
+            f"{agent_shell} -lc {shlex.quote(f'mise install {install_flags}')}",
+            timeout=300,
+        )
         output.detail("Agent mise packages installed")
         installed = True
     except SSHError as e:
         if lockfile_exists and agent_cfg.mise_allow_unlocked:
             output.warn("some agent packages not in lockfile, installing unlocked...")
             try:
-                agent_target.run("mise install -y", timeout=300)
+                agent_target.run(
+                    f"{agent_shell} -lc {shlex.quote('mise install -y')}",
+                    timeout=300,
+                )
                 output.detail("Agent mise packages installed (unlocked)")
                 installed = True
             except SSHError as e2:
@@ -1238,7 +1255,10 @@ def _run_agent_mise_setup(
         from agentworks.ssh import SSHError as _SSHError
 
         with contextlib.suppress(_SSHError):
-            agent_target.run("mise prune -y", timeout=60)
+            agent_target.run(
+                f"{agent_shell} -lc {shlex.quote('mise prune -y')}",
+                timeout=60,
+            )
 
 
 def _build_agent_test_command(
