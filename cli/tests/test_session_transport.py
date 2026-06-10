@@ -302,10 +302,10 @@ def test_exec_agent_uses_direct_agent_ssh(
         lambda vm, config, agent, **kwargs: target,
     )
     monkeypatch.setattr(agent_mgr, "_assert_agent_ssh_works", lambda *a, **k: None)
-    monkeypatch.setattr(
-        "agentworks.vms.manager.keep_vm_active",
-        lambda *a, **k: _NullCM(),
-    )
+    # exec_agent imports keep_vm_active at module load (see top of
+    # agents/manager.py), so the patch must land on that binding -- not
+    # on agentworks.vms.manager.keep_vm_active, which would be a no-op.
+    monkeypatch.setattr(agent_mgr, "keep_vm_active", lambda *a, **k: _NullCM())
 
     called_args: list[list[str]] = []
 

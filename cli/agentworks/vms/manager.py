@@ -511,6 +511,16 @@ def exec_vm(db: Database, config: Config, name: str, command: list[str]) -> int:
 
     vm = _require_vm(db, name)
     _guard_failed_vm(vm)
+    # admin_exec_target asserts tailscale_host is not None; guard first so
+    # the operator gets an actionable StateError instead of an AssertionError
+    # (which also disappears under python -O).
+    if vm.tailscale_host is None:
+        raise StateError(
+            f"VM '{name}' has no Tailscale IP",
+            entity_kind="vm",
+            entity_name=name,
+            hint="VM init may not be complete. Check 'vm describe' for status.",
+        )
     target = admin_exec_target(vm, config)
 
     remote_cmd = command[0] if len(command) == 1 else shlex.join(command)

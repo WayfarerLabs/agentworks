@@ -907,7 +907,7 @@ def _create_agent_on_vm(
                     cred_lines.extend(provider.credential_lines(token))
             if cred_lines:
                 cred_content = "\n".join(cred_lines) + "\n"
-                _write_agent_file(admin_target, linux_user, f"{home}/.git-credentials", cred_content, mode="600")
+                _write_agent_file(admin_target, linux_user, f"{home}/.git-credentials", cred_content, mode="0600")
                 agent_target.run("git config --global credential.helper store")
         except Exception as e:
             output.warn(f"agent git credential setup failed: {e}")
