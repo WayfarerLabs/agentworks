@@ -65,28 +65,37 @@ operator-side SSH config block. One declarative path that satisfies first-time c
 reinit identically.
 
 - [ ] `vms/initializer.py`: extend `_reconcile_authorized_keys` with an optional `owner=` parameter.
-      When set, switch to the stage-and-install path (scp to `/tmp/agw-ak.XXXXXX`,
-      `sudo install -o <owner> -g <owner> -m 0600 ... <home>/.ssh/authorized_keys`, cleanup the
-      staging file). When unset, preserve today's direct-write behavior for admin.
+      When set, switch to the stage-and-install path:
+      `sudo install -d -o <owner> -g <owner> -m 0700 <home>/.ssh` to ensure the directory exists;
+      `scp` to `/tmp/agw-ak.XXXXXX`;
+      `sudo install -o <owner> -g <owner> -m 0600 <staging> <home>/.ssh/authorized_keys`;
+      `sudo rm -f <staging>`. When unset, preserve today's direct-write behavior for admin.
 - [ ] `agents/manager._create_agent_on_vm`: after the agent's Linux user exists, invoke
       `_reconcile_authorized_keys` with the agent's home as `home=` and `owner=agent.linux_user` to
       trigger the staging path.
 - [ ] `agents/manager.reinit_agent`: identical invocation. No special-casing for first-time vs
       subsequent runs.
-- [ ] `agentworks/ssh_config.py`: add a per-agent block writer / refresher / remover that mirrors
-      the existing per-VM admin block. Block shape: `Host <prefix><vm>--<agent>` with
-      `HostName <vm-tailscale-host>`, `User <agent.linux_user>`, identity inherited.
-- [ ] `agents/manager._create_agent_on_vm`: also write the operator SSH config block for this agent.
-- [ ] `agents/manager.reinit_agent`: also refresh the operator SSH config block.
-- [ ] `agents/manager.delete_agent`: remove the operator SSH config block.
-- [ ] Verify by direct SSH: after `agent create`, `ssh awvm--<vm>--<agent>` succeeds with the
+- [ ] `agentworks/ssh_config.py:_rebuild_config_dir`: extend the `for vm in db.list_vms()` loop to
+      also emit one per-agent `Host` block per VM (alias suffix `--<agent.linux_user>` appended to
+      the existing VM alias; `User` overridden to the agent's Linux user; all other fields inherited
+      from the per-VM admin block). No new add / remove code path; the declarative rebuild handles
+      state transitions.
+- [ ] `agents/manager._create_agent_on_vm`: call `sync_ssh_config(config, db)` after the agent row
+      is written, so the per-agent block appears in the operator's SSH config.
+- [ ] `agents/manager.reinit_agent`: same call (declarative rebuild picks up any changes).
+- [ ] `agents/manager.delete_agent`: same call after the DB row removal so the rebuild drops the
+      block.
+- [ ] Verify by direct SSH: after `agent create`, `ssh <prefix><vm>--<agent>` succeeds with the
       operator's key and lands the operator in the agent's shell.
-- [ ] Tests: fresh agent has expected authorized_keys content and expected operator config block;
-      reinit after editing `operator.extra_ssh_public_keys` reflects the change; delete removes the
-      operator config block.
+- [ ] Tests: fresh agent has expected on-VM `authorized_keys` content and a corresponding per-agent
+      block in the operator's SSH config; reinit after editing `operator.extra_ssh_public_keys`
+      reflects the change; delete drops both the on-VM file (via `userdel --remove`'s home directory
+      removal) and the operator-side block.
 
-Definition of done: any agent on a VM can be SSH'd to directly with the operator's key, via the SSH
-config alias. No code yet _uses_ this; it's the foundation for phases 5 and 6.
+Definition of done: operators can `ssh <prefix><vm>--<agent>` and land directly in the agent's
+shell. This is user-visible value as of phase-3 merge, not just plumbing for phases 5 and 6:
+anything that targets SSH aliases (VS Code Remote-SSH, ad-hoc scp, manual ssh) gains agent targeting
+at this point.
 
 ## Phase 4: Target-user SSH plumbing in code
 
@@ -118,6 +127,10 @@ prefix is removed from `sessions/tmux.py`.
 - [ ] `_grant_server_access` runs as the agent (granting admin access to the agent's tmux server's
       `server-access` ACL). The function stays load-bearing for admin's existing read path into
       agent tmux servers per FRD R1's carve-out.
+- [ ] In `_grant_server_access` itself (`sessions/tmux.py:248`), drop the inner `sudo -u <q_user>`
+      prefix on the `tmux server-access -a ...` call. The caller is now the agent, so sudo'ing to
+      the agent is redundant and confusing. Keep the function's outer shape (caller passes the
+      appropriate `ExecTarget`); only the inner sudo goes.
 - [ ] Tests: create an agent-mode session; verify the resulting tmux server runs as the agent uid;
       admin can still attach via the existing socket / group access; restart cycles work.
 - [ ] Verify against a pre-conversion session (created under the old admin+sudo pattern): attach /
@@ -162,9 +175,12 @@ both the env-and-secrets and direct-target-user-SSH decisions in context.
 
 ## Sequencing notes
 
-- **Phases 1 and 2 are independent.** Phase 2 doesn't depend on phase 1's _result_ (the hardening
-  lands regardless); it depends on phase 1's _completion_ only insofar as we want the pid-check
-  answer before relying on it. They can land in parallel PRs.
+- **Phase 1 must complete before phase 2 merges.** Phase 2 enables `hidepid=1` on all
+  newly-provisioned and reinit'd VMs. If phase 1 hasn't documented the per-platform pid-check
+  verification yet (especially WSL2), a VM created in the gap could end up with `hidepid=1` plus
+  broken pid checks on a platform that turned out to need the sudo fallback. Phase 2 can be
+  developed in parallel with phase 1 but cannot land on main until phase 1's per-platform answers
+  are documented.
 - **Phase 3 must precede phases 5 and 6.** No point routing SSH to agent users that can't accept the
   operator's key, and no point telling operators to use the SSH alias before it exists.
 - **Phase 4 must precede phases 5 and 6.** The new helper needs to exist before call sites use it.

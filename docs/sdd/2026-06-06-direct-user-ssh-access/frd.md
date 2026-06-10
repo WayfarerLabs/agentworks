@@ -79,8 +79,8 @@ tighter baseline.
 
 ### R1: Direct target-user SSH for agent operations
 
-Operations whose subject is the agent (the work is being done _as_ the agent's Linux uid) open SSH
-directly as the agent's Linux user, over Tailscale, rather than SSH'ing as admin and
+Operations whose target user is the agent (the work is being done _as_ the agent's Linux uid) open
+SSH directly as the agent's Linux user, over Tailscale, rather than SSH'ing as admin and
 `sudo --login -u <agent>`. Concretely:
 
 - Agent-mode session creation (`sessions/tmux.create_session`, agent path) replaces
@@ -88,10 +88,10 @@ directly as the agent's Linux user, over Tailscale, rather than SSH'ing as admin
 - Agent-mode session restart follows the same pattern: the rebuilt tmux server is spawned over a
   direct agent SSH session.
 - `agent shell` replaces `ssh admin@vm + sudo su --login <agent>` with `ssh -t <agent>@vm`.
-- Any future site whose subject is the agent follows the same pattern.
+- Any future site whose target user is the agent follows the same pattern.
 
-The choice of target user is explicit at each call site and derived from the operation's subject.
-All new agent SSH connections, like all existing admin SSH connections, go over Tailscale.
+The choice of target user is explicit at each call site and derived from the operation's nature. All
+new agent SSH connections, like all existing admin SSH connections, go over Tailscale.
 
 #### Out of scope: admin operations that read or maintain agent state
 
@@ -103,8 +103,9 @@ out of scope for the direct-target-user-SSH flip:
 - **`session list`** and other batch reads. A single `tmux has-session` compound across all sessions
   on a VM in one SSH call (admin) is materially faster than fanning out one SSH per (VM, agent).
   Keep as-is.
-- **`session attach`** and any other tmux-attach surface (`console attach`, etc.): admin attaches to
-  an existing tmux server through group permissions on the socket. Unchanged.
+- **`session attach`** and `console attach`: admin attaches to an existing tmux server through group
+  permissions on the socket. Unchanged. (Legacy `vm console` / `workspace console` are separately
+  addressed in Non-goals.)
 - **`force_kill_tmux_server`** against an agent's tmux pid: admin via sudo. Unchanged.
 - **All console operations** (`console create`, `console add-session`, `console add-shell`,
   `console attach`, `console restore-session`, and the rest). The console is admin-owned and is the

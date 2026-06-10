@@ -32,12 +32,14 @@ def agent_exec_target(vm: VMRow, config: Config, agent: AgentRow) -> ExecTarget:
     """ExecTarget that connects to the VM as the agent's Linux user (new)."""
 ```
 
-Both return `ExecTarget`, so downstream code is identical regardless of which builder produced it.
-Internally they share a private builder that takes a Linux username plus the interactive /
-non-interactive choice and threads it through the existing identity / proxy-jump / Tailscale-host
-derivation; the exact shape of that helper is an LLD concern.
+Both return `ExecTarget`, plus the existing keyword-only options (`logger=`, `default_timeout=`,
+etc.) carried over from `admin_exec_target`'s current signature. Downstream code is identical
+regardless of which builder produced the `ExecTarget`. Internally they share a private builder that
+takes a Linux username plus the interactive / non-interactive choice and threads it through the
+existing identity / proxy-jump / Tailscale-host derivation; the exact shape of that helper is an LLD
+concern.
 
-Call sites pick the builder that matches the operation's subject:
+Call sites pick the builder that matches the operation's target user:
 
 - Admin operations and all admin paths into agent state (per FRD R1's carve-out):
   `admin_exec_target`.
@@ -101,14 +103,19 @@ to a non-self path.
 
 #### Mechanism: stage and install
 
-For agent users, the write is a two-step staging path that runs over admin's existing `ExecTarget`:
+For agent users, the write is a staging path that runs over admin's existing `ExecTarget`:
 
-1. `scp` the new `authorized_keys` content to a private staging path on the VM, e.g.
+1. Ensure the agent's `~/.ssh/` directory exists with correct ownership and mode:
+   `sudo install -d -o <agent> -g <agent> -m 0700 /home/<agent>/.ssh`. `install -d` is idempotent
+   (creates if missing; leaves existing dirs alone) and sets owner/group/mode in one atomic step.
+   `useradd -m` does not create `.ssh` (it is not in the default `/etc/skel`), so this step is
+   necessary on first agent create and harmless on subsequent runs.
+2. `scp` the new `authorized_keys` content to a private staging path on the VM, e.g.
    `/tmp/agw-ak.XXXXXX`, owned by admin and mode 0600.
-2. `sudo install -o <agent> -g <agent> -m 0600 <staging-path> /home/<agent>/.ssh/authorized_keys`.
+3. `sudo install -o <agent> -g <agent> -m 0600 <staging-path> /home/<agent>/.ssh/authorized_keys`.
    `install` does an atomic rename into place with the requested owner / group / mode, so the
    on-disk file is never momentarily readable by another uid or with the wrong mode.
-3. `sudo rm -f <staging-path>` (cleanup; `install` does not consume the source).
+4. `sudo rm -f <staging-path>` (cleanup; `install` does not consume the source).
 
 This is the only path used for the agent. There is no separate "write as the agent" path on reinit:
 one declarative process satisfies both first-time create and subsequent reinit, matching how the
@@ -137,8 +144,9 @@ _reconcile_authorized_keys(
 ### Permissions
 
 The agent's `~/.ssh/` directory is mode 0700, owned by the agent. The `authorized_keys` file is mode
-0600, owned by the agent. `install` sets both owner and mode atomically; ownership of `~/.ssh/`
-itself comes from the agent create path that established the home dir.
+0600, owned by the agent. `install -d` (step 1 above) establishes the directory with the correct
+ownership and mode on first agent create; `install` (step 3) sets the file's owner and mode
+atomically.
 
 ### Operator key rotation flow
 
@@ -150,25 +158,36 @@ operator wants to refresh all agents at once, that is convenience functionality 
 
 ## Per-agent operator SSH config
 
-`ssh_config.py` today writes one `Host` block per VM under the operator's SSH config directory
-(`Host <prefix><vm>`, e.g. `Host awvm--vm1`). This SDD adds one block per agent on top of that:
+`agentworks/ssh_config.py` already manages the operator's SSH config in a declarative,
+rebuild-from-DB style: `sync_ssh_config(config, db)` calls `_rebuild_config_dir(config, db)`, which
+iterates `db.list_vms()` and writes one `Host <prefix><vm>` block per VM (the admin alias). This SDD
+extends that loop to also emit one per-agent block per VM:
 
 ```text
+Host awvm--vm1
+  HostName <vm1-tailscale-host>
+  User <admin>
+  IdentityFile ~/.ssh/agentworks_ed25519
+
 Host awvm--vm1--claude
   HostName <vm1-tailscale-host>
   User claude
   IdentityFile ~/.ssh/agentworks_ed25519
 ```
 
-The HostName, IdentityFile, and other per-VM settings are identical to the admin entry for the same
-VM; only `User` differs. The block is written / refreshed / removed by the agent lifecycle:
+`HostName`, `IdentityFile`, and the other per-VM settings are identical to the admin entry for the
+same VM; only `User` and the alias suffix differ. The alias suffix is `--<agent.linux_user>`
+appended to whatever VM alias the operator's `ssh_host_prefix` produces (so an operator who has set
+a non-default prefix gets `<their-prefix><vm>--<agent>`).
 
-- **Agent create**: write a new block immediately after the agent is provisioned.
-- **Agent reinit**: rewrite the block in place. Same declarative path as create.
-- **Agent delete**: remove the block.
+Because the writer is declarative-rebuild-from-DB, no per-event "writer / refresher / remover"
+exists. Agent create / reinit / delete write to the DB and then call `sync_ssh_config(config, db)`
+(the same call `vms/manager.py` already makes at `create_vm` / `delete_vm` / `rekey_vm` /
+`port_forward_vm`). On each call, `_rebuild_config_dir` emits the current canonical state of all VMs
+and all their agents. There is no separate add / remove code path.
 
-Like the admin block, this is operator-machine state, not on-VM state. Touchpoint:
-`agentworks/ssh_config.py` gets a per-agent variant of its existing per-VM writer.
+This is operator-machine state, not on-VM state. The on-VM `authorized_keys` work above is the on-VM
+half of the pairing; this is the off-VM half.
 
 ## VM hardening
 
@@ -181,7 +200,8 @@ Applied at `vm create` provisioning (via `vms/initializer.*`) and re-applied at 
 proc  /proc  proc  defaults,hidepid=1  0  0
 ```
 
-Applied immediately without reboot via `mount -o remount,hidepid=1 /proc`.
+Applied immediately without reboot via `sudo mount -o remount,hidepid=1 /proc`. Admin's
+`NOPASSWD: ALL` sudoers entry covers this; remount-to-same-options is a kernel-level no-op.
 
 ### Sysctl set
 
