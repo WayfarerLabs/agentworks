@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from agentworks.config import Config
-    from agentworks.db import VMRow
+    from agentworks.db import AgentRow, VMRow
 
 
 @dataclass(frozen=True)
@@ -39,17 +39,19 @@ class SSHTarget:
     force_tty: bool = False
 
 
-def admin_exec_target(
+def _build_exec_target_for_user(
     vm: VMRow,
     config: Config,
     *,
+    user: str,
     logger: SSHLogger | None = None,
     default_timeout: int | None = None,
 ) -> ExecTarget:
-    """Build an ExecTarget for the admin user via Tailscale SSH.
+    """Build an ExecTarget that connects to the VM as the given Linux user.
 
-    On Windows, forces TTY allocation to prevent zsh from hanging on
-    non-interactive piped SSH commands.
+    Shared core of admin_exec_target and agent_exec_target. On Windows,
+    forces TTY allocation to prevent zsh from hanging on non-interactive
+    piped SSH commands.
     """
     import sys
 
@@ -57,10 +59,52 @@ def admin_exec_target(
     return ExecTarget(
         ssh=SSHTarget(
             host=vm.tailscale_host,
-            user=vm.admin_username,
+            user=user,
             identity_file=config.operator.ssh_private_key,
             force_tty=sys.platform == "win32",
         ),
+        logger=logger,
+        default_timeout=default_timeout,
+    )
+
+
+def admin_exec_target(
+    vm: VMRow,
+    config: Config,
+    *,
+    logger: SSHLogger | None = None,
+    default_timeout: int | None = None,
+) -> ExecTarget:
+    """Build an ExecTarget for the admin user via Tailscale SSH."""
+    return _build_exec_target_for_user(
+        vm,
+        config,
+        user=vm.admin_username,
+        logger=logger,
+        default_timeout=default_timeout,
+    )
+
+
+def agent_exec_target(
+    vm: VMRow,
+    config: Config,
+    agent: AgentRow,
+    *,
+    logger: SSHLogger | None = None,
+    default_timeout: int | None = None,
+) -> ExecTarget:
+    """Build an ExecTarget that connects to the VM as the agent's Linux user.
+
+    Used by agent-mode operations whose target user is the agent (session
+    creation, agent shell, etc.). The agent's authorized_keys must already
+    accept the operator's SSH key (see agentworks.vms.initializer's
+    _reconcile_authorized_keys stage-and-install path, invoked at agent
+    create / reinit).
+    """
+    return _build_exec_target_for_user(
+        vm,
+        config,
+        user=agent.linux_user,
         logger=logger,
         default_timeout=default_timeout,
     )
