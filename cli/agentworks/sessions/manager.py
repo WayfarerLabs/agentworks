@@ -683,14 +683,26 @@ def create_session(
 
             deploy_restricted_config(run_command, history_limit=config.session.history_limit)
             command = _build_session_command(template, session_name=name, workspace_name=workspace_name)
+            # Pick the SSH transport for tmux operations:
+            # - admin sessions: admin's run_command (unchanged)
+            # - agent sessions: agent's run_command (FRD R1, direct
+            #   target-user SSH). admin's `target` is still passed for
+            #   socket-root setup which requires root.
+            session_run_command: RunCommand
+            if mode == SessionMode.AGENT:
+                assert agent is not None
+                from agentworks.ssh import agent_exec_target
+
+                session_run_command = agent_exec_target(vm, config, agent).run
+            else:
+                session_run_command = run_command
             sock, pid = create_tmux_session(
                 name,
                 ws.workspace_path,
                 command,
                 linux_user,
-                run_command=run_command,
+                run_command=session_run_command,
                 target=target,
-                run_as_root=run_as_root,
                 admin_username=vm.admin_username,
                 is_admin=(mode == SessionMode.ADMIN),
             )
@@ -943,15 +955,29 @@ def restart_session(
         is_admin = session.mode == SessionMode.ADMIN.value
         linux_user = _resolve_session_linux_user(db, session, vm)
 
+        # Pick the SSH transport for the rebuild's tmux operations. Mirrors
+        # create_session above: agent sessions rebuild via agent's
+        # run_command (FRD R1, direct target-user SSH); admin sessions
+        # continue to use admin's run_command.
+        session_run_command: RunCommand
+        if not is_admin:
+            assert session.agent_name is not None
+            agent = db.get_agent(session.agent_name)
+            assert agent is not None, f"agent '{session.agent_name}' missing for session '{name}'"
+            from agentworks.ssh import agent_exec_target
+
+            session_run_command = agent_exec_target(vm, config, agent).run
+        else:
+            session_run_command = run_command
+
         try:
             new_sock, pid = create_tmux_session(
                 name,
                 ws.workspace_path,
                 command,
                 linux_user,
-                run_command=run_command,
+                run_command=session_run_command,
                 target=target,
-                run_as_root=run_as_root,
                 admin_username=vm.admin_username,
                 is_admin=is_admin,
             )
