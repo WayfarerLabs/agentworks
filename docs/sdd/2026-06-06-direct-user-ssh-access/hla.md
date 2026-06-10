@@ -90,6 +90,29 @@ today, reached via one less indirection.
 The socket-permission tweak (`chmod g+rwx <sock>`) that previously ran via admin's sudo path now
 runs as the agent (the socket's owner). Same effect, no sudo needed.
 
+## Agent create / reinit: bootstrap then self-configure
+
+`_create_agent_on_vm` splits into two phases, distinguished by which transport runs each step:
+
+1. **Bootstrap (admin)**: `useradd` / `usermod` → tmux socket infrastructure under `/var/lib/`
+   (root-owned parent) → `_reconcile_authorized_keys` via stage-and-install. This is the only admin
+   work in the flow. The final step is what makes direct agent SSH possible.
+2. **Self-configure (agent)**: every subsequent step runs over the agent's own SSH session against
+   `agent_target` — rc / profile, git config + credentials, dotfiles, user install commands, mise
+   (config + lockfile + install + prune), nerf Claude plugin, Claude marketplaces + plugins. The
+   agent owns its home, so file writes go via `agent_target.write_file` (no sudo / chown dance) and
+   source-ref fetches (dotfiles, mise lockfile) call `fetch_dir` / `fetch_file` with `agent_target`
+   so content lands at its final path with correct ownership in one step.
+
+Keeping the phases disjoint by transport minimizes the code surface that runs as root on the agent's
+behalf. The only admin writes into the agent's home are the authorized_keys bootstrap; once that's
+in place the agent self-configures for everything else. This matches FRD R1's "operations whose
+target user is the agent open SSH directly as the agent's Linux user."
+
+`reinit_agent` calls `_create_agent_on_vm` with the same args; both phases are idempotent (the
+useradd path becomes `usermod`, `_reconcile_authorized_keys` overwrites with the configured key set,
+`fetch_dir` handles existing-dest overwrite, and every `write_file` is a full replace).
+
 ## Authorized keys for agents
 
 ### What changes
