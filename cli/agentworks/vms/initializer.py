@@ -304,12 +304,23 @@ def _reconcile_authorized_keys(
     config: Config,
     home: str,
     logger: SSHLogger,
+    *,
+    owner: str | None = None,
 ) -> None:
-    """Reconcile ~/.ssh/authorized_keys with the configured key set.
+    """Reconcile <home>/.ssh/authorized_keys with the configured key set.
 
     Writes the primary ssh_public_key plus any extra_ssh_public_keys from
-    config. This is a full overwrite so that removed keys are cleaned up
-    on reinit.
+    config. Full overwrite so that removed keys are cleaned up on reinit.
+
+    When ``owner`` is None (default), writes directly via the connected SSH
+    user (admin writing to admin's home). When ``owner`` is set to a Linux
+    username different from the SSH user (e.g. an agent's username), uses
+    a stage-and-install path: ensures ``<home>/.ssh`` exists with correct
+    ownership, scp's the file content to a private staging path as the SSH
+    user, then ``sudo install``s the staged file atomically into place with
+    the requested owner / group / mode. The agent has no SSH access of its
+    own at create time, so admin's ExecTarget is the only available
+    transport.
     """
     logger.step("SSH authorized keys")
 
@@ -319,11 +330,45 @@ def _reconcile_authorized_keys(
 
     extra_count = len(keys) - 1
     label = f"1 primary + {extra_count} extra" if extra_count else "1 primary"
+    if owner is not None:
+        label = f"{label} for {owner}"
     output.detail(f"Reconciling authorized_keys ({label})...")
 
     content = AUTHORIZED_KEYS_HEADER + "\n".join(keys) + "\n"
+
+    if owner is None:
+        # Direct-write: the SSH user writes to its own home.
+        try:
+            target.write_file(f"{home}/.ssh/authorized_keys", content, mode="600")
+        except SSHError as e:
+            msg = f"authorized_keys reconciliation failed: {e}"
+            logger.warning(msg)
+            output.warn(msg)
+        return
+
+    # Stage-and-install: admin writes for a non-self uid (agent).
+    quoted_owner = shlex.quote(owner)
     try:
-        target.write_file(f"{home}/.ssh/authorized_keys", content, mode="600")
+        # Ensure <home>/.ssh exists with correct ownership/mode.
+        # `useradd -m` doesn't create .ssh (not in /etc/skel), and install -d
+        # is idempotent (creates if missing; sets owner/mode either way).
+        target.run(
+            f"install -d -o {quoted_owner} -g {quoted_owner} -m 0700 {home}/.ssh",
+            sudo=True,
+        )
+        # Stage the content in /tmp via scp as admin.
+        mktemp_result = target.run("mktemp --tmpdir agw-ak.XXXXXX")
+        staging = (getattr(mktemp_result, "stdout", "") or "").strip()
+        if not staging:
+            raise SSHError("mktemp produced empty path")
+        target.write_file(staging, content)
+        # Atomic install into place with the agent's owner/group/mode.
+        target.run(
+            f"install -o {quoted_owner} -g {quoted_owner} -m 0600 "
+            f"{shlex.quote(staging)} {home}/.ssh/authorized_keys",
+            sudo=True,
+        )
+        target.run(f"rm -f {shlex.quote(staging)}", check=False)
     except SSHError as e:
         msg = f"authorized_keys reconciliation failed: {e}"
         logger.warning(msg)

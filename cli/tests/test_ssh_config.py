@@ -211,3 +211,78 @@ def test_format_entry_no_quotes_without_spaces(tmp_path: Path) -> None:
         identity_file=Path("/home/user/.ssh/id_ed25519"),
     )
     assert '"' not in entry
+
+
+def _mock_agent(name: str, linux_user: str, vm_name: str) -> MagicMock:
+    agent = MagicMock()
+    agent.name = name
+    agent.linux_user = linux_user
+    agent.vm_name = vm_name
+    return agent
+
+
+def test_rebuild_config_dir_emits_per_agent_blocks(tmp_path: Path) -> None:
+    """Each VM with agents gets one extra Host block per agent."""
+    config, ssh_dir = _mock_config(tmp_path)
+    db = MagicMock()
+    db.list_vms.return_value = [_mock_vm("vm1", "100.64.0.1")]
+    db.list_agents.return_value = [
+        _mock_agent("claude", "claude", "vm1"),
+        _mock_agent("aider", "aider", "vm1"),
+    ]
+
+    _rebuild_config_dir(config, db)
+
+    content = (ssh_dir / "config.d" / _MANAGED_CONF).read_text()
+    # Admin block still present
+    assert "Host awvm--vm1\n" in content
+    assert "User agentworks" in content
+    # Two per-agent blocks
+    assert "Host awvm--vm1--claude\n" in content
+    assert "Host awvm--vm1--aider\n" in content
+    assert "User claude" in content
+    assert "User aider" in content
+    # All blocks share the VM's HostName
+    assert content.count("100.64.0.1") == 3
+
+
+def test_rebuild_config_dir_no_agent_blocks_when_vm_has_none(tmp_path: Path) -> None:
+    config, ssh_dir = _mock_config(tmp_path)
+    db = MagicMock()
+    db.list_vms.return_value = [_mock_vm("solo", "100.64.0.9")]
+    db.list_agents.return_value = []
+
+    _rebuild_config_dir(config, db)
+
+    content = (ssh_dir / "config.d" / _MANAGED_CONF).read_text()
+    assert "Host awvm--solo\n" in content
+    # No --<agent> suffix anywhere
+    assert "Host awvm--solo--" not in content
+
+
+def test_rebuild_config_dir_agent_blocks_per_vm(tmp_path: Path) -> None:
+    """Per-agent blocks are scoped to their VM; cross-VM aliases don't appear."""
+    config, ssh_dir = _mock_config(tmp_path)
+    db = MagicMock()
+    db.list_vms.return_value = [
+        _mock_vm("vm1", "100.64.0.1"),
+        _mock_vm("vm2", "100.64.0.2"),
+    ]
+
+    def list_agents_side_effect(*, vm_name: str) -> list[MagicMock]:
+        if vm_name == "vm1":
+            return [_mock_agent("a", "a", "vm1")]
+        if vm_name == "vm2":
+            return [_mock_agent("b", "b", "vm2")]
+        return []
+
+    db.list_agents.side_effect = list_agents_side_effect
+
+    _rebuild_config_dir(config, db)
+
+    content = (ssh_dir / "config.d" / _MANAGED_CONF).read_text()
+    assert "Host awvm--vm1--a\n" in content
+    assert "Host awvm--vm2--b\n" in content
+    # The agent named "a" is on vm1 only -- it must NOT appear under vm2
+    assert "Host awvm--vm2--a\n" not in content
+    assert "Host awvm--vm1--b\n" not in content

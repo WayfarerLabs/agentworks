@@ -182,6 +182,12 @@ def create_agent(
                 _add_to_workspace_group(vm, config, db, linux_user, ws.name, logger=None)
                 db.insert_agent_grant(name, ws.name, "explicit")
 
+        # Refresh operator SSH config so `ssh <prefix><vm>--<agent>` works.
+        # Declarative rebuild from DB state picks up the new agent row.
+        from agentworks.ssh_config import sync_ssh_config
+
+        sync_ssh_config(config, db)
+
         output.info(f"Agent '{name}' created on VM '{vm_name}' (user: {agent.linux_user})")
 
 
@@ -291,6 +297,11 @@ def delete_agent(
 
         db.delete_agent(name)
 
+        # Refresh operator SSH config so the per-agent block disappears.
+        from agentworks.ssh_config import sync_ssh_config
+
+        sync_ssh_config(config, db)
+
         output.info(f"Agent '{name}' deleted")
 
 
@@ -343,6 +354,12 @@ def reinit_agent(
                 ) from e
         finally:
             ssh_logger.close()
+
+        # Refresh operator SSH config (declarative rebuild; picks up any
+        # config changes that affect the per-agent block).
+        from agentworks.ssh_config import sync_ssh_config
+
+        sync_ssh_config(config, db)
 
         output.info(f"Agent '{name}' reinitialized")
 
@@ -749,6 +766,20 @@ def _create_agent_on_vm(
         target.run(f"useradd -m -s {shell_path} {linux_user}", sudo=True)
     else:
         target.run(f"usermod -s {shell_path} {linux_user}", sudo=True)
+
+    # Reconcile the agent's authorized_keys so direct SSH as the agent works
+    # (FRD R3). Identical call shape at create and reinit (declarative
+    # parity); the helper handles the agent's ~/.ssh creation on first run.
+    if logger is not None:
+        from agentworks.vms.initializer import _reconcile_authorized_keys
+
+        _reconcile_authorized_keys(
+            target,
+            config,
+            home=home,
+            logger=logger,
+            owner=linux_user,
+        )
 
     # Ensure the agent tmux socket infrastructure exists. Call
     # ensure_agent_socket_root first so this works on VMs that haven't

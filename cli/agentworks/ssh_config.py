@@ -108,15 +108,29 @@ def _rebuild_config_dir(config: Config, db: Database) -> None:
     for vm in db.list_vms():
         if not vm.tailscale_host:
             continue
-        alias = ssh_host_alias(vm.name, prefix)
+        vm_alias = ssh_host_alias(vm.name, prefix)
+        # Admin alias for this VM.
         blocks.append(
             _format_entry(
-                alias=alias,
+                alias=vm_alias,
                 hostname=vm.tailscale_host,
                 user=vm.admin_username,
                 identity_file=config.operator.ssh_private_key,
             )
         )
+        # Per-agent aliases on this VM. Same HostName / IdentityFile as the
+        # VM block; only User and the alias suffix differ. The alias is
+        # `<vm_alias>--<agent.linux_user>` so an operator can
+        # `ssh <prefix><vm>--<agent>` and land directly in the agent's shell.
+        for agent in db.list_agents(vm_name=vm.name):
+            blocks.append(
+                _format_entry(
+                    alias=f"{vm_alias}--{agent.linux_user}",
+                    hostname=vm.tailscale_host,
+                    user=agent.linux_user,
+                    identity_file=config.operator.ssh_private_key,
+                )
+            )
 
     conf_path = config_d / _MANAGED_CONF
     if len(blocks) > 1:

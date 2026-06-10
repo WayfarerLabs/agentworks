@@ -765,3 +765,102 @@ def test_fstab_hidepid_rewrites_when_sentinel_present_but_differs() -> None:
     # And only one sentinel line in the output (no duplication)
     assert new_content.count(HARDENING_FSTAB_SENTINEL) == 1
     assert any("install -m 0644" in cmd and HARDENING_FSTAB_PATH in cmd for cmd in target.run_log)
+
+
+# -- _reconcile_authorized_keys: owner= stage-and-install path -----------------
+
+
+def _make_reconcile_target(*, mktemp_path: str = "/tmp/agw-ak.AAAAAA") -> MagicMock:
+    """ExecTarget mock that returns a known mktemp path; logs run calls."""
+    target = MagicMock()
+    run_log: list[str] = []
+    write_log: list[tuple[str, str]] = []
+    target.run_log = run_log
+    target.write_log = write_log
+
+    def run_side_effect(cmd: str, **kwargs):  # noqa: ANN001 -- mock side_effect
+        run_log.append(cmd)
+        result = MagicMock()
+        result.returncode = 0
+        result.ok = True
+        result.stderr = ""
+        result.stdout = mktemp_path if cmd.startswith("mktemp") else ""
+        return result
+
+    target.run.side_effect = run_side_effect
+    target.write_file.side_effect = lambda path, content, **kw: write_log.append((path, content))
+    return target
+
+
+def _make_keys_config(tmp_path) -> MagicMock:
+    primary = tmp_path / "id_ed25519.pub"
+    primary.write_text("ssh-ed25519 AAAA primary-key\n")
+    config = MagicMock()
+    config.operator.ssh_public_key = primary
+    config.operator.extra_ssh_public_keys = []
+    return config
+
+
+def test_reconcile_authorized_keys_direct_write_when_owner_none(tmp_path) -> None:
+    from agentworks.vms.initializer import _reconcile_authorized_keys
+
+    target = _make_reconcile_target()
+    config = _make_keys_config(tmp_path)
+    logger = MagicMock()
+
+    _reconcile_authorized_keys(target, config, home="/home/admin", logger=logger)
+
+    # Direct write_file path -- single write, no install commands.
+    assert len(target.write_log) == 1
+    path, content = target.write_log[0]
+    assert path == "/home/admin/.ssh/authorized_keys"
+    assert "primary-key" in content
+    # No install, no mktemp, no sudo dance.
+    assert not any("install" in cmd for cmd in target.run_log)
+    assert not any(cmd.startswith("mktemp") for cmd in target.run_log)
+
+
+def test_reconcile_authorized_keys_stage_and_install_when_owner_set(tmp_path) -> None:
+    from agentworks.vms.initializer import _reconcile_authorized_keys
+
+    target = _make_reconcile_target(mktemp_path="/tmp/agw-ak.XXXXYY")
+    config = _make_keys_config(tmp_path)
+    logger = MagicMock()
+
+    _reconcile_authorized_keys(
+        target, config, home="/home/claude", logger=logger, owner="claude"
+    )
+
+    # Expected sequence:
+    # 1. install -d to ensure /home/claude/.ssh exists with owner=claude
+    # 2. mktemp to get a staging path
+    # 3. write_file(staging, content) via scp as admin
+    # 4. install (atomic rename) into /home/claude/.ssh/authorized_keys
+    # 5. rm -f staging
+    install_d_calls = [c for c in target.run_log if "install -d" in c]
+    assert len(install_d_calls) == 1
+    assert "-o claude -g claude" in install_d_calls[0]
+    assert "/home/claude/.ssh" in install_d_calls[0]
+    assert "0700" in install_d_calls[0]
+
+    mktemp_calls = [c for c in target.run_log if c.startswith("mktemp")]
+    assert len(mktemp_calls) == 1
+
+    # write_file landed at the mktemp path with the keys content
+    assert len(target.write_log) == 1
+    staging_path, content = target.write_log[0]
+    assert staging_path == "/tmp/agw-ak.XXXXYY"
+    assert "primary-key" in content
+
+    # install -o claude -g claude -m 0600 ... authorized_keys
+    install_calls = [
+        c for c in target.run_log
+        if c.startswith("install ") and "authorized_keys" in c and "0600" in c
+    ]
+    assert len(install_calls) == 1
+    assert "-o claude -g claude" in install_calls[0]
+    assert "/home/claude/.ssh/authorized_keys" in install_calls[0]
+
+    # cleanup
+    rm_calls = [c for c in target.run_log if c.startswith("rm -f") and "/tmp/agw-ak" in c]
+    assert len(rm_calls) == 1
