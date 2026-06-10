@@ -183,11 +183,11 @@ Goal: capture the rationale alongside the work.
 - [x] Updated `cli/README.md` agents section: `agent shell` / `agent exec` UX, the new direct-SSH
       alias surface (`awvm--<vm>` and `awagent--<agent>` together), and the `ssh_agent_host_prefix`
       config knob. The aliases are the most user-visible addition.
-- [~] Cross-SDD references: kept brief. The FRD's motivation already names env-and-secrets as the
-  downstream consumer; the HLA's "Interaction with other SDDs" section frames this SDD as the
-  precondition. Actual edits to the env-and-secrets SDD's HLA and the CLI-side-secret-injection ADR
-  are intentionally out of scope here -- those documents own their own framing of how they build on
-  top of this access model.
+- [x] Cross-SDD references: kept brief and unidirectional. The FRD motivation and HLA "Interaction
+      with other SDDs" section name env-and-secrets as the downstream consumer; no edits reach back
+      into the env-and-secrets SDD or the CLI-side-secret-injection ADR. Those documents own their
+      own framing of how they build on this access model. (Originally scoped to edit in both
+      directions; narrowed during implementation to keep this PR's scope tight.)
 
 Definition of done: an interested reader can follow the SDD chain start-to-finish and understand
 both the env-and-secrets and direct-target-user-SSH decisions in context.

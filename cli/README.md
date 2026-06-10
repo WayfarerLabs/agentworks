@@ -149,6 +149,9 @@ Changes to config (new packages, different install commands, etc.) are picked up
 `vm delete` requires `--force` if the VM has workspaces, agents, or sessions. The confirmation
 message shows what will be deleted. Pass `--yes` to skip the prompt.
 
+`agw vm shell` is the agentworks-wrapped entry point; for raw SSH (VS Code Remote-SSH, `scp`, etc.),
+use the `awvm--<vm>` alias documented under [Direct SSH aliases](#direct-ssh-aliases).
+
 ### Workspaces
 
 Manage workspaces on VMs.
@@ -208,7 +211,11 @@ for scripted invocations like `agw agent exec myagent -- claude -p "..."`.
 `agent delete` requires `--force` if the agent has running sessions. Pass `--yes` to skip the
 confirmation prompt.
 
-#### Direct SSH aliases
+`agw agent shell` / `agw agent exec` are agentworks-wrapped entry points; for raw SSH access to an
+agent (e.g. from VS Code Remote-SSH or `scp`), use the `awagent--<agent>` alias documented under
+[Direct SSH aliases](#direct-ssh-aliases).
+
+### Direct SSH aliases
 
 Agentworks maintains operator-side SSH config entries for both VMs and agents under
 `~/.ssh/config.d/agentworks.conf` (or inline in `~/.ssh/config` if `ssh_config_dir = false`):
@@ -455,7 +462,7 @@ Browse and inspect the built-in catalog of installable tools.
 | `agw config init`                   | Create a sample config file                  |
 | `agw config edit`                   | Open config in `$EDITOR`                     |
 | `agw config sample`                 | Print the sample config to stdout            |
-| `agw config sync-ssh-config`        | Rebuild SSH config entries for all VMs       |
+| `agw config sync-ssh-config`        | Rebuild SSH config entries for VMs + agents  |
 | `agw config sync-vscode-workspaces` | Regenerate .code-workspace files for all VMs |
 
 ## Configuration

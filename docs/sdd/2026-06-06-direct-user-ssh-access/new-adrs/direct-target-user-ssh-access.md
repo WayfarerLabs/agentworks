@@ -87,3 +87,12 @@ implementation detail).
 - Tradeoff: agent creation / reinit now has two sequential SSH transports (admin for the bootstrap,
   then agent for self-configuration). One extra connection handshake per agent operation. The cost
   is negligible against the simplification it enables.
+- Tradeoff: the operator's SSH public key is now installed in N+1 places per VM (admin's
+  `authorized_keys` plus each agent's `authorized_keys`), reconciled by agentworks on every
+  `agent reinit`. That widens the revocation surface if the operator key is ever compromised --
+  rotating it requires `vm reinit` for the admin entry on every VM AND `agent reinit` for every
+  agent. The declarative reconciliation makes the operation mechanical, but it is no longer a
+  single-place change.
+- Tradeoff: VM audit trails distribute across users. Previously every operator-driven action hit
+  `auth.log` as the admin user (with the sudo trail attached); now they appear under each agent's
+  session log. Operators who relied on the centralized view need to aggregate across per-user logs.
