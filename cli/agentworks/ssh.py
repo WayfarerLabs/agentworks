@@ -766,6 +766,37 @@ class ExecTarget:
 
         self.run(f"tar -xzf {remote_tmp} -C {remote_path} && rm -f {remote_tmp}", timeout=timeout)
 
+    def call_streaming(self, command: str) -> int:
+        """Run a remote command with stdio passthrough; return its exit code.
+
+        Used for ``agw agent exec`` / ``agw vm exec``-style invocations
+        where the operator wants the remote command's stdout / stderr to
+        stream to their terminal rather than be captured and re-printed
+        by ``run``. Non-interactive: ``BatchMode=yes`` and no TTY
+        allocation, so this is the wrong helper for tmux attach or
+        interactive shells (use ``interactive()`` for those).
+
+        Only the SSH transport is supported today; other transports
+        (lima, remote_lima, wsl2) raise ``SSHError`` if asked.
+        """
+        import subprocess as _subprocess
+
+        if self.ssh is None:
+            raise SSHError("call_streaming requires an SSH-backed ExecTarget")
+        args = ["ssh", "-T", "-o", "StrictHostKeyChecking=accept-new", "-o", "BatchMode=yes"]
+        if self.ssh.port is not None:
+            args.extend(["-p", str(self.ssh.port)])
+        if self.ssh.identity_file is not None:
+            args.extend(["-i", str(self.ssh.identity_file)])
+        if self.ssh.proxy_jump is not None:
+            args.extend(["-J", self.ssh.proxy_jump])
+        if self.ssh.user:
+            args.append(f"{self.ssh.user}@{self.ssh.host}")
+        else:
+            args.append(self.ssh.host)
+        args.append(command)
+        return _subprocess.call(args)
+
     def write_file(self, remote_path: str, content: str, *, mode: str | None = None) -> None:
         """Write string content to a remote file safely.
 

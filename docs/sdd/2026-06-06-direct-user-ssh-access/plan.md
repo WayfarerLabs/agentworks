@@ -51,17 +51,22 @@ with a known sudo / no-sudo answer per platform.
 Goal: bake the hardening into VM provisioning. Independent of any SSH/access changes; lands the
 security baseline so subsequent phases can rely on it.
 
-- [ ] `vms/initializer.py`: write `/etc/sysctl.d/99-agentworks.conf` with the sysctl set from HLA.
+- [x] `vms/initializer.py`: write `/etc/sysctl.d/99-agentworks.conf` with the sysctl set from HLA.
       Content-compare against the existing file; only write and run `sysctl --system` when content
       changed.
-- [ ] `vms/initializer.py`: add the `hidepid=1` `/proc` mount option to `/etc/fstab` using the
-      `# agentworks: hidepid` sentinel from HLA. On reapply: if the sentinel line matches exactly,
-      no-op; if the mount-options differ, rewrite the line in place. Never duplicate.
-- [ ] Live remount: `mount -o remount,hidepid=1 /proc` (naturally idempotent).
-- [ ] Apply at both `vm create` and `vm reinit`. Same code path; declarative.
-- [ ] Unit tests: fresh fstab gets the sentinel line; existing fstab with the sentinel and matching
-      options is a no-op; existing fstab with the sentinel and differing options is rewritten in
-      place. Same shape of test for the sysctl file.
+- [x] `vms/initializer.py`: ensure the `/proc` line in `/etc/fstab` has `hidepid>=1`. Implementation
+      shipped a **semantic parse-and-edit** of the existing `/proc` line rather than the
+      sentinel-line approach originally specified in HLA: find the `proc` fstype row, parse its
+      options, edit `hidepid` in place if needed, preserve admin-set `hidepid=2` (stricter than
+      default), append a `/proc` row only when none exists. Action codes returned by
+      `_ensure_proc_hidepid_in_fstab` are: `no-op`, `appended`, `added-option`, `upgraded`,
+      `preserved-stricter`, `malformed`. This change is intentional and removes the foot-gun of a
+      sentinel that admins can edit out by hand.
+- [x] Live remount: `mount -o remount,hidepid=1 /proc` (naturally idempotent).
+- [x] Apply at both `vm create` and `vm reinit`. Same code path; declarative.
+- [x] Unit tests: the fstab editor's decision tree (no-op / append / add-option / upgrade /
+      preserve-stricter / malformed) is covered in `tests/test_initializer.py`; the sysctl content
+      compare is covered in the same file.
 - [ ] Integration smoke: `vm reinit` on an existing VM applies the hardening without breaking
       running session / console state, and re-running it produces no observable side effects.
 
@@ -74,33 +79,31 @@ Goal: extend agent create / reinit / delete to manage the on-VM agent `authorize
 operator-side SSH config block. One declarative path that satisfies first-time create and subsequent
 reinit identically.
 
-- [ ] `vms/initializer.py`: extend `_reconcile_authorized_keys` with an optional `owner=` parameter.
-      When set, switch to the stage-and-install path:
-      `sudo install -d -o <owner> -g <owner> -m 0700 <home>/.ssh` to ensure the directory exists;
-      `scp` to `/tmp/agw-ak.XXXXXX`;
-      `sudo install -o <owner> -g <owner> -m 0600 <staging> <home>/.ssh/authorized_keys`;
-      `sudo rm -f <staging>`. When unset, preserve today's direct-write behavior for admin.
-- [ ] `agents/manager._create_agent_on_vm`: after the agent's Linux user exists, invoke
-      `_reconcile_authorized_keys` with the agent's home as `home=` and `owner=agent.linux_user` to
-      trigger the staging path.
-- [ ] `agents/manager.reinit_agent`: identical invocation. No special-casing for first-time vs
-      subsequent runs.
-- [ ] `agentworks/ssh_config.py:_rebuild_config_dir`: extend the `for vm in db.list_vms()` loop to
-      also emit one per-agent `Host` block per VM (alias suffix `--<agent.linux_user>` appended to
-      the existing VM alias; `User` overridden to the agent's Linux user; all other fields inherited
-      from the per-VM admin block). No new add / remove code path; the declarative rebuild handles
-      state transitions.
-- [ ] `agents/manager._create_agent_on_vm`: call `sync_ssh_config(config, db)` after the agent row
-      is written, so the per-agent block appears in the operator's SSH config.
-- [ ] `agents/manager.reinit_agent`: same call (declarative rebuild picks up any changes).
-- [ ] `agents/manager.delete_agent`: same call after the DB row removal so the rebuild drops the
-      block.
+- [x] `vms/initializer.py`: extend `_reconcile_authorized_keys` with an optional `owner=` parameter.
+      When set, switches to the stage-and-install path: `install -d` ensures `<home>/.ssh`
+      ownership/mode, `mktemp` produces a randomized staging path, `write_file` lands content with
+      `mode=0600` so it's private even before the atomic install,
+      `install -o <owner> -g <owner> -m     0600 <staging> <home>/.ssh/authorized_keys`, then
+      `rm -f <staging>` in a `try/finally` so a partial failure doesn't leak the staging file.
+      Failure on the `owner=` path raises so the caller's rollback fires; the admin direct-write
+      path (`owner=None`) keeps its historical warn-only behavior.
+- [x] `agents/manager._create_agent_on_vm`: invokes `_reconcile_authorized_keys` after the agent's
+      Linux user exists; `agent_target` is constructed right after to short-circuit any downstream
+      step that needs direct agent SSH.
+- [x] `agents/manager.reinit_agent`: identical invocation.
+- [x] `agentworks/ssh_config.py`: per-agent `Host` blocks are emitted alongside the per-VM admin
+      blocks via the same declarative rebuild path.
+- [x] `agents/manager._create_agent_on_vm`: calls `sync_ssh_config(config, db)` after the agent row
+      lands.
+- [x] `agents/manager.reinit_agent`: same call.
+- [x] `agents/manager.delete_agent`: same call after DB row removal.
 - [ ] Verify by direct SSH: after `agent create`, `ssh <prefix><vm>--<agent>` succeeds with the
-      operator's key and lands the operator in the agent's shell.
-- [ ] Tests: fresh agent has expected on-VM `authorized_keys` content and a corresponding per-agent
-      block in the operator's SSH config; reinit after editing `operator.extra_ssh_public_keys`
-      reflects the change; delete drops both the on-VM file (via `userdel --remove`'s home directory
-      removal) and the operator-side block.
+      operator's key and lands the operator in the agent's shell. (Manual UX check; deferred to
+      next-VM-roll smoke.)
+- [x] Tests: `tests/test_authorized_keys.py` covers both branches of `_reconcile_authorized_keys`
+      (admin direct-write and agent stage-and-install), including the failure-cleanup `try/finally`
+      and the owner-path-raises contract; `tests/test_ssh_config.py` covers the per-agent `Host`
+      block rebuild.
 
 Definition of done: operators can `ssh <prefix><vm>--<agent>` and land directly in the agent's
 shell. This is user-visible value as of phase-3 merge, not just plumbing for phases 5 and 6:
@@ -111,13 +114,13 @@ at this point.
 
 Goal: introduce `agent_exec_target`, leave the call sites unchanged.
 
-- [ ] `agentworks/ssh.py`: add `agent_exec_target(vm, config, agent) -> ExecTarget` that produces an
-      ExecTarget connecting as the agent's Linux user. Internally factor the shared builder under
-      both `admin_exec_target` and `agent_exec_target`.
-- [ ] `admin_exec_target` unchanged from the caller's view (continues to return ExecTarget).
-- [ ] Tests for the new helper: produces the right SSH user, identity file, proxy-jump,
-      Tailscale-host derivation; `-t` flag is set in interactive mode and not in non-interactive
-      mode; connects successfully to admin and to an agent user on a fresh VM.
+- [x] `agentworks/ssh.py`: `agent_exec_target(vm, config, agent)` plus a shared
+      `exec_target_for_user` builder factored out of `admin_exec_target` / `agent_exec_target`.
+      `exec_target_for_user` is also public (no leading underscore) so `_create_agent_on_vm` can
+      call it during create, when the agent isn't in the DB yet.
+- [x] `admin_exec_target` unchanged from the caller's view (continues to return ExecTarget).
+- [x] Tests for the helpers: `tests/test_exec_target.py` covers SSH user, identity file, proxy-jump,
+      and Tailscale-host derivation, plus the `-tt` (force-TTY) behavior on Windows operators.
 
 Definition of done: the new helper exists, is well-tested, and produces ExecTargets that connect
 successfully as admin and as agents. No call sites converted yet.
@@ -127,25 +130,24 @@ successfully as admin and as agents. No call sites converted yet.
 Goal: agent-mode session create / restart uses direct-agent SSH; the `sudo --login -u <agent>`
 prefix is removed from `sessions/tmux.py`.
 
-- [ ] `sessions/tmux.py:create_session` (agent branch): drop the `sudo --login -u <agent>` prefix;
-      the caller passes an agent-targeted `ExecTarget`.
-- [ ] `sessions/manager.py:create_session` / `restart_session`: choose `agent_exec_target(...)` when
-      the session is agent-mode, `admin_exec_target(...)` when admin-mode. Thread the appropriate
-      ExecTarget through to tmux helpers.
-- [ ] Socket chmod (`chmod g+rwx <sock>`) runs as the agent (the socket owner). Drop the `sudo` and
-      the `run_as_root` parameter on the relevant helpers.
-- [ ] `_grant_server_access` runs as the agent (granting admin access to the agent's tmux server's
-      `server-access` ACL). The function stays load-bearing for admin's existing read path into
-      agent tmux servers per FRD R1's carve-out.
-- [ ] In `_grant_server_access` itself (`sessions/tmux.py:248`), drop the inner `sudo -u <q_user>`
-      prefix on the `tmux server-access -a ...` call. The caller is now the agent, so sudo'ing to
-      the agent is redundant and confusing. Keep the function's outer shape (caller passes the
-      appropriate `ExecTarget`); only the inner sudo goes.
-- [ ] Tests: create an agent-mode session; verify the resulting tmux server runs as the agent uid;
-      admin can still attach via the existing socket / group access; restart cycles work.
+- [x] `sessions/tmux.py:create_session` (agent branch): `sudo --login -u <agent>` prefix removed;
+      caller passes an agent-targeted `ExecTarget`.
+- [x] `sessions/manager.py:create_session` / `restart_session` / `stop_session` / `delete_session`:
+      choose `agent_exec_target(...)` for agent-mode sessions (via the shared
+      `_build_session_target` helper) and `admin_exec_target(...)` for admin-mode. The probe at
+      `_assert_agent_ssh_works` runs BEFORE any destructive action (and, for `create_session`,
+      before any state mutation; for `delete_session`, before the confirm prompt).
+- [x] Socket chmod runs as the agent; `force_kill_tmux_server` gained a `use_sudo` parameter
+      defaulting to True (admin path stays unchanged; agent-SSH callers set False).
+- [x] `_grant_server_access` runs as the agent; the inner `sudo -u <q_user>` was dropped.
+- [x] Tests: `tests/test_session_transport.py` covers transport identity (agent-mode session's
+      `run_command` comes from `agent_exec_target`, not admin+sudo) plus probe-ordering
+      (`create_session` probes before state mutation; `delete_session` probes before the confirm
+      prompt). `tests/test_error_wrapper.py` covers KI rollback of group / DB state on the agent
+      path.
 - [ ] Verify against a pre-conversion session (created under the old admin+sudo pattern): attach /
       list / restart still work; restart picks up the new code path; the new tmux server is
-      structurally identical (per FRD R6).
+      structurally identical (per FRD R6). (Manual UX check; deferred to next-VM-roll smoke.)
 
 Definition of done: all new agent-mode sessions are created via direct-agent SSH. Admin's existing
 read / attach / maintenance paths into agent tmux servers continue to work unchanged (FRD R1
@@ -155,13 +157,18 @@ carve-out, R6 migration).
 
 Goal: `agent shell` SSHs as the agent directly, no sudo step.
 
-- [ ] `agents/manager.shell_agent`: replace both branches (with workspace, without) with a single
-      direct-agent SSH path via `agent_exec_target` + `interactive`. `cd <workspace>` if a workspace
-      was provided; otherwise an interactive login shell at the agent's home.
-- [ ] Tests: `agent shell` without workspace lands at the agent's home; with workspace lands at the
-      workspace path.
-- [ ] Manual UX check: shell starts cleanly, env contains agent's `$USER`/`$HOME`, no sudo-related
-      transient output.
+- [x] `agents/manager.shell_agent`: single direct-agent SSH path via `agent_exec_target` +
+      `interactive`. `cd <workspace>` if a workspace was provided; otherwise an interactive login
+      shell at the agent's home. Bonus scope landed in this phase: `agents/manager.exec_agent`
+      (non-interactive `agw agent exec`) was converted to direct agent SSH at the same time;
+      `_create_agent_on_vm` and its install/mise/plugin helpers all switched to `agent_target.run`
+      for "do work AS the agent" steps, retiring the `_run_as_agent` shim entirely.
+- [x] Tests: `tests/test_session_transport.py::test_exec_agent_uses_direct_agent_ssh` confirms
+      `exec_agent` builds its SSH argv from the agent's ExecTarget and never invokes
+      `sudo --login -u`. `_assert_agent_ssh_works` is covered for the ok / 255 / non-255 / SSHError
+      paths in `tests/test_agents.py`.
+- [ ] Manual UX check: `agent shell` and `agent exec` start cleanly, env contains agent's
+      `$USER`/`$HOME`, no sudo-related transient output. (Deferred to next-VM-roll smoke.)
 
 Definition of done: `agent shell` no longer routes through admin+sudo.
 

@@ -225,15 +225,23 @@ baseline regardless of upstream defaults drift.
 
 `vm reinit` applies the hardening identically to `vm create`. Both must converge:
 
-- **fstab edit**. Append a sentinel-tagged line on first run:
+- **fstab edit**. Implemented as a semantic parse-and-edit of the existing `/proc` line in
+  `/etc/fstab`, NOT a sentinel-line append. `_ensure_proc_hidepid_in_fstab` finds the row whose
+  fstype field is `proc`, parses its options field, and returns one of these actions along with the
+  new content and effective `hidepid` value:
 
-  ```text
-  proc  /proc  proc  defaults,hidepid=1  0  0  # agentworks: hidepid
-  ```
+  | Action               | When                                                    | Effect                                                |
+  | -------------------- | ------------------------------------------------------- | ----------------------------------------------------- |
+  | `no-op`              | line already has `hidepid` >= 1                         | nothing written                                       |
+  | `appended`           | no `/proc` row in fstab                                 | append `proc /proc proc defaults,hidepid=1 0 0`       |
+  | `added-option`       | `/proc` row exists, options lack `hidepid`              | edit options field in place to add `hidepid=1`        |
+  | `upgraded`           | `/proc` row has `hidepid=0`                             | rewrite that option to `hidepid=1`                    |
+  | `preserved-stricter` | `/proc` row has `hidepid=2` (admin opted in)            | nothing written; live-remount uses the existing value |
+  | `malformed`          | `/proc` row exists but the line failed to parse cleanly | leave fstab alone; warn; live-remount still issued    |
 
-  On subsequent runs, detect the `# agentworks: hidepid` sentinel. If the line matches exactly, do
-  nothing (idempotent no-op). If the line is present but the mount-options field differs, rewrite
-  that line in place. Never duplicate the line.
+  This shape replaced an earlier sentinel-comment approach (`# agentworks: hidepid`). The sentinel
+  was foot-gunny: admins editing the line by hand would strip the comment and the next reinit would
+  duplicate the row. The semantic editor needs no marker and respects admin-set `hidepid=2`.
 
 - **sysctl file write**. Compute the desired content; compare against the existing file content. If
   identical, no write and no reload. If different (or missing), write atomically and run

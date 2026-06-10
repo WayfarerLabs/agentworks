@@ -27,6 +27,7 @@
     "exitcode",
     "fifos",
     "frontmatter",
+    "fstype",
     "getent",
     "githubcli",
     "gruntweave",

@@ -146,3 +146,31 @@ def test_assert_agent_ssh_works_passes_through_non_transport_failures() -> None:
     # No StateError raised; the helper returns quietly. The caller is
     # responsible for handling whatever else went wrong.
     _assert_agent_ssh_works(target, agent)
+
+
+def test_assert_agent_ssh_works_wraps_ssh_error_as_connectivity() -> None:
+    """target.run raising SSHError (timeout / unreachable) re-raises as ConnectivityError.
+
+    Without this, a probe against an unreachable VM throws raw SSHError,
+    bypassing the actionable "VM unreachable" hint and confusing the
+    surface error with the pre-rollout case.
+    """
+    from unittest.mock import MagicMock
+
+    import pytest as _pt
+
+    from agentworks.agents.manager import _assert_agent_ssh_works
+    from agentworks.errors import ConnectivityError
+    from agentworks.ssh import SSHError
+
+    target = MagicMock()
+    target.run.side_effect = SSHError("timed out after 3 attempts")
+
+    agent = MagicMock()
+    agent.name = "claude"
+    agent.linux_user = "claude"
+    agent.vm_name = "alpha"
+
+    with _pt.raises(ConnectivityError) as exc_info:
+        _assert_agent_ssh_works(target, agent)
+    assert "alpha" in (exc_info.value.hint or "")

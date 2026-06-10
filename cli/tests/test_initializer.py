@@ -609,7 +609,7 @@ def _make_hardening_target(
     target.write_log = write_log
     target.run_log = run_log
 
-    from agentworks.vms.initializer import HARDENING_FSTAB_PATH, HARDENING_SYSCTL_PATH
+    from agentworks.vms.hardening import HARDENING_FSTAB_PATH, HARDENING_SYSCTL_PATH
 
     def run_side_effect(cmd, **kwargs):  # noqa: ANN001 -- mock side_effect signature
         run_log.append(cmd)
@@ -650,7 +650,7 @@ def _make_hardening_target(
 
 
 def test_sysctl_baseline_writes_when_missing() -> None:
-    from agentworks.vms.initializer import (
+    from agentworks.vms.hardening import (
         HARDENING_SYSCTL_CONTENT,
         HARDENING_SYSCTL_PATH,
         _apply_hardening_sysctl,
@@ -669,7 +669,7 @@ def test_sysctl_baseline_writes_when_missing() -> None:
 
 
 def test_sysctl_baseline_noop_when_content_matches() -> None:
-    from agentworks.vms.initializer import (
+    from agentworks.vms.hardening import (
         HARDENING_SYSCTL_CONTENT,
         HARDENING_SYSCTL_PATH,
         _apply_hardening_sysctl,
@@ -687,7 +687,7 @@ def test_sysctl_baseline_noop_when_content_matches() -> None:
 
 
 def test_sysctl_baseline_rewrites_when_content_differs() -> None:
-    from agentworks.vms.initializer import (
+    from agentworks.vms.hardening import (
         HARDENING_SYSCTL_CONTENT,
         HARDENING_SYSCTL_PATH,
         _apply_hardening_sysctl,
@@ -706,7 +706,7 @@ def test_sysctl_baseline_rewrites_when_content_differs() -> None:
 
 def test_fstab_hidepid_appends_when_no_proc_line() -> None:
     """No /proc line in fstab: append one with defaults,hidepid=1."""
-    from agentworks.vms.initializer import (
+    from agentworks.vms.hardening import (
         HARDENING_FSTAB_PATH,
         _apply_hardening_fstab,
     )
@@ -729,7 +729,7 @@ def test_fstab_hidepid_appends_when_no_proc_line() -> None:
 
 def test_fstab_hidepid_adds_option_when_proc_line_has_no_hidepid() -> None:
     """Existing /proc line with no hidepid= : append hidepid=1 to options."""
-    from agentworks.vms.initializer import (
+    from agentworks.vms.hardening import (
         HARDENING_FSTAB_PATH,
         _apply_hardening_fstab,
     )
@@ -753,7 +753,7 @@ def test_fstab_hidepid_adds_option_when_proc_line_has_no_hidepid() -> None:
 
 def test_fstab_hidepid_upgrades_0_to_1() -> None:
     """Existing /proc line with hidepid=0: upgrade to hidepid=1."""
-    from agentworks.vms.initializer import (
+    from agentworks.vms.hardening import (
         HARDENING_FSTAB_PATH,
         _apply_hardening_fstab,
     )
@@ -773,7 +773,7 @@ def test_fstab_hidepid_upgrades_0_to_1() -> None:
 
 def test_fstab_hidepid_noop_when_already_1() -> None:
     """Existing /proc line with hidepid=1: no fstab rewrite, but still remount."""
-    from agentworks.vms.initializer import (
+    from agentworks.vms.hardening import (
         HARDENING_FSTAB_PATH,
         _apply_hardening_fstab,
     )
@@ -791,7 +791,7 @@ def test_fstab_hidepid_noop_when_already_1() -> None:
 
 def test_fstab_hidepid_preserves_admin_set_hidepid_2() -> None:
     """Existing /proc line with hidepid=2 (stricter): no fstab edit, remount uses 2."""
-    from agentworks.vms.initializer import (
+    from agentworks.vms.hardening import (
         HARDENING_FSTAB_PATH,
         _apply_hardening_fstab,
     )
@@ -812,7 +812,7 @@ def test_fstab_hidepid_preserves_admin_set_hidepid_2() -> None:
 
 
 def test_ensure_proc_hidepid_appends_when_no_proc_line() -> None:
-    from agentworks.vms.initializer import _ensure_proc_hidepid_in_fstab
+    from agentworks.vms.hardening import _ensure_proc_hidepid_in_fstab
 
     content = "UUID=root  /  ext4  defaults  0  1\n"
     new, action, eff = _ensure_proc_hidepid_in_fstab(content)
@@ -822,7 +822,7 @@ def test_ensure_proc_hidepid_appends_when_no_proc_line() -> None:
 
 
 def test_ensure_proc_hidepid_added_option() -> None:
-    from agentworks.vms.initializer import _ensure_proc_hidepid_in_fstab
+    from agentworks.vms.hardening import _ensure_proc_hidepid_in_fstab
 
     content = "proc  /proc  proc  defaults  0  0\n"
     new, action, eff = _ensure_proc_hidepid_in_fstab(content)
@@ -832,7 +832,7 @@ def test_ensure_proc_hidepid_added_option() -> None:
 
 
 def test_ensure_proc_hidepid_upgraded() -> None:
-    from agentworks.vms.initializer import _ensure_proc_hidepid_in_fstab
+    from agentworks.vms.hardening import _ensure_proc_hidepid_in_fstab
 
     content = "proc  /proc  proc  defaults,hidepid=0  0  0\n"
     new, action, eff = _ensure_proc_hidepid_in_fstab(content)
@@ -843,7 +843,7 @@ def test_ensure_proc_hidepid_upgraded() -> None:
 
 
 def test_ensure_proc_hidepid_no_op() -> None:
-    from agentworks.vms.initializer import _ensure_proc_hidepid_in_fstab
+    from agentworks.vms.hardening import _ensure_proc_hidepid_in_fstab
 
     content = "proc  /proc  proc  defaults,hidepid=1  0  0\n"
     new, action, eff = _ensure_proc_hidepid_in_fstab(content)
@@ -853,7 +853,7 @@ def test_ensure_proc_hidepid_no_op() -> None:
 
 
 def test_ensure_proc_hidepid_preserves_stricter() -> None:
-    from agentworks.vms.initializer import _ensure_proc_hidepid_in_fstab
+    from agentworks.vms.hardening import _ensure_proc_hidepid_in_fstab
 
     content = "proc  /proc  proc  defaults,hidepid=2  0  0\n"
     new, action, eff = _ensure_proc_hidepid_in_fstab(content)
@@ -864,7 +864,7 @@ def test_ensure_proc_hidepid_preserves_stricter() -> None:
 
 def test_ensure_proc_hidepid_preserves_trailing_comment() -> None:
     """An existing trailing comment on the /proc line is preserved on edit."""
-    from agentworks.vms.initializer import _ensure_proc_hidepid_in_fstab
+    from agentworks.vms.hardening import _ensure_proc_hidepid_in_fstab
 
     content = "proc  /proc  proc  defaults  0  0  # custom proc note\n"
     new, action, _ = _ensure_proc_hidepid_in_fstab(content)
@@ -874,7 +874,7 @@ def test_ensure_proc_hidepid_preserves_trailing_comment() -> None:
 
 def test_ensure_proc_hidepid_malformed() -> None:
     """A /proc line without 6 fields is left untouched (caller warns)."""
-    from agentworks.vms.initializer import _ensure_proc_hidepid_in_fstab
+    from agentworks.vms.hardening import _ensure_proc_hidepid_in_fstab
 
     content = "proc  /proc  proc\n"
     new, action, eff = _ensure_proc_hidepid_in_fstab(content)

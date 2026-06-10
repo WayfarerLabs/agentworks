@@ -34,20 +34,42 @@ def _write_agent_file(
     dest: str,
     content: str,
     *,
-    mode: str | None = None,
+    mode: str = "0644",
 ) -> None:
-    """Write a file into an agent user's home via tmp + mv.
+    """Write a file into an agent user's home via stage-and-install.
 
-    scp runs as admin and can't write to the agent's home directly.
-    Logging is sourced from ``target.logger``.
+    Admin's SSH writes to a non-predictable mktemp path with 0600 perms,
+    then ``install`` atomically places it at ``dest`` owned by the agent
+    with the requested mode. This closes the cross-uid leakage window that
+    a naive ``scp + mv + chown + chmod`` sequence opens, where the staging
+    file is briefly world-readable to other agents on the VM.
+
+    ``mode`` defaults to 0644 (matching the historical chmod-only behavior
+    for callers that don't set it). Callers writing secrets pass an
+    explicit restrictive mode (e.g. ``"0600"`` for ``.git-credentials``).
     """
-    safe_name = linux_user.replace("/", "-")
-    tmp_path = f"/tmp/agentworks-{safe_name}-{dest.rsplit('/', 1)[-1]}"
-    target.write_file(tmp_path, content)
-    target.run(f"mv {tmp_path} {dest}", sudo=True)
-    target.run(f"chown {linux_user}:{linux_user} {dest}", sudo=True)
-    if mode:
-        target.run(f"chmod {mode} {dest}", sudo=True)
+    import shlex
+
+    from agentworks.ssh import SSHError
+
+    quoted_owner = shlex.quote(linux_user)
+    quoted_dest = shlex.quote(dest)
+    mktemp_result = target.run("mktemp --tmpdir agw-agentfile.XXXXXX")
+    staging = (getattr(mktemp_result, "stdout", "") or "").strip()
+    if not staging:
+        raise SSHError("mktemp produced empty path")
+    try:
+        # Restrict the staging file to admin before content lands. Combined
+        # with the mktemp randomized suffix, this prevents cross-uid reads
+        # of secret material during the placement window.
+        target.write_file(staging, content, mode="0600")
+        target.run(
+            f"install -o {quoted_owner} -g {quoted_owner} -m {shlex.quote(mode)} "
+            f"{shlex.quote(staging)} {quoted_dest}",
+            sudo=True,
+        )
+    finally:
+        target.run(f"rm -f {shlex.quote(staging)}", check=False)
 
 
 def derive_linux_user(agent_name: str) -> str:
@@ -85,10 +107,29 @@ def _assert_agent_ssh_works(target: ExecTarget, agent: AgentRow) -> None:
 
     A probe round-trip costs ~50ms over Tailscale + ControlMaster. Cheaper
     than letting the failure surface mid-operation with partial state.
-    """
-    from agentworks.ssh import SSH_TRANSPORT_ERROR
 
-    probe = target.run("true", check=False)
+    Two failure shapes are distinguished:
+
+    - Non-zero exit (SSH_TRANSPORT_ERROR = 255 typically): SSH connected
+      and ``ssh`` itself reported an auth / transport failure. Treated as
+      the pre-rollout case and raised as ``StateError`` with a reinit hint.
+    - ``SSHError`` from ``target.run`` (timeout / unreachable host /
+      ControlMaster-down): the VM itself isn't reachable. Re-raised as
+      ``ConnectivityError`` so the operator sees "VM unreachable" rather
+      than "agent needs reinit."
+    """
+    from agentworks.errors import ConnectivityError
+    from agentworks.ssh import SSH_TRANSPORT_ERROR, SSHError
+
+    try:
+        probe = target.run("true", check=False)
+    except SSHError as e:
+        raise ConnectivityError(
+            f"direct SSH probe to agent '{agent.name}' failed: {e}",
+            entity_kind="agent",
+            entity_name=agent.name,
+            hint=f"Check that VM '{agent.vm_name}' is reachable.",
+        ) from e
     if probe.ok:
         return
     # SSH transport failures (auth rejected, host unreachable, etc.) report
@@ -557,7 +598,6 @@ def exec_agent(
     return value is the remote command's exit code.
     """
     import shlex
-    import subprocess
 
     from agentworks.ssh import agent_exec_target
 
@@ -570,10 +610,7 @@ def exec_agent(
         )
 
     vm = _require_vm(db, agent.vm_name)
-
     target = agent_exec_target(vm, config, agent)
-    ssh = target.ssh
-    assert ssh is not None, "agent_exec_target returned non-SSH target"
 
     with keep_vm_active(db, config, vm):
         # Probe direct agent SSH first so pre-rollout agents (whose
@@ -584,19 +621,7 @@ def exec_agent(
         # Wrap in a login shell so the agent's PATH (mise shims,
         # ~/.local/bin, etc.) is set up. This matches the env an operator
         # gets via `agent shell`.
-        login_cmd = f"$SHELL -lc {shlex.quote(remote_cmd)}"
-
-        ssh_args = ["ssh", "-T", "-o", "StrictHostKeyChecking=accept-new", "-o", "BatchMode=yes"]
-        if ssh.port is not None:
-            ssh_args.extend(["-p", str(ssh.port)])
-        if ssh.identity_file is not None:
-            ssh_args.extend(["-i", str(ssh.identity_file)])
-        if ssh.proxy_jump is not None:
-            ssh_args.extend(["-J", ssh.proxy_jump])
-        ssh_args.append(f"{ssh.user}@{ssh.host}")
-        ssh_args.append(login_cmd)
-
-        return subprocess.call(ssh_args)
+        return target.call_streaming(f"$SHELL -lc {shlex.quote(remote_cmd)}")
 
 
 # -- VM operations ---------------------------------------------------------

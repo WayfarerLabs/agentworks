@@ -84,31 +84,45 @@ def _build_session_target(
     config: Config,
     db: Database,
     admin_target: ExecTarget,
-) -> tuple[ExecTarget, bool]:
+) -> ExecTarget:
     """Pick the SSH transport for destructive operations on a single session.
 
-    Returns ``(target, target_owns_session)``. For agent sessions, builds an
-    agent ExecTarget and probes it (raises StateError with reinit hint if
-    the agent's authorized_keys aren't provisioned -- FRD R1 / Phase 3).
-    For admin sessions, returns the admin target unchanged.
+    Returns an ExecTarget whose SSH user is the session's owning Linux user
+    (admin for admin-mode, agent for agent-mode). For agent sessions, builds
+    an agent ExecTarget and probes it -- raises StateError with a reinit
+    hint if the agent's authorized_keys aren't provisioned (FRD R1 /
+    Phase 3). For admin sessions, returns the admin target unchanged.
 
     Single-session paths use this to make kill / restart operations
     consistent with create: every destructive step on an agent session
-    goes via direct agent SSH. Batch paths keep admin's target across all
-    sessions for efficiency (FRD R1 carve-out for batch ops).
+    goes via direct agent SSH. Because the returned target always owns
+    the session it will operate on, callers can issue destructive commands
+    without sudo. Batch paths intentionally don't use this helper -- they
+    keep admin's target across all sessions and pass ``sudo=True`` to
+    reach into agent tmux servers (FRD R1 carve-out for batch ops).
     """
     if session.mode == SessionMode.ADMIN.value:
-        return admin_target, True
+        return admin_target
 
-    assert session.agent_name is not None
+    if session.agent_name is None:
+        raise NotFoundError(
+            f"session '{session.name}' is agent-mode but has no agent_name",
+            entity_kind="session",
+            entity_name=session.name,
+        )
     agent = db.get_agent(session.agent_name)
-    assert agent is not None, f"agent '{session.agent_name}' missing for session '{session.name}'"
+    if agent is None:
+        raise NotFoundError(
+            f"agent '{session.agent_name}' (referenced by session '{session.name}') not found",
+            entity_kind="agent",
+            entity_name=session.agent_name,
+        )
     from agentworks.agents.manager import _assert_agent_ssh_works
     from agentworks.ssh import agent_exec_target
 
     agent_target = agent_exec_target(vm, config, agent)
     _assert_agent_ssh_works(agent_target, agent)
-    return agent_target, True
+    return agent_target
 
 
 def _repair_session_pid(
@@ -618,6 +632,7 @@ def create_session(
 
         # Resolve mode and linux user (no side effects; safe outside the try).
         resolved_agent_name: str | None = None
+        agent_target = None
         if agent_name is not None:
             mode = SessionMode.AGENT
             agent = db.get_agent(agent_name)
@@ -636,6 +651,17 @@ def create_session(
                 )
             linux_user = agent.linux_user
             resolved_agent_name = agent_name
+
+            # Probe direct agent SSH BEFORE any state mutation (group add,
+            # DB inserts, restricted-config write). A pre-rollout agent
+            # surfaces here as an actionable StateError; without this,
+            # the rollback path would unwind the mutations but the
+            # operator's view would just see "session create failed".
+            from agentworks.agents.manager import _assert_agent_ssh_works
+            from agentworks.ssh import agent_exec_target
+
+            agent_target = agent_exec_target(vm, config, agent)
+            _assert_agent_ssh_works(agent_target, agent)
         else:
             mode = SessionMode.ADMIN
             linux_user = vm.admin_username
@@ -720,18 +746,13 @@ def create_session(
             # Pick the SSH transport for tmux operations:
             # - admin sessions: admin's run_command (unchanged)
             # - agent sessions: agent's run_command (FRD R1, direct
-            #   target-user SSH). admin's `target` is still passed for
-            #   socket-root setup which requires root.
+            #   target-user SSH). agent_target was built and probed above
+            #   so a pre-rollout agent never reaches this point. admin's
+            #   ``target`` is still passed for socket-root setup which
+            #   requires root.
             session_run_command: RunCommand
             if mode == SessionMode.AGENT:
-                assert agent is not None  # mypy: narrowed by mode check above
-                from agentworks.agents.manager import _assert_agent_ssh_works
-                from agentworks.ssh import agent_exec_target
-
-                agent_target = agent_exec_target(vm, config, agent)
-                # Surface the pre-rollout "agent has no authorized_keys" case
-                # as an actionable error before doing any tmux work.
-                _assert_agent_ssh_works(agent_target, agent)
+                assert agent_target is not None  # set in the agent_name branch above
                 session_run_command = agent_target.run
             else:
                 session_run_command = run_command
@@ -912,11 +933,13 @@ def stop_session(
         # Pick the destructive-op transport BEFORE doing anything destructive.
         # For agent sessions this also probes the agent's direct SSH so a
         # pre-rollout agent surfaces as an actionable StateError up front
-        # rather than mid-kill (FRD R1, Phase 3).
-        target, target_owns_session = _build_session_target(
+        # rather than mid-kill (FRD R1, Phase 3). _build_session_target
+        # always returns a same-uid target, so no sudo is needed for the
+        # destructive ops below.
+        target = _build_session_target(
             session, vm=vm, config=config, db=db, admin_target=admin_target
         )
-        kill_sudo = not target_owns_session
+        kill_sudo = False
 
         if status == SessionStatus.BROKEN:
             if not force:
@@ -945,8 +968,9 @@ def stop_session(
             output.info(f"Session '{name}' force-stopped")
             return
 
-        # OK -- delegate to shared stop logic
-        failed = _execute_stop([(session, target, target_owns_session)], db=db, force=force)
+        # OK -- delegate to shared stop logic. target_owns_session=True
+        # because _build_session_target returned a same-uid target.
+        failed = _execute_stop([(session, target, True)], db=db, force=force)
         if failed:
             raise ExternalError(
                 f"failed to stop session '{name}': {failed[0][1]}",
@@ -985,13 +1009,14 @@ def restart_session(
         # front rather than leaving us with a stopped session we can't
         # restart. Same transport is used for kill (above) and create
         # (below): every destructive step on an agent session goes via
-        # direct agent SSH (FRD R1, Phase 3).
+        # direct agent SSH (FRD R1, Phase 3). _build_session_target always
+        # returns a same-uid target, so no sudo is needed for kill.
         is_admin = session.mode == SessionMode.ADMIN.value
-        session_target, target_owns_session = _build_session_target(
+        session_target = _build_session_target(
             session, vm=vm, config=config, db=db, admin_target=admin_target
         )
         session_run_command: RunCommand = session_target.run
-        kill_sudo = not target_owns_session
+        kill_sudo = False
 
         # UNKNOWN is impossible here -- _ensure_pid raises on unresolvable sessions
         if status == SessionStatus.BROKEN:
@@ -1271,17 +1296,21 @@ def delete_session(
                 hint="Use --force to delete.",
             )
 
-        # Confirm before any destructive action
-        if not yes and not output.confirm(f"Delete session '{name}'?"):
-            raise UserAbort("delete cancelled")
-
-        # Pick the destructive-op transport BEFORE any destructive action.
-        # For agent sessions: build agent ExecTarget + probe (FRD R1, Phase 3).
-        session_target, target_owns_session = _build_session_target(
+        # Pick the destructive-op transport BEFORE prompting the operator.
+        # For agent sessions, ``_build_session_target`` probes direct agent
+        # SSH (FRD R1, Phase 3); a pre-rollout agent surfaces here as an
+        # actionable error rather than after the operator has already
+        # confirmed the delete. The helper returns a same-uid target, so
+        # no sudo is needed for the destructive ops below.
+        session_target = _build_session_target(
             session, vm=vm, config=config, db=db, admin_target=admin_target
         )
         session_run_command: RunCommand = session_target.run
-        kill_sudo = not target_owns_session
+        kill_sudo = False
+
+        # Confirm before any destructive action
+        if not yes and not output.confirm(f"Delete session '{name}'?"):
+            raise UserAbort("delete cancelled")
 
         # Now kill if needed
         if status == SessionStatus.OK:
