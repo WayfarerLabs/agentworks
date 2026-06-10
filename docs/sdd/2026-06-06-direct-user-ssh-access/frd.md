@@ -236,21 +236,27 @@ pick up _their_ new behavior. That is a concern of those SDDs, not this one.
 
 Agentworks already maintains operator-side SSH config entries for each VM (typically
 `Host awvm--<vm>` under the operator's `~/.ssh/config.d/` directory, derived from
-`operator.ssh_host_prefix`). This SDD extends that to per-agent entries so the operator can
-`ssh awvm--<vm>--<agent>` to land directly in the agent's shell, and so tooling such as VS Code
+`operator.ssh_host_prefix`). This SDD adds parallel per-agent entries so the operator can
+`ssh awagent--<agent>` to land directly in the agent's shell, and so tooling such as VS Code
 Remote-SSH can target agents explicitly.
+
+The agent alias intentionally does NOT embed the VM name. Agents belong to exactly one VM (the
+`vm_name` FK on the agents table) and `agents.name` is the PRIMARY KEY, so the operator-facing
+handle is globally unique without VM disambiguation. The Linux user (`agt-<name>` for new agents,
+`agt--<name>` for legacy) is an implementation detail the alias deliberately hides. A separate
+`operator.ssh_agent_host_prefix` config field (default `awagent--`) controls this prefix
+independently from `ssh_host_prefix` so the two kinds of aliases are visibly distinct.
 
 Lifecycle (mirrors admin entries):
 
-- **Agent create**: write a `Host awvm--<vm>--<agent>` entry. HostName derives from the VM's
-  Tailscale host (same as the admin entry); `User` is the agent's Linux user; `IdentityFile`
-  inherited from the operator config.
+- **Agent create**: write a `Host awagent--<agent>` entry. HostName derives from the agent's home
+  VM's Tailscale host; `User` is the agent's Linux user; `IdentityFile` inherited from the operator
+  config.
 - **Agent reinit**: refresh the entry. Picks up any changes to host or identity paths.
 - **Agent delete**: remove the entry.
 
 This is a single declarative process: the same code path satisfies first-time create and subsequent
-reinit. The host-prefix shape (`awvm--<vm>--<agent>`) is reserved here so that future naming choices
-for per-agent entries remain compatible.
+reinit.
 
 ## Non-goals
 

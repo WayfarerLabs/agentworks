@@ -53,6 +53,19 @@ def ssh_host_alias(vm_name: str, prefix: str = "awvm--") -> str:
     return f"{prefix}{vm_name}"
 
 
+def ssh_agent_alias(agent_name: str, prefix: str = "awagent--") -> str:
+    """Return the SSH host alias for an agent.
+
+    Keyed on the operator-facing ``agent.name`` rather than on the
+    underlying Linux user, since the Linux-user shape (``agt-<name>``,
+    legacy ``agt--<name>``, etc.) is an implementation detail operators
+    shouldn't have to remember. Globally unique because ``agents.name``
+    is the primary key on the agents table; the VM the agent lives on is
+    looked up by SSH config via the per-agent block's ``HostName``.
+    """
+    return f"{prefix}{agent_name}"
+
+
 def sync_ssh_config(config: Config, db: Database) -> None:
     """Rebuild SSH config from current DB state."""
     if config.operator.ssh_config_dir:
@@ -71,6 +84,7 @@ def _legacy_rebuild(config: Config, db: Database) -> None:
     ssh_config = config.operator.ssh_config
     user_section, _old_entries = _read_managed(ssh_config)
     prefix = config.operator.ssh_host_prefix
+    agent_prefix = config.operator.ssh_agent_host_prefix
 
     entries: dict[str, str] = {}
     for vm in db.list_vms():
@@ -85,7 +99,7 @@ def _legacy_rebuild(config: Config, db: Database) -> None:
         )
         # Per-agent aliases on this VM (parity with _rebuild_config_dir).
         for agent in db.list_agents(vm_name=vm.name):
-            agent_alias = f"{vm_alias}--{agent.linux_user}"
+            agent_alias = ssh_agent_alias(agent.name, agent_prefix)
             entries[agent_alias] = _format_entry(
                 alias=agent_alias,
                 hostname=vm.tailscale_host,
@@ -109,6 +123,7 @@ def _rebuild_config_dir(config: Config, db: Database) -> None:
     config_d = ssh_config.parent / _CONFIG_DIR_NAME
     config_d.mkdir(parents=True, exist_ok=True)
     prefix = config.operator.ssh_host_prefix
+    agent_prefix = config.operator.ssh_agent_host_prefix
 
     # Ensure Include directive at top of ssh_config
     _ensure_include(ssh_config)
@@ -132,13 +147,14 @@ def _rebuild_config_dir(config: Config, db: Database) -> None:
             )
         )
         # Per-agent aliases on this VM. Same HostName / IdentityFile as the
-        # VM block; only User and the alias suffix differ. The alias is
-        # `<vm_alias>--<agent.linux_user>` so an operator can
-        # `ssh <prefix><vm>--<agent>` and land directly in the agent's shell.
+        # VM block; only User and the alias differ. The alias is a
+        # top-level ``<agent_prefix><agent.name>`` (not nested under the
+        # VM alias) because agents belong to exactly one VM and the
+        # operator-facing handle is the agent name, not the Linux user.
         for agent in db.list_agents(vm_name=vm.name):
             blocks.append(
                 _format_entry(
-                    alias=f"{vm_alias}--{agent.linux_user}",
+                    alias=ssh_agent_alias(agent.name, agent_prefix),
                     hostname=vm.tailscale_host,
                     user=agent.linux_user,
                     identity_file=config.operator.ssh_private_key,

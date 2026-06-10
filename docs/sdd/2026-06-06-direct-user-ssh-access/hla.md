@@ -160,8 +160,9 @@ operator wants to refresh all agents at once, that is convenience functionality 
 
 `agentworks/ssh_config.py` already manages the operator's SSH config in a declarative,
 rebuild-from-DB style: `sync_ssh_config(config, db)` calls `_rebuild_config_dir(config, db)`, which
-iterates `db.list_vms()` and writes one `Host <prefix><vm>` block per VM (the admin alias). This SDD
-extends that loop to also emit one per-agent block per VM:
+iterates `db.list_vms()` and writes one `Host <vm_prefix><vm>` block per VM (the admin alias). This
+SDD extends that loop to also emit one per-agent block, keyed on the operator-facing agent name and
+distinguished from VM blocks by its own prefix:
 
 ```text
 Host awvm--vm1
@@ -169,16 +170,20 @@ Host awvm--vm1
   User <admin>
   IdentityFile ~/.ssh/agentworks_ed25519
 
-Host awvm--vm1--claude
+Host awagent--claude
   HostName <vm1-tailscale-host>
-  User claude
+  User agt-claude
   IdentityFile ~/.ssh/agentworks_ed25519
 ```
 
-`HostName`, `IdentityFile`, and the other per-VM settings are identical to the admin entry for the
-same VM; only `User` and the alias suffix differ. The alias suffix is `--<agent.linux_user>`
-appended to whatever VM alias the operator's `ssh_host_prefix` produces (so an operator who has set
-a non-default prefix gets `<their-prefix><vm>--<agent>`).
+`HostName`, `IdentityFile`, and the other per-VM settings of the agent block match the agent's home
+VM. The `User` is the on-VM Linux user (an implementation detail the alias deliberately hides). The
+alias itself is `<agent_prefix><agent.name>`, controlled by `operator.ssh_agent_host_prefix`
+(default `awagent--`). The shape uses the operator-facing agent name rather than the Linux user
+because the Linux user (`agt-<name>`, legacy `agt--<name>`, etc.) is not something operators are
+expected to remember, and because `agents.name` is the PRIMARY KEY on the agents table so the
+top-level alias is unambiguous without embedding the VM name (every agent belongs to exactly one
+VM).
 
 Because the writer is declarative-rebuild-from-DB, no per-event "writer / refresher / remover"
 exists. Agent create / reinit / delete write to the DB and then call `sync_ssh_config(config, db)`

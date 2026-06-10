@@ -97,18 +97,18 @@ reinit identically.
       lands.
 - [x] `agents/manager.reinit_agent`: same call.
 - [x] `agents/manager.delete_agent`: same call after DB row removal.
-- [ ] Verify by direct SSH: after `agent create`, `ssh <prefix><vm>--<agent>` succeeds with the
-      operator's key and lands the operator in the agent's shell. (Manual UX check; deferred to
-      next-VM-roll smoke.)
+- [ ] Verify by direct SSH: after `agent create`, `ssh <agent_prefix><agent>` (default
+      `awagent--<agent>`) succeeds with the operator's key and lands the operator in the agent's
+      shell. (Manual UX check; deferred to next-VM-roll smoke.)
 - [x] Tests: `tests/test_authorized_keys.py` covers both branches of `_reconcile_authorized_keys`
       (admin direct-write and agent stage-and-install), including the failure-cleanup `try/finally`
       and the owner-path-raises contract; `tests/test_ssh_config.py` covers the per-agent `Host`
       block rebuild.
 
-Definition of done: operators can `ssh <prefix><vm>--<agent>` and land directly in the agent's
-shell. This is user-visible value as of phase-3 merge, not just plumbing for phases 5 and 6:
-anything that targets SSH aliases (VS Code Remote-SSH, ad-hoc scp, manual ssh) gains agent targeting
-at this point.
+Definition of done: operators can `ssh <agent_prefix><agent>` (default `awagent--<agent>`) and land
+directly in the agent's shell. This is user-visible value as of phase-3 merge, not just plumbing for
+phases 5 and 6: anything that targets SSH aliases (VS Code Remote-SSH, ad-hoc scp, manual ssh) gains
+agent targeting at this point.
 
 ## Phase 4: Target-user SSH plumbing in code
 
@@ -181,7 +181,7 @@ Goal: capture the rationale alongside the work.
       SDD merges.
 - [ ] Update `cli/README.md` if any operator-facing surface changes (`agent shell` UX, the new
       per-agent SSH aliases). The aliases are the most user-visible addition; document the
-      `awvm--<vm>--<agent>` shape.
+      `awagent--<agent>` shape (and the parallel `awvm--<vm>` shape it deliberately mirrors).
 - [ ] Update the env-and-secrets SDD's HLA and CLI-side-secret-injection ADR to reference this SDD's
       three-mode framing and assume direct target-user SSH as the access model. **Merge order**:
       this SDD is the precondition and is expected to merge first; if env-and-secrets somehow lands

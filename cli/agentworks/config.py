@@ -96,6 +96,7 @@ class OperatorConfig:
     ssh_config: Path = field(default_factory=lambda: Path.home() / ".ssh" / "config")
     ssh_config_dir: bool = True
     ssh_host_prefix: str = "awvm--"
+    ssh_agent_host_prefix: str = "awagent--"
     extra_ssh_public_keys: list[Path] = field(default_factory=list)
 
 
@@ -343,6 +344,7 @@ _OPERATOR_KEYS = {
     "ssh_config",
     "ssh_config_dir",
     "ssh_host_prefix",
+    "ssh_agent_host_prefix",
     "extra_ssh_public_keys",
 }
 
@@ -390,12 +392,20 @@ def _load_operator(data: dict[str, object], issues: list[str]) -> OperatorConfig
             f"or dots (no whitespace or special characters), got: {host_prefix!r}"
         )
 
+    agent_host_prefix = str(raw.get("ssh_agent_host_prefix", "awagent--"))
+    if not SSH_HOST_PREFIX_RE.match(agent_host_prefix):
+        raise ConfigError(
+            f"{section_name}.ssh_agent_host_prefix must be alphanumeric with hyphens, underscores, "
+            f"or dots (no whitespace or special characters), got: {agent_host_prefix!r}"
+        )
+
     return OperatorConfig(
         ssh_public_key=pub,
         ssh_private_key=priv,
         ssh_config=ssh_config,
         ssh_config_dir=bool(raw.get("ssh_config_dir", True)),
         ssh_host_prefix=host_prefix,
+        ssh_agent_host_prefix=agent_host_prefix,
         extra_ssh_public_keys=extra_keys,
     )
 
