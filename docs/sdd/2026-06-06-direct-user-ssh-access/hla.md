@@ -19,32 +19,29 @@ Existing tmux socket / `server-access` infrastructure for cross-user attach is u
 
 ## Access mode plumbing
 
-### Target-user SSH target builder
+### Target-user `ExecTarget` builders
 
-A small extension to the existing SSH target machinery in `agentworks.ssh`:
+A small extension to the existing SSH target machinery in `agentworks.ssh`. The existing
+`admin_exec_target(vm, config)` stays; a parallel `agent_exec_target(vm, config, agent)` is added:
 
 ```python
-def ssh_target_for_user(
-    vm: VMRow,
-    config: Config,
-    *,
-    user: str,  # admin username or agent linux_user
-    interactive: bool = False,
-) -> SSHTarget:
-    """Build an SSH target that connects to the VM as the given Linux user."""
-    ...
+def admin_exec_target(vm: VMRow, config: Config) -> ExecTarget:
+    """ExecTarget that connects to the VM as the admin user (existing)."""
+
+def agent_exec_target(vm: VMRow, config: Config, agent: AgentRow) -> ExecTarget:
+    """ExecTarget that connects to the VM as the agent's Linux user (new)."""
 ```
 
-- `user` chooses the SSH user. Admin operations pass `vm.admin_username`; agent operations pass
-  `agent.linux_user`.
-- `interactive=True` flips to the `-t` form (used by Mode 2 surfaces). Default is non-interactive
-  (Modes 1 and 3, plus all `target.run(...)` plumbing).
-- All other options (identity file, proxy jump, Tailscale host) are derived as today.
+Both return `ExecTarget`, so downstream code is identical regardless of which builder produced it.
+Internally they share a private builder that takes a Linux username plus the interactive /
+non-interactive choice and threads it through the existing identity / proxy-jump / Tailscale-host
+derivation; the exact shape of that helper is an LLD concern.
 
-The existing `admin_exec_target(vm, config)` becomes a thin wrapper that calls
-`ssh_target_for_user(vm, config, user=vm.admin_username)`. A parallel
-`agent_exec_target(vm, config, agent)` calls it with the agent's user. Call sites pick one or the
-other; both produce the same `ExecTarget` type, so downstream code is identical.
+Call sites pick the builder that matches the operation's subject:
+
+- Admin operations and all admin paths into agent state (per FRD R1's carve-out):
+  `admin_exec_target`.
+- New agent-mode session create / restart and `agent shell`: `agent_exec_target`.
 
 ### Mode 1: provisioning (admin only)
 
@@ -95,38 +92,83 @@ runs as the agent (the socket's owner). Same effect, no sudo needed.
 
 ### What changes
 
-`vms/initializer._reconcile_authorized_keys` already accepts a `home` parameter and is otherwise
-user-agnostic. The change is to invoke it from agent-side flows:
+`vms/initializer._reconcile_authorized_keys` writes admin's `~/.ssh/authorized_keys` today via
+`target.write_file(..., mode="600")`, which goes through `scp` as the connected SSH user. That works
+fine for admin (admin writes to their own home), but it does not work for agents: admin cannot `scp`
+into `/home/<agent>/.ssh/authorized_keys` because `scp` runs as the SSH user (admin) and the agent
+home is mode 0700 owned by the agent. The existing helper needs a small extension to support writing
+to a non-self path.
+
+#### Mechanism: stage and install
+
+For agent users, the write is a two-step staging path that runs over admin's existing `ExecTarget`:
+
+1. `scp` the new `authorized_keys` content to a private staging path on the VM, e.g.
+   `/tmp/agw-ak.XXXXXX`, owned by admin and mode 0600.
+2. `sudo install -o <agent> -g <agent> -m 0600 <staging-path> /home/<agent>/.ssh/authorized_keys`.
+   `install` does an atomic rename into place with the requested owner / group / mode, so the
+   on-disk file is never momentarily readable by another uid or with the wrong mode.
+3. `sudo rm -f <staging-path>` (cleanup; `install` does not consume the source).
+
+This is the only path used for the agent. There is no separate "write as the agent" path on reinit:
+one declarative process satisfies both first-time create and subsequent reinit, matching how the
+rest of agentworks treats configuration. The admin user retains its existing direct-write flow (no
+staging needed, since admin writes to its own home).
+
+The extension to `_reconcile_authorized_keys` is small: add an optional `owner` argument (defaults
+to "the connected SSH user," preserving today's behavior); when set, switch to the stage-and-install
+path. The exact signature is an LLD concern.
+
+#### Invocation points
 
 ```python
-# agents/manager._create_agent_on_vm (new step, after user creation)
+# agents/manager._create_agent_on_vm (new step, after user / home creation)
 _reconcile_authorized_keys(
-    target,  # admin's ExecTarget; admin writes into the agent's home via sudo
+    target,                          # admin's ExecTarget
     config,
     home=f"/home/{agent.linux_user}",
+    owner=agent.linux_user,          # triggers the staging path
     logger=ssh_logger,
 )
 
-# agents/manager.reinit_agent (new step)
-# same call as above
+# agents/manager.reinit_agent (new step): identical call
 ```
-
-Writing into the agent's home is done by admin via sudo'd write, because the agent does not yet have
-SSH access at create time. Subsequent reinit can either continue using admin's sudo path (same as
-today's admin-keys reconciliation) or switch to writing as the agent once SSH is established.
-Admin-via-sudo is simpler and consistent with how every other agent-side artifact gets written
-today.
 
 ### Permissions
 
 The agent's `~/.ssh/` directory is mode 0700, owned by the agent. The `authorized_keys` file is mode
-0600, owned by the agent. `_reconcile_authorized_keys`'s `target.write_file(..., mode="600")` call
-handles the mode; ownership comes from the create path that established the home dir.
+0600, owned by the agent. `install` sets both owner and mode atomically; ownership of `~/.ssh/`
+itself comes from the agent create path that established the home dir.
 
 ### Operator key rotation flow
 
-`vm reinit` flows that re-sync admin's keys today get an additive operation: walk all agents on the
-VM and re-sync each. This is a small loop in `vm reinit`'s post-init pass.
+Per FRD R3: operator updates `operator.ssh_public_key` and / or `operator.extra_ssh_public_keys` in
+config, then runs `agent reinit <name>` for each agent that should pick up the change. `vm reinit`
+continues to handle admin only; agents are an independent lifecycle (mirroring workspaces). If an
+operator wants to refresh all agents at once, that is convenience functionality on top of
+`agent reinit` and out of scope here.
+
+## Per-agent operator SSH config
+
+`ssh_config.py` today writes one `Host` block per VM under the operator's SSH config directory
+(`Host <prefix><vm>`, e.g. `Host awvm--vm1`). This SDD adds one block per agent on top of that:
+
+```text
+Host awvm--vm1--claude
+  HostName <vm1-tailscale-host>
+  User claude
+  IdentityFile ~/.ssh/agentworks_ed25519
+```
+
+The HostName, IdentityFile, and other per-VM settings are identical to the admin entry for the same
+VM; only `User` differs. The block is written / refreshed / removed by the agent lifecycle:
+
+- **Agent create**: write a new block immediately after the agent is provisioned.
+- **Agent reinit**: rewrite the block in place. Same declarative path as create.
+- **Agent delete**: remove the block.
+
+Like the admin block, this is operator-machine state, not on-VM state. Touchpoint:
+`agentworks/ssh_config.py` gets a per-agent variant of its existing per-VM writer.
 
 ## VM hardening
 
@@ -159,6 +201,29 @@ kernel.unprivileged_bpf_disabled = 1
 Most are likely defaults on a recent Debian; the file makes the contract explicit and guarantees the
 baseline regardless of upstream defaults drift.
 
+### Idempotency
+
+`vm reinit` applies the hardening identically to `vm create`. Both must converge:
+
+- **fstab edit**. Append a sentinel-tagged line on first run:
+
+  ```text
+  proc  /proc  proc  defaults,hidepid=1  0  0  # agentworks: hidepid
+  ```
+
+  On subsequent runs, detect the `# agentworks: hidepid` sentinel. If the line matches exactly, do
+  nothing (idempotent no-op). If the line is present but the mount-options field differs, rewrite
+  that line in place. Never duplicate the line.
+
+- **sysctl file write**. Compute the desired content; compare against the existing file content. If
+  identical, no write and no reload. If different (or missing), write atomically and run
+  `sysctl --system`.
+
+- **Live remount**. `mount -o remount,hidepid=1 /proc` is naturally idempotent (remount to the same
+  options is a no-op).
+
+This keeps `vm reinit` quiet on a steady-state VM and observable when hardening actually drifts.
+
 ### Compatibility with existing pid checks
 
 Per FRD R5, the four call sites doing `test -d /proc/<pid>` are expected to continue working
@@ -185,16 +250,19 @@ No active migration is needed:
 
 ## Touch points by file
 
-| File                                                        | Change                                                  |
-| ----------------------------------------------------------- | ------------------------------------------------------- |
-| `agentworks/ssh.py`                                         | `ssh_target_for_user(...)` helper; `agent_exec_target`  |
-| `agentworks/agents/manager.py:_create_agent_on_vm`          | Call `_reconcile_authorized_keys` for agent's home      |
-| `agentworks/agents/manager.py:reinit_agent`                 | Same (picks up key rotation)                            |
-| `agentworks/agents/manager.py:shell_agent`                  | Drop sudo branch; use `agent_exec_target` + interactive |
-| `agentworks/sessions/tmux.py:create_session` (agent branch) | Drop `sudo --login -u <agent>` prefix                   |
-| `agentworks/sessions/manager.py`                            | Pass agent identity through to tmux create where needed |
-| `agentworks/vms/manager.py:reinit_vm`                       | Walk agents; reconcile their authorized_keys            |
-| `agentworks/vms/initializer.py`                             | `hidepid=1` fstab entry; sysctl.d file; apply on reinit |
+| File                                                                             | Change                                                                                                                         |
+| -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `agentworks/ssh.py`                                                              | New `agent_exec_target(vm, config, agent)`; shared internal builder under both wrappers                                        |
+| `agentworks/ssh_config.py`                                                       | Per-agent SSH config block writer / refresher / remover (mirrors admin block)                                                  |
+| `agentworks/vms/initializer.py`                                                  | Extend `_reconcile_authorized_keys` with `owner=` (stage-and-install path); hidepid=1 fstab; sysctl.d file; idempotent reapply |
+| `agentworks/agents/manager.py:_create_agent_on_vm`                               | Call `_reconcile_authorized_keys` with `owner=agent.linux_user`; write operator SSH config block                               |
+| `agentworks/agents/manager.py:reinit_agent`                                      | Same path as create (declarative parity)                                                                                       |
+| `agentworks/agents/manager.py:delete_agent`                                      | Remove operator SSH config block                                                                                               |
+| `agentworks/agents/manager.py:shell_agent`                                       | Drop sudo branch; use `agent_exec_target` + interactive                                                                        |
+| `agentworks/sessions/tmux.py:create_session` (agent branch)                      | Drop `sudo --login -u <agent>` prefix; agent runs tmux as itself                                                               |
+| `agentworks/sessions/manager.py`                                                 | Pass agent identity through to tmux create where needed                                                                        |
+| `agentworks/sessions/manager.py:_pid_alive`, batch status compound               | Verified, no change (admin's pid check works cross-uid under hidepid=1; see R5)                                                |
+| `agentworks/sessions/tmux.py:force_kill_tmux_server` (two `test -d /proc/<pid>`) | Verified, no change (same)                                                                                                     |
 
 The set of files touched is small. Each change is local and reviewable on its own.
 

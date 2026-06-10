@@ -79,21 +79,46 @@ tighter baseline.
 
 ### R1: Direct target-user SSH for agent operations
 
-Operations whose target user is an agent open SSH directly as the agent's Linux user, rather than
-SSH'ing as admin and `sudo --login -u <agent>`. Concretely:
+Operations whose subject is the agent (the work is being done _as_ the agent's Linux uid) open SSH
+directly as the agent's Linux user, over Tailscale, rather than SSH'ing as admin and
+`sudo --login -u <agent>`. Concretely:
 
 - Agent-mode session creation (`sessions/tmux.create_session`, agent path) replaces
   `ssh admin@vm "sudo --login -u <agent> tmux ..."` with `ssh <agent>@vm "tmux ..."`.
+- Agent-mode session restart follows the same pattern: the rebuilt tmux server is spawned over a
+  direct agent SSH session.
 - `agent shell` replaces `ssh admin@vm + sudo su --login <agent>` with `ssh -t <agent>@vm`.
-- Any future site that performs work as the agent follows the same pattern.
+- Any future site whose subject is the agent follows the same pattern.
 
-Operations whose target user is admin continue to SSH as admin. The choice of target user is
-explicit at the call site and derived from the operation's nature.
+The choice of target user is explicit at each call site and derived from the operation's subject.
+All new agent SSH connections, like all existing admin SSH connections, go over Tailscale.
 
-The existing socket / group / `server-access` ACL infrastructure for cross-user tmux attach
-(established by the 2026-04-10 agent-tmux-sockets SDD) is preserved unchanged. Admin retains its
-existing ability to attach to agent-owned tmux servers via group permissions. This SDD changes _who
-opens the SSH connection for what kind of operation_, not the on-VM socket model.
+#### Out of scope: admin operations that read or maintain agent state
+
+Many operations are admin operations even though they read or affect agent-owned tmux servers. These
+continue to SSH as admin and continue to use the existing socket / group permissions /
+`server-access` ACL path established by the 2026-04-10 agent-tmux-sockets SDD. They are explicitly
+out of scope for the direct-target-user-SSH flip:
+
+- **`session list`** and other batch reads. A single `tmux has-session` compound across all sessions
+  on a VM in one SSH call (admin) is materially faster than fanning out one SSH per (VM, agent).
+  Keep as-is.
+- **`session attach`** and any other tmux-attach surface (`console attach`, etc.): admin attaches to
+  an existing tmux server through group permissions on the socket. Unchanged.
+- **`force_kill_tmux_server`** against an agent's tmux pid: admin via sudo. Unchanged.
+- **All console operations** (`console create`, `console add-session`, `console add-shell`,
+  `console attach`, `console restore-session`, and the rest). The console is admin-owned and is the
+  only mechanism in agentworks for mixing multi-agent and admin windows in a single tmux server.
+  `console add-session` references an agent-owned tmux session, but the console- management action
+  itself is performed as admin against admin's tmux server.
+- **All provisioning operations** and `vm shell` / `workspace shell`. Already admin today;
+  unchanged.
+
+The infrastructure that supports admin's cross-uid reach (group-shared sockets,
+`_grant_server_access`, the tmux `server-access` ACL) is preserved unchanged and remains
+load-bearing for the operations above. This SDD flips the _write_ path for agent operations; the
+existing infrastructure remains the _read_, _attach_, and _maintenance_ path for admin operations
+that touch agent state.
 
 ### R2: Three access modes as the codified pattern
 
@@ -140,7 +165,14 @@ manual edits are overwritten.
 ### R4: VM hardening at provisioning
 
 VMs are provisioned with the following hardening, applied at `vm create` and re-applied on
-`vm reinit`:
+`vm reinit`. The hardening composes with the access cleanup: direct target-user SSH narrows the uid
+that sees secret material on the wire, and `hidepid=1` then closes the cross-uid argv leak that
+would otherwise expose that material to any user on the VM. Together they move the baseline from
+"permissive process visibility under admin+sudo" to "tight per-uid isolation under direct
+target-user SSH."
+
+`vm reinit` re-application is idempotent: the second run is a no-op unless the hardening file
+contents have changed. HLA spells out the recipe.
 
 #### R4a: `/proc` mounted with `hidepid=1`
 
@@ -199,16 +231,39 @@ No data migration, no compat shim, no operator action required.
 Future SDDs that build on this one (e.g. env-and-secrets) may require restart for old sessions to
 pick up _their_ new behavior. That is a concern of those SDDs, not this one.
 
+### R7: Operator-side SSH config entries for agents
+
+Agentworks already maintains operator-side SSH config entries for each VM (typically
+`Host awvm--<vm>` under the operator's `~/.ssh/config.d/` directory, derived from
+`operator.ssh_host_prefix`). This SDD extends that to per-agent entries so the operator can
+`ssh awvm--<vm>--<agent>` to land directly in the agent's shell, and so tooling such as VS Code
+Remote-SSH can target agents explicitly.
+
+Lifecycle (mirrors admin entries):
+
+- **Agent create**: write a `Host awvm--<vm>--<agent>` entry. HostName derives from the VM's
+  Tailscale host (same as the admin entry); `User` is the agent's Linux user; `IdentityFile`
+  inherited from the operator config.
+- **Agent reinit**: refresh the entry. Picks up any changes to host or identity paths.
+- **Agent delete**: remove the entry.
+
+This is a single declarative process: the same code path satisfies first-time create and subsequent
+reinit. The host-prefix shape (`awvm--<vm>--<agent>`) is reserved here so that future naming choices
+for per-agent entries remain compatible.
+
 ## Non-goals
 
 - **Env variable propagation of any kind.** This SDD is the prerequisite for the env-and-secrets SDD
   and is ultimately motivated by it, but it does not specify any env-related behavior itself.
   Establishing standard `AGENTWORKS_*` identity vars, exposing user-defined env, propagating secrets
   over the SSH transport: all owned by env-and-secrets, not here.
-- **Removing the agent-tmux-sockets infrastructure.** The group-shared sockets + `server-access` ACL
-  model from the 2026-04-10 SDD continues to provide admin's access path for batch read operations
-  and attaches. Direct target-user SSH is the _write_ path for agent operations; cross-user socket
-  access remains the _read_ path.
+- **Admin operations that touch agent state.** Admin's existing read / attach / maintenance paths
+  into agent-owned tmux servers (via the 2026-04-10 SDD's group permissions and `server-access` ACL)
+  remain unchanged. This SDD flips only the _write_ path for agent operations. See R1 for the full
+  list of admin operations that stay on the existing mechanism.
+- **Removing the agent-tmux-sockets infrastructure.** Per the above, the group-shared sockets +
+  `server-access` ACL model from the 2026-04-10 SDD continues to provide admin's access path for
+  batch read operations and attaches and remains load-bearing.
 - **Sunsetting `vm console` / `workspace console`.** These legacy single-console entry points are
   worth eventually replacing with the named-console infrastructure, but that is a separate cleanup.
   Out of scope here.
