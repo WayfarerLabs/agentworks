@@ -176,16 +176,18 @@ Definition of done: `agent shell` no longer routes through admin+sudo.
 
 Goal: capture the rationale alongside the work.
 
-- [ ] ADR draft in `docs/sdd/2026-06-06-direct-user-ssh-access/new-adrs/` covering the access model
-      decision and the VM hardening choices. Will be numbered and moved to `docs/adrs/` when this
-      SDD merges.
-- [ ] Update `cli/README.md` if any operator-facing surface changes (`agent shell` UX, the new
-      per-agent SSH aliases). The aliases are the most user-visible addition; document the
-      `awagent--<agent>` shape (and the parallel `awvm--<vm>` shape it deliberately mirrors).
-- [ ] Update the env-and-secrets SDD's HLA and CLI-side-secret-injection ADR to reference this SDD's
-      three-mode framing and assume direct target-user SSH as the access model. **Merge order**:
-      this SDD is the precondition and is expected to merge first; if env-and-secrets somehow lands
-      first, defer these cross-SDD edits to a separate PR rather than blocking either SDD.
+- [x] ADR drafts in `docs/sdd/2026-06-06-direct-user-ssh-access/new-adrs/` covering the access model
+      decision and the VM hardening choices. Two drafts: `direct-target-user-ssh-access.md` and
+      `vm-hardening-at-provisioning.md`. Will be numbered and moved to `docs/adrs/` when this SDD
+      merges.
+- [x] Updated `cli/README.md` agents section: `agent shell` / `agent exec` UX, the new direct-SSH
+      alias surface (`awvm--<vm>` and `awagent--<agent>` together), and the `ssh_agent_host_prefix`
+      config knob. The aliases are the most user-visible addition.
+- [~] Cross-SDD references: kept brief. The FRD's motivation already names env-and-secrets as the
+  downstream consumer; the HLA's "Interaction with other SDDs" section frames this SDD as the
+  precondition. Actual edits to the env-and-secrets SDD's HLA and the CLI-side-secret-injection ADR
+  are intentionally out of scope here -- those documents own their own framing of how they build on
+  top of this access model.
 
 Definition of done: an interested reader can follow the SDD chain start-to-finish and understand
 both the env-and-secrets and direct-target-user-SSH decisions in context.
