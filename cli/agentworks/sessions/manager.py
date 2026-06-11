@@ -89,15 +89,15 @@ def _build_session_target(
 
     Returns an ExecTarget whose SSH user is the session's owning Linux user
     (admin for admin-mode, agent for agent-mode). For agent sessions, builds
-    an agent ExecTarget and probes it -- raises StateError with a reinit
-    hint if the agent's authorized_keys aren't provisioned (FRD R1 /
-    Phase 3). For admin sessions, returns the admin target unchanged.
+    an agent ExecTarget and probes it; raises StateError with a reinit hint
+    if the agent's authorized_keys aren't provisioned (FRD R1 / Phase 3).
+    For admin sessions, returns the admin target unchanged.
 
     Single-session paths use this to make kill / restart operations
     consistent with create: every destructive step on an agent session
     goes via direct agent SSH. Because the returned target always owns
     the session it will operate on, callers can issue destructive commands
-    without sudo. Batch paths intentionally don't use this helper -- they
+    without sudo. Batch paths intentionally don't use this helper; they
     keep admin's target across all sessions and pass ``sudo=True`` to
     reach into agent tmux servers (FRD R1 carve-out for batch ops).
     """
@@ -968,7 +968,7 @@ def stop_session(
             output.info(f"Session '{name}' force-stopped")
             return
 
-        # OK -- delegate to shared stop logic. target_owns_session=True
+        # OK: delegate to shared stop logic. target_owns_session=True
         # because _build_session_target returned a same-uid target.
         failed = _execute_stop([(session, target, True)], db=db, force=force)
         if failed:

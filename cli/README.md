@@ -205,8 +205,8 @@ Manage agents (isolated Linux users) on VMs. Agents are VM-scoped and access wor
 `agent shell` and `agent exec` both SSH directly as the agent's Linux user. `agent shell` opens an
 interactive login shell (sources the agent's profile; pass `--workspace <ws>` to `cd` into a granted
 workspace first). `agent exec` runs a single command non-interactively but still wraps it in the
-agent's login shell so the agent's `PATH` (mise shims, `~/.local/bin`, etc.) is in scope -- useful
-for scripted invocations like `agw agent exec myagent -- claude -p "..."`.
+agent's login shell so the agent's `PATH` (mise shims, `~/.local/bin`, etc.) is in scope. Useful for
+scripted invocations like `agw agent exec myagent -- claude -p "..."`.
 
 `agent delete` requires `--force` if the agent has running sessions. Pass `--yes` to skip the
 confirmation prompt.

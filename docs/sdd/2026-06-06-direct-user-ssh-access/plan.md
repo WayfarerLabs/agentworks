@@ -15,8 +15,8 @@ Per-platform verification. On each provisioned VM:
 1. Remount `/proc` with `hidepid=1`: `sudo mount -o remount,hidepid=1 /proc`.
 2. Identify a process owned by a different Linux user than the one running the check.
 3. Run the cross-uid pid-check pair:
-   - `test -d /proc/<other-pid>` -- expected exit 0 (directory still visible).
-   - `cat /proc/<other-pid>/cmdline >/dev/null` -- expected non-zero (permission denied).
+   - `test -d /proc/<other-pid>` (expect exit 0, directory still visible).
+   - `cat /proc/<other-pid>/cmdline >/dev/null` (expect non-zero, permission denied).
 4. Revert: `sudo mount -o remount,hidepid=0 /proc`.
 
 The cross-uid framing is what matters: same-uid reads always succeed regardless of `hidepid`, so
@@ -26,10 +26,10 @@ agent) exercise the same kernel permission code path; one direction is enough pe
 
 Platforms to verify:
 
-- [x] **lima** -- 2026-06-10. Debian 12 bookworm, kernel `6.1.0-49-arm64`. Cross-uid agent -> admin:
+- [x] **lima** (2026-06-10): Debian 12 bookworm, kernel `6.1.0-49-arm64`. Cross-uid agent to admin:
       `test -d` returned 0, `cat .../cmdline` returned 1. Result: works as expected.
 - [ ] **azure**
-- [ ] **wsl2** -- the Microsoft-patched kernel is the most likely platform to deviate from vanilla
+- [ ] **wsl2**: the Microsoft-patched kernel is the most likely platform to deviate from vanilla
       procfs semantics. Worth verifying explicitly even if other platforms pass.
 - [ ] **proxmox**
 

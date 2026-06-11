@@ -9,10 +9,10 @@ merges).
 
 ## Context
 
-Agentworks runs commands on VMs as multiple Linux users -- admin for provisioning and admin-side
-maintenance, agents for sessions, shells, and ad-hoc execution. The original access model used a
-single SSH transport: connect as admin, then `sudo --login -u <agent>` whenever the actual subject
-was an agent.
+Agentworks runs commands on VMs as multiple Linux users: admin for provisioning and admin-side
+maintenance, plus an agent user for each agent's sessions, shells, and ad-hoc execution. The
+original access model used a single SSH transport: connect as admin, then `sudo --login -u <agent>`
+whenever the actual subject was an agent.
 
 That detour caused a slow accumulation of friction:
 
@@ -36,11 +36,11 @@ stays in scope only for steps that fundamentally need root or that the agent can
 
 The model has three access modes:
 
-1. **Provisioning script** -- admin only. Cloud-init, apt, package install, sysctl, fstab.
-2. **Interactive shell** -- admin or agent. `vm shell`, `agent shell`. Opens a TTY login shell
+1. **Provisioning script**: admin only. Cloud-init, apt, package install, sysctl, fstab.
+2. **Interactive shell**: admin or agent. `vm shell`, `agent shell`. Opens a TTY login shell
    directly as the requested user.
-3. **Tmux session creation** -- admin or agent. Agent-mode session creation, restart, kill, and
-   delete all run over the agent's own SSH session. Admin-mode sessions run over admin's.
+3. **Tmux session creation**: admin or agent. Agent-mode session creation, restart, kill, and delete
+   all run over the agent's own SSH session. Admin-mode sessions run over admin's.
 
 A small carve-out keeps admin-side paths where they make sense (FRD R1):
 
@@ -89,8 +89,8 @@ implementation detail).
   is negligible against the simplification it enables.
 - Tradeoff: the operator's SSH public key is now installed in N+1 places per VM (admin's
   `authorized_keys` plus each agent's `authorized_keys`), reconciled by agentworks on every
-  `agent reinit`. That widens the revocation surface if the operator key is ever compromised --
-  rotating it requires `vm reinit` for the admin entry on every VM AND `agent reinit` for every
+  `agent reinit`. That widens the revocation surface if the operator key is ever compromised;
+  rotating it requires `vm reinit` for the admin entry on every VM and `agent reinit` for every
   agent. The declarative reconciliation makes the operation mechanical, but it is no longer a
   single-place change.
 - Tradeoff: VM audit trails distribute across users. Previously every operator-driven action hit

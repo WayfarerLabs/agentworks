@@ -760,7 +760,7 @@ def _create_agent_on_vm(
 ) -> None:
     """Create an agent Linux user on a VM and configure their environment.
 
-    Workspace group membership is NOT set here -- it is managed by the
+    Workspace group membership is NOT set here; it is managed by the
     grant system. This function only creates the user and configures
     their tools.
 
@@ -772,10 +772,10 @@ def _create_agent_on_vm(
        SSH possible from this point onward. This is the only admin work
        in agent create / reinit.
     2. **Self-configure (agent)**: every subsequent step runs over the
-       agent's own SSH session against ``agent_target`` -- rc / profile,
-       git config + credentials, dotfiles, install commands, mise, claude
-       plugins. The agent owns its home, so no sudo or cross-uid file
-       writes are needed in this phase.
+       agent's own SSH session against ``agent_target``. Covers rc /
+       profile, git config + credentials, dotfiles, install commands,
+       mise, claude plugins. The agent owns its home, so no sudo or
+       cross-uid file writes are needed in this phase.
 
     Keeping these two phases disjoint by transport (admin_target vs.
     agent_target) minimizes the code surface that runs as root on the
@@ -812,8 +812,8 @@ def _create_agent_on_vm(
     # parent; admin is the only transport that can create it).
     # ensure_agent_socket_root first so this works on VMs that haven't
     # been reinited since the socket feature was added. The per-agent
-    # dir won't exist for a brand-new agent -- suppress the "missing"
-    # warning; misconfiguration of an existing dir still warns.
+    # dir won't exist for a brand-new agent, so we suppress the
+    # "missing" warning; misconfiguration of an existing dir still warns.
     ensure_agent_socket_root(admin_target, vm.admin_username)
     ensure_agent_socket_dir(admin_target, linux_user, warn_if_missing=False)
     removed = cleanup_stale_sockets(admin_target, linux_user)
@@ -1044,7 +1044,7 @@ def _run_agent_install_commands(
 
     Runs entirely over agent SSH (FRD R1). The agent owns its home, so
     the PATH-additions profile is written via ``agent_target.write_file``
-    directly -- no sudo / chown dance.
+    directly, with no sudo / chown dance.
     """
     command_names = config.agent.user_install_commands
     if not command_names:

@@ -6,13 +6,13 @@ provisioning orchestration and the hardening rules self-contained
 of the direct-target-user-SSH SDD.
 
 Public surface:
-- ``apply_vm_hardening(target, logger)`` -- the top-level entry point
+- ``apply_vm_hardening(target, logger)``: the top-level entry point
   invoked by ``_phase_b_setup``. Idempotent; non-fatal on failure
   (warns + continues to match the rest of phase B).
-- ``_apply_hardening_sysctl`` / ``_apply_hardening_fstab`` -- each
+- ``_apply_hardening_sysctl`` / ``_apply_hardening_fstab``: each
   hardening step in isolation, kept exposed (with an underscore prefix)
   so unit tests can exercise them without standing up the full phase.
-- ``_ensure_proc_hidepid_in_fstab`` -- the pure parse-and-edit core of
+- ``_ensure_proc_hidepid_in_fstab``: the pure parse-and-edit core of
   the fstab decision; no I/O, exhaustively unit-tested.
 """
 
@@ -68,12 +68,12 @@ def _ensure_proc_hidepid_in_fstab(content: str) -> tuple[str, str, int]:
     Returns ``(new_content, action, effective_hidepid)``.
 
     Actions:
-    - ``"no-op"`` -- existing /proc has hidepid=1 already; content unchanged.
-    - ``"appended"`` -- no /proc line in fstab; appended a new one.
-    - ``"added-option"`` -- existing /proc line; appended hidepid=1 to options.
-    - ``"upgraded"`` -- existing /proc line had hidepid=0; upgraded to 1.
-    - ``"preserved-stricter"`` -- existing /proc has hidepid>=2; content unchanged.
-    - ``"malformed"`` -- found a /proc line that doesn't split cleanly into the
+    - ``"no-op"``: existing /proc has hidepid=1 already; content unchanged.
+    - ``"appended"``: no /proc line in fstab; appended a new one.
+    - ``"added-option"``: existing /proc line; appended hidepid=1 to options.
+    - ``"upgraded"``: existing /proc line had hidepid=0; upgraded to 1.
+    - ``"preserved-stricter"``: existing /proc has hidepid>=2; content unchanged.
+    - ``"malformed"``: found a /proc line that doesn't split cleanly into the
       six expected fstab fields; content unchanged, caller should warn.
 
     ``effective_hidepid`` is the value /proc should be mounted with after
@@ -225,7 +225,7 @@ def _apply_hardening_fstab(target: ExecTarget, logger: SSHLogger) -> None:
         # Already exactly what we want; nothing to log.
         pass
     else:
-        # action in {"appended", "added-option", "upgraded"} -- write the file.
+        # action in {"appended", "added-option", "upgraded"}: write the file.
         action_msg = {
             "appended": "Added /proc entry to /etc/fstab.",
             "added-option": "Added hidepid=1 to /proc options in /etc/fstab.",

@@ -26,9 +26,9 @@ VM init applies two hardening steps, both at `vm create` and at every `vm reinit
 
 1. Mount `/proc` with `hidepid=1`. Restricts the contents of `/proc/<pid>/` (cmdline, environ,
    status, etc.) to processes owned by the same uid or root. Crucially, **directory entries remain
-   visible cross-uid** -- `test -d /proc/<pid>` and other "does this pid still exist" checks
-   continue to work for any uid. This is the difference between `hidepid=1` (restrict file contents)
-   and `hidepid=2` (also hide pid existence).
+   visible cross-uid**: `test -d /proc/<pid>` and other "does this pid still exist" checks continue
+   to work for any uid. This is the difference between `hidepid=1` (restrict file contents) and
+   `hidepid=2` (also hide pid existence).
 2. Write `/etc/sysctl.d/99-agentworks.conf` with a baseline set: `kernel.dmesg_restrict=1`,
    `kernel.kptr_restrict=1`, `kernel.yama.ptrace_scope=1`, `fs.protected_*` family,
    `kernel.unprivileged_bpf_disabled=1`. Each closes a class of cross-uid surface that has no place
