@@ -1,11 +1,10 @@
-# N. Direct target-user SSH as the access model
+# 11. Direct target-user SSH as the access model
 
 Date: 2026-06-10
 
 ## Status
 
-Draft (will be numbered and moved to `docs/adrs/` when SDD `2026-06-06-direct-user-ssh-access`
-merges).
+Accepted
 
 ## Context
 

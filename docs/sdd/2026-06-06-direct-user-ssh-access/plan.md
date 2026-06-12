@@ -1,6 +1,6 @@
 # Direct target-user SSH access: plan
 
-**Status:** Draft **Repo:** `agentworks`
+**Status:** Locked **Repo:** `agentworks`
 
 The plan is phased. Each phase ends at a green CI and a usable intermediate state. The hidepid
 verification is phase 1 because everything downstream assumes its result.
@@ -176,9 +176,9 @@ Definition of done: `agent shell` no longer routes through admin+sudo.
 
 Goal: capture the rationale alongside the work.
 
-- [x] ADR drafts in `docs/sdd/2026-06-06-direct-user-ssh-access/new-adrs/` covering the access model
-      decision and the VM hardening choices. Two drafts: `direct-target-user-ssh-access.md` and
-      `vm-hardening-at-init.md`. Will be numbered and moved to `docs/adrs/` when this SDD merges.
+- [x] ADRs covering the access model decision and the VM hardening choices, accepted into
+      `docs/adrs/` at SDD lock: `0011-direct-target-user-ssh-access.md` and
+      `0012-vm-hardening-at-init.md`.
 - [x] Updated `cli/README.md` agents section: `agent shell` / `agent exec` UX, the new direct-SSH
       alias surface (`awvm--<vm>` and `awagent--<agent>` together), and the `ssh_agent_host_prefix`
       config knob. The aliases are the most user-visible addition.

@@ -1,6 +1,6 @@
 # Direct target-user SSH access: HLA
 
-**Status:** Draft **Repo:** `agentworks` **Path:** `cli/agentworks/`
+**Status:** Locked **Repo:** `agentworks` **Path:** `cli/agentworks/`
 
 ## Overview
 

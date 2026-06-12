@@ -1,11 +1,10 @@
-# N. VM hardening at init (hidepid=1 + sysctl baseline)
+# 12. VM hardening at init (hidepid=1 + sysctl baseline)
 
 Date: 2026-06-10
 
 ## Status
 
-Draft (will be numbered and moved to `docs/adrs/` when SDD `2026-06-06-direct-user-ssh-access`
-merges).
+Accepted
 
 ## Context
 
