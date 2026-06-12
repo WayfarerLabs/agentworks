@@ -28,10 +28,11 @@ Platforms to verify:
 
 - [x] **lima** (2026-06-10): Debian 12 bookworm, kernel `6.1.0-49-arm64`. Cross-uid agent to admin:
       `test -d` returned 0, `cat .../cmdline` returned 1. Result: works as expected.
-- [ ] **azure**
-- [ ] **wsl2**: the Microsoft-patched kernel is the most likely platform to deviate from vanilla
-      procfs semantics. Worth verifying explicitly even if other platforms pass.
-- [ ] **proxmox**
+- [x] **azure** (2026-06-12): verified, works as expected.
+- [x] **wsl2** (2026-06-12): verified, works as expected. The Microsoft-patched kernel was the
+      most-likely deviation candidate but matches mainline procfs semantics here.
+- [ ] **proxmox**: not currently testable in operator's environment. Will be verified
+      opportunistically.
 
 **Decision point** (per-platform):
 

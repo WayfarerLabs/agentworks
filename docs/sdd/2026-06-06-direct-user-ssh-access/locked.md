@@ -33,11 +33,11 @@ a dated entry.
 
 ## Deferred at lock
 
-- **Per-platform hidepid verification** (plan Phase 1). Lima verified 2026-06-10. Azure and WSL2
-  verification planned in operator's environment; proxmox not currently testable. If any platform
-  deviates from the lima result, the four pid-check call sites in `sessions/manager.py` and
-  `sessions/tmux.py` route through sudo for that platform; design accommodates this without code
-  shape changes.
+- **Per-platform hidepid verification** (plan Phase 1). Lima verified 2026-06-10; Azure and WSL2
+  verified 2026-06-12. Proxmox not currently testable in operator's environment; will be verified
+  opportunistically. If proxmox ever deviates from the three verified platforms, the four pid-check
+  call sites in `sessions/manager.py` and `sessions/tmux.py` route through sudo for that platform;
+  design accommodates this without code shape changes.
 - **Manual UX smokes** (plan Phases 2 / 3 / 5 / 6). `vm reinit` on a live VM, raw
   `ssh awagent--<agent>` landing in the agent's shell, pre-conversion session restart picking up the
   new code path, `agent shell` and `agent exec` clean env. Happen naturally during ongoing use; if
