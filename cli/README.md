@@ -149,6 +149,9 @@ Changes to config (new packages, different install commands, etc.) are picked up
 `vm delete` requires `--force` if the VM has workspaces, agents, or sessions. The confirmation
 message shows what will be deleted. Pass `--yes` to skip the prompt.
 
+`agw vm shell` is the agentworks-wrapped entry point; for raw SSH (VS Code Remote-SSH, `scp`, etc.),
+use the `awvm--<vm>` alias documented under [Direct SSH aliases](#direct-ssh-aliases).
+
 ### Workspaces
 
 Manage workspaces on VMs.
@@ -182,24 +185,54 @@ during deletion. Pass `--yes` to skip the confirmation prompt.
 
 Manage agents (isolated Linux users) on VMs. Agents are VM-scoped and access workspaces via grants.
 
-| Command                                      | Description                    |
-| -------------------------------------------- | ------------------------------ |
-| `agw agent create <name> [--vm]`             | Create an agent on a VM        |
-| `agw agent list [--vm <vm>]`                 | List agents                    |
-| `agw agent describe <name>`                  | Show agent details and grants  |
-| `agw agent reinit <name>`                    | Re-run agent setup             |
-| `agw agent grant-workspaces <name> <ws>...`  | Grant workspace access         |
-| `agw agent grant-workspaces <name> --all`    | Grant access to all workspaces |
-| `agw agent revoke-workspaces <name> <ws>...` | Revoke workspace access        |
-| `agw agent revoke-workspaces <name> --all`   | Revoke all explicit grants     |
-| `agw agent shell <name> [--workspace <ws>]`  | Shell into an agent            |
-| `agw agent delete <name>`                    | Delete an agent                |
+| Command                                      | Description                              |
+| -------------------------------------------- | ---------------------------------------- |
+| `agw agent create <name> [--vm]`             | Create an agent on a VM                  |
+| `agw agent list [--vm <vm>]`                 | List agents                              |
+| `agw agent describe <name>`                  | Show agent details and grants            |
+| `agw agent reinit <name>`                    | Re-run agent setup                       |
+| `agw agent grant-workspaces <name> <ws>...`  | Grant workspace access                   |
+| `agw agent grant-workspaces <name> --all`    | Grant access to all workspaces           |
+| `agw agent revoke-workspaces <name> <ws>...` | Revoke workspace access                  |
+| `agw agent revoke-workspaces <name> --all`   | Revoke all explicit grants               |
+| `agw agent shell <name> [--workspace <ws>]`  | Open an interactive shell as the agent   |
+| `agw agent exec <name> -- <cmd...>`          | Run a one-shot command non-interactively |
+| `agw agent delete <name>`                    | Delete an agent                          |
 
 `agent create <name>` takes the agent name as a required positional. Optional flags: `--vm`,
 `--template`, and `--grant-all-workspaces`.
 
+`agent shell` and `agent exec` both SSH directly as the agent's Linux user. `agent shell` opens an
+interactive login shell (sources the agent's profile; pass `--workspace <ws>` to `cd` into a granted
+workspace first). `agent exec` runs a single command non-interactively but still wraps it in the
+agent's login shell so the agent's `PATH` (mise shims, `~/.local/bin`, etc.) is in scope. Useful for
+scripted invocations like `agw agent exec myagent -- claude -p "..."`.
+
 `agent delete` requires `--force` if the agent has running sessions. Pass `--yes` to skip the
 confirmation prompt.
+
+`agw agent shell` / `agw agent exec` are agentworks-wrapped entry points; for raw SSH access to an
+agent (e.g. from VS Code Remote-SSH or `scp`), use the `awagent--<agent>` alias documented under
+[Direct SSH aliases](#direct-ssh-aliases).
+
+### Direct SSH aliases
+
+Agentworks maintains operator-side SSH config entries for both VMs and agents under
+`~/.ssh/config.d/agentworks.conf` (or inline in `~/.ssh/config` if `ssh_config_dir = false`):
+
+| Alias shape        | Lands you as           | Use cases                                         |
+| ------------------ | ---------------------- | ------------------------------------------------- |
+| `awvm--<vm>`       | The VM's admin user    | `ssh awvm--myvm`, `scp file awvm--myvm:~/`        |
+| `awagent--<agent>` | The agent's Linux user | `ssh awagent--claude`, VS Code Remote-SSH targets |
+
+The agent alias is keyed on the agent's operator-facing name (the same name you use in
+`agw agent ...` commands), not on the on-VM Linux user (which is an implementation detail). The
+prefixes are configurable via `operator.ssh_host_prefix` (default `awvm--`) and
+`operator.ssh_agent_host_prefix` (default `awagent--`).
+
+Entries are rebuilt declaratively from the database on every agent / VM lifecycle operation, so a
+fresh `agw agent create` or `agw vm delete` keeps the file in sync without manual intervention. Run
+`agw config sync-ssh-config` to force a rebuild.
 
 ### Sessions
 
@@ -429,7 +462,7 @@ Browse and inspect the built-in catalog of installable tools.
 | `agw config init`                   | Create a sample config file                  |
 | `agw config edit`                   | Open config in `$EDITOR`                     |
 | `agw config sample`                 | Print the sample config to stdout            |
-| `agw config sync-ssh-config`        | Rebuild SSH config entries for all VMs       |
+| `agw config sync-ssh-config`        | Rebuild SSH config entries for VMs + agents  |
 | `agw config sync-vscode-workspaces` | Regenerate .code-workspace files for all VMs |
 
 ## Configuration

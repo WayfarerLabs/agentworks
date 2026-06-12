@@ -589,3 +589,394 @@ def test_install_claude_plugins_noop_when_empty() -> None:
 
     install_claude_plugins(fake_run, marketplaces=[], plugins=[])
     assert not called
+
+
+# -- VM hardening tests --------------------------------------------------------
+
+
+def _make_hardening_target(
+    *,
+    sysctl_content: str | None = None,
+    fstab_content: str | None = None,
+) -> MagicMock:
+    """ExecTarget mock parameterized by what `cat /etc/sysctl.d/...` and `cat /etc/fstab` return.
+
+    `sysctl_content=None` simulates a missing file (cat exits non-zero).
+    """
+    target = MagicMock()
+    write_log: list[tuple[str, str]] = []
+    run_log: list[str] = []
+    target.write_log = write_log
+    target.run_log = run_log
+
+    from agentworks.vms.hardening import HARDENING_FSTAB_PATH, HARDENING_SYSCTL_PATH
+
+    def run_side_effect(cmd, **kwargs):  # noqa: ANN001 -- mock side_effect signature
+        run_log.append(cmd)
+        result = MagicMock()
+        if cmd == f"cat {HARDENING_SYSCTL_PATH}":
+            if sysctl_content is None:
+                result.returncode = 1
+                result.ok = False
+                result.stdout = ""
+            else:
+                result.returncode = 0
+                result.ok = True
+                result.stdout = sysctl_content
+        elif cmd == f"cat {HARDENING_FSTAB_PATH}":
+            if fstab_content is None:
+                result.returncode = 1
+                result.ok = False
+                result.stdout = ""
+            else:
+                result.returncode = 0
+                result.ok = True
+                result.stdout = fstab_content
+        elif cmd.startswith("mktemp"):
+            result.returncode = 0
+            result.ok = True
+            # Return a deterministic staging path so tests can assert against it.
+            result.stdout = "/tmp/agw-fstab.AAAAAA" if "fstab" in cmd else "/tmp/agw-sysctl.AAAAAA"
+        else:
+            result.returncode = 0
+            result.ok = True
+            result.stdout = ""
+        result.stderr = ""
+        return result
+
+    target.run.side_effect = run_side_effect
+    target.write_file.side_effect = lambda path, content, **kw: write_log.append((path, content))
+    return target
+
+
+def test_sysctl_baseline_writes_when_missing() -> None:
+    from agentworks.vms.hardening import (
+        HARDENING_SYSCTL_CONTENT,
+        HARDENING_SYSCTL_PATH,
+        _apply_hardening_sysctl,
+    )
+
+    target = _make_hardening_target(sysctl_content=None)
+    logger = MagicMock()
+
+    _apply_hardening_sysctl(target, logger)
+
+    # write_file was called with the canonical content
+    assert any(content == HARDENING_SYSCTL_CONTENT for _, content in target.write_log)
+    # install -m 0644 and sysctl --system were run
+    assert any("install -m 0644" in cmd and HARDENING_SYSCTL_PATH in cmd for cmd in target.run_log)
+    assert any(cmd == "sysctl --system" for cmd in target.run_log)
+
+
+def test_sysctl_baseline_noop_when_content_matches() -> None:
+    from agentworks.vms.hardening import (
+        HARDENING_SYSCTL_CONTENT,
+        HARDENING_SYSCTL_PATH,
+        _apply_hardening_sysctl,
+    )
+
+    target = _make_hardening_target(sysctl_content=HARDENING_SYSCTL_CONTENT)
+    logger = MagicMock()
+
+    _apply_hardening_sysctl(target, logger)
+
+    # No write, no install, no sysctl reload
+    assert target.write_log == []
+    assert not any("install -m 0644" in cmd and HARDENING_SYSCTL_PATH in cmd for cmd in target.run_log)
+    assert not any(cmd == "sysctl --system" for cmd in target.run_log)
+
+
+def test_sysctl_baseline_rewrites_when_content_differs() -> None:
+    from agentworks.vms.hardening import (
+        HARDENING_SYSCTL_CONTENT,
+        HARDENING_SYSCTL_PATH,
+        _apply_hardening_sysctl,
+    )
+
+    target = _make_hardening_target(sysctl_content="# old content\n")
+    logger = MagicMock()
+
+    _apply_hardening_sysctl(target, logger)
+
+    # Writes the canonical content and reloads
+    assert any(content == HARDENING_SYSCTL_CONTENT for _, content in target.write_log)
+    assert any("install -m 0644" in cmd and HARDENING_SYSCTL_PATH in cmd for cmd in target.run_log)
+    assert any(cmd == "sysctl --system" for cmd in target.run_log)
+
+
+def test_fstab_hidepid_appends_when_no_proc_line() -> None:
+    """No /proc line in fstab: append one with defaults,hidepid=1."""
+    from agentworks.vms.hardening import (
+        HARDENING_FSTAB_PATH,
+        _apply_hardening_fstab,
+    )
+
+    fstab_in = "# fstab\nUUID=root  /  ext4  defaults  0  1\n"
+    target = _make_hardening_target(fstab_content=fstab_in)
+    logger = MagicMock()
+
+    _apply_hardening_fstab(target, logger)
+
+    assert len(target.write_log) == 1
+    _, new_content = target.write_log[0]
+    # New /proc line ends up in the file with hidepid=1.
+    assert "proc" in new_content and "hidepid=1" in new_content
+    # Original lines preserved.
+    assert "UUID=root  /  ext4  defaults  0  1" in new_content
+    assert any("install -m 0644" in cmd and HARDENING_FSTAB_PATH in cmd for cmd in target.run_log)
+    assert any(cmd == "mount -o remount,hidepid=1 /proc" for cmd in target.run_log)
+
+
+def test_fstab_hidepid_adds_option_when_proc_line_has_no_hidepid() -> None:
+    """Existing /proc line with no hidepid= : append hidepid=1 to options."""
+    from agentworks.vms.hardening import (
+        HARDENING_FSTAB_PATH,
+        _apply_hardening_fstab,
+    )
+
+    fstab_in = "# fstab\nproc  /proc  proc  defaults  0  0\n"
+    target = _make_hardening_target(fstab_content=fstab_in)
+    logger = MagicMock()
+
+    _apply_hardening_fstab(target, logger)
+
+    assert len(target.write_log) == 1
+    _, new_content = target.write_log[0]
+    # The single proc line now has both defaults AND hidepid=1; not parallel lines.
+    proc_lines = [ln for ln in new_content.splitlines() if ln.split()[:1] == ["proc"]]
+    assert len(proc_lines) == 1
+    assert "defaults" in proc_lines[0]
+    assert "hidepid=1" in proc_lines[0]
+    assert any("install -m 0644" in cmd and HARDENING_FSTAB_PATH in cmd for cmd in target.run_log)
+    assert any(cmd == "mount -o remount,hidepid=1 /proc" for cmd in target.run_log)
+
+
+def test_fstab_hidepid_upgrades_0_to_1() -> None:
+    """Existing /proc line with hidepid=0: upgrade to hidepid=1."""
+    from agentworks.vms.hardening import (
+        HARDENING_FSTAB_PATH,
+        _apply_hardening_fstab,
+    )
+
+    fstab_in = "proc  /proc  proc  defaults,hidepid=0  0  0\n"
+    target = _make_hardening_target(fstab_content=fstab_in)
+    logger = MagicMock()
+
+    _apply_hardening_fstab(target, logger)
+
+    assert len(target.write_log) == 1
+    _, new_content = target.write_log[0]
+    assert "hidepid=1" in new_content
+    assert "hidepid=0" not in new_content
+    assert any("install -m 0644" in cmd and HARDENING_FSTAB_PATH in cmd for cmd in target.run_log)
+
+
+def test_fstab_hidepid_noop_when_already_1() -> None:
+    """Existing /proc line with hidepid=1: no fstab rewrite, but still remount."""
+    from agentworks.vms.hardening import (
+        HARDENING_FSTAB_PATH,
+        _apply_hardening_fstab,
+    )
+
+    fstab_in = "proc  /proc  proc  defaults,hidepid=1  0  0\n"
+    target = _make_hardening_target(fstab_content=fstab_in)
+    logger = MagicMock()
+
+    _apply_hardening_fstab(target, logger)
+
+    assert target.write_log == []
+    assert not any("install -m 0644" in cmd and HARDENING_FSTAB_PATH in cmd for cmd in target.run_log)
+    assert any(cmd == "mount -o remount,hidepid=1 /proc" for cmd in target.run_log)
+
+
+def test_fstab_hidepid_preserves_admin_set_hidepid_2() -> None:
+    """Existing /proc line with hidepid=2 (stricter): no fstab edit, remount uses 2."""
+    from agentworks.vms.hardening import (
+        HARDENING_FSTAB_PATH,
+        _apply_hardening_fstab,
+    )
+
+    fstab_in = "proc  /proc  proc  defaults,hidepid=2  0  0\n"
+    target = _make_hardening_target(fstab_content=fstab_in)
+    logger = MagicMock()
+
+    _apply_hardening_fstab(target, logger)
+
+    assert target.write_log == []
+    assert not any("install -m 0644" in cmd and HARDENING_FSTAB_PATH in cmd for cmd in target.run_log)
+    # Critical: live remount uses hidepid=2 (admin's stricter choice), not 1.
+    assert any(cmd == "mount -o remount,hidepid=2 /proc" for cmd in target.run_log)
+
+
+# -- Pure function tests for the fstab editor ----------------------------------
+
+
+def test_ensure_proc_hidepid_appends_when_no_proc_line() -> None:
+    from agentworks.vms.hardening import _ensure_proc_hidepid_in_fstab
+
+    content = "UUID=root  /  ext4  defaults  0  1\n"
+    new, action, eff = _ensure_proc_hidepid_in_fstab(content)
+    assert action == "appended"
+    assert eff == 1
+    assert "proc" in new and "hidepid=1" in new
+
+
+def test_ensure_proc_hidepid_added_option() -> None:
+    from agentworks.vms.hardening import _ensure_proc_hidepid_in_fstab
+
+    content = "proc  /proc  proc  defaults  0  0\n"
+    new, action, eff = _ensure_proc_hidepid_in_fstab(content)
+    assert action == "added-option"
+    assert eff == 1
+    assert "hidepid=1" in new
+
+
+def test_ensure_proc_hidepid_upgraded() -> None:
+    from agentworks.vms.hardening import _ensure_proc_hidepid_in_fstab
+
+    content = "proc  /proc  proc  defaults,hidepid=0  0  0\n"
+    new, action, eff = _ensure_proc_hidepid_in_fstab(content)
+    assert action == "upgraded"
+    assert eff == 1
+    assert "hidepid=1" in new
+    assert "hidepid=0" not in new
+
+
+def test_ensure_proc_hidepid_no_op() -> None:
+    from agentworks.vms.hardening import _ensure_proc_hidepid_in_fstab
+
+    content = "proc  /proc  proc  defaults,hidepid=1  0  0\n"
+    new, action, eff = _ensure_proc_hidepid_in_fstab(content)
+    assert action == "no-op"
+    assert eff == 1
+    assert new == content
+
+
+def test_ensure_proc_hidepid_preserves_stricter() -> None:
+    from agentworks.vms.hardening import _ensure_proc_hidepid_in_fstab
+
+    content = "proc  /proc  proc  defaults,hidepid=2  0  0\n"
+    new, action, eff = _ensure_proc_hidepid_in_fstab(content)
+    assert action == "preserved-stricter"
+    assert eff == 2
+    assert new == content
+
+
+def test_ensure_proc_hidepid_preserves_trailing_comment() -> None:
+    """An existing trailing comment on the /proc line is preserved on edit."""
+    from agentworks.vms.hardening import _ensure_proc_hidepid_in_fstab
+
+    content = "proc  /proc  proc  defaults  0  0  # custom proc note\n"
+    new, action, _ = _ensure_proc_hidepid_in_fstab(content)
+    assert action == "added-option"
+    assert "# custom proc note" in new
+
+
+def test_ensure_proc_hidepid_malformed() -> None:
+    """A /proc line without 6 fields is left untouched (caller warns)."""
+    from agentworks.vms.hardening import _ensure_proc_hidepid_in_fstab
+
+    content = "proc  /proc  proc\n"
+    new, action, eff = _ensure_proc_hidepid_in_fstab(content)
+    assert action == "malformed"
+    assert new == content
+    assert eff == 1
+
+
+# -- _reconcile_authorized_keys: owner= stage-and-install path -----------------
+
+
+def _make_reconcile_target(*, mktemp_path: str = "/tmp/agw-ak.AAAAAA") -> MagicMock:
+    """ExecTarget mock that returns a known mktemp path; logs run calls."""
+    target = MagicMock()
+    run_log: list[str] = []
+    write_log: list[tuple[str, str]] = []
+    target.run_log = run_log
+    target.write_log = write_log
+
+    def run_side_effect(cmd: str, **kwargs):  # noqa: ANN001 -- mock side_effect
+        run_log.append(cmd)
+        result = MagicMock()
+        result.returncode = 0
+        result.ok = True
+        result.stderr = ""
+        result.stdout = mktemp_path if cmd.startswith("mktemp") else ""
+        return result
+
+    target.run.side_effect = run_side_effect
+    target.write_file.side_effect = lambda path, content, **kw: write_log.append((path, content))
+    return target
+
+
+def _make_keys_config(tmp_path) -> MagicMock:
+    primary = tmp_path / "id_ed25519.pub"
+    primary.write_text("ssh-ed25519 AAAA primary-key\n")
+    config = MagicMock()
+    config.operator.ssh_public_key = primary
+    config.operator.extra_ssh_public_keys = []
+    return config
+
+
+def test_reconcile_authorized_keys_direct_write_when_owner_none(tmp_path) -> None:
+    from agentworks.vms.initializer import _reconcile_authorized_keys
+
+    target = _make_reconcile_target()
+    config = _make_keys_config(tmp_path)
+    logger = MagicMock()
+
+    _reconcile_authorized_keys(target, config, home="/home/admin", logger=logger)
+
+    # Direct write_file path -- single write, no install commands.
+    assert len(target.write_log) == 1
+    path, content = target.write_log[0]
+    assert path == "/home/admin/.ssh/authorized_keys"
+    assert "primary-key" in content
+    # No install, no mktemp, no sudo dance.
+    assert not any("install" in cmd for cmd in target.run_log)
+    assert not any(cmd.startswith("mktemp") for cmd in target.run_log)
+
+
+def test_reconcile_authorized_keys_stage_and_install_when_owner_set(tmp_path) -> None:
+    from agentworks.vms.initializer import _reconcile_authorized_keys
+
+    target = _make_reconcile_target(mktemp_path="/tmp/agw-ak.XXXXYY")
+    config = _make_keys_config(tmp_path)
+    logger = MagicMock()
+
+    _reconcile_authorized_keys(
+        target, config, home="/home/claude", logger=logger, owner="claude"
+    )
+
+    # Expected sequence:
+    # 1. install -d to ensure /home/claude/.ssh exists with owner=claude
+    # 2. mktemp to get a staging path
+    # 3. write_file(staging, content) via scp as admin
+    # 4. install (atomic rename) into /home/claude/.ssh/authorized_keys
+    # 5. rm -f staging
+    install_d_calls = [c for c in target.run_log if "install -d" in c]
+    assert len(install_d_calls) == 1
+    assert "-o claude -g claude" in install_d_calls[0]
+    assert "/home/claude/.ssh" in install_d_calls[0]
+    assert "0700" in install_d_calls[0]
+
+    mktemp_calls = [c for c in target.run_log if c.startswith("mktemp")]
+    assert len(mktemp_calls) == 1
+
+    # write_file landed at the mktemp path with the keys content
+    assert len(target.write_log) == 1
+    staging_path, content = target.write_log[0]
+    assert staging_path == "/tmp/agw-ak.XXXXYY"
+    assert "primary-key" in content
+
+    # install -o claude -g claude -m 0600 ... authorized_keys
+    install_calls = [
+        c for c in target.run_log
+        if c.startswith("install ") and "authorized_keys" in c and "0600" in c
+    ]
+    assert len(install_calls) == 1
+    assert "-o claude -g claude" in install_calls[0]
+    assert "/home/claude/.ssh/authorized_keys" in install_calls[0]
+
+    # cleanup
+    rm_calls = [c for c in target.run_log if c.startswith("rm -f") and "/tmp/agw-ak" in c]
+    assert len(rm_calls) == 1

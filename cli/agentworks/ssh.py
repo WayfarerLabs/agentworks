@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from agentworks.config import Config
-    from agentworks.db import VMRow
+    from agentworks.db import AgentRow, VMRow
 
 
 @dataclass(frozen=True)
@@ -39,14 +39,20 @@ class SSHTarget:
     force_tty: bool = False
 
 
-def admin_exec_target(
+def exec_target_for_user(
     vm: VMRow,
     config: Config,
     *,
+    user: str,
     logger: SSHLogger | None = None,
     default_timeout: int | None = None,
 ) -> ExecTarget:
-    """Build an ExecTarget for the admin user via Tailscale SSH.
+    """Build an ExecTarget that connects to the VM as the given Linux user.
+
+    Shared core of ``admin_exec_target`` and ``agent_exec_target``. Also
+    available directly for the rare case where the caller has a Linux
+    username but no ``AgentRow`` (e.g. mid-create when the agent isn't in
+    the DB yet but its on-VM identity already accepts the operator's key).
 
     On Windows, forces TTY allocation to prevent zsh from hanging on
     non-interactive piped SSH commands.
@@ -57,10 +63,52 @@ def admin_exec_target(
     return ExecTarget(
         ssh=SSHTarget(
             host=vm.tailscale_host,
-            user=vm.admin_username,
+            user=user,
             identity_file=config.operator.ssh_private_key,
             force_tty=sys.platform == "win32",
         ),
+        logger=logger,
+        default_timeout=default_timeout,
+    )
+
+
+def admin_exec_target(
+    vm: VMRow,
+    config: Config,
+    *,
+    logger: SSHLogger | None = None,
+    default_timeout: int | None = None,
+) -> ExecTarget:
+    """Build an ExecTarget for the admin user via Tailscale SSH."""
+    return exec_target_for_user(
+        vm,
+        config,
+        user=vm.admin_username,
+        logger=logger,
+        default_timeout=default_timeout,
+    )
+
+
+def agent_exec_target(
+    vm: VMRow,
+    config: Config,
+    agent: AgentRow,
+    *,
+    logger: SSHLogger | None = None,
+    default_timeout: int | None = None,
+) -> ExecTarget:
+    """Build an ExecTarget that connects to the VM as the agent's Linux user.
+
+    Used by agent-mode operations whose target user is the agent (session
+    creation, agent shell, agent exec, etc.). The agent's authorized_keys
+    must already accept the operator's SSH key (see
+    ``agentworks.vms.initializer._reconcile_authorized_keys``'s
+    stage-and-install path, invoked at agent create / reinit).
+    """
+    return exec_target_for_user(
+        vm,
+        config,
+        user=agent.linux_user,
         logger=logger,
         default_timeout=default_timeout,
     )
@@ -311,6 +359,10 @@ def run(
 def interactive(target: SSHTarget | ExecTarget, command: str) -> int:
     """Run an interactive SSH command with a TTY (for tmux attach, etc.).
 
+    If ``command`` is empty, opens a plain interactive login shell on the
+    target (no remote command argument at all). Otherwise runs ``command``
+    over a PTY-allocated SSH session.
+
     Returns the process exit code. Does not raise on failure.
     """
     target = _unwrap_ssh(target)
@@ -326,7 +378,8 @@ def interactive(target: SSHTarget | ExecTarget, command: str) -> int:
         args.append(f"{target.user}@{target.host}")
     else:
         args.append(target.host)
-    args.append(command)
+    if command:
+        args.append(command)
     return subprocess.call(args)
 
 
@@ -712,6 +765,37 @@ class ExecTarget:
             self.run(f"mkdir -p {remote_path}", timeout=timeout)
 
         self.run(f"tar -xzf {remote_tmp} -C {remote_path} && rm -f {remote_tmp}", timeout=timeout)
+
+    def call_streaming(self, command: str) -> int:
+        """Run a remote command with stdio passthrough; return its exit code.
+
+        Used for ``agw agent exec`` / ``agw vm exec``-style invocations
+        where the operator wants the remote command's stdout / stderr to
+        stream to their terminal rather than be captured and re-printed
+        by ``run``. Non-interactive: ``BatchMode=yes`` and no TTY
+        allocation, so this is the wrong helper for tmux attach or
+        interactive shells (use ``interactive()`` for those).
+
+        Only the SSH transport is supported today; other transports
+        (lima, remote_lima, wsl2) raise ``SSHError`` if asked.
+        """
+        import subprocess as _subprocess
+
+        if self.ssh is None:
+            raise SSHError("call_streaming requires an SSH-backed ExecTarget")
+        args = ["ssh", "-T", "-o", "StrictHostKeyChecking=accept-new", "-o", "BatchMode=yes"]
+        if self.ssh.port is not None:
+            args.extend(["-p", str(self.ssh.port)])
+        if self.ssh.identity_file is not None:
+            args.extend(["-i", str(self.ssh.identity_file)])
+        if self.ssh.proxy_jump is not None:
+            args.extend(["-J", self.ssh.proxy_jump])
+        if self.ssh.user:
+            args.append(f"{self.ssh.user}@{self.ssh.host}")
+        else:
+            args.append(self.ssh.host)
+        args.append(command)
+        return _subprocess.call(args)
 
     def write_file(self, remote_path: str, content: str, *, mode: str | None = None) -> None:
         """Write string content to a remote file safely.

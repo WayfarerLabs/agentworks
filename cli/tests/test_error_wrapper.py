@@ -301,6 +301,11 @@ def test_create_session_releases_group_membership_on_keyboard_interrupt(
     fake_factory = lambda vm, config, **kwargs: _Target()  # noqa: E731
     monkeypatch.setattr("agentworks.ssh.admin_exec_target", fake_factory)
     monkeypatch.setattr("agentworks.sessions.manager.admin_exec_target", fake_factory)
+    # agent_exec_target is constructed in session_manager.create_session for
+    # agent-mode sessions (FRD R1, direct target-user SSH). Stub it too so
+    # the SimpleNamespace config doesn't need an `operator` attribute.
+    agent_factory = lambda vm, config, agent, **kwargs: _Target()  # noqa: E731
+    monkeypatch.setattr("agentworks.ssh.agent_exec_target", agent_factory)
     monkeypatch.setattr(
         session_manager, "_build_session_command", lambda *args, **kwargs: "true"
     )

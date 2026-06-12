@@ -115,6 +115,7 @@ def _mock_config(tmp_path: Path) -> tuple[MagicMock, Path]:
     config.operator.ssh_config = ssh_config
     config.operator.ssh_config_dir = True
     config.operator.ssh_host_prefix = "awvm--"
+    config.operator.ssh_agent_host_prefix = "awagent--"
     config.operator.ssh_private_key = Path("/home/user/.ssh/id_ed25519")
     return config, ssh_dir
 
@@ -211,3 +212,134 @@ def test_format_entry_no_quotes_without_spaces(tmp_path: Path) -> None:
         identity_file=Path("/home/user/.ssh/id_ed25519"),
     )
     assert '"' not in entry
+
+
+def _mock_agent(name: str, linux_user: str, vm_name: str) -> MagicMock:
+    agent = MagicMock()
+    agent.name = name
+    agent.linux_user = linux_user
+    agent.vm_name = vm_name
+    return agent
+
+
+def test_rebuild_config_dir_emits_per_agent_blocks(tmp_path: Path) -> None:
+    """Each VM's agents get one top-level ``awagent--<name>`` Host block each."""
+    config, ssh_dir = _mock_config(tmp_path)
+    db = MagicMock()
+    db.list_vms.return_value = [_mock_vm("vm1", "100.64.0.1")]
+    db.list_agents.return_value = [
+        _mock_agent("claude", "agt-claude", "vm1"),
+        _mock_agent("aider", "agt-aider", "vm1"),
+    ]
+
+    _rebuild_config_dir(config, db)
+
+    content = (ssh_dir / "config.d" / _MANAGED_CONF).read_text()
+    # Admin block still present
+    assert "Host awvm--vm1\n" in content
+    assert "User agentworks" in content
+    # Per-agent blocks use the operator-facing agent name, not the Linux user.
+    assert "Host awagent--claude\n" in content
+    assert "Host awagent--aider\n" in content
+    # User is still the on-VM Linux user (the implementation detail the
+    # alias hides).
+    assert "User agt-claude" in content
+    assert "User agt-aider" in content
+    # Old ``<vm>--<linux_user>`` shape is gone.
+    assert "Host awvm--vm1--claude" not in content
+    assert "Host awvm--vm1--agt-claude" not in content
+    # All blocks share the VM's HostName
+    assert content.count("100.64.0.1") == 3
+
+
+def test_rebuild_config_dir_no_agent_blocks_when_vm_has_none(tmp_path: Path) -> None:
+    config, ssh_dir = _mock_config(tmp_path)
+    db = MagicMock()
+    db.list_vms.return_value = [_mock_vm("solo", "100.64.0.9")]
+    db.list_agents.return_value = []
+
+    _rebuild_config_dir(config, db)
+
+    content = (ssh_dir / "config.d" / _MANAGED_CONF).read_text()
+    assert "Host awvm--solo\n" in content
+    # No --<agent> suffix anywhere on the VM block.
+    assert "Host awvm--solo--" not in content
+    # And no awagent-- block.
+    assert "Host awagent--" not in content
+
+
+def test_rebuild_config_dir_agent_blocks_global_namespace(tmp_path: Path) -> None:
+    """Agent aliases are globally unique (agents.name is PRIMARY KEY); the
+    alias does not embed the VM name, so a single ``awagent--<name>`` block
+    is emitted per agent regardless of which VM owns them."""
+    config, ssh_dir = _mock_config(tmp_path)
+    db = MagicMock()
+    db.list_vms.return_value = [
+        _mock_vm("vm1", "100.64.0.1"),
+        _mock_vm("vm2", "100.64.0.2"),
+    ]
+
+    def list_agents_side_effect(*, vm_name: str) -> list[MagicMock]:
+        if vm_name == "vm1":
+            return [_mock_agent("a", "agt-a", "vm1")]
+        if vm_name == "vm2":
+            return [_mock_agent("b", "agt-b", "vm2")]
+        return []
+
+    db.list_agents.side_effect = list_agents_side_effect
+
+    _rebuild_config_dir(config, db)
+
+    content = (ssh_dir / "config.d" / _MANAGED_CONF).read_text()
+    assert "Host awagent--a\n" in content
+    assert "Host awagent--b\n" in content
+    # Each agent block carries its own VM's HostName.
+    assert "100.64.0.1" in content
+    assert "100.64.0.2" in content
+
+
+# -- legacy rebuild: per-agent block parity --------------------------------
+
+
+def test_legacy_rebuild_emits_per_agent_blocks(tmp_path: Path) -> None:
+    """The legacy path (ssh_config_dir=False) emits the same per-agent
+    blocks as the config.d path. Symmetry was added as part of FRD R7."""
+    from agentworks.ssh_config import _legacy_rebuild
+
+    config, ssh_dir = _mock_config(tmp_path)
+    config.operator.ssh_config_dir = False  # legacy
+    db = MagicMock()
+    db.list_vms.return_value = [_mock_vm("vm1", "100.64.0.1")]
+    db.list_agents.return_value = [
+        _mock_agent("claude", "agt-claude", "vm1"),
+        _mock_agent("aider", "agt-aider", "vm1"),
+    ]
+
+    _legacy_rebuild(config, db)
+
+    content = config.operator.ssh_config.read_text()
+    # Admin block still present (existing behavior)
+    assert "Host awvm--vm1\n" in content
+    assert "User agentworks" in content
+    # Per-agent blocks use the operator-facing agent name.
+    assert "Host awagent--claude\n" in content
+    assert "Host awagent--aider\n" in content
+    assert "User agt-claude" in content
+    assert "User agt-aider" in content
+
+
+def test_legacy_rebuild_no_agents_no_per_agent_blocks(tmp_path: Path) -> None:
+    from agentworks.ssh_config import _legacy_rebuild
+
+    config, ssh_dir = _mock_config(tmp_path)
+    config.operator.ssh_config_dir = False
+    db = MagicMock()
+    db.list_vms.return_value = [_mock_vm("solo", "100.64.0.9")]
+    db.list_agents.return_value = []
+
+    _legacy_rebuild(config, db)
+
+    content = config.operator.ssh_config.read_text()
+    assert "Host awvm--solo\n" in content
+    assert "Host awvm--solo--" not in content
+    assert "Host awagent--" not in content

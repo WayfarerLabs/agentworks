@@ -1897,6 +1897,12 @@ def test_delete_agent_kills_console_windows(
         "agentworks.agents.manager._delete_agent_on_vm",
         lambda *a, **k: None,
     )
+    # delete_agent now refreshes operator SSH config; stub it out since the
+    # test's _StubConfig lacks the operator.* attributes the real path needs.
+    monkeypatch.setattr(
+        "agentworks.ssh_config.sync_ssh_config",
+        lambda *a, **k: None,
+    )
 
     captured: list[list[tuple[str, str]]] = []
 

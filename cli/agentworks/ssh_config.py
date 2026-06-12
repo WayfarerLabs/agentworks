@@ -53,6 +53,19 @@ def ssh_host_alias(vm_name: str, prefix: str = "awvm--") -> str:
     return f"{prefix}{vm_name}"
 
 
+def ssh_agent_alias(agent_name: str, prefix: str = "awagent--") -> str:
+    """Return the SSH host alias for an agent.
+
+    Keyed on the operator-facing ``agent.name`` rather than on the
+    underlying Linux user, since the Linux-user shape (``agt-<name>``,
+    legacy ``agt--<name>``, etc.) is an implementation detail operators
+    shouldn't have to remember. Globally unique because ``agents.name``
+    is the primary key on the agents table; the VM the agent lives on is
+    looked up by SSH config via the per-agent block's ``HostName``.
+    """
+    return f"{prefix}{agent_name}"
+
+
 def sync_ssh_config(config: Config, db: Database) -> None:
     """Rebuild SSH config from current DB state."""
     if config.operator.ssh_config_dir:
@@ -63,22 +76,36 @@ def sync_ssh_config(config: Config, db: Database) -> None:
 
 
 def _legacy_rebuild(config: Config, db: Database) -> None:
-    """Legacy: rebuild the managed section from all VMs in DB."""
+    """Legacy: rebuild the managed section from all VMs in DB.
+
+    Emits the same per-VM admin block + per-agent blocks as
+    ``_rebuild_config_dir``; only the file layout differs.
+    """
     ssh_config = config.operator.ssh_config
     user_section, _old_entries = _read_managed(ssh_config)
     prefix = config.operator.ssh_host_prefix
+    agent_prefix = config.operator.ssh_agent_host_prefix
 
     entries: dict[str, str] = {}
     for vm in db.list_vms():
         if not vm.tailscale_host:
             continue
-        alias = ssh_host_alias(vm.name, prefix)
-        entries[alias] = _format_entry(
-            alias=alias,
+        vm_alias = ssh_host_alias(vm.name, prefix)
+        entries[vm_alias] = _format_entry(
+            alias=vm_alias,
             hostname=vm.tailscale_host,
             user=vm.admin_username,
             identity_file=config.operator.ssh_private_key,
         )
+        # Per-agent aliases on this VM (parity with _rebuild_config_dir).
+        for agent in db.list_agents(vm_name=vm.name):
+            agent_alias = ssh_agent_alias(agent.name, agent_prefix)
+            entries[agent_alias] = _format_entry(
+                alias=agent_alias,
+                hostname=vm.tailscale_host,
+                user=agent.linux_user,
+                identity_file=config.operator.ssh_private_key,
+            )
     _write_legacy(ssh_config, user_section, entries)
 
 
@@ -96,6 +123,7 @@ def _rebuild_config_dir(config: Config, db: Database) -> None:
     config_d = ssh_config.parent / _CONFIG_DIR_NAME
     config_d.mkdir(parents=True, exist_ok=True)
     prefix = config.operator.ssh_host_prefix
+    agent_prefix = config.operator.ssh_agent_host_prefix
 
     # Ensure Include directive at top of ssh_config
     _ensure_include(ssh_config)
@@ -108,15 +136,30 @@ def _rebuild_config_dir(config: Config, db: Database) -> None:
     for vm in db.list_vms():
         if not vm.tailscale_host:
             continue
-        alias = ssh_host_alias(vm.name, prefix)
+        vm_alias = ssh_host_alias(vm.name, prefix)
+        # Admin alias for this VM.
         blocks.append(
             _format_entry(
-                alias=alias,
+                alias=vm_alias,
                 hostname=vm.tailscale_host,
                 user=vm.admin_username,
                 identity_file=config.operator.ssh_private_key,
             )
         )
+        # Per-agent aliases on this VM. Same HostName / IdentityFile as the
+        # VM block; only User and the alias differ. The alias is a
+        # top-level ``<agent_prefix><agent.name>`` (not nested under the
+        # VM alias) because agents belong to exactly one VM and the
+        # operator-facing handle is the agent name, not the Linux user.
+        for agent in db.list_agents(vm_name=vm.name):
+            blocks.append(
+                _format_entry(
+                    alias=ssh_agent_alias(agent.name, agent_prefix),
+                    hostname=vm.tailscale_host,
+                    user=agent.linux_user,
+                    identity_file=config.operator.ssh_private_key,
+                )
+            )
 
     conf_path = config_d / _MANAGED_CONF
     if len(blocks) > 1:

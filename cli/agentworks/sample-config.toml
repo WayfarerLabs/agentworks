@@ -22,7 +22,8 @@ ssh_public_key = "~/.ssh/id_ed25519.pub"    # required: used to authorize access
 ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connections to VMs
 # ssh_config = "~/.ssh/config"               # SSH config file for VM host entries
 # ssh_config_dir = true                      # manage VM entries in ~/.ssh/config.d/
-# ssh_host_prefix = "awvm--"                 # prefix for SSH host aliases (e.g. awvm--myvm)
+# ssh_host_prefix = "awvm--"                 # prefix for VM SSH host aliases (e.g. awvm--myvm)
+# ssh_agent_host_prefix = "awagent--"        # prefix for agent SSH host aliases (e.g. awagent--myagent)
 # extra_ssh_public_keys = [                  # additional public keys for VM authorized_keys
 #     "~/.ssh/other_key.pub",
 # ]

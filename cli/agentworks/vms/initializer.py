@@ -304,12 +304,28 @@ def _reconcile_authorized_keys(
     config: Config,
     home: str,
     logger: SSHLogger,
+    *,
+    owner: str | None = None,
 ) -> None:
-    """Reconcile ~/.ssh/authorized_keys with the configured key set.
+    """Reconcile <home>/.ssh/authorized_keys with the configured key set.
 
     Writes the primary ssh_public_key plus any extra_ssh_public_keys from
-    config. This is a full overwrite so that removed keys are cleaned up
-    on reinit.
+    config. Full overwrite so that removed keys are cleaned up on reinit.
+
+    When ``owner`` is None (default), writes directly via the connected SSH
+    user (admin writing to admin's home). Failure is downgraded to a warning
+    because the operator can recover on the next ``vm reinit``.
+
+    When ``owner`` is set to a Linux username different from the SSH user
+    (e.g. an agent's username), uses a stage-and-install path: ensures
+    ``<home>/.ssh`` exists with correct ownership, scp's the file content
+    to a private mktemp path with 0600 perms, then ``sudo install``s the
+    staged file atomically into place with the requested owner / group /
+    mode. The staging file is removed in a ``finally`` block so a partial
+    failure doesn't leak it. Failure on this path RAISES (``SSHError``):
+    the call is load-bearing for whether the operator can SSH to the agent
+    at all, so a silent failure here would leave the caller running
+    downstream commands that all fail with a cryptic ``exit 255``.
     """
     logger.step("SSH authorized keys")
 
@@ -319,15 +335,47 @@ def _reconcile_authorized_keys(
 
     extra_count = len(keys) - 1
     label = f"1 primary + {extra_count} extra" if extra_count else "1 primary"
+    if owner is not None:
+        label = f"{label} for {owner}"
     output.detail(f"Reconciling authorized_keys ({label})...")
 
     content = AUTHORIZED_KEYS_HEADER + "\n".join(keys) + "\n"
+
+    if owner is None:
+        # Direct-write: the SSH user writes to its own home.
+        try:
+            target.write_file(f"{home}/.ssh/authorized_keys", content, mode="600")
+        except SSHError as e:
+            msg = f"authorized_keys reconciliation failed: {e}"
+            logger.warning(msg)
+            output.warn(msg)
+        return
+
+    # Stage-and-install: admin writes for a non-self uid (agent).
+    quoted_owner = shlex.quote(owner)
+    # Ensure <home>/.ssh exists with correct ownership/mode.
+    # `useradd -m` doesn't create .ssh (not in /etc/skel), and install -d
+    # is idempotent (creates if missing; sets owner/mode either way).
+    target.run(
+        f"install -d -o {quoted_owner} -g {quoted_owner} -m 0700 {home}/.ssh",
+        sudo=True,
+    )
+    mktemp_result = target.run("mktemp --tmpdir agw-ak.XXXXXX")
+    staging = (getattr(mktemp_result, "stdout", "") or "").strip()
+    if not staging:
+        raise SSHError("mktemp produced empty path")
     try:
-        target.write_file(f"{home}/.ssh/authorized_keys", content, mode="600")
-    except SSHError as e:
-        msg = f"authorized_keys reconciliation failed: {e}"
-        logger.warning(msg)
-        output.warn(msg)
+        # Restrict the staging file before content lands; mktemp's
+        # randomized suffix plus 0600 perms keep the contents private
+        # between admin's write and the atomic install.
+        target.write_file(staging, content, mode="0600")
+        target.run(
+            f"install -o {quoted_owner} -g {quoted_owner} -m 0600 "
+            f"{shlex.quote(staging)} {home}/.ssh/authorized_keys",
+            sudo=True,
+        )
+    finally:
+        target.run(f"rm -f {shlex.quote(staging)}", check=False)
 
 
 def _configure_apt_sources(
@@ -587,6 +635,10 @@ def _run_catalog_commands(
         path_additions.extend(entry.path)
 
     return path_additions
+
+
+# VM hardening (sysctl baseline + /proc hidepid=1) lives in
+# agentworks.vms.hardening per FRD R4a + R4b.
 
 
 def verify_tailscale_available() -> None:
@@ -1113,6 +1165,14 @@ def _phase_b_setup(
     catalog = load_catalog(config)
     validate_selections(config, catalog)
 
+    # Non-fatal: VM hardening (sysctl baseline + /proc hidepid>=1).
+    # First step in Phase B so the rest of init runs under the hardened
+    # baseline. Depends only on coreutils + procps (always present);
+    # nothing here needs apt-installed packages. Idempotent on reinit.
+    from agentworks.vms.hardening import apply_vm_hardening
+
+    apply_vm_hardening(ts_target, logger)
+
     # Non-fatal: system repos + packages (mise repo added, then all packages)
     _install_system_packages(ts_target, logger)
 
@@ -1459,7 +1519,7 @@ def _install_nerf_claude_plugin_for_user(
 
 RunCmd = Callable[[str, int], object]
 """Callable that runs a shell command with a timeout. Used to abstract
-admin (target.run) vs agent (_run_as_agent) execution."""
+the choice of ExecTarget (admin vs agent) at the call site."""
 
 
 def install_claude_plugins(
@@ -1470,9 +1530,14 @@ def install_claude_plugins(
 ) -> None:
     """Register Claude Code marketplaces and install plugins. Non-fatal.
 
-    The caller provides a run_cmd that handles shell/user context:
-    - Admin: wraps in login shell via {shell} -lc
-    - Agent: wraps in su - via _run_as_agent
+    The caller provides a ``run_cmd`` that wraps the command in a login
+    shell (``{shell} -lc <cmd>``) so the calling user's PATH (mise shims,
+    ``~/.local/bin``, etc.) is in scope. A plain non-interactive SSH
+    invocation gets a non-login shell that sources neither ``.bashrc``
+    nor ``.profile``, so ``command -v claude`` would falsely fail. Both
+    the admin call site (``_phase_b_setup`` in this file) and the agent
+    call site (``_create_agent_on_vm`` in ``agents/manager.py``) wrap
+    accordingly; the helper itself stays transport- and user-agnostic.
     """
     if not marketplaces and not plugins:
         return

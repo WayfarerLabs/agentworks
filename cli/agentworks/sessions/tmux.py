@@ -236,16 +236,19 @@ def tmux_cmd(base: str, socket_path: str | None = None, *, sudo: bool = False) -
 
 def _grant_server_access(
     run_command: RunCommand,
-    linux_user: str,
     socket_path: str,
 ) -> None:
-    """Grant tmux server-access to every member of the socket group."""
-    q_user = shlex.quote(linux_user)
+    """Grant tmux server-access to every member of the socket group.
+
+    Called as the agent (the tmux server owner) post FRD R1. No inner
+    sudo is needed: the agent runs ``tmux server-access`` against its
+    own server.
+    """
     q_sock = shlex.quote(socket_path)
     grp = shlex.quote(AGENT_SOCKET_GROUP)
     run_command(
         f"for u in $(getent group {grp} | cut -d: -f4 | tr ',' ' '); do "
-        f"sudo -u {q_user} tmux -S {q_sock} server-access -a \"$u\"; "
+        f'tmux -S {q_sock} server-access -a "$u"; '
         f"done",
     )
 
@@ -258,17 +261,23 @@ def create_session(
     *,
     run_command: RunCommand,
     target: ExecTarget | None = None,
-    run_as_root: RunCommand | None = None,
     admin_username: str | None = None,
     is_admin: bool = True,
 ) -> tuple[str | None, int | None]:
     """Create a locked-down tmux session.
 
     For admin mode, the command runs directly on the admin's default tmux
-    server.  For agent mode, the session is created as the agent Linux user
-    with a per-session socket so the agent's tmux server (and shell) run under
-    the agent's uid.  The admin gains access via group permissions on the
-    socket and the tmux ``server-access`` ACL.
+    server. ``run_command`` is admin's SSH connection.
+
+    For agent mode, ``run_command`` is the AGENT's SSH connection (FRD R1,
+    direct target-user SSH). The agent's tmux server runs under the agent's
+    uid on a per-session socket. ``target=`` is still required and must be
+    admin's ExecTarget: it is used for socket-root setup
+    (``AGENT_SOCKET_ROOT``, currently `/run/agentworks/agent-tmux-sockets`)
+    which needs root. Admin retains its read /
+    attach / maintenance reach into the agent's tmux server via group
+    permissions on the socket and the tmux ``server-access`` ACL granted
+    here (per the 2026-04-10 agent-tmux-sockets SDD; unchanged).
 
     Returns (socket_path, tmux_server_pid). socket_path is None for admin-mode.
     """
@@ -294,23 +303,30 @@ def create_session(
         return (None, pid)
     else:
         assert linux_user is not None
-        assert run_as_root is not None, "run_as_root required for agent sessions"
         assert admin_username is not None, "admin_username required for agent sessions"
-        q_user = shlex.quote(linux_user)
         sock = agent_socket_path(linux_user, session_name)
         q_sock = shlex.quote(sock)
 
         # Ensure the tmpfs socket directories exist (wiped on VM reboot).
-        assert target is not None, "target required for agent sessions"
+        # Uses the ADMIN target (`target=` arg); writing under
+        # AGENT_SOCKET_ROOT (/run/agentworks/agent-tmux-sockets) still
+        # requires root and goes through admin's
+        # sudo path.
+        assert target is not None, "target (admin's ExecTarget) required for agent sessions"
         ensure_agent_socket_root(target, admin_username)
         ensure_agent_socket_dir(target, linux_user)
+
+        # From here on, run_command is the AGENT's SSH connection (FRD R1,
+        # direct target-user SSH). The agent owns its own socket dir, its
+        # tmux server, and the socket file once created, so no sudo is
+        # needed for any subsequent step.
 
         # Check for an existing socket file before creating the session.
         # A stale socket (no server) is removed to start clean. An active
         # socket (server running) is an error -- something else is using it.
         sock_exists = run_command(f"test -e {q_sock}", check=False)
         if getattr(sock_exists, "ok", False):
-            server_alive = run_as_root(
+            server_alive = run_command(
                 f"tmux -S {q_sock} list-sessions 2>/dev/null",
                 check=False,
             )
@@ -319,14 +335,18 @@ def create_session(
                     f"Socket {sock} already has an active tmux server. "
                     f"Kill it first or choose a different session name."
                 )
-            # Stale socket -- remove it
+            # Stale socket: remove it. Agent owns the file in both the
+            # post-rollout case (this code created it as the agent) and
+            # the pre-rollout case (sudo --login -u <agent> tmux created
+            # it owned by the agent), so plain rm works in both worlds.
             from agentworks import output as _output
 
             _output.detail(f"Removing stale socket: {sock}")
-            run_as_root(f"rm -f {q_sock}", check=False)
+            run_command(f"rm -f {q_sock}", check=False)
 
-        # Build the pane command.  sudo --login gives the agent a proper
-        # login environment; tmux then starts the pane shell as that user.
+        # Build the pane command. No `sudo --login` prefix: the agent is
+        # already the SSH user (FRD R1), so tmux runs directly under the
+        # agent's uid.
         if command:
             inner = shlex.quote(f"cd {q_path} && {command}")
             shell_cmd = f"$SHELL -lic {inner}"
@@ -334,7 +354,6 @@ def create_session(
             shell_cmd = ""
 
         cmd = (
-            f"sudo --login -u {q_user} "
             f"tmux -S {q_sock} new-session -d -s {q_session} "
             f"-c {q_path} -f {RESTRICTED_CONFIG_PATH}"
         )
@@ -342,12 +361,13 @@ def create_session(
             cmd += f" {shlex.quote(shell_cmd)}"
         run_command(cmd)
 
-        # Fix socket permissions (tmux creates sockets mode 0700).
-        # Socket is owned by the agent user, so sudo is needed.
-        run_as_root(f"chmod g+rwx {q_sock}")
+        # Fix socket permissions (tmux creates sockets mode 0700). Agent
+        # owns the socket; no sudo needed.
+        run_command(f"chmod g+rwx {q_sock}")
 
-        # Grant tmux server-access to all socket-group members
-        _grant_server_access(run_command, linux_user, sock)
+        # Grant tmux server-access to all socket-group members. The agent
+        # runs this against its own tmux server.
+        _grant_server_access(run_command, sock)
 
         try:
             pid_out = run_command(tmux_cmd("display-message -p '#{pid}'", sock), check=False)
@@ -464,10 +484,18 @@ def force_kill_tmux_server(
     target: ExecTarget,
     socket_path: str | None = None,
     log: Callable[[str], None] | None = None,
+    use_sudo: bool = True,
 ) -> bool:
     """Kill a tmux server by PID with SIGTERM -> SIGKILL escalation.
 
     Cleans up socket file if present. Returns True if the process is dead.
+
+    ``use_sudo`` defaults True for the admin path (cross-uid kill of an
+    agent's tmux pid; admin's NOPASSWD sudo). Pass False when ``target`` is
+    the agent's own ExecTarget: the agent can kill its own pid and remove
+    its own socket without sudo. FRD R1's carve-out for admin force-kill
+    applies to batch operations; single-session agent ops go through agent
+    SSH directly (no sudo).
     """
     if pid <= 1:
         raise ValueError(f"refusing to kill PID {pid} (dangerous special value)")
@@ -479,13 +507,13 @@ def force_kill_tmux_server(
 
     # SIGTERM
     _log(f"Sending SIGTERM to PID {pid}")
-    target.run(f"kill {pid}", sudo=True, check=False)
+    target.run(f"kill {pid}", sudo=use_sudo, check=False)
     time.sleep(2)
 
     # Check if still alive
     if target.run(f"test -d /proc/{pid}", check=False).ok:
         _log(f"PID {pid} survived SIGTERM, escalating to SIGKILL")
-        target.run(f"kill -9 {pid}", sudo=True, check=False)
+        target.run(f"kill -9 {pid}", sudo=use_sudo, check=False)
         time.sleep(1)
 
     # Final check
@@ -498,6 +526,6 @@ def force_kill_tmux_server(
     # Clean up stale socket (validate path is under expected root)
     if socket_path and socket_path.startswith(AGENT_SOCKET_ROOT + "/"):
         _log(f"Removing stale socket {socket_path}")
-        target.run(f"rm -f {shlex.quote(socket_path)}", sudo=True, check=False)
+        target.run(f"rm -f {shlex.quote(socket_path)}", sudo=use_sudo, check=False)
 
     return True
