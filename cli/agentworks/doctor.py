@@ -188,7 +188,9 @@ def _check_tailscale() -> HealthGroup:
             timeout=10,
         )
         if result.returncode == 0:
-            if os.environ.get("TAILSCALE_AUTH_KEY"):
+            from agentworks.env_compat import read_env_with_legacy
+
+            if read_env_with_legacy("AW_TAILSCALE_AUTH_KEY", "TAILSCALE_AUTH_KEY"):
                 g.ok("Connected to tailnet", "auth key env var set")
             else:
                 g.ok("Connected to tailnet", "will prompt for auth key during VM init")
@@ -288,7 +290,8 @@ def _check_git_credentials(config: Config) -> HealthGroup:
         g.warn("Git credentials", f"could not resolve providers: {e}")
         return g
 
-    from agentworks.git_credentials.base import env_var_for_credential
+    from agentworks.env_compat import read_env_with_legacy
+    from agentworks.git_credentials.base import env_var_for_credential, legacy_env_var_for_credential
 
     for name, provider in providers.items():
         label = provider.display_name
@@ -296,7 +299,7 @@ def _check_git_credentials(config: Config) -> HealthGroup:
             if not provider.verify_auth():
                 g.warn(label, f"auth check failed ({provider.auth_hint()})")
                 continue
-            if os.environ.get(env_var_for_credential(name)):
+            if read_env_with_legacy(env_var_for_credential(name), legacy_env_var_for_credential(name)):
                 g.ok(label, "ready (token set via environment)")
             else:
                 g.ok(label, "ready (will prompt for token during VM init)")
