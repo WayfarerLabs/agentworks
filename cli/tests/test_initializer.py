@@ -14,6 +14,7 @@ from agentworks.catalog import (
 from agentworks.vms.initializer import (
     _configure_apt_sources,
     _install_apt_packages,
+    _preserve_ssh_host_keys,
     _run_catalog_commands,
 )
 
@@ -531,6 +532,47 @@ def test_run_catalog_commands_runs_when_test_dir_missing() -> None:
     assert result == []
     run_calls = [str(c) for c in target.run.call_args_list]
     assert any("sh -c" in c for c in run_calls)
+
+
+# -- SSH host key preservation ---------------------------------------------
+
+
+def test_preserve_ssh_host_keys_writes_dropin() -> None:
+    """Writes the cloud-init drop-in as root with the canonical content."""
+    from agentworks.vms.bootstrap_script import (
+        SSH_PRESERVE_KEYS_LINES,
+        SSH_PRESERVE_KEYS_PATH,
+    )
+
+    target = MagicMock()
+    target.run.return_value = MagicMock(stdout="", stderr="", returncode=0, ok=True)
+    logger = MagicMock()
+    logger.has_warnings = False
+
+    _preserve_ssh_host_keys(target, logger)
+
+    assert target.run.call_count == 1
+    cmd = target.run.call_args[0][0]
+    assert target.run.call_args.kwargs.get("sudo") is True
+    assert SSH_PRESERVE_KEYS_PATH in cmd
+    assert "/etc/cloud/cloud.cfg.d" in cmd  # parent created
+    for line in SSH_PRESERVE_KEYS_LINES:
+        assert line in cmd
+    logger.warning.assert_not_called()
+
+
+def test_preserve_ssh_host_keys_warns_on_failure() -> None:
+    """A failure is non-fatal: logged as a warning, no exception raised."""
+    from agentworks.ssh import SSHError
+
+    target = MagicMock()
+    target.run.side_effect = SSHError("permission denied")
+    logger = MagicMock()
+    logger.has_warnings = False
+
+    _preserve_ssh_host_keys(target, logger)
+
+    logger.warning.assert_called_once()
 
 
 # -- install_claude_plugins ------------------------------------------------

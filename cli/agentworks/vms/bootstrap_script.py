@@ -16,6 +16,16 @@ from __future__ import annotations
 import shlex
 from dataclasses import dataclass, field
 
+# Canonical cloud-init drop-in that stops host-key regeneration on stop/start.
+# By default cloud-init may delete and regenerate /etc/ssh/ssh_host_* on some
+# boot events, which makes SSH clients reject the connection with a changed
+# host key. This drop-in is written here during Phase A and reconciled during
+# Phase B (initializer._preserve_ssh_host_keys), so VMs provisioned before it
+# existed get repaired on `vm reinit`.
+SSH_PRESERVE_KEYS_PATH = "/etc/cloud/cloud.cfg.d/99-preserve-ssh-keys.cfg"
+SSH_PRESERVE_KEYS_LINES = ("ssh_deletekeys: false", "ssh_genkeytypes: []")
+SSH_PRESERVE_KEYS_CONTENT = "".join(f"{line}\n" for line in SSH_PRESERVE_KEYS_LINES)
+
 SCRIPT_TEMPLATE = """\
 #!/bin/bash
 set -euo pipefail
@@ -51,12 +61,12 @@ echo "##SUCCESS## provisioning packages installed"
 # By default, cloud-init may delete and regenerate SSH host keys on certain
 # boot events (e.g., VM stop/start). This causes SSH clients to reject the
 # connection due to a changed host key. Tell cloud-init to preserve existing keys.
+# The same drop-in is reconciled during Phase B (initializer._preserve_ssh_host_keys)
+# so VMs created before this step existed get repaired on `vm reinit`.
 echo "##STEP## Preserve SSH host keys"
 mkdir -p /etc/cloud/cloud.cfg.d
-cat > /etc/cloud/cloud.cfg.d/99-preserve-ssh-keys.cfg <<'CLOUDCFG'
-ssh_deletekeys: false
-ssh_genkeytypes: []
-CLOUDCFG
+cat > {ssh_preserve_path} <<'CLOUDCFG'
+{ssh_preserve_content}CLOUDCFG
 echo "##SUCCESS## SSH host key preservation configured"
 
 # -- Step 3: SSH public key --
@@ -144,6 +154,8 @@ def generate_bootstrap_script(
         tailscale_auth_key=shlex.quote(tailscale_auth_key),
         vm_hostname=shlex.quote(hostname),
         swap=swap,
+        ssh_preserve_path=SSH_PRESERVE_KEYS_PATH,
+        ssh_preserve_content=SSH_PRESERVE_KEYS_CONTENT,
     )
 
 

@@ -14,6 +14,7 @@ failures produce warnings and a `partial` status.
 | Step                  | Notes                                                                        |
 | --------------------- | ---------------------------------------------------------------------------- |
 | Apt sources           | Key downloaded if missing, source list overwritten                           |
+| SSH host key preserve | cloud-init drop-in written so host keys survive stop/start (repairs old VMs) |
 | Shell                 | Overwritten from config                                                      |
 | SSH authorized keys   | Overwritten from config                                                      |
 | Git credentials       | Overwritten from config                                                      |
