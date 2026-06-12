@@ -218,7 +218,7 @@ connectivity without exposing SSH ports to the public internet.
 
 During `vm create` (and `vm start` when re-joining), you will be prompted for a Tailscale auth key
 unless the `AW_TAILSCALE_AUTH_KEY` environment variable is set (legacy `TAILSCALE_AUTH_KEY` is still
-read, with a deprecation warning). Generate keys at the
+read with a deprecation warning, and will be removed in a future release). Generate keys at the
 [Tailscale admin console](https://login.tailscale.com/admin/settings/keys).
 
 Ephemeral auth keys (with `?ephemeral=true` appended) are fully supported. The Tailscale node is

@@ -519,7 +519,10 @@ forward-only and run automatically.
 
 ## Environment Variables
 
-| Variable                         | Description                                                                      |
-| -------------------------------- | -------------------------------------------------------------------------------- |
-| `AW_TAILSCALE_AUTH_KEY`          | Tailscale auth key (skips prompt). `TAILSCALE_AUTH_KEY` accepted but deprecated. |
-| `AW_GIT_CREDENTIALS_<CRED_NAME>` | Git credential for `<CRED_NAME>`. `GIT_CREDENTIALS_<CRED_NAME>` accepted, warns. |
+| Variable                         | Description                                                                               |
+| -------------------------------- | ----------------------------------------------------------------------------------------- |
+| `AW_TAILSCALE_AUTH_KEY`          | Tailscale auth key (skips prompt). Legacy `TAILSCALE_AUTH_KEY` still read; warns once.    |
+| `AW_GIT_CREDENTIALS_<CRED_NAME>` | Git credential for `<CRED_NAME>`. Legacy `GIT_CREDENTIALS_<CRED_NAME>` still read; warns. |
+
+Legacy env-var names continue to work with a one-time deprecation warning per process per name, and
+will be removed in a future release.
