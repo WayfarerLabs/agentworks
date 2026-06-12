@@ -178,8 +178,7 @@ Goal: capture the rationale alongside the work.
 
 - [x] ADR drafts in `docs/sdd/2026-06-06-direct-user-ssh-access/new-adrs/` covering the access model
       decision and the VM hardening choices. Two drafts: `direct-target-user-ssh-access.md` and
-      `vm-hardening-at-provisioning.md`. Will be numbered and moved to `docs/adrs/` when this SDD
-      merges.
+      `vm-hardening-at-init.md`. Will be numbered and moved to `docs/adrs/` when this SDD merges.
 - [x] Updated `cli/README.md` agents section: `agent shell` / `agent exec` UX, the new direct-SSH
       alias surface (`awvm--<vm>` and `awagent--<agent>` together), and the `ssh_agent_host_prefix`
       config knob. The aliases are the most user-visible addition.
