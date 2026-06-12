@@ -1,5 +1,39 @@
 # Changelog
 
+## [0.7.0](https://github.com/WayfarerLabs/agentworks/compare/v0.6.0...v0.7.0) (2026-06-12)
+
+
+### Features
+
+* **agents:** agent shell uses direct agent SSH ([edccd6f](https://github.com/WayfarerLabs/agentworks/commit/edccd6f4a66700afa372210b30eceb676cac16af))
+* **agents:** authorized_keys + operator ssh config for agent users ([7991dc3](https://github.com/WayfarerLabs/agentworks/commit/7991dc37186c59542f8e18367831b7b9878ed13d))
+* **agents:** typed error on pre-rollout agent SSH + reviewer cleanups ([edc5552](https://github.com/WayfarerLabs/agentworks/commit/edc555233acf30d10b8a98075db4f5c1c065cbc8))
+* **cli:** AW_-prefixed env vars with legacy fallback ([ceb9e05](https://github.com/WayfarerLabs/agentworks/commit/ceb9e057f48eca5b230618d768aee0e777cb1636))
+* **cli:** AW_-prefixed env vars with legacy fallback ([62617b9](https://github.com/WayfarerLabs/agentworks/commit/62617b97e5951fa91e89a718cad5babc8ea872d4))
+* **sessions:** create agent-mode tmux sessions via direct agent SSH ([389141f](https://github.com/WayfarerLabs/agentworks/commit/389141f5f5a14549b7db8541a1f33144a0fe97ca))
+* **ssh:** add agent_exec_target ExecTarget builder ([8452262](https://github.com/WayfarerLabs/agentworks/commit/8452262e0c985301a81dc12574cb165d2d3ba135))
+* **vms:** apply VM hardening at vm create + vm reinit ([81b6dcf](https://github.com/WayfarerLabs/agentworks/commit/81b6dcf235e382b6b6ce4ce2b91994d8c1ee28a5))
+
+
+### Bug Fixes
+
+* **agents:** wrap claude/dotfiles commands in login shell for agent PATH ([0fa1cd5](https://github.com/WayfarerLabs/agentworks/commit/0fa1cd55fc756a27aee7cb77edbceeaaf617a50f))
+* **agents:** wrap mise install/prune in login shell too ([aace97d](https://github.com/WayfarerLabs/agentworks/commit/aace97d2775d12afb8dd1690e5f191be7d059f10))
+* **env:** doctor.py legacy-aware credential check + both-set note + removal-timeline doc ([101c645](https://github.com/WayfarerLabs/agentworks/commit/101c6450039e56f685bc5023163d03329dce5664))
+* **vms:** restore tailscale_host guard on exec_vm + round-2 review nits ([59c7d9a](https://github.com/WayfarerLabs/agentworks/commit/59c7d9a9cd47a76781ec6c140fbd72d53ea16948))
+
+
+### Documentation
+
+* address Copilot feedback on PR [#107](https://github.com/WayfarerLabs/agentworks/issues/107) (proper noun, EDITOR/VISUAL, doctor scope, tmux detach hint) ([b4ed925](https://github.com/WayfarerLabs/agentworks/commit/b4ed925beb62cccbcb732dc4244d5358cdd4a3f3))
+* move walkthrough to cli/, collapse top-level Tmux subsections ([34dbcc2](https://github.com/WayfarerLabs/agentworks/commit/34dbcc2edd52520941805256a695d8eaa9311a4d))
+* rewrite tmux detach hint to not overpromise on prefix override ([343f729](https://github.com/WayfarerLabs/agentworks/commit/343f72959f4dd7c92c97d9e89486bf01900091ec))
+* **sdd:** address phase-7 review (tradeoffs, sync-ssh-config, SSH-alias placement) ([8e1c9bd](https://github.com/WayfarerLabs/agentworks/commit/8e1c9bd9d7da3e99fdd891a3b8e85d3ab09b29d8))
+* **sdd:** direct-user-ssh-access SDD ([ef1281f](https://github.com/WayfarerLabs/agentworks/commit/ef1281fb3ed1df7bf37f0eeb7252d3a9515c76d4))
+* **sdd:** phase 7 deliverables (two ADR drafts + cli/README SSH alias surface) ([c984705](https://github.com/WayfarerLabs/agentworks/commit/c984705546e8a029d8cca916f0231562c0c1c21b))
+* tighten READMEs to project-vs-CLI split ([2021699](https://github.com/WayfarerLabs/agentworks/commit/2021699f4f09ec7fab9cdd51eb829e960df0c851))
+* tighten tmux detach hint to two lines ([4b549ce](https://github.com/WayfarerLabs/agentworks/commit/4b549ce2f810e7c1f13ef8ea58616b17e4e22aef))
+
 ## [0.6.0](https://github.com/WayfarerLabs/agentworks/compare/v0.5.0...v0.6.0) (2026-06-06)
 
 
