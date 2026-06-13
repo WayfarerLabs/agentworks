@@ -29,6 +29,7 @@ from agentworks.errors import (
     ExternalError,
     NotFoundError,
     ProvisionerError,
+    SecretUnavailableError,
     StateError,
     UserAbort,
     ValidationError,
@@ -45,6 +46,7 @@ __all__ = [
     "ExternalError",
     "NotFoundError",
     "ProvisionerError",
+    "SecretUnavailableError",
     "StateError",
     "UserAbort",
     "ValidationError",
@@ -261,7 +263,29 @@ def prompt_secret(label: str, hint: str | None = None) -> str:
     return _handler.prompt_secret(label, hint)
 
 
-# -- Interactivity gate -----------------------------------------------------
+def progress(label: str, total: int | None = None) -> Progress:
+    """Start a tracked operation. Returns a Progress handle."""
+    return _handler.progress(label, total)
+
+
+def set_handler(handler: OutputHandler) -> None:
+    """Replace the global output handler.
+
+    Call from the application entrypoint to route output through the appropriate
+    mechanism (typer.echo for CLI, websocket for web, list collector for tests).
+    """
+    global _handler
+    _handler = handler
+
+
+def get_handler() -> OutputHandler:
+    """Return the current output handler."""
+    return _handler
+
+
+# ---------------------------------------------------------------------------
+# Interactivity gate
+# ---------------------------------------------------------------------------
 
 _non_interactive: bool = False
 
@@ -285,25 +309,5 @@ def is_interactive() -> bool:
     if _non_interactive:
         return False
     return sys.stdin.isatty()
-
-
-def progress(label: str, total: int | None = None) -> Progress:
-    """Start a tracked operation. Returns a Progress handle."""
-    return _handler.progress(label, total)
-
-
-def set_handler(handler: OutputHandler) -> None:
-    """Replace the global output handler.
-
-    Call from the application entrypoint to route output through the appropriate
-    mechanism (typer.echo for CLI, websocket for web, list collector for tests).
-    """
-    global _handler
-    _handler = handler
-
-
-def get_handler() -> OutputHandler:
-    """Return the current output handler."""
-    return _handler
 
 
