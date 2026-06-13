@@ -76,6 +76,14 @@ site.
    console add-shell, exec, etc.) uses the same `build_export_block(...)` prelude. The transport is
    the SSH command line, which already exists everywhere agentworks opens a shell.
 
+6. **No rotation or refresh semantics required.** Every shell-open is a fresh resolution from the
+   configured backend chain. There is no "resolved at create time, refreshed every N hours"
+   machinery (which Kubernetes External Secrets Operator and similar systems need because they
+   materialize values into long-lived stores). Operator rotates a secret in their vault → the next
+   shell-open picks up the new value automatically. Existing shells retain the env they captured at
+   create time, consistent with FRD R5 "Attach inherits create-time env" and the broader "restart to
+   pick up new values" contract.
+
 ### Negative
 
 1. **The CLI handles secrets on every invocation that opens a shell.** In the file model, the
