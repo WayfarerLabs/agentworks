@@ -1,4 +1,4 @@
-"""Core types and protocol for the agentworks secret system.
+"""Core types, protocol, and base class for the agentworks secret system.
 
 See ``docs/sdd/2026-06-05-env-and-secrets/`` and
 ``docs/adrs/00NN-cli-side-secret-injection.md`` (numbered at SDD lock) for
@@ -8,8 +8,9 @@ another SecretSource in the chain.
 
 from __future__ import annotations
 
+from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Literal, Protocol, runtime_checkable
+from typing import Literal, Protocol
 
 
 @dataclass(frozen=True)
@@ -20,12 +21,12 @@ class SecretDecl:
     ``backend_mappings`` is keyed by backend kind (e.g. ``"env_var"``,
     ``"onepassword"``). Value forms per FRD R4:
 
-    - ``str``: backend's identifier for this secret (env var name, op:// URI, ...).
+    - ``str``: backend's identifier for this secret (env var name, op:// URI, etc.).
     - ``dict[str, object]``: structured identifier (for backends whose ID has
       multiple fields, e.g. 1Password ``{vault, item, field}``).
-    - ``False``: opt out -- skip this backend for this secret regardless of
-      any default convention the backend would otherwise apply.
-    - key absent: use the backend's default convention if it has one; else
+    - ``False``: opt out; skip this backend for this secret regardless of any
+      default convention the backend would otherwise apply.
+    - key absent: use the backend's default convention if it has one, else
       soft-skip (backend reports as "no mapping" via ``would_attempt``).
     """
 
@@ -61,14 +62,18 @@ class SecretConfig:
     backends: tuple[str, ...] = ()
 
 
-@runtime_checkable
 class SecretSource(Protocol):
-    """Protocol for backends that can produce secret values at command time.
+    """Structural type contract for backends that produce secret values.
 
-    Every backend implements the same protocol; ``PromptSource`` is just one
+    Every backend implements this protocol; ``PromptSource`` is just one
     instance whose ``get`` happens to interact with the operator instead of
     reading from a vault. The resolver iterates a configured chain of sources
     in precedence order; first to return a non-None value wins.
+
+    This is a type-only protocol: implementations do not need to inherit from
+    it. Most concrete sources inherit from ``SecretSourceBase`` to pick up the
+    default ``batch_get``, but a class that structurally implements the four
+    members below satisfies the protocol regardless.
     """
 
     kind: str
@@ -93,11 +98,37 @@ class SecretSource(Protocol):
         ...
 
     def batch_get(self, secrets: list[SecretDecl]) -> dict[str, str]:
-        """Batch resolve. The default implementation loops ``get``. Backends
-        that authenticate (1Password, Vault) override to amortize that cost
-        across the batch. ``PromptSource`` overrides to emit all prompts in
-        one operator interaction.
+        """Batch resolve. Backends that authenticate (1Password, Vault)
+        override to amortize that cost across the batch. ``PromptSource``
+        overrides to emit all prompts in one operator interaction.
         """
+        ...
+
+
+class SecretSourceBase(ABC):
+    """Default base class for SecretSource implementations.
+
+    Provides a default ``batch_get`` that loops ``get``. Concrete sources
+    inherit from this for the shared default and implement ``would_attempt``
+    and ``get`` (plus override ``batch_get`` when the backend benefits from
+    amortizing per-batch cost).
+
+    ``SecretSource`` remains the type contract; this base class is purely a
+    sharing convenience. Code that does not need the default ``batch_get`` can
+    implement ``SecretSource`` structurally without inheriting from this base.
+    """
+
+    kind: str
+
+    @abstractmethod
+    def would_attempt(self, secret: SecretDecl) -> bool:
+        ...
+
+    @abstractmethod
+    def get(self, secret: SecretDecl) -> str | None:
+        ...
+
+    def batch_get(self, secrets: list[SecretDecl]) -> dict[str, str]:
         out: dict[str, str] = {}
         for s in secrets:
             value = self.get(s)

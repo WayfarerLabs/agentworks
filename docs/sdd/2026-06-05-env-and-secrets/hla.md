@@ -249,12 +249,18 @@ class SecretSource(Protocol):
     def get(self, secret: SecretDecl) -> str | None: ...
 
     def batch_get(self, secrets: list[SecretDecl]) -> dict[str, str]:
-        """Optional batch optimization. Default impl loops .get(). Sources that
-        authenticate (Vault, 1Password CLI) override to amortize that cost across
-        the resolve_all() pass. PromptSource overrides to emit all prompts in one
-        operator interaction."""
-        return {s.name: v for s in secrets if (v := self.get(s)) is not None}
+        """Optional batch optimization. Sources that authenticate (Vault,
+        1Password CLI) override to amortize that cost across the resolve_all()
+        pass. PromptSource overrides to emit all prompts in one operator
+        interaction."""
+        ...
 ```
+
+`SecretSource` is a pure type-only protocol. The default `batch_get` (loop `.get` and drop None
+values) lives on a sibling `SecretSourceBase(ABC)` with abstract `would_attempt` and `get`. Concrete
+sources inherit from the ABC to pick up the default; this keeps the structural type contract clean
+while still letting backends share one batch implementation. A class that does not need the default
+may implement `SecretSource` structurally without inheriting from the base.
 
 After all sources are instantiated, the loader walks every declared secret against the active chain:
 a secret is **unreachable** if no source returns True from `would_attempt`. Unreachable secrets are
@@ -397,8 +403,11 @@ class SecretBackendConfig:
 @dataclass(frozen=True)
 class SecretConfig:
     """Top-level [secret_config] table."""
-    backends: list[str]            # dual-role: active set + precedence order
+    backends: tuple[str, ...]      # dual-role: active set + precedence order
 ```
+
+`backends` is stored as a `tuple` rather than a `list` so the dataclass stays
+`frozen=True`-compatible (hashable, immutable) without bespoke copy logic.
 
 The loader instantiates one `SecretSource` per kind named in `backends`, in order, and hands the
 list to the resolver. Backends declared in `[secret_backends.*]` but absent from `backends` are

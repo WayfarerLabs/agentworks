@@ -3,15 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
 
 import pytest
 
-from agentworks.errors import SecretUnavailableError
+from agentworks.errors import ConfigError, SecretUnavailableError
 from agentworks.secrets import SecretDecl, SecretResolver
-
-if TYPE_CHECKING:
-    pass
 
 
 class _FakeSource:
@@ -207,3 +203,93 @@ def test_required_for_dedupes_and_returns_decls() -> None:
 def test_empty_chain_with_no_secrets_resolves_empty() -> None:
     r = SecretResolver([], {})
     assert r.resolve_all([]) == {}
+
+
+def test_unsatisfied_hint_omits_opted_out_sources() -> None:
+    """The hint for a missing secret should not list sources whose would_attempt
+    returned False (e.g. via backend_mappings.env_var = false). Only sources
+    that actually tried appear in the per-secret hint."""
+    s1 = _FakeSource("env_var")
+    s2 = _FakeSource("prompt")
+    decl = _decl("x", backend_mappings={"env_var": False})
+    r = SecretResolver([s1, s2], {"x": decl})
+    with pytest.raises(SecretUnavailableError) as exc:
+        r.resolve_all([decl])
+    hint = exc.value.hint or ""
+    assert "x" in hint
+    assert "prompt" in hint
+    assert "env_var" not in hint
+
+
+def test_unsatisfied_hint_per_secret_listing() -> None:
+    """When multiple secrets fail, each gets its own per-secret hint line so
+    operators can see which backends were tried for each one."""
+    s_env = _FakeSource("env_var")
+    s_prompt = _FakeSource("prompt")
+    decls = {
+        "a": _decl("a", backend_mappings={"env_var": False}),
+        "b": _decl("b"),
+    }
+    r = SecretResolver([s_env, s_prompt], decls)
+    with pytest.raises(SecretUnavailableError) as exc:
+        r.resolve_all([decls["a"], decls["b"]])
+    hint = exc.value.hint or ""
+    # 'a' opted out of env_var, only prompt tried.
+    assert "a: tried prompt" in hint
+    # 'b' had no opt-out, both tried.
+    assert "b: tried env_var, prompt" in hint
+
+
+def test_render_mixed_plaintext_secret_and_bare_string() -> None:
+    """render() handles a single env dict containing plaintext _Entry, secret
+    _Entry, and bare-string entries simultaneously - the realistic Phase 2+
+    shape."""
+    s1 = _FakeSource("env_var", values={"sec": "resolved"})
+    r = SecretResolver([s1], _decls("sec"))
+
+    @dataclass(frozen=True)
+    class _Entry:
+        value: str | None = None
+        secret: str | None = None
+
+    env: dict[str, object] = {
+        "PLAIN": _Entry(value="plain-val"),
+        "SECRET": _Entry(secret="sec"),
+        "BARE": "bare-val",
+    }
+    out = r.render(env)
+    assert out == {"PLAIN": "plain-val", "SECRET": "resolved", "BARE": "bare-val"}
+
+
+def test_render_raises_on_unknown_secret_reference() -> None:
+    """An env entry referencing a secret name not in self._decls is a
+    ConfigError rather than a silent drop or KeyError."""
+    r = SecretResolver([_FakeSource("env_var")], _decls("known"))
+
+    @dataclass(frozen=True)
+    class _Entry:
+        value: str | None = None
+        secret: str | None = None
+
+    env: dict[str, object] = {"BAD": _Entry(secret="unknown-secret")}
+    with pytest.raises(ConfigError) as exc:
+        r.render(env)
+    assert "BAD" in str(exc.value)
+    assert "unknown-secret" in str(exc.value)
+
+
+def test_render_raises_on_malformed_entry() -> None:
+    """An entry with neither a plaintext value nor a secret reference (and
+    that isn't a bare string) is a ConfigError."""
+    r = SecretResolver([], {})
+
+    @dataclass(frozen=True)
+    class _Empty:
+        # Has neither .value nor .secret with content.
+        value: str | None = None
+        secret: str | None = None
+
+    env: dict[str, object] = {"BAD": _Empty()}
+    with pytest.raises(ConfigError) as exc:
+        r.render(env)
+    assert "BAD" in str(exc.value)

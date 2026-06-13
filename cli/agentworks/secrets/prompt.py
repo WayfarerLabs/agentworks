@@ -9,10 +9,10 @@ source entirely from its backends list.
 from __future__ import annotations
 
 from agentworks import output
-from agentworks.secrets.base import SecretDecl, SecretSource
+from agentworks.secrets.base import SecretDecl, SecretSourceBase
 
 
-class PromptSource(SecretSource):
+class PromptSource(SecretSourceBase):
     """Interactive prompt source.
 
     ``would_attempt`` returns True for any secret: prompting always applies

@@ -8,6 +8,7 @@ from agentworks.secrets.base import (
     SecretConfig,
     SecretDecl,
     SecretSource,
+    SecretSourceBase,
 )
 from agentworks.secrets.env_var import EnvVarSource, env_var_name_for
 from agentworks.secrets.prompt import PromptSource
@@ -21,5 +22,6 @@ __all__ = [
     "SecretDecl",
     "SecretResolver",
     "SecretSource",
+    "SecretSourceBase",
     "env_var_name_for",
 ]

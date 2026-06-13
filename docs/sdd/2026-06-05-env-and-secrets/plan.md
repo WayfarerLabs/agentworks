@@ -10,26 +10,33 @@ HLA's phasing section; refer to FRD / HLA for the design and ADR for the trust-a
 Goal: stand up the `agentworks.secrets` package with the protocol, v1 sources, resolver, and config
 types. No consumers yet. All unit-tested.
 
-- [ ] `cli/agentworks/errors.py`: add `SecretUnavailableError(AgentworksError)`.
-- [ ] `cli/agentworks/output.py`: add module-level `is_interactive()` helper. The
+- [x] `cli/agentworks/errors.py`: add `SecretUnavailableError(AgentworksError)`.
+- [x] `cli/agentworks/output.py`: add module-level `is_interactive()` helper. The
       `--non-interactive` flag still seeds via the existing Typer callback in `cli/_app.py`, but now
-      writes into `output` rather than keeping a `cli/_app`-private module global. The existing
-      `cli/_app.is_interactive` becomes a thin re-export for back-compat.
-- [ ] `cli/agentworks/secrets/__init__.py`: package surface (re-exports).
-- [ ] `cli/agentworks/secrets/base.py`:
+      writes into `output` rather than keeping a `cli/_app`-private module global.
+      (`cli/_app.is_interactive` was dropped after grep confirmed no external callers; the lone
+      internal user, `require_interactive`, now calls `output.is_interactive()` directly.)
+- [x] `cli/agentworks/secrets/__init__.py`: package surface (re-exports).
+- [x] `cli/agentworks/secrets/base.py`:
   - `SecretDecl` dataclass (name, description, hint, backend_mappings).
   - `SecretBackendConfig` dataclass (kind plus per-backend fields).
-  - `SecretConfig` dataclass (backends list).
-  - `SecretSource` Protocol (kind, would_attempt, get, batch_get default).
-- [ ] `cli/agentworks/secrets/env_var.py`: `EnvVarSource` (default convention `AW_SECRET_<NAME>`,
+  - `SecretConfig` dataclass (backends list, implemented as `tuple[str, ...]` for hashable
+    frozen-dataclass storage).
+  - `SecretSource` Protocol (kind, would_attempt, get, batch_get) - pure structural type contract.
+  - `SecretSourceBase` ABC with the default `batch_get` (loops `get`) for sharing between concrete
+    sources. Concrete sources inherit from the ABC; the Protocol remains type-only.
+- [x] `cli/agentworks/secrets/env_var.py`: `EnvVarSource` (default convention `AW_SECRET_<NAME>`,
       `backend_mappings.env_var` string-or-False override).
-- [ ] `cli/agentworks/secrets/prompt.py`: `PromptSource` (uses `output.is_interactive()` +
+- [x] `cli/agentworks/secrets/prompt.py`: `PromptSource` (uses `output.is_interactive()` +
       `output.prompt_secret`, batch_get groups all prompts).
-- [ ] `cli/agentworks/secrets/resolver.py`: `SecretResolver` (chain iteration, batch_get per source,
-      cache, `SecretUnavailableError` on no-source-resolved).
-- [ ] Tests: `cli/tests/test_secrets_base.py`, `test_secrets_env_var.py`, `test_secrets_prompt.py`,
+- [x] `cli/agentworks/secrets/resolver.py`: `SecretResolver` (chain iteration, batch_get per source,
+      cache, `SecretUnavailableError` on no-source-resolved, per-secret hint listing only sources
+      that actually `would_attempt`; `render` raises `ConfigError` on unknown-secret refs or
+      malformed entries).
+- [x] Tests: `cli/tests/test_secrets_base.py`, `test_secrets_env_var.py`, `test_secrets_prompt.py`,
       `test_secrets_resolver.py`. Coverage for resolution order, opt-out `false`, batch_get, cache,
-      unreachable raises, would_attempt across sources.
+      unreachable raises, would_attempt across sources, per-secret hint narrowing, mixed render
+      shapes, render rejecting unknown-secret refs and malformed entries.
 
 Definition of done: `from agentworks.secrets import SecretResolver, EnvVarSource, PromptSource`
 works; tests pin every behavior in the FRD R4 / HLA Secret model sections.

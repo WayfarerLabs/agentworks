@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from agentworks.errors import SecretUnavailableError
+from agentworks.errors import ConfigError, SecretUnavailableError
 
 if TYPE_CHECKING:
     from agentworks.secrets.base import SecretDecl, SecretSource
@@ -94,11 +94,19 @@ class SecretResolver:
             missing = [s for s in missing if s.name not in resolved]
 
         if missing:
-            names = sorted(s.name for s in missing)
-            tried = ", ".join(s.kind for s in self._sources) or "(none)"
+            sorted_missing = sorted(missing, key=lambda d: d.name)
+            names = [d.name for d in sorted_missing]
+            # Per-secret backend list: only sources that actually attempted
+            # (would_attempt == True) appear, so a secret with env_var opted out
+            # via backend_mappings doesn't get told "env_var was tried".
+            per_secret = []
+            for d in sorted_missing:
+                attempted = [s.kind for s in self._sources if s.would_attempt(d)]
+                kinds = ", ".join(attempted) if attempted else "(none; secret unreachable)"
+                per_secret.append(f"{d.name}: tried {kinds}")
             raise SecretUnavailableError(
                 f"no active backend could resolve secret(s): {', '.join(names)}",
-                hint=f"backends tried: {tried}",
+                hint="; ".join(per_secret),
             )
         return out
 
@@ -114,14 +122,19 @@ class SecretResolver:
         the env package, we duck-type on attributes rather than importing
         ``EnvEntry``: any object with a ``.value`` or ``.secret`` attribute
         works.
+
+        Raises ``ConfigError`` if an entry references an unknown secret name
+        or has neither a plaintext value nor a secret reference. These shapes
+        should be caught by config-load validation; ``render`` rejects them
+        rather than silently dropping a key.
         """
+        seen: set[str] = set()
         needed: list[SecretDecl] = []
         for entry in env.values():
             secret_name = getattr(entry, "secret", None)
-            if secret_name and secret_name in self._decls:
-                decl = self._decls[secret_name]
-                if decl not in needed:
-                    needed.append(decl)
+            if secret_name and secret_name not in seen and secret_name in self._decls:
+                seen.add(secret_name)
+                needed.append(self._decls[secret_name])
         resolved = self.resolve_all(needed) if needed else {}
 
         out: dict[str, str] = {}
@@ -129,11 +142,21 @@ class SecretResolver:
             secret_name = getattr(entry, "secret", None)
             value = getattr(entry, "value", None)
             if secret_name:
+                if secret_name not in self._decls:
+                    raise ConfigError(
+                        f"env key {key!r} references unknown secret {secret_name!r}",
+                        hint=f"declare it under [secrets.{secret_name}]",
+                    )
                 out[key] = resolved[secret_name]
             elif value is not None:
                 out[key] = value
             elif isinstance(entry, str):
                 out[key] = entry
+            else:
+                raise ConfigError(
+                    f"env key {key!r} has malformed entry: "
+                    "neither a plaintext value nor a secret reference",
+                )
         return out
 
     def required_for(self, env: dict[str, object]) -> list[SecretDecl]:

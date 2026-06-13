@@ -1,4 +1,6 @@
-"""Tests for the SecretSource protocol defaults and dataclass shapes."""
+"""Tests for the SecretSource protocol, the SecretSourceBase ABC, and the
+dataclass shapes in agentworks.secrets.base.
+"""
 
 from __future__ import annotations
 
@@ -8,7 +10,7 @@ from agentworks.secrets import (
     SecretBackendConfig,
     SecretConfig,
     SecretDecl,
-    SecretSource,
+    SecretSourceBase,
 )
 
 
@@ -42,30 +44,59 @@ def test_secret_config_preserves_order() -> None:
     assert cfg.backends == ("env_var", "onepassword", "prompt")
 
 
-def test_protocol_runtime_checkable_accepts_minimal_impl() -> None:
-    """A minimal class implementing the protocol satisfies isinstance()."""
+def test_base_class_default_batch_get_loops_get() -> None:
+    """SecretSourceBase.batch_get loops .get and skips None values."""
 
-    class _MinimalSource:
-        kind = "test"
+    class _LoopSource(SecretSourceBase):
+        kind = "loop"
+
+        def __init__(self, values: dict[str, str]) -> None:
+            self._values = values
 
         def would_attempt(self, secret: SecretDecl) -> bool:
             return True
 
         def get(self, secret: SecretDecl) -> str | None:
-            return "ok"
+            return self._values.get(secret.name)
+
+    src = _LoopSource(values={"a": "1", "c": "3"})
+    out = src.batch_get(
+        [
+            SecretDecl(name="a", description="A"),
+            SecretDecl(name="b", description="B"),
+            SecretDecl(name="c", description="C"),
+        ]
+    )
+    assert out == {"a": "1", "c": "3"}
+
+
+def test_base_class_refuses_missing_abstract_methods() -> None:
+    """A subclass missing an abstract method cannot be instantiated."""
+
+    class _MissingGet(SecretSourceBase):
+        kind = "missing-get"
+
+        def would_attempt(self, secret: SecretDecl) -> bool:
+            return True
+
+    with pytest.raises(TypeError):
+        _MissingGet()  # type: ignore[abstract]
+
+
+def test_base_class_subclass_can_override_batch_get() -> None:
+    """Overriding batch_get works; the default is not pinned."""
+
+    class _CustomBatch(SecretSourceBase):
+        kind = "custom"
+
+        def would_attempt(self, secret: SecretDecl) -> bool:
+            return True
+
+        def get(self, secret: SecretDecl) -> str | None:
+            return None  # should not be called
 
         def batch_get(self, secrets: list[SecretDecl]) -> dict[str, str]:
-            return {s.name: "ok" for s in secrets}
+            return {s.name: f"batched-{s.name}" for s in secrets}
 
-    assert isinstance(_MinimalSource(), SecretSource)
-
-
-def test_protocol_rejects_missing_method() -> None:
-    """Classes lacking the protocol methods fail isinstance()."""
-
-    class _IncompleteSource:
-        kind = "broken"
-        # Missing: would_attempt, get, batch_get
-
-    with pytest.raises(AssertionError):
-        assert isinstance(_IncompleteSource(), SecretSource)
+    out = _CustomBatch().batch_get([SecretDecl(name="x", description="X")])
+    assert out == {"x": "batched-x"}

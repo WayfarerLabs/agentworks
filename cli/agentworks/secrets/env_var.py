@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 
-from agentworks.secrets.base import SecretDecl, SecretSource
+from agentworks.secrets.base import SecretDecl, SecretSourceBase
 
 
 def env_var_name_for(secret_name: str) -> str:
@@ -12,7 +12,7 @@ def env_var_name_for(secret_name: str) -> str:
     return "AW_SECRET_" + secret_name.upper().replace("-", "_")
 
 
-class EnvVarSource(SecretSource):
+class EnvVarSource(SecretSourceBase):
     """Reads from operator-side environment variables.
 
     Resolution:

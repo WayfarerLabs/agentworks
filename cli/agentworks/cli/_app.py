@@ -80,19 +80,10 @@ def _global_options(
 # -- Interactivity gate ----------------------------------------------------
 
 
-def is_interactive() -> bool:
-    """Check if stdin is a TTY and --non-interactive was not passed.
-
-    Thin re-export of ``agentworks.output.is_interactive`` for callers that
-    have historically imported from ``cli/_app``.
-    """
-    from agentworks import output
-
-    return output.is_interactive()
-
-
 def require_interactive(what: str) -> None:
     """Raise if not interactive and a prompt would be needed."""
-    if not is_interactive():
+    from agentworks import output
+
+    if not output.is_interactive():
         typer.echo(f"Error: {what} is required in non-interactive mode", err=True)
         raise typer.Exit(1)

@@ -388,6 +388,13 @@ authoritative source is the merge computed at command time.
   `would_attempt(secret)` because the secret has no mapping and the backend has no default
   convention. Helps surface typos in `backend_mappings.<backend>` keys and incomplete migrations
   when an operator adds a new backend.
+- `backend_mappings.<kind>` keys referencing a backend that is not declared in
+  `[secret_backends.*]`: reported as an error (the kind does not exist in this config).
+- `backend_mappings.<kind>` keys referencing a backend that is declared in `[secret_backends.*]` but
+  not present in `[secret_config].backends`: reported as a warning. This shape is legitimate (an
+  operator may keep mappings authored for a backend they have temporarily disabled, ready to
+  re-enable later) but worth flagging because the mapping has no effect in the current
+  configuration.
 
 Doctor does not prompt for secrets; it only reports state.
 
