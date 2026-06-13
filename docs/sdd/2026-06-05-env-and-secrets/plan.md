@@ -101,47 +101,41 @@ is the consumption: instead of `build_export_block(env)` followed by glue, we pa
 
 ### Phase 3 deliverables
 
-- [ ] Delete `cli/agentworks/env/exports.py` (`build_export_block`, `build_prefixed_command`).
+- [x] Delete `cli/agentworks/env/exports.py` (`build_export_block`, `build_prefixed_command`).
       Remove from `agentworks.env` package surface and from tests. Env transport is now an SSH
       property, not a shell-command property.
-- [ ] `cli/agentworks/ssh.py`: thread an `env: dict[str, str] | None` kwarg through `run`,
+- [x] `cli/agentworks/ssh.py`: thread an `env: dict[str, str] | None` kwarg through `run`,
       `interactive`, and `ExecTarget.run`. Each `K=V` pair becomes `-o SetEnv=K=V` on the SSH
-      command line. The `RunCommand` Protocol in `agentworks.sessions.tmux` widens to match.
-- [ ] `cli/agentworks/sessions/tmux.py`: drop `_build_pane_command` and the prelude composition.
+      command line. Lima / RemoteLima / WSL2 transports embed env as scoped bash assignments at the
+      head of the payload. The `RunCommand` Protocol in `agentworks.sessions.tmux` widens to match.
+- [x] `cli/agentworks/sessions/tmux.py`: drop `_build_pane_command` and the prelude composition.
       `create_session` takes the env dict, the pane command becomes the simple inner shape
       (`$SHELL -lic 'cd <path> && exec <command>'` or just empty), env reaches the pane via
       `tmux new-session -e KEY=VAL` flags on the SSH-invoked tmux command. Tmux's session
       environment carries the vars to every pane in the session.
-- [ ] `cli/agentworks/sessions/manager.py`: `_resolve_session_env` stays (still composes the env
+- [x] `cli/agentworks/sessions/manager.py`: `_resolve_session_env` stays (still composes the env
       dict). Call sites pass it via `create_tmux_session(..., env=...)` -> SSH layer.
-- [ ] **Admin sessions move to per-session sockets**, mirroring the agent-mode pattern. Without
-      per-session sockets, tmux's shared default server for admin mode would freeze the first
-      session's env into the server and leak it to subsequent admin-session panes. With per-session
-      sockets, each admin-mode `tmux new-session` starts a fresh server that inherits the
-      SetEnv-delivered env from the SSH connection. Socket path lives under
-      `/run/agentworks/admin-tmux-sockets/<admin-user>/<session>.sock`. The agent-mode socket- root
-      setup pattern (admin-target writes the socket root, ensures per-user dir) is reused verbatim
-      for admin mode.
-- [ ] **Drop the redundant `sudo su --login agentworks`** in the console admin-shell windows (legacy
-      `sessions/console.py.create_console` and `multi_console._build_console_tmux`). Post FRD R1 the
-      SSH user IS the admin user; the sudo is a relic that wipes env across a user switch that was
-      already a no-op. The admin-shell pane becomes `$SHELL -lic 'exec     $SHELL -l'`-equivalent
-      (or just an empty pane command, letting tmux's default-shell handle it).
-- [ ] **Console add-shell panes** (`multi_console._split_shell_pane`): per-pane env injected via
-      `tmux split-window -e KEY=VAL`. For the agent-pane branch (`sudo --login -u <agent>`), the
-      sudo IS legitimate (the tmux server runs as admin; the pane needs to run as the agent).
-      Sudoers config is extended (Phase 4) with `env_keep += "AGENTWORKS_* AW_*"` so the
-      agentworks-managed vars survive the sudo boundary. Non-agentworks vars from operator env
-      tables are stripped at sudo crossing (intended: those vars were scoped to the SSH session, not
-      to delegated processes).
-- [ ] `cli/agentworks/env/identity.py` retains the three identity-subset helpers
+- [x] **Admin sessions move to per-session sockets**, mirroring the agent-mode pattern. Each
+      admin-mode `tmux new-session` starts a fresh server that inherits the SetEnv-delivered env
+      from the SSH connection. Socket path lives under
+      `/run/agentworks/admin-tmux-sockets/<admin-user>/<session>.sock`. `ensure_admin_socket_root`
+      and `cleanup_stale_admin_sockets` helpers mirror the agent-mode plumbing.
+- [x] **Drop the redundant `sudo su --login agentworks`** in the console admin-shell windows (legacy
+      `sessions/console.py.create_console` and `multi_console._build_console_tmux`). Admin-shell
+      window now `exec $SHELL -l` directly.
+- [x] **Console add-shell panes** (`multi_console._split_shell_pane`): per-pane env injected via
+      `tmux split-window -e KEY=VAL` plus belt-and-suspenders SetEnv on `target.run`. New
+      `_resolve_pane_env` helper composes admin / agent scopes. For the agent-pane branch
+      (`sudo --login -u <agent>`), the sudo IS legitimate (the tmux server runs as admin; the pane
+      needs to run as the agent); sudoers env_keep deployed in Phase 4 keeps agentworks-managed vars
+      surviving the sudo boundary. Until Phase 4 lands, env injection on the agent-pane branch is
+      best-effort (vars cross into tmux's session env but get stripped at the sudo crossing).
+- [x] `cli/agentworks/env/identity.py` retains the three identity-subset helpers
       (`vm_stable_identity_env`, `per_user_identity_env`, `per_context_identity_env`). With SetEnv
       as the transport, `compose_env` overlays per-context identity vars on top of the resolved user
       env (identity wins). VM-stable and per-user vars are NOT in the SetEnv payload; they come from
-      the VM-side profile fragments in Phase 4. (An operator reaching a VM via raw SSH outside
-      agentworks gets those vars from the profile fragments; the SetEnv path is for
-      agentworks-issued commands only.)
-- [ ] Tests:
+      the VM-side profile fragments in Phase 4.
+- [x] Tests:
   - SSH-layer SetEnv arg construction (one `-o SetEnv=K=V` per dict entry, order preserved, values
     with special chars accepted).
   - `create_tmux_session` builds the `tmux new-session -e KEY=VAL` flag list correctly for admin and
