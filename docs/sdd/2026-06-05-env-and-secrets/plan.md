@@ -80,17 +80,38 @@ Definition of done: an operator can author config that mentions secrets and env 
 Goal: existing shell-open sites in sessions / consoles use the env+secrets prelude. Behavior is
 unchanged for operators with no env / secrets configured.
 
-- [ ] `cli/agentworks/sessions/manager.py`: replace inline `export` in `_build_session_command` with
-      `build_prefixed_command(...)`. Move from inner-shell placement to outer SSH-command-shell
-      placement (per HLA "Prelude placement vs login shells").
-- [ ] `cli/agentworks/sessions/tmux.py`: pass the env dict through `create_session` so the prelude
-      lands on the right transport for agent-mode and admin-mode sessions.
-- [ ] `cli/agentworks/sessions/console.py` / `multi_console.py`: same shape, per pane / per window.
-- [ ] Tests: spy on the constructed command to confirm the prelude shape. Cover plaintext-only,
-      secret-resolved, and mixed cases. Re-run existing session / console suites for regressions.
+- [x] `cli/agentworks/sessions/manager.py`: `_build_session_command` now returns only the inner
+      login-shell payload (no exports). New `_resolve_session_env` helper composes the per-context
+      env from the resolved VM / workspace / agent templates, applies `{{session_name}}` /
+      `{{workspace_name}}` template-var substitution to session env values, runs the dict through
+      `compose_env` (renders secrets, overlays identity vars), and hands the rendered
+      `dict[str, str]` to `create_tmux_session`.
+- [x] `cli/agentworks/sessions/tmux.py`: `create_session` accepts a new `env` kwarg and a new
+      `_build_pane_command` helper places the prelude OUTSIDE the login-shell wrapper:
+      `EXPORTS && $SHELL -lic 'cd PATH && command'`. Behavior unchanged when `env` is empty (no
+      prelude, no command shape change).
+- [x] `cli/agentworks/env/compose.py`: new
+      `compose_env(resolver, ctx, vm, workspace=, admin=,     agent=, session=)` helper that runs
+      the standard pipeline (identity ⊕ resolved user env) with identity-wins ordering.
+      `per_context_identity_env` is the inline subset; VM-stable and per-user identity vars live in
+      Phase 4 profile fragments.
+- [x] `cli/agentworks/secrets/resolver.py`: narrow `render` / `required_for` to
+      `Mapping[str, EnvEntry]` now that Phase 2's EnvEntry exists. Phase 1's duck-typed
+      `dict[str, object]` is gone. Bare-string and malformed-entry tests removed (EnvEntry's
+      exactly-one invariant makes those cases unreachable).
+- [x] Tests: env-compose helpers, identity subset helpers (vm-stable / per-user / per-context),
+      `_build_pane_command` shape (prelude outside login shell, empty-input fallthrough).
+- [ ] **Deferred**: env injection on console admin-shell windows
+      (`sessions/console.py.create_console` and `multi_console._build_console_tmux`) plus the
+      per-pane `_add_shell_pane` in `multi_console.py`. These paths still wrap in `sudo --login` (a
+      pre-FRD-R1 relic), which wipes the env across the user switch and breaks the HLA "outer shell"
+      placement. Aligning these with FRD R1 (drop the redundant `sudo` when the SSH user already
+      matches the target shell) is a small refactor on top of this work; tracking as a Phase 3
+      follow-up.
 
 Definition of done: `agw session create` with no env config produces the same on-VM state as before.
-With env config, the values are present in the shell's env.
+With env config, the values are present in the shell's env. (Met for sessions; console admin-shell
+and per-pane wiring deferred per the bullet above.)
 
 ## Phase 4: provisioning + agent setup wiring
 

@@ -43,18 +43,53 @@ class ResourceContext:
 
 
 def agentworks_identity_env(ctx: ResourceContext) -> dict[str, str]:
-    """Return the AGENTWORKS_* vars that apply to ``ctx``.
+    """Return ALL AGENTWORKS_* vars that apply to ``ctx``.
 
-    Always includes AGENTWORKS_VM, AGENTWORKS_VM_HOST, AGENTWORKS_PLATFORM,
-    AGENTWORKS_USER. Adds AGENTWORKS_WORKSPACE[_DIR] / AGENTWORKS_AGENT /
-    AGENTWORKS_SESSION[_KIND] when the corresponding scope is set.
+    Includes the full identity set: VM-stable vars (VM / VM_HOST / PLATFORM),
+    per-user vars (USER), and per-context vars (WORKSPACE[_DIR] / AGENT /
+    SESSION[_KIND]). Use the focused helpers below to select the subset
+    appropriate for a particular write site (inline prelude vs profile
+    fragments).
     """
     out = {
+        **vm_stable_identity_env(ctx),
+        **per_user_identity_env(ctx),
+        **per_context_identity_env(ctx),
+    }
+    return out
+
+
+def vm_stable_identity_env(ctx: ResourceContext) -> dict[str, str]:
+    """VM-stable subset, written to ``/etc/profile.d/agentworks-identity.sh``.
+
+    The same on every Linux user on the VM and every shell that VM hosts.
+    Phase 4 of the env-and-secrets effort writes these to a system-wide
+    profile fragment so that any shell on the VM (including raw ssh logins)
+    sees them.
+    """
+    return {
         "AGENTWORKS_VM": ctx.vm_name,
         "AGENTWORKS_VM_HOST": ctx.vm_host,
         "AGENTWORKS_PLATFORM": ctx.platform,
-        "AGENTWORKS_USER": ctx.user,
     }
+
+
+def per_user_identity_env(ctx: ResourceContext) -> dict[str, str]:
+    """Per-user subset, written to ``~/.agentworks-profile.sh``.
+
+    Each Linux user on the VM gets their own copy of this fragment with
+    AGENTWORKS_USER set to their username.
+    """
+    return {"AGENTWORKS_USER": ctx.user}
+
+
+def per_context_identity_env(ctx: ResourceContext) -> dict[str, str]:
+    """Per-context subset, injected inline at shell-open time.
+
+    Values vary per shell-open invocation (workspace / agent / session
+    context), so these cannot live in a VM-side profile fragment.
+    """
+    out: dict[str, str] = {}
     if ctx.workspace_name is not None:
         out["AGENTWORKS_WORKSPACE"] = ctx.workspace_name
     if ctx.workspace_dir is not None:

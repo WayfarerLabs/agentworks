@@ -10,6 +10,9 @@ from typing import TYPE_CHECKING
 from agentworks.errors import ConfigError, SecretUnavailableError
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
+    from agentworks.env.entry import EnvEntry
     from agentworks.secrets.base import SecretDecl, SecretSource
 
 
@@ -112,54 +115,46 @@ class SecretResolver:
 
     def render(
         self,
-        env: dict[str, object],
+        env: Mapping[str, EnvEntry],
     ) -> dict[str, str]:
         """Resolve an effective-env dict into concrete ``{KEY: value}``.
 
-        ``env`` values are either plaintext strings or ``EnvEntry``-shaped
-        objects with ``.value`` (plaintext) or ``.secret`` (secret name
-        referencing ``self._decls``). To keep this module independent of
-        the env package, we duck-type on attributes rather than importing
-        ``EnvEntry``: any object with a ``.value`` or ``.secret`` attribute
-        works.
+        Phase 2 of the env-and-secrets effort introduced the EnvEntry type;
+        this signature was widened to ``dict[str, object]`` during Phase 1
+        to delay the env-package dependency. Now narrowed to the natural
+        shape: a mapping of env-var name to EnvEntry (which carries either
+        ``.value`` plaintext or ``.secret`` reference).
 
-        Raises ``ConfigError`` if an entry references an unknown secret name
-        or has neither a plaintext value nor a secret reference. These shapes
-        should be caught by config-load validation; ``render`` rejects them
-        rather than silently dropping a key.
+        Raises ``ConfigError`` if an entry references an unknown secret
+        name. The exhaustive-or-else case (entry has neither value nor
+        secret) cannot happen by construction because EnvEntry's
+        ``__post_init__`` enforces the exactly-one invariant.
         """
         seen: set[str] = set()
         needed: list[SecretDecl] = []
         for entry in env.values():
-            secret_name = getattr(entry, "secret", None)
-            if secret_name and secret_name not in seen and secret_name in self._decls:
-                seen.add(secret_name)
-                needed.append(self._decls[secret_name])
+            if entry.secret is not None and entry.secret not in seen and entry.secret in self._decls:
+                seen.add(entry.secret)
+                needed.append(self._decls[entry.secret])
         resolved = self.resolve_all(needed) if needed else {}
 
         out: dict[str, str] = {}
         for key, entry in env.items():
-            secret_name = getattr(entry, "secret", None)
-            value = getattr(entry, "value", None)
-            if secret_name:
-                if secret_name not in self._decls:
+            if entry.secret is not None:
+                if entry.secret not in self._decls:
                     raise ConfigError(
-                        f"env key {key!r} references unknown secret {secret_name!r}",
-                        hint=f"declare it under [secrets.{secret_name}]",
+                        f"env key {key!r} references unknown secret {entry.secret!r}",
+                        hint=f"declare it under [secrets.{entry.secret}]",
                     )
-                out[key] = resolved[secret_name]
-            elif value is not None:
-                out[key] = value
-            elif isinstance(entry, str):
-                out[key] = entry
+                out[key] = resolved[entry.secret]
             else:
-                raise ConfigError(
-                    f"env key {key!r} has malformed entry: "
-                    "neither a plaintext value nor a secret reference",
-                )
+                # EnvEntry invariant: exactly one of value/secret set, so
+                # value is non-None when secret is None.
+                assert entry.value is not None
+                out[key] = entry.value
         return out
 
-    def required_for(self, env: dict[str, object]) -> list[SecretDecl]:
+    def required_for(self, env: Mapping[str, EnvEntry]) -> list[SecretDecl]:
         """Return deduplicated SecretDecls referenced by ``env``.
 
         Used by eager-prompting orchestration to compute the union of
@@ -168,8 +163,7 @@ class SecretResolver:
         seen: set[str] = set()
         out: list[SecretDecl] = []
         for entry in env.values():
-            secret_name = getattr(entry, "secret", None)
-            if secret_name and secret_name in self._decls and secret_name not in seen:
-                seen.add(secret_name)
-                out.append(self._decls[secret_name])
+            if entry.secret is not None and entry.secret in self._decls and entry.secret not in seen:
+                seen.add(entry.secret)
+                out.append(self._decls[entry.secret])
         return out

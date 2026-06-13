@@ -128,6 +128,7 @@ def test_create_session_probes_before_state_mutation(
         env: dict[str, str] = {}
 
     monkeypatch.setattr(session_manager, "_resolve_template", lambda *a, **k: _Tmpl())
+    monkeypatch.setattr(session_manager, "_resolve_session_env", lambda *a, **k: {})
 
     config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
 
@@ -178,10 +179,11 @@ def test_create_session_uses_agent_target_for_tmux(
     captured: dict[str, object] = {}
 
     def _capture_create(
-        name, ws_path, command, linux_user, *, run_command, target, admin_username, is_admin
+        name, ws_path, command, linux_user, *, run_command, target, admin_username, is_admin, env=None
     ):  # type: ignore[no-untyped-def]
         captured["run_command"] = run_command
         captured["target"] = target
+        captured["env"] = env
         return ("/tmp/sock", 12345)
 
     monkeypatch.setattr(tmux_mod, "create_session", _capture_create)
@@ -193,6 +195,7 @@ def test_create_session_uses_agent_target_for_tmux(
         env: dict[str, str] = {}
 
     monkeypatch.setattr(session_manager, "_resolve_template", lambda *a, **k: _Tmpl())
+    monkeypatch.setattr(session_manager, "_resolve_session_env", lambda *a, **k: {})
 
     config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
 

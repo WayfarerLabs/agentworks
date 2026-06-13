@@ -8,9 +8,16 @@ then hand the result to ``build_export_block`` or ``build_prefixed_command`` to
 produce the shell prelude any shell-opening site can prepend.
 """
 
+from agentworks.env.compose import compose_env
 from agentworks.env.entry import EnvEntry
 from agentworks.env.exports import build_export_block, build_prefixed_command
-from agentworks.env.identity import ResourceContext, agentworks_identity_env
+from agentworks.env.identity import (
+    ResourceContext,
+    agentworks_identity_env,
+    per_context_identity_env,
+    per_user_identity_env,
+    vm_stable_identity_env,
+)
 from agentworks.env.merge import effective_env
 
 __all__ = [
@@ -19,5 +26,9 @@ __all__ = [
     "agentworks_identity_env",
     "build_export_block",
     "build_prefixed_command",
+    "compose_env",
     "effective_env",
+    "per_context_identity_env",
+    "per_user_identity_env",
+    "vm_stable_identity_env",
 ]

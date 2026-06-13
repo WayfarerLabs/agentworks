@@ -11,6 +11,8 @@ from __future__ import annotations
 import shlex
 from typing import TYPE_CHECKING, Protocol
 
+from agentworks.env import build_export_block
+
 if TYPE_CHECKING:
     from collections.abc import Callable
 
@@ -253,6 +255,37 @@ def _grant_server_access(
     )
 
 
+def _build_pane_command(*, command: str, q_path: str, prelude: str) -> str:
+    """Compose the tmux pane command for create_session.
+
+    Shape per HLA "Prelude placement vs login shells":
+
+        <prelude> && $SHELL -lic 'cd <path> && exec <command>'
+
+    The prelude lives OUTSIDE the login shell wrapper, so the login shell's
+    startup files (``~/.zprofile``, ``~/.agentworks-profile.sh``) inherit the
+    prelude vars via ``environ`` and can layer their own exports on top.
+
+    Empty inputs short-circuit so the no-env / no-command paths produce the
+    same shell command tmux saw before this phase (tmux's default shell is
+    used when the returned string is empty).
+    """
+    if command:
+        inner = shlex.quote(f"cd {q_path} && {command}")
+        shell_cmd = f"$SHELL -lic {inner}"
+    else:
+        shell_cmd = ""
+
+    if prelude and shell_cmd:
+        return f"{prelude} && {shell_cmd}"
+    if prelude:
+        # No command but env prelude present: invoke a login shell so the
+        # prelude has a process to land in. tmux's own default-shell path
+        # would skip the prelude entirely.
+        return f"{prelude} && $SHELL -l"
+    return shell_cmd
+
+
 def create_session(
     session_name: str,
     workspace_path: str,
@@ -263,6 +296,7 @@ def create_session(
     target: ExecTarget | None = None,
     admin_username: str | None = None,
     is_admin: bool = True,
+    env: dict[str, str] | None = None,
 ) -> tuple[str | None, int | None]:
     """Create a locked-down tmux session.
 
@@ -284,16 +318,14 @@ def create_session(
     q_session = shlex.quote(session_name)
     q_path = shlex.quote(workspace_path)
 
+    prelude = build_export_block(env or {})
+
     if is_admin:
-        if command:
-            inner = shlex.quote(f"cd {q_path} && {command}")
-            shell_cmd = f"$SHELL -lic {inner}"
-        else:
-            shell_cmd = ""
+        pane_cmd = _build_pane_command(command=command, q_path=q_path, prelude=prelude)
 
         cmd = f"tmux new-session -d -s {q_session} -c {q_path} -f {RESTRICTED_CONFIG_PATH}"
-        if shell_cmd:
-            cmd += f" {shlex.quote(shell_cmd)}"
+        if pane_cmd:
+            cmd += f" {shlex.quote(pane_cmd)}"
         run_command(cmd)
         try:
             pid_out = run_command("tmux display-message -p '#{pid}'", check=False)
@@ -347,18 +379,14 @@ def create_session(
         # Build the pane command. No `sudo --login` prefix: the agent is
         # already the SSH user (FRD R1), so tmux runs directly under the
         # agent's uid.
-        if command:
-            inner = shlex.quote(f"cd {q_path} && {command}")
-            shell_cmd = f"$SHELL -lic {inner}"
-        else:
-            shell_cmd = ""
+        pane_cmd = _build_pane_command(command=command, q_path=q_path, prelude=prelude)
 
         cmd = (
             f"tmux -S {q_sock} new-session -d -s {q_session} "
             f"-c {q_path} -f {RESTRICTED_CONFIG_PATH}"
         )
-        if shell_cmd:
-            cmd += f" {shlex.quote(shell_cmd)}"
+        if pane_cmd:
+            cmd += f" {shlex.quote(pane_cmd)}"
         run_command(cmd)
 
         # Fix socket permissions (tmux creates sockets mode 0700). Agent

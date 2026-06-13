@@ -239,6 +239,7 @@ def test_create_session_rolls_back_on_keyboard_interrupt(
         env: dict[str, str] = {}
 
     monkeypatch.setattr(session_manager, "_resolve_template", lambda *a, **k: _Tmpl())
+    monkeypatch.setattr(session_manager, "_resolve_session_env", lambda *a, **k: {})
 
     # Stand-in Config: only the few attributes the code path under test reads.
     config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
@@ -331,6 +332,7 @@ def test_create_session_releases_group_membership_on_keyboard_interrupt(
         env: dict[str, str] = {}
 
     monkeypatch.setattr(session_manager, "_resolve_template", lambda *a, **k: _Tmpl())
+    monkeypatch.setattr(session_manager, "_resolve_session_env", lambda *a, **k: {})
 
     config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
 
@@ -421,6 +423,7 @@ def test_create_session_rollback_failure_does_not_mask_keyboard_interrupt(
         env: dict[str, str] = {}
 
     monkeypatch.setattr(session_manager, "_resolve_template", lambda *a, **k: _Tmpl())
+    monkeypatch.setattr(session_manager, "_resolve_session_env", lambda *a, **k: {})
 
     config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
 

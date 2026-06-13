@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-
 import pytest
 
+from agentworks.env import EnvEntry
 from agentworks.errors import ConfigError, SecretUnavailableError
 from agentworks.secrets import SecretDecl, SecretResolver
 
@@ -160,25 +159,12 @@ def test_render_resolves_secret_refs_and_passes_through_plaintext() -> None:
     s1 = _FakeSource("env_var", values={"sec": "resolved-value"})
     r = SecretResolver([s1], _decls("sec"))
 
-    @dataclass(frozen=True)
-    class _Entry:
-        value: str | None = None
-        secret: str | None = None
-
     env = {
-        "PLAIN": _Entry(value="plain-val"),
-        "SECRET": _Entry(secret="sec"),
+        "PLAIN": EnvEntry(key="PLAIN", value="plain-val"),
+        "SECRET": EnvEntry(key="SECRET", secret="sec"),
     }
     out = r.render(env)
     assert out == {"PLAIN": "plain-val", "SECRET": "resolved-value"}
-
-
-def test_render_handles_bare_string_entries() -> None:
-    """If an env dict has bare-string values (no .value attr), render
-    passes them through."""
-    r = SecretResolver([], _decls())
-    out = r.render({"PLAIN": "raw"})
-    assert out == {"PLAIN": "raw"}
 
 
 def test_required_for_dedupes_and_returns_decls() -> None:
@@ -186,15 +172,10 @@ def test_required_for_dedupes_and_returns_decls() -> None:
     decls = {"shared": _decl("shared")}
     r = SecretResolver([s1], decls)
 
-    @dataclass(frozen=True)
-    class _Entry:
-        secret: str | None = None
-        value: str | None = None
-
     env = {
-        "A": _Entry(secret="shared"),
-        "B": _Entry(secret="shared"),  # same secret twice
-        "C": _Entry(value="plain"),
+        "A": EnvEntry(key="A", secret="shared"),
+        "B": EnvEntry(key="B", secret="shared"),  # same secret twice
+        "C": EnvEntry(key="C", value="plain"),
     }
     needed = r.required_for(env)
     assert [d.name for d in needed] == ["shared"]
@@ -240,56 +221,25 @@ def test_unsatisfied_hint_per_secret_listing() -> None:
     assert "b: tried env_var, prompt" in hint
 
 
-def test_render_mixed_plaintext_secret_and_bare_string() -> None:
-    """render() handles a single env dict containing plaintext _Entry, secret
-    _Entry, and bare-string entries simultaneously - the realistic Phase 2+
-    shape."""
+def test_render_mixed_plaintext_and_secret_entries() -> None:
+    """render() handles plaintext and secret EnvEntry instances together."""
     s1 = _FakeSource("env_var", values={"sec": "resolved"})
     r = SecretResolver([s1], _decls("sec"))
 
-    @dataclass(frozen=True)
-    class _Entry:
-        value: str | None = None
-        secret: str | None = None
-
-    env: dict[str, object] = {
-        "PLAIN": _Entry(value="plain-val"),
-        "SECRET": _Entry(secret="sec"),
-        "BARE": "bare-val",
+    env = {
+        "PLAIN": EnvEntry(key="PLAIN", value="plain-val"),
+        "SECRET": EnvEntry(key="SECRET", secret="sec"),
     }
     out = r.render(env)
-    assert out == {"PLAIN": "plain-val", "SECRET": "resolved", "BARE": "bare-val"}
+    assert out == {"PLAIN": "plain-val", "SECRET": "resolved"}
 
 
 def test_render_raises_on_unknown_secret_reference() -> None:
     """An env entry referencing a secret name not in self._decls is a
     ConfigError rather than a silent drop or KeyError."""
     r = SecretResolver([_FakeSource("env_var")], _decls("known"))
-
-    @dataclass(frozen=True)
-    class _Entry:
-        value: str | None = None
-        secret: str | None = None
-
-    env: dict[str, object] = {"BAD": _Entry(secret="unknown-secret")}
+    env = {"BAD": EnvEntry(key="BAD", secret="unknown-secret")}
     with pytest.raises(ConfigError) as exc:
         r.render(env)
     assert "BAD" in str(exc.value)
     assert "unknown-secret" in str(exc.value)
-
-
-def test_render_raises_on_malformed_entry() -> None:
-    """An entry with neither a plaintext value nor a secret reference (and
-    that isn't a bare string) is a ConfigError."""
-    r = SecretResolver([], {})
-
-    @dataclass(frozen=True)
-    class _Empty:
-        # Has neither .value nor .secret with content.
-        value: str | None = None
-        secret: str | None = None
-
-    env: dict[str, object] = {"BAD": _Empty()}
-    with pytest.raises(ConfigError) as exc:
-        r.render(env)
-    assert "BAD" in str(exc.value)

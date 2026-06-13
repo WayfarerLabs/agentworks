@@ -48,6 +48,7 @@
     "keyrings",
     "kptr",
     "kubeconfig",
+    "kwarg",
     "lifecycles",
     "limactl",
     "lockfiles",

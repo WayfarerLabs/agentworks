@@ -16,7 +16,6 @@ from agentworks.db import PID_STOPPED, SessionMode, SessionStatus
 from agentworks.errors import (
     AlreadyExistsError,
     BrokenStateError,
-    ConfigError,
     ConnectivityError,
     ExternalError,
     NotFoundError,
@@ -37,6 +36,7 @@ _KNOWN_TEMPLATE_VARS = {"session_name", "workspace_name"}
 if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database, SessionRow, VMRow, WorkspaceRow
+    from agentworks.env import EnvEntry
     from agentworks.sessions.templates import ResolvedSessionTemplate
     from agentworks.sessions.tmux import RunCommand
     from agentworks.ssh import ExecTarget, SSHLogger
@@ -411,6 +411,109 @@ def _substitute_template_vars(text: str, variables: dict[str, str]) -> str:
     return _TEMPLATE_VAR_RE.sub(replace, text)
 
 
+def _substitute_template_vars_in_env(
+    env: dict[str, EnvEntry],
+    variables: dict[str, str],
+) -> dict[str, EnvEntry]:
+    """Apply ``{{session_name}}`` / ``{{workspace_name}}`` substitution to
+    plaintext env entry values.
+
+    Preserves the legacy template-variable hook that ``_build_session_command``
+    carried before the EnvEntry migration. Secret-ref entries pass through
+    unchanged (variable substitution applies to the resolved string at
+    backend time, not the secret name).
+    """
+    from agentworks.env import EnvEntry as _EnvEntry
+
+    result: dict[str, _EnvEntry] = {}
+    for key, entry in env.items():
+        if entry.value is None:
+            result[key] = entry
+            continue
+        new_val = _substitute_template_vars(entry.value, variables)
+        if new_val == entry.value:
+            result[key] = entry
+        else:
+            result[key] = _EnvEntry(key=key, value=new_val)
+    return result
+
+
+def _resolve_session_env(
+    config: Config,
+    *,
+    db: Database,
+    vm: VMRow,
+    ws: WorkspaceRow,
+    session_name: str,
+    session_template: ResolvedSessionTemplate,
+    mode: SessionMode,
+    agent_name: str | None,
+    linux_user: str,
+) -> dict[str, str]:
+    """Compose the shell-open env for a session create / restart.
+
+    Resolves the per-VM / per-workspace / per-agent templates, builds the
+    ResourceContext, applies template-variable substitution to the session
+    template's env values, and runs the merged dict through
+    ``compose_env`` (which renders secrets via the config resolver and
+    overlays per-context identity vars).
+    """
+    from agentworks.agents.templates import resolve_from_dict as _resolve_agent_template
+    from agentworks.env import ResourceContext, compose_env
+    from agentworks.vms.templates import resolve_from_dict as _resolve_vm_template
+    from agentworks.workspaces.templates import resolve_template as _resolve_ws_template
+
+    vm_template = _resolve_vm_template(config.vm_templates, vm.template)
+    workspace_template = _resolve_ws_template(config, ws.template)
+
+    admin_env: dict[str, EnvEntry] | None
+    agent_env: dict[str, EnvEntry] | None
+    if mode == SessionMode.ADMIN:
+        admin_env = config.admin.env
+        agent_env = None
+    else:
+        assert agent_name is not None  # caller enforces; agent mode requires an agent
+        admin_env = None
+        agent_row = db.get_agent(agent_name)
+        if agent_row is None:
+            raise NotFoundError(
+                f"agent '{agent_name}' not found",
+                entity_kind="agent",
+                entity_name=agent_name,
+            )
+        resolved_agent_template = _resolve_agent_template(
+            config.agent_templates, agent_row.template
+        )
+        agent_env = resolved_agent_template.env
+
+    ctx = ResourceContext(
+        vm_name=vm.name,
+        vm_host=vm.vm_host_name or vm.platform,
+        platform=vm.platform,
+        user=linux_user,
+        workspace_name=ws.name,
+        workspace_dir=ws.workspace_path,
+        agent_name=agent_name,
+        session_name=session_name,
+        session_kind="admin" if mode == SessionMode.ADMIN else "agent",
+    )
+
+    session_env = _substitute_template_vars_in_env(
+        session_template.env,
+        variables={"session_name": session_name, "workspace_name": ws.name},
+    )
+
+    return compose_env(
+        resolver=config.secret_resolver,
+        ctx=ctx,
+        vm=vm_template.env,
+        workspace=workspace_template.env,
+        admin=admin_env,
+        agent=agent_env,
+        session=session_env,
+    )
+
+
 def _build_session_command(
     template: ResolvedSessionTemplate,
     *,
@@ -418,10 +521,16 @@ def _build_session_command(
     workspace_name: str,
     restart: bool = False,
 ) -> str:
-    """Build the shell command string for a session from its template.
+    """Build the inner login-shell command for a session from its template.
 
-    Returns an empty string if the template has no command (login shell only).
-    Uses restart_command (if defined) when restart=True.
+    Returns an empty string when the template has no command (login shell
+    only). Uses restart_command (if defined) when restart=True.
+
+    The result is the inner payload that runs INSIDE the login shell
+    wrapper. Env exports are not produced here; they land in the OUTER SSH-
+    command shell (see ``sessions/tmux.create_session``) so that the login
+    shell's startup files (``~/.zprofile``, ``~/.agentworks-profile.sh``)
+    see the prelude vars via ``environ`` and can layer on top.
     """
     variables = {
         "session_name": session_name,
@@ -431,27 +540,16 @@ def _build_session_command(
     raw_command = template.restart_command if restart and template.restart_command else template.command
     command = _substitute_template_vars(raw_command, variables)
 
-    parts = []
-    for key, entry in template.env.items():
+    # The template env regex check happens at config-load time
+    # (`config._parse_env_table`); validation here is a defense-in-depth
+    # sanity check while this code is the only consumer of `template.env`.
+    for key in template.env:
         if not _ENV_KEY_RE.match(key):
             raise ValidationError(f"invalid env var name {key!r} in template '{template.name}'")
-        if entry.secret is not None:
-            # Phase 3 of the env-and-secrets effort wires the SecretResolver into
-            # session command construction. Until then, a session template that
-            # references a secret cannot be materialized into a shell command.
-            raise ConfigError(
-                f"session template {template.name!r} env key {key!r} references "
-                f"secret {entry.secret!r}; secret resolution into session commands "
-                "lands in Phase 3 of the env-and-secrets effort"
-            )
-        assert entry.value is not None  # EnvEntry invariant: exactly one of value/secret
-        val = _substitute_template_vars(entry.value, variables)
-        parts.append(f"export {key}={shlex.quote(val)}")
 
     if command:
-        parts.append(f"exec {command}")
-
-    return " && ".join(parts)
+        return f"exec {command}"
+    return ""
 
 
 # -- Liveness checks -------------------------------------------------------
@@ -754,6 +852,17 @@ def create_session(
 
             deploy_restricted_config(run_command, history_limit=config.session.history_limit)
             command = _build_session_command(template, session_name=name, workspace_name=workspace_name)
+            session_env = _resolve_session_env(
+                config,
+                db=db,
+                vm=vm,
+                ws=ws,
+                session_name=name,
+                session_template=template,
+                mode=mode,
+                agent_name=resolved_agent_name,
+                linux_user=linux_user,
+            )
             # Pick the SSH transport for tmux operations:
             # - admin sessions: admin's run_command (unchanged)
             # - agent sessions: agent's run_command (FRD R1, direct
@@ -776,6 +885,7 @@ def create_session(
                 target=target,
                 admin_username=vm.admin_username,
                 is_admin=(mode == SessionMode.ADMIN),
+                env=session_env,
             )
         except KeyboardInterrupt:
             output.warn(f"Cancelling session create '{name}'... rolling back.")
@@ -1077,6 +1187,17 @@ def restart_session(
             restart=True,
         )
         linux_user = _resolve_session_linux_user(db, session, vm)
+        session_env = _resolve_session_env(
+            config,
+            db=db,
+            vm=vm,
+            ws=ws,
+            session_name=name,
+            session_template=template,
+            mode=SessionMode(session.mode),
+            agent_name=session.agent_name,
+            linux_user=linux_user,
+        )
 
         try:
             new_sock, pid = create_tmux_session(
@@ -1088,6 +1209,7 @@ def restart_session(
                 target=admin_target,
                 admin_username=vm.admin_username,
                 is_admin=is_admin,
+                env=session_env,
             )
         except RuntimeError as exc:
             if "already has an active tmux server" in str(exc):
