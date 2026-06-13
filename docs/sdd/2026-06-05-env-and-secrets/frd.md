@@ -25,15 +25,17 @@ This SDD establishes:
 1. A standard set of `AGENTWORKS_*` env vars that identify the current resource context wherever
    agentworks opens a shell.
 2. A unified env var schema where each entry is either a plaintext value or a reference to a named
-   secret, definable at four scopes (admin, vm template, workspace template, agent template, and
-   session template) with deterministic merge semantics.
-3. A secret declaration mechanism that, like the existing `git_credentials` model, defines the
-   _existence_ of a secret in config and resolves its _value_ from the CLI environment with an
-   interactive prompt fallback. Values are never persisted by agentworks.
+   secret, definable across the resource graph (admin, vm template, workspace template, agent
+   template, session template) with deterministic merge semantics.
+3. A pluggable secret-backend system. Backends (env var, interactive prompt, and later 1Password,
+   keychain, vault, ...) are uniform members of a `SecretSource` protocol. Operators configure which
+   backends are active and in what order via a single precedence list. Secret declarations in config
+   declare the _existence_ of a secret; backends produce the _value_ at command time. Values are
+   never persisted by agentworks.
 
-Future work (out of scope for this SDD but anticipated): folding `git_credentials` into the general
-secret mechanism, and adding pluggable backends (keychain, 1Password, vault) beyond env-var +
-prompt.
+v1 ships with two backends: `env_var` (operator-side env-var lookup) and `prompt` (interactive
+last-resort). Future work, out of scope for this SDD: additional backends (keychain, 1Password CLI,
+vault); folding `git_credentials` into the general secret mechanism.
 
 ## Terminology
 
@@ -46,10 +48,14 @@ prompt.
 - **Env entry**: a single declaration; one key with either a `value =` (plaintext) or `secret =`
   (reference to a declared secret).
 - **Secret**: a named credential whose _existence_ is declared in config but whose _value_ is never
-  persisted by agentworks. Resolved at command time from a CLI env var; prompted interactively if
-  the env var is unset.
-- **Secret source**: the mechanism that produces the value of a secret at command time. For v1 the
-  only source is env-var-then-prompt. The interface accommodates additional sources later.
+  persisted by agentworks. Resolved at command time through the configured backend chain.
+- **Secret backend**: a provider that can produce secret values at command time (`env_var`,
+  `prompt`, future `onepassword`, `keychain`, etc.). All backends implement the `SecretSource`
+  protocol. Operators configure which backends are active and in what order via
+  `[secret_config].backends`.
+- **Backend mapping**: per-secret, per-backend identifier override. For backends with a default
+  convention (e.g. `env_var` derives `AW_SECRET_<NAME>`), absent = use the default. For backends
+  without one (e.g. 1Password), absent = skip this backend for this secret.
 - **AGENTWORKS\_\* vars**: the small fixed set of env vars that agentworks always sets to identify
   the resource context (e.g. `AGENTWORKS_VM`, `AGENTWORKS_SESSION`). Automatic; not
   user-configurable.
@@ -111,8 +117,8 @@ EDITOR = "nvim"
 Each scope applies to a shell when its predicate matches:
 
 - `admin` applies to shells opened as the admin Linux user. That covers admin-mode sessions,
-  `vm shell`, `vm exec`, console admin shells (e.g. console layout's `--include-admin-shell`), and
-  provisioning shells.
+  `vm shell`, `vm exec`, console admin shells (`console create --add-admin-shell`), and provisioning
+  shells.
 - `vm` applies to every on-VM shell.
 - `workspace` applies when the shell has workspace context.
 - `agent` applies to shells opened as an agent's Linux user.
@@ -149,22 +155,26 @@ inheritance-resolved env for a template is what feeds into the cross-scope merge
 
 ### R3: Secret declarations
 
-Secrets are declared in a top-level `[secrets]` table, each entry containing at minimum a
-description for prompt UX:
+Secrets are declared in `[secrets.<name>]` blocks. Each declares the _existence_ of a secret and
+optionally describes per-backend mapping overrides (R4):
 
 ```toml
 [secrets.anthropic-api-key]
 description = "Anthropic API key for Claude agents"
+hint = "https://console.anthropic.com/settings/keys"
 
-[secrets.openai-api-key]
-description = "OpenAI API key"
-hint = "https://platform.openai.com/api-keys"
+[secrets.github-token]
+description = "GitHub PAT for repo access"
+backend_mappings.env_var = "GITHUB_TOKEN"
+backend_mappings.onepassword = "op://Personal/GitHub/token"
 ```
 
 Fields:
 
 - `description` (required): one-line description shown in prompts and `agw doctor`.
 - `hint` (optional): additional guidance shown with the prompt (e.g. where to create the secret).
+- `backend_mappings.<backend>` (optional): per-backend identifier override for this secret. See R4
+  for value forms and semantics.
 
 Secret names use the same character rules as resource names (lowercase alphanumeric, hyphens,
 underscores; see `NAME_RE` in `config.py`). The namespace is flat and global.
@@ -173,19 +183,74 @@ Declaring a secret is the _only_ way to make a `{ secret = "..." }` reference re
 no implicit lookup of arbitrary env vars by name; this avoids "ambient capability" surprises and
 gives `agw doctor` a complete view of what the operator needs to provide.
 
-### R4: Secret resolution and prompting
+### R4: Secret backends and resolution
 
-When a command needs a secret value, the resolution order is:
+Secret values are sourced through an operator-configurable chain of backends. Each backend is a
+provider that can answer "do you have a value for this secret?" Backends include things like "the
+operator's CLI environment" (`env_var`), "1Password CLI" (`onepassword`), and "interactive prompt"
+(`prompt`). All are uniform members of the same `SecretSource` protocol; prompt is just the last
+source in the chain by convention.
 
-1. **CLI environment variable**: `AW_SECRET_<NAME>` (uppercase, hyphens to underscores). The
-   operator is expected to source this from their personal vault (1Password, keychain, etc.) before
-   invoking `agw`. Mirrors the existing `GIT_CREDENTIALS_<NAME>` pattern.
-2. **Interactive prompt** (only when stdin is a TTY and `--non-interactive` is not set):
-   `output.prompt_secret(...)` with the declared description and hint. Values entered at the prompt
-   are used for the current invocation only; not persisted, not cached, not echoed.
+#### Backend declarations
 
-If the env var is unset and the CLI is non-interactive, the command fails with a clear error naming
-the unset secret(s) and the env var(s) that would satisfy them.
+Backends are configured in `[secret_backends.<kind>]` blocks. Each block carries the backend's
+connection / global config:
+
+```toml
+[secret_backends.env_var]
+# Always available; no config needed. Default convention: secret "github-token" maps to env var
+# AW_SECRET_GITHUB_TOKEN. Override per-secret via backend_mappings (R3).
+
+[secret_backends.onepassword]
+account = "wfscot@example.com"
+vault = "Personal"
+# No default convention. Each secret must declare backend_mappings.onepassword to be resolvable
+# from this backend.
+
+[secret_backends.prompt]
+# Effective only when stdin is a TTY and --non-interactive is not set. No config.
+```
+
+#### Active backends and precedence
+
+A single top-level `[secret_config]` table holds the list of active backends, in precedence order:
+
+```toml
+[secret_config]
+# This list controls BOTH which backends are active and the order they are tried in.
+# A backend declared in [secret_backends.*] but absent from this list is dormant.
+# First backend to return a value wins.
+backends = ["env_var", "onepassword", "prompt"]
+```
+
+#### Per-secret mappings
+
+Some backends have a default name-to-identifier convention (e.g. `env_var` derives
+`AW_SECRET_<NAME>` from the secret's name). Others do not (1Password item paths, vault paths, etc.
+have no automatic mapping). Per-secret overrides live in `[secrets.<name>].backend_mappings` (R3),
+keyed by backend kind. Value forms:
+
+| Value         | Meaning                                                                |
+| ------------- | ---------------------------------------------------------------------- |
+| `"some-id"`   | Simple identifier (e.g. env var name, `op://...` URI).                 |
+| `{ ... }`     | Structured identifier (for backends whose ID has multiple fields).     |
+| `false`       | Opt out: skip this backend for this secret, regardless of any default. |
+| (key omitted) | Use the backend's default convention if one exists, else soft-skip.    |
+
+Soft-skip means the backend returns no value and the resolver moves on; `agw doctor` surfaces
+secrets where a configured backend is skipped due to missing mapping, so silent typos still get
+caught.
+
+A secret that is unreachable from every active backend (every active backend is either `false` in
+its mapping or has no default convention and no explicit mapping) is a config-time error.
+
+#### Resolution at command time
+
+The resolver walks `secret_config.backends` in order, asking each source for the missing secrets.
+First source to return a value wins; the resolver caches the value for the rest of the command
+invocation. Prompt is just the last source in the chain; in `--non-interactive` mode or when stdin
+is not a TTY, `PromptSource` returns `None` and the resolver raises `SecretUnavailableError` naming
+the unsatisfied secret(s) and which backends were tried.
 
 #### Eager, batched prompting at command start
 
@@ -209,15 +274,16 @@ otherwise interact with existing shells consume no secrets and prompt for none.
 Commands that open new shells (and therefore consume secrets):
 
 - Provisioning: `vm create`, `vm reinit`, `agent create`, `agent reinit`.
-- Session create / restart: `session create`, `session restart`, `session start`.
-- Console window creation: `console create`, `console add-shell`, `console add-session`.
+- Session create / restart: `session create`, `session restart`.
+- Console window creation: `console create` (any sessions named in the create), `console add-shell`.
 - Interactive ad-hoc shells: `vm shell`, `agent shell`.
 - Non-interactive exec: `vm exec`, `agent exec`.
 
 Commands that consume no secrets:
 
 - Attach / inspection: `session attach`, `session list`, `session describe`, `console attach`,
-  `vm list`, `agent list`, `workspace list`, etc.
+  `console add-session`, `vm list`, `agent list`, `workspace list`, etc. (`console add-session`
+  joins an existing tmux session via a wrapper window; no new agent shell is opened.)
 - Lifecycle that does not open a new shell on the target: `session stop`, `session delete`,
   `agent delete`, `vm stop`, `vm delete`. (These run admin-side maintenance, not new agent shells.)
 
@@ -233,9 +299,9 @@ elaborates the mechanism.
 
 Examples:
 
-- `agw vm create vm1`: opens provisioning shells (admin user) and the agent-setup shells if any
-  agents are derived from the template. Needs the secrets referenced by the admin / vm-template env
-  chain, plus any agent-template env for derived agents.
+- `agw vm create vm1`: opens provisioning shells as the admin user. Needs the secrets referenced by
+  the admin / vm-template env chain. (Agent secrets are needed by `agent create`, not `vm create`;
+  agents are a separate lifecycle step.)
 - `agw session create s1 -t claude`: opens a new session shell as the agent's Linux user. Needs the
   secrets referenced by the full chain: vm-template, workspace-template, agent-template,
   session-template (and admin if the session is admin-mode).
@@ -245,7 +311,9 @@ Examples:
 - `agw session restart --all-stopped --vm vm1` over-approximates: it prompts for secrets across all
   sessions on `vm1`, even ones that turn out to be running and will not be restarted. In
   `--non-interactive` mode this can surface as a failure on a secret the command would not have
-  actually consumed; narrow the filter to recover.
+  actually consumed. Recover by either setting the missing secret in your CLI env
+  (`AW_SECRET_<NAME>` or whichever backend mapping applies) or narrowing the static filter (e.g. add
+  an explicit `--workspace`).
 
 ### R5: Effective env propagation
 
@@ -265,16 +333,22 @@ shell agentworks opens. Propagation happens at shell-creation time only:
 
 `session attach`, `console attach`, and any other surface that joins an EXISTING shell process
 inherit the env that was captured at create time. They do not consume or inject secrets, do not
-re-export, and do not modify the running shell's env. This is the same contract the previous SDD
-(`2026-06-06-direct-user-ssh-access` FRD R6) established for "old sessions" generally: changes to
-config or secret values take effect only when the shell is created. To pick up new values, restart
-the session (`session restart`) or recreate the console window.
+re-export, and do not modify the running shell's env.
+
+This SDD establishes the contract: changes to config or secret values take effect only when a shell
+is created. To pick up new values, restart the session (`session restart`) or recreate the console
+window. The prior direct-target-user-SSH SDD's FRD R6 forward-referenced this need; this is where it
+lands.
 
 #### Profile-fragment role
 
-For the VM-stable identity vars (`AGENTWORKS_VM`, `AGENTWORKS_VM_HOST`, `AGENTWORKS_PLATFORM`,
-`AGENTWORKS_USER`), the implementation places them in the existing `.agentworks-profile.sh` during
-VM / agent init so that any shell on the VM (even ones not opened through agentworks) sees them.
+Identity vars that are the same for every Linux user on the VM (`AGENTWORKS_VM`,
+`AGENTWORKS_VM_HOST`, `AGENTWORKS_PLATFORM`) are written to a system-wide profile fragment
+(`/etc/profile.d/agentworks-identity.sh`) by `vms/initializer.py` at VM init. The per-user var
+`AGENTWORKS_USER` is written to each Linux user's `~/.agentworks-profile.sh` at init / agent create.
+Together they ensure any shell on the VM (even ones not opened through agentworks) sees the right
+identity vars.
+
 Per-context vars (workspace, agent, session) and ALL user-defined env, plaintext or secret, are
 always set inline at the shell-open site. User-defined env is never cached on the VM disk; the
 authoritative source is the merge computed at command time.
@@ -297,8 +371,7 @@ Doctor does not prompt for secrets; it only reports state.
 A small inspection facility helps operators understand what an opened shell will see:
 
 ```text
-agw env show (--vm NAME | --workspace NAME | --agent NAME | --session NAME)
-             [--reveal-secrets]
+agw env show [--vm NAME] [--workspace NAME] [--agent NAME] [--session NAME] [--reveal-secrets]
 ```
 
 - At least one of `--vm` / `--workspace` / `--agent` / `--session` is required. Without a context,

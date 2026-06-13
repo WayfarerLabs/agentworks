@@ -6,9 +6,9 @@
 
 Two new packages anchor this work:
 
-- **`agentworks.secrets`**: declares the `Secret` config type, the `SecretSource` protocol, an
-  `EnvVarSource` (the v1 source), and a `PromptFallback` (CLI-only interactive last-resort). Also
-  exposes a `SecretResolver` that batches lookups and prompts up front. Modeled on
+- **`agentworks.secrets`**: declares the `SecretDecl` and `SecretBackendConfig` config types, the
+  `SecretSource` protocol, the v1 source implementations (`EnvVarSource`, `PromptSource`), and a
+  `SecretResolver` that batches lookups across the configured backend chain. Modeled in spirit on
   `agentworks.git_credentials`.
 - **`agentworks.env`**: declares the `EnvEntry` config type (value-or-secret-ref), merge logic
   across the resource graph, the standard `AGENTWORKS_*` var producers, and a single
@@ -59,6 +59,13 @@ class SecretDecl:
     name: str
     description: str
     hint: str | None = None
+    # Per-backend mapping overrides, keyed by backend kind.
+    # Value forms:
+    #   str        -> backend's identifier for this secret (e.g. env var name, op:// URI)
+    #   dict       -> structured identifier (for backends whose ID has multiple fields)
+    #   False      -> opt out: skip this backend for this secret
+    #   key absent -> use backend's default convention if any, else soft-skip
+    backend_mappings: dict[str, str | dict[str, object] | Literal[False]] = field(default_factory=dict)
 ```
 
 Each scope that supports env adds `env: dict[str, EnvEntry] = field(default_factory=dict)`:
@@ -70,16 +77,57 @@ Each scope that supports env adds `env: dict[str, EnvEntry] = field(default_fact
 - `SessionTemplate.env` (replaces the existing `env: dict[str, str] | None` with
   `dict[str, EnvEntry]`; bare string values in TOML continue to work as plaintext)
 
-`Config` gains `secrets: dict[str, SecretDecl]`.
+`Config` gains:
+
+- `secrets: dict[str, SecretDecl]` (from `[secrets.*]`)
+- `secret_backends: dict[str, SecretBackendConfig]` (from `[secret_backends.*]`)
+- `secret_config: SecretConfig` (from `[secret_config]`)
 
 ### TOML shape
 
+A complete, illustrative slice:
+
 ```toml
+[secret_backends.env_var]
+# Always available; default convention is AW_SECRET_<NAME>. No config needed.
+
+[secret_backends.onepassword]
+account = "wfscot@example.com"
+vault = "Personal"
+
+[secret_backends.prompt]
+# Effective only when stdin is a TTY and the CLI is not --non-interactive.
+
+[secret_config]
+# Dual-role: enabled backends + precedence order. First-match wins.
+backends = ["env_var", "onepassword", "prompt"]
+
 [secrets.anthropic-api-key]
 description = "Anthropic API key for Claude agents"
+hint = "https://console.anthropic.com/settings/keys"
+backend_mappings.onepassword = "op://Personal/Anthropic/key"
+
+[secrets.github-token]
+description = "GitHub PAT for repo access"
+backend_mappings.env_var = "GITHUB_TOKEN"        # override AW_SECRET_<NAME> default
+backend_mappings.onepassword = "op://Personal/GitHub/token"
+
+[secrets.openai-key]
+description = "OpenAI API key"
+# Structured mapping form for backends whose ID has multiple fields.
+backend_mappings.onepassword = { vault = "Shared", item = "OpenAI", field = "key" }
+
+[secrets.super-sensitive-token]
+description = "Force-prompt token"
+backend_mappings.env_var = false     # opt out: skip even the default convention
+backend_mappings.onepassword = false # opt out: only PromptSource can resolve this
 
 [admin.env]
 HTTP_PROXY = "http://proxy.example:3128"
+
+[vm_templates.default.env]
+EDITOR = "nvim"
+GITHUB_TOKEN = { secret = "github-token" }
 
 [agent_templates.claude.env]
 ANTHROPIC_API_KEY = { secret = "anthropic-api-key" }
@@ -113,9 +161,10 @@ def effective_env(
 ) -> dict[str, EnvEntry]:
     """Layered merge: session > (agent | admin) > workspace > vm.
 
-    Exactly one of `admin` / `agent` should be non-None per call. The caller
-    decides based on which Linux user the shell will run as.
+    Exactly one of `admin` / `agent` is non-None per call: the caller knows
+    which Linux user the shell runs as.
     """
+    assert not (admin and agent), "effective_env: pass exactly one of admin/agent"
     merged: dict[str, EnvEntry] = dict(vm.env)
     if workspace:
         merged.update(workspace.env)
@@ -172,68 +221,108 @@ fragment, parallel to but separate from this scheme.
 
 ## Secret model
 
-Sources and prompting are distinct concerns. A **source** answers "what value does this secret have,
-if you already know"; a **prompt fallback** asks the operator when no source knows. Today's v1 has
-one source (env vars) and one fallback (interactive prompt), but they compose independently so
-additional sources can land without touching the prompt path, and a future non-interactive caller
-(e.g. a controller process) can simply omit the fallback.
+All secret-producing concerns implement a single `SecretSource` protocol. Interactive prompting is
+just another source (`PromptSource`) that happens to interact with the operator instead of reading
+from somewhere. The resolver iterates a configured chain of sources in precedence order; the first
+to return a value wins.
 
 ```python
 class SecretSource(Protocol):
     """A source that can produce a secret value at command time."""
+
+    kind: str  # matches the [secret_backends.<kind>] key
 
     def get(self, secret: SecretDecl) -> str | None: ...
 
     def batch_get(self, secrets: list[SecretDecl]) -> dict[str, str]:
         """Optional batch optimization. Default impl loops .get(). Sources that
         authenticate (Vault, 1Password CLI) override to amortize that cost across
-        the resolve_all() pass."""
+        the resolve_all() pass. PromptSource overrides to emit all prompts in one
+        operator interaction."""
         return {s.name: v for s in secrets if (v := self.get(s)) is not None}
+```
 
+### v1 source implementations
 
+```python
 class EnvVarSource:
-    """Reads from operator-side environment variables. The v1 source."""
+    """Reads from operator-side environment variables. Default convention:
+    secret 'github-token' maps to env var AW_SECRET_GITHUB_TOKEN. Per-secret
+    overrides via secret.backend_mappings.env_var (string for the env var name,
+    or `false` to skip entirely)."""
 
-    def env_var_name(self, name: str) -> str:
-        return "AW_SECRET_" + name.upper().replace("-", "_")
+    kind = "env_var"
+
+    def _resolved_name(self, secret: SecretDecl) -> str | None:
+        mapping = secret.backend_mappings.get("env_var")
+        if mapping is False:
+            return None  # explicit opt-out
+        if isinstance(mapping, str):
+            return mapping  # operator-supplied env var name
+        return "AW_SECRET_" + secret.name.upper().replace("-", "_")  # default
 
     def get(self, secret: SecretDecl) -> str | None:
         from os import environ
+        name = self._resolved_name(secret)
+        return environ.get(name) if name else None
 
-        return environ.get(self.env_var_name(secret.name))
 
+class PromptSource:
+    """Interactive last-resort, normally the final entry in [secret_config].backends.
+    Returns None when stdin is not a TTY or the CLI is in --non-interactive mode --
+    the resolver then raises SecretUnavailableError naming the unsatisfied secrets.
 
-class PromptFallback:
-    """Interactive last-resort. NOT a SecretSource: sources return existing values;
-    a fallback interacts with the operator to produce one. The resolver invokes the
-    fallback only when stdin is a TTY and the CLI is not --non-interactive.
+    A future controller-process caller simply omits PromptSource from its backends
+    list; the same None-then-raise path surfaces missing values as a typed error
+    to the API client instead of prompting the controller."""
 
-    A future controller-process caller omits the fallback entirely; missing values
-    surface as a typed error to the API client instead of prompting the controller."""
+    kind = "prompt"
 
-    def prompt(self, secret: SecretDecl) -> str:
+    def get(self, secret: SecretDecl) -> str | None:
         from agentworks import output
-
+        if not output.is_interactive():
+            return None
         label = f"Secret '{secret.name}': {secret.description}"
         return output.prompt_secret(label, hint=secret.hint)
+
+    def batch_get(self, secrets: list[SecretDecl]) -> dict[str, str]:
+        """Override: emit all prompts in one operator interaction."""
+        if not output.is_interactive():
+            return {}
+        return {s.name: self.get(s) for s in secrets}
 ```
 
-The protocol shape leaves room for future `KeychainSource`, `OnePasswordSource`, `VaultSource`, etc.
-The resolver tries sources in order, then invokes the fallback (if configured) for any remaining
-unknowns:
+A future `OnePasswordSource` would look like:
+
+```python
+class OnePasswordSource:
+    kind = "onepassword"
+
+    def __init__(self, config: OnePasswordBackendConfig) -> None:
+        self._account = config.account
+        self._vault = config.vault
+
+    def get(self, secret: SecretDecl) -> str | None:
+        mapping = secret.backend_mappings.get("onepassword")
+        if mapping is False or mapping is None:
+            return None  # opt-out or no-mapping; no default convention for 1pw
+        ref = mapping if isinstance(mapping, str) else _build_op_ref(mapping, self._vault)
+        return _shell_out("op", "read", ref, account=self._account)
+
+    def batch_get(self, secrets): ...  # one `op` invocation for all needed at once
+```
+
+### Resolver
 
 ```python
 class SecretResolver:
     def __init__(
         self,
-        sources: list[SecretSource],
+        sources: list[SecretSource],   # ordered by [secret_config].backends precedence
         decls: dict[str, SecretDecl],
-        *,
-        prompt_fallback: PromptFallback | None = None,
     ) -> None:
         self._sources = sources
         self._decls = decls
-        self._fallback = prompt_fallback
         self._cache: dict[str, str] = {}  # process-lifetime; CLI invocation bounded
 
     def required_for(self, env: dict[str, EnvEntry]) -> list[SecretDecl]:
@@ -241,10 +330,12 @@ class SecretResolver:
         ...
 
     def resolve_all(self, secrets: list[SecretDecl]) -> dict[str, str]:
-        """Batch-resolve: try sources in order, then prompt for the rest (one prompt
-        session, only if a fallback is configured). Raises SecretUnavailableError
-        when no source has the value and no fallback is configured (e.g. non-interactive
-        CLI, or future controller-process caller)."""
+        """Batch-resolve: try each source in precedence order. Each source's
+        batch_get() is called once with the still-missing set; values it returns
+        are cached and removed from the missing set; the next source sees only
+        what is still unresolved. If a secret is still unresolved after every
+        source (including PromptSource if present), raises SecretUnavailableError
+        naming the unsatisfied secret and which backends were tried."""
         ...
 
     def render(self, env: dict[str, EnvEntry]) -> dict[str, str]:
@@ -252,13 +343,36 @@ class SecretResolver:
         ...
 ```
 
-`resolve_all` is the eager-prompting entry point. It groups remaining-after-sources secrets and
-emits all prompts before returning, so command bodies that call `resolver.render(env)` later get a
-fully-populated dict back synchronously.
+`resolve_all` is the eager-prompting entry point. PromptSource's `batch_get` emits all prompts in
+one operator interaction, preserving the "prompt once at the start" UX even though prompt is just
+another source in the chain.
 
-In-process cache means resolving the same secret twice in one command (e.g. for two sessions)
-prompts once. The cache lifetime is the CLI invocation; rotation between commands picks up the new
-value on the next invocation because the cache is rebuilt from scratch.
+In-process cache means resolving the same secret twice in one command (e.g. for two sessions) hits a
+backend at most once. The cache lifetime is the CLI invocation; rotation between commands picks up
+the new value on the next invocation because the cache is rebuilt from scratch. A future controller
+process will need to revisit cache lifetime (TTL or revocation hooks) since its process lifetime is
+much longer than a single command.
+
+### Backend configuration types
+
+```python
+@dataclass(frozen=True)
+class SecretBackendConfig:
+    """Connection / global config for one backend instance."""
+    kind: str                      # matches [secret_backends.<kind>] key
+    # Additional fields per backend kind (e.g. account, vault for onepassword).
+    # Concrete subclasses (OnePasswordBackendConfig, KeychainBackendConfig, ...)
+    # carry their own fields.
+
+@dataclass(frozen=True)
+class SecretConfig:
+    """Top-level [secret_config] table."""
+    backends: list[str]            # dual-role: active set + precedence order
+```
+
+The loader instantiates one `SecretSource` per kind named in `backends`, in order, and hands the
+list to the resolver. Backends declared in `[secret_backends.*]` but absent from `backends` are
+inert (the source instance is never created).
 
 ## Building the export block
 
@@ -308,17 +422,28 @@ Attach surfaces (`session attach`, `console attach`) do NOT appear in this table
 shell processes and inherit those processes' create-time env. See FRD R5 "Attach inherits
 create-time env."
 
-### VM-stable identity in the profile fragment
+### Identity vars on the VM
 
-`vms/initializer._write_agentworks_profile` learns to write the VM-scoped identity vars
-(`AGENTWORKS_VM`, `AGENTWORKS_VM_HOST`, `AGENTWORKS_PLATFORM`, `AGENTWORKS_USER`) so any shell on
-the VM (even one started outside agentworks) sees them. These are reinit-time-stable values, fine to
-cache on disk.
+Two write surfaces, chosen by whether the value varies per Linux user:
 
-User-defined env (plaintext or secret) is NOT cached in the profile fragment. It is always computed
-at command time and injected inline at the shell-open site. This keeps a single authoritative source
-for env values (config + CLI environment) and avoids stale-cache surprises when config changes
-between reinit and the next shell.
+- **System-wide fragment** (new): `/etc/profile.d/agentworks-identity.sh`, written once per VM by
+  `vms/initializer.py`. Contains the truly VM-stable identity vars: `AGENTWORKS_VM`,
+  `AGENTWORKS_VM_HOST`, `AGENTWORKS_PLATFORM`. Mirrors the existing `AGENTWORKS_NERF_HOME` pattern
+  (`/etc/profile.d/agentworks-nerf.sh` plus `/etc/zsh/zprofile`). Any shell on the VM, including
+  ones started outside agentworks (e.g. an operator landing via the `awvm--<vm>` alias), sees these
+  vars from this fragment.
+- **Per-user fragment** (existing, extended): `~/.agentworks-profile.sh`, written per Linux user by
+  the existing `_write_agentworks_profile`. Gains `AGENTWORKS_USER` (per-user value). Written for
+  admin during VM init and for each agent during Phase 2 of `agents/manager._create_agent_on_vm`.
+  Reinit-idempotent.
+
+Per-context vars (`AGENTWORKS_WORKSPACE`, `AGENTWORKS_WORKSPACE_DIR`, `AGENTWORKS_AGENT`,
+`AGENTWORKS_SESSION`, `AGENTWORKS_SESSION_KIND`) are set inline at shell-open time because their
+values depend on the context, not the user or VM.
+
+User-defined env (plaintext or secret) is NEVER cached on the VM. It is always computed at command
+time and injected inline at the shell-open site. Single authoritative source (config + CLI
+environment); no stale-cache surprises when config changes between reinit and the next shell.
 
 ## Eager prompting flow
 
@@ -397,8 +522,7 @@ targets (via `db.list_sessions`, etc., with only the static filters applied). A 
 ### `agw env show`
 
 ```text
-agw env show (--vm NAME | --workspace NAME | --agent NAME | --session NAME)
-             [--reveal-secrets]
+agw env show [--vm NAME] [--workspace NAME] [--agent NAME] [--session NAME] [--reveal-secrets]
 ```
 
 - At least one context flag is required. Without one, the command fails with a message explaining
@@ -480,7 +604,7 @@ Set by `vms/initializer.py` in `/etc/zsh/zprofile`. Unchanged. Lives parallel to
 The plan will phase the work, but the full design above is the target. Anticipated shape:
 
 1. **Foundations**: `agentworks.secrets` package, `[secrets]` config section, `Secret`,
-   `SecretSource`, `EnvOrPromptSource`, `SecretResolver`. No consumers yet.
+   `SecretSource`, `EnvVarSource`, `PromptSource`, `SecretResolver`. No consumers yet.
 2. **Env model**: `agentworks.env` package, `EnvEntry`, config sections at all five scopes,
    `effective_env()`, `agentworks_identity_env()`, `build_export_block()`. Migrate existing
    `session_templates.*.env` parsing to the new type (plaintext-compatible).
@@ -509,7 +633,7 @@ literal `$` in legitimate values, and lose IDE/lint support.
 
 ### Closer-scope-overrides, with implicit inheritance
 
-`session > agent > workspace > vm > admin`. A higher-specificity scope replaces lower-specificity
+`session > (agent | admin) > workspace > vm`. A higher-specificity scope replaces lower-specificity
 entries by key; non-overridden entries inherit. This matches operator intuition (the session
 template is the most specific declaration available, so it wins) and matches how other agentworks
 template fields already compose.
@@ -535,13 +659,40 @@ their personal vault (1Password, keychain, etc.): they export `AW_SECRET_<NAME>`
 finds it. Reimplementing vault storage inside agentworks adds little value and a lot of security
 surface. This matches the existing `GIT_CREDENTIALS_*` model.
 
-### Pluggable source interface, single source in v1
+### Uniform SecretSource protocol with prompt as one source among many
 
-`SecretSource` is a Protocol with one implementation (`EnvVarSource`) in v1. Sources and the prompt
-fallback are independent: a source returns existing values, a fallback interacts with the operator
-to produce one. Defining both shapes now is cheap and lets later iterations add sources (keychain,
-1Password CLI, Vault) without touching the prompt path, and lets future non-CLI callers (notably a
-controller process that may replace this CLI's secret-loading role) omit the fallback entirely.
+Every backend (env var, prompt, future 1Password / keychain / vault) implements the same
+`SecretSource` protocol. The resolver walks a configured chain in precedence order and the first
+source to return a value wins. Prompting is just `PromptSource` sitting at the end of the chain by
+convention; it returns `None` when stdin is not a TTY or `--non-interactive` is set, and the
+resolver then raises `SecretUnavailableError`.
+
+Why one protocol instead of separating "sources" from "fallback":
+
+- A future controller-process caller composes its own chain without `PromptSource`. The
+  no-value-found path naturally surfaces as a typed error to API clients, exactly as the CLI's
+  non-interactive path does today. No special-casing.
+- Adding new sources doesn't require touching the resolver: they just go into the chain.
+- `batch_get` lets each source decide its own batching strategy. `PromptSource.batch_get` emits all
+  prompts in one operator interaction; `OnePasswordSource.batch_get` issues one `op` call for the
+  whole batch; `EnvVarSource.batch_get` just loops the dict. The resolver doesn't need to know.
+
+### Per-secret backend mappings (not per-backend)
+
+Each `[secrets.<name>]` block carries its own `backend_mappings` table, keyed by backend kind. The
+alternative (per-backend `[secret_backends.<kind>].mappings.<secret>` tables) was considered and
+rejected: secret adds are more frequent than backend adds, and the operator's primary "where does
+this secret come from?" question is answered from one block under per-secret mappings; under
+per-backend mappings it would require a scan across all backend declarations. Adding a new backend
+to a 30-secret repo is mitigated by per-backend default conventions (secrets that use the default
+need no per-secret config) and by `agw doctor` surfacing secrets that have no mapping for a newly
+configured backend.
+
+Default name-to-identifier conventions live with the source implementation. `EnvVarSource` derives
+`AW_SECRET_<NAME>`; backends without a sensible default (1Password, vault, etc.) soft-skip secrets
+that have no mapping. Operators opt out of a backend for a specific secret with
+`backend_mappings.<backend> = false`. A secret with no resolvable backend (every active source is
+`false` or no-default-no-mapping) is a config-time error.
 
 ### Identity vars are not opt-out
 
