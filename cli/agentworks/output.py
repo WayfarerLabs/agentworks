@@ -261,6 +261,32 @@ def prompt_secret(label: str, hint: str | None = None) -> str:
     return _handler.prompt_secret(label, hint)
 
 
+# -- Interactivity gate -----------------------------------------------------
+
+_non_interactive: bool = False
+
+
+def set_non_interactive(value: bool) -> None:
+    """Seed the --non-interactive flag for this CLI invocation.
+
+    Called once from the Typer global-options callback at CLI entry. Service-layer
+    code reads via ``is_interactive()`` and does not import from ``cli/_app``.
+    """
+    global _non_interactive  # noqa: PLW0603
+    _non_interactive = value
+
+
+def is_interactive() -> bool:
+    """True iff stdin is a TTY and --non-interactive was not passed.
+
+    Service-layer helpers (e.g. ``agentworks.secrets.PromptSource``) consult
+    this rather than the cli/_app module to stay Typer-isolated.
+    """
+    if _non_interactive:
+        return False
+    return sys.stdin.isatty()
+
+
 def progress(label: str, total: int | None = None) -> Progress:
     """Start a tracked operation. Returns a Progress handle."""
     return _handler.progress(label, total)

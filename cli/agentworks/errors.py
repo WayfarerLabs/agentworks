@@ -82,6 +82,16 @@ class ConnectivityError(AgentworksError):
     """Network or transport-level failure (SSH, Tailscale, host unreachable)."""
 
 
+class SecretUnavailableError(AgentworksError):
+    """No active secret backend could resolve the requested secret.
+
+    Raised by ``SecretResolver`` when every source in the active chain returned
+    None for at least one needed secret. The ``hint`` field carries the list of
+    backends that were tried so the operator can act (e.g. set
+    ``AW_SECRET_<NAME>``, configure 1Password, or run interactively).
+    """
+
+
 class ExternalError(AgentworksError):
     """An external system failed in a non-connectivity way.
 
