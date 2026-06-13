@@ -22,8 +22,9 @@ showed SSH has a native mechanism for the same job:
 - `ssh -o SetEnv=KEY=VALUE user@host` (client side): hands the var directly to the SSH protocol's
   environment-passing channel. Available since OpenSSH 7.8 (every distro we target).
 - `AcceptEnv` (server side): names which env-var patterns sshd is willing to accept from the client
-  and inject into the user's shell environment via PAM's `pam_env` machinery. Most distros ship a
-  conservative default (`AcceptEnv LANG LC_*`) for historical compatibility reasons.
+  and inject into the user's shell environment (sshd's session-spawn code path places the matched
+  vars into the child environment before exec; this is independent of the `pam_env` module). Most
+  distros ship a conservative default (`AcceptEnv LANG LC_*`) for historical compatibility reasons.
 
 Adopting SetEnv on the client requires the server to accept the vars. The question is: **what should
 `AcceptEnv` allow?**
@@ -98,12 +99,14 @@ processes the user delegates from there).
 - **Broader sshd posture than typical defaults.** Operators auditing their VM's `sshd_config` will
   see the wildcard and may need to be reassured about the threat-model alignment above. Mitigated by
   this ADR existing as the answer.
-- **PAM `pam_env` is the transport on the sshd side.** Its precise behavior across distros is
-  conventionally well-defined but not centrally guaranteed; a future minor sshd or libpam change
-  could in principle alter the surface. Validated on Debian 12 (the agentworks base, per ADR 0002),
-  which ships libpam-modules with the `pam_env` module that has been stable since 2008. Non-Debian
-  VM bases are out of scope per ADR 0002. We treat `AcceptEnv` + PAM env injection as a stable
-  contract for the foreseeable future; if a regression appears, the ADR is the place to revisit.
+- **`AcceptEnv` is implemented inside sshd itself.** The matched vars are placed in the session env
+  by sshd's `session.c` before it `exec`s the user's shell (distinct from the `pam_env` module,
+  which sources vars from `pam_env.conf` / `environment` files). Its precise behavior across distros
+  is conventionally well-defined but not centrally guaranteed; a future minor sshd change could in
+  principle alter the surface. Validated on Debian 12 (the agentworks base, per ADR 0002), whose
+  openssh-server has carried this code path stably for many years. Non-Debian VM bases are out of
+  scope per ADR 0002. We treat `AcceptEnv` as a stable OpenSSH contract for the foreseeable future;
+  if a regression appears, this ADR is the place to revisit.
 - **Values containing newlines** are not reliably transportable via SetEnv (the SSH protocol encodes
   env strings without escaping mechanisms for control chars). Agentworks secrets are expected to be
   opaque tokens; an operator who tries to set a multiline value in `[admin.env]` may see truncation.

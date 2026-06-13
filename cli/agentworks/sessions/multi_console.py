@@ -1081,9 +1081,11 @@ def _resolve_pane_env(
         )
 
     if session.agent_name is None:
-        # Defensive: a non-admin pane on an admin-mode session means the
-        # caller is opening a non-admin pane on a session that has no
-        # agent to switch to. Skip env injection rather than guess.
+        # In theory unreachable given the caller's ``use_admin`` logic in
+        # ``_split_shell_pane`` (an admin-mode session has session_user ==
+        # admin_user, which forces is_admin_pane=True up there). Guarded
+        # here against future invariant drift so a non-admin pane on a
+        # session with no agent silently skips env rather than crashing.
         return {}
 
     agent = db.get_agent(session.agent_name)
@@ -1132,19 +1134,22 @@ def _split_shell_pane(
     restore-session detect which specific shell (out of an ordered list) is
     missing after an accidental kill.
 
-    Env reaches the pane via two channels (env-and-secrets SDD Phase 3 +
-    Phase 4):
+    Env reaches the pane via:
 
-    1. ``tmux split-window -e KEY=VAL`` flags set the pane process env;
-       agentworks-managed vars (``AGENTWORKS_*``, ``AW_*``) survive the
-       sudo crossing in the agent-pane branch via the sudoers env_keep
-       fragment deployed by VM init in Phase 4. Until that Phase 4 deploy
-       lands, agent-pane env injection is effectively a no-op (the vars
-       cross into the pane process but sudo strips them).
-    2. SSH SetEnv on ``target.run`` is belt-and-suspenders for paths
-       where the console tmux server has just been (re)started; in
-       steady state the existing server's env isn't refreshed by a new
-       SSH connection, so (1) is the load-bearing mechanism.
+    1. ``tmux split-window -e KEY=VAL`` flags (load-bearing): tmux sets
+       these vars on the pane process before exec; agentworks-managed
+       vars (``AGENTWORKS_*``, ``AW_*``) survive the sudo crossing in
+       the agent-pane branch via the sudoers env_keep fragment
+       deployed by VM init in Phase 4. Until that Phase 4 deploy
+       lands, agent-pane env injection is effectively a no-op (the
+       vars cross into the pane process but sudo strips them).
+    2. SSH SetEnv on ``target.run`` (SSH transport only;
+       non-SSH transports are a no-op because the tmux client is
+       talking to an already-running server and the client's env
+       doesn't flow into server-spawned panes). For SSH this is
+       belt-and-suspenders in the rare case where the console tmux
+       server has just been (re)started; in steady state channel (1)
+       is what reaches the pane.
 
     Returns the new pane id on full success (split + tag both completed), or
     None if either step failed (tmux refused the split, or the pane was created

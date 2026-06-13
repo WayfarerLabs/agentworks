@@ -466,3 +466,11 @@ documented in the requirements above:
   but emits a one-time warning naming the affected sessions. Existing live admin tmux sessions on
   the default socket are not auto-migrated; operators recreate them via `agw session delete <name>`
   then `agw session create ...`.
+- **Restricted tmux config sets `default-command "$SHELL -l"`.** Agentworks sessions now invoke a
+  login shell for no-command panes so the Phase 4 profile fragments
+  (`/etc/profile.d/agentworks-identity.sh`, `~/.agentworks-profile.sh`) get sourced. An operator who
+  customized `default-command` in their `~/.tmux.conf` to something other than a login shell will
+  find the agentworks-restricted config overriding that (the restricted config is sourced AFTER the
+  user's `~/.tmux.conf` and wins). Realistic impact is small (most operators don't customize
+  `default-command`, and those who do typically want a login shell), but the override is a behavior
+  change worth surfacing.

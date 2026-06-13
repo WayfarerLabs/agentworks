@@ -6,6 +6,7 @@ the operator's SSH config and agent.
 
 from __future__ import annotations
 
+import shlex
 import subprocess
 import tempfile
 from dataclasses import dataclass
@@ -327,8 +328,6 @@ def run(
         SSHResult with exit code, stdout, and stderr.
     """
     target = _unwrap_ssh(target)
-    import shlex
-
     args = _ssh_base_args(target, env=env)
     if target.login_shell:
         args.append(f"$SHELL -lc {shlex.quote(command)}")
@@ -424,12 +423,10 @@ def run_as_root(
     so pipelines and ``&&`` chains are fully privileged. This matches
     ``ExecTarget.run(sudo=True)``.
     """
-    import shlex as _shlex
-
     target = _unwrap_ssh(target)
     return run(
         target,
-        f"sudo -n bash -c {_shlex.quote(command)}",
+        f"sudo -n bash -c {shlex.quote(command)}",
         check=check,
         timeout=timeout,
         logger=logger,
@@ -539,9 +536,7 @@ def _env_assignment_prefix(env: dict[str, str] | None) -> str:
     """
     if not env:
         return ""
-    import shlex as _shlex
-
-    return "".join(f"{k}={_shlex.quote(v)} " for k, v in env.items())
+    return "".join(f"{k}={shlex.quote(v)} " for k, v in env.items())
 
 
 def lima_run(
@@ -742,10 +737,8 @@ class ExecTarget:
                 descendants. Unified across transports so callers don't
                 need to special-case.
         """
-        import shlex as _shlex
-
         if sudo:
-            command = f"sudo -n bash -c {_shlex.quote(command)}"
+            command = f"sudo -n bash -c {shlex.quote(command)}"
 
         t = self._timeout(timeout)
         lg = self.logger

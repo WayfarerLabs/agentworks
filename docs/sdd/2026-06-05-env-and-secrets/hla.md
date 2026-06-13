@@ -36,7 +36,7 @@ shell-open call sites.
                             |     target.run(cmd, env=...)          |
                             |   SSH layer materializes              |
                             |     ssh -o SetEnv=K=V user@host cmd   |
-                            |   sshd (AcceptEnv *) injects via PAM. |
+                            |   sshd (AcceptEnv *) injects into shell.|
                             +--------------------------------------+
 ```
 
@@ -418,8 +418,9 @@ Env injection is a property of the SSH connection, not a property of the shell c
 composes a `dict[str, str]` of effective env (user-defined + per-context identity vars) and hands it
 to the SSH layer; the SSH layer materializes one `-o SetEnv=KEY=VALUE` argument per entry. On the
 remote side, sshd accepts the vars (per the `AcceptEnv *` directive deployed in Phase 4; see
-`new-adrs/sshd-accept-env-wildcard.md`) and injects them into the user's shell environment via PAM's
-`accept_env` machinery before the user's shell starts.
+`new-adrs/sshd-accept-env-wildcard.md`) and places them into the user's shell environment before the
+shell is `exec`d. This happens inside sshd itself (its session-spawn code path), not via the
+`pam_env` PAM module.
 
 Sites compose like this:
 
@@ -654,12 +655,12 @@ Per scope discussion: no `--env KEY=VAL` overrides. Operators set CLI env or edi
 - `agw env show` defaults to redaction (`<from secret: ...>`); explicit `--reveal-secrets` is the
   only path that prints secret values to a terminal.
 - Env values transported via SSH SetEnv ride the SSH protocol's environment channel, not the SSH
-  command-line. On the VM side they are NOT visible to anyone reading `ps` (they enter the user's
-  shell environment via PAM, not via a `bash -c "export ..."` step). On the operator's machine the
-  SetEnv args ARE on the local `ssh` invocation's command line and visible to `ps -e` on that
-  machine, which is consistent with the trust-anchor analysis in `cli-side-secret-injection.md` (the
-  operator workstation is the trust anchor; processes on it can already read the secrets the CLI
-  would otherwise feed to a remote shell).
+  command-line. On the VM side they are NOT visible to anyone reading `ps` (sshd places them in the
+  spawned shell's environment before exec, not via a `bash -c "export ..."` step). On the operator's
+  machine the SetEnv args ARE on the local `ssh` invocation's command line and visible to `ps -e` on
+  that machine, which is consistent with the trust-anchor analysis in `cli-side-secret-injection.md`
+  (the operator workstation is the trust anchor; processes on it can already read the secrets the
+  CLI would otherwise feed to a remote shell).
 
 ## DB schema impact
 
