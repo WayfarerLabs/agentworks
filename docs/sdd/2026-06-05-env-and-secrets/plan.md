@@ -110,8 +110,25 @@ unchanged for operators with no env / secrets configured.
       follow-up.
 
 Definition of done: `agw session create` with no env config produces the same on-VM state as before.
-With env config, the values are present in the shell's env. (Met for sessions; console admin-shell
-and per-pane wiring deferred per the bullet above.)
+With env config, the values are present in the shell's env. Definition of done is met for sessions;
+console admin-shell and per-pane wiring **must land before Phase 4** so Phase 4's provisioning
+prelude composes against a uniform shell-open surface. Tracked as the Phase 3 follow-up bullet
+above.
+
+**Behavior change to surface in the lockfile**: `_resolve_session_env` consults `VMRow.template` and
+`AgentRow.template` to resolve the actual VM / agent template, where the pre-Phase-3
+`_build_session_command` only consulted `session.template`. Operators who populated
+`[vm_templates.<non-default>.env]` or `[agent_templates.<non-default>.env]` will now see those vars
+in their next session create / restart; before this phase those tables were silently dead config.
+This is the FRD-R2-intended behavior, but it is observable for operators with non-default templates
+and should be called out in `locked.md` when the SDD locks.
+
+**Batch operations do not yet honor "prompt once up front"**: `restart_session` calls into
+`_resolve_session_env` per session, so an `agw restart-all` (or similar) batch path will resolve
+secrets incrementally rather than as a single eager pass. The resolver caches across calls within a
+single CLI invocation, so the operator is still prompted at most once per secret, but the prompts
+are interleaved with mutation work rather than happening up front. Phase 6 (eager prompting
+orchestration) is the capstone that fixes this.
 
 ## Phase 4: provisioning + agent setup wiring
 

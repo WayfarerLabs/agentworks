@@ -403,8 +403,9 @@ def _parse_env_table(
             )
         if key_str.startswith(_AGENTWORKS_ENV_PREFIX):
             issues.append(
-                f"{context}.env overrides agentworks-managed identity variable "
-                f"{key_str!r}; these are intended to be read-only"
+                f"{context}.env sets agentworks-managed identity variable "
+                f"{key_str!r}; identity values win at the runtime prelude, "
+                "so your value will be ignored at command time. Remove the entry."
             )
         if isinstance(val, str):
             result[key_str] = EnvEntry(key=key_str, value=val)

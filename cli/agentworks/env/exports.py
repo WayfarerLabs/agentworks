@@ -1,6 +1,6 @@
 """Shell-prelude helpers.
 
-``build_export_block`` returns a quoted ``export K=v; ...`` string ready to
+``build_export_block`` returns a quoted ``export K=v && ...`` string ready to
 prepend to any shell command. ``build_prefixed_command`` composes the export
 block with a command, transparently handling the empty-env case so call
 sites can drop their own conditionals.
@@ -16,7 +16,7 @@ import shlex
 
 
 def build_export_block(env: dict[str, str]) -> str:
-    """Return ``export K1=v1; export K2=v2; ...`` for ``env``.
+    """Return ``export K1=v1 && export K2=v2 && ...`` for ``env``.
 
     Empty input returns the empty string. Keys are emitted in iteration order
     so the caller controls precedence (effective_env already produced a
@@ -27,18 +27,16 @@ def build_export_block(env: dict[str, str]) -> str:
     """
     if not env:
         return ""
-    # Joined with `; ` rather than `&&`: shlex.quote makes individual exports
-    # essentially infallible (none of these can fail unless quoting is broken,
-    # in which case the resolver/render layer already raised). The HLA pseudocode
-    # uses `&&`; we diverge here in favor of the more conservative shape because
-    # `;` matches what the existing inline-export path in `_build_session_command`
-    # produces and keeps the prelude going even on the unlikely event of a
-    # malformed export.
-    return "; ".join(f"export {key}={shlex.quote(value)}" for key, value in env.items())
+    # Joined with `&&` to match the HLA pseudocode and the consumer's
+    # `<exports> && <command>` glue in build_prefixed_command / the tmux
+    # pane builder: keeping the same separator throughout means the assembled
+    # command parses uniformly under POSIX shell precedence (no surprise that
+    # a malformed export silently skips the actual command).
+    return " && ".join(f"export {key}={shlex.quote(value)}" for key, value in env.items())
 
 
 def build_prefixed_command(env: dict[str, str], command: str) -> str:
-    """Return ``<exports>; <command>`` or just ``<command>`` for empty env.
+    """Return ``<exports> && <command>`` or just ``<command>`` for empty env.
 
     The empty-env case keeps call sites simple: a caller with no env to
     inject does not need to special-case the prefix, just pass an empty
@@ -47,4 +45,4 @@ def build_prefixed_command(env: dict[str, str], command: str) -> str:
     block = build_export_block(env)
     if not block:
         return command
-    return f"{block}; {command}"
+    return f"{block} && {command}"

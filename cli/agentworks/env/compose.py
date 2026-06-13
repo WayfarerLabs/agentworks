@@ -51,4 +51,8 @@ def compose_env(
             session=session,
         )
     )
+    # Identity overlays user_env: AGENTWORKS_* names always reflect the
+    # platform-set value at the runtime prelude (FRD R1). A collision in
+    # user env has already produced a load-time warning in
+    # config._parse_env_table; here we silently discard it.
     return {**user_env, **identity}

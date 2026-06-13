@@ -37,10 +37,31 @@ def test_prelude_and_command_compose_with_prelude_outside_login_shell() -> None:
     out = _build_pane_command(
         command="claude",
         q_path="/tmp/ws",
-        prelude="export AGENTWORKS_SESSION=s1; export EDITOR=nvim",
+        prelude="export AGENTWORKS_SESSION=s1 && export EDITOR=nvim",
     )
-    assert out.startswith("export AGENTWORKS_SESSION=s1; export EDITOR=nvim && $SHELL -lic ")
+    assert out.startswith("export AGENTWORKS_SESSION=s1 && export EDITOR=nvim && $SHELL -lic ")
     assert "cd /tmp/ws && claude" in out
+
+
+def test_prelude_only_branch_reachable_from_typical_session_env() -> None:
+    """A login-shell-only session (no command) still gets identity vars from
+    per_context_identity_env at minimum, so the prelude-only branch is hit
+    in practice; this pins that compose path."""
+    from agentworks.env import ResourceContext, build_export_block, per_context_identity_env
+
+    ctx = ResourceContext(
+        vm_name="vm-1",
+        platform="lima",
+        user="agentworks",
+        session_name="s1",
+        session_kind="agent",
+    )
+    prelude = build_export_block(per_context_identity_env(ctx))
+    out = _build_pane_command(command="", q_path="/tmp", prelude=prelude)
+    # No login command in the inner; the prelude lands then a bare login shell.
+    assert out.endswith("&& $SHELL -l")
+    assert "export AGENTWORKS_SESSION=s1" in out
+    assert "export AGENTWORKS_SESSION_KIND=agent" in out
 
 
 def test_prelude_is_not_inside_login_shell_quote() -> None:

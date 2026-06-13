@@ -21,10 +21,12 @@ SessionKind = Literal["admin", "agent"]
 class ResourceContext:
     """The resource chain that scopes a shell.
 
-    ``vm_name`` / ``vm_host`` / ``platform`` / ``user`` are always present
-    for an on-VM shell. The remaining fields are present when the
-    corresponding scope applies (workspace context, agent context, session
-    context).
+    ``vm_name`` / ``platform`` / ``user`` are always present for an on-VM
+    shell. ``vm_host`` is the name from the ``vm_hosts`` registry (e.g.
+    ``"lima-local"``); only Lima VMs are tied to a registry entry, so the
+    field is ``None`` for VMs without one. The remaining fields are
+    present when the corresponding scope applies (workspace context,
+    agent context, session context).
 
     ``session_kind`` is ``"admin"`` when the session runs as the admin user
     and ``"agent"`` when it runs as an agent user. It is set whenever
@@ -32,9 +34,9 @@ class ResourceContext:
     """
 
     vm_name: str
-    vm_host: str
     platform: str
     user: str
+    vm_host: str | None = None
     workspace_name: str | None = None
     workspace_dir: str | None = None
     agent_name: str | None = None
@@ -66,12 +68,18 @@ def vm_stable_identity_env(ctx: ResourceContext) -> dict[str, str]:
     Phase 4 of the env-and-secrets effort writes these to a system-wide
     profile fragment so that any shell on the VM (including raw ssh logins)
     sees them.
+
+    ``AGENTWORKS_VM_HOST`` is only emitted when the VM has a registered
+    host (Lima VMs may; Azure / WSL2 / Proxmox VMs do not, per the
+    ``vm_hosts`` registry).
     """
-    return {
+    out = {
         "AGENTWORKS_VM": ctx.vm_name,
-        "AGENTWORKS_VM_HOST": ctx.vm_host,
         "AGENTWORKS_PLATFORM": ctx.platform,
     }
+    if ctx.vm_host is not None:
+        out["AGENTWORKS_VM_HOST"] = ctx.vm_host
+    return out
 
 
 def per_user_identity_env(ctx: ResourceContext) -> dict[str, str]:

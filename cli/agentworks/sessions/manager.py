@@ -27,8 +27,6 @@ from agentworks.sessions.tmux import AGENT_SOCKET_ROOT
 from agentworks.ssh import SSH_TRANSPORT_ERROR, admin_exec_target
 from agentworks.vms.manager import keep_vm_active, keep_vms_active
 
-_ENV_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
-
 # Template variable substitution -- uses {{var}} syntax consistent with nerftools.
 _TEMPLATE_VAR_RE = re.compile(r"\{\{(\w+)\}\}")
 _KNOWN_TEMPLATE_VARS = {"session_name", "workspace_name"}
@@ -488,7 +486,7 @@ def _resolve_session_env(
 
     ctx = ResourceContext(
         vm_name=vm.name,
-        vm_host=vm.vm_host_name or vm.platform,
+        vm_host=vm.vm_host_name,
         platform=vm.platform,
         user=linux_user,
         workspace_name=ws.name,
@@ -539,13 +537,6 @@ def _build_session_command(
 
     raw_command = template.restart_command if restart and template.restart_command else template.command
     command = _substitute_template_vars(raw_command, variables)
-
-    # The template env regex check happens at config-load time
-    # (`config._parse_env_table`); validation here is a defense-in-depth
-    # sanity check while this code is the only consumer of `template.env`.
-    for key in template.env:
-        if not _ENV_KEY_RE.match(key):
-            raise ValidationError(f"invalid env var name {key!r} in template '{template.name}'")
 
     if command:
         return f"exec {command}"
