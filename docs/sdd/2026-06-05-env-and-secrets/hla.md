@@ -36,7 +36,7 @@ shell-open call sites.
                             |     target.run(cmd, env=...)          |
                             |   SSH layer materializes              |
                             |     ssh -o SetEnv=K=V user@host cmd   |
-                            |   sshd (AcceptEnv *) injects into shell.|
+                            |   sshd (AcceptEnv *) places in shell. |
                             +--------------------------------------+
 ```
 
