@@ -68,17 +68,17 @@ Whenever agentworks opens a shell on a VM (session creation, session attach, con
 exec, provisioning, agent setup, admin shell, etc.), it sets the subset of the following variables
 that apply to the shell's resource context:
 
-| Variable                   | Set when             | Value                                                   |
-| -------------------------- | -------------------- | ------------------------------------------------------- |
-| `AGENTWORKS_VM`            | Always (on-VM shell) | VM name                                                 |
-| `AGENTWORKS_VM_HOST`       | Always (on-VM shell) | VM host name (per `vm_hosts` config)                    |
-| `AGENTWORKS_PLATFORM`      | Always (on-VM shell) | One of `lima`, `azure`, `wsl2`, `proxmox`               |
-| `AGENTWORKS_USER`          | Always (on-VM shell) | The on-VM Linux user (admin username or agent username) |
-| `AGENTWORKS_WORKSPACE`     | Workspace context    | Workspace name                                          |
-| `AGENTWORKS_WORKSPACE_DIR` | Workspace context    | Absolute path to the workspace dir on the VM            |
-| `AGENTWORKS_AGENT`         | Agent context        | Agent name                                              |
-| `AGENTWORKS_SESSION`       | Session context      | Session name                                            |
-| `AGENTWORKS_SESSION_KIND`  | Session context      | `admin` or `agent`                                      |
+| Variable                   | Set when             | Value                                                         |
+| -------------------------- | -------------------- | ------------------------------------------------------------- |
+| `AGENTWORKS_VM`            | Always (on-VM shell) | VM name                                                       |
+| `AGENTWORKS_VM_HOST`       | Always (on-VM shell) | VM host name from the `vm_hosts` registry (e.g. `lima-local`) |
+| `AGENTWORKS_PLATFORM`      | Always (on-VM shell) | One of `lima`, `azure`, `wsl2`, `proxmox`                     |
+| `AGENTWORKS_USER`          | Always (on-VM shell) | The on-VM Linux user (admin username or agent username)       |
+| `AGENTWORKS_WORKSPACE`     | Workspace context    | Workspace name                                                |
+| `AGENTWORKS_WORKSPACE_DIR` | Workspace context    | Absolute path to the workspace dir on the VM                  |
+| `AGENTWORKS_AGENT`         | Agent context        | Agent name                                                    |
+| `AGENTWORKS_SESSION`       | Session context      | Session name                                                  |
+| `AGENTWORKS_SESSION_KIND`  | Session context      | `admin` or `agent`                                            |
 
 The existing `AGENTWORKS_NERF_HOME` (set by VM initializer) is grandfathered into this scheme; it is
 VM-scoped and continues to live in the system-wide profile fragment.
@@ -133,10 +133,10 @@ session > (agent | admin) > workspace > vm
 
 The same key appearing at multiple applicable scopes takes the highest-specificity value. Keys
 appearing at only one scope contribute directly. There is no list / string append semantics (e.g.
-`PATH = "...:${PATH}"`); shell expansion of references is not interpreted by agentworks. Operators
-needing PATH-style appends can write a full expansion (`PATH = "/foo:/usr/bin:/bin"`) or use shell
-profile mechanisms outside this system. (Future iteration may add an explicit append/prepend
-syntax.)
+`PATH = "...:${PATH}"`); shell variable expansion inside values is not interpreted by agentworks.
+Values are passed through verbatim and shlex-quoted at shell-open time. Operators needing PATH-style
+appends can write a full expansion (`PATH = "/foo:/usr/bin:/bin"`) or use shell profile mechanisms
+outside this system. (Future iteration may add an explicit append/prepend syntax.)
 
 #### Template inheritance
 
@@ -144,14 +144,35 @@ For templates that support `inherits`, env entries inherit along the inheritance
 standard "child overrides parent by key" pattern that other template fields already use. The
 inheritance-resolved env for a template is what feeds into the cross-scope merge described above.
 
+The child's per-key entry replaces the parent's wholesale; form changes (plaintext to secret-ref and
+vice versa) are allowed. For example:
+
+```toml
+[agent_templates.base.env]
+LOG_LEVEL = "info"
+API_KEY = { secret = "default-api-key" }
+
+[agent_templates.coder]
+inherits = ["base"]
+
+[agent_templates.coder.env]
+LOG_LEVEL = "debug"                              # plaintext overrides plaintext
+API_KEY = "literal-test-value-for-coder"         # plaintext overrides a secret-ref
+EXTRA = { secret = "coder-only-secret" }         # secret-ref added by child
+```
+
+The resolved env for `coder` is the union: `LOG_LEVEL=debug` (child), `API_KEY` literal (child),
+`EXTRA` secret-ref (child).
+
 #### Validation
 
 - Keys must match `^[A-Za-z_][A-Za-z0-9_]*$` (POSIX env var name).
 - Values are strings or `{ secret = "<name>" }` inline tables. No other shapes.
 - `secret = "<name>"` must reference a declared secret (see R3). Unknown references are a config
   error.
-- Keys starting with `AGENTWORKS_` may be set by users but emit a config warning (R1 sets these
-  automatically and overrides risk confusing downstream consumers).
+- Keys starting with `AGENTWORKS_` may be set by users but emit a config-load warning (every CLI
+  invocation, so the operator sees it quickly; R1 sets these automatically and overrides risk
+  confusing downstream consumers).
 
 ### R3: Secret declarations
 
@@ -282,8 +303,8 @@ Commands that open new shells (and therefore consume secrets):
 Commands that consume no secrets:
 
 - Attach / inspection: `session attach`, `session list`, `session describe`, `console attach`,
-  `console add-session`, `vm list`, `agent list`, `workspace list`, etc. (`console add-session`
-  joins an existing tmux session via a wrapper window; no new agent shell is opened.)
+  `console add-sessions`, `vm list`, `agent list`, `workspace list`, etc. (`console add-sessions`
+  joins existing tmux sessions via wrapper windows; no new agent shells are opened.)
 - Lifecycle that does not open a new shell on the target: `session stop`, `session delete`,
   `agent delete`, `vm stop`, `vm delete`. (These run admin-side maintenance, not new agent shells.)
 
@@ -320,14 +341,14 @@ Examples:
 The effective env (R2 merge) plus the applicable AGENTWORKS\_\* vars (R1) are propagated to every
 shell agentworks opens. Propagation happens at shell-creation time only:
 
-| Surface                   | Commands                                                       | Mechanism                                  |
-| ------------------------- | -------------------------------------------------------------- | ------------------------------------------ |
-| Provisioning              | `vm create` / `vm reinit` / `agent create` / `agent reinit`    | Inline `export` before the work            |
-| Session create / restart  | `session create` / `session restart` / `session start`         | Inline `export` in the new-session payload |
-| Console window creation   | `console create` / `console add-shell` / `console add-session` | Inline `export` per window                 |
-| Multi-console panes       | Each pane created via the named-console layout                 | Inline `export` per pane                   |
-| Interactive ad-hoc shells | `vm shell` / `agent shell`                                     | Inline `export` for the interactive shell  |
-| Non-interactive exec      | `vm exec` / `agent exec`                                       | Inline `export` before the command         |
+| Surface                   | Commands                                                          | Mechanism                                  |
+| ------------------------- | ----------------------------------------------------------------- | ------------------------------------------ |
+| Provisioning              | `vm create` / `vm reinit` / `agent create` / `agent reinit`       | Inline `export` before the work            |
+| Session create / restart  | `session create` / `session restart`                              | Inline `export` in the new-session payload |
+| Console window creation   | `console create` (sessions named in create) / `console add-shell` | Inline `export` per window                 |
+| Multi-console panes       | Each pane created via the named-console layout                    | Inline `export` per pane                   |
+| Interactive ad-hoc shells | `vm shell` / `agent shell`                                        | Inline `export` for the interactive shell  |
+| Non-interactive exec      | `vm exec` / `agent exec`                                          | Inline `export` before the command         |
 
 #### Attach inherits create-time env
 
@@ -361,8 +382,12 @@ authoritative source is the merge computed at command time.
 - `{ secret = "..." }` references to undeclared secrets (broken references).
 - Effective env conflicts that arise from valid configurations (informational; show which scope wins
   per key).
-- Whether the CLI environment currently has each declared secret's `AW_SECRET_*` set (a "would I get
-  prompted?" preview).
+- For each declared secret: the first active backend whose `would_attempt(secret)` returns True, and
+  whether resolution would succeed without prompting (a "would I get prompted?" preview).
+- Soft-skip findings: secrets where one or more active backends return False from
+  `would_attempt(secret)` because the secret has no mapping and the backend has no default
+  convention. Helps surface typos in `backend_mappings.<backend>` keys and incomplete migrations
+  when an operator adds a new backend.
 
 Doctor does not prompt for secrets; it only reports state.
 
@@ -377,12 +402,15 @@ agw env show [--vm NAME] [--workspace NAME] [--agent NAME] [--session NAME] [--r
 - At least one of `--vm` / `--workspace` / `--agent` / `--session` is required. Without a context,
   the command fails with a message explaining that an env table is always relative to some resource
   scope.
+- When `--session` is given, the VM, workspace, and agent for that session are auto-resolved from
+  the DB row (the session knows its own chain). Same for `--workspace` (resolves to its VM) and
+  `--agent` (resolves to its VM). Manually-passed flags override the auto-resolution.
 - Default output: plaintext entries show their actual values; secret-backed entries show as
   `<from secret: NAME>`. Plaintext values are safe to display because they already live in config in
   cleartext.
-- `--reveal-secrets`: resolves secret-backed entries through the normal env-or-prompt path and
-  prints their values. Without this flag, secret values are never read from operator env or prompted
-  for during `env show`.
+- `--reveal-secrets`: resolves secret-backed entries through the active backend chain and prints
+  their values. Without this flag, `env show` never consults any backend for secret-backed entries
+  (no env reads, no prompts).
 
 Future iterations may add `agw secret list` (lists declared secrets and their presence in CLI env)
 and `agw secret show <name>` (gated; resolves a single secret through the normal path).
@@ -390,10 +418,11 @@ and `agw secret show <name>` (gated; resolves a single secret through the normal
 ## Non-goals
 
 - **Persistent secret storage by agentworks**: prompted values are not saved. Operators wanting
-  persistence use their own vault (1Password, keychain) and export the `AW_SECRET_*` env var from
-  there before running `agw`.
-- **Pluggable secret backends in v1**: only env-var-then-prompt is implemented. The interface is
-  designed to allow additional providers (keychain, 1Password CLI, Vault) in a later iteration.
+  persistence use their own vault, exposed either via the matching backend (`onepassword`,
+  `keychain`, etc.) or by exporting `AW_SECRET_<NAME>` into the operator shell.
+- **Additional secret backends in v1**: v1 ships `env_var` and `prompt`. The `SecretSource` protocol
+  is shaped to accommodate later additions (keychain, 1Password CLI, Vault), but those
+  implementations are out of scope here.
 - **Replacing `git_credentials`**: kept separate for this SDD. Folding git credentials into the
   general secret mechanism is anticipated future work but not part of this design.
 - **PATH-style append/prepend**: only direct override semantics in v1. Operators needing list

@@ -6,10 +6,10 @@
 
 Two new packages anchor this work:
 
-- **`agentworks.secrets`**: declares the `SecretDecl` and `SecretBackendConfig` config types, the
-  `SecretSource` protocol, the v1 source implementations (`EnvVarSource`, `PromptSource`), and a
-  `SecretResolver` that batches lookups across the configured backend chain. Modeled in spirit on
-  `agentworks.git_credentials`.
+- **`agentworks.secrets`**: declares the `SecretDecl`, `SecretBackendConfig`, and `SecretConfig`
+  config types, the `SecretSource` protocol, the v1 source implementations (`EnvVarSource`,
+  `PromptSource`), and a `SecretResolver` that batches lookups across the configured backend chain.
+  Modeled in spirit on `agentworks.git_credentials`.
 - **`agentworks.env`**: declares the `EnvEntry` config type (value-or-secret-ref), merge logic
   across the resource graph, the standard `AGENTWORKS_*` var producers, and a single
   `build_export_block(...)` that returns the `export KEY=...` shell prelude any shell-opening site
@@ -232,6 +232,20 @@ class SecretSource(Protocol):
 
     kind: str  # matches the [secret_backends.<kind>] key
 
+    def would_attempt(self, secret: SecretDecl) -> bool:
+        """Does this source ATTEMPT to resolve this secret? Determined from
+        config alone, without network or vault I/O.
+
+        - EnvVarSource: True unless backend_mappings.env_var is False.
+        - OnePasswordSource: True only when backend_mappings.onepassword is
+          a string or dict (no default convention for 1pw).
+        - PromptSource: True (prompt always attempts if asked, modulo TTY /
+          --non-interactive check at runtime).
+
+        Used at config-load time to surface unreachable secrets and by
+        `agw doctor` to show which backend would handle each secret."""
+        ...
+
     def get(self, secret: SecretDecl) -> str | None: ...
 
     def batch_get(self, secrets: list[SecretDecl]) -> dict[str, str]:
@@ -241,6 +255,12 @@ class SecretSource(Protocol):
         operator interaction."""
         return {s.name: v for s in secrets if (v := self.get(s)) is not None}
 ```
+
+After all sources are instantiated, the loader walks every declared secret against the active chain:
+a secret is **unreachable** if no source returns True from `would_attempt`. Unreachable secrets are
+a config-load error (they reference values nothing in the chain can produce). Secrets where
+some-but-not-all configured backends skip them are not errors; `agw doctor` surfaces those as
+informational findings ("secret X has no mapping for active backend Y, will skip").
 
 ### v1 source implementations
 
@@ -287,10 +307,18 @@ class PromptSource:
 
     def batch_get(self, secrets: list[SecretDecl]) -> dict[str, str]:
         """Override: emit all prompts in one operator interaction."""
+        from agentworks import output
         if not output.is_interactive():
             return {}
         return {s.name: self.get(s) for s in secrets}
 ```
+
+`output.is_interactive()` is a new helper this SDD adds to `agentworks.output`. It moves the
+existing interactivity check from `cli/_app.py:is_interactive()` (which is Typer-aware and
+inappropriate to import from the service layer) to `agentworks.output`, where the other prompt
+helpers (`output.prompt_secret`, `output.confirm`) already live. The `--non-interactive` flag is
+stored in `output` and seeded by the Typer callback at CLI entry, exactly the way the prompt state
+already is.
 
 A future `OnePasswordSource` would look like:
 
@@ -304,8 +332,10 @@ class OnePasswordSource:
 
     def get(self, secret: SecretDecl) -> str | None:
         mapping = secret.backend_mappings.get("onepassword")
-        if mapping is False or mapping is None:
-            return None  # opt-out or no-mapping; no default convention for 1pw
+        if mapping is False:
+            return None  # explicit opt-out
+        if mapping is None:
+            return None  # no mapping; no default convention for 1pw (doctor surfaces this)
         ref = mapping if isinstance(mapping, str) else _build_op_ref(mapping, self._vault)
         return _shell_out("op", "read", ref, account=self._account)
 
@@ -395,6 +425,22 @@ prelude = build_export_block(full_env)
 command = f"{prelude} && {original_command}" if prelude else original_command
 ```
 
+### Prelude placement vs. login shells
+
+The prelude runs in the OUTER SSH-command shell (whichever shell the remote SSH invocation hands the
+command to). If `original_command` is itself a login shell wrapper (e.g. `{shell} -lc 'foo'`, as
+used by `_build_session_command` and the agent install-command path established in the
+direct-target-user-SSH SDD), the exports happen FIRST and the login shell runs as a child process
+that inherits them via `environ`. Login-shell startup files (`/etc/profile`, `~/.bash_profile`,
+`~/.zprofile`, `~/.agentworks-profile.sh`) then run with the prelude's vars already set; they can
+read them, and any further exports they perform take precedence (which is the intended interaction
+with the per-user identity fragment that holds `AGENTWORKS_USER`).
+
+The existing `_build_session_command` currently injects exports INSIDE the login-shell wrapper. That
+will be refactored to use the unified outer-shell placement so all shell-open sites have the same
+prelude shape. Behavior for plaintext and secret values is unchanged either way; the refactor is for
+uniformity.
+
 ## Shell-opening surfaces
 
 Each site builds an env prelude from the appropriate context layers and prepends it to the shell
@@ -426,12 +472,12 @@ create-time env."
 
 Two write surfaces, chosen by whether the value varies per Linux user:
 
-- **System-wide fragment** (new): `/etc/profile.d/agentworks-identity.sh`, written once per VM by
-  `vms/initializer.py`. Contains the truly VM-stable identity vars: `AGENTWORKS_VM`,
-  `AGENTWORKS_VM_HOST`, `AGENTWORKS_PLATFORM`. Mirrors the existing `AGENTWORKS_NERF_HOME` pattern
-  (`/etc/profile.d/agentworks-nerf.sh` plus `/etc/zsh/zprofile`). Any shell on the VM, including
-  ones started outside agentworks (e.g. an operator landing via the `awvm--<vm>` alias), sees these
-  vars from this fragment.
+- **System-wide fragment** (new): written by `vms/initializer.py` at the SAME two locations the
+  existing `AGENTWORKS_NERF_HOME` install uses (`/etc/profile.d/agentworks-identity.sh` AND an
+  appended block in `/etc/zsh/zprofile`, because zsh does not source `/etc/profile.d/*` by default).
+  Contains the truly VM-stable identity vars: `AGENTWORKS_VM`, `AGENTWORKS_VM_HOST`,
+  `AGENTWORKS_PLATFORM`. Any shell on the VM, including ones started outside agentworks (e.g. an
+  operator landing via the `awvm--<vm>` alias), sees these vars.
 - **Per-user fragment** (existing, extended): `~/.agentworks-profile.sh`, written per Linux user by
   the existing `_write_agentworks_profile`. Gains `AGENTWORKS_USER` (per-user value). Written for
   admin during VM init and for each agent during Phase 2 of `agents/manager._create_agent_on_vm`.
@@ -527,13 +573,15 @@ agw env show [--vm NAME] [--workspace NAME] [--agent NAME] [--session NAME] [--r
 
 - At least one context flag is required. Without one, the command fails with a message explaining
   that an env table is always relative to some resource scope.
-- Resolves the context implied by the flags. Omitted flags = scope not in context.
+- Auto-resolves the chain from a single named entity's DB row: `--session s1` infers the workspace,
+  agent, and VM; `--workspace ws1` infers the VM; `--agent a1` infers the VM. Manually-passed flags
+  override the inferred chain.
 - Prints the effective env in precedence-sorted order, annotating each row with the winning scope.
 - Plaintext entries show their actual values (already cleartext in config; no disclosure).
 - Secret-backed entries show as `<from secret: NAME>` by default.
-- `--reveal-secrets`: resolves secret-backed entries through the normal env-or-prompt path and
-  prints the values. Without this flag, `env show` never reads operator env for secrets and never
-  prompts.
+- `--reveal-secrets`: resolves secret-backed entries through the active backend chain and prints the
+  values. Without this flag, `env show` never consults any backend for secret-backed entries (no env
+  reads, no prompts).
 
 ### `agw doctor` additions
 
@@ -553,7 +601,8 @@ Per scope discussion: no `--env KEY=VAL` overrides. Operators set CLI env or edi
   parsing all scopes).
 - Loader emits a config warning for user-defined keys beginning with `AGENTWORKS_`.
 - Resolver raises a typed `SecretUnavailableError` (subclass of `agentworks.errors.AgentworksError`)
-  when a non-TTY environment cannot satisfy a secret. CLI renders this with the env var name to set.
+  when no source in the active chain can satisfy a secret. CLI renders this with the unsatisfied
+  secret name(s) and which backends were tried (the error's own attributes).
 - `build_export_block` is intentionally not given access to raw secrets vs plaintext info; by the
   time it runs, the dict is already a flat `{KEY: value}`. Sites are responsible for not logging the
   dict.
@@ -566,7 +615,9 @@ Per scope discussion: no `--env KEY=VAL` overrides. Operators set CLI env or edi
 - The prelude that is sent over SSH is necessarily on the SSH command line, which is visible to
   anyone who can read `ps` on the VM during the brief window of process start. This is a known
   tradeoff for env-var-shaped credentials and matches the existing behavior of the session-template
-  `env`. Documented in operator docs; not a new exposure.
+  `env`. Documented in operator docs; not a new exposure. The same window applies to plaintext
+  values as well (they ride the same prelude), but plaintext is already cleartext in config so this
+  is not an additional disclosure.
 
 ## DB schema impact
 
@@ -603,8 +654,9 @@ Set by `vms/initializer.py` in `/etc/zsh/zprofile`. Unchanged. Lives parallel to
 
 The plan will phase the work, but the full design above is the target. Anticipated shape:
 
-1. **Foundations**: `agentworks.secrets` package, `[secrets]` config section, `Secret`,
-   `SecretSource`, `EnvVarSource`, `PromptSource`, `SecretResolver`. No consumers yet.
+1. **Foundations**: `agentworks.secrets` package, `[secrets]` / `[secret_backends]` /
+   `[secret_config]` config sections, `SecretDecl` / `SecretBackendConfig` / `SecretConfig` types,
+   `SecretSource` protocol, `EnvVarSource`, `PromptSource`, `SecretResolver`. No consumers yet.
 2. **Env model**: `agentworks.env` package, `EnvEntry`, config sections at all five scopes,
    `effective_env()`, `agentworks_identity_env()`, `build_export_block()`. Migrate existing
    `session_templates.*.env` parsing to the new type (plaintext-compatible).

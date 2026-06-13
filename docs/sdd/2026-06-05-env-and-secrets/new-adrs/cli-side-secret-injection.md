@@ -43,8 +43,10 @@ process resolves secret values from operator-side sources (env var, then prompt)
 inline in the shell payload sent over SSH, and never persists secret values to the VM. No VM-side
 storage of secret material, no VM-side broker process.
 
-The on-VM `.agentworks-profile.sh` may cache non-secret, VM-scoped env entries as an optimization,
-but `secret = "..."` entries are excluded from that cache and are always injected inline.
+Per FRD R5 / HLA "Identity vars on the VM", user-defined env (plaintext or secret) is never cached
+on the VM. The on-VM profile fragments hold only the VM-stable identity vars (`AGENTWORKS_VM`,
+etc.); user-defined env is always computed at command time and injected inline at the shell-open
+site.
 
 ## Consequences
 
@@ -77,12 +79,14 @@ but `secret = "..."` entries are excluded from that cache and are always injecte
 ### Negative
 
 1. **The CLI handles secrets on every invocation that opens a shell.** In the file model, the
-   create-time command was the only place secrets had to be known; later commands (session attach,
-   console add-shell, restart, exec) didn't need them. With CLI injection, every such command needs
-   the secret in operator env (or prompts). In practice operators wrap their shell with `op run --`
-   or equivalent so credentials are present any time `agw` runs, but it is a real cost. The CLI
-   process handles secret material more often, on the (presumed-trusted) operator workstation rather
-   than the (less-trusted) VM. Net acceptable for agentworks's use case, but worth naming.
+   create-time command was the only place secrets had to be known; later commands that open new
+   shells (`session restart`, `console add-shell`, `agent exec`, `vm exec`, etc.) didn't need them.
+   With CLI injection, every such command needs the secret available through the active backend
+   chain. (`session attach` is unaffected: it joins the existing tmux server's captured env, no
+   re-resolution.) In practice operators wrap their shell with `op run --` or equivalent so
+   credentials are present any time `agw` runs, but it is a real cost. The CLI process handles
+   secret material more often, on the (presumed-trusted) operator workstation rather than the
+   (less-trusted) VM. Net acceptable for agentworks's use case, but worth naming.
 
 2. **SSH command line exposure window.** The `export KEY=val && cmd` prelude appears on the SSH
    command line, which is briefly visible via `ps` to any process that can read it during the start
