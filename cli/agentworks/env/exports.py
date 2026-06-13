@@ -27,6 +27,13 @@ def build_export_block(env: dict[str, str]) -> str:
     """
     if not env:
         return ""
+    # Joined with `; ` rather than `&&`: shlex.quote makes individual exports
+    # essentially infallible (none of these can fail unless quoting is broken,
+    # in which case the resolver/render layer already raised). The HLA pseudocode
+    # uses `&&`; we diverge here in favor of the more conservative shape because
+    # `;` matches what the existing inline-export path in `_build_session_command`
+    # produces and keeps the prelude going even on the unlikely event of a
+    # malformed export.
     return "; ".join(f"export {key}={shlex.quote(value)}" for key, value in env.items())
 
 

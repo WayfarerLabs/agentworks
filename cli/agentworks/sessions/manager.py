@@ -444,7 +444,8 @@ def _build_session_command(
                 f"secret {entry.secret!r}; secret resolution into session commands "
                 "lands in Phase 3 of the env-and-secrets effort"
             )
-        val = _substitute_template_vars(entry.value or "", variables)
+        assert entry.value is not None  # EnvEntry invariant: exactly one of value/secret
+        val = _substitute_template_vars(entry.value, variables)
         parts.append(f"export {key}={shlex.quote(val)}")
 
     if command:

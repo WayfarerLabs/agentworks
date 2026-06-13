@@ -10,7 +10,7 @@ import sys
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Literal, Protocol
 
 # ConfigError is defined in agentworks.errors and re-exported here for backward
 # compatibility with existing `from agentworks.config import ConfigError` users.
@@ -24,10 +24,10 @@ from agentworks.secrets import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Callable, Mapping
 
     from agentworks.agents.templates import ResolvedAgentTemplate
-    from agentworks.secrets import SecretResolver
+    from agentworks.secrets import SecretResolver, SecretSource
     from agentworks.vms.templates import ResolvedVMTemplate
 
 CONFIG_DIR = Path.home() / ".config" / "agentworks"
@@ -315,11 +315,14 @@ class Config:
     # Per-backend connection config keyed by kind ("env_var", "onepassword", ...).
     secret_backends: dict[str, SecretBackendConfig] = field(default_factory=dict)
     # Top-level [secret_config] table; carries the enabled-backends precedence list.
-    secret_config_data: SecretConfig = field(default_factory=lambda: SecretConfig())
+    secret_config_data: SecretConfig = field(default_factory=SecretConfig)
     # Resolver assembled from secret_config_data.backends in precedence order.
-    # None when no backends are configured; that case keeps existing behavior
-    # for operators who don't opt into secrets.
-    secret_resolver: SecretResolver | None = None
+    # An empty SecretResolver (no sources, no secrets) is constructed when the
+    # operator hasn't opted into secrets - callers always get a usable resolver,
+    # so call sites can `.render(env)` unconditionally instead of branching on
+    # None. _validate_env_secret_refs runs before resolver assembly, so this
+    # empty-chain shape never has to face a secret-ref env entry.
+    secret_resolver: SecretResolver = field(default_factory=lambda: _empty_resolver())
     config_issues: tuple[str, ...] = ()
 
 
@@ -980,7 +983,7 @@ def _load_secrets(data: dict[str, object], issues: list[str]) -> dict[str, Secre
             raise ConfigError(
                 f"secrets.{name_str}.backend_mappings must be a table"
             )
-        backend_mappings: dict[str, object] = {}
+        backend_mappings: dict[str, str | dict[str, object] | Literal[False]] = {}
         for kind, mapping in raw_mappings.items():
             kind_str = str(kind)
             if isinstance(mapping, bool):
@@ -1004,30 +1007,40 @@ def _load_secrets(data: dict[str, object], issues: list[str]) -> dict[str, Secre
             name=name_str,
             description=description,
             hint=hint,
-            backend_mappings=backend_mappings,  # type: ignore[arg-type]
+            backend_mappings=backend_mappings,
         )
     return decls
 
 
 def _load_secret_backends(
     data: dict[str, object],
-    issues: list[str],  # noqa: ARG001 - reserved for future per-backend warnings
+    issues: list[str],
 ) -> dict[str, SecretBackendConfig]:
     """Load [secret_backends.*] sections into SecretBackendConfig entries.
 
     v1 only carries the ``kind`` field; per-backend subclasses (with account /
     vault / etc.) arrive when those backends ship. Extra fields in v1
     sections are accepted but ignored.
+
+    A declared kind not in the known-factory map (e.g. typo ``env-var`` for
+    ``env_var``) emits a load-time warning so operators discover it before
+    they reach for the section in ``[secret_config].backends``.
     """
     raw = data.get("secret_backends", {})
     if not isinstance(raw, dict):
         raise ConfigError("[secret_backends] must be a table")
 
+    known_kinds = set(_v1_source_factories().keys())
     backends: dict[str, SecretBackendConfig] = {}
     for kind, bdata in raw.items():
         kind_str = str(kind)
         if not isinstance(bdata, dict):
             raise ConfigError(f"secret_backends.{kind_str} must be a table")
+        if kind_str not in known_kinds:
+            issues.append(
+                f"[secret_backends.{kind_str}] declares an unknown backend kind; "
+                f"v1 supports {sorted(known_kinds)}"
+            )
         backends[kind_str] = SecretBackendConfig(kind=kind_str)
     return backends
 
@@ -1046,43 +1059,51 @@ def _load_secret_config(data: dict[str, object], issues: list[str]) -> SecretCon
     return SecretConfig(backends=tuple(backends_raw))
 
 
-# Backend kinds whose source class is built in to v1. Future backends register
-# here as they ship; an entry in [secret_config].backends pointing to a kind
-# not in this map is a config-load error so operators discover typos and
-# missing implementations at load time rather than at command time.
-_V1_SOURCE_FACTORIES: dict[str, object] = {}
+def _empty_resolver() -> SecretResolver:
+    """A no-op SecretResolver used as the default when no secrets are configured.
+
+    Lets call sites depend on `Config.secret_resolver` always being a valid
+    SecretResolver instead of branching on None. Safe because
+    `_validate_env_secret_refs` runs before resolver assembly, so an empty
+    chain never has to face a secret-ref env entry.
+    """
+    from agentworks.secrets import SecretResolver
+
+    return SecretResolver([], {})
+
+
+# Backend kinds whose source class is built in to v1. Source factories
+# accept no constructor args today; later backends accepting a
+# ``SecretBackendConfig`` will widen this signature when they ship.
+def _v1_source_factories() -> dict[str, Callable[[], SecretSource]]:
+    from agentworks.secrets import EnvVarSource, PromptSource
+
+    return {
+        "env_var": EnvVarSource,
+        "prompt": PromptSource,
+    }
 
 
 def _build_secret_resolver(
     secret_config_data: SecretConfig,
-    secret_backends: dict[str, SecretBackendConfig],
+    secret_backends: dict[str, SecretBackendConfig],  # noqa: ARG001 - reserved for future per-backend ctor wiring
     secrets: dict[str, SecretDecl],
-) -> SecretResolver | None:
+) -> SecretResolver:
     """Assemble a SecretResolver from the configured backend chain.
 
-    Returns ``None`` when no backends are configured and no secrets are
-    declared (operators who don't opt in pay nothing). When backends ARE
-    configured, validates that:
+    Returns a no-op resolver when no backends are configured (and no secrets
+    are declared). When backends ARE configured, validates:
 
     - every kind in ``[secret_config].backends`` has a known source factory;
-    - kinds requiring a ``[secret_backends.<kind>]`` section have one;
     - no declared secret is unreachable through the configured chain.
     """
-    from agentworks.secrets import EnvVarSource, PromptSource, SecretResolver
+    from agentworks.secrets import SecretResolver
 
     if not secret_config_data.backends and not secrets:
-        return None
+        return _empty_resolver()
 
-    # Sources that don't need a [secret_backends.<kind>] section.
-    _no_backend_config_needed = {"env_var", "prompt"}
-
-    factories: dict[str, object] = {
-        "env_var": EnvVarSource,
-        "prompt": PromptSource,
-        **_V1_SOURCE_FACTORIES,
-    }
-
-    sources = []
+    factories = _v1_source_factories()
+    sources: list[SecretSource] = []
     for kind in secret_config_data.backends:
         factory = factories.get(kind)
         if factory is None:
@@ -1090,14 +1111,7 @@ def _build_secret_resolver(
                 f"[secret_config].backends: unknown backend kind {kind!r}; "
                 f"v1 supports {sorted(factories.keys())}"
             )
-        if kind not in _no_backend_config_needed and kind not in secret_backends:
-            raise ConfigError(
-                f"[secret_config].backends references {kind!r} but no "
-                f"[secret_backends.{kind}] section is declared"
-            )
-        # v1 sources take no constructor args; later backends will accept
-        # their SecretBackendConfig here.
-        sources.append(factory())  # type: ignore[operator]
+        sources.append(factory())
 
     resolver = SecretResolver(sources, secrets)
 

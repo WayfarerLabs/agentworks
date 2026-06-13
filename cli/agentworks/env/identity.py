@@ -12,6 +12,9 @@ See FRD R1 for the full var table and the "Set when" predicates.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Literal
+
+SessionKind = Literal["admin", "agent"]
 
 
 @dataclass(frozen=True)
@@ -23,8 +26,8 @@ class ResourceContext:
     corresponding scope applies (workspace context, agent context, session
     context).
 
-    ``session_kind`` is "admin" when the session runs as the admin user and
-    "agent" when it runs as an agent user. It is set whenever
+    ``session_kind`` is ``"admin"`` when the session runs as the admin user
+    and ``"agent"`` when it runs as an agent user. It is set whenever
     ``session_name`` is set; the loader / caller enforces this invariant.
     """
 
@@ -36,7 +39,7 @@ class ResourceContext:
     workspace_dir: str | None = None
     agent_name: str | None = None
     session_name: str | None = None
-    session_kind: str | None = None
+    session_kind: SessionKind | None = None
 
 
 def agentworks_identity_env(ctx: ResourceContext) -> dict[str, str]:

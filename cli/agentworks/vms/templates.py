@@ -102,11 +102,6 @@ def _append_dedupe(target: list[str], source: list[str]) -> list[str]:
     return result
 
 
-def _merge_map(target: dict[str, str], source: dict[str, str]) -> dict[str, str]:
-    """Merge source map into target. Source wins on key collision."""
-    return {**target, **source}
-
-
 def _merge(target: ResolvedVMTemplate, source: ResolvedVMTemplate) -> None:
     """Merge source into target. Scalars: source wins. Lists: append with dedupe."""
     target.cpus = source.cpus

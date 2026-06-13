@@ -51,14 +51,18 @@ def _write_base(config_path: Path, *, extras: str = "") -> None:
     )
 
 
-def test_no_secrets_section_loads_with_no_resolver(tmp_path: Path) -> None:
+def test_no_secrets_section_loads_with_empty_resolver(tmp_path: Path) -> None:
+    """When no secrets / backends are configured, the resolver is an empty
+    SecretResolver rather than None: call sites can render env unconditionally."""
     cfg_file = tmp_path / "config.toml"
     _write_base(cfg_file)
     cfg = load_config(cfg_file, warn_issues=False)
     assert cfg.secrets == {}
     assert cfg.secret_backends == {}
     assert cfg.secret_config_data.backends == ()
-    assert cfg.secret_resolver is None
+    assert cfg.secret_resolver is not None
+    # An empty resolver renders an env with no entries to {} without raising.
+    assert cfg.secret_resolver.render({}) == {}
 
 
 def test_admin_env_plaintext_and_secret(tmp_path: Path) -> None:
@@ -344,18 +348,95 @@ def test_unreachable_secret_raises(tmp_path: Path) -> None:
         load_config(cfg_file, warn_issues=False)
 
 
-def test_backend_with_section_required_when_not_env_var_or_prompt(
+def test_unknown_backend_kind_in_secret_backends_emits_warning(
     tmp_path: Path,
 ) -> None:
+    """A typo in [secret_backends.<kind>] (e.g. 'env-var' for 'env_var') surfaces
+    at load time as a warning, not at reach-for time in [secret_config].backends."""
     cfg_file = tmp_path / "config.toml"
     _write_base(
         cfg_file,
         extras="""
-        [secret_config]
-        backends = ["env_var", "onepassword"]
+        [secret_backends.env-var]
+        # typo: should be env_var
         """,
     )
-    # onepassword isn't a v1-shipped backend, so unknown-kind fires first;
-    # this verifies the loader's defense-in-depth ordering.
-    with pytest.raises(ConfigError):
+    cfg = load_config(cfg_file, warn_issues=False)
+    assert any(
+        "env-var" in issue and "unknown backend kind" in issue
+        for issue in cfg.config_issues
+    ), cfg.config_issues
+
+
+@pytest.mark.parametrize(
+    ("scope_extras", "context_label"),
+    [
+        ("[vm_templates.default.env]\nAGENTWORKS_VM = \"override\"", "vm_templates.default.env"),
+        ("[admin.env]\nAGENTWORKS_USER = \"override\"", "admin.env"),
+        ("[agent_templates.claude.env]\nAGENTWORKS_AGENT = \"override\"", "agent_templates.claude.env"),
+        ("[workspace_templates.ws.env]\nAGENTWORKS_WORKSPACE = \"override\"", "workspace_templates.ws.env"),
+        ("[session_templates.shell.env]\nAGENTWORKS_SESSION = \"override\"", "session_templates.shell.env"),
+    ],
+)
+def test_agentworks_prefix_warning_fires_for_every_scope(
+    tmp_path: Path, scope_extras: str, context_label: str,
+) -> None:
+    """The AGENTWORKS_* override warning fires for every scope's env table,
+    not just admin.env. Pin this so a future refactor that moves the check
+    into a per-scope code path doesn't silently miss some scopes."""
+    cfg_file = tmp_path / "config.toml"
+    _write_base(cfg_file, extras="\n" + scope_extras + "\n")
+    cfg = load_config(cfg_file, warn_issues=False)
+    assert any(
+        context_label in issue and "identity variable" in issue
+        for issue in cfg.config_issues
+    ), cfg.config_issues
+
+
+def test_session_template_inherits_parent_env(tmp_path: Path) -> None:
+    """A child session template with no env of its own inherits the parent's env
+    unchanged. Pins None-vs-empty handling in the merge."""
+    cfg_file = tmp_path / "config.toml"
+    _write_base(
+        cfg_file,
+        extras="""
+        [session_templates.parent.env]
+        EDITOR = "nvim"
+
+        [session_templates.child]
+        inherits = ["parent"]
+        """,
+    )
+    cfg = load_config(cfg_file, warn_issues=False)
+    # Resolve the child template through the inheritance chain.
+    from agentworks.sessions.templates import resolve_from_dict
+
+    resolved = resolve_from_dict(cfg.session_templates, "child")
+    assert resolved.env["EDITOR"].value == "nvim"
+
+
+def test_undeclared_secret_in_parent_caught_even_if_child_overrides(
+    tmp_path: Path,
+) -> None:
+    """A parent template with a secret-ref pointing at an undeclared secret is
+    rejected at load time even when a child template overrides that key with
+    plaintext. _validate_env_secret_refs walks every template independently."""
+    cfg_file = tmp_path / "config.toml"
+    _write_base(
+        cfg_file,
+        extras="""
+        [agent_templates.parent.env]
+        TOKEN = { secret = "missing-secret" }
+
+        [agent_templates.child]
+        inherits = ["parent"]
+
+        [agent_templates.child.env]
+        TOKEN = "literal-value"
+
+        [secret_config]
+        backends = ["env_var", "prompt"]
+        """,
+    )
+    with pytest.raises(ConfigError, match="missing-secret"):
         load_config(cfg_file, warn_issues=False)
