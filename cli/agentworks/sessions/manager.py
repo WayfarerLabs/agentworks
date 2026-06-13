@@ -16,6 +16,7 @@ from agentworks.db import PID_STOPPED, SessionMode, SessionStatus
 from agentworks.errors import (
     AlreadyExistsError,
     BrokenStateError,
+    ConfigError,
     ConnectivityError,
     ExternalError,
     NotFoundError,
@@ -431,10 +432,19 @@ def _build_session_command(
     command = _substitute_template_vars(raw_command, variables)
 
     parts = []
-    for key, val in template.env.items():
+    for key, entry in template.env.items():
         if not _ENV_KEY_RE.match(key):
             raise ValidationError(f"invalid env var name {key!r} in template '{template.name}'")
-        val = _substitute_template_vars(val, variables)
+        if entry.secret is not None:
+            # Phase 3 of the env-and-secrets effort wires the SecretResolver into
+            # session command construction. Until then, a session template that
+            # references a secret cannot be materialized into a shell command.
+            raise ConfigError(
+                f"session template {template.name!r} env key {key!r} references "
+                f"secret {entry.secret!r}; secret resolution into session commands "
+                "lands in Phase 3 of the env-and-secrets effort"
+            )
+        val = _substitute_template_vars(entry.value or "", variables)
         parts.append(f"export {key}={shlex.quote(val)}")
 
     if command:

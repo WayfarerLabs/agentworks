@@ -45,27 +45,32 @@ works; tests pin every behavior in the FRD R4 / HLA Secret model sections.
 
 Goal: the env model around the secrets foundation. Pure-data, no shell-opening sites changed yet.
 
-- [ ] `cli/agentworks/env/__init__.py`: package surface.
-- [ ] `cli/agentworks/env/entry.py`: `EnvEntry` dataclass (key, value-or-secret).
-- [ ] `cli/agentworks/env/merge.py`: `effective_env()` with the
+- [x] `cli/agentworks/env/__init__.py`: package surface.
+- [x] `cli/agentworks/env/entry.py`: `EnvEntry` dataclass (key, value-or-secret).
+- [x] `cli/agentworks/env/merge.py`: `effective_env()` with the
       `session > (agent | admin) >     workspace > vm` ladder, including the
       `assert not (admin and agent)` invariant.
-- [ ] `cli/agentworks/env/identity.py`: `ResourceContext` dataclass and `agentworks_identity_env()`
+- [x] `cli/agentworks/env/identity.py`: `ResourceContext` dataclass and `agentworks_identity_env()`
       producer.
-- [ ] `cli/agentworks/env/exports.py`: `build_export_block()` and `build_prefixed_command()` (the
+- [x] `cli/agentworks/env/exports.py`: `build_export_block()` and `build_prefixed_command()` (the
       latter handles empty-env case to keep call sites simple).
-- [ ] `cli/agentworks/config.py`:
+- [x] `cli/agentworks/config.py`:
   - Add `env: dict[str, EnvEntry]` to `AdminConfig`, `VMTemplate`, `WorkspaceTemplate`,
     `AgentTemplate`. Migrate `SessionTemplate.env` from `dict[str, str] | None` to
-    `dict[str, EnvEntry]` (plaintext-compatible loader).
+    `dict[str, EnvEntry]` (plaintext-compatible loader). Resolved\* templates also carry `env`,
+    merged child-overrides-parent during inheritance resolution.
   - Add `[secrets.*]`, `[secret_backends.*]`, `[secret_config]` loaders.
   - Validate: env key regex, plaintext-vs-secret shape, unknown secret refs, AGENTWORKS\_\*
     overrides emit a load-time warning, backend kinds match a registered source, unreachable secrets
-    raise.
-- [ ] Loader produces `SecretSource` instances per `[secret_config].backends` and assembles a
-      `SecretResolver`.
-- [ ] Tests: env merge, identity producer, export-block formatting, loader for all the new shapes
+    raise. (`true` rejected in `backend_mappings`; only `false` opt-out is valid.)
+- [x] Loader produces `SecretSource` instances per `[secret_config].backends` and assembles a
+      `SecretResolver`. Returns `None` when neither secrets nor backends are configured (operators
+      who don't opt in pay nothing).
+- [x] Tests: env merge, identity producer, export-block formatting, loader for all the new shapes
       including the unreachable error and the AGENTWORKS\_\* override warning.
+- [x] `cli/agentworks/sessions/manager.py._build_session_command`: minimal adapter to iterate
+      `EnvEntry` (plaintext only; secret-ref entries raise `ConfigError` pointing at Phase 3
+      wiring).
 
 Definition of done: an operator can author config that mentions secrets and env without crashing;
 `config.load_config()` returns populated structures; no shell-open sites use them yet.
