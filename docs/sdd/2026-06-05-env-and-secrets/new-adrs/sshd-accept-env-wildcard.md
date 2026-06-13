@@ -100,7 +100,9 @@ processes the user delegates from there).
   this ADR existing as the answer.
 - **PAM `pam_env` is the transport on the sshd side.** Its precise behavior across distros is
   conventionally well-defined but not centrally guaranteed; a future minor sshd or libpam change
-  could in principle alter the surface. We treat `AcceptEnv` + PAM env injection as a stable
+  could in principle alter the surface. Validated on Debian 12 (the agentworks base, per ADR 0002),
+  which ships libpam-modules with the `pam_env` module that has been stable since 2008. Non-Debian
+  VM bases are out of scope per ADR 0002. We treat `AcceptEnv` + PAM env injection as a stable
   contract for the foreseeable future; if a regression appears, the ADR is the place to revisit.
 - **Values containing newlines** are not reliably transportable via SetEnv (the SSH protocol encodes
   env strings without escaping mechanisms for control chars). Agentworks secrets are expected to be

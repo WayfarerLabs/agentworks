@@ -36,6 +36,18 @@ def test_pane_command_wraps_in_login_interactive_shell() -> None:
     assert "cd /workspace && exec claude" in out
 
 
+def test_pane_command_owns_exec_no_double_wrap() -> None:
+    """Regression: a previous Phase 3 pass had ``_build_session_command``
+    prepend ``exec`` and ``_pane_command`` prepend it again, producing
+    ``cd ... && exec exec claude``. The exec wrapping is owned by
+    ``_pane_command`` only; if the caller hands us a command that already
+    starts with ``exec``, we must NOT double it."""
+    out = _pane_command("exec claude", shlex.quote("/workspace"))
+    # Exactly one `exec` between `&&` and `claude`.
+    inner_count = out.count(" exec ")
+    assert inner_count == 1, f"expected one ' exec ' segment, got {inner_count}: {out!r}"
+
+
 def test_tmux_env_flags_empty_input() -> None:
     assert _tmux_env_flags({}) == ""
     assert _tmux_env_flags(None) == ""
@@ -52,6 +64,19 @@ def test_tmux_env_flags_emits_per_pair() -> None:
 def test_tmux_env_flags_quotes_values_with_spaces() -> None:
     out = _tmux_env_flags({"GREET": "hello world"})
     assert "-e 'GREET=hello world'" in out
+
+
+def test_tmux_env_flags_round_trip_through_shlex_for_single_quotes() -> None:
+    """The output is destined for the SSH remote shell, which parses it via
+    shell rules; values containing single quotes must round-trip cleanly
+    through ``shlex.split`` (same parser bash uses)."""
+    out = _tmux_env_flags({"PATH": "/it's/here", "OK": "fine"})
+    # Strip the leading space then split as the remote shell would.
+    tokens = shlex.split(out.lstrip())
+    # Expect two -e pairs.
+    assert tokens.count("-e") == 2
+    assert "PATH=/it's/here" in tokens
+    assert "OK=fine" in tokens
 
 
 def test_admin_socket_path_under_admin_socket_root() -> None:

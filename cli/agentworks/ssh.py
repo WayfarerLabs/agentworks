@@ -528,6 +528,22 @@ class LimaTarget:
     vm_name: str
 
 
+def _env_assignment_prefix(env: dict[str, str] | None) -> str:
+    """Return ``K1=v1 K2=v2 `` (trailing space) for ``env`` or empty string.
+
+    Used by the non-SSH transports (Lima, RemoteLima, WSL2) where the OpenSSH
+    SetEnv mechanism doesn't apply. The bash payload these transports run
+    receives the vars as scoped assignments preceding the command, which
+    bash interprets as per-command env (exported to that command's process
+    and any children it spawns).
+    """
+    if not env:
+        return ""
+    import shlex as _shlex
+
+    return "".join(f"{k}={_shlex.quote(v)} " for k, v in env.items())
+
+
 def lima_run(
     target: LimaTarget,
     command: str,
@@ -535,9 +551,11 @@ def lima_run(
     check: bool = True,
     timeout: int | None = None,
     logger: SSHLogger | None = None,
+    env: dict[str, str] | None = None,
 ) -> SSHResult:
     """Execute a command inside a local Lima VM via limactl shell."""
-    args = ["limactl", "shell", target.vm_name, "bash", "-lc", command]
+    env_prefix = _env_assignment_prefix(env)
+    args = ["limactl", "shell", target.vm_name, "bash", "-lc", f"{env_prefix}{command}"]
     try:
         result = subprocess.run(
             args, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout
@@ -575,6 +593,7 @@ def remote_lima_run(
     check: bool = True,
     timeout: int | None = None,
     logger: SSHLogger | None = None,
+    env: dict[str, str] | None = None,
 ) -> SSHResult:
     """Execute a command inside a remote Lima VM via the VM host.
 
@@ -582,9 +601,15 @@ def remote_lima_run(
     so we can pass multiple args after the host and they become one
     command line. This avoids nested single-quote escaping while still
     letting the VM host's login shell find limactl on PATH.
+
+    Env vars don't propagate through the SSH SetEnv at the VM-host hop
+    into the Lima VM (limactl shell starts a fresh shell on the VM side
+    without inheriting the host's env), so we embed them as scoped
+    assignments inside the lima_cmd payload.
     """
     host_target = SSHTarget(host=target.vm_host_ssh, user=None, login_shell=True)
-    lima_cmd = f"limactl shell {target.vm_name} -- {command}"
+    env_prefix = _env_assignment_prefix(env)
+    lima_cmd = f"limactl shell {target.vm_name} -- {env_prefix}{command}"
     return run(host_target, lima_cmd, check=check, timeout=timeout, logger=logger)
 
 
@@ -603,8 +628,10 @@ def wsl2_run(
     check: bool = True,
     timeout: int | None = None,
     logger: SSHLogger | None = None,
+    env: dict[str, str] | None = None,
 ) -> SSHResult:
     """Execute a command inside a WSL2 distro."""
+    env_prefix = _env_assignment_prefix(env)
     args = [
         "wsl",
         "--distribution",
@@ -614,7 +641,7 @@ def wsl2_run(
         "--",
         "bash",
         "-lc",
-        command,
+        f"{env_prefix}{command}",
     ]
     try:
         result = subprocess.run(
@@ -706,13 +733,14 @@ class ExecTarget:
                  Only meaningful for SSH transport (controls -tt flag).
             check: Raise SSHError on non-zero exit.
             timeout: Timeout in seconds.
-            env: Env vars to inject via the transport's native env-passing
-                mechanism. For SSH, materialized as ``-o SetEnv=K=V`` args;
-                accepted on the remote side under the ``AcceptEnv *`` directive
-                deployed by VM init. Currently only honored for the SSH
-                transport; Lima / WSL2 paths log a warning and ignore env (no
-                non-agentworks consumer relies on env injection on those
-                transports today).
+            env: Env vars to inject. For SSH transport, materialized as
+                ``-o SetEnv=K=V`` args (accepted on the remote side under
+                the ``AcceptEnv *`` directive deployed by VM init). For
+                Lima / RemoteLima / WSL2 transports, embedded as scoped
+                assignments at the head of the bash payload (``K=v K=v
+                cmd``) which bash exports for the command and its
+                descendants. Unified across transports so callers don't
+                need to special-case.
         """
         import shlex as _shlex
 
@@ -729,20 +757,12 @@ class ExecTarget:
 
             ssh = _replace(self.ssh, force_tty=effective_tty) if effective_tty != self.ssh.force_tty else self.ssh
             return run(ssh, command, check=check, timeout=t, logger=lg, env=env)
-        if env:
-            from agentworks import output as _output
-
-            _output.warn(
-                f"env injection requested on non-SSH transport "
-                f"({'lima' if self.lima else 'remote_lima' if self.remote_lima else 'wsl2'}); "
-                "vars will not reach the remote shell"
-            )
         if self.lima is not None:
-            return lima_run(self.lima, command, check=check, timeout=t, logger=lg)
+            return lima_run(self.lima, command, check=check, timeout=t, logger=lg, env=env)
         if self.remote_lima is not None:
-            return remote_lima_run(self.remote_lima, command, check=check, timeout=t, logger=lg)
+            return remote_lima_run(self.remote_lima, command, check=check, timeout=t, logger=lg, env=env)
         if self.wsl2 is not None:
-            return wsl2_run(self.wsl2, command, check=check, timeout=t, logger=lg)
+            return wsl2_run(self.wsl2, command, check=check, timeout=t, logger=lg, env=env)
         msg = "ExecTarget has no target configured"
         raise SSHError(msg)
 

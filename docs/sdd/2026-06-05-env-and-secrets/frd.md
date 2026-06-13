@@ -445,3 +445,24 @@ and `agw secret show <name>` (gated; resolves a single secret through the normal
   stricter requirements can keep their config in an encrypted home dir.
 - **VM-side secret distribution beyond shell env**: writing secrets to files on the VM (e.g. for
   consumers that read `~/.somecred`) is out of scope. The mechanism is env-var-shaped end-to-end.
+
+## Migration notes
+
+Operators upgrading across the env-and-secrets SDD see two observable changes that aren't otherwise
+documented in the requirements above:
+
+- **Per-VM / per-agent template env now picked up at session create / restart.** The pre-SDD
+  `_build_session_command` only consulted the session template's `env`. After this SDD,
+  `_resolve_session_env` walks `VMRow.template` and `AgentRow.template` to resolve the VM and agent
+  template env that applies to the session. Operators who populated
+  `[vm_templates.<non-default>.env]` or `[agent_templates.<non-default>.env]` now see those vars in
+  the next session create / restart; before this SDD those tables were silently dead config for any
+  non-default-template VM / agent.
+- **Admin sessions move to per-session sockets.** Pre-SDD admin sessions used the shared default
+  tmux server per admin user; after this SDD each admin session gets its own server on
+  `/run/agentworks/admin-tmux-sockets/<admin>/<session>.sock`, mirroring the agent-mode pattern.
+  Sessions created before the upgrade have `socket_path = NULL` in the DB and surface as a typed
+  `StateError` from `check_session_status` pointing at recreate; `agw session list` still lists them
+  but emits a one-time warning naming the affected sessions. Existing live admin tmux sessions on
+  the default socket are not auto-migrated; operators recreate them via `agw session delete <name>`
+  then `agw session create ...`.

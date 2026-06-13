@@ -157,12 +157,34 @@ def ensure_agent_socket_dir(
 def cleanup_stale_sockets(target: ExecTarget, linux_user: str) -> int:
     """Remove socket files whose tmux server is no longer running.
 
+    Targets the per-user agent socket directory under ``AGENT_SOCKET_ROOT``.
+    Use ``cleanup_stale_admin_sockets`` for admin sessions (different root).
     Uses sudo for both the tmux check and file removal -- this is an
     infrastructure maintenance context (vm reinit / agent create).
 
     Returns the number of stale sockets removed.
     """
-    q_dir = shlex.quote(f"{AGENT_SOCKET_ROOT}/{linux_user}")
+    return _cleanup_stale_sockets_under(
+        target, f"{AGENT_SOCKET_ROOT}/{linux_user}",
+    )
+
+
+def cleanup_stale_admin_sockets(target: ExecTarget, admin_username: str) -> int:
+    """Remove admin-side socket files whose tmux server is no longer running.
+
+    Mirrors ``cleanup_stale_sockets`` for the per-session admin socket
+    directory introduced by the env-and-secrets SDD. Called from VM reinit
+    to keep the directory from accumulating cruft over a long-lived VM's
+    repeated session create/delete cycles.
+    """
+    return _cleanup_stale_sockets_under(
+        target, f"{ADMIN_SOCKET_ROOT}/{admin_username}",
+    )
+
+
+def _cleanup_stale_sockets_under(target: ExecTarget, dir_path: str) -> int:
+    """Shared implementation for cleanup_stale_{agent,admin}_sockets."""
+    q_dir = shlex.quote(dir_path)
     result = target.run(f"find {q_dir} -name '*.sock' -type s 2>/dev/null", sudo=True, check=False)
     if not result.stdout.strip():
         return 0
@@ -243,6 +265,15 @@ set -g aggressive-resize on
 # Disable status bar -- the console provides this when nested;
 # for direct attach, the session is the only thing on screen.
 set -g status off
+
+# When tmux spawns a default-shell pane (no explicit pane command, as in
+# `tmux new-session -d` with no trailing command), source the operator's
+# login dotfiles so profile fragments installed by VM init
+# (/etc/profile.d/agentworks-identity.sh, ~/.agentworks-profile.sh) are
+# loaded. Without this, tmux's default-shell runs non-login and the
+# AGENTWORKS_VM / AGENTWORKS_USER vars from the fragments would not
+# appear in no-command sessions.
+set -g default-command "$SHELL -l"
 
 # Disable window/pane/session creation and management.
 # The user's prefix key, detach, copy mode, and scroll bindings are preserved.
@@ -334,6 +365,13 @@ def _pane_command(command: str, q_path: str) -> str:
     - command non-empty: ``$SHELL -lic 'cd <path> && exec <command>'``
     - command empty: ``""`` (let tmux fall back to its default-shell login)
 
+    Defensive against a caller pre-prepending ``exec``: this function is the
+    sole owner of the exec wrapping, so a leading ``exec`` on the input is
+    stripped before re-applying. (A prior Phase 3 pass had both
+    ``_build_session_command`` and ``_pane_command`` emitting their own
+    ``exec``, producing ``cd ... && exec exec <cmd>``; that's harmless at
+    runtime but visible in scrollback and confusing.)
+
     Env injection is NOT part of this string. Env reaches the pane via
     ``tmux new-session -e KEY=VAL`` (which seeds the session-environment
     table) and via SSH SetEnv (which seeds the tmux server's process env
@@ -341,7 +379,8 @@ def _pane_command(command: str, q_path: str) -> str:
     """
     if not command:
         return ""
-    inner = shlex.quote(f"cd {q_path} && exec {command}")
+    stripped = command.removeprefix("exec ").lstrip()
+    inner = shlex.quote(f"cd {q_path} && exec {stripped}")
     return f"$SHELL -lic {inner}"
 
 

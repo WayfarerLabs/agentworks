@@ -522,9 +522,13 @@ def _build_session_command(
     """Build the command for a session from its template.
 
     Returns an empty string when the template has no command (login shell
-    only). Uses restart_command (if defined) when restart=True. Env
-    injection is a separate concern handled by the SSH layer (SetEnv) and
-    tmux's ``-e`` flag on new-session; see ``sessions/tmux.create_session``.
+    only). Uses restart_command (if defined) when restart=True. The
+    ``exec`` wrapping that lets the command replace the login shell is
+    applied downstream in ``sessions/tmux._pane_command``; this function
+    just returns the operator's command string (after template-var
+    substitution). Env injection is a separate concern handled by the
+    SSH layer (SetEnv) and tmux's ``-e`` flag on new-session; see
+    ``sessions/tmux.create_session``.
     """
     variables = {
         "session_name": session_name,
@@ -532,11 +536,7 @@ def _build_session_command(
     }
 
     raw_command = template.restart_command if restart and template.restart_command else template.command
-    command = _substitute_template_vars(raw_command, variables)
-
-    if command:
-        return f"exec {command}"
-    return ""
+    return _substitute_template_vars(raw_command, variables)
 
 
 # -- Liveness checks -------------------------------------------------------
@@ -561,7 +561,10 @@ def check_session_status(
 ) -> SessionStatus:
     """Determine session status. Dispatches by session type.
 
-    Pure function -- no DB side effects.
+    No DB side effects. Raises ``StateError`` when the session row predates
+    the per-session-socket model introduced by the env-and-secrets SDD
+    (``socket_path is None`` for an admin session); the operator's only
+    recourse for such rows is to delete and recreate.
     """
     if session.pid == PID_STOPPED:
         return SessionStatus.STOPPED
@@ -570,12 +573,19 @@ def check_session_status(
 
     if session.socket_path is not None:
         return _check_dedicated_session(session, target=target)
-    # Legacy admin session predating per-session sockets. Surface a clean
-    # error so the operator knows to recreate it; the new admin-mode path
-    # always stores a socket_path.
-    raise RuntimeError(
-        f"session '{session.name}' has no socket_path; recreate it under the "
-        "per-session-socket model introduced by the env-and-secrets SDD"
+    # Legacy admin session predating per-session sockets. Surface as a
+    # typed StateError so the CLI's top-level error wrapper renders it
+    # as a one-liner; the new admin-mode path always stores a
+    # socket_path.
+    raise StateError(
+        f"session '{session.name}' has no socket_path",
+        entity_kind="session",
+        entity_name=session.name,
+        hint=(
+            "This session predates the per-session-socket model introduced by "
+            "the env-and-secrets SDD. Recreate it: `agw session delete "
+            f"{session.name}` then `agw session create ...`."
+        ),
     )
 
 
@@ -624,16 +634,25 @@ def batch_check_status(
 
     # Build compound command: has-session with inline boot_id + PID for any
     # session whose has-session probe fails. Admin and agent sessions now
-    # follow the same dedicated-socket model after the env-and-secrets SDD;
-    # legacy admin sessions with socket_path=None are rejected upstream by
-    # get_status with a clean recreate message.
+    # follow the same dedicated-socket model after the env-and-secrets SDD.
+    # Legacy admin sessions with socket_path=None are skipped here with a
+    # one-time warning so that `agw session list` against a VM with a mix of
+    # legacy and new sessions still surfaces the new ones cleanly; the
+    # operator-facing single-session paths (`session attach`, etc.) go
+    # through `check_session_status`, which raises a typed StateError
+    # pointing at the recreate.
+    legacy = [s.name for s in checkable if s.socket_path is None]
+    if legacy:
+        names = ", ".join(sorted(legacy))
+        output.warn(
+            f"{len(legacy)} session(s) predate the per-session-socket model "
+            f"and need recreate (`agw session delete` then create): {names}"
+        )
+
     parts = []
     for s in checkable:
         if s.socket_path is None:
-            raise RuntimeError(
-                f"session '{s.name}' has no socket_path; recreate it under the "
-                "per-session-socket model introduced by the env-and-secrets SDD"
-            )
+            continue
         q_session = shlex.quote(s.name)  # quoted for tmux -t argument
         name = s.name  # raw for output field (names are validated, no shell-special chars)
         has_cmd = tmux_cmd(f"has-session -t {q_session}", s.socket_path)
@@ -645,6 +664,8 @@ def batch_check_status(
             f"echo \"S:{name}:1:$BOOT:$?\"; "
             f"else echo \"S:{name}:0\"; fi"
         )
+    if not parts:
+        return {}
     cmd = "; ".join(parts)
 
     result = target.run(cmd, check=False)

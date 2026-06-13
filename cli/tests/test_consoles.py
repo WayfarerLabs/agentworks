@@ -78,6 +78,10 @@ class _StubNamedConsoleConfig:
     tmux_layout: str = "tiled"
 
 
+class _StubAdminConfig:
+    env: dict[str, object] = {}  # noqa: RUF012 - stub class attr
+
+
 class _StubConfig:
     """A no-op Config stand-in.
 
@@ -89,9 +93,26 @@ class _StubConfig:
 
     ``named_console`` provides only what multi_console reads from Config;
     extend here as new fields are added to NamedConsoleConfig.
+
+    ``vm_templates``, ``agent_templates``, ``workspace_templates``,
+    ``session_templates``, ``admin``, and ``secret_resolver`` carry empty
+    defaults so ``_resolve_pane_env`` and related env-resolution helpers
+    in multi_console don't crash on stub inputs; tests that probe env
+    flow should use real Config rather than this stub.
     """
 
     named_console = _StubNamedConsoleConfig()
+    vm_templates: dict[str, object] = {}  # noqa: RUF012
+    agent_templates: dict[str, object] = {}  # noqa: RUF012
+    workspace_templates: dict[str, object] = {}  # noqa: RUF012
+    session_templates: dict[str, object] = {}  # noqa: RUF012
+    admin: _StubAdminConfig = _StubAdminConfig()
+
+    @property
+    def secret_resolver(self) -> object:
+        from agentworks.secrets import SecretResolver
+
+        return SecretResolver([], {})
 
 
 # -- parse_session_spec ----------------------------------------------------
@@ -2003,6 +2024,36 @@ def test_split_shell_pane_admin_branch_no_sudo(
     assert len(splits) == 1
     assert "sudo --login" not in splits[0]
     assert 'exec "$SHELL" -l' in splits[0]
+
+
+def test_split_shell_pane_emits_tmux_env_flags_for_identity_vars(
+    db: Database, fake_target: _FakeTarget
+) -> None:
+    """`tmux split-window -e KEY=VAL` flags carry the per-context identity
+    vars (AGENTWORKS_SESSION etc.) into the pane process. The agent-pane
+    case relies on Phase 4's sudoers env_keep to survive the sudo --login
+    boundary; this test pins the wire shape regardless."""
+    _seed_vm(db, with_tailscale=True)
+    db._conn.execute(
+        "INSERT INTO agents (name, vm_name, linux_user) VALUES ('bot', 'vm1', 'bot-user')",
+    )
+    db._conn.execute(
+        "INSERT INTO sessions (name, workspace_name, template, mode, agent_name, socket_path) "
+        "VALUES ('s', 'ws-vm1', 'default', 'agent', 'bot', '/tmp/s.sock')",
+    )
+    db._conn.commit()
+    create_console(db, name="con", vm_name="vm1", session_specs=["s"])
+
+    fake_target.commands.clear()
+    fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
+    add_shell(db, _StubConfig(), console_name="con", session_name="s")
+
+    splits = [c for c in fake_target.commands if "split-window -t aw-console-con:s" in c]
+    assert len(splits) == 1
+    # At least the per-context identity vars are present.
+    assert " -e AGENTWORKS_SESSION=s" in splits[0]
+    assert " -e AGENTWORKS_SESSION_KIND=agent" in splits[0]
+    assert " -e AGENTWORKS_AGENT=bot" in splits[0]
 
 
 # -- Pane tagging ----------------------------------------------------------

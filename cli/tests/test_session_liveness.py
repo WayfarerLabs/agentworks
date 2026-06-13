@@ -186,16 +186,37 @@ def test_admin_stopped_dead_pid() -> None:
     assert check_session_status(session, target=target) == SessionStatus.STOPPED
 
 
-def test_legacy_admin_session_without_socket_raises() -> None:
+def test_admin_broken_after_setenv_pivot() -> None:
+    """Admin session: has-session fails AND PID is alive on the same boot
+    -> BROKEN. Before the env-and-secrets SDD admin sessions never reached
+    BROKEN (they shared the default tmux server, so a PID-alive socket-
+    unreachable state didn't exist). With per-session admin sockets the
+    same BROKEN semantic that applies to agents now applies to admin."""
+    session = _session("s1", pid=42, socket_path="/sock", mode="admin", boot_id=BOOT_CURRENT)
+    target = _FakeTarget({
+        "has-session": _FakeResult(ok=False),
+        "boot_id": _FakeResult(ok=True, stdout=BOOT_CURRENT + "\n"),
+        "test -d /proc/42": _FakeResult(ok=True),
+    })
+    assert check_session_status(session, target=target) == SessionStatus.BROKEN
+
+
+def test_legacy_admin_session_without_socket_raises_state_error() -> None:
     """A SessionRow predating the env-and-secrets SDD that has socket_path=None
-    surfaces a clean error pointing at recreate; the new admin model requires
-    a per-session socket."""
+    surfaces as a typed StateError so the CLI's top-level error wrapper
+    renders it cleanly; the new admin model requires a per-session socket."""
     import pytest
+
+    from agentworks.errors import StateError
 
     session = _session("s1", pid=42, mode="admin", boot_id=BOOT_CURRENT)
     target = _FakeTarget({"has-session": _FakeResult(ok=True)})
-    with pytest.raises(RuntimeError, match="no socket_path"):
+    with pytest.raises(StateError, match="no socket_path") as exc:
         check_session_status(session, target=target)
+    assert exc.value.entity_kind == "session"
+    assert exc.value.entity_name == "s1"
+    assert exc.value.hint is not None
+    assert "session delete" in exc.value.hint
 
 
 def test_unknown_no_pid() -> None:

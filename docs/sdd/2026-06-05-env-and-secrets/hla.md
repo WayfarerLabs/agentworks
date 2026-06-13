@@ -444,6 +444,13 @@ For tmux contexts specifically, env flows through two paths in tandem:
    suspenders for per-context vars that should win on collision and for `tmux split-window` adds on
    a server that's already running.
 
+Even with per-session sockets making the SetEnv path sufficient for new-session paths in steady
+state, the `-e` flags are kept as defense-in-depth: they are load-bearing for `tmux split-window`
+(the console add-shell pane path attaches to an existing console tmux server whose env was frozen at
+server start; SetEnv on the new SSH connection wouldn't reach the new pane) and they survive a
+future refactor that reintroduces shared servers for any path. The dual-channel design is the
+explicit design intent, not a redundant artifact.
+
 ### Identity vars on the VM (independent of SetEnv)
 
 VM-stable identity (`AGENTWORKS_VM`, `AGENTWORKS_VM_HOST`, `AGENTWORKS_PLATFORM`) and per-user
