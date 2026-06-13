@@ -11,9 +11,9 @@ Two new packages anchor this work:
   `PromptSource`), and a `SecretResolver` that batches lookups across the configured backend chain.
   Modeled in spirit on `agentworks.git_credentials`.
 - **`agentworks.env`**: declares the `EnvEntry` config type (value-or-secret-ref), merge logic
-  across the resource graph, the standard `AGENTWORKS_*` var producers, and a single
-  `build_export_block(...)` that returns the `export KEY=...` shell prelude any shell-opening site
-  can prepend.
+  across the resource graph, the standard `AGENTWORKS_*` var producers, and a `compose_env(...)`
+  helper that any shell-opening site uses to produce the final `dict[str, str]` of resolved env. The
+  SSH layer accepts that dict and materializes one `-o SetEnv=K=V` argument per entry.
 
 Both are pure Python with no Typer dependency, consistent with the typer-isolation rule. The CLI
 layer (commands) calls into these packages; the manager layer composes them with the rest of the
@@ -23,21 +23,20 @@ shell-open call sites.
 +-------------------+      +--------------------+      +----------------+
 |  config.py        |----->|  agentworks.env    |<-----| agentworks     |
 |  (loads tables)   |      |  - EnvEntry         |      |  .secrets      |
-|  - admin.env      |      |  - merge()          |      |  - Secret      |
+|  - admin.env      |      |  - effective_env()  |      |  - SecretDecl  |
 |  - vm_tpl.env     |      |  - AGENTWORKS_*     |      |  - SecretSource|
-|  - ws_tpl.env     |      |  - build_export...  |      |  - resolver    |
+|  - ws_tpl.env     |      |  - compose_env()    |      |  - resolver    |
 |  - agent_tpl.env  |      +---------+-----------+      +--------+-------+
 |  - sess_tpl.env   |                |                          |
-|  - [secrets]      |                |  effective env           |  resolved values
+|  - [secrets]      |                |  dict[str, str]          |  resolved values
 +-------------------+                v                          v
                             +--------------------------------------+
                             |   shell-opening sites                 |
-                            |   - sessions/tmux.create_session      |
-                            |   - sessions/console add-* surfaces   |
-                            |   - sessions/multi_console panes      |
-                            |   - vms/initializer provisioning      |
-                            |   - agents/manager setup              |
-                            |   - exec / admin-shell helpers        |
+                            |   compose env, hand to SSH layer:     |
+                            |     target.run(cmd, env=...)          |
+                            |   SSH layer materializes              |
+                            |     ssh -o SetEnv=K=V user@host cmd   |
+                            |   sshd (AcceptEnv *) injects via PAM. |
                             +--------------------------------------+
 ```
 
@@ -413,47 +412,73 @@ The loader instantiates one `SecretSource` per kind named in `backends`, in orde
 list to the resolver. Backends declared in `[secret_backends.*]` but absent from `backends` are
 inert (the source instance is never created).
 
-## Building the export block
+## Env transport: SSH SetEnv
 
-A single helper produces the shell prelude any shell-opening site can prepend:
-
-```python
-def build_export_block(env: dict[str, str]) -> str:
-    """Return 'export KEY=value && export KEY2=value2 && ...' with proper quoting."""
-    parts = [f"export {k}={shlex.quote(v)}" for k, v in env.items()]
-    return " && ".join(parts)
-```
+Env injection is a property of the SSH connection, not a property of the shell command. The CLI
+composes a `dict[str, str]` of effective env (user-defined + per-context identity vars) and hands it
+to the SSH layer; the SSH layer materializes one `-o SetEnv=KEY=VALUE` argument per entry. On the
+remote side, sshd accepts the vars (per the `AcceptEnv *` directive deployed in Phase 4; see
+`new-adrs/sshd-accept-env-wildcard.md`) and injects them into the user's shell environment via PAM's
+`accept_env` machinery before the user's shell starts.
 
 Sites compose like this:
 
 ```python
-identity = agentworks_identity_env(ctx)
+identity = per_context_identity_env(ctx)
 user_env = resolver.render(effective_env(admin=..., vm=..., ...))
-full_env = {**user_env, **identity}  # identity wins
-prelude = build_export_block(full_env)
-command = f"{prelude} && {original_command}" if prelude else original_command
+full_env = {**user_env, **identity}  # identity wins (FRD R1)
+target.run(command, env=full_env)    # SSH layer materializes -o SetEnv=K=V args
 ```
 
-### Prelude placement vs. login shells
+No `build_export_block`. No prelude composition. No "outer shell vs login shell" question. The SSH
+protocol carries the vars; the CLI's responsibility ends at handing the env dict to the SSH layer.
 
-The prelude runs in the OUTER SSH-command shell (whichever shell the remote SSH invocation hands the
-command to). If `original_command` is itself a login shell wrapper (e.g. `{shell} -lc 'foo'`, as
-used by `_build_session_command` and the agent install-command path established in the
-direct-target-user-SSH SDD), the exports happen FIRST and the login shell runs as a child process
-that inherits them via `environ`. Login-shell startup files (`/etc/profile`, `~/.bash_profile`,
-`~/.zprofile`, `~/.agentworks-profile.sh`) then run with the prelude's vars already set; they can
-read them, and any further exports they perform take precedence (which is the intended interaction
-with the per-user identity fragment that holds `AGENTWORKS_USER`).
+For tmux contexts specifically, env flows through two paths in tandem:
 
-The existing `_build_session_command` currently injects exports INSIDE the login-shell wrapper. That
-will be refactored to use the unified outer-shell placement so all shell-open sites have the same
-prelude shape. Behavior for plaintext and secret values is unchanged either way; the refactor is for
-uniformity.
+1. **SetEnv at the SSH layer** delivers env to the user's shell that runs `tmux new-session` (or
+   `tmux split-window`). When tmux is creating a fresh server (no existing server on the chosen
+   socket), the server inherits this env. Per-session sockets (Phase 3) ensure every admin and agent
+   session creates a fresh server, so SetEnv-delivered env always reaches the pane.
+2. **`tmux new-session -e KEY=VAL` / `tmux split-window -e KEY=VAL`** flags. Tmux's own
+   per-session-environment table carries these to every pane in the session. Used belt-and-
+   suspenders for per-context vars that should win on collision and for `tmux split-window` adds on
+   a server that's already running.
+
+### Identity vars on the VM (independent of SetEnv)
+
+VM-stable identity (`AGENTWORKS_VM`, `AGENTWORKS_VM_HOST`, `AGENTWORKS_PLATFORM`) and per-user
+identity (`AGENTWORKS_USER`) live in profile fragments on the VM, NOT in the SetEnv payload:
+
+- **System-wide fragment**: `/etc/profile.d/agentworks-identity.sh` plus a matching block in
+  `/etc/zsh/zprofile` (zsh does not source `/etc/profile.d/*` by default). Written by VM init.
+- **Per-user fragment**: `~/.agentworks-profile.sh` (one per Linux user on the VM). Holds
+  `AGENTWORKS_USER`.
+
+These fragments serve operators who reach the VM via raw SSH (`ssh awvm--<vm>`) outside agentworks:
+their login shell sources the fragments and sees the identity vars without agentworks doing
+anything. Per-context identity vars (`AGENTWORKS_SESSION` etc.) do not have a sensible static value;
+they only enter via SetEnv when agentworks opens the shell.
+
+### Sudo boundaries
+
+The console add-shell pane path uses `sudo --login -u <agent>` to switch a tmux pane's process to
+the agent's user (the tmux server runs as admin; the pane needs to run as the agent). Sudo strips
+env by default. VM init writes `/etc/sudoers.d/50-agentworks-env-keep` with
+`Defaults env_keep += "AGENTWORKS_* AW_*"` so agentworks-managed vars survive the boundary;
+non-agentworks vars from operator env tables are stripped at the sudo crossing (intended; the
+operator-defined vars were scoped to the SSH session, not to delegated subprocesses).
+
+The admin-shell windows in the console paths historically wrapped in `sudo su --login admin`. Post
+FRD R1 the SSH user IS the admin user, so the sudo was a no-op user-switch that wiped env for no
+benefit. Phase 3 removes it.
 
 ## Shell-opening surfaces
 
-Each site builds an env prelude from the appropriate context layers and prepends it to the shell
-payload. The site set, drawn from the FRD R5 propagation table:
+Each site composes the effective env from the appropriate context layers and hands the dict to the
+SSH layer (`ExecTarget.run(env=...)` / `interactive(target, command, env=...)`) which materializes
+`-o SetEnv=K=V` args on the SSH command line. For tmux sites the env is additionally passed via
+`tmux new-session -e K=V` / `tmux split-window -e K=V` so it lands in tmux's session-environment
+table. The site set, drawn from the FRD R5 propagation table:
 
 | Module / function                                                         | Context layers (admin shells)      | Context layers (agent shells)      |
 | ------------------------------------------------------------------------- | ---------------------------------- | ---------------------------------- |
@@ -468,10 +493,10 @@ payload. The site set, drawn from the FRD R5 propagation table:
 The two-phase split in `_create_agent_on_vm` from the direct-target-user-SSH SDD interacts cleanly
 with this work: Phase 1 (admin bootstrap) runs over `admin_target` and uses the admin env merge;
 Phase 2 (agent self-configure) runs over `agent_target` and uses the agent env merge. The two phases
-never share a prelude.
+never share env.
 
-Each site is a small refactor: collect context, build the env via the resolver, prepend the prelude.
-The prelude shape is identical across sites; what differs is which scopes feed in.
+Each site is a small refactor: collect context, build the env via the resolver, pass to the SSH
+layer via the `env=` kwarg. What differs across sites is which scopes feed `compose_env`.
 
 Attach surfaces (`session attach`, `console attach`) do NOT appear in this table. They join existing
 shell processes and inherit those processes' create-time env. See FRD R5 "Attach inherits
@@ -558,10 +583,10 @@ proceed with command execution
   for each shell opened:
     |
     v
-    build_export_block(identity + resolver.render(effective_env(ctx)))
+    compose_env(resolver, ctx, vm=..., admin=..., ...) -> dict[str, str]
     |
     v
-    prepend to the shell command
+    pass to the SSH layer via env= kwarg; SSH layer adds -o SetEnv=K=V args
 ```
 
 For commands with a single, obvious target (e.g. `session create s1 -t claude`), the candidate set
@@ -612,21 +637,22 @@ Per scope discussion: no `--env KEY=VAL` overrides. Operators set CLI env or edi
 - Resolver raises a typed `SecretUnavailableError` (subclass of `agentworks.errors.AgentworksError`)
   when no source in the active chain can satisfy a secret. CLI renders this with the unsatisfied
   secret name(s) and which backends were tried (the error's own attributes).
-- `build_export_block` is intentionally not given access to raw secrets vs plaintext info; by the
-  time it runs, the dict is already a flat `{KEY: value}`. Sites are responsible for not logging the
-  dict.
+- `compose_env` is intentionally not given access to raw secrets vs plaintext info; by the time it
+  returns, the dict is already a flat `{KEY: value}` of resolved strings. Sites are responsible for
+  not logging the dict.
 
 ## Logging and disclosure controls
 
 - `agentworks.output.detail("...")` and similar may print env _keys_ but never _values_.
 - `agw env show` defaults to redaction (`<from secret: ...>`); explicit `--reveal-secrets` is the
   only path that prints secret values to a terminal.
-- The prelude that is sent over SSH is necessarily on the SSH command line, which is visible to
-  anyone who can read `ps` on the VM during the brief window of process start. This is a known
-  tradeoff for env-var-shaped credentials and matches the existing behavior of the session-template
-  `env`. Documented in operator docs; not a new exposure. The same window applies to plaintext
-  values as well (they ride the same prelude), but plaintext is already cleartext in config so this
-  is not an additional disclosure.
+- Env values transported via SSH SetEnv ride the SSH protocol's environment channel, not the SSH
+  command-line. On the VM side they are NOT visible to anyone reading `ps` (they enter the user's
+  shell environment via PAM, not via a `bash -c "export ..."` step). On the operator's machine the
+  SetEnv args ARE on the local `ssh` invocation's command line and visible to `ps -e` on that
+  machine, which is consistent with the trust-anchor analysis in `cli-side-secret-injection.md` (the
+  operator workstation is the trust anchor; processes on it can already read the secrets the CLI
+  would otherwise feed to a remote shell).
 
 ## DB schema impact
 
@@ -667,12 +693,18 @@ The plan will phase the work, but the full design above is the target. Anticipat
    `[secret_config]` config sections, `SecretDecl` / `SecretBackendConfig` / `SecretConfig` types,
    `SecretSource` protocol, `EnvVarSource`, `PromptSource`, `SecretResolver`. No consumers yet.
 2. **Env model**: `agentworks.env` package, `EnvEntry`, config sections at all five scopes,
-   `effective_env()`, `agentworks_identity_env()`, `build_export_block()`. Migrate existing
-   `session_templates.*.env` parsing to the new type (plaintext-compatible).
-3. **Session/console wiring**: replace inline `export` in `sessions/manager._build_session_command`,
-   wire to `sessions/console.*` and `sessions/multi_console.*`.
+   `effective_env()`, `agentworks_identity_env()` (and per-context / VM-stable / per-user subset
+   helpers), `compose_env()`. Migrate existing `session_templates.*.env` parsing to the new type
+   (plaintext-compatible).
+3. **SSH SetEnv pivot + session/console wiring**: thread `env=` kwarg through `agentworks.ssh`
+   (materialized as `-o SetEnv=K=V` args), wire `sessions/manager`, `sessions/tmux`,
+   `sessions/console.*`, `sessions/multi_console.*` to compose env and pass to the SSH layer. Switch
+   admin sessions to per-session sockets (mirror agent mode) so each session creates a fresh tmux
+   server that inherits the SSH-delivered env. Drop the redundant `sudo su --login admin` in console
+   paths.
 4. **Provisioning + agent setup wiring**: thread context through `vms/initializer.*` and
-   `agents/manager.*`. Write VM-stable identity to the profile fragment.
+   `agents/manager.*`. Write VM-stable identity to the profile fragment, deploy `AcceptEnv *` sshd
+   config, deploy `env_keep += "AGENTWORKS_* AW_*"` sudoers config.
 5. **CLI**: `agw env show`, `agw doctor` additions, sample-config + docs.
 6. **Eager prompting orchestration**: hook `SecretResolver.resolve_all` into command entry for
    anything that opens a shell; thread the resolver through manager calls.

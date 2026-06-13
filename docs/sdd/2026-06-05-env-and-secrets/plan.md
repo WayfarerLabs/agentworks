@@ -75,53 +75,99 @@ Goal: the env model around the secrets foundation. Pure-data, no shell-opening s
 Definition of done: an operator can author config that mentions secrets and env without crashing;
 `config.load_config()` returns populated structures; no shell-open sites use them yet.
 
-## Phase 3: session + console wiring
+## Phase 3: SSH SetEnv pivot + session / console wiring
 
-Goal: existing shell-open sites in sessions / consoles use the env+secrets prelude. Behavior is
-unchanged for operators with no env / secrets configured.
+Goal: env injection happens through the SSH layer's `SetEnv` mechanism, not through a CLI-composed
+shell prelude. All shell-opening sites (sessions, consoles, exec, interactive shells) get the same
+env via the same SSH-layer plumbing. Behavior is unchanged for operators with no env / secrets
+configured.
 
-- [x] `cli/agentworks/sessions/manager.py`: `_build_session_command` now returns only the inner
-      login-shell payload (no exports). New `_resolve_session_env` helper composes the per-context
-      env from the resolved VM / workspace / agent templates, applies `{{session_name}}` /
-      `{{workspace_name}}` template-var substitution to session env values, runs the dict through
-      `compose_env` (renders secrets, overlays identity vars), and hands the rendered
-      `dict[str, str]` to `create_tmux_session`.
-- [x] `cli/agentworks/sessions/tmux.py`: `create_session` accepts a new `env` kwarg and a new
-      `_build_pane_command` helper places the prelude OUTSIDE the login-shell wrapper:
-      `EXPORTS && $SHELL -lic 'cd PATH && command'`. Behavior unchanged when `env` is empty (no
-      prelude, no command shape change).
-- [x] `cli/agentworks/env/compose.py`: new
-      `compose_env(resolver, ctx, vm, workspace=, admin=,     agent=, session=)` helper that runs
-      the standard pipeline (identity ⊕ resolved user env) with identity-wins ordering.
-      `per_context_identity_env` is the inline subset; VM-stable and per-user identity vars live in
-      Phase 4 profile fragments.
-- [x] `cli/agentworks/secrets/resolver.py`: narrow `render` / `required_for` to
-      `Mapping[str, EnvEntry]` now that Phase 2's EnvEntry exists. Phase 1's duck-typed
-      `dict[str, object]` is gone. Bare-string and malformed-entry tests removed (EnvEntry's
-      exactly-one invariant makes those cases unreachable).
-- [x] Tests: env-compose helpers, identity subset helpers (vm-stable / per-user / per-context),
-      `_build_pane_command` shape (prelude outside login shell, empty-input fallthrough).
-- [ ] **Deferred**: env injection on console admin-shell windows
-      (`sessions/console.py.create_console` and `multi_console._build_console_tmux`) plus the
-      per-pane `_add_shell_pane` in `multi_console.py`. These paths still wrap in `sudo --login` (a
-      pre-FRD-R1 relic), which wipes the env across the user switch and breaks the HLA "outer shell"
-      placement. Aligning these with FRD R1 (drop the redundant `sudo` when the SSH user already
-      matches the target shell) is a small refactor on top of this work; tracking as a Phase 3
-      follow-up.
+### Pivot context
 
-Definition of done: `agw session create` with no env config produces the same on-VM state as before.
-With env config, the values are present in the shell's env. Definition of done is met for sessions;
-console admin-shell and per-pane wiring **must land before Phase 4** so Phase 4's provisioning
-prelude composes against a uniform shell-open surface. Tracked as the Phase 3 follow-up bullet
-above.
+The first pass of Phase 3 (commits `91f32db` and `bb64136`) wired env into session create / restart
+via a CLI-composed shell prelude (`build_export_block` + `build_prefixed_command`). Working through
+the implementation surfaced enough friction (nested quoting through SSH → tmux → pane shell,
+`sudo --login` env wipes, login-vs-non-login shell semantics, deferred console paths) that we
+re-evaluated the transport mechanism itself. The SSH protocol already has `SetEnv` (client) /
+`AcceptEnv` (server) for exactly this purpose. Adopting it removes the entire prelude composition
+layer from the CLI and gives a uniform shape across every shell-opening site. See
+`new-adrs/sshd-accept-env-wildcard.md` for the security-posture decision behind the wildcard
+AcceptEnv.
 
-**Behavior change to surface in the lockfile**: `_resolve_session_env` consults `VMRow.template` and
-`AgentRow.template` to resolve the actual VM / agent template, where the pre-Phase-3
-`_build_session_command` only consulted `session.template`. Operators who populated
-`[vm_templates.<non-default>.env]` or `[agent_templates.<non-default>.env]` will now see those vars
-in their next session create / restart; before this phase those tables were silently dead config.
-This is the FRD-R2-intended behavior, but it is observable for operators with non-default templates
-and should be called out in `locked.md` when the SDD locks.
+This phase rewrites the earlier Phase 3 commits accordingly. The `compose_env` /
+`per_context_identity_env` / SecretResolver-render machinery from those commits stays; what changes
+is the consumption: instead of `build_export_block(env)` followed by glue, we pass the flat
+`dict[str, str]` to SSH as `-o SetEnv=K=V` args.
+
+### Phase 3 deliverables
+
+- [ ] Delete `cli/agentworks/env/exports.py` (`build_export_block`, `build_prefixed_command`).
+      Remove from `agentworks.env` package surface and from tests. Env transport is now an SSH
+      property, not a shell-command property.
+- [ ] `cli/agentworks/ssh.py`: thread an `env: dict[str, str] | None` kwarg through `run`,
+      `interactive`, and `ExecTarget.run`. Each `K=V` pair becomes `-o SetEnv=K=V` on the SSH
+      command line. The `RunCommand` Protocol in `agentworks.sessions.tmux` widens to match.
+- [ ] `cli/agentworks/sessions/tmux.py`: drop `_build_pane_command` and the prelude composition.
+      `create_session` takes the env dict, the pane command becomes the simple inner shape
+      (`$SHELL -lic 'cd <path> && exec <command>'` or just empty), env reaches the pane via
+      `tmux new-session -e KEY=VAL` flags on the SSH-invoked tmux command. Tmux's session
+      environment carries the vars to every pane in the session.
+- [ ] `cli/agentworks/sessions/manager.py`: `_resolve_session_env` stays (still composes the env
+      dict). Call sites pass it via `create_tmux_session(..., env=...)` -> SSH layer.
+- [ ] **Admin sessions move to per-session sockets**, mirroring the agent-mode pattern. Without
+      per-session sockets, tmux's shared default server for admin mode would freeze the first
+      session's env into the server and leak it to subsequent admin-session panes. With per-session
+      sockets, each admin-mode `tmux new-session` starts a fresh server that inherits the
+      SetEnv-delivered env from the SSH connection. Socket path lives under
+      `/run/agentworks/admin-tmux-sockets/<admin-user>/<session>.sock`. The agent-mode socket- root
+      setup pattern (admin-target writes the socket root, ensures per-user dir) is reused verbatim
+      for admin mode.
+- [ ] **Drop the redundant `sudo su --login agentworks`** in the console admin-shell windows (legacy
+      `sessions/console.py.create_console` and `multi_console._build_console_tmux`). Post FRD R1 the
+      SSH user IS the admin user; the sudo is a relic that wipes env across a user switch that was
+      already a no-op. The admin-shell pane becomes `$SHELL -lic 'exec     $SHELL -l'`-equivalent
+      (or just an empty pane command, letting tmux's default-shell handle it).
+- [ ] **Console add-shell panes** (`multi_console._split_shell_pane`): per-pane env injected via
+      `tmux split-window -e KEY=VAL`. For the agent-pane branch (`sudo --login -u <agent>`), the
+      sudo IS legitimate (the tmux server runs as admin; the pane needs to run as the agent).
+      Sudoers config is extended (Phase 4) with `env_keep += "AGENTWORKS_* AW_*"` so the
+      agentworks-managed vars survive the sudo boundary. Non-agentworks vars from operator env
+      tables are stripped at sudo crossing (intended: those vars were scoped to the SSH session, not
+      to delegated processes).
+- [ ] `cli/agentworks/env/identity.py` retains the three identity-subset helpers
+      (`vm_stable_identity_env`, `per_user_identity_env`, `per_context_identity_env`). With SetEnv
+      as the transport, `compose_env` overlays per-context identity vars on top of the resolved user
+      env (identity wins). VM-stable and per-user vars are NOT in the SetEnv payload; they come from
+      the VM-side profile fragments in Phase 4. (An operator reaching a VM via raw SSH outside
+      agentworks gets those vars from the profile fragments; the SetEnv path is for
+      agentworks-issued commands only.)
+- [ ] Tests:
+  - SSH-layer SetEnv arg construction (one `-o SetEnv=K=V` per dict entry, order preserved, values
+    with special chars accepted).
+  - `create_tmux_session` builds the `tmux new-session -e KEY=VAL` flag list correctly for admin and
+    agent modes.
+  - `_split_shell_pane` builds `tmux split-window -e KEY=VAL` for admin and agent panes.
+  - Per-session socket plumbing for admin mode mirrors agent mode (socket-root setup + server-access
+    grant).
+  - Console admin-shell window no longer wraps in sudo.
+
+Definition of done: a fresh `agw session create` produces a tmux server whose pane process
+environment carries the resolved user env + per-context identity vars (verifiable from inside the
+pane via `env | grep AGENTWORKS_`). Behavior is identical to pre-Phase-3 when no env / secrets are
+configured (empty SetEnv list, default pane command shape). `agw vm shell` / `agw agent shell` work
+the same way, via SSH SetEnv with no tmux involvement.
+
+**Behavior changes to surface in the lockfile**:
+
+- `_resolve_session_env` consults `VMRow.template` and `AgentRow.template` to resolve the actual VM
+  / agent template, where the pre-Phase-3 `_build_session_command` only consulted
+  `session.template`. Operators who populated `[vm_templates.<non-default>.env]` or
+  `[agent_templates.<non-default>.env]` will see those vars in their next session create / restart;
+  before this phase those tables were silently dead config.
+- Admin sessions use per-session sockets after this phase. Raw `tmux ls` on a VM no longer shows all
+  admin sessions on the user's default tmux server; operators should use `agw session list` /
+  `agw session attach <name>`. Existing live admin tmux sessions from before the migration become
+  orphaned (no agw-managed sockets backing them); on Phase 4 reinit they're cleared.
 
 **Batch operations do not yet honor "prompt once up front"**: `restart_session` calls into
 `_resolve_session_env` per session, so an `agw restart-all` (or similar) batch path will resolve
@@ -130,29 +176,48 @@ single CLI invocation, so the operator is still prompted at most once per secret
 are interleaved with mutation work rather than happening up front. Phase 6 (eager prompting
 orchestration) is the capstone that fixes this.
 
-## Phase 4: provisioning + agent setup wiring
+## Phase 4: VM-side identity + AcceptEnv / sudoers config
 
-Goal: provisioning shells (vm create / reinit) and agent setup shells (agent create / reinit
-Phase 2) inject env+secrets. VM-stable identity vars land in profile fragments.
+Goal: VM-stable identity vars and per-user identity vars land in profile fragments, sshd is
+configured to accept SetEnv'd vars from agentworks, and sudoers is configured to keep
+agentworks-managed vars across user switches. Provisioning shells and agent setup shells inject
+env+secrets via the SSH SetEnv path established in Phase 3.
 
 - [ ] `cli/agentworks/vms/initializer.py`:
   - New helper `_write_agentworks_identity_profile(target, ctx)` writes
     `/etc/profile.d/agentworks-identity.sh` AND the matching block in `/etc/zsh/zprofile` (mirrors
-    the existing `AGENTWORKS_NERF_HOME` install pattern).
-  - Extend `_write_agentworks_profile(target, ...)` to include `AGENTWORKS_USER`.
-  - Provisioning shells in Phase A / B prepend the env+secrets prelude.
+    the existing `AGENTWORKS_NERF_HOME` install pattern). Contents are the VM-stable subset:
+    `AGENTWORKS_VM`, `AGENTWORKS_VM_HOST` (when applicable), `AGENTWORKS_PLATFORM`.
+  - Extend `_write_agentworks_profile(target, ...)` (per-user fragment, existing) to include
+    `AGENTWORKS_USER`.
+  - **New helper `_write_sshd_accept_env(target)`** writes
+    `/etc/ssh/sshd_config.d/50-agentworks-accept-env.conf` with `AcceptEnv *`, validates with
+    `sshd -t`, and restarts sshd. Per the `sshd-accept-env-wildcard` ADR.
+  - **New helper `_write_sudoers_env_keep(target)`** writes `/etc/sudoers.d/50-agentworks-env-keep`
+    with `Defaults env_keep += "AGENTWORKS_* AW_*"`, validated with `visudo -c` before install. Lets
+    agentworks-managed vars survive the sudo boundary in console add-shell agent panes and any
+    future sudo path.
+  - Provisioning shells in Phase A / B pass env via `ExecTarget.run(env=...)` (uses the SetEnv path;
+    no shell prelude composition). VM-stable + per-user identity vars are NOT in the SetEnv payload
+    during init (the profile fragments aren't written yet at Phase A start; the SetEnv payload
+    carries operator-defined env for `[admin.env]` and the like).
 - [ ] `cli/agentworks/agents/manager.py._create_agent_on_vm`:
   - Phase 1 (admin bootstrap): `_write_agentworks_profile` for the new agent's user gets
-    `AGENTWORKS_USER`. Prelude assembled with `admin=...`, no agent.
-  - Phase 2 (agent self-configure): every `agent_target.run(...)` call gets the agent-side prelude
-    prepended. `_run_agent_install_commands` and `_run_agent_mise_setup` accept and use a per-call
-    env dict.
-- [ ] Tests: prelude assembly per phase; idempotent rewrites of profile fragments; AGENTWORKS\_\*
-      vars present on a fresh-VM shell.
+    `AGENTWORKS_USER`. SSH commands during admin bootstrap pass env via `target.run(env=...)` using
+    the admin scope (`compose_env(..., admin=..., vm=...)`).
+  - Phase 2 (agent self-configure): every `agent_target.run(...)` call passes env using the agent
+    scope (`compose_env(..., agent=..., vm=...)`).
+  - `_run_agent_install_commands` and `_run_agent_mise_setup` accept and use a per-call env dict,
+    threaded through to the underlying SSH layer.
+- [ ] Tests: env assembly per phase; idempotent rewrites of profile fragments and sshd*config.d /
+      sudoers.d files; `AGENTWORKS*\*`vars present in`env`output via raw    `ssh
+      awvm--<vm>`(profile-fragment path) AND via`agw vm exec env` (SetEnv path).
 
 Definition of done: a fresh `vm create` + `agent create` produces a VM where any shell on it (via
-agentworks or via raw `ssh awvm--vm`) sees the expected `AGENTWORKS_*` identity vars, and
-agentworks-opened shells see the configured user env merged correctly.
+agentworks or via raw `ssh awvm--vm`) sees the expected `AGENTWORKS_*` identity vars, sshd accepts
+SetEnv'd env vars from agentworks-issued commands, and sudo preserves `AGENTWORKS_*` / `AW_*` across
+user switches for the console-pane paths. Agentworks-opened shells see the configured user env
+merged correctly.
 
 ## Phase 5: CLI surface
 
@@ -201,9 +266,15 @@ chain, then the command proceeds with no further interruptions.
 
 - Phases 1 and 2 are pure additive (new packages, new config types). No behavior change for
   operators with no env / secrets configured.
-- Phase 3 swaps inline-export call sites. Behavior preserved for empty env; new behavior for
-  populated env.
-- Phase 4 changes VM-side state on init / reinit (profile fragments). Idempotent.
+- Phase 3 pivots the env-transport mechanism to SSH SetEnv (vs the original shell-prelude design).
+  Behavior preserved for empty env; new behavior for populated env. Admin sessions move to
+  per-session sockets; raw `tmux ls` on a VM no longer shows them grouped. Console paths drop the
+  redundant `sudo su --login admin`.
+- Phase 4 changes VM-side state on init / reinit: profile fragments (`/etc/profile.d/`,
+  `~/.agentworks-profile.sh`), sshd config (`/etc/ssh/sshd_config.d/50-agentworks-accept-env.conf`),
+  and sudoers config (`/etc/sudoers.d/50-agentworks-env-keep`). Idempotent. Until a VM is reinit'd
+  to pick up the new sshd config, SetEnv'd vars from Phase 3 commands will be silently dropped at
+  sshd; doctor (Phase 5) reports this state.
 - Phase 5 is operator-visible; ships at the end of implementation so the docs match the surface.
 - Phase 6 is the orchestration capstone: every command's secret needs computed up front, single
   resolve pass.
