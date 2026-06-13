@@ -1225,9 +1225,11 @@ def _build_console_tmux(
         # is impossible for any session (validate_name rejects leading hyphen,
         # consecutive hyphens, and trailing hyphen), so we don't need extra
         # logic to distinguish this internal window from real session windows.
+        # No sudo wrapper: the SSH user IS the admin user (FRD R1 direct
+        # target-user SSH), so a login shell at the pane is the goal directly.
         target.run(
             f"tmux new-session -d -s {q_con} -n {shlex.quote(ADMIN_SHELL_WINDOW)} "
-            f"{shlex.quote('exec sudo su --login ' + shlex.quote(vm.admin_username))}"
+            f"{shlex.quote('exec $SHELL -l')}"
         )
         placeholder_used = False
         placeholder = ""

@@ -519,16 +519,12 @@ def _build_session_command(
     workspace_name: str,
     restart: bool = False,
 ) -> str:
-    """Build the inner login-shell command for a session from its template.
+    """Build the command for a session from its template.
 
     Returns an empty string when the template has no command (login shell
-    only). Uses restart_command (if defined) when restart=True.
-
-    The result is the inner payload that runs INSIDE the login shell
-    wrapper. Env exports are not produced here; they land in the OUTER SSH-
-    command shell (see ``sessions/tmux.create_session``) so that the login
-    shell's startup files (``~/.zprofile``, ``~/.agentworks-profile.sh``)
-    see the prelude vars via ``environ`` and can layer on top.
+    only). Uses restart_command (if defined) when restart=True. Env
+    injection is a separate concern handled by the SSH layer (SetEnv) and
+    tmux's ``-e`` flag on new-session; see ``sessions/tmux.create_session``.
     """
     variables = {
         "session_name": session_name,
@@ -572,15 +568,22 @@ def check_session_status(
     if session.pid is None or session.boot_id is None:
         return SessionStatus.UNKNOWN
 
-    if session.mode == SessionMode.AGENT.value and session.socket_path is not None:
-        return _check_dedicated_agent_session(session, target=target)
-    if session.mode == SessionMode.ADMIN.value and session.socket_path is None:
-        return _check_shared_admin_session(session, target=target)
-    raise RuntimeError(f"unexpected session config: mode={session.mode}, socket_path={session.socket_path}")
+    if session.socket_path is not None:
+        return _check_dedicated_session(session, target=target)
+    # Legacy admin session predating per-session sockets. Surface a clean
+    # error so the operator knows to recreate it; the new admin-mode path
+    # always stores a socket_path.
+    raise RuntimeError(
+        f"session '{session.name}' has no socket_path; recreate it under the "
+        "per-session-socket model introduced by the env-and-secrets SDD"
+    )
 
 
-def _check_dedicated_agent_session(session: SessionRow, *, target: ExecTarget) -> SessionStatus:
-    """Agent sessions with their own tmux server and socket."""
+def _check_dedicated_session(session: SessionRow, *, target: ExecTarget) -> SessionStatus:
+    """Sessions with their own tmux server and socket. Applies uniformly to
+    admin and agent sessions after the env-and-secrets SDD migrated admin
+    sessions to per-session sockets.
+    """
     from agentworks.sessions.tmux import tmux_cmd
 
     q_session = shlex.quote(session.name)
@@ -603,20 +606,6 @@ def _check_dedicated_agent_session(session: SessionRow, *, target: ExecTarget) -
     return SessionStatus.BROKEN  # same boot, process alive, socket unreachable
 
 
-def _check_shared_admin_session(session: SessionRow, *, target: ExecTarget) -> SessionStatus:
-    """Admin sessions on the default tmux server. BROKEN does not apply."""
-    from agentworks.sessions.tmux import tmux_cmd
-
-    q_session = shlex.quote(session.name)
-    cmd = tmux_cmd(f"has-session -t {q_session}") + " 2>/dev/null"
-    result = target.run(cmd, check=False)
-    if result.returncode == SSH_TRANSPORT_ERROR:
-        return SessionStatus.UNKNOWN  # SSH transport failure, not a session state
-    if result.ok:
-        return SessionStatus.OK
-    return SessionStatus.STOPPED
-
-
 def batch_check_status(
     sessions: list[SessionRow],
     *,
@@ -633,27 +622,29 @@ def batch_check_status(
     if not checkable:
         return {}
 
-    # Build compound command: has-session with inline boot_id + PID for agent failures
+    # Build compound command: has-session with inline boot_id + PID for any
+    # session whose has-session probe fails. Admin and agent sessions now
+    # follow the same dedicated-socket model after the env-and-secrets SDD;
+    # legacy admin sessions with socket_path=None are rejected upstream by
+    # get_status with a clean recreate message.
     parts = []
     for s in checkable:
+        if s.socket_path is None:
+            raise RuntimeError(
+                f"session '{s.name}' has no socket_path; recreate it under the "
+                "per-session-socket model introduced by the env-and-secrets SDD"
+            )
         q_session = shlex.quote(s.name)  # quoted for tmux -t argument
         name = s.name  # raw for output field (names are validated, no shell-special chars)
         has_cmd = tmux_cmd(f"has-session -t {q_session}", s.socket_path)
-        if s.mode == SessionMode.AGENT.value and s.socket_path is not None:
-            # Agent session: inline follow-up on failure
-            parts.append(
-                f"{has_cmd} 2>/dev/null; "
-                f"if [ $? -ne 0 ]; then "
-                f"BOOT=$(cat /proc/sys/kernel/random/boot_id); "
-                f"test -d /proc/{s.pid}; "
-                f"echo \"S:{name}:1:$BOOT:$?\"; "
-                f"else echo \"S:{name}:0\"; fi"
-            )
-        elif s.mode == SessionMode.ADMIN.value and s.socket_path is None:
-            # Admin session: has-session only
-            parts.append(f"{has_cmd} 2>/dev/null; echo \"S:{name}:$?\"")
-        else:
-            raise RuntimeError(f"unexpected session config: mode={s.mode}, socket_path={s.socket_path}")
+        parts.append(
+            f"{has_cmd} 2>/dev/null; "
+            f"if [ $? -ne 0 ]; then "
+            f"BOOT=$(cat /proc/sys/kernel/random/boot_id); "
+            f"test -d /proc/{s.pid}; "
+            f"echo \"S:{name}:1:$BOOT:$?\"; "
+            f"else echo \"S:{name}:0\"; fi"
+        )
     cmd = "; ".join(parts)
 
     result = target.run(cmd, check=False)

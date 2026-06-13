@@ -258,7 +258,11 @@ SSH_CONNECT_TIMEOUT = 30
 SSH_DEFAULT_RETRIES = 1
 
 
-def _ssh_base_args(target: SSHTarget) -> list[str]:
+def _ssh_base_args(
+    target: SSHTarget,
+    *,
+    env: dict[str, str] | None = None,
+) -> list[str]:
     args = ["ssh", "-o", "StrictHostKeyChecking=accept-new", "-o", "BatchMode=yes"]
     if target.force_tty:
         args.insert(1, "-tt")
@@ -268,6 +272,13 @@ def _ssh_base_args(target: SSHTarget) -> list[str]:
         args.extend(["-i", str(target.identity_file)])
     if target.proxy_jump is not None:
         args.extend(["-J", target.proxy_jump])
+    if env:
+        for key, value in env.items():
+            # Each SetEnv pair is passed as `-o SetEnv=KEY=VALUE`. The remote
+            # sshd accepts it under the `AcceptEnv *` directive deployed by VM
+            # init (see new-adrs/sshd-accept-env-wildcard.md) and injects the
+            # var into the user's shell environment before the shell starts.
+            args.extend(["-o", f"SetEnv={key}={value}"])
     if target.user:
         args.append(f"{target.user}@{target.host}")
     else:
@@ -292,6 +303,7 @@ def run(
     retries: int = SSH_DEFAULT_RETRIES,
     on_retry: Callable[[int, int], None] | None = None,
     logger: SSHLogger | None = None,
+    env: dict[str, str] | None = None,
 ) -> SSHResult:
     """Execute a command on a remote host via SSH.
 
@@ -306,6 +318,10 @@ def run(
         retries: Number of attempts (default: SSH_RETRIES).
         on_retry: Optional callback(attempt, max_retries) called before each retry.
         logger: Optional SSHLogger to record command output.
+        env: Env vars to inject via SSH SetEnv. Each pair becomes a
+            ``-o SetEnv=KEY=VALUE`` argument on the SSH command line;
+            agentworks-managed VMs accept these via the ``AcceptEnv *``
+            directive deployed by VM init.
 
     Returns:
         SSHResult with exit code, stdout, and stderr.
@@ -313,7 +329,7 @@ def run(
     target = _unwrap_ssh(target)
     import shlex
 
-    args = _ssh_base_args(target)
+    args = _ssh_base_args(target, env=env)
     if target.login_shell:
         args.append(f"$SHELL -lc {shlex.quote(command)}")
     else:
@@ -356,12 +372,20 @@ def run(
     raise SSHError(msg) from last_err
 
 
-def interactive(target: SSHTarget | ExecTarget, command: str) -> int:
+def interactive(
+    target: SSHTarget | ExecTarget,
+    command: str,
+    *,
+    env: dict[str, str] | None = None,
+) -> int:
     """Run an interactive SSH command with a TTY (for tmux attach, etc.).
 
     If ``command`` is empty, opens a plain interactive login shell on the
     target (no remote command argument at all). Otherwise runs ``command``
     over a PTY-allocated SSH session.
+
+    ``env`` injects env vars via SSH SetEnv (``-o SetEnv=K=V``), accepted by
+    the remote ``AcceptEnv *`` directive deployed by VM init.
 
     Returns the process exit code. Does not raise on failure.
     """
@@ -374,6 +398,9 @@ def interactive(target: SSHTarget | ExecTarget, command: str) -> int:
         args.extend(["-i", str(target.identity_file)])
     if target.proxy_jump is not None:
         args.extend(["-J", target.proxy_jump])
+    if env:
+        for key, value in env.items():
+            args.extend(["-o", f"SetEnv={key}={value}"])
     if target.user:
         args.append(f"{target.user}@{target.host}")
     else:
@@ -668,6 +695,7 @@ class ExecTarget:
         tty: bool | None = None,
         check: bool = True,
         timeout: int | None = None,
+        env: dict[str, str] | None = None,
     ) -> SSHResult:
         """Run a command on the target.
 
@@ -678,6 +706,13 @@ class ExecTarget:
                  Only meaningful for SSH transport (controls -tt flag).
             check: Raise SSHError on non-zero exit.
             timeout: Timeout in seconds.
+            env: Env vars to inject via the transport's native env-passing
+                mechanism. For SSH, materialized as ``-o SetEnv=K=V`` args;
+                accepted on the remote side under the ``AcceptEnv *`` directive
+                deployed by VM init. Currently only honored for the SSH
+                transport; Lima / WSL2 paths log a warning and ignore env (no
+                non-agentworks consumer relies on env injection on those
+                transports today).
         """
         import shlex as _shlex
 
@@ -693,7 +728,15 @@ class ExecTarget:
             from dataclasses import replace as _replace
 
             ssh = _replace(self.ssh, force_tty=effective_tty) if effective_tty != self.ssh.force_tty else self.ssh
-            return run(ssh, command, check=check, timeout=t, logger=lg)
+            return run(ssh, command, check=check, timeout=t, logger=lg, env=env)
+        if env:
+            from agentworks import output as _output
+
+            _output.warn(
+                f"env injection requested on non-SSH transport "
+                f"({'lima' if self.lima else 'remote_lima' if self.remote_lima else 'wsl2'}); "
+                "vars will not reach the remote shell"
+            )
         if self.lima is not None:
             return lima_run(self.lima, command, check=check, timeout=t, logger=lg)
         if self.remote_lima is not None:

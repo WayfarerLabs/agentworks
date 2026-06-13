@@ -63,10 +63,13 @@ def _seed_vm(db: Database, vm_name: str = "vm1", *, with_tailscale: bool = False
 
 def _seed_sessions(db: Database, names: list[str], *, workspace_name: str = "ws-vm1") -> None:
     for n in names:
+        # Per the env-and-secrets SDD, all sessions (admin and agent) carry
+        # a per-session socket path. Tests that only need the row's existence
+        # use a sentinel path; tests that actually probe tmux replace it.
         db._conn.execute(
-            "INSERT INTO sessions (name, workspace_name, template, mode) "
-            "VALUES (?, ?, 'default', 'admin')",
-            (n, workspace_name),
+            "INSERT INTO sessions (name, workspace_name, template, mode, socket_path) "
+            "VALUES (?, ?, 'default', 'admin', ?)",
+            (n, workspace_name, f"/run/agentworks/admin-tmux-sockets/admin/{n}.sock"),
         )
     db._conn.commit()
 
@@ -1114,11 +1117,13 @@ def test_attach_console_builds_admin_shell_window_without_placeholder(
     cmds = fake_target.commands
     new_sessions = [c for c in cmds if "new-session -d -s aw-console-con" in c]
     assert len(new_sessions) == 1
-    # Window 0 is the --admin-- window, running sudo su --login <admin> -- pin
-    # the shape so quoting regressions in the bootstrap fail loudly.
+    # Window 0 is the --admin-- window, running `exec $SHELL -l` directly --
+    # the prior `sudo su --login <admin>` wrapper was a no-op user-switch
+    # (post FRD R1 the SSH user IS the admin user) and got dropped by the
+    # env-and-secrets SDD.
     assert "-n --admin--" in new_sessions[0]
-    assert "sudo su --login" in new_sessions[0]
-    assert "admin" in new_sessions[0]  # the admin username from _seed_vm
+    assert "exec $SHELL -l" in new_sessions[0]
+    assert "sudo" not in new_sessions[0]
     assert not any("_PLACEHOLDER" in c for c in cmds)
     assert not any("list-windows" in c for c in cmds)
     new_windows = [c for c in cmds if "new-window -t aw-console-con" in c]

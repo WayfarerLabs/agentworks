@@ -50,7 +50,7 @@ def agentworks_identity_env(ctx: ResourceContext) -> dict[str, str]:
     Includes the full identity set: VM-stable vars (VM / VM_HOST / PLATFORM),
     per-user vars (USER), and per-context vars (WORKSPACE[_DIR] / AGENT /
     SESSION[_KIND]). Use the focused helpers below to select the subset
-    appropriate for a particular write site (inline prelude vs profile
+    appropriate for a particular write site (SSH SetEnv vs profile
     fragments).
     """
     out = {
