@@ -298,6 +298,21 @@ def test_exec_agent_uses_direct_agent_ssh(
     # on agentworks.vms.manager.keep_vm_active, which would be a no-op.
     monkeypatch.setattr(agent_mgr, "keep_vm_active", lambda *a, **k: _NullCM())
 
+    # Phase 6.5 added eager-resolve + env composition; stub both out so the
+    # SimpleNamespace config below doesn't need vm_templates / agent_templates
+    # / secret_resolver. This test focuses on the SSH transport, not env.
+    monkeypatch.setattr(agent_mgr, "_agent_shell_secret_target", lambda *a, **k: object())
+    monkeypatch.setattr("agentworks.secrets.resolve_for_command", lambda *a, **k: {})
+    monkeypatch.setattr(
+        "agentworks.agents.templates.resolve_from_dict",
+        lambda *a, **k: SimpleNamespace(env={}),
+    )
+    monkeypatch.setattr(
+        "agentworks.vms.templates.resolve_from_dict",
+        lambda *a, **k: SimpleNamespace(env={}),
+    )
+    monkeypatch.setattr("agentworks.env.compose_env", lambda **k: {})
+
     called_args: list[list[str]] = []
 
     def _spy_call(args: list[str], *_a: object, **_k: object) -> int:
@@ -308,6 +323,9 @@ def test_exec_agent_uses_direct_agent_ssh(
 
     config = SimpleNamespace(
         operator=SimpleNamespace(ssh_private_key=None),
+        agent_templates={},
+        vm_templates={},
+        secret_resolver=None,
     )
 
     rc = agent_mgr.exec_agent(db, config, name="a1", command=["echo", "hi"])  # type: ignore[arg-type]

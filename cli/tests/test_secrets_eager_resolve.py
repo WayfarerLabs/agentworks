@@ -611,6 +611,133 @@ def test_agent_reinit_eager_resolve_fires_before_ssh_setup(
     db.close()
 
 
+def test_vm_shell_eager_resolve_fires_before_ssh(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """shell_vm must call resolve_for_command BEFORE opening the SSH
+    session. A failed eager-resolve produces no SSH call."""
+    from agentworks.vms import manager as vm_manager
+
+    db = _seed_basic_db(tmp_path)
+
+    monkeypatch.setattr(vm_manager, "_vm_secret_target", lambda *a, **k: object())
+
+    def _explode(*args: object, **kwargs: object) -> None:
+        raise SecretUnavailableError(
+            "no active backend could resolve secret(s): api-key",
+            hint="api-key: tried env_var",
+        )
+
+    monkeypatch.setattr("agentworks.secrets.resolve_for_command", _explode)
+
+    ssh_called: list[bool] = []
+
+    def _track_interactive(*args: object, **kwargs: object) -> int:
+        ssh_called.append(True)
+        return 0
+
+    monkeypatch.setattr("agentworks.ssh.interactive", _track_interactive)
+
+    config = SimpleNamespace(
+        vm=SimpleNamespace(env={}),
+        admin=SimpleNamespace(env={}),
+        secret_resolver=None,
+    )
+
+    with pytest.raises(SecretUnavailableError, match="api-key"):
+        vm_manager.shell_vm(db, config, "vm1")  # type: ignore[arg-type]
+
+    assert ssh_called == [], "eager-resolve must precede the SSH session"
+    db.close()
+
+
+def test_vm_exec_eager_resolve_fires_before_ssh(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """exec_vm must call resolve_for_command BEFORE running the remote
+    command. A failed eager-resolve raises before call_streaming runs."""
+    from agentworks.vms import manager as vm_manager
+
+    db = _seed_basic_db(tmp_path)
+
+    monkeypatch.setattr(vm_manager, "_vm_secret_target", lambda *a, **k: object())
+
+    def _explode(*args: object, **kwargs: object) -> None:
+        raise SecretUnavailableError(
+            "no active backend could resolve secret(s): api-key",
+            hint="api-key: tried env_var",
+        )
+
+    monkeypatch.setattr("agentworks.secrets.resolve_for_command", _explode)
+
+    streaming_calls: list[str] = []
+
+    class _Target:
+        def call_streaming(self, cmd: str, *, env: object = None) -> int:
+            streaming_calls.append(cmd)
+            return 0
+
+    monkeypatch.setattr(
+        "agentworks.ssh.admin_exec_target", lambda *a, **k: _Target()
+    )
+
+    config = SimpleNamespace(
+        vm=SimpleNamespace(env={}),
+        admin=SimpleNamespace(env={}),
+        secret_resolver=None,
+    )
+
+    with pytest.raises(SecretUnavailableError, match="api-key"):
+        vm_manager.exec_vm(db, config, "vm1", ["echo", "hi"])  # type: ignore[arg-type]
+
+    assert streaming_calls == [], "eager-resolve must precede call_streaming"
+    db.close()
+
+
+def test_agent_exec_eager_resolve_fires_before_ssh(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """exec_agent must call resolve_for_command BEFORE running the
+    remote command. A failed eager-resolve raises before call_streaming."""
+    from agentworks.agents import manager as agent_manager
+
+    db = _seed_basic_db(tmp_path)
+    db.insert_agent("a1", "vm1", "agt-a1", template="default")
+
+    monkeypatch.setattr(
+        agent_manager, "_agent_shell_secret_target", lambda *a, **k: object()
+    )
+
+    def _explode(*args: object, **kwargs: object) -> None:
+        raise SecretUnavailableError(
+            "no active backend could resolve secret(s): api-key",
+            hint="api-key: tried env_var",
+        )
+
+    monkeypatch.setattr("agentworks.secrets.resolve_for_command", _explode)
+
+    streaming_calls: list[str] = []
+
+    class _Target:
+        def call_streaming(self, cmd: str, *, env: object = None) -> int:
+            streaming_calls.append(cmd)
+            return 0
+
+    monkeypatch.setattr(
+        "agentworks.ssh.agent_exec_target", lambda *a, **k: _Target()
+    )
+
+    config = SimpleNamespace()
+
+    with pytest.raises(SecretUnavailableError, match="api-key"):
+        agent_manager.exec_agent(
+            db, config, name="a1", command=["echo", "hi"],  # type: ignore[arg-type]
+        )
+
+    assert streaming_calls == [], "eager-resolve must precede call_streaming"
+    db.close()
+
+
 def test_console_add_shell_promotes_admin_for_admin_mode_session(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

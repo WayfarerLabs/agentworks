@@ -505,8 +505,11 @@ def describe_vm(db: Database, config: Config, name: str) -> None:
 
 def shell_vm(db: Database, config: Config, name: str) -> None:
     """Open a shell on a VM's home directory."""
-    import subprocess
     import sys
+
+    from agentworks.env import ResourceContext, compose_env
+    from agentworks.secrets import resolve_for_command
+    from agentworks.ssh import admin_exec_target, interactive
 
     vm = _require_vm(db, name)
     _guard_failed_vm(vm)
@@ -518,13 +521,28 @@ def shell_vm(db: Database, config: Config, name: str) -> None:
             hint="VM init may not be complete. Check 'vm describe' for status.",
         )
 
-    ssh_cmd = ["ssh", "-t"]
-    if config.operator.ssh_private_key:
-        ssh_cmd.extend(["-i", str(config.operator.ssh_private_key)])
-    ssh_cmd.append(f"{vm.admin_username}@{vm.tailscale_host}")
+    # Eager-prompting orchestration (FRD R4 / Phase 6): resolve every
+    # secret referenced by the admin shell's env chain BEFORE opening
+    # the interactive SSH session. Non-interactive failures surface as
+    # SecretUnavailableError up front rather than mid-session.
+    resolve_for_command([_vm_secret_target(config)], config)
 
+    ctx = ResourceContext(
+        vm_name=vm.name,
+        vm_host=vm.vm_host_name,
+        platform=vm.platform,
+        user=vm.admin_username,
+    )
+    env = compose_env(
+        resolver=config.secret_resolver,
+        ctx=ctx,
+        vm=config.vm.env,
+        admin=config.admin.env,
+    )
+
+    target = admin_exec_target(vm, config)
     with keep_vm_active(db, config, vm):
-        sys.exit(subprocess.call(ssh_cmd))
+        sys.exit(interactive(target, "", env=env))
 
 
 def exec_vm(db: Database, config: Config, name: str, command: list[str]) -> int:
@@ -535,6 +553,8 @@ def exec_vm(db: Database, config: Config, name: str, command: list[str]) -> int:
     """
     import shlex
 
+    from agentworks.env import ResourceContext, compose_env
+    from agentworks.secrets import resolve_for_command
     from agentworks.ssh import admin_exec_target
 
     vm = _require_vm(db, name)
@@ -549,11 +569,30 @@ def exec_vm(db: Database, config: Config, name: str, command: list[str]) -> int:
             entity_name=name,
             hint="VM init may not be complete. Check 'vm describe' for status.",
         )
-    target = admin_exec_target(vm, config)
 
+    # Eager-prompting orchestration (FRD R4 / Phase 6): resolve every
+    # secret referenced by the admin exec env chain BEFORE running the
+    # remote command. Non-interactive failures surface as
+    # SecretUnavailableError before the SSH session opens.
+    resolve_for_command([_vm_secret_target(config)], config)
+
+    ctx = ResourceContext(
+        vm_name=vm.name,
+        vm_host=vm.vm_host_name,
+        platform=vm.platform,
+        user=vm.admin_username,
+    )
+    env = compose_env(
+        resolver=config.secret_resolver,
+        ctx=ctx,
+        vm=config.vm.env,
+        admin=config.admin.env,
+    )
+
+    target = admin_exec_target(vm, config)
     remote_cmd = command[0] if len(command) == 1 else shlex.join(command)
     with keep_vm_active(db, config, vm):
-        return target.call_streaming(remote_cmd)
+        return target.call_streaming(remote_cmd, env=env)
 
 
 def add_git_credential(db: Database, config: Config, name: str, credential_name: str) -> None:

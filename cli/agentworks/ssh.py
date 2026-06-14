@@ -822,7 +822,12 @@ class ExecTarget:
 
         self.run(f"tar -xzf {remote_tmp} -C {remote_path} && rm -f {remote_tmp}", timeout=timeout)
 
-    def call_streaming(self, command: str) -> int:
+    def call_streaming(
+        self,
+        command: str,
+        *,
+        env: dict[str, str] | None = None,
+    ) -> int:
         """Run a remote command with stdio passthrough; return its exit code.
 
         Used for ``agw agent exec`` / ``agw vm exec``-style invocations
@@ -831,6 +836,10 @@ class ExecTarget:
         by ``run``. Non-interactive: ``BatchMode=yes`` and no TTY
         allocation, so this is the wrong helper for tmux attach or
         interactive shells (use ``interactive()`` for those).
+
+        ``env`` injects env vars via SSH SetEnv (``-o SetEnv=K=V``),
+        accepted by the remote ``AcceptEnv *`` directive deployed by VM
+        init. Matches the env path used by ``run`` / ``interactive``.
 
         Only the SSH transport is supported today; other transports
         (lima, remote_lima, wsl2) raise ``SSHError`` if asked.
@@ -846,6 +855,9 @@ class ExecTarget:
             args.extend(["-i", str(self.ssh.identity_file)])
         if self.ssh.proxy_jump is not None:
             args.extend(["-J", self.ssh.proxy_jump])
+        if env:
+            for key, value in env.items():
+                args.extend(["-o", f"SetEnv={key}={value}"])
         if self.ssh.user:
             args.append(f"{self.ssh.user}@{self.ssh.host}")
         else:

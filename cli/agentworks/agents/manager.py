@@ -90,6 +90,32 @@ def _agent_secret_targets(config: Config, vm: VMRow) -> list[SecretTarget]:
     ]
 
 
+def _agent_shell_secret_target(
+    config: Config, vm: VMRow, agent: AgentRow,
+) -> SecretTarget:
+    """Build the SecretTarget for ``agent shell`` / ``agent exec``.
+
+    Single-phase: the operator opens one shell as the agent's Linux
+    user. Scope = vm + agent (FRD R2). The VM scope is the VM's actual
+    template env (resolved via DB row), not ``config.vm`` (which is the
+    config-time default and may not match the VM's template). The agent
+    scope is the agent row's template, NOT ``config.agent`` -- the agent
+    pre-exists this call and may have been created under a different
+    template than the operator's current ``--template`` would resolve.
+    """
+    from agentworks.agents.templates import resolve_from_dict as _resolve_agent_template
+    from agentworks.secrets import SecretTarget
+    from agentworks.vms.templates import resolve_from_dict as _resolve_vm_template
+
+    vm_tmpl = _resolve_vm_template(config.vm_templates, vm.template)
+    agent_tmpl = _resolve_agent_template(config.agent_templates, agent.template)
+    return SecretTarget(
+        vm=vm_tmpl.env,
+        agent=agent_tmpl.env,
+        label=f"agent-shell={agent.name}",
+    )
+
+
 def workspace_group(workspace_name: str) -> str:
     """Derive the Linux group name for a newly-created workspace: ws-<name>.
 
@@ -566,7 +592,54 @@ def shell_agent(
 
     import sys
 
+    from agentworks.env import ResourceContext, compose_env
+    from agentworks.secrets import resolve_for_command
     from agentworks.ssh import agent_exec_target, interactive
+
+    # Resolve workspace upfront (needed for both authz check and env ctx)
+    # before any SSH probe so failures surface as clean validation errors.
+    ws: WorkspaceRow | None = None
+    if workspace_name:
+        ws = db.get_workspace(workspace_name)
+        if ws is None:
+            raise NotFoundError(
+                f"workspace '{workspace_name}' not found",
+                entity_kind="workspace",
+                entity_name=workspace_name,
+            )
+        if not db.has_any_grant(name, workspace_name):
+            raise AuthorizationError(
+                f"agent '{name}' does not have access to workspace '{workspace_name}'",
+                entity_kind="agent",
+                entity_name=name,
+                hint=f"Run 'agent grant-workspaces {name} {workspace_name}' to grant access.",
+            )
+
+    # Eager-prompting orchestration (FRD R4 / Phase 6): resolve every
+    # secret referenced by the agent shell's env chain BEFORE opening
+    # the interactive SSH session. Non-interactive failures surface as
+    # SecretUnavailableError up front rather than mid-session.
+    resolve_for_command([_agent_shell_secret_target(config, vm, agent)], config)
+
+    from agentworks.agents.templates import resolve_from_dict as _resolve_agent_template
+    from agentworks.vms.templates import resolve_from_dict as _resolve_vm_template
+    agent_tmpl = _resolve_agent_template(config.agent_templates, agent.template)
+    vm_tmpl = _resolve_vm_template(config.vm_templates, vm.template)
+    ctx = ResourceContext(
+        vm_name=vm.name,
+        vm_host=vm.vm_host_name,
+        platform=vm.platform,
+        user=agent.linux_user,
+        workspace_name=ws.name if ws else None,
+        workspace_dir=ws.workspace_path if ws else None,
+        agent_name=agent.name,
+    )
+    env = compose_env(
+        resolver=config.secret_resolver,
+        ctx=ctx,
+        vm=vm_tmpl.env,
+        agent=agent_tmpl.env,
+    )
 
     # Direct agent SSH (FRD R1): no admin+sudo detour. The agent's
     # authorized_keys (Phase 3) accepts the operator's key set.
@@ -579,31 +652,17 @@ def shell_agent(
         # on Permission denied.
         _assert_agent_ssh_works(target, agent)
 
-        if workspace_name:
-            ws = db.get_workspace(workspace_name)
-            if ws is None:
-                raise NotFoundError(
-                    f"workspace '{workspace_name}' not found",
-                    entity_kind="workspace",
-                    entity_name=workspace_name,
-                )
-            if not db.has_any_grant(name, workspace_name):
-                raise AuthorizationError(
-                    f"agent '{name}' does not have access to workspace '{workspace_name}'",
-                    entity_kind="agent",
-                    entity_name=name,
-                    hint=f"Run 'agent grant-workspaces {name} {workspace_name}' to grant access.",
-                )
+        if ws is not None:
             import shlex
 
             q_path = shlex.quote(ws.workspace_path)
             # SSH as the agent, then cd into the workspace and exec an
             # interactive login shell. No sudo / su involved.
             shell_cmd = f"cd {q_path} && exec $SHELL -li"
-            sys.exit(interactive(target, shell_cmd))
+            sys.exit(interactive(target, shell_cmd, env=env))
         else:
             # SSH as the agent with no command -> interactive login shell.
-            sys.exit(interactive(target, ""))
+            sys.exit(interactive(target, "", env=env))
 
 
 def exec_agent(
@@ -622,7 +681,11 @@ def exec_agent(
     """
     import shlex
 
+    from agentworks.agents.templates import resolve_from_dict as _resolve_agent_template
+    from agentworks.env import ResourceContext, compose_env
+    from agentworks.secrets import resolve_for_command
     from agentworks.ssh import agent_exec_target
+    from agentworks.vms.templates import resolve_from_dict as _resolve_vm_template
 
     agent = db.get_agent(name)
     if agent is None:
@@ -633,6 +696,29 @@ def exec_agent(
         )
 
     vm = _require_vm(db, agent.vm_name)
+
+    # Eager-prompting orchestration (FRD R4 / Phase 6): resolve every
+    # secret referenced by the agent exec env chain BEFORE running the
+    # remote command. Non-interactive failures surface as
+    # SecretUnavailableError before the SSH session opens.
+    resolve_for_command([_agent_shell_secret_target(config, vm, agent)], config)
+
+    agent_tmpl = _resolve_agent_template(config.agent_templates, agent.template)
+    vm_tmpl = _resolve_vm_template(config.vm_templates, vm.template)
+    ctx = ResourceContext(
+        vm_name=vm.name,
+        vm_host=vm.vm_host_name,
+        platform=vm.platform,
+        user=agent.linux_user,
+        agent_name=agent.name,
+    )
+    env = compose_env(
+        resolver=config.secret_resolver,
+        ctx=ctx,
+        vm=vm_tmpl.env,
+        agent=agent_tmpl.env,
+    )
+
     target = agent_exec_target(vm, config, agent)
 
     with keep_vm_active(db, config, vm):
@@ -644,7 +730,9 @@ def exec_agent(
         # Wrap in a login shell so the agent's PATH (mise shims,
         # ~/.local/bin, etc.) is set up. This matches the env an operator
         # gets via `agent shell`.
-        return target.call_streaming(f"$SHELL -lc {shlex.quote(remote_cmd)}")
+        return target.call_streaming(
+            f"$SHELL -lc {shlex.quote(remote_cmd)}", env=env,
+        )
 
 
 # -- VM operations ---------------------------------------------------------
