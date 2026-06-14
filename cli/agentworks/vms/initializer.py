@@ -144,6 +144,13 @@ def _write_agentworks_identity_profile(
     System-wide; sourced by every login shell on the VM. ``identity_env``
     is the VM-stable subset (typically AGENTWORKS_VM, AGENTWORKS_VM_HOST,
     AGENTWORKS_PLATFORM) produced by ``agentworks.env.vm_stable_identity_env``.
+
+    The ``/etc/profile.d/agentworks-identity.sh`` file is fully owned by
+    agentworks: each reinit overwrites it. The block in ``/etc/zsh/zprofile``
+    is bracketed by ``# agentworks-identity-begin`` / ``# agentworks-identity-end``
+    marker comments; content between those markers is agentworks-owned and
+    gets rewritten on every reinit. An operator who hand-edits between the
+    markers is opting in to having that content overwritten.
     """
     logger.step("Identity profile")
     output.detail(
@@ -234,11 +241,15 @@ def _write_sshd_accept_env(
     if there wasn't one) when validation fails. The race window where
     a non-validated file sits at the final path is bounded by the
     ``sshd -t`` call and never affects the running sshd (the reload
-    only happens on validation success). On Debian an
-    ``unattended-upgrades`` reload between write and validate would
-    pick up the new file, but the snippet is a single ``AcceptEnv *``
-    line and the chance of that one line failing ``sshd -t`` in
-    isolation is essentially nil.
+    only happens on validation success). The only way the broken file
+    could become active is if an unrelated process (a ``dpkg`` postinst
+    on openssh-server triggering ``deb-systemd-invoke try-reload-or-
+    restart ssh.service``, for instance, possibly invoked by
+    ``unattended-upgrades`` transitively) reloads sshd in the millisecond-
+    wide window between tee and sshd -t. The snippet is a single
+    ``AcceptEnv *`` line and the chance of that one line failing
+    ``sshd -t`` in isolation is essentially nil; we accept the bounded
+    risk.
 
     Idempotent on reinit.
     """

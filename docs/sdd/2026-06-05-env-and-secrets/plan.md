@@ -209,7 +209,7 @@ env+secrets via the SSH SetEnv path established in Phase 3.
     via `target.run(env=...)` using the admin scope.
   - Phase 2 of `_create_agent_on_vm` (agent self-configure): every `agent_target.run(...)` call
     passes env using the agent scope.
-- [x] Tests: tests/test_initializer_env_fragments.py (12 tests). Pin: identity-profile system-wide +
+- [x] Tests: tests/test_initializer_env_fragments.py (17 tests). Pin: identity-profile system-wide +
       zprofile mirror with reinit-safe sed-strip; sshd AcceptEnv validates before reload; sudoers
       env_keep validates with visudo and rolls back on failure; per-user profile carries
       AGENTWORKS_USER when identity_env is passed; backward-compat when identity_env is omitted.

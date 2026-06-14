@@ -237,6 +237,27 @@ def test_sshd_accept_env_removes_file_when_no_prior_and_validation_fails() -> No
     assert not any("systemctl reload ssh" in c for c in commands)
 
 
+def test_sshd_accept_env_success_with_prior_file_ordering() -> None:
+    """When a prior config file exists AND validation succeeds, the
+    sequence is cp(backup) -> tee(write) -> sshd -t -> rm -f .bak ->
+    systemctl reload ssh. Pins the order so a future refactor that
+    reorders steps fails loudly (e.g. swapping reload before validate
+    would activate an untested config)."""
+    target = _SpyTarget(validate_ok=True, prior_file_present=True)
+    _write_sshd_accept_env(target, _SpyLogger())
+    commands = [r for r, _ in target.runs]
+
+    cp_idx = next(i for i, c in enumerate(commands) if "cp" in c and ".bak" in c)
+    tee_idx = next(
+        i for i, c in enumerate(commands) if "tee" in c and "50-agentworks-accept-env" in c
+    )
+    validate_idx = next(i for i, c in enumerate(commands) if "sshd -t" in c)
+    cleanup_idx = next(i for i, c in enumerate(commands) if "rm -f" in c and ".bak" in c)
+    reload_idx = next(i for i, c in enumerate(commands) if "systemctl reload ssh" in c)
+
+    assert cp_idx < tee_idx < validate_idx < cleanup_idx < reload_idx
+
+
 # ---------------------------------------------------------------------------
 # sudoers env_keep
 # ---------------------------------------------------------------------------
