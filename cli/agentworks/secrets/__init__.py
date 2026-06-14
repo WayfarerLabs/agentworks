@@ -11,6 +11,11 @@ from agentworks.secrets.base import (
     SecretSourceBase,
 )
 from agentworks.secrets.env_var import EnvVarSource, env_var_name_for
+from agentworks.secrets.orchestration import (
+    SecretTarget,
+    compute_needed_secrets,
+    resolve_for_command,
+)
 from agentworks.secrets.prompt import PromptSource
 from agentworks.secrets.resolver import SecretResolver
 
@@ -23,5 +28,8 @@ __all__ = [
     "SecretResolver",
     "SecretSource",
     "SecretSourceBase",
+    "SecretTarget",
+    "compute_needed_secrets",
     "env_var_name_for",
+    "resolve_for_command",
 ]
