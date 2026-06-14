@@ -21,6 +21,8 @@ import pytest
 
 from agentworks.db import Database
 
+from .conftest import stub_session_resolvers
+
 if TYPE_CHECKING:
     pass
 
@@ -121,13 +123,7 @@ def test_create_session_probes_before_state_mutation(
     # patching at its source module catches every late import.
     monkeypatch.setattr(agent_mgr, "_assert_agent_ssh_works", _probe_rejects)
 
-    class _Tmpl:
-        name = "default"
-        command = ""
-        restart_command = None
-        env: dict[str, str] = {}
-
-    monkeypatch.setattr(session_manager, "_resolve_template", lambda *a, **k: _Tmpl())
+    stub_session_resolvers(monkeypatch)
 
     config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
 
@@ -178,21 +174,16 @@ def test_create_session_uses_agent_target_for_tmux(
     captured: dict[str, object] = {}
 
     def _capture_create(
-        name, ws_path, command, linux_user, *, run_command, target, admin_username, is_admin
+        name, ws_path, command, linux_user, *, run_command, target, admin_username, is_admin, env=None
     ):  # type: ignore[no-untyped-def]
         captured["run_command"] = run_command
         captured["target"] = target
+        captured["env"] = env
         return ("/tmp/sock", 12345)
 
     monkeypatch.setattr(tmux_mod, "create_session", _capture_create)
 
-    class _Tmpl:
-        name = "default"
-        command = ""
-        restart_command = None
-        env: dict[str, str] = {}
-
-    monkeypatch.setattr(session_manager, "_resolve_template", lambda *a, **k: _Tmpl())
+    stub_session_resolvers(monkeypatch)
 
     config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
 

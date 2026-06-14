@@ -1,0 +1,139 @@
+"""Tests for the AGENTWORKS_* identity producer."""
+
+from __future__ import annotations
+
+from agentworks.env import ResourceContext, agentworks_identity_env
+
+
+def _ctx(**overrides: object) -> ResourceContext:
+    base: dict[str, object] = {
+        "vm_name": "vm-1",
+        "vm_host": "lima-local",
+        "platform": "lima",
+        "user": "agentworks",
+    }
+    base.update(overrides)
+    return ResourceContext(**base)  # type: ignore[arg-type]
+
+
+def test_vm_only_emits_base_four_vars() -> None:
+    out = agentworks_identity_env(_ctx())
+    assert out == {
+        "AGENTWORKS_VM": "vm-1",
+        "AGENTWORKS_VM_HOST": "lima-local",
+        "AGENTWORKS_PLATFORM": "lima",
+        "AGENTWORKS_USER": "agentworks",
+    }
+
+
+def test_workspace_context_adds_workspace_vars() -> None:
+    out = agentworks_identity_env(
+        _ctx(workspace_name="ws-a", workspace_dir="/home/agentworks/ws-a"),
+    )
+    assert out["AGENTWORKS_WORKSPACE"] == "ws-a"
+    assert out["AGENTWORKS_WORKSPACE_DIR"] == "/home/agentworks/ws-a"
+
+
+def test_agent_context_adds_agent_var() -> None:
+    out = agentworks_identity_env(_ctx(agent_name="claude"))
+    assert out["AGENTWORKS_AGENT"] == "claude"
+
+
+def test_session_context_adds_session_vars() -> None:
+    out = agentworks_identity_env(
+        _ctx(session_name="s1", session_kind="agent"),
+    )
+    assert out["AGENTWORKS_SESSION"] == "s1"
+    assert out["AGENTWORKS_SESSION_KIND"] == "agent"
+
+
+def test_session_kind_omitted_when_not_set() -> None:
+    out = agentworks_identity_env(_ctx(session_name="s1"))
+    assert "AGENTWORKS_SESSION" in out
+    assert "AGENTWORKS_SESSION_KIND" not in out
+
+
+def test_full_chain() -> None:
+    out = agentworks_identity_env(
+        _ctx(
+            workspace_name="ws-a",
+            workspace_dir="/home/claude/ws-a",
+            agent_name="claude",
+            session_name="s1",
+            session_kind="agent",
+        ),
+    )
+    assert out == {
+        "AGENTWORKS_VM": "vm-1",
+        "AGENTWORKS_VM_HOST": "lima-local",
+        "AGENTWORKS_PLATFORM": "lima",
+        "AGENTWORKS_USER": "agentworks",
+        "AGENTWORKS_WORKSPACE": "ws-a",
+        "AGENTWORKS_WORKSPACE_DIR": "/home/claude/ws-a",
+        "AGENTWORKS_AGENT": "claude",
+        "AGENTWORKS_SESSION": "s1",
+        "AGENTWORKS_SESSION_KIND": "agent",
+    }
+
+
+def test_admin_session_kind() -> None:
+    out = agentworks_identity_env(
+        _ctx(session_name="admin-shell", session_kind="admin"),
+    )
+    assert out["AGENTWORKS_SESSION_KIND"] == "admin"
+
+
+def test_vm_stable_subset_is_three_vars_only() -> None:
+    """vm_stable_identity_env returns exactly the three vars that get written
+    to /etc/profile.d/agentworks-identity.sh in Phase 4."""
+    from agentworks.env import vm_stable_identity_env
+
+    out = vm_stable_identity_env(_ctx())
+    assert out == {
+        "AGENTWORKS_VM": "vm-1",
+        "AGENTWORKS_VM_HOST": "lima-local",
+        "AGENTWORKS_PLATFORM": "lima",
+    }
+
+
+def test_per_user_subset_is_user_only() -> None:
+    """per_user_identity_env returns exactly AGENTWORKS_USER (the only var that
+    varies per Linux user and lives in ~/.agentworks-profile.sh in Phase 4)."""
+    from agentworks.env import per_user_identity_env
+
+    out = per_user_identity_env(_ctx())
+    assert out == {"AGENTWORKS_USER": "agentworks"}
+
+
+def test_per_context_subset_omits_vm_user_vars() -> None:
+    """per_context_identity_env returns only the per-context vars (workspace /
+    agent / session); VM-stable and per-user vars are NOT included."""
+    from agentworks.env import per_context_identity_env
+
+    out = per_context_identity_env(
+        _ctx(
+            workspace_name="ws-a",
+            workspace_dir="/home/agentworks/ws-a",
+            agent_name="claude",
+            session_name="s1",
+            session_kind="agent",
+        )
+    )
+    assert "AGENTWORKS_VM" not in out
+    assert "AGENTWORKS_USER" not in out
+    assert "AGENTWORKS_PLATFORM" not in out
+    assert out == {
+        "AGENTWORKS_WORKSPACE": "ws-a",
+        "AGENTWORKS_WORKSPACE_DIR": "/home/agentworks/ws-a",
+        "AGENTWORKS_AGENT": "claude",
+        "AGENTWORKS_SESSION": "s1",
+        "AGENTWORKS_SESSION_KIND": "agent",
+    }
+
+
+def test_per_context_subset_minimal_when_no_scope() -> None:
+    """When only the base VM/user fields are set (no workspace / agent /
+    session), per_context_identity_env returns an empty dict."""
+    from agentworks.env import per_context_identity_env
+
+    assert per_context_identity_env(_ctx()) == {}

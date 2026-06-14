@@ -29,6 +29,7 @@ from agentworks.errors import (
     ExternalError,
     NotFoundError,
     ProvisionerError,
+    SecretUnavailableError,
     StateError,
     UserAbort,
     ValidationError,
@@ -45,6 +46,7 @@ __all__ = [
     "ExternalError",
     "NotFoundError",
     "ProvisionerError",
+    "SecretUnavailableError",
     "StateError",
     "UserAbort",
     "ValidationError",
@@ -279,5 +281,33 @@ def set_handler(handler: OutputHandler) -> None:
 def get_handler() -> OutputHandler:
     """Return the current output handler."""
     return _handler
+
+
+# ---------------------------------------------------------------------------
+# Interactivity gate
+# ---------------------------------------------------------------------------
+
+_non_interactive: bool = False
+
+
+def set_non_interactive(value: bool) -> None:
+    """Seed the --non-interactive flag for this CLI invocation.
+
+    Called once from the Typer global-options callback at CLI entry. Service-layer
+    code reads via ``is_interactive()`` and does not import from ``cli/_app``.
+    """
+    global _non_interactive  # noqa: PLW0603
+    _non_interactive = value
+
+
+def is_interactive() -> bool:
+    """True iff stdin is a TTY and --non-interactive was not passed.
+
+    Service-layer helpers (e.g. ``agentworks.secrets.PromptSource``) consult
+    this rather than the cli/_app module to stay Typer-isolated.
+    """
+    if _non_interactive:
+        return False
+    return sys.stdin.isatty()
 
 

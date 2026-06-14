@@ -6,11 +6,12 @@ built-in empty template fallback.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from agentworks.config import Config, WorkspaceTemplate
+    from agentworks.env import EnvEntry
 
 
 @dataclass
@@ -20,6 +21,7 @@ class ResolvedTemplate:
     name: str
     repo: str | None = None
     tmuxinator: bool = True
+    env: dict[str, EnvEntry] = field(default_factory=dict)
 
 
 def resolve_template(config: Config, template_name: str | None = None) -> ResolvedTemplate:
@@ -66,6 +68,7 @@ def _merge(target: ResolvedTemplate, source: ResolvedTemplate) -> None:
     if source.repo is not None:
         target.repo = source.repo
     target.tmuxinator = source.tmuxinator
+    target.env = {**target.env, **source.env}
 
 
 def _merge_template(target: ResolvedTemplate, tmpl: WorkspaceTemplate) -> None:
@@ -74,3 +77,5 @@ def _merge_template(target: ResolvedTemplate, tmpl: WorkspaceTemplate) -> None:
         target.repo = tmpl.repo
     if tmpl.tmuxinator is not None:
         target.tmuxinator = tmpl.tmuxinator
+    if tmpl.env:
+        target.env = {**target.env, **tmpl.env}

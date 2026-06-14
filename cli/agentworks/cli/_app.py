@@ -26,8 +26,10 @@ app = typer.Typer(
 
 
 # -- Global flag state -----------------------------------------------------
+# The --non-interactive flag lives in agentworks.output (service-layer reads
+# it from there to stay Typer-isolated). The Typer callback below seeds it.
+# --debug stays here because only the CLI error wrapper consults it.
 
-_non_interactive = False
 _debug = False
 
 
@@ -68,23 +70,20 @@ def _global_options(
     """Global options for all commands."""
     import os
 
-    global _non_interactive, _debug  # noqa: PLW0603
-    _non_interactive = non_interactive
+    from agentworks import output
+
+    global _debug  # noqa: PLW0603
+    output.set_non_interactive(non_interactive)
     _debug = debug or os.environ.get("AGW_DEBUG") == "1"
 
 
 # -- Interactivity gate ----------------------------------------------------
 
 
-def is_interactive() -> bool:
-    """Check if stdin is a TTY and --non-interactive was not passed."""
-    if _non_interactive:
-        return False
-    return sys.stdin.isatty()
-
-
 def require_interactive(what: str) -> None:
     """Raise if not interactive and a prompt would be needed."""
-    if not is_interactive():
+    from agentworks import output
+
+    if not output.is_interactive():
         typer.echo(f"Error: {what} is required in non-interactive mode", err=True)
         raise typer.Exit(1)

@@ -26,8 +26,13 @@ if TYPE_CHECKING:
     from tests.conftest import CapturedOutput
 
 
-class _StubVerticalLayoutConfig:
-    """Stub config whose named_console layout selects aw-session-vertical."""
+class _StubVerticalLayoutConfig(_StubConfig):
+    """Stub config whose named_console layout selects aw-session-vertical.
+
+    Inherits the empty vm/agent/workspace/session_templates + admin + resolver
+    defaults from ``_StubConfig`` so console env-resolution code doesn't crash;
+    overrides the named-console layout.
+    """
 
     class _NC:
         tmux_layout: str = "aw-session-vertical"

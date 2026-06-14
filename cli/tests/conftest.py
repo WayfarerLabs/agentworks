@@ -179,3 +179,31 @@ def fake_target(monkeypatch: pytest.MonkeyPatch) -> _FakeTarget:
         lambda target, command: 0,
     )
     return target
+
+
+class _StubSessionTemplate:
+    """Minimal stand-in for ``ResolvedSessionTemplate`` used by the helper below."""
+
+    name = "default"
+    command = ""
+    restart_command = None
+    env: dict[str, str] = {}  # noqa: RUF012 - mutable class attr is fine for a stub
+
+
+def stub_session_resolvers(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Stub the session-template and env resolvers in ``sessions.manager``.
+
+    Several tests construct a ``SimpleNamespace`` config that omits the
+    ``vm_templates`` / ``agent_templates`` / ``secret_resolver`` attributes
+    the real Phase 3+ resolvers read. Patching the resolvers themselves
+    keeps those tests scope-correct (they exercise rollback / transport
+    plumbing, not env composition) without expanding the fake config.
+    """
+    from agentworks.sessions import manager as session_manager
+
+    monkeypatch.setattr(
+        session_manager, "_resolve_template", lambda *a, **k: _StubSessionTemplate()
+    )
+    monkeypatch.setattr(
+        session_manager, "_resolve_session_env", lambda *a, **k: {}
+    )

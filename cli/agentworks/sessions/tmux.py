@@ -23,16 +23,37 @@ DEFAULT_HISTORY_LIMIT = 50_000
 AGENT_SOCKET_ROOT = "/run/agentworks/agent-tmux-sockets"
 AGENT_SOCKET_GROUP = "tmux-agent-access"
 
+# Admin tmux socket infrastructure (mirrors the agent pattern; per-session
+# sockets so each admin session creates a fresh tmux server that inherits the
+# SetEnv-delivered env from the SSH connection, preventing the prior shared-
+# server env-leak across admin sessions).
+ADMIN_SOCKET_ROOT = "/run/agentworks/admin-tmux-sockets"
+
 
 class RunCommand(Protocol):
-    """Callable that runs a shell command on a target (e.g. partial of ssh.run)."""
+    """Callable that runs a shell command on a target (e.g. partial of ssh.run).
 
-    def __call__(self, command: str, *, check: bool = True) -> object: ...
+    The ``env`` kwarg is materialized by the underlying SSH layer as
+    ``-o SetEnv=KEY=VALUE`` arguments; see ``agentworks.ssh.run``.
+    """
+
+    def __call__(
+        self,
+        command: str,
+        *,
+        check: bool = True,
+        env: dict[str, str] | None = None,
+    ) -> object: ...
 
 
 def agent_socket_path(linux_user: str, session_name: str) -> str:
     """Return the tmux socket path for an agent-mode session."""
     return f"{AGENT_SOCKET_ROOT}/{linux_user}/{session_name}.sock"
+
+
+def admin_socket_path(admin_username: str, session_name: str) -> str:
+    """Return the tmux socket path for an admin-mode session."""
+    return f"{ADMIN_SOCKET_ROOT}/{admin_username}/{session_name}.sock"
 
 
 def ensure_agent_socket_root(
@@ -136,12 +157,34 @@ def ensure_agent_socket_dir(
 def cleanup_stale_sockets(target: ExecTarget, linux_user: str) -> int:
     """Remove socket files whose tmux server is no longer running.
 
+    Targets the per-user agent socket directory under ``AGENT_SOCKET_ROOT``.
+    Use ``cleanup_stale_admin_sockets`` for admin sessions (different root).
     Uses sudo for both the tmux check and file removal -- this is an
     infrastructure maintenance context (vm reinit / agent create).
 
     Returns the number of stale sockets removed.
     """
-    q_dir = shlex.quote(f"{AGENT_SOCKET_ROOT}/{linux_user}")
+    return _cleanup_stale_sockets_under(
+        target, f"{AGENT_SOCKET_ROOT}/{linux_user}",
+    )
+
+
+def cleanup_stale_admin_sockets(target: ExecTarget, admin_username: str) -> int:
+    """Remove admin-side socket files whose tmux server is no longer running.
+
+    Mirrors ``cleanup_stale_sockets`` for the per-session admin socket
+    directory introduced by the env-and-secrets SDD. Called from VM reinit
+    to keep the directory from accumulating cruft over a long-lived VM's
+    repeated session create/delete cycles.
+    """
+    return _cleanup_stale_sockets_under(
+        target, f"{ADMIN_SOCKET_ROOT}/{admin_username}",
+    )
+
+
+def _cleanup_stale_sockets_under(target: ExecTarget, dir_path: str) -> int:
+    """Shared implementation for cleanup_stale_{agent,admin}_sockets."""
+    q_dir = shlex.quote(dir_path)
     result = target.run(f"find {q_dir} -name '*.sock' -type s 2>/dev/null", sudo=True, check=False)
     if not result.stdout.strip():
         return 0
@@ -157,6 +200,37 @@ def cleanup_stale_sockets(target: ExecTarget, linux_user: str) -> int:
             target.run(f"rm -f {q_sock}", sudo=True, check=False)
             removed += 1
     return removed
+
+
+def ensure_admin_socket_root(
+    target: ExecTarget,
+    admin_username: str,
+) -> None:
+    """Create the admin tmux socket root directory (idempotent).
+
+    Simpler than ``ensure_agent_socket_root``: admin sockets only need to be
+    accessible to the admin user, so no shared group is involved. The root
+    directory is owned by the admin user and sits at mode 0700.
+    """
+    q_root = shlex.quote(ADMIN_SOCKET_ROOT)
+    q_admin_dir = shlex.quote(f"{ADMIN_SOCKET_ROOT}/{admin_username}")
+    q_admin = shlex.quote(admin_username)
+
+    probe = target.run(
+        f'if test -d {q_admin_dir}; then stat -c "%U %a" {q_admin_dir} 2>/dev/null || echo PROBE_FAILED; '
+        f"else echo MISSING; fi",
+        sudo=True,
+        check=False,
+    )
+    if probe.stdout.strip() == f"{admin_username} 700":
+        return
+
+    target.run(f"mkdir -p {q_root}", sudo=True)
+    target.run(f"chown root:root {q_root}", sudo=True)
+    target.run(f"chmod 0755 {q_root}", sudo=True)
+    target.run(f"mkdir -p {q_admin_dir}", sudo=True)
+    target.run(f"chown {q_admin}:{q_admin} {q_admin_dir}", sudo=True)
+    target.run(f"chmod 0700 {q_admin_dir}", sudo=True)
 
 
 def generate_restricted_config(history_limit: int = DEFAULT_HISTORY_LIMIT) -> str:
@@ -191,6 +265,15 @@ set -g aggressive-resize on
 # Disable status bar -- the console provides this when nested;
 # for direct attach, the session is the only thing on screen.
 set -g status off
+
+# When tmux spawns a default-shell pane (no explicit pane command, as in
+# `tmux new-session -d` with no trailing command), source the operator's
+# login dotfiles so profile fragments installed by VM init
+# (/etc/profile.d/agentworks-identity.sh, ~/.agentworks-profile.sh) are
+# loaded. Without this, tmux's default-shell runs non-login and the
+# AGENTWORKS_VM / AGENTWORKS_USER vars from the fragments would not
+# appear in no-command sessions.
+set -g default-command "$SHELL -l"
 
 # Disable window/pane/session creation and management.
 # The user's prefix key, detach, copy mode, and scroll bindings are preserved.
@@ -253,6 +336,54 @@ def _grant_server_access(
     )
 
 
+def _tmux_env_flags(env: dict[str, str] | None) -> str:
+    """Return ``-e KEY=VAL -e KEY=VAL`` flags for ``tmux new-session`` /
+    ``tmux split-window``.
+
+    Tmux's session-environment table propagates these vars to every pane in
+    the session (and to panes spawned later via ``split-window``). Belt-and-
+    suspenders with the SSH SetEnv layer: SetEnv brings the vars into the
+    SSH command's shell, which tmux then inherits when it spawns/starts the
+    server; tmux's ``-e`` makes the propagation explicit per-session, which
+    matters when the same operator opens multiple sessions on a long-lived
+    tmux server (each session ends up with its own per-session env).
+
+    Returns the empty string for empty / None input so call sites can
+    string-concat without conditionals.
+    """
+    if not env:
+        return ""
+    parts = [f"-e {shlex.quote(f'{k}={v}')}" for k, v in env.items()]
+    return " " + " ".join(parts)
+
+
+def _pane_command(command: str, q_path: str) -> str:
+    """Return the pane command for ``tmux new-session``.
+
+    Shape:
+
+    - command non-empty: ``$SHELL -lic 'cd <path> && exec <command>'``
+    - command empty: ``""`` (let tmux fall back to its default-shell login)
+
+    Defensive against a caller pre-prepending ``exec``: this function is the
+    sole owner of the exec wrapping, so a leading ``exec`` on the input is
+    stripped before re-applying. (A prior Phase 3 pass had both
+    ``_build_session_command`` and ``_pane_command`` emitting their own
+    ``exec``, producing ``cd ... && exec exec <cmd>``; that's harmless at
+    runtime but visible in scrollback and confusing.)
+
+    Env injection is NOT part of this string. Env reaches the pane via
+    ``tmux new-session -e KEY=VAL`` (which seeds the session-environment
+    table) and via SSH SetEnv (which seeds the tmux server's process env
+    when the server starts).
+    """
+    if not command:
+        return ""
+    stripped = command.removeprefix("exec ").lstrip()
+    inner = shlex.quote(f"cd {q_path} && exec {stripped}")
+    return f"$SHELL -lic {inner}"
+
+
 def create_session(
     session_name: str,
     workspace_path: str,
@@ -263,118 +394,92 @@ def create_session(
     target: ExecTarget | None = None,
     admin_username: str | None = None,
     is_admin: bool = True,
-) -> tuple[str | None, int | None]:
+    env: dict[str, str] | None = None,
+) -> tuple[str, int | None]:
     """Create a locked-down tmux session.
 
-    For admin mode, the command runs directly on the admin's default tmux
-    server. ``run_command`` is admin's SSH connection.
+    Both admin and agent modes use per-session sockets under
+    ``/run/agentworks/<mode>-tmux-sockets/<user>/<name>.sock`` (per the env-
+    and-secrets SDD: each session gets a fresh tmux server, so the SetEnv-
+    delivered env from the SSH connection reaches the pane via the server
+    inheriting its own creation env).
 
-    For agent mode, ``run_command`` is the AGENT's SSH connection (FRD R1,
-    direct target-user SSH). The agent's tmux server runs under the agent's
-    uid on a per-session socket. ``target=`` is still required and must be
-    admin's ExecTarget: it is used for socket-root setup
-    (``AGENT_SOCKET_ROOT``, currently `/run/agentworks/agent-tmux-sockets`)
-    which needs root. Admin retains its read /
-    attach / maintenance reach into the agent's tmux server via group
-    permissions on the socket and the tmux ``server-access`` ACL granted
-    here (per the 2026-04-10 agent-tmux-sockets SDD; unchanged).
+    For admin mode, ``run_command`` is admin's SSH connection. ``target`` is
+    used for sudo socket-root setup (writing under ``/run/agentworks/``).
+    For agent mode, ``run_command`` is the AGENT's SSH connection (FRD R1),
+    and ``target`` must be admin's ExecTarget (for AGENT_SOCKET_ROOT setup).
 
-    Returns (socket_path, tmux_server_pid). socket_path is None for admin-mode.
+    ``env`` flows to the pane via two channels (belt and suspenders):
+    1. ``run_command`` materializes ``-o SetEnv=K=V`` args on the SSH
+       command line so sshd injects the vars into the user's shell that
+       runs ``tmux new-session``; tmux inherits.
+    2. ``-e KEY=VAL`` on ``tmux new-session`` seeds the session-environment
+       table so per-session env stays scoped to this session.
+
+    Returns (socket_path, tmux_server_pid).
     """
+    assert linux_user is not None
+    assert admin_username is not None, "admin_username required for create_session"
+    assert target is not None, "target (admin's ExecTarget) required for create_session"
+
     q_session = shlex.quote(session_name)
     q_path = shlex.quote(workspace_path)
+    pane_cmd = _pane_command(command, q_path)
+    env_flags = _tmux_env_flags(env)
 
+    # Per-session socket setup. The admin path uses the simpler shape (no
+    # cross-user group magic); the agent path keeps the existing group-shared
+    # plumbing because admin needs attach access to the agent's tmux server
+    # (per the 2026-04-10 agent-tmux-sockets SDD).
     if is_admin:
-        if command:
-            inner = shlex.quote(f"cd {q_path} && {command}")
-            shell_cmd = f"$SHELL -lic {inner}"
-        else:
-            shell_cmd = ""
-
-        cmd = f"tmux new-session -d -s {q_session} -c {q_path} -f {RESTRICTED_CONFIG_PATH}"
-        if shell_cmd:
-            cmd += f" {shlex.quote(shell_cmd)}"
-        run_command(cmd)
-        try:
-            pid_out = run_command("tmux display-message -p '#{pid}'", check=False)
-            pid: int | None = _parse_pid(getattr(pid_out, "stdout", ""), context="after session create")
-        except (RuntimeError, ValueError):
-            pid = None  # best-effort; auto-repair will recover on next access
-        return (None, pid)
+        ensure_admin_socket_root(target, admin_username)
+        sock = admin_socket_path(admin_username, session_name)
     else:
-        assert linux_user is not None
-        assert admin_username is not None, "admin_username required for agent sessions"
-        sock = agent_socket_path(linux_user, session_name)
-        q_sock = shlex.quote(sock)
-
-        # Ensure the tmpfs socket directories exist (wiped on VM reboot).
-        # Uses the ADMIN target (`target=` arg); writing under
-        # AGENT_SOCKET_ROOT (/run/agentworks/agent-tmux-sockets) still
-        # requires root and goes through admin's
-        # sudo path.
-        assert target is not None, "target (admin's ExecTarget) required for agent sessions"
         ensure_agent_socket_root(target, admin_username)
         ensure_agent_socket_dir(target, linux_user)
+        sock = agent_socket_path(linux_user, session_name)
+    q_sock = shlex.quote(sock)
 
-        # From here on, run_command is the AGENT's SSH connection (FRD R1,
-        # direct target-user SSH). The agent owns its own socket dir, its
-        # tmux server, and the socket file once created, so no sudo is
-        # needed for any subsequent step.
-
-        # Check for an existing socket file before creating the session.
-        # A stale socket (no server) is removed to start clean. An active
-        # socket (server running) is an error -- something else is using it.
-        sock_exists = run_command(f"test -e {q_sock}", check=False)
-        if getattr(sock_exists, "ok", False):
-            server_alive = run_command(
-                f"tmux -S {q_sock} list-sessions 2>/dev/null",
-                check=False,
-            )
-            if getattr(server_alive, "ok", False):
-                raise RuntimeError(
-                    f"Socket {sock} already has an active tmux server. "
-                    f"Kill it first or choose a different session name."
-                )
-            # Stale socket: remove it. Agent owns the file in both the
-            # post-rollout case (this code created it as the agent) and
-            # the pre-rollout case (sudo --login -u <agent> tmux created
-            # it owned by the agent), so plain rm works in both worlds.
-            from agentworks import output as _output
-
-            _output.detail(f"Removing stale socket: {sock}")
-            run_command(f"rm -f {q_sock}", check=False)
-
-        # Build the pane command. No `sudo --login` prefix: the agent is
-        # already the SSH user (FRD R1), so tmux runs directly under the
-        # agent's uid.
-        if command:
-            inner = shlex.quote(f"cd {q_path} && {command}")
-            shell_cmd = f"$SHELL -lic {inner}"
-        else:
-            shell_cmd = ""
-
-        cmd = (
-            f"tmux -S {q_sock} new-session -d -s {q_session} "
-            f"-c {q_path} -f {RESTRICTED_CONFIG_PATH}"
+    # Stale-socket handling: if a socket file exists but no server is alive
+    # behind it, remove it before creating the new session. An active server
+    # is a conflict (something else owns this name).
+    sock_exists = run_command(f"test -e {q_sock}", check=False)
+    if getattr(sock_exists, "ok", False):
+        server_alive = run_command(
+            f"tmux -S {q_sock} list-sessions 2>/dev/null", check=False
         )
-        if shell_cmd:
-            cmd += f" {shlex.quote(shell_cmd)}"
-        run_command(cmd)
+        if getattr(server_alive, "ok", False):
+            raise RuntimeError(
+                f"Socket {sock} already has an active tmux server. "
+                f"Kill it first or choose a different session name."
+            )
+        from agentworks import output as _output
 
-        # Fix socket permissions (tmux creates sockets mode 0700). Agent
-        # owns the socket; no sudo needed.
+        _output.detail(f"Removing stale socket: {sock}")
+        run_command(f"rm -f {q_sock}", check=False)
+
+    # Create the session. SetEnv vars travel with run_command; tmux's -e
+    # flags add them to the session-environment table.
+    cmd = (
+        f"tmux -S {q_sock} new-session -d -s {q_session} "
+        f"-c {q_path} -f {RESTRICTED_CONFIG_PATH}{env_flags}"
+    )
+    if pane_cmd:
+        cmd += f" {shlex.quote(pane_cmd)}"
+    run_command(cmd, env=env)
+
+    # Socket permissions + cross-user access only matter for agent sessions
+    # (admin has direct access to its own per-session socket).
+    if not is_admin:
         run_command(f"chmod g+rwx {q_sock}")
-
-        # Grant tmux server-access to all socket-group members. The agent
-        # runs this against its own tmux server.
         _grant_server_access(run_command, sock)
 
-        try:
-            pid_out = run_command(tmux_cmd("display-message -p '#{pid}'", sock), check=False)
-            pid = _parse_pid(getattr(pid_out, "stdout", ""), context="after session create")
-        except (RuntimeError, ValueError):
-            pid = None  # best-effort; auto-repair will recover on next access
-        return (sock, pid)
+    try:
+        pid_out = run_command(tmux_cmd("display-message -p '#{pid}'", sock), check=False)
+        pid: int | None = _parse_pid(getattr(pid_out, "stdout", ""), context="after session create")
+    except (RuntimeError, ValueError):
+        pid = None  # best-effort; auto-repair will recover on next access
+    return (sock, pid)
 
 
 def kill_session(
