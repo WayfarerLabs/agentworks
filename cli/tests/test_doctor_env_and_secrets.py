@@ -294,6 +294,38 @@ AGENTWORKS_SESSION = "operator-override"
     assert any("AGENTWORKS_SESSION" in (c.message or "") for c in warns)
 
 
+def test_identity_marker_constant_matches_parse_env_table_phrase(
+    tmp_path: Path,
+) -> None:
+    """``_check_config`` filters identity issues out of the Configuration
+    group on the assumption that ``_parse_env_table`` records them with a
+    specific marker phrase, and ``_check_env`` re-surfaces them in the
+    more specific Env group on the same assumption. If the marker ever
+    drifts on one side (e.g. someone changes the wording in either
+    ``_parse_env_table`` or ``_IDENTITY_ISSUE_MARKER`` without updating
+    the other), the warning either double-reports or vanishes. Pin the
+    contract here so that drift surfaces as a test failure."""
+    from agentworks.doctor import _IDENTITY_ISSUE_MARKER
+
+    cfg = _write_config(
+        tmp_path,
+        extras="""
+[admin.env]
+AGENTWORKS_SESSION = "operator-override"
+""",
+    )
+    config = load_config(cfg, warn_issues=False)
+    identity_issues = [
+        issue for issue in config.config_issues
+        if _IDENTITY_ISSUE_MARKER in issue
+    ]
+    assert identity_issues, (
+        "the AGENTWORKS_SESSION override in admin.env should produce at "
+        "least one config_issue containing the identity marker; the marker "
+        "in doctor.py has drifted from the phrase in _parse_env_table"
+    )
+
+
 def test_check_env_reports_cross_scope_conflict(tmp_path: Path) -> None:
     """A key set at both admin and vm scopes is reported as info (the
     operator can run `agw env show` for the effective value)."""

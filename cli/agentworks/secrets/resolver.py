@@ -68,14 +68,26 @@ class SecretResolver:
         self,
         secret: SecretDecl,
     ) -> tuple[Literal["available", "prompt", "unreachable"], str | None]:
-        """Side-effect-free preview of how the chain would resolve ``secret``.
+        """Preview how the chain would resolve ``secret``.
 
         Walks the chain in precedence order. For each non-prompt source that
-        would attempt the secret, calls ``get(secret)`` and returns the kind
-        on the first non-None result. If the walk reaches a prompt source
-        before any value is available, returns that prompt source's kind; the
-        actual prompt is never emitted from this method. If no source would
-        produce a value or prompt, returns ``("unreachable", None)``.
+        would attempt the secret, calls ``source.get(secret)`` and returns
+        the kind on the first non-None result. If the walk reaches a prompt
+        source before any value is available, returns that prompt source's
+        kind; ``PromptSource.get`` is never called by this method (which is
+        why doctor can use it safely). If no source would produce a value
+        or prompt, returns ``("unreachable", None)``.
+
+        Side-effect contract: ``get`` is called on every non-prompt source
+        in the chain up to the first one that returns a value. Today both
+        non-prompt sources (``env_var`` is the only one) have read-only
+        ``get`` implementations, so the preview is effectively pure. A
+        future backend whose ``get`` authenticates, hits a network, or
+        triggers a biometric/Touch-ID prompt would need to either (a)
+        expose a separate side-effect-free probe API that this method
+        could route to, or (b) be gated out of preview probing explicitly.
+        The narrow guarantee here is just "no operator-facing interactive
+        prompt is emitted from this method", which is enough for doctor.
 
         Used by ``agw doctor`` to surface the FRD R6 would-prompt preview:
         operators learn up front which secrets would force an interactive

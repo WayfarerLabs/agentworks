@@ -276,9 +276,10 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # =============================================================================
 #
 # Env tables can be declared at five scopes; for any given session the merged
-# value is computed in this precedence order (later wins, identity wins last):
+# value is computed in this precedence order (highest scope wins; identity
+# vars win over everything):
 #
-#   vm < workspace < admin|agent < session < AGENTWORKS_* identity
+#   session > (agent | admin) > workspace > vm    (AGENTWORKS_* overrides all)
 #
 # Admin and agent scopes are mutually exclusive: a shell opened as the admin
 # user (e.g. `agw vm shell`) sees admin scope; an agent-mode session sees

@@ -534,9 +534,11 @@ agw env show --vm my-vm --reveal-secrets       # resolves through the active bac
 
 `agw doctor` surfaces FRD R6 findings for the env + secrets configuration: for each declared secret,
 whether it would resolve silently (e.g. from an `AW_SECRET_<NAME>` env var) or fall through to an
-interactive prompt at command time; unused secret declarations; `backend_mappings.<kind>` entries
-pointing at an undeclared or inactive backend; attempts to override `AGENTWORKS_*` identity vars;
-and informational cross-scope key conflicts. Broken `{ secret = "..." }` references are caught
+interactive prompt at command time; soft-skip findings (active backends that won't attempt a given
+secret because it has no mapping and the backend has no default convention -- useful for spotting
+typos in `backend_mappings.<kind>` keys); unused secret declarations; `backend_mappings.<kind>`
+entries pointing at an undeclared or inactive backend; attempts to override `AGENTWORKS_*` identity
+vars; and informational cross-scope key conflicts. Broken `{ secret = "..." }` references are caught
 earlier as a hard config-load error before doctor runs.
 
 ### Mise (Polyglot Tool Manager)
