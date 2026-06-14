@@ -191,13 +191,19 @@ class _StubSessionTemplate:
 
 
 def stub_session_resolvers(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Stub the session-template and env resolvers in ``sessions.manager``.
+    """Stub the session-template, env, and eager-resolve helpers in
+    ``sessions.manager``.
 
     Several tests construct a ``SimpleNamespace`` config that omits the
     ``vm_templates`` / ``agent_templates`` / ``secret_resolver`` attributes
     the real Phase 3+ resolvers read. Patching the resolvers themselves
     keeps those tests scope-correct (they exercise rollback / transport
     plumbing, not env composition) without expanding the fake config.
+
+    Also stubs the Phase 6 eager-prompting orchestration: ``create_session``
+    and ``restart_session`` call ``_session_secret_target`` +
+    ``resolve_for_command`` before the first mutation. Tests that don't
+    care about secret resolution patch both out.
     """
     from agentworks.sessions import manager as session_manager
 
@@ -206,4 +212,13 @@ def stub_session_resolvers(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     monkeypatch.setattr(
         session_manager, "_resolve_session_env", lambda *a, **k: {}
+    )
+    monkeypatch.setattr(
+        session_manager, "_session_secret_target", lambda *a, **k: None
+    )
+    # ``resolve_for_command`` is imported locally inside create_session /
+    # restart_session, so patch its module-level home; the import inside
+    # the function picks up the patched version.
+    monkeypatch.setattr(
+        "agentworks.secrets.resolve_for_command", lambda *a, **k: {}
     )

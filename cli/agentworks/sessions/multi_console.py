@@ -53,6 +53,7 @@ if TYPE_CHECKING:
         ShellEntry,
         VMRow,
     )
+    from agentworks.secrets import SecretTarget
     from agentworks.ssh import ExecTarget
 
 TMUX_PREFIX = "aw-console-"
@@ -563,6 +564,28 @@ def add_shell(
             entity_kind="console-member",
             entity_name=session_name,
         )
+
+    # Eager-prompting orchestration (FRD R4 / Phase 6): resolve any
+    # secrets referenced by this pane's env chain BEFORE the DB write +
+    # potential pane-split below. Non-interactive failures surface as
+    # SecretUnavailableError with no partial state to clean up. We
+    # always resolve (even when the console isn't live), since the
+    # operator typed add-shell expecting to use the new pane shortly.
+    session_row = db.get_session(session_name)
+    vm_row = db.get_vm(console.vm_name)
+    if session_row is not None and vm_row is not None:
+        pane_target = _pane_secret_target(
+            config,
+            db,
+            vm=vm_row,
+            session=session_row,
+            is_admin_pane=admin,
+        )
+        if pane_target is not None:
+            from agentworks.secrets import resolve_for_command
+
+            resolve_for_command([pane_target], config)
+
     new_shell: ShellEntry = {"cwd": cwd, "admin": admin}
     new_shells = [*cs.shells, new_shell]
     db.update_console_shells(console_name, session_name, new_shells)
@@ -1026,6 +1049,59 @@ def kill_session_windows(
             f"live console window cleanup failed: {exc}. "
             f"Stale windows may persist; rebuild with: {recovery}"
         )
+
+
+def _pane_secret_target(
+    config: Config,
+    db: Database,
+    *,
+    vm: VMRow,
+    session: SessionRow,
+    is_admin_pane: bool,
+) -> SecretTarget | None:
+    """Build the SecretTarget for a console pane, for eager-prompting.
+
+    Mirrors the scope-selection logic of ``_resolve_pane_env`` (admin
+    pane: admin + vm + workspace; agent pane: vm + workspace + agent +
+    session) but stops before composing the rendered env. Returns
+    ``None`` when the session row is missing fields the resolver would
+    need (matches ``_resolve_pane_env``'s defensive fallthrough).
+    """
+    from agentworks.agents.templates import resolve_from_dict as _resolve_agent_template
+    from agentworks.secrets import SecretTarget
+    from agentworks.sessions.templates import resolve_from_dict as _resolve_session_template
+    from agentworks.vms.templates import resolve_from_dict as _resolve_vm_template
+    from agentworks.workspaces.templates import resolve_template as _resolve_ws_template
+
+    workspace = db.get_workspace(session.workspace_name)
+    if workspace is None:
+        return None
+
+    vm_tmpl = _resolve_vm_template(config.vm_templates, vm.template)
+    ws_tmpl = _resolve_ws_template(config, workspace.template)
+
+    if is_admin_pane:
+        return SecretTarget(
+            vm=vm_tmpl.env,
+            workspace=ws_tmpl.env,
+            admin=config.admin.env,
+            label=f"console-pane:{session.name}/admin",
+        )
+
+    if session.agent_name is None:
+        return None
+    agent = db.get_agent(session.agent_name)
+    if agent is None:
+        return None
+    agent_tmpl = _resolve_agent_template(config.agent_templates, agent.template)
+    session_tmpl = _resolve_session_template(config.session_templates, session.template)
+    return SecretTarget(
+        vm=vm_tmpl.env,
+        workspace=ws_tmpl.env,
+        agent=agent_tmpl.env,
+        session=session_tmpl.env,
+        label=f"console-pane:{session.name}/agent",
+    )
 
 
 def _resolve_pane_env(

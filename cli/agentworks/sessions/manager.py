@@ -35,6 +35,7 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database, SessionRow, VMRow, WorkspaceRow
     from agentworks.env import EnvEntry
+    from agentworks.secrets import SecretTarget
     from agentworks.sessions.templates import ResolvedSessionTemplate
     from agentworks.sessions.tmux import RunCommand
     from agentworks.ssh import ExecTarget, SSHLogger
@@ -436,7 +437,7 @@ def _substitute_template_vars_in_env(
     return result
 
 
-def _resolve_session_env(
+def _resolve_session_env_scopes(
     config: Config,
     *,
     db: Database,
@@ -446,18 +447,25 @@ def _resolve_session_env(
     session_template: ResolvedSessionTemplate,
     mode: SessionMode,
     agent_name: str | None,
-    linux_user: str,
-) -> dict[str, str]:
-    """Compose the shell-open env for a session create / restart.
+) -> tuple[
+    dict[str, EnvEntry],
+    dict[str, EnvEntry],
+    dict[str, EnvEntry] | None,
+    dict[str, EnvEntry] | None,
+    dict[str, EnvEntry],
+]:
+    """Resolve the per-scope env dicts (vm, workspace, admin, agent, session)
+    for a session create / restart.
 
-    Resolves the per-VM / per-workspace / per-agent templates, builds the
-    ResourceContext, applies template-variable substitution to the session
-    template's env values, and runs the merged dict through
-    ``compose_env`` (which renders secrets via the config resolver and
-    overlays per-context identity vars).
+    Returns the dicts ``effective_env`` would consume. Shared by
+    ``_resolve_session_env`` (which composes them through
+    ``compose_env`` into the rendered shell env) and the eager-prompting
+    orchestration helper ``_session_secret_target`` (which wraps them as
+    a ``SecretTarget`` for resolve_for_command, before any state
+    mutation). Sharing this helper avoids duplicate template resolution
+    and guarantees the two consumers see identical scope state.
     """
     from agentworks.agents.templates import resolve_from_dict as _resolve_agent_template
-    from agentworks.env import ResourceContext, compose_env
     from agentworks.vms.templates import resolve_from_dict as _resolve_vm_template
     from agentworks.workspaces.templates import resolve_template as _resolve_ws_template
 
@@ -484,6 +492,92 @@ def _resolve_session_env(
         )
         agent_env = resolved_agent_template.env
 
+    session_env = _substitute_template_vars_in_env(
+        session_template.env,
+        variables={"session_name": session_name, "workspace_name": ws.name},
+    )
+
+    return (
+        vm_template.env,
+        workspace_template.env,
+        admin_env,
+        agent_env,
+        session_env,
+    )
+
+
+def _session_secret_target(
+    config: Config,
+    *,
+    db: Database,
+    vm: VMRow,
+    ws: WorkspaceRow,
+    session_name: str,
+    session_template: ResolvedSessionTemplate,
+    mode: SessionMode,
+    agent_name: str | None,
+) -> SecretTarget:
+    """Build a SecretTarget for a session, for eager-prompting orchestration.
+
+    Constructed from the same template chain that ``_resolve_session_env``
+    would consume; substitution invariance (Phase 6.1) guarantees the
+    SecretDecl union is identical pre- vs post-substitution.
+    """
+    from agentworks.secrets import SecretTarget
+
+    vm_env, ws_env, admin_env, agent_env, session_env = _resolve_session_env_scopes(
+        config,
+        db=db,
+        vm=vm,
+        ws=ws,
+        session_name=session_name,
+        session_template=session_template,
+        mode=mode,
+        agent_name=agent_name,
+    )
+    return SecretTarget(
+        vm=vm_env,
+        workspace=ws_env,
+        admin=admin_env,
+        agent=agent_env,
+        session=session_env,
+        label=f"session={session_name}",
+    )
+
+
+def _resolve_session_env(
+    config: Config,
+    *,
+    db: Database,
+    vm: VMRow,
+    ws: WorkspaceRow,
+    session_name: str,
+    session_template: ResolvedSessionTemplate,
+    mode: SessionMode,
+    agent_name: str | None,
+    linux_user: str,
+) -> dict[str, str]:
+    """Compose the shell-open env for a session create / restart.
+
+    Resolves the per-VM / per-workspace / per-agent templates, builds the
+    ResourceContext, applies template-variable substitution to the session
+    template's env values, and runs the merged dict through
+    ``compose_env`` (which renders secrets via the config resolver and
+    overlays per-context identity vars).
+    """
+    from agentworks.env import ResourceContext, compose_env
+
+    vm_env, ws_env, admin_env, agent_env, session_env = _resolve_session_env_scopes(
+        config,
+        db=db,
+        vm=vm,
+        ws=ws,
+        session_name=session_name,
+        session_template=session_template,
+        mode=mode,
+        agent_name=agent_name,
+    )
+
     ctx = ResourceContext(
         vm_name=vm.name,
         vm_host=vm.vm_host_name,
@@ -496,16 +590,11 @@ def _resolve_session_env(
         session_kind="admin" if mode == SessionMode.ADMIN else "agent",
     )
 
-    session_env = _substitute_template_vars_in_env(
-        session_template.env,
-        variables={"session_name": session_name, "workspace_name": ws.name},
-    )
-
     return compose_env(
         resolver=config.secret_resolver,
         ctx=ctx,
-        vm=vm_template.env,
-        workspace=workspace_template.env,
+        vm=vm_env,
+        workspace=ws_env,
         admin=admin_env,
         agent=agent_env,
         session=session_env,
@@ -788,6 +877,29 @@ def create_session(
             from agentworks.sessions.tmux import agent_socket_path
 
             expected_socket = agent_socket_path(linux_user, name)
+
+        # Eager-prompting orchestration (FRD R4 / Phase 6): resolve every
+        # secret referenced by this session's env chain up front, before
+        # the auto-grant insert / DB row / restricted-config write below.
+        # Non-interactive failures surface as SecretUnavailableError with
+        # a per-secret hint, with no partial state to clean up.
+        from agentworks.secrets import resolve_for_command
+
+        resolve_for_command(
+            [
+                _session_secret_target(
+                    config,
+                    db=db,
+                    vm=vm,
+                    ws=ws,
+                    session_name=name,
+                    session_template=template,
+                    mode=mode,
+                    agent_name=resolved_agent_name,
+                ),
+            ],
+            config,
+        )
 
         def _rollback() -> None:
             # Best-effort rollback. Each step runs inside its own try/except so
@@ -1142,6 +1254,29 @@ def restart_session(
         session_run_command: RunCommand = session_target.run
         kill_sudo = False
 
+        # Eager-prompting orchestration (FRD R4 / Phase 6): resolve every
+        # secret referenced by this session's env chain BEFORE any kill /
+        # destructive step. Non-interactive failures surface as
+        # SecretUnavailableError with no partial state to clean up.
+        template = _resolve_template(config, session.template)
+        from agentworks.secrets import resolve_for_command
+
+        resolve_for_command(
+            [
+                _session_secret_target(
+                    config,
+                    db=db,
+                    vm=vm,
+                    ws=ws,
+                    session_name=name,
+                    session_template=template,
+                    mode=SessionMode(session.mode),
+                    agent_name=session.agent_name,
+                ),
+            ],
+            config,
+        )
+
         # UNKNOWN is impossible here -- _ensure_pid raises on unresolvable sessions
         if status == SessionStatus.BROKEN:
             if not force:
@@ -1179,7 +1314,6 @@ def restart_session(
                     entity_name=name,
                 )
 
-        template = _resolve_template(config, session.template)
         deploy_restricted_config(run_command, history_limit=config.session.history_limit)
 
         # Use restart_command if available, otherwise fall back to command
