@@ -571,15 +571,22 @@ def add_shell(
     # SecretUnavailableError with no partial state to clean up. We
     # always resolve (even when the console isn't live), since the
     # operator typed add-shell expecting to use the new pane shortly.
+    # use_admin promotion matches _split_shell_pane: an admin-mode
+    # session has session_user == admin_user, so a pane on that session
+    # always runs as admin even when --admin wasn't passed. Compute the
+    # same promoted value here so the eager-resolve scope matches what
+    # _resolve_pane_env will produce at pane-split time.
     session_row = db.get_session(session_name)
     vm_row = db.get_vm(console.vm_name)
     if session_row is not None and vm_row is not None:
+        session_user = _session_linux_user(db, session_row, vm_row)
+        use_admin = admin or session_user == vm_row.admin_username
         pane_target = _pane_secret_target(
             config,
             db,
             vm=vm_row,
             session=session_row,
-            is_admin_pane=admin,
+            is_admin_pane=use_admin,
         )
         if pane_target is not None:
             from agentworks.secrets import resolve_for_command
@@ -1066,6 +1073,14 @@ def _pane_secret_target(
     session) but stops before composing the rendered env. Returns
     ``None`` when the session row is missing fields the resolver would
     need (matches ``_resolve_pane_env``'s defensive fallthrough).
+
+    ``is_admin_pane`` is the PROMOTED value, not the operator-passed
+    --admin flag. Callers must apply the same promotion ``_split_shell_pane``
+    uses: ``use_admin = shell_admin_flag or session_user == admin_user``.
+    Passing the raw flag for an admin-mode session (session_user ==
+    admin_user) would route through the ``agent_name is None`` branch
+    and silently return ``None``, breaking the eager-resolve guarantee
+    for that shape.
     """
     from agentworks.agents.templates import resolve_from_dict as _resolve_agent_template
     from agentworks.secrets import SecretTarget

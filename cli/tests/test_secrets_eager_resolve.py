@@ -181,6 +181,66 @@ def test_session_create_calls_resolve_with_session_target(
 # ---------------------------------------------------------------------------
 
 
+def test_session_restart_broken_no_force_bails_before_eager_resolve(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A BROKEN session restarted without --force must raise BrokenStateError
+    BEFORE eager-resolve runs. The operator gets a clean error without
+    being asked for credentials they would have discarded."""
+    from agentworks.db import SessionMode, SessionStatus
+    from agentworks.errors import BrokenStateError
+    from agentworks.sessions import manager as session_manager
+
+    db = _seed_basic_db(tmp_path)
+    _stub_session_prep(monkeypatch)
+
+    db._conn.execute(
+        "INSERT INTO sessions (name, workspace_name, template, mode, pid) "
+        "VALUES ('s1', 'ws1', 'default', ?, 9999)",
+        (SessionMode.ADMIN.value,),
+    )
+    db._conn.commit()
+
+    monkeypatch.setattr(
+        session_manager,
+        "_ensure_pid",
+        lambda session, **kwargs: session,
+    )
+    monkeypatch.setattr(
+        session_manager, "check_session_status", lambda *a, **k: SessionStatus.BROKEN
+    )
+    monkeypatch.setattr(
+        session_manager,
+        "_build_session_target",
+        lambda *a, **k: SimpleNamespace(run=lambda *a, **k: None),
+    )
+
+    resolve_calls: list[object] = []
+
+    def _track_resolve(*args: object, **kwargs: object) -> dict[str, str]:
+        resolve_calls.append(args)
+        return {}
+
+    monkeypatch.setattr("agentworks.secrets.resolve_for_command", _track_resolve)
+
+    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
+
+    with pytest.raises(BrokenStateError, match="broken"):
+        session_manager.restart_session(
+            db,
+            config,  # type: ignore[arg-type]
+            name="s1",
+            force=False,
+            yes=True,
+        )
+
+    assert resolve_calls == [], (
+        "BROKEN + no --force must bail BEFORE eager-resolve so the "
+        "operator isn't asked for credentials they would discard"
+    )
+    db.close()
+
+
 def test_session_restart_eager_resolve_fires_before_kill(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -310,4 +370,61 @@ def test_console_add_shell_eager_resolve_fires_before_db_update(
     cs = db.get_console_session("c1", "s1")
     assert cs is not None
     assert cs.shells == [], "eager-resolve must precede update_console_shells"
+    db.close()
+
+
+def test_console_add_shell_promotes_admin_for_admin_mode_session(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """add_shell against an admin-mode session must promote the pane's
+    is_admin_pane to True even when the operator passed ``admin=False``,
+    matching ``_split_shell_pane``'s ``use_admin = shell.admin or
+    session_user == admin_user`` logic. Without the promotion, the
+    helper's ``agent_name is None`` branch would silently skip eager-
+    resolve while ``_resolve_pane_env`` at split time prompts for
+    admin-scope secrets late."""
+    from agentworks.sessions import multi_console
+
+    db = _seed_basic_db(tmp_path)
+    db._conn.execute(
+        "INSERT INTO sessions (name, workspace_name, template, mode) "
+        "VALUES ('s1', 'ws1', 'default', 'admin')"
+    )
+    db._conn.execute("INSERT INTO consoles (name, vm_name) VALUES ('c1', 'vm1')")
+    db._conn.execute(
+        "INSERT INTO console_sessions (console_name, session_name, shells, position) "
+        "VALUES ('c1', 's1', '[]', 0)"
+    )
+    db._conn.commit()
+
+    captured: dict[str, object] = {}
+
+    def _spy_target(
+        config: object,
+        db: object,
+        *,
+        vm: object,
+        session: object,
+        is_admin_pane: bool,
+    ) -> object:
+        captured["is_admin_pane"] = is_admin_pane
+        return object()
+
+    monkeypatch.setattr(multi_console, "_pane_secret_target", _spy_target)
+    monkeypatch.setattr("agentworks.secrets.resolve_for_command", lambda *a, **k: {})
+
+    config = SimpleNamespace()
+
+    multi_console.add_shell(
+        db,
+        config,  # type: ignore[arg-type]
+        console_name="c1",
+        session_name="s1",
+        cwd=None,
+        admin=False,  # operator did NOT pass --admin
+    )
+
+    assert captured["is_admin_pane"] is True, (
+        "admin-mode session + add_shell without --admin should promote to admin pane"
+    )
     db.close()

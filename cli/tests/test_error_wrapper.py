@@ -318,16 +318,7 @@ def test_create_session_releases_group_membership_on_keyboard_interrupt(
 
     monkeypatch.setattr(tmux_mod, "create_session", _explode)
 
-    class _Tmpl:
-        name = "default"
-        command = ""
-        restart_command = None
-        env: dict[str, str] = {}
-
-    monkeypatch.setattr(session_manager, "_resolve_template", lambda *a, **k: _Tmpl())
-    monkeypatch.setattr(session_manager, "_resolve_session_env", lambda *a, **k: {})
-    monkeypatch.setattr(session_manager, "_session_secret_target", lambda *a, **k: None)
-    monkeypatch.setattr("agentworks.secrets.resolve_for_command", lambda *a, **k: {})
+    stub_session_resolvers(monkeypatch)
 
     config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
 
@@ -411,16 +402,7 @@ def test_create_session_rollback_failure_does_not_mask_keyboard_interrupt(
 
     db.delete_session = _failing_delete_session  # type: ignore[method-assign]
 
-    class _Tmpl:
-        name = "default"
-        command = ""
-        restart_command = None
-        env: dict[str, str] = {}
-
-    monkeypatch.setattr(session_manager, "_resolve_template", lambda *a, **k: _Tmpl())
-    monkeypatch.setattr(session_manager, "_resolve_session_env", lambda *a, **k: {})
-    monkeypatch.setattr(session_manager, "_session_secret_target", lambda *a, **k: None)
-    monkeypatch.setattr("agentworks.secrets.resolve_for_command", lambda *a, **k: {})
+    stub_session_resolvers(monkeypatch)
 
     config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
 

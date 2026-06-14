@@ -7,7 +7,7 @@ import re
 import shlex
 import sys
 from functools import partial
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 import typer
 
@@ -437,6 +437,20 @@ def _substitute_template_vars_in_env(
     return result
 
 
+class _SessionEnvScopes(NamedTuple):
+    """Per-scope env dicts for a session create / restart.
+
+    Named-tuple shape (rather than a 5-tuple) keeps callers readable and
+    leaves room for a new scope without breaking unpacking sites.
+    """
+
+    vm: dict[str, EnvEntry]
+    workspace: dict[str, EnvEntry]
+    admin: dict[str, EnvEntry] | None
+    agent: dict[str, EnvEntry] | None
+    session: dict[str, EnvEntry]
+
+
 def _resolve_session_env_scopes(
     config: Config,
     *,
@@ -447,13 +461,7 @@ def _resolve_session_env_scopes(
     session_template: ResolvedSessionTemplate,
     mode: SessionMode,
     agent_name: str | None,
-) -> tuple[
-    dict[str, EnvEntry],
-    dict[str, EnvEntry],
-    dict[str, EnvEntry] | None,
-    dict[str, EnvEntry] | None,
-    dict[str, EnvEntry],
-]:
+) -> _SessionEnvScopes:
     """Resolve the per-scope env dicts (vm, workspace, admin, agent, session)
     for a session create / restart.
 
@@ -497,12 +505,12 @@ def _resolve_session_env_scopes(
         variables={"session_name": session_name, "workspace_name": ws.name},
     )
 
-    return (
-        vm_template.env,
-        workspace_template.env,
-        admin_env,
-        agent_env,
-        session_env,
+    return _SessionEnvScopes(
+        vm=vm_template.env,
+        workspace=workspace_template.env,
+        admin=admin_env,
+        agent=agent_env,
+        session=session_env,
     )
 
 
@@ -525,7 +533,7 @@ def _session_secret_target(
     """
     from agentworks.secrets import SecretTarget
 
-    vm_env, ws_env, admin_env, agent_env, session_env = _resolve_session_env_scopes(
+    scopes = _resolve_session_env_scopes(
         config,
         db=db,
         vm=vm,
@@ -536,11 +544,11 @@ def _session_secret_target(
         agent_name=agent_name,
     )
     return SecretTarget(
-        vm=vm_env,
-        workspace=ws_env,
-        admin=admin_env,
-        agent=agent_env,
-        session=session_env,
+        vm=scopes.vm,
+        workspace=scopes.workspace,
+        admin=scopes.admin,
+        agent=scopes.agent,
+        session=scopes.session,
         label=f"session={session_name}",
     )
 
@@ -567,7 +575,7 @@ def _resolve_session_env(
     """
     from agentworks.env import ResourceContext, compose_env
 
-    vm_env, ws_env, admin_env, agent_env, session_env = _resolve_session_env_scopes(
+    scopes = _resolve_session_env_scopes(
         config,
         db=db,
         vm=vm,
@@ -593,11 +601,11 @@ def _resolve_session_env(
     return compose_env(
         resolver=config.secret_resolver,
         ctx=ctx,
-        vm=vm_env,
-        workspace=ws_env,
-        admin=admin_env,
-        agent=agent_env,
-        session=session_env,
+        vm=scopes.vm,
+        workspace=scopes.workspace,
+        admin=scopes.admin,
+        agent=scopes.agent,
+        session=scopes.session,
     )
 
 
@@ -1254,6 +1262,24 @@ def restart_session(
         session_run_command: RunCommand = session_target.run
         kill_sudo = False
 
+        # Bail-before-prompt: refuse the operation up front in the cases
+        # where the operator either lacks the right flag (BROKEN + no
+        # --force) or declines the confirm (OK + interactive 'no').
+        # Eager-resolve runs AFTER these checks so we don't ask for
+        # secrets the command was about to discard.
+        # UNKNOWN is impossible here -- _ensure_pid raises on unresolvable sessions.
+        if status == SessionStatus.BROKEN and not force:
+            raise BrokenStateError(
+                f"session '{name}' is broken (PID alive but tmux unreachable).",
+                entity_kind="session",
+                entity_name=name,
+                hint="Use --force to restart.",
+            )
+        if status == SessionStatus.OK and not yes and not output.confirm(
+            f"Session '{name}' is running. Restart?"
+        ):
+            raise UserAbort("restart cancelled")
+
         # Eager-prompting orchestration (FRD R4 / Phase 6): resolve every
         # secret referenced by this session's env chain BEFORE any kill /
         # destructive step. Non-interactive failures surface as
@@ -1277,15 +1303,7 @@ def restart_session(
             config,
         )
 
-        # UNKNOWN is impossible here -- _ensure_pid raises on unresolvable sessions
         if status == SessionStatus.BROKEN:
-            if not force:
-                raise BrokenStateError(
-                    f"session '{name}' is broken (PID alive but tmux unreachable).",
-                    entity_kind="session",
-                    entity_name=name,
-                    hint="Use --force to restart.",
-                )
             from agentworks.sessions.tmux import force_kill_tmux_server
 
             output.warn(f"Session '{name}' is broken (tmux unreachable), force-killing via PID")
@@ -1304,8 +1322,8 @@ def restart_session(
                     entity_name=name,
                 )
         elif status == SessionStatus.OK:
-            if not yes and not output.confirm(f"Session '{name}' is running. Restart?"):
-                raise UserAbort("restart cancelled")
+            # Confirm already happened above (before eager-resolve), so we
+            # know the operator opted in.
             sock = session.socket_path
             if not _kill_session(name, run_command=session_run_command, socket_path=sock):
                 raise ExternalError(
