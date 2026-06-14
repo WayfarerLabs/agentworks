@@ -52,15 +52,29 @@ def _agent_secret_targets(config: Config, vm: VMRow) -> list[SecretTarget]:
 
     Returns one target per phase so the orchestrator unions both scope
     chains in a single resolve_all batch. The VM scope is the resolved
-    vm-template env (config.vm_templates[vm.template]), NOT the
+    vm-template env (``config.vm_templates[vm.template]``), NOT the
     config-time default ``config.vm``: an agent installed on a
     non-default-template VM must see that VM's actual env.
+
+    Resolution asymmetry vs ``sessions/manager._resolve_session_env_scopes``:
+    sessions look up both the vm-template AND the agent-template from
+    their respective DB rows (because agents pre-exist sessions). Here
+    the vm-template still comes from ``vm.template`` (DB row), but the
+    agent-template is read from ``config.agent`` -- the agent doesn't
+    exist yet at create time, and at reinit time ``create_agent`` /
+    ``reinit_agent`` have already ``_replace``'d ``config.agent`` from
+    the DB row's ``agent.template`` (lines 121 / 378). The net inputs
+    are identical, but the asymmetry is real because the two sites are
+    at different points in the agent lifecycle.
     """
     from agentworks.secrets import SecretTarget
     from agentworks.vms.templates import resolve_from_dict as _resolve_vm_template
 
     vm_tmpl = _resolve_vm_template(config.vm_templates, vm.template)
-    agent_tmpl = config.agent  # already resolved by caller if --template was passed
+    # config.agent is always a ResolvedAgentTemplate: the loader resolves
+    # a default at config-load time, and create_agent / reinit_agent
+    # already _replace'd it from the DB row's template when non-default.
+    agent_tmpl = config.agent
 
     return [
         SecretTarget(
