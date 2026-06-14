@@ -876,8 +876,10 @@ def _create_agent_on_vm(
         except Exception as e:
             output.warn(f"agent git credential setup failed: {e}")
 
-    # User install commands.
-    _run_agent_install_commands(agent_target=agent_target, config=config, home=home)
+    # User install commands + per-user identity profile fragment.
+    _run_agent_install_commands(
+        agent_target=agent_target, config=config, home=home, linux_user=linux_user
+    )
 
     # Dotfiles.
     if agent_cfg.dotfiles_source:
@@ -1039,17 +1041,20 @@ def _run_agent_install_commands(
     agent_target: ExecTarget,
     config: Config,
     home: str,
+    linux_user: str,
 ) -> None:
-    """Run user install commands for an agent. Failures warn but do not abort.
+    """Run user install commands for an agent and write the agent's profile
+    fragment. Failures warn but do not abort.
 
     Runs entirely over agent SSH (FRD R1). The agent owns its home, so
-    the PATH-additions profile is written via ``agent_target.write_file``
+    the profile fragment is written via ``agent_target.write_file``
     directly, with no sudo / chown dance.
-    """
-    command_names = config.agent.user_install_commands
-    if not command_names:
-        return
 
+    The profile fragment is written unconditionally (even if there are no
+    install commands and no PATH additions) so that the per-user identity
+    var ``AGENTWORKS_USER`` always lands. Catalog install commands add
+    their ``path`` entries on top.
+    """
     import shlex
 
     from agentworks.catalog import load_catalog
@@ -1058,6 +1063,7 @@ def _run_agent_install_commands(
     catalog = load_catalog(config)
     shell = config.agent.shell
     path_additions: list[str] = []
+    command_names = config.agent.user_install_commands
     total = len(command_names)
 
     for i, name in enumerate(command_names, 1):
@@ -1089,30 +1095,42 @@ def _run_agent_install_commands(
             output.warn(f"agent install command '{name}' failed: {e}")
         path_additions.extend(entry.path)
 
-    # Write PATH additions for the agent
-    if path_additions:
-        from agentworks.vms.initializer import AGENTWORKS_PROFILE
+    # Write the agent's profile fragment (PATH additions + per-user identity).
+    # Written unconditionally so AGENTWORKS_USER always lands; install
+    # commands contribute their PATH entries on top.
+    from agentworks.env import ResourceContext, per_user_identity_env
+    from agentworks.vms.initializer import AGENTWORKS_PROFILE
 
+    if path_additions:
         output.detail(f"Adding {len(path_additions)} PATH entries for agent...")
-        lines = ["# Managed by agentworks -- do not edit"]
-        for p in path_additions:
-            expanded = p.replace("~", "$HOME", 1) if p.startswith("~") else p
-            lines.append(f'export PATH="{expanded}:$PATH"')
-        content = "\n".join(lines) + "\n"
-        try:
-            profile_path = f"{home}/{AGENTWORKS_PROFILE}"
-            agent_target.write_file(profile_path, content, mode="0644")
-            # Source from shell profiles (the agent owns these files; write directly).
-            source_line = f". {profile_path}"
-            rc_files = [f"{home}/.profile", f"{home}/.bashrc"]
-            if shell == "zsh":
-                rc_files.append(f"{home}/.zprofile")
-            for rc in rc_files:
-                agent_target.run(
-                    f"grep -q {AGENTWORKS_PROFILE} {rc} 2>/dev/null || printf '%s\\n' '{source_line}' >> {rc}",
-                )
-        except SSHError as e:
-            output.warn(f"agent PATH configuration failed: {e}")
+    lines = ["# Managed by agentworks -- do not edit"]
+    for p in path_additions:
+        expanded = p.replace("~", "$HOME", 1) if p.startswith("~") else p
+        lines.append(f'export PATH="{expanded}:$PATH"')
+    identity = per_user_identity_env(
+        ResourceContext(
+            vm_name="",  # unused by per_user_identity_env
+            platform="",
+            user=linux_user,
+        )
+    )
+    for key, value in identity.items():
+        lines.append(f'export {key}={shlex.quote(value)}')
+    content = "\n".join(lines) + "\n"
+    try:
+        profile_path = f"{home}/{AGENTWORKS_PROFILE}"
+        agent_target.write_file(profile_path, content, mode="0644")
+        # Source from shell profiles (the agent owns these files; write directly).
+        source_line = f". {profile_path}"
+        rc_files = [f"{home}/.profile", f"{home}/.bashrc"]
+        if shell == "zsh":
+            rc_files.append(f"{home}/.zprofile")
+        for rc in rc_files:
+            agent_target.run(
+                f"grep -q {AGENTWORKS_PROFILE} {rc} 2>/dev/null || printf '%s\\n' '{source_line}' >> {rc}",
+            )
+    except SSHError as e:
+        output.warn(f"agent profile configuration failed: {e}")
 
 
 def _run_agent_mise_setup(

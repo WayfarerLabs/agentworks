@@ -177,35 +177,42 @@ configured to accept SetEnv'd vars from agentworks, and sudoers is configured to
 agentworks-managed vars across user switches. Provisioning shells and agent setup shells inject
 env+secrets via the SSH SetEnv path established in Phase 3.
 
-- [ ] `cli/agentworks/vms/initializer.py`:
-  - New helper `_write_agentworks_identity_profile(target, ctx)` writes
+- [x] `cli/agentworks/vms/initializer.py`:
+  - New helper `_write_agentworks_identity_profile(target, identity_env, logger)` writes
     `/etc/profile.d/agentworks-identity.sh` AND the matching block in `/etc/zsh/zprofile` (mirrors
     the existing `AGENTWORKS_NERF_HOME` install pattern). Contents are the VM-stable subset:
-    `AGENTWORKS_VM`, `AGENTWORKS_VM_HOST` (when applicable), `AGENTWORKS_PLATFORM`.
-  - Extend `_write_agentworks_profile(target, ...)` (per-user fragment, existing) to include
-    `AGENTWORKS_USER`.
-  - **New helper `_write_sshd_accept_env(target)`** writes
+    `AGENTWORKS_VM`, `AGENTWORKS_VM_HOST` (when applicable), `AGENTWORKS_PLATFORM`. Reinit-safe
+    (sed-strips the prior agentworks-identity block from `/etc/zsh/zprofile` before re-appending).
+  - Extend `_write_agentworks_profile(target, ...)` (per-user fragment, existing) with an optional
+    `identity_env` kwarg so `AGENTWORKS_USER` lands in the per-user profile
+    `~/.agentworks-profile.sh`.
+  - **New helper `_write_sshd_accept_env(target, logger)`** writes
     `/etc/ssh/sshd_config.d/50-agentworks-accept-env.conf` with `AcceptEnv *`, validates with
-    `sshd -t`, and restarts sshd. Per the `sshd-accept-env-wildcard` ADR.
-  - **New helper `_write_sudoers_env_keep(target)`** writes `/etc/sudoers.d/50-agentworks-env-keep`
-    with `Defaults env_keep += "AGENTWORKS_* AW_*"`, validated with `visudo -c` before install. Lets
-    agentworks-managed vars survive the sudo boundary in console add-shell agent panes and any
-    future sudo path.
-  - Provisioning shells in Phase A / B pass env via `ExecTarget.run(env=...)` (uses the SetEnv path;
-    no shell prelude composition). VM-stable + per-user identity vars are NOT in the SetEnv payload
-    during init (the profile fragments aren't written yet at Phase A start; the SetEnv payload
-    carries operator-defined env for `[admin.env]` and the like).
-- [ ] `cli/agentworks/agents/manager.py._create_agent_on_vm`:
-  - Phase 1 (admin bootstrap): `_write_agentworks_profile` for the new agent's user gets
-    `AGENTWORKS_USER`. SSH commands during admin bootstrap pass env via `target.run(env=...)` using
-    the admin scope (`compose_env(..., admin=..., vm=...)`).
-  - Phase 2 (agent self-configure): every `agent_target.run(...)` call passes env using the agent
-    scope (`compose_env(..., agent=..., vm=...)`).
-  - `_run_agent_install_commands` and `_run_agent_mise_setup` accept and use a per-call env dict,
-    threaded through to the underlying SSH layer.
-- [ ] Tests: env assembly per phase; idempotent rewrites of profile fragments and sshd*config.d /
-      sudoers.d files; `AGENTWORKS*\*`vars present in`env`output via raw    `ssh
-      awvm--<vm>`(profile-fragment path) AND via`agw vm exec env` (SetEnv path).
+    `sshd -t`, and reloads sshd (systemctl). Per the `sshd-accept-env-wildcard` ADR.
+  - **New helper `_write_sudoers_env_keep(target, logger)`** writes
+    `/etc/sudoers.d/50-agentworks-env-keep` with `Defaults env_keep += "AGENTWORKS_* AW_*"`,
+    validated with `visudo -cf` against a staging file before promotion. Lets agentworks-managed
+    vars survive the sudo boundary in console add-shell agent panes.
+  - All four helpers wired into `_phase_b_setup` after `apply_vm_hardening`.
+- [x] `cli/agentworks/agents/manager.py._create_agent_on_vm`:
+  - Per-user identity (`AGENTWORKS_USER`) now lands in the agent's `~/.agentworks-profile.sh` via
+    the rewritten `_run_agent_install_commands`. The profile fragment is written unconditionally so
+    AGENTWORKS_USER lands even when an agent has no user install commands.
+- [ ] **Follow-up in this phase**: thread env through provisioning / agent-setup SSH calls via
+      `target.run(env=...)`. Per the SDD this should land in Phase 4. Splitting it off as a
+      follow-up commit on top of this work so the four helpers + profile-fragment work can be
+      reviewed independently from the per-call-site env threading. The follow-up will:
+  - Compute admin env once at the head of `_phase_b_setup` via `compose_env` with the admin / vm
+    scopes and thread to user-install-command runners, mise installers, claude plugin installer, and
+    dotfiles installer.
+  - Phase 1 of `_create_agent_on_vm` (admin bootstrap): SSH commands during admin bootstrap pass env
+    via `target.run(env=...)` using the admin scope.
+  - Phase 2 of `_create_agent_on_vm` (agent self-configure): every `agent_target.run(...)` call
+    passes env using the agent scope.
+- [x] Tests: tests/test_initializer_env_fragments.py (12 tests). Pin: identity-profile system-wide +
+      zprofile mirror with reinit-safe sed-strip; sshd AcceptEnv validates before reload; sudoers
+      env_keep validates with visudo and rolls back on failure; per-user profile carries
+      AGENTWORKS_USER when identity_env is passed; backward-compat when identity_env is omitted.
 
 Definition of done: a fresh `vm create` + `agent create` produces a VM where any shell on it (via
 agentworks or via raw `ssh awvm--vm`) sees the expected `AGENTWORKS_*` identity vars, sshd accepts
