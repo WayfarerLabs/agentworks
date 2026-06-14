@@ -373,6 +373,120 @@ def test_console_add_shell_eager_resolve_fires_before_db_update(
     db.close()
 
 
+def test_vm_create_eager_resolve_fires_before_db_insert(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """create_vm must call resolve_for_command BEFORE db.insert_vm. A
+    failed eager-resolve leaves no DB row behind."""
+    from agentworks.vms import manager as vm_manager
+
+    db = Database(tmp_path / "test.db")
+
+    # Stub the upfront resolvers so the SimpleNamespace config below
+    # doesn't need their fields.
+    monkeypatch.setattr(vm_manager, "verify_tailscale_available", lambda: None)
+    monkeypatch.setattr(
+        vm_manager, "resolve_git_credential_providers", lambda *a, **k: {}
+    )
+    monkeypatch.setattr(vm_manager, "verify_git_credential_auth", lambda *a, **k: None)
+    monkeypatch.setattr(vm_manager, "_collect_secrets", lambda *a, **k: (None, {}))
+    monkeypatch.setattr(vm_manager, "_vm_secret_target", lambda *a, **k: object())
+
+    def _explode(*args: object, **kwargs: object) -> None:
+        raise SecretUnavailableError(
+            "no active backend could resolve secret(s): api-key",
+            hint="api-key: tried env_var",
+        )
+
+    monkeypatch.setattr("agentworks.secrets.resolve_for_command", _explode)
+
+    config = SimpleNamespace(
+        vm=SimpleNamespace(
+            name="default", env={}, cpus=2, memory=4, disk=20,
+            azure_vm_size="x", swap=2,
+        ),
+        admin=SimpleNamespace(env={}, username="admin", git_credentials=[]),
+        defaults=SimpleNamespace(platform=None, vm_host=None),
+        azure=None,
+        proxmox=None,
+        vm_templates={"default": object()},
+    )
+
+    # Patch resolve_template to return config.vm so the early template
+    # _replace pass through is a no-op for this test.
+    monkeypatch.setattr(
+        "agentworks.vms.templates.resolve_template", lambda *a, **k: config.vm
+    )
+
+    with pytest.raises(SecretUnavailableError, match="api-key"):
+        vm_manager.create_vm(
+            db,
+            config,  # type: ignore[arg-type]
+            name="vm1",
+        )
+
+    # No DB row was inserted.
+    assert db.get_vm("vm1") is None
+    db.close()
+
+
+def test_vm_reinit_eager_resolve_fires_before_ssh_target_build(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """reinit_vm must call resolve_for_command BEFORE building the
+    Tailscale SSH target / running initialize_vm. A failed eager-resolve
+    leaves the VM untouched (no SSH session opened)."""
+    from agentworks.db import InitStatus, ProvisioningStatus
+    from agentworks.vms import manager as vm_manager
+
+    db = _seed_basic_db(tmp_path)
+    # Mark the VM as fully provisioned + with a tailscale_host so reinit
+    # proceeds past its state guards.
+    db._conn.execute(
+        "UPDATE vms SET provisioning_status = ?, init_status = ?, tailscale_host = ? "
+        "WHERE name = 'vm1'",
+        (ProvisioningStatus.COMPLETE.value, InitStatus.COMPLETE.value, "100.64.0.5"),
+    )
+    db._conn.commit()
+
+    monkeypatch.setattr(vm_manager, "verify_tailscale_available", lambda: None)
+    monkeypatch.setattr(
+        vm_manager, "resolve_git_credential_providers", lambda *a, **k: {}
+    )
+    monkeypatch.setattr(vm_manager, "verify_git_credential_auth", lambda *a, **k: None)
+    monkeypatch.setattr(vm_manager, "_vm_secret_target", lambda *a, **k: object())
+
+    ssh_target_called: list[bool] = []
+
+    def _track_ssh_target(*args: object, **kwargs: object) -> object:
+        ssh_target_called.append(True)
+        return SimpleNamespace(run=lambda *a, **k: None)
+
+    monkeypatch.setattr("agentworks.ssh.admin_exec_target", _track_ssh_target)
+
+    def _explode(*args: object, **kwargs: object) -> None:
+        raise SecretUnavailableError(
+            "no active backend could resolve secret(s): api-key",
+            hint="api-key: tried env_var",
+        )
+
+    monkeypatch.setattr("agentworks.secrets.resolve_for_command", _explode)
+
+    config = SimpleNamespace(
+        vm=SimpleNamespace(name="default", env={}),
+        admin=SimpleNamespace(env={}, git_credentials=[]),
+        vm_templates={"default": object()},
+    )
+
+    with pytest.raises(SecretUnavailableError, match="api-key"):
+        vm_manager.reinit_vm(db, config, "vm1")  # type: ignore[arg-type]
+
+    assert ssh_target_called == [], (
+        "eager-resolve must precede admin_exec_target; no SSH session opened"
+    )
+    db.close()
+
+
 def test_console_add_shell_promotes_admin_for_admin_mode_session(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

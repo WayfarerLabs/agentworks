@@ -34,7 +34,25 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database, VMRow
     from agentworks.git_credentials.base import GitCredentialProvider
+    from agentworks.secrets import SecretTarget
     from agentworks.vms.base import VMProvisioner
+
+
+def _vm_secret_target(config: Config) -> SecretTarget:
+    """Build the SecretTarget for VM provisioning / reinit.
+
+    VM-level commands open admin shells on the VM, applying admin scope
+    over the resolved vm-template scope per FRD R2. No workspace / agent
+    / session context (those layers are created by their own commands
+    with their own eager-resolve calls).
+    """
+    from agentworks.secrets import SecretTarget
+
+    return SecretTarget(
+        vm=config.vm.env,
+        admin=config.admin.env,
+        label="vm",
+    )
 
 
 @contextlib.contextmanager
@@ -179,6 +197,16 @@ def create_vm(
 
     # Collect secrets upfront so the user isn't interrupted mid-provisioning
     tailscale_auth_key, git_tokens = _collect_secrets(providers, vm_name)
+
+    # Eager-prompting orchestration (FRD R4 / Phase 6): resolve every
+    # secret referenced by the admin / vm env chain BEFORE the DB insert
+    # or any SSH-driven provisioning. Non-interactive failures surface
+    # as SecretUnavailableError with no partial state to clean up.
+    # The legacy _collect_secrets above will eventually migrate into
+    # this path via the extra_decls hook.
+    from agentworks.secrets import resolve_for_command
+
+    resolve_for_command([_vm_secret_target(config)], config)
 
     # Create DB record with as-provisioned resource values
     db.insert_vm(
@@ -891,6 +919,14 @@ def reinit_vm(
     git_tokens: dict[str, str] = {}
     for cred_name, provider in providers.items():
         git_tokens[cred_name] = provider.obtain_token(name)
+
+    # Eager-prompting orchestration (FRD R4 / Phase 6): resolve every
+    # secret referenced by the admin / vm env chain BEFORE any SSH-
+    # driven reinit work. Non-interactive failures surface as
+    # SecretUnavailableError before the SSH session is opened.
+    from agentworks.secrets import resolve_for_command
+
+    resolve_for_command([_vm_secret_target(config)], config)
 
     # Build Tailscale SSH target with logging
     from agentworks.ssh import SSHLogger
