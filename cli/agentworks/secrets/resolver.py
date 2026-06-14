@@ -5,7 +5,7 @@ See FRD R4 and HLA "Secret model" / "Eager prompting flow" for the design.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from agentworks.errors import ConfigError, SecretUnavailableError
 
@@ -63,6 +63,33 @@ class SecretResolver:
             if s.would_attempt(secret):
                 return s
         return None
+
+    def preview_resolution(
+        self,
+        secret: SecretDecl,
+    ) -> tuple[Literal["available", "prompt", "unreachable"], str | None]:
+        """Side-effect-free preview of how the chain would resolve ``secret``.
+
+        Walks the chain in precedence order. For each non-prompt source that
+        would attempt the secret, calls ``get(secret)`` and returns the kind
+        on the first non-None result. If the walk reaches a prompt source
+        before any value is available, returns that prompt source's kind; the
+        actual prompt is never emitted from this method. If no source would
+        produce a value or prompt, returns ``("unreachable", None)``.
+
+        Used by ``agw doctor`` to surface the FRD R6 would-prompt preview:
+        operators learn up front which secrets would force an interactive
+        prompt at command time vs. which would resolve silently from a
+        non-interactive backend.
+        """
+        for source in self._sources:
+            if source.kind == "prompt":
+                return ("prompt", source.kind)
+            if not source.would_attempt(secret):
+                continue
+            if source.get(secret) is not None:
+                return ("available", source.kind)
+        return ("unreachable", None)
 
     def resolve_all(self, secrets: list[SecretDecl]) -> dict[str, str]:
         """Batch-resolve every secret through the chain.

@@ -19,6 +19,13 @@ if TYPE_CHECKING:
     from agentworks.env.entry import EnvEntry
 
 
+# Marker phrase emitted by ``_parse_env_table`` in config.py for
+# AGENTWORKS_* identity overrides. Used by ``_check_config`` (to
+# suppress) and ``_check_env`` (to re-surface in the more specific
+# Env group) so the warning appears once and only once per run.
+_IDENTITY_ISSUE_MARKER = "sets agentworks-managed identity variable"
+
+
 class Status(Enum):
     OK = "ok"
     INFO = "info"
@@ -230,9 +237,15 @@ def _check_config() -> tuple[HealthGroup, Config | None]:
         g.fail("Config", "failed to load")
         return g, None
 
-    for issue in config.config_issues:
+    # Identity-override issues are surfaced in the more specific Env group
+    # (see ``_check_env``); skip them here to avoid double-reporting.
+    config_issues = [
+        issue for issue in config.config_issues
+        if _IDENTITY_ISSUE_MARKER not in issue
+    ]
+    for issue in config_issues:
         g.warn("Config", issue)
-    if not config.config_issues:
+    if not config_issues:
         g.ok("Config is valid")
 
     # SSH keys
@@ -361,18 +374,29 @@ def _check_secrets(config: Config) -> HealthGroup:
     active_backend_kinds = set(config.secret_config_data.backends)
 
     resolver = config.secret_resolver
+    builtin_kinds = {"env_var", "prompt"}
     for name, decl in sorted(config.secrets.items()):
-        # Would-prompt / would-attempt preview.
-        first = resolver.first_attempting_source(decl)
-        if first is None:
+        # Would-prompt preview (FRD R6): probe non-prompt sources in
+        # precedence order and report whether the secret would resolve
+        # silently or fall through to an interactive prompt.
+        outcome, kind = resolver.preview_resolution(decl)
+        if outcome == "available":
+            g.ok(
+                f"secret {name!r}",
+                f"available via {kind} (no prompt needed)",
+            )
+        elif outcome == "prompt":
+            g.warn(
+                f"secret {name!r}",
+                "would prompt at command time (no non-interactive backend has a value)",
+            )
+        else:  # unreachable
+            # Defensive: ``_build_secret_resolver`` raises at config-load
+            # time for any secret that no active source would attempt, so
+            # reaching this branch implies loader/resolver skew.
             g.fail(
                 f"secret {name!r}",
                 "no active backend would attempt to resolve it",
-            )
-        else:
-            g.ok(
-                f"secret {name!r}",
-                f"first attempting backend: {first.kind}",
             )
 
         # Soft-skip findings.
@@ -390,22 +414,21 @@ def _check_secrets(config: Config) -> HealthGroup:
                 "declared but not referenced by any env entry",
             )
 
-        # backend_mappings sanity: kinds present in mappings but not in
-        # [secret_backends.*] are errors; kinds declared but not in
-        # [secret_config].backends are warnings (the mapping has no
-        # effect at the moment but the operator may be intentionally
-        # keeping it for a temporarily disabled backend).
+        # backend_mappings sanity:
+        # - kind not declared in [secret_backends.*] AND not a built-in
+        #   (env_var / prompt) -> error (kind does not exist in this config).
+        # - kind declared (or built-in) but not in [secret_config].backends
+        #   -> warning (mapping has no effect; operator may be staging a
+        #   disabled backend).
         for kind in decl.backend_mappings:
-            # env_var / prompt are built-in and don't require a
-            # [secret_backends.<kind>] section, so don't treat their
-            # absence from declared_backend_kinds as a fault.
-            if kind in declared_backend_kinds:
+            if kind in declared_backend_kinds or kind in builtin_kinds:
                 if kind not in active_backend_kinds:
                     g.warn(
                         f"secret {name!r} maps {kind}",
-                        "backend declared but not active in [secret_config].backends",
+                        "backend not active in [secret_config].backends; "
+                        "mapping has no effect in the current configuration",
                     )
-            elif kind not in {"env_var", "prompt"} | active_backend_kinds:
+            else:
                 g.fail(
                     f"secret {name!r} maps {kind}",
                     f"no [secret_backends.{kind}] section declared",
@@ -419,37 +442,45 @@ def _check_env(config: Config) -> HealthGroup:
 
     Surfaces the config-load warnings already collected in
     ``config.config_issues`` (e.g. AGENTWORKS_* overrides) as env-group
-    findings, and flags keys set at multiple scopes as informational
-    (the operator can refer to ``agw env show`` for the winning value).
+    findings, and flags keys set at multiple FRD-R2 scopes as
+    informational (the operator can refer to ``agw env show`` for the
+    winning value).
     """
     g = HealthGroup("Env")
 
-    # Per-scope key catalog (just for cross-scope conflict reporting).
-    key_scopes: dict[str, list[str]] = {}
+    # Track which FRD R2 scopes (vm / workspace / admin / agent / session)
+    # set each key. Templates within a single scope kind are mutually
+    # exclusive at runtime (only one VM template applies per VM), so we
+    # collapse same-kind sources into a single scope label here to avoid
+    # spurious "multiple scopes" reports.
+    key_scopes: dict[str, set[str]] = {}
 
     def _record(env: dict[str, EnvEntry] | None, scope: str) -> None:
         if not env:
             return
         for key in env:
-            key_scopes.setdefault(key, []).append(scope)
+            key_scopes.setdefault(key, set()).add(scope)
 
     _record(config.admin.env, "admin")
-    for vt_name, vt in config.vm_templates.items():
-        _record(vt.env, f"vm_templates.{vt_name}")
-    for wt_name, wt in config.workspace_templates.items():
-        _record(wt.env, f"workspace_templates.{wt_name}")
-    for at_name, at in config.agent_templates.items():
-        _record(at.env, f"agent_templates.{at_name}")
-    for st_name, st in config.session_templates.items():
-        _record(st.env, f"session_templates.{st_name}")
+    for vt in config.vm_templates.values():
+        _record(vt.env, "vm")
+    for wt in config.workspace_templates.values():
+        _record(wt.env, "workspace")
+    for at in config.agent_templates.values():
+        _record(at.env, "agent")
+    for st in config.session_templates.values():
+        _record(st.env, "session")
 
-    # Re-surface load-time config issues that name AGENTWORKS_* identity
-    # overrides (per_parse_env_table records them on config_issues at
-    # load time; doctor reflects them as warn findings so they stay
-    # visible across runs).
+    # Re-surface load-time config issues that flag AGENTWORKS_* identity
+    # overrides. ``_parse_env_table`` records them on ``config_issues`` at
+    # load time with the marker phrase "sets agentworks-managed identity
+    # variable"; doctor reflects them as warn findings so they stay
+    # visible across runs. The Configuration group filters them out (see
+    # ``_check_config``) so the warning appears once, in the more specific
+    # Env group.
     identity_issues = [
         issue for issue in config.config_issues
-        if "identity variable" in issue or "AGENTWORKS_" in issue
+        if _IDENTITY_ISSUE_MARKER in issue
     ]
     for issue in identity_issues:
         g.warn("Identity override", issue)
@@ -457,7 +488,7 @@ def _check_env(config: Config) -> HealthGroup:
     # Multi-scope key reports (informational; ``agw env show`` is the
     # authoritative tool for the winning value per context).
     multi_scope = [
-        (key, scopes) for key, scopes in sorted(key_scopes.items())
+        (key, sorted(scopes)) for key, scopes in sorted(key_scopes.items())
         if len(scopes) > 1
     ]
     if multi_scope:

@@ -497,15 +497,15 @@ Key sections:
 ### Environment Variables and Secrets
 
 Env tables can be declared at five scopes; for any given session the merged value is computed in
-this precedence order (later wins; identity wins last):
+this precedence order (highest scope wins; identity vars win over everything):
 
 ```text
-vm < workspace < admin|agent < session < AGENTWORKS_* identity
+session > (agent | admin) > workspace > vm           (AGENTWORKS_* identity overrides all)
 ```
 
-Admin and agent scopes are mutually exclusive: a sudo'd admin command sees admin scope; an
-agent-mode session sees agent scope. Each scope is a TOML table mapping env-var name to either a
-plaintext string or `{ secret = "<name>" }`:
+Admin and agent scopes are mutually exclusive: a shell opened as the admin user (e.g.
+`agw vm shell`) sees admin scope; an agent-mode session sees agent scope. Each scope is a TOML table
+mapping env-var name to either a plaintext string or `{ secret = "<name>" }`:
 
 ```toml
 [vm_templates.default.env]
@@ -532,8 +532,12 @@ agw env show --session my-session              # secrets redacted as <from secre
 agw env show --vm my-vm --reveal-secrets       # resolves through the active backend chain
 ```
 
-`agw doctor` validates the env + secrets configuration: dangling secret references, attempts to
-override `AGENTWORKS_*` identity vars, and cross-scope key conflicts.
+`agw doctor` surfaces FRD R6 findings for the env + secrets configuration: for each declared secret,
+whether it would resolve silently (e.g. from an `AW_SECRET_<NAME>` env var) or fall through to an
+interactive prompt at command time; unused secret declarations; `backend_mappings.<kind>` entries
+pointing at an undeclared or inactive backend; attempts to override `AGENTWORKS_*` identity vars;
+and informational cross-scope key conflicts. Broken `{ secret = "..." }` references are caught
+earlier as a hard config-load error before doctor runs.
 
 ### Mise (Polyglot Tool Manager)
 

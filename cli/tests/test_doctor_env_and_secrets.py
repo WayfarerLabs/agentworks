@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from agentworks.config import load_config
 from agentworks.doctor import Status, _check_env, _check_secrets
 
@@ -47,7 +49,13 @@ def test_no_secrets_returns_info(tmp_path: Path) -> None:
     assert "none" in (g.checks[0].message or "")
 
 
-def test_secret_with_active_backend_reports_first_attempting(tmp_path: Path) -> None:
+def test_secret_resolved_silently_reports_ok(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When the operator has AW_SECRET_<NAME> set in env, the would-prompt
+    preview reports the secret as available (no prompt needed) and names
+    the kind that would provide it."""
+    monkeypatch.setenv("AW_SECRET_SHARED", "from-operator-env")
     cfg = _write_config(
         tmp_path,
         extras="""
@@ -65,9 +73,40 @@ backends = ["env_var", "prompt"]
     g = _check_secrets(config)
     msgs = [(c.status, c.name, c.message) for c in g.checks]
     assert any(
-        status == Status.OK and "shared" in name and "env_var" in (msg or "")
+        status == Status.OK
+        and "shared" in name
+        and "available via env_var" in (msg or "")
         for status, name, msg in msgs
     ), msgs
+
+
+def test_secret_would_prompt_when_no_non_interactive_value(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When no non-interactive backend has a value, the preview reports
+    that the secret would prompt at command time (FRD R6 would-prompt
+    preview)."""
+    monkeypatch.delenv("AW_SECRET_SHARED", raising=False)
+    cfg = _write_config(
+        tmp_path,
+        extras="""
+[admin.env]
+TOKEN = { secret = "shared" }
+
+[secrets.shared]
+description = "Shared API token"
+
+[secret_config]
+backends = ["env_var", "prompt"]
+""",
+    )
+    config = load_config(cfg, warn_issues=False)
+    g = _check_secrets(config)
+    warns = [c for c in g.checks if c.status == Status.WARN]
+    assert any(
+        "shared" in c.name and "would prompt" in (c.message or "")
+        for c in warns
+    ), [(c.name, c.message) for c in warns]
 
 
 def test_unused_secret_declaration_warns(tmp_path: Path) -> None:
@@ -136,6 +175,90 @@ backends = ["env_var"]
     assert not any("maps env_var" in c.name for c in warns)
 
 
+def test_mapping_to_undeclared_kind_fails(tmp_path: Path) -> None:
+    """A backend_mappings entry referencing a kind that has no
+    [secret_backends.<kind>] section AND is not a built-in (env_var /
+    prompt) is reported as an error (FRD R6)."""
+    cfg = _write_config(
+        tmp_path,
+        extras="""
+[admin.env]
+TOKEN = { secret = "shared" }
+
+[secrets.shared]
+description = "shared token"
+backend_mappings.bogusvault = "x"
+
+[secret_config]
+backends = ["env_var", "prompt"]
+""",
+    )
+    config = load_config(cfg, warn_issues=False)
+    g = _check_secrets(config)
+    fails = [c for c in g.checks if c.status == Status.FAIL]
+    assert any(
+        "maps bogusvault" in c.name and "no [secret_backends.bogusvault]" in (c.message or "")
+        for c in fails
+    ), [(c.name, c.message) for c in fails]
+
+
+def test_mapping_to_declared_but_inactive_kind_warns(tmp_path: Path) -> None:
+    """A backend_mappings entry referencing a kind that IS declared in
+    [secret_backends.*] but NOT listed in [secret_config].backends is
+    reported as a warning (mapping has no effect)."""
+    cfg = _write_config(
+        tmp_path,
+        extras="""
+[admin.env]
+TOKEN = { secret = "shared" }
+
+[secrets.shared]
+description = "shared token"
+backend_mappings.onepassword = "op://Personal/x/y"
+
+[secret_backends.onepassword]
+
+[secret_config]
+backends = ["env_var", "prompt"]
+""",
+    )
+    config = load_config(cfg, warn_issues=False)
+    g = _check_secrets(config)
+    warns = [c for c in g.checks if c.status == Status.WARN]
+    assert any(
+        "maps onepassword" in c.name and "not active" in (c.message or "")
+        for c in warns
+    ), [(c.name, c.message) for c in warns]
+
+
+def test_builtin_mapping_warns_when_builtin_not_active(tmp_path: Path) -> None:
+    """env_var and prompt don't need a [secret_backends.*] section, but a
+    backend_mappings.env_var entry is still meaningless if env_var isn't
+    listed in [secret_config].backends. The exemption for built-ins must
+    not swallow the not-active warning."""
+    cfg = _write_config(
+        tmp_path,
+        extras="""
+[admin.env]
+TOKEN = { secret = "shared" }
+
+[secrets.shared]
+description = "shared token"
+backend_mappings.env_var = "CUSTOM_NAME"
+
+[secret_config]
+backends = ["prompt"]
+""",
+    )
+    config = load_config(cfg, warn_issues=False)
+    g = _check_secrets(config)
+    warns = [c for c in g.checks if c.status == Status.WARN]
+    assert any(
+        "maps env_var" in c.name and "not active" in (c.message or "")
+        for c in warns
+    ), [(c.name, c.message) for c in warns]
+
+
 # ---------------------------------------------------------------------------
 # _check_env
 # ---------------------------------------------------------------------------
@@ -188,6 +311,31 @@ EDITOR = "emacs"
     g = _check_env(config)
     info = [c for c in g.checks if c.status == Status.INFO]
     assert any("EDITOR" in c.name and "multiple scopes" in (c.message or "") for c in info)
+
+
+def test_check_env_does_not_flag_two_templates_same_scope_as_conflict(
+    tmp_path: Path,
+) -> None:
+    """Two VM templates that both set EDITOR are mutually exclusive at
+    runtime (only one applies per VM), so doctor must NOT report this as
+    a multi-scope conflict. Same-scope-kind templates collapse to one
+    scope label (FRD R2 scopes: vm/workspace/admin/agent/session)."""
+    cfg = _write_config(
+        tmp_path,
+        extras="""
+[vm_templates.default.env]
+EDITOR = "vim"
+
+[vm_templates.heavy.env]
+EDITOR = "emacs"
+""",
+    )
+    config = load_config(cfg, warn_issues=False)
+    g = _check_env(config)
+    info = [c for c in g.checks if c.status == Status.INFO]
+    assert not any("EDITOR" in c.name and "multiple scopes" in (c.message or "") for c in info), (
+        [(c.name, c.message) for c in info]
+    )
 
 
 def test_check_env_quietly_reports_clean_no_conflicts(tmp_path: Path) -> None:

@@ -261,7 +261,9 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # [session_templates.custom-tool]
 # command = "my-tool --flag"
 # description = "Custom tool"
-# env = { MY_VAR = "value" }               # environment variables to set
+#
+# [session_templates.custom-tool.env]
+# MY_VAR = "value"
 
 # --- Session configuration ---
 # Non-template session settings.
@@ -278,8 +280,9 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 #
 #   vm < workspace < admin|agent < session < AGENTWORKS_* identity
 #
-# Admin and agent scopes are mutually exclusive: a sudo'd admin command (e.g.
-# `agw vm shell`) sees admin scope; an agent-mode session sees agent scope.
+# Admin and agent scopes are mutually exclusive: a shell opened as the admin
+# user (e.g. `agw vm shell`) sees admin scope; an agent-mode session sees
+# agent scope.
 #
 # Each scope is a TOML table whose keys are env-var names. Values are either:
 #   - a string ("value") for plaintext, or
@@ -311,11 +314,11 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # CLAUDE_LOG_LEVEL = "info"
 
 # --- Secret declarations ---
-# Every `{ secret = "<name>" }` reference must point to a declaration. A
-# declaration may be empty; the only required form is the `[secrets.<name>]`
-# header itself. `description` and `hint` improve prompts/diagnostics.
-# `backend_mappings.<kind>` overrides the backend's default identifier for
-# this one secret (or sets `false` to opt out of that backend entirely).
+# Every `{ secret = "<name>" }` reference must point to a declaration.
+# `description` is required and shown in prompts and `agw doctor`; `hint`
+# (optional) is shown alongside the prompt. `backend_mappings.<kind>`
+# (optional) overrides that backend's default identifier for this one
+# secret, or sets `false` to opt out of that backend entirely.
 
 # [secrets.npm-token]
 # description = "npm registry token"
