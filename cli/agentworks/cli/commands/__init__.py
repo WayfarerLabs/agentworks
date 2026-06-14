@@ -19,5 +19,6 @@ from . import session  # noqa: F401
 from . import console  # noqa: F401
 from . import catalog  # noqa: F401
 from . import config  # noqa: F401
+from . import env  # noqa: F401
 from . import completion  # noqa: F401
 from . import doctor  # noqa: F401
