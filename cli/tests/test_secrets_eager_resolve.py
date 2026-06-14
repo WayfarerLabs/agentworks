@@ -487,6 +487,130 @@ def test_vm_reinit_eager_resolve_fires_before_ssh_target_build(
     db.close()
 
 
+def test_agent_create_eager_resolve_fires_before_ssh_setup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """create_agent must call resolve_for_command BEFORE the SSH-driven
+    _create_agent_on_vm runs. A failed eager-resolve leaves no agent
+    row inserted (the DB insert happens AFTER _create_agent_on_vm
+    succeeds) and no on-VM user created."""
+    from agentworks.agents import manager as agent_manager
+
+    db = _seed_basic_db(tmp_path)
+
+    monkeypatch.setattr(
+        agent_manager, "_collect_agent_credentials", lambda *a, **k: {}
+    )
+    create_called: list[bool] = []
+    monkeypatch.setattr(
+        agent_manager,
+        "_create_agent_on_vm",
+        lambda *a, **k: create_called.append(True),
+    )
+    monkeypatch.setattr(
+        agent_manager, "_agent_secret_targets", lambda *a, **k: [object(), object()]
+    )
+
+    def _explode(*args: object, **kwargs: object) -> None:
+        raise SecretUnavailableError(
+            "no active backend could resolve secret(s): api-key",
+            hint="api-key: tried env_var",
+        )
+
+    monkeypatch.setattr("agentworks.secrets.resolve_for_command", _explode)
+
+    class _Tmpl:
+        name = "default"
+        env: dict[str, str] = {}
+
+    monkeypatch.setattr(
+        "agentworks.agents.templates.resolve_template", lambda *a, **k: _Tmpl()
+    )
+
+    config = SimpleNamespace(
+        agent=_Tmpl(),
+        vm=SimpleNamespace(name="default", env={}),
+        admin=SimpleNamespace(env={}),
+        vm_templates={"default": object()},
+        agent_templates={"default": _Tmpl()},
+    )
+
+    with pytest.raises(SecretUnavailableError, match="api-key"):
+        agent_manager.create_agent(
+            db,
+            config,  # type: ignore[arg-type]
+            name="a1",
+            vm_name="vm1",
+        )
+
+    assert create_called == [], (
+        "eager-resolve must precede _create_agent_on_vm; SSH setup ran anyway"
+    )
+    assert db.get_agent("a1") is None
+    db.close()
+
+
+def test_agent_reinit_eager_resolve_fires_before_ssh_setup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """reinit_agent must call resolve_for_command BEFORE _create_agent_on_vm.
+    A failed eager-resolve leaves the existing agent row untouched and
+    no SSH session opened."""
+    from agentworks.agents import manager as agent_manager
+
+    db = _seed_basic_db(tmp_path)
+    db.insert_agent("a1", "vm1", "agt-a1", template="default")
+
+    monkeypatch.setattr(
+        agent_manager, "_collect_agent_credentials", lambda *a, **k: {}
+    )
+    create_called: list[bool] = []
+    monkeypatch.setattr(
+        agent_manager,
+        "_create_agent_on_vm",
+        lambda *a, **k: create_called.append(True),
+    )
+    monkeypatch.setattr(
+        agent_manager, "_agent_secret_targets", lambda *a, **k: [object(), object()]
+    )
+
+    def _explode(*args: object, **kwargs: object) -> None:
+        raise SecretUnavailableError(
+            "no active backend could resolve secret(s): api-key",
+            hint="api-key: tried env_var",
+        )
+
+    monkeypatch.setattr("agentworks.secrets.resolve_for_command", _explode)
+
+    class _Tmpl:
+        name = "default"
+        env: dict[str, str] = {}
+
+    monkeypatch.setattr(
+        "agentworks.agents.templates.resolve_template", lambda *a, **k: _Tmpl()
+    )
+
+    config = SimpleNamespace(
+        agent=_Tmpl(),
+        vm=SimpleNamespace(name="default", env={}),
+        admin=SimpleNamespace(env={}),
+        vm_templates={"default": object()},
+        agent_templates={"default": _Tmpl()},
+    )
+
+    with pytest.raises(SecretUnavailableError, match="api-key"):
+        agent_manager.reinit_agent(
+            db,
+            config,  # type: ignore[arg-type]
+            name="a1",
+        )
+
+    assert create_called == [], (
+        "eager-resolve must precede _create_agent_on_vm; SSH setup ran anyway"
+    )
+    db.close()
+
+
 def test_console_add_shell_promotes_admin_for_admin_mode_session(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

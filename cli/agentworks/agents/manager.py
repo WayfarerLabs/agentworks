@@ -22,6 +22,7 @@ if TYPE_CHECKING:
     from agentworks.catalog import UserInstallCommandEntry
     from agentworks.config import Config
     from agentworks.db import AgentRow, Database, VMRow, WorkspaceRow
+    from agentworks.secrets import SecretTarget
     from agentworks.ssh import ExecTarget, SSHLogger
 
 AGENT_PREFIX = "agt-"
@@ -37,6 +38,42 @@ def derive_linux_user(agent_name: str) -> str:
     used at agent-create time.
     """
     return f"{AGENT_PREFIX}{agent_name}"
+
+
+def _agent_secret_targets(config: Config, vm: VMRow) -> list[SecretTarget]:
+    """Build the SecretTarget list for agent create / reinit.
+
+    Agent setup runs across two SSH phases (FRD R5):
+
+    - Phase 1: admin bootstrap. Shells run as the VM admin; scope = vm
+      + admin.
+    - Phase 2: agent self-configure. Shells run as the new agent user;
+      scope = vm + agent.
+
+    Returns one target per phase so the orchestrator unions both scope
+    chains in a single resolve_all batch. The VM scope is the resolved
+    vm-template env (config.vm_templates[vm.template]), NOT the
+    config-time default ``config.vm``: an agent installed on a
+    non-default-template VM must see that VM's actual env.
+    """
+    from agentworks.secrets import SecretTarget
+    from agentworks.vms.templates import resolve_from_dict as _resolve_vm_template
+
+    vm_tmpl = _resolve_vm_template(config.vm_templates, vm.template)
+    agent_tmpl = config.agent  # already resolved by caller if --template was passed
+
+    return [
+        SecretTarget(
+            vm=vm_tmpl.env,
+            admin=config.admin.env,
+            label=f"agent={agent_tmpl.name}/admin-bootstrap",
+        ),
+        SecretTarget(
+            vm=vm_tmpl.env,
+            agent=agent_tmpl.env,
+            label=f"agent={agent_tmpl.name}/self-configure",
+        ),
+    ]
 
 
 def workspace_group(workspace_name: str) -> str:
@@ -134,6 +171,14 @@ def create_agent(
 
     # Collect credentials up front before any SSH work
     git_tokens = _collect_agent_credentials(config)
+
+    # Eager-prompting orchestration (FRD R4 / Phase 6): resolve every
+    # secret referenced by the admin-bootstrap and agent-self-configure
+    # env chains BEFORE any SSH-driven setup. Non-interactive failures
+    # surface as SecretUnavailableError with no partial state to clean up.
+    from agentworks.secrets import resolve_for_command
+
+    resolve_for_command(_agent_secret_targets(config, vm), config)
 
     from agentworks.ssh import SSHLogger
     ssh_logger = SSHLogger(vm.name, "agent-create")
@@ -336,6 +381,14 @@ def reinit_agent(
 
     # Collect credentials up front before any SSH work
     git_tokens = _collect_agent_credentials(config)
+
+    # Eager-prompting orchestration (FRD R4 / Phase 6): resolve every
+    # secret referenced by the admin-bootstrap and agent-self-configure
+    # env chains BEFORE any SSH-driven reinit. Non-interactive failures
+    # surface as SecretUnavailableError before the SSH session is opened.
+    from agentworks.secrets import resolve_for_command
+
+    resolve_for_command(_agent_secret_targets(config, vm), config)
 
     from agentworks.ssh import SSHLogger
     ssh_logger = SSHLogger(vm.name, "agent-reinit")
