@@ -484,12 +484,56 @@ Key sections:
 - `[workspace_templates.*]` -- workspace templates with inheritance
 - `[named_console]` -- named-console layout (tmux preset names + `aw-session-vertical`)
 - `[git_credentials.*]` -- git credential providers (GitHub, Azure DevOps)
+- `[<scope>.env]` -- env vars at vm / workspace / admin / agent / session scope
+- `[secrets.*]` -- secret declarations referenced by `{ secret = "name" }` env entries
+- `[secret_backends.*]` / `[secret_config]` -- active secret backend chain
 - `[apt_sources.*]` -- user-defined third-party apt repositories
 - `[apt_packages.*]` -- user-defined named apt package sets
 - `[system_install_commands.*]` -- user-defined system-level install commands
 - `[user_install_commands.*]` -- user-defined per-user install commands
 - `[azure]` -- Azure-specific settings
 - `[proxmox]` -- Proxmox VE API settings
+
+### Environment Variables and Secrets
+
+Env tables can be declared at five scopes; for any given session the merged value is computed in
+this precedence order (later wins; identity wins last):
+
+```text
+vm < workspace < admin|agent < session < AGENTWORKS_* identity
+```
+
+Admin and agent scopes are mutually exclusive: a sudo'd admin command sees admin scope; an
+agent-mode session sees agent scope. Each scope is a TOML table mapping env-var name to either a
+plaintext string or `{ secret = "<name>" }`:
+
+```toml
+[vm_templates.default.env]
+HTTP_PROXY = "http://proxy:3128"
+NPM_TOKEN = { secret = "npm-token" }
+
+[admin.env]
+EDITOR = "nvim"
+```
+
+Every `{ secret = "<name>" }` reference must point to a `[secrets.<name>]` declaration. Active
+backends (and their precedence order) are listed in `[secret_config].backends`. Today the
+implemented backends are:
+
+- `env_var` -- reads from the operator's process env. Default convention is
+  `AW_SECRET_<UPPER_SNAKE_CASE>`, overridable per secret via
+  `[secrets.<name>].backend_mappings.env_var = "CUSTOM_NAME"`.
+- `prompt` -- interactive prompt; batched at the start of the CLI run.
+
+Inspect the merged result for any context with `agw env show`:
+
+```bash
+agw env show --session my-session              # secrets redacted as <from secret: name>
+agw env show --vm my-vm --reveal-secrets       # resolves through the active backend chain
+```
+
+`agw doctor` validates the env + secrets configuration: dangling secret references, attempts to
+override `AGENTWORKS_*` identity vars, and cross-scope key conflicts.
 
 ### Mise (Polyglot Tool Manager)
 

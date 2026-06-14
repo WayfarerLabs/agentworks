@@ -189,6 +189,13 @@ defined once and stamped many times. The longer-lived resources (VMs and agents)
 [mostly idempotent](docs/guides/idempotency.md) "reinitialization" so that they can be reliably
 evolved over time.
 
+Environment variables and secrets are first-class in the configuration: env tables can be declared
+at vm, workspace, admin, agent, or session scope and merge in a defined precedence order. Secret
+references (`{ secret = "name" }`) resolve through a configurable backend chain (`env_var` reads
+from `AW_SECRET_<NAME>`; `prompt` asks interactively at run time). Use `agw env show` to inspect the
+merged result for any context. See [cli/README.md](cli/README.md#environment-variables-and-secrets)
+for the shape and `agw config sample` for the full reference.
+
 ## Tightly Integrated Tools
 
 In the spirit of opinionated consistency, Agentworks tightly integrates a small set of excellent

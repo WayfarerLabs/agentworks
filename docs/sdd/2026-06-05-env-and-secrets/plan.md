@@ -224,18 +224,18 @@ merged correctly.
 
 Goal: operator-visible commands and docs.
 
-- [ ] `cli/agentworks/cli/commands/env.py`: new `agw env show` command with
+- [x] `cli/agentworks/cli/commands/env.py`: new `agw env show` command with
       `--vm / --workspace / --agent / --session` flags (at least one required; auto-resolve the
       chain from the named entity's DB row) and `--reveal-secrets`. Output precedence-sorted,
       scope-annotated, secret entries redacted by default.
-- [ ] `cli/agentworks/doctor.py`: new Secrets and Env health groups per FRD R6.
-- [ ] `cli/agentworks/sample-config.toml`: add `[secret_backends.*]`, `[secret_config]`,
+- [x] `cli/agentworks/doctor.py`: new Secrets and Env health groups per FRD R6.
+- [x] `cli/agentworks/sample-config.toml`: add `[secret_backends.*]`, `[secret_config]`,
       `[secrets.*]` sections and the per-scope `env` subtable examples. Keep entries commented so a
       fresh `agw config init` does not enable backends an operator hasn't opted into.
-- [ ] `cli/README.md` + top-level `README.md`: short section on env + secrets, pointer to
+- [x] `cli/README.md` + top-level `README.md`: short section on env + secrets, pointer to
       `agw env show`, the `AW_SECRET_<NAME>` env-var convention, the per-secret `backend_mappings`,
       and the `[secret_config].backends` precedence list.
-- [ ] Tests: command-shape tests for `env show` (context required, auto-resolution, redaction);
+- [x] Tests: command-shape tests for `env show` (context required, auto-resolution, redaction);
       doctor tests for each new finding type.
 
 Definition of done: `agw env show --session s1` works end-to-end; `agw doctor` surfaces broken

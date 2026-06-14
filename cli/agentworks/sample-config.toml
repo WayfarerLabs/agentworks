@@ -270,6 +270,81 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # history_limit = 50000                     # tmux scrollback buffer lines per session
 
 # =============================================================================
+# Environment variables and secrets
+# =============================================================================
+#
+# Env tables can be declared at five scopes; for any given session the merged
+# value is computed in this precedence order (later wins, identity wins last):
+#
+#   vm < workspace < admin|agent < session < AGENTWORKS_* identity
+#
+# Admin and agent scopes are mutually exclusive: a sudo'd admin command (e.g.
+# `agw vm shell`) sees admin scope; an agent-mode session sees agent scope.
+#
+# Each scope is a TOML table whose keys are env-var names. Values are either:
+#   - a string ("value") for plaintext, or
+#   - an inline table { secret = "<name>" } that references a declared secret.
+# No other shapes are allowed (no nested tables, no arrays).
+#
+# Use `agw env show --vm/--workspace/--agent/--session <name>` to preview the
+# merged value at any scope, with each row annotated by its origin scope.
+# Pass `--reveal-secrets` to also resolve secrets through the configured
+# backend chain. Run `agw doctor` to surface dangling secret references,
+# identity-override attempts, and cross-scope conflicts.
+
+# --- Env tables (one per scope; uncomment what you need) ---
+
+# [vm_templates.default.env]
+# HTTP_PROXY = "http://proxy:3128"            # plaintext
+# NPM_TOKEN = { secret = "npm-token" }        # secret reference (declare below)
+
+# [workspace_templates.default.env]
+# REPO_REGION = "us-east-1"
+
+# [admin.env]
+# EDITOR = "nvim"
+
+# [agent_templates.default.env]
+# OPENAI_API_KEY = { secret = "openai-api-key" }
+
+# [session_templates.default.env]
+# CLAUDE_LOG_LEVEL = "info"
+
+# --- Secret declarations ---
+# Every `{ secret = "<name>" }` reference must point to a declaration. A
+# declaration may be empty; the only required form is the `[secrets.<name>]`
+# header itself. `description` and `hint` improve prompts/diagnostics.
+# `backend_mappings.<kind>` overrides the backend's default identifier for
+# this one secret (or sets `false` to opt out of that backend entirely).
+
+# [secrets.npm-token]
+# description = "npm registry token"
+# hint = "Generate at https://www.npmjs.com/settings/<user>/tokens"
+
+# [secrets.openai-api-key]
+# description = "OpenAI API key"
+# backend_mappings.env_var = "OPENAI_API_KEY"    # override default convention
+
+# --- Secret backends ---
+# Backends are declared in `[secret_backends.<kind>]` and activated by
+# listing them in `[secret_config].backends` in precedence order.
+# Currently implemented kinds: `env_var`, `prompt`.
+
+# [secret_backends.env_var]
+# Reads from process env. Default convention is AW_SECRET_<UPPER_SNAKE_CASE>,
+# so secret "npm-token" reads from AW_SECRET_NPM_TOKEN unless overridden via
+# `[secrets.<name>].backend_mappings.env_var`.
+
+# [secret_backends.prompt]
+# Interactive prompt. Always applies; the operator is asked once per missing
+# secret per CLI invocation (batched at the start where possible).
+
+# [secret_config]
+# backends = ["env_var", "prompt"]
+# Backends declared above but absent from this list are dormant. Order is
+# resolution precedence: the first backend that produces a value wins.
+
+# =============================================================================
 # Catalog extensions
 # =============================================================================
 #
