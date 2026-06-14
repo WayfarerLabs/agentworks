@@ -246,18 +246,26 @@ secret refs, unused declarations, and the would-prompt preview.
 Goal: every secret-consuming command resolves all needed secrets up front (within first few
 seconds), before any state mutation. Non-interactive failure is a clear actionable error.
 
-- [ ] `cli/agentworks/secrets/orchestration.py` (or equivalent):
-      `compute_needed_secrets(targets,     config)` walks the env chain across all candidates.
-      `resolve_for_command(...)` calls `SecretResolver.resolve_all`. Static-vs-dynamic filter
-      handling lives here.
+- [x] `cli/agentworks/secrets/orchestration.py`:
+      `compute_needed_secrets(targets, config, *, extra_decls=())` walks each target's env chain via
+      `effective_env` and unions referenced `SecretDecl`s with first-encounter ordering.
+      `resolve_for_command(...)` issues one batched `SecretResolver.resolve_all` and returns the
+      resolved `{name: value}` map. `SecretTarget` mirrors the per-scope env shape; `extra_decls` is
+      the hook for future Tailscale / git-cred migrations. The orchestrator stays generic (no DB /
+      template coupling); static-vs-dynamic filter discipline lives at each manager call site (next
+      bullet).
 - [ ] Wire into the manager layer for: `vm create`, `vm reinit`, `agent create`, `agent reinit`,
       `session create`, `session restart`, `console create`, `console add-shell`, `vm exec`,
       `agent exec`, `vm shell`, `agent shell`. Each manager entry computes its candidate set from
       static filters only and calls `resolve_for_command` before any destructive work.
 - [ ] Verify `session attach` / `session list` / `session describe` / `console attach` /
       `console add-sessions` do NOT consume secrets (per FRD R4 / R5).
-- [ ] Tests: spy on the resolver to confirm one resolve-all call per command, before any mutation;
-      non-interactive mode raises `SecretUnavailableError` with the right hint.
+- [x] Tests for the orchestration module (16 tests in `cli/tests/test_secrets_orchestration.py`):
+      target unioning + dedup, cross-target ordering, substitution invariance, extra_decls hook,
+      cache-wins-over-late-env-changes (cache contract), admin+agent mutex, label-not-in-equality,
+      non-hashability.
+- [ ] Tests for the manager wiring: spy on the resolver to confirm one resolve-all call per command,
+      before any mutation; non-interactive mode raises `SecretUnavailableError` with the right hint.
 
 Definition of done: an operator with no `AW_SECRET_<NAME>` in env who runs
 `agw session create ... -t claude` gets one prompt up front for all needed secrets across the full

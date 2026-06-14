@@ -26,6 +26,22 @@ agents. It just walks env dicts. Future legacy-prompt migrations
 (Tailscale auth key, git credentials) hook in via ``extra_decls`` rather
 than special-casing them in the orchestrator.
 
+**Substitution invariance:** callers may hand in either pre- or
+post-substitution env dicts (e.g. before or after
+``_substitute_template_vars_in_env``). The computed union of
+``SecretDecl``s is invariant under substitution because substitution
+only rewrites ``EnvEntry.value`` (plaintext), never ``EnvEntry.secret``
+(the reference name). This is load-bearing for the Phase 6.2 wiring,
+which builds targets from un-substituted template env dicts.
+
+**Non-interactive errors:** ``resolve_for_command`` raises
+``SecretUnavailableError`` if the resolver's chain can't satisfy a
+secret (e.g. ``--non-interactive`` + no ``AW_SECRET_<NAME>`` set). The
+error carries a per-secret hint listing the backends tried. Manager-
+layer callers may catch and re-raise with command-level context
+(``entity_kind`` / ``entity_name``) if useful, but the default error
+shape is already operator-actionable.
+
 See ``docs/sdd/2026-06-05-env-and-secrets/`` for the full design.
 """
 
@@ -50,12 +66,19 @@ class SecretTarget:
 
     Fields mirror ``effective_env``: callers pass the per-scope env dicts
     they would have passed to ``effective_env`` for actual execution.
-    Admin and agent are mutually exclusive (the merge layer enforces it).
+    Admin and agent are mutually exclusive (the merge layer raises
+    ``ValueError`` if both are set).
 
     Targets do not carry DB rows. Callers resolve templates first and
     construct targets from the resulting env dicts, which keeps the
     orchestrator decoupled from DB / template-resolution code and makes
     unit tests trivially construct fake targets.
+
+    Equality: ``label`` is excluded. Two targets with the same env
+    dicts but different labels compare equal. Hashing is not supported
+    -- the dataclass is frozen but the env fields are mutable dicts,
+    so ``hash(target)`` raises ``TypeError``. Callers that need to
+    dedupe targets must do it by env content, not via ``set``.
     """
 
     vm: dict[str, EnvEntry]
@@ -64,7 +87,8 @@ class SecretTarget:
     agent: dict[str, EnvEntry] | None = None
     session: dict[str, EnvEntry] | None = None
     label: str | None = field(default=None, compare=False)
-    """Optional human-readable label for diagnostics. Not part of identity."""
+    """Optional human-readable label for diagnostics. Not part of
+    equality, hashing, or identity."""
 
 
 def compute_needed_secrets(
@@ -113,7 +137,7 @@ def resolve_for_command(
     config: Config,
     *,
     extra_decls: Iterable[SecretDecl] = (),
-) -> None:
+) -> dict[str, str]:
     """Eagerly resolve every secret referenced by the candidate targets.
 
     Computes the union of needed ``SecretDecl``s via
@@ -121,6 +145,13 @@ def resolve_for_command(
     call through the configured backend chain. Values land in the
     resolver's cache; subsequent ``compose_env`` / ``resolver.render``
     calls inside the command hit the cache and never re-prompt.
+
+    Returns the ``{secret_name: value}`` mapping that
+    ``SecretResolver.resolve_all`` produced. The cache (populated as a
+    side effect) is the primary channel; the return value is for
+    callers that want logging or diagnostics ("resolved N secrets")
+    without re-deriving state. Empty target union returns ``{}``
+    without consulting any backend.
 
     In non-interactive mode, missing secrets surface as
     ``SecretUnavailableError`` with a per-secret breakdown of which
@@ -137,5 +168,5 @@ def resolve_for_command(
     """
     decls = compute_needed_secrets(targets, config, extra_decls=extra_decls)
     if not decls:
-        return
-    config.secret_resolver.resolve_all(decls)
+        return {}
+    return config.secret_resolver.resolve_all(decls)

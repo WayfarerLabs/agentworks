@@ -1,12 +1,15 @@
 """Tests for eager-prompting orchestration (Phase 6).
 
 Pins:
-- compute_needed_secrets unions across targets and dedupes by name
+- compute_needed_secrets unions across targets and dedupes by name,
+  preserving first-encounter order both within and across targets
+- secret-reference union is invariant under value substitution
 - extra_decls extends the union without target env-table membership
-- resolve_for_command issues one batched resolve_all per command
+- resolve_for_command returns the {secret: value} map AND populates
+  the resolver cache so subsequent renders use cached values
 - resolve_for_command on an empty union does not call the resolver
-- SecretTarget.label is excluded from identity (compare=False)
-- Admin and agent scopes don't both flow through a single target
+- SecretTarget.label is excluded from equality; hashing is not supported
+- Admin and agent scopes are mutually exclusive in a single target
 """
 
 from __future__ import annotations
@@ -179,6 +182,85 @@ backends = ["env_var", "prompt"]
     assert sorted(d.name for d in decls) == ["external", "from-env"]
 
 
+def test_secret_references_invariant_under_value_substitution(
+    tmp_path: Path,
+) -> None:
+    """Callers may hand pre- or post-substitution env dicts to
+    SecretTarget. The computed SecretDecl union is invariant because
+    _substitute_template_vars_in_env only rewrites EnvEntry.value
+    (plaintext), never EnvEntry.secret (the reference name). This is
+    load-bearing for Phase 6.2 wiring, which builds targets from
+    un-substituted template env dicts."""
+    cfg = _write_config(
+        tmp_path,
+        extras="""
+[secrets.api]
+description = "api"
+
+[secret_config]
+backends = ["env_var", "prompt"]
+""",
+    )
+    config = load_config(cfg, warn_issues=False)
+
+    pre_subst = {
+        "API": EnvEntry(key="API", secret="api"),
+        "GREETING": EnvEntry(key="GREETING", value="hello {{session_name}}"),
+    }
+    post_subst = {
+        "API": EnvEntry(key="API", secret="api"),
+        "GREETING": EnvEntry(key="GREETING", value="hello mysession"),
+    }
+    pre = compute_needed_secrets([SecretTarget(vm=pre_subst)], config)
+    post = compute_needed_secrets([SecretTarget(vm=post_subst)], config)
+    assert [d.name for d in pre] == [d.name for d in post] == ["api"]
+
+
+def test_admin_and_agent_in_same_target_raises(tmp_path: Path) -> None:
+    """Admin and agent scopes are mutually exclusive at the merge
+    layer. Building a SecretTarget with both set is a programmer
+    error; the orchestrator should surface it eagerly from
+    compute_needed_secrets rather than letting it slip through to the
+    later compose_env call."""
+    cfg = _write_config(tmp_path)
+    config = load_config(cfg, warn_issues=False)
+
+    target = SecretTarget(
+        vm={},
+        admin={"A": EnvEntry(key="A", value="x")},
+        agent={"B": EnvEntry(key="B", value="y")},
+    )
+    with pytest.raises(ValueError, match="admin.*agent|agent.*admin"):
+        compute_needed_secrets([target], config)
+
+
+def test_cross_target_first_encounter_ordering(tmp_path: Path) -> None:
+    """First-encounter ordering holds across targets, not just within
+    a target. For non-interactive errors the operator wants the
+    missing-secrets list in prompt-order."""
+    cfg = _write_config(
+        tmp_path,
+        extras="""
+[secrets.b-secret]
+description = "b"
+[secrets.a-secret]
+description = "a"
+
+[secret_config]
+backends = ["env_var", "prompt"]
+""",
+    )
+    config = load_config(cfg, warn_issues=False)
+
+    target_b = SecretTarget(vm={"B": EnvEntry(key="B", secret="b-secret")})
+    target_a = SecretTarget(vm={"A": EnvEntry(key="A", secret="a-secret")})
+
+    decls = compute_needed_secrets([target_b, target_a], config)
+    # b-secret encountered first (target_b is first in the list), so
+    # it leads the order even though a-secret sorts alphabetically before.
+    assert [d.name for d in decls] == ["b-secret", "a-secret"]
+
+
 def test_extra_decls_dedupe_against_target_decls(tmp_path: Path) -> None:
     """An extra_decl that's ALSO referenced by a target's env chain
     appears once, not twice."""
@@ -205,12 +287,12 @@ backends = ["env_var", "prompt"]
 # ---------------------------------------------------------------------------
 
 
-def test_resolve_for_command_calls_backend_once(
+def test_resolve_for_command_returns_resolved_values(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The configured backend's batch_get fires exactly once per command:
-    once at the eager-resolve call, then never again because subsequent
-    compose_env / resolver.render calls hit the resolver cache."""
+    """The return value mirrors what SecretResolver.resolve_all
+    produced -- useful for callers that want to log "resolved N
+    secrets" without re-deriving state from the cache."""
     monkeypatch.setenv("AW_SECRET_API_KEY", "from-env")
     cfg = _write_config(
         tmp_path,
@@ -223,31 +305,44 @@ backends = ["env_var"]
 """,
     )
     config = load_config(cfg, warn_issues=False)
-
-    # The env_var source is the only active backend; spy its batch_get to
-    # count how many times the chain actually consults a backend.
-    env_var_source = config.secret_resolver._sources[0]
-    assert env_var_source.kind == "env_var"
-    calls: list[list[str]] = []
-    original = env_var_source.batch_get
-
-    def _spy(decls: list[SecretDecl]) -> dict[str, str]:
-        calls.append([d.name for d in decls])
-        return original(decls)
-
-    monkeypatch.setattr(env_var_source, "batch_get", _spy)
-
     target = SecretTarget(vm={"K": EnvEntry(key="K", secret="api-key")})
-    resolve_for_command([target], config)
+    resolved = resolve_for_command([target], config)
+    assert resolved == {"api-key": "from-env"}
 
-    assert calls == [["api-key"]]
 
-    # Subsequent renders hit the resolver cache: backend is never consulted again.
-    config.secret_resolver.render({"K": EnvEntry(key="K", secret="api-key")})
-    config.secret_resolver.render({"K": EnvEntry(key="K", secret="api-key")})
-    assert calls == [["api-key"]], (
-        "backend.batch_get must not fire again once the cache is warm"
+def test_resolve_for_command_cache_wins_over_late_env_changes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Behavior pin for the cache contract: once resolve_for_command
+    has captured a value, subsequent renders inside the same command
+    use the cached value even if the backing source value changes.
+    This is the operator-facing guarantee that "we don't re-prompt /
+    re-read mid-command" -- testable via the resolver's public API
+    without reaching into private source lists."""
+    monkeypatch.setenv("AW_SECRET_API_KEY", "first")
+    cfg = _write_config(
+        tmp_path,
+        extras="""
+[secrets.api-key]
+description = "api"
+
+[secret_config]
+backends = ["env_var"]
+""",
     )
+    config = load_config(cfg, warn_issues=False)
+    target = SecretTarget(vm={"K": EnvEntry(key="K", secret="api-key")})
+    resolved = resolve_for_command([target], config)
+    assert resolved == {"api-key": "first"}
+
+    # Mutate the env after eager-resolve. A naive (uncached)
+    # resolution would pick up "second"; the cache guarantees we
+    # still see "first".
+    monkeypatch.setenv("AW_SECRET_API_KEY", "second")
+    rendered = config.secret_resolver.render(
+        {"K": EnvEntry(key="K", secret="api-key")}
+    )
+    assert rendered == {"K": "first"}
 
 
 def test_resolve_for_command_skips_resolver_when_no_secrets(
@@ -314,12 +409,22 @@ backends = ["env_var"]
 
 
 def test_label_excluded_from_equality() -> None:
-    """label is diagnostic-only; targets with the same envs but different
-    labels are equal."""
+    """label is diagnostic-only; targets with the same envs but
+    different labels are equal. Hashing is not supported (env fields
+    are mutable dicts), so set-based dedup is not part of the contract."""
     env = {"K": EnvEntry(key="K", value="v")}
     a = SecretTarget(vm=env, label="provisioning")
     b = SecretTarget(vm=env, label="session-create")
     assert a == b
+
+
+def test_secret_target_is_not_hashable() -> None:
+    """The dataclass is frozen but its env fields are mutable dicts.
+    Hash attempts must fail loudly rather than half-work. Pinned so a
+    future hashing change is a deliberate decision, not silent drift."""
+    target = SecretTarget(vm={"K": EnvEntry(key="K", value="v")})
+    with pytest.raises(TypeError):
+        hash(target)
 
 
 def test_label_round_trips() -> None:
