@@ -247,12 +247,14 @@ def test_sshd_accept_env_success_with_prior_file_ordering() -> None:
     _write_sshd_accept_env(target, _SpyLogger())
     commands = [r for r, _ in target.runs]
 
-    cp_idx = next(i for i, c in enumerate(commands) if "cp" in c and ".bak" in c)
+    cp_idx = next(i for i, c in enumerate(commands) if c.startswith("sudo cp ") and ".bak" in c)
     tee_idx = next(
         i for i, c in enumerate(commands) if "tee" in c and "50-agentworks-accept-env" in c
     )
     validate_idx = next(i for i, c in enumerate(commands) if "sshd -t" in c)
-    cleanup_idx = next(i for i, c in enumerate(commands) if "rm -f" in c and ".bak" in c)
+    cleanup_idx = next(
+        i for i, c in enumerate(commands) if c.startswith("sudo rm -f ") and ".bak" in c
+    )
     reload_idx = next(i for i, c in enumerate(commands) if "systemctl reload ssh" in c)
 
     assert cp_idx < tee_idx < validate_idx < cleanup_idx < reload_idx
