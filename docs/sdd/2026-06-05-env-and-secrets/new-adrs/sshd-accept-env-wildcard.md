@@ -83,8 +83,11 @@ processes the user delegates from there).
 - **Removes a layer of complexity from the CLI.** No prelude composition, no quote-escape reasoning
   through nested shells, no "outer shell vs login shell" question. The SetEnv path is one well-known
   SSH protocol feature; the existing OpenSSH client and sshd handle the transport.
-- **Uniform across all SSH command paths**: sessions, consoles, exec, interactive shells,
-  provisioning, agent setup. Every site composes the same env dict and passes it to the SSH layer.
+- **Uniform across all SSH command paths the design targets**: sessions, consoles, exec, interactive
+  shells, provisioning, agent setup. Every site composes the same env dict and passes it to the SSH
+  layer. (Phase 3 wires sessions / consoles / exec / interactive paths; Phase 4 deploys the VM-side
+  acceptance plus initial profile fragments; threading the `env=` kwarg through the per-step
+  provisioning and agent-setup SSH calls is the remaining Phase 4 follow-up, tracked in the plan.)
 - **Survives the `sudo --login` boundary** cleanly via the targeted sudoers `env_keep` directive,
   without the CLI having to invent a per-user-switch injection mechanism.
 - **Operator-extensible without sshd_config changes**: an operator who adds a new env-var pattern to

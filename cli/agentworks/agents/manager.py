@@ -878,7 +878,11 @@ def _create_agent_on_vm(
 
     # User install commands + per-user identity profile fragment.
     _run_agent_install_commands(
-        agent_target=agent_target, config=config, home=home, linux_user=linux_user
+        agent_target=agent_target,
+        config=config,
+        home=home,
+        vm=vm,
+        linux_user=linux_user,
     )
 
     # Dotfiles.
@@ -1041,6 +1045,7 @@ def _run_agent_install_commands(
     agent_target: ExecTarget,
     config: Config,
     home: str,
+    vm: VMRow,
     linux_user: str,
 ) -> None:
     """Run user install commands for an agent and write the agent's profile
@@ -1053,7 +1058,9 @@ def _run_agent_install_commands(
     The profile fragment is written unconditionally (even if there are no
     install commands and no PATH additions) so that the per-user identity
     var ``AGENTWORKS_USER`` always lands. Catalog install commands add
-    their ``path`` entries on top.
+    their ``path`` entries on top. ``vm`` + ``linux_user`` feed the real
+    ``ResourceContext`` that ``per_user_identity_env`` consumes (no
+    synthetic empty fields).
     """
     import shlex
 
@@ -1109,9 +1116,10 @@ def _run_agent_install_commands(
         lines.append(f'export PATH="{expanded}:$PATH"')
     identity = per_user_identity_env(
         ResourceContext(
-            vm_name="",  # unused by per_user_identity_env
-            platform="",
+            vm_name=vm.name,
+            platform=vm.platform,
             user=linux_user,
+            vm_host=vm.vm_host_name,
         )
     )
     for key, value in identity.items():
