@@ -82,6 +82,24 @@ def test_unsatisfied_raises_with_backends_tried() -> None:
     assert "prompt" in (exc.value.hint or "")
 
 
+def test_embedded_newline_in_resolved_value_raises() -> None:
+    """ADR 0014: a resolved secret value containing a newline corrupts
+    SSH SetEnv. The resolver hard-fails at resolve_all time so the
+    operator sees a clear error instead of an opaque SSH-side rejection."""
+    s1 = _FakeSource("vault", values={"x": "line1\nline2"})
+    r = SecretResolver([s1], _decls("x"))
+    with pytest.raises(ConfigError, match="newline"):
+        r.resolve_all([_decl("x")])
+
+
+def test_embedded_carriage_return_in_resolved_value_raises() -> None:
+    """Same guard for bare CR (some legacy formats)."""
+    s1 = _FakeSource("vault", values={"x": "line1\rline2"})
+    r = SecretResolver([s1], _decls("x"))
+    with pytest.raises(ConfigError, match="newline"):
+        r.resolve_all([_decl("x")])
+
+
 def test_cache_hits_skip_sources() -> None:
     s1 = _FakeSource("first", values={"x": "v1"})
     r = SecretResolver([s1], _decls("x"))

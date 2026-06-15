@@ -364,6 +364,45 @@ def add_sessions(
                 entity_name=spec.name,
             )
 
+    # Eager-prompting orchestration (FRD R4 / Phase 6.6 review): when
+    # any spec carries shells > 0 the live-attach path below will open
+    # new shells via _add_session_window. Resolve every referenced
+    # secret BEFORE the DB write so a failure leaves no partial state.
+    # default_shells produces {cwd: None, admin: False} entries, so the
+    # only admin-promotion path is session_user == admin_user (an
+    # admin-mode session). Skip entirely if no specs carry shells (the
+    # bare ``add-sessions s1 s2`` shape).
+    if any(spec.shells > 0 for spec in specs):
+        from agentworks.secrets import resolve_for_command
+
+        vm_row = db.get_vm(console.vm_name)
+        new_shell_targets: list[SecretTarget] = []
+        if vm_row is not None:
+            for spec in specs:
+                if spec.shells <= 0:
+                    continue
+                session = db.get_session(spec.name)
+                if session is None:
+                    continue
+                try:
+                    session_user = _session_linux_user(db, session, vm_row)
+                except NotFoundError:
+                    continue
+                # All new shells are admin=False (default_shells), so
+                # use_admin promotion only fires for admin-mode sessions.
+                use_admin = session_user == vm_row.admin_username
+                pane = _pane_secret_target(
+                    config, db,
+                    vm=vm_row, session=session, is_admin_pane=use_admin,
+                )
+                if pane is None:
+                    continue
+                # Same target shape per new shell; the resolver caches
+                # so adding the target N times doesn't multiply prompts.
+                new_shell_targets.extend([pane] * spec.shells)
+        if new_shell_targets:
+            resolve_for_command(new_shell_targets, config)
+
     with db.transaction():
         for spec in specs:
             db.add_console_session(console_name, spec.name, default_shells(spec.shells))
@@ -709,6 +748,22 @@ def restore_session(
             output.info(
                 f"window '{session_name}' is missing; rebuilding from config..."
             )
+            # Eager-prompting orchestration (FRD R4 / Phase 6.6 review):
+            # the window-rebuild path also opens new shells (one per
+            # configured shell entry, via _add_session_window ->
+            # _split_shell_pane). Resolve every referenced secret BEFORE
+            # any pane is opened. Targets cover ALL configured shells in
+            # this case (the window is missing, so every pane is new).
+            from agentworks.secrets import resolve_for_command
+
+            all_indices = list(range(configured_count))
+            if all_indices:
+                resolve_for_command(
+                    _restore_session_secret_targets(
+                        db, config, vm=vm, member=member, indices=all_indices,
+                    ),
+                    config,
+                )
             _add_session_window(
                 target,
                 db,

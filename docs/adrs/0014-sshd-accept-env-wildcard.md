@@ -113,7 +113,10 @@ processes the user delegates from there).
 - **Values containing newlines** are not reliably transportable via SetEnv (the SSH protocol encodes
   env strings without escaping mechanisms for control chars). Agentworks secrets are expected to be
   opaque tokens; an operator who tries to set a multiline value in `[admin.env]` may see truncation.
-  We surface this as a config-load warning if a value contains a newline.
+  Surfaced as a config-load warning when a plaintext value contains a newline; resolved secret
+  values are also checked at `SecretResolver.resolve_all` time and raise `ConfigError` rather than
+  silently corrupting the SSH argument. The env-var source additionally strips trailing newlines
+  (the common copy-paste artifact).
 - **The wildcard is a one-time decision per VM.** Operators who want a curated allowlist for their
   own audit reasons would need to override agentworks's init template. This is supported (init
   writes a single file under `/etc/ssh/sshd_config.d/`; operators can replace it) but adds one more
@@ -148,5 +151,6 @@ processes the user delegates from there).
 - VM-init also writes a sudoers fragment with `env_keep += "AGENTWORKS_* AW_*"`. The sudoers surface
   narrows the AcceptEnv wildcard, so only agentworks-managed vars survive a sudo boundary.
 - An existing VM that predates this ADR cannot accept SetEnv'd env vars until it's reinit'd to pick
-  up the new sshd config. `agw doctor` reports VMs whose sshd config doesn't carry the AcceptEnv
-  wildcard so operators can plan the reinit.
+  up the new sshd config. `agw doctor`'s "VM env support" group probes each reachable VM for the
+  `50-agentworks-accept-env.conf` fragment and reports per-VM ok / missing / unreachable so
+  operators can plan the reinit explicitly.

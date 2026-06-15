@@ -408,6 +408,17 @@ def _parse_env_table(
                 "so your value will be ignored at command time. Remove the entry."
             )
         if isinstance(val, str):
+            # ADR 0014: newlines in env values would corrupt the SSH
+            # `-o SetEnv=KEY=VALUE` argument shape. Warn at load time so
+            # operators catch accidental trailing newlines (a common
+            # copy-paste artifact). The runtime resolver applies the
+            # same check defensively to secret-resolved values.
+            if "\n" in val or "\r" in val:
+                issues.append(
+                    f"{context}.env.{key_str}: value contains a newline; "
+                    "SSH SetEnv cannot transport it cleanly. Strip the "
+                    "newline at the source."
+                )
             result[key_str] = EnvEntry(key=key_str, value=val)
         elif isinstance(val, dict):
             extra = set(val.keys()) - {"secret"}

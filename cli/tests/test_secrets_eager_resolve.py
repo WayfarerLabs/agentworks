@@ -999,6 +999,68 @@ def test_attach_console_existing_tmux_session_skips_eager_resolve(
 # ---------------------------------------------------------------------------
 
 
+def test_session_attach_does_not_eager_resolve(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``session attach`` joins an existing tmux session via SSH; the
+    existing session retains its create-time env (FRD R5 "Attach
+    inherits create-time env"). Eager-resolve must NOT fire."""
+    from agentworks.db import SessionMode, SessionStatus
+    from agentworks.sessions import manager as session_manager
+
+    db = _seed_basic_db(tmp_path)
+    db._conn.execute(
+        "INSERT INTO sessions (name, workspace_name, template, mode, pid) "
+        "VALUES ('s1', 'ws1', 'default', ?, 1234)",
+        (SessionMode.ADMIN.value,),
+    )
+    db._conn.commit()
+
+    resolve_called: list[bool] = []
+
+    def _track_resolve(*args: object, **kwargs: object) -> dict[str, str]:
+        resolve_called.append(True)
+        return {}
+
+    monkeypatch.setattr("agentworks.secrets.resolve_for_command", _track_resolve)
+
+    # Stub out the SSH probe + transport so we don't need a real VM.
+    fake_target = SimpleNamespace(
+        run=lambda *a, **k: SimpleNamespace(ok=True, returncode=0, stdout="", stderr=""),
+    )
+    ws_row = db.get_workspace("ws1")
+    vm_row = db.get_vm("vm1")
+    assert ws_row is not None and vm_row is not None
+    monkeypatch.setattr(
+        session_manager, "_prepare_vm",
+        lambda *a, **k: (ws_row, vm_row, fake_target.run, None, fake_target),
+    )
+    monkeypatch.setattr(
+        session_manager, "_ensure_pid", lambda session, **kwargs: session,
+    )
+    monkeypatch.setattr(
+        session_manager, "check_session_status",
+        lambda *a, **k: SessionStatus.OK,
+    )
+    monkeypatch.setattr(session_manager, "keep_vm_active", lambda *a, **k: _NullCM())
+    monkeypatch.setattr(
+        "agentworks.ssh.interactive", lambda *a, **k: 0,
+    )
+
+    import contextlib
+
+    config = SimpleNamespace(operator=SimpleNamespace(ssh_private_key=None))
+    # interactive() returns int and the manager doesn't sys.exit here,
+    # but suppress for forward-compat with future refactors.
+    with contextlib.suppress(SystemExit):
+        session_manager.attach_session(db, config, name="s1")  # type: ignore[arg-type]
+
+    assert resolve_called == [], (
+        "session attach joins existing shell; must not eager-resolve"
+    )
+    db.close()
+
+
 def test_session_list_does_not_eager_resolve(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1229,6 +1291,167 @@ def test_vm_provisioning_runners_thread_env_via_setenv() -> None:
         f"expected >=5 'env=admin_env' threading sites in _phase_b_setup, "
         f"got {count}; did a runner lose its env kwarg?"
     )
+
+
+def test_console_add_sessions_with_shells_eager_resolves(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``console add-sessions s1+2`` requests 2 new shell panes per
+    session. Per FRD R4 those panes consume secrets at open time, so
+    eager-resolve must fire BEFORE the DB write that records the new
+    shells. Regression test for the PR-review finding that the +N path
+    silently opened shells with no eager-resolve."""
+    from agentworks.sessions import multi_console
+
+    db = _seed_basic_db(tmp_path)
+    db._conn.execute(
+        "INSERT INTO sessions (name, workspace_name, template, mode) "
+        "VALUES ('s1', 'ws1', 'default', 'admin')"
+    )
+    db._conn.execute("INSERT INTO consoles (name, vm_name) VALUES ('c1', 'vm1')")
+    db._conn.commit()
+
+    monkeypatch.setattr(
+        multi_console, "_pane_secret_target", lambda *a, **k: object(),
+    )
+
+    def _explode(*args: object, **kwargs: object) -> None:
+        raise SecretUnavailableError(
+            "no active backend could resolve secret(s): api-key",
+            hint="api-key: tried env_var",
+        )
+
+    monkeypatch.setattr("agentworks.secrets.resolve_for_command", _explode)
+
+    config = SimpleNamespace(
+        named_console=SimpleNamespace(tmux_layout="aw-session-vertical"),
+    )
+
+    with pytest.raises(SecretUnavailableError, match="api-key"):
+        multi_console.add_sessions(
+            db, config,  # type: ignore[arg-type]
+            console_name="c1", session_specs=["s1+2"],
+        )
+
+    # DB write must not have happened.
+    assert db.get_console_session("c1", "s1") is None, (
+        "eager-resolve must fire BEFORE the console_sessions DB insert "
+        "when any spec requests shells"
+    )
+    db.close()
+
+
+def test_console_add_sessions_without_shells_does_not_eager_resolve(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``console add-sessions s1 s2`` (no +N) opens no new shells in the
+    DB-write path; it only registers DB rows. The live-attach wrappers
+    join existing tmux servers without consuming secrets. Eager-resolve
+    must NOT fire."""
+    from agentworks.sessions import multi_console
+
+    db = _seed_basic_db(tmp_path)
+    db._conn.execute(
+        "INSERT INTO sessions (name, workspace_name, template, mode) "
+        "VALUES ('s1', 'ws1', 'default', 'admin')"
+    )
+    db._conn.execute("INSERT INTO consoles (name, vm_name) VALUES ('c1', 'vm1')")
+    db._conn.commit()
+
+    monkeypatch.setattr(multi_console, "_live_target", lambda *a, **k: None)
+
+    resolve_called: list[bool] = []
+
+    def _track_resolve(*args: object, **kwargs: object) -> dict[str, str]:
+        resolve_called.append(True)
+        return {}
+
+    monkeypatch.setattr("agentworks.secrets.resolve_for_command", _track_resolve)
+
+    config = SimpleNamespace()
+    multi_console.add_sessions(
+        db, config,  # type: ignore[arg-type]
+        console_name="c1", session_specs=["s1"],
+    )
+
+    assert resolve_called == [], (
+        "add-sessions without +N must not eager-resolve; wrappers only "
+        "join existing sessions"
+    )
+    db.close()
+
+
+def test_restore_session_window_missing_branch_eager_resolves(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When restore_session's window-missing path rebuilds via
+    _add_session_window, it opens new shells -- so eager-resolve must
+    fire BEFORE the rebuild. Regression test for the PR-review finding
+    that this branch bypassed the eager-resolve wired further down."""
+    from agentworks.sessions import multi_console
+
+    db = _seed_basic_db(tmp_path)
+    db._conn.execute(
+        "INSERT INTO sessions (name, workspace_name, template, mode) "
+        "VALUES ('s1', 'ws1', 'default', 'admin')"
+    )
+    db._conn.execute("INSERT INTO consoles (name, vm_name) VALUES ('c1', 'vm1')")
+    # Two configured shells so the rebuild would open new panes.
+    db._conn.execute(
+        "INSERT INTO console_sessions (console_name, session_name, shells, position) "
+        "VALUES ('c1', 's1', "
+        "'[{\"cwd\":null,\"admin\":true},{\"cwd\":null,\"admin\":false}]', 0)"
+    )
+    db._conn.commit()
+
+    fake_vm = SimpleNamespace(name="vm1", admin_username="admin", tailscale_host="x")
+    # `tmux list-windows` returns names NOT including 's1' (window missing).
+    fake_target = SimpleNamespace(
+        run=lambda *a, **k: SimpleNamespace(ok=True, returncode=0, stdout="other-window", stderr=""),
+    )
+    monkeypatch.setattr(
+        multi_console, "_prepare_vm_target_for_attach",
+        lambda *a, **k: (fake_vm, fake_target),
+    )
+    monkeypatch.setattr(multi_console, "keep_vm_active", lambda *a, **k: _NullCM())
+    monkeypatch.setattr(
+        multi_console, "_console_tmux_exists", lambda *a, **k: True,
+    )
+    monkeypatch.setattr(
+        multi_console, "_restore_session_secret_targets",
+        lambda *a, **k: [object(), object()],
+    )
+
+    add_called: list[bool] = []
+    monkeypatch.setattr(
+        multi_console,
+        "_add_session_window",
+        lambda *a, **k: add_called.append(True),
+    )
+
+    def _explode(*args: object, **kwargs: object) -> None:
+        raise SecretUnavailableError(
+            "no active backend could resolve secret(s): api-key",
+            hint="api-key: tried env_var",
+        )
+
+    monkeypatch.setattr("agentworks.secrets.resolve_for_command", _explode)
+
+    config = SimpleNamespace(
+        named_console=SimpleNamespace(tmux_layout="aw-session-vertical"),
+    )
+
+    with pytest.raises(SecretUnavailableError, match="api-key"):
+        multi_console.restore_session(
+            db, config,  # type: ignore[arg-type]
+            console_name="c1", session_name="s1",
+        )
+
+    assert add_called == [], (
+        "eager-resolve must fire BEFORE _add_session_window in the "
+        "window-missing rebuild branch"
+    )
+    db.close()
 
 
 def test_console_add_shell_promotes_admin_for_admin_mode_session(

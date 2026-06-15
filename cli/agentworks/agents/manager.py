@@ -290,7 +290,12 @@ def create_agent(
         # rollback commands are logged BEFORE the footer, not after.
         try:
             try:
-                _create_agent_on_vm(vm, config, linux_user, git_tokens=git_tokens, logger=ssh_logger)
+                _create_agent_on_vm(
+                    vm, config, linux_user,
+                    agent_name=name,
+                    git_tokens=git_tokens,
+                    logger=ssh_logger,
+                )
             except KeyboardInterrupt:
                 output.warn(f"Cancelling agent create '{name}'... rolling back.")
                 _safe_rollback()
@@ -484,7 +489,12 @@ def reinit_agent(
     with keep_vm_active(db, config, vm):
         try:
             try:
-                _create_agent_on_vm(vm, config, agent.linux_user, git_tokens=git_tokens, logger=ssh_logger)
+                _create_agent_on_vm(
+                    vm, config, agent.linux_user,
+                    agent_name=agent.name,
+                    git_tokens=git_tokens,
+                    logger=ssh_logger,
+                )
             except KeyboardInterrupt:
                 output.warn(
                     f"Cancelling agent reinit '{name}'. The agent may be in a partial state. "
@@ -963,6 +973,7 @@ def _create_agent_on_vm(
     config: Config,
     linux_user: str,
     *,
+    agent_name: str,
     git_tokens: dict[str, str] | None = None,
     logger: SSHLogger,
 ) -> None:
@@ -1061,7 +1072,12 @@ def _create_agent_on_vm(
             platform=vm.platform,
             user=linux_user,
             vm_host=vm.vm_host_name,
-            agent_name=None,
+            # FRD R1: agent shells must see AGENTWORKS_AGENT. The agent
+            # is being created / reinitialized in this very call, so its
+            # name is known by the caller; threaded down so the install
+            # runners (mise / dotfiles / user_install_commands / nerf /
+            # claude plugins) all see the identity var set correctly.
+            agent_name=agent_name,
         ),
         vm=vm_tmpl_for_env.env,
         agent=agent_cfg.env,

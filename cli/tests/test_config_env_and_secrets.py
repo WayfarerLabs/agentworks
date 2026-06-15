@@ -393,6 +393,22 @@ def test_agentworks_prefix_warning_fires_for_every_scope(
     ), cfg.config_issues
 
 
+def test_plaintext_env_with_newline_warns_at_load(tmp_path: Path) -> None:
+    """Per ADR 0014: a newline in a plaintext env value would corrupt
+    the SSH SetEnv argument shape. Catch it at load time so the operator
+    sees a clear message instead of an opaque SSH-side rejection."""
+    cfg_file = tmp_path / "config.toml"
+    _write_base(
+        cfg_file,
+        extras='\n[admin.env]\nMULTILINE = "line1\\nline2"\n',
+    )
+    cfg = load_config(cfg_file, warn_issues=False)
+    assert any(
+        "MULTILINE" in issue and "newline" in issue
+        for issue in cfg.config_issues
+    ), cfg.config_issues
+
+
 def test_session_template_inherits_parent_env(tmp_path: Path) -> None:
     """A child session template with no env of its own inherits the parent's env
     unchanged. Pins None-vs-empty handling in the merge."""

@@ -39,9 +39,15 @@ CLI-injection model that strongly outweigh this benefit.
 ## Decision
 
 Agentworks injects secret values into VM shells from the **CLI side at command time**. The CLI
-process resolves secret values from operator-side sources (env var, then prompt), exports them
-inline in the shell payload sent over SSH, and never persists secret values to the VM. No VM-side
-storage of secret material, no VM-side broker process.
+process resolves secret values from operator-side sources (env var, then prompt) and hands them to
+the SSH layer as `-o SetEnv=K=V` arguments per ADR 0014; the remote sshd places them in the spawned
+shell's environment before exec, so values never persist on the VM. No VM-side storage of secret
+material, no VM-side broker process.
+
+(This ADR was originally drafted around a CLI-composed `build_export_block` prelude. Phase 3 of the
+SDD pivoted to SSH SetEnv, which is documented in ADR 0014; the trust-anchor analysis below is
+unchanged by that pivot: the CLI is still the only place secret values exist outside of running
+processes.)
 
 Per FRD R5 / HLA "Identity vars on the VM", user-defined env (plaintext or secret) is never cached
 on the VM. The on-VM profile fragments hold only the VM-stable identity vars (`AGENTWORKS_VM`,
@@ -73,8 +79,9 @@ site.
    "shells receive their env on stdin."
 
 5. **Uniform mechanism across surfaces.** Every shell-opening site (provisioning, session create,
-   console add-shell, exec, etc.) uses the same `build_export_block(...)` prelude. The transport is
-   the SSH command line, which already exists everywhere agentworks opens a shell.
+   console add-shell, exec, etc.) uses the same SSH SetEnv plumbing (the SSH layer's `env=` kwarg
+   materializes `-o SetEnv=K=V` per pair). The transport is the SSH command line, which already
+   exists everywhere agentworks opens a shell.
 
 6. **No rotation or refresh semantics required.** Every shell-open is a fresh resolution from the
    configured backend chain. There is no "resolved at create time, refreshed every N hours"

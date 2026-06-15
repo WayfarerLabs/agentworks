@@ -118,6 +118,11 @@ def run_checks(*, completion_version: str | None = None) -> HealthReport:
 
     report.groups.append(_check_database())
 
+    # VM-side SSH probes (per ADR 0014): runs only when config + DB load
+    # succeeded so this stays a no-op for fresh installs.
+    if config is not None:
+        report.groups.append(_check_vm_accept_env(config))
+
     if completion_version is not None:
         report.groups.append(_check_completions(completion_version))
 
@@ -500,6 +505,103 @@ def _check_env(config: Config) -> HealthGroup:
             )
     elif not identity_issues:
         g.ok("Env keys", f"{len(key_scopes)} declared, no cross-scope conflicts")
+
+    return g
+
+
+def _check_vm_accept_env(config: Config) -> HealthGroup:
+    """Probe each provisioned VM for the AcceptEnv-wildcard sshd fragment
+    deployed by Phase 4 (`/etc/ssh/sshd_config.d/50-agentworks-accept-env.conf`).
+
+    Per ADR 0014: VMs predating the env-and-secrets SDD silently drop
+    SetEnv'd env at sshd until they're reinit'd. This check surfaces
+    them so the operator can plan the reinit explicitly.
+
+    Skips VMs that aren't fully provisioned or have no tailscale_host
+    (probing them would fail for unrelated reasons). Each probe runs
+    with a short timeout; a small thread pool keeps wall-clock bounded
+    when the operator has many VMs.
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    from agentworks.db import Database, ProvisioningStatus
+    from agentworks.ssh import SSHError, admin_exec_target
+
+    g = HealthGroup("VM env support")
+
+    try:
+        exists, current, latest = Database.check_schema()
+        if not exists or current != latest:
+            # Doctor's database check group will surface this; nothing
+            # actionable here without a current schema.
+            return g
+        db = Database()
+        vms = [
+            v for v in db.list_vms()
+            if v.provisioning_status == ProvisioningStatus.COMPLETE.value
+            and v.tailscale_host is not None
+        ]
+    except Exception as e:
+        g.warn("VM probe", f"could not list VMs: {e}")
+        return g
+
+    if not vms:
+        g.info("VM probe", "no provisioned VMs to check")
+        return g
+
+    probe_cmd = "test -f /etc/ssh/sshd_config.d/50-agentworks-accept-env.conf"
+
+    # SQLite connections are thread-bound; build the per-VM ExecTarget
+    # in the main thread, then run the SSH probes concurrently against
+    # already-resolved targets. Short timeout: doctor is interactive and
+    # the probe is a trivial `test -f`, so a stopped or unreachable VM
+    # should fail fast rather than block the whole sweep.
+    _probe_timeout = 5
+    targets: list[tuple[str, object]] = []
+    for vm in vms:
+        try:
+            targets.append(
+                (vm.name, admin_exec_target(vm, config, default_timeout=_probe_timeout))
+            )
+        except Exception as e:  # noqa: BLE001 - defensive: unreachable target degrades cleanly
+            targets.append((vm.name, e))
+
+    def _probe(name: str, target_or_err: object) -> tuple[str, str, str | None]:
+        if isinstance(target_or_err, Exception):
+            return (name, "unreachable", str(target_or_err))
+        try:
+            result = target_or_err.run(probe_cmd, check=False, timeout=_probe_timeout)  # type: ignore[attr-defined]
+        except SSHError as e:
+            return (name, "unreachable", str(e))
+        except Exception as e:  # noqa: BLE001 - defensive: any transport error degrades to "unreachable"
+            return (name, "unreachable", str(e))
+        if result.ok:
+            return (name, "ok", None)
+        return (name, "missing", None)
+
+    results: list[tuple[str, str, str | None]] = []
+    max_workers = min(8, len(targets))
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {executor.submit(_probe, n, t): n for n, t in targets}
+        for fut in as_completed(futures):
+            results.append(fut.result())
+
+    results.sort(key=lambda r: r[0])
+    for name, status, detail in results:
+        if status == "ok":
+            g.ok(f"VM {name!r}", "AcceptEnv wildcard present")
+        elif status == "missing":
+            g.warn(
+                f"VM {name!r}",
+                "missing AcceptEnv wildcard; SSH SetEnv from agentworks "
+                "is silently dropped. Run `agw vm reinit` to deploy the "
+                "sshd fragment.",
+            )
+        else:  # unreachable
+            g.info(
+                f"VM {name!r}",
+                f"could not probe (SSH unreachable): {detail or 'no detail'}",
+            )
 
     return g
 

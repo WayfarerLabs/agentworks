@@ -22,6 +22,29 @@ def test_default_convention_reads_env(monkeypatch: pytest.MonkeyPatch) -> None:
     assert src.get(SecretDecl(name="github-token", description="GitHub PAT")) == "ghp_xxx"
 
 
+def test_get_strips_trailing_newline(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Trailing newlines (the common ``op read`` / ``pbpaste`` artifact)
+    are stripped so the value cleanly transports through SSH SetEnv."""
+    monkeypatch.setenv("AW_SECRET_TOKEN", "ghp_xxx\n")
+    src = EnvVarSource()
+    assert src.get(SecretDecl(name="token", description="t")) == "ghp_xxx"
+
+
+def test_get_strips_trailing_crlf(monkeypatch: pytest.MonkeyPatch) -> None:
+    """CRLF (Windows clipboard) trailing also stripped."""
+    monkeypatch.setenv("AW_SECRET_TOKEN", "ghp_xxx\r\n")
+    src = EnvVarSource()
+    assert src.get(SecretDecl(name="token", description="t")) == "ghp_xxx"
+
+
+def test_get_preserves_internal_whitespace(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Stripping is rstrip(newlines), not full strip(); internal spaces
+    and leading whitespace are preserved (some token formats use them)."""
+    monkeypatch.setenv("AW_SECRET_TOKEN", "  internal value  ")
+    src = EnvVarSource()
+    assert src.get(SecretDecl(name="token", description="t")) == "  internal value  "
+
+
 def test_override_uses_alternate_env_var(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("AW_SECRET_GITHUB_TOKEN", raising=False)
     monkeypatch.setenv("GITHUB_TOKEN", "from-existing-env")

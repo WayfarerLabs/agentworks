@@ -661,6 +661,13 @@ Per scope discussion: no `--env KEY=VAL` overrides. Operators set CLI env or edi
   that machine, which is consistent with the trust-anchor analysis in
   `docs/adrs/0013-cli-side-secret-injection.md` (the operator workstation is the trust anchor;
   processes on it can already read the secrets the CLI would otherwise feed to a remote shell).
+- Non-SSH transports (Lima local, RemoteLima, WSL2) embed env as inline `K=V cmd` shell assignments
+  on a `bash -lc` invocation rather than going through SetEnv. Those values ARE visible in the
+  `bash` argv via `ps -ef` on the transport's local host (Lima VM, RemoteLima target, WSL2 distro
+  host) for the duration of the process. The trust-anchor analysis in ADR 0013 still holds: only the
+  operator's workstation can issue these commands, and the only co-tenant in those argvs is the same
+  agentworks-managed VM. The RemoteLima case is the only one with a separately-administered host,
+  and that host's operator already has shell access to the Lima VM via their own SSH credentials.
 
 ## DB schema impact
 

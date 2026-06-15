@@ -79,26 +79,33 @@ updates this lockfile with a dated entry.
 
 ## ADRs
 
-- [ADR 0013: CLI-side Secret Injection for VM Shells](../../adrs/0013-cli-side-secret-injection.md)
-  — secret values live on the operator workstation and transit SSH per-shell-open; never written to
-  VM disk.
-- [ADR 0014: AcceptEnv Wildcard on Agentworks-Managed VMs](../../adrs/0014-sshd-accept-env-wildcard.md)
-  — sshd accepts arbitrary env keys via `AcceptEnv *`; the trust anchor is the operator's SSH
+- [ADR 0013: CLI-side Secret Injection for VM Shells](../../adrs/0013-cli-side-secret-injection.md).
+  Secret values live on the operator workstation and transit SSH per-shell-open; never written to VM
+  disk.
+- [ADR 0014: AcceptEnv Wildcard on Agentworks-Managed VMs](../../adrs/0014-sshd-accept-env-wildcard.md).
+  sshd accepts arbitrary env keys via `AcceptEnv *`; the trust anchor is the operator's SSH
   authentication, not a per-key allowlist.
 
 ## Tests
 
 - 16 tests in `cli/tests/test_secrets_orchestration.py` (orchestration module).
-- 23 tests in `cli/tests/test_secrets_eager_resolve.py` (manager wiring + no-shell-opening
-  verification).
+- 27 tests in `cli/tests/test_secrets_eager_resolve.py` (manager wiring + no-shell-opening
+  verification + add-sessions+N + restore-session window-missing + session attach tripwire).
 - 17 tests in `cli/tests/test_initializer_env_fragments.py` (Phase 4 VM-side fragments).
+- 19 tests in `cli/tests/test_doctor_env_and_secrets.py` (FRD R6 health groups + ADR 0014's
+  per-VM AcceptEnv probe).
 - Comprehensive coverage in `test_secrets_base.py`, `test_secrets_env_var.py`,
   `test_secrets_prompt.py`, `test_secrets_resolver.py`, `test_config_env_and_secrets.py`,
-  `test_doctor_env_and_secrets.py`, `test_env_show.py`.
-- Total cli suite: 759 tests, all passing at lock.
+  `test_env_show.py`.
+- Total cli suite: 773 tests, all passing at lock.
 
 ## Deferred at lock
 
+- **Deprecated `agw vm console` not wired into eager-prompting.** The legacy single-VM-tmux console
+  (`cli/agentworks/sessions/console.py`, surfaced via `agw vm console`) opens an admin shell on
+  first attach without going through `resolve_for_command`. Operators are directed at the
+  named-console surface (`agw console attach`) instead, which IS wired. The deprecated command is
+  staged for removal; we did not retrofit it.
 - **Legacy secret-adjacent fields not yet migrated.** `tailscale_auth_key` and the
   `git_credentials.*` token resolution still go through their pre-SDD prompt-or-env-var paths. The
   orchestrator's `extra_decls` kwarg is the agreed migration hook (default secret name + default
@@ -117,7 +124,7 @@ updates this lockfile with a dated entry.
 
 ## Cross-references
 
-- [FRD](frd.md) — functional requirements (R1 through R7).
-- [HLA](hla.md) — high-level architecture, including the SetEnv-pivot rationale and the
-  env-transport diagram.
-- [plan](plan.md) — phased implementation plan with all checkboxes ticked.
+- [FRD](frd.md): functional requirements (R1 through R7).
+- [HLA](hla.md): high-level architecture, including the SetEnv-pivot rationale and the env-transport
+  diagram.
+- [plan](plan.md): phased implementation plan with all checkboxes ticked.

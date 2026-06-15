@@ -43,4 +43,12 @@ class EnvVarSource(SecretSourceBase):
         name = self._resolved_name(secret)
         if name is None:
             return None
-        return os.environ.get(name)
+        raw = os.environ.get(name)
+        if raw is None:
+            return None
+        # Strip trailing carriage-returns / newlines. Tokens copied from
+        # `op read`, `pbpaste`, vim-yanked lines, etc. routinely carry
+        # one. Embedded newlines (rare; usually a malformed secret) are
+        # surfaced by the resolver's resolve_all layer so the operator
+        # sees a clear error instead of an opaque SSH SetEnv rejection.
+        return raw.rstrip("\r\n")

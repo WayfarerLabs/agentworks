@@ -131,6 +131,19 @@ class SecretResolver:
                 continue
             resolved = source.batch_get(still_attemptable)
             for name, value in resolved.items():
+                # ADR 0014: embedded newlines would corrupt SSH
+                # `-o SetEnv=KEY=VALUE` arguments. The env_var source
+                # already strips trailing newlines (the common copy-paste
+                # artifact); anything still containing one is a malformed
+                # secret value and a hard error worth surfacing now
+                # rather than as an opaque SSH-side rejection.
+                if "\n" in value or "\r" in value:
+                    raise ConfigError(
+                        f"secret {name!r}: resolved value contains a newline; "
+                        f"cannot transport via SSH SetEnv. Fix the value at "
+                        f"the source (e.g. strip trailing newlines from the "
+                        f"env var or vault entry).",
+                    )
                 self._cache[name] = value
                 out[name] = value
             missing = [s for s in missing if s.name not in resolved]
