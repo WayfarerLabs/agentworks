@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 from agentworks import output
 from agentworks.config import validate_name
@@ -22,6 +22,7 @@ if TYPE_CHECKING:
     from agentworks.catalog import UserInstallCommandEntry
     from agentworks.config import Config
     from agentworks.db import AgentRow, Database, VMRow, WorkspaceRow
+    from agentworks.env import EnvEntry
     from agentworks.secrets import SecretTarget
     from agentworks.ssh import ExecTarget, SSHLogger
 
@@ -90,29 +91,77 @@ def _agent_secret_targets(config: Config, vm: VMRow) -> list[SecretTarget]:
     ]
 
 
-def _agent_shell_secret_target(
-    config: Config, vm: VMRow, agent: AgentRow,
-) -> SecretTarget:
-    """Build the SecretTarget for ``agent shell`` / ``agent exec``.
+class _AgentDirectEnvScopes(NamedTuple):
+    """Per-scope env dicts for ``agent shell`` / ``agent exec``.
 
-    Single-phase: the operator opens one shell as the agent's Linux
-    user. Scope = vm + agent (FRD R2). The VM scope is the VM's actual
-    template env (resolved via DB row), not ``config.vm`` (which is the
-    config-time default and may not match the VM's template). The agent
-    scope is the agent row's template, NOT ``config.agent`` -- the agent
-    pre-exists this call and may have been created under a different
-    template than the operator's current ``--template`` would resolve.
+    The ``workspace`` field is ``None`` for shells / execs that don't
+    pin a workspace context (``agent shell`` without ``--workspace``,
+    ``agent exec`` today). When set, workspace-template env enters the
+    FRD R2 precedence ladder between vm and agent.
+    """
+
+    vm: dict[str, EnvEntry]
+    workspace: dict[str, EnvEntry] | None
+    agent: dict[str, EnvEntry]
+
+
+def _resolve_agent_direct_env_scopes(
+    config: Config,
+    vm: VMRow,
+    agent: AgentRow,
+    *,
+    ws: WorkspaceRow | None = None,
+) -> _AgentDirectEnvScopes:
+    """Resolve per-scope env dicts for ``agent shell`` / ``agent exec``.
+
+    Both the SecretTarget (eager-resolve) and the ``compose_env`` call
+    (render) consume the result of this helper, guaranteeing they see
+    identical scope state -- no drift between "what was prompted for"
+    and "what was passed to the shell."
+
+    Scope sources mirror the FRD R2 precedence ladder:
+
+    - ``vm``: the VM's actual template env (DB row, not ``config.vm``).
+    - ``workspace``: when ``ws`` is supplied, the workspace template's env.
+    - ``agent``: the agent row's template env (DB row, not ``config.agent``).
+      The agent pre-exists this call and may have been created under a
+      different template than the operator's current ``--template``
+      would resolve.
     """
     from agentworks.agents.templates import resolve_from_dict as _resolve_agent_template
-    from agentworks.secrets import SecretTarget
     from agentworks.vms.templates import resolve_from_dict as _resolve_vm_template
+    from agentworks.workspaces.templates import resolve_template as _resolve_ws_template
 
     vm_tmpl = _resolve_vm_template(config.vm_templates, vm.template)
     agent_tmpl = _resolve_agent_template(config.agent_templates, agent.template)
-    return SecretTarget(
+    ws_env: dict[str, EnvEntry] | None = None
+    if ws is not None:
+        ws_env = _resolve_ws_template(config, ws.template).env
+    return _AgentDirectEnvScopes(
         vm=vm_tmpl.env,
+        workspace=ws_env,
         agent=agent_tmpl.env,
-        label=f"agent-shell={agent.name}",
+    )
+
+
+def _agent_direct_secret_target(
+    scopes: _AgentDirectEnvScopes, *, label: str,
+) -> SecretTarget:
+    """Build the SecretTarget for ``agent shell`` / ``agent exec`` from
+    pre-resolved scope dicts.
+
+    Single-phase: the operator opens one shell as the agent's Linux user.
+    The companion ``compose_env`` call must consume the same ``scopes``
+    so the eager-resolve prompts cover exactly what the runtime env will
+    reference (no drift).
+    """
+    from agentworks.secrets import SecretTarget
+
+    return SecretTarget(
+        vm=scopes.vm,
+        workspace=scopes.workspace,
+        agent=scopes.agent,
+        label=label,
     )
 
 
@@ -596,8 +645,9 @@ def shell_agent(
     from agentworks.secrets import resolve_for_command
     from agentworks.ssh import agent_exec_target, interactive
 
-    # Resolve workspace upfront (needed for both authz check and env ctx)
-    # before any SSH probe so failures surface as clean validation errors.
+    # Resolve workspace upfront (needed for authz check, env scope, AND
+    # ctx) before any SSH probe so failures surface as clean validation
+    # errors and the eager-resolve below sees the right scope chain.
     ws: WorkspaceRow | None = None
     if workspace_name:
         ws = db.get_workspace(workspace_name)
@@ -617,14 +667,15 @@ def shell_agent(
 
     # Eager-prompting orchestration (FRD R4 / Phase 6): resolve every
     # secret referenced by the agent shell's env chain BEFORE opening
-    # the interactive SSH session. Non-interactive failures surface as
-    # SecretUnavailableError up front rather than mid-session.
-    resolve_for_command([_agent_shell_secret_target(config, vm, agent)], config)
+    # the interactive SSH session. The same scope dicts feed both the
+    # SecretTarget (for resolve_for_command) and compose_env below so
+    # the two consumers can't drift.
+    scopes = _resolve_agent_direct_env_scopes(config, vm, agent, ws=ws)
+    resolve_for_command(
+        [_agent_direct_secret_target(scopes, label=f"agent-shell={agent.name}")],
+        config,
+    )
 
-    from agentworks.agents.templates import resolve_from_dict as _resolve_agent_template
-    from agentworks.vms.templates import resolve_from_dict as _resolve_vm_template
-    agent_tmpl = _resolve_agent_template(config.agent_templates, agent.template)
-    vm_tmpl = _resolve_vm_template(config.vm_templates, vm.template)
     ctx = ResourceContext(
         vm_name=vm.name,
         vm_host=vm.vm_host_name,
@@ -637,8 +688,9 @@ def shell_agent(
     env = compose_env(
         resolver=config.secret_resolver,
         ctx=ctx,
-        vm=vm_tmpl.env,
-        agent=agent_tmpl.env,
+        vm=scopes.vm,
+        workspace=scopes.workspace,
+        agent=scopes.agent,
     )
 
     # Direct agent SSH (FRD R1): no admin+sudo detour. The agent's
@@ -681,11 +733,9 @@ def exec_agent(
     """
     import shlex
 
-    from agentworks.agents.templates import resolve_from_dict as _resolve_agent_template
     from agentworks.env import ResourceContext, compose_env
     from agentworks.secrets import resolve_for_command
     from agentworks.ssh import agent_exec_target
-    from agentworks.vms.templates import resolve_from_dict as _resolve_vm_template
 
     agent = db.get_agent(name)
     if agent is None:
@@ -699,12 +749,14 @@ def exec_agent(
 
     # Eager-prompting orchestration (FRD R4 / Phase 6): resolve every
     # secret referenced by the agent exec env chain BEFORE running the
-    # remote command. Non-interactive failures surface as
-    # SecretUnavailableError before the SSH session opens.
-    resolve_for_command([_agent_shell_secret_target(config, vm, agent)], config)
+    # remote command. The same scope dicts feed both the SecretTarget
+    # and compose_env below so the two consumers can't drift.
+    scopes = _resolve_agent_direct_env_scopes(config, vm, agent)
+    resolve_for_command(
+        [_agent_direct_secret_target(scopes, label=f"agent-exec={agent.name}")],
+        config,
+    )
 
-    agent_tmpl = _resolve_agent_template(config.agent_templates, agent.template)
-    vm_tmpl = _resolve_vm_template(config.vm_templates, vm.template)
     ctx = ResourceContext(
         vm_name=vm.name,
         vm_host=vm.vm_host_name,
@@ -715,8 +767,9 @@ def exec_agent(
     env = compose_env(
         resolver=config.secret_resolver,
         ctx=ctx,
-        vm=vm_tmpl.env,
-        agent=agent_tmpl.env,
+        vm=scopes.vm,
+        workspace=scopes.workspace,
+        agent=scopes.agent,
     )
 
     target = agent_exec_target(vm, config, agent)

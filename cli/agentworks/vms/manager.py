@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import contextlib
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 from agentworks import output
 from agentworks.config import VALID_PLATFORMS, validate_admin_username, validate_name
@@ -33,25 +33,58 @@ if TYPE_CHECKING:
 
     from agentworks.config import Config
     from agentworks.db import Database, VMRow
+    from agentworks.env import EnvEntry
     from agentworks.git_credentials.base import GitCredentialProvider
     from agentworks.secrets import SecretTarget
     from agentworks.vms.base import VMProvisioner
 
 
-def _vm_secret_target(config: Config) -> SecretTarget:
-    """Build the SecretTarget for VM provisioning / reinit.
+class _VmAdminEnvScopes(NamedTuple):
+    """Per-scope env dicts for vm-level commands (provisioning, shell, exec)."""
 
-    VM-level commands open admin shells on the VM, applying admin scope
-    over the resolved vm-template scope per FRD R2. No workspace / agent
-    / session context (those layers are created by their own commands
-    with their own eager-resolve calls).
+    vm: dict[str, EnvEntry]
+    admin: dict[str, EnvEntry]
+
+
+def _resolve_vm_admin_env_scopes(
+    config: Config, vm: VMRow | None = None,
+) -> _VmAdminEnvScopes:
+    """Resolve per-scope env dicts for vm-level commands.
+
+    When ``vm`` is provided (reinit / shell / exec), the vm-scope env
+    comes from the VM's actual template (``config.vm_templates[vm.template]``)
+    -- NOT ``config.vm``, which is the config-time default and may not
+    match the VM's actual template.
+
+    When ``vm`` is None (``create_vm``, where the VM doesn't exist in the
+    DB yet), the caller is expected to have already
+    ``_replace(config, vm=resolved_template)``'d from the operator's
+    ``--template`` flag, so ``config.vm`` is authoritative.
+    """
+    if vm is None:
+        vm_env = config.vm.env
+    else:
+        from agentworks.vms.templates import resolve_from_dict as _resolve_vm_template
+        vm_env = _resolve_vm_template(config.vm_templates, vm.template).env
+    return _VmAdminEnvScopes(vm=vm_env, admin=config.admin.env)
+
+
+def _vm_secret_target(
+    config: Config, vm: VMRow | None = None,
+) -> SecretTarget:
+    """Build the SecretTarget for VM-level commands.
+
+    Sources its scope dicts from ``_resolve_vm_admin_env_scopes``; the
+    companion ``compose_env`` call at shell / exec sites must use the
+    SAME helper so both consumers see identical scope state (no drift).
     """
     from agentworks.secrets import SecretTarget
 
+    scopes = _resolve_vm_admin_env_scopes(config, vm)
     return SecretTarget(
-        vm=config.vm.env,
-        admin=config.admin.env,
-        label="vm",
+        vm=scopes.vm,
+        admin=scopes.admin,
+        label=f"vm={vm.name}" if vm is not None else "vm",
     )
 
 
@@ -523,9 +556,14 @@ def shell_vm(db: Database, config: Config, name: str) -> None:
 
     # Eager-prompting orchestration (FRD R4 / Phase 6): resolve every
     # secret referenced by the admin shell's env chain BEFORE opening
-    # the interactive SSH session. Non-interactive failures surface as
-    # SecretUnavailableError up front rather than mid-session.
-    resolve_for_command([_vm_secret_target(config)], config)
+    # the interactive SSH session. The same scope dicts feed both the
+    # SecretTarget (via _vm_secret_target) and compose_env so the two
+    # consumers can't drift. Crucially the vm scope comes from
+    # vm.template (DB row), not config.vm (which is the config-default
+    # template and would silently route the wrong env into a shell on a
+    # non-default-template VM).
+    scopes = _resolve_vm_admin_env_scopes(config, vm)
+    resolve_for_command([_vm_secret_target(config, vm)], config)
 
     ctx = ResourceContext(
         vm_name=vm.name,
@@ -536,8 +574,8 @@ def shell_vm(db: Database, config: Config, name: str) -> None:
     env = compose_env(
         resolver=config.secret_resolver,
         ctx=ctx,
-        vm=config.vm.env,
-        admin=config.admin.env,
+        vm=scopes.vm,
+        admin=scopes.admin,
     )
 
     target = admin_exec_target(vm, config)
@@ -572,9 +610,11 @@ def exec_vm(db: Database, config: Config, name: str, command: list[str]) -> int:
 
     # Eager-prompting orchestration (FRD R4 / Phase 6): resolve every
     # secret referenced by the admin exec env chain BEFORE running the
-    # remote command. Non-interactive failures surface as
-    # SecretUnavailableError before the SSH session opens.
-    resolve_for_command([_vm_secret_target(config)], config)
+    # remote command. The same scope dicts feed both the SecretTarget
+    # and compose_env so the two consumers can't drift. The vm scope
+    # comes from vm.template (DB row), not config.vm.
+    scopes = _resolve_vm_admin_env_scopes(config, vm)
+    resolve_for_command([_vm_secret_target(config, vm)], config)
 
     ctx = ResourceContext(
         vm_name=vm.name,
@@ -585,8 +625,8 @@ def exec_vm(db: Database, config: Config, name: str, command: list[str]) -> int:
     env = compose_env(
         resolver=config.secret_resolver,
         ctx=ctx,
-        vm=config.vm.env,
-        admin=config.admin.env,
+        vm=scopes.vm,
+        admin=scopes.admin,
     )
 
     target = admin_exec_target(vm, config)
@@ -961,11 +1001,13 @@ def reinit_vm(
 
     # Eager-prompting orchestration (FRD R4 / Phase 6): resolve every
     # secret referenced by the admin / vm env chain BEFORE any SSH-
-    # driven reinit work. Non-interactive failures surface as
-    # SecretUnavailableError before the SSH session is opened.
+    # driven reinit work. Pass ``vm`` so the helper resolves the vm
+    # scope from vm.template (DB row), not config.vm (which the
+    # _replace above happens to keep in sync, but the explicit form
+    # mirrors shell_vm / exec_vm and removes the implicit dependency).
     from agentworks.secrets import resolve_for_command
 
-    resolve_for_command([_vm_secret_target(config)], config)
+    resolve_for_command([_vm_secret_target(config, vm)], config)
 
     # Build Tailscale SSH target with logging
     from agentworks.ssh import SSHLogger

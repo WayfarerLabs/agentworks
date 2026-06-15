@@ -620,6 +620,10 @@ def test_vm_shell_eager_resolve_fires_before_ssh(
 
     db = _seed_basic_db(tmp_path)
 
+    monkeypatch.setattr(
+        vm_manager, "_resolve_vm_admin_env_scopes",
+        lambda *a, **k: vm_manager._VmAdminEnvScopes(vm={}, admin={}),
+    )
     monkeypatch.setattr(vm_manager, "_vm_secret_target", lambda *a, **k: object())
 
     def _explode(*args: object, **kwargs: object) -> None:
@@ -660,6 +664,10 @@ def test_vm_exec_eager_resolve_fires_before_ssh(
 
     db = _seed_basic_db(tmp_path)
 
+    monkeypatch.setattr(
+        vm_manager, "_resolve_vm_admin_env_scopes",
+        lambda *a, **k: vm_manager._VmAdminEnvScopes(vm={}, admin={}),
+    )
     monkeypatch.setattr(vm_manager, "_vm_secret_target", lambda *a, **k: object())
 
     def _explode(*args: object, **kwargs: object) -> None:
@@ -705,7 +713,11 @@ def test_agent_exec_eager_resolve_fires_before_ssh(
     db.insert_agent("a1", "vm1", "agt-a1", template="default")
 
     monkeypatch.setattr(
-        agent_manager, "_agent_shell_secret_target", lambda *a, **k: object()
+        agent_manager, "_resolve_agent_direct_env_scopes",
+        lambda *a, **k: agent_manager._AgentDirectEnvScopes(vm={}, workspace=None, agent={}),
+    )
+    monkeypatch.setattr(
+        agent_manager, "_agent_direct_secret_target", lambda *a, **k: object()
     )
 
     def _explode(*args: object, **kwargs: object) -> None:
@@ -735,6 +747,65 @@ def test_agent_exec_eager_resolve_fires_before_ssh(
         )
 
     assert streaming_calls == [], "eager-resolve must precede call_streaming"
+    db.close()
+
+
+def test_shell_agent_passes_workspace_scope_to_secret_target(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """shell_agent --workspace must include workspace-template env in
+    the SecretTarget so workspace-scope secrets get eager-resolved.
+    Regression test for the Phase 6.5 review's BLOCKING bug: workspace
+    scope was silently dropped from agent shell --workspace."""
+    from agentworks.agents import manager as agent_manager
+
+    db = _seed_basic_db(tmp_path)
+    db.insert_agent("a1", "vm1", "agt-a1", template="default")
+    # Grant the agent access so the authz check passes.
+    db.insert_agent_grant("a1", "ws1", "explicit")
+
+    captured_scopes: dict[str, object] = {}
+
+    def _spy_scopes(
+        config: object, vm: object, agent: object, *, ws: object = None,
+    ) -> object:
+        # Record the ws arg so the test can pin "shell_agent passes the
+        # workspace row through to the scope resolver."
+        captured_scopes["ws"] = ws
+        return agent_manager._AgentDirectEnvScopes(vm={}, workspace=None, agent={})
+
+    monkeypatch.setattr(
+        agent_manager, "_resolve_agent_direct_env_scopes", _spy_scopes
+    )
+    monkeypatch.setattr(
+        agent_manager, "_agent_direct_secret_target", lambda *a, **k: object()
+    )
+    monkeypatch.setattr(
+        "agentworks.workspaces.manager._ensure_vm_running", lambda *a, **k: None
+    )
+
+    class _Sentinel(Exception):
+        """Raised from resolve_for_command so the test stops before SSH."""
+
+    def _explode(*args: object, **kwargs: object) -> None:
+        raise _Sentinel
+
+    monkeypatch.setattr("agentworks.secrets.resolve_for_command", _explode)
+
+    config = SimpleNamespace()
+
+    with pytest.raises(_Sentinel):
+        agent_manager.shell_agent(
+            db, config, name="a1", workspace_name="ws1",  # type: ignore[arg-type]
+        )
+
+    # The scope resolver received the workspace row, not None. The
+    # workspace template env will then flow into both the SecretTarget
+    # and compose_env, satisfying FRD R2 for `agent shell --workspace`.
+    ws_arg = captured_scopes.get("ws")
+    assert ws_arg is not None
+    # Verify it's the right workspace row.
+    assert getattr(ws_arg, "name", None) == "ws1"
     db.close()
 
 
