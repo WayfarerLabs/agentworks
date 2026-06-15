@@ -510,11 +510,17 @@ def _run_mise_install(
     logger: SSHLogger,
     *,
     prune: bool = True,
+    env: dict[str, str] | None = None,
 ) -> None:
     """Run mise install, handling locked/unlocked modes.
 
     If a lockfile is present, tries --locked first. If that fails due to
     unlocked packages and allow_unlocked is true, retries without --locked.
+
+    ``env`` (Phase 6 / FRD R5): SSH SetEnv injection on the install /
+    prune commands so plugin installers + post-install hooks see the
+    merged scope env. The presence-check (``test -f mise.lock``) doesn't
+    take env because it shouldn't observe scope state.
     """
     logger.step("Mise install")
 
@@ -535,6 +541,7 @@ def _run_mise_install(
             target.run(
                 f"{shell} -lc 'mise install -y --locked'",
                 timeout=300,
+                env=env,
             )
             output.detail("Mise packages installed (locked)")
             installed = True
@@ -556,6 +563,7 @@ def _run_mise_install(
             target.run(
                 f"{shell} -lc 'mise install -y'",
                 timeout=300,
+                env=env,
             )
             output.detail("Mise packages installed")
             installed = True
@@ -572,7 +580,7 @@ def _run_mise_install(
         import contextlib
 
         with contextlib.suppress(SSHError):
-            target.run(f"{shell} -lc 'mise prune -y'", timeout=60)
+            target.run(f"{shell} -lc 'mise prune -y'", timeout=60, env=env)
 
 
 # -- SSH authorized keys ------------------------------------------------------
@@ -877,8 +885,18 @@ def _run_catalog_commands(
     logger: SSHLogger,
     *,
     label: str = "Install command",
+    env: dict[str, str] | None = None,
 ) -> list[str]:
-    """Run install commands from a catalog entry dict. Returns PATH additions."""
+    """Run install commands from a catalog entry dict. Returns PATH additions.
+
+    ``env`` (Phase 6 / FRD R5): when provided, injects each key=value
+    pair via SSH SetEnv so the install command sees the merged
+    operator-defined env (admin / vm scopes for the admin user, agent /
+    vm for an agent user). Already-resolved through the SecretResolver
+    by the caller; this layer just plumbs it through. Test-installed
+    commands skip the env injection because they're idempotent checks
+    that shouldn't depend on the merged scope.
+    """
     if not command_names:
         return []
 
@@ -911,7 +929,11 @@ def _run_catalog_commands(
         truncated = entry.command[:60]
         output.detail(f"{label} {i}/{total} ({name}): {truncated}...")
         try:
-            target.run(f"{shlex.quote(shell)} -lc {shlex.quote(entry.command)}", timeout=120)
+            target.run(
+                f"{shlex.quote(shell)} -lc {shlex.quote(entry.command)}",
+                timeout=120,
+                env=env,
+            )
         except SSHError as e:
             msg = f"{label.lower()} '{name}' failed: {truncated}... ({e})"
             logger.warning(msg)
@@ -1480,6 +1502,23 @@ def _phase_b_setup(
         ts_target, vm_stable_identity_env(identity_ctx), logger,
     )
 
+    # Phase 6.3b: compose the admin env once and thread it into the
+    # user-facing install runners below (dotfiles, mise, user_install_commands,
+    # nerf/claude plugins). Eager-resolve at the manager entry (Phase 6.3)
+    # has already warmed the resolver cache, so this compose_env hits
+    # cached values rather than prompting. Infrastructure setup steps
+    # earlier in this function (system packages, apt sources, sshd
+    # config, sudoers, hardening) deliberately don't take env -- they're
+    # bootstrap actions that shouldn't observe operator scope.
+    from agentworks.env import compose_env
+
+    admin_env = compose_env(
+        resolver=config.secret_resolver,
+        ctx=identity_ctx,
+        vm=config.vm.env,
+        admin=config.admin.env,
+    )
+
     # Non-fatal: system repos + packages (mise repo added, then all packages)
     _install_system_packages(ts_target, logger)
 
@@ -1623,7 +1662,11 @@ def _phase_b_setup(
             fetch_dir(ref, ts_target, dest, logger=logger)
 
             output.detail(f"Running dotfiles install: {config.admin.dotfiles_install_cmd}")
-            ts_target.run(f"cd {dest} && {config.admin.dotfiles_install_cmd}", timeout=120)
+            ts_target.run(
+                f"cd {dest} && {config.admin.dotfiles_install_cmd}",
+                timeout=120,
+                env=admin_env,
+            )
         except (SourceRefError, Exception) as e:
             msg = f"dotfiles install failed: {e}"
             logger.warning(msg)
@@ -1636,12 +1679,18 @@ def _phase_b_setup(
     # Non-fatal: mise install (after config + dotfiles + lockfile are all settled)
     prune = config.admin.mise_prune_on_reinit
     if config.admin.mise_packages or config.admin.mise_lockfile:
-        _run_mise_install(ts_target, admin_shell, home, config.admin.mise_allow_unlocked, logger, prune=prune)
+        _run_mise_install(
+            ts_target, admin_shell, home, config.admin.mise_allow_unlocked, logger,
+            prune=prune, env=admin_env,
+        )
     else:
         try:
             check = ts_target.run(f"test -f {home}/.config/mise/config.toml", check=False)
             if check.ok:
-                _run_mise_install(ts_target, admin_shell, home, config.admin.mise_allow_unlocked, logger, prune=prune)
+                _run_mise_install(
+                    ts_target, admin_shell, home, config.admin.mise_allow_unlocked, logger,
+                    prune=prune, env=admin_env,
+                )
         except SSHError:
             pass
 
@@ -1654,6 +1703,7 @@ def _phase_b_setup(
         home,
         logger,
         label="User install command",
+        env=admin_env,
     )
 
     # Non-fatal: shell profile (PATH exports + per-user identity, sourced at login)
@@ -1675,12 +1725,14 @@ def _phase_b_setup(
 
     # Non-fatal: install nerf Claude plugin for admin user
     if config.admin.nerf_install_claude_plugin:
-        _install_nerf_claude_plugin_for_user(ts_target, admin_shell, logger)
+        _install_nerf_claude_plugin_for_user(
+            ts_target, admin_shell, logger, env=admin_env,
+        )
 
     # Non-fatal: Claude Code marketplaces and plugins for admin user
     def _admin_run_cmd(cmd: str, timeout: int) -> object:
         inner = shlex.quote(cmd)
-        return ts_target.run(f"{admin_shell} -lc {inner}", timeout=timeout)
+        return ts_target.run(f"{admin_shell} -lc {inner}", timeout=timeout, env=admin_env)
 
     install_claude_plugins(
         _admin_run_cmd, config.admin.claude_marketplaces, config.admin.claude_plugins, logger
@@ -1800,8 +1852,15 @@ def _install_nerf_claude_plugin_for_user(
     target: ExecTarget,
     shell: str,
     logger: SSHLogger,
+    *,
+    env: dict[str, str] | None = None,
 ) -> None:
-    """Install the nerf Claude Code plugin for the current user. Non-fatal."""
+    """Install the nerf Claude Code plugin for the current user. Non-fatal.
+
+    ``env`` (Phase 6 / FRD R5): SSH SetEnv on the install command so
+    the plugin's install hooks see the merged scope env. The presence
+    check is plain (no scope dependency).
+    """
     logger.step("Nerf plugin install")
 
     try:
@@ -1821,6 +1880,7 @@ def _install_nerf_claude_plugin_for_user(
         target.run(
             f"{shell} -lc '$AGENTWORKS_NERF_HOME/claude-plugin/scripts/install-plugin'",
             timeout=30,
+            env=env,
         )
         output.detail("Nerf Claude plugin installed")
     except SSHError as e:
