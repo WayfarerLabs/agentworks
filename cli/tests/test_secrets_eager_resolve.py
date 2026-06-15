@@ -994,6 +994,128 @@ def test_attach_console_existing_tmux_session_skips_eager_resolve(
     db.close()
 
 
+# ---------------------------------------------------------------------------
+# FRD R4 / R5 no-shell-opening surface: these commands MUST NOT eager-resolve
+# ---------------------------------------------------------------------------
+
+
+def test_session_list_does_not_eager_resolve(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``session list`` reads the DB only; per FRD R4/R5 it opens no new
+    shells and consumes no secrets. A spy on resolve_for_command must
+    never fire."""
+    from agentworks.sessions import manager as session_manager
+
+    db = _seed_basic_db(tmp_path)
+
+    resolve_called: list[bool] = []
+
+    def _track_resolve(*args: object, **kwargs: object) -> dict[str, str]:
+        resolve_called.append(True)
+        return {}
+
+    monkeypatch.setattr("agentworks.secrets.resolve_for_command", _track_resolve)
+
+    config = SimpleNamespace()
+    session_manager.list_sessions(
+        db,
+        config,  # type: ignore[arg-type]
+        no_status=True,  # avoid SSH liveness probes
+    )
+
+    assert resolve_called == [], (
+        "session list reads DB only; must not eager-resolve secrets"
+    )
+    db.close()
+
+
+def test_session_describe_does_not_eager_resolve(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``session describe`` reads DB + best-effort liveness; per FRD R4/R5
+    it opens no new shells and consumes no secrets."""
+    from agentworks.db import SessionMode
+    from agentworks.sessions import manager as session_manager
+
+    db = _seed_basic_db(tmp_path)
+    db._conn.execute(
+        "INSERT INTO sessions (name, workspace_name, template, mode) "
+        "VALUES ('s1', 'ws1', 'default', ?)",
+        (SessionMode.ADMIN.value,),
+    )
+    db._conn.commit()
+
+    resolve_called: list[bool] = []
+
+    def _track_resolve(*args: object, **kwargs: object) -> dict[str, str]:
+        resolve_called.append(True)
+        return {}
+
+    monkeypatch.setattr("agentworks.secrets.resolve_for_command", _track_resolve)
+    # Stub liveness probes that describe might attempt; they don't matter
+    # for this test, only the resolve_for_command spy does.
+    monkeypatch.setattr(
+        "agentworks.workspaces.manager._ensure_vm_running",
+        lambda *a, **k: None,
+    )
+
+    config = SimpleNamespace(operator=SimpleNamespace(ssh_private_key=None))
+    # describe_session is best-effort against the VM. Any SSH errors are
+    # swallowed; what matters is whether resolve_for_command got called.
+    try:
+        session_manager.describe_session(
+            db, config, "s1", no_status=True,  # type: ignore[arg-type]
+        )
+    except Exception:
+        pass
+
+    assert resolve_called == [], (
+        "session describe must not eager-resolve secrets"
+    )
+    db.close()
+
+
+def test_console_add_sessions_does_not_eager_resolve(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``console add-sessions`` joins existing tmux sessions via wrapper
+    windows; no new agent shells are opened. Per FRD R4/R5 it consumes
+    no secrets."""
+    from agentworks.sessions import multi_console
+
+    db = _seed_basic_db(tmp_path)
+    db._conn.execute(
+        "INSERT INTO sessions (name, workspace_name, template, mode) "
+        "VALUES ('s1', 'ws1', 'default', 'admin')"
+    )
+    db._conn.execute(
+        "INSERT INTO consoles (name, vm_name) VALUES ('c1', 'vm1')"
+    )
+    db._conn.commit()
+
+    resolve_called: list[bool] = []
+
+    def _track_resolve(*args: object, **kwargs: object) -> dict[str, str]:
+        resolve_called.append(True)
+        return {}
+
+    monkeypatch.setattr("agentworks.secrets.resolve_for_command", _track_resolve)
+    monkeypatch.setattr(
+        multi_console, "_live_target", lambda *a, **k: None
+    )
+
+    config = SimpleNamespace()
+    multi_console.add_sessions(
+        db, config, console_name="c1", session_specs=["s1"],  # type: ignore[arg-type]
+    )
+
+    assert resolve_called == [], (
+        "console add-sessions joins existing sessions; must not eager-resolve"
+    )
+    db.close()
+
+
 def test_agent_setup_runners_thread_env_via_setenv() -> None:
     """Source-level tripwire for the Phase 6.4b threading contract:
     every runner inside Phase 2 of ``_create_agent_on_vm`` that opens a

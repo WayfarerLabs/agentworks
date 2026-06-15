@@ -254,18 +254,34 @@ seconds), before any state mutation. Non-interactive failure is a clear actionab
       the hook for future Tailscale / git-cred migrations. The orchestrator stays generic (no DB /
       template coupling); static-vs-dynamic filter discipline lives at each manager call site (next
       bullet).
-- [ ] Wire into the manager layer for: `vm create`, `vm reinit`, `agent create`, `agent reinit`,
-      `session create`, `session restart`, `console create`, `console add-shell`, `vm exec`,
-      `agent exec`, `vm shell`, `agent shell`. Each manager entry computes its candidate set from
-      static filters only and calls `resolve_for_command` before any destructive work.
-- [ ] Verify `session attach` / `session list` / `session describe` / `console attach` /
-      `console add-sessions` do NOT consume secrets (per FRD R4 / R5).
+- [x] Wire into the manager layer for: `vm create`, `vm reinit`, `agent create`, `agent reinit`,
+      `session create`, `session restart`, `console add-shell`, `vm exec`, `agent exec`, `vm shell`,
+      `agent shell`, plus the deferred follow-ups for the console build path: `attach_console`'s
+      first-attach build and `restore_session`. (`console create` itself is DB-only in the current
+      impl; window creation defers to first-attach inside `attach_console`. The eager-resolve fires
+      at the actual shell-opening point, matching the FRD's intent even if not its literal
+      phrasing.)
+- [x] Verify `session attach` / `session list` / `session describe` / `console attach` (existing
+      tmux session) / `console add-sessions` do NOT consume secrets (per FRD R4 / R5). Pinned by
+      source-level tests in `test_secrets_eager_resolve.py`.
+- [x] Thread env through provisioning + agent-setup SSH runners (the Phase 4 deferral). Both
+      `_phase_b_setup` (admin env) and `_create_agent_on_vm` Phase 2 (agent env) compose env once
+      via `compose_env` -- the resolver cache is warm from the manager-entry eager-resolve, so this
+      hits cached values rather than re-prompting. Threaded into user_install_commands, mise install
+      / prune, nerf plugin, claude marketplaces / plugins, and dotfiles install. Infrastructure
+      setup (apt, sshd, sudoers, hardening, useradd, socket setup, authorized_keys) deliberately
+      doesn't take env -- those are bootstrap actions that shouldn't observe operator scope.
 - [x] Tests for the orchestration module (16 tests in `cli/tests/test_secrets_orchestration.py`):
       target unioning + dedup, cross-target ordering, substitution invariance, extra_decls hook,
       cache-wins-over-late-env-changes (cache contract), admin+agent mutex, label-not-in-equality,
       non-hashability.
-- [ ] Tests for the manager wiring: spy on the resolver to confirm one resolve-all call per command,
-      before any mutation; non-interactive mode raises `SecretUnavailableError` with the right hint.
+- [x] Tests for the manager wiring (22 tests in `cli/tests/test_secrets_eager_resolve.py`):
+      eager-resolve fires BEFORE the first state mutation in each shell-opening entry point (session
+      / vm / agent / console add-shell / console build / restore_session); failed eager-resolve
+      leaves no DB row, no SSH session, no tmux state. Source-level tripwires pin that every
+      user-facing install runner in `_phase_b_setup` and `_create_agent_on_vm` carries
+      `env=admin_env` / `env=agent_env`. No-shell-opening commands (session list / describe /
+      console add-sessions / plain console attach) verified to NOT call `resolve_for_command`.
 
 Definition of done: an operator with no `AW_SECRET_<NAME>` in env who runs
 `agw session create ... -t claude` gets one prompt up front for all needed secrets across the full

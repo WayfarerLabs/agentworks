@@ -525,6 +525,15 @@ implemented backends are:
   `[secrets.<name>].backend_mappings.env_var = "CUSTOM_NAME"`.
 - `prompt` -- interactive prompt; batched at the start of the CLI run.
 
+**Eager prompting (FRD R4):** every command that opens new shells resolves all needed secrets up
+front, before any state mutation. The set of secrets is computed from the command's static filters
+(positional targets, `--vm`, `--workspace`, `--agent`, etc.) -- dynamic predicates like
+`--all-stopped` apply later, so the prompted set may over-approximate. Non-interactive mode (no TTY
+or `--non-interactive`) surfaces missing secrets as `SecretUnavailableError` with a per-secret hint
+naming which backends were tried. Commands that join existing shells (`session attach`,
+`session list`, `console attach` against a live tmux session, `console add-sessions`) consume no
+secrets per FRD R4 / R5.
+
 Inspect the merged result for any context with `agw env show`:
 
 ```bash
