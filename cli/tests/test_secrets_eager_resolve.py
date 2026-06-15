@@ -26,6 +26,16 @@ if TYPE_CHECKING:
     pass
 
 
+class _NullCM:
+    """No-op context manager used to stub ``keep_vm_active``."""
+
+    def __enter__(self) -> None:
+        return None
+
+    def __exit__(self, *_a: object) -> None:
+        return None
+
+
 def _stub_target() -> object:
     class _Result:
         ok = True
@@ -872,6 +882,60 @@ def test_attach_console_build_path_eager_resolves_before_tmux(
     db.close()
 
 
+def test_console_build_secret_targets_excludes_session_attach_panes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """_console_build_secret_targets enumerates panes that OPEN NEW
+    SHELLS: the admin shell (when set) and each configured helper
+    shell pane. Session-attach windows are deliberately excluded per
+    FRD R4 (they join existing tmux servers; SetEnv on the SSH
+    connection doesn't flow into the existing server's panes)."""
+    from agentworks.sessions import multi_console
+
+    db = _seed_basic_db(tmp_path)
+    # Seed: console with admin_shell=True + one session with two shells.
+    db._conn.execute(
+        "INSERT INTO sessions (name, workspace_name, template, mode) "
+        "VALUES ('s1', 'ws1', 'default', 'admin')"
+    )
+    db._conn.execute(
+        "INSERT INTO consoles (name, vm_name, admin_shell) VALUES ('c1', 'vm1', 1)"
+    )
+    # Two shells: one --admin, one not. Admin-mode session promotes the
+    # non-admin shell to admin via use_admin = ... or session_user ==
+    # admin_user.
+    db._conn.execute(
+        "INSERT INTO console_sessions (console_name, session_name, shells, position) "
+        "VALUES ('c1', 's1', '[{\"cwd\":null,\"admin\":true},{\"cwd\":null,\"admin\":false}]', 0)"
+    )
+    db._conn.commit()
+
+    sentinel_pane = object()
+    sentinel_admin = object()
+    monkeypatch.setattr(
+        multi_console, "_pane_secret_target", lambda *a, **k: sentinel_pane,
+    )
+    monkeypatch.setattr(
+        multi_console, "_admin_only_secret_target", lambda *a, **k: sentinel_admin,
+    )
+
+    vm = db.get_vm("vm1")
+    console = db.get_console("c1")
+    assert vm is not None
+    assert console is not None
+    targets = multi_console._console_build_secret_targets(
+        db, SimpleNamespace(), console=console, vm=vm,  # type: ignore[arg-type]
+    )
+
+    # Expected: 1 admin-shell + 2 shell panes (one per configured shell).
+    # No session-attach pane.
+    assert len(targets) == 3
+    assert targets[0] is sentinel_admin
+    assert targets[1] is sentinel_pane
+    assert targets[2] is sentinel_pane
+    db.close()
+
+
 def test_attach_console_existing_tmux_session_skips_eager_resolve(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -923,14 +987,6 @@ def test_attach_console_existing_tmux_session_skips_eager_resolve(
         "per FRD R4: it joins existing shells, consumes no secrets"
     )
     db.close()
-
-
-class _NullCM:
-    def __enter__(self) -> None:
-        return None
-
-    def __exit__(self, *_a: object) -> None:
-        return None
 
 
 def test_console_add_shell_promotes_admin_for_admin_mode_session(

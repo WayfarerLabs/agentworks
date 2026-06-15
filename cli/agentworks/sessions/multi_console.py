@@ -687,18 +687,6 @@ def restore_session(
                 ),
             )
 
-        # Eager-prompting orchestration (FRD R4 / Phase 6): restore_session
-        # may need to rebuild the entire window OR fill in missing shell
-        # panes; either way it opens new shells. Resolve up front for the
-        # full configured shell set (over-approximates by including
-        # already-live shells whose secrets are likely cached anyway).
-        from agentworks.secrets import resolve_for_command
-
-        resolve_for_command(
-            _restore_session_secret_targets(db, config, vm=vm, member=member),
-            config,
-        )
-
         q_con = shlex.quote(tmux_session_name(console_name))
         q_win = shlex.quote(session_name)
         layout = config.named_console.tmux_layout
@@ -835,6 +823,25 @@ def restore_session(
                 entity_name=session_name,
             )
         session_user = _session_linux_user(db, session, vm)
+
+        # Eager-prompting orchestration (FRD R4 / Phase 6): restore_session
+        # opens new shells for the missing pane indices. Resolve secrets
+        # NOW -- after all the validation guards (untagged-panes /
+        # duplicate-tags / out-of-range / "already matches config" no-op)
+        # so an operator with a tag-corruption gets the actionable
+        # validation error instead of being prompted for credentials they
+        # would never end up using. Targets are scoped precisely to the
+        # missing config indices (not all configured shells) so non-
+        # interactive runs only fail on secrets that actually would be
+        # consumed.
+        from agentworks.secrets import resolve_for_command
+
+        resolve_for_command(
+            _restore_session_secret_targets(
+                db, config, vm=vm, member=member, indices=missing,
+            ),
+            config,
+        )
 
         output.info(
             f"Restoring {len(missing)} shell pane(s) in '{session_name}': "
@@ -1132,13 +1139,21 @@ def _pane_secret_target(
 
 
 def _admin_only_secret_target(
-    config: Config, vm: VMRow, label: str,
+    config: Config, vm: VMRow, *, label: str,
 ) -> SecretTarget:
     """SecretTarget for an admin-only console pane (no workspace context).
 
     Used for ``console.admin_shell`` panes at build time -- a vanilla
     admin login shell with vm + admin scope. Workspace and session
     contexts don't apply (the admin shell isn't tied to either).
+
+    Note: today ``_build_console_tmux`` creates the admin-shell window
+    via ``tmux new-session -d ... 'exec $SHELL -l'`` with no SetEnv /
+    ``tmux new-session -e`` flags, so the resolved env doesn't yet
+    reach the admin shell. The eager-resolve here still produces the
+    right operator-facing UX (prompt up front, before any tmux work)
+    and warms the cache for whenever the injection wiring lands as
+    part of Phase 6.3b's broader env-threading work.
     """
     from agentworks.secrets import SecretTarget
     from agentworks.vms.templates import resolve_from_dict as _resolve_vm_template
@@ -1181,7 +1196,8 @@ def _console_build_secret_targets(
     if console.admin_shell:
         targets.append(
             _admin_only_secret_target(
-                config, vm, label=f"console={console.name}/admin-shell",
+                config, vm,
+                label=f"console={console.name}/admin-shell",
             ),
         )
     for member in db.list_console_sessions(console.name):
@@ -1208,14 +1224,18 @@ def _restore_session_secret_targets(
     *,
     vm: VMRow,
     member: ConsoleSessionRow,
+    indices: list[int] | None = None,
 ) -> list[SecretTarget]:
     """SecretTargets for the panes ``restore_session`` may need to open.
 
-    Covers the per-shell panes of a single window. Over-approximates
-    by including ALL configured shells (not just the missing ones), so
-    a single eager-resolve call up front covers any subset that turns
-    out to be missing. The resolver cache makes the over-approximation
-    cheap for already-resolved secrets.
+    When ``indices`` is None, returns targets for ALL configured shell
+    panes in the member's window (used when the window itself is
+    missing and needs a full rebuild). When ``indices`` is provided,
+    targets are scoped to that subset (used when the window exists and
+    only specific panes are missing). The precise-indices path is
+    preferred at the restore site because the validation guards above
+    already filtered down to the missing set; over-approximation would
+    risk prompting for secrets the command never actually consumes.
     """
     targets: list[SecretTarget] = []
     session = db.get_session(member.session_name)
@@ -1225,7 +1245,12 @@ def _restore_session_secret_targets(
         session_user = _session_linux_user(db, session, vm)
     except NotFoundError:
         return targets
-    for shell in member.shells:
+    shells_iter = (
+        ((idx, member.shells[idx]) for idx in indices)
+        if indices is not None
+        else enumerate(member.shells)
+    )
+    for _idx, shell in shells_iter:
         use_admin = shell["admin"] or session_user == vm.admin_username
         pane = _pane_secret_target(
             config, db, vm=vm, session=session, is_admin_pane=use_admin,
