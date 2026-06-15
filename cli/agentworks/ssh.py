@@ -259,6 +259,29 @@ SSH_CONNECT_TIMEOUT = 30
 SSH_DEFAULT_RETRIES = 1
 
 
+def _set_env_args(env: dict[str, str] | None) -> list[str]:
+    """Build the ``-o SetEnv=...`` ssh-client args for a (key, value) dict.
+
+    ssh_config(5) says "for each parameter, the first obtained value will
+    be used" -- so emitting ``-o SetEnv=K=V`` once per pair silently drops
+    every pair after the first. We coalesce all pairs into a single
+    ``-o SetEnv="K1=V1" "K2=V2" ...`` argument; the option's value is
+    parsed by OpenSSH as whitespace-separated VAR=VALUE pairs with
+    double-quote grouping. Values are always quoted (handles spaces, empty
+    values, and embedded ``"``/``\\``) with the standard escapes.
+
+    The remote sshd accepts the pairs under the ``AcceptEnv *`` directive
+    deployed by VM init (see ADR 0014).
+    """
+    if not env:
+        return []
+    pairs = []
+    for key, value in env.items():
+        escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+        pairs.append(f'{key}="{escaped}"')
+    return ["-o", "SetEnv=" + " ".join(pairs)]
+
+
 def _ssh_base_args(
     target: SSHTarget,
     *,
@@ -273,13 +296,7 @@ def _ssh_base_args(
         args.extend(["-i", str(target.identity_file)])
     if target.proxy_jump is not None:
         args.extend(["-J", target.proxy_jump])
-    if env:
-        for key, value in env.items():
-            # Each SetEnv pair is passed as `-o SetEnv=KEY=VALUE`. The remote
-            # sshd accepts it under the `AcceptEnv *` directive deployed by VM
-            # init (see docs/adrs/0014-sshd-accept-env-wildcard.md) and injects the
-            # var into the user's shell environment before the shell starts.
-            args.extend(["-o", f"SetEnv={key}={value}"])
+    args.extend(_set_env_args(env))
     if target.user:
         args.append(f"{target.user}@{target.host}")
     else:
@@ -319,10 +336,10 @@ def run(
         retries: Number of attempts (default: SSH_RETRIES).
         on_retry: Optional callback(attempt, max_retries) called before each retry.
         logger: Optional SSHLogger to record command output.
-        env: Env vars to inject via SSH SetEnv. Each pair becomes a
-            ``-o SetEnv=KEY=VALUE`` argument on the SSH command line;
-            agentworks-managed VMs accept these via the ``AcceptEnv *``
-            directive deployed by VM init.
+        env: Env vars to inject via SSH SetEnv. All pairs are coalesced
+            into a single ``-o SetEnv="K1=V1" "K2=V2" ...`` argument (see
+            ``_set_env_args``); agentworks-managed VMs accept these via
+            the ``AcceptEnv *`` directive deployed by VM init.
 
     Returns:
         SSHResult with exit code, stdout, and stderr.
@@ -383,8 +400,9 @@ def interactive(
     target (no remote command argument at all). Otherwise runs ``command``
     over a PTY-allocated SSH session.
 
-    ``env`` injects env vars via SSH SetEnv (``-o SetEnv=K=V``), accepted by
-    the remote ``AcceptEnv *`` directive deployed by VM init.
+    ``env`` injects env vars via SSH SetEnv (all pairs coalesced into one
+    ``-o SetEnv="K1=V1" "K2=V2" ...`` argument; see ``_set_env_args``),
+    accepted by the remote ``AcceptEnv *`` directive deployed by VM init.
 
     Returns the process exit code. Does not raise on failure.
     """
@@ -397,9 +415,7 @@ def interactive(
         args.extend(["-i", str(target.identity_file)])
     if target.proxy_jump is not None:
         args.extend(["-J", target.proxy_jump])
-    if env:
-        for key, value in env.items():
-            args.extend(["-o", f"SetEnv={key}={value}"])
+    args.extend(_set_env_args(env))
     if target.user:
         args.append(f"{target.user}@{target.host}")
     else:
@@ -728,9 +744,10 @@ class ExecTarget:
                  Only meaningful for SSH transport (controls -tt flag).
             check: Raise SSHError on non-zero exit.
             timeout: Timeout in seconds.
-            env: Env vars to inject. For SSH transport, materialized as
-                ``-o SetEnv=K=V`` args (accepted on the remote side under
-                the ``AcceptEnv *`` directive deployed by VM init). For
+            env: Env vars to inject. For SSH transport, coalesced into a
+                single ``-o SetEnv="K1=V1" "K2=V2" ...`` argument (see
+                ``_set_env_args``; accepted on the remote side under the
+                ``AcceptEnv *`` directive deployed by VM init). For
                 Lima / RemoteLima / WSL2 transports, embedded as scoped
                 assignments at the head of the bash payload (``K=v K=v
                 cmd``) which bash exports for the command and its
@@ -837,9 +854,11 @@ class ExecTarget:
         allocation, so this is the wrong helper for tmux attach or
         interactive shells (use ``interactive()`` for those).
 
-        ``env`` injects env vars via SSH SetEnv (``-o SetEnv=K=V``),
-        accepted by the remote ``AcceptEnv *`` directive deployed by VM
-        init. Matches the env path used by ``run`` / ``interactive``.
+        ``env`` injects env vars via SSH SetEnv (all pairs coalesced into
+        one ``-o SetEnv="K1=V1" "K2=V2" ...`` argument; see
+        ``_set_env_args``), accepted by the remote ``AcceptEnv *``
+        directive deployed by VM init. Matches the env path used by
+        ``run`` / ``interactive``.
 
         Only the SSH transport is supported today; other transports
         (lima, remote_lima, wsl2) raise ``SSHError`` if asked.
@@ -855,9 +874,7 @@ class ExecTarget:
             args.extend(["-i", str(self.ssh.identity_file)])
         if self.ssh.proxy_jump is not None:
             args.extend(["-J", self.ssh.proxy_jump])
-        if env:
-            for key, value in env.items():
-                args.extend(["-o", f"SetEnv={key}={value}"])
+        args.extend(_set_env_args(env))
         if self.ssh.user:
             args.append(f"{self.ssh.user}@{self.ssh.host}")
         else:

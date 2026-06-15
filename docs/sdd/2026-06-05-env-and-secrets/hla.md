@@ -13,7 +13,9 @@ Two new packages anchor this work:
 - **`agentworks.env`**: declares the `EnvEntry` config type (value-or-secret-ref), merge logic
   across the resource graph, the standard `AGENTWORKS_*` var producers, and a `compose_env(...)`
   helper that any shell-opening site uses to produce the final `dict[str, str]` of resolved env. The
-  SSH layer accepts that dict and materializes one `-o SetEnv=K=V` argument per entry.
+  SSH layer accepts that dict and coalesces every pair into one `-o SetEnv="K1=V1" "K2=V2" ...`
+  argument (ssh_config(5) treats `SetEnv` as first-wins, so repeating the flag would silently drop
+  every pair after the first; see `ssh._set_env_args`).
 
 Both are pure Python with no Typer dependency, consistent with the typer-isolation rule. The CLI
 layer (commands) calls into these packages; the manager layer composes them with the rest of the
@@ -34,8 +36,8 @@ shell-open call sites.
                             |   shell-opening sites                 |
                             |   compose env, hand to SSH layer:     |
                             |     target.run(cmd, env=...)          |
-                            |   SSH layer materializes              |
-                            |     ssh -o SetEnv=K=V user@host cmd   |
+                            |   SSH layer coalesces (one -o arg):   |
+                            |     ssh -o SetEnv="K=V" "K=V" user@h  |
                             |   sshd (AcceptEnv *) places in shell. |
                             +--------------------------------------+
 ```
@@ -434,11 +436,12 @@ inert (the source instance is never created).
 
 Env injection is a property of the SSH connection, not a property of the shell command. The CLI
 composes a `dict[str, str]` of effective env (user-defined + per-context identity vars) and hands it
-to the SSH layer; the SSH layer materializes one `-o SetEnv=KEY=VALUE` argument per entry. On the
-remote side, sshd accepts the vars (per the `AcceptEnv *` directive deployed in Phase 4; see
-`docs/adrs/0014-sshd-accept-env-wildcard.md`) and places them into the user's shell environment
-before the shell is `exec`d. This happens inside sshd itself (its session-spawn code path), not via
-the `pam_env` PAM module.
+to the SSH layer; the SSH layer coalesces every pair into a single `-o SetEnv="K1=V1" "K2=V2" ...`
+argument (`ssh._set_env_args`; repeating the flag would silently drop every pair after the first per
+ssh_config(5)). On the remote side, sshd accepts the vars (per the `AcceptEnv *` directive deployed
+in Phase 4; see `docs/adrs/0014-sshd-accept-env-wildcard.md`) and places them into the user's shell
+environment before the shell is `exec`d. This happens inside sshd itself (its session-spawn code
+path), not via the `pam_env` PAM module.
 
 Sites compose like this:
 
@@ -446,7 +449,7 @@ Sites compose like this:
 identity = per_context_identity_env(ctx)
 user_env = resolver.render(effective_env(admin=..., vm=..., ...))
 full_env = {**user_env, **identity}  # identity wins (FRD R1)
-target.run(command, env=full_env)    # SSH layer materializes -o SetEnv=K=V args
+target.run(command, env=full_env)    # SSH layer emits one -o SetEnv="K1=V1" "K2=V2" ... arg
 ```
 
 No `build_export_block`. No prelude composition. No "outer shell vs login shell" question. The SSH
@@ -501,10 +504,10 @@ benefit. Phase 3 removes it.
 ## Shell-opening surfaces
 
 Each site composes the effective env from the appropriate context layers and hands the dict to the
-SSH layer (`ExecTarget.run(env=...)` / `interactive(target, command, env=...)`) which materializes
-`-o SetEnv=K=V` args on the SSH command line. For tmux sites the env is additionally passed via
-`tmux new-session -e K=V` / `tmux split-window -e K=V` so it lands in tmux's session-environment
-table. The site set, drawn from the FRD R5 propagation table:
+SSH layer (`ExecTarget.run(env=...)` / `interactive(target, command, env=...)`) which emits a single
+`-o SetEnv="K1=V1" "K2=V2" ...` arg on the SSH command line. For tmux sites the env is additionally
+passed via `tmux new-session -e K=V` / `tmux split-window -e K=V` so it lands in tmux's
+session-environment table. The site set, drawn from the FRD R5 propagation table:
 
 | Module / function                                                         | Context layers (admin shells)      | Context layers (agent shells)      |
 | ------------------------------------------------------------------------- | ---------------------------------- | ---------------------------------- |
@@ -612,7 +615,7 @@ proceed with command execution
     compose_env(resolver, ctx, vm=..., admin=..., ...) -> dict[str, str]
     |
     v
-    pass to the SSH layer via env= kwarg; SSH layer adds -o SetEnv=K=V args
+    pass to the SSH layer via env= kwarg; SSH layer emits one -o SetEnv="K=V" "K=V" arg
 ```
 
 For commands with a single, obvious target (e.g. `session create s1 -t claude`), the candidate set
@@ -730,11 +733,11 @@ The plan will phase the work, but the full design above is the target. Anticipat
    helpers), `compose_env()`. Migrate existing `session_templates.*.env` parsing to the new type
    (plaintext-compatible).
 3. **SSH SetEnv pivot + session/console wiring**: thread `env=` kwarg through `agentworks.ssh`
-   (materialized as `-o SetEnv=K=V` args), wire `sessions/manager`, `sessions/tmux`,
-   `sessions/console.*`, `sessions/multi_console.*` to compose env and pass to the SSH layer. Switch
-   admin sessions to per-session sockets (mirror agent mode) so each session creates a fresh tmux
-   server that inherits the SSH-delivered env. Drop the redundant `sudo su --login admin` in console
-   paths.
+   (coalesced into one `-o SetEnv="K1=V1" "K2=V2" ...` arg), wire `sessions/manager`,
+   `sessions/tmux`, `sessions/console.*`, `sessions/multi_console.*` to compose env and pass to the
+   SSH layer. Switch admin sessions to per-session sockets (mirror agent mode) so each session
+   creates a fresh tmux server that inherits the SSH-delivered env. Drop the redundant
+   `sudo su --login admin` in console paths.
 4. **Provisioning + agent setup wiring**: thread context through `vms/initializer.*` and
    `agents/manager.*`. Write VM-stable identity to the profile fragment, deploy `AcceptEnv *` sshd
    config, deploy `env_keep += "AGENTWORKS_* AW_*"` sudoers config.

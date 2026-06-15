@@ -4,9 +4,10 @@ Combines AGENTWORKS_* identity vars (per-context subset only; VM-stable and
 per-user subsets live in VM-side profile fragments) with the user-defined
 env merged across the precedence ladder and then resolved through the
 SecretResolver. The resulting flat ``dict[str, str]`` is handed to the SSH
-layer (``ExecTarget.run(env=...)``), which materializes one ``-o SetEnv=K=V``
-arg per entry; the remote sshd accepts these under the ``AcceptEnv *``
-directive deployed by VM init.
+layer (``ExecTarget.run(env=...)``), which coalesces every pair into one
+``-o SetEnv="K1=V1" "K2=V2" ...`` argument (see ``ssh._set_env_args``);
+the remote sshd accepts these under the ``AcceptEnv *`` directive
+deployed by VM init.
 
 Identity vars take precedence over user-defined env on key collision: an
 operator who sets AGENTWORKS_SESSION_KIND in their own env gets a load-time

@@ -98,7 +98,7 @@ AcceptEnv.
 This phase rewrites the earlier Phase 3 commits accordingly. The `compose_env` /
 `per_context_identity_env` / SecretResolver-render machinery from those commits stays; what changes
 is the consumption: instead of `build_export_block(env)` followed by glue, we pass the flat
-`dict[str, str]` to SSH as `-o SetEnv=K=V` args.
+`dict[str, str]` to SSH as a single `-o SetEnv="K1=V1" "K2=V2" ...` argument.
 
 ### Phase 3 deliverables
 
@@ -106,9 +106,11 @@ is the consumption: instead of `build_export_block(env)` followed by glue, we pa
       Remove from `agentworks.env` package surface and from tests. Env transport is now an SSH
       property, not a shell-command property.
 - [x] `cli/agentworks/ssh.py`: thread an `env: dict[str, str] | None` kwarg through `run`,
-      `interactive`, and `ExecTarget.run`. Each `K=V` pair becomes `-o SetEnv=K=V` on the SSH
-      command line. Lima / RemoteLima / WSL2 transports embed env as scoped bash assignments at the
-      head of the payload. The `RunCommand` Protocol in `agentworks.sessions.tmux` widens to match.
+      `interactive`, and `ExecTarget.run`. All pairs are coalesced into one
+      `-o SetEnv="K1=V1" "K2=V2" ...` arg on the SSH command line (repeating `-o SetEnv=` would
+      silently drop every pair after the first per ssh_config(5)'s first-wins rule). Lima /
+      RemoteLima / WSL2 transports embed env as scoped bash assignments at the head of the payload.
+      The `RunCommand` Protocol in `agentworks.sessions.tmux` widens to match.
 - [x] `cli/agentworks/sessions/tmux.py`: drop `_build_pane_command` and the prelude composition.
       `create_session` takes the env dict, the pane command becomes the simple inner shape
       (`$SHELL -lic 'cd <path> && exec <command>'` or just empty), env reaches the pane via
@@ -137,8 +139,8 @@ is the consumption: instead of `build_export_block(env)` followed by glue, we pa
       env (identity wins). VM-stable and per-user vars are NOT in the SetEnv payload; they come from
       the VM-side profile fragments in Phase 4.
 - [x] Tests:
-  - SSH-layer SetEnv arg construction (one `-o SetEnv=K=V` per dict entry, order preserved, values
-    with special chars accepted).
+  - SSH-layer SetEnv arg construction (one `-o SetEnv=...` arg with all pairs coalesced, values
+    always double-quoted to survive spaces / embedded `"`/`\` / empty values).
   - `create_tmux_session` builds the `tmux new-session -e KEY=VAL` flag list correctly for admin and
     agent modes.
   - `_split_shell_pane` builds `tmux split-window -e KEY=VAL` for admin and agent panes.

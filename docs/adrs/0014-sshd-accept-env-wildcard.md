@@ -64,11 +64,15 @@ already deploys VM-stable identity fragments and the agentworks tmux-restricted 
 sshd config snippet, restarts sshd (the existing init flow already manages sshd lifecycle), and
 verifies the directive is active.
 
-All SSH commands that agentworks issues use `-o SetEnv=KEY=VALUE` to inject env vars; no shell-
-prelude composition lives in the CLI. The `agentworks.env` package's `compose_env` produces the flat
-`dict[str, str]` that drives the SetEnv args, but no longer feeds `build_export_block`. Both
-`build_export_block` and `build_prefixed_command` are removed; env transport is a property of the
-SSH connection, not a property of the shell command.
+All SSH commands that agentworks issues coalesce every env pair into one
+`-o SetEnv="K1=V1" "K2=V2" ...` argument; no shell-prelude composition lives in the CLI. The
+single-argument shape matters: `ssh_config(5)` says "for each parameter, the first obtained value
+will be used," so repeating `-o SetEnv=` per pair silently drops every pair after the first. Values
+are always double-quoted with `\` and `"` escaped so spaces, empty values, and embedded quotes pass
+through cleanly. The `agentworks.env` package's `compose_env` produces the flat `dict[str, str]`
+that drives the SetEnv arg, but no longer feeds `build_export_block`. Both `build_export_block` and
+`build_prefixed_command` are removed; env transport is a property of the SSH connection, not a
+property of the shell command.
 
 For sudo-to-agent paths (console add-shell panes that switch user to an agent for a pane shell), the
 corresponding sudoers config grows an `env_keep += "AGENTWORKS_* AW_*"` directive so that sudo

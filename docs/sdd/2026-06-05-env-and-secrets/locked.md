@@ -29,8 +29,11 @@ updates this lockfile with a dated entry.
 
 - **SSH SetEnv** (FRD R5, ADR 0014). The `agentworks.ssh` layer's `run` / `interactive` /
   `ExecTarget.run` / `ExecTarget.call_streaming` all accept an `env: dict[str, str] | None` kwarg
-  and materialize one `-o SetEnv=KEY=VALUE` argument per pair. The remote sshd accepts the vars
-  under the `AcceptEnv *` directive deployed at VM init.
+  and coalesce every pair into a single `-o SetEnv="K1=V1" "K2=V2" ...` argument (values always
+  double-quoted with `\` and `"` escaped). Repeating `-o SetEnv=` per pair would silently drop every
+  pair after the first per ssh_config(5)'s "first obtained value wins" rule; see `ssh._set_env_args`
+  and the regression coverage in `test_ssh_set_env.py`. The remote sshd accepts the vars under the
+  `AcceptEnv *` directive deployed at VM init.
 - **VM-side fragments** (Phase 4). `/etc/ssh/sshd_config.d/50-agentworks-accept-env.conf`
   (`AcceptEnv *`, validated with `sshd -t` before reload), `/etc/sudoers.d/50-agentworks-env-keep`
   (`env_keep += "AGENTWORKS_* AW_*"`, validated with visudo via staging),
@@ -96,7 +99,7 @@ updates this lockfile with a dated entry.
 - Comprehensive coverage in `test_secrets_base.py`, `test_secrets_env_var.py`,
   `test_secrets_prompt.py`, `test_secrets_resolver.py`, `test_config_env_and_secrets.py`,
   `test_env_show.py`.
-- Total cli suite: 774 tests, all passing at lock.
+- Total cli suite: 778 tests, all passing at lock.
 
 ## Deferred at lock
 
