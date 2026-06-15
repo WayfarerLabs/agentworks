@@ -151,6 +151,10 @@ processes the user delegates from there).
 - VM-init also writes a sudoers fragment with `env_keep += "AGENTWORKS_* AW_*"`. The sudoers surface
   narrows the AcceptEnv wildcard, so only agentworks-managed vars survive a sudo boundary.
 - An existing VM that predates this ADR cannot accept SetEnv'd env vars until it's reinit'd to pick
-  up the new sshd config. `agw doctor`'s "VM env support" group probes each reachable VM for the
-  `50-agentworks-accept-env.conf` fragment and reports per-VM ok / missing / unreachable so
-  operators can plan the reinit explicitly.
+  up the new sshd config. Operators with pre-SDD VMs need to run `agw vm reinit` to deploy the sshd
+  fragment. We considered a doctor probe that SSHs into every VM to check for the
+  `50-agentworks-accept-env.conf` fragment, but rejected it: every `agw doctor` invocation would pay
+  an SSH round-trip per VM, and the same shape of probe would need to grow for each future drift the
+  operator cared about (a slippery slope). The principled fix is to version the VM definition in the
+  database and detect drift cheaply against the recorded version; that's tracked as future work. In
+  the meantime, operator-visible failures (SetEnv'd vars not reaching the VM) are the cue to reinit.

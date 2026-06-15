@@ -92,12 +92,11 @@ updates this lockfile with a dated entry.
 - 27 tests in `cli/tests/test_secrets_eager_resolve.py` (manager wiring + no-shell-opening
   verification + add-sessions+N + restore-session window-missing + session attach tripwire).
 - 17 tests in `cli/tests/test_initializer_env_fragments.py` (Phase 4 VM-side fragments).
-- 19 tests in `cli/tests/test_doctor_env_and_secrets.py` (FRD R6 health groups + ADR 0014's per-VM
-  AcceptEnv probe).
+- 15 tests in `cli/tests/test_doctor_env_and_secrets.py` (FRD R6 health groups).
 - Comprehensive coverage in `test_secrets_base.py`, `test_secrets_env_var.py`,
   `test_secrets_prompt.py`, `test_secrets_resolver.py`, `test_config_env_and_secrets.py`,
   `test_env_show.py`.
-- Total cli suite: 778 tests, all passing at lock.
+- Total cli suite: 774 tests, all passing at lock.
 
 ## Deferred at lock
 
@@ -116,6 +115,14 @@ updates this lockfile with a dated entry.
   `tmux new-session -e` flags. The eager-resolve produces the right operator-facing UX (prompted up
   front, before any tmux work) and warms the cache, but the resolved values don't yet reach the
   admin shell at the wire. Documented in `_admin_only_secret_target`'s docstring.
+- **Pre-SDD VMs need manual `agw vm reinit`.** VMs that were provisioned before this SDD don't have
+  the `50-agentworks-accept-env.conf` sshd fragment, so SSH SetEnv silently drops env vars at the
+  remote sshd. An earlier iteration of Phase 5 added an `agw doctor` "VM env support" group that
+  SSH-probed every VM for the fragment; we removed it because the per-VM SSH round-trip is too
+  costly for an interactive doctor sweep and the same shape of probe would need to grow for each
+  future drift (a slippery slope). The principled fix is to version the VM definition in the
+  database and detect drift cheaply against the recorded version; see ADR 0014 "Consequences".
+  Deferred to a future SDD.
 - **Per-target diagnostic context on `SecretUnavailableError`.** The resolver's error carries a
   per-secret backend-tried hint; manager-layer call sites could wrap and add `entity_kind` /
   `entity_name` context. Deferred per the Phase 6.1 review's stance: try the bare error in 6.2+ and
