@@ -24,6 +24,7 @@ from agentworks import output
 from agentworks.db import InitStatus, ProvisioningStatus
 from agentworks.env import (
     ResourceContext,
+    compose_env,
     per_user_identity_env,
     vm_stable_identity_env,
 )
@@ -1510,8 +1511,6 @@ def _phase_b_setup(
     # earlier in this function (system packages, apt sources, sshd
     # config, sudoers, hardening) deliberately don't take env -- they're
     # bootstrap actions that shouldn't observe operator scope.
-    from agentworks.env import compose_env
-
     admin_env = compose_env(
         resolver=config.secret_resolver,
         ctx=identity_ctx,
