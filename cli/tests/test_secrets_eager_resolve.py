@@ -885,11 +885,16 @@ def test_attach_console_build_path_eager_resolves_before_tmux(
 def test_console_build_secret_targets_excludes_session_attach_panes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """_console_build_secret_targets enumerates panes that OPEN NEW
-    SHELLS: the admin shell (when set) and each configured helper
-    shell pane. Session-attach windows are deliberately excluded per
-    FRD R4 (they join existing tmux servers; SetEnv on the SSH
-    connection doesn't flow into the existing server's panes)."""
+    """_console_build_secret_targets enumerates only the panes that
+    OPEN NEW SHELLS: the admin shell (when set) and each configured
+    helper shell pane. Session-attach windows are deliberately
+    excluded per FRD R4 (they join existing tmux servers; SetEnv on
+    the SSH connection doesn't flow into the existing server's panes).
+
+    Pins enumeration shape (admin_shell present, helper shells one-per-
+    config, no session-attach pane). The per-pane scope-selection
+    contract (admin promotion, scope mix) is covered by sibling tests
+    on _pane_secret_target via add_shell."""
     from agentworks.sessions import multi_console
 
     db = _seed_basic_db(tmp_path)

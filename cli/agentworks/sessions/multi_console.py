@@ -1152,8 +1152,8 @@ def _admin_only_secret_target(
     ``tmux new-session -e`` flags, so the resolved env doesn't yet
     reach the admin shell. The eager-resolve here still produces the
     right operator-facing UX (prompt up front, before any tmux work)
-    and warms the cache for whenever the injection wiring lands as
-    part of Phase 6.3b's broader env-threading work.
+    and warms the cache for when the admin-shell env-injection wiring
+    lands as a follow-up.
     """
     from agentworks.secrets import SecretTarget
     from agentworks.vms.templates import resolve_from_dict as _resolve_vm_template
@@ -1224,18 +1224,18 @@ def _restore_session_secret_targets(
     *,
     vm: VMRow,
     member: ConsoleSessionRow,
-    indices: list[int] | None = None,
+    indices: list[int],
 ) -> list[SecretTarget]:
-    """SecretTargets for the panes ``restore_session`` may need to open.
+    """SecretTargets for the specific missing shell-pane indices that
+    ``restore_session`` will open.
 
-    When ``indices`` is None, returns targets for ALL configured shell
-    panes in the member's window (used when the window itself is
-    missing and needs a full rebuild). When ``indices`` is provided,
-    targets are scoped to that subset (used when the window exists and
-    only specific panes are missing). The precise-indices path is
-    preferred at the restore site because the validation guards above
-    already filtered down to the missing set; over-approximation would
-    risk prompting for secrets the command never actually consumes.
+    Targets are scoped precisely to the caller-supplied indices: the
+    restore path's validation guards filter down to ``missing`` before
+    invoking this helper, so over-approximating would risk prompting
+    for secrets the command never actually consumes. (The window-
+    missing rebuild path in ``restore_session`` calls
+    ``_add_session_window`` directly; that path does its own
+    enumeration and doesn't route through this helper.)
     """
     targets: list[SecretTarget] = []
     session = db.get_session(member.session_name)
@@ -1245,12 +1245,8 @@ def _restore_session_secret_targets(
         session_user = _session_linux_user(db, session, vm)
     except NotFoundError:
         return targets
-    shells_iter = (
-        ((idx, member.shells[idx]) for idx in indices)
-        if indices is not None
-        else enumerate(member.shells)
-    )
-    for _idx, shell in shells_iter:
+    for idx in indices:
+        shell = member.shells[idx]
         use_admin = shell["admin"] or session_user == vm.admin_username
         pane = _pane_secret_target(
             config, db, vm=vm, session=session, is_admin_pane=use_admin,
