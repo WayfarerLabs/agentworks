@@ -204,7 +204,7 @@ env+secrets via the SSH SetEnv path established in Phase 3.
       plugin, claude plugins, and dotfiles install) and Phase 6.4b (agents/manager.py:
       `_create_agent_on_vm` Phase 2 composes `agent_env` once and threads it into the agent-side
       runners). Phase 1 of `_create_agent_on_vm` (admin bootstrap: useradd, socket setup,
-      authorized_keys) is infrastructure and deliberately doesn't take env -- same boundary as the
+      authorized_keys) is infrastructure and deliberately doesn't take env; same boundary as the
       vms-side infrastructure-vs-user-facing split. See Phase 6 bullet below for the consolidated
       record.
 - [x] Tests: tests/test_initializer_env_fragments.py (17 tests). Pin: identity-profile system-wide +
@@ -264,11 +264,11 @@ seconds), before any state mutation. Non-interactive failure is a clear actionab
       source-level tests in `test_secrets_eager_resolve.py`.
 - [x] Thread env through provisioning + agent-setup SSH runners (the Phase 4 deferral). Both
       `_phase_b_setup` (admin env) and `_create_agent_on_vm` Phase 2 (agent env) compose env once
-      via `compose_env` -- the resolver cache is warm from the manager-entry eager-resolve, so this
+      via `compose_env`. The resolver cache is warm from the manager-entry eager-resolve, so this
       hits cached values rather than re-prompting. Threaded into user_install_commands, mise install
       / prune, nerf plugin, claude marketplaces / plugins, and dotfiles install. Infrastructure
       setup (apt, sshd, sudoers, hardening, useradd, socket setup, authorized_keys) deliberately
-      doesn't take env -- those are bootstrap actions that shouldn't observe operator scope.
+      doesn't take env; those are bootstrap actions that shouldn't observe operator scope.
 - [x] Tests for the orchestration module (16 tests in `cli/tests/test_secrets_orchestration.py`):
       target unioning + dedup, cross-target ordering, substitution invariance, extra_decls hook,
       cache-wins-over-late-env-changes (cache contract), admin+agent mutex, label-not-in-equality,

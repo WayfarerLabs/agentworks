@@ -304,7 +304,7 @@ Commands that open new shells (and therefore consume secrets):
   creation defers to first attach inside `attach_console`'s build path (and the related
   `restore_session` repair path). Eager-resolve fires at the actual shell-opening sites
   (`attach_console` when building, `restore_session`, `console add-shell`) rather than at
-  `console create` itself; the operator-facing UX -- "prompted up front, before any tmux work" -- is
+  `console create` itself. The operator-facing UX ("prompted up front, before any tmux work") is
   preserved.
 - Interactive ad-hoc shells: `vm shell`, `agent shell`.
 - Non-interactive exec: `vm exec`, `agent exec`.
