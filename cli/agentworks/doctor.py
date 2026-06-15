@@ -38,6 +38,10 @@ class HealthCheck:
     name: str
     status: Status
     message: str | None = None
+    hint: str | None = None
+    """Optional remediation text. Rendered on a separate line by the
+    CLI surface so the operator sees actionable next steps without
+    cramming everything into one parenthetical."""
 
 
 @dataclass
@@ -45,17 +49,17 @@ class HealthGroup:
     name: str
     checks: list[HealthCheck] = field(default_factory=list)
 
-    def ok(self, name: str, message: str | None = None) -> None:
-        self.checks.append(HealthCheck(name=name, status=Status.OK, message=message))
+    def ok(self, name: str, message: str | None = None, *, hint: str | None = None) -> None:
+        self.checks.append(HealthCheck(name=name, status=Status.OK, message=message, hint=hint))
 
-    def info(self, name: str, message: str | None = None) -> None:
-        self.checks.append(HealthCheck(name=name, status=Status.INFO, message=message))
+    def info(self, name: str, message: str | None = None, *, hint: str | None = None) -> None:
+        self.checks.append(HealthCheck(name=name, status=Status.INFO, message=message, hint=hint))
 
-    def warn(self, name: str, message: str | None = None) -> None:
-        self.checks.append(HealthCheck(name=name, status=Status.WARN, message=message))
+    def warn(self, name: str, message: str | None = None, *, hint: str | None = None) -> None:
+        self.checks.append(HealthCheck(name=name, status=Status.WARN, message=message, hint=hint))
 
-    def fail(self, name: str, message: str | None = None) -> None:
-        self.checks.append(HealthCheck(name=name, status=Status.FAIL, message=message))
+    def fail(self, name: str, message: str | None = None, *, hint: str | None = None) -> None:
+        self.checks.append(HealthCheck(name=name, status=Status.FAIL, message=message, hint=hint))
 
 
 @dataclass
@@ -236,7 +240,7 @@ def _check_config() -> tuple[HealthGroup, Config | None]:
 
         config = load_config(warn_issues=False)
     except ConfigError as e:
-        g.fail("Config", str(e))
+        g.fail("Config", str(e), hint=e.hint)
         return g, None
     except SystemExit:
         g.fail("Config", "failed to load")
@@ -379,7 +383,7 @@ def _check_secrets(config: Config) -> HealthGroup:
     active_backend_kinds = set(config.secret_config_data.backends)
 
     resolver = config.secret_resolver
-    builtin_kinds = {"env_var", "prompt"}
+    builtin_kinds = {"env-var", "prompt"}
     for name, decl in sorted(config.secrets.items()):
         # Would-prompt preview (FRD R6): probe non-prompt sources in
         # precedence order and report whether the secret would resolve
@@ -421,7 +425,7 @@ def _check_secrets(config: Config) -> HealthGroup:
 
         # backend_mappings sanity:
         # - kind not declared in [secret_backends.*] AND not a built-in
-        #   (env_var / prompt) -> error (kind does not exist in this config).
+        #   (env-var / prompt) -> error (kind does not exist in this config).
         # - kind declared (or built-in) but not in [secret_config].backends
         #   -> warning (mapping has no effect; operator may be staging a
         #   disabled backend).

@@ -79,7 +79,7 @@ def test_unions_single_target_env_chain(
 description = "shared API key"
 
 [secret_config]
-backends = ["env_var"]
+backends = ["env-var"]
 """,
     )
     config = load_config(cfg, warn_issues=False)
@@ -100,7 +100,7 @@ description = "shared"
 description = "unique to target a"
 
 [secret_config]
-backends = ["env_var", "prompt"]
+backends = ["env-var", "prompt"]
 """,
     )
     config = load_config(cfg, warn_issues=False)
@@ -142,7 +142,7 @@ description = "admin"
 description = "session"
 
 [secret_config]
-backends = ["env_var", "prompt"]
+backends = ["env-var", "prompt"]
 """,
     )
     config = load_config(cfg, warn_issues=False)
@@ -171,7 +171,7 @@ description = "in env table"
 description = "not in any env table"
 
 [secret_config]
-backends = ["env_var", "prompt"]
+backends = ["env-var", "prompt"]
 """,
     )
     config = load_config(cfg, warn_issues=False)
@@ -198,7 +198,7 @@ def test_secret_references_invariant_under_value_substitution(
 description = "api"
 
 [secret_config]
-backends = ["env_var", "prompt"]
+backends = ["env-var", "prompt"]
 """,
     )
     config = load_config(cfg, warn_issues=False)
@@ -247,7 +247,7 @@ description = "b"
 description = "a"
 
 [secret_config]
-backends = ["env_var", "prompt"]
+backends = ["env-var", "prompt"]
 """,
     )
     config = load_config(cfg, warn_issues=False)
@@ -271,7 +271,7 @@ def test_extra_decls_dedupe_against_target_decls(tmp_path: Path) -> None:
 description = "shared"
 
 [secret_config]
-backends = ["env_var", "prompt"]
+backends = ["env-var", "prompt"]
 """,
     )
     config = load_config(cfg, warn_issues=False)
@@ -301,7 +301,7 @@ def test_resolve_for_command_returns_resolved_values(
 description = "api"
 
 [secret_config]
-backends = ["env_var"]
+backends = ["env-var"]
 """,
     )
     config = load_config(cfg, warn_issues=False)
@@ -327,7 +327,7 @@ def test_resolve_for_command_cache_wins_over_late_env_changes(
 description = "api"
 
 [secret_config]
-backends = ["env_var"]
+backends = ["env-var"]
 """,
     )
     config = load_config(cfg, warn_issues=False)
@@ -383,7 +383,7 @@ def test_resolve_for_command_passes_extra_decls_through(
 description = "external"
 
 [secret_config]
-backends = ["env_var"]
+backends = ["env-var"]
 """,
     )
     config = load_config(cfg, warn_issues=False)

@@ -33,7 +33,7 @@ This SDD establishes:
    declare the _existence_ of a secret; backends produce the _value_ at command time. Values are
    never persisted by agentworks.
 
-v1 ships with two backends: `env_var` (operator-side env-var lookup) and `prompt` (interactive
+v1 ships with two backends: `env-var` (operator-side env-var lookup) and `prompt` (interactive
 last-resort). Future work, out of scope for this SDD: additional backends (keychain, 1Password CLI,
 vault); folding `git_credentials` into the general secret mechanism.
 
@@ -49,12 +49,12 @@ vault); folding `git_credentials` into the general secret mechanism.
   (reference to a declared secret).
 - **Secret**: a named credential whose _existence_ is declared in config but whose _value_ is never
   persisted by agentworks. Resolved at command time through the configured backend chain.
-- **Secret backend**: a provider that can produce secret values at command time (`env_var`,
+- **Secret backend**: a provider that can produce secret values at command time (`env-var`,
   `prompt`, future `onepassword`, `keychain`, etc.). All backends implement the `SecretSource`
   protocol. Operators configure which backends are active and in what order via
   `[secret_config].backends`.
 - **Backend mapping**: per-secret, per-backend identifier override. For backends with a default
-  convention (e.g. `env_var` derives `AW_SECRET_<NAME>`), absent = use the default. For backends
+  convention (e.g. `env-var` derives `AW_SECRET_<NAME>`), absent = use the default. For backends
   without one (e.g. 1Password), absent = skip this backend for this secret.
 - **AGENTWORKS\_\* vars**: the small fixed set of env vars that agentworks always sets to identify
   the resource context (e.g. `AGENTWORKS_VM`, `AGENTWORKS_SESSION`). Automatic; not
@@ -189,7 +189,7 @@ hint = "https://console.anthropic.com/settings/keys"
 
 [secrets.github-token]
 description = "GitHub PAT for repo access"
-backend_mappings.env_var = "GITHUB_TOKEN"
+backend_mappings.env-var = "GITHUB_TOKEN"
 backend_mappings.onepassword = "op://Personal/GitHub/token"
 ```
 
@@ -211,7 +211,7 @@ gives `agw doctor` a complete view of what the operator needs to provide.
 
 Secret values are sourced through an operator-configurable chain of backends. Each backend is a
 provider that can answer "do you have a value for this secret?" Backends include things like "the
-operator's CLI environment" (`env_var`), "1Password CLI" (`onepassword`), and "interactive prompt"
+operator's CLI environment" (`env-var`), "1Password CLI" (`onepassword`), and "interactive prompt"
 (`prompt`). All are uniform members of the same `SecretSource` protocol; prompt is just the last
 source in the chain by convention.
 
@@ -221,7 +221,7 @@ Backends are configured in `[secret_backends.<kind>]` blocks. Each block carries
 connection / global config:
 
 ```toml
-[secret_backends.env_var]
+[secret_backends.env-var]
 # Always available; no config needed. Default convention: secret "github-token" maps to env var
 # AW_SECRET_GITHUB_TOKEN. Override per-secret via backend_mappings (R3).
 
@@ -244,12 +244,12 @@ A single top-level `[secret_config]` table holds the list of active backends, in
 # This list controls BOTH which backends are active and the order they are tried in.
 # A backend declared in [secret_backends.*] but absent from this list is dormant.
 # First backend to return a value wins.
-backends = ["env_var", "onepassword", "prompt"]
+backends = ["env-var", "onepassword", "prompt"]
 ```
 
 #### Per-secret mappings
 
-Some backends have a default name-to-identifier convention (e.g. `env_var` derives
+Some backends have a default name-to-identifier convention (e.g. `env-var` derives
 `AW_SECRET_<NAME>` from the secret's name). Others do not (1Password item paths, vault paths, etc.
 have no automatic mapping). Per-secret overrides live in `[secrets.<name>].backend_mappings` (R3),
 keyed by backend kind. Value forms:
@@ -436,7 +436,7 @@ and `agw secret show <name>` (gated; resolves a single secret through the normal
 - **Persistent secret storage by agentworks**: prompted values are not saved. Operators wanting
   persistence use their own vault, exposed either via the matching backend (`onepassword`,
   `keychain`, etc.) or by exporting `AW_SECRET_<NAME>` into the operator shell.
-- **Additional secret backends in v1**: v1 ships `env_var` and `prompt`. The `SecretSource` protocol
+- **Additional secret backends in v1**: v1 ships `env-var` and `prompt`. The `SecretSource` protocol
   is shaped to accommodate later additions (keychain, 1Password CLI, Vault), but those
   implementations are out of scope here.
 - **Replacing `git_credentials`**: kept separate for this SDD. Folding git credentials into the

@@ -7,7 +7,7 @@ from agentworks.secrets import SecretDecl, SecretResolver
 
 
 class _FakeSource:
-    kind = "env_var"
+    kind = "env-var"
 
     def __init__(self, values: dict[str, str]) -> None:
         self._values = values

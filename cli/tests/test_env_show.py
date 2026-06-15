@@ -195,7 +195,7 @@ API_KEY = { secret = "shared-token" }
 description = "shared API token"
 
 [secret_config]
-backends = ["env_var", "prompt"]
+backends = ["env-var", "prompt"]
 """,
     )
     config = load_config(cfg, warn_issues=False)
@@ -222,7 +222,7 @@ API_KEY = { secret = "shared-token" }
 description = "shared API token"
 
 [secret_config]
-backends = ["env_var", "prompt"]
+backends = ["env-var", "prompt"]
 """,
     )
     config = load_config(cfg, warn_issues=False)

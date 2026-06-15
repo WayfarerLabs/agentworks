@@ -66,7 +66,7 @@ TOKEN = { secret = "shared" }
 description = "Shared API token"
 
 [secret_config]
-backends = ["env_var", "prompt"]
+backends = ["env-var", "prompt"]
 """,
     )
     config = load_config(cfg, warn_issues=False)
@@ -75,7 +75,7 @@ backends = ["env_var", "prompt"]
     assert any(
         status == Status.OK
         and "shared" in name
-        and "available via env_var" in (msg or "")
+        and "available via env-var" in (msg or "")
         for status, name, msg in msgs
     ), msgs
 
@@ -97,7 +97,7 @@ TOKEN = { secret = "shared" }
 description = "Shared API token"
 
 [secret_config]
-backends = ["env_var", "prompt"]
+backends = ["env-var", "prompt"]
 """,
     )
     config = load_config(cfg, warn_issues=False)
@@ -118,7 +118,7 @@ def test_unused_secret_declaration_warns(tmp_path: Path) -> None:
 description = "nobody references me"
 
 [secret_config]
-backends = ["env_var", "prompt"]
+backends = ["env-var", "prompt"]
 """,
     )
     config = load_config(cfg, warn_issues=False)
@@ -128,7 +128,7 @@ backends = ["env_var", "prompt"]
 
 
 def test_soft_skipped_backends_are_info(tmp_path: Path) -> None:
-    """When a secret has env_var opted-out (=false), the env_var source's
+    """When a secret has env-var opted-out (=false), the env-var source's
     would_attempt returns False and doctor reports it as a soft-skip."""
     cfg = _write_config(
         tmp_path,
@@ -138,16 +138,16 @@ TOKEN = { secret = "manual" }
 
 [secrets.manual]
 description = "force-prompt"
-backend_mappings.env_var = false
+backend_mappings.env-var = false
 
 [secret_config]
-backends = ["env_var", "prompt"]
+backends = ["env-var", "prompt"]
 """,
     )
     config = load_config(cfg, warn_issues=False)
     g = _check_secrets(config)
     info = [c for c in g.checks if c.status == Status.INFO]
-    assert any("manual" in c.name and "env_var" in (c.message or "") for c in info)
+    assert any("manual" in c.name and "env-var" in (c.message or "") for c in info)
 
 
 def test_mapping_to_active_backend_is_silent(tmp_path: Path) -> None:
@@ -161,10 +161,10 @@ TOKEN = { secret = "shared" }
 
 [secrets.shared]
 description = "shared token"
-backend_mappings.env_var = "CUSTOM_NAME"
+backend_mappings.env-var = "CUSTOM_NAME"
 
 [secret_config]
-backends = ["env_var"]
+backends = ["env-var"]
 """,
     )
     config = load_config(cfg, warn_issues=False)
@@ -172,12 +172,12 @@ backends = ["env_var"]
     warns = [c for c in g.checks if c.status == Status.WARN]
     # No warn about backend_mappings (the only WARN here would be about
     # secret not declared, but it IS declared and referenced).
-    assert not any("maps env_var" in c.name for c in warns)
+    assert not any("maps env-var" in c.name for c in warns)
 
 
 def test_mapping_to_undeclared_kind_fails(tmp_path: Path) -> None:
     """A backend_mappings entry referencing a kind that has no
-    [secret_backends.<kind>] section AND is not a built-in (env_var /
+    [secret_backends.<kind>] section AND is not a built-in (env-var /
     prompt) is reported as an error (FRD R6)."""
     cfg = _write_config(
         tmp_path,
@@ -190,7 +190,7 @@ description = "shared token"
 backend_mappings.bogusvault = "x"
 
 [secret_config]
-backends = ["env_var", "prompt"]
+backends = ["env-var", "prompt"]
 """,
     )
     config = load_config(cfg, warn_issues=False)
@@ -219,7 +219,7 @@ backend_mappings.onepassword = "op://Personal/x/y"
 [secret_backends.onepassword]
 
 [secret_config]
-backends = ["env_var", "prompt"]
+backends = ["env-var", "prompt"]
 """,
     )
     config = load_config(cfg, warn_issues=False)
@@ -232,8 +232,8 @@ backends = ["env_var", "prompt"]
 
 
 def test_builtin_mapping_warns_when_builtin_not_active(tmp_path: Path) -> None:
-    """env_var and prompt don't need a [secret_backends.*] section, but a
-    backend_mappings.env_var entry is still meaningless if env_var isn't
+    """env-var and prompt don't need a [secret_backends.*] section, but a
+    backend_mappings.env-var entry is still meaningless if env-var isn't
     listed in [secret_config].backends. The exemption for built-ins must
     not swallow the not-active warning."""
     cfg = _write_config(
@@ -244,7 +244,7 @@ TOKEN = { secret = "shared" }
 
 [secrets.shared]
 description = "shared token"
-backend_mappings.env_var = "CUSTOM_NAME"
+backend_mappings.env-var = "CUSTOM_NAME"
 
 [secret_config]
 backends = ["prompt"]
@@ -254,7 +254,7 @@ backends = ["prompt"]
     g = _check_secrets(config)
     warns = [c for c in g.checks if c.status == Status.WARN]
     assert any(
-        "maps env_var" in c.name and "not active" in (c.message or "")
+        "maps env-var" in c.name and "not active" in (c.message or "")
         for c in warns
     ), [(c.name, c.message) for c in warns]
 

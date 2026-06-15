@@ -24,24 +24,36 @@ def test_secret_decl_carries_mappings() -> None:
     d = SecretDecl(
         name="x",
         description="X",
-        backend_mappings={"env_var": "X_TOKEN", "onepassword": False, "vault": {"path": "x"}},
+        backend_mappings={"env-var": "X_TOKEN", "onepassword": False, "vault": {"path": "x"}},
     )
-    assert d.backend_mappings["env_var"] == "X_TOKEN"
+    assert d.backend_mappings["env-var"] == "X_TOKEN"
     assert d.backend_mappings["onepassword"] is False
     assert d.backend_mappings["vault"] == {"path": "x"}
 
 
 def test_secret_backend_config_carries_kind() -> None:
-    assert SecretBackendConfig(kind="env_var").kind == "env_var"
+    assert SecretBackendConfig(kind="env-var").kind == "env-var"
 
 
-def test_secret_config_default_empty() -> None:
-    assert SecretConfig().backends == ()
+def test_secret_config_default_chain() -> None:
+    """SecretConfig defaults to the standard env-var + prompt chain when no
+    [secret_config].backends is provided. Operators who don't use secrets
+    pay nothing; operators who do get sensible zero-config resolution."""
+    from agentworks.secrets.base import DEFAULT_BACKEND_CHAIN
+
+    assert SecretConfig().backends == DEFAULT_BACKEND_CHAIN
+    assert DEFAULT_BACKEND_CHAIN == ("env-var", "prompt")
+
+
+def test_secret_config_explicit_empty_disables_chain() -> None:
+    """An explicit empty list opts out of resolution entirely (different
+    from absence-of-config, which gets the default chain)."""
+    assert SecretConfig(backends=()).backends == ()
 
 
 def test_secret_config_preserves_order() -> None:
-    cfg = SecretConfig(backends=("env_var", "onepassword", "prompt"))
-    assert cfg.backends == ("env_var", "onepassword", "prompt")
+    cfg = SecretConfig(backends=("env-var", "onepassword", "prompt"))
+    assert cfg.backends == ("env-var", "onepassword", "prompt")
 
 
 def test_base_class_default_batch_get_loops_get() -> None:

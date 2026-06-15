@@ -18,7 +18,7 @@ class SecretDecl:
     """A declared secret. Values are never stored here; only the existence,
     description, and per-backend identifier overrides.
 
-    ``backend_mappings`` is keyed by backend kind (e.g. ``"env_var"``,
+    ``backend_mappings`` is keyed by backend kind (e.g. ``"env-var"``,
     ``"onepassword"``). Value forms per FRD R4:
 
     - ``str``: backend's identifier for this secret (env var name, op:// URI, etc.).
@@ -50,6 +50,16 @@ class SecretBackendConfig:
     kind: str
 
 
+DEFAULT_BACKEND_CHAIN: tuple[str, ...] = ("env-var", "prompt")
+"""Default backend chain when ``[secret_config].backends`` is absent.
+
+Resolves declared secrets from operator-side env (``AW_SECRET_<NAME>``) first,
+then prompts interactively. The chain is operator-overridable via an explicit
+``[secret_config]`` block; an explicit empty list ``backends = []`` disables
+resolution entirely (operators who don't use secrets pay nothing either way).
+"""
+
+
 @dataclass(frozen=True)
 class SecretConfig:
     """Top-level [secret_config] table.
@@ -57,9 +67,14 @@ class SecretConfig:
     ``backends`` is dual-role: presence enables the backend, list order is the
     resolution precedence. A backend declared in ``[secret_backends.*]`` but
     absent from this list is dormant (its source is never instantiated).
+
+    Default value is ``DEFAULT_BACKEND_CHAIN`` (``env-var``, then ``prompt``).
+    The default applies when the operator's TOML has no ``[secret_config]``
+    table OR has the table without a ``backends`` key. An explicit
+    ``backends = []`` disables resolution entirely.
     """
 
-    backends: tuple[str, ...] = ()
+    backends: tuple[str, ...] = DEFAULT_BACKEND_CHAIN
 
 
 class SecretSource(Protocol):

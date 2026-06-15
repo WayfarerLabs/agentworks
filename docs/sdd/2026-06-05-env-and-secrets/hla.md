@@ -40,6 +40,24 @@ shell-open call sites.
                             +--------------------------------------+
 ```
 
+## Naming conventions
+
+Two namespaces in the config surface, two case conventions:
+
+- **Framework keys** (TOML section names, field names): `snake_case`. Examples: `[vm_templates]`,
+  `[secret_backends]`, `[secret_config]`, `ssh_public_key`, `mise_activate`, `backend_mappings`.
+  This is the TOML/Python convention; field names map 1:1 to Python attributes.
+- **Operator-typed identifiers** (anything the operator types as a value): `kebab-case`. Examples:
+  VM / workspace / agent / session / console / secret names; backend-kind strings like `env-var`,
+  `prompt`, `onepassword`; values referenced in fields like `secret = "github-token"` or
+  `backends = ["env-var", "prompt"]`.
+
+The `NAME_RE` validator in `config.py` is permissive (allows both hyphens and underscores) so
+operators with legacy names still load, but new names should follow kebab. The kind string `env-var`
+is the only multi-word built-in backend identifier; its Python module (`env_var.py`), class
+(`EnvVarSource`), and helper (`env_var_name_for`) stay snake_case because Python identifiers can't
+contain hyphens.
+
 ## Data model
 
 ### Config types (in `config.py`)
@@ -87,7 +105,7 @@ Each scope that supports env adds `env: dict[str, EnvEntry] = field(default_fact
 A complete, illustrative slice:
 
 ```toml
-[secret_backends.env_var]
+[secret_backends.env-var]
 # Always available; default convention is AW_SECRET_<NAME>. No config needed.
 
 [secret_backends.onepassword]
@@ -99,7 +117,7 @@ vault = "Personal"
 
 [secret_config]
 # Dual-role: enabled backends + precedence order. First-match wins.
-backends = ["env_var", "onepassword", "prompt"]
+backends = ["env-var", "onepassword", "prompt"]
 
 [secrets.anthropic-api-key]
 description = "Anthropic API key for Claude agents"
@@ -108,7 +126,7 @@ backend_mappings.onepassword = "op://Personal/Anthropic/key"
 
 [secrets.github-token]
 description = "GitHub PAT for repo access"
-backend_mappings.env_var = "GITHUB_TOKEN"        # override AW_SECRET_<NAME> default
+backend_mappings.env-var = "GITHUB_TOKEN"        # override AW_SECRET_<NAME> default
 backend_mappings.onepassword = "op://Personal/GitHub/token"
 
 [secrets.openai-key]
@@ -118,7 +136,7 @@ backend_mappings.onepassword = { vault = "Shared", item = "OpenAI", field = "key
 
 [secrets.super-sensitive-token]
 description = "Force-prompt token"
-backend_mappings.env_var = false     # opt out: skip even the default convention
+backend_mappings.env-var = false     # opt out: skip even the default convention
 backend_mappings.onepassword = false # opt out: only PromptSource can resolve this
 
 [admin.env]
@@ -235,7 +253,7 @@ class SecretSource(Protocol):
         """Does this source ATTEMPT to resolve this secret? Determined from
         config alone, without network or vault I/O.
 
-        - EnvVarSource: True unless backend_mappings.env_var is False.
+        - EnvVarSource: True unless backend_mappings.env-var is False.
         - OnePasswordSource: True only when backend_mappings.onepassword is
           a string or dict (no default convention for 1pw).
         - PromptSource: True (prompt always attempts if asked, modulo TTY /
@@ -273,13 +291,13 @@ informational findings ("secret X has no mapping for active backend Y, will skip
 class EnvVarSource:
     """Reads from operator-side environment variables. Default convention:
     secret 'github-token' maps to env var AW_SECRET_GITHUB_TOKEN. Per-secret
-    overrides via secret.backend_mappings.env_var (string for the env var name,
+    overrides via secret.backend_mappings.env-var (string for the env var name,
     or `false` to skip entirely)."""
 
-    kind = "env_var"
+    kind = "env-var"
 
     def _resolved_name(self, secret: SecretDecl) -> str | None:
-        mapping = secret.backend_mappings.get("env_var")
+        mapping = secret.backend_mappings.get("env-var")
         if mapping is False:
             return None  # explicit opt-out
         if isinstance(mapping, str):

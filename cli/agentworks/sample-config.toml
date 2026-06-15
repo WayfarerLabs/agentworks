@@ -9,6 +9,14 @@
 # `agw catalog list` to see what is available. You can reference
 # catalog entries by name in templates and define your own entries below
 # to extend or override the catalog.
+#
+# Naming conventions:
+#   - Framework keys (section names, field names) use snake_case:
+#     [vm_templates.foo], ssh_public_key, mise_activate, backend_mappings.
+#   - Operator-typed identifiers (entity names, backend kinds, secret names)
+#     use kebab-case: [vm_templates.dev-host], `secret = "github-token"`,
+#     `backends = ["env-var", "prompt"]`. The validator is permissive so
+#     legacy names continue to load, but new names should follow kebab.
 
 # =============================================================================
 # Operator identity and platform settings
@@ -327,26 +335,27 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 
 # [secrets.openai-api-key]
 # description = "OpenAI API key"
-# backend_mappings.env_var = "OPENAI_API_KEY"    # override default convention
+# backend_mappings.env-var = "OPENAI_API_KEY"    # override default convention
 
 # --- Secret backends ---
 # Backends are declared in `[secret_backends.<kind>]` and activated by
 # listing them in `[secret_config].backends` in precedence order.
-# Currently implemented kinds: `env_var`, `prompt`.
+# Currently implemented kinds: `env-var`, `prompt`.
 
-# [secret_backends.env_var]
+# [secret_backends.env-var]
 # Reads from process env. Default convention is AW_SECRET_<UPPER_SNAKE_CASE>,
 # so secret "npm-token" reads from AW_SECRET_NPM_TOKEN unless overridden via
-# `[secrets.<name>].backend_mappings.env_var`.
+# `[secrets.<name>].backend_mappings.env-var`.
 
 # [secret_backends.prompt]
 # Interactive prompt. Always applies; the operator is asked once per missing
 # secret per CLI invocation (batched at the start where possible).
 
 # [secret_config]
-# backends = ["env_var", "prompt"]
+# backends = ["env-var", "prompt"]    # the default chain; explicit configuration overrides.
 # Backends declared above but absent from this list are dormant. Order is
-# resolution precedence: the first backend that produces a value wins.
+# resolution precedence: the first backend that produces a value wins. An
+# explicit empty list `backends = []` disables resolution entirely.
 
 # =============================================================================
 # Catalog extensions

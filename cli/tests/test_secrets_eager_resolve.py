@@ -111,7 +111,7 @@ def test_session_create_eager_resolve_fires_before_db_insert(
     def _explode(*args: object, **kwargs: object) -> None:
         raise SecretUnavailableError(
             "no active backend could resolve secret(s): api-key",
-            hint="api-key: tried env_var",
+            hint="api-key: tried env-var",
         )
 
     monkeypatch.setattr("agentworks.secrets.resolve_for_command", _explode)
@@ -306,7 +306,7 @@ def test_session_restart_eager_resolve_fires_before_kill(
     def _explode(*args: object, **kwargs: object) -> None:
         raise SecretUnavailableError(
             "no active backend could resolve secret(s): api-key",
-            hint="api-key: tried env_var",
+            hint="api-key: tried env-var",
         )
 
     monkeypatch.setattr("agentworks.secrets.resolve_for_command", _explode)
@@ -359,7 +359,7 @@ def test_console_add_shell_eager_resolve_fires_before_db_update(
     def _explode(*args: object, **kwargs: object) -> None:
         raise SecretUnavailableError(
             "no active backend could resolve secret(s): api-key",
-            hint="api-key: tried env_var",
+            hint="api-key: tried env-var",
         )
 
     monkeypatch.setattr("agentworks.secrets.resolve_for_command", _explode)
@@ -405,7 +405,7 @@ def test_vm_create_eager_resolve_fires_before_db_insert(
     def _explode(*args: object, **kwargs: object) -> None:
         raise SecretUnavailableError(
             "no active backend could resolve secret(s): api-key",
-            hint="api-key: tried env_var",
+            hint="api-key: tried env-var",
         )
 
     monkeypatch.setattr("agentworks.secrets.resolve_for_command", _explode)
@@ -481,7 +481,7 @@ def test_vm_reinit_eager_resolve_fires_before_ssh_target_build(
     def _explode(*args: object, **kwargs: object) -> None:
         raise SecretUnavailableError(
             "no active backend could resolve secret(s): api-key",
-            hint="api-key: tried env_var",
+            hint="api-key: tried env-var",
         )
 
     monkeypatch.setattr("agentworks.secrets.resolve_for_command", _explode)
@@ -528,7 +528,7 @@ def test_agent_create_eager_resolve_fires_before_ssh_setup(
     def _explode(*args: object, **kwargs: object) -> None:
         raise SecretUnavailableError(
             "no active backend could resolve secret(s): api-key",
-            hint="api-key: tried env_var",
+            hint="api-key: tried env-var",
         )
 
     monkeypatch.setattr("agentworks.secrets.resolve_for_command", _explode)
@@ -591,7 +591,7 @@ def test_agent_reinit_eager_resolve_fires_before_ssh_setup(
     def _explode(*args: object, **kwargs: object) -> None:
         raise SecretUnavailableError(
             "no active backend could resolve secret(s): api-key",
-            hint="api-key: tried env_var",
+            hint="api-key: tried env-var",
         )
 
     monkeypatch.setattr("agentworks.secrets.resolve_for_command", _explode)
@@ -643,7 +643,7 @@ def test_vm_shell_eager_resolve_fires_before_ssh(
     def _explode(*args: object, **kwargs: object) -> None:
         raise SecretUnavailableError(
             "no active backend could resolve secret(s): api-key",
-            hint="api-key: tried env_var",
+            hint="api-key: tried env-var",
         )
 
     monkeypatch.setattr("agentworks.secrets.resolve_for_command", _explode)
@@ -687,7 +687,7 @@ def test_vm_exec_eager_resolve_fires_before_ssh(
     def _explode(*args: object, **kwargs: object) -> None:
         raise SecretUnavailableError(
             "no active backend could resolve secret(s): api-key",
-            hint="api-key: tried env_var",
+            hint="api-key: tried env-var",
         )
 
     monkeypatch.setattr("agentworks.secrets.resolve_for_command", _explode)
@@ -737,7 +737,7 @@ def test_agent_exec_eager_resolve_fires_before_ssh(
     def _explode(*args: object, **kwargs: object) -> None:
         raise SecretUnavailableError(
             "no active backend could resolve secret(s): api-key",
-            hint="api-key: tried env_var",
+            hint="api-key: tried env-var",
         )
 
     monkeypatch.setattr("agentworks.secrets.resolve_for_command", _explode)
@@ -863,7 +863,7 @@ def test_attach_console_build_path_eager_resolves_before_tmux(
     def _explode(*args: object, **kwargs: object) -> None:
         raise SecretUnavailableError(
             "no active backend could resolve secret(s): api-key",
-            hint="api-key: tried env_var",
+            hint="api-key: tried env-var",
         )
 
     monkeypatch.setattr("agentworks.secrets.resolve_for_command", _explode)
@@ -1318,7 +1318,7 @@ def test_console_add_sessions_with_shells_eager_resolves(
     def _explode(*args: object, **kwargs: object) -> None:
         raise SecretUnavailableError(
             "no active backend could resolve secret(s): api-key",
-            hint="api-key: tried env_var",
+            hint="api-key: tried env-var",
         )
 
     monkeypatch.setattr("agentworks.secrets.resolve_for_command", _explode)
@@ -1432,7 +1432,7 @@ def test_restore_session_window_missing_branch_eager_resolves(
     def _explode(*args: object, **kwargs: object) -> None:
         raise SecretUnavailableError(
             "no active backend could resolve secret(s): api-key",
-            hint="api-key: tried env_var",
+            hint="api-key: tried env-var",
         )
 
     monkeypatch.setattr("agentworks.secrets.resolve_for_command", _explode)

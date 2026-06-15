@@ -8,7 +8,11 @@ from agentworks.secrets.base import SecretDecl, SecretSourceBase
 
 
 def env_var_name_for(secret_name: str) -> str:
-    """Default convention: secret 'github-token' -> 'AW_SECRET_GITHUB_TOKEN'."""
+    """Default convention: secret 'github-token' -> 'AW_SECRET_GITHUB_TOKEN'.
+
+    Note: the Python helper name stays snake_case (Python convention); the
+    backend-kind string ``env-var`` is kebab-case (operator-typed identifier).
+    """
     return "AW_SECRET_" + secret_name.upper().replace("-", "_")
 
 
@@ -17,16 +21,20 @@ class EnvVarSource(SecretSourceBase):
 
     Resolution:
 
-    - ``backend_mappings.env_var`` is ``False``: opt out; return None.
-    - ``backend_mappings.env_var`` is a string: use that as the env var name.
+    - ``backend_mappings.env-var`` is ``False``: opt out; return None.
+    - ``backend_mappings.env-var`` is a string: use that as the env var name.
     - Otherwise: derive ``AW_SECRET_<NAME>`` from the secret's name.
 
     ``would_attempt`` returns False only for explicit opt-out; the source
     always tries its derived or overridden env var name, even if that var
     isn't set in the current shell.
+
+    The kind string ``env-var`` is kebab-case (operator-typed identifier
+    convention); the Python module / class / helper stays snake_case
+    (Python convention). See HLA "Naming conventions".
     """
 
-    kind = "env_var"
+    kind = "env-var"
 
     def _resolved_name(self, secret: SecretDecl) -> str | None:
         mapping = secret.backend_mappings.get(self.kind)

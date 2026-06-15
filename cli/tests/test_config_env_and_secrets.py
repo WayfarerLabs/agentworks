@@ -52,17 +52,70 @@ def _write_base(config_path: Path, *, extras: str = "") -> None:
 
 
 def test_no_secrets_section_loads_with_empty_resolver(tmp_path: Path) -> None:
-    """When no secrets / backends are configured, the resolver is an empty
-    SecretResolver rather than None: call sites can render env unconditionally."""
+    """When no secrets are configured, the resolver is a no-op resolver
+    rather than None: call sites can render env unconditionally. With no
+    [secret_config] in the TOML, SecretConfig defaults to the standard
+    env-var + prompt chain, but with no declared secrets the resolver is
+    still empty in practice (no sources are consulted)."""
     cfg_file = tmp_path / "config.toml"
     _write_base(cfg_file)
     cfg = load_config(cfg_file, warn_issues=False)
     assert cfg.secrets == {}
     assert cfg.secret_backends == {}
-    assert cfg.secret_config_data.backends == ()
+    # Absence of [secret_config] defaults to the standard chain.
+    assert cfg.secret_config_data.backends == ("env-var", "prompt")
     assert cfg.secret_resolver is not None
-    # An empty resolver renders an env with no entries to {} without raising.
+    # No declared secrets => empty resolver, renders {} -> {} without raising.
     assert cfg.secret_resolver.render({}) == {}
+
+
+def test_secret_config_absent_uses_default_chain(tmp_path: Path) -> None:
+    """With no [secret_config] table, the loader uses the default chain
+    so zero-config secret refs Just Work. Operator who writes
+    `KEY = { secret = "x" }` doesn't have to also configure backends."""
+    cfg_file = tmp_path / "config.toml"
+    _write_base(
+        cfg_file,
+        extras="""
+        [admin.env]
+        API_KEY = { secret = "api-key" }
+
+        [secrets.api-key]
+        description = "API token"
+        """,
+    )
+    cfg = load_config(cfg_file, warn_issues=False)
+    assert cfg.secret_config_data.backends == ("env-var", "prompt")
+
+
+def test_secret_config_table_without_backends_uses_default_chain(tmp_path: Path) -> None:
+    """[secret_config] without an explicit backends key still falls back
+    to the default chain. This shape lets operators reserve the table
+    for future fields without losing the default resolution behavior."""
+    cfg_file = tmp_path / "config.toml"
+    _write_base(
+        cfg_file,
+        extras="""
+        [secret_config]
+        """,
+    )
+    cfg = load_config(cfg_file, warn_issues=False)
+    assert cfg.secret_config_data.backends == ("env-var", "prompt")
+
+
+def test_secret_config_explicit_empty_list_disables_resolution(tmp_path: Path) -> None:
+    """An explicit `backends = []` is respected (operator opts out
+    entirely). Distinct from absence-of-config, which gets the default."""
+    cfg_file = tmp_path / "config.toml"
+    _write_base(
+        cfg_file,
+        extras="""
+        [secret_config]
+        backends = []
+        """,
+    )
+    cfg = load_config(cfg_file, warn_issues=False)
+    assert cfg.secret_config_data.backends == ()
 
 
 def test_admin_env_plaintext_and_secret(tmp_path: Path) -> None:
@@ -78,7 +131,7 @@ def test_admin_env_plaintext_and_secret(tmp_path: Path) -> None:
         description = "Shared token"
 
         [secret_config]
-        backends = ["env_var", "prompt"]
+        backends = ["env-var", "prompt"]
         """,
     )
     cfg = load_config(cfg_file, warn_issues=False)
@@ -114,7 +167,7 @@ def test_agent_template_env(tmp_path: Path) -> None:
         description = "Anthropic API key"
 
         [secret_config]
-        backends = ["env_var", "prompt"]
+        backends = ["env-var", "prompt"]
         """,
     )
     cfg = load_config(cfg_file, warn_issues=False)
@@ -152,7 +205,7 @@ def test_session_template_env_plaintext_and_secret(tmp_path: Path) -> None:
         description = "Anthropic API key"
 
         [secret_config]
-        backends = ["env_var", "prompt"]
+        backends = ["env-var", "prompt"]
         """,
     )
     cfg = load_config(cfg_file, warn_issues=False)
@@ -226,7 +279,7 @@ def test_env_referencing_undeclared_secret_raises(tmp_path: Path) -> None:
         API_KEY = { secret = "missing" }
 
         [secret_config]
-        backends = ["env_var"]
+        backends = ["env-var"]
         """,
     )
     with pytest.raises(ConfigError, match="undeclared secret"):
@@ -236,7 +289,7 @@ def test_env_referencing_undeclared_secret_raises(tmp_path: Path) -> None:
 def test_secret_declared_with_all_mapping_forms(tmp_path: Path) -> None:
     """All three backend_mappings value shapes (string, inline table, false) parse
     onto SecretDecl. The chain uses prompt-only so even token-c (which opts out
-    of env_var) and token-b (mapping for a future backend) stay reachable through
+    of env-var) and token-b (mapping for a future backend) stay reachable through
     PromptSource."""
     cfg_file = tmp_path / "config.toml"
     _write_base(
@@ -244,7 +297,7 @@ def test_secret_declared_with_all_mapping_forms(tmp_path: Path) -> None:
         extras="""
         [secrets.token-a]
         description = "string mapping"
-        backend_mappings.env_var = "OVERRIDE_NAME"
+        backend_mappings.env-var = "OVERRIDE_NAME"
 
         [secrets.token-b]
         description = "structured mapping (for future backend)"
@@ -252,18 +305,18 @@ def test_secret_declared_with_all_mapping_forms(tmp_path: Path) -> None:
 
         [secrets.token-c]
         description = "opt-out mapping"
-        backend_mappings.env_var = false
+        backend_mappings.env-var = false
 
         [secret_config]
         backends = ["prompt"]
         """,
     )
     cfg = load_config(cfg_file, warn_issues=False)
-    assert cfg.secrets["token-a"].backend_mappings == {"env_var": "OVERRIDE_NAME"}
+    assert cfg.secrets["token-a"].backend_mappings == {"env-var": "OVERRIDE_NAME"}
     assert cfg.secrets["token-b"].backend_mappings == {
         "onepassword": {"vault": "Shared", "item": "Tok", "field": "key"}
     }
-    assert cfg.secrets["token-c"].backend_mappings == {"env_var": False}
+    assert cfg.secrets["token-c"].backend_mappings == {"env-var": False}
 
 
 def test_secret_true_in_backend_mappings_rejected(tmp_path: Path) -> None:
@@ -273,10 +326,10 @@ def test_secret_true_in_backend_mappings_rejected(tmp_path: Path) -> None:
         extras="""
         [secrets.token]
         description = "bad"
-        backend_mappings.env_var = true
+        backend_mappings.env-var = true
 
         [secret_config]
-        backends = ["env_var"]
+        backends = ["env-var"]
         """,
     )
     with pytest.raises(ConfigError, match="true"):
@@ -289,11 +342,11 @@ def test_secret_config_backends_preserves_precedence(tmp_path: Path) -> None:
         cfg_file,
         extras="""
         [secret_config]
-        backends = ["env_var", "prompt"]
+        backends = ["env-var", "prompt"]
         """,
     )
     cfg = load_config(cfg_file, warn_issues=False)
-    assert cfg.secret_config_data.backends == ("env_var", "prompt")
+    assert cfg.secret_config_data.backends == ("env-var", "prompt")
 
 
 def test_secret_resolver_assembled_when_backends_configured(tmp_path: Path) -> None:
@@ -305,7 +358,7 @@ def test_secret_resolver_assembled_when_backends_configured(tmp_path: Path) -> N
         description = "Shared token"
 
         [secret_config]
-        backends = ["env_var", "prompt"]
+        backends = ["env-var", "prompt"]
         """,
     )
     cfg = load_config(cfg_file, warn_issues=False)
@@ -313,7 +366,7 @@ def test_secret_resolver_assembled_when_backends_configured(tmp_path: Path) -> N
     # Smoke-check the chain by asking for the first attempting source.
     first = cfg.secret_resolver.first_attempting_source(cfg.secrets["shared"])
     assert first is not None
-    assert first.kind == "env_var"
+    assert first.kind == "env-var"
 
 
 def test_unknown_backend_kind_raises(tmp_path: Path) -> None:
@@ -322,7 +375,7 @@ def test_unknown_backend_kind_raises(tmp_path: Path) -> None:
         cfg_file,
         extras="""
         [secret_config]
-        backends = ["env_var", "totally-fake-backend"]
+        backends = ["env-var", "totally-fake-backend"]
         """,
     )
     with pytest.raises(ConfigError, match="totally-fake-backend"):
@@ -330,7 +383,7 @@ def test_unknown_backend_kind_raises(tmp_path: Path) -> None:
 
 
 def test_unreachable_secret_raises(tmp_path: Path) -> None:
-    """A secret with env_var = false and a backend chain with no other attempting
+    """A secret with env-var = false and a backend chain with no other attempting
     source is unreachable; the loader rejects this at load time."""
     cfg_file = tmp_path / "config.toml"
     _write_base(
@@ -338,32 +391,66 @@ def test_unreachable_secret_raises(tmp_path: Path) -> None:
         extras="""
         [secrets.stranded]
         description = "no path to resolution"
-        backend_mappings.env_var = false
+        backend_mappings.env-var = false
 
         [secret_config]
-        backends = ["env_var"]
+        backends = ["env-var"]
         """,
     )
     with pytest.raises(ConfigError, match="unreachable"):
         load_config(cfg_file, warn_issues=False)
 
 
-def test_unknown_backend_kind_in_secret_backends_emits_warning(
-    tmp_path: Path,
-) -> None:
-    """A typo in [secret_backends.<kind>] (e.g. 'env-var' for 'env_var') surfaces
-    at load time as a warning, not at reach-for time in [secret_config].backends."""
+def test_unreachable_secret_error_message_and_hint(tmp_path: Path) -> None:
+    """The unreachable-secret error keeps its message short (just the
+    affected secret names) and surfaces remediation via the typed hint,
+    so the doctor renderer can show it on a separate line and other
+    surfaces (raw exception) still see the actionable text."""
     cfg_file = tmp_path / "config.toml"
     _write_base(
         cfg_file,
         extras="""
-        [secret_backends.env-var]
-        # typo: should be env_var
+        [secrets.stranded]
+        description = "no path to resolution"
+        backend_mappings.env-var = false
+
+        [secret_config]
+        backends = ["env-var"]
+        """,
+    )
+    with pytest.raises(ConfigError) as exc:
+        load_config(cfg_file, warn_issues=False)
+
+    # Message is short: just the affected secrets, no remediation noise.
+    assert "stranded" in str(exc.value)
+    assert "unreachable secret" in str(exc.value)
+    # Remediation lives in the hint, not the message.
+    assert exc.value.hint is not None
+    assert "active backend chain" in exc.value.hint
+    assert "env-var" in exc.value.hint
+    # The hint mentions the three remediation paths.
+    assert "prompt" in exc.value.hint
+    assert "backend_mappings" in exc.value.hint
+    assert "remove" in exc.value.hint
+
+
+def test_unknown_backend_kind_in_secret_backends_emits_warning(
+    tmp_path: Path,
+) -> None:
+    """A typo in [secret_backends.<kind>] (e.g. 'env_var' or 'envvar' for
+    'env-var') surfaces at load time as a warning, not at reach-for time
+    in [secret_config].backends."""
+    cfg_file = tmp_path / "config.toml"
+    _write_base(
+        cfg_file,
+        extras="""
+        [secret_backends.env_var]
+        # typo: kind is 'env-var' (kebab), not 'env_var' (snake)
         """,
     )
     cfg = load_config(cfg_file, warn_issues=False)
     assert any(
-        "env-var" in issue and "unknown backend kind" in issue
+        "env_var" in issue and "unknown backend kind" in issue
         for issue in cfg.config_issues
     ), cfg.config_issues
 
@@ -451,7 +538,7 @@ def test_undeclared_secret_in_parent_caught_even_if_child_overrides(
         TOKEN = "literal-value"
 
         [secret_config]
-        backends = ["env_var", "prompt"]
+        backends = ["env-var", "prompt"]
         """,
     )
     with pytest.raises(ConfigError, match="missing-secret"):

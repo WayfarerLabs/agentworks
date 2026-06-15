@@ -92,12 +92,12 @@ updates this lockfile with a dated entry.
 - 27 tests in `cli/tests/test_secrets_eager_resolve.py` (manager wiring + no-shell-opening
   verification + add-sessions+N + restore-session window-missing + session attach tripwire).
 - 17 tests in `cli/tests/test_initializer_env_fragments.py` (Phase 4 VM-side fragments).
-- 19 tests in `cli/tests/test_doctor_env_and_secrets.py` (FRD R6 health groups + ADR 0014's
-  per-VM AcceptEnv probe).
+- 19 tests in `cli/tests/test_doctor_env_and_secrets.py` (FRD R6 health groups + ADR 0014's per-VM
+  AcceptEnv probe).
 - Comprehensive coverage in `test_secrets_base.py`, `test_secrets_env_var.py`,
   `test_secrets_prompt.py`, `test_secrets_resolver.py`, `test_config_env_and_secrets.py`,
   `test_env_show.py`.
-- Total cli suite: 773 tests, all passing at lock.
+- Total cli suite: 778 tests, all passing at lock.
 
 ## Deferred at lock
 

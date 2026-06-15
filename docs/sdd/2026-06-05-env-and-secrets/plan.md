@@ -26,7 +26,8 @@ types. No consumers yet. All unit-tested.
   - `SecretSourceBase` ABC with the default `batch_get` (loops `get`) for sharing between concrete
     sources. Concrete sources inherit from the ABC; the Protocol remains type-only.
 - [x] `cli/agentworks/secrets/env_var.py`: `EnvVarSource` (default convention `AW_SECRET_<NAME>`,
-      `backend_mappings.env_var` string-or-False override).
+      `backend_mappings.env-var` string-or-False override). Python module / class names stay
+      snake_case / PascalCase; the wire-level kind string is the kebab-case `env-var`.
 - [x] `cli/agentworks/secrets/prompt.py`: `PromptSource` (uses `output.is_interactive()` +
       `output.prompt_secret`, batch_get groups all prompts).
 - [x] `cli/agentworks/secrets/resolver.py`: `SecretResolver` (chain iteration, batch_get per source,

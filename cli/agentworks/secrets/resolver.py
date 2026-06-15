@@ -80,7 +80,7 @@ class SecretResolver:
 
         Side-effect contract: ``get`` is called on every non-prompt source
         in the chain up to the first one that returns a value. Today both
-        non-prompt sources (``env_var`` is the only one) have read-only
+        non-prompt sources (``env-var`` is the only one) have read-only
         ``get`` implementations, so the preview is effectively pure. A
         future backend whose ``get`` authenticates, hits a network, or
         triggers a biometric/Touch-ID prompt would need to either (a)
@@ -132,7 +132,7 @@ class SecretResolver:
             resolved = source.batch_get(still_attemptable)
             for name, value in resolved.items():
                 # ADR 0014: embedded newlines would corrupt SSH
-                # `-o SetEnv=KEY=VALUE` arguments. The env_var source
+                # `-o SetEnv=KEY=VALUE` arguments. The env-var source
                 # already strips trailing newlines (the common copy-paste
                 # artifact); anything still containing one is a malformed
                 # secret value and a hard error worth surfacing now
@@ -152,8 +152,8 @@ class SecretResolver:
             sorted_missing = sorted(missing, key=lambda d: d.name)
             names = [d.name for d in sorted_missing]
             # Per-secret backend list: only sources that actually attempted
-            # (would_attempt == True) appear, so a secret with env_var opted out
-            # via backend_mappings doesn't get told "env_var was tried".
+            # (would_attempt == True) appear, so a secret with env-var opted out
+            # via backend_mappings doesn't get told "env-var was tried".
             per_secret = []
             for d in sorted_missing:
                 attempted = [s.kind for s in self._sources if s.would_attempt(d)]

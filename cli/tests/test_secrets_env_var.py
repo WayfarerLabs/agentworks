@@ -52,19 +52,19 @@ def test_override_uses_alternate_env_var(monkeypatch: pytest.MonkeyPatch) -> Non
     decl = SecretDecl(
         name="github-token",
         description="GitHub PAT",
-        backend_mappings={"env_var": "GITHUB_TOKEN"},
+        backend_mappings={"env-var": "GITHUB_TOKEN"},
     )
     assert src.get(decl) == "from-existing-env"
 
 
 def test_opt_out_returns_none_even_when_default_env_set(monkeypatch: pytest.MonkeyPatch) -> None:
-    """`backend_mappings.env_var = False` means skip even if AW_SECRET_<NAME> is set."""
+    """`backend_mappings.env-var = False` means skip even if AW_SECRET_<NAME> is set."""
     monkeypatch.setenv("AW_SECRET_FORCED", "value")
     src = EnvVarSource()
     decl = SecretDecl(
         name="forced",
         description="Force prompt only",
-        backend_mappings={"env_var": False},
+        backend_mappings={"env-var": False},
     )
     assert src.get(decl) is None
 
@@ -85,14 +85,14 @@ def test_would_attempt_true_when_override_string() -> None:
     decl = SecretDecl(
         name="x",
         description="X",
-        backend_mappings={"env_var": "EXISTING_X"},
+        backend_mappings={"env-var": "EXISTING_X"},
     )
     assert src.would_attempt(decl) is True
 
 
 def test_would_attempt_false_when_opted_out() -> None:
     src = EnvVarSource()
-    decl = SecretDecl(name="x", description="X", backend_mappings={"env_var": False})
+    decl = SecretDecl(name="x", description="X", backend_mappings={"env-var": False})
     assert src.would_attempt(decl) is False
 
 

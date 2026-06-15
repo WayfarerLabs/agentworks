@@ -312,7 +312,7 @@ class Config:
     # Env-and-secrets ----------------------------------------------------
     # Declared secrets, keyed by name. Empty when [secrets.*] is absent.
     secrets: dict[str, SecretDecl] = field(default_factory=dict)
-    # Per-backend connection config keyed by kind ("env_var", "onepassword", ...).
+    # Per-backend connection config keyed by kind ("env-var", "onepassword", ...).
     secret_backends: dict[str, SecretBackendConfig] = field(default_factory=dict)
     # Top-level [secret_config] table; carries the enabled-backends precedence list.
     secret_config_data: SecretConfig = field(default_factory=SecretConfig)
@@ -1034,8 +1034,8 @@ def _load_secret_backends(
     vault / etc.) arrive when those backends ship. Extra fields in v1
     sections are accepted but ignored.
 
-    A declared kind not in the known-factory map (e.g. typo ``env-var`` for
-    ``env_var``) emits a load-time warning so operators discover it before
+    A declared kind not in the known-factory map (e.g. typo ``envvar`` for
+    ``env-var``) emits a load-time warning so operators discover it before
     they reach for the section in ``[secret_config].backends``.
     """
     raw = data.get("secret_backends", {})
@@ -1058,12 +1058,22 @@ def _load_secret_backends(
 
 
 def _load_secret_config(data: dict[str, object], issues: list[str]) -> SecretConfig:
-    """Load [secret_config] with the enabled-backends precedence list."""
-    raw = data.get("secret_config", {})
+    """Load [secret_config] with the enabled-backends precedence list.
+
+    Absence of the [secret_config] table OR absence of the ``backends`` key
+    within it falls back to ``SecretConfig()``'s default chain
+    (``DEFAULT_BACKEND_CHAIN``). An explicit ``backends = []`` is respected
+    as "no backends" (operator opts out of resolution entirely).
+    """
+    if "secret_config" not in data:
+        return SecretConfig()  # absence -> default chain
+    raw = data["secret_config"]
     if not isinstance(raw, dict):
         raise ConfigError("[secret_config] must be a table")
     _warn_unexpected_keys(raw, {"backends"}, "secret_config", issues)
-    backends_raw = raw.get("backends", [])
+    if "backends" not in raw:
+        return SecretConfig()  # table present but no key -> default chain
+    backends_raw = raw["backends"]
     if not isinstance(backends_raw, list) or not all(
         isinstance(b, str) for b in backends_raw
     ):
@@ -1091,7 +1101,7 @@ def _v1_source_factories() -> dict[str, Callable[[], SecretSource]]:
     from agentworks.secrets import EnvVarSource, PromptSource
 
     return {
-        "env_var": EnvVarSource,
+        "env-var": EnvVarSource,
         "prompt": PromptSource,
     }
 
@@ -1130,11 +1140,30 @@ def _build_secret_resolver(
     unreachable = resolver.unreachable_secrets()
     if unreachable:
         names = ", ".join(sorted(d.name for d in unreachable))
+        chain_str = ", ".join(secret_config_data.backends) or "(empty)"
+        # The unreachable-secret case is tight by construction: with the
+        # default chain (``env-var``, ``prompt``), prompt's would_attempt
+        # returns True for every secret, so nothing is unreachable.
+        # Reaching this error means the operator has either:
+        # (a) explicitly stripped prompt from [secret_config].backends, AND
+        # (b) the remaining backends opt out via backend_mappings (env-var
+        #     respects `false`; backends without default conventions like
+        #     1password require an explicit mapping), OR
+        # (c) explicitly set backends = [] (resolution disabled).
+        # The hint enumerates the three remediations in the order they're
+        # most often the right fix.
         raise ConfigError(
-            f"unreachable secret(s): {names}; "
-            "no active backend would attempt to resolve them. Either add a "
-            "mapping under [secrets.<name>].backend_mappings, enable a backend "
-            "in [secret_config].backends, or remove the declaration."
+            f"unreachable secret(s): {names}",
+            hint=(
+                f"active backend chain: [{chain_str}]. Each declared secret "
+                "needs at least one backend in the chain that would attempt "
+                "it. To fix: add 'prompt' (or another always-attempting backend) "
+                "to [secret_config].backends; drop a "
+                "`backend_mappings.<kind> = false` opt-out on the affected "
+                "secret(s); add `backend_mappings.<kind>` for a backend that "
+                "has no default convention (e.g. 1password); or remove the "
+                "unused secret declaration."
+            ),
         )
 
     return resolver
