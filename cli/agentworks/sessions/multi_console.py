@@ -687,6 +687,18 @@ def restore_session(
                 ),
             )
 
+        # Eager-prompting orchestration (FRD R4 / Phase 6): restore_session
+        # may need to rebuild the entire window OR fill in missing shell
+        # panes; either way it opens new shells. Resolve up front for the
+        # full configured shell set (over-approximates by including
+        # already-live shells whose secrets are likely cached anyway).
+        from agentworks.secrets import resolve_for_command
+
+        resolve_for_command(
+            _restore_session_secret_targets(db, config, vm=vm, member=member),
+            config,
+        )
+
         q_con = shlex.quote(tmux_session_name(console_name))
         q_win = shlex.quote(session_name)
         layout = config.named_console.tmux_layout
@@ -1117,6 +1129,110 @@ def _pane_secret_target(
         session=session_tmpl.env,
         label=f"console-pane:{session.name}/agent",
     )
+
+
+def _admin_only_secret_target(
+    config: Config, vm: VMRow, label: str,
+) -> SecretTarget:
+    """SecretTarget for an admin-only console pane (no workspace context).
+
+    Used for ``console.admin_shell`` panes at build time -- a vanilla
+    admin login shell with vm + admin scope. Workspace and session
+    contexts don't apply (the admin shell isn't tied to either).
+    """
+    from agentworks.secrets import SecretTarget
+    from agentworks.vms.templates import resolve_from_dict as _resolve_vm_template
+
+    vm_tmpl = _resolve_vm_template(config.vm_templates, vm.template)
+    return SecretTarget(
+        vm=vm_tmpl.env,
+        admin=config.admin.env,
+        label=label,
+    )
+
+
+def _console_build_secret_targets(
+    db: Database,
+    config: Config,
+    *,
+    console: ConsoleRow,
+    vm: VMRow,
+) -> list[SecretTarget]:
+    """Build the SecretTarget list for every pane the console build path
+    would open from scratch.
+
+    The set covers panes that OPEN NEW SHELLS (per FRD R4):
+
+    - The admin shell window (when ``console.admin_shell`` is set):
+      vm + admin scope.
+    - For each session window: every configured shell pane (a session-
+      attach pane joins the session's existing tmux server and consumes
+      no new secrets -- skipped here per FRD R4).
+
+    Same ``use_admin`` promotion as ``_split_shell_pane`` (shell admin
+    flag OR session_user == admin_user) so the eager-resolve scope
+    matches what the build path will actually consume.
+
+    Sessions whose agent / workspace rows are missing get their shell
+    panes skipped (matches ``_pane_secret_target``'s defensive
+    fallthrough). The operator surfaces these via ``agw doctor``.
+    """
+    targets: list[SecretTarget] = []
+    if console.admin_shell:
+        targets.append(
+            _admin_only_secret_target(
+                config, vm, label=f"console={console.name}/admin-shell",
+            ),
+        )
+    for member in db.list_console_sessions(console.name):
+        session = db.get_session(member.session_name)
+        if session is None:
+            continue
+        try:
+            session_user = _session_linux_user(db, session, vm)
+        except NotFoundError:
+            continue
+        for shell in member.shells:
+            use_admin = shell["admin"] or session_user == vm.admin_username
+            pane = _pane_secret_target(
+                config, db, vm=vm, session=session, is_admin_pane=use_admin,
+            )
+            if pane is not None:
+                targets.append(pane)
+    return targets
+
+
+def _restore_session_secret_targets(
+    db: Database,
+    config: Config,
+    *,
+    vm: VMRow,
+    member: ConsoleSessionRow,
+) -> list[SecretTarget]:
+    """SecretTargets for the panes ``restore_session`` may need to open.
+
+    Covers the per-shell panes of a single window. Over-approximates
+    by including ALL configured shells (not just the missing ones), so
+    a single eager-resolve call up front covers any subset that turns
+    out to be missing. The resolver cache makes the over-approximation
+    cheap for already-resolved secrets.
+    """
+    targets: list[SecretTarget] = []
+    session = db.get_session(member.session_name)
+    if session is None:
+        return targets
+    try:
+        session_user = _session_linux_user(db, session, vm)
+    except NotFoundError:
+        return targets
+    for shell in member.shells:
+        use_admin = shell["admin"] or session_user == vm.admin_username
+        pane = _pane_secret_target(
+            config, db, vm=vm, session=session, is_admin_pane=use_admin,
+        )
+        if pane is not None:
+            targets.append(pane)
+    return targets
 
 
 def _resolve_pane_env(
@@ -1603,6 +1719,22 @@ def attach_console(
     with keep_vm_active(db, config, vm):
         exists = _console_tmux_exists(target, name)
         layout = config.named_console.tmux_layout
+
+        # Eager-prompting orchestration (FRD R4 / Phase 6): the
+        # build path opens new shells (admin shell + helper shell panes
+        # per session window). Resolve every referenced secret BEFORE
+        # _build_console_tmux issues the first tmux command. The plain
+        # attach path (tmux session already exists) opens no new shells
+        # so it skips eager-resolve, matching FRD R4 / R5: "console
+        # attach joins existing shells, consumes no secrets."
+        if recreate or not exists:
+            from agentworks.secrets import resolve_for_command
+
+            resolve_for_command(
+                _console_build_secret_targets(db, config, console=console, vm=vm),
+                config,
+            )
+
         if recreate and exists:
             output.info(f"Rebuilding console '{name}' (--recreate)...")
             _build_console_tmux(target, db, config, console, vm, layout=layout)

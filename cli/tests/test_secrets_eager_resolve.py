@@ -813,6 +813,126 @@ def test_shell_agent_passes_workspace_scope_to_secret_target(
     db.close()
 
 
+def test_attach_console_build_path_eager_resolves_before_tmux(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """attach_console's first-attach build path opens new shells
+    (admin shell + per-session shell panes). resolve_for_command must
+    fire BEFORE _build_console_tmux issues any tmux command. A failed
+    eager-resolve leaves no tmux state created."""
+    from agentworks.sessions import multi_console
+
+    db = _seed_basic_db(tmp_path)
+    db._conn.execute("INSERT INTO consoles (name, vm_name) VALUES ('c1', 'vm1')")
+    db._conn.commit()
+
+    monkeypatch.setattr(
+        multi_console,
+        "_prepare_vm_target_for_attach",
+        lambda *a, **k: (
+            SimpleNamespace(name="vm1", admin_username="admin"),
+            SimpleNamespace(run=lambda *a, **k: None),
+        ),
+    )
+    monkeypatch.setattr(multi_console, "keep_vm_active", lambda *a, **k: _NullCM())
+    monkeypatch.setattr(
+        multi_console, "_console_tmux_exists", lambda *a, **k: False,
+    )
+    monkeypatch.setattr(
+        multi_console, "_console_build_secret_targets",
+        lambda *a, **k: [object()],
+    )
+
+    build_called: list[bool] = []
+    monkeypatch.setattr(
+        multi_console,
+        "_build_console_tmux",
+        lambda *a, **k: build_called.append(True),
+    )
+
+    def _explode(*args: object, **kwargs: object) -> None:
+        raise SecretUnavailableError(
+            "no active backend could resolve secret(s): api-key",
+            hint="api-key: tried env_var",
+        )
+
+    monkeypatch.setattr("agentworks.secrets.resolve_for_command", _explode)
+
+    config = SimpleNamespace(
+        named_console=SimpleNamespace(tmux_layout="aw-session-vertical"),
+    )
+
+    monkeypatch.delenv("TMUX", raising=False)
+    with pytest.raises(SecretUnavailableError, match="api-key"):
+        multi_console.attach_console(db, config, name="c1")  # type: ignore[arg-type]
+
+    assert build_called == [], (
+        "eager-resolve must fire before _build_console_tmux; build ran anyway"
+    )
+    db.close()
+
+
+def test_attach_console_existing_tmux_session_skips_eager_resolve(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When the tmux session already exists (plain attach, not first-
+    attach build), FRD R4 says no secrets are consumed. The wiring
+    must reflect that: resolve_for_command is NOT called."""
+    from agentworks.sessions import multi_console
+
+    db = _seed_basic_db(tmp_path)
+    db._conn.execute("INSERT INTO consoles (name, vm_name) VALUES ('c1', 'vm1')")
+    db._conn.commit()
+
+    monkeypatch.setattr(
+        multi_console,
+        "_prepare_vm_target_for_attach",
+        lambda *a, **k: (
+            SimpleNamespace(name="vm1", admin_username="admin"),
+            SimpleNamespace(run=lambda *a, **k: None),
+        ),
+    )
+    monkeypatch.setattr(multi_console, "keep_vm_active", lambda *a, **k: _NullCM())
+    monkeypatch.setattr(
+        multi_console, "_console_tmux_exists", lambda *a, **k: True,
+    )
+    monkeypatch.setattr(
+        "agentworks.ssh.interactive", lambda *a, **k: 0,
+    )
+
+    resolve_called: list[bool] = []
+
+    def _track_resolve(*args: object, **kwargs: object) -> dict[str, str]:
+        resolve_called.append(True)
+        return {}
+
+    monkeypatch.setattr(
+        "agentworks.secrets.resolve_for_command", _track_resolve
+    )
+
+    config = SimpleNamespace(
+        named_console=SimpleNamespace(tmux_layout="aw-session-vertical"),
+    )
+
+    monkeypatch.delenv("TMUX", raising=False)
+    with pytest.raises(SystemExit):
+        multi_console.attach_console(db, config, name="c1")  # type: ignore[arg-type]
+
+    assert resolve_called == [], (
+        "plain attach (existing tmux session) must NOT eager-resolve "
+        "per FRD R4: it joins existing shells, consumes no secrets"
+    )
+    db.close()
+
+
+class _NullCM:
+    def __enter__(self) -> None:
+        return None
+
+    def __exit__(self, *_a: object) -> None:
+        return None
+
+
 def test_console_add_shell_promotes_admin_for_admin_mode_session(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
