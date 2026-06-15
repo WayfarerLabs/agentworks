@@ -277,7 +277,7 @@ def _ssh_base_args(
         for key, value in env.items():
             # Each SetEnv pair is passed as `-o SetEnv=KEY=VALUE`. The remote
             # sshd accepts it under the `AcceptEnv *` directive deployed by VM
-            # init (see new-adrs/sshd-accept-env-wildcard.md) and injects the
+            # init (see docs/adrs/0014-sshd-accept-env-wildcard.md) and injects the
             # var into the user's shell environment before the shell starts.
             args.extend(["-o", f"SetEnv={key}={value}"])
     if target.user:

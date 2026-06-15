@@ -1,10 +1,10 @@
-# N. AcceptEnv Wildcard on Agentworks-Managed VMs
+# 14. AcceptEnv Wildcard on Agentworks-Managed VMs
 
 Date: 2026-06-13
 
 ## Status
 
-Proposed (will be numbered and accepted when the env-and-secrets SDD is merged).
+Accepted
 
 ## Context
 

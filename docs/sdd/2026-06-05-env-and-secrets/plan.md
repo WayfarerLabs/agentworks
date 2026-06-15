@@ -1,6 +1,6 @@
 # Environment variables and secrets: plan
 
-**Status:** Draft **Repo:** `agentworks`
+**Status:** Locked **Repo:** `agentworks`
 
 The plan is phased. Each phase ends at a green CI and a usable intermediate state. Order matches the
 HLA's phasing section; refer to FRD / HLA for the design and ADR for the trust-anchor rationale.
@@ -91,7 +91,7 @@ the implementation surfaced enough friction (nested quoting through SSH → tmux
 re-evaluated the transport mechanism itself. The SSH protocol already has `SetEnv` (client) /
 `AcceptEnv` (server) for exactly this purpose. Adopting it removes the entire prelude composition
 layer from the CLI and gives a uniform shape across every shell-opening site. See
-`new-adrs/sshd-accept-env-wildcard.md` for the security-posture decision behind the wildcard
+`docs/adrs/0014-sshd-accept-env-wildcard.md` for the security-posture decision behind the wildcard
 AcceptEnv.
 
 This phase rewrites the earlier Phase 3 commits accordingly. The `compose_env` /

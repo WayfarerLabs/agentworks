@@ -8,7 +8,7 @@ agents) assemble effective env via ``compose_env`` and hand the resulting
 ``ssh.interactive(target, command, env=...)``), which materializes one
 ``-o SetEnv=KEY=VALUE`` argument per entry. The remote sshd accepts these
 under the ``AcceptEnv *`` directive deployed by VM init (see
-``new-adrs/sshd-accept-env-wildcard.md``).
+``docs/adrs/0014-sshd-accept-env-wildcard.md``).
 """
 
 from agentworks.env.compose import compose_env

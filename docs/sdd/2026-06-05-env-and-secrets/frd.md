@@ -1,6 +1,6 @@
 # Environment variables and secrets: functional requirements
 
-**Status:** Draft **Repo:** `agentworks` **Path:** `cli/agentworks/`
+**Status:** Locked **Repo:** `agentworks` **Path:** `cli/agentworks/`
 
 ## Background
 

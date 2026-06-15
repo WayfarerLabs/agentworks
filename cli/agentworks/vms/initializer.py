@@ -116,7 +116,7 @@ def _write_agentworks_profile(
 #
 #   /etc/ssh/sshd_config.d/50-agentworks-accept-env.conf
 #     `AcceptEnv *`. Allows agentworks-issued SSH commands to inject env
-#     vars via the SetEnv mechanism (see new-adrs/sshd-accept-env-wildcard.md).
+#     vars via the SetEnv mechanism (see docs/adrs/0014-sshd-accept-env-wildcard.md).
 #     Validated with `sshd -t` before sshd is reloaded.
 #
 #   /etc/sudoers.d/50-agentworks-env-keep
@@ -319,7 +319,7 @@ def _write_sudoers_env_keep(
         "# Managed by agentworks -- do not edit.\n"
         "# Preserves agentworks-managed env vars across sudo for the\n"
         "# console add-shell agent-pane path; see\n"
-        "# new-adrs/sshd-accept-env-wildcard.md.\n"
+        "# docs/adrs/0014-sshd-accept-env-wildcard.md.\n"
         'Defaults env_keep += "AGENTWORKS_* AW_*"\n'
     )
     q_body = shlex.quote(body)

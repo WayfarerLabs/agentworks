@@ -1,9 +1,9 @@
 """Core types, protocol, and base class for the agentworks secret system.
 
 See ``docs/sdd/2026-06-05-env-and-secrets/`` and
-``docs/adrs/00NN-cli-side-secret-injection.md`` (numbered at SDD lock) for
-background on why values never persist on the VM and why prompt is just
-another SecretSource in the chain.
+``docs/adrs/0013-cli-side-secret-injection.md`` for background on why
+values never persist on the VM and why prompt is just another
+SecretSource in the chain.
 """
 
 from __future__ import annotations

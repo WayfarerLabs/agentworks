@@ -1,10 +1,10 @@
-# N. CLI-side Secret Injection for VM Shells
+# 13. CLI-side Secret Injection for VM Shells
 
 Date: 2026-06-06
 
 ## Status
 
-Proposed (will be numbered and accepted when the env-and-secrets SDD is merged).
+Accepted
 
 ## Context
 

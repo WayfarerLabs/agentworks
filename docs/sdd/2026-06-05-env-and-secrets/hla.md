@@ -1,6 +1,6 @@
 # Environment variables and secrets: high-level architecture
 
-**Status:** Draft **Repo:** `agentworks` **Path:** `cli/agentworks/env/`, `cli/agentworks/secrets/`
+**Status:** Locked **Repo:** `agentworks` **Path:** `cli/agentworks/env/`, `cli/agentworks/secrets/`
 
 ## Overview
 
@@ -418,9 +418,9 @@ Env injection is a property of the SSH connection, not a property of the shell c
 composes a `dict[str, str]` of effective env (user-defined + per-context identity vars) and hands it
 to the SSH layer; the SSH layer materializes one `-o SetEnv=KEY=VALUE` argument per entry. On the
 remote side, sshd accepts the vars (per the `AcceptEnv *` directive deployed in Phase 4; see
-`new-adrs/sshd-accept-env-wildcard.md`) and places them into the user's shell environment before the
-shell is `exec`d. This happens inside sshd itself (its session-spawn code path), not via the
-`pam_env` PAM module.
+`docs/adrs/0014-sshd-accept-env-wildcard.md`) and places them into the user's shell environment
+before the shell is `exec`d. This happens inside sshd itself (its session-spawn code path), not via
+the `pam_env` PAM module.
 
 Sites compose like this:
 
@@ -658,9 +658,9 @@ Per scope discussion: no `--env KEY=VAL` overrides. Operators set CLI env or edi
   command-line. On the VM side they are NOT visible to anyone reading `ps` (sshd places them in the
   spawned shell's environment before exec, not via a `bash -c "export ..."` step). On the operator's
   machine the SetEnv args ARE on the local `ssh` invocation's command line and visible to `ps -e` on
-  that machine, which is consistent with the trust-anchor analysis in `cli-side-secret-injection.md`
-  (the operator workstation is the trust anchor; processes on it can already read the secrets the
-  CLI would otherwise feed to a remote shell).
+  that machine, which is consistent with the trust-anchor analysis in
+  `docs/adrs/0013-cli-side-secret-injection.md` (the operator workstation is the trust anchor;
+  processes on it can already read the secrets the CLI would otherwise feed to a remote shell).
 
 ## DB schema impact
 

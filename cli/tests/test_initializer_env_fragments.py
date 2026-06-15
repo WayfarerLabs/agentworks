@@ -2,7 +2,7 @@
 
 Pins the wire shape of the four init-time writers that deploy the
 runtime contract for SSH SetEnv + sudoers env_keep + identity profile
-fragments. See ``new-adrs/sshd-accept-env-wildcard.md`` and the
+fragments. See ``docs/adrs/0014-sshd-accept-env-wildcard.md`` and the
 env-and-secrets SDD plan Phase 4.
 """
 
