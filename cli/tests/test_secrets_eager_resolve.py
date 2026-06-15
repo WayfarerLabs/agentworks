@@ -454,6 +454,10 @@ def test_vm_reinit_eager_resolve_fires_before_ssh_target_build(
         vm_manager, "resolve_git_credential_providers", lambda *a, **k: {}
     )
     monkeypatch.setattr(vm_manager, "verify_git_credential_auth", lambda *a, **k: None)
+    monkeypatch.setattr(
+        vm_manager, "_resolve_vm_admin_env_scopes",
+        lambda *a, **k: vm_manager._VmAdminEnvScopes(vm={}, admin={}),
+    )
     monkeypatch.setattr(vm_manager, "_vm_secret_target", lambda *a, **k: object())
 
     ssh_target_called: list[bool] = []

@@ -70,21 +70,20 @@ def _resolve_vm_admin_env_scopes(
 
 
 def _vm_secret_target(
-    config: Config, vm: VMRow | None = None,
+    scopes: _VmAdminEnvScopes, *, label: str,
 ) -> SecretTarget:
-    """Build the SecretTarget for VM-level commands.
+    """Build the SecretTarget for VM-level commands from pre-resolved scopes.
 
-    Sources its scope dicts from ``_resolve_vm_admin_env_scopes``; the
-    companion ``compose_env`` call at shell / exec sites must use the
-    SAME helper so both consumers see identical scope state (no drift).
+    Callers resolve scopes via ``_resolve_vm_admin_env_scopes`` once and
+    feed the result to BOTH this builder (for eager-resolve) and
+    ``compose_env`` (for render) so the two consumers can't drift.
     """
     from agentworks.secrets import SecretTarget
 
-    scopes = _resolve_vm_admin_env_scopes(config, vm)
     return SecretTarget(
         vm=scopes.vm,
         admin=scopes.admin,
-        label=f"vm={vm.name}" if vm is not None else "vm",
+        label=label,
     )
 
 
@@ -239,7 +238,8 @@ def create_vm(
     # this path via the extra_decls hook.
     from agentworks.secrets import resolve_for_command
 
-    resolve_for_command([_vm_secret_target(config)], config)
+    scopes = _resolve_vm_admin_env_scopes(config)
+    resolve_for_command([_vm_secret_target(scopes, label="vm")], config)
 
     # Create DB record with as-provisioned resource values
     db.insert_vm(
@@ -563,7 +563,9 @@ def shell_vm(db: Database, config: Config, name: str) -> None:
     # template and would silently route the wrong env into a shell on a
     # non-default-template VM).
     scopes = _resolve_vm_admin_env_scopes(config, vm)
-    resolve_for_command([_vm_secret_target(config, vm)], config)
+    resolve_for_command(
+        [_vm_secret_target(scopes, label=f"vm-shell={vm.name}")], config,
+    )
 
     ctx = ResourceContext(
         vm_name=vm.name,
@@ -614,7 +616,9 @@ def exec_vm(db: Database, config: Config, name: str, command: list[str]) -> int:
     # and compose_env so the two consumers can't drift. The vm scope
     # comes from vm.template (DB row), not config.vm.
     scopes = _resolve_vm_admin_env_scopes(config, vm)
-    resolve_for_command([_vm_secret_target(config, vm)], config)
+    resolve_for_command(
+        [_vm_secret_target(scopes, label=f"vm-exec={vm.name}")], config,
+    )
 
     ctx = ResourceContext(
         vm_name=vm.name,
@@ -1002,12 +1006,16 @@ def reinit_vm(
     # Eager-prompting orchestration (FRD R4 / Phase 6): resolve every
     # secret referenced by the admin / vm env chain BEFORE any SSH-
     # driven reinit work. Pass ``vm`` so the helper resolves the vm
-    # scope from vm.template (DB row), not config.vm (which the
-    # _replace above happens to keep in sync, but the explicit form
-    # mirrors shell_vm / exec_vm and removes the implicit dependency).
+    # scope from vm.template (DB row); this removes the secret-target's
+    # implicit dependency on the _replace(config, vm=...) above (which
+    # is still load-bearing for run_initialization and the provisioners
+    # downstream that read config.vm directly).
     from agentworks.secrets import resolve_for_command
 
-    resolve_for_command([_vm_secret_target(config, vm)], config)
+    scopes = _resolve_vm_admin_env_scopes(config, vm)
+    resolve_for_command(
+        [_vm_secret_target(scopes, label=f"vm-reinit={vm.name}")], config,
+    )
 
     # Build Tailscale SSH target with logging
     from agentworks.ssh import SSHLogger
