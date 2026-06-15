@@ -1043,6 +1043,30 @@ def _create_agent_on_vm(
 
     agent_target = exec_target_for_user(vm, config, user=linux_user, logger=logger)
 
+    # Phase 6.4b: compose the agent env once and thread it into the
+    # user-facing install runners below (install commands, dotfiles
+    # install, mise install/prune, nerf/claude plugins). Eager-resolve
+    # at the manager entry (Phase 6.4) has already warmed the resolver
+    # cache, so this compose_env hits cached values rather than
+    # prompting. Phase 1 (admin bootstrap above) is infrastructure
+    # (useradd / socket setup / authorized_keys); it doesn't take env.
+    from agentworks.env import ResourceContext, compose_env
+    from agentworks.vms.templates import resolve_from_dict as _resolve_vm_template
+
+    vm_tmpl_for_env = _resolve_vm_template(config.vm_templates, vm.template)
+    agent_env = compose_env(
+        resolver=config.secret_resolver,
+        ctx=ResourceContext(
+            vm_name=vm.name,
+            platform=vm.platform,
+            user=linux_user,
+            vm_host=vm.vm_host_name,
+            agent_name=None,
+        ),
+        vm=vm_tmpl_for_env.env,
+        agent=agent_cfg.env,
+    )
+
     # Minimal rc file with a clear agent prompt.
     if agent_shell == "zsh":
         rc_content = f"export PS1='[agent:{linux_user}] %~%# '\n"
@@ -1091,6 +1115,7 @@ def _create_agent_on_vm(
         home=home,
         vm=vm,
         linux_user=linux_user,
+        env=agent_env,
     )
 
     # Dotfiles.
@@ -1166,16 +1191,19 @@ def _create_agent_on_vm(
             agent_target.run(
                 f"{agent_shell} -lc {_shlex.quote(inner)}",
                 timeout=120,
+                env=agent_env,
             )
         except (SourceRefError, Exception) as e:
             output.warn(f"agent dotfiles failed: {e}")
 
     # Mise.
-    _run_agent_mise_setup(agent_target=agent_target, config=config, home=home)
+    _run_agent_mise_setup(
+        agent_target=agent_target, config=config, home=home, env=agent_env,
+    )
 
     # Install nerf Claude plugin.
     if config.agent.nerf_install_claude_plugin:
-        _install_nerf_claude_plugin_for_agent(agent_target, agent_shell)
+        _install_nerf_claude_plugin_for_agent(agent_target, agent_shell, env=agent_env)
 
     # Claude Code marketplaces and plugins. The probe (`command -v
     # claude`) and the actual `claude plugin ...` invocations need the
@@ -1189,7 +1217,9 @@ def _create_agent_on_vm(
     from agentworks.vms.initializer import install_claude_plugins
 
     def _agent_run_cmd(cmd: str, timeout: int) -> object:
-        return agent_target.run(f"{agent_shell} -lc {_shlex.quote(cmd)}", timeout=timeout)
+        return agent_target.run(
+            f"{agent_shell} -lc {_shlex.quote(cmd)}", timeout=timeout, env=agent_env,
+        )
 
     install_claude_plugins(
         _agent_run_cmd,
@@ -1201,8 +1231,15 @@ def _create_agent_on_vm(
 def _install_nerf_claude_plugin_for_agent(
     agent_target: ExecTarget,
     shell: str,
+    *,
+    env: dict[str, str] | None = None,
 ) -> None:
-    """Install the nerf Claude Code plugin for an agent user. Non-fatal."""
+    """Install the nerf Claude Code plugin for an agent user. Non-fatal.
+
+    ``env`` (Phase 6.4b / FRD R5): SSH SetEnv on the install command so
+    plugin hooks see the merged agent scope env. Presence check is
+    plain (no scope dependency).
+    """
     from agentworks.ssh import SSHError
 
     try:
@@ -1221,6 +1258,7 @@ def _install_nerf_claude_plugin_for_agent(
         agent_target.run(
             f"{shell} -lc '$AGENTWORKS_NERF_HOME/claude-plugin/scripts/install-plugin'",
             timeout=30,
+            env=env,
         )
         output.detail("Nerf Claude plugin installed for agent")
     except SSHError as e:
@@ -1255,6 +1293,7 @@ def _run_agent_install_commands(
     home: str,
     vm: VMRow,
     linux_user: str,
+    env: dict[str, str] | None = None,
 ) -> None:
     """Run user install commands for an agent and write the agent's profile
     fragment. Failures warn but do not abort.
@@ -1305,6 +1344,7 @@ def _run_agent_install_commands(
             agent_target.run(
                 f"{shell} -lc {shlex.quote(entry.command)}",
                 timeout=120,
+                env=env,
             )
         except SSHError as e:
             output.warn(f"agent install command '{name}' failed: {e}")
@@ -1354,6 +1394,7 @@ def _run_agent_mise_setup(
     agent_target: ExecTarget,
     config: Config,
     home: str,
+    env: dict[str, str] | None = None,
 ) -> None:
     """Set up mise for an agent: shims PATH, config, lockfile, install.
 
@@ -1462,6 +1503,7 @@ def _run_agent_mise_setup(
         agent_target.run(
             f"{agent_shell} -lc {shlex.quote(f'mise install {install_flags}')}",
             timeout=300,
+            env=env,
         )
         output.detail("Agent mise packages installed")
         installed = True
@@ -1472,6 +1514,7 @@ def _run_agent_mise_setup(
                 agent_target.run(
                     f"{agent_shell} -lc {shlex.quote('mise install -y')}",
                     timeout=300,
+                    env=env,
                 )
                 output.detail("Agent mise packages installed (unlocked)")
                 installed = True
@@ -1492,6 +1535,7 @@ def _run_agent_mise_setup(
             agent_target.run(
                 f"{agent_shell} -lc {shlex.quote('mise prune -y')}",
                 timeout=60,
+                env=env,
             )
 
 

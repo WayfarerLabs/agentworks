@@ -994,6 +994,25 @@ def test_attach_console_existing_tmux_session_skips_eager_resolve(
     db.close()
 
 
+def test_agent_setup_runners_thread_env_via_setenv() -> None:
+    """Source-level tripwire for the Phase 6.4b threading contract:
+    every runner inside Phase 2 of ``_create_agent_on_vm`` that opens a
+    new agent-facing shell (install commands, dotfiles install, mise
+    install/prune, nerf plugin, claude plugins via _agent_run_cmd) must
+    carry ``env=agent_env``. A future contributor dropping the kwarg
+    from one site drops the count below 5."""
+    import inspect
+
+    from agentworks.agents import manager as agent_mgr
+
+    src = inspect.getsource(agent_mgr._create_agent_on_vm)
+    count = src.count("env=agent_env")
+    assert count >= 5, (
+        f"expected >=5 'env=agent_env' threading sites in _create_agent_on_vm, "
+        f"got {count}; did a runner lose its env kwarg?"
+    )
+
+
 def test_vm_provisioning_runners_thread_env_via_setenv() -> None:
     """Source-level tripwire for the Phase 6.3b threading contract: every
     runner inside ``_phase_b_setup`` that opens a new operator-facing
