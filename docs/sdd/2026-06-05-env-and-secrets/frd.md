@@ -300,6 +300,12 @@ Commands that open new shells (and therefore consume secrets):
 - Provisioning: `vm create`, `vm reinit`, `agent create`, `agent reinit`.
 - Session create / restart: `session create`, `session restart`.
 - Console window creation: `console create` (any sessions named in the create), `console add-shell`.
+  _Implementation note (Phase 6):_ `console create` is DB-only in the current implementation; window
+  creation defers to first attach inside `attach_console`'s build path (and the related
+  `restore_session` repair path). Eager-resolve fires at the actual shell-opening sites
+  (`attach_console` when building, `restore_session`, `console add-shell`) rather than at
+  `console create` itself; the operator-facing UX -- "prompted up front, before any tmux work" -- is
+  preserved.
 - Interactive ad-hoc shells: `vm shell`, `agent shell`.
 - Non-interactive exec: `vm exec`, `agent exec`.
 

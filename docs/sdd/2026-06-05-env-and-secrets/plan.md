@@ -198,17 +198,15 @@ env+secrets via the SSH SetEnv path established in Phase 3.
   - Per-user identity (`AGENTWORKS_USER`) now lands in the agent's `~/.agentworks-profile.sh` via
     the rewritten `_run_agent_install_commands`. The profile fragment is written unconditionally so
     AGENTWORKS_USER lands even when an agent has no user install commands.
-- [ ] **Follow-up in this phase**: thread env through provisioning / agent-setup SSH calls via
-      `target.run(env=...)`. Per the SDD this should land in Phase 4. Splitting it off as a
-      follow-up commit on top of this work so the four helpers + profile-fragment work can be
-      reviewed independently from the per-call-site env threading. The follow-up will:
-  - Compute admin env once at the head of `_phase_b_setup` via `compose_env` with the admin / vm
-    scopes and thread to user-install-command runners, mise installers, claude plugin installer, and
-    dotfiles installer.
-  - Phase 1 of `_create_agent_on_vm` (admin bootstrap): SSH commands during admin bootstrap pass env
-    via `target.run(env=...)` using the admin scope.
-  - Phase 2 of `_create_agent_on_vm` (agent self-configure): every `agent_target.run(...)` call
-    passes env using the agent scope.
+- [x] **Follow-up in this phase**: thread env through provisioning / agent-setup SSH calls via
+      `target.run(env=...)`. Delivered as Phase 6.3b (vms/initializer.py: `_phase_b_setup` composes
+      `admin_env` once and threads it into user-install-command runners, mise install/prune, nerf
+      plugin, claude plugins, and dotfiles install) and Phase 6.4b (agents/manager.py:
+      `_create_agent_on_vm` Phase 2 composes `agent_env` once and threads it into the agent-side
+      runners). Phase 1 of `_create_agent_on_vm` (admin bootstrap: useradd, socket setup,
+      authorized_keys) is infrastructure and deliberately doesn't take env -- same boundary as the
+      vms-side infrastructure-vs-user-facing split. See Phase 6 bullet below for the consolidated
+      record.
 - [x] Tests: tests/test_initializer_env_fragments.py (17 tests). Pin: identity-profile system-wide +
       zprofile mirror with reinit-safe sed-strip; sshd AcceptEnv validates before reload; sudoers
       env_keep validates with visudo and rolls back on failure; per-user profile carries

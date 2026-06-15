@@ -1004,10 +1004,18 @@ def test_session_list_does_not_eager_resolve(
 ) -> None:
     """``session list`` reads the DB only; per FRD R4/R5 it opens no new
     shells and consumes no secrets. A spy on resolve_for_command must
-    never fire."""
+    never fire. Seeded with a session row so the meaty body (not the
+    empty-list short-circuit) is exercised."""
+    from agentworks.db import SessionMode
     from agentworks.sessions import manager as session_manager
 
     db = _seed_basic_db(tmp_path)
+    db._conn.execute(
+        "INSERT INTO sessions (name, workspace_name, template, mode) "
+        "VALUES ('s1', 'ws1', 'default', ?)",
+        (SessionMode.ADMIN.value,),
+    )
+    db._conn.commit()
 
     resolve_called: list[bool] = []
 
@@ -1035,7 +1043,7 @@ def test_session_describe_does_not_eager_resolve(
 ) -> None:
     """``session describe`` reads DB + best-effort liveness; per FRD R4/R5
     it opens no new shells and consumes no secrets."""
-    from agentworks.db import SessionMode
+    from agentworks.db import SessionMode, SessionStatus
     from agentworks.sessions import manager as session_manager
 
     db = _seed_basic_db(tmp_path)
@@ -1053,22 +1061,32 @@ def test_session_describe_does_not_eager_resolve(
         return {}
 
     monkeypatch.setattr("agentworks.secrets.resolve_for_command", _track_resolve)
-    # Stub liveness probes that describe might attempt; they don't matter
-    # for this test, only the resolve_for_command spy does.
+    # describe_session calls _prepare_vm which probes SSH connectivity.
+    # Stub it and the downstream status helpers; the contract under test
+    # is whether resolve_for_command fires, not the probe path.
+    ws_row = db.get_workspace("ws1")
+    vm_row = db.get_vm("vm1")
+    assert ws_row is not None and vm_row is not None
+    fake_target = SimpleNamespace(
+        run=lambda *a, **k: SimpleNamespace(ok=True, returncode=0, stdout="", stderr=""),
+    )
     monkeypatch.setattr(
-        "agentworks.workspaces.manager._ensure_vm_running",
-        lambda *a, **k: None,
+        session_manager, "_prepare_vm",
+        lambda *a, **k: (ws_row, vm_row, fake_target.run, None, fake_target),
+    )
+    monkeypatch.setattr(
+        session_manager, "_ensure_pid", lambda session, **kwargs: session,
+    )
+    monkeypatch.setattr(
+        session_manager, "check_session_status",
+        lambda *a, **k: SessionStatus.UNKNOWN,
     )
 
     config = SimpleNamespace(operator=SimpleNamespace(ssh_private_key=None))
-    # describe_session is best-effort against the VM. Any SSH errors are
-    # swallowed; what matters is whether resolve_for_command got called.
-    try:
-        session_manager.describe_session(
-            db, config, "s1", no_status=True,  # type: ignore[arg-type]
-        )
-    except Exception:
-        pass
+    # describe_session has `name` as a keyword-only arg.
+    session_manager.describe_session(
+        db, config, name="s1",  # type: ignore[arg-type]
+    )
 
     assert resolve_called == [], (
         "session describe must not eager-resolve secrets"
@@ -1076,12 +1094,64 @@ def test_session_describe_does_not_eager_resolve(
     db.close()
 
 
-def test_console_add_sessions_does_not_eager_resolve(
+def test_console_add_sessions_does_not_eager_resolve_live_branch(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """``console add-sessions`` joins existing tmux sessions via wrapper
-    windows; no new agent shells are opened. Per FRD R4/R5 it consumes
-    no secrets."""
+    """``console add-sessions`` with a live tmux session: wraps existing
+    sessions into new console windows via tmux new-window + attach. No
+    new agent shells are opened; per FRD R4/R5 no secrets consumed."""
+    from agentworks.sessions import multi_console
+
+    db = _seed_basic_db(tmp_path)
+    db._conn.execute(
+        "INSERT INTO sessions (name, workspace_name, template, mode) "
+        "VALUES ('s1', 'ws1', 'default', 'admin')"
+    )
+    db._conn.execute(
+        "INSERT INTO consoles (name, vm_name) VALUES ('c1', 'vm1')"
+    )
+    db._conn.commit()
+
+    resolve_called: list[bool] = []
+
+    def _track_resolve(*args: object, **kwargs: object) -> dict[str, str]:
+        resolve_called.append(True)
+        return {}
+
+    monkeypatch.setattr("agentworks.secrets.resolve_for_command", _track_resolve)
+    # Live branch: simulate a live tmux session so _add_session_window runs.
+    fake_vm = SimpleNamespace(name="vm1", admin_username="admin", tailscale_host="x")
+    fake_target = SimpleNamespace(
+        run=lambda *a, **k: SimpleNamespace(ok=True, returncode=0, stdout="", stderr=""),
+    )
+    monkeypatch.setattr(
+        multi_console, "_live_target", lambda *a, **k: (fake_vm, fake_target),
+    )
+    monkeypatch.setattr(
+        multi_console, "_console_tmux_exists", lambda *a, **k: True,
+    )
+    monkeypatch.setattr(
+        multi_console, "_add_session_window", lambda *a, **k: None,
+    )
+
+    config = SimpleNamespace(
+        named_console=SimpleNamespace(tmux_layout="aw-session-vertical"),
+    )
+    multi_console.add_sessions(
+        db, config, console_name="c1", session_specs=["s1"],  # type: ignore[arg-type]
+    )
+
+    assert resolve_called == [], (
+        "console add-sessions even on the live branch must not eager-resolve"
+    )
+    db.close()
+
+
+def test_console_add_sessions_does_not_eager_resolve_db_only_branch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``console add-sessions`` DB-only branch (no live tmux): just
+    inserts console_sessions rows. Trivially no secrets."""
     from agentworks.sessions import multi_console
 
     db = _seed_basic_db(tmp_path)
@@ -1111,7 +1181,7 @@ def test_console_add_sessions_does_not_eager_resolve(
     )
 
     assert resolve_called == [], (
-        "console add-sessions joins existing sessions; must not eager-resolve"
+        "console add-sessions DB-only branch must not eager-resolve"
     )
     db.close()
 
