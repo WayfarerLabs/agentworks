@@ -11,16 +11,17 @@ failures produce warnings and a `partial` status.
 
 ### Fully idempotent
 
-| Step                  | Notes                                                                        |
-| --------------------- | ---------------------------------------------------------------------------- |
-| Apt sources           | Key downloaded if missing, source list overwritten                           |
-| Shell                 | Overwritten from config                                                      |
-| SSH authorized keys   | Overwritten from config                                                      |
-| Git credentials       | Overwritten from config                                                      |
-| Dotfiles (git source) | `git pull` if already cloned, fresh clone if not                             |
-| Mise packages         | Installed if missing, pruned if removed (when `mise_prune_on_reinit = true`) |
-| Mise activation       | Overwritten from config (disabled comment written when off)                  |
-| PATH additions        | Overwritten from config                                                      |
+| Step                  | Notes                                                                                                               |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| Apt sources           | Key downloaded if missing, source list overwritten                                                                  |
+| Shell                 | Overwritten from config                                                                                             |
+| SSH authorized keys   | Overwritten from config                                                                                             |
+| Git credentials       | Overwritten from config                                                                                             |
+| Dotfiles (git source) | `git pull` if already cloned, fresh clone if not                                                                    |
+| Mise packages         | Installed if missing, pruned if removed (when `mise_prune_on_reinit = true`)                                        |
+| Mise activation       | Overwritten from config (disabled comment written when off)                                                         |
+| PATH additions        | Overwritten from config                                                                                             |
+| Tailscale DNS         | Drop-in rewritten only when content differs; `resolv.conf` symlink repaired only when not already the resolved stub |
 
 ### Additive only
 
