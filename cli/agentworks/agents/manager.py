@@ -1083,19 +1083,10 @@ def _create_agent_on_vm(
         agent=agent_cfg.env,
     )
 
-    # Minimal rc file with a clear agent prompt.
-    if agent_shell == "zsh":
-        rc_content = f"export PS1='[agent:{linux_user}] %~%# '\n"
-        rc_file = f"{home}/.zshrc"
-    elif agent_shell == "bash":
-        rc_content = f"export PS1='[agent:{linux_user}] \\w\\$ '\n"
-        rc_file = f"{home}/.bashrc"
-    else:
-        output.warn(f"unsupported shell '{agent_shell}', skipping prompt configuration")
-        rc_content = None
-        rc_file = None
-    if rc_content and rc_file:
-        agent_target.write_file(rc_file, rc_content, mode="0644")
+    # No PS1 setup: operators who want an agent indicator can read
+    # $AGENTWORKS_AGENT (exported by the VM-side identity profile fragment)
+    # from their own prompt. A hardcoded PS1 lost against starship /
+    # powerlevel10k anyway, and clobbered symlinked dotfiles via scp.
 
     # Git safe.directory wildcard (agents access repos owned by admin).
     if config.admin.git_force_safe_directory:
