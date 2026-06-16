@@ -119,6 +119,20 @@ class SecretSource(Protocol):
         """
         ...
 
+    def describe_lookup(self, secret: SecretDecl) -> str | None:
+        """Human-readable identifier this source would use to look up
+        ``secret`` (post-mapping resolution): env var name, vault path,
+        ``op://`` URI, etc. Returns None for sources with no static
+        identifier -- prompt always attempts but its "lookup" is the
+        operator typing at command time.
+
+        Pure config-derived; never probes the backend. Used by
+        ``agw secret list`` to render the per-(secret, backend) table
+        cell so operators can see what each backend would look up
+        without needing to compute the convention by hand.
+        """
+        ...
+
 
 class SecretSourceBase(ABC):
     """Default base class for SecretSource implementations.
@@ -150,3 +164,7 @@ class SecretSourceBase(ABC):
             if value is not None:
                 out[s.name] = value
         return out
+
+    def describe_lookup(self, secret: SecretDecl) -> str | None:  # noqa: ARG002 - default
+        """Default: no static identifier. Override in sources that have one."""
+        return None

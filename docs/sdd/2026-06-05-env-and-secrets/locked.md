@@ -75,6 +75,11 @@ updates this lockfile with a dated entry.
   (would-prompt preview via `SecretResolver.preview_resolution`). Surfaces unused secret
   declarations, soft-skip findings, `backend_mappings.<kind>` pointing at undeclared / inactive
   backends, `AGENTWORKS_*` identity overrides, and cross-scope env-key conflicts.
+- **`agw secret list`** (Phase 5 / FRD R6 discoverability). Static (secrets x backends) table. Rows
+  are declared secrets; columns are the configured chain in precedence order; cells show each
+  backend's lookup identifier (env var name, `op://` URI, ...) or `disabled` / `enabled`. Powered by
+  a generic `SecretSource.describe_lookup` protocol method so env-var has no special treatment;
+  future backends (1Password, Vault) plug in by overriding the method.
 - **Sample config** (`cli/agentworks/sample-config.toml`). Adds env tables and secret-config
   sections with explanatory comments.
 - **README**. `cli/README.md` documents the env-and-secrets surface, including the eager-prompting
@@ -96,10 +101,11 @@ updates this lockfile with a dated entry.
   verification + add-sessions+N + restore-session window-missing + session attach tripwire).
 - 17 tests in `cli/tests/test_initializer_env_fragments.py` (Phase 4 VM-side fragments).
 - 15 tests in `cli/tests/test_doctor_env_and_secrets.py` (FRD R6 health groups).
+- 8 tests in `cli/tests/test_secrets_inspect.py` (`agw secret list` table builder).
 - Comprehensive coverage in `test_secrets_base.py`, `test_secrets_env_var.py`,
   `test_secrets_prompt.py`, `test_secrets_resolver.py`, `test_config_env_and_secrets.py`,
   `test_env_show.py`.
-- Total cli suite: 778 tests, all passing at lock.
+- Total cli suite: 789 tests, all passing at lock.
 
 ## Deferred at lock
 

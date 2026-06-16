@@ -34,6 +34,13 @@ class SecretResolver:
         self._decls = decls
         self._cache: dict[str, str] = {}
 
+    @property
+    def sources(self) -> tuple[SecretSource, ...]:
+        """Active source chain in precedence order. Read-only view for
+        introspection (``agw secret list``, etc.); resolution paths
+        continue to use ``self._sources`` directly."""
+        return tuple(self._sources)
+
     def unreachable_secrets(self) -> list[SecretDecl]:
         """Secrets that no active source would attempt to resolve.
 

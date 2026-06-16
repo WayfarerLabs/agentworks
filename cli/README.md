@@ -541,6 +541,22 @@ agw env show --session my-session              # secrets redacted as <from secre
 agw env show --vm my-vm --reveal-secrets       # resolves through the active backend chain
 ```
 
+Inspect how each active backend would resolve each declared secret (e.g. "which env var name does
+this secret read from?") with `agw secret list`:
+
+```bash
+agw secret list
+# NAME           env-var                  prompt
+# ----           -------                  ------
+# github-token   AW_SECRET_GITHUB_TOKEN   enabled
+# force-prompt   disabled                 enabled
+# api-key        OPENAI_API_KEY           enabled
+```
+
+Columns are the active backends in `[secret_config].backends` precedence order. Cells show each
+backend's static lookup identifier (env var name, vault path, `op://` URI) or `disabled` / `enabled`
+for backends with an explicit opt-out or no static identifier (prompt). Values are never resolved.
+
 `agw doctor` surfaces FRD R6 findings for the env + secrets configuration: for each declared secret,
 whether it would resolve silently (e.g. from an `AW_SECRET_<NAME>` env var) or fall through to an
 interactive prompt at command time; soft-skip findings (active backends that won't attempt a given

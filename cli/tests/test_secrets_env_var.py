@@ -112,3 +112,34 @@ def test_batch_get_returns_only_resolved(monkeypatch: pytest.MonkeyPatch) -> Non
         [SecretDecl(name="foo", description="F"), SecretDecl(name="bar", description="B")]
     )
     assert out == {"foo": "foo-val"}
+
+
+def test_describe_lookup_returns_default_convention() -> None:
+    """Without an override, describe_lookup returns ``AW_SECRET_<UPPER>``."""
+    src = EnvVarSource()
+    assert src.describe_lookup(SecretDecl(name="github-token", description="...")) == (
+        "AW_SECRET_GITHUB_TOKEN"
+    )
+
+
+def test_describe_lookup_returns_override() -> None:
+    """A ``backend_mappings.env-var`` string override wins over the default."""
+    src = EnvVarSource()
+    decl = SecretDecl(
+        name="github-token",
+        description="...",
+        backend_mappings={"env-var": "GITHUB_TOKEN"},
+    )
+    assert src.describe_lookup(decl) == "GITHUB_TOKEN"
+
+
+def test_describe_lookup_returns_none_when_opted_out() -> None:
+    """``backend_mappings.env-var = False`` opts the backend out entirely,
+    so there's no identifier to describe."""
+    src = EnvVarSource()
+    decl = SecretDecl(
+        name="forced",
+        description="...",
+        backend_mappings={"env-var": False},
+    )
+    assert src.describe_lookup(decl) is None

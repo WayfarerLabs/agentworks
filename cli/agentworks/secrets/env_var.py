@@ -60,3 +60,6 @@ class EnvVarSource(SecretSourceBase):
         # surfaced by the resolver's resolve_all layer so the operator
         # sees a clear error instead of an opaque SSH SetEnv rejection.
         return raw.rstrip("\r\n")
+
+    def describe_lookup(self, secret: SecretDecl) -> str | None:
+        return self._resolved_name(secret)
