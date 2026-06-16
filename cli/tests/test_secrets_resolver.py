@@ -184,16 +184,6 @@ def test_unreachable_secrets_at_load_time() -> None:
     assert [d.name for d in unreachable] == ["stranded"]
 
 
-def test_skipping_sources_reports_per_secret() -> None:
-    s1 = _FakeSource("env-var")
-    s2 = _FakeSource("onepassword", attempts={"x"})
-    decls = {"x": _decl("x"), "y": _decl("y")}
-    r = SecretResolver([s1, s2], decls)
-    # For y, onepassword skips (it has no mapping); env-var still attempts.
-    skipping = r.skipping_sources(decls["y"])
-    assert [s.kind for s in skipping] == ["onepassword"]
-
-
 def test_first_attempting_source() -> None:
     s1 = _FakeSource("env-var")  # always attempts
     s2 = _FakeSource("prompt")

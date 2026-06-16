@@ -334,16 +334,18 @@ def _check_git_credentials(config: Config) -> HealthGroup:
 def _check_secrets(config: Config) -> HealthGroup:
     """Check declared secrets per env-and-secrets SDD FRD R6.
 
-    For each declared secret, reports the first backend in the active
-    chain that would attempt to resolve it (the "would-prompt preview"),
-    flags soft-skips (backends that won't attempt this secret for lack of
-    a default convention or an explicit mapping), and flags unused
-    declarations (secrets nobody references).
+    For each declared secret, reports one row showing whether and how
+    the active backend chain would resolve it. Backend-applicability
+    details (which backends would soft-skip this secret due to
+    ``backend_mappings.<kind> = false`` or a missing mapping) live in
+    ``agw secret list``; doctor stays focused on the runtime outcome.
 
-    Also flags ``backend_mappings.<kind>`` keys whose kind is unknown
-    (no [secret_backends.<kind>] section) as an error, and kinds that
-    are declared but not active in ``[secret_config].backends`` as a
-    warning. The active-resolver chain is config.secret_resolver.
+    Also flags configuration-validity issues per secret: unused
+    declarations (secrets nobody references), ``backend_mappings.<kind>``
+    keys whose kind is unknown (no ``[secret_backends.<kind>]`` section),
+    and kinds that are declared but not active in
+    ``[secret_config].backends``. The active resolver chain is
+    ``config.secret_resolver``.
     """
     g = HealthGroup("Secrets")
 
@@ -385,14 +387,6 @@ def _check_secrets(config: Config) -> HealthGroup:
             g.info(f"secret {name!r}", f"would resolve via {kind}")
         else:
             g.fail(f"secret {name!r}", "not available in any backend")
-
-        # Soft-skip findings.
-        skipping = [s.kind for s in resolver.skipping_sources(decl)]
-        if skipping:
-            g.info(
-                f"secret {name!r} soft-skipped by",
-                ", ".join(skipping),
-            )
 
         # Unused declaration warning.
         if name not in referenced:

@@ -53,14 +53,6 @@ class SecretResolver:
             if not any(s.would_attempt(d) for s in self._sources)
         ]
 
-    def skipping_sources(self, secret: SecretDecl) -> list[SecretSource]:
-        """Active sources that will not attempt to resolve this secret.
-
-        Used by ``agw doctor`` to report soft-skip findings ("backend X has
-        no mapping for secret Y; will skip").
-        """
-        return [s for s in self._sources if not s.would_attempt(secret)]
-
     def first_attempting_source(self, secret: SecretDecl) -> SecretSource | None:
         """The first source in precedence order that would attempt this
         secret. Used by ``agw doctor`` for the "would I get prompted?"

@@ -156,29 +156,6 @@ backends = ["env-var", "prompt"]
     assert any("unused" in c.name and "not referenced" in (c.message or "") for c in warns)
 
 
-def test_soft_skipped_backends_are_info(tmp_path: Path) -> None:
-    """When a secret has env-var opted-out (=false), the env-var source's
-    would_attempt returns False and doctor reports it as a soft-skip."""
-    cfg = _write_config(
-        tmp_path,
-        extras="""
-[admin.env]
-TOKEN = { secret = "manual" }
-
-[secrets.manual]
-description = "force-prompt"
-backend_mappings.env-var = false
-
-[secret_config]
-backends = ["env-var", "prompt"]
-""",
-    )
-    config = load_config(cfg, warn_issues=False)
-    g = _check_secrets(config)
-    info = [c for c in g.checks if c.status == Status.INFO]
-    assert any("manual" in c.name and "env-var" in (c.message or "") for c in info)
-
-
 def test_mapping_to_active_backend_is_silent(tmp_path: Path) -> None:
     """A backend_mappings entry that points at a backend currently in
     [secret_config].backends produces NO warning."""
