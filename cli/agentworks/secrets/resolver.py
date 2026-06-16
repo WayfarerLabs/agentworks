@@ -5,7 +5,7 @@ See FRD R4 and HLA "Secret model" / "Eager prompting flow" for the design.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
 from agentworks.errors import ConfigError, SecretUnavailableError
 
@@ -71,44 +71,28 @@ class SecretResolver:
                 return s
         return None
 
-    def preview_resolution(
-        self,
-        secret: SecretDecl,
-    ) -> tuple[Literal["available", "prompt", "unreachable"], str | None]:
-        """Preview how the chain would resolve ``secret``.
+    def preview_resolution(self, secret: SecretDecl) -> str | None:
+        """Return the kind of the first source that would resolve ``secret``,
+        or ``None`` if no source in the active chain would.
 
-        Walks the chain in precedence order. For each non-prompt source that
-        would attempt the secret, calls ``source.get(secret)`` and returns
-        the kind on the first non-None result. If the walk reaches a prompt
-        source before any value is available, returns that prompt source's
-        kind; ``PromptSource.get`` is never called by this method (which is
-        why doctor can use it safely). If no source would produce a value
-        or prompt, returns ``("unreachable", None)``.
+        Walks the chain in precedence order. ``would_attempt`` gates each
+        source; a source opted out via ``backend_mappings`` is skipped.
+        Prompt has no probe-safe ``get`` (calling it would prompt the
+        operator), so if prompt's ``would_attempt`` is True it's reported
+        as the resolver without calling ``get``. Every other source must
+        return non-None from ``get`` to be reported.
 
-        Side-effect contract: ``get`` is called on every non-prompt source
-        in the chain up to the first one that returns a value. Today both
-        non-prompt sources (``env-var`` is the only one) have read-only
-        ``get`` implementations, so the preview is effectively pure. A
-        future backend whose ``get`` authenticates, hits a network, or
-        triggers a biometric/Touch-ID prompt would need to either (a)
-        expose a separate side-effect-free probe API that this method
-        could route to, or (b) be gated out of preview probing explicitly.
-        The narrow guarantee here is just "no operator-facing interactive
-        prompt is emitted from this method", which is enough for doctor.
-
-        Used by ``agw doctor`` to surface the FRD R6 would-prompt preview:
-        operators learn up front which secrets would force an interactive
-        prompt at command time vs. which would resolve silently from a
-        non-interactive backend.
+        Used by ``agw doctor`` to tell the operator which backend will
+        satisfy each declared secret at command time.
         """
         for source in self._sources:
-            if source.kind == "prompt":
-                return ("prompt", source.kind)
             if not source.would_attempt(secret):
                 continue
+            if source.kind == "prompt":
+                return source.kind
             if source.get(secret) is not None:
-                return ("available", source.kind)
-        return ("unreachable", None)
+                return source.kind
+        return None
 
     def resolve_all(self, secrets: list[SecretDecl]) -> dict[str, str]:
         """Batch-resolve every secret through the chain.

@@ -49,12 +49,11 @@ def test_no_secrets_returns_info(tmp_path: Path) -> None:
     assert "none" in (g.checks[0].message or "")
 
 
-def test_secret_resolved_silently_reports_ok(
+def test_secret_resolves_via_env_var_when_set(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """When the operator has AW_SECRET_<NAME> set in env, the would-prompt
-    preview reports the secret as available (no prompt needed) and names
-    the kind that would provide it."""
+    """When AW_SECRET_<NAME> is set, doctor reports the secret as resolving
+    via env-var."""
     monkeypatch.setenv("AW_SECRET_SHARED", "from-operator-env")
     cfg = _write_config(
         tmp_path,
@@ -73,19 +72,18 @@ backends = ["env-var", "prompt"]
     g = _check_secrets(config)
     msgs = [(c.status, c.name, c.message) for c in g.checks]
     assert any(
-        status == Status.OK
+        status == Status.INFO
         and "shared" in name
-        and "available via env-var" in (msg or "")
+        and "would resolve via env-var" in (msg or "")
         for status, name, msg in msgs
     ), msgs
 
 
-def test_secret_would_prompt_when_no_non_interactive_value(
+def test_secret_resolves_via_prompt_when_env_var_unset(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """When no non-interactive backend has a value, the preview reports
-    that the secret would prompt at command time (FRD R6 would-prompt
-    preview)."""
+    """When env-var has nothing and prompt is in the chain, doctor reports
+    the secret as resolving via prompt -- prompt is just another backend."""
     monkeypatch.delenv("AW_SECRET_SHARED", raising=False)
     cfg = _write_config(
         tmp_path,
@@ -102,11 +100,42 @@ backends = ["env-var", "prompt"]
     )
     config = load_config(cfg, warn_issues=False)
     g = _check_secrets(config)
-    warns = [c for c in g.checks if c.status == Status.WARN]
+    infos = [c for c in g.checks if c.status == Status.INFO]
     assert any(
-        "shared" in c.name and "would prompt" in (c.message or "")
-        for c in warns
-    ), [(c.name, c.message) for c in warns]
+        "shared" in c.name and "would resolve via prompt" in (c.message or "")
+        for c in infos
+    ), [(c.name, c.message) for c in infos]
+
+
+def test_secret_not_available_when_env_var_unset_and_prompt_opted_out(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression: when prompt is opted out via backend_mappings.prompt =
+    false AND env-var has no value, doctor must report 'not available'.
+    Previously preview_resolution short-circuited on prompt without
+    checking the opt-out and falsely reported 'would prompt'."""
+    monkeypatch.delenv("AW_SECRET_OPTED_OUT", raising=False)
+    cfg = _write_config(
+        tmp_path,
+        extras="""
+[admin.env]
+TOKEN = { secret = "opted-out" }
+
+[secrets.opted-out]
+description = "Must come from env-var"
+backend_mappings.prompt = false
+
+[secret_config]
+backends = ["env-var", "prompt"]
+""",
+    )
+    config = load_config(cfg, warn_issues=False)
+    g = _check_secrets(config)
+    fails = [c for c in g.checks if c.status == Status.FAIL]
+    assert any(
+        "opted-out" in c.name and "not available" in (c.message or "")
+        for c in fails
+    ), [(c.name, c.message) for c in fails]
 
 
 def test_unused_secret_declaration_warns(tmp_path: Path) -> None:

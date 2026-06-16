@@ -380,28 +380,11 @@ def _check_secrets(config: Config) -> HealthGroup:
     resolver = config.secret_resolver
     builtin_kinds = {"env-var", "prompt"}
     for name, decl in sorted(config.secrets.items()):
-        # Would-prompt preview (FRD R6): probe non-prompt sources in
-        # precedence order and report whether the secret would resolve
-        # silently or fall through to an interactive prompt.
-        outcome, kind = resolver.preview_resolution(decl)
-        if outcome == "available":
-            g.ok(
-                f"secret {name!r}",
-                f"available via {kind} (no prompt needed)",
-            )
-        elif outcome == "prompt":
-            g.warn(
-                f"secret {name!r}",
-                "would prompt at command time (no non-interactive backend has a value)",
-            )
-        else:  # unreachable
-            # Defensive: ``_build_secret_resolver`` raises at config-load
-            # time for any secret that no active source would attempt, so
-            # reaching this branch implies loader/resolver skew.
-            g.fail(
-                f"secret {name!r}",
-                "no active backend would attempt to resolve it",
-            )
+        kind = resolver.preview_resolution(decl)
+        if kind is not None:
+            g.info(f"secret {name!r}", f"would resolve via {kind}")
+        else:
+            g.fail(f"secret {name!r}", "not available in any backend")
 
         # Soft-skip findings.
         skipping = [s.kind for s in resolver.skipping_sources(decl)]

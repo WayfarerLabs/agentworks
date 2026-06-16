@@ -105,7 +105,7 @@ updates this lockfile with a dated entry.
 - Comprehensive coverage in `test_secrets_base.py`, `test_secrets_env_var.py`,
   `test_secrets_prompt.py`, `test_secrets_resolver.py`, `test_config_env_and_secrets.py`,
   `test_env_show.py`.
-- Total cli suite: 793 tests, all passing at lock.
+- Total cli suite: 795 tests, all passing at lock.
 
 ## Deferred at lock
 

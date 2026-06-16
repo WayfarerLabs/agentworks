@@ -211,27 +211,26 @@ def test_first_attempting_source_skips_opted_out() -> None:
     assert first is s2
 
 
-def test_preview_resolution_reports_available_from_non_prompt_source() -> None:
+def test_preview_resolution_reports_first_source_with_value() -> None:
     s1 = _FakeSource("env-var", values={"x": "from-env"})
     s2 = _FakeSource("prompt")
     r = SecretResolver([s1, s2], _decls("x"))
-    outcome, kind = r.preview_resolution(_decl("x"))
-    assert outcome == "available"
-    assert kind == "env-var"
+    assert r.preview_resolution(_decl("x")) == "env-var"
 
 
-def test_preview_resolution_reports_would_prompt_when_chain_falls_through() -> None:
-    s1 = _FakeSource("env-var")  # no values; would_attempt returns True but get returns None
+def test_preview_resolution_falls_through_to_prompt() -> None:
+    """env-var would_attempt is True but get returns None; prompt is the
+    next source and is not opted out, so preview reports prompt."""
+    s1 = _FakeSource("env-var")  # no values
     s2 = _FakeSource("prompt")
     r = SecretResolver([s1, s2], _decls("x"))
-    outcome, kind = r.preview_resolution(_decl("x"))
-    assert outcome == "prompt"
-    assert kind == "prompt"
+    assert r.preview_resolution(_decl("x")) == "prompt"
 
 
 def test_preview_resolution_never_calls_get_on_prompt_source() -> None:
-    """The preview must never call get() on a prompt source; doing so
-    would actually prompt the operator."""
+    """Preview must never call ``get`` on a prompt source -- doing so would
+    actually prompt the operator. Prompt is reported on the strength of
+    ``would_attempt`` alone."""
 
     class _ExplodingPrompt(_FakeSource):
         def get(self, secret: SecretDecl) -> str | None:
@@ -240,32 +239,37 @@ def test_preview_resolution_never_calls_get_on_prompt_source() -> None:
     s1 = _FakeSource("env-var")
     s2 = _ExplodingPrompt("prompt")
     r = SecretResolver([s1, s2], _decls("x"))
-    # Should report would-prompt without ever calling s2.get().
-    outcome, _ = r.preview_resolution(_decl("x"))
-    assert outcome == "prompt"
+    assert r.preview_resolution(_decl("x")) == "prompt"
 
 
-def test_preview_resolution_skips_opted_out_sources() -> None:
-    """A secret with backend_mappings.<kind> = False makes that source's
-    would_attempt return False; preview must skip it and continue."""
+def test_preview_resolution_skips_opted_out_env_var() -> None:
+    """A secret with ``backend_mappings.env-var = false`` makes env-var's
+    would_attempt return False; preview skips it and continues to prompt."""
     s1 = _FakeSource("env-var", values={"x": "from-env"})
     s2 = _FakeSource("prompt")
     decl = _decl("x", backend_mappings={"env-var": False})
     r = SecretResolver([s1, s2], {"x": decl})
-    outcome, kind = r.preview_resolution(decl)
-    assert outcome == "prompt"
-    assert kind == "prompt"
+    assert r.preview_resolution(decl) == "prompt"
 
 
-def test_preview_resolution_unreachable_when_no_source_attempts() -> None:
-    """If no source would attempt the secret and there's no prompt
-    source either, the preview reports unreachable. Defensive case: the
-    loader would normally raise at config-load time."""
+def test_preview_resolution_honors_opt_out_for_prompt_source() -> None:
+    """Regression: prompt was previously reported even when opted out via
+    ``backend_mappings.prompt = false``. Now it correctly returns None,
+    matching what would actually happen at command time
+    (SecretUnavailableError)."""
+    s1 = _FakeSource("env-var")  # no values; falls through
+    s2 = _FakeSource("prompt")
+    decl = _decl("x", backend_mappings={"prompt": False})
+    r = SecretResolver([s1, s2], {"x": decl})
+    assert r.preview_resolution(decl) is None
+
+
+def test_preview_resolution_returns_none_when_no_source_attempts() -> None:
+    """If nothing in the chain would attempt the secret, preview is None.
+    Defensive case: the loader would normally raise at config-load time."""
     s1 = _FakeSource("env-var", attempts=set())  # never attempts anything
     r = SecretResolver([s1], _decls("x"))
-    outcome, kind = r.preview_resolution(_decl("x"))
-    assert outcome == "unreachable"
-    assert kind is None
+    assert r.preview_resolution(_decl("x")) is None
 
 
 def test_render_resolves_secret_refs_and_passes_through_plaintext() -> None:
