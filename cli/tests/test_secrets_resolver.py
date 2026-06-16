@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from agentworks.env import EnvEntry
-from agentworks.errors import ConfigError, SecretUnavailableError
+from agentworks.errors import ConfigError, SecretMappingError, SecretUnavailableError
 from agentworks.secrets import SecretDecl, SecretResolver
 
 
@@ -69,6 +69,44 @@ def test_fallthrough_to_later_source() -> None:
     s2 = _FakeSource("second", values={"x": "from-second"})
     r = SecretResolver([s1, s2], _decls("x"))
     assert r.resolve_all([_decl("x")]) == {"x": "from-second"}
+
+
+def test_hard_miss_halts_chain_via_secret_mapping_error() -> None:
+    """Persistent-store backends (1Password, Vault) raise SecretMappingError
+    when an explicit mapping doesn't resolve. The resolver lets the exception
+    propagate so a misconfigured store doesn't fall through to a prompt that
+    would mask the real config problem."""
+
+    class _StrictMissSource:
+        kind = "strict"
+
+        def __init__(self) -> None:
+            self.batch_get_calls: list[list[str]] = []
+
+        def would_attempt(self, secret: SecretDecl) -> bool:  # noqa: ARG002
+            return True
+
+        def get(self, secret: SecretDecl) -> str | None:
+            raise SecretMappingError(
+                f"strict backend has no item for {secret.name!r}",
+            )
+
+        def batch_get(self, secrets: list[SecretDecl]) -> dict[str, str]:
+            self.batch_get_calls.append([s.name for s in secrets])
+            # Default behavior loops .get(), so propagation flows naturally.
+            for s in secrets:
+                self.get(s)
+            return {}  # unreachable; .get raises
+
+    strict = _StrictMissSource()
+    later = _FakeSource("prompt", values={"x": "would-prompt"})
+    r = SecretResolver([strict, later], _decls("x"))
+
+    with pytest.raises(SecretMappingError, match="strict backend has no item"):
+        r.resolve_all([_decl("x")])
+
+    # Critical contract: the prompt source NEVER ran. Hard miss halts the chain.
+    assert later.batch_get_calls == []
 
 
 def test_unsatisfied_raises_with_backends_tried() -> None:

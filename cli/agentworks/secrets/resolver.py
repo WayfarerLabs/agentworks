@@ -120,6 +120,13 @@ class SecretResolver:
 
         Cache hits (secrets resolved in a previous call within the same
         resolver instance) are returned without re-consulting any source.
+
+        Soft misses (a source returning ``None`` from ``get``) fall through
+        to the next source naturally. Hard misses (a persistent-store backend
+        raising ``SecretMappingError``) halt the chain: the exception
+        propagates out so a misconfigured store doesn't fall through to a
+        prompt and mask the real config error. See ``SecretSource.get`` for
+        the soft-vs-hard contract.
         """
         out: dict[str, str] = {}
         missing: list[SecretDecl] = []

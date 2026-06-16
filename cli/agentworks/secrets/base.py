@@ -105,10 +105,31 @@ class SecretSource(Protocol):
         ...
 
     def get(self, secret: SecretDecl) -> str | None:
-        """Resolve the secret if this source can. Return None to fall through
-        to the next source in the chain. Raises only on hard failures (e.g.
-        vault unreachable mid-batch); "not configured for this secret" is
-        signaled with None and surfaces upstream via ``would_attempt``.
+        """Resolve the secret if this source can. Two miss modes:
+
+        - **Soft miss** (return ``None``): "I don't have a value; try the next
+          source in the chain." The conventional shape for env-style backends
+          (env-var, prompt): an env var that isn't set is just-not-set; there's
+          no signal that the operator misconfigured anything. Falling through
+          is the right behavior.
+        - **Hard miss** (raise ``SecretMappingError``): "the operator told me
+          exactly where to look and that location definitively has no value."
+          The conventional shape for persistent-store backends (1Password,
+          Vault) where the mapping is an explicit identifier (``op://...``,
+          vault path). The resolver halts the chain on this exception so a
+          misconfigured store doesn't quietly fall through to a prompt that
+          masks the real config error. Per-backend config
+          (``strict_on_miss = false`` on ``[secret_backends.<kind>]``) opts
+          the source back into soft-miss fall-through when wanted.
+
+        Transport / authentication failures (vault locked mid-batch, network
+        down) raise ``ConnectivityError`` or ``ExternalError`` rather than
+        ``SecretMappingError`` -- the former are ephemeral, the latter is a
+        config-shape signal.
+
+        "Not configured for this secret at all" -- i.e. no default convention
+        and no explicit mapping -- is signaled via ``would_attempt`` returning
+        False and never calls ``get``; that's separate from a miss.
         """
         ...
 

@@ -92,6 +92,27 @@ class SecretUnavailableError(AgentworksError):
     """
 
 
+class SecretMappingError(SecretUnavailableError):
+    """A backend with a configured mapping reports the mapping doesn't resolve.
+
+    Distinct from a soft miss (where ``SecretSource.get`` returns ``None`` to
+    fall through to the next backend in the chain). A source raises this when
+    the operator has explicitly told it where to look and the lookup definitively
+    returns "not present" -- a 1Password URI pointing at a deleted item, a Vault
+    path with no value, etc. The resolver halts the chain on this exception so
+    a misconfigured persistent store doesn't quietly fall through to a prompt.
+
+    Conventional sources (env-var, prompt) keep returning ``None`` for the soft-
+    miss case; only persistent-store backends raise this. Operators can opt back
+    into fall-through via per-backend config (e.g. ``strict_on_miss = false`` on
+    ``[secret_backends.<kind>]``) when that flexibility is wanted.
+
+    Transport / authentication failures (vault locked, network down) are
+    distinct from a mapping miss and surface as ``ConnectivityError`` or
+    ``ExternalError`` per the broader error taxonomy.
+    """
+
+
 class ExternalError(AgentworksError):
     """An external system failed in a non-connectivity way.
 

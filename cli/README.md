@@ -534,6 +534,15 @@ naming which backends were tried. Commands that join existing shells (`session a
 `session list`, `console attach` against a live tmux session, `console add-sessions`) consume no
 secrets per FRD R4 / R5.
 
+**Miss semantics:** what "not found" means depends on the backend. Conventional sources (`env-var`,
+`prompt`) treat a missing value as a soft miss and fall through to the next backend in the chain --
+a `GITHUB_TOKEN` env var that isn't set is just-not-set, not a config error. Persistent-store
+backends (1Password, Vault when implemented) treat an explicit mapping that doesn't resolve as a
+hard miss: they raise `SecretMappingError` and the chain halts so a wrong `op://` URI doesn't
+quietly fall through to a prompt that masks the real problem. Operators can opt persistent stores
+back into fall-through behavior via `strict_on_miss = false` on `[secret_backends.<kind>]` when they
+want layered fallbacks.
+
 Inspect the merged result for any context with `agw env show`:
 
 ```bash
