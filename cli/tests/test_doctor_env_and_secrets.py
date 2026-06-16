@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from agentworks.config import load_config
-from agentworks.doctor import Status, _check_env, _check_secrets
+from agentworks.doctor import Status, _check_config, _check_secrets
 
 
 def _write_config(tmp_path: Path, *, extras: str = "") -> Path:
@@ -324,27 +324,18 @@ backends = ["prompt"]
 
 
 # ---------------------------------------------------------------------------
-# _check_env
+# AGENTWORKS_* identity overrides surface in the Configuration group
 # ---------------------------------------------------------------------------
 
 
-def test_check_env_clean_config_reports_ok(tmp_path: Path) -> None:
-    cfg = _write_config(
-        tmp_path,
-        extras="""
-[admin.env]
-EDITOR = "nvim"
-""",
-    )
-    config = load_config(cfg, warn_issues=False)
-    g = _check_env(config)
-    assert g.name == "Env"
-    assert any(c.status == Status.OK and "Env keys" in c.name for c in g.checks)
-
-
-def test_check_env_surfaces_identity_override_warning(tmp_path: Path) -> None:
+def test_agentworks_identity_override_surfaces_in_configuration(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """An operator who sets AGENTWORKS_SESSION in their env table triggers
-    a config-load warning that doctor re-surfaces in the Env group."""
+    a config-load warning. Doctor surfaces it once, in the Configuration
+    group (there used to be a separate Env group; it was removed as
+    redundant since ``agw env show`` is the authoritative inspection
+    surface)."""
     cfg = _write_config(
         tmp_path,
         extras="""
@@ -352,92 +343,9 @@ def test_check_env_surfaces_identity_override_warning(tmp_path: Path) -> None:
 AGENTWORKS_SESSION = "operator-override"
 """,
     )
-    config = load_config(cfg, warn_issues=False)
-    g = _check_env(config)
+    monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg)
+    g, _ = _check_config()
     warns = [c for c in g.checks if c.status == Status.WARN]
-    assert any("AGENTWORKS_SESSION" in (c.message or "") for c in warns)
-
-
-def test_identity_marker_constant_matches_parse_env_table_phrase(
-    tmp_path: Path,
-) -> None:
-    """``_check_config`` filters identity issues out of the Configuration
-    group on the assumption that ``_parse_env_table`` records them with a
-    specific marker phrase, and ``_check_env`` re-surfaces them in the
-    more specific Env group on the same assumption. If the marker ever
-    drifts on one side (e.g. someone changes the wording in either
-    ``_parse_env_table`` or ``_IDENTITY_ISSUE_MARKER`` without updating
-    the other), the warning either double-reports or vanishes. Pin the
-    contract here so that drift surfaces as a test failure."""
-    from agentworks.doctor import _IDENTITY_ISSUE_MARKER
-
-    cfg = _write_config(
-        tmp_path,
-        extras="""
-[admin.env]
-AGENTWORKS_SESSION = "operator-override"
-""",
+    assert any("AGENTWORKS_SESSION" in (c.message or "") for c in warns), (
+        [(c.name, c.message) for c in warns]
     )
-    config = load_config(cfg, warn_issues=False)
-    identity_issues = [
-        issue for issue in config.config_issues
-        if _IDENTITY_ISSUE_MARKER in issue
-    ]
-    assert identity_issues, (
-        "the AGENTWORKS_SESSION override in admin.env should produce at "
-        "least one config_issue containing the identity marker; the marker "
-        "in doctor.py has drifted from the phrase in _parse_env_table"
-    )
-
-
-def test_check_env_reports_cross_scope_conflict(tmp_path: Path) -> None:
-    """A key set at both admin and vm scopes is reported as info (the
-    operator can run `agw env show` for the effective value)."""
-    cfg = _write_config(
-        tmp_path,
-        extras="""
-[admin.env]
-EDITOR = "vim"
-
-[vm_templates.default.env]
-EDITOR = "emacs"
-""",
-    )
-    config = load_config(cfg, warn_issues=False)
-    g = _check_env(config)
-    info = [c for c in g.checks if c.status == Status.INFO]
-    assert any("EDITOR" in c.name and "multiple scopes" in (c.message or "") for c in info)
-
-
-def test_check_env_does_not_flag_two_templates_same_scope_as_conflict(
-    tmp_path: Path,
-) -> None:
-    """Two VM templates that both set EDITOR are mutually exclusive at
-    runtime (only one applies per VM), so doctor must NOT report this as
-    a multi-scope conflict. Same-scope-kind templates collapse to one
-    scope label (FRD R2 scopes: vm/workspace/admin/agent/session)."""
-    cfg = _write_config(
-        tmp_path,
-        extras="""
-[vm_templates.default.env]
-EDITOR = "vim"
-
-[vm_templates.heavy.env]
-EDITOR = "emacs"
-""",
-    )
-    config = load_config(cfg, warn_issues=False)
-    g = _check_env(config)
-    info = [c for c in g.checks if c.status == Status.INFO]
-    assert not any("EDITOR" in c.name and "multiple scopes" in (c.message or "") for c in info), (
-        [(c.name, c.message) for c in info]
-    )
-
-
-def test_check_env_quietly_reports_clean_no_conflicts(tmp_path: Path) -> None:
-    cfg = _write_config(tmp_path)
-    config = load_config(cfg, warn_issues=False)
-    g = _check_env(config)
-    assert g.name == "Env"
-    # No env declared: the helper still records "0 declared, no cross-scope conflicts" OK.
-    assert any(c.status == Status.OK and "no cross-scope conflicts" in (c.message or "") for c in g.checks)

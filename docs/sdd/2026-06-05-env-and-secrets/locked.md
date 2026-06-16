@@ -70,11 +70,13 @@ updates this lockfile with a dated entry.
 - **`agw env show`** (FRD R6, Phase 5). Inspect the merged env at any scope (`--vm` / `--workspace`
   / `--agent` / `--session`) with auto-resolve from any single context. Secrets render as
   `<from secret: NAME>` by default; `--reveal-secrets` resolves through the active backend chain.
-- **`agw doctor` Secrets + Env health groups** (FRD R6, Phase 5). For each declared secret, reports
-  whether it would resolve silently or fall through to an interactive prompt at command time
-  (would-prompt preview via `SecretResolver.preview_resolution`). Surfaces unused secret
-  declarations, soft-skip findings, `backend_mappings.<kind>` pointing at undeclared / inactive
-  backends, `AGENTWORKS_*` identity overrides, and cross-scope env-key conflicts.
+- **`agw doctor` Secrets health group** (FRD R6, Phase 5). Leads with one row naming the active
+  backend chain (`Configured backends: env-var, prompt`). For each declared secret, reports one row
+  showing whether and how the active chain would resolve it (`would resolve via env-var`,
+  `would resolve via prompt`, or `not available in any backend`). Also flags unused secret
+  declarations and `backend_mappings.<kind>` pointing at undeclared or inactive backends.
+  `AGENTWORKS_*` identity overrides surface in the Configuration group (they're a config-load
+  warning; doctor doesn't need a dedicated group for them).
 - **`agw secret list`** (Phase 5 / FRD R6 discoverability). Static (secrets x backends) table. Rows
   are declared secrets; columns are the configured chain in precedence order; cells show each
   backend's lookup identifier (env var name, `op://` URI, ...) or `disabled` / `enabled`. Powered by
@@ -100,12 +102,12 @@ updates this lockfile with a dated entry.
 - 27 tests in `cli/tests/test_secrets_eager_resolve.py` (manager wiring + no-shell-opening
   verification + add-sessions+N + restore-session window-missing + session attach tripwire).
 - 17 tests in `cli/tests/test_initializer_env_fragments.py` (Phase 4 VM-side fragments).
-- 15 tests in `cli/tests/test_doctor_env_and_secrets.py` (FRD R6 health groups).
+- 12 tests in `cli/tests/test_doctor_env_and_secrets.py` (FRD R6 Secrets group).
 - 8 tests in `cli/tests/test_secrets_inspect.py` (`agw secret list` table builder).
 - Comprehensive coverage in `test_secrets_base.py`, `test_secrets_env_var.py`,
   `test_secrets_prompt.py`, `test_secrets_resolver.py`, `test_config_env_and_secrets.py`,
   `test_env_show.py`.
-- Total cli suite: 795 tests, all passing at lock.
+- Total cli suite: 790 tests, all passing at lock.
 
 ## Deferred at lock
 
