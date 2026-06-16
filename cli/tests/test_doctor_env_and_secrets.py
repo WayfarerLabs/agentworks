@@ -39,14 +39,72 @@ shell = "zsh"
 # ---------------------------------------------------------------------------
 
 
-def test_no_secrets_returns_info(tmp_path: Path) -> None:
+def test_no_secrets_with_default_chain_shows_backends_then_none(
+    tmp_path: Path,
+) -> None:
+    """Default chain present, no secrets declared: two info rows -- one
+    naming the backends, one stating no secrets are declared."""
     cfg = _write_config(tmp_path)
     config = load_config(cfg, warn_issues=False)
     g = _check_secrets(config)
     assert g.name == "Secrets"
-    assert len(g.checks) == 1
-    assert g.checks[0].status == Status.INFO
-    assert "none" in (g.checks[0].message or "")
+    statuses = [(c.name, c.status, c.message) for c in g.checks]
+    assert any(
+        name == "Configured backends"
+        and status == Status.INFO
+        and "env-var" in (msg or "")
+        and "prompt" in (msg or "")
+        for name, status, msg in statuses
+    ), statuses
+    assert any(
+        name == "Declared secrets"
+        and status == Status.INFO
+        and "none" in (msg or "")
+        for name, status, msg in statuses
+    ), statuses
+
+
+def test_empty_backends_no_secrets_warns(tmp_path: Path) -> None:
+    """Empty backend chain with no declared secrets: warn (operator may
+    have intended to disable secret resolution; nothing to resolve
+    anyway, so it's not a hard error)."""
+    cfg = _write_config(
+        tmp_path,
+        extras="""
+[secret_config]
+backends = []
+""",
+    )
+    config = load_config(cfg, warn_issues=False)
+    g = _check_secrets(config)
+    warns = [c for c in g.checks if c.status == Status.WARN]
+    assert any(
+        c.name == "Configured backends" and "none active" in (c.message or "")
+        for c in warns
+    ), [(c.name, c.message) for c in warns]
+
+
+def test_backends_row_lists_chain_in_precedence_order(tmp_path: Path) -> None:
+    """The configured-backends row spells out the chain so operators can
+    see the resolution order at a glance, without running secret list."""
+    cfg = _write_config(
+        tmp_path,
+        extras="""
+[admin.env]
+TOKEN = { secret = "shared" }
+
+[secrets.shared]
+description = "..."
+
+[secret_config]
+backends = ["prompt", "env-var"]
+""",
+    )
+    config = load_config(cfg, warn_issues=False)
+    g = _check_secrets(config)
+    row = next(c for c in g.checks if c.name == "Configured backends")
+    assert row.status == Status.INFO
+    assert row.message == "prompt, env-var"
 
 
 def test_secret_resolves_via_env_var_when_set(

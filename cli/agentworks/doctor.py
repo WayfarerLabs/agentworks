@@ -349,7 +349,20 @@ def _check_secrets(config: Config) -> HealthGroup:
     """
     g = HealthGroup("Secrets")
 
-    if not config.secrets:
+    active_backends = config.secret_config_data.backends
+    has_secrets = bool(config.secrets)
+
+    if active_backends:
+        g.info("Configured backends", ", ".join(active_backends))
+    elif has_secrets:
+        # Defensive: the loader normally rejects this at config-load time
+        # (unreachable secrets). Doctor surfaces it anyway in case the
+        # operator reaches this state via partial config edits.
+        g.fail("Configured backends", "none active but secrets are declared")
+    else:
+        g.warn("Configured backends", "none active")
+
+    if not has_secrets:
         g.info("Declared secrets", "none")
         return g
 
