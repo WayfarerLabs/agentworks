@@ -167,11 +167,6 @@ class VMTemplate:
     apt_packages: list[str] | None = None
     snap: list[str] | None = None
     system_install_commands: list[str] | None = None
-    # Nerf tools
-    nerf_build_claude_plugin: bool | None = None
-    skip_nerf_defaults: bool | None = None
-    nerf_addl_manifests: list[Path] | None = None
-    nerf_home_dir: str | None = None
 
 
 @dataclass(frozen=True)
@@ -191,7 +186,6 @@ class AdminConfig:
     mise_allow_unlocked: bool = False
     mise_install_before: str = "7d"
     mise_prune_on_reinit: bool = True
-    nerf_install_claude_plugin: bool = False
     git_force_safe_directory: bool = True
     # Claude Code
     claude_marketplaces: list[str] = field(default_factory=list)
@@ -216,7 +210,6 @@ class AgentTemplate:
     mise_allow_unlocked: bool | None = None
     mise_install_before: str | None = None
     mise_prune_on_reinit: bool | None = None
-    nerf_install_claude_plugin: bool | None = None
     claude_marketplaces: list[str] | None = None
     claude_plugins: list[str] | None = None
 
@@ -485,10 +478,6 @@ _VM_TEMPLATE_KEYS = {
     "apt_packages",
     "snap",
     "system_install_commands",
-    "nerf_build_claude_plugin",
-    "skip_nerf_defaults",
-    "nerf_addl_manifests",
-    "nerf_home_dir",
 }
 
 
@@ -508,8 +497,6 @@ def _load_vm_templates(data: dict[str, object], issues: list[str]) -> dict[str, 
             raise ConfigError(f"vm_templates.{name} must be a table")
         _warn_unexpected_keys(tdata, _VM_TEMPLATE_KEYS, f"vm_templates.{name}", issues)
 
-        nerf_addl = [_expand(str(m)) for m in tdata["nerf_addl_manifests"]] if "nerf_addl_manifests" in tdata else None
-
         templates[name] = VMTemplate(
             name=name,
             inherits=list(tdata.get("inherits", [])),
@@ -524,12 +511,6 @@ def _load_vm_templates(data: dict[str, object], issues: list[str]) -> dict[str, 
             system_install_commands=(
                 list(tdata["system_install_commands"]) if "system_install_commands" in tdata else None
             ),
-            nerf_build_claude_plugin=(
-                bool(tdata["nerf_build_claude_plugin"]) if "nerf_build_claude_plugin" in tdata else None
-            ),
-            skip_nerf_defaults=bool(tdata["skip_nerf_defaults"]) if "skip_nerf_defaults" in tdata else None,
-            nerf_addl_manifests=nerf_addl,
-            nerf_home_dir=str(tdata["nerf_home_dir"]) if "nerf_home_dir" in tdata else None,
         )
 
     # Validate inherits references and cycles
@@ -556,7 +537,6 @@ _USER_CONFIG_KEYS = {
     "mise_allow_unlocked",
     "mise_install_before",
     "mise_prune_on_reinit",
-    "nerf_install_claude_plugin",
     "git_force_safe_directory",
     "claude_marketplaces",
     "claude_plugins",
@@ -588,7 +568,6 @@ def _load_admin_config(data: dict[str, object], issues: list[str]) -> AdminConfi
         mise_allow_unlocked=bool(raw.get("mise_allow_unlocked", False)),
         mise_install_before=str(raw.get("mise_install_before", "7d")),
         mise_prune_on_reinit=bool(raw.get("mise_prune_on_reinit", True)),
-        nerf_install_claude_plugin=bool(raw.get("nerf_install_claude_plugin", False)),
         git_force_safe_directory=bool(raw.get("git_force_safe_directory", True)),
         claude_marketplaces=_require_string_list(raw, "claude_marketplaces", "admin.config"),
         claude_plugins=_require_string_list(raw, "claude_plugins", "admin.config"),
@@ -629,9 +608,6 @@ def _load_agent_templates(data: dict[str, object], issues: list[str]) -> dict[st
             mise_allow_unlocked=(bool(tdata["mise_allow_unlocked"]) if "mise_allow_unlocked" in tdata else None),
             mise_install_before=(str(tdata["mise_install_before"]) if "mise_install_before" in tdata else None),
             mise_prune_on_reinit=(bool(tdata["mise_prune_on_reinit"]) if "mise_prune_on_reinit" in tdata else None),
-            nerf_install_claude_plugin=(
-                bool(tdata["nerf_install_claude_plugin"]) if "nerf_install_claude_plugin" in tdata else None
-            ),
             claude_marketplaces=(
                 _require_string_list(tdata, "claude_marketplaces", f"agent_templates.{name}")
                 if "claude_marketplaces" in tdata else None
