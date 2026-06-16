@@ -520,9 +520,9 @@ Every `{ secret = "<name>" }` reference must point to a `[secrets.<name>]` decla
 backends (and their precedence order) are listed in `[secret_config].backends`. Today the
 implemented backends are:
 
-- `env_var` -- reads from the operator's process env. Default convention is
+- `env-var` -- reads from the operator's process env. Default convention is
   `AW_SECRET_<UPPER_SNAKE_CASE>`, overridable per secret via
-  `[secrets.<name>].backend_mappings.env_var = "CUSTOM_NAME"`.
+  `[secrets.<name>].backend_mappings.env-var = "CUSTOM_NAME"`.
 - `prompt` -- interactive prompt; batched at the start of the CLI run.
 
 **Eager prompting (FRD R4):** every command that opens new shells resolves all needed secrets up
