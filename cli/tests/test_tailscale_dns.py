@@ -1,8 +1,9 @@
-"""Tests for the tailscaled cold-boot DNS race fix.
+"""Tests for the tailscaled cold-boot startup-ordering fix.
 
 See ``agentworks.vms.tailscale_dns`` and GitHub issue #117 for the
-root-cause analysis. These tests cover each step's idempotency and the
-sequencing of file rewrites + daemon-reload.
+root-cause analysis. These tests cover the drop-in's idempotency, the
+specific systemd-unit semantics that make the fix correct, and the
+invariant that we never restart tailscaled in phase B.
 """
 
 from __future__ import annotations
@@ -10,16 +11,9 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 
-def _make_dns_fix_target(
-    *,
-    resolv_link_target: str | None = None,
-    dropin_content: str | None = None,
-) -> MagicMock:
-    """ExecTarget mock parameterized by readlink output and current drop-in content.
+def _make_dns_fix_target(*, dropin_content: str | None = None) -> MagicMock:
+    """ExecTarget mock parameterized by current drop-in content.
 
-    - ``resolv_link_target=None``: ``readlink /etc/resolv.conf`` exits non-zero
-      (regular file or absent), mirroring the broken/latched state.
-    - ``resolv_link_target="..."``: ``readlink`` returns this target with exit 0.
     - ``dropin_content=None``: the drop-in file is absent (``cat`` exits non-zero).
     - ``dropin_content="..."``: ``cat`` returns this content.
     """
@@ -29,25 +23,13 @@ def _make_dns_fix_target(
     target.write_log = write_log
     target.run_log = run_log
 
-    from agentworks.vms.tailscale_dns import (
-        RESOLV_CONF_PATH,
-        TAILSCALED_DROPIN_PATH,
-    )
+    from agentworks.vms.tailscale_dns import TAILSCALED_DROPIN_PATH
 
     def run_side_effect(cmd, **kwargs):  # noqa: ANN001 -- mock side_effect signature
         run_log.append(cmd)
         result = MagicMock()
         result.stderr = ""
-        if cmd == f"readlink {RESOLV_CONF_PATH}":
-            if resolv_link_target is None:
-                result.returncode = 1
-                result.ok = False
-                result.stdout = ""
-            else:
-                result.returncode = 0
-                result.ok = True
-                result.stdout = resolv_link_target + "\n"
-        elif cmd == f"cat {TAILSCALED_DROPIN_PATH}":
+        if cmd == f"cat {TAILSCALED_DROPIN_PATH}":
             if dropin_content is None:
                 result.returncode = 1
                 result.ok = False
@@ -71,79 +53,49 @@ def _make_dns_fix_target(
     return target
 
 
-# -- systemd-resolved enable ---------------------------------------------------
+# -- Drop-in content semantics (the load-bearing piece of the fix) ------------
 
 
-def test_ensure_systemd_resolved_enabled_always_calls_enable_now() -> None:
-    """`systemctl enable --now` is idempotent at the systemd layer, so we
-    always call it without a pre-check."""
-    from agentworks.vms.tailscale_dns import _ensure_systemd_resolved_enabled
+def test_dropin_content_orders_after_network_online() -> None:
+    """The drop-in must order tailscaled after network-online.target.
 
-    target = _make_dns_fix_target()
-    logger = MagicMock()
+    This is the actual race fix; if this assertion ever flips, the
+    cold-boot DNS race comes back.
+    """
+    from agentworks.vms.tailscale_dns import TAILSCALED_DROPIN_CONTENT
 
-    _ensure_systemd_resolved_enabled(target, logger)
-
-    assert any(cmd == "systemctl enable --now systemd-resolved" for cmd in target.run_log)
-
-
-# -- /etc/resolv.conf symlink repair -------------------------------------------
+    assert "After=network-online.target" in TAILSCALED_DROPIN_CONTENT
+    assert "Wants=network-online.target" in TAILSCALED_DROPIN_CONTENT
 
 
-def test_resolv_conf_symlink_noop_when_already_correct() -> None:
-    """If readlink shows the resolved stub already, no ln is invoked."""
-    from agentworks.vms.tailscale_dns import (
-        RESOLVED_STUB_PATH,
-        _ensure_resolv_conf_symlink,
-    )
+def test_dropin_content_includes_nss_lookup_target() -> None:
+    """nss-lookup.target is the passive sync point for NSS-providing
+    resolvers (systemd-resolved, NetworkManager, etc.), so ordering
+    after it catches D-Bus-readiness even when the per-resolver After=
+    on the unit isn't sufficient."""
+    from agentworks.vms.tailscale_dns import TAILSCALED_DROPIN_CONTENT
 
-    target = _make_dns_fix_target(resolv_link_target=RESOLVED_STUB_PATH)
-    logger = MagicMock()
-
-    _ensure_resolv_conf_symlink(target, logger)
-
-    assert not any(cmd.startswith("ln -sf") for cmd in target.run_log)
+    assert "nss-lookup.target" in TAILSCALED_DROPIN_CONTENT
 
 
-def test_resolv_conf_symlink_repaired_when_not_symlink() -> None:
-    """A non-symlink (regular file, the latched-broken state) is repaired."""
-    from agentworks.vms.tailscale_dns import (
-        RESOLV_CONF_PATH,
-        RESOLVED_STUB_PATH,
-        _ensure_resolv_conf_symlink,
-    )
+def test_dropin_content_does_not_use_requires() -> None:
+    """Requires= would take tailscaled (and our SSH transport) down if
+    network-online.target ever fails to fire. Wants= degrades to the
+    pre-fix behavior instead, which is recoverable. This contract is
+    documented in the module docstring and is the reason for the
+    deliberate choice; lock it in."""
+    from agentworks.vms.tailscale_dns import TAILSCALED_DROPIN_CONTENT
 
-    target = _make_dns_fix_target(resolv_link_target=None)
-    logger = MagicMock()
-
-    _ensure_resolv_conf_symlink(target, logger)
-
-    assert any(
-        cmd == f"ln -sf {RESOLVED_STUB_PATH} {RESOLV_CONF_PATH}"
-        for cmd in target.run_log
-    )
+    # Check actual systemd directives, not comment text. A comment line
+    # like "# Wants= (not Requires=) ..." should not flip this test.
+    directive_lines = [
+        ln for ln in TAILSCALED_DROPIN_CONTENT.splitlines()
+        if ln and not ln.lstrip().startswith("#")
+    ]
+    assert not any("Requires=" in ln for ln in directive_lines)
 
 
-def test_resolv_conf_symlink_repaired_when_pointing_elsewhere() -> None:
-    """A symlink pointing at the wrong target is repaired."""
-    from agentworks.vms.tailscale_dns import (
-        RESOLV_CONF_PATH,
-        RESOLVED_STUB_PATH,
-        _ensure_resolv_conf_symlink,
-    )
-
-    target = _make_dns_fix_target(resolv_link_target="/run/some/other/path.conf")
-    logger = MagicMock()
-
-    _ensure_resolv_conf_symlink(target, logger)
-
-    assert any(
-        cmd == f"ln -sf {RESOLVED_STUB_PATH} {RESOLV_CONF_PATH}"
-        for cmd in target.run_log
-    )
-
-
-# -- tailscaled drop-in --------------------------------------------------------
+# -- Drop-in install / idempotency --------------------------------------------
 
 
 def test_dropin_written_when_missing() -> None:
@@ -160,9 +112,7 @@ def test_dropin_written_when_missing() -> None:
 
     _ensure_tailscaled_dropin(target, logger)
 
-    # write_file called with the canonical content
     assert any(content == TAILSCALED_DROPIN_CONTENT for _, content in target.write_log)
-    # drop-in directory ensured, install -m 0644 -> drop-in path, and daemon-reload all happened
     assert any(cmd == f"install -d -m 0755 -o root -g root {TAILSCALED_DROPIN_DIR}" for cmd in target.run_log)
     assert any("install -m 0644" in cmd and TAILSCALED_DROPIN_PATH in cmd for cmd in target.run_log)
     assert any(cmd == "systemctl daemon-reload" for cmd in target.run_log)
@@ -187,14 +137,17 @@ def test_dropin_noop_when_content_matches() -> None:
 
 
 def test_dropin_rewritten_when_content_differs() -> None:
-    """A stale drop-in (e.g. older managed version) is rewritten."""
+    """A stale drop-in (e.g. an earlier managed version) is rewritten."""
     from agentworks.vms.tailscale_dns import (
         TAILSCALED_DROPIN_CONTENT,
         TAILSCALED_DROPIN_PATH,
         _ensure_tailscaled_dropin,
     )
 
-    target = _make_dns_fix_target(dropin_content="# old content\n[Unit]\nAfter=resolved\n")
+    # An earlier version of this fix ordered against systemd-resolved
+    # specifically. Confirm that drop-in is recognized as stale and rewritten.
+    stale = "[Unit]\nAfter=systemd-resolved.service\nWants=systemd-resolved.service\n"
+    target = _make_dns_fix_target(dropin_content=stale)
     logger = MagicMock()
 
     _ensure_tailscaled_dropin(target, logger)
@@ -213,31 +166,40 @@ def test_dropin_does_not_restart_tailscaled() -> None:
 
     _ensure_tailscaled_dropin(target, logger)
 
-    assert not any("restart tailscaled" in cmd or "restart tailscaled.service" in cmd for cmd in target.run_log)
+    assert not any("restart tailscaled" in cmd for cmd in target.run_log)
 
 
-# -- top-level apply ------------------------------------------------------------
+# -- Top-level apply: non-fatal contract --------------------------------------
 
 
-def test_apply_invokes_all_three_steps() -> None:
-    """End-to-end smoke: enable, symlink, drop-in install all visible in run_log."""
+def test_apply_invokes_dropin_install() -> None:
+    """End-to-end smoke: the drop-in install is visible in the run_log."""
     from agentworks.vms.tailscale_dns import (
-        RESOLV_CONF_PATH,
-        RESOLVED_STUB_PATH,
         TAILSCALED_DROPIN_PATH,
         apply_tailscaled_dns_fix,
     )
 
-    # Start from a fully-broken state so every step has something to do.
-    target = _make_dns_fix_target(resolv_link_target=None, dropin_content=None)
+    target = _make_dns_fix_target(dropin_content=None)
     logger = MagicMock()
 
     apply_tailscaled_dns_fix(target, logger)
 
-    assert any(cmd == "systemctl enable --now systemd-resolved" for cmd in target.run_log)
-    assert any(
-        cmd == f"ln -sf {RESOLVED_STUB_PATH} {RESOLV_CONF_PATH}"
-        for cmd in target.run_log
-    )
     assert any("install -m 0644" in cmd and TAILSCALED_DROPIN_PATH in cmd for cmd in target.run_log)
     assert any(cmd == "systemctl daemon-reload" for cmd in target.run_log)
+
+
+def test_apply_swallows_ssherror_and_warns() -> None:
+    """The apply function must not propagate SSHError; failures warn and
+    continue, matching the rest of phase B's contract."""
+    from agentworks.ssh import SSHError
+    from agentworks.vms.tailscale_dns import apply_tailscaled_dns_fix
+
+    target = MagicMock()
+    target.run.side_effect = SSHError("simulated failure")
+    logger = MagicMock()
+
+    # Must not raise.
+    apply_tailscaled_dns_fix(target, logger)
+
+    # The non-fatal contract: a warning was emitted via the logger.
+    assert logger.warning.called

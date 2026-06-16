@@ -1174,9 +1174,11 @@ def _phase_b_setup(
     apply_vm_hardening(ts_target, logger)
 
     # Non-fatal: tailscaled cold-boot DNS race fix (GitHub issue #117).
-    # Applied early in Phase B so existing VMs pick up the fix on the
-    # first reinit. Does not restart tailscaled (would disconnect us);
-    # the drop-in takes effect on next cold boot.
+    # Drops in a systemd override that orders tailscaled after the DNS
+    # layer is up so its DNS-manager probe finds a resolver instead of
+    # falling back to direct mode. Applied early in Phase B so existing
+    # VMs pick up the fix on the first reinit. Does not restart
+    # tailscaled (would disconnect us); takes effect on next cold boot.
     from agentworks.vms.tailscale_dns import apply_tailscaled_dns_fix
 
     apply_tailscaled_dns_fix(ts_target, logger)

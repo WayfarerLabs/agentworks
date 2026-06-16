@@ -1,32 +1,37 @@
-"""tailscaled cold-boot DNS race fix.
+"""tailscaled cold-boot startup ordering, so DNS detection finds a resolver.
 
-On cold boot, ``tailscaled`` can start before ``systemd-resolved`` has
-registered its D-Bus interface. Its DNS-manager probe then fails to
-reach resolved, falls through to ``resolvconf``/openresolv detection
-(satisfied by resolved's own compat shim at ``/usr/sbin/resolvconf``),
-selects direct mode, and rewrites ``/etc/resolv.conf`` as a regular
-file pointing at ``100.100.100.100`` with no upstream. The result is
-SERVFAIL for everything non-tailnet. The state is self-perpetuating:
-subsequent ``systemctl restart tailscaled`` keeps re-detecting direct
-mode until the stub symlink is restored. See GitHub issue #117 for the
-full root-cause analysis.
+When tailscaled starts before the DNS layer is up, its DNS-manager
+probe fails, it falls back to direct mode, and rewrites
+``/etc/resolv.conf`` as a regular file pointing at ``100.100.100.100``
+with no upstream resolver. The result is SERVFAIL for everything
+non-tailnet. The state is self-perpetuating: subsequent
+``systemctl restart tailscaled`` keeps re-detecting direct mode. See
+GitHub issue #117 for the full root-cause analysis.
 
-This module applies three idempotent steps at init time:
+The fix is a single idempotent step: drop in a
+``tailscaled.service.d`` override that orders tailscaled after
+``network-online.target`` (the canonical systemd signal that networking
+is up, including DNS) and ``nss-lookup.target`` (the passive sync
+point that NSS-providing resolvers declare ``Before=``). With this
+ordering, by the time tailscaled starts, whichever DNS manager the VM
+uses -- systemd-resolved, NetworkManager, dhcpcd-resolvconf, anything
+else -- is up and detectable, so tailscaled picks the right mode
+instead of falling back to direct.
 
-1. ``systemctl enable --now systemd-resolved`` -- belt and suspenders.
-2. Restore ``/etc/resolv.conf`` to the resolved stub symlink. This
-   breaks the latch on any VM that is currently stuck in direct mode.
-3. Drop a ``tailscaled.service.d/10-after-resolved.conf`` override that
-   adds ``After=`` and ``Wants=systemd-resolved.service``. Step 3 is
-   the actual race fix; steps 1 and 2 recover already-broken VMs.
-
-Deliberately NOT ``Requires=`` -- a resolved failure should degrade
-DNS, not take tailscaled (and thus our SSH transport) offline.
+Deliberately ``Wants=``, not ``Requires=``: a ``network-online``
+failure should let tailscaled fall back to its (broken-but-recoverable)
+default behavior rather than block the unit and risk taking the VM
+off the tailnet entirely.
 
 Deliberately does NOT restart tailscaled. Phase B runs over the tailnet,
 so restarting tailscaled would disconnect us mid-init. The drop-in
 takes effect on the next cold boot, which is exactly when the race
 fires.
+
+Recovery of VMs already latched in the broken state (resolv.conf is a
+regular file, tailscaled keeps re-detecting direct mode on restart) is
+left to the operator: clear the file once, reboot, and the new ordering
+prevents recurrence.
 """
 
 from __future__ import annotations
@@ -42,42 +47,32 @@ if TYPE_CHECKING:
 
 
 TAILSCALED_DROPIN_DIR = "/etc/systemd/system/tailscaled.service.d"
-TAILSCALED_DROPIN_PATH = f"{TAILSCALED_DROPIN_DIR}/10-after-resolved.conf"
+TAILSCALED_DROPIN_PATH = f"{TAILSCALED_DROPIN_DIR}/10-after-network-online.conf"
 TAILSCALED_DROPIN_CONTENT = """\
 # Managed by agentworks. Do not edit; rewritten on vm reinit.
-# Source: GitHub issue #117 -- orders tailscaled after systemd-resolved
-# so its DNS-manager probe finds the resolved D-Bus interface and
-# picks systemd-resolved mode instead of falling back to direct mode.
-# Wants= (not Requires=) keeps the VM reachable if resolved ever fails.
+# Source: GitHub issue #117. Ensures a DNS resolver is in place before
+# tailscaled probes for one. Without this, tailscaled can mis-detect
+# direct mode on cold boot and rewrite /etc/resolv.conf with no upstream
+# resolver. Ordering against network-online.target (the canonical
+# "network is up, DNS is configured" signal) catches whichever resolver
+# manager is actually in use. nss-lookup.target adds passive ordering
+# against NSS-providing resolvers that declare Before=nss-lookup.target.
+# Wants= (not Requires=) lets tailscaled still come up if network-online
+# never fires.
 [Unit]
-After=systemd-resolved.service
-Wants=systemd-resolved.service
+After=network-online.target nss-lookup.target
+Wants=network-online.target
 """
-
-RESOLV_CONF_PATH = "/etc/resolv.conf"
-RESOLVED_STUB_PATH = "/run/systemd/resolve/stub-resolv.conf"
 
 
 def apply_tailscaled_dns_fix(target: ExecTarget, logger: SSHLogger) -> None:
     """Apply the tailscaled cold-boot DNS race fix.
 
-    Idempotent: a second run is a no-op unless on-disk state differs.
-    Called at vm create and re-applied at vm reinit. Non-fatal: each
-    step's failure warns and continues (matches the rest of phase B).
+    Idempotent: a second run is a no-op unless on-disk content differs.
+    Called at vm create and re-applied at vm reinit. Non-fatal: failure
+    warns and continues (matches the rest of phase B).
     """
     logger.step("Tailscale DNS")
-    try:
-        _ensure_systemd_resolved_enabled(target, logger)
-    except SSHError as e:
-        msg = f"systemd-resolved enable failed: {e}"
-        logger.warning(msg)
-        output.warn(msg)
-    try:
-        _ensure_resolv_conf_symlink(target, logger)
-    except SSHError as e:
-        msg = f"{RESOLV_CONF_PATH} symlink repair failed: {e}"
-        logger.warning(msg)
-        output.warn(msg)
     try:
         _ensure_tailscaled_dropin(target, logger)
     except SSHError as e:
@@ -86,37 +81,8 @@ def apply_tailscaled_dns_fix(target: ExecTarget, logger: SSHLogger) -> None:
         output.warn(msg)
 
 
-def _ensure_systemd_resolved_enabled(target: ExecTarget, logger: SSHLogger) -> None:
-    """Ensure systemd-resolved is enabled and running.
-
-    ``systemctl enable --now`` is itself idempotent (no-op if already
-    enabled and active), so no pre-check is needed.
-    """
-    target.run("systemctl enable --now systemd-resolved", sudo=True)
-
-
-def _ensure_resolv_conf_symlink(target: ExecTarget, logger: SSHLogger) -> None:
-    """Ensure ``/etc/resolv.conf`` is the resolved stub symlink.
-
-    Restoring this symlink is the only thing that breaks tailscaled out
-    of the latched direct-mode state where it has rewritten resolv.conf
-    as a regular file. ``ln -sf`` is atomic via rename, so racing
-    readers see either the old or new target, never a missing file.
-    """
-    current = target.run(f"readlink {RESOLV_CONF_PATH}", check=False)
-    if getattr(current, "ok", False) and getattr(current, "stdout", "").strip() == RESOLVED_STUB_PATH:
-        output.detail(f"{RESOLV_CONF_PATH} already points at resolved stub; no change.")
-        return
-
-    output.detail(f"Restoring {RESOLV_CONF_PATH} symlink to resolved stub...")
-    target.run(
-        f"ln -sf {shlex.quote(RESOLVED_STUB_PATH)} {RESOLV_CONF_PATH}",
-        sudo=True,
-    )
-
-
 def _ensure_tailscaled_dropin(target: ExecTarget, logger: SSHLogger) -> None:
-    """Install/refresh the tailscaled After=resolved drop-in.
+    """Install/refresh the tailscaled startup-ordering drop-in.
 
     Writes only when content differs; runs ``daemon-reload`` only when
     the file was actually rewritten.
@@ -129,7 +95,7 @@ def _ensure_tailscaled_dropin(target: ExecTarget, logger: SSHLogger) -> None:
         output.detail("tailscaled drop-in already installed; no change.")
         return
 
-    output.detail("Installing tailscaled After=resolved drop-in...")
+    output.detail("Installing tailscaled startup-ordering drop-in...")
     target.run(
         f"install -d -m 0755 -o root -g root {TAILSCALED_DROPIN_DIR}",
         sudo=True,
