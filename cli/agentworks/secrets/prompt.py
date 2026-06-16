@@ -17,10 +17,12 @@ class PromptSource(SecretSourceBase):
 
     ``would_attempt`` returns True for any secret unless the operator opted
     out via ``backend_mappings.prompt = false``. That opt-out matches the
-    contract on ``SecretDecl.backend_mappings`` and is the way to force a
-    secret to error rather than fall through to interactive prompt -- useful
-    for testing (the secret must come from env-var) or for non-interactive
-    pipelines where a prompt would defeat the point.
+    contract on ``SecretDecl.backend_mappings``. It's most useful for testing
+    in an interactive shell -- the operator wants to verify the env-var path
+    resolves cleanly without quietly falling through to a prompt when the
+    env var happens to be unset. Non-interactive mode (no TTY /
+    ``--non-interactive``) already makes prompt a no-op via ``get``'s TTY
+    check, so the opt-out is not needed there.
 
     The runtime decision to actually prompt or return None is made inside
     ``get`` / ``batch_get`` based on ``output.is_interactive()``.
