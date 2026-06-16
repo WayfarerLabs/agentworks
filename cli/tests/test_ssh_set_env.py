@@ -95,6 +95,29 @@ def test_set_env_args_handles_empty_value() -> None:
     assert _set_env_value(args) == 'EMPTY="" FULL="value"'
 
 
+def test_set_env_args_handles_tab_in_value() -> None:
+    """Tabs are whitespace to OpenSSH's argv_split; the surrounding double
+    quotes group the value so the tab survives intact."""
+    args = _set_env_args({"K": "before\tafter", "L": "x"})
+    assert _set_env_value(args) == 'K="before\tafter" L="x"'
+
+
+def test_set_env_args_handles_equals_in_value() -> None:
+    """A literal ``=`` inside a value (e.g. a token that itself uses =) must
+    not confuse OpenSSH's K=V pair parser; the quoting keeps the whole RHS
+    as one token."""
+    args = _set_env_args({"K": "a=b=c", "L": "x"})
+    assert _set_env_value(args) == 'K="a=b=c" L="x"'
+
+
+def test_set_env_args_handles_non_ascii() -> None:
+    """Non-ASCII characters in values pass through as-is. OpenSSH treats
+    the SetEnv arg as a byte string; Python's str -> argv conversion is
+    UTF-8 on every platform we target."""
+    args = _set_env_args({"K": "café"})
+    assert _set_env_value(args) == 'K="café"'
+
+
 def test_base_args_set_env_precedes_host() -> None:
     """The SetEnv -o flag must appear before the user@host positional;
     otherwise OpenSSH parses it as part of the remote command."""

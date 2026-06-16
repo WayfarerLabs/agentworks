@@ -118,9 +118,10 @@ class SecretSource(Protocol):
           Vault) where the mapping is an explicit identifier (``op://...``,
           vault path). The resolver halts the chain on this exception so a
           misconfigured store doesn't quietly fall through to a prompt that
-          masks the real config error. Per-backend config
-          (``strict_on_miss = false`` on ``[secret_backends.<kind>]``) opts
-          the source back into soft-miss fall-through when wanted.
+          masks the real config error. A future per-backend ``strict_on_miss``
+          toggle on ``[secret_backends.<kind>]`` could opt persistent stores
+          back into soft-miss fall-through; not wired today since no backend
+          that would honor it ships in this surface.
 
         Transport / authentication failures (vault locked mid-batch, network
         down) raise ``ConnectivityError`` or ``ExternalError`` rather than
@@ -150,7 +151,12 @@ class SecretSource(Protocol):
         Pure config-derived; never probes the backend. Used by
         ``agw secret list`` to render the per-(secret, backend) table
         cell so operators can see what each backend would look up
-        without needing to compute the convention by hand.
+        without needing to compute the convention by hand. The renderer
+        composes the cell as:
+
+        - ``would_attempt(secret) == False`` -> ``disabled``
+        - ``would_attempt(secret) == True`` and identifier is None -> ``enabled``
+        - identifier is a non-empty string -> the identifier itself
         """
         ...
 

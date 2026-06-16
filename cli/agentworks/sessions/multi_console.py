@@ -397,9 +397,11 @@ def add_sessions(
                 )
                 if pane is None:
                     continue
-                # Same target shape per new shell; the resolver caches
-                # so adding the target N times doesn't multiply prompts.
-                new_shell_targets.extend([pane] * spec.shells)
+                # Every new shell on this session has the same scope chain,
+                # so one target covers them all. Eager-resolve unions per
+                # secret name; the resolver cache makes additional copies
+                # redundant.
+                new_shell_targets.append(pane)
         if new_shell_targets:
             resolve_for_command(new_shell_targets, config)
 

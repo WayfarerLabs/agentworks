@@ -68,17 +68,17 @@ Whenever agentworks opens a shell on a VM (session creation, session attach, con
 exec, provisioning, agent setup, admin shell, etc.), it sets the subset of the following variables
 that apply to the shell's resource context:
 
-| Variable                   | Set when             | Value                                                         |
-| -------------------------- | -------------------- | ------------------------------------------------------------- |
-| `AGENTWORKS_VM`            | Always (on-VM shell) | VM name                                                       |
-| `AGENTWORKS_VM_HOST`       | Always (on-VM shell) | VM host name from the `vm_hosts` registry (e.g. `lima-local`) |
-| `AGENTWORKS_PLATFORM`      | Always (on-VM shell) | One of `lima`, `azure`, `wsl2`, `proxmox`                     |
-| `AGENTWORKS_USER`          | Always (on-VM shell) | The on-VM Linux user (admin username or agent username)       |
-| `AGENTWORKS_WORKSPACE`     | Workspace context    | Workspace name                                                |
-| `AGENTWORKS_WORKSPACE_DIR` | Workspace context    | Absolute path to the workspace dir on the VM                  |
-| `AGENTWORKS_AGENT`         | Agent context        | Agent name                                                    |
-| `AGENTWORKS_SESSION`       | Session context      | Session name                                                  |
-| `AGENTWORKS_SESSION_KIND`  | Session context      | `admin` or `agent`                                            |
+| Variable                   | Set when             | Value                                                                                                                                             |
+| -------------------------- | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `AGENTWORKS_VM`            | Always (on-VM shell) | VM name                                                                                                                                           |
+| `AGENTWORKS_VM_HOST`       | VMs with a host      | VM host name from the `vm_hosts` registry (e.g. `lima-local`). Set only when the VM has an entry in the registry (today: Lima-platform VMs only). |
+| `AGENTWORKS_PLATFORM`      | Always (on-VM shell) | One of `lima`, `azure`, `wsl2`, `proxmox`                                                                                                         |
+| `AGENTWORKS_USER`          | Always (on-VM shell) | The on-VM Linux user (admin username or agent username)                                                                                           |
+| `AGENTWORKS_WORKSPACE`     | Workspace context    | Workspace name                                                                                                                                    |
+| `AGENTWORKS_WORKSPACE_DIR` | Workspace context    | Absolute path to the workspace dir on the VM                                                                                                      |
+| `AGENTWORKS_AGENT`         | Agent context        | Agent name                                                                                                                                        |
+| `AGENTWORKS_SESSION`       | Session context      | Session name                                                                                                                                      |
+| `AGENTWORKS_SESSION_KIND`  | Session context      | `admin` or `agent`                                                                                                                                |
 
 The existing `AGENTWORKS_NERF_HOME` (set by VM initializer) is grandfathered into this scheme; it is
 VM-scoped and continues to live in the system-wide profile fragment.

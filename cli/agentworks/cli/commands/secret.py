@@ -25,44 +25,6 @@ def secret_list() -> None:
     an explicit opt-out. Values are never resolved.
     """
     from agentworks.config import load_config
-    from agentworks.secrets.inspect import build_secret_table
+    from agentworks.secrets.inspect import build_secret_table, render_secret_table
 
-    table = build_secret_table(load_config())
-
-    if not table.rows:
-        typer.echo("No secrets declared in config.")
-        return
-    if not table.backend_kinds:
-        typer.echo(
-            "No active secret backends. Set [secret_config].backends in your "
-            "config (or leave it unset to use the default chain)."
-        )
-        return
-
-    # Render each cell to a string up front so column widths can be
-    # computed from the rendered text.
-    rendered: list[tuple[str, ...]] = []
-    for row in table.rows:
-        cells: list[str] = [row.name]
-        for cell in row.cells:
-            if not cell.would_attempt:
-                cells.append("disabled")
-            elif cell.identifier is not None:
-                cells.append(cell.identifier)
-            else:
-                cells.append("enabled")
-        rendered.append(tuple(cells))
-
-    headers = ("NAME", *table.backend_kinds)
-    widths = [
-        max(len(headers[i]), *(len(r[i]) for r in rendered))
-        for i in range(len(headers))
-    ]
-
-    def _fmt(cols: tuple[str, ...]) -> str:
-        return "  ".join(c.ljust(widths[i]) for i, c in enumerate(cols))
-
-    typer.echo(_fmt(headers))
-    typer.echo(_fmt(tuple("-" * w for w in widths)))
-    for r in rendered:
-        typer.echo(_fmt(r))
+    render_secret_table(build_secret_table(load_config()))

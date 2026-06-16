@@ -1,9 +1,9 @@
-"""Service-layer introspection for ``agw secret`` commands.
+"""Service-layer introspection and rendering for ``agw secret`` commands.
 
-Builds a structured view of every declared secret across every active
-backend in the configured chain. CLI surfaces (``agw secret list``)
-consume the returned dataclasses; the build logic stays here so it's
-testable without rendering.
+``build_secret_table`` produces the structured view (tested without
+rendering); ``render_secret_table`` formats it for an operator. The CLI
+command stays thin: build, render, done. Matches the shape of
+``env.show.show_env`` (build rows + emit through ``agentworks.output``).
 
 The table is the only discovery path operators have for "which env var
 is this secret read from?" -- per the env-and-secrets SDD design,
@@ -15,6 +15,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
+
+from agentworks import output
 
 if TYPE_CHECKING:
     from agentworks.config import Config
@@ -84,3 +86,57 @@ def build_secret_table(config: Config) -> SecretTable:
         )
 
     return SecretTable(backend_kinds=backend_kinds, rows=tuple(rows))
+
+
+def render_secret_table(table: SecretTable) -> None:
+    """Emit the table as operator-friendly output.
+
+    Empty-state messages match the loader's defaults so an operator who
+    runs ``agw secret list`` on a fresh config sees one of:
+
+    - ``No secrets declared in config.`` -- no `[secrets.<name>]` tables.
+    - ``No active secret backends.`` -- ``[secret_config].backends = []``.
+
+    Otherwise a header + table with one column per active backend in
+    chain order. Cell semantics: an explicit identifier
+    (``AW_SECRET_X``, ``op://...``) when the backend has one;
+    ``disabled`` when ``would_attempt`` is False;
+    ``enabled`` for backends that always attempt without a static key
+    (e.g. ``prompt``).
+    """
+    if not table.rows:
+        output.info("No secrets declared in config.")
+        return
+    if not table.backend_kinds:
+        output.info(
+            "No active secret backends. Set [secret_config].backends in your "
+            "config (or leave it unset to use the default chain).",
+        )
+        return
+
+    # Render cells to strings up front so column widths can be measured.
+    rendered: list[tuple[str, ...]] = []
+    for row in table.rows:
+        cells: list[str] = [row.name]
+        for cell in row.cells:
+            if not cell.would_attempt:
+                cells.append("disabled")
+            elif cell.identifier is not None:
+                cells.append(cell.identifier)
+            else:
+                cells.append("enabled")
+        rendered.append(tuple(cells))
+
+    headers = ("NAME", *table.backend_kinds)
+    widths = [
+        max(len(headers[i]), *(len(r[i]) for r in rendered))
+        for i in range(len(headers))
+    ]
+
+    def _fmt(cols: tuple[str, ...]) -> str:
+        return "  ".join(c.ljust(widths[i]) for i, c in enumerate(cols))
+
+    output.info(_fmt(headers))
+    output.info(_fmt(tuple("-" * w for w in widths)))
+    for r in rendered:
+        output.info(_fmt(r))

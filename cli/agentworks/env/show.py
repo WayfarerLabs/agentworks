@@ -367,7 +367,12 @@ def _render_value(
     Plaintext entries render as their value verbatim. Secret entries
     render as ``<from secret: NAME>`` by default; ``reveal_secrets``
     pulls the value through the resolver. Resolution failures surface
-    inline as ``<error: ...>`` so the table still completes.
+    inline as ``<error: ...>`` so the table still completes. That
+    includes the resolver's transport-safety guard: a backend value
+    containing newline / CR / NUL bytes raises ``ConfigError`` (the
+    same guard that protects SSH SetEnv from corruption) and the
+    operator sees it here as ``<error: secret 'X': resolved value
+    contains a control character...>``.
     """
     if entry.secret is not None:
         if not reveal_secrets:

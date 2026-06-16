@@ -301,8 +301,9 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # Use `agw env show --vm/--workspace/--agent/--session <name>` to preview the
 # merged value at any scope, with each row annotated by its origin scope.
 # Pass `--reveal-secrets` to also resolve secrets through the configured
-# backend chain. Run `agw doctor` to surface dangling secret references,
-# identity-override attempts, and cross-scope conflicts.
+# backend chain. Run `agw doctor` to surface unused secret declarations
+# and identity-override attempts. Run `agw secret list` to see how each
+# active backend would look up each declared secret.
 
 # --- Env tables (one per scope; uncomment what you need) ---
 

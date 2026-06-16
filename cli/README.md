@@ -537,11 +537,9 @@ secrets per FRD R4 / R5.
 **Miss semantics:** what "not found" means depends on the backend. Conventional sources (`env-var`,
 `prompt`) treat a missing value as a soft miss and fall through to the next backend in the chain --
 a `GITHUB_TOKEN` env var that isn't set is just-not-set, not a config error. Persistent-store
-backends (1Password, Vault when implemented) treat an explicit mapping that doesn't resolve as a
-hard miss: they raise `SecretMappingError` and the chain halts so a wrong `op://` URI doesn't
-quietly fall through to a prompt that masks the real problem. Operators can opt persistent stores
-back into fall-through behavior via `strict_on_miss = false` on `[secret_backends.<kind>]` when they
-want layered fallbacks.
+backends (1Password, Vault when implemented) will treat an explicit mapping that doesn't resolve as
+a hard miss: they raise `SecretMappingError` and the chain halts so a wrong `op://` URI doesn't
+quietly fall through to a prompt that masks the real problem.
 
 Inspect the merged result for any context with `agw env show`:
 
@@ -566,14 +564,14 @@ Columns are the active backends in `[secret_config].backends` precedence order. 
 backend's static lookup identifier (env var name, vault path, `op://` URI) or `disabled` / `enabled`
 for backends with an explicit opt-out or no static identifier (prompt). Values are never resolved.
 
-`agw doctor` surfaces FRD R6 findings for the env + secrets configuration: for each declared secret,
-whether it would resolve silently (e.g. from an `AW_SECRET_<NAME>` env var) or fall through to an
-interactive prompt at command time; soft-skip findings (active backends that won't attempt a given
-secret because it has no mapping and the backend has no default convention -- useful for spotting
-typos in `backend_mappings.<kind>` keys); unused secret declarations; `backend_mappings.<kind>`
-entries pointing at an undeclared or inactive backend; attempts to override `AGENTWORKS_*` identity
-vars; and informational cross-scope key conflicts. Broken `{ secret = "..." }` references are caught
-earlier as a hard config-load error before doctor runs.
+`agw doctor`'s Secrets group leads with one row naming the active backend chain
+(`Configured backends: env-var, prompt`). Then one row per declared secret showing whether the chain
+would resolve it (`would resolve via env-var`, `would resolve via prompt`, or
+`not available in any backend`). Per-secret config-validity findings round out the group: unused
+secret declarations and `backend_mappings.<kind>` entries pointing at undeclared or inactive
+backends. `AGENTWORKS_*` identity overrides surface in the Configuration group (they're a
+config-load warning). Broken `{ secret = "..." }` references are caught earlier as a hard
+config-load error before doctor runs.
 
 ### Mise (Polyglot Tool Manager)
 

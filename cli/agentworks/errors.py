@@ -103,9 +103,10 @@ class SecretMappingError(SecretUnavailableError):
     a misconfigured persistent store doesn't quietly fall through to a prompt.
 
     Conventional sources (env-var, prompt) keep returning ``None`` for the soft-
-    miss case; only persistent-store backends raise this. Operators can opt back
-    into fall-through via per-backend config (e.g. ``strict_on_miss = false`` on
-    ``[secret_backends.<kind>]``) when that flexibility is wanted.
+    miss case; only persistent-store backends raise this. Future per-backend
+    config (e.g. a ``strict_on_miss`` toggle on ``[secret_backends.<kind>]``)
+    could let operators opt persistent stores back into fall-through; not
+    wired today since no backend that would honor it ships in this surface.
 
     Transport / authentication failures (vault locked, network down) are
     distinct from a mapping miss and surface as ``ConnectivityError`` or

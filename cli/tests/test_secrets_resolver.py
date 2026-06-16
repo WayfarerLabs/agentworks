@@ -126,7 +126,7 @@ def test_embedded_newline_in_resolved_value_raises() -> None:
     operator sees a clear error instead of an opaque SSH-side rejection."""
     s1 = _FakeSource("vault", values={"x": "line1\nline2"})
     r = SecretResolver([s1], _decls("x"))
-    with pytest.raises(ConfigError, match="newline"):
+    with pytest.raises(ConfigError, match="control character"):
         r.resolve_all([_decl("x")])
 
 
@@ -134,7 +134,16 @@ def test_embedded_carriage_return_in_resolved_value_raises() -> None:
     """Same guard for bare CR (some legacy formats)."""
     s1 = _FakeSource("vault", values={"x": "line1\rline2"})
     r = SecretResolver([s1], _decls("x"))
-    with pytest.raises(ConfigError, match="newline"):
+    with pytest.raises(ConfigError, match="control character"):
+        r.resolve_all([_decl("x")])
+
+
+def test_embedded_nul_in_resolved_value_raises() -> None:
+    """NUL bytes truncate the OpenSSH SetEnv arg at the C-string boundary;
+    reject up front for the same reason newlines are rejected."""
+    s1 = _FakeSource("vault", values={"x": "valid\x00rest"})
+    r = SecretResolver([s1], _decls("x"))
+    with pytest.raises(ConfigError, match="control character"):
         r.resolve_all([_decl("x")])
 
 

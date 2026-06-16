@@ -42,8 +42,8 @@ shell = "zsh"
 def test_no_secrets_with_default_chain_shows_backends_then_none(
     tmp_path: Path,
 ) -> None:
-    """Default chain present, no secrets declared: two info rows -- one
-    naming the backends, one stating no secrets are declared."""
+    """Default chain present, no secrets declared: an ok row naming the
+    backends, and an info row stating no secrets are declared."""
     cfg = _write_config(tmp_path)
     config = load_config(cfg, warn_issues=False)
     g = _check_secrets(config)
@@ -51,7 +51,7 @@ def test_no_secrets_with_default_chain_shows_backends_then_none(
     statuses = [(c.name, c.status, c.message) for c in g.checks]
     assert any(
         name == "Configured backends"
-        and status == Status.INFO
+        and status == Status.OK
         and "env-var" in (msg or "")
         and "prompt" in (msg or "")
         for name, status, msg in statuses
@@ -103,7 +103,7 @@ backends = ["prompt", "env-var"]
     config = load_config(cfg, warn_issues=False)
     g = _check_secrets(config)
     row = next(c for c in g.checks if c.name == "Configured backends")
-    assert row.status == Status.INFO
+    assert row.status == Status.OK
     assert row.message == "prompt, env-var"
 
 

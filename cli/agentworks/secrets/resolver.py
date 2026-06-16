@@ -126,13 +126,16 @@ class SecretResolver:
                 # already strips trailing newlines (the common copy-paste
                 # artifact); anything still containing one is a malformed
                 # secret value and a hard error worth surfacing now
-                # rather than as an opaque SSH-side rejection.
-                if "\n" in value or "\r" in value:
+                # rather than as an opaque SSH-side rejection. NULs are
+                # rejected for the same reason: OpenSSH's argv handling
+                # would silently truncate the SetEnv arg at the first NUL.
+                if "\n" in value or "\r" in value or "\0" in value:
                     raise ConfigError(
-                        f"secret {name!r}: resolved value contains a newline; "
-                        f"cannot transport via SSH SetEnv. Fix the value at "
-                        f"the source (e.g. strip trailing newlines from the "
-                        f"env var or vault entry).",
+                        f"secret {name!r}: resolved value contains a "
+                        f"control character (newline, carriage return, "
+                        f"or NUL); cannot transport via SSH SetEnv. Fix "
+                        f"the value at the source (e.g. strip trailing "
+                        f"newlines from the env var or vault entry).",
                     )
                 self._cache[name] = value
                 out[name] = value

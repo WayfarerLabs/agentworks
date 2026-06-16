@@ -648,9 +648,15 @@ agw env show [--vm NAME] [--workspace NAME] [--agent NAME] [--session NAME] [--r
 
 ### `agw doctor` additions
 
-- "Secrets" section: lists declared secrets, marks each as "available in CLI env" or "would prompt."
-- "Env" section: lists conflicts (same key set at multiple scopes), unused secret declarations,
-  broken `secret =` references.
+- "Secrets" section: leads with one row naming the active backend chain
+  (`Configured backends: env-var, prompt`). Then one row per declared secret with the runtime
+  outcome (`would resolve via <kind>` or `not available in any backend`). Per-secret config-validity
+  findings follow: unused declarations, `backend_mappings.<kind>` pointing at undeclared or inactive
+  backends. See `locked.md`'s "Operator surface" section for the canonical shape; this section
+  captures intent.
+- `AGENTWORKS_*` identity overrides surface in the Configuration group (config-load warning).
+- Broken `secret =` references are caught at config-load time as a hard error before doctor runs;
+  nothing for doctor to report.
 
 ### No new flags on existing commands
 
