@@ -17,10 +17,61 @@ def _set_interactive(monkeypatch: pytest.MonkeyPatch, value: bool) -> None:
     monkeypatch.setattr(output, "is_interactive", lambda: value)
 
 
-def test_would_attempt_always_true() -> None:
-    """Prompt applies to any secret; the runtime TTY check is in get()."""
+def test_would_attempt_true_by_default() -> None:
+    """Prompt applies to any secret unless opted out; the runtime TTY check
+    is in get()."""
     src = PromptSource()
     assert src.would_attempt(SecretDecl(name="x", description="X")) is True
+
+
+def test_would_attempt_false_when_opted_out() -> None:
+    """``backend_mappings.prompt = false`` disables prompt for this secret
+    -- the way operators force a secret to error rather than silently
+    fall through to interactive input (useful for testing and for
+    non-interactive pipelines)."""
+    src = PromptSource()
+    decl = SecretDecl(
+        name="x", description="X", backend_mappings={"prompt": False},
+    )
+    assert src.would_attempt(decl) is False
+
+
+def test_get_returns_none_when_opted_out(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Even in an interactive shell, an opted-out secret never prompts."""
+    _set_interactive(monkeypatch, True)
+    src = PromptSource()
+    decl = SecretDecl(
+        name="x", description="X", backend_mappings={"prompt": False},
+    )
+    assert src.get(decl) is None
+
+
+def test_batch_get_skips_opted_out_in_interactive(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``batch_get`` collects only secrets prompt would actually attempt;
+    opted-out secrets are omitted from the prompt batch and the returned
+    map. They'll surface as SecretUnavailableError upstream if no other
+    backend produces them."""
+    _set_interactive(monkeypatch, True)
+
+    prompted: list[str] = []
+
+    def fake_prompt(label: str, hint: str | None = None) -> str:  # noqa: ARG001
+        prompted.append(label)
+        return "typed-value"
+
+    from agentworks import output as _output
+    monkeypatch.setattr(_output, "prompt_secret", fake_prompt)
+
+    src = PromptSource()
+    opted_out = SecretDecl(
+        name="forced", description="X", backend_mappings={"prompt": False},
+    )
+    normal = SecretDecl(name="normal", description="Y")
+    out = src.batch_get([opted_out, normal])
+    assert "forced" not in out
+    assert out["normal"] == "typed-value"
+    # And only the normal secret prompted the operator.
+    assert len(prompted) == 1
 
 
 def test_get_returns_none_when_not_interactive(monkeypatch: pytest.MonkeyPatch) -> None:
