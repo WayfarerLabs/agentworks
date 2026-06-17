@@ -1172,6 +1172,14 @@ def _create_agent_on_vm(
         config.agent.claude_plugins,
     )
 
+    # Defensive final step: re-ensure source lines in case dotfiles
+    # install (or any other later step) overwrote a shell rc file in
+    # place. Idempotent grep-or-append.
+    from agentworks.vms.initializer import _ensure_agentworks_files_sourced
+    _ensure_agentworks_files_sourced(
+        agent_target, home=home, shell=agent_shell, logger=logger,
+    )
+
 
 def _install_nerf_claude_plugin_for_agent(
     agent_target: ExecTarget,

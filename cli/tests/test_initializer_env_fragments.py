@@ -14,8 +14,10 @@ import pytest
 
 from agentworks.vms.initializer import (
     AGENTWORKS_PROFILE,
+    AGENTWORKS_RC,
     AGENTWORKS_SSHD_ACCEPT_ENV_PATH,
     AGENTWORKS_SUDOERS_ENV_KEEP_PATH,
+    _ensure_agentworks_files_sourced,
     _write_agentworks_identity_profile,
     _write_agentworks_profile,
     _write_sshd_accept_env,
@@ -363,6 +365,70 @@ def test_per_user_profile_writes_empty_body_when_no_paths() -> None:
     body = profile_writes[0]
     assert "PATH=" not in body
     assert "Managed by agentworks" in body
+
+
+# ---------------------------------------------------------------------------
+# Defensive end-of-setup ensure step
+# ---------------------------------------------------------------------------
+
+
+def test_ensure_files_sourced_appends_profile_to_bash_rcs() -> None:
+    """For shell=bash, the ensure step appends the profile source line to
+    ~/.profile and ~/.bashrc (not ~/.zprofile). Idempotent grep-or-append
+    shape."""
+    target = _SpyTarget()
+    _ensure_agentworks_files_sourced(
+        target, home="/home/me", shell="bash", logger=_SpyLogger(),
+    )
+    commands = [c for c, _ in target.runs]
+    profile_appends = [
+        c for c in commands if AGENTWORKS_PROFILE in c and "grep -q" in c
+    ]
+    assert any("/home/me/.profile" in c for c in profile_appends)
+    assert any("/home/me/.bashrc" in c for c in profile_appends)
+    assert not any(".zprofile" in c for c in profile_appends), (
+        "bash shell should not touch .zprofile"
+    )
+
+
+def test_ensure_files_sourced_adds_zprofile_when_shell_is_zsh() -> None:
+    target = _SpyTarget()
+    _ensure_agentworks_files_sourced(
+        target, home="/home/me", shell="zsh", logger=_SpyLogger(),
+    )
+    commands = [c for c, _ in target.runs]
+    profile_appends = [
+        c for c in commands if AGENTWORKS_PROFILE in c and "grep -q" in c
+    ]
+    assert any("/home/me/.zprofile" in c for c in profile_appends)
+
+
+def test_ensure_files_sourced_appends_rc_to_interactive_rcs() -> None:
+    """Similar check for AGENTWORKS_RC (mise activation) -- always
+    .bashrc, plus .zshrc when shell=zsh."""
+    target = _SpyTarget()
+    _ensure_agentworks_files_sourced(
+        target, home="/home/me", shell="zsh", logger=_SpyLogger(),
+    )
+    commands = [c for c, _ in target.runs]
+    rc_appends = [c for c in commands if AGENTWORKS_RC in c and "grep -q" in c]
+    assert any("/home/me/.bashrc" in c for c in rc_appends)
+    assert any("/home/me/.zshrc" in c for c in rc_appends)
+
+
+def test_ensure_files_sourced_uses_grep_or_append_shape() -> None:
+    """The source-line append is idempotent: ``grep -q ... || printf ... >> rc``.
+    A future contributor swapping for an unconditional append would
+    introduce duplicate source lines on every reinit."""
+    target = _SpyTarget()
+    _ensure_agentworks_files_sourced(
+        target, home="/home/me", shell="bash", logger=_SpyLogger(),
+    )
+    for command, _ in target.runs:
+        assert command.startswith("grep -q "), (
+            f"expected grep-or-append shape; got: {command}"
+        )
+        assert " || printf " in command
 
 
 if __name__ == "__main__":  # pragma: no cover

@@ -43,6 +43,61 @@ AGENTWORKS_PROFILE = ".agentworks-profile.sh"
 AGENTWORKS_RC = ".agentworks-rc.sh"
 
 
+def _ensure_agentworks_files_sourced(
+    target: ExecTarget,
+    *,
+    home: str,
+    shell: str,
+    logger: SSHLogger,
+) -> None:
+    """Defensive final step: idempotently re-append `. ~/.agentworks-*`
+    source lines to the user's shell rc files.
+
+    Earlier steps in setup (``_write_agentworks_profile``,
+    ``_write_agent_profile``, ``_write_agentworks_rc``, the mise rc-write
+    in ``_run_agent_mise_setup``) each append their source line via
+    grep-or-append when they run. Dotfiles install -- and any other
+    later step that overwrites a shell rc file in place -- can clobber
+    those lines. This helper runs LAST in setup so the source lines
+    survive a dotfiles installer that ships its own ``.zprofile`` /
+    ``.bashrc`` / etc.
+
+    grep-or-append shape means this is a no-op when the source line is
+    already present (the common case where nothing clobbered).
+
+    ``home`` is the literal home directory path (e.g.
+    ``/home/agentworks``). Admin and agent setup pass their respective
+    values; the helper does not assume ``$HOME`` shell expansion.
+
+    ``shell`` selects which zsh-specific files to ensure (``.zprofile``,
+    ``.zshrc``). bash rc files are always checked because we always
+    write source lines to them.
+    """
+    logger.step("Ensure agentworks files sourced")
+
+    profile_source = f". {home}/{AGENTWORKS_PROFILE}"
+    profile_rcs = [f"{home}/.profile", f"{home}/.bashrc"]
+    if shell == "zsh":
+        profile_rcs.append(f"{home}/.zprofile")
+    for rc in profile_rcs:
+        target.run(
+            f"grep -q {AGENTWORKS_PROFILE} {rc} 2>/dev/null || "
+            f"printf '%s\\n' '{profile_source}' >> {rc}",
+            check=False,
+        )
+
+    rc_source = f". {home}/{AGENTWORKS_RC}"
+    rc_files = [f"{home}/.bashrc"]
+    if shell == "zsh":
+        rc_files.append(f"{home}/.zshrc")
+    for rc in rc_files:
+        target.run(
+            f"grep -q {AGENTWORKS_RC} {rc} 2>/dev/null || "
+            f"printf '%s\\n' '{rc_source}' >> {rc}",
+            check=False,
+        )
+
+
 def _write_agentworks_profile(
     target: ExecTarget,
     path_additions: list[str],
@@ -1724,6 +1779,13 @@ def _phase_b_setup(
 
     install_claude_plugins(
         _admin_run_cmd, config.admin.claude_marketplaces, config.admin.claude_plugins, logger
+    )
+
+    # Defensive final step: re-ensure source lines in case any earlier
+    # step (dotfiles install in particular) overwrote a shell rc file
+    # in place. Idempotent grep-or-append.
+    _ensure_agentworks_files_sourced(
+        ts_target, home=home, shell=admin_shell, logger=logger,
     )
 
 

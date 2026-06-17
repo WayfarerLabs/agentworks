@@ -1127,6 +1127,41 @@ def test_vm_provisioning_runners_have_no_env_injection() -> None:
     )
 
 
+def test_phase_b_setup_ends_with_ensure_files_sourced() -> None:
+    """Defensive: ``_ensure_agentworks_files_sourced`` runs as the final
+    step of admin VM init so that source lines in shell rc files survive
+    a dotfiles installer that ships its own ``.zprofile`` / ``.bashrc`` /
+    etc. The grep-or-append shape is idempotent; the rule is just that
+    the call exists at the end."""
+    import inspect
+
+    from agentworks.vms import initializer as init
+
+    src = inspect.getsource(init._phase_b_setup)
+    assert "_ensure_agentworks_files_sourced" in src, (
+        "expected _ensure_agentworks_files_sourced call in _phase_b_setup; "
+        "without it, a dotfiles installer that overwrites a shell rc "
+        "file can leave AGENTWORKS_AGENT and mise activation unreachable."
+    )
+
+
+def test_create_agent_on_vm_ends_with_ensure_files_sourced() -> None:
+    """Mirror of test_phase_b_setup_ends_with_ensure_files_sourced for the
+    agent path. Agent's dotfiles install runs after the early profile
+    write; the final ensure step recovers if dotfiles clobbered our
+    source lines."""
+    import inspect
+
+    from agentworks.agents import manager as agent_mgr
+
+    src = inspect.getsource(agent_mgr._create_agent_on_vm)
+    assert "_ensure_agentworks_files_sourced" in src, (
+        "expected _ensure_agentworks_files_sourced call in "
+        "_create_agent_on_vm; without it, dotfiles install can leave "
+        "AGENTWORKS_AGENT and mise activation unreachable for the agent."
+    )
+
+
 def test_console_add_sessions_with_shells_eager_resolves(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
