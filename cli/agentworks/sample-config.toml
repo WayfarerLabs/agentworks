@@ -4,6 +4,11 @@
 # Required fields are uncommented. Everything else shows the default value
 # commented out -- uncomment and change only what you need.
 #
+# Comment convention: examples are written as `#key = "value"` (no space
+# after `#`), so you can uncomment a line in place by deleting one `#`.
+# Prose comments use `# <text>` (with space). Pinned by tests in
+# `cli/tests/test_sample_config.py`.
+#
 # Agentworks ships a built-in catalog of common tools (apt sources, apt
 # packages, system install commands, user install commands). Run
 # `agw catalog list` to see what is available. You can reference
@@ -28,26 +33,26 @@
 [operator]
 ssh_public_key = "~/.ssh/id_ed25519.pub"    # required: used to authorize access to VMs
 ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connections to VMs
-# ssh_config = "~/.ssh/config"               # SSH config file for VM host entries
-# ssh_config_dir = true                      # manage VM entries in ~/.ssh/config.d/
-# ssh_host_prefix = "awvm--"                 # prefix for VM SSH host aliases (e.g. awvm--myvm)
-# ssh_agent_host_prefix = "awagent--"        # prefix for agent SSH host aliases (e.g. awagent--myagent)
-# extra_ssh_public_keys = [                  # additional public keys for VM authorized_keys
-#     "~/.ssh/other_key.pub",
-# ]
+#ssh_config = "~/.ssh/config"               # SSH config file for VM host entries
+#ssh_config_dir = true                      # manage VM entries in ~/.ssh/config.d/
+#ssh_host_prefix = "awvm--"                 # prefix for VM SSH host aliases (e.g. awvm--myvm)
+#ssh_agent_host_prefix = "awagent--"        # prefix for agent SSH host aliases (e.g. awagent--myagent)
+#extra_ssh_public_keys = [                  # additional public keys for VM authorized_keys
+#    "~/.ssh/other_key.pub",
+#]
 
 # --- Paths ---
 
 [paths]
-# vm_workspaces = "/opt/agentworks/workspaces"  # workspace directory on VMs
-# vscode_workspaces = "~/aw-vscode-workspaces"   # .code-workspace file directory
-# backups = "~/.config/agentworks/backups"       # vm backup directory
+#vm_workspaces = "/opt/agentworks/workspaces"  # workspace directory on VMs
+#vscode_workspaces = "~/aw-vscode-workspaces"   # .code-workspace file directory
+#backups = "~/.config/agentworks/backups"       # vm backup directory
 
 # --- Default values for CLI flags ---
 
 [defaults]
-# platform = "lima"                          # lima, azure, or wsl2
-# vm_host = "mac-studio"                     # default VM host for remote Lima
+#platform = "lima"                          # lima, azure, or wsl2
+#vm_host = "mac-studio"                     # default VM host for remote Lima
 
 # --- Named-console settings ---
 # Scope: this section applies only to named multi-session consoles created
@@ -64,7 +69,7 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # live console) is enough to switch layouts.
 
 [named_console]
-# tmux_layout = "aw-session-vertical"
+#tmux_layout = "aw-session-vertical"
 # Valid values:
 #   aw-session-vertical  - single column; session pane takes the top 50%
 #                          and shell panes stack vertically in the bottom 50%
@@ -85,15 +90,15 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # agent_templates. Tokens are prompted during VM init (or read from env vars)
 # and stored via git credential-store on the VM.
 
-# [git_credentials.github]
-# type = "github"
-# description = "GitHub full access"               # optional, shown in prompts and logs
+#[git_credentials.github]
+#type = "github"
+#description = "GitHub full access"               # optional, shown in prompts and logs
 # Token: create at https://github.com/settings/tokens (repo scope)
 
-# [git_credentials.azdo]
-# type = "azdo"
-# org = "my-org"
-# description = "Azure DevOps for my-org"          # optional, shown in prompts and logs
+#[git_credentials.azdo]
+#type = "azdo"
+#org = "my-org"
+#description = "Azure DevOps for my-org"          # optional, shown in prompts and logs
 # Token: create at https://dev.azure.com/{org}/_usersSettings/tokens
 
 # --- Secrets ---
@@ -113,51 +118,51 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # identifier for this one secret, or sets `false` to opt out of that backend
 # entirely.
 
-# [secrets.npm-token]
-# description = "npm registry token"
-# hint = "Generate at https://www.npmjs.com/settings/<user>/tokens"
+#[secrets.npm-token]
+#description = "npm registry token"
+#hint = "Generate at https://www.npmjs.com/settings/<user>/tokens"
 
-# [secrets.openai-api-key]
-# description = "OpenAI API key"
-# backend_mappings.env-var = "OPENAI_API_KEY"    # override default convention
+#[secrets.openai-api-key]
+#description = "OpenAI API key"
+#backend_mappings.env-var = "OPENAI_API_KEY"    # override default convention
 
 # Backend declarations. Backends are activated by listing them in
 # `[secret_config].backends` in precedence order. Currently implemented kinds:
 # `env-var`, `prompt`.
 
-# [secret_backends.env-var]
+#[secret_backends.env-var]
 # Reads from process env. Default convention is AW_SECRET_<UPPER_SNAKE_CASE>,
 # so secret "npm-token" reads from AW_SECRET_NPM_TOKEN unless overridden via
 # `[secrets.<name>].backend_mappings.env-var`.
 
-# [secret_backends.prompt]
+#[secret_backends.prompt]
 # Interactive prompt. Always applies; the operator is asked once per missing
 # secret per CLI invocation (batched at the start where possible).
 
-# [secret_config]
-# backends = ["env-var", "prompt"]    # the default chain; explicit configuration overrides.
+#[secret_config]
+#backends = ["env-var", "prompt"]    # the default chain; explicit configuration overrides.
 # Backends declared above but absent from this list are dormant. Order is
 # resolution precedence: the first backend that produces a value wins. An
 # explicit empty list `backends = []` disables resolution entirely.
 
 # --- Azure settings (only needed for --platform azure) ---
 
-# [azure]
-# subscription_id = "..."                    # required for azure platform
-# resource_group = "agentworks-vms"          # required for azure platform
-# region = "eastus2"                         # required for azure platform
+#[azure]
+#subscription_id = "..."                    # required for azure platform
+#resource_group = "agentworks-vms"          # required for azure platform
+#region = "eastus2"                         # required for azure platform
 
 # --- Proxmox settings (only needed for --platform proxmox) ---
 
-# [proxmox]
-# api_url = "https://pve.example.com:8006"   # required: Proxmox API URL
-# node = "pve"                                # required: Proxmox node name
-# token_id = "agentworks@pam!agentworks"      # required: API token ID
-# template_vmid = 9000                        # required: VMID of Debian 12 cloud-init template
-# storage = "local-lvm"                       # target storage for cloned disks
-# bridge = "vmbr0"                            # network bridge
-# pool = "agentworks"                         # Proxmox resource pool for VMs
-# verify_ssl = true                           # verify TLS certificate
+#[proxmox]
+#api_url = "https://pve.example.com:8006"   # required: Proxmox API URL
+#node = "pve"                                # required: Proxmox node name
+#token_id = "agentworks@pam!agentworks"      # required: API token ID
+#template_vmid = 9000                        # required: VMID of Debian 12 cloud-init template
+#storage = "local-lvm"                       # target storage for cloned disks
+#bridge = "vmbr0"                            # network bridge
+#pool = "agentworks"                         # Proxmox resource pool for VMs
+#verify_ssl = true                           # verify TLS certificate
 # Token secret: set PROXMOX_TOKEN_SECRET environment variable
 
 # =============================================================================
@@ -191,104 +196,104 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 
 [vm_templates.default]
 # -- Provisioning (set once at create time) --
-# cpus = 4                                   # number of CPUs (Lima)
-# memory = 8                                 # memory in GiB (Lima)
-# azure_vm_size = "Standard_B2s"             # Azure VM size (determines cpu and memory for Azure)
-# disk = 50                                  # disk size in GiB
-# swap = 4                                   # swap file size in GiB (0 to disable)
+#cpus = 4                                   # number of CPUs (Lima)
+#memory = 8                                 # memory in GiB (Lima)
+#azure_vm_size = "Standard_B2s"             # Azure VM size (determines cpu and memory for Azure)
+#disk = 50                                  # disk size in GiB
+#swap = 4                                   # swap file size in GiB (0 to disable)
 # -- System-wide initialization (applied on create and reinit) --
-# apt = [                                    # direct apt packages
-#     "zsh",
-#     "unzip",
-#     "build-essential",
-#     "ripgrep",
-#     "fzf",
-#     "fd-find",
-# ]
-# apt_packages = ["gh", "docker"]            # named apt package sets from catalog
-# snap = []                                  # direct snap packages
-# system_install_commands = ["az-cli"]       # system-level commands from catalog
+#apt = [                                    # direct apt packages
+#    "zsh",
+#    "unzip",
+#    "build-essential",
+#    "ripgrep",
+#    "fzf",
+#    "fd-find",
+#]
+#apt_packages = ["gh", "docker"]            # named apt package sets from catalog
+#snap = []                                  # direct snap packages
+#system_install_commands = ["az-cli"]       # system-level commands from catalog
 # -- Nerf tools --
-# nerf_build_claude_plugin = false             # build Claude Code nerf tools plugin
-# skip_nerf_defaults = false                   # skip built-in nerf catalog
-# nerf_addl_manifests = [                      # additional manifest files to merge in
-#     "~/.config/agentworks/nerf/my-tools/manifest.yaml",
-# ]
-# nerf_home_dir = "/opt/agentworks/nerf"       # root dir for nerf artifacts
+#nerf_build_claude_plugin = false             # build Claude Code nerf tools plugin
+#skip_nerf_defaults = false                   # skip built-in nerf catalog
+#nerf_addl_manifests = [                      # additional manifest files to merge in
+#    "~/.config/agentworks/nerf/my-tools/manifest.yaml",
+#]
+#nerf_home_dir = "/opt/agentworks/nerf"       # root dir for nerf artifacts
 
-# [vm_templates.heavy]
-# inherits = ["default"]
-# cpus = 16
-# memory = 64
-# disk = 200
+#[vm_templates.heavy]
+#inherits = ["default"]
+#cpus = 16
+#memory = 64
+#disk = 200
 
-# [vm_templates.default.env]
-# HTTP_PROXY = "http://proxy:3128"            # plaintext
-# NPM_TOKEN = { secret = "npm-token" }        # secret reference (see Secrets section above)
+#[vm_templates.default.env]
+#HTTP_PROXY = "http://proxy:3128"            # plaintext
+#NPM_TOKEN = { secret = "npm-token" }        # secret reference (see Secrets section above)
 
 # --- Admin user configuration ---
 # Per-user settings for the admin (operator) user on VMs. Applied during
 # init/reinit. This is not a template; there is one admin config.
 
-# [admin.config]
-# username = "agentworks"                    # admin username on VMs (default: agentworks)
-# shell = "zsh"                              # admin shell (default: zsh)
-# git_credentials = ["github"]              # git credential providers to configure
-# user_install_commands = ["bun"]             # per-user commands from catalog
+#[admin.config]
+#username = "agentworks"                    # admin username on VMs (default: agentworks)
+#shell = "zsh"                              # admin shell (default: zsh)
+#git_credentials = ["github"]              # git credential providers to configure
+#user_install_commands = ["bun"]             # per-user commands from catalog
 # -- Dotfiles (source refs: local path or git::, see docs/guides/source-refs.md) --
-# dotfiles_source = "git::https://github.com/user/dotfiles"
-# dotfiles_destination = "~/.dotfiles"       # where to put them on the VM
-# dotfiles_install_cmd = "./install.sh"      # command to run after clone/copy
+#dotfiles_source = "git::https://github.com/user/dotfiles"
+#dotfiles_destination = "~/.dotfiles"       # where to put them on the VM
+#dotfiles_install_cmd = "./install.sh"      # command to run after clone/copy
 # -- Mise (see docs/guides/mise.md) --
-# mise_activate = true                       # add mise activate to shell profile
-# mise_packages = ["terraform@1.14.5", "adr-tools@3.0.0"]  # name@version tool declarations
-# mise_lockfile = "~/.config/agentworks/mise.lock"   # source ref (wins over dotfiles)
-# mise_allow_unlocked = false                # install packages not in lockfile (with warning)
-# mise_install_before = "7d"                 # reject versions newer than this
-# mise_prune_on_reinit = true                # remove stale tool versions on reinit
+#mise_activate = true                       # add mise activate to shell profile
+#mise_packages = ["terraform@1.14.5", "adr-tools@3.0.0"]  # name@version tool declarations
+#mise_lockfile = "~/.config/agentworks/mise.lock"   # source ref (wins over dotfiles)
+#mise_allow_unlocked = false                # install packages not in lockfile (with warning)
+#mise_install_before = "7d"                 # reject versions newer than this
+#mise_prune_on_reinit = true                # remove stale tool versions on reinit
 # -- Git --
-# git_force_safe_directory = true              # set safe.directory '*' for admin and agents
+#git_force_safe_directory = true              # set safe.directory '*' for admin and agents
 # -- Nerf tools --
-# nerf_install_claude_plugin = false           # install nerf plugin for this user
+#nerf_install_claude_plugin = false           # install nerf plugin for this user
 # -- Claude Code (requires claude CLI on PATH, e.g. via user_install_commands) --
-# claude_marketplaces = ["https://github.com/WayfarerLabs/nerftools#1.2.0"]
-# claude_plugins = ["nerftools-default@nerftools"]
+#claude_marketplaces = ["https://github.com/WayfarerLabs/nerftools#1.2.0"]
+#claude_plugins = ["nerftools-default@nerftools"]
 
-# [admin.env]
-# EDITOR = "nvim"
+#[admin.env]
+#EDITOR = "nvim"
 
 # --- Agent templates ---
 # Per-user settings for agent users. Selected at agent create time with
 # --template. Agents default to nothing unless explicitly configured.
 
-# [agent_templates.default]
-# shell = "bash"                             # agent shell (default: bash)
-# git_credentials = []                       # git credential providers (default: none)
-# user_install_commands = []                 # per-user commands from catalog
+#[agent_templates.default]
+#shell = "bash"                             # agent shell (default: bash)
+#git_credentials = []                       # git credential providers (default: none)
+#user_install_commands = []                 # per-user commands from catalog
 # -- Dotfiles --
-# dotfiles_source = "git::https://github.com/user/agent-dotfiles"
-# dotfiles_destination = "~/.dotfiles"
-# dotfiles_install_cmd = "./install.sh"
+#dotfiles_source = "git::https://github.com/user/agent-dotfiles"
+#dotfiles_destination = "~/.dotfiles"
+#dotfiles_install_cmd = "./install.sh"
 # -- Mise --
-# mise_activate = true                       # add mise activate to agent shell profile
-# mise_packages = ["terraform@1.14.5"]              # name@version tool declarations
-# mise_lockfile = "~/.config/agentworks/agent-mise.lock"
-# mise_allow_unlocked = false
-# mise_install_before = "7d"
-# mise_prune_on_reinit = true
+#mise_activate = true                       # add mise activate to agent shell profile
+#mise_packages = ["terraform@1.14.5"]              # name@version tool declarations
+#mise_lockfile = "~/.config/agentworks/agent-mise.lock"
+#mise_allow_unlocked = false
+#mise_install_before = "7d"
+#mise_prune_on_reinit = true
 # -- Nerf tools --
-# nerf_install_claude_plugin = false           # install nerf plugin for this agent
+#nerf_install_claude_plugin = false           # install nerf plugin for this agent
 # -- Claude Code (requires claude CLI on PATH, e.g. via user_install_commands) --
-# claude_marketplaces = ["https://github.com/WayfarerLabs/nerftools#1.2.0"]
-# claude_plugins = ["nerftools-default@nerftools"]
+#claude_marketplaces = ["https://github.com/WayfarerLabs/nerftools#1.2.0"]
+#claude_plugins = ["nerftools-default@nerftools"]
 
-# [agent_templates.restricted]
-# inherits = ["default"]
-# user_install_commands = []
-# mise_packages = []
+#[agent_templates.restricted]
+#inherits = ["default"]
+#user_install_commands = []
+#mise_packages = []
 
-# [agent_templates.default.env]
-# OPENAI_API_KEY = { secret = "openai-api-key" }
+#[agent_templates.default.env]
+#OPENAI_API_KEY = { secret = "openai-api-key" }
 
 # --- Workspace templates ---
 # Selected at workspace create time with --template. The "default" template
@@ -298,18 +303,18 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # provide authentication via personal access tokens. Public repos work
 # without credentials.
 
-# [workspace_templates.default]
-# repo = "https://github.com/org/repo.git"  # git repo to clone into workspace
-# tmuxinator = true                          # generate tmuxinator config
-# inherits = []                              # list of parent template names
+#[workspace_templates.default]
+#repo = "https://github.com/org/repo.git"  # git repo to clone into workspace
+#tmuxinator = true                          # generate tmuxinator config
+#inherits = []                              # list of parent template names
 
-# [workspace_templates.myproject]
-# repo = "https://github.com/org/myproject.git"
-# tmuxinator = false
-# inherits = ["default"]
+#[workspace_templates.myproject]
+#repo = "https://github.com/org/myproject.git"
+#tmuxinator = false
+#inherits = ["default"]
 
-# [workspace_templates.default.env]
-# REPO_REGION = "us-east-1"
+#[workspace_templates.default.env]
+#REPO_REGION = "us-east-1"
 
 # --- Session templates ---
 # Define commands that sessions can run. The built-in "default" template runs a
@@ -324,32 +329,32 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 #
 # env maps are merged during inheritance (child wins on key collision).
 
-# [session_templates.default]               # override the built-in default
-# command = "claude --name {{session_name}}"
-# restart_command = "claude --resume {{session_name}}"
-# description = "Claude Code interactive session"
+#[session_templates.default]               # override the built-in default
+#command = "claude --name {{session_name}}"
+#restart_command = "claude --resume {{session_name}}"
+#description = "Claude Code interactive session"
 
-# [session_templates.claude]
-# inherits = ["default"]
-# command = "claude --name {{session_name}}"
-# restart_command = "claude --resume {{session_name}}"
-# description = "Claude Code interactive session"
+#[session_templates.claude]
+#inherits = ["default"]
+#command = "claude --name {{session_name}}"
+#restart_command = "claude --resume {{session_name}}"
+#description = "Claude Code interactive session"
 
-# [session_templates.default.env]
-# CLAUDE_LOG_LEVEL = "info"
+#[session_templates.default.env]
+#CLAUDE_LOG_LEVEL = "info"
 
-# [session_templates.custom-tool]
-# command = "my-tool --flag"
-# description = "Custom tool"
+#[session_templates.custom-tool]
+#command = "my-tool --flag"
+#description = "Custom tool"
 #
-# [session_templates.custom-tool.env]
-# MY_VAR = "value"
+#[session_templates.custom-tool.env]
+#MY_VAR = "value"
 
 # --- Session configuration ---
 # Non-template session settings.
 
-# [session.config]
-# history_limit = 50000                     # tmux scrollback buffer lines per session
+#[session.config]
+#history_limit = 50000                     # tmux scrollback buffer lines per session
 
 # =============================================================================
 # Catalog extensions
@@ -363,20 +368,20 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # Third-party apt repositories.
 # Use {arch} as a placeholder for the VM architecture (amd64 or arm64).
 
-# [apt_sources.my-repo]
-# description = "My internal apt repository"
-# key_url = "https://apt.example.com/key.gpg"
-# key_path = "/etc/apt/keyrings/my-repo.gpg"
-# source = "deb [arch={arch} signed-by=/etc/apt/keyrings/my-repo.gpg] https://apt.example.com/debian bookworm main"
-# source_file = "my-repo.list"
+#[apt_sources.my-repo]
+#description = "My internal apt repository"
+#key_url = "https://apt.example.com/key.gpg"
+#key_path = "/etc/apt/keyrings/my-repo.gpg"
+#source = "deb [arch={arch} signed-by=/etc/apt/keyrings/my-repo.gpg] https://apt.example.com/debian bookworm main"
+#source_file = "my-repo.list"
 
 # --- Custom apt packages ---
 # Named package sets with optional apt source dependencies.
 
-# [apt_packages.my-tool]
-# description = "My internal tool"
-# apt_sources = ["my-repo"]
-# apt = ["my-tool"]
+#[apt_packages.my-tool]
+#description = "My internal tool"
+#apt_sources = ["my-repo"]
+#apt = ["my-tool"]
 
 # --- Custom system install commands ---
 # Shell commands that install system-wide tooling (run during vm init/reinit).
@@ -384,10 +389,10 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # Optional checks short-circuit installation if the tool is already present.
 # Use only one of: test_exec, test_file, or test_dir.
 
-# [system_install_commands.my-system-tool]
-# description = "Custom system-wide tool"
-# command = "curl -fsSL https://example.com/install.sh | sudo bash"
-# test_exec = "my-system-tool"            # skip if command is on PATH
+#[system_install_commands.my-system-tool]
+#description = "Custom system-wide tool"
+#command = "curl -fsSL https://example.com/install.sh | sudo bash"
+#test_exec = "my-system-tool"            # skip if command is on PATH
 
 # --- Custom user install commands ---
 # Shell commands that install per-user tooling (run for admin and agents).
@@ -395,8 +400,8 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # Use only one of: test_exec, test_file, or test_dir.
 # For test_file/test_dir, ~ resolves to the target user's home.
 
-# [user_install_commands.my-tool]
-# description = "Custom per-user tool"
-# command = "curl -fsSL https://example.com/install.sh | bash"
-# path = ["~/.my-tool/bin"]
-# test_exec = "my-tool"                   # skip if command is on PATH
+#[user_install_commands.my-tool]
+#description = "Custom per-user tool"
+#command = "curl -fsSL https://example.com/install.sh | bash"
+#path = ["~/.my-tool/bin"]
+#test_exec = "my-tool"                   # skip if command is on PATH
