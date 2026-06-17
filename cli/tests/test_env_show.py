@@ -96,17 +96,24 @@ def test_unknown_vm_raises_validation_error(db: Database, tmp_path: Path) -> Non
 def test_session_flag_auto_resolves_workspace_agent_vm(
     db: Database, tmp_path: Path,
 ) -> None:
-    """--session s1 should infer workspace, agent, and vm from the session row."""
+    """--session s1 should infer workspace, agent, and vm from the session
+    row. The dynamic identity vars (AGENTWORKS_SESSION, AGENTWORKS_WORKSPACE)
+    show up in env-show output because they're per-context. AGENTWORKS_AGENT
+    does NOT -- it's per-user-static under the new identity taxonomy and
+    lives in the agent's on-disk profile fragment, not in inline env."""
     cfg = _write_config(tmp_path)
     config = load_config(cfg, warn_issues=False)
     _seed_db(db, with_workspace=True, with_agent=True, with_session=True)
 
     rows = show_env(db, config, session_name="s1")
-    # Identity vars confirm full chain was resolved.
+    # Per-context dynamic identity vars are surfaced.
     keys = {r.key: r for r in rows}
     assert keys["AGENTWORKS_SESSION"].rendered_value == "s1"
-    assert keys["AGENTWORKS_AGENT"].rendered_value == "claude"
     assert keys["AGENTWORKS_WORKSPACE"].rendered_value == "ws-a"
+    # Per-user static identity (AGENTWORKS_AGENT) is NOT in env-show
+    # output: it comes from the on-disk profile fragment, same shape as
+    # the VM-stable vars (AGENTWORKS_VM etc.).
+    assert "AGENTWORKS_AGENT" not in keys
 
 
 def test_workspace_flag_auto_resolves_vm(db: Database, tmp_path: Path) -> None:

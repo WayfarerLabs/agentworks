@@ -24,7 +24,6 @@ from agentworks import output
 from agentworks.db import InitStatus, ProvisioningStatus
 from agentworks.env import (
     ResourceContext,
-    compose_env,
     vm_stable_identity_env,
 )
 from agentworks.errors import ConnectivityError, ExternalError, NotFoundError
@@ -48,21 +47,25 @@ def _write_agentworks_profile(
     target: ExecTarget,
     path_additions: list[str],
     logger: SSHLogger,
+    *,
+    identity_env: dict[str, str] | None = None,
 ) -> None:
     """Write the agentworks-managed login profile fragment.
 
-    Writes $HOME/.agentworks-profile.sh with PATH exports. Sourced from
-    ~/.profile (bash/sh) and ~/.zprofile (zsh) -- runs once per login
-    shell, inherited by child processes.
+    Writes $HOME/.agentworks-profile.sh with per-user static identity
+    exports (e.g. ``AGENTWORKS_AGENT`` for agent users) followed by PATH
+    exports. Sourced from ~/.profile (bash/sh) and ~/.zprofile (zsh) --
+    runs once per login shell, inherited by child processes.
 
     System-wide identity vars (VM / VM_HOST / PLATFORM) live in
     ``/etc/profile.d/agentworks-identity.sh``, written by
     ``_write_agentworks_identity_profile``. The on-VM Linux user is
     already exposed by the standard ``$USER`` / ``$LOGNAME`` env vars,
-    so there's no per-user agentworks identity var to write here.
+    so admin users pass an empty ``identity_env``.
 
-    Always written (even if path_additions is empty) so that reinit can
-    clear previously set paths.
+    Always written (even when both ``identity_env`` is empty and
+    ``path_additions`` is empty) so that reinit can clear previously set
+    paths or identity.
     """
     # Deduplicate paths while preserving order
     seen: set[str] = set()
@@ -77,6 +80,9 @@ def _write_agentworks_profile(
 
     try:
         lines = ["# Managed by agentworks -- do not edit"]
+        if identity_env:
+            for key, value in identity_env.items():
+                lines.append(f"export {key}={shlex.quote(value)}")
         for p in unique_paths:
             expanded = p.replace("~", "$HOME", 1) if p.startswith("~") else p
             lines.append(f'export PATH="{expanded}:$PATH"')
@@ -1499,20 +1505,14 @@ def _phase_b_setup(
         vm_host=vm_row.vm_host_name,
     )
 
-    # Phase 6.3b: compose the admin env once and thread it into the
-    # user-facing install runners below (dotfiles, mise, user_install_commands,
-    # nerf/claude plugins). Eager-resolve at the manager entry (Phase 6.3)
-    # has already warmed the resolver cache, so this compose_env hits
-    # cached values rather than prompting. Infrastructure setup steps
-    # earlier in this function (system packages, apt sources, sshd
-    # config, sudoers, hardening) deliberately don't take env -- they're
-    # bootstrap actions that shouldn't observe operator scope.
-    admin_env = compose_env(
-        resolver=config.secret_resolver,
-        ctx=identity_ctx,
-        vm=config.vm.env,
-        admin=config.admin.env,
-    )
+    # Provisioning is hermetic: no operator env, no per-context identity,
+    # no secrets from env tables are injected into install commands. Static
+    # identity (AGENTWORKS_VM / VM_HOST / PLATFORM) reaches install commands
+    # via /etc/profile.d/agentworks-identity.sh sourcing. Tailscale auth key
+    # and git credentials -- the only provisioning-time secrets -- have
+    # their own dedicated config paths outside [admin.env]. Operator env
+    # only reaches RUNTIME shells (vm shell, agent shell, sessions,
+    # consoles), never build-time install machinery.
 
     # Non-fatal: system repos + packages (mise repo added, then all packages)
     _install_system_packages(ts_target, logger)
@@ -1670,7 +1670,6 @@ def _phase_b_setup(
             ts_target.run(
                 f"cd {dest} && {config.admin.dotfiles_install_cmd}",
                 timeout=120,
-                env=admin_env,
             )
         except (SourceRefError, Exception) as e:
             msg = f"dotfiles install failed: {e}"
@@ -1686,7 +1685,7 @@ def _phase_b_setup(
     if config.admin.mise_packages or config.admin.mise_lockfile:
         _run_mise_install(
             ts_target, admin_shell, home, config.admin.mise_allow_unlocked, logger,
-            prune=prune, env=admin_env,
+            prune=prune,
         )
     else:
         try:
@@ -1694,7 +1693,7 @@ def _phase_b_setup(
             if check.ok:
                 _run_mise_install(
                     ts_target, admin_shell, home, config.admin.mise_allow_unlocked, logger,
-                    prune=prune, env=admin_env,
+                    prune=prune,
                 )
         except SSHError:
             pass
@@ -1708,7 +1707,6 @@ def _phase_b_setup(
         home,
         logger,
         label="User install command",
-        env=admin_env,
     )
 
     # Non-fatal: shell profile (PATH exports sourced at login)
@@ -1725,14 +1723,12 @@ def _phase_b_setup(
 
     # Non-fatal: install nerf Claude plugin for admin user
     if config.admin.nerf_install_claude_plugin:
-        _install_nerf_claude_plugin_for_user(
-            ts_target, admin_shell, logger, env=admin_env,
-        )
+        _install_nerf_claude_plugin_for_user(ts_target, admin_shell, logger)
 
     # Non-fatal: Claude Code marketplaces and plugins for admin user
     def _admin_run_cmd(cmd: str, timeout: int) -> object:
         inner = shlex.quote(cmd)
-        return ts_target.run(f"{admin_shell} -lc {inner}", timeout=timeout, env=admin_env)
+        return ts_target.run(f"{admin_shell} -lc {inner}", timeout=timeout)
 
     install_claude_plugins(
         _admin_run_cmd, config.admin.claude_marketplaces, config.admin.claude_plugins, logger

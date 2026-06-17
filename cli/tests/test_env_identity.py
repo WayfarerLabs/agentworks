@@ -97,29 +97,33 @@ def test_vm_stable_subset_is_three_vars_only() -> None:
     }
 
 
-def test_per_context_subset_omits_vm_vars() -> None:
-    """per_context_identity_env returns only the per-context vars (workspace /
-    agent / session); VM-stable vars are NOT included."""
-    from agentworks.env import per_context_identity_env
+def test_per_context_subset_holds_workspace_and_session_only() -> None:
+    """per_context_identity_env returns only the dynamic per-context vars
+    (workspace and session). VM-stable vars are NOT included (they live
+    in the system-wide profile fragment). AGENTWORKS_AGENT is NOT
+    included either -- it's per-user-static now, written to the agent's
+    ~/.agentworks-profile.sh and reached via login-shell sourcing."""
+    from agentworks.env import per_context_identity_env, per_user_identity_env
 
-    out = per_context_identity_env(
-        _ctx(
-            workspace_name="ws-a",
-            workspace_dir="/home/agentworks/ws-a",
-            agent_name="claude",
-            session_name="s1",
-            session_kind="agent",
-        )
+    ctx = _ctx(
+        workspace_name="ws-a",
+        workspace_dir="/home/agentworks/ws-a",
+        agent_name="claude",
+        session_name="s1",
+        session_kind="agent",
     )
+    out = per_context_identity_env(ctx)
     assert "AGENTWORKS_VM" not in out
     assert "AGENTWORKS_PLATFORM" not in out
+    assert "AGENTWORKS_AGENT" not in out
     assert out == {
         "AGENTWORKS_WORKSPACE": "ws-a",
         "AGENTWORKS_WORKSPACE_DIR": "/home/agentworks/ws-a",
-        "AGENTWORKS_AGENT": "claude",
         "AGENTWORKS_SESSION": "s1",
         "AGENTWORKS_SESSION_KIND": "agent",
     }
+    # AGENTWORKS_AGENT lives in the per-user subset instead.
+    assert per_user_identity_env(ctx) == {"AGENTWORKS_AGENT": "claude"}
 
 
 def test_per_context_subset_minimal_when_no_scope() -> None:

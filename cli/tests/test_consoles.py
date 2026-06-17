@@ -2026,13 +2026,16 @@ def test_split_shell_pane_admin_branch_no_sudo(
     assert 'exec "$SHELL" -l' in splits[0]
 
 
-def test_split_shell_pane_emits_tmux_env_flags_for_identity_vars(
+def test_split_shell_pane_emits_workspace_identity_only(
     db: Database, fake_target: _FakeTarget
 ) -> None:
-    """`tmux split-window -e KEY=VAL` flags carry the per-context identity
-    vars (AGENTWORKS_SESSION etc.) into the pane process. The agent-pane
-    case relies on Phase 4's sudoers env_keep to survive the sudo --login
-    boundary; this test pins the wire shape regardless."""
+    """``tmux split-window -e KEY=VAL`` flags on a console add-shell agent
+    pane carry the workspace dynamic-identity vars only. The pane is a
+    sidecar shell rooted in the session's workspace -- it's not part of
+    the session, so it doesn't see AGENTWORKS_SESSION[_KIND]. The agent's
+    own AGENTWORKS_AGENT is per-user-static and reaches the pane via the
+    agent's on-disk ``~/.agentworks-profile.sh`` (login-shell sourcing),
+    not via SetEnv. Tests the post-static/dynamic-split contract."""
     _seed_vm(db, with_tailscale=True)
     db._conn.execute(
         "INSERT INTO agents (name, vm_name, linux_user) VALUES ('bot', 'vm1', 'bot-user')",
@@ -2050,10 +2053,15 @@ def test_split_shell_pane_emits_tmux_env_flags_for_identity_vars(
 
     splits = [c for c in fake_target.commands if "split-window -t aw-console-con:s" in c]
     assert len(splits) == 1
-    # At least the per-context identity vars are present.
-    assert " -e AGENTWORKS_SESSION=s" in splits[0]
-    assert " -e AGENTWORKS_SESSION_KIND=agent" in splits[0]
-    assert " -e AGENTWORKS_AGENT=bot" in splits[0]
+    # Workspace dynamic identity reaches the pane.
+    assert " -e AGENTWORKS_WORKSPACE=ws-vm1" in splits[0]
+    assert " -e AGENTWORKS_WORKSPACE_DIR=" in splits[0]
+    # Session dynamic identity does NOT (add-shell panes are sidecar
+    # shells, not part of the session itself).
+    assert "AGENTWORKS_SESSION" not in splits[0]
+    # Agent static identity does NOT come via SetEnv (it's in the agent's
+    # per-user profile fragment).
+    assert "AGENTWORKS_AGENT" not in splits[0]
 
 
 # -- Pane tagging ----------------------------------------------------------

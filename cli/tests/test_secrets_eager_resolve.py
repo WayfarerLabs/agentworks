@@ -383,246 +383,71 @@ def test_console_add_shell_eager_resolve_fires_before_db_update(
     db.close()
 
 
-def test_vm_create_eager_resolve_fires_before_db_insert(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """create_vm must call resolve_for_command BEFORE db.insert_vm. A
-    failed eager-resolve leaves no DB row behind."""
+def test_vm_create_does_not_eager_resolve_operator_env() -> None:
+    """Provisioning is hermetic: operator [admin.env] / [vm_templates.*.env]
+    secrets are NOT prompted at vm create. Verify by source inspection
+    that create_vm doesn't call resolve_for_command (operator env only
+    reaches runtime shells, where it gets prompted at the use site).
+
+    Tailscale auth key / git credentials remain prompted upfront via the
+    legacy _collect_secrets path; they're provisioning-time secrets that
+    live outside the env-block system."""
+    import inspect
+
     from agentworks.vms import manager as vm_manager
 
-    db = Database(tmp_path / "test.db")
-
-    # Stub the upfront resolvers so the SimpleNamespace config below
-    # doesn't need their fields.
-    monkeypatch.setattr(vm_manager, "verify_tailscale_available", lambda: None)
-    monkeypatch.setattr(
-        vm_manager, "resolve_git_credential_providers", lambda *a, **k: {}
-    )
-    monkeypatch.setattr(vm_manager, "verify_git_credential_auth", lambda *a, **k: None)
-    monkeypatch.setattr(vm_manager, "_collect_secrets", lambda *a, **k: (None, {}))
-    monkeypatch.setattr(vm_manager, "_vm_secret_target", lambda *a, **k: object())
-
-    def _explode(*args: object, **kwargs: object) -> None:
-        raise SecretUnavailableError(
-            "no active backend could resolve secret(s): api-key",
-            hint="api-key: tried env-var",
-        )
-
-    monkeypatch.setattr("agentworks.secrets.resolve_for_command", _explode)
-
-    config = SimpleNamespace(
-        vm=SimpleNamespace(
-            name="default", env={}, cpus=2, memory=4, disk=20,
-            azure_vm_size="x", swap=2,
-        ),
-        admin=SimpleNamespace(env={}, username="admin", git_credentials=[]),
-        defaults=SimpleNamespace(platform=None, vm_host=None),
-        azure=None,
-        proxmox=None,
-        vm_templates={"default": object()},
+    src = inspect.getsource(vm_manager.create_vm)
+    assert "resolve_for_command" not in src, (
+        "found resolve_for_command in create_vm; provisioning should not "
+        "prompt for operator-env secrets. Operator env reaches runtime "
+        "shells only; they get prompted at the use site."
     )
 
-    # Patch resolve_template to return config.vm so the early template
-    # _replace pass through is a no-op for this test.
-    monkeypatch.setattr(
-        "agentworks.vms.templates.resolve_template", lambda *a, **k: config.vm
-    )
 
-    with pytest.raises(SecretUnavailableError, match="api-key"):
-        vm_manager.create_vm(
-            db,
-            config,  # type: ignore[arg-type]
-            name="vm1",
-        )
+def test_vm_reinit_does_not_eager_resolve_operator_env() -> None:
+    """Mirror of test_vm_create_does_not_eager_resolve_operator_env for
+    vm reinit. Provisioning paths are hermetic; runtime paths are where
+    operator-env secrets get prompted."""
+    import inspect
 
-    # No DB row was inserted.
-    assert db.get_vm("vm1") is None
-    db.close()
-
-
-def test_vm_reinit_eager_resolve_fires_before_ssh_target_build(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """reinit_vm must call resolve_for_command BEFORE building the
-    Tailscale SSH target / running initialize_vm. A failed eager-resolve
-    leaves the VM untouched (no SSH session opened)."""
-    from agentworks.db import InitStatus, ProvisioningStatus
     from agentworks.vms import manager as vm_manager
 
-    db = _seed_basic_db(tmp_path)
-    # Mark the VM as fully provisioned + with a tailscale_host so reinit
-    # proceeds past its state guards.
-    db._conn.execute(
-        "UPDATE vms SET provisioning_status = ?, init_status = ?, tailscale_host = ? "
-        "WHERE name = 'vm1'",
-        (ProvisioningStatus.COMPLETE.value, InitStatus.COMPLETE.value, "100.64.0.5"),
-    )
-    db._conn.commit()
-
-    monkeypatch.setattr(vm_manager, "verify_tailscale_available", lambda: None)
-    monkeypatch.setattr(
-        vm_manager, "resolve_git_credential_providers", lambda *a, **k: {}
-    )
-    monkeypatch.setattr(vm_manager, "verify_git_credential_auth", lambda *a, **k: None)
-    monkeypatch.setattr(
-        vm_manager, "_resolve_vm_admin_env_scopes",
-        lambda *a, **k: vm_manager._VmAdminEnvScopes(vm={}, admin={}),
-    )
-    monkeypatch.setattr(vm_manager, "_vm_secret_target", lambda *a, **k: object())
-
-    ssh_target_called: list[bool] = []
-
-    def _track_ssh_target(*args: object, **kwargs: object) -> object:
-        ssh_target_called.append(True)
-        return SimpleNamespace(run=lambda *a, **k: None)
-
-    monkeypatch.setattr("agentworks.ssh.admin_exec_target", _track_ssh_target)
-
-    def _explode(*args: object, **kwargs: object) -> None:
-        raise SecretUnavailableError(
-            "no active backend could resolve secret(s): api-key",
-            hint="api-key: tried env-var",
-        )
-
-    monkeypatch.setattr("agentworks.secrets.resolve_for_command", _explode)
-
-    config = SimpleNamespace(
-        vm=SimpleNamespace(name="default", env={}),
-        admin=SimpleNamespace(env={}, git_credentials=[]),
-        vm_templates={"default": object()},
+    src = inspect.getsource(vm_manager.reinit_vm)
+    assert "resolve_for_command" not in src, (
+        "found resolve_for_command in reinit_vm; provisioning should not "
+        "prompt for operator-env secrets."
     )
 
-    with pytest.raises(SecretUnavailableError, match="api-key"):
-        vm_manager.reinit_vm(db, config, "vm1")  # type: ignore[arg-type]
 
-    assert ssh_target_called == [], (
-        "eager-resolve must precede admin_exec_target; no SSH session opened"
-    )
-    db.close()
+def test_agent_create_does_not_eager_resolve_operator_env() -> None:
+    """Provisioning is hermetic: operator [agent.env] / [vm_templates.*.env]
+    secrets are NOT prompted at agent create. They're prompted at the
+    use site (agent shell, session create, etc.). git credentials remain
+    prompted upfront via _collect_agent_credentials; they're a
+    provisioning-time concern that lives outside the env-block system."""
+    import inspect
 
-
-def test_agent_create_eager_resolve_fires_before_ssh_setup(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """create_agent must call resolve_for_command BEFORE the SSH-driven
-    _create_agent_on_vm runs. A failed eager-resolve leaves no agent
-    row inserted (the DB insert happens AFTER _create_agent_on_vm
-    succeeds) and no on-VM user created."""
     from agentworks.agents import manager as agent_manager
 
-    db = _seed_basic_db(tmp_path)
-
-    monkeypatch.setattr(
-        agent_manager, "_collect_agent_credentials", lambda *a, **k: {}
-    )
-    create_called: list[bool] = []
-    monkeypatch.setattr(
-        agent_manager,
-        "_create_agent_on_vm",
-        lambda *a, **k: create_called.append(True),
-    )
-    monkeypatch.setattr(
-        agent_manager, "_agent_secret_targets", lambda *a, **k: [object(), object()]
+    src = inspect.getsource(agent_manager.create_agent)
+    assert "resolve_for_command" not in src, (
+        "found resolve_for_command in create_agent; provisioning should "
+        "not prompt for operator-env secrets."
     )
 
-    def _explode(*args: object, **kwargs: object) -> None:
-        raise SecretUnavailableError(
-            "no active backend could resolve secret(s): api-key",
-            hint="api-key: tried env-var",
-        )
 
-    monkeypatch.setattr("agentworks.secrets.resolve_for_command", _explode)
+def test_agent_reinit_does_not_eager_resolve_operator_env() -> None:
+    """Mirror of test_agent_create_does_not_eager_resolve_operator_env
+    for agent reinit."""
+    import inspect
 
-    class _Tmpl:
-        name = "default"
-        env: dict[str, str] = {}
-
-    monkeypatch.setattr(
-        "agentworks.agents.templates.resolve_template", lambda *a, **k: _Tmpl()
-    )
-
-    config = SimpleNamespace(
-        agent=_Tmpl(),
-        vm=SimpleNamespace(name="default", env={}),
-        admin=SimpleNamespace(env={}),
-        vm_templates={"default": object()},
-        agent_templates={"default": _Tmpl()},
-    )
-
-    with pytest.raises(SecretUnavailableError, match="api-key"):
-        agent_manager.create_agent(
-            db,
-            config,  # type: ignore[arg-type]
-            name="a1",
-            vm_name="vm1",
-        )
-
-    assert create_called == [], (
-        "eager-resolve must precede _create_agent_on_vm; SSH setup ran anyway"
-    )
-    assert db.get_agent("a1") is None
-    db.close()
-
-
-def test_agent_reinit_eager_resolve_fires_before_ssh_setup(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """reinit_agent must call resolve_for_command BEFORE _create_agent_on_vm.
-    A failed eager-resolve leaves the existing agent row untouched and
-    no SSH session opened."""
     from agentworks.agents import manager as agent_manager
 
-    db = _seed_basic_db(tmp_path)
-    db.insert_agent("a1", "vm1", "agt-a1", template="default")
-
-    monkeypatch.setattr(
-        agent_manager, "_collect_agent_credentials", lambda *a, **k: {}
+    src = inspect.getsource(agent_manager.reinit_agent)
+    assert "resolve_for_command" not in src, (
+        "found resolve_for_command in reinit_agent; provisioning should "
+        "not prompt for operator-env secrets."
     )
-    create_called: list[bool] = []
-    monkeypatch.setattr(
-        agent_manager,
-        "_create_agent_on_vm",
-        lambda *a, **k: create_called.append(True),
-    )
-    monkeypatch.setattr(
-        agent_manager, "_agent_secret_targets", lambda *a, **k: [object(), object()]
-    )
-
-    def _explode(*args: object, **kwargs: object) -> None:
-        raise SecretUnavailableError(
-            "no active backend could resolve secret(s): api-key",
-            hint="api-key: tried env-var",
-        )
-
-    monkeypatch.setattr("agentworks.secrets.resolve_for_command", _explode)
-
-    class _Tmpl:
-        name = "default"
-        env: dict[str, str] = {}
-
-    monkeypatch.setattr(
-        "agentworks.agents.templates.resolve_template", lambda *a, **k: _Tmpl()
-    )
-
-    config = SimpleNamespace(
-        agent=_Tmpl(),
-        vm=SimpleNamespace(name="default", env={}),
-        admin=SimpleNamespace(env={}),
-        vm_templates={"default": object()},
-        agent_templates={"default": _Tmpl()},
-    )
-
-    with pytest.raises(SecretUnavailableError, match="api-key"):
-        agent_manager.reinit_agent(
-            db,
-            config,  # type: ignore[arg-type]
-            name="a1",
-        )
-
-    assert create_called == [], (
-        "eager-resolve must precede _create_agent_on_vm; SSH setup ran anyway"
-    )
-    db.close()
 
 
 def test_vm_shell_eager_resolve_fires_before_ssh(
@@ -1248,48 +1073,57 @@ def test_console_add_sessions_does_not_eager_resolve_db_only_branch(
     db.close()
 
 
-def test_agent_setup_runners_thread_env_via_setenv() -> None:
-    """Source-level tripwire for the Phase 6.4b threading contract:
-    every runner inside Phase 2 of ``_create_agent_on_vm`` that opens a
-    new agent-facing shell (install commands, dotfiles install, mise
-    install/prune, nerf plugin, claude plugins via _agent_run_cmd) must
-    carry ``env=agent_env``. A future contributor dropping the kwarg
-    from one site drops the count below 5."""
+def test_agent_setup_runners_have_no_env_injection() -> None:
+    """Source-level tripwire: provisioning is hermetic. None of the agent
+    setup runners (install commands, dotfiles install, mise, nerf plugin,
+    claude plugins) should pass ``env=`` from operator [agent.env] /
+    [vm_templates.*.env] tables. Static identity (AGENTWORKS_AGENT)
+    reaches them via the per-user ~/.agentworks-profile.sh, written
+    EARLY in agent setup phase 2 before any install command runs.
+    A future contributor adding ``env=agent_env`` (or any variant) to a
+    runner re-introduces the coupling this rule exists to prevent."""
     import inspect
 
     from agentworks.agents import manager as agent_mgr
 
     src = inspect.getsource(agent_mgr._create_agent_on_vm)
-    count = src.count("env=agent_env")
-    assert count >= 5, (
-        f"expected >=5 'env=agent_env' threading sites in _create_agent_on_vm, "
-        f"got {count}; did a runner lose its env kwarg?"
+    assert "env=agent_env" not in src, (
+        "found 'env=agent_env' in _create_agent_on_vm; provisioning runners "
+        "must not inject operator env. Identity comes via the per-user "
+        "profile fragment, not SetEnv."
+    )
+    assert "agent_env = compose_env" not in src, (
+        "found 'agent_env = compose_env' in _create_agent_on_vm; the "
+        "operator-env composition was removed because no provisioning "
+        "runner consumes it."
     )
 
 
-def test_vm_provisioning_runners_thread_env_via_setenv() -> None:
-    """Source-level tripwire for the Phase 6.3b threading contract: every
-    runner inside ``_phase_b_setup`` that opens a new operator-facing
-    shell (dotfiles install, both mise call paths, user_install_commands,
-    nerf plugin, claude plugins via _admin_run_cmd) must carry
-    ``env=admin_env``.
+def test_vm_provisioning_runners_have_no_env_injection() -> None:
+    """Source-level tripwire: provisioning is hermetic. None of the VM
+    init user-facing runners (dotfiles install, mise, user_install_commands,
+    nerf plugin, claude plugins) should pass ``env=`` from operator
+    [admin.env] / [vm_templates.*.env] tables. Static identity reaches
+    them via the system-wide /etc/profile.d/agentworks-identity.sh
+    written by VM init. Operator env only lands at RUNTIME shells.
 
-    This is intentionally a source-inspection tripwire rather than a
-    behavioral test: the behavior (env actually reaches the remote
-    shell via SSH SetEnv) is already pinned by the Phase 3 ssh.py
-    tests. What 6.3b adds is purely syntactic -- each call site got
-    the kwarg. A future contributor dropping the kwarg from one site
-    drops the count below 5; that's exactly what this assertion
-    catches."""
+    A future contributor adding ``env=admin_env`` to a provisioning
+    runner re-introduces the build-time-config-coupling this rule
+    exists to prevent."""
     import inspect
 
     from agentworks.vms import initializer as init
 
     src = inspect.getsource(init._phase_b_setup)
-    count = src.count("env=admin_env")
-    assert count >= 5, (
-        f"expected >=5 'env=admin_env' threading sites in _phase_b_setup, "
-        f"got {count}; did a runner lose its env kwarg?"
+    assert "env=admin_env" not in src, (
+        "found 'env=admin_env' in _phase_b_setup; provisioning runners "
+        "must not inject operator env. Identity reaches them via the "
+        "system-wide /etc/profile.d/ fragment, not SetEnv."
+    )
+    assert "admin_env = compose_env" not in src, (
+        "found 'admin_env = compose_env' in _phase_b_setup; the "
+        "operator-env composition was removed because no provisioning "
+        "runner consumes it."
     )
 
 

@@ -73,9 +73,9 @@ that apply to the shell's resource context:
 | `AGENTWORKS_VM`            | Always (on-VM shell) | VM name                                                                                                                                           |
 | `AGENTWORKS_VM_HOST`       | VMs with a host      | VM host name from the `vm_hosts` registry (e.g. `lima-local`). Set only when the VM has an entry in the registry (today: Lima-platform VMs only). |
 | `AGENTWORKS_PLATFORM`      | Always (on-VM shell) | One of `lima`, `azure`, `wsl2`, `proxmox`                                                                                                         |
+| `AGENTWORKS_AGENT`         | Agent users (static) | Friendly agent name. Written to the agent's `~/.agentworks-profile.sh` at agent setup time; reaches every login shell as that user via sourcing.  |
 | `AGENTWORKS_WORKSPACE`     | Workspace context    | Workspace name                                                                                                                                    |
 | `AGENTWORKS_WORKSPACE_DIR` | Workspace context    | Absolute path to the workspace dir on the VM                                                                                                      |
-| `AGENTWORKS_AGENT`         | Agent context        | Agent name                                                                                                                                        |
 | `AGENTWORKS_SESSION`       | Session context      | Session name                                                                                                                                      |
 | `AGENTWORKS_SESSION_KIND`  | Session context      | `admin` or `agent`                                                                                                                                |
 
@@ -328,9 +328,12 @@ elaborates the mechanism.
 
 Examples:
 
-- `agw vm create vm1`: opens provisioning shells as the admin user. Needs the secrets referenced by
-  the admin / vm-template env chain. (Agent secrets are needed by `agent create`, not `vm create`;
-  agents are a separate lifecycle step.)
+- `agw vm create vm1`: provisioning is hermetic. The only secrets prompted up front are
+  provisioning-required (Tailscale auth key, git credentials), which live outside the env-block
+  system. Operator `[admin.env]` / `[vm_templates.*.env]` secrets get prompted at the runtime _use_
+  site (vm shell, session create, etc.) instead.
+- `agw agent create a1 --vm vm1`: same hermeticity. Operator `[agent_templates.*.env]` secrets get
+  prompted at agent shell / session create time, not at agent create.
 - `agw session create s1 -t claude`: opens a new session shell as the agent's Linux user. Needs the
   secrets referenced by the full chain: vm-template, workspace-template, agent-template,
   session-template (and admin if the session is admin-mode).
@@ -349,14 +352,15 @@ Examples:
 The effective env (R2 merge) plus the applicable AGENTWORKS\_\* vars (R1) are propagated to every
 shell agentworks opens. Propagation happens at shell-creation time only:
 
-| Surface                   | Commands                                                          | Mechanism                                  |
-| ------------------------- | ----------------------------------------------------------------- | ------------------------------------------ |
-| Provisioning              | `vm create` / `vm reinit` / `agent create` / `agent reinit`       | Inline `export` before the work            |
-| Session create / restart  | `session create` / `session restart`                              | Inline `export` in the new-session payload |
-| Console window creation   | `console create` (sessions named in create) / `console add-shell` | Inline `export` per window                 |
-| Multi-console panes       | Each pane created via the named-console layout                    | Inline `export` per pane                   |
-| Interactive ad-hoc shells | `vm shell` / `agent shell`                                        | Inline `export` for the interactive shell  |
-| Non-interactive exec      | `vm exec` / `agent exec`                                          | Inline `export` before the command         |
+| Surface                   | Commands                                                    | Mechanism                                                                                                                             |
+| ------------------------- | ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| Provisioning              | `vm create` / `vm reinit` / `agent create` / `agent reinit` | **No operator env injected; hermetic.** Static identity via on-disk profile fragments.                                                |
+| Session create / restart  | `session create` / `session restart`                        | SSH SetEnv + `tmux new-session -e` for the new session                                                                                |
+| Console build             | `console attach` first attach / `--recreate`                | SSH SetEnv + `tmux new-session -e` per session window                                                                                 |
+| Console add-shell panes   | `console add-shell`                                         | SSH SetEnv + `tmux split-window -e` per pane (workspace scope; no session scope -- panes are sidecar shells, not part of the session) |
+| Console restore-session   | `console restore-session` (window-missing branch)           | SSH SetEnv when the window has to be recreated                                                                                        |
+| Interactive ad-hoc shells | `vm shell` / `agent shell` (with `--workspace` when set)    | SSH SetEnv on the interactive shell                                                                                                   |
+| Non-interactive exec      | `vm exec` / `agent exec`                                    | SSH SetEnv on the command                                                                                                             |
 
 #### Attach inherits create-time env
 
@@ -369,18 +373,30 @@ is created. To pick up new values, restart the session (`session restart`) or re
 window. The prior direct-target-user-SSH SDD's FRD R6 forward-referenced this need; this is where it
 lands.
 
-#### Profile-fragment role
+#### Static vs dynamic identity
 
-Identity vars that are the same for every Linux user on the VM (`AGENTWORKS_VM`,
-`AGENTWORKS_VM_HOST`, `AGENTWORKS_PLATFORM`) are written to a system-wide profile fragment
-(`/etc/profile.d/agentworks-identity.sh`) by `vms/initializer.py` at VM init. Together with the zsh
-mirror in `/etc/zsh/zprofile`, they ensure any login shell on the VM (even ones not opened through
-agentworks) sees the right identity vars. The on-VM Linux user identifies itself via the standard
-POSIX `$USER` / `$LOGNAME` env vars; no AGENTWORKS\_-prefixed copy is maintained.
+Identity vars split into three kinds with three placements:
 
-Per-context vars (workspace, agent, session) and ALL user-defined env, plaintext or secret, are
-always set inline at the shell-open site. User-defined env is never cached on the VM disk; the
-authoritative source is the merge computed at command time.
+- **VM-stable static** (`AGENTWORKS_VM`, `AGENTWORKS_VM_HOST`, `AGENTWORKS_PLATFORM`). Same for
+  every Linux user on the VM and every shell that VM hosts. Lives in the system-wide
+  `/etc/profile.d/agentworks-identity.sh` fragment (and a marker-bracketed block in
+  `/etc/zsh/zprofile` because zsh skips `/etc/profile.d/*` by default). Any login shell on the VM
+  picks these up by sourcing -- no inline injection needed, even ones that aren't opened through
+  agentworks.
+- **Per-user static** (`AGENTWORKS_AGENT` for agent users). Same value every time a given Linux user
+  logs in. Lives in the user's `~/.agentworks-profile.sh`. Written at agent setup time before any
+  install command runs, so the install machinery sees it via the standard login-shell sourcing
+  chain. Admin users get the empty subset -- their identity is the standard POSIX `$USER` /
+  `$LOGNAME`.
+- **Per-context dynamic** (`AGENTWORKS_WORKSPACE`, `AGENTWORKS_WORKSPACE_DIR`, `AGENTWORKS_SESSION`,
+  `AGENTWORKS_SESSION_KIND`). Vary per shell-open invocation. Cannot live on disk; injected via SSH
+  SetEnv / `tmux -e` at shell-open time.
+
+User-defined env (R2) is treated the same as per-context dynamic identity at runtime sites (SetEnv
+at shell-open). User-defined env is never cached on the VM disk; the authoritative source is the
+merge computed at command time. **Provisioning** (VM init, agent setup install commands) is
+hermetic: it sees static identity via profile fragments but NEVER per-context identity or
+user-defined env -- those are operator preferences that only reach runtime shells.
 
 ### R6: Doctor integration
 

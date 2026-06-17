@@ -227,19 +227,13 @@ def create_vm(
     providers = resolve_git_credential_providers(config, config.admin.git_credentials)
     verify_git_credential_auth(providers)
 
-    # Collect secrets upfront so the user isn't interrupted mid-provisioning
+    # Collect provisioning-time secrets upfront (tailscale auth, git creds).
+    # Provisioning is hermetic: operator [admin.env] / [vm_templates.*.env]
+    # secrets are NOT prompted here -- they're not used until runtime
+    # shells. The legacy _collect_secrets path remains because the
+    # provisioning-required secrets it covers (tailscale, git) live
+    # outside the env-block system today.
     tailscale_auth_key, git_tokens = _collect_secrets(providers, vm_name)
-
-    # Eager-prompting orchestration (FRD R4 / Phase 6): resolve every
-    # secret referenced by the admin / vm env chain BEFORE the DB insert
-    # or any SSH-driven provisioning. Non-interactive failures surface
-    # as SecretUnavailableError with no partial state to clean up.
-    # The legacy _collect_secrets above will eventually migrate into
-    # this path via the extra_decls hook.
-    from agentworks.secrets import resolve_for_command
-
-    scopes = _resolve_vm_admin_env_scopes(config)
-    resolve_for_command([_vm_secret_target(scopes, label="vm")], config)
 
     # Create DB record with as-provisioned resource values
     db.insert_vm(
@@ -1003,19 +997,9 @@ def reinit_vm(
     for cred_name, provider in providers.items():
         git_tokens[cred_name] = provider.obtain_token(name)
 
-    # Eager-prompting orchestration (FRD R4 / Phase 6): resolve every
-    # secret referenced by the admin / vm env chain BEFORE any SSH-
-    # driven reinit work. Pass ``vm`` so the helper resolves the vm
-    # scope from vm.template (DB row); this removes the secret-target's
-    # implicit dependency on the _replace(config, vm=...) above (which
-    # is still load-bearing for run_initialization and the provisioners
-    # downstream that read config.vm directly).
-    from agentworks.secrets import resolve_for_command
-
-    scopes = _resolve_vm_admin_env_scopes(config, vm)
-    resolve_for_command(
-        [_vm_secret_target(scopes, label=f"vm-reinit={vm.name}")], config,
-    )
+    # Provisioning is hermetic: no operator-env secrets are prompted at
+    # reinit. They get prompted at the use site (vm shell, session
+    # create, etc.) once provisioning completes.
 
     # Build Tailscale SSH target with logging
     from agentworks.ssh import SSHLogger

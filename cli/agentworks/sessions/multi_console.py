@@ -1144,11 +1144,17 @@ def _pane_secret_target(
 ) -> SecretTarget | None:
     """Build the SecretTarget for a console pane, for eager-prompting.
 
-    Mirrors the scope-selection logic of ``_resolve_pane_env`` (admin
-    pane: admin + vm + workspace; agent pane: vm + workspace + agent +
-    session) but stops before composing the rendered env. Returns
+    Mirrors the scope-selection logic of ``_resolve_pane_env``. Console
+    add-shell panes are sidecar shells rooted in a workspace (not in the
+    session itself), so the scope chain stops at workspace:
+
+    - Admin pane: vm + workspace + admin.
+    - Agent pane: vm + workspace + agent.
+
+    Session-template env is NOT included -- those vars are for the session
+    itself, not for sidecar shells attached to its window. Returns
     ``None`` when the session row is missing fields the resolver would
-    need (matches ``_resolve_pane_env``'s defensive fallthrough).
+    need.
 
     ``is_admin_pane`` is the PROMOTED value, not the operator-passed
     --admin flag. Callers must apply the same promotion ``_split_shell_pane``
@@ -1160,7 +1166,6 @@ def _pane_secret_target(
     """
     from agentworks.agents.templates import resolve_from_dict as _resolve_agent_template
     from agentworks.secrets import SecretTarget
-    from agentworks.sessions.templates import resolve_from_dict as _resolve_session_template
     from agentworks.vms.templates import resolve_from_dict as _resolve_vm_template
     from agentworks.workspaces.templates import resolve_template as _resolve_ws_template
 
@@ -1185,12 +1190,10 @@ def _pane_secret_target(
     if agent is None:
         return None
     agent_tmpl = _resolve_agent_template(config.agent_templates, agent.template)
-    session_tmpl = _resolve_session_template(config.session_templates, session.template)
     return SecretTarget(
         vm=vm_tmpl.env,
         workspace=ws_tmpl.env,
         agent=agent_tmpl.env,
-        session=session_tmpl.env,
         label=f"console-pane:{session.name}/agent",
     )
 
@@ -1322,20 +1325,30 @@ def _resolve_pane_env(
     pane_user: str,
     is_admin_pane: bool,
 ) -> dict[str, str]:
-    """Compose env for a console add-shell pane on a session's window.
+    """Compose env for a console add-shell pane attached to a session's window.
 
-    Admin pane: admin + vm + workspace scope (no agent / session context).
-    Agent pane: vm + workspace + agent + session scope, matching what the
-    underlying session itself sees. Per the env-and-secrets SDD's R5
-    propagation table.
+    Console add-shell panes are sidecar shells -- they're organized under
+    a session's window in the console UI, but they're not *in* the session
+    (separate process tree, not part of the session's tmux). Under the
+    env-and-secrets identity taxonomy they're "admin or agent shell rooted
+    in a workspace": they see workspace dynamic identity but NOT session
+    identity, and their operator env stops at workspace scope. The
+    sessions themselves (the agent's actual tmux server / shells) keep
+    full session context -- they ARE the workload.
+
+    Admin pane: admin + vm + workspace operator env; workspace dynamic
+    identity.
+
+    Agent pane: vm + workspace + agent operator env; workspace dynamic
+    identity. ``AGENTWORKS_AGENT`` reaches the pane via the agent's
+    per-user profile fragment (static identity), not via SetEnv.
 
     Returns ``{}`` when the session's row is missing fields that the env
-    resolution needs (e.g. agent_name None for an agent pane); the caller
-    proceeds without env injection rather than raising mid-pane-split.
+    resolution needs (e.g. workspace lookup fails); the caller proceeds
+    without env injection rather than raising mid-pane-split.
     """
     from agentworks.agents.templates import resolve_from_dict as _resolve_agent_template
     from agentworks.env import ResourceContext, compose_env
-    from agentworks.sessions.templates import resolve_from_dict as _resolve_session_template
     from agentworks.vms.templates import resolve_from_dict as _resolve_vm_template
     from agentworks.workspaces.templates import resolve_template as _resolve_ws_template
 
@@ -1346,17 +1359,20 @@ def _resolve_pane_env(
     vm_tmpl = _resolve_vm_template(config.vm_templates, vm.template)
     ws_tmpl = _resolve_ws_template(config, workspace.template)
 
-    base_ctx_kwargs: dict[str, object] = {
-        "vm_name": vm.name,
-        "vm_host": vm.vm_host_name,
-        "platform": vm.platform,
-        "user": pane_user,
-        "workspace_name": workspace.name,
-        "workspace_dir": workspace.workspace_path,
-    }
+    # No session context: add-shell panes are sidecar shells, not part of
+    # the session itself. No agent_name in the ctx either -- the agent
+    # identifier is per-user-static and lives in the on-disk profile
+    # fragment, not in per-context SetEnv.
+    ctx = ResourceContext(
+        vm_name=vm.name,
+        vm_host=vm.vm_host_name,
+        platform=vm.platform,
+        user=pane_user,
+        workspace_name=workspace.name,
+        workspace_dir=workspace.workspace_path,
+    )
 
     if is_admin_pane:
-        ctx = ResourceContext(**base_ctx_kwargs)  # type: ignore[arg-type]
         return compose_env(
             resolver=config.secret_resolver,
             ctx=ctx,
@@ -1377,20 +1393,12 @@ def _resolve_pane_env(
     if agent is None:
         return {}
     agent_tmpl = _resolve_agent_template(config.agent_templates, agent.template)
-    session_tmpl = _resolve_session_template(config.session_templates, session.template)
-    ctx = ResourceContext(
-        **base_ctx_kwargs,  # type: ignore[arg-type]
-        agent_name=session.agent_name,
-        session_name=session.name,
-        session_kind="agent",
-    )
     return compose_env(
         resolver=config.secret_resolver,
         ctx=ctx,
         vm=vm_tmpl.env,
         workspace=ws_tmpl.env,
         agent=agent_tmpl.env,
-        session=session_tmpl.env,
     )
 
 

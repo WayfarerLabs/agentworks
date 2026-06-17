@@ -17,8 +17,11 @@ updates this lockfile with a dated entry.
   per-secret backend-tried hint on resolution failure.
 - **`agentworks.env` package** (FRD R1, R2). `EnvEntry` (plaintext-or-secret-ref), `effective_env`
   with the FRD R2 precedence ladder `session > (agent | admin) > workspace > vm`, `ResourceContext`
-  with per-context / vm-stable identity producers, and `compose_env` that renders user env through
-  the resolver and overlays identity vars.
+  with three identity producers split by how each var varies: `vm_stable_identity_env`
+  (`AGENTWORKS_VM` etc., on disk), `per_user_identity_env` (`AGENTWORKS_AGENT` for agent users, on
+  disk), and `per_context_identity_env` (`AGENTWORKS_WORKSPACE[_DIR]`, `AGENTWORKS_SESSION[_KIND]`,
+  injected via SetEnv). `compose_env` renders user env through the resolver and overlays the
+  per-context dynamic subset.
 - **TOML loader extensions** (FRD R2, R3). `[admin.env]`, `[vm_templates.*.env]`,
   `[workspace_templates.*.env]`, `[agent_templates.*.env]`, `[session_templates.*.env]`,
   `[secrets.<name>]`, `[secret_backends.<kind>]`, and `[secret_config]` parsed and validated at
@@ -37,8 +40,9 @@ updates this lockfile with a dated entry.
 - **VM-side fragments** (Phase 4). `/etc/ssh/sshd_config.d/50-agentworks-accept-env.conf`
   (`AcceptEnv *`, validated with `sshd -t` before reload), `/etc/sudoers.d/50-agentworks-env-keep`
   (`env_keep += "AGENTWORKS_* AW_*"`, validated with visudo via staging),
-  `/etc/profile.d/agentworks-identity.sh` for VM-stable identity vars, `~/.agentworks-profile.sh`
-  for per-user login-shell PATH additions. Idempotent on reinit.
+  `/etc/profile.d/agentworks-identity.sh` for VM-stable static identity, `~/.agentworks-profile.sh`
+  for per-user static identity (`AGENTWORKS_AGENT` for agent users) + login-shell PATH additions.
+  Idempotent on reinit.
 
 ### Eager prompting (Phase 6)
 
@@ -52,15 +56,17 @@ updates this lockfile with a dated entry.
   `session restart`, `console add-shell`, `vm create`, `vm reinit`, `agent create`, `agent reinit`,
   `vm shell`, `vm exec`, `agent shell`, `agent exec`, plus the console build path (`attach_console`
   on first attach or `--recreate`) and `restore_session`.
-- **Env threading through provisioning + agent setup** (Phase 6.3b + 6.4b). `_phase_b_setup`
-  composes `admin_env` once via `compose_env` (the manager-entry eager-resolve has already warmed
-  the cache, so this hits cached values rather than re-prompting) and threads it into the
-  user-facing install runners: user_install_commands, mise install/prune, nerf claude plugin, claude
-  marketplaces / plugins, dotfiles install. `_create_agent_on_vm` Phase 2 does the same for
-  `agent_env` against the agent-side runners. Phase 1 of `_create_agent_on_vm` (admin bootstrap:
-  useradd, socket setup, authorized_keys) and the infrastructure setup steps in `_phase_b_setup`
-  (apt, sshd config, sudoers, hardening, identity profile) deliberately don't take env; they're
-  bootstrap actions that shouldn't observe operator scope.
+- **Provisioning is hermetic.** Neither VM init (`_phase_b_setup`) nor agent setup phase 2
+  (`_create_agent_on_vm`) injects operator env into their user-facing install runners. Dotfiles
+  install, mise install/prune, user_install_commands, nerf claude plugin install, claude
+  marketplaces / plugins all run with no `env=` kwarg. Static identity reaches them via the on-disk
+  profile fragments: VM-stable identity via `/etc/profile.d/agentworks-identity.sh`, agent identity
+  via the agent's `~/.agentworks-profile.sh` (written EARLY in agent setup phase 2, before any
+  install command runs, so the install machinery sees `AGENTWORKS_AGENT` via login-shell sourcing).
+  Provisioning-required secrets (Tailscale auth key, git credentials) live in dedicated config
+  sections outside the env-block system and continue to flow through their own paths. Eager-resolve
+  at vm/agent create/reinit no longer prompts for operator-env secrets; those get prompted at the
+  runtime use site (vm shell, session create, etc.) where they actually matter.
 - **No-shell-opening commands verified** to NOT call `resolve_for_command` per FRD R4 / R5:
   `session attach`, `session list`, `session describe`, `console attach` against an existing tmux
   session, `console add-sessions`. Pinned by tests in `test_secrets_eager_resolve.py`.

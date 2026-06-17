@@ -47,13 +47,25 @@ class ResourceContext:
 def agentworks_identity_env(ctx: ResourceContext) -> dict[str, str]:
     """Return ALL AGENTWORKS_* vars that apply to ``ctx``.
 
-    Includes VM-stable vars (VM / VM_HOST / PLATFORM) and per-context vars
-    (WORKSPACE[_DIR] / AGENT / SESSION[_KIND]). The on-VM Linux user is
-    already exposed by the standard ``$USER`` / ``$LOGNAME`` env vars; we
-    don't shadow those with an AGENTWORKS_-prefixed copy.
+    Identity vars split into three kinds:
+
+    - **VM-stable** (``vm_stable_identity_env``): same for every shell on
+      the VM; lives in ``/etc/profile.d/agentworks-identity.sh``.
+    - **Per-user static** (``per_user_identity_env``): same for every shell
+      as a given Linux user; lives in ``~/.agentworks-profile.sh``. Today
+      this is ``AGENTWORKS_AGENT`` for agent users only -- admins get the
+      empty dict (their identity is the standard ``$USER`` / ``$LOGNAME``).
+    - **Per-context dynamic** (``per_context_identity_env``): varies per
+      shell-open; injected via SSH SetEnv. Today this is the workspace /
+      session context vars.
+
+    The on-VM Linux user is already exposed by the standard ``$USER`` /
+    ``$LOGNAME`` env vars; we don't shadow those with an AGENTWORKS_-
+    prefixed copy.
     """
     return {
         **vm_stable_identity_env(ctx),
+        **per_user_identity_env(ctx),
         **per_context_identity_env(ctx),
     }
 
@@ -79,19 +91,37 @@ def vm_stable_identity_env(ctx: ResourceContext) -> dict[str, str]:
     return out
 
 
-def per_context_identity_env(ctx: ResourceContext) -> dict[str, str]:
-    """Per-context subset, injected inline at shell-open time.
+def per_user_identity_env(ctx: ResourceContext) -> dict[str, str]:
+    """Per-user static subset, written to ``~/.agentworks-profile.sh``.
 
-    Values vary per shell-open invocation (workspace / agent / session
-    context), so these cannot live in a VM-side profile fragment.
+    The same value every time a given Linux user logs in. Today this is
+    ``AGENTWORKS_AGENT`` for agent users only -- admin users get an empty
+    dict (their identity is the standard ``$USER`` / ``$LOGNAME``).
+
+    The agent's setup writes this fragment before the agent's install
+    commands run, so install commands see ``AGENTWORKS_AGENT`` via the
+    standard login-shell sourcing chain (no SetEnv injection needed at
+    provisioning time, no SetEnv injection needed at runtime either:
+    every login shell as that user sources the fragment).
+    """
+    out: dict[str, str] = {}
+    if ctx.agent_name is not None:
+        out["AGENTWORKS_AGENT"] = ctx.agent_name
+    return out
+
+
+def per_context_identity_env(ctx: ResourceContext) -> dict[str, str]:
+    """Per-context dynamic subset, injected via SSH SetEnv at shell-open.
+
+    Values vary per shell-open invocation (workspace / session context),
+    so these can't live in an on-disk profile fragment. Agent identity is
+    static at the user level, not per-context; see ``per_user_identity_env``.
     """
     out: dict[str, str] = {}
     if ctx.workspace_name is not None:
         out["AGENTWORKS_WORKSPACE"] = ctx.workspace_name
     if ctx.workspace_dir is not None:
         out["AGENTWORKS_WORKSPACE_DIR"] = ctx.workspace_dir
-    if ctx.agent_name is not None:
-        out["AGENTWORKS_AGENT"] = ctx.agent_name
     if ctx.session_name is not None:
         out["AGENTWORKS_SESSION"] = ctx.session_name
         if ctx.session_kind is not None:

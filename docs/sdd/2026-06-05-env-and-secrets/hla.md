@@ -219,15 +219,22 @@ class ResourceContext:
     session_kind: Literal["admin", "agent"] | None = None
 
 def agentworks_identity_env(ctx: ResourceContext) -> dict[str, str]:
+    # Identity vars split into three kinds, each with a distinct placement:
+    #   - VM-stable static: /etc/profile.d/agentworks-identity.sh
+    #   - per-user static: ~/.agentworks-profile.sh (agent users only)
+    #   - per-context dynamic: SetEnv at shell-open time
     # The on-VM Linux user identifies itself via the standard $USER /
     # $LOGNAME env vars; no AGENTWORKS_-prefixed copy is maintained.
     out: dict[str, str] = {}
+    # VM-stable static
     if ctx.vm_name:     out["AGENTWORKS_VM"] = ctx.vm_name
     if ctx.vm_host:     out["AGENTWORKS_VM_HOST"] = ctx.vm_host
     if ctx.platform:    out["AGENTWORKS_PLATFORM"] = ctx.platform
+    # Per-user static (agent users only)
+    if ctx.agent_name:  out["AGENTWORKS_AGENT"] = ctx.agent_name
+    # Per-context dynamic
     if ctx.workspace_name: out["AGENTWORKS_WORKSPACE"] = ctx.workspace_name
     if ctx.workspace_dir:  out["AGENTWORKS_WORKSPACE_DIR"] = ctx.workspace_dir
-    if ctx.agent_name:     out["AGENTWORKS_AGENT"] = ctx.agent_name
     if ctx.session_name:   out["AGENTWORKS_SESSION"] = ctx.session_name
     if ctx.session_kind:   out["AGENTWORKS_SESSION_KIND"] = ctx.session_kind
     return out
@@ -511,23 +518,36 @@ SSH layer (`ExecTarget.run(env=...)` / `interactive(target, command, env=...)`) 
 passed via `tmux new-session -e K=V` / `tmux split-window -e K=V` so it lands in tmux's
 session-environment table. The site set, drawn from the FRD R5 propagation table:
 
-| Module / function                                                         | Context layers (admin shells)      | Context layers (agent shells)      |
-| ------------------------------------------------------------------------- | ---------------------------------- | ---------------------------------- |
-| `vms/initializer.*` (provisioning, vm reinit)                             | admin + vm                         | n/a                                |
-| `agents/manager._create_agent_on_vm` Phase 2 (agent self-configure)       | n/a                                | vm + agent                         |
-| `sessions/tmux.create_session` (admin-mode)                               | admin + vm + workspace + session   | n/a                                |
-| `sessions/tmux.create_session` (agent-mode)                               | n/a                                | vm + workspace + agent + session   |
-| `sessions/console.*` / `sessions/multi_console.*` (per pane / per window) | admin + vm (+ workspace if scoped) | vm + workspace + agent (+ session) |
-| `agents/manager.exec_agent` / `shell_agent`                               | n/a                                | vm + agent (+ workspace if scoped) |
-| `vms/manager.exec_vm` / `shell_vm`                                        | admin + vm                         | n/a                                |
+| Module / function                                                    | Context layers (admin shells)    | Context layers (agent shells)      |
+| -------------------------------------------------------------------- | -------------------------------- | ---------------------------------- |
+| `vms/initializer.*` (provisioning, vm reinit)                        | **none (hermetic)**              | n/a                                |
+| `agents/manager._create_agent_on_vm` Phase 2 (agent self-configure)  | n/a                              | **none (hermetic)**                |
+| `sessions/tmux.create_session` (admin-mode)                          | admin + vm + workspace + session | n/a                                |
+| `sessions/tmux.create_session` (agent-mode)                          | n/a                              | vm + workspace + agent + session   |
+| `sessions/multi_console._build_console_tmux` (per session window)    | admin + vm + workspace + session | vm + workspace + agent + session   |
+| `sessions/multi_console._split_shell_pane` (add-shell sidecar panes) | admin + vm + workspace           | vm + workspace + agent             |
+| `sessions/console.*` (legacy `agw vm console`)                       | none (no injection by design)    | n/a                                |
+| `agents/manager.exec_agent` / `shell_agent`                          | n/a                              | vm + agent (+ workspace if scoped) |
+| `vms/manager.exec_vm` / `shell_vm`                                   | admin + vm                       | n/a                                |
+
+Provisioning hermeticity: VM init and agent setup install commands open shells too, but they don't
+take operator env. Static identity reaches them via the on-disk profile fragments (system-wide for
+VM-stable; per-user `~/.agentworks-profile.sh` for `AGENTWORKS_AGENT` on agent users). Operator env
+is a runtime preference; it doesn't influence build-time provisioning.
+
+Console add-shell panes are sidecar shells rooted in a workspace -- they're organized under a
+session's window in the console UI but they're not in the session. They see workspace dynamic
+identity but NOT session dynamic identity, mirroring the shape of `vm shell --workspace` /
+`agent shell --workspace`.
 
 The two-phase split in `_create_agent_on_vm` from the direct-target-user-SSH SDD interacts cleanly
-with this work: Phase 1 (admin bootstrap) runs over `admin_target` and uses the admin env merge;
-Phase 2 (agent self-configure) runs over `agent_target` and uses the agent env merge. The two phases
-never share env.
+with this work: Phase 1 (admin bootstrap) is pure infrastructure (useradd, sockets, authorized_keys)
+and never took env. Phase 2 (agent self-configure) runs as the agent and would have taken
+`agent_env`, but no longer does -- per the hermeticity rule above.
 
-Each site is a small refactor: collect context, build the env via the resolver, pass to the SSH
-layer via the `env=` kwarg. What differs across sites is which scopes feed `compose_env`.
+Each non-provisioning site is a small refactor: collect context, build the env via the resolver,
+pass to the SSH layer via the `env=` kwarg. What differs across sites is which scopes feed
+`compose_env`.
 
 Attach surfaces (`session attach`, `console attach`) do NOT appear in this table. They join existing
 shell processes and inherit those processes' create-time env. See FRD R5 "Attach inherits
@@ -535,23 +555,23 @@ create-time env."
 
 ### Identity vars on the VM
 
-Two write surfaces, chosen by whether the value varies per Linux user:
+Three placements, chosen by how the value varies:
 
-- **System-wide fragment** (new): written by `vms/initializer.py` at the SAME two locations the
-  existing `AGENTWORKS_NERF_HOME` install uses (`/etc/profile.d/agentworks-identity.sh` AND an
-  appended block in `/etc/zsh/zprofile`, because zsh does not source `/etc/profile.d/*` by default).
-  Contains the truly VM-stable identity vars: `AGENTWORKS_VM`, `AGENTWORKS_VM_HOST`,
-  `AGENTWORKS_PLATFORM`. Any shell on the VM, including ones started outside agentworks (e.g. an
-  operator landing via the `awvm--<vm>` alias), sees these vars.
-- **Per-user fragment** (existing): `~/.agentworks-profile.sh`, written per Linux user by the
-  existing `_write_agentworks_profile`. Holds login-shell PATH additions (mise shims, install-
-  command path entries, etc.). Written for admin during VM init and for each agent during Phase 2 of
-  `agents/manager._create_agent_on_vm`. Reinit-idempotent. The on-VM Linux user identifies itself
-  via the standard `$USER` / `$LOGNAME` env vars.
-
-Per-context vars (`AGENTWORKS_WORKSPACE`, `AGENTWORKS_WORKSPACE_DIR`, `AGENTWORKS_AGENT`,
-`AGENTWORKS_SESSION`, `AGENTWORKS_SESSION_KIND`) are set inline at shell-open time because their
-values depend on the context, not the user or VM.
+- **System-wide fragment** (VM-stable): `vms/initializer.py` writes
+  `/etc/profile.d/agentworks-identity.sh` plus an appended block in `/etc/zsh/zprofile` (zsh does
+  not source `/etc/profile.d/*` by default). Contains the truly VM-stable identity vars:
+  `AGENTWORKS_VM`, `AGENTWORKS_VM_HOST`, `AGENTWORKS_PLATFORM`. Any shell on the VM, including ones
+  started outside agentworks (e.g. an operator landing via the `awvm--<vm>` alias), sees these vars.
+- **Per-user fragment** (`~/.agentworks-profile.sh`): written by `_write_agentworks_profile`. For
+  agent users it holds `AGENTWORKS_AGENT` (per-user static identity) plus login-shell PATH additions
+  (mise shims, install-command path entries, etc.). For admin users it holds just the PATH additions
+  -- admin identity is the standard `$USER` / `$LOGNAME`. For agents the fragment is written EARLY
+  in agent setup phase 2 (before any install commands run) so the install machinery sees
+  `AGENTWORKS_AGENT` via login-shell sourcing; it's rewritten at the end of
+  `_run_agent_install_commands` with accumulated PATH entries.
+- **Per-context dynamic** (SetEnv at shell-open): `AGENTWORKS_WORKSPACE`,
+  `AGENTWORKS_WORKSPACE_DIR`, `AGENTWORKS_SESSION`, `AGENTWORKS_SESSION_KIND` -- their values depend
+  on which workload the shell belongs to, so they can't live on disk.
 
 User-defined env (plaintext or secret) is NEVER cached on the VM. It is always computed at command
 time and injected inline at the shell-open site. Single authoritative source (config + CLI
