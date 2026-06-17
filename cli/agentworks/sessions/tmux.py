@@ -271,8 +271,8 @@ set -g status off
 # login dotfiles so profile fragments installed by VM init
 # (/etc/profile.d/agentworks-identity.sh, ~/.agentworks-profile.sh) are
 # loaded. Without this, tmux's default-shell runs non-login and the
-# AGENTWORKS_VM / AGENTWORKS_USER vars from the fragments would not
-# appear in no-command sessions.
+# AGENTWORKS_VM identity vars and PATH additions from the fragments
+# would not appear in no-command sessions.
 set -g default-command "$SHELL -l"
 
 # Disable window/pane/session creation and management.

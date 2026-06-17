@@ -16,13 +16,15 @@ def _ctx(**overrides: object) -> ResourceContext:
     return ResourceContext(**base)  # type: ignore[arg-type]
 
 
-def test_vm_only_emits_base_four_vars() -> None:
+def test_vm_only_emits_base_three_vars() -> None:
+    """Base case: only VM-stable identity. The on-VM Linux user is exposed
+    via the standard ``$USER`` / ``$LOGNAME`` env vars, not a separate
+    AGENTWORKS_-prefixed copy."""
     out = agentworks_identity_env(_ctx())
     assert out == {
         "AGENTWORKS_VM": "vm-1",
         "AGENTWORKS_VM_HOST": "lima-local",
         "AGENTWORKS_PLATFORM": "lima",
-        "AGENTWORKS_USER": "agentworks",
     }
 
 
@@ -67,7 +69,6 @@ def test_full_chain() -> None:
         "AGENTWORKS_VM": "vm-1",
         "AGENTWORKS_VM_HOST": "lima-local",
         "AGENTWORKS_PLATFORM": "lima",
-        "AGENTWORKS_USER": "agentworks",
         "AGENTWORKS_WORKSPACE": "ws-a",
         "AGENTWORKS_WORKSPACE_DIR": "/home/claude/ws-a",
         "AGENTWORKS_AGENT": "claude",
@@ -96,18 +97,9 @@ def test_vm_stable_subset_is_three_vars_only() -> None:
     }
 
 
-def test_per_user_subset_is_user_only() -> None:
-    """per_user_identity_env returns exactly AGENTWORKS_USER (the only var that
-    varies per Linux user and lives in ~/.agentworks-profile.sh in Phase 4)."""
-    from agentworks.env import per_user_identity_env
-
-    out = per_user_identity_env(_ctx())
-    assert out == {"AGENTWORKS_USER": "agentworks"}
-
-
-def test_per_context_subset_omits_vm_user_vars() -> None:
+def test_per_context_subset_omits_vm_vars() -> None:
     """per_context_identity_env returns only the per-context vars (workspace /
-    agent / session); VM-stable and per-user vars are NOT included."""
+    agent / session); VM-stable vars are NOT included."""
     from agentworks.env import per_context_identity_env
 
     out = per_context_identity_env(
@@ -120,7 +112,6 @@ def test_per_context_subset_omits_vm_user_vars() -> None:
         )
     )
     assert "AGENTWORKS_VM" not in out
-    assert "AGENTWORKS_USER" not in out
     assert "AGENTWORKS_PLATFORM" not in out
     assert out == {
         "AGENTWORKS_WORKSPACE": "ws-a",

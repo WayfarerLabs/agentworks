@@ -459,7 +459,7 @@ def test_unknown_backend_kind_in_secret_backends_emits_warning(
     ("scope_extras", "context_label"),
     [
         ("[vm_templates.default.env]\nAGENTWORKS_VM = \"override\"", "vm_templates.default.env"),
-        ("[admin.env]\nAGENTWORKS_USER = \"override\"", "admin.env"),
+        ("[admin.env]\nAGENTWORKS_PLATFORM = \"override\"", "admin.env"),
         ("[agent_templates.claude.env]\nAGENTWORKS_AGENT = \"override\"", "agent_templates.claude.env"),
         ("[workspace_templates.ws.env]\nAGENTWORKS_WORKSPACE = \"override\"", "workspace_templates.ws.env"),
         ("[session_templates.shell.env]\nAGENTWORKS_SESSION = \"override\"", "session_templates.shell.env"),

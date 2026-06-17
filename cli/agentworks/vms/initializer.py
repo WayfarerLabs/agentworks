@@ -25,7 +25,6 @@ from agentworks.db import InitStatus, ProvisioningStatus
 from agentworks.env import (
     ResourceContext,
     compose_env,
-    per_user_identity_env,
     vm_stable_identity_env,
 )
 from agentworks.errors import ConnectivityError, ExternalError, NotFoundError
@@ -49,23 +48,21 @@ def _write_agentworks_profile(
     target: ExecTarget,
     path_additions: list[str],
     logger: SSHLogger,
-    *,
-    identity_env: dict[str, str] | None = None,
 ) -> None:
     """Write the agentworks-managed login profile fragment.
 
-    Writes $HOME/.agentworks-profile.sh with PATH exports and identity env
-    vars. Sourced from ~/.profile (bash/sh) and ~/.zprofile (zsh) -- runs
-    once per login shell, inherited by child processes.
+    Writes $HOME/.agentworks-profile.sh with PATH exports. Sourced from
+    ~/.profile (bash/sh) and ~/.zprofile (zsh) -- runs once per login
+    shell, inherited by child processes.
 
-    ``identity_env`` carries the per-user identity subset (currently just
-    ``AGENTWORKS_USER``); these vars get exported alongside the PATH
-    additions. The system-wide identity vars (VM / VM_HOST / PLATFORM) live
-    in ``/etc/profile.d/agentworks-identity.sh``, written by
-    ``_write_agentworks_identity_profile``.
+    System-wide identity vars (VM / VM_HOST / PLATFORM) live in
+    ``/etc/profile.d/agentworks-identity.sh``, written by
+    ``_write_agentworks_identity_profile``. The on-VM Linux user is
+    already exposed by the standard ``$USER`` / ``$LOGNAME`` env vars,
+    so there's no per-user agentworks identity var to write here.
 
-    Always written (even if empty) so that reinit can clear previously set
-    paths.
+    Always written (even if path_additions is empty) so that reinit can
+    clear previously set paths.
     """
     # Deduplicate paths while preserving order
     seen: set[str] = set()
@@ -83,9 +80,6 @@ def _write_agentworks_profile(
         for p in unique_paths:
             expanded = p.replace("~", "$HOME", 1) if p.startswith("~") else p
             lines.append(f'export PATH="{expanded}:$PATH"')
-        if identity_env:
-            for key, value in identity_env.items():
-                lines.append(f'export {key}={shlex.quote(value)}')
         target.write_file(f"~/{AGENTWORKS_PROFILE}", "\n".join(lines) + "\n")
 
         # Source from ~/.profile (bash/sh) and ~/.zprofile (zsh)
@@ -1717,14 +1711,9 @@ def _phase_b_setup(
         env=admin_env,
     )
 
-    # Non-fatal: shell profile (PATH exports + per-user identity, sourced at login)
+    # Non-fatal: shell profile (PATH exports sourced at login)
     all_paths = system_path + mise_path + user_path
-    _write_agentworks_profile(
-        ts_target,
-        all_paths,
-        logger,
-        identity_env=per_user_identity_env(identity_ctx),
-    )
+    _write_agentworks_profile(ts_target, all_paths, logger)
 
     # Non-fatal: shell rc (interactive shell hooks like mise activate)
     rc_snippets = [MISE_ACTIVATE_LINES] if config.admin.mise_activate else ["# mise activation disabled"]

@@ -268,16 +268,16 @@ def test_identity_subset_skips_vm_stable_vars(
     db: Database, tmp_path: Path,
 ) -> None:
     """The inline (env show) identity output mirrors the inline prelude
-    subset: VM-stable vars (AGENTWORKS_VM / _VM_HOST / _PLATFORM) and the
-    per-user AGENTWORKS_USER come from VM-side profile fragments (Phase 4)
-    and don't appear in the env-show output."""
+    subset: VM-stable vars (AGENTWORKS_VM / _VM_HOST / _PLATFORM) come from
+    VM-side profile fragments (Phase 4) and don't appear in the env-show
+    output."""
     cfg = _write_config(tmp_path)
     config = load_config(cfg, warn_issues=False)
     _seed_db(db, with_workspace=True, with_agent=True, with_session=True)
 
     rows = show_env(db, config, session_name="s1")
     keys = {r.key for r in rows}
-    for excluded in ("AGENTWORKS_VM", "AGENTWORKS_VM_HOST", "AGENTWORKS_PLATFORM", "AGENTWORKS_USER"):
+    for excluded in ("AGENTWORKS_VM", "AGENTWORKS_VM_HOST", "AGENTWORKS_PLATFORM"):
         assert excluded not in keys, f"{excluded} should not appear in env show output"
 
 

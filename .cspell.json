@@ -55,6 +55,7 @@
     "lifecycles",
     "limactl",
     "lockfiles",
+    "logname",
     "multicall",
     "myproject",
     "mypy",

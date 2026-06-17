@@ -17,7 +17,6 @@ from agentworks.env.identity import (
     ResourceContext,
     agentworks_identity_env,
     per_context_identity_env,
-    per_user_identity_env,
     vm_stable_identity_env,
 )
 from agentworks.env.merge import effective_env
@@ -29,6 +28,5 @@ __all__ = [
     "compose_env",
     "effective_env",
     "per_context_identity_env",
-    "per_user_identity_env",
     "vm_stable_identity_env",
 ]

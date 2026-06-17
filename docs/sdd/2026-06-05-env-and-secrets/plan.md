@@ -133,11 +133,12 @@ is the consumption: instead of `build_export_block(env)` followed by glue, we pa
       needs to run as the agent); sudoers env_keep deployed in Phase 4 keeps agentworks-managed vars
       surviving the sudo boundary. Until Phase 4 lands, env injection on the agent-pane branch is
       best-effort (vars cross into tmux's session env but get stripped at the sudo crossing).
-- [x] `cli/agentworks/env/identity.py` retains the three identity-subset helpers
-      (`vm_stable_identity_env`, `per_user_identity_env`, `per_context_identity_env`). With SetEnv
-      as the transport, `compose_env` overlays per-context identity vars on top of the resolved user
-      env (identity wins). VM-stable and per-user vars are NOT in the SetEnv payload; they come from
-      the VM-side profile fragments in Phase 4.
+- [x] `cli/agentworks/env/identity.py` retains the identity-subset helpers
+      (`vm_stable_identity_env`, `per_context_identity_env`). With SetEnv as the transport,
+      `compose_env` overlays per-context identity vars on top of the resolved user env (identity
+      wins). VM-stable vars are NOT in the SetEnv payload; they come from the VM-side profile
+      fragments in Phase 4. The on-VM Linux user identifies itself via the standard `$USER` /
+      `$LOGNAME` env vars; no AGENTWORKS\_-prefixed copy is maintained.
 - [x] Tests:
   - SSH-layer SetEnv arg construction (one `-o SetEnv=...` arg with all pairs coalesced, values
     always double-quoted to survive spaces / embedded `"`/`\` / empty values).
@@ -186,9 +187,9 @@ env+secrets via the SSH SetEnv path established in Phase 3.
     the existing `AGENTWORKS_NERF_HOME` install pattern). Contents are the VM-stable subset:
     `AGENTWORKS_VM`, `AGENTWORKS_VM_HOST` (when applicable), `AGENTWORKS_PLATFORM`. Reinit-safe
     (sed-strips the prior agentworks-identity block from `/etc/zsh/zprofile` before re-appending).
-  - Extend `_write_agentworks_profile(target, ...)` (per-user fragment, existing) with an optional
-    `identity_env` kwarg so `AGENTWORKS_USER` lands in the per-user profile
-    `~/.agentworks-profile.sh`.
+  - `_write_agentworks_profile(target, ...)` (per-user fragment, existing) keeps its login-shell
+    PATH role. The on-VM Linux user identifies itself via the standard `$USER` / `$LOGNAME` env
+    vars; no AGENTWORKS\_-prefixed copy is maintained.
   - **New helper `_write_sshd_accept_env(target, logger)`** writes
     `/etc/ssh/sshd_config.d/50-agentworks-accept-env.conf` with `AcceptEnv *`, validates with
     `sshd -t`, and reloads sshd (systemctl). Per the `sshd-accept-env-wildcard` ADR.
@@ -198,9 +199,9 @@ env+secrets via the SSH SetEnv path established in Phase 3.
     vars survive the sudo boundary in console add-shell agent panes.
   - All four helpers wired into `_phase_b_setup` after `apply_vm_hardening`.
 - [x] `cli/agentworks/agents/manager.py._create_agent_on_vm`:
-  - Per-user identity (`AGENTWORKS_USER`) now lands in the agent's `~/.agentworks-profile.sh` via
-    the rewritten `_run_agent_install_commands`. The profile fragment is written unconditionally so
-    AGENTWORKS_USER lands even when an agent has no user install commands.
+  - The agent's `~/.agentworks-profile.sh` carries login-shell PATH additions from catalog
+    `user_install_commands` entries. Written unconditionally so reinit can clear stale PATH lines
+    when the operator removes install commands.
 - [x] **Follow-up in this phase**: thread env through provisioning / agent-setup SSH calls via
       `target.run(env=...)`. Delivered as Phase 6.3b (vms/initializer.py: `_phase_b_setup` composes
       `admin_env` once and threads it into user-install-command runners, mise install/prune, nerf
@@ -210,10 +211,10 @@ env+secrets via the SSH SetEnv path established in Phase 3.
       authorized_keys) is infrastructure and deliberately doesn't take env; same boundary as the
       vms-side infrastructure-vs-user-facing split. See Phase 6 bullet below for the consolidated
       record.
-- [x] Tests: tests/test_initializer_env_fragments.py (17 tests). Pin: identity-profile system-wide +
-      zprofile mirror with reinit-safe sed-strip; sshd AcceptEnv validates before reload; sudoers
-      env_keep validates with visudo and rolls back on failure; per-user profile carries
-      AGENTWORKS_USER when identity_env is passed; backward-compat when identity_env is omitted.
+- [x] Tests: tests/test_initializer_env_fragments.py. Pin: identity-profile system-wide + zprofile
+      mirror with reinit-safe sed-strip; sshd AcceptEnv validates before reload; sudoers env_keep
+      validates with visudo and rolls back on failure; per-user profile carries PATH additions and
+      clears cleanly on reinit when path_additions is empty.
 
 Definition of done: a fresh `vm create` + `agent create` produces a VM where any shell on it (via
 agentworks or via raw `ssh awvm--vm`) sees the expected `AGENTWORKS_*` identity vars, sshd accepts

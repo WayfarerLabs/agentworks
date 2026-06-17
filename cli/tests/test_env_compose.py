@@ -85,13 +85,13 @@ def test_compose_env_renders_secrets_via_resolver() -> None:
     assert out["API_KEY"] == "resolved-value"
 
 
-def test_compose_env_omits_vm_stable_and_per_user_vars() -> None:
-    """The inline prelude does NOT include AGENTWORKS_VM / VM_HOST / PLATFORM /
-    USER. Those land in Phase 4 profile fragments on the VM."""
+def test_compose_env_omits_vm_stable_vars() -> None:
+    """The inline prelude does NOT include AGENTWORKS_VM / VM_HOST / PLATFORM.
+    Those land in Phase 4 profile fragments on the VM."""
     out = compose_env(
         resolver=_empty_resolver(),
         ctx=_ctx(),
         vm={},
     )
-    for excluded in ("AGENTWORKS_VM", "AGENTWORKS_VM_HOST", "AGENTWORKS_PLATFORM", "AGENTWORKS_USER"):
+    for excluded in ("AGENTWORKS_VM", "AGENTWORKS_VM_HOST", "AGENTWORKS_PLATFORM"):
         assert excluded not in out, f"{excluded} should not appear in inline prelude"

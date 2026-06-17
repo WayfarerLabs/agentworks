@@ -47,18 +47,15 @@ class ResourceContext:
 def agentworks_identity_env(ctx: ResourceContext) -> dict[str, str]:
     """Return ALL AGENTWORKS_* vars that apply to ``ctx``.
 
-    Includes the full identity set: VM-stable vars (VM / VM_HOST / PLATFORM),
-    per-user vars (USER), and per-context vars (WORKSPACE[_DIR] / AGENT /
-    SESSION[_KIND]). Use the focused helpers below to select the subset
-    appropriate for a particular write site (SSH SetEnv vs profile
-    fragments).
+    Includes VM-stable vars (VM / VM_HOST / PLATFORM) and per-context vars
+    (WORKSPACE[_DIR] / AGENT / SESSION[_KIND]). The on-VM Linux user is
+    already exposed by the standard ``$USER`` / ``$LOGNAME`` env vars; we
+    don't shadow those with an AGENTWORKS_-prefixed copy.
     """
-    out = {
+    return {
         **vm_stable_identity_env(ctx),
-        **per_user_identity_env(ctx),
         **per_context_identity_env(ctx),
     }
-    return out
 
 
 def vm_stable_identity_env(ctx: ResourceContext) -> dict[str, str]:
@@ -80,15 +77,6 @@ def vm_stable_identity_env(ctx: ResourceContext) -> dict[str, str]:
     if ctx.vm_host is not None:
         out["AGENTWORKS_VM_HOST"] = ctx.vm_host
     return out
-
-
-def per_user_identity_env(ctx: ResourceContext) -> dict[str, str]:
-    """Per-user subset, written to ``~/.agentworks-profile.sh``.
-
-    Each Linux user on the VM gets their own copy of this fragment with
-    AGENTWORKS_USER set to their username.
-    """
-    return {"AGENTWORKS_USER": ctx.user}
 
 
 def per_context_identity_env(ctx: ResourceContext) -> dict[str, str]:

@@ -219,11 +219,12 @@ class ResourceContext:
     session_kind: Literal["admin", "agent"] | None = None
 
 def agentworks_identity_env(ctx: ResourceContext) -> dict[str, str]:
+    # The on-VM Linux user identifies itself via the standard $USER /
+    # $LOGNAME env vars; no AGENTWORKS_-prefixed copy is maintained.
     out: dict[str, str] = {}
     if ctx.vm_name:     out["AGENTWORKS_VM"] = ctx.vm_name
     if ctx.vm_host:     out["AGENTWORKS_VM_HOST"] = ctx.vm_host
     if ctx.platform:    out["AGENTWORKS_PLATFORM"] = ctx.platform
-    if ctx.on_vm_user:  out["AGENTWORKS_USER"] = ctx.on_vm_user
     if ctx.workspace_name: out["AGENTWORKS_WORKSPACE"] = ctx.workspace_name
     if ctx.workspace_dir:  out["AGENTWORKS_WORKSPACE_DIR"] = ctx.workspace_dir
     if ctx.agent_name:     out["AGENTWORKS_AGENT"] = ctx.agent_name
@@ -475,13 +476,14 @@ explicit design intent, not a redundant artifact.
 
 ### Identity vars on the VM (independent of SetEnv)
 
-VM-stable identity (`AGENTWORKS_VM`, `AGENTWORKS_VM_HOST`, `AGENTWORKS_PLATFORM`) and per-user
-identity (`AGENTWORKS_USER`) live in profile fragments on the VM, NOT in the SetEnv payload:
+VM-stable identity (`AGENTWORKS_VM`, `AGENTWORKS_VM_HOST`, `AGENTWORKS_PLATFORM`) lives in a
+system-wide profile fragment on the VM, NOT in the SetEnv payload:
 
 - **System-wide fragment**: `/etc/profile.d/agentworks-identity.sh` plus a matching block in
   `/etc/zsh/zprofile` (zsh does not source `/etc/profile.d/*` by default). Written by VM init.
-- **Per-user fragment**: `~/.agentworks-profile.sh` (one per Linux user on the VM). Holds
-  `AGENTWORKS_USER`.
+- **Per-user fragment**: `~/.agentworks-profile.sh` (one per Linux user on the VM). Holds PATH
+  additions only (the on-VM Linux user identifies itself via the standard `$USER` / `$LOGNAME` env
+  vars).
 
 These fragments serve operators who reach the VM via raw SSH (`ssh awvm--<vm>`) outside agentworks:
 their login shell sources the fragments and sees the identity vars without agentworks doing
@@ -541,10 +543,11 @@ Two write surfaces, chosen by whether the value varies per Linux user:
   Contains the truly VM-stable identity vars: `AGENTWORKS_VM`, `AGENTWORKS_VM_HOST`,
   `AGENTWORKS_PLATFORM`. Any shell on the VM, including ones started outside agentworks (e.g. an
   operator landing via the `awvm--<vm>` alias), sees these vars.
-- **Per-user fragment** (existing, extended): `~/.agentworks-profile.sh`, written per Linux user by
-  the existing `_write_agentworks_profile`. Gains `AGENTWORKS_USER` (per-user value). Written for
-  admin during VM init and for each agent during Phase 2 of `agents/manager._create_agent_on_vm`.
-  Reinit-idempotent.
+- **Per-user fragment** (existing): `~/.agentworks-profile.sh`, written per Linux user by the
+  existing `_write_agentworks_profile`. Holds login-shell PATH additions (mise shims, install-
+  command path entries, etc.). Written for admin during VM init and for each agent during Phase 2 of
+  `agents/manager._create_agent_on_vm`. Reinit-idempotent. The on-VM Linux user identifies itself
+  via the standard `$USER` / `$LOGNAME` env vars.
 
 Per-context vars (`AGENTWORKS_WORKSPACE`, `AGENTWORKS_WORKSPACE_DIR`, `AGENTWORKS_AGENT`,
 `AGENTWORKS_SESSION`, `AGENTWORKS_SESSION_KIND`) are set inline at shell-open time because their

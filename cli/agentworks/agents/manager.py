@@ -1115,13 +1115,11 @@ def _create_agent_on_vm(
         except Exception as e:
             output.warn(f"agent git credential setup failed: {e}")
 
-    # User install commands + per-user identity profile fragment.
+    # User install commands + login-shell PATH profile fragment.
     _run_agent_install_commands(
         agent_target=agent_target,
         config=config,
         home=home,
-        vm=vm,
-        linux_user=linux_user,
         env=agent_env,
     )
 
@@ -1298,8 +1296,6 @@ def _run_agent_install_commands(
     agent_target: ExecTarget,
     config: Config,
     home: str,
-    vm: VMRow,
-    linux_user: str,
     env: dict[str, str] | None = None,
 ) -> None:
     """Run user install commands for an agent and write the agent's profile
@@ -1309,12 +1305,10 @@ def _run_agent_install_commands(
     the profile fragment is written via ``agent_target.write_file``
     directly, with no sudo / chown dance.
 
-    The profile fragment is written unconditionally (even if there are no
-    install commands and no PATH additions) so that the per-user identity
-    var ``AGENTWORKS_USER`` always lands. Catalog install commands add
-    their ``path`` entries on top. ``vm`` + ``linux_user`` feed the real
-    ``ResourceContext`` that ``per_user_identity_env`` consumes (no
-    synthetic empty fields).
+    The profile fragment is written unconditionally (even when there are
+    no install commands and no PATH additions) so that reinit can clear
+    previously set paths. Catalog install commands add their ``path``
+    entries on top.
     """
     import shlex
 
@@ -1357,10 +1351,9 @@ def _run_agent_install_commands(
             output.warn(f"agent install command '{name}' failed: {e}")
         path_additions.extend(entry.path)
 
-    # Write the agent's profile fragment (PATH additions + per-user identity).
-    # Written unconditionally so AGENTWORKS_USER always lands; install
-    # commands contribute their PATH entries on top.
-    from agentworks.env import ResourceContext, per_user_identity_env
+    # Write the agent's profile fragment (login-shell PATH additions).
+    # Written unconditionally so reinit can clear previously set paths
+    # when the operator removes install commands.
     from agentworks.vms.initializer import AGENTWORKS_PROFILE
 
     if path_additions:
@@ -1369,16 +1362,6 @@ def _run_agent_install_commands(
     for p in path_additions:
         expanded = p.replace("~", "$HOME", 1) if p.startswith("~") else p
         lines.append(f'export PATH="{expanded}:$PATH"')
-    identity = per_user_identity_env(
-        ResourceContext(
-            vm_name=vm.name,
-            platform=vm.platform,
-            user=linux_user,
-            vm_host=vm.vm_host_name,
-        )
-    )
-    for key, value in identity.items():
-        lines.append(f'export {key}={shlex.quote(value)}')
     content = "\n".join(lines) + "\n"
     try:
         profile_path = f"{home}/{AGENTWORKS_PROFILE}"

@@ -17,8 +17,8 @@ updates this lockfile with a dated entry.
   per-secret backend-tried hint on resolution failure.
 - **`agentworks.env` package** (FRD R1, R2). `EnvEntry` (plaintext-or-secret-ref), `effective_env`
   with the FRD R2 precedence ladder `session > (agent | admin) > workspace > vm`, `ResourceContext`
-  with per-context / per-user / vm-stable identity producers, and `compose_env` that renders user
-  env through the resolver and overlays identity vars.
+  with per-context / vm-stable identity producers, and `compose_env` that renders user env through
+  the resolver and overlays identity vars.
 - **TOML loader extensions** (FRD R2, R3). `[admin.env]`, `[vm_templates.*.env]`,
   `[workspace_templates.*.env]`, `[agent_templates.*.env]`, `[session_templates.*.env]`,
   `[secrets.<name>]`, `[secret_backends.<kind>]`, and `[secret_config]` parsed and validated at
@@ -38,7 +38,7 @@ updates this lockfile with a dated entry.
   (`AcceptEnv *`, validated with `sshd -t` before reload), `/etc/sudoers.d/50-agentworks-env-keep`
   (`env_keep += "AGENTWORKS_* AW_*"`, validated with visudo via staging),
   `/etc/profile.d/agentworks-identity.sh` for VM-stable identity vars, `~/.agentworks-profile.sh`
-  for per-user identity. Idempotent on reinit.
+  for per-user login-shell PATH additions. Idempotent on reinit.
 
 ### Eager prompting (Phase 6)
 
@@ -107,7 +107,7 @@ updates this lockfile with a dated entry.
 - Comprehensive coverage in `test_secrets_base.py`, `test_secrets_env_var.py`,
   `test_secrets_prompt.py`, `test_secrets_resolver.py`, `test_config_env_and_secrets.py`,
   `test_env_show.py`.
-- Total cli suite: 795 tests, all passing at lock.
+- Total cli suite: 793 tests, all passing at lock.
 
 ## Deferred at lock
 

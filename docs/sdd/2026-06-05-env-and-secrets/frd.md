@@ -73,7 +73,6 @@ that apply to the shell's resource context:
 | `AGENTWORKS_VM`            | Always (on-VM shell) | VM name                                                                                                                                           |
 | `AGENTWORKS_VM_HOST`       | VMs with a host      | VM host name from the `vm_hosts` registry (e.g. `lima-local`). Set only when the VM has an entry in the registry (today: Lima-platform VMs only). |
 | `AGENTWORKS_PLATFORM`      | Always (on-VM shell) | One of `lima`, `azure`, `wsl2`, `proxmox`                                                                                                         |
-| `AGENTWORKS_USER`          | Always (on-VM shell) | The on-VM Linux user (admin username or agent username)                                                                                           |
 | `AGENTWORKS_WORKSPACE`     | Workspace context    | Workspace name                                                                                                                                    |
 | `AGENTWORKS_WORKSPACE_DIR` | Workspace context    | Absolute path to the workspace dir on the VM                                                                                                      |
 | `AGENTWORKS_AGENT`         | Agent context        | Agent name                                                                                                                                        |
@@ -374,10 +373,10 @@ lands.
 
 Identity vars that are the same for every Linux user on the VM (`AGENTWORKS_VM`,
 `AGENTWORKS_VM_HOST`, `AGENTWORKS_PLATFORM`) are written to a system-wide profile fragment
-(`/etc/profile.d/agentworks-identity.sh`) by `vms/initializer.py` at VM init. The per-user var
-`AGENTWORKS_USER` is written to each Linux user's `~/.agentworks-profile.sh` at init / agent create.
-Together they ensure any shell on the VM (even ones not opened through agentworks) sees the right
-identity vars.
+(`/etc/profile.d/agentworks-identity.sh`) by `vms/initializer.py` at VM init. Together with the zsh
+mirror in `/etc/zsh/zprofile`, they ensure any login shell on the VM (even ones not opened through
+agentworks) sees the right identity vars. The on-VM Linux user identifies itself via the standard
+POSIX `$USER` / `$LOGNAME` env vars; no AGENTWORKS\_-prefixed copy is maintained.
 
 Per-context vars (workspace, agent, session) and ALL user-defined env, plaintext or secret, are
 always set inline at the shell-open site. User-defined env is never cached on the VM disk; the

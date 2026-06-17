@@ -331,54 +331,38 @@ def test_sudoers_env_keep_includes_agentworks_and_aw_patterns() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Per-user profile fragment (AGENTWORKS_USER)
+# Per-user profile fragment (PATH additions)
 # ---------------------------------------------------------------------------
 
 
-def test_per_user_profile_writes_agentworks_user_when_provided() -> None:
+def test_per_user_profile_writes_path_exports() -> None:
+    target = _SpyTarget()
+    _write_agentworks_profile(
+        target,
+        path_additions=["/opt/bin", "~/.local/bin"],
+        logger=_SpyLogger(),
+    )
+    profile_writes = [c for p, c in target.writes if AGENTWORKS_PROFILE in p]
+    assert len(profile_writes) == 1
+    body = profile_writes[0]
+    assert 'export PATH="/opt/bin:$PATH"' in body
+    assert 'export PATH="$HOME/.local/bin:$PATH"' in body
+
+
+def test_per_user_profile_writes_empty_body_when_no_paths() -> None:
+    """Reinit safety: an operator who removes their install commands gets
+    a clean fragment (just the managed-by header) on the next reinit."""
     target = _SpyTarget()
     _write_agentworks_profile(
         target,
         path_additions=[],
         logger=_SpyLogger(),
-        identity_env={"AGENTWORKS_USER": "aw-claude"},
-    )
-    profile_writes = [c for p, c in target.writes if AGENTWORKS_PROFILE in p]
-    assert len(profile_writes) == 1
-    assert "export AGENTWORKS_USER=aw-claude" in profile_writes[0]
-
-
-def test_per_user_profile_omits_identity_when_not_provided() -> None:
-    """Backward-compat: existing callers that don't pass identity_env get the
-    old shape (just PATH exports)."""
-    target = _SpyTarget()
-    _write_agentworks_profile(
-        target,
-        path_additions=["/opt/bin"],
-        logger=_SpyLogger(),
-    )
-    profile_writes = [c for p, c in target.writes if AGENTWORKS_PROFILE in p]
-    assert len(profile_writes) == 1
-    assert "PATH=" in profile_writes[0]
-    assert "AGENTWORKS_USER" not in profile_writes[0]
-
-
-def test_per_user_profile_appends_path_then_identity() -> None:
-    target = _SpyTarget()
-    _write_agentworks_profile(
-        target,
-        path_additions=["/opt/bin"],
-        logger=_SpyLogger(),
-        identity_env={"AGENTWORKS_USER": "agentworks"},
     )
     profile_writes = [c for p, c in target.writes if AGENTWORKS_PROFILE in p]
     assert len(profile_writes) == 1
     body = profile_writes[0]
-    # PATH export before AGENTWORKS_USER (so user's shell tweaks to PATH that
-    # reference AGENTWORKS_USER, if any, can rely on it).
-    path_idx = body.find("PATH=")
-    user_idx = body.find("AGENTWORKS_USER")
-    assert 0 < path_idx < user_idx
+    assert "PATH=" not in body
+    assert "Managed by agentworks" in body
 
 
 if __name__ == "__main__":  # pragma: no cover
