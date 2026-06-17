@@ -34,6 +34,8 @@ def doctor() -> None:
             if check.message is not None:
                 msg += f" ({check.message})"
             typer.echo(f"  {label} {msg}")
+            if check.hint:
+                typer.echo(f"         hint: {check.hint}")
         typer.echo()
 
     c = report.counts()

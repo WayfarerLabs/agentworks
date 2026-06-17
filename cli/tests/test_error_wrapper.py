@@ -12,6 +12,8 @@ from agentworks.cli import _record_unhandled_error
 from agentworks.output import AgentworksError
 from agentworks.ssh import SSHError
 
+from .conftest import stub_session_resolvers
+
 
 def test_ssh_error_is_agentworks_error() -> None:
     """SSHError must be an AgentworksError subclass so main()'s wrapper catches
@@ -230,15 +232,7 @@ def test_create_session_rolls_back_on_keyboard_interrupt(
 
     monkeypatch.setattr(tmux_mod, "create_session", _explode)
 
-    # Stub the template resolver so we don't need a real config on disk
-    # (CI runs without ~/.config/agentworks/config.toml).
-    class _Tmpl:
-        name = "default"
-        command = ""
-        restart_command = None
-        env: dict[str, str] = {}
-
-    monkeypatch.setattr(session_manager, "_resolve_template", lambda *a, **k: _Tmpl())
+    stub_session_resolvers(monkeypatch)
 
     # Stand-in Config: only the few attributes the code path under test reads.
     config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
@@ -324,13 +318,7 @@ def test_create_session_releases_group_membership_on_keyboard_interrupt(
 
     monkeypatch.setattr(tmux_mod, "create_session", _explode)
 
-    class _Tmpl:
-        name = "default"
-        command = ""
-        restart_command = None
-        env: dict[str, str] = {}
-
-    monkeypatch.setattr(session_manager, "_resolve_template", lambda *a, **k: _Tmpl())
+    stub_session_resolvers(monkeypatch)
 
     config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
 
@@ -414,13 +402,7 @@ def test_create_session_rollback_failure_does_not_mask_keyboard_interrupt(
 
     db.delete_session = _failing_delete_session  # type: ignore[method-assign]
 
-    class _Tmpl:
-        name = "default"
-        command = ""
-        restart_command = None
-        env: dict[str, str] = {}
-
-    monkeypatch.setattr(session_manager, "_resolve_template", lambda *a, **k: _Tmpl())
+    stub_session_resolvers(monkeypatch)
 
     config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
 

@@ -123,6 +123,12 @@ DYNAMIC_COMPLETIONS: dict[tuple[str, str], str] = {
     # VM console
     ("vm.console", "name"): "vms",
 
+    # Env inspection
+    ("env.show", "vm"): "vms",
+    ("env.show", "workspace"): "workspaces",
+    ("env.show", "agent"): "agents",
+    ("env.show", "session"): "sessions",
+
     # Named consoles
     ("console.create", "vm"): "vms",
     ("console.create", "sessions"): "sessions",

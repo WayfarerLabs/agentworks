@@ -20,6 +20,10 @@ from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.db import InitStatus, ProvisioningStatus
+from agentworks.env import (
+    ResourceContext,
+    vm_stable_identity_env,
+)
 from agentworks.errors import ConnectivityError, ExternalError, NotFoundError
 from agentworks.ssh import ExecTarget, SSHError, SSHLogger, SSHTarget
 from agentworks.vms.cloud_init import INIT_SYSTEM_PACKAGES, PROVISIONING_PACKAGES
@@ -37,17 +41,84 @@ AGENTWORKS_PROFILE = ".agentworks-profile.sh"
 AGENTWORKS_RC = ".agentworks-rc.sh"
 
 
+def _ensure_agentworks_files_sourced(
+    target: ExecTarget,
+    *,
+    home: str,
+    shell: str,
+    logger: SSHLogger,
+) -> None:
+    """Defensive final step: idempotently re-append `. ~/.agentworks-*`
+    source lines to the user's shell rc files.
+
+    Earlier steps in setup (``_write_agentworks_profile``,
+    ``_write_agent_profile``, ``_write_agentworks_rc``, the mise rc-write
+    in ``_run_agent_mise_setup``) each append their source line via
+    grep-or-append when they run. Dotfiles install -- and any other
+    later step that overwrites a shell rc file in place -- can clobber
+    those lines. This helper runs LAST in setup so the source lines
+    survive a dotfiles installer that ships its own ``.zprofile`` /
+    ``.bashrc`` / etc.
+
+    grep-or-append shape means this is a no-op when the source line is
+    already present (the common case where nothing clobbered).
+
+    ``home`` is the literal home directory path (e.g.
+    ``/home/agentworks``). Admin and agent setup pass their respective
+    values; the helper does not assume ``$HOME`` shell expansion.
+
+    ``shell`` selects which zsh-specific files to ensure (``.zprofile``,
+    ``.zshrc``). bash rc files are always checked because we always
+    write source lines to them.
+    """
+    logger.step("Ensure agentworks files sourced")
+
+    profile_source = f". {home}/{AGENTWORKS_PROFILE}"
+    profile_rcs = [f"{home}/.profile", f"{home}/.bashrc"]
+    if shell == "zsh":
+        profile_rcs.append(f"{home}/.zprofile")
+    for rc in profile_rcs:
+        target.run(
+            f"grep -q {AGENTWORKS_PROFILE} {rc} 2>/dev/null || "
+            f"printf '%s\\n' '{profile_source}' >> {rc}",
+            check=False,
+        )
+
+    rc_source = f". {home}/{AGENTWORKS_RC}"
+    rc_files = [f"{home}/.bashrc"]
+    if shell == "zsh":
+        rc_files.append(f"{home}/.zshrc")
+    for rc in rc_files:
+        target.run(
+            f"grep -q {AGENTWORKS_RC} {rc} 2>/dev/null || "
+            f"printf '%s\\n' '{rc_source}' >> {rc}",
+            check=False,
+        )
+
+
 def _write_agentworks_profile(
     target: ExecTarget,
     path_additions: list[str],
     logger: SSHLogger,
+    *,
+    identity_env: dict[str, str] | None = None,
 ) -> None:
     """Write the agentworks-managed login profile fragment.
 
-    Writes $HOME/.agentworks-profile.sh with PATH exports and env vars.
-    Sourced from ~/.profile (bash/sh) and ~/.zprofile (zsh) -- runs once
-    per login shell, inherited by child processes.
-    Always written (even if empty) so that reinit can clear previously set paths.
+    Writes $HOME/.agentworks-profile.sh with per-user static identity
+    exports (e.g. ``AGENTWORKS_AGENT`` for agent users) followed by PATH
+    exports. Sourced from ~/.profile (bash/sh) and ~/.zprofile (zsh) --
+    runs once per login shell, inherited by child processes.
+
+    System-wide identity vars (VM / VM_HOST / PLATFORM) live in
+    ``/etc/profile.d/agentworks-identity.sh``, written by
+    ``_write_agentworks_identity_profile``. The on-VM Linux user is
+    already exposed by the standard ``$USER`` / ``$LOGNAME`` env vars,
+    so admin users pass an empty ``identity_env``.
+
+    Always written (even when both ``identity_env`` is empty and
+    ``path_additions`` is empty) so that reinit can clear previously set
+    paths or identity.
     """
     # Deduplicate paths while preserving order
     seen: set[str] = set()
@@ -62,6 +133,9 @@ def _write_agentworks_profile(
 
     try:
         lines = ["# Managed by agentworks -- do not edit"]
+        if identity_env:
+            for key, value in identity_env.items():
+                lines.append(f"export {key}={shlex.quote(value)}")
         for p in unique_paths:
             expanded = p.replace("~", "$HOME", 1) if p.startswith("~") else p
             lines.append(f'export PATH="{expanded}:$PATH"')
@@ -75,6 +149,278 @@ def _write_agentworks_profile(
             )
     except SSHError as e:
         msg = f"shell profile write failed: {e}"
+        logger.warning(msg)
+        output.warn(msg)
+
+
+# -- VM-side identity / sshd / sudoers fragments -----------------------------
+#
+# Three on-VM files maintained by agentworks init (per the env-and-secrets
+# SDD's Phase 4):
+#
+#   /etc/profile.d/agentworks-identity.sh
+#     System-wide login-shell fragment with the VM-stable identity vars
+#     (AGENTWORKS_VM / AGENTWORKS_VM_HOST / AGENTWORKS_PLATFORM). Sourced by
+#     every login shell on the VM (including raw `ssh awvm--<name>` from
+#     outside agentworks), so identity vars don't require agentworks to be
+#     the one opening the shell. Also writes to /etc/zsh/zprofile because
+#     zsh skips /etc/profile.d by default.
+#
+#   /etc/ssh/sshd_config.d/50-agentworks-accept-env.conf
+#     `AcceptEnv *`. Allows agentworks-issued SSH commands to inject env
+#     vars via the SetEnv mechanism (see docs/adrs/0014-sshd-accept-env-wildcard.md).
+#     Validated with `sshd -t` before sshd is reloaded.
+#
+#   /etc/sudoers.d/50-agentworks-env-keep
+#     `Defaults env_keep += "AGENTWORKS_* AW_*"`. Lets agentworks-managed
+#     vars survive the sudo boundary in console add-shell agent panes
+#     (where the tmux server runs as admin and a pane sudo's to the agent).
+#     Validated with `visudo -c` before install.
+
+AGENTWORKS_IDENTITY_PROFILE_PATH = "/etc/profile.d/agentworks-identity.sh"
+AGENTWORKS_ZPROFILE_PATH = "/etc/zsh/zprofile"
+AGENTWORKS_SSHD_ACCEPT_ENV_PATH = "/etc/ssh/sshd_config.d/50-agentworks-accept-env.conf"
+AGENTWORKS_SUDOERS_ENV_KEEP_PATH = "/etc/sudoers.d/50-agentworks-env-keep"
+
+# Marker comment used to find and replace the identity block in
+# /etc/zsh/zprofile across reinit cycles.
+_ZSH_IDENTITY_MARKER = "# agentworks-identity"
+
+
+def _write_agentworks_identity_profile(
+    target: ExecTarget,
+    identity_env: dict[str, str],
+    logger: SSHLogger,
+) -> None:
+    """Write the VM-stable identity profile fragment.
+
+    System-wide; sourced by every login shell on the VM. ``identity_env``
+    is the VM-stable subset (typically AGENTWORKS_VM, AGENTWORKS_VM_HOST,
+    AGENTWORKS_PLATFORM) produced by ``agentworks.env.vm_stable_identity_env``.
+
+    The ``/etc/profile.d/agentworks-identity.sh`` file is fully owned by
+    agentworks: each reinit overwrites it. The block in ``/etc/zsh/zprofile``
+    is bracketed by ``# agentworks-identity-begin`` / ``# agentworks-identity-end``
+    marker comments; content between those markers is agentworks-owned and
+    gets rewritten on every reinit. An operator who hand-edits between the
+    markers is opting in to having that content overwritten.
+    """
+    logger.step("Identity profile")
+    output.detail(
+        f"Writing {AGENTWORKS_IDENTITY_PROFILE_PATH} ({len(identity_env)} vars)..."
+    )
+
+    lines = ["# Managed by agentworks -- do not edit"]
+    for key, value in identity_env.items():
+        lines.append(f"export {key}={shlex.quote(value)}")
+    body = "\n".join(lines) + "\n"
+    q_body = shlex.quote(body)
+
+    try:
+        # System-wide /etc/profile.d/ fragment.
+        target.run(
+            f"printf '%s' {q_body} | sudo tee {AGENTWORKS_IDENTITY_PROFILE_PATH} > /dev/null",
+        )
+
+        # Mirror into /etc/zsh/zprofile because zsh skips /etc/profile.d
+        # by default. Idempotent: strip any existing agentworks-identity
+        # block (between marker and end-marker) before appending the new
+        # one so reinit doesn't accumulate stale entries.
+        marker = _ZSH_IDENTITY_MARKER
+        q_zprofile = shlex.quote(AGENTWORKS_ZPROFILE_PATH)
+
+        # On a fresh VM, /etc/zsh/ doesn't exist until apt installs
+        # zsh-common (which happens later in init). Create it ourselves so
+        # the mirror lands regardless of install order; when zsh is later
+        # installed, dpkg's noninteractive default keeps our fragment
+        # rather than overwriting it.
+        target.run("sudo mkdir -p /etc/zsh")
+
+        # Strip the prior block only if the file exists AND both markers
+        # are present. A half-edited file (begin marker without matching
+        # end) would otherwise cause sed's address range to delete from
+        # the begin marker through end-of-file, potentially nuking
+        # unrelated operator-added content.
+        file_exists = target.run(f"sudo test -f {q_zprofile}", check=False).ok
+        if file_exists:
+            q_begin = shlex.quote(f"{marker}-begin")
+            q_end = shlex.quote(f"{marker}-end")
+            has_begin = target.run(
+                f"sudo grep -qF {q_begin} {q_zprofile}", check=False,
+            ).ok
+            has_end = target.run(
+                f"sudo grep -qF {q_end} {q_zprofile}", check=False,
+            ).ok
+            if has_begin and has_end:
+                sed_script = shlex.quote(
+                    f"/^{marker}-begin/,/^{marker}-end/d"
+                )
+                target.run(f"sudo sed -i {sed_script} {q_zprofile}")
+            elif has_begin or has_end:
+                output.warn(
+                    f"{AGENTWORKS_ZPROFILE_PATH} has unmatched "
+                    "agentworks-identity markers; leaving them in place "
+                    "and appending a fresh block. Inspect the file and "
+                    "remove the orphan marker manually."
+                )
+
+        zsh_block = (
+            f"{marker}-begin\n"
+            + "".join(f"export {k}={shlex.quote(v)}\n" for k, v in identity_env.items())
+            + f"{marker}-end\n"
+        )
+        q_zsh_block = shlex.quote(zsh_block)
+        target.run(
+            f"printf '%s' {q_zsh_block} | sudo tee -a {q_zprofile} > /dev/null",
+        )
+    except SSHError as e:
+        msg = (
+            f"identity profile write failed: {e}. "
+            "Re-run `agw vm reinit` to retry."
+        )
+        logger.warning(msg)
+        output.warn(msg)
+
+
+def _write_sshd_accept_env(
+    target: ExecTarget,
+    logger: SSHLogger,
+) -> None:
+    """Deploy ``AcceptEnv *`` to sshd_config.d/ and reload sshd.
+
+    The directive lets ``ssh -o SetEnv=KEY=VALUE`` calls from the CLI flow
+    through to the user's shell. See the agentworks AcceptEnv wildcard
+    ADR for the trust-anchor analysis behind the wildcard.
+
+    Validation strategy (backup-validate-restore-on-failure): ``sshd -t``
+    validates the FULL merged config (it follows the
+    ``Include /etc/ssh/sshd_config.d/*.conf`` directive in
+    ``/etc/ssh/sshd_config``), so we cannot validate the snippet in
+    isolation. Instead we back up any prior file, write the new content
+    to the final path, validate, and restore the prior file (or remove
+    if there wasn't one) when validation fails. The race window where
+    a non-validated file sits at the final path is bounded by the
+    ``sshd -t`` call and never affects the running sshd (the reload
+    only happens on validation success). The only way the broken file
+    could become active is if an unrelated process (a ``dpkg`` postinst
+    on openssh-server triggering ``deb-systemd-invoke try-reload-or-
+    restart ssh.service``, for instance, possibly invoked by
+    ``unattended-upgrades`` transitively) reloads sshd in the millisecond-
+    wide window between tee and sshd -t. The snippet is a single
+    ``AcceptEnv *`` line and the chance of that one line failing
+    ``sshd -t`` in isolation is essentially nil; we accept the bounded
+    risk.
+
+    Idempotent on reinit.
+    """
+    logger.step("sshd AcceptEnv")
+    output.detail(f"Writing {AGENTWORKS_SSHD_ACCEPT_ENV_PATH}...")
+
+    body = (
+        "# Managed by agentworks -- do not edit.\n"
+        "# Allows agentworks-issued SSH commands to inject env vars via\n"
+        "# `-o SetEnv=KEY=VALUE`; see the agentworks AcceptEnv wildcard ADR.\n"
+        "AcceptEnv *\n"
+    )
+    q_body = shlex.quote(body)
+    q_path = shlex.quote(AGENTWORKS_SSHD_ACCEPT_ENV_PATH)
+    q_bak = shlex.quote(AGENTWORKS_SSHD_ACCEPT_ENV_PATH + ".bak")
+
+    try:
+        # Capture any prior content so we can roll back on validate failure.
+        had_prior = target.run(f"sudo test -f {q_path}", check=False).ok
+        if had_prior:
+            target.run(f"sudo cp {q_path} {q_bak}")
+
+        target.run(f"printf '%s' {q_body} | sudo tee {q_path} > /dev/null")
+
+        validate = target.run("sudo sshd -t", check=False)
+        if not validate.ok:
+            if had_prior:
+                target.run(f"sudo mv {q_bak} {q_path}", check=False)
+            else:
+                target.run(f"sudo rm -f {q_path}", check=False)
+            raise SSHError(
+                f"sshd -t rejected the AcceptEnv fragment: {validate.stderr.strip()}"
+            )
+
+        # Validation OK: drop the backup (best-effort; orphaned .bak is
+        # harmless since `.bak` doesn't match `*.conf` in sshd_config.d).
+        if had_prior:
+            target.run(f"sudo rm -f {q_bak}", check=False)
+
+        target.run("sudo systemctl reload ssh", check=False)
+    except SSHError as e:
+        msg = (
+            f"sshd AcceptEnv install failed: {e}. "
+            "Re-run `agw vm reinit` to retry."
+        )
+        logger.warning(msg)
+        output.warn(msg)
+
+
+def _write_sudoers_env_keep(
+    target: ExecTarget,
+    logger: SSHLogger,
+) -> None:
+    """Deploy ``env_keep += "AGENTWORKS_* AW_*"`` to sudoers.d/.
+
+    Without this, sudo strips agentworks-managed env vars across the user
+    switch in console add-shell agent panes (the tmux server runs as
+    admin; the pane sudo's to the agent). Validated with ``visudo -c``
+    before install; on validation failure the file is removed so the
+    sudoers DB stays consistent.
+    """
+    logger.step("sudoers env_keep")
+    output.detail(f"Writing {AGENTWORKS_SUDOERS_ENV_KEEP_PATH}...")
+
+    body = (
+        "# Managed by agentworks -- do not edit.\n"
+        "# Preserves agentworks-managed env vars across sudo for the\n"
+        "# console add-shell agent-pane path; see\n"
+        "# docs/adrs/0014-sshd-accept-env-wildcard.md.\n"
+        'Defaults env_keep += "AGENTWORKS_* AW_*"\n'
+    )
+    q_body = shlex.quote(body)
+    q_path = shlex.quote(AGENTWORKS_SUDOERS_ENV_KEEP_PATH)
+
+    # Write to a staging file, validate with visudo -cf, only then
+    # promote to the real path. A broken sudoers fragment can lock
+    # the operator out of sudo entirely, so the validate step is
+    # load-bearing.
+    #
+    # The staging path uses a .tmp suffix; sudo's /etc/sudoers.d/ loader
+    # only picks up files whose names don't contain a literal '.' AND
+    # match the no-tilde rule, so .tmp files are safely ignored even if
+    # cleanup races mid-init.
+    staging = AGENTWORKS_SUDOERS_ENV_KEEP_PATH + ".tmp"
+    q_staging = shlex.quote(staging)
+    try:
+        try:
+            target.run(
+                f"printf '%s' {q_body} | sudo tee {q_staging} > /dev/null",
+            )
+            target.run(f"sudo chmod 0440 {q_staging}")
+            validate = target.run(
+                f"sudo visudo -cf {q_staging}", check=False,
+            )
+            if not validate.ok:
+                raise SSHError(
+                    f"visudo -cf rejected the env_keep fragment: "
+                    f"{validate.stderr.strip()}"
+                )
+            target.run(f"sudo mv {q_staging} {q_path}")
+        finally:
+            # Always best-effort-remove the staging path. On the success
+            # path the mv above already moved the file, so rm is a no-op;
+            # on any failure path we don't want orphaned .tmp files
+            # accumulating under /etc/sudoers.d/.
+            target.run(f"sudo rm -f {q_staging}", check=False)
+    except SSHError as e:
+        msg = (
+            f"sudoers env_keep install failed: {e}. "
+            "Re-run `agw vm reinit` to retry."
+        )
         logger.warning(msg)
         output.warn(msg)
 
@@ -229,6 +575,11 @@ def _run_mise_install(
 
     If a lockfile is present, tries --locked first. If that fails due to
     unlocked packages and allow_unlocked is true, retries without --locked.
+
+    Runs without env injection: provisioning is hermetic. mise hooks see
+    static identity via the system-wide profile fragment (login-shell
+    sourcing) and have no access to operator env (those reach runtime
+    shells only).
     """
     logger.step("Mise install")
 
@@ -592,7 +943,13 @@ def _run_catalog_commands(
     *,
     label: str = "Install command",
 ) -> list[str]:
-    """Run install commands from a catalog entry dict. Returns PATH additions."""
+    """Run install commands from a catalog entry dict. Returns PATH additions.
+
+    Runs without env injection: provisioning is hermetic. Install commands
+    see static identity via the on-disk profile fragments (login-shell
+    sourcing) and have no access to operator env (those reach runtime
+    shells only).
+    """
     if not command_names:
         return []
 
@@ -625,7 +982,10 @@ def _run_catalog_commands(
         truncated = entry.command[:60]
         output.detail(f"{label} {i}/{total} ({name}): {truncated}...")
         try:
-            target.run(f"{shlex.quote(shell)} -lc {shlex.quote(entry.command)}", timeout=120)
+            target.run(
+                f"{shlex.quote(shell)} -lc {shlex.quote(entry.command)}",
+                timeout=120,
+            )
         except SSHError as e:
             msg = f"{label.lower()} '{name}' failed: {truncated}... ({e})"
             logger.warning(msg)
@@ -1171,6 +1531,33 @@ def _phase_b_setup(
 
     apply_vm_hardening(ts_target, logger)
 
+    # Non-fatal: VM-wide SetEnv plumbing (env-and-secrets SDD Phase 4).
+    # Runs before apt install so subsequent SSH commands within init can
+    # rely on the SetEnv path. These targets don't touch zsh-shipped files,
+    # so dpkg conffile handling doesn't apply.
+    _write_sshd_accept_env(ts_target, logger)
+    _write_sudoers_env_keep(ts_target, logger)
+    vm_row = db.get_vm(vm_name)
+    # Init runs against a VM that exists in the DB (initialize_vm fetches the
+    # row up front). A None here is an internal invariant violation, not a
+    # recoverable state, so surface it loudly.
+    assert vm_row is not None, f"VM '{vm_name}' missing from DB mid-init"
+    identity_ctx = ResourceContext(
+        vm_name=vm_row.name,
+        platform=vm_row.platform,
+        user=admin_username,
+        vm_host=vm_row.vm_host_name,
+    )
+
+    # Provisioning is hermetic: no operator env, no per-context identity,
+    # no secrets from env tables are injected into install commands. Static
+    # identity (AGENTWORKS_VM / VM_HOST / PLATFORM) reaches install commands
+    # via /etc/profile.d/agentworks-identity.sh sourcing. Tailscale auth key
+    # and git credentials -- the only provisioning-time secrets -- have
+    # their own dedicated config paths outside [admin.env]. Operator env
+    # only reaches RUNTIME shells (vm shell, agent shell, sessions,
+    # consoles), never build-time install machinery.
+
     # Non-fatal: system repos + packages (mise repo added, then all packages)
     _install_system_packages(ts_target, logger)
 
@@ -1179,6 +1566,16 @@ def _phase_b_setup(
 
     # Non-fatal: apt packages (direct list + catalog entries)
     _install_apt_packages(ts_target, config, catalog, logger)
+
+    # Identity profile fragments. Runs AFTER apt install because apt uses
+    # `--force-confnew`, which would replace the agentworks block in
+    # `/etc/zsh/zprofile` with zsh-common's package default if zsh got
+    # installed after we wrote our fragment. Post-install, we append cleanly
+    # on top of whatever the package shipped. The mirror is idempotent on
+    # reinit (strip-and-rewrite via begin/end markers).
+    _write_agentworks_identity_profile(
+        ts_target, vm_stable_identity_env(identity_ctx), logger,
+    )
 
     # Non-fatal: snap packages
     if config.vm.snap:
@@ -1314,7 +1711,10 @@ def _phase_b_setup(
             fetch_dir(ref, ts_target, dest, logger=logger)
 
             output.detail(f"Running dotfiles install: {config.admin.dotfiles_install_cmd}")
-            ts_target.run(f"cd {dest} && {config.admin.dotfiles_install_cmd}", timeout=120)
+            ts_target.run(
+                f"cd {dest} && {config.admin.dotfiles_install_cmd}",
+                timeout=120,
+            )
         except (SourceRefError, Exception) as e:
             msg = f"dotfiles install failed: {e}"
             logger.warning(msg)
@@ -1327,12 +1727,18 @@ def _phase_b_setup(
     # Non-fatal: mise install (after config + dotfiles + lockfile are all settled)
     prune = config.admin.mise_prune_on_reinit
     if config.admin.mise_packages or config.admin.mise_lockfile:
-        _run_mise_install(ts_target, admin_shell, home, config.admin.mise_allow_unlocked, logger, prune=prune)
+        _run_mise_install(
+            ts_target, admin_shell, home, config.admin.mise_allow_unlocked, logger,
+            prune=prune,
+        )
     else:
         try:
             check = ts_target.run(f"test -f {home}/.config/mise/config.toml", check=False)
             if check.ok:
-                _run_mise_install(ts_target, admin_shell, home, config.admin.mise_allow_unlocked, logger, prune=prune)
+                _run_mise_install(
+                    ts_target, admin_shell, home, config.admin.mise_allow_unlocked, logger,
+                    prune=prune,
+                )
         except SSHError:
             pass
 
@@ -1347,7 +1753,7 @@ def _phase_b_setup(
         label="User install command",
     )
 
-    # Non-fatal: shell profile (PATH exports, sourced at login)
+    # Non-fatal: shell profile (PATH exports sourced at login)
     all_paths = system_path + mise_path + user_path
     _write_agentworks_profile(ts_target, all_paths, logger)
 
@@ -1362,6 +1768,13 @@ def _phase_b_setup(
 
     install_claude_plugins(
         _admin_run_cmd, config.admin.claude_marketplaces, config.admin.claude_plugins, logger
+    )
+
+    # Defensive final step: re-ensure source lines in case any earlier
+    # step (dotfiles install in particular) overwrote a shell rc file
+    # in place. Idempotent grep-or-append.
+    _ensure_agentworks_files_sourced(
+        ts_target, home=home, shell=admin_shell, logger=logger,
     )
 
 

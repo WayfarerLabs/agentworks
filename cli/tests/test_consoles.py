@@ -63,16 +63,23 @@ def _seed_vm(db: Database, vm_name: str = "vm1", *, with_tailscale: bool = False
 
 def _seed_sessions(db: Database, names: list[str], *, workspace_name: str = "ws-vm1") -> None:
     for n in names:
+        # Per the env-and-secrets SDD, all sessions (admin and agent) carry
+        # a per-session socket path. Tests that only need the row's existence
+        # use a sentinel path; tests that actually probe tmux replace it.
         db._conn.execute(
-            "INSERT INTO sessions (name, workspace_name, template, mode) "
-            "VALUES (?, ?, 'default', 'admin')",
-            (n, workspace_name),
+            "INSERT INTO sessions (name, workspace_name, template, mode, socket_path) "
+            "VALUES (?, ?, 'default', 'admin', ?)",
+            (n, workspace_name, f"/run/agentworks/admin-tmux-sockets/admin/{n}.sock"),
         )
     db._conn.commit()
 
 
 class _StubNamedConsoleConfig:
     tmux_layout: str = "tiled"
+
+
+class _StubAdminConfig:
+    env: dict[str, object] = {}  # noqa: RUF012 - stub class attr
 
 
 class _StubConfig:
@@ -86,9 +93,26 @@ class _StubConfig:
 
     ``named_console`` provides only what multi_console reads from Config;
     extend here as new fields are added to NamedConsoleConfig.
+
+    ``vm_templates``, ``agent_templates``, ``workspace_templates``,
+    ``session_templates``, ``admin``, and ``secret_resolver`` carry empty
+    defaults so ``_resolve_pane_env`` and related env-resolution helpers
+    in multi_console don't crash on stub inputs; tests that probe env
+    flow should use real Config rather than this stub.
     """
 
     named_console = _StubNamedConsoleConfig()
+    vm_templates: dict[str, object] = {}  # noqa: RUF012
+    agent_templates: dict[str, object] = {}  # noqa: RUF012
+    workspace_templates: dict[str, object] = {}  # noqa: RUF012
+    session_templates: dict[str, object] = {}  # noqa: RUF012
+    admin: _StubAdminConfig = _StubAdminConfig()
+
+    @property
+    def secret_resolver(self) -> object:
+        from agentworks.secrets import SecretResolver
+
+        return SecretResolver([], {})
 
 
 # -- parse_session_spec ----------------------------------------------------
@@ -1114,11 +1138,13 @@ def test_attach_console_builds_admin_shell_window_without_placeholder(
     cmds = fake_target.commands
     new_sessions = [c for c in cmds if "new-session -d -s aw-console-con" in c]
     assert len(new_sessions) == 1
-    # Window 0 is the --admin-- window, running sudo su --login <admin> -- pin
-    # the shape so quoting regressions in the bootstrap fail loudly.
+    # Window 0 is the --admin-- window, running `exec $SHELL -l` directly --
+    # the prior `sudo su --login <admin>` wrapper was a no-op user-switch
+    # (post FRD R1 the SSH user IS the admin user) and got dropped by the
+    # env-and-secrets SDD.
     assert "-n --admin--" in new_sessions[0]
-    assert "sudo su --login" in new_sessions[0]
-    assert "admin" in new_sessions[0]  # the admin username from _seed_vm
+    assert "exec $SHELL -l" in new_sessions[0]
+    assert "sudo" not in new_sessions[0]
     assert not any("_PLACEHOLDER" in c for c in cmds)
     assert not any("list-windows" in c for c in cmds)
     new_windows = [c for c in cmds if "new-window -t aw-console-con" in c]
@@ -1998,6 +2024,44 @@ def test_split_shell_pane_admin_branch_no_sudo(
     assert len(splits) == 1
     assert "sudo --login" not in splits[0]
     assert 'exec "$SHELL" -l' in splits[0]
+
+
+def test_split_shell_pane_emits_workspace_identity_only(
+    db: Database, fake_target: _FakeTarget
+) -> None:
+    """``tmux split-window -e KEY=VAL`` flags on a console add-shell agent
+    pane carry the workspace dynamic-identity vars only. The pane is a
+    sidecar shell rooted in the session's workspace -- it's not part of
+    the session, so it doesn't see AGENTWORKS_SESSION[_KIND]. The agent's
+    own AGENTWORKS_AGENT is per-user-static and reaches the pane via the
+    agent's on-disk ``~/.agentworks-profile.sh`` (login-shell sourcing),
+    not via SetEnv. Tests the post-static/dynamic-split contract."""
+    _seed_vm(db, with_tailscale=True)
+    db._conn.execute(
+        "INSERT INTO agents (name, vm_name, linux_user) VALUES ('bot', 'vm1', 'bot-user')",
+    )
+    db._conn.execute(
+        "INSERT INTO sessions (name, workspace_name, template, mode, agent_name, socket_path) "
+        "VALUES ('s', 'ws-vm1', 'default', 'agent', 'bot', '/tmp/s.sock')",
+    )
+    db._conn.commit()
+    create_console(db, name="con", vm_name="vm1", session_specs=["s"])
+
+    fake_target.commands.clear()
+    fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
+    add_shell(db, _StubConfig(), console_name="con", session_name="s")
+
+    splits = [c for c in fake_target.commands if "split-window -t aw-console-con:s" in c]
+    assert len(splits) == 1
+    # Workspace dynamic identity reaches the pane.
+    assert " -e AGENTWORKS_WORKSPACE=ws-vm1" in splits[0]
+    assert " -e AGENTWORKS_WORKSPACE_DIR=" in splits[0]
+    # Session dynamic identity does NOT (add-shell panes are sidecar
+    # shells, not part of the session itself).
+    assert "AGENTWORKS_SESSION" not in splits[0]
+    # Agent static identity does NOT come via SetEnv (it's in the agent's
+    # per-user profile fragment).
+    assert "AGENTWORKS_AGENT" not in splits[0]
 
 
 # -- Pane tagging ----------------------------------------------------------

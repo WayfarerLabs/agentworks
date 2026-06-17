@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from agentworks.config import Config, VMTemplate
+    from agentworks.env import EnvEntry
 
 
 @dataclass
@@ -30,6 +31,8 @@ class ResolvedVMTemplate:
     apt_packages: list[str] = field(default_factory=list)
     snap: list[str] = field(default_factory=list)
     system_install_commands: list[str] = field(default_factory=list)
+    # Env (declared per-template; merged child-overrides-parent)
+    env: dict[str, EnvEntry] = field(default_factory=dict)
 
 
 def resolve_from_dict(
@@ -92,11 +95,6 @@ def _append_dedupe(target: list[str], source: list[str]) -> list[str]:
     return result
 
 
-def _merge_map(target: dict[str, str], source: dict[str, str]) -> dict[str, str]:
-    """Merge source map into target. Source wins on key collision."""
-    return {**target, **source}
-
-
 def _merge(target: ResolvedVMTemplate, source: ResolvedVMTemplate) -> None:
     """Merge source into target. Scalars: source wins. Lists: append with dedupe."""
     target.cpus = source.cpus
@@ -108,6 +106,7 @@ def _merge(target: ResolvedVMTemplate, source: ResolvedVMTemplate) -> None:
     target.apt_packages = _append_dedupe(target.apt_packages, source.apt_packages)
     target.snap = _append_dedupe(target.snap, source.snap)
     target.system_install_commands = _append_dedupe(target.system_install_commands, source.system_install_commands)
+    target.env = {**target.env, **source.env}
 
 
 def _merge_template(target: ResolvedVMTemplate, tmpl: VMTemplate) -> None:
@@ -131,3 +130,5 @@ def _merge_template(target: ResolvedVMTemplate, tmpl: VMTemplate) -> None:
         target.snap = _append_dedupe(target.snap, tmpl.snap)
     if tmpl.system_install_commands is not None:
         target.system_install_commands = _append_dedupe(target.system_install_commands, tmpl.system_install_commands)
+    if tmpl.env:
+        target.env = {**target.env, **tmpl.env}

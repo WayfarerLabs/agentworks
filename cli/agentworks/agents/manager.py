@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 from agentworks import output
 from agentworks.config import validate_name
@@ -22,6 +22,8 @@ if TYPE_CHECKING:
     from agentworks.catalog import UserInstallCommandEntry
     from agentworks.config import Config
     from agentworks.db import AgentRow, Database, VMRow, WorkspaceRow
+    from agentworks.env import EnvEntry
+    from agentworks.secrets import SecretTarget
     from agentworks.ssh import ExecTarget, SSHLogger
 
 AGENT_PREFIX = "agt-"
@@ -37,6 +39,80 @@ def derive_linux_user(agent_name: str) -> str:
     used at agent-create time.
     """
     return f"{AGENT_PREFIX}{agent_name}"
+
+
+class _AgentDirectEnvScopes(NamedTuple):
+    """Per-scope env dicts for ``agent shell`` / ``agent exec``.
+
+    The ``workspace`` field is ``None`` for shells / execs that don't
+    pin a workspace context (``agent shell`` without ``--workspace``,
+    ``agent exec`` today). When set, workspace-template env enters the
+    FRD R2 precedence ladder between vm and agent.
+    """
+
+    vm: dict[str, EnvEntry]
+    workspace: dict[str, EnvEntry] | None
+    agent: dict[str, EnvEntry]
+
+
+def _resolve_agent_direct_env_scopes(
+    config: Config,
+    vm: VMRow,
+    agent: AgentRow,
+    *,
+    ws: WorkspaceRow | None = None,
+) -> _AgentDirectEnvScopes:
+    """Resolve per-scope env dicts for ``agent shell`` / ``agent exec``.
+
+    Both the SecretTarget (eager-resolve) and the ``compose_env`` call
+    (render) consume the result of this helper, guaranteeing they see
+    identical scope state -- no drift between "what was prompted for"
+    and "what was passed to the shell."
+
+    Scope sources mirror the FRD R2 precedence ladder:
+
+    - ``vm``: the VM's actual template env (DB row, not ``config.vm``).
+    - ``workspace``: when ``ws`` is supplied, the workspace template's env.
+    - ``agent``: the agent row's template env (DB row, not ``config.agent``).
+      The agent pre-exists this call and may have been created under a
+      different template than the operator's current ``--template``
+      would resolve.
+    """
+    from agentworks.agents.templates import resolve_from_dict as _resolve_agent_template
+    from agentworks.vms.templates import resolve_from_dict as _resolve_vm_template
+    from agentworks.workspaces.templates import resolve_template as _resolve_ws_template
+
+    vm_tmpl = _resolve_vm_template(config.vm_templates, vm.template)
+    agent_tmpl = _resolve_agent_template(config.agent_templates, agent.template)
+    ws_env: dict[str, EnvEntry] | None = None
+    if ws is not None:
+        ws_env = _resolve_ws_template(config, ws.template).env
+    return _AgentDirectEnvScopes(
+        vm=vm_tmpl.env,
+        workspace=ws_env,
+        agent=agent_tmpl.env,
+    )
+
+
+def _agent_direct_secret_target(
+    scopes: _AgentDirectEnvScopes, *, label: str,
+) -> SecretTarget:
+    """Build the SecretTarget for ``agent shell`` / ``agent exec`` from
+    pre-resolved scope dicts.
+
+    Single-phase: the operator opens one shell as the agent's Linux user.
+    The companion ``compose_env`` call must consume the same ``scopes``
+    so the eager-resolve prompts cover exactly what the runtime env will
+    reference (no drift).
+    """
+    from agentworks.secrets import SecretTarget
+
+    return SecretTarget(
+        vm=scopes.vm,
+        workspace=scopes.workspace,
+        agent=scopes.agent,
+        label=label,
+    )
 
 
 def workspace_group(workspace_name: str) -> str:
@@ -132,7 +208,10 @@ def create_agent(
     vm = _require_vm(db, vm_name)
     linux_user = derive_linux_user(name)
 
-    # Collect credentials up front before any SSH work
+    # Collect agent-provisioning credentials up front (git tokens live
+    # outside the env-block system). Operator env secrets are NOT
+    # prompted at agent create -- provisioning is hermetic. They get
+    # prompted at the use site (agent shell, session create, etc.).
     git_tokens = _collect_agent_credentials(config)
 
     from agentworks.ssh import SSHLogger
@@ -156,7 +235,12 @@ def create_agent(
         # rollback commands are logged BEFORE the footer, not after.
         try:
             try:
-                _create_agent_on_vm(vm, config, linux_user, git_tokens=git_tokens, logger=ssh_logger)
+                _create_agent_on_vm(
+                    vm, config, linux_user,
+                    agent_name=name,
+                    git_tokens=git_tokens,
+                    logger=ssh_logger,
+                )
             except KeyboardInterrupt:
                 output.warn(f"Cancelling agent create '{name}'... rolling back.")
                 _safe_rollback()
@@ -337,12 +421,21 @@ def reinit_agent(
     # Collect credentials up front before any SSH work
     git_tokens = _collect_agent_credentials(config)
 
+    # Provisioning is hermetic: no operator-env secrets are prompted at
+    # agent reinit. They get prompted at the use site (agent shell,
+    # session create, etc.) once reinit completes.
+
     from agentworks.ssh import SSHLogger
     ssh_logger = SSHLogger(vm.name, "agent-reinit")
     with keep_vm_active(db, config, vm):
         try:
             try:
-                _create_agent_on_vm(vm, config, agent.linux_user, git_tokens=git_tokens, logger=ssh_logger)
+                _create_agent_on_vm(
+                    vm, config, agent.linux_user,
+                    agent_name=agent.name,
+                    git_tokens=git_tokens,
+                    logger=ssh_logger,
+                )
             except KeyboardInterrupt:
                 output.warn(
                     f"Cancelling agent reinit '{name}'. The agent may be in a partial state. "
@@ -499,7 +592,57 @@ def shell_agent(
 
     import sys
 
+    from agentworks.env import ResourceContext, compose_env
+    from agentworks.secrets import resolve_for_command
     from agentworks.ssh import agent_exec_target, interactive
+
+    # Resolve workspace upfront (needed for authz check, env scope, AND
+    # ctx) before any SSH probe so failures surface as clean validation
+    # errors and the eager-resolve below sees the right scope chain.
+    ws: WorkspaceRow | None = None
+    if workspace_name:
+        ws = db.get_workspace(workspace_name)
+        if ws is None:
+            raise NotFoundError(
+                f"workspace '{workspace_name}' not found",
+                entity_kind="workspace",
+                entity_name=workspace_name,
+            )
+        if not db.has_any_grant(name, workspace_name):
+            raise AuthorizationError(
+                f"agent '{name}' does not have access to workspace '{workspace_name}'",
+                entity_kind="agent",
+                entity_name=name,
+                hint=f"Run 'agent grant-workspaces {name} {workspace_name}' to grant access.",
+            )
+
+    # Eager-prompting orchestration (FRD R4 / Phase 6): resolve every
+    # secret referenced by the agent shell's env chain BEFORE opening
+    # the interactive SSH session. The same scope dicts feed both the
+    # SecretTarget (for resolve_for_command) and compose_env below so
+    # the two consumers can't drift.
+    scopes = _resolve_agent_direct_env_scopes(config, vm, agent, ws=ws)
+    resolve_for_command(
+        [_agent_direct_secret_target(scopes, label=f"agent-shell={agent.name}")],
+        config,
+    )
+
+    ctx = ResourceContext(
+        vm_name=vm.name,
+        vm_host=vm.vm_host_name,
+        platform=vm.platform,
+        user=agent.linux_user,
+        workspace_name=ws.name if ws else None,
+        workspace_dir=ws.workspace_path if ws else None,
+        agent_name=agent.name,
+    )
+    env = compose_env(
+        resolver=config.secret_resolver,
+        ctx=ctx,
+        vm=scopes.vm,
+        workspace=scopes.workspace,
+        agent=scopes.agent,
+    )
 
     # Direct agent SSH (FRD R1): no admin+sudo detour. The agent's
     # authorized_keys (Phase 3) accepts the operator's key set.
@@ -512,31 +655,17 @@ def shell_agent(
         # on Permission denied.
         _assert_agent_ssh_works(target, agent)
 
-        if workspace_name:
-            ws = db.get_workspace(workspace_name)
-            if ws is None:
-                raise NotFoundError(
-                    f"workspace '{workspace_name}' not found",
-                    entity_kind="workspace",
-                    entity_name=workspace_name,
-                )
-            if not db.has_any_grant(name, workspace_name):
-                raise AuthorizationError(
-                    f"agent '{name}' does not have access to workspace '{workspace_name}'",
-                    entity_kind="agent",
-                    entity_name=name,
-                    hint=f"Run 'agent grant-workspaces {name} {workspace_name}' to grant access.",
-                )
+        if ws is not None:
             import shlex
 
             q_path = shlex.quote(ws.workspace_path)
             # SSH as the agent, then cd into the workspace and exec an
             # interactive login shell. No sudo / su involved.
             shell_cmd = f"cd {q_path} && exec $SHELL -li"
-            sys.exit(interactive(target, shell_cmd))
+            sys.exit(interactive(target, shell_cmd, env=env))
         else:
             # SSH as the agent with no command -> interactive login shell.
-            sys.exit(interactive(target, ""))
+            sys.exit(interactive(target, "", env=env))
 
 
 def exec_agent(
@@ -555,6 +684,8 @@ def exec_agent(
     """
     import shlex
 
+    from agentworks.env import ResourceContext, compose_env
+    from agentworks.secrets import resolve_for_command
     from agentworks.ssh import agent_exec_target
 
     agent = db.get_agent(name)
@@ -566,6 +697,32 @@ def exec_agent(
         )
 
     vm = _require_vm(db, agent.vm_name)
+
+    # Eager-prompting orchestration (FRD R4 / Phase 6): resolve every
+    # secret referenced by the agent exec env chain BEFORE running the
+    # remote command. The same scope dicts feed both the SecretTarget
+    # and compose_env below so the two consumers can't drift.
+    scopes = _resolve_agent_direct_env_scopes(config, vm, agent)
+    resolve_for_command(
+        [_agent_direct_secret_target(scopes, label=f"agent-exec={agent.name}")],
+        config,
+    )
+
+    ctx = ResourceContext(
+        vm_name=vm.name,
+        vm_host=vm.vm_host_name,
+        platform=vm.platform,
+        user=agent.linux_user,
+        agent_name=agent.name,
+    )
+    env = compose_env(
+        resolver=config.secret_resolver,
+        ctx=ctx,
+        vm=scopes.vm,
+        workspace=scopes.workspace,
+        agent=scopes.agent,
+    )
+
     target = agent_exec_target(vm, config, agent)
 
     with keep_vm_active(db, config, vm):
@@ -577,7 +734,9 @@ def exec_agent(
         # Wrap in a login shell so the agent's PATH (mise shims,
         # ~/.local/bin, etc.) is set up. This matches the env an operator
         # gets via `agent shell`.
-        return target.call_streaming(f"$SHELL -lc {shlex.quote(remote_cmd)}")
+        return target.call_streaming(
+            f"$SHELL -lc {shlex.quote(remote_cmd)}", env=env,
+        )
 
 
 # -- VM operations ---------------------------------------------------------
@@ -755,6 +914,7 @@ def _create_agent_on_vm(
     config: Config,
     linux_user: str,
     *,
+    agent_name: str,
     git_tokens: dict[str, str] | None = None,
     logger: SSHLogger,
 ) -> None:
@@ -835,19 +995,40 @@ def _create_agent_on_vm(
 
     agent_target = exec_target_for_user(vm, config, user=linux_user, logger=logger)
 
-    # Minimal rc file with a clear agent prompt.
-    if agent_shell == "zsh":
-        rc_content = f"export PS1='[agent:{linux_user}] %~%# '\n"
-        rc_file = f"{home}/.zshrc"
-    elif agent_shell == "bash":
-        rc_content = f"export PS1='[agent:{linux_user}] \\w\\$ '\n"
-        rc_file = f"{home}/.bashrc"
-    else:
-        output.warn(f"unsupported shell '{agent_shell}', skipping prompt configuration")
-        rc_content = None
-        rc_file = None
-    if rc_content and rc_file:
-        agent_target.write_file(rc_file, rc_content, mode="0644")
+    # Provisioning is hermetic: no operator env from [agent_templates.*.env]
+    # or [vm_templates.*.env] is injected into the agent's install runners.
+    # Static identity (AGENTWORKS_VM via /etc/profile.d/, AGENTWORKS_AGENT
+    # via the per-user ~/.agentworks-profile.sh we write BELOW before the
+    # install commands run) reaches the runners through login-shell
+    # sourcing. Operator env only lands at runtime shells.
+
+    # Write the agent's per-user profile fragment EARLY -- before any
+    # install commands run -- so that AGENTWORKS_AGENT is visible to
+    # those commands via the login-shell sourcing chain. The fragment
+    # gets rewritten at the end of _run_agent_install_commands with
+    # accumulated PATH entries from catalog install commands.
+    from agentworks.env import ResourceContext, per_user_identity_env
+
+    agent_identity_ctx = ResourceContext(
+        vm_name=vm.name,
+        platform=vm.platform,
+        user=linux_user,
+        vm_host=vm.vm_host_name,
+        agent_name=agent_name,
+    )
+    agent_identity = per_user_identity_env(agent_identity_ctx)
+    _write_agent_profile(
+        agent_target,
+        home=home,
+        shell=agent_cfg.shell,
+        identity_env=agent_identity,
+    )
+
+    # No PS1 setup: operators who want an agent indicator can read
+    # $AGENTWORKS_AGENT (exported by the per-user profile fragment we
+    # just wrote) from their own prompt. A hardcoded PS1 lost against
+    # starship / powerlevel10k anyway, and clobbered symlinked dotfiles
+    # via scp.
 
     # Git safe.directory wildcard (agents access repos owned by admin).
     if config.admin.git_force_safe_directory:
@@ -876,8 +1057,13 @@ def _create_agent_on_vm(
         except Exception as e:
             output.warn(f"agent git credential setup failed: {e}")
 
-    # User install commands.
-    _run_agent_install_commands(agent_target=agent_target, config=config, home=home)
+    # User install commands + login-shell PATH profile fragment.
+    _run_agent_install_commands(
+        agent_target=agent_target,
+        config=config,
+        home=home,
+        identity_env=agent_identity,
+    )
 
     # Dotfiles.
     if agent_cfg.dotfiles_source:
@@ -944,10 +1130,11 @@ def _create_agent_on_vm(
                 fetch_dir(ref, agent_target, dest)
 
             output.detail(f"Running agent dotfiles install: {agent_cfg.dotfiles_install_cmd}")
-            # Wrap in a login shell: the dotfiles install command is
-            # user-provided and likely expects the agent's interactive
-            # env (PATH additions, aliases, exported vars) to be in
-            # scope, same as if they had run it themselves.
+            # Wrap in a login shell so the dotfiles install command sees
+            # static identity (AGENTWORKS_AGENT via the per-user profile
+            # fragment written earlier this phase) and any PATH the agent
+            # already has. Provisioning is hermetic: no operator env
+            # injected (would only reach runtime shells anyway).
             inner = f"cd {_shlex.quote(dest)} && {agent_cfg.dotfiles_install_cmd}"
             agent_target.run(
                 f"{agent_shell} -lc {_shlex.quote(inner)}",
@@ -970,12 +1157,22 @@ def _create_agent_on_vm(
     from agentworks.vms.initializer import install_claude_plugins
 
     def _agent_run_cmd(cmd: str, timeout: int) -> object:
-        return agent_target.run(f"{agent_shell} -lc {_shlex.quote(cmd)}", timeout=timeout)
+        return agent_target.run(
+            f"{agent_shell} -lc {_shlex.quote(cmd)}", timeout=timeout,
+        )
 
     install_claude_plugins(
         _agent_run_cmd,
         config.agent.claude_marketplaces,
         config.agent.claude_plugins,
+    )
+
+    # Defensive final step: re-ensure source lines in case dotfiles
+    # install (or any other later step) overwrote a shell rc file in
+    # place. Idempotent grep-or-append.
+    from agentworks.vms.initializer import _ensure_agentworks_files_sourced
+    _ensure_agentworks_files_sourced(
+        agent_target, home=home, shell=agent_shell, logger=logger,
     )
 
 
@@ -1005,17 +1202,26 @@ def _run_agent_install_commands(
     agent_target: ExecTarget,
     config: Config,
     home: str,
+    identity_env: dict[str, str],
 ) -> None:
-    """Run user install commands for an agent. Failures warn but do not abort.
+    """Run user install commands for an agent and rewrite the agent's
+    profile fragment with the accumulated PATH. Failures warn but do
+    not abort.
 
     Runs entirely over agent SSH (FRD R1). The agent owns its home, so
-    the PATH-additions profile is written via ``agent_target.write_file``
+    the profile fragment is written via ``agent_target.write_file``
     directly, with no sudo / chown dance.
-    """
-    command_names = config.agent.user_install_commands
-    if not command_names:
-        return
 
+    The profile fragment is rewritten unconditionally (even when there
+    are no install commands and no PATH additions) so that reinit can
+    clear previously set paths. Catalog install commands add their
+    ``path`` entries on top.
+
+    Install commands run without any env= injection -- provisioning is
+    hermetic. Static identity (``AGENTWORKS_AGENT``, etc.) reaches the
+    install command via login-shell sourcing of the per-user profile
+    fragment that was written earlier in agent-setup phase 2.
+    """
     import shlex
 
     from agentworks.catalog import load_catalog
@@ -1024,6 +1230,7 @@ def _run_agent_install_commands(
     catalog = load_catalog(config)
     shell = config.agent.shell
     path_additions: list[str] = []
+    command_names = config.agent.user_install_commands
     total = len(command_names)
 
     for i, name in enumerate(command_names, 1):
@@ -1046,7 +1253,8 @@ def _run_agent_install_commands(
         truncated = entry.command[:60]
         output.detail(f"Agent install command {i}/{total} ({name}): {truncated}...")
         try:
-            # Run the install command in a login shell to source the agent's profile.
+            # Run the install command in a login shell to source the agent's
+            # profile (provides AGENTWORKS_AGENT + PATH adds from earlier).
             agent_target.run(
                 f"{shell} -lc {shlex.quote(entry.command)}",
                 timeout=120,
@@ -1055,30 +1263,65 @@ def _run_agent_install_commands(
             output.warn(f"agent install command '{name}' failed: {e}")
         path_additions.extend(entry.path)
 
-    # Write PATH additions for the agent
+    # Rewrite the agent's profile fragment with identity + accumulated
+    # PATH additions. The fragment was written with identity-only earlier
+    # in _create_agent_on_vm (so install commands above could see
+    # AGENTWORKS_AGENT via login-shell sourcing); the rewrite here adds
+    # the PATH entries those install commands contributed.
     if path_additions:
-        from agentworks.vms.initializer import AGENTWORKS_PROFILE
-
         output.detail(f"Adding {len(path_additions)} PATH entries for agent...")
-        lines = ["# Managed by agentworks -- do not edit"]
-        for p in path_additions:
-            expanded = p.replace("~", "$HOME", 1) if p.startswith("~") else p
-            lines.append(f'export PATH="{expanded}:$PATH"')
-        content = "\n".join(lines) + "\n"
-        try:
-            profile_path = f"{home}/{AGENTWORKS_PROFILE}"
-            agent_target.write_file(profile_path, content, mode="0644")
-            # Source from shell profiles (the agent owns these files; write directly).
-            source_line = f". {profile_path}"
-            rc_files = [f"{home}/.profile", f"{home}/.bashrc"]
-            if shell == "zsh":
-                rc_files.append(f"{home}/.zprofile")
-            for rc in rc_files:
-                agent_target.run(
-                    f"grep -q {AGENTWORKS_PROFILE} {rc} 2>/dev/null || printf '%s\\n' '{source_line}' >> {rc}",
-                )
-        except SSHError as e:
-            output.warn(f"agent PATH configuration failed: {e}")
+    _write_agent_profile(
+        agent_target,
+        home=home,
+        shell=shell,
+        identity_env=identity_env,
+        path_additions=path_additions,
+    )
+
+
+def _write_agent_profile(
+    agent_target: ExecTarget,
+    *,
+    home: str,
+    shell: str,
+    identity_env: dict[str, str],
+    path_additions: list[str] | None = None,
+) -> None:
+    """Write the agent's ``~/.agentworks-profile.sh`` and source it from
+    the agent's shell rc files.
+
+    Used twice in agent setup: once with identity-only (before install
+    commands run, so they see AGENTWORKS_AGENT via login-shell sourcing),
+    and once with identity + accumulated PATH (after install commands).
+    Both writes overwrite the file; the source-line append is
+    grep-or-append so the rc files don't accumulate duplicate lines on
+    reinit.
+    """
+    import shlex
+
+    from agentworks.ssh import SSHError
+    from agentworks.vms.initializer import AGENTWORKS_PROFILE
+
+    lines = ["# Managed by agentworks -- do not edit"]
+    for key, value in identity_env.items():
+        lines.append(f"export {key}={shlex.quote(value)}")
+    for p in (path_additions or []):
+        expanded = p.replace("~", "$HOME", 1) if p.startswith("~") else p
+        lines.append(f'export PATH="{expanded}:$PATH"')
+    content = "\n".join(lines) + "\n"
+    try:
+        profile_path = f"{home}/{AGENTWORKS_PROFILE}"
+        agent_target.write_file(profile_path, content, mode="0644")
+        source_line = f". {profile_path}"
+        rc_files = [f"{home}/.profile", f"{home}/.bashrc"]
+        if shell == "zsh":
+            rc_files.append(f"{home}/.zprofile")
+        for rc in rc_files:
+            agent_target.run(
+                f"grep -q {AGENTWORKS_PROFILE} {rc} 2>/dev/null || printf '%s\\n' '{source_line}' >> {rc}",
+            )
+    except SSHError as e:
+        output.warn(f"agent profile configuration failed: {e}")
 
 
 def _run_agent_mise_setup(
@@ -1098,9 +1341,7 @@ def _run_agent_mise_setup(
     (``{shell} -lc``) so the agent's PATH and any other profile-exported
     env (mise's own activation hooks, plugin discovery paths, downstream
     tooling like ``npm`` / ``pip`` that mise plugins shell out to during
-    install) are in scope. mise's binary is on system PATH so a plain
-    invocation would technically find it, but its behavior is shell- and
-    env-sensitive enough that the wrap is the principled default.
+    install) are in scope. No env= injection: provisioning is hermetic.
     """
     import shlex
 

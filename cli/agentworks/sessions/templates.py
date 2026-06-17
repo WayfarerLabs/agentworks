@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from agentworks.config import Config, SessionTemplate
+    from agentworks.env import EnvEntry
 
 
 @dataclass
@@ -22,7 +23,7 @@ class ResolvedSessionTemplate:
     command: str = ""
     description: str = "Login shell"
     restart_command: str = ""
-    env: dict[str, str] = field(default_factory=dict)
+    env: dict[str, EnvEntry] = field(default_factory=dict)
 
 
 def _append_dedupe(target: list[str], source: list[str]) -> list[str]:
@@ -36,8 +37,8 @@ def _append_dedupe(target: list[str], source: list[str]) -> list[str]:
     return result
 
 
-def _merge_map(target: dict[str, str], source: dict[str, str]) -> dict[str, str]:
-    """Merge source map into target. Source wins on key collision."""
+def _merge_map(target: dict[str, EnvEntry], source: dict[str, EnvEntry]) -> dict[str, EnvEntry]:
+    """Merge source env map into target. Source wins on key collision."""
     return {**target, **source}
 
 

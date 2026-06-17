@@ -10,17 +10,24 @@ import sys
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Literal, Protocol
 
 # ConfigError is defined in agentworks.errors and re-exported here for backward
 # compatibility with existing `from agentworks.config import ConfigError` users.
 # The `X as X` shape marks the name as an explicit re-export for mypy strict mode.
+from agentworks.env import EnvEntry
 from agentworks.errors import ConfigError as ConfigError
+from agentworks.secrets import (
+    SecretBackendConfig,
+    SecretConfig,
+    SecretDecl,
+)
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Callable, Mapping
 
     from agentworks.agents.templates import ResolvedAgentTemplate
+    from agentworks.secrets import SecretResolver, SecretSource
     from agentworks.vms.templates import ResolvedVMTemplate
 
 CONFIG_DIR = Path.home() / ".config" / "agentworks"
@@ -167,6 +174,9 @@ class VMTemplate:
     apt_packages: list[str] | None = None
     snap: list[str] | None = None
     system_install_commands: list[str] | None = None
+    # Env (declared per-template; merged child-overrides-parent at resolution).
+    # Plaintext or secret references; the loader produces EnvEntry instances.
+    env: dict[str, EnvEntry] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -190,6 +200,8 @@ class AdminConfig:
     # Claude Code
     claude_marketplaces: list[str] = field(default_factory=list)
     claude_plugins: list[str] = field(default_factory=list)
+    # Env that applies whenever a shell is opened as the admin user.
+    env: dict[str, EnvEntry] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -212,6 +224,7 @@ class AgentTemplate:
     mise_prune_on_reinit: bool | None = None
     claude_marketplaces: list[str] | None = None
     claude_plugins: list[str] | None = None
+    env: dict[str, EnvEntry] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -220,6 +233,7 @@ class WorkspaceTemplate:
     inherits: list[str] = field(default_factory=list)
     repo: str | None = None
     tmuxinator: bool | None = None  # None = not explicitly set (inherit/default to True)
+    env: dict[str, EnvEntry] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -239,7 +253,7 @@ class SessionTemplate:
     command: str | None = None
     description: str | None = None
     restart_command: str | None = None
-    env: dict[str, str] | None = None
+    env: dict[str, EnvEntry] | None = None
 
 
 @dataclass(frozen=True)
@@ -288,6 +302,20 @@ class Config:
     user_install_commands: dict[str, object] = field(default_factory=dict)
     azure: AzureConfig | None = None
     proxmox: ProxmoxConfig | None = None
+    # Env-and-secrets ----------------------------------------------------
+    # Declared secrets, keyed by name. Empty when [secrets.*] is absent.
+    secrets: dict[str, SecretDecl] = field(default_factory=dict)
+    # Per-backend connection config keyed by kind ("env-var", "onepassword", ...).
+    secret_backends: dict[str, SecretBackendConfig] = field(default_factory=dict)
+    # Top-level [secret_config] table; carries the enabled-backends precedence list.
+    secret_config_data: SecretConfig = field(default_factory=SecretConfig)
+    # Resolver assembled from secret_config_data.backends in precedence order.
+    # An empty SecretResolver (no sources, no secrets) is constructed when the
+    # operator hasn't opted into secrets - callers always get a usable resolver,
+    # so call sites can `.render(env)` unconditionally instead of branching on
+    # None. _validate_env_secret_refs runs before resolver assembly, so this
+    # empty-chain shape never has to face a secret-ref env entry.
+    secret_resolver: SecretResolver = field(default_factory=lambda: _empty_resolver())
     config_issues: tuple[str, ...] = ()
 
 
@@ -329,6 +357,82 @@ def _warn_unexpected_keys(
     if unexpected:
         keys = ", ".join(sorted(unexpected))
         issues.append(f"unexpected keys in [{section}]: {keys}")
+
+
+_ENV_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_AGENTWORKS_ENV_PREFIX = "AGENTWORKS_"
+
+
+def _parse_env_table(
+    raw_env: object,
+    *,
+    context: str,
+    issues: list[str],
+) -> dict[str, EnvEntry]:
+    """Parse a TOML env table into ``dict[str, EnvEntry]``.
+
+    Two value shapes per key:
+
+    - bare string: ``KEY = "value"`` produces ``EnvEntry(key, value=...)``.
+    - inline table with secret: ``KEY = { secret = "name" }`` produces
+      ``EnvEntry(key, secret=...)``.
+
+    Any other shape raises ``ConfigError``. ``AGENTWORKS_*`` keys append a
+    load-time warning to ``issues`` (operators are discouraged from overriding
+    agentworks-managed identity vars). Missing or None input returns ``{}``.
+    """
+    if raw_env is None:
+        return {}
+    if not isinstance(raw_env, dict):
+        raise ConfigError(f"{context}.env must be a table")
+
+    result: dict[str, EnvEntry] = {}
+    for key, val in raw_env.items():
+        key_str = str(key)
+        if not _ENV_KEY_RE.match(key_str):
+            raise ConfigError(
+                f"{context}.env: invalid env var name {key_str!r} "
+                "(must match /^[A-Za-z_][A-Za-z0-9_]*$/)"
+            )
+        if key_str.startswith(_AGENTWORKS_ENV_PREFIX):
+            issues.append(
+                f"{context}.env sets agentworks-managed identity variable "
+                f"{key_str!r}; identity values win at the runtime prelude, "
+                "so your value will be ignored at command time. Remove the entry."
+            )
+        if isinstance(val, str):
+            # ADR 0014: newlines in env values would corrupt the SSH
+            # `-o SetEnv=KEY=VALUE` argument shape. Warn at load time so
+            # operators catch accidental trailing newlines (a common
+            # copy-paste artifact). The runtime resolver applies the
+            # same check defensively to secret-resolved values.
+            if "\n" in val or "\r" in val:
+                issues.append(
+                    f"{context}.env.{key_str}: value contains a newline; "
+                    "SSH SetEnv cannot transport it cleanly. Strip the "
+                    "newline at the source."
+                )
+            result[key_str] = EnvEntry(key=key_str, value=val)
+        elif isinstance(val, dict):
+            extra = set(val.keys()) - {"secret"}
+            if extra:
+                raise ConfigError(
+                    f"{context}.env.{key_str}: unexpected keys {sorted(extra)}; "
+                    "only 'secret' is supported in env-entry inline tables"
+                )
+            secret_name = val.get("secret")
+            if not isinstance(secret_name, str):
+                raise ConfigError(
+                    f"{context}.env.{key_str}: inline table must set "
+                    "'secret = \"<name>\"' (or use a bare string for plaintext)"
+                )
+            result[key_str] = EnvEntry(key=key_str, secret=secret_name)
+        else:
+            raise ConfigError(
+                f"{context}.env.{key_str}: must be a string (plaintext) or "
+                "inline table of the form { secret = \"<name>\" }"
+            )
+    return result
 
 
 _OPERATOR_KEYS = {
@@ -478,6 +582,7 @@ _VM_TEMPLATE_KEYS = {
     "apt_packages",
     "snap",
     "system_install_commands",
+    "env",
 }
 
 
@@ -511,6 +616,7 @@ def _load_vm_templates(data: dict[str, object], issues: list[str]) -> dict[str, 
             system_install_commands=(
                 list(tdata["system_install_commands"]) if "system_install_commands" in tdata else None
             ),
+            env=_parse_env_table(tdata.get("env"), context=f"vm_templates.{name}", issues=issues),
         )
 
     # Validate inherits references and cycles
@@ -571,10 +677,11 @@ def _load_admin_config(data: dict[str, object], issues: list[str]) -> AdminConfi
         git_force_safe_directory=bool(raw.get("git_force_safe_directory", True)),
         claude_marketplaces=_require_string_list(raw, "claude_marketplaces", "admin.config"),
         claude_plugins=_require_string_list(raw, "claude_plugins", "admin.config"),
+        env=_parse_env_table(top.get("env"), context="admin", issues=issues),
     )
 
 
-_AGENT_TEMPLATE_KEYS = _USER_CONFIG_KEYS | {"inherits"}
+_AGENT_TEMPLATE_KEYS = _USER_CONFIG_KEYS | {"inherits", "env"}
 
 
 def _load_agent_templates(data: dict[str, object], issues: list[str]) -> dict[str, AgentTemplate]:
@@ -616,6 +723,7 @@ def _load_agent_templates(data: dict[str, object], issues: list[str]) -> dict[st
                 _require_string_list(tdata, "claude_plugins", f"agent_templates.{name}")
                 if "claude_plugins" in tdata else None
             ),
+            env=_parse_env_table(tdata.get("env"), context=f"agent_templates.{name}", issues=issues),
         )
 
     for name, tmpl in templates.items():
@@ -657,7 +765,10 @@ def _load_catalog_sections(
     )
 
 
-def _load_workspace_templates(data: dict[str, object]) -> dict[str, WorkspaceTemplate]:
+def _load_workspace_templates(
+    data: dict[str, object],
+    issues: list[str],
+) -> dict[str, WorkspaceTemplate]:
     raw = data.get("workspace_templates", {})
     if not isinstance(raw, dict):
         raise ConfigError("[workspace_templates] must be a table")
@@ -671,6 +782,11 @@ def _load_workspace_templates(data: dict[str, object]) -> dict[str, WorkspaceTem
             inherits=list(tdata.get("inherits", [])),
             repo=str(tdata["repo"]) if "repo" in tdata else None,
             tmuxinator=bool(tdata["tmuxinator"]) if "tmuxinator" in tdata else None,
+            env=_parse_env_table(
+                tdata.get("env"),
+                context=f"workspace_templates.{name}",
+                issues=issues,
+            ),
         )
 
     # validate inherits references and cycles
@@ -769,12 +885,13 @@ def _load_session_templates(data: dict[str, object], issues: list[str]) -> dict[
         if not isinstance(tdata, dict):
             raise ConfigError(f"session_templates.{name} must be a table")
         _warn_unexpected_keys(tdata, _SESSION_TEMPLATE_KEYS, f"session_templates.{name}", issues)
-        env_raw = tdata.get("env")
-        env: dict[str, str] | None = None
-        if env_raw is not None:
-            if not isinstance(env_raw, dict):
-                raise ConfigError(f"session_templates.{name}.env must be a table")
-            env = {str(k): str(v) for k, v in env_raw.items()}
+        env: dict[str, EnvEntry] | None = None
+        if "env" in tdata:
+            env = _parse_env_table(
+                tdata["env"],
+                context=f"session_templates.{name}",
+                issues=issues,
+            )
         templates[name] = SessionTemplate(
             name=name,
             inherits=list(tdata.get("inherits", [])),
@@ -825,6 +942,240 @@ def _load_proxmox(data: dict[str, object]) -> ProxmoxConfig | None:
     )
 
 
+def _load_secrets(data: dict[str, object], issues: list[str]) -> dict[str, SecretDecl]:
+    """Load [secrets.*] declarations into SecretDecls keyed by name."""
+    raw = data.get("secrets", {})
+    if not isinstance(raw, dict):
+        raise ConfigError("[secrets] must be a table")
+
+    expected = {"description", "hint", "backend_mappings"}
+    decls: dict[str, SecretDecl] = {}
+    for name, sdata in raw.items():
+        name_str = str(name)
+        if not isinstance(sdata, dict):
+            raise ConfigError(f"secrets.{name_str} must be a table")
+        validate_name(name_str)
+        _warn_unexpected_keys(sdata, expected, f"secrets.{name_str}", issues)
+
+        description = sdata.get("description")
+        if not isinstance(description, str) or not description:
+            raise ConfigError(
+                f"secrets.{name_str}.description is required and must be a non-empty string"
+            )
+        hint = sdata.get("hint")
+        if hint is not None and not isinstance(hint, str):
+            raise ConfigError(f"secrets.{name_str}.hint must be a string")
+
+        raw_mappings = sdata.get("backend_mappings", {})
+        if not isinstance(raw_mappings, dict):
+            raise ConfigError(
+                f"secrets.{name_str}.backend_mappings must be a table"
+            )
+        backend_mappings: dict[str, str | dict[str, object] | Literal[False]] = {}
+        for kind, mapping in raw_mappings.items():
+            kind_str = str(kind)
+            if isinstance(mapping, bool):
+                if mapping is True:
+                    raise ConfigError(
+                        f"secrets.{name_str}.backend_mappings.{kind_str}: "
+                        "boolean must be `false` (opt-out); `true` is not a valid value"
+                    )
+                backend_mappings[kind_str] = False
+            elif isinstance(mapping, str):
+                backend_mappings[kind_str] = mapping
+            elif isinstance(mapping, dict):
+                backend_mappings[kind_str] = dict(mapping)
+            else:
+                raise ConfigError(
+                    f"secrets.{name_str}.backend_mappings.{kind_str}: "
+                    "must be a string, inline table, or false"
+                )
+
+        decls[name_str] = SecretDecl(
+            name=name_str,
+            description=description,
+            hint=hint,
+            backend_mappings=backend_mappings,
+        )
+    return decls
+
+
+def _load_secret_backends(
+    data: dict[str, object],
+    issues: list[str],
+) -> dict[str, SecretBackendConfig]:
+    """Load [secret_backends.*] sections into SecretBackendConfig entries.
+
+    v1 only carries the ``kind`` field; per-backend subclasses (with account /
+    vault / etc.) arrive when those backends ship. Extra fields in v1
+    sections are accepted but ignored.
+
+    A declared kind not in the known-factory map (e.g. typo ``envvar`` for
+    ``env-var``) emits a load-time warning so operators discover it before
+    they reach for the section in ``[secret_config].backends``.
+    """
+    raw = data.get("secret_backends", {})
+    if not isinstance(raw, dict):
+        raise ConfigError("[secret_backends] must be a table")
+
+    known_kinds = set(_v1_source_factories().keys())
+    backends: dict[str, SecretBackendConfig] = {}
+    for kind, bdata in raw.items():
+        kind_str = str(kind)
+        if not isinstance(bdata, dict):
+            raise ConfigError(f"secret_backends.{kind_str} must be a table")
+        if kind_str not in known_kinds:
+            issues.append(
+                f"[secret_backends.{kind_str}] declares an unknown backend kind; "
+                f"v1 supports {sorted(known_kinds)}"
+            )
+        backends[kind_str] = SecretBackendConfig(kind=kind_str)
+    return backends
+
+
+def _load_secret_config(data: dict[str, object], issues: list[str]) -> SecretConfig:
+    """Load [secret_config] with the enabled-backends precedence list.
+
+    Absence of the [secret_config] table OR absence of the ``backends`` key
+    within it falls back to ``SecretConfig()``'s default chain
+    (``DEFAULT_BACKEND_CHAIN``). An explicit ``backends = []`` is respected
+    as "no backends" (operator opts out of resolution entirely).
+    """
+    if "secret_config" not in data:
+        return SecretConfig()  # absence -> default chain
+    raw = data["secret_config"]
+    if not isinstance(raw, dict):
+        raise ConfigError("[secret_config] must be a table")
+    _warn_unexpected_keys(raw, {"backends"}, "secret_config", issues)
+    if "backends" not in raw:
+        return SecretConfig()  # table present but no key -> default chain
+    backends_raw = raw["backends"]
+    if not isinstance(backends_raw, list) or not all(
+        isinstance(b, str) for b in backends_raw
+    ):
+        raise ConfigError("[secret_config].backends must be a list of strings")
+    return SecretConfig(backends=tuple(backends_raw))
+
+
+def _empty_resolver() -> SecretResolver:
+    """A no-op SecretResolver used as the default when no secrets are configured.
+
+    Lets call sites depend on `Config.secret_resolver` always being a valid
+    SecretResolver instead of branching on None. Safe because
+    `_validate_env_secret_refs` runs before resolver assembly, so an empty
+    chain never has to face a secret-ref env entry.
+    """
+    from agentworks.secrets import SecretResolver
+
+    return SecretResolver([], {})
+
+
+# Backend kinds whose source class is built in to v1. Source factories
+# accept no constructor args today; later backends accepting a
+# ``SecretBackendConfig`` will widen this signature when they ship.
+def _v1_source_factories() -> dict[str, Callable[[], SecretSource]]:
+    from agentworks.secrets import EnvVarSource, PromptSource
+
+    return {
+        "env-var": EnvVarSource,
+        "prompt": PromptSource,
+    }
+
+
+def _build_secret_resolver(
+    secret_config_data: SecretConfig,
+    secret_backends: dict[str, SecretBackendConfig],  # noqa: ARG001 - reserved for future per-backend ctor wiring
+    secrets: dict[str, SecretDecl],
+) -> SecretResolver:
+    """Assemble a SecretResolver from the configured backend chain.
+
+    Returns a no-op resolver when no backends are configured (and no secrets
+    are declared). When backends ARE configured, validates:
+
+    - every kind in ``[secret_config].backends`` has a known source factory;
+    - no declared secret is unreachable through the configured chain.
+    """
+    from agentworks.secrets import SecretResolver
+
+    if not secret_config_data.backends and not secrets:
+        return _empty_resolver()
+
+    factories = _v1_source_factories()
+    sources: list[SecretSource] = []
+    for kind in secret_config_data.backends:
+        factory = factories.get(kind)
+        if factory is None:
+            raise ConfigError(
+                f"[secret_config].backends: unknown backend kind {kind!r}; "
+                f"v1 supports {sorted(factories.keys())}"
+            )
+        sources.append(factory())
+
+    resolver = SecretResolver(sources, secrets)
+
+    unreachable = resolver.unreachable_secrets()
+    if unreachable:
+        names = ", ".join(sorted(d.name for d in unreachable))
+        chain_str = ", ".join(secret_config_data.backends) or "(empty)"
+        # The unreachable-secret case is tight by construction: with the
+        # default chain (``env-var``, ``prompt``), prompt's would_attempt
+        # returns True for every secret, so nothing is unreachable.
+        # Reaching this error means the operator has either:
+        # (a) explicitly stripped prompt from [secret_config].backends, AND
+        # (b) the remaining backends opt out via backend_mappings (env-var
+        #     respects `false`; backends without default conventions like
+        #     1password require an explicit mapping), OR
+        # (c) explicitly set backends = [] (resolution disabled).
+        # The hint enumerates the three remediations in the order they're
+        # most often the right fix.
+        raise ConfigError(
+            f"unreachable secret(s): {names}",
+            hint=(
+                f"active backend chain: [{chain_str}]. Each declared secret "
+                "needs at least one backend in the chain that would attempt "
+                "it. To fix: add 'prompt' (or another always-attempting backend) "
+                "to [secret_config].backends; drop a "
+                "`backend_mappings.<kind> = false` opt-out on the affected "
+                "secret(s); add `backend_mappings.<kind>` for a backend that "
+                "has no default convention (e.g. 1password); or remove the "
+                "unused secret declaration."
+            ),
+        )
+
+    return resolver
+
+
+def _validate_env_secret_refs(
+    *,
+    secrets: dict[str, SecretDecl],
+    admin: AdminConfig,
+    vm_templates: dict[str, VMTemplate],
+    workspace_templates: dict[str, WorkspaceTemplate],
+    agent_templates: dict[str, AgentTemplate],
+    session_templates: dict[str, SessionTemplate],
+) -> None:
+    """Verify every env entry's secret reference points at a declared secret."""
+
+    def _check(env: dict[str, EnvEntry], context: str) -> None:
+        for key, entry in env.items():
+            if entry.secret is not None and entry.secret not in secrets:
+                raise ConfigError(
+                    f"{context}.{key} references undeclared secret "
+                    f"{entry.secret!r}; declare it under [secrets.{entry.secret}]"
+                )
+
+    _check(admin.env, "admin.env")
+    for tname, vt in vm_templates.items():
+        _check(vt.env, f"vm_templates.{tname}.env")
+    for tname, wt in workspace_templates.items():
+        _check(wt.env, f"workspace_templates.{tname}.env")
+    for tname, at in agent_templates.items():
+        _check(at.env, f"agent_templates.{tname}.env")
+    for tname, st in session_templates.items():
+        if st.env:
+            _check(st.env, f"session_templates.{tname}.env")
+
+
 EXPECTED_TOP_LEVEL_KEYS = {
     "operator",
     "paths",
@@ -843,6 +1194,9 @@ EXPECTED_TOP_LEVEL_KEYS = {
     "git_credentials",
     "azure",
     "proxmox",
+    "secrets",
+    "secret_backends",
+    "secret_config",
 }
 
 
@@ -915,6 +1269,22 @@ def load_config(path: Path | None = None, *, warn_issues: bool = True) -> Config
     resolved_agent = _resolve_agent(loaded_agent_templates)
 
     admin = _load_admin_config(data, issues)
+    workspace_templates = _load_workspace_templates(data, issues)
+
+    secrets = _load_secrets(data, issues)
+    secret_backends = _load_secret_backends(data, issues)
+    secret_config_data = _load_secret_config(data, issues)
+    _validate_env_secret_refs(
+        secrets=secrets,
+        admin=admin,
+        vm_templates=loaded_vm_templates,
+        workspace_templates=workspace_templates,
+        agent_templates=loaded_agent_templates,
+        session_templates=session_templates,
+    )
+    secret_resolver = _build_secret_resolver(
+        secret_config_data, secret_backends, secrets
+    )
 
     config = Config(
         operator=_load_operator(data, issues),
@@ -928,7 +1298,7 @@ def load_config(path: Path | None = None, *, warn_issues: bool = True) -> Config
         agent=resolved_agent,
         session=session_config,
         session_templates=session_templates,
-        workspace_templates=_load_workspace_templates(data),
+        workspace_templates=workspace_templates,
         git_credentials=git_credentials,
         apt_sources=apt_sources,
         apt_packages=apt_packages,
@@ -936,6 +1306,10 @@ def load_config(path: Path | None = None, *, warn_issues: bool = True) -> Config
         user_install_commands=user_cmds,
         azure=_load_azure(data),
         proxmox=_load_proxmox(data),
+        secrets=secrets,
+        secret_backends=secret_backends,
+        secret_config_data=secret_config_data,
+        secret_resolver=secret_resolver,
         config_issues=tuple(issues),
     )
 
