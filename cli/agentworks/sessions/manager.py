@@ -29,7 +29,7 @@ from agentworks.vms.manager import keep_vm_active, keep_vms_active
 
 _ENV_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
-# Template variable substitution -- uses {{var}} syntax consistent with nerftools.
+# Template variable substitution: {{var}} double-brace syntax.
 _TEMPLATE_VAR_RE = re.compile(r"\{\{(\w+)\}\}")
 _KNOWN_TEMPLATE_VARS = {"session_name", "workspace_name"}
 
