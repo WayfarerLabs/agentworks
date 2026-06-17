@@ -37,20 +37,21 @@ class PromptSource(SecretSourceBase):
     def would_attempt(self, secret: SecretDecl) -> bool:
         return secret.backend_mappings.get(self.kind) is not False
 
+    def _should_prompt(self, secret: SecretDecl) -> bool:
+        """Both gates rolled into one check: the operator hasn't opted
+        the secret out, and the runtime is interactive."""
+        return self.would_attempt(secret) and output.is_interactive()
+
     def get(self, secret: SecretDecl) -> str | None:
-        if not self.would_attempt(secret):
-            return None
-        if not output.is_interactive():
+        if not self._should_prompt(secret):
             return None
         return self._prompt_one(secret)
 
     def batch_get(self, secrets: list[SecretDecl]) -> dict[str, str]:
-        if not output.is_interactive():
-            return {}
         return {
             s.name: self._prompt_one(s)
             for s in secrets
-            if self.would_attempt(s)
+            if self._should_prompt(s)
         }
 
     @staticmethod
