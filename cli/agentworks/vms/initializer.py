@@ -518,17 +518,16 @@ def _run_mise_install(
     logger: SSHLogger,
     *,
     prune: bool = True,
-    env: dict[str, str] | None = None,
 ) -> None:
     """Run mise install, handling locked/unlocked modes.
 
     If a lockfile is present, tries --locked first. If that fails due to
     unlocked packages and allow_unlocked is true, retries without --locked.
 
-    ``env`` (Phase 6 / FRD R5): SSH SetEnv injection on the install /
-    prune commands so plugin installers + post-install hooks see the
-    merged scope env. The presence-check (``test -f mise.lock``) doesn't
-    take env because it shouldn't observe scope state.
+    Runs without env injection: provisioning is hermetic. mise hooks see
+    static identity via the system-wide profile fragment (login-shell
+    sourcing) and have no access to operator env (those reach runtime
+    shells only).
     """
     logger.step("Mise install")
 
@@ -549,7 +548,6 @@ def _run_mise_install(
             target.run(
                 f"{shell} -lc 'mise install -y --locked'",
                 timeout=300,
-                env=env,
             )
             output.detail("Mise packages installed (locked)")
             installed = True
@@ -571,7 +569,6 @@ def _run_mise_install(
             target.run(
                 f"{shell} -lc 'mise install -y'",
                 timeout=300,
-                env=env,
             )
             output.detail("Mise packages installed")
             installed = True
@@ -588,7 +585,7 @@ def _run_mise_install(
         import contextlib
 
         with contextlib.suppress(SSHError):
-            target.run(f"{shell} -lc 'mise prune -y'", timeout=60, env=env)
+            target.run(f"{shell} -lc 'mise prune -y'", timeout=60)
 
 
 # -- SSH authorized keys ------------------------------------------------------
@@ -893,17 +890,13 @@ def _run_catalog_commands(
     logger: SSHLogger,
     *,
     label: str = "Install command",
-    env: dict[str, str] | None = None,
 ) -> list[str]:
     """Run install commands from a catalog entry dict. Returns PATH additions.
 
-    ``env`` (Phase 6 / FRD R5): when provided, injects each key=value
-    pair via SSH SetEnv so the install command sees the merged
-    operator-defined env (admin / vm scopes for the admin user, agent /
-    vm for an agent user). Already-resolved through the SecretResolver
-    by the caller; this layer just plumbs it through. Test-installed
-    commands skip the env injection because they're idempotent checks
-    that shouldn't depend on the merged scope.
+    Runs without env injection: provisioning is hermetic. Install commands
+    see static identity via the on-disk profile fragments (login-shell
+    sourcing) and have no access to operator env (those reach runtime
+    shells only).
     """
     if not command_names:
         return []
@@ -940,7 +933,6 @@ def _run_catalog_commands(
             target.run(
                 f"{shlex.quote(shell)} -lc {shlex.quote(entry.command)}",
                 timeout=120,
-                env=env,
             )
         except SSHError as e:
             msg = f"{label.lower()} '{name}' failed: {truncated}... ({e})"
@@ -1848,14 +1840,12 @@ def _install_nerf_claude_plugin_for_user(
     target: ExecTarget,
     shell: str,
     logger: SSHLogger,
-    *,
-    env: dict[str, str] | None = None,
 ) -> None:
     """Install the nerf Claude Code plugin for the current user. Non-fatal.
 
-    ``env`` (Phase 6 / FRD R5): SSH SetEnv on the install command so
-    the plugin's install hooks see the merged scope env. The presence
-    check is plain (no scope dependency).
+    Runs without env injection: provisioning is hermetic. Static identity
+    reaches the install hook via the system-wide
+    `/etc/profile.d/agentworks-identity.sh` fragment (login-shell sourcing).
     """
     logger.step("Nerf plugin install")
 
@@ -1876,7 +1866,6 @@ def _install_nerf_claude_plugin_for_user(
         target.run(
             f"{shell} -lc '$AGENTWORKS_NERF_HOME/claude-plugin/scripts/install-plugin'",
             timeout=30,
-            env=env,
         )
         output.detail("Nerf Claude plugin installed")
     except SSHError as e:

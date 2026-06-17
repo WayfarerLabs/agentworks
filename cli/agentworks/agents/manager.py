@@ -1176,14 +1176,12 @@ def _create_agent_on_vm(
 def _install_nerf_claude_plugin_for_agent(
     agent_target: ExecTarget,
     shell: str,
-    *,
-    env: dict[str, str] | None = None,
 ) -> None:
     """Install the nerf Claude Code plugin for an agent user. Non-fatal.
 
-    ``env`` (Phase 6.4b / FRD R5): SSH SetEnv on the install command so
-    plugin hooks see the merged agent scope env. Presence check is
-    plain (no scope dependency).
+    Runs without env injection: provisioning is hermetic. Static identity
+    reaches the install hook via the agent's per-user profile fragment
+    (login-shell sourcing).
     """
     from agentworks.ssh import SSHError
 
@@ -1203,7 +1201,6 @@ def _install_nerf_claude_plugin_for_agent(
         agent_target.run(
             f"{shell} -lc '$AGENTWORKS_NERF_HOME/claude-plugin/scripts/install-plugin'",
             timeout=30,
-            env=env,
         )
         output.detail("Nerf Claude plugin installed for agent")
     except SSHError as e:
@@ -1363,7 +1360,6 @@ def _run_agent_mise_setup(
     agent_target: ExecTarget,
     config: Config,
     home: str,
-    env: dict[str, str] | None = None,
 ) -> None:
     """Set up mise for an agent: shims PATH, config, lockfile, install.
 
@@ -1376,9 +1372,7 @@ def _run_agent_mise_setup(
     (``{shell} -lc``) so the agent's PATH and any other profile-exported
     env (mise's own activation hooks, plugin discovery paths, downstream
     tooling like ``npm`` / ``pip`` that mise plugins shell out to during
-    install) are in scope. mise's binary is on system PATH so a plain
-    invocation would technically find it, but its behavior is shell- and
-    env-sensitive enough that the wrap is the principled default.
+    install) are in scope. No env= injection: provisioning is hermetic.
     """
     import shlex
 
@@ -1472,7 +1466,6 @@ def _run_agent_mise_setup(
         agent_target.run(
             f"{agent_shell} -lc {shlex.quote(f'mise install {install_flags}')}",
             timeout=300,
-            env=env,
         )
         output.detail("Agent mise packages installed")
         installed = True
@@ -1483,7 +1476,6 @@ def _run_agent_mise_setup(
                 agent_target.run(
                     f"{agent_shell} -lc {shlex.quote('mise install -y')}",
                     timeout=300,
-                    env=env,
                 )
                 output.detail("Agent mise packages installed (unlocked)")
                 installed = True
@@ -1504,7 +1496,6 @@ def _run_agent_mise_setup(
             agent_target.run(
                 f"{agent_shell} -lc {shlex.quote('mise prune -y')}",
                 timeout=60,
-                env=env,
             )
 
 
