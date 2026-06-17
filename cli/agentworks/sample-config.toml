@@ -96,6 +96,50 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # description = "Azure DevOps for my-org"          # optional, shown in prompts and logs
 # Token: create at https://dev.azure.com/{org}/_usersSettings/tokens
 
+# --- Secrets ---
+# A pluggable, named-secret system used by env tables on resources below.
+# Anywhere a value can be a string, it can also be `{ secret = "<name>" }`,
+# which references a declaration here. Backends produce the value at command
+# time; agentworks never persists secret values to disk.
+#
+# Use `agw secret list` to see how each active backend would look up each
+# declared secret. Use `agw doctor` to surface unused declarations and
+# would-prompt previews.
+
+# Secret declarations -- one per `{ secret = "<name>" }` reference used anywhere
+# in your config. `description` is required and shown in prompts and
+# `agw doctor`; `hint` (optional) is shown alongside the prompt.
+# `backend_mappings.<kind>` (optional) overrides that backend's default
+# identifier for this one secret, or sets `false` to opt out of that backend
+# entirely.
+
+# [secrets.npm-token]
+# description = "npm registry token"
+# hint = "Generate at https://www.npmjs.com/settings/<user>/tokens"
+
+# [secrets.openai-api-key]
+# description = "OpenAI API key"
+# backend_mappings.env-var = "OPENAI_API_KEY"    # override default convention
+
+# Backend declarations. Backends are activated by listing them in
+# `[secret_config].backends` in precedence order. Currently implemented kinds:
+# `env-var`, `prompt`.
+
+# [secret_backends.env-var]
+# Reads from process env. Default convention is AW_SECRET_<UPPER_SNAKE_CASE>,
+# so secret "npm-token" reads from AW_SECRET_NPM_TOKEN unless overridden via
+# `[secrets.<name>].backend_mappings.env-var`.
+
+# [secret_backends.prompt]
+# Interactive prompt. Always applies; the operator is asked once per missing
+# secret per CLI invocation (batched at the start where possible).
+
+# [secret_config]
+# backends = ["env-var", "prompt"]    # the default chain; explicit configuration overrides.
+# Backends declared above but absent from this list are dormant. Order is
+# resolution precedence: the first backend that produces a value wins. An
+# explicit empty list `backends = []` disables resolution entirely.
+
 # --- Azure settings (only needed for --platform azure) ---
 
 # [azure]
@@ -124,6 +168,18 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # template type supports a "default" entry used when --template is not
 # specified. Templates support inheritance via the "inherits" key:
 # child values override parents, depth-first left-to-right.
+#
+# Each resource type below has an optional `.env` table next to its
+# definition for environment variable overrides. Env tables merge in this
+# precedence order (highest wins; identity vars win over everything):
+#
+#     session > (agent | admin) > workspace > vm    (AGENTWORKS_* overrides all)
+#
+# Admin and agent scopes are mutually exclusive: a shell opened as the admin
+# user (e.g. `agw vm shell`) sees admin scope; an agent-mode session sees
+# agent scope. Each env-table key is either a plaintext string or an inline
+# `{ secret = "<name>" }` reference to a declaration in the "Secrets"
+# section above. Use `agw env show` to preview the merged value at any scope.
 
 # --- VM templates ---
 # System-level VM configuration: hardware resources, system packages, and
@@ -166,6 +222,10 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # memory = 64
 # disk = 200
 
+# [vm_templates.default.env]
+# HTTP_PROXY = "http://proxy:3128"            # plaintext
+# NPM_TOKEN = { secret = "npm-token" }        # secret reference (see Secrets section above)
+
 # --- Admin user configuration ---
 # Per-user settings for the admin (operator) user on VMs. Applied during
 # init/reinit. This is not a template; there is one admin config.
@@ -193,6 +253,9 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # -- Claude Code (requires claude CLI on PATH, e.g. via user_install_commands) --
 # claude_marketplaces = ["https://github.com/WayfarerLabs/nerftools#1.2.0"]
 # claude_plugins = ["nerftools-default@nerftools"]
+
+# [admin.env]
+# EDITOR = "nvim"
 
 # --- Agent templates ---
 # Per-user settings for agent users. Selected at agent create time with
@@ -224,6 +287,9 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # user_install_commands = []
 # mise_packages = []
 
+# [agent_templates.default.env]
+# OPENAI_API_KEY = { secret = "openai-api-key" }
+
 # --- Workspace templates ---
 # Selected at workspace create time with --template. The "default" template
 # is used when --template is not specified.
@@ -241,6 +307,9 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # repo = "https://github.com/org/myproject.git"
 # tmuxinator = false
 # inherits = ["default"]
+
+# [workspace_templates.default.env]
+# REPO_REGION = "us-east-1"
 
 # --- Session templates ---
 # Define commands that sessions can run. The built-in "default" template runs a
@@ -266,6 +335,9 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # restart_command = "claude --resume {{session_name}}"
 # description = "Claude Code interactive session"
 
+# [session_templates.default.env]
+# CLAUDE_LOG_LEVEL = "info"
+
 # [session_templates.custom-tool]
 # command = "my-tool --flag"
 # description = "Custom tool"
@@ -278,85 +350,6 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 
 # [session.config]
 # history_limit = 50000                     # tmux scrollback buffer lines per session
-
-# =============================================================================
-# Environment variables and secrets
-# =============================================================================
-#
-# Env tables can be declared at five scopes; for any given session the merged
-# value is computed in this precedence order (highest scope wins; identity
-# vars win over everything):
-#
-#   session > (agent | admin) > workspace > vm    (AGENTWORKS_* overrides all)
-#
-# Admin and agent scopes are mutually exclusive: a shell opened as the admin
-# user (e.g. `agw vm shell`) sees admin scope; an agent-mode session sees
-# agent scope.
-#
-# Each scope is a TOML table whose keys are env-var names. Values are either:
-#   - a string ("value") for plaintext, or
-#   - an inline table { secret = "<name>" } that references a declared secret.
-# No other shapes are allowed (no nested tables, no arrays).
-#
-# Use `agw env show --vm/--workspace/--agent/--session <name>` to preview the
-# merged value at any scope, with each row annotated by its origin scope.
-# Pass `--reveal-secrets` to also resolve secrets through the configured
-# backend chain. Run `agw doctor` to surface unused secret declarations
-# and identity-override attempts. Run `agw secret list` to see how each
-# active backend would look up each declared secret.
-
-# --- Env tables (one per scope; uncomment what you need) ---
-
-# [vm_templates.default.env]
-# HTTP_PROXY = "http://proxy:3128"            # plaintext
-# NPM_TOKEN = { secret = "npm-token" }        # secret reference (declare below)
-
-# [workspace_templates.default.env]
-# REPO_REGION = "us-east-1"
-
-# [admin.env]
-# EDITOR = "nvim"
-
-# [agent_templates.default.env]
-# OPENAI_API_KEY = { secret = "openai-api-key" }
-
-# [session_templates.default.env]
-# CLAUDE_LOG_LEVEL = "info"
-
-# --- Secret declarations ---
-# Every `{ secret = "<name>" }` reference must point to a declaration.
-# `description` is required and shown in prompts and `agw doctor`; `hint`
-# (optional) is shown alongside the prompt. `backend_mappings.<kind>`
-# (optional) overrides that backend's default identifier for this one
-# secret, or sets `false` to opt out of that backend entirely.
-
-# [secrets.npm-token]
-# description = "npm registry token"
-# hint = "Generate at https://www.npmjs.com/settings/<user>/tokens"
-
-# [secrets.openai-api-key]
-# description = "OpenAI API key"
-# backend_mappings.env-var = "OPENAI_API_KEY"    # override default convention
-
-# --- Secret backends ---
-# Backends are declared in `[secret_backends.<kind>]` and activated by
-# listing them in `[secret_config].backends` in precedence order.
-# Currently implemented kinds: `env-var`, `prompt`.
-
-# [secret_backends.env-var]
-# Reads from process env. Default convention is AW_SECRET_<UPPER_SNAKE_CASE>,
-# so secret "npm-token" reads from AW_SECRET_NPM_TOKEN unless overridden via
-# `[secrets.<name>].backend_mappings.env-var`.
-
-# [secret_backends.prompt]
-# Interactive prompt. Always applies; the operator is asked once per missing
-# secret per CLI invocation (batched at the start where possible).
-
-# [secret_config]
-# backends = ["env-var", "prompt"]    # the default chain; explicit configuration overrides.
-# Backends declared above but absent from this list are dormant. Order is
-# resolution precedence: the first backend that produces a value wins. An
-# explicit empty list `backends = []` disables resolution entirely.
 
 # =============================================================================
 # Catalog extensions
