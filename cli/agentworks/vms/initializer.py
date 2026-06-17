@@ -177,6 +177,13 @@ def _write_agentworks_identity_profile(
         marker = _ZSH_IDENTITY_MARKER
         q_zprofile = shlex.quote(AGENTWORKS_ZPROFILE_PATH)
 
+        # On a fresh VM, /etc/zsh/ doesn't exist until apt installs
+        # zsh-common (which happens later in init). Create it ourselves so
+        # the mirror lands regardless of install order; when zsh is later
+        # installed, dpkg's noninteractive default keeps our fragment
+        # rather than overwriting it.
+        target.run("sudo mkdir -p /etc/zsh")
+
         # Strip the prior block only if the file exists AND both markers
         # are present. A half-edited file (begin marker without matching
         # end) would otherwise cause sed's address range to delete from
@@ -1480,27 +1487,22 @@ def _phase_b_setup(
 
     apply_vm_hardening(ts_target, logger)
 
-    # Non-fatal: VM-wide env-and-secrets fragments (env-and-secrets SDD Phase 4).
-    # Run early so subsequent SSH commands within init can rely on the SetEnv
-    # path (e.g. when this code starts threading env into provisioning calls)
-    # and so a raw `ssh awvm--<vm>` outside agentworks sees the identity vars
-    # immediately. Each helper is idempotent on reinit.
+    # Non-fatal: VM-wide SetEnv plumbing (env-and-secrets SDD Phase 4).
+    # Runs before apt install so subsequent SSH commands within init can
+    # rely on the SetEnv path. These targets don't touch zsh-shipped files,
+    # so dpkg conffile handling doesn't apply.
     _write_sshd_accept_env(ts_target, logger)
     _write_sudoers_env_keep(ts_target, logger)
     vm_row = db.get_vm(vm_name)
     # Init runs against a VM that exists in the DB (initialize_vm fetches the
     # row up front). A None here is an internal invariant violation, not a
-    # recoverable state, so surface it loudly rather than silently skipping
-    # the identity-profile write.
+    # recoverable state, so surface it loudly.
     assert vm_row is not None, f"VM '{vm_name}' missing from DB mid-init"
     identity_ctx = ResourceContext(
         vm_name=vm_row.name,
         platform=vm_row.platform,
         user=admin_username,
         vm_host=vm_row.vm_host_name,
-    )
-    _write_agentworks_identity_profile(
-        ts_target, vm_stable_identity_env(identity_ctx), logger,
     )
 
     # Phase 6.3b: compose the admin env once and thread it into the
@@ -1526,6 +1528,16 @@ def _phase_b_setup(
 
     # Non-fatal: apt packages (direct list + catalog entries)
     _install_apt_packages(ts_target, config, catalog, logger)
+
+    # Identity profile fragments. Runs AFTER apt install because apt uses
+    # `--force-confnew`, which would replace the agentworks block in
+    # `/etc/zsh/zprofile` with zsh-common's package default if zsh got
+    # installed after we wrote our fragment. Post-install, we append cleanly
+    # on top of whatever the package shipped. The mirror is idempotent on
+    # reinit (strip-and-rewrite via begin/end markers).
+    _write_agentworks_identity_profile(
+        ts_target, vm_stable_identity_env(identity_ctx), logger,
+    )
 
     # Non-fatal: snap packages
     if config.vm.snap:

@@ -145,6 +145,32 @@ def test_identity_profile_skips_strip_on_first_init() -> None:
     assert any("tee -a /etc/zsh/zprofile" in c for c in commands)
 
 
+def test_identity_profile_creates_etc_zsh_directory() -> None:
+    """Regression: on a fresh VM, /etc/zsh/ doesn't exist until apt
+    installs zsh-common (which happens later in init than the identity-
+    profile write). The mirror previously failed with ``tee: /etc/zsh/
+    zprofile: No such file or directory``. The helper now runs
+    ``mkdir -p /etc/zsh`` before the append so the write succeeds even
+    when zsh isn't installed yet."""
+    target = _SpyTarget(prior_file_present=False)
+    _write_agentworks_identity_profile(
+        target, {"AGENTWORKS_VM": "vm-1"}, _SpyLogger(),
+    )
+    commands = [r for r, _ in target.runs]
+    mkdir_idx = next(
+        (i for i, c in enumerate(commands) if "mkdir -p /etc/zsh" in c),
+        None,
+    )
+    assert mkdir_idx is not None, (
+        "expected `mkdir -p /etc/zsh` somewhere in the run; got: "
+        f"{commands}"
+    )
+    append_idx = next(
+        i for i, c in enumerate(commands) if "tee -a /etc/zsh/zprofile" in c
+    )
+    assert mkdir_idx < append_idx, "mkdir must precede the append"
+
+
 def test_identity_profile_only_strips_when_both_markers_present() -> None:
     """Reinit safety: if only one of begin/end markers exists in zprofile
     (a half-edited file), the helper skips the strip step and warns rather
