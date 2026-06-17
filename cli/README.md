@@ -439,9 +439,9 @@ description = "Claude Code interactive session"
 ```
 
 Template commands support `{{session_name}}` and `{{workspace_name}}` variable substitution
-(double-brace syntax, consistent with nerftools manifests). The optional `restart_command` is used
-by `session restart` -- useful for tools like Claude Code where `--resume` picks up the previous
-conversation. If omitted, the regular `command` is used.
+(double-brace syntax). The optional `restart_command` is used by `session restart` -- useful for
+tools like Claude Code where `--resume` picks up the previous conversation. If omitted, the regular
+`command` is used.
 
 ### Catalog
 
@@ -579,35 +579,18 @@ Agentworks installs [mise](https://mise.jdx.dev/) by default on all VMs for mana
 (terraform, adr-tools, node, etc.) with optional lockfile-based integrity verification. See
 [Using mise](../docs/guides/mise.md) for the full guide.
 
-### Nerf Tools (Claude Code Plugin)
+### Claude Code Plugins
 
-Agentworks can build and deploy a Claude Code plugin containing "nerf tools" -- scoped,
-safety-constrained wrappers for CLI operations like git, az, and other tools. Nerf tools enforce
-guardrails (validated parameters, restricted flags, pre-flight checks) so AI agents operate safely.
-
-Enable in your VM template:
-
-```toml
-[vm_templates.default]
-nerf_build_claude_plugin = true
-```
-
-This builds the plugin to `nerf_home_dir/claude-plugin/` during VM init. To auto-install the plugin
-for users, add to admin or agent config:
+Agentworks can register Claude Code marketplaces and install plugins automatically per user (admin
+and per-agent). Configure via `claude_marketplaces` and `claude_plugins` in `admin.config` or any
+`agent_templates.*`. Requires the `claude` CLI on PATH (typically installed via
+`user_install_commands`). To install nerftools this way:
 
 ```toml
 [admin.config]
-nerf_install_claude_plugin = true
+claude_marketplaces = ["https://github.com/WayfarerLabs/nerftools#4.1.0"]
+claude_plugins = ["nerftools-default@nerftools"]
 ```
-
-The plugin provides skills that document available tools, and operator commands for managing
-permissions (`/nerftools:nerfctl-grant-allow`, `/nerftools:nerfctl-grant-deny`, etc.). Custom tool
-manifests can be added via `nerf_addl_manifests`.
-
-Plugin identity (name, marketplace metadata) is defined in agentworks' own `nerf-config.yaml` and
-loaded via the nerftools config API. The version is a date-based build stamp that changes on each
-reinit. The build always emits an embedded marketplace so the plugin directory is installable
-standalone via `claude plugin marketplace add`.
 
 ### Built-in Catalog
 

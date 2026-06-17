@@ -27,7 +27,9 @@ from agentworks.sessions.tmux import AGENT_SOCKET_ROOT
 from agentworks.ssh import SSH_TRANSPORT_ERROR, admin_exec_target
 from agentworks.vms.manager import keep_vm_active, keep_vms_active
 
-# Template variable substitution -- uses {{var}} syntax consistent with nerftools.
+_ENV_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+# Template variable substitution: {{var}} double-brace syntax.
 _TEMPLATE_VAR_RE = re.compile(r"\{\{(\w+)\}\}")
 _KNOWN_TEMPLATE_VARS = {"session_name", "workspace_name"}
 

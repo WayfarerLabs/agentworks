@@ -15,9 +15,7 @@ from __future__ import annotations
 import ipaddress
 import shlex
 import subprocess
-import tempfile
 from collections.abc import Callable
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from agentworks import output
@@ -165,9 +163,8 @@ def _write_agentworks_profile(
 #     (AGENTWORKS_VM / AGENTWORKS_VM_HOST / AGENTWORKS_PLATFORM). Sourced by
 #     every login shell on the VM (including raw `ssh awvm--<name>` from
 #     outside agentworks), so identity vars don't require agentworks to be
-#     the one opening the shell. Mirrors the AGENTWORKS_NERF_HOME install
-#     pattern (also writes to /etc/zsh/zprofile because zsh skips
-#     /etc/profile.d by default).
+#     the one opening the shell. Also writes to /etc/zsh/zprofile because
+#     zsh skips /etc/profile.d by default.
 #
 #   /etc/ssh/sshd_config.d/50-agentworks-accept-env.conf
 #     `AcceptEnv *`. Allows agentworks-issued SSH commands to inject env
@@ -1764,14 +1761,6 @@ def _phase_b_setup(
     rc_snippets = [MISE_ACTIVATE_LINES] if config.admin.mise_activate else ["# mise activation disabled"]
     _write_agentworks_rc(ts_target, rc_snippets, logger)
 
-    # Non-fatal: nerf tools
-    if config.vm.nerf_build_claude_plugin:
-        _build_nerf_claude_plugin(ts_target, config, logger)
-
-    # Non-fatal: install nerf Claude plugin for admin user
-    if config.admin.nerf_install_claude_plugin:
-        _install_nerf_claude_plugin_for_user(ts_target, admin_shell, logger)
-
     # Non-fatal: Claude Code marketplaces and plugins for admin user
     def _admin_run_cmd(cmd: str, timeout: int) -> object:
         inner = shlex.quote(cmd)
@@ -1787,153 +1776,6 @@ def _phase_b_setup(
     _ensure_agentworks_files_sourced(
         ts_target, home=home, shell=admin_shell, logger=logger,
     )
-
-
-def _build_nerf_claude_plugin(
-    ts_target: ExecTarget,
-    config: Config,
-    logger: SSHLogger,
-) -> None:
-    """Build the nerf Claude Code plugin locally and deploy to the VM. Non-fatal."""
-    logger.step("Nerf tools (Claude plugin)")
-    output.detail("Building nerf Claude Code plugin...")
-
-    nerf_home = config.vm.nerf_home_dir
-    plugin_dir = f"{nerf_home}/claude-plugin"
-
-    try:
-        try:
-            from nerftools import BUILTIN_MANIFESTS_DIR  # type: ignore[import-untyped]
-            from nerftools.config import load_config, resolve_claude_plugin_meta  # type: ignore[import-untyped]
-            from nerftools.formats import build_claude_plugin  # type: ignore[import-untyped]
-            from nerftools.manifest import (  # type: ignore[import-untyped]
-                ManifestError,
-                load_manifest,
-                merge_manifests,
-            )
-        except ImportError as e:
-            raise RuntimeError(f"nerftools is not installed: {e}") from e
-
-        manifest_paths: list[Path] = []
-        if not config.vm.skip_nerf_defaults and BUILTIN_MANIFESTS_DIR.exists():
-            for f in sorted(BUILTIN_MANIFESTS_DIR.iterdir()):
-                if f.suffix == ".yaml" and f.is_file():
-                    manifest_paths.append(f)
-        manifest_paths.extend(config.vm.nerf_addl_manifests)
-
-        try:
-            manifests = merge_manifests([load_manifest(p) for p in manifest_paths])
-        except ManifestError as e:
-            raise RuntimeError(f"nerf manifest error: {e}") from e
-
-        # Plugin metadata from agentworks nerf-config.yaml.
-        # Version is fixed (from nerftools defaults) so the plugin path stays
-        # stable across rebuilds -- important because Claude Code grants
-        # permissions based on absolute tool paths.
-        nerf_config_path = Path(__file__).resolve().parent.parent / "nerf-config.yaml"
-        nerf_config = load_config(nerf_config_path)
-        plugin_meta, marketplace_meta = resolve_claude_plugin_meta(nerf_config)
-
-        with tempfile.TemporaryDirectory() as tmp:
-            tmp_path = Path(tmp)
-            build_claude_plugin(manifests, tmp_path, plugin_meta, marketplace_meta=marketplace_meta)
-
-            # Clean and create remote dir
-            ts_target.run(f"rm -rf {shlex.quote(plugin_dir)}", sudo=True)
-            ts_target.run(f"mkdir -p {shlex.quote(plugin_dir)}", sudo=True)
-            ts_target.run(f"sudo chown -R $(id -un):$(id -un) {shlex.quote(plugin_dir)}")
-
-            # Copy plugin artifacts
-            ts_target.copy_dir_to(tmp_path, plugin_dir, delete=False, timeout=60)
-
-            # Make the entire nerf home world-readable so all users can access the plugin
-            ts_target.run(
-                f"chmod -R a+rX {shlex.quote(nerf_home)}",
-                sudo=True,
-            )
-            # Fix execute bits on scripts (Windows tarballs lose them, a+rX only sets x on dirs)
-            find_cmd = (
-                f"find {shlex.quote(plugin_dir)} -type f"
-                r" \( -name 'nerf-*' -o -name 'nerfctl-*' \) -exec chmod a+x {} +"
-            )
-            ts_target.run(find_cmd)
-
-        # Write an install helper with the plugin/marketplace names baked in
-        # so _install_nerf_claude_plugin_for_user can call it without parsing JSON.
-        p_name = shlex.quote(plugin_meta.name)
-        m_name = shlex.quote(marketplace_meta.name if marketplace_meta else plugin_meta.name)
-        # Drop the pre-1.0 marketplace name if a previous build registered it,
-        # otherwise `marketplace add` no-ops on the same path under the old name.
-        install_script = (
-            "#!/usr/bin/env bash\n"
-            "set -euo pipefail\n"
-            'PLUGIN_DIR="$(cd "$(dirname "$0")/.." && pwd)"\n'
-            "claude plugin marketplace remove agentworks-nerf-local >/dev/null 2>&1 || true\n"
-            'claude plugin marketplace add "$PLUGIN_DIR"\n'
-            f"claude plugin install {p_name}@{m_name} --scope user\n"
-        )
-        install_path = f"{plugin_dir}/scripts/install-plugin"
-        scripts_dir = shlex.quote(plugin_dir + "/scripts")
-        quoted_script = shlex.quote(install_script)
-        quoted_path = shlex.quote(install_path)
-        ts_target.run(
-            f"mkdir -p {scripts_dir} && printf '%s' {quoted_script} > {quoted_path} && chmod a+x {quoted_path}",
-        )
-
-        output.detail(f"Nerf Claude plugin built to {plugin_dir}")
-
-        # System-wide env var so all users can locate nerf home
-        env_line = f'export AGENTWORKS_NERF_HOME="{nerf_home}"'
-        ts_target.run(
-            f"printf '%s\\n' {shlex.quote(env_line)} | sudo tee /etc/profile.d/agentworks-nerf.sh > /dev/null",
-        )
-        ts_target.run(
-            f"grep -qF AGENTWORKS_NERF_HOME /etc/zsh/zprofile 2>/dev/null"
-            f" || printf '%s\\n' {shlex.quote(env_line)} | sudo tee -a /etc/zsh/zprofile > /dev/null",
-        )
-
-    except (SSHError, RuntimeError) as e:
-        msg = f"nerf Claude plugin build failed: {e}"
-        logger.warning(msg)
-        output.warn(msg)
-
-
-def _install_nerf_claude_plugin_for_user(
-    target: ExecTarget,
-    shell: str,
-    logger: SSHLogger,
-) -> None:
-    """Install the nerf Claude Code plugin for the current user. Non-fatal.
-
-    Runs without env injection: provisioning is hermetic. Static identity
-    reaches the install hook via the system-wide
-    `/etc/profile.d/agentworks-identity.sh` fragment (login-shell sourcing).
-    """
-    logger.step("Nerf plugin install")
-
-    try:
-        # Check that the plugin and install helper exist via the system env var
-        check_result = target.run(
-            f"{shell} -lc 'test -x $AGENTWORKS_NERF_HOME/claude-plugin/scripts/install-plugin'",
-            check=False,
-        )
-        if not check_result.ok:
-            output.warn(
-                "nerf Claude plugin not found on this VM. "
-                "Set nerf_build_claude_plugin = true in your VM template and reinit."
-            )
-            return
-
-        output.detail("Installing nerf Claude plugin...")
-        target.run(
-            f"{shell} -lc '$AGENTWORKS_NERF_HOME/claude-plugin/scripts/install-plugin'",
-            timeout=30,
-        )
-        output.detail("Nerf Claude plugin installed")
-    except SSHError as e:
-        msg = f"nerf plugin install failed: {e}"
-        logger.warning(msg)
-        output.warn(msg)
 
 
 RunCmd = Callable[[str, int], object]

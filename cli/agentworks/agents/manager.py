@@ -1146,17 +1146,12 @@ def _create_agent_on_vm(
     # Mise.
     _run_agent_mise_setup(agent_target=agent_target, config=config, home=home)
 
-    # Install nerf Claude plugin.
-    if config.agent.nerf_install_claude_plugin:
-        _install_nerf_claude_plugin_for_agent(agent_target, agent_shell)
-
     # Claude Code marketplaces and plugins. The probe (`command -v
     # claude`) and the actual `claude plugin ...` invocations need the
     # agent's PATH (mise shims, ~/.local/bin, etc.); a plain SSH command
     # gets a non-interactive non-login shell that sources none of the
     # rc / profile files. Wrap in `<shell> -lc` for parity with the
-    # admin caller in vms/initializer.py and with the install / nerf
-    # helpers above.
+    # admin caller in vms/initializer.py.
     import shlex as _shlex
 
     from agentworks.vms.initializer import install_claude_plugins
@@ -1179,40 +1174,6 @@ def _create_agent_on_vm(
     _ensure_agentworks_files_sourced(
         agent_target, home=home, shell=agent_shell, logger=logger,
     )
-
-
-def _install_nerf_claude_plugin_for_agent(
-    agent_target: ExecTarget,
-    shell: str,
-) -> None:
-    """Install the nerf Claude Code plugin for an agent user. Non-fatal.
-
-    Runs without env injection: provisioning is hermetic. Static identity
-    reaches the install hook via the agent's per-user profile fragment
-    (login-shell sourcing).
-    """
-    from agentworks.ssh import SSHError
-
-    try:
-        check = agent_target.run(
-            f"{shell} -lc 'test -x $AGENTWORKS_NERF_HOME/claude-plugin/scripts/install-plugin'",
-            check=False,
-        )
-        if not check.ok:
-            output.warn(
-                "nerf Claude plugin not found on this VM. "
-                "Set nerf_build_claude_plugin = true in your VM template and reinit."
-            )
-            return
-
-        output.detail("Installing nerf Claude plugin for agent...")
-        agent_target.run(
-            f"{shell} -lc '$AGENTWORKS_NERF_HOME/claude-plugin/scripts/install-plugin'",
-            timeout=30,
-        )
-        output.detail("Nerf Claude plugin installed for agent")
-    except SSHError as e:
-        output.warn(f"agent nerf plugin install failed: {e}")
 
 
 def _delete_agent_on_vm(
