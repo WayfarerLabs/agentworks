@@ -243,9 +243,6 @@ def agentworks_identity_env(ctx: ResourceContext) -> dict[str, str]:
 These take precedence over user-defined env (and the loader emits a warning if a user attempts to
 override an `AGENTWORKS_*` key).
 
-`AGENTWORKS_NERF_HOME` is unaffected by this work; it stays in the existing system-wide profile
-fragment, parallel to but separate from this scheme.
-
 ## Secret model
 
 All secret-producing concerns implement a single `SecretSource` protocol. Interactive prompting is
@@ -745,10 +742,6 @@ credentials into the general `Secret` mechanism by:
    `[admin.git_credentials]` or equivalent mapping table that names which secrets feed git.
 
 This is out of scope here; noted to ensure the abstraction is shaped to accommodate it.
-
-### Existing `AGENTWORKS_NERF_HOME`
-
-Set by `vms/initializer.py` in `/etc/zsh/zprofile`. Unchanged. Lives parallel to the new scheme.
 
 ## Phasing (for the plan)
 

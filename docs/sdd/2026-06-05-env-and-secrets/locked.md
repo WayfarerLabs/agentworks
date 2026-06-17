@@ -58,15 +58,15 @@ updates this lockfile with a dated entry.
   on first attach or `--recreate`) and `restore_session`.
 - **Provisioning is hermetic.** Neither VM init (`_phase_b_setup`) nor agent setup phase 2
   (`_create_agent_on_vm`) injects operator env into their user-facing install runners. Dotfiles
-  install, mise install/prune, user_install_commands, nerf claude plugin install, claude
-  marketplaces / plugins all run with no `env=` kwarg. Static identity reaches them via the on-disk
-  profile fragments: VM-stable identity via `/etc/profile.d/agentworks-identity.sh`, agent identity
-  via the agent's `~/.agentworks-profile.sh` (written EARLY in agent setup phase 2, before any
-  install command runs, so the install machinery sees `AGENTWORKS_AGENT` via login-shell sourcing).
-  Provisioning-required secrets (Tailscale auth key, git credentials) live in dedicated config
-  sections outside the env-block system and continue to flow through their own paths. Eager-resolve
-  at vm/agent create/reinit no longer prompts for operator-env secrets; those get prompted at the
-  runtime use site (vm shell, session create, etc.) where they actually matter.
+  install, mise install/prune, user_install_commands, claude marketplaces / plugins all run with no
+  `env=` kwarg. Static identity reaches them via the on-disk profile fragments: VM-stable identity
+  via `/etc/profile.d/agentworks-identity.sh`, agent identity via the agent's
+  `~/.agentworks-profile.sh` (written EARLY in agent setup phase 2, before any install command runs,
+  so the install machinery sees `AGENTWORKS_AGENT` via login-shell sourcing). Provisioning-required
+  secrets (Tailscale auth key, git credentials) live in dedicated config sections outside the
+  env-block system and continue to flow through their own paths. Eager-resolve at vm/agent
+  create/reinit no longer prompts for operator-env secrets; those get prompted at the runtime use
+  site (vm shell, session create, etc.) where they actually matter.
 - **No-shell-opening commands verified** to NOT call `resolve_for_command` per FRD R4 / R5:
   `session attach`, `session list`, `session describe`, `console attach` against an existing tmux
   session, `console add-sessions`. Pinned by tests in `test_secrets_eager_resolve.py`.

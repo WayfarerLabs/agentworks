@@ -183,8 +183,8 @@ env+secrets via the SSH SetEnv path established in Phase 3.
 
 - [x] `cli/agentworks/vms/initializer.py`:
   - New helper `_write_agentworks_identity_profile(target, identity_env, logger)` writes
-    `/etc/profile.d/agentworks-identity.sh` AND the matching block in `/etc/zsh/zprofile` (mirrors
-    the existing `AGENTWORKS_NERF_HOME` install pattern). Contents are the VM-stable subset:
+    `/etc/profile.d/agentworks-identity.sh` AND the matching block in `/etc/zsh/zprofile` (zsh skips
+    `/etc/profile.d` by default, hence the second file). Contents are the VM-stable subset:
     `AGENTWORKS_VM`, `AGENTWORKS_VM_HOST` (when applicable), `AGENTWORKS_PLATFORM`. Reinit-safe
     (sed-strips the prior agentworks-identity block from `/etc/zsh/zprofile` before re-appending).
   - `_write_agentworks_profile(target, ...)` (per-user fragment, existing) keeps its login-shell
@@ -270,9 +270,9 @@ seconds), before any state mutation. Non-interactive failure is a clear actionab
       `_phase_b_setup` (admin env) and `_create_agent_on_vm` Phase 2 (agent env) compose env once
       via `compose_env`. The resolver cache is warm from the manager-entry eager-resolve, so this
       hits cached values rather than re-prompting. Threaded into user_install_commands, mise install
-      / prune, nerf plugin, claude marketplaces / plugins, and dotfiles install. Infrastructure
-      setup (apt, sshd, sudoers, hardening, useradd, socket setup, authorized_keys) deliberately
-      doesn't take env; those are bootstrap actions that shouldn't observe operator scope.
+      / prune, claude marketplaces / plugins, and dotfiles install. Infrastructure setup (apt, sshd,
+      sudoers, hardening, useradd, socket setup, authorized_keys) deliberately doesn't take env;
+      those are bootstrap actions that shouldn't observe operator scope.
 - [x] Tests for the orchestration module (16 tests in `cli/tests/test_secrets_orchestration.py`):
       target unioning + dedup, cross-target ordering, substitution invariance, extra_decls hook,
       cache-wins-over-late-env-changes (cache contract), admin+agent mutex, label-not-in-equality,

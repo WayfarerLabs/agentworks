@@ -1075,8 +1075,8 @@ def test_console_add_sessions_does_not_eager_resolve_db_only_branch(
 
 def test_agent_setup_runners_have_no_env_injection() -> None:
     """Source-level tripwire: provisioning is hermetic. None of the agent
-    setup runners (install commands, dotfiles install, mise, nerf plugin,
-    claude plugins) should pass ``env=`` from operator [agent.env] /
+    setup runners (install commands, dotfiles install, mise, claude
+    plugins) should pass ``env=`` from operator [agent.env] /
     [vm_templates.*.env] tables. Static identity (AGENTWORKS_AGENT)
     reaches them via the per-user ~/.agentworks-profile.sh, written
     EARLY in agent setup phase 2 before any install command runs.
@@ -1102,8 +1102,8 @@ def test_agent_setup_runners_have_no_env_injection() -> None:
 def test_vm_provisioning_runners_have_no_env_injection() -> None:
     """Source-level tripwire: provisioning is hermetic. None of the VM
     init user-facing runners (dotfiles install, mise, user_install_commands,
-    nerf plugin, claude plugins) should pass ``env=`` from operator
-    [admin.env] / [vm_templates.*.env] tables. Static identity reaches
+    claude plugins) should pass ``env=`` from operator [admin.env] /
+    [vm_templates.*.env] tables. Static identity reaches
     them via the system-wide /etc/profile.d/agentworks-identity.sh
     written by VM init. Operator env only lands at RUNTIME shells.
 

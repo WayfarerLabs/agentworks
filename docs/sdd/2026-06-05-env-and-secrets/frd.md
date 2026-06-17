@@ -79,9 +79,6 @@ that apply to the shell's resource context:
 | `AGENTWORKS_SESSION`       | Session context      | Session name                                                                                                                                      |
 | `AGENTWORKS_SESSION_KIND`  | Session context      | `admin` or `agent`                                                                                                                                |
 
-The existing `AGENTWORKS_NERF_HOME` (set by VM initializer) is grandfathered into this scheme; it is
-VM-scoped and continues to live in the system-wide profile fragment.
-
 There is no opt-out. These vars are always set when their scope applies. User-defined env (R2) may
 shadow the names, in which case the loader emits a config-load warning; identity values win at the
 runtime prelude regardless, so the override has no effect at command time. The warning is the only
