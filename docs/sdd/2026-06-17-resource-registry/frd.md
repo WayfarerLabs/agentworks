@@ -51,8 +51,13 @@ reconciliation, but that move is deliberately not part of this design.
   resources live in the DB and stay there. Resources carry their own fields (name, kind, origin,
   description, usage list, kind-specific data); they are distinct from the **requirements** that
   reference them by name.
-- **Resource registry**: the keyed lookup for one kind of resource (e.g., `config.secrets`,
-  `config.vm_templates`).
+- **Resource registry**: a per-kind container of resources of that kind. One registry per kind
+  (`config.secrets`, `config.vm_templates`, ...). Holds resources arriving from any of the three
+  origin paths (built-in, operator-declared, auto-declared) and carries the kind's **miss policy**
+  (R2) which dictates what happens when a requirement points at a name the registry does not yet
+  contain. Lookup within a registry is by `name`; cross-kind identity is the `(kind, name)` pair.
+  Queried by the validation pass and surfaced via `agw doctor`, `agw secret list`, and (Phase 2)
+  `agw resource list`.
 - **Resource requirement**: a **reference declaration** -- one resource saying "I need this other
   resource by name". Distinct from the resource itself: requirements point at resources but are not
   resources. Carries the target's `name` and `kind`, a system-defined `usage`, the declaring
