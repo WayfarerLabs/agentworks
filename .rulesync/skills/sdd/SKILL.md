@@ -43,8 +43,41 @@ stored in the feature directory with descriptive names (e.g. `something-lld.md`)
 the plan should include generating any missing low-level design documents as part of the work, and
 they should be linked to from the plan.
 
-Additional artifacts related to the development effort (e.g. background research, UI concepts, API
-specifications, data models, diagrams, etc.) may be stored in the feature directory as needed.
+Two additional artifact types come up often enough to call out by name:
+
+- `prior-art-research.md`: Captures the background research, prior art, and external sources that
+  informed the design. Considering prior art is part of nearly every non-trivial design effort, so
+  default to including this artifact. Skip it only when the work is a pure internal refactor or
+  follows already-established patterns where there is no meaningful external research to surface. A
+  useful structure: a short executive summary, findings organized by research dimension with sources
+  cited per finding, an explicit "refuted / do-not-rely-on" section for claims considered and
+  rejected, open questions the research did not resolve, and a sources table grading each entry by
+  quality and angle. Tie each finding to a design decision so the link from research to design is
+  auditable.
+- `migration-strategy.md`: Describes how the existing system moves to the target design. Use this
+  when the work reshapes something already in use (data, schemas, pipelines, API surfaces, module
+  layouts) rather than being net-new. A useful structure: an inventory of the current state
+  (concrete numbers and a dated snapshot), target naming/shape with before/after examples,
+  transition mechanics (additive-first vs. in-place, data movement, producer repointing,
+  backward-compatibility shims), sequencing (per-item timelines, vertical-slice-first), a worked
+  example for one representative case, and a risks-and-safeguards section.
+
+Additional artifacts related to the development effort (e.g. UI concepts, API specifications, data
+models, diagrams, etc.) may be stored in the feature directory as needed.
+
+## Artifact Mutability
+
+As a general rule, SDD artifacts are mutable until the lockfile is created. As issues are
+encountered during implementation, the specs and plan should be updated to reflect the new
+understanding and any changes to the requirements, architecture, or plan. The SDD artifacts are
+living documents and should evolve with the work.
+
+The one exception to that is that **completed plan checkboxes should not be modified in any way**
+(unchecked, modified, moved, removed, ...). Once a checkbox is marked complete, it should be
+considered an immutable record of what was done. If the plan changes such that a completed checkbox
+is no longer relevant, it should be left as-is and new checkboxes should be added to reflect the new
+plan. This preserves the historical record of what was actually done, even if the implemented
+solution evolves.
 
 ## Lockfile
 
@@ -175,3 +208,15 @@ Work driven via SDD should be done in one or more feature branches. The general 
 7. Alternatively, if future work superseded unfinished work in an existing SDD feature directory,
    that future work should update the existing SDD specs to indicate that the remaining work is
    superseded.
+
+## PR Review
+
+Significant changes to SDD artifacts -- whether net-new specs or material revisions to existing ones
+-- should go through a draft PR for review before the work is merged. The aim is to surface concerns
+about requirements, architecture, or plan early, while changes are still cheap.
+
+Consider phasing the review across multiple PRs rather than landing all the artifacts in one. A
+common pattern is FRD first (to confirm we agree on what we're building), then HLA (to confirm the
+design holds up), then plan and any LLDs. Each phased review is cheaper to consume than a single
+sprawling PR, and it limits how far the work can drift down the wrong path before someone catches
+it.
