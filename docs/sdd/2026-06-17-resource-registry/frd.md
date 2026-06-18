@@ -22,7 +22,8 @@ block secrets, but explicitly deferred two adjacent concerns:
 This SDD addresses both, in one framework:
 
 - A **resource-requirement contract** where each resource type declares what other resources it
-  needs (by name, with a system-defined purpose).
+  needs (by name, with a system-defined usage). One resource may be required by many; all usages are
+  tracked and surfaced via the CLI.
 - A **resource-registry** validation pass that walks all requirements, looks each up in the
   appropriate registry, and dispatches missing-name policies per registry kind (auto-declare for
   secrets; built-in default for templates; error for catalogs; etc.).
@@ -51,11 +52,13 @@ reconciliation, but that move is deliberately not part of this design.
 - **Resource registry**: the keyed lookup for one kind of resource (e.g., `config.secrets`,
   `config.vm_templates`).
 - **Resource requirement**: a declaration by one resource that it needs another. Carries the
-  referenced name, the system-defined purpose, the source of the requirement, and (optionally)
-  per-kind defaults for auto-declaration.
-- **Purpose**: the system-defined "what this resource is needed for", set by the requirement.
-  Invariant across configurations; shown in `agw doctor` and resolution prompts. Distinct from the
-  operator-set description.
+  referenced name, the system-defined usage, the source as a `(kind, name)` pair, and (optionally)
+  per-kind defaults for auto-declaration. A resource may have many requirements; the framework
+  collects them all.
+- **Usage**: the system-defined "what this resource is being used for", set by the requirement. Each
+  requirement contributes one usage; a resource that is required by multiple sources accumulates a
+  list of usages. Surfaced in `agw doctor` and `agw secret describe`. Distinct from the operator-set
+  description.
 - **Description**: the operator-defined free-form note about a resource (already exists today on
   secrets and `git_credentials`; this SDD formalizes the convention for new resource types).
 - **Miss policy**: what a registry does when a requirement's name has no match in the registry.
@@ -77,28 +80,43 @@ Every resource type that references other resources by name declares those refer
 - **`name`** (required): the referenced resource's name. Operator-overridable when the declaring
   resource exposes the name as a config field (e.g. `vm_templates.x.tailscale_auth_key`); otherwise
   fixed.
-- **`purpose`** (required): one-line description of what the declaring resource needs the referenced
-  resource for. Stable across configurations.
-- **`source`** (required): a stable identifier for the declaring resource (e.g.
-  `vm_template:default`, `git_credentials:github-prod`). Used for diagnostics and provenance.
-- **`kind`** (required): the resource kind being referenced (`secret`, `vm_template`, etc.).
+- **`usage`** (required): one-line description of what the declaring resource needs the referenced
+  resource for. Each requirement contributes one usage.
+- **`source`** (required): the declaring resource's identity as a `(kind, name)` pair (e.g.
+  `("vm_template", "default")`, `("git_credentials", "github-prod")`). Same `(kind, name)` shape
+  used throughout the framework for resource identity. Surfaced in diagnostics and provenance.
+- **`kind`** (required): the kind of resource being referenced (`secret`, `vm_template`, etc.).
 - **Kind-specific extras** (optional): defaults the registry's auto-declare policy uses to
-  synthesize a missing resource. For secrets: default `backend_mappings`. For templates (Phase 2):
-  the built-in default field set.
+  synthesize a missing resource. For secrets in Phase 1, no extras are needed (the framework default
+  conventions cover the common case); the slot exists for future and Phase-2 use.
 
-A resource's `required_resources()` method returns the full list (one per reference; the framework
-deduplicates). The validation pass collects requirements across the entire config and feeds them
-into the registries.
+A resource's `required_resources()` method returns the full list (one per reference, no
+deduplication at the producer side). The validation pass collects requirements across the entire
+config, keyed by `(kind, name)`, and feeds them into the registries.
+
+#### Multi-requirement resources
+
+A single resource may be the target of multiple requirements. The framework explicitly supports
+this:
+
+- **Auto-declared resources** synthesize once per `(kind, name)`. When multiple requirements would
+  trigger auto-declaration of the same name, the first-encountered requirement supplies any
+  kind-specific extras (deterministic walk order: alphabetical by section). The remaining
+  requirements contribute additional usages but do not re-synthesize the resource.
+- **Operator-declared resources** are unchanged by additional requirements pointing at them. The
+  resource keeps the operator's fields; the requirements just add to its usage list.
+- **All usages are retained**. The resource's accumulated usage list is what `agw secret describe`
+  (R8) renders. Duplicate usage strings from different requirements are deduplicated for display.
 
 ### R2: Per-registry miss policies
 
 Each resource registry declares its miss policy:
 
-| Registry                                                                  | Miss policy               | Behavior                                                                                                                                            |
-| ------------------------------------------------------------------------- | ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Secret registry                                                           | Auto-declare              | A `SecretRequirement` whose name is missing synthesizes a `SecretDecl` from the requirement (carrying its `purpose` and default `backend_mappings`) |
-| VM, workspace, agent, session template registries                         | Default-only auto-declare | The reserved name `default` synthesizes the built-in default template; any other name is a config-load error                                        |
-| Catalog command registry, git credential provider registry, backend kinds | Error                     | Unknown names are config-load errors                                                                                                                |
+| Registry                                                                  | Miss policy               | Behavior                                                                                                                                                                  |
+| ------------------------------------------------------------------------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Secret registry                                                           | Auto-declare              | A `SecretRequirement` whose name is missing synthesizes a `SecretDecl` carrying the requirement's usage. Additional requirements for the same name contribute more usages |
+| VM, workspace, agent, session template registries                         | Default-only auto-declare | The reserved name `default` synthesizes the built-in default template; any other name is a config-load error                                                              |
+| Catalog command registry, git credential provider registry, backend kinds | Error                     | Unknown names are config-load errors                                                                                                                                      |
 
 Error messages include the requirement's `source` so the operator sees, e.g.:
 
@@ -112,12 +130,16 @@ semantics.
 
 ### R3: Per-field merge between operator declarations and auto-declared defaults
 
-When a resource is **both** operator-declared and required, the merge is per-field:
+When a resource is **both** operator-declared and required, the merge is per-field for
+operator-settable fields:
 
-- Fields the operator specified in `[secrets.<name>]`, `[git_credentials.<name>]`, ... win.
-- Fields the operator omitted fall back to the requirement's defaults.
-- Provenance is `operator` (the operator declared the resource), but the framework retains the
-  matching `auto_source` reference so doctor can report "operator-declared; also auto-required by
+- Operator-settable fields (`description`, `hint`, `backend_mappings`): operator wins per field (or
+  per key, in the case of `backend_mappings`). Fields the operator omitted fall back to the
+  requirement's defaults (if any).
+- System-collected fields (`usage`): always accumulated from the matching requirements, regardless
+  of operator declaration. The operator does not set usage; the system tracks all of them.
+- Provenance is `operator` (the operator declared the resource), and the framework retains the
+  matching requirement sources so doctor can report "operator-declared; also required by
   `<source>`".
 
 Example: operator writes
@@ -125,12 +147,13 @@ Example: operator writes
 ```toml
 [secrets.tailscale-auth-key]
 backend_mappings.env-var = "TS_KEY"
+description = "Prod tailnet key, owner: SRE team"
 ```
 
-and omits `purpose` and `description`. The final `SecretDecl` carries the operator's
-`backend_mappings.env-var = "TS_KEY"` AND the requirement's default
-`purpose = "Tailscale auth key for VM provisioning"`. The operator does not have to retype
-boilerplate; the system fills in what wasn't customized.
+The final `SecretDecl` carries the operator's `backend_mappings.env-var` and `description`, and the
+usage list `["Tailscale auth key for VM provisioning"]` from the VM-template requirement. The
+operator does not have to retype the usage; the system fills it in automatically and updates it when
+new requirements arrive.
 
 ### R4: Cycle detection in the validation pass
 
@@ -156,8 +179,8 @@ refs has a legitimate use.
 Resolution:
 
 1. `agw vm create vm1` triggers manager-entry eager-resolve.
-2. The resolved VM template emits a
-   `SecretRequirement(name=<tailscale_auth_key>, purpose="Tailscale auth key for VM provisioning", source="vm_template:<name>")`.
+2. The resolved VM template emits a `SecretRequirement` with `name=<tailscale_auth_key>`,
+   `usage="Tailscale auth key for VM provisioning"`, and `source=("vm_template", <name>)`.
 3. If the named secret isn't operator-declared, the auto-declare policy synthesizes it.
 4. The orchestrator resolves the secret through the configured backend chain (first wins).
 5. The resolved value is threaded as a function argument to the Tailscale install runner.
@@ -197,36 +220,54 @@ backend chain, resolved value threaded to the git credential install runner that
 ### R7: Operator description as a distinct field
 
 Every resource type that supports operator declaration carries an optional `description` field that
-is separate from the system-defined `purpose`:
+is separate from the system-collected `usage` list:
 
-- **`purpose`** comes from the requirement; system-defined; invariant across configurations.
-  Example: `"Tailscale auth key for VM provisioning"`.
-- **`description`** is operator-set; free-form note. Example:
+- **`usage`** (list, system-collected) comes from the matching requirements; one entry per
+  requirement. Operators do not set it. Example entry: `"Tailscale auth key for VM provisioning"`. A
+  resource required by several sources has several usages.
+- **`description`** (string, operator-set) is the operator's free-form note. Example:
   `"Prod tailnet auth key, 90-day expiry, owner: SRE team"`.
 
-Both surface in `agw doctor` and `agw secret list` as distinct columns. The convention is the same
-for any resource type Phase 2 brings into the framework.
+Both surface in `agw doctor`, `agw secret list`, and `agw secret describe` (R8). The convention is
+the same for any resource type Phase 2 brings into the framework.
 
 `description` is encouraged but not required. The validation pass emits a config-load warning when a
 declared resource has no `description`, surfacing the gap. Operators who deliberately leave the
 field blank pay one warning per CLI invocation; a future iteration may upgrade this to an error if
 the encouragement-toward-discipline pays off.
 
-### R8: Provenance in `agw doctor` and `agw secret list`
+### R8: Provenance and inspection via doctor, secret list, and secret describe
 
 `agw doctor`'s Secrets group surfaces:
 
 - **Per-secret origin**: `operator-declared` or `auto-declared by <source>`. For per-field-merge
-  cases (operator declared, also auto-required) doctor reports both: origin is operator; the
-  matching requirement source is shown as supplemental.
-- **Purpose**: from the requirement.
+  cases (operator declared, also required) doctor reports both: origin is operator; the matching
+  requirement sources are shown as supplemental.
+- **Usages**: count and first entry; the full list is on `agw secret describe`.
 - **Description**: operator-set, when present.
 
 `agw secret list` adds an `Origin` column. The header summary becomes, e.g.,
-`12 secrets (4 auto-declared, 8 operator-declared)`.
+`12 secrets (4 auto-declared, 8 operator-declared)`. List shows summary; for detail, the operator
+runs describe.
+
+`agw secret describe <name>` (new in Phase 1) is the per-secret detail view:
+
+- **Name, kind, origin, description** (operator-set, when present).
+- **All registered usages**: one row per requirement, showing the source `(kind, name)` and the
+  usage text. A resource referenced by three sources shows three rows. Duplicate usage text is
+  collapsed.
+- **Backend mappings**: the merged table, with provenance per backend (operator-set vs.
+  framework-default vs. backend-default-convention).
+- **Current resolution preview**: which active backend would resolve this secret right now
+  (`would resolve via env-var`, `would prompt`, or `not available in any backend`). Mirrors the
+  doctor preview but scoped to one secret.
+
+Describe does not prompt and does not resolve secret values; it reports state.
 
 Phase 2 generalizes the same provenance display to other resource registries when their migration
-lands; until then they use the existing per-type reporting.
+lands; until then they use the existing per-type reporting. The `describe` command pattern extends
+naturally to other resource kinds in Phase 2 (e.g., `agw template describe <name>`), though only
+`agw secret describe` is in scope for Phase 1.
 
 ### R9: Eager-resolve integration
 
