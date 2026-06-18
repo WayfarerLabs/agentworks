@@ -21,6 +21,8 @@ import pytest
 
 from agentworks.db import Database
 
+from .conftest import stub_session_resolvers
+
 if TYPE_CHECKING:
     pass
 
@@ -121,13 +123,7 @@ def test_create_session_probes_before_state_mutation(
     # patching at its source module catches every late import.
     monkeypatch.setattr(agent_mgr, "_assert_agent_ssh_works", _probe_rejects)
 
-    class _Tmpl:
-        name = "default"
-        command = ""
-        restart_command = None
-        env: dict[str, str] = {}
-
-    monkeypatch.setattr(session_manager, "_resolve_template", lambda *a, **k: _Tmpl())
+    stub_session_resolvers(monkeypatch)
 
     config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
 
@@ -178,21 +174,16 @@ def test_create_session_uses_agent_target_for_tmux(
     captured: dict[str, object] = {}
 
     def _capture_create(
-        name, ws_path, command, linux_user, *, run_command, target, admin_username, is_admin
+        name, ws_path, command, linux_user, *, run_command, target, admin_username, is_admin, env=None
     ):  # type: ignore[no-untyped-def]
         captured["run_command"] = run_command
         captured["target"] = target
+        captured["env"] = env
         return ("/tmp/sock", 12345)
 
     monkeypatch.setattr(tmux_mod, "create_session", _capture_create)
 
-    class _Tmpl:
-        name = "default"
-        command = ""
-        restart_command = None
-        env: dict[str, str] = {}
-
-    monkeypatch.setattr(session_manager, "_resolve_template", lambda *a, **k: _Tmpl())
+    stub_session_resolvers(monkeypatch)
 
     config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
 
@@ -307,6 +298,17 @@ def test_exec_agent_uses_direct_agent_ssh(
     # on agentworks.vms.manager.keep_vm_active, which would be a no-op.
     monkeypatch.setattr(agent_mgr, "keep_vm_active", lambda *a, **k: _NullCM())
 
+    # Phase 6.5 added eager-resolve + env composition; stub both out so the
+    # SimpleNamespace config below doesn't need vm_templates / agent_templates
+    # / secret_resolver. This test focuses on the SSH transport, not env.
+    monkeypatch.setattr(
+        agent_mgr, "_resolve_agent_direct_env_scopes",
+        lambda *a, **k: agent_mgr._AgentDirectEnvScopes(vm={}, workspace=None, agent={}),
+    )
+    monkeypatch.setattr(agent_mgr, "_agent_direct_secret_target", lambda *a, **k: object())
+    monkeypatch.setattr("agentworks.secrets.resolve_for_command", lambda *a, **k: {})
+    monkeypatch.setattr("agentworks.env.compose_env", lambda **k: {})
+
     called_args: list[list[str]] = []
 
     def _spy_call(args: list[str], *_a: object, **_k: object) -> int:
@@ -317,6 +319,7 @@ def test_exec_agent_uses_direct_agent_ssh(
 
     config = SimpleNamespace(
         operator=SimpleNamespace(ssh_private_key=None),
+        secret_resolver=None,
     )
 
     rc = agent_mgr.exec_agent(db, config, name="a1", command=["echo", "hi"])  # type: ignore[arg-type]

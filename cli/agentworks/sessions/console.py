@@ -45,11 +45,14 @@ def create_console(
     if recreate:
         run_command(f"tmux kill-session -t {CONSOLE_SESSION_NAME}", check=False)
 
-    # Create the session with a login shell as the initial window
+    # Create the session with a login shell as the initial window.
+    # No sudo wrapper: post FRD R1 the SSH user IS the admin user; sudo
+    # to admin was a no-op user-switch that wiped env (left over from the
+    # pre-direct-target-user-SSH era).
     run_command(
         f"tmux new-session -d -s {CONSOLE_SESSION_NAME} "
         f"-n admin-shell "
-        f"{shlex.quote('exec sudo su --login ' + shlex.quote(admin_username))}"
+        f"{shlex.quote('exec $SHELL -l')}"
     )
 
     # Keep windows open when attached session command exits

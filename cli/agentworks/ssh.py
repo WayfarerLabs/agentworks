@@ -6,6 +6,7 @@ the operator's SSH config and agent.
 
 from __future__ import annotations
 
+import shlex
 import subprocess
 import tempfile
 from dataclasses import dataclass
@@ -258,7 +259,34 @@ SSH_CONNECT_TIMEOUT = 30
 SSH_DEFAULT_RETRIES = 1
 
 
-def _ssh_base_args(target: SSHTarget) -> list[str]:
+def _set_env_args(env: dict[str, str] | None) -> list[str]:
+    """Build the ``-o SetEnv=...`` ssh-client args for a (key, value) dict.
+
+    ssh_config(5) says "for each parameter, the first obtained value will
+    be used" -- so emitting ``-o SetEnv=K=V`` once per pair silently drops
+    every pair after the first. We coalesce all pairs into a single
+    ``-o SetEnv="K1=V1" "K2=V2" ...`` argument; the option's value is
+    parsed by OpenSSH as whitespace-separated VAR=VALUE pairs with
+    double-quote grouping. Values are always quoted (handles spaces, empty
+    values, and embedded ``"``/``\\``) with the standard escapes.
+
+    The remote sshd accepts the pairs under the ``AcceptEnv *`` directive
+    deployed by VM init (see ADR 0014).
+    """
+    if not env:
+        return []
+    pairs = []
+    for key, value in env.items():
+        escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+        pairs.append(f'{key}="{escaped}"')
+    return ["-o", "SetEnv=" + " ".join(pairs)]
+
+
+def _ssh_base_args(
+    target: SSHTarget,
+    *,
+    env: dict[str, str] | None = None,
+) -> list[str]:
     args = ["ssh", "-o", "StrictHostKeyChecking=accept-new", "-o", "BatchMode=yes"]
     if target.force_tty:
         args.insert(1, "-tt")
@@ -268,6 +296,7 @@ def _ssh_base_args(target: SSHTarget) -> list[str]:
         args.extend(["-i", str(target.identity_file)])
     if target.proxy_jump is not None:
         args.extend(["-J", target.proxy_jump])
+    args.extend(_set_env_args(env))
     if target.user:
         args.append(f"{target.user}@{target.host}")
     else:
@@ -292,6 +321,7 @@ def run(
     retries: int = SSH_DEFAULT_RETRIES,
     on_retry: Callable[[int, int], None] | None = None,
     logger: SSHLogger | None = None,
+    env: dict[str, str] | None = None,
 ) -> SSHResult:
     """Execute a command on a remote host via SSH.
 
@@ -306,14 +336,16 @@ def run(
         retries: Number of attempts (default: SSH_RETRIES).
         on_retry: Optional callback(attempt, max_retries) called before each retry.
         logger: Optional SSHLogger to record command output.
+        env: Env vars to inject via SSH SetEnv. All pairs are coalesced
+            into a single ``-o SetEnv="K1=V1" "K2=V2" ...`` argument (see
+            ``_set_env_args``); agentworks-managed VMs accept these via
+            the ``AcceptEnv *`` directive deployed by VM init.
 
     Returns:
         SSHResult with exit code, stdout, and stderr.
     """
     target = _unwrap_ssh(target)
-    import shlex
-
-    args = _ssh_base_args(target)
+    args = _ssh_base_args(target, env=env)
     if target.login_shell:
         args.append(f"$SHELL -lc {shlex.quote(command)}")
     else:
@@ -356,12 +388,21 @@ def run(
     raise SSHError(msg) from last_err
 
 
-def interactive(target: SSHTarget | ExecTarget, command: str) -> int:
+def interactive(
+    target: SSHTarget | ExecTarget,
+    command: str,
+    *,
+    env: dict[str, str] | None = None,
+) -> int:
     """Run an interactive SSH command with a TTY (for tmux attach, etc.).
 
     If ``command`` is empty, opens a plain interactive login shell on the
     target (no remote command argument at all). Otherwise runs ``command``
     over a PTY-allocated SSH session.
+
+    ``env`` injects env vars via SSH SetEnv (all pairs coalesced into one
+    ``-o SetEnv="K1=V1" "K2=V2" ...`` argument; see ``_set_env_args``),
+    accepted by the remote ``AcceptEnv *`` directive deployed by VM init.
 
     Returns the process exit code. Does not raise on failure.
     """
@@ -374,6 +415,7 @@ def interactive(target: SSHTarget | ExecTarget, command: str) -> int:
         args.extend(["-i", str(target.identity_file)])
     if target.proxy_jump is not None:
         args.extend(["-J", target.proxy_jump])
+    args.extend(_set_env_args(env))
     if target.user:
         args.append(f"{target.user}@{target.host}")
     else:
@@ -397,12 +439,10 @@ def run_as_root(
     so pipelines and ``&&`` chains are fully privileged. This matches
     ``ExecTarget.run(sudo=True)``.
     """
-    import shlex as _shlex
-
     target = _unwrap_ssh(target)
     return run(
         target,
-        f"sudo -n bash -c {_shlex.quote(command)}",
+        f"sudo -n bash -c {shlex.quote(command)}",
         check=check,
         timeout=timeout,
         logger=logger,
@@ -501,6 +541,20 @@ class LimaTarget:
     vm_name: str
 
 
+def _env_assignment_prefix(env: dict[str, str] | None) -> str:
+    """Return ``K1=v1 K2=v2 `` (trailing space) for ``env`` or empty string.
+
+    Used by the non-SSH transports (Lima, RemoteLima, WSL2) where the OpenSSH
+    SetEnv mechanism doesn't apply. The bash payload these transports run
+    receives the vars as scoped assignments preceding the command, which
+    bash interprets as per-command env (exported to that command's process
+    and any children it spawns).
+    """
+    if not env:
+        return ""
+    return "".join(f"{k}={shlex.quote(v)} " for k, v in env.items())
+
+
 def lima_run(
     target: LimaTarget,
     command: str,
@@ -508,9 +562,11 @@ def lima_run(
     check: bool = True,
     timeout: int | None = None,
     logger: SSHLogger | None = None,
+    env: dict[str, str] | None = None,
 ) -> SSHResult:
     """Execute a command inside a local Lima VM via limactl shell."""
-    args = ["limactl", "shell", target.vm_name, "bash", "-lc", command]
+    env_prefix = _env_assignment_prefix(env)
+    args = ["limactl", "shell", target.vm_name, "bash", "-lc", f"{env_prefix}{command}"]
     try:
         result = subprocess.run(
             args, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout
@@ -548,6 +604,7 @@ def remote_lima_run(
     check: bool = True,
     timeout: int | None = None,
     logger: SSHLogger | None = None,
+    env: dict[str, str] | None = None,
 ) -> SSHResult:
     """Execute a command inside a remote Lima VM via the VM host.
 
@@ -555,9 +612,15 @@ def remote_lima_run(
     so we can pass multiple args after the host and they become one
     command line. This avoids nested single-quote escaping while still
     letting the VM host's login shell find limactl on PATH.
+
+    Env vars don't propagate through the SSH SetEnv at the VM-host hop
+    into the Lima VM (limactl shell starts a fresh shell on the VM side
+    without inheriting the host's env), so we embed them as scoped
+    assignments inside the lima_cmd payload.
     """
     host_target = SSHTarget(host=target.vm_host_ssh, user=None, login_shell=True)
-    lima_cmd = f"limactl shell {target.vm_name} -- {command}"
+    env_prefix = _env_assignment_prefix(env)
+    lima_cmd = f"limactl shell {target.vm_name} -- {env_prefix}{command}"
     return run(host_target, lima_cmd, check=check, timeout=timeout, logger=logger)
 
 
@@ -576,8 +639,10 @@ def wsl2_run(
     check: bool = True,
     timeout: int | None = None,
     logger: SSHLogger | None = None,
+    env: dict[str, str] | None = None,
 ) -> SSHResult:
     """Execute a command inside a WSL2 distro."""
+    env_prefix = _env_assignment_prefix(env)
     args = [
         "wsl",
         "--distribution",
@@ -587,7 +652,7 @@ def wsl2_run(
         "--",
         "bash",
         "-lc",
-        command,
+        f"{env_prefix}{command}",
     ]
     try:
         result = subprocess.run(
@@ -668,6 +733,7 @@ class ExecTarget:
         tty: bool | None = None,
         check: bool = True,
         timeout: int | None = None,
+        env: dict[str, str] | None = None,
     ) -> SSHResult:
         """Run a command on the target.
 
@@ -678,11 +744,18 @@ class ExecTarget:
                  Only meaningful for SSH transport (controls -tt flag).
             check: Raise SSHError on non-zero exit.
             timeout: Timeout in seconds.
+            env: Env vars to inject. For SSH transport, coalesced into a
+                single ``-o SetEnv="K1=V1" "K2=V2" ...`` argument (see
+                ``_set_env_args``; accepted on the remote side under the
+                ``AcceptEnv *`` directive deployed by VM init). For
+                Lima / RemoteLima / WSL2 transports, embedded as scoped
+                assignments at the head of the bash payload (``K=v K=v
+                cmd``) which bash exports for the command and its
+                descendants. Unified across transports so callers don't
+                need to special-case.
         """
-        import shlex as _shlex
-
         if sudo:
-            command = f"sudo -n bash -c {_shlex.quote(command)}"
+            command = f"sudo -n bash -c {shlex.quote(command)}"
 
         t = self._timeout(timeout)
         lg = self.logger
@@ -693,13 +766,13 @@ class ExecTarget:
             from dataclasses import replace as _replace
 
             ssh = _replace(self.ssh, force_tty=effective_tty) if effective_tty != self.ssh.force_tty else self.ssh
-            return run(ssh, command, check=check, timeout=t, logger=lg)
+            return run(ssh, command, check=check, timeout=t, logger=lg, env=env)
         if self.lima is not None:
-            return lima_run(self.lima, command, check=check, timeout=t, logger=lg)
+            return lima_run(self.lima, command, check=check, timeout=t, logger=lg, env=env)
         if self.remote_lima is not None:
-            return remote_lima_run(self.remote_lima, command, check=check, timeout=t, logger=lg)
+            return remote_lima_run(self.remote_lima, command, check=check, timeout=t, logger=lg, env=env)
         if self.wsl2 is not None:
-            return wsl2_run(self.wsl2, command, check=check, timeout=t, logger=lg)
+            return wsl2_run(self.wsl2, command, check=check, timeout=t, logger=lg, env=env)
         msg = "ExecTarget has no target configured"
         raise SSHError(msg)
 
@@ -766,7 +839,12 @@ class ExecTarget:
 
         self.run(f"tar -xzf {remote_tmp} -C {remote_path} && rm -f {remote_tmp}", timeout=timeout)
 
-    def call_streaming(self, command: str) -> int:
+    def call_streaming(
+        self,
+        command: str,
+        *,
+        env: dict[str, str] | None = None,
+    ) -> int:
         """Run a remote command with stdio passthrough; return its exit code.
 
         Used for ``agw agent exec`` / ``agw vm exec``-style invocations
@@ -775,6 +853,12 @@ class ExecTarget:
         by ``run``. Non-interactive: ``BatchMode=yes`` and no TTY
         allocation, so this is the wrong helper for tmux attach or
         interactive shells (use ``interactive()`` for those).
+
+        ``env`` injects env vars via SSH SetEnv (all pairs coalesced into
+        one ``-o SetEnv="K1=V1" "K2=V2" ...`` argument; see
+        ``_set_env_args``), accepted by the remote ``AcceptEnv *``
+        directive deployed by VM init. Matches the env path used by
+        ``run`` / ``interactive``.
 
         Only the SSH transport is supported today; other transports
         (lima, remote_lima, wsl2) raise ``SSHError`` if asked.
@@ -790,6 +874,7 @@ class ExecTarget:
             args.extend(["-i", str(self.ssh.identity_file)])
         if self.ssh.proxy_jump is not None:
             args.extend(["-J", self.ssh.proxy_jump])
+        args.extend(_set_env_args(env))
         if self.ssh.user:
             args.append(f"{self.ssh.user}@{self.ssh.host}")
         else:

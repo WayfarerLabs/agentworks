@@ -439,9 +439,9 @@ description = "Claude Code interactive session"
 ```
 
 Template commands support `{{session_name}}` and `{{workspace_name}}` variable substitution
-(double-brace syntax, consistent with nerftools manifests). The optional `restart_command` is used
-by `session restart` -- useful for tools like Claude Code where `--resume` picks up the previous
-conversation. If omitted, the regular `command` is used.
+(double-brace syntax). The optional `restart_command` is used by `session restart` -- useful for
+tools like Claude Code where `--resume` picks up the previous conversation. If omitted, the regular
+`command` is used.
 
 ### Catalog
 
@@ -484,6 +484,9 @@ Key sections:
 - `[workspace_templates.*]` -- workspace templates with inheritance
 - `[named_console]` -- named-console layout (tmux preset names + `aw-session-vertical`)
 - `[git_credentials.*]` -- git credential providers (GitHub, Azure DevOps)
+- `[<scope>.env]` -- env vars at vm / workspace / admin / agent / session scope
+- `[secrets.*]` -- secret declarations referenced by `{ secret = "name" }` env entries
+- `[secret_backends.*]` / `[secret_config]` -- active secret backend chain
 - `[apt_sources.*]` -- user-defined third-party apt repositories
 - `[apt_packages.*]` -- user-defined named apt package sets
 - `[system_install_commands.*]` -- user-defined system-level install commands
@@ -491,41 +494,103 @@ Key sections:
 - `[azure]` -- Azure-specific settings
 - `[proxmox]` -- Proxmox VE API settings
 
+### Environment Variables and Secrets
+
+Env tables can be declared at five scopes; for any given session the merged value is computed in
+this precedence order (highest scope wins; identity vars win over everything):
+
+```text
+session > (agent | admin) > workspace > vm           (AGENTWORKS_* identity overrides all)
+```
+
+Admin and agent scopes are mutually exclusive: a shell opened as the admin user (e.g.
+`agw vm shell`) sees admin scope; an agent-mode session sees agent scope. Each scope is a TOML table
+mapping env-var name to either a plaintext string or `{ secret = "<name>" }`:
+
+```toml
+[vm_templates.default.env]
+HTTP_PROXY = "http://proxy:3128"
+NPM_TOKEN = { secret = "npm-token" }
+
+[admin.env]
+EDITOR = "nvim"
+```
+
+Every `{ secret = "<name>" }` reference must point to a `[secrets.<name>]` declaration. Active
+backends (and their precedence order) are listed in `[secret_config].backends`. Today the
+implemented backends are:
+
+- `env-var` -- reads from the operator's process env. Default convention is
+  `AW_SECRET_<UPPER_SNAKE_CASE>`, overridable per secret via
+  `[secrets.<name>].backend_mappings.env-var = "CUSTOM_NAME"`.
+- `prompt` -- interactive prompt; batched at the start of the CLI run.
+
+**Eager prompting (FRD R4):** every command that opens new shells resolves all needed secrets up
+front, before any state mutation. The set of secrets is computed from the command's static filters
+(positional targets, `--vm`, `--workspace`, `--agent`, etc.) -- dynamic predicates like
+`--all-stopped` apply later, so the prompted set may over-approximate. Non-interactive mode (no TTY
+or `--non-interactive`) surfaces missing secrets as `SecretUnavailableError` with a per-secret hint
+naming which backends were tried. Commands that join existing shells (`session attach`,
+`session list`, `console attach` against a live tmux session, `console add-sessions`) consume no
+secrets per FRD R4 / R5.
+
+**Miss semantics:** what "not found" means depends on the backend. Conventional sources (`env-var`,
+`prompt`) treat a missing value as a soft miss and fall through to the next backend in the chain --
+a `GITHUB_TOKEN` env var that isn't set is just-not-set, not a config error. Persistent-store
+backends (1Password, Vault when implemented) will treat an explicit mapping that doesn't resolve as
+a hard miss: they raise `SecretMappingError` and the chain halts so a wrong `op://` URI doesn't
+quietly fall through to a prompt that masks the real problem.
+
+Inspect the merged result for any context with `agw env show`:
+
+```bash
+agw env show --session my-session              # secrets redacted as <from secret: name>
+agw env show --vm my-vm --reveal-secrets       # resolves through the active backend chain
+```
+
+Inspect how each active backend would resolve each declared secret (e.g. "which env var name does
+this secret read from?") with `agw secret list`:
+
+```bash
+agw secret list
+# NAME           env-var                  prompt
+# ----           -------                  ------
+# github-token   AW_SECRET_GITHUB_TOKEN   enabled
+# force-prompt   disabled                 enabled
+# api-key        OPENAI_API_KEY           enabled
+```
+
+Columns are the active backends in `[secret_config].backends` precedence order. Cells show each
+backend's static lookup identifier (env var name, vault path, `op://` URI) or `disabled` / `enabled`
+for backends with an explicit opt-out or no static identifier (prompt). Values are never resolved.
+
+`agw doctor`'s Secrets group leads with one row naming the active backend chain
+(`Configured backends: env-var, prompt`). Then one row per declared secret showing whether the chain
+would resolve it (`would resolve via env-var`, `would resolve via prompt`, or
+`not available in any backend`). Per-secret config-validity findings round out the group: unused
+secret declarations and `backend_mappings.<kind>` entries pointing at undeclared or inactive
+backends. `AGENTWORKS_*` identity overrides surface in the Configuration group (they're a
+config-load warning). Broken `{ secret = "..." }` references are caught earlier as a hard
+config-load error before doctor runs.
+
 ### Mise (Polyglot Tool Manager)
 
 Agentworks installs [mise](https://mise.jdx.dev/) by default on all VMs for managing CLI tools
 (terraform, adr-tools, node, etc.) with optional lockfile-based integrity verification. See
 [Using mise](../docs/guides/mise.md) for the full guide.
 
-### Nerf Tools (Claude Code Plugin)
+### Claude Code Plugins
 
-Agentworks can build and deploy a Claude Code plugin containing "nerf tools" -- scoped,
-safety-constrained wrappers for CLI operations like git, az, and other tools. Nerf tools enforce
-guardrails (validated parameters, restricted flags, pre-flight checks) so AI agents operate safely.
-
-Enable in your VM template:
-
-```toml
-[vm_templates.default]
-nerf_build_claude_plugin = true
-```
-
-This builds the plugin to `nerf_home_dir/claude-plugin/` during VM init. To auto-install the plugin
-for users, add to admin or agent config:
+Agentworks can register Claude Code marketplaces and install plugins automatically per user (admin
+and per-agent). Configure via `claude_marketplaces` and `claude_plugins` in `admin.config` or any
+`agent_templates.*`. Requires the `claude` CLI on PATH (typically installed via
+`user_install_commands`). To install nerftools this way:
 
 ```toml
 [admin.config]
-nerf_install_claude_plugin = true
+claude_marketplaces = ["https://github.com/WayfarerLabs/nerftools#4.1.0"]
+claude_plugins = ["nerftools-default@nerftools"]
 ```
-
-The plugin provides skills that document available tools, and operator commands for managing
-permissions (`/nerftools:nerfctl-grant-allow`, `/nerftools:nerfctl-grant-deny`, etc.). Custom tool
-manifests can be added via `nerf_addl_manifests`.
-
-Plugin identity (name, marketplace metadata) is defined in agentworks' own `nerf-config.yaml` and
-loaded via the nerftools config API. The version is a date-based build stamp that changes on each
-reinit. The build always emits an embedded marketplace so the plugin directory is installable
-standalone via `claude plugin marketplace add`.
 
 ### Built-in Catalog
 

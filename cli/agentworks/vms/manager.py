@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import contextlib
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 from agentworks import output
 from agentworks.config import VALID_PLATFORMS, validate_admin_username, validate_name
@@ -33,8 +33,58 @@ if TYPE_CHECKING:
 
     from agentworks.config import Config
     from agentworks.db import Database, VMRow
+    from agentworks.env import EnvEntry
     from agentworks.git_credentials.base import GitCredentialProvider
+    from agentworks.secrets import SecretTarget
     from agentworks.vms.base import VMProvisioner
+
+
+class _VmAdminEnvScopes(NamedTuple):
+    """Per-scope env dicts for vm-level commands (provisioning, shell, exec)."""
+
+    vm: dict[str, EnvEntry]
+    admin: dict[str, EnvEntry]
+
+
+def _resolve_vm_admin_env_scopes(
+    config: Config, vm: VMRow | None = None,
+) -> _VmAdminEnvScopes:
+    """Resolve per-scope env dicts for vm-level commands.
+
+    When ``vm`` is provided (reinit / shell / exec), the vm-scope env
+    comes from the VM's actual template (``config.vm_templates[vm.template]``)
+    -- NOT ``config.vm``, which is the config-time default and may not
+    match the VM's actual template.
+
+    When ``vm`` is None (``create_vm``, where the VM doesn't exist in the
+    DB yet), the caller is expected to have already
+    ``_replace(config, vm=resolved_template)``'d from the operator's
+    ``--template`` flag, so ``config.vm`` is authoritative.
+    """
+    if vm is None:
+        vm_env = config.vm.env
+    else:
+        from agentworks.vms.templates import resolve_from_dict as _resolve_vm_template
+        vm_env = _resolve_vm_template(config.vm_templates, vm.template).env
+    return _VmAdminEnvScopes(vm=vm_env, admin=config.admin.env)
+
+
+def _vm_secret_target(
+    scopes: _VmAdminEnvScopes, *, label: str,
+) -> SecretTarget:
+    """Build the SecretTarget for VM-level commands from pre-resolved scopes.
+
+    Callers resolve scopes via ``_resolve_vm_admin_env_scopes`` once and
+    feed the result to BOTH this builder (for eager-resolve) and
+    ``compose_env`` (for render) so the two consumers can't drift.
+    """
+    from agentworks.secrets import SecretTarget
+
+    return SecretTarget(
+        vm=scopes.vm,
+        admin=scopes.admin,
+        label=label,
+    )
 
 
 @contextlib.contextmanager
@@ -177,7 +227,12 @@ def create_vm(
     providers = resolve_git_credential_providers(config, config.admin.git_credentials)
     verify_git_credential_auth(providers)
 
-    # Collect secrets upfront so the user isn't interrupted mid-provisioning
+    # Collect provisioning-time secrets upfront (tailscale auth, git creds).
+    # Provisioning is hermetic: operator [admin.env] / [vm_templates.*.env]
+    # secrets are NOT prompted here -- they're not used until runtime
+    # shells. The legacy _collect_secrets path remains because the
+    # provisioning-required secrets it covers (tailscale, git) live
+    # outside the env-block system today.
     tailscale_auth_key, git_tokens = _collect_secrets(providers, vm_name)
 
     # Create DB record with as-provisioned resource values
@@ -477,8 +532,11 @@ def describe_vm(db: Database, config: Config, name: str) -> None:
 
 def shell_vm(db: Database, config: Config, name: str) -> None:
     """Open a shell on a VM's home directory."""
-    import subprocess
     import sys
+
+    from agentworks.env import ResourceContext, compose_env
+    from agentworks.secrets import resolve_for_command
+    from agentworks.ssh import admin_exec_target, interactive
 
     vm = _require_vm(db, name)
     _guard_failed_vm(vm)
@@ -490,13 +548,35 @@ def shell_vm(db: Database, config: Config, name: str) -> None:
             hint="VM init may not be complete. Check 'vm describe' for status.",
         )
 
-    ssh_cmd = ["ssh", "-t"]
-    if config.operator.ssh_private_key:
-        ssh_cmd.extend(["-i", str(config.operator.ssh_private_key)])
-    ssh_cmd.append(f"{vm.admin_username}@{vm.tailscale_host}")
+    # Eager-prompting orchestration (FRD R4 / Phase 6): resolve every
+    # secret referenced by the admin shell's env chain BEFORE opening
+    # the interactive SSH session. The same scope dicts feed both the
+    # SecretTarget (via _vm_secret_target) and compose_env so the two
+    # consumers can't drift. Crucially the vm scope comes from
+    # vm.template (DB row), not config.vm (which is the config-default
+    # template and would silently route the wrong env into a shell on a
+    # non-default-template VM).
+    scopes = _resolve_vm_admin_env_scopes(config, vm)
+    resolve_for_command(
+        [_vm_secret_target(scopes, label=f"vm-shell={vm.name}")], config,
+    )
 
+    ctx = ResourceContext(
+        vm_name=vm.name,
+        vm_host=vm.vm_host_name,
+        platform=vm.platform,
+        user=vm.admin_username,
+    )
+    env = compose_env(
+        resolver=config.secret_resolver,
+        ctx=ctx,
+        vm=scopes.vm,
+        admin=scopes.admin,
+    )
+
+    target = admin_exec_target(vm, config)
     with keep_vm_active(db, config, vm):
-        sys.exit(subprocess.call(ssh_cmd))
+        sys.exit(interactive(target, "", env=env))
 
 
 def exec_vm(db: Database, config: Config, name: str, command: list[str]) -> int:
@@ -507,6 +587,8 @@ def exec_vm(db: Database, config: Config, name: str, command: list[str]) -> int:
     """
     import shlex
 
+    from agentworks.env import ResourceContext, compose_env
+    from agentworks.secrets import resolve_for_command
     from agentworks.ssh import admin_exec_target
 
     vm = _require_vm(db, name)
@@ -521,11 +603,34 @@ def exec_vm(db: Database, config: Config, name: str, command: list[str]) -> int:
             entity_name=name,
             hint="VM init may not be complete. Check 'vm describe' for status.",
         )
-    target = admin_exec_target(vm, config)
 
+    # Eager-prompting orchestration (FRD R4 / Phase 6): resolve every
+    # secret referenced by the admin exec env chain BEFORE running the
+    # remote command. The same scope dicts feed both the SecretTarget
+    # and compose_env so the two consumers can't drift. The vm scope
+    # comes from vm.template (DB row), not config.vm.
+    scopes = _resolve_vm_admin_env_scopes(config, vm)
+    resolve_for_command(
+        [_vm_secret_target(scopes, label=f"vm-exec={vm.name}")], config,
+    )
+
+    ctx = ResourceContext(
+        vm_name=vm.name,
+        vm_host=vm.vm_host_name,
+        platform=vm.platform,
+        user=vm.admin_username,
+    )
+    env = compose_env(
+        resolver=config.secret_resolver,
+        ctx=ctx,
+        vm=scopes.vm,
+        admin=scopes.admin,
+    )
+
+    target = admin_exec_target(vm, config)
     remote_cmd = command[0] if len(command) == 1 else shlex.join(command)
     with keep_vm_active(db, config, vm):
-        return target.call_streaming(remote_cmd)
+        return target.call_streaming(remote_cmd, env=env)
 
 
 def add_git_credential(db: Database, config: Config, name: str, credential_name: str) -> None:
@@ -891,6 +996,10 @@ def reinit_vm(
     git_tokens: dict[str, str] = {}
     for cred_name, provider in providers.items():
         git_tokens[cred_name] = provider.obtain_token(name)
+
+    # Provisioning is hermetic: no operator-env secrets are prompted at
+    # reinit. They get prompted at the use site (vm shell, session
+    # create, etc.) once provisioning completes.
 
     # Build Tailscale SSH target with logging
     from agentworks.ssh import SSHLogger
