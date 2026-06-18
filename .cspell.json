@@ -16,6 +16,8 @@
     "ciuser",
     "cmdline",
     "cpus",
+    "cutover",
+    "cutovers",
     "daemonized",
     "dataclass",
     "dataclasses",
