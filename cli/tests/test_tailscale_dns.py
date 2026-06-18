@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+import pytest
+
 
 def _make_dns_fix_target(*, dropin_content: str | None = None) -> MagicMock:
     """ExecTarget mock parameterized by current drop-in content.
@@ -300,13 +302,27 @@ def test_detect_silent_when_dns_works() -> None:
     )
 
 
-def test_detect_silent_when_resolved_not_active() -> None:
-    """If resolved isn't the resolver we don't have a known-safe heal path,
-    so we stay quiet and let the apt failure speak for itself."""
+def test_detect_warns_when_resolved_not_active() -> None:
+    """First two latch signals match but resolved isn't the active resolver:
+    we saw the breakage, but the heal logic for this resolver setup isn't
+    implemented. Surface a non-fatal warning rather than raising (the hint
+    we'd suggest would be wrong) or returning silently (the operator would
+    hit a cryptic apt failure with no visible diagnosis)."""
     from agentworks.vms.tailscale_dns import detect_tailscaled_dns_latched
 
     target = _make_latch_target(resolved_active=False)
-    detect_tailscaled_dns_latched(target, MagicMock())  # must not raise
+    logger = MagicMock()
+    detect_tailscaled_dns_latched(target, logger)  # must not raise
+
+    # The warning must land on the SSHLogger (so it shows up in the SSH
+    # log's warnings summary at logger.close()) AND mention the bad state.
+    # We don't pin exact wording, but the operator needs to be able to
+    # connect this warning to the apt failure they'll hit a few steps
+    # later, which means it has to name what we saw.
+    assert logger.warning.called
+    warning_text = " ".join(call.args[0] for call in logger.warning.call_args_list)
+    assert "latched" in warning_text or "issue #117" in warning_text
+    assert "not implemented" in warning_text or "No heal" in warning_text
 
 
 def test_detect_raises_state_error_with_heal_hint() -> None:
@@ -329,33 +345,54 @@ def test_detect_raises_state_error_with_heal_hint() -> None:
     assert "systemctl start tailscaled" in (err.hint or "")
 
 
-def test_detect_does_not_modify_anything() -> None:
-    """Detection is read-only -- no writes, no service touches.
+@pytest.mark.parametrize(
+    ("case", "kwargs"),
+    [
+        ("resolv_unreadable", {"resolv_readable": False}),
+        ("resolv_not_tailscaled", {"resolv_is_tailscaled": False}),
+        ("dns_works", {"dns_probe_ok": True}),
+        ("resolved_not_active", {"resolved_active": False}),
+        ("latched", {}),  # defaults describe the all-signals-match latched state
+    ],
+)
+def test_detect_does_not_modify_anything(case: str, kwargs: dict[str, bool]) -> None:
+    """Detection is read-only across every branch -- no writes, no service
+    touches, no daemon-reloads, no file restorations. The operator decides
+    whether and how to heal; detection only surfaces the diagnosis.
 
-    Even in the latched-state raise path, we must not mutate the VM.
-    The whole point is to surface the problem so the operator can
-    decide whether and how to heal.
+    Parametrized across all five branches (four no-raise paths plus the
+    latched/raise path) so any future contributor who adds a side effect
+    in any branch trips this regardless of which branch they touched.
+
+    Uses an allow-list shape (every command must start with one of three
+    known read-only prefixes) rather than a deny-list. A deny-list would
+    only catch the specific mutation verbs we thought to enumerate; a
+    contributor could slip ``mv``, ``cp``, ``chmod``, ``sed -i``, ``tee``,
+    or a ``sh -c "... > /etc/foo"`` past it. The allow-list catches any
+    new command shape regardless of how it would mutate state.
     """
     import contextlib
 
     from agentworks.errors import StateError
     from agentworks.vms.tailscale_dns import detect_tailscaled_dns_latched
 
-    target = _make_latch_target()
+    target = _make_latch_target(**kwargs)
     with contextlib.suppress(StateError):
         detect_tailscaled_dns_latched(target, MagicMock())
 
-    # No write side effects of any kind:
+    # No file writes via either entry point. write_file is the documented
+    # path; copy_to is the lower-level primitive write_file delegates to.
+    # Asserting both pins down the contract regardless of which API a
+    # future contributor reaches for.
     target.write_file.assert_not_called()
-    forbidden_substrings = (
-        "rm ",
-        "ln -sf",
-        "install -",
-        "systemctl restart",
-        "systemctl start",
-        "systemctl stop",
-        "systemctl daemon-reload",
-    )
+    target.copy_to.assert_not_called()
+
+    # Allow-list: detection should only ever issue these three read-only
+    # command shapes. Any other command shape -- even one that looks
+    # read-only -- is a contract change that warrants explicit review.
+    allowed_prefixes = ("cat ", "getent hosts ", "systemctl is-active ")
     for cmd in target.run_log:
-        for s in forbidden_substrings:
-            assert s not in cmd, f"detection issued a write-y command: {cmd!r}"
+        assert cmd.startswith(allowed_prefixes), (
+            f"[{case}] detection issued a command outside the read-only "
+            f"allow-list: {cmd!r}"
+        )

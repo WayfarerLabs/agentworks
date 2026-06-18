@@ -38,10 +38,11 @@ combination of ``/etc/resolv.conf`` being tailscaled-managed, libc
 DNS not working, and ``systemd-resolved`` being the platform's
 active resolver. The suggested heal restores the resolved stub
 symlink, which is only the right move when resolved IS the resolver.
-On platforms with a different resolver, detection stays silent and
-the operator gets the normal cryptic apt failure -- worse UX, but
-not worse than today, and we don't risk suggesting a fix that would
-break a non-resolved VM.
+On platforms with a different resolver, detection emits a non-fatal
+warning -- we saw the breakage, but the heal logic for this resolver
+setup isn't implemented -- so the operator has a visible link
+between the diagnosis and the apt failure that follows. We don't
+attempt a heal we know would be wrong.
 """
 
 from __future__ import annotations
@@ -162,17 +163,26 @@ def detect_tailscaled_dns_latched(target: ExecTarget, logger: SSHLogger) -> None
     - ``systemd-resolved`` is active on the VM (the platform whose heal
       sequence we know).
 
-    Returns silently otherwise. Any individual signal mismatch means the
-    VM is either healthy, on a different resolver setup, or in a state
-    we don't have a known-safe heal for -- all reasons to stay out of
-    the way and let subsequent steps run (and, if they fail, surface
-    their own errors).
+    Emits a non-fatal warning when the resolv.conf + DNS-probe signals
+    fire but ``systemd-resolved`` isn't the active resolver. We've
+    detected the broken state but don't have a heal implementation for
+    this resolver setup; the warning ensures the operator gets a
+    visible link between the diagnosis and the cryptic apt failure
+    that will follow, rather than burying the lede under a ``detail``
+    line.
+
+    Returns silently when no sign of breakage is present (healthy VM,
+    or a resolv.conf we don't recognize as tailscaled-managed).
     """
     logger.step("Tailscale DNS state")
 
     # Resolv.conf signature -- the cheapest check, and the only one that
-    # uniquely points at tailscaled.
-    resolv = target.run("cat /etc/resolv.conf", sudo=True, check=False)
+    # uniquely points at tailscaled. /etc/resolv.conf is mode 0644 on
+    # every standard distribution (including in the latched state, where
+    # tailscaled rewrites it as a regular file with default mode), so no
+    # sudo is needed here -- keeping the read footprint minimal makes the
+    # read-only contract more obvious.
+    resolv = target.run("cat /etc/resolv.conf", check=False)
     if not getattr(resolv, "ok", False):
         output.detail("Could not read /etc/resolv.conf; skipping latch check.")
         return
@@ -186,14 +196,23 @@ def detect_tailscaled_dns_latched(target: ExecTarget, logger: SSHLogger) -> None
         output.detail("libc DNS works; tailscaled forwarder is healthy.")
         return
 
-    # Platform gate -- the heal sequence we suggest assumes resolved is the
-    # active resolver. If it isn't, suppress the hint rather than guess.
+    # Platform gate. The heal we'd suggest restores the resolved stub
+    # symlink, which is only correct when resolved IS the active
+    # resolver. For other resolver setups we don't yet have a tested
+    # heal implementation. Surface a warning -- we saw the breakage,
+    # but the fix logic for this platform isn't implemented -- rather
+    # than the StateError with a hint we know would be wrong.
     resolved = target.run("systemctl is-active --quiet systemd-resolved", check=False)
     if not getattr(resolved, "ok", False):
-        output.detail(
-            "DNS probe failed but systemd-resolved is not the active resolver; "
-            "no known heal path. Letting subsequent steps surface the failure."
+        msg = (
+            f"tailscaled DNS appears latched (issue #117): /etc/resolv.conf is "
+            f"tailscaled-managed and libc lookup of '{_DNS_PROBE_NAME}' failed. "
+            f"No heal is currently implemented for this VM's resolver setup "
+            f"(systemd-resolved is not the active resolver). Subsequent steps "
+            f"that need external DNS (apt-get update, etc.) will likely fail."
         )
+        logger.warning(msg)
+        output.warn(msg)
         return
 
     raise StateError(
