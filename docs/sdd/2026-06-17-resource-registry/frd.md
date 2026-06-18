@@ -303,6 +303,29 @@ Phase 2 is primarily a refactor: validation logic consolidates, error messages g
 shape, and the codebase has one place to add new resource types. There are no operator-facing config
 changes beyond improved error messages.
 
+#### `agw resource` cross-kind inspection
+
+Phase 2 also adds an `agw resource` command tree for cross-kind inspection of the registry. It is
+deliberately scoped to fields the declaration framework defines; kind-specific details stay in the
+kind-specific commands (`agw secret describe`, future `agw template describe`, ...).
+
+```text
+agw resource list [--kind <kind1,kind2,...>] [--origin operator|auto]
+agw resource describe <kind> <name>
+```
+
+- `agw resource list` shows one row per declared resource across all kinds in the registry. Columns:
+  kind, name, origin, usage count (or first usage when short), description (truncated). Filters:
+  `--kind` (CSV per the cli-conventions filter pattern), `--origin` (one of `operator`, `auto`).
+- `agw resource describe <kind> <name>` shows the framework-level detail view: kind, name, origin
+  (with requirement sources when auto-declared), full usage list, description. Kind-specific detail
+  (backend mappings, inheritance chain, resolved fields, ...) belongs in the kind's own `describe`
+  command.
+
+`agw resource` is gated to Phase 2 because the cross-kind view only earns its keep once multiple
+kinds are in the registry; with only secrets in Phase 1 it would be redundant with `agw secret list`
+/ `agw secret describe`.
+
 ## Non-goals
 
 - **Manifest-style multi-file config**. This SDD acknowledges an anticipated direction toward
