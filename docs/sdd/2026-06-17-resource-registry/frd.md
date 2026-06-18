@@ -33,11 +33,21 @@ The framework ships in two phases (see plan): Phase 1 introduces the framework a
 system secrets; Phase 2 migrates the remaining resource references (template inheritance, catalog
 commands, git credential providers, secret backend kinds) to use the same framework.
 
+### Scope
+
+All named agentworks entities are _resources_: templates, secrets, backends, catalog entries, VMs,
+agents, sessions, consoles, and so on. This SDD's framework manages the **config-declared** subset.
+Resources with lifecycle and observable state (VMs, agents, sessions, consoles) live in the DB today
+and are out of scope here. The framework's storage abstraction is shaped to admit a future
+manifest-style-config SDD that would bring lifecycle resources into the registry alongside DB-side
+reconciliation, but that move is deliberately not part of this design.
+
 ## Terminology
 
-- **Resource**: any named thing the config knows about: secrets, VM templates, workspace templates,
-  agent templates, session templates, catalog commands, git credential providers, secret backend
-  kinds.
+- **Resource**: any named entity in agentworks. The umbrella term covers both config-declared
+  resources (templates, secrets, backends, catalog entries) and lifecycle resources (VMs, agents,
+  sessions, consoles). The framework in this SDD manages only the config-declared subset; lifecycle
+  resources live in the DB and stay there.
 - **Resource registry**: the keyed lookup for one kind of resource (e.g., `config.secrets`,
   `config.vm_templates`).
 - **Resource requirement**: a declaration by one resource that it needs another. Carries the
@@ -259,6 +269,11 @@ changes beyond improved error messages.
   compatible with such a future shift: resource identity is already `(kind, name)`-shaped and the
   validation pass is independent of the parser. The loader changes (single TOML to multiple YAML
   files) are a separate concern handled in its own SDD if and when that direction is committed.
+- **Bringing lifecycle resources into the Resource Registry**. VMs, agents, sessions, and consoles
+  are resources, but they live in the DB and are managed via CLI commands today. Migrating them into
+  the registry (with reconciliation against DB state) is reserved for a future manifest-style-config
+  SDD. That future SDD would extend the framework's storage backend rather than replace the
+  framework, but the work is deliberately out of scope here.
 - **Namespaces / multi-tenant resource scoping**. Resource identity remains globally `(kind, name)`.
 - **A new transport for system secrets**. Resolved values reach provisioning runners as function
   arguments, not via SSH SetEnv or profile fragments. The hermetic-provisioning contract from the
