@@ -10,13 +10,13 @@ GitHub issue #117 for the full root-cause analysis.
 
 This module covers two things, both called from ``_phase_b_setup``:
 
-1. ``apply_tailscaled_dns_fix`` -- prevention. Installs a
+1. ``apply_tailscaled_dns_fix``: prevention. Installs a
    ``tailscaled.service.d`` override that orders tailscaled after
    ``network-online.target`` and ``nss-lookup.target`` so its
    DNS-manager probe finds a resolver instead of falling back to
    direct mode. Takes effect on next cold boot. Idempotent, non-fatal.
 
-2. ``detect_tailscaled_dns_latched`` -- diagnosis. Probes for the
+2. ``detect_tailscaled_dns_latched``: diagnosis. Probes for the
    already-broken state and raises ``StateError`` with the manual
    heal block as a hint if found. Runs before the apt step so we
    abort with a clear error instead of failing cryptically on
@@ -39,9 +39,9 @@ DNS not working, and ``systemd-resolved`` being the platform's
 active resolver. The suggested heal restores the resolved stub
 symlink, which is only the right move when resolved IS the resolver.
 On platforms with a different resolver, detection emits a non-fatal
-warning -- we saw the breakage, but the heal logic for this resolver
-setup isn't implemented -- so the operator has a visible link
-between the diagnosis and the apt failure that follows. We don't
+warning that says "we saw the breakage, but the heal logic for this
+resolver setup isn't implemented." This gives the operator a visible
+link between the diagnosis and the apt failure that follows. We don't
 attempt a heal we know would be wrong.
 """
 
@@ -130,7 +130,7 @@ def _ensure_tailscaled_dropin(target: ExecTarget, logger: SSHLogger) -> None:
 # Probe target for the libc DNS check. Stable A record, frequently cached on
 # real upstream resolvers so a working tailscaled forwarder will answer it,
 # and it's what `apt-get update` will hit a few steps later anyway. If this
-# specific lookup ever stops being stable, swap it -- the check just needs
+# specific lookup ever stops being stable, swap it. The check just needs
 # any external name that should resolve via libc.
 _DNS_PROBE_NAME = "deb.debian.org"
 
@@ -176,11 +176,11 @@ def detect_tailscaled_dns_latched(target: ExecTarget, logger: SSHLogger) -> None
     """
     logger.step("Tailscale DNS state")
 
-    # Resolv.conf signature -- the cheapest check, and the only one that
+    # Resolv.conf signature: the cheapest check, and the only one that
     # uniquely points at tailscaled. /etc/resolv.conf is mode 0644 on
     # every standard distribution (including in the latched state, where
-    # tailscaled rewrites it as a regular file with default mode), so no
-    # sudo is needed here -- keeping the read footprint minimal makes the
+    # tailscaled rewrites it as a regular file with default mode); no
+    # sudo is needed here. Keeping the read footprint minimal makes the
     # read-only contract more obvious.
     resolv = target.run("cat /etc/resolv.conf", check=False)
     if not getattr(resolv, "ok", False):
@@ -190,7 +190,7 @@ def detect_tailscaled_dns_latched(target: ExecTarget, logger: SSHLogger) -> None
         output.detail("/etc/resolv.conf is not tailscaled-managed; no latch.")
         return
 
-    # libc DNS probe -- the actual failure mode the latch creates.
+    # libc DNS probe. The actual failure mode the latch creates.
     probe = target.run(f"getent hosts {shlex.quote(_DNS_PROBE_NAME)}", check=False)
     if getattr(probe, "ok", False):
         output.detail("libc DNS works; tailscaled forwarder is healthy.")
@@ -199,9 +199,9 @@ def detect_tailscaled_dns_latched(target: ExecTarget, logger: SSHLogger) -> None
     # Platform gate. The heal we'd suggest restores the resolved stub
     # symlink, which is only correct when resolved IS the active
     # resolver. For other resolver setups we don't yet have a tested
-    # heal implementation. Surface a warning -- we saw the breakage,
-    # but the fix logic for this platform isn't implemented -- rather
-    # than the StateError with a hint we know would be wrong.
+    # heal implementation. Surface a warning that says "we saw the
+    # breakage, but the fix logic for this platform isn't implemented,"
+    # rather than the StateError with a hint we know would be wrong.
     resolved = target.run("systemctl is-active --quiet systemd-resolved", check=False)
     if not getattr(resolved, "ok", False):
         msg = (

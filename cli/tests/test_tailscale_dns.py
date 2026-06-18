@@ -220,7 +220,7 @@ def _make_latch_target(
     """ExecTarget mock parameterized by the four signals the detector reads.
 
     Defaults describe a latched VM with systemd-resolved as the platform
-    resolver -- the case where detection should raise.
+    resolver, which is the case where detection should raise.
     """
     target = MagicMock()
     run_log: list[str] = []
@@ -356,7 +356,7 @@ def test_detect_raises_state_error_with_heal_hint() -> None:
     ],
 )
 def test_detect_does_not_modify_anything(case: str, kwargs: dict[str, bool]) -> None:
-    """Detection is read-only across every branch -- no writes, no service
+    """Detection is read-only across every branch: no writes, no service
     touches, no daemon-reloads, no file restorations. The operator decides
     whether and how to heal; detection only surfaces the diagnosis.
 
@@ -388,8 +388,8 @@ def test_detect_does_not_modify_anything(case: str, kwargs: dict[str, bool]) -> 
     target.copy_to.assert_not_called()
 
     # Allow-list: detection should only ever issue these three read-only
-    # command shapes. Any other command shape -- even one that looks
-    # read-only -- is a contract change that warrants explicit review.
+    # command shapes. Any other command shape (even one that looks
+    # read-only) is a contract change that warrants explicit review.
     allowed_prefixes = ("cat ", "getent hosts ", "systemctl is-active ")
     for cmd in target.run_log:
         assert cmd.startswith(allowed_prefixes), (
