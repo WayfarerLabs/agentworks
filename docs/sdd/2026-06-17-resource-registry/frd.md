@@ -45,10 +45,12 @@ reconciliation, but that move is deliberately not part of this design.
 
 ## Terminology
 
-- **Resource**: a named entity that **lives in a registry**. Any named thing in agentworks qualifies
-  (templates, secrets, backends, catalog entries, VMs, agents, sessions, consoles), but the
-  framework in this SDD manages only the config-declared subset. Lifecycle resources (VMs, agents,
-  sessions, consoles) live in the DB and stay there.
+- **Resource**: any named entity in agentworks. The umbrella term covers both config-declared
+  resources (templates, secrets, backends, catalog entries) and lifecycle resources (VMs, agents,
+  sessions, consoles). The framework in this SDD manages only the config-declared subset; lifecycle
+  resources live in the DB and stay there. Resources carry their own fields (name, kind, origin,
+  description, usage list, kind-specific data); they are distinct from the **requirements** that
+  reference them by name.
 - **Resource registry**: the keyed lookup for one kind of resource (e.g., `config.secrets`,
   `config.vm_templates`).
 - **Resource requirement**: a **reference declaration** -- one resource saying "I need this other
