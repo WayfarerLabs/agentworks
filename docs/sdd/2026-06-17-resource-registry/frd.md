@@ -25,8 +25,8 @@ This SDD addresses both, in one framework:
   needs (by name, with a system-defined usage). One resource may be required by many; all usages are
   tracked and surfaced via the CLI.
 - A **resource-registry** validation pass that walks all requirements, looks each up in the
-  appropriate registry, and dispatches missing-name policies per registry kind (auto-declare for
-  secrets; built-in default for templates; error for catalogs; etc.).
+  registry, and dispatches missing-name policies per kind (auto-declare for secrets; built-in
+  default for templates; error for catalogs; etc.).
 - A **migration of `tailscale_auth_key` and `git_credentials.*.token`** to first-class secret
   references, using the auto-declare policy so the zero-config UX is preserved.
 
@@ -51,13 +51,13 @@ reconciliation, but that move is deliberately not part of this design.
   resources live in the DB and stay there. Resources carry their own fields (name, kind, origin,
   description, usage list, kind-specific data); they are distinct from the **requirements** that
   reference them by name.
-- **Resource registry**: a per-kind container of resources of that kind. One registry per kind
-  (`config.secrets`, `config.vm_templates`, ...). Holds resources arriving from any of the three
-  origin paths (built-in, operator-declared, auto-declared) and carries the kind's **miss policy**
-  (R2) which dictates what happens when a requirement points at a name the registry does not yet
-  contain. Lookup within a registry is by `name`; cross-kind identity is the `(kind, name)` pair.
-  Queried by the validation pass and surfaced via `agw doctor`, `agw secret list`, and (Phase 2)
-  `agw resource list`.
+- **Resource registry**: the framework's single container holding every declared resource. Kind is
+  the primary dimension; within a kind, resources are looked up by name, so cross-kind identity is
+  the `(kind, name)` pair. Each kind contributes its own **miss policy** (R2) which the registry
+  applies when a requirement points at a `(kind, name)` not yet in the registry. Resources arrive in
+  the registry through three origin paths (R4): built-in instantiation, operator declarations in
+  config, and auto-declared synthesis from requirements. Queried by the validation pass and surfaced
+  via `agw doctor`, `agw secret list`, and (Phase 2) `agw resource list`.
 - **Resource requirement**: a **reference declaration** -- one resource saying "I need this other
   resource by name". Distinct from the resource itself: requirements point at resources but are not
   resources. Carries the target's `name` and `kind`, a system-defined `usage`, the declaring
@@ -70,8 +70,8 @@ reconciliation, but that move is deliberately not part of this design.
   description.
 - **Description**: the operator-defined free-form note about a resource (already exists today on
   secrets and `git_credentials`; this SDD formalizes the convention for new resource types).
-- **Miss policy**: what a registry does when a requirement's name has no match in the registry.
-  Per-registry. Options:
+- **Miss policy**: what the registry does when a requirement's `(kind, name)` has no match in the
+  registry. Declared per kind. Options:
   - **Auto-declare**: synthesize the resource from the requirement's defaults and add it to the
     registry. The resulting resource has `origin = auto-declared`.
   - **Built-in fallback**: instantiate a code-defined resource for a specific reserved name (e.g.,
@@ -107,7 +107,7 @@ Every resource type that references other resources by name declares those refer
 
 A resource's `required_resources()` method returns the full list (one per reference, no
 deduplication at the producer side). The validation pass collects requirements across the entire
-config, keyed by `(kind, name)`, and feeds them into the registries.
+config, keyed by `(kind, name)`, and feeds them into the registry.
 
 #### Multi-requirement resources
 
@@ -123,15 +123,15 @@ this:
 - **All usages are retained**. The resource's accumulated usage list is what `agw secret describe`
   (R9) renders. Duplicate usage strings from different requirements are deduplicated for display.
 
-### R2: Per-registry miss policies
+### R2: Per-kind miss policies
 
-Each resource registry declares its miss policy:
+Each kind in the registry declares its miss policy:
 
-| Registry                                                                  | Miss policy       | Behavior                                                                                                                                                                  |
-| ------------------------------------------------------------------------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Secret registry                                                           | Auto-declare      | A `SecretRequirement` whose name is missing synthesizes a `SecretDecl` carrying the requirement's usage. Origin: `auto-declared`. Additional requirements add more usages |
-| VM, workspace, agent, session template registries                         | Built-in fallback | The reserved name `default` instantiates the code-defined default template. Origin: `built-in`. Any other name is a config-load error                                     |
-| Catalog command registry, git credential provider registry, backend kinds | Error             | Unknown names are config-load errors                                                                                                                                      |
+| Kind                                                              | Miss policy       | Behavior                                                                                                                                                                  |
+| ----------------------------------------------------------------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Secret                                                            | Auto-declare      | A `SecretRequirement` whose name is missing synthesizes a `SecretDecl` carrying the requirement's usage. Origin: `auto-declared`. Additional requirements add more usages |
+| VM template, workspace template, agent template, session template | Built-in fallback | The reserved name `default` instantiates the code-defined default template. Origin: `built-in`. Any other name is a config-load error                                     |
+| Catalog command, git credential provider, secret backend kind     | Error             | Unknown names are config-load errors                                                                                                                                      |
 
 Error messages include the requirement's `source` so the operator sees, e.g.:
 
@@ -139,8 +139,8 @@ Error messages include the requirement's `source` so the operator sees, e.g.:
 vm_template "azure-prod" references unknown agent_template "claude-experimental"
 ```
 
-The framework controls error shape; resource types only declare the policy. Migrating an existing
-bespoke-validation registry into the framework changes the error wording but not the validation
+The framework controls error shape; each kind only declares its policy. Migrating an existing
+bespoke-validation kind into the framework changes the error wording but not the validation
 semantics.
 
 ### R3: Per-field merge between operator declarations and auto-declared defaults
@@ -310,8 +310,8 @@ shows summary; for detail, the operator runs describe.
 
 Describe does not prompt and does not resolve secret values; it reports state.
 
-Phase 2 generalizes the same origin display to other resource registries when their migration lands;
-until then they use the existing per-type reporting. The `describe` command pattern extends
+Phase 2 generalizes the same origin display to other kinds in the registry when their migration
+lands; until then they use the existing per-type reporting. The `describe` command pattern extends
 naturally to other resource kinds in Phase 2 (e.g., `agw template describe <name>`), though only
 `agw secret describe` is in scope for Phase 1.
 
@@ -331,23 +331,24 @@ resulting `SecretDecl`s into `resolve_for_command(extra_decls=...)`.
 
 ### R11: Phase 2 scope (resource type migrations)
 
-Phase 2 migrates the remaining resource references to use the framework:
+Phase 2 brings the remaining resource references under the framework. Each of the kinds below
+becomes a first-class kind in the registry with its own miss policy:
 
-- **Template inheritance**: `inherits = ["..."]` resolution moves into the `VMTemplateRegistry` /
-  `WorkspaceTemplateRegistry` / `AgentTemplateRegistry` / `SessionTemplateRegistry` validation pass.
-  The default-only auto-declare policy formalizes the current "built-in default" fallback.
-  Operator-facing behavior is unchanged; error messages get the framework's consistent shape.
+- **Template inheritance**: `inherits = ["..."]` resolution for VM, workspace, agent, and session
+  templates moves into the framework's validation pass. Each template kind uses the built-in
+  fallback policy so the implicit `default` template is formalized. Operator-facing behavior is
+  unchanged; error messages get the framework's consistent shape.
 - **Catalog commands**: references to catalog command names (`apt_packages = ["gh"]`,
-  `system_install_commands = ["az-cli"]`, `user_install_commands = ["bun"]`) move into a
-  `CatalogRegistry` with the error miss policy. Error messages name the referencing scope.
-- **Git credential providers**: `[git_credentials.<name>].type` references move into a
-  `GitCredentialProviderRegistry` with the error miss policy.
-- **Secret backend kinds**: `[secret_backends.<kind>]` references move into a
-  `SecretBackendKindRegistry` with the error miss policy.
+  `system_install_commands = ["az-cli"]`, `user_install_commands = ["bun"]`) become a kind with the
+  error miss policy. Error messages name the referencing scope.
+- **Git credential providers**: `[git_credentials.<name>].type` references become a kind with the
+  error miss policy.
+- **Secret backend kinds**: `[secret_backends.<kind>]` references become a kind with the error miss
+  policy.
 
-Phase 2 is primarily a refactor: validation logic consolidates, error messages get a consistent
-shape, and the codebase has one place to add new resource types. There are no operator-facing config
-changes beyond improved error messages.
+Phase 2 is primarily a refactor: validation logic consolidates into the framework, error messages
+get a consistent shape, and the codebase has one place to register new kinds. There are no
+operator-facing config changes beyond improved error messages.
 
 #### `agw resource` cross-kind inspection
 
@@ -396,9 +397,9 @@ kinds are in the registry; with only secrets in Phase 1 it would be redundant wi
 - **Plaintext or polymorphic forms for `tailscale_auth_key` and `git_credentials.*.token`**. Both
   fields accept secret names only. EnvEntry-style `{ secret = "..." }` polymorphism is intentionally
   not extended to these fields.
-- **Soft-disable for built-in-default template names**. A registry that auto-declares `default` does
-  so unconditionally. Operators override behavior by declaring `[vm_templates.default]` explicitly;
-  there is no "no default" mode.
+- **Soft-disable for built-in-default template names**. A kind whose miss policy is built-in
+  fallback for `default` instantiates the built-in unconditionally. Operators override behavior by
+  declaring `[vm_templates.default]` explicitly; there is no "no default" mode.
 - **Resource removal semantics for auto-declared resources**. An auto-declared resource that has no
   remaining requirement (e.g., the operator changed `vm_templates.x.tailscale_auth_key` to reference
   a different secret) is silently pruned at the end of the validation pass. The framework does not
