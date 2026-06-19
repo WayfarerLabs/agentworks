@@ -359,10 +359,17 @@ def test_check_raises_state_error_with_heal_hint() -> None:
 
     err = exc_info.value
     assert err.entity_kind == "vm"
+    hint = err.hint or ""
     # The hint must contain the actual heal commands an operator pastes:
-    assert "systemctl stop tailscaled" in (err.hint or "")
-    assert "ln -sf /run/systemd/resolve/stub-resolv.conf" in (err.hint or "")
-    assert "systemctl start tailscaled" in (err.hint or "")
+    assert "systemctl stop tailscaled" in hint
+    assert "ln -sf /run/systemd/resolve/stub-resolv.conf" in hint
+    assert "systemctl start tailscaled" in hint
+    # And must warn that the simple sequence kills an SSH session over
+    # Tailscale and offer the detached alternative. Without this the
+    # operator runs the first command and finds themselves locked out
+    # mid-heal -- the most user-hostile shape this could fail in.
+    assert "Tailscale" in hint
+    assert "systemd-run" in hint
 
 
 def test_check_dns_probe_runs_first() -> None:
