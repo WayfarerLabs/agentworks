@@ -36,6 +36,7 @@ if TYPE_CHECKING:
     from agentworks.env import EnvEntry
     from agentworks.git_credentials.base import GitCredentialProvider
     from agentworks.secrets import SecretTarget
+    from agentworks.ssh import ExecTarget
     from agentworks.vms.base import VMProvisioner
 
 
@@ -530,8 +531,16 @@ def describe_vm(db: Database, config: Config, name: str) -> None:
         output.detail("(none)")
 
 
-def shell_vm(db: Database, config: Config, name: str) -> None:
-    """Open a shell on a VM's home directory."""
+def shell_vm(db: Database, config: Config, name: str, *, provisioner: bool = False) -> None:
+    """Open a shell on a VM's home directory.
+
+    By default uses the Tailscale SSH transport. Pass ``provisioner=True``
+    to use the platform-native transport instead (``limactl shell`` for
+    Lima, ``wsl.exe`` for WSL2, SSH via public IP for Azure). The
+    provisioner shell is the right choice when Tailscale connectivity is
+    the thing you need to fix (e.g. healing the issue #117 latched DNS
+    state, which involves restarting tailscaled itself).
+    """
     import sys
 
     from agentworks.env import ResourceContext, compose_env
@@ -540,17 +549,22 @@ def shell_vm(db: Database, config: Config, name: str) -> None:
 
     vm = _require_vm(db, name)
     _guard_failed_vm(vm)
-    if vm.tailscale_host is None:
+    if not provisioner and vm.tailscale_host is None:
         raise StateError(
             f"VM '{name}' has no Tailscale IP",
             entity_kind="vm",
             entity_name=name,
-            hint="VM init may not be complete. Check 'vm describe' for status.",
+            hint=(
+                "VM init may not be complete; check 'vm describe' for status. "
+                "If Tailscale itself is the problem you're trying to reach the "
+                "VM to fix, run with --provisioner to use the platform-native "
+                "transport instead."
+            ),
         )
 
     # Eager-prompting orchestration (FRD R4 / Phase 6): resolve every
     # secret referenced by the admin shell's env chain BEFORE opening
-    # the interactive SSH session. The same scope dicts feed both the
+    # the interactive session. The same scope dicts feed both the
     # SecretTarget (via _vm_secret_target) and compose_env so the two
     # consumers can't drift. Crucially the vm scope comes from
     # vm.template (DB row), not config.vm (which is the config-default
@@ -574,9 +588,52 @@ def shell_vm(db: Database, config: Config, name: str) -> None:
         admin=scopes.admin,
     )
 
-    target = admin_exec_target(vm, config)
+    if provisioner:
+        target = _provisioner_shell_target(db, config, vm)
+    else:
+        target = admin_exec_target(vm, config)
     with keep_vm_active(db, config, vm):
         sys.exit(interactive(target, "", env=env))
+
+
+def _provisioner_shell_target(
+    db: Database, config: Config, vm: VMRow,
+) -> ExecTarget:
+    """Resolve the platform-native ExecTarget for ``vm shell --provisioner``.
+
+    Wraps the per-platform ``VMProvisioner.admin_exec_target`` in typed
+    errors so the CLI surfaces a clear message when the transport isn't
+    available (Proxmox is not implemented; Azure requires a public IP
+    to already be attached).
+    """
+    prov = get_provisioner_for_vm(db, vm, config)
+    try:
+        target = prov.admin_exec_target(vm, config=config)
+    except NotImplementedError as e:
+        raise StateError(
+            f"Provisioner shell is not implemented for platform '{vm.platform}'.",
+            entity_kind="vm",
+            entity_name=vm.name,
+            hint=str(e),
+        ) from e
+
+    # Azure's admin_exec_target returns SSHTarget(host="") when no public IP
+    # is attached. Attaching one isn't free (Azure API call + propagation
+    # wait), so we don't do it implicitly; surface the gap and tell the
+    # operator the in-portal escape hatch.
+    if target.ssh is not None and not target.ssh.host:
+        raise StateError(
+            f"Provisioner shell on platform '{vm.platform}' requires a public IP, "
+            f"but VM '{vm.name}' has none attached.",
+            entity_kind="vm",
+            entity_name=vm.name,
+            hint=(
+                "For Azure: attach a public IP via the Azure portal or use "
+                "the serial console (Connect > Serial console on the VM "
+                "resource page)."
+            ),
+        )
+    return target
 
 
 def exec_vm(db: Database, config: Config, name: str, command: list[str]) -> int:

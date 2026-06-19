@@ -152,6 +152,13 @@ message shows what will be deleted. Pass `--yes` to skip the prompt.
 `agw vm shell` is the agentworks-wrapped entry point; for raw SSH (VS Code Remote-SSH, `scp`, etc.),
 use the `awvm--<vm>` alias documented under [Direct SSH aliases](#direct-ssh-aliases).
 
+`agw vm shell --provisioner` opens the same shell over the platform-native transport
+(`limactl shell` for Lima, `wsl.exe` for WSL2, SSH via attached public IP for Azure) instead of
+Tailscale. Useful when Tailscale itself is the thing you need to reach the VM to fix (the issue #117
+latched DNS state is the canonical case: its heal involves restarting tailscaled, which would
+terminate a Tailscale-SSH session mid-sequence). Lima and WSL2 work transparently. Azure requires a
+public IP already attached. Proxmox is not yet supported.
+
 ### Workspaces
 
 Manage workspaces on VMs.
