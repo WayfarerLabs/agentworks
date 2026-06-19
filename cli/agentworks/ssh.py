@@ -465,11 +465,20 @@ def _remote_lima_interactive(target: RemoteLimaTarget, command: str) -> int:
 
     Two-hop interactive: ssh -t to the VM host, then have it invoke
     limactl shell with TTY allocation.
+
+    The inner invocation is wrapped in ``$SHELL -lc`` so the VM host
+    runs it through a login shell. Without this, ssh's default
+    non-login shell wouldn't have the operator's per-shell PATH
+    additions (Homebrew's /opt/homebrew/bin etc.), and ``limactl``
+    would fail with ``command not found``. Mirrors the
+    ``login_shell=True`` pattern that ``remote_lima_run`` uses for
+    the non-interactive path.
     """
     inner = f"limactl shell {target.vm_name}"
     if command:
         inner = f"limactl shell {target.vm_name} bash -lc {shlex.quote(command)}"
-    args = ["ssh", "-t", "-o", "StrictHostKeyChecking=accept-new", target.vm_host_ssh, inner]
+    wrapped = f"$SHELL -lc {shlex.quote(inner)}"
+    args = ["ssh", "-t", "-o", "StrictHostKeyChecking=accept-new", target.vm_host_ssh, wrapped]
     return subprocess.call(args)
 
 

@@ -303,7 +303,11 @@ def test_interactive_dispatches_to_wsl2() -> None:
 
 
 def test_interactive_dispatches_to_remote_lima() -> None:
-    """ExecTarget with remote_lima set: ssh -t to the VM host, then limactl shell."""
+    """ExecTarget with remote_lima set: ssh -t to the VM host, then limactl
+    shell, wrapped in ``$SHELL -lc`` so the VM host's login-shell PATH
+    additions (Homebrew's /opt/homebrew/bin etc.) are in scope. Without
+    that wrapping the inner ``limactl`` invocation hits 'command not
+    found' on macOS hosts where limactl is installed via Homebrew."""
     from agentworks.ssh import ExecTarget, RemoteLimaTarget, interactive
 
     target = ExecTarget(
@@ -316,7 +320,13 @@ def test_interactive_dispatches_to_remote_lima() -> None:
         assert argv[0] == "ssh"
         assert "-t" in argv
         assert "host.example" in argv
-        assert argv[-1] == "limactl shell my-vm"
+        # The last arg is the remote shell payload: a $SHELL -lc wrapping
+        # the limactl invocation. Lock in both the login-shell wrapping
+        # AND the inner limactl call so a future refactor can't silently
+        # drop either piece.
+        payload = argv[-1]
+        assert payload.startswith("$SHELL -lc ")
+        assert "limactl shell my-vm" in payload
 
 
 def test_interactive_raises_when_no_transport_configured() -> None:
