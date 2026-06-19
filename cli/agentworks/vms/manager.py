@@ -36,6 +36,7 @@ if TYPE_CHECKING:
     from agentworks.env import EnvEntry
     from agentworks.git_credentials.base import GitCredentialProvider
     from agentworks.secrets import SecretTarget
+    from agentworks.ssh import ExecTarget
     from agentworks.vms.base import VMProvisioner
 
 
@@ -530,8 +531,16 @@ def describe_vm(db: Database, config: Config, name: str) -> None:
         output.detail("(none)")
 
 
-def shell_vm(db: Database, config: Config, name: str) -> None:
-    """Open a shell on a VM's home directory."""
+def shell_vm(db: Database, config: Config, name: str, *, provisioner: bool = False) -> None:
+    """Open a shell on a VM's home directory.
+
+    By default uses the Tailscale SSH transport. Pass ``provisioner=True``
+    to use the platform-native transport instead (``limactl shell`` for
+    Lima, ``wsl.exe`` for WSL2, SSH via public IP for Azure). The
+    provisioner shell is the right choice when Tailscale connectivity is
+    the thing you need to fix (e.g. healing the issue #117 latched DNS
+    state, which involves restarting tailscaled itself).
+    """
     import sys
 
     from agentworks.env import ResourceContext, compose_env
@@ -539,18 +548,28 @@ def shell_vm(db: Database, config: Config, name: str) -> None:
     from agentworks.ssh import admin_exec_target, interactive
 
     vm = _require_vm(db, name)
-    _guard_failed_vm(vm)
-    if vm.tailscale_host is None:
+    # Init failure warns instead of blocks: shelling into a partially-
+    # initialized VM is exactly the kind of operation that lets the
+    # operator diagnose what failed or apply a manual fix (e.g. healing
+    # the issue #117 latched DNS state) before re-running reinit. Same
+    # rationale applies to `vm exec` (see exec_vm below).
+    _guard_failed_vm(vm, allow_failed_init=True)
+    if not provisioner and vm.tailscale_host is None:
         raise StateError(
             f"VM '{name}' has no Tailscale IP",
             entity_kind="vm",
             entity_name=name,
-            hint="VM init may not be complete. Check 'vm describe' for status.",
+            hint=(
+                "VM init may not be complete; check 'vm describe' for status. "
+                "If Tailscale itself is the problem you're trying to reach the "
+                "VM to fix, run with --provisioner to use the platform-native "
+                "transport instead."
+            ),
         )
 
     # Eager-prompting orchestration (FRD R4 / Phase 6): resolve every
     # secret referenced by the admin shell's env chain BEFORE opening
-    # the interactive SSH session. The same scope dicts feed both the
+    # the interactive session. The same scope dicts feed both the
     # SecretTarget (via _vm_secret_target) and compose_env so the two
     # consumers can't drift. Crucially the vm scope comes from
     # vm.template (DB row), not config.vm (which is the config-default
@@ -574,9 +593,109 @@ def shell_vm(db: Database, config: Config, name: str) -> None:
         admin=scopes.admin,
     )
 
-    target = admin_exec_target(vm, config)
-    with keep_vm_active(db, config, vm):
+    with contextlib.ExitStack() as stack:
+        stack.enter_context(keep_vm_active(db, config, vm))
+        target = (
+            _provisioner_shell_target(db, config, vm, stack)
+            if provisioner
+            else admin_exec_target(vm, config)
+        )
         sys.exit(interactive(target, "", env=env))
+
+
+def _provisioner_shell_target(
+    db: Database, config: Config, vm: VMRow, stack: contextlib.ExitStack,
+) -> ExecTarget:
+    """Resolve the platform-native ExecTarget for ``vm shell --provisioner``.
+
+    On Azure, attaches a temporary public IP for the duration of the
+    supplied ExitStack and registers detach as a cleanup callback so
+    the IP is removed regardless of how the caller unwinds (success,
+    SSH failure, ^C, etc.). Other provisioners have a usable transport
+    in steady state and don't need this dance.
+
+    Wraps the per-platform ``VMProvisioner.admin_exec_target`` in typed
+    errors so the CLI surfaces a clear message when the transport isn't
+    available (Proxmox: not implemented).
+    """
+    prov = get_provisioner_for_vm(db, vm, config)
+
+    # Azure-specific: attach a public IP if one isn't already present.
+    # The attach/detach pair mirrors the established pattern in
+    # rekey_vm (manager.py around the rekey block): attach now,
+    # register detach on the stack so cleanup is unconditional. Other
+    # provisioners' transports work without any pre-step.
+    from agentworks.vms.provisioners.azure import AzureProvisioner
+
+    if isinstance(prov, AzureProvisioner):
+        prov.attach_public_ip(vm)
+        stack.callback(prov.detach_public_ip, vm)
+    try:
+        target = prov.admin_exec_target(vm, config=config)
+    except NotImplementedError as e:
+        # Proxmox is the only platform here today: QEMU guest agent exec
+        # is one-shot and non-interactive, so we can't surface an
+        # interactive shell through it. Point the operator at the web
+        # UI's serial console as the equivalent escape hatch.
+        hint = str(e)
+        if vm.platform == "proxmox":
+            hint = (
+                "Proxmox's QEMU guest agent exec interface is one-shot "
+                "and non-interactive, so an interactive shell can't be "
+                "exposed through it. Use the Proxmox web UI's serial "
+                "console (VM > Console in the Proxmox VE web UI) as the "
+                "equivalent escape hatch."
+            )
+        raise StateError(
+            f"Provisioner shell is not implemented for platform '{vm.platform}'.",
+            entity_kind="vm",
+            entity_name=vm.name,
+            hint=hint,
+        ) from e
+
+    # Defensive: Azure's admin_exec_target returns SSHTarget(host="")
+    # when no public IP is attached. After attach_public_ip above, this
+    # shouldn't happen on Azure. If it does (attach silently failed, or
+    # a future provisioner returns an SSH target without ensuring the
+    # host is set), surface clearly rather than letting interactive()
+    # hang on an empty hostname.
+    if target.ssh is not None and not target.ssh.host:
+        raise StateError(
+            f"Provisioner shell on platform '{vm.platform}' resolved to an SSH "
+            f"target with no host. VM '{vm.name}' may not be reachable.",
+            entity_kind="vm",
+            entity_name=vm.name,
+            hint=(
+                "For Azure: the temporary public IP attach may have silently "
+                "failed; check the Azure portal for the VM's network "
+                "configuration, or use the serial console (Connect > Serial "
+                "console on the VM resource page)."
+            ),
+        )
+
+    # Wait for the transport to be reachable before handing it to
+    # interactive(). For Azure this gives the freshly-attached public IP
+    # time to propagate through the SDN. The Azure SDK's "NIC update
+    # succeeded" return doesn't mean packets route there yet, and
+    # without this loop the operator's first ssh attempt commonly hits
+    # "Connection refused" on a healthy VM. For local transports (Lima,
+    # WSL2) the probe succeeds on the first try and the loop is a
+    # no-op. Mirrors the established pattern in rekey_vm.
+    import time
+
+    from agentworks.ssh import SSHError
+
+    output.detail("Waiting for provisioning transport...")
+    for attempt in range(6):
+        try:
+            target.run("echo ok", timeout=10)
+            break
+        except SSHError:
+            if attempt == 5:
+                raise
+            time.sleep(3)
+
+    return target
 
 
 def exec_vm(db: Database, config: Config, name: str, command: list[str]) -> int:
@@ -592,7 +711,11 @@ def exec_vm(db: Database, config: Config, name: str, command: list[str]) -> int:
     from agentworks.ssh import admin_exec_target
 
     vm = _require_vm(db, name)
-    _guard_failed_vm(vm)
+    # Init failure warns instead of blocks. exec is the non-interactive
+    # twin of shell: both are diagnostic primitives, and running
+    # `agw vm exec failed-vm cat /var/log/cloud-init.log` is precisely
+    # the kind of investigation an operator does on a failed-init VM.
+    _guard_failed_vm(vm, allow_failed_init=True)
     # admin_exec_target asserts tailscale_host is not None; guard first so
     # the operator gets an actionable StateError instead of an AssertionError
     # (which also disappears under python -O).
@@ -1103,8 +1226,19 @@ def _init_log_hint(vm_name: str) -> str:
     return f" See log: {logs[0]}" if logs else ""
 
 
-def _guard_failed_vm(vm: VMRow) -> None:
-    """Block operations on VMs with failed provisioning or initialization."""
+def _guard_failed_vm(vm: VMRow, *, allow_failed_init: bool = False) -> None:
+    """Block operations on VMs with failed provisioning or initialization.
+
+    When ``allow_failed_init`` is True, an init-status failure becomes
+    a non-fatal warning instead of a hard block. Used by operations
+    that exist precisely so the operator can reach into the VM to
+    diagnose or fix the cause of the init failure (e.g. ``vm shell``
+    opening a session on a partially-initialized VM to apply a manual
+    heal before re-running ``vm reinit``; ``vm exec`` running a one-shot
+    diagnostic command). Provisioning failure is never softened: the
+    VM may not even be reachable, and the project's stance there is
+    "delete and recreate."
+    """
     if vm.provisioning_status == ProvisioningStatus.FAILED.value:
         raise StateError(
             f"VM '{vm.name}' has failed provisioning.{_init_log_hint(vm.name)}",
@@ -1113,6 +1247,12 @@ def _guard_failed_vm(vm: VMRow) -> None:
             hint="Only 'vm delete' is supported on a failed-provisioning VM.",
         )
     if vm.init_status == InitStatus.FAILED.value:
+        if allow_failed_init:
+            output.warn(
+                f"VM '{vm.name}' has failed initialization.{_init_log_hint(vm.name)} "
+                f"Continuing. Use 'vm reinit' to retry once the cause is resolved.",
+            )
+            return
         raise StateError(
             f"VM '{vm.name}' has failed initialization.{_init_log_hint(vm.name)}",
             entity_kind="vm",

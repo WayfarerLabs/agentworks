@@ -1531,6 +1531,28 @@ def _phase_b_setup(
 
     apply_vm_hardening(ts_target, logger)
 
+    # Check VM DNS works before subsequent steps that need external
+    # resolution (apt-get update, source fetches, etc.) fail cryptically.
+    # When DNS is broken AND the failure matches the known issue #117
+    # latched shape AND the heal applies to this resolver setup, raises
+    # StateError with the manual heal block as a hint. When DNS is broken
+    # for any other reason, surfaces a non-fatal warning so the operator
+    # has a visible link to the apt failure that will follow.
+    from agentworks.vms.tailscale_dns import (
+        apply_tailscaled_dns_fix,
+        check_vm_dns,
+    )
+
+    check_vm_dns(ts_target, logger)
+
+    # Non-fatal: tailscaled cold-boot DNS race fix (GitHub issue #117).
+    # Drops in a systemd override that orders tailscaled after the DNS
+    # layer is up so its DNS-manager probe finds a resolver instead of
+    # falling back to direct mode. Applied early in Phase B so existing
+    # VMs pick up the fix on the first reinit. Does not restart
+    # tailscaled (would disconnect us); takes effect on next cold boot.
+    apply_tailscaled_dns_fix(ts_target, logger)
+
     # Non-fatal: VM-wide SetEnv plumbing (env-and-secrets SDD Phase 4).
     # Runs before apt install so subsequent SSH commands within init can
     # rely on the SetEnv path. These targets don't touch zsh-shipped files,

@@ -169,12 +169,24 @@ def vm_exec(
 @vm_app.command("shell")
 def vm_shell(
     name: Annotated[str, typer.Argument(help="VM name")],
+    provisioner: Annotated[
+        bool,
+        typer.Option(
+            "--provisioner",
+            help=(
+                "Use the platform-native transport (limactl shell, wsl.exe, "
+                "Azure public-IP SSH) instead of Tailscale SSH. Useful when "
+                "Tailscale itself is the thing you're trying to reach the VM "
+                "to fix."
+            ),
+        ),
+    ] = False,
 ) -> None:
     """Open a shell on a VM (home directory)."""
     from agentworks.config import load_config
     from agentworks.vms.manager import shell_vm
 
-    shell_vm(get_db(), load_config(), name)
+    shell_vm(get_db(), load_config(), name, provisioner=provisioner)
 
 
 @vm_app.command("port-forward")

@@ -36,11 +36,15 @@ next reinit sees no sentinel and appends a duplicate.
 ## Consequences
 
 - Cross-uid metadata leakage closed at the kernel layer. No per-call-site mitigation needed.
-- Agentworks owns this layer of VM configuration. Manual operator edits to `/etc/fstab`'s `/proc`
-  options or to the agentworks sysctl file are not recommended and can break agentworks (e.g.
-  `hidepid=2` would break our liveness checks). The fstab editor is tolerant where it safely can be:
-  it preserves `hidepid=2` if it sees an admin set it, and warns on lines it can't parse rather than
-  rewriting blindly. The contract, though, is that agentworks owns this configuration.
+- Agentworks owns VM configuration. This ADR codifies two specific surfaces (`/etc/fstab`'s `/proc`
+  options and `/etc/sysctl.d/99-agentworks.conf`), but the principle is general: any file agentworks
+  plants on a VM at init is owned by agentworks, and future init work is free to extend the set
+  (e.g. systemd unit drop-ins, additional sysctl files, resolver configuration) without amending
+  this ADR. Manual operator edits to agentworks-owned files are not recommended and can break
+  agentworks (e.g. `hidepid=2` would break our liveness checks). Where safe, init steps tolerate
+  admin edits: the fstab editor preserves `hidepid=2` if it sees an admin set it, and warns on lines
+  it can't parse rather than rewriting blindly. The contract, though, is that agentworks owns the
+  configuration it writes.
 - Idempotent reapply: a steady-state VM produces no observable side effects on `vm reinit`. The
   sysctl path content-compares before writing; the fstab editor returns `no-op` when the line
   already meets the bar; the live remount is a kernel no-op when options match.
