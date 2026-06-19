@@ -27,8 +27,8 @@ This SDD addresses both, in one framework:
   needs (by name, with a system-defined usage). One resource may be required by many; all usages are
   tracked and surfaced via the CLI.
 - A **resource-registry** validation pass that walks all requirements, looks each up in the
-  registry, and dispatches missing-name policies per kind (auto-declare for secrets; built-in
-  default for templates; error for catalogs; etc.).
+  registry, and dispatches missing-name policies per kind (auto-declare for secrets; auto-declare
+  restricted to `default` for templates; error for catalogs; etc.).
 - A **migration of `tailscale_auth_key` and `git_credentials.*.token`** to first-class secret
   references, using the auto-declare policy so the zero-config UX is preserved.
 
@@ -58,10 +58,9 @@ reconciliation, but that move is deliberately not part of this design.
   resource sources in the future. Kind is the primary dimension; within a kind, resources are looked
   up by name, so cross-kind identity is the `(kind, name)` pair. Each kind contributes its own
   **miss policy** (R2) which the registry applies when a requirement points at a `(kind, name)` not
-  yet in the registry. Resources arrive in the registry through three origin paths (R4): built-in
-  instantiation, operator declarations in config, and auto-declared synthesis from requirements.
-  Queried by the validation pass and surfaced via `agw doctor`, `agw secret list`, and (Phase 2)
-  `agw resource list`.
+  yet in the registry. Resources arrive in the registry through two origin paths (R4): operator
+  declarations in config, and auto-declared synthesis from requirements. Queried by the validation
+  pass and surfaced via `agw doctor`, `agw secret list`, and (Phase 2) `agw resource list`.
 - **Resource requirement**: a **reference declaration** -- one resource saying "I need this other
   resource by name". Distinct from the resource itself: requirements point at resources but are not
   resources. Carries the target's `name` and `kind`, a system-defined `usage`, the declaring
@@ -78,19 +77,16 @@ reconciliation, but that move is deliberately not part of this design.
 - **Description**: the operator-defined free-form note about a resource (already exists today on
   secrets and `git_credentials`; this SDD formalizes the convention for new resource types).
 - **Miss policy**: what the registry does when a requirement's `(kind, name)` has no match in the
-  registry. Declared per kind. Options:
-  - **Auto-declare**: synthesize the resource from the requirement's defaults and add it to the
-    registry. The resulting resource has `origin = auto-declared`.
-  - **Built-in fallback**: instantiate a code-defined resource for a specific reserved name (e.g.,
-    `default`). The resulting resource has `origin = built-in`. Any other name is a config-load
-    error.
+  registry. Declared per kind. Two options:
+  - **Auto-declare**: synthesize the resource from the kind's defaults and add it to the registry.
+    The resulting resource has `origin = auto-declared`. A kind may restrict which names it accepts
+    (e.g., template kinds accept only the reserved name `default`); requests for other names error.
   - **Error**: raise a config-load error citing the requirement source.
-- **Origin**: the per-resource record of where the resource came from. Three values: `built-in`
-  (from code; e.g., the implicit `default` template), `operator-declared` (from operator config;
-  carries file path and line number for traceability), `auto-declared` (synthesized to satisfy a
-  requirement; carries the first matching requirement's source `(kind, name)`). Set once when the
-  resource is added to the registry; never mutated afterwards. Surfaced in `agw doctor`,
-  `agw secret list`, and `agw secret describe`.
+- **Origin**: the per-resource record of where the resource came from. Two values:
+  `operator-declared` (from operator config; carries file path and line number for traceability) and
+  `auto-declared` (synthesized to satisfy a requirement; carries the first matching requirement's
+  source `(kind, name)`). Set once when the resource is added to the registry; never mutated
+  afterwards. Surfaced in `agw doctor`, `agw secret list`, and `agw secret describe`.
 
 ## Requirements
 
@@ -135,11 +131,11 @@ this:
 
 Each kind in the registry declares its miss policy:
 
-| Kind                                                              | Miss policy       | Behavior                                                                                                                                                                  |
-| ----------------------------------------------------------------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Secret                                                            | Auto-declare      | A `SecretRequirement` whose name is missing synthesizes a `SecretDecl` carrying the requirement's usage. Origin: `auto-declared`. Additional requirements add more usages |
-| VM template, workspace template, agent template, session template | Built-in fallback | The reserved name `default` instantiates the code-defined default template. Origin: `built-in`. Any other name is a config-load error                                     |
-| Catalog command, git credential provider, secret backend kind     | Error             | Unknown names are config-load errors                                                                                                                                      |
+| Kind                                                              | Miss policy                             | Behavior                                                                                                                                                                  |
+| ----------------------------------------------------------------- | --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Secret                                                            | Auto-declare (any name)                 | A `SecretRequirement` whose name is missing synthesizes a `SecretDecl` carrying the requirement's usage. Origin: `auto-declared`. Additional requirements add more usages |
+| VM template, workspace template, agent template, session template | Auto-declare (reserved name: `default`) | A requirement for `default` synthesizes the kind's code-defined default template. Origin: `auto-declared`. Any other missing name is a config-load error                  |
+| Catalog command, git credential provider, secret backend kind     | Error                                   | Unknown names are config-load errors                                                                                                                                      |
 
 Error messages include the requirement's `source` so the operator sees, e.g.:
 
@@ -157,9 +153,10 @@ from `tailscale_auth_key` or a git credential `token`: if the name isn't operato
 secret kind's auto-declare policy synthesizes it. Per-source policy divergence is intentionally not
 supported -- it would multiply the complexity and undermine the unified model.
 
-**Built-in fallback is unconditional.** Template kinds always instantiate the built-in `default`
-when a requirement references it. Operators override by declaring `[vm_templates.default]` (or the
-corresponding kind) explicitly; there is no "no default" mode.
+**Template default auto-declare is unconditional.** Template kinds always synthesize the
+code-defined `default` when a requirement references it. Operators customize by declaring
+`[vm_templates.default]` (or the corresponding kind) explicitly -- per-field merge (R3) applies, so
+unspecified fields fall back to the framework's defaults. There is no "no default" mode.
 
 ### R3: Per-field merge between operator declarations and auto-declared defaults
 
@@ -193,12 +190,8 @@ requirements arrive.
 ### R4: Origin tracking on every resource
 
 Every resource in a registry carries an `origin` field that records how it came to be in the
-registry. Three origin types:
+registry. Two origin types:
 
-- **`built-in`**: the resource is defined in code and loaded into the registry on demand. Example:
-  the implicit `default` VM template (instantiated by the built-in-fallback miss policy when no
-  operator declared one and a requirement referenced `default`). Built-in resources carry no
-  file:line; their source is agentworks itself.
 - **`operator-declared`**: the resource is declared in operator config. The origin carries the
   **file path and line number** of the declaration's opening line, scoped to the loaded TOML config
   file (e.g., `~/.config/agentworks/config.toml:42`). If multi-file config (manifests, layering) is
@@ -207,7 +200,9 @@ registry. Three origin types:
 - **`auto-declared`**: the resource was synthesized at config-load time to satisfy a missing
   requirement. The origin carries the **first matching requirement in config-load order (R1)** --
   its `source` `(kind, name)` is recorded. Subsequent requirements that match the same name
-  contribute additional usages (R1) but do not alter the origin field.
+  contribute additional usages (R1) but do not alter the origin field. Applies uniformly to
+  framework-synthesized resources, including default templates (the `source` is the first template
+  that referenced `default`).
 
 The origin field is set once when the resource is added to the registry and is never mutated
 afterwards. It is the primary signal for "where did this resource come from?" -- useful for
@@ -305,9 +300,9 @@ the same for any resource type Phase 2 brings into the framework.
 
 `description` is encouraged but not required. The validation pass emits a config-load warning when
 an **operator-declared** resource has no `description`, surfacing the gap so the operator can
-document their own resources. Auto-declared and built-in resources do not trigger the warning (the
-operator didn't author them; demanding a description would be noise). Operators who deliberately
-leave the field blank pay one warning per CLI invocation.
+document their own resources. Auto-declared resources do not trigger the warning (the operator
+didn't author them; demanding a description would be noise). Operators who deliberately leave the
+field blank pay one warning per CLI invocation.
 
 ### R9: Origin and inspection via doctor, secret list, and secret describe
 
@@ -322,14 +317,14 @@ leave the field blank pay one warning per CLI invocation.
 - **Description**: operator-set, when present.
 
 `agw secret list` adds an `Origin` column with the same shape (kind plus the relevant detail). The
-header summary becomes, e.g., `12 secrets (1 built-in, 4 auto-declared, 7 operator-declared)`. List
-shows summary; for detail, the operator runs describe.
+header summary becomes, e.g., `12 secrets (5 auto-declared, 7 operator-declared)`. List shows
+summary; for detail, the operator runs describe.
 
 `agw secret describe <name>` (new in Phase 1) is the per-secret detail view:
 
 - **Name, kind, origin, description** (operator-set, when present). Origin is rendered with full
   detail: file path and line for operator-declared; the triggering requirement's `(kind, name)` for
-  auto-declared; agentworks itself for built-in.
+  auto-declared.
 - **All registered usages**: one row per requirement, showing the source `(kind, name)` and the
   usage text. A resource referenced by three sources shows three rows. Duplicate usage text is
   collapsed.
@@ -392,9 +387,9 @@ Phase 2 brings the remaining resource references under the framework. Each of th
 becomes a first-class kind in the registry with its own miss policy:
 
 - **Template inheritance**: `inherits = ["..."]` resolution for VM, workspace, agent, and session
-  templates moves into the framework's validation pass. Each template kind uses the built-in
-  fallback policy so the implicit `default` template is formalized. Operator-facing behavior is
-  unchanged; error messages get the framework's consistent shape.
+  templates moves into the framework's validation pass. Each template kind uses the auto-declare
+  (reserved name: `default`) miss policy so the implicit `default` template is formalized.
+  Operator-facing behavior is unchanged; error messages get the framework's consistent shape.
 - **Catalog commands**: references to catalog command names (`apt_packages = ["gh"]`,
   `system_install_commands = ["az-cli"]`, `user_install_commands = ["bun"]`) become a kind with the
   error miss policy. Error messages name the referencing scope.
@@ -414,15 +409,14 @@ deliberately scoped to fields the declaration framework defines; kind-specific d
 kind-specific commands (`agw secret describe`, future `agw template describe`, ...).
 
 ```text
-agw resource list [--kind <kind1,kind2,...>] [--origin built-in|operator|auto]
+agw resource list [--kind <kind1,kind2,...>] [--origin operator|auto]
 agw resource describe <kind> <name>
 ```
 
 - `agw resource list` shows one row per declared resource across all kinds in the registry. Columns:
   kind, name, origin (with detail per R4: file:line for operator-declared, requirement source for
   auto-declared), usage count (or first usage when short), description (truncated). Filters:
-  `--kind` (CSV per the cli-conventions filter pattern), `--origin` (one of `built-in`, `operator`,
-  `auto`).
+  `--kind` (CSV per the cli-conventions filter pattern), `--origin` (one of `operator`, `auto`).
 - `agw resource describe <kind> <name>` shows the framework-level detail view: kind, name, origin
   with full detail, all registered usages, and description. Kind-specific detail (backend mappings,
   inheritance chain, resolved fields, ...) belongs in the kind's own `describe` command. The
