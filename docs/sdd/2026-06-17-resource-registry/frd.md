@@ -73,11 +73,8 @@ reconciliation, but that move is deliberately not part of this design.
   sources accumulates a list of usages. Surfaced in `agw doctor` and `agw secret describe`. Distinct
   from the operator-set description. Phrased as a short noun phrase that completes the sentence
   template `<target> is used by <source> as <usage>.` -- no capitalization except for proper nouns
-  or acronyms, no trailing period, under ~50 chars. Articles are fine when they're part of naming
-  the role. Examples: `"the VM-provisioning auth key"`, `"the GitHub auth token"`,
-  `"the ANTHROPIC_API_KEY env var"`, `"a parent template"`. Counter-examples:
-  `"to authenticate VMs"` (infinitive, doesn't fit the slot), `"the Codex agent"` (names the
-  consumer, not the role), `"Used for cloning repos"` (sentence fragment with leading verb).
+  or acronyms, no trailing period, under ~50 chars. Examples: `"the VM-provisioning auth key"`,
+  `"the GitHub auth token"`, `"the ANTHROPIC_API_KEY env var"`, `"a parent template"`.
 - **Description**: the operator-defined free-form note about a resource (already exists today on
   secrets and `git_credentials`; this SDD formalizes the convention for new resource types).
 - **Miss policy**: what the registry does when a requirement's `(kind, name)` has no match in the
@@ -111,9 +108,9 @@ Every resource type that references other resources by name declares those refer
   `("vm_template", "default")`, `("git_credentials", "github-prod")`). Same `(kind, name)` shape
   used throughout the framework for resource identity. Surfaced in diagnostics and provenance.
 - **`kind`** (required): the kind of resource being referenced (`secret`, `vm_template`, etc.).
-- **Kind-specific extras** (optional): defaults the registry's auto-declare policy uses to
-  synthesize a missing resource. For secrets in Phase 1, no extras are needed (the framework default
-  conventions cover the common case); the slot exists for future and Phase-2 use.
+- **Kind-specific extras** (optional): kind-defined defaults the auto-declare policy uses. For
+  `SecretRequirement`, none are defined; the framework's default backend conventions cover the
+  common case.
 
 A resource's `required_resources()` method returns the full list (one per reference, no
 deduplication at the producer side). The validation pass collects requirements across the entire
@@ -160,6 +157,10 @@ from `tailscale_auth_key` or a git credential `token`: if the name isn't operato
 secret kind's auto-declare policy synthesizes it. Per-source policy divergence is intentionally not
 supported -- it would multiply the complexity and undermine the unified model.
 
+**Built-in fallback is unconditional.** Template kinds always instantiate the built-in `default`
+when a requirement references it. Operators override by declaring `[vm_templates.default]` (or the
+corresponding kind) explicitly; there is no "no default" mode.
+
 ### R3: Per-field merge between operator declarations and auto-declared defaults
 
 When a resource is **both** operator-declared and required, the merge is per-field for
@@ -204,9 +205,9 @@ registry. Three origin types:
   added later, that SDD revisits this field. When the resource is also referenced by requirements,
   the matching requirements are retained separately (R3) but the origin stays `operator-declared`.
 - **`auto-declared`**: the resource was synthesized at config-load time to satisfy a missing
-  requirement. The origin carries the **first-encountered requirement's `source`** (a `(kind, name)`
-  pair), using the same config-load walk order described in R1. Subsequent requirements that match
-  the same name contribute additional usages (R1) but do not alter the origin field.
+  requirement. The origin carries the **first matching requirement in config-load order (R1)** --
+  its `source` `(kind, name)` is recorded. Subsequent requirements that match the same name
+  contribute additional usages (R1) but do not alter the origin field.
 
 The origin field is set once when the resource is added to the registry and is never mutated
 afterwards. It is the primary signal for "where did this resource come from?" -- useful for
@@ -224,10 +225,8 @@ The validation pass detects cycles in the resource reference graph. Inheritance 
 are caught uniformly with a clear error naming the cycle and the resources involved. Cycle errors
 are config-load errors with no fallback.
 
-Phase 1 ships the check but exercises nothing: secrets don't reference secrets, and the kinds in
-Phase 1's framework (just `secret`) have no inheritance relationships. The check matters once Phase
-2 (R11) brings template inheritance into the framework. Implementing it in Phase 1 keeps the
-framework complete from day one and lets Phase 2 land as a pure migration.
+Phase 1 ships the check but exercises nothing (secrets don't reference secrets); Phase 2 (R11)
+brings template inheritance into the framework, which is where the check earns its keep.
 
 ### R6: Tailscale auth key as a secret reference
 
@@ -287,7 +286,8 @@ token = "shared-github-token"   # share a secret across credentials (uncommon bu
 
 Resolution mirrors R6: requirement collected, auto-declared if missing, eager-resolved via the
 backend chain, resolved value threaded to the git credential install runner that writes
-`~/.git-credentials` on the VM.
+`~/.git-credentials` on the VM. The default secret name relies on git credential entry names being
+unique within `[git_credentials.*]`, which they already are by config-schema.
 
 ### R8: Operator description as a distinct field
 
@@ -341,14 +341,7 @@ shows summary; for detail, the operator runs describe.
 
 Describe does not prompt and does not resolve secret values; it reports state.
 
-Phase 2 generalizes the same origin display to other kinds in the registry when their migration
-lands; until then they use the existing per-type reporting. The `describe` command pattern extends
-naturally to other resource kinds in Phase 2 (e.g., `agw template describe <name>`), though only
-`agw secret describe` is in scope for Phase 1.
-
 ### R10: Registry construction and eager-resolve scope
-
-Two distinct concerns, often conflated, kept separate here:
 
 #### Registry construction: universal
 
@@ -442,16 +435,12 @@ kinds are in the registry; with only secrets in Phase 1 it would be redundant wi
 
 ## Non-goals
 
-- **Manifest-style multi-file config**. This SDD acknowledges an anticipated direction toward
-  Kubernetes-style YAML manifests but does not introduce them. The framework as designed is
-  compatible with such a future shift: resource identity is already `(kind, name)`-shaped and the
-  validation pass is independent of the parser. The loader changes (single TOML to multiple YAML
-  files) are a separate concern handled in its own SDD if and when that direction is committed.
+- **Manifest-style multi-file config**. The framework's `(kind, name)` identity and
+  parser-independent validation pass leave the door open; the loader migration is its own SDD.
 - **Bringing lifecycle resources into the Resource Registry**. VMs, agents, sessions, and consoles
-  are resources, but they live in the DB and are managed via CLI commands today. Migrating them into
-  the registry (with reconciliation against DB state) is reserved for a future manifest-style-config
-  SDD. That future SDD would extend the framework's storage backend rather than replace the
-  framework, but the work is deliberately out of scope here.
+  are resources but live in the DB and are managed via CLI commands today. Migrating them into the
+  registry (with reconciliation against DB state) is reserved for a future manifest-style-config SDD
+  that extends the framework's storage backend.
 - **Namespaces / multi-tenant resource scoping**. Resource identity remains globally `(kind, name)`.
 - **A new transport for system secrets**. Resolved values reach provisioning runners as function
   arguments, not via SSH SetEnv or profile fragments. The hermetic-provisioning contract from the
@@ -463,14 +452,6 @@ kinds are in the registry; with only secrets in Phase 1 it would be redundant wi
 - **Plaintext or polymorphic forms for `tailscale_auth_key` and `git_credentials.*.token`**. Both
   fields accept secret names only. EnvEntry-style `{ secret = "..." }` polymorphism is intentionally
   not extended to these fields.
-- **Soft-disable for built-in-default template names**. A kind whose miss policy is built-in
-  fallback for `default` instantiates the built-in unconditionally. Operators override behavior by
-  declaring `[vm_templates.default]` explicitly; there is no "no default" mode.
-- **Resource removal semantics for auto-declared resources**. An auto-declared resource that has no
-  remaining requirement (e.g., the operator changed `vm_templates.x.tailscale_auth_key` to reference
-  a different secret) is silently pruned at the end of the validation pass. The framework does not
-  surface "this used to be auto-declared but isn't anymore"; the only signal is the updated
-  `agw secret list`.
 
 ## Migration notes
 
