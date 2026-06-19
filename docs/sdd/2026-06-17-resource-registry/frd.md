@@ -68,14 +68,16 @@ reconciliation, but that move is deliberately not part of this design.
   resource's `source` as a `(kind, name)` pair, and (optionally) per-kind defaults the registry's
   auto-declare policy may use. A resource may have many requirements pointing at it; the framework
   collects them all.
-- **Usage**: the system-defined "what this resource is being used for", set by the requirement. Each
-  requirement contributes one usage; a resource that is required by multiple sources accumulates a
-  list of usages. Surfaced in `agw doctor` and `agw secret describe`. Distinct from the operator-set
-  description. This should be phrased as a short noun phrase that completes the sentence template
-  `<source> uses <target> for <usage>.` -- sentence case, no leading article, no trailing period,
-  under ~50 chars. Examples: `"VM provisioning"`, `"GitHub repo cloning"`,
-  `"Codex agent API access"`. Counter-examples: `"to authenticate VMs"` (infinitive),
-  `"the Codex agent"` (consumer, not use-case), `"Used for cloning repos"` (sentence fragment).
+- **Usage**: the system-defined "role this resource plays for the requirement's source", set by the
+  requirement. Each requirement contributes one usage; a resource that is required by multiple
+  sources accumulates a list of usages. Surfaced in `agw doctor` and `agw secret describe`. Distinct
+  from the operator-set description. Phrased as a short noun phrase that completes the sentence
+  template `<target> is used by <source> as <usage>.` -- no capitalization except for proper nouns
+  or acronyms, no trailing period, under ~50 chars. Articles are fine when they're part of naming
+  the role. Examples: `"the VM-provisioning auth key"`, `"the GitHub auth token"`,
+  `"the ANTHROPIC_API_KEY env var"`, `"a parent template"`. Counter-examples:
+  `"to authenticate VMs"` (infinitive, doesn't fit the slot), `"the Codex agent"` (names the
+  consumer, not the role), `"Used for cloning repos"` (sentence fragment with leading verb).
 - **Description**: the operator-defined free-form note about a resource (already exists today on
   secrets and `git_credentials`; this SDD formalizes the convention for new resource types).
 - **Miss policy**: what the registry does when a requirement's `(kind, name)` has no match in the
@@ -174,8 +176,9 @@ description = "Prod tailnet key, owner: SRE team"
 ```
 
 The final `SecretDecl` carries the operator's `backend_mappings.env-var` and `description`, and the
-usage list `["VM provisioning"]` from the VM-template requirement. The operator does not have to
-retype the usage; the system fills it in automatically and updates it when new requirements arrive.
+usage list `["the VM-provisioning auth key"]` from the VM-template requirement. The operator does
+not have to retype the usage; the system fills it in automatically and updates it when new
+requirements arrive.
 
 ### R4: Origin tracking on every resource
 
@@ -229,7 +232,7 @@ Resolution:
 
 1. `agw vm create vm1` triggers manager-entry eager-resolve.
 2. The resolved VM template emits a `SecretRequirement` with `name=<tailscale_auth_key>`,
-   `usage="VM provisioning"`, and `source=("vm_template", <name>)`.
+   `usage="the VM-provisioning auth key"`, and `source=("vm_template", <name>)`.
 3. If the named secret isn't operator-declared, the auto-declare policy synthesizes it.
 4. The orchestrator resolves the secret through the configured backend chain (first wins).
 5. The resolved value is threaded as a function argument to the Tailscale install runner.
@@ -272,8 +275,8 @@ Every resource type that supports operator declaration carries an optional `desc
 is separate from the system-collected `usage` list:
 
 - **`usage`** (list, system-collected) comes from the matching requirements; one entry per
-  requirement. Operators do not set it. Example entry: `"VM provisioning"`. A resource required by
-  several sources has several usages.
+  requirement. Operators do not set it. Example entry: `"the VM-provisioning auth key"`. A resource
+  required by several sources has several usages.
 - **`description`** (string, operator-set) is the operator's free-form note. Example:
   `"Prod tailnet auth key, 90-day expiry, owner: SRE team"`.
 
