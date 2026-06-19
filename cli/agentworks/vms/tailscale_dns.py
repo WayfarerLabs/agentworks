@@ -202,7 +202,9 @@ def check_vm_dns(target: ExecTarget, logger: SSHLogger) -> None:
     output.detail(f"Checking DNS resolution ({_DNS_PROBE_NAME})...")
     probe = target.run(f"getent hosts {shlex.quote(_DNS_PROBE_NAME)}", check=False)
     if getattr(probe, "ok", False):
-        output.detail("VM DNS is healthy.")
+        # No "VM DNS is healthy." line on the happy path: phase B's
+        # convention is "say what we're doing, stay silent on success,
+        # warn or raise on failure."
         return
 
     # DNS is broken. Subsequent steps that need external resolution
