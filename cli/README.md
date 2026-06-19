@@ -157,7 +157,9 @@ use the `awvm--<vm>` alias documented under [Direct SSH aliases](#direct-ssh-ali
 instead of Tailscale. Useful when Tailscale itself is the thing you need to reach the VM to fix (the
 issue #117 latched DNS state is the canonical case: its heal involves restarting tailscaled, which
 would terminate a Tailscale-SSH session mid-sequence). On Azure, a public IP is attached for the
-duration of the session and detached on exit. Proxmox is not yet supported.
+duration of the session and detached on exit. Proxmox isn't supported by this flag because the QEMU
+guest agent's exec interface is one-shot and non-interactive; use the Proxmox web UI's serial
+console (`VM > Console` in the Proxmox VE web UI) as the equivalent escape hatch.
 
 ### Workspaces
 

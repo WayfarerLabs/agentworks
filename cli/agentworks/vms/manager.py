@@ -632,11 +632,24 @@ def _provisioner_shell_target(
     try:
         target = prov.admin_exec_target(vm, config=config)
     except NotImplementedError as e:
+        # Proxmox is the only platform here today: QEMU guest agent exec
+        # is one-shot and non-interactive, so we can't surface an
+        # interactive shell through it. Point the operator at the web
+        # UI's serial console as the equivalent escape hatch.
+        hint = str(e)
+        if vm.platform == "proxmox":
+            hint = (
+                "Proxmox's QEMU guest agent exec interface is one-shot "
+                "and non-interactive, so an interactive shell can't be "
+                "exposed through it. Use the Proxmox web UI's serial "
+                "console (VM > Console in the Proxmox VE web UI) as the "
+                "equivalent escape hatch."
+            )
         raise StateError(
             f"Provisioner shell is not implemented for platform '{vm.platform}'.",
             entity_kind="vm",
             entity_name=vm.name,
-            hint=str(e),
+            hint=hint,
         ) from e
 
     # Defensive: Azure's admin_exec_target returns SSHTarget(host="")

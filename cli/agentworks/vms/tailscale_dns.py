@@ -160,7 +160,10 @@ _LATCHED_HEAL_HINT = (
     "Note: `--provisioner` requires the platform-native transport to be\n"
     "available. Lima and WSL2 work transparently. Azure transparently\n"
     "attaches and then detaches a temporary public IP for the session.\n"
-    "Proxmox is not yet supported."
+    "Proxmox doesn't expose an interactive transport via its QEMU guest\n"
+    "agent; use the Proxmox web UI's serial console for the same VM\n"
+    "(VM > Console in the Proxmox VE web UI), then run the heal block\n"
+    "above in that session."
 )
 
 

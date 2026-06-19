@@ -29,16 +29,17 @@ if TYPE_CHECKING:
 def _seed_db(
     tmp_path: Path,
     *,
+    platform: str = "lima",
     tailscale_host: str | None = "100.64.0.5",
     init_status: str | None = None,
     provisioning_status: str | None = None,
 ) -> Database:
-    """VM row in a fresh sqlite db. Defaults paint a healthy VM; override
-    individual fields to exercise the failed-init / failed-provisioning
-    guard paths."""
+    """VM row in a fresh sqlite db. Defaults paint a healthy Lima VM;
+    override individual fields to exercise other-platform branches or
+    the failed-init / failed-provisioning guard paths."""
     db = Database(tmp_path / "test.db")
     cols = ["name", "platform", "admin_username", "tailscale_host"]
-    vals: list[object] = ["vm1", "lima", "admin", tailscale_host]
+    vals: list[object] = ["vm1", platform, "admin", tailscale_host]
     if init_status is not None:
         cols.append("init_status")
         vals.append(init_status)
@@ -201,19 +202,21 @@ def test_shell_vm_provisioner_uses_provisioner_admin_exec_target(
 def test_provisioner_shell_target_wraps_notimplementederror(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Proxmox's provisioner shell raises NotImplementedError. The wrapper
-    must convert that into a typed StateError so the CLI renders it as
-    a one-liner with the provisioner's message as the hint, rather than
-    leaking a Python traceback to the operator."""
+    """A NotImplementedError from the provisioner (e.g. Proxmox today) is
+    wrapped into a typed StateError so the CLI renders it as a one-liner
+    rather than leaking a Python traceback.
+
+    Uses a non-proxmox platform so the generic hint path is exercised; the
+    Proxmox-specific hint shape is tested separately below."""
     import contextlib
 
     from agentworks.vms import manager as vm_manager
 
-    db = _seed_db(tmp_path)
+    db = _seed_db(tmp_path, platform="lima")
 
     class _UnsupportedProvisioner:
         def admin_exec_target(self, vm: object, *, config: object | None = None) -> object:
-            raise NotImplementedError("Proxmox provisioning transport not yet implemented.")
+            raise NotImplementedError("provisioning transport not yet implemented.")
 
     monkeypatch.setattr(
         vm_manager, "get_provisioner_for_vm",
@@ -226,7 +229,46 @@ def test_provisioner_shell_target_wraps_notimplementederror(
 
     err = exc_info.value
     assert err.entity_kind == "vm"
+    # Generic platforms get the NotImplementedError's text as the hint.
     assert "not yet implemented" in (err.hint or "")
+    db.close()
+
+
+def test_provisioner_shell_target_proxmox_hint_points_at_web_console(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """On Proxmox specifically, the NotImplementedError wrapper substitutes
+    a Proxmox-specific hint pointing the operator at the web UI's serial
+    console. The guest agent's exec interface can't carry an interactive
+    session, so the web console is the realistic escape hatch and the
+    operator should hear that directly rather than the generic NIE text."""
+    import contextlib
+
+    from agentworks.vms import manager as vm_manager
+
+    db = _seed_db(tmp_path, platform="proxmox")
+
+    class _ProxmoxProvisioner:
+        def admin_exec_target(self, vm: object, *, config: object | None = None) -> object:
+            raise NotImplementedError("Proxmox provisioning transport not yet implemented.")
+
+    monkeypatch.setattr(
+        vm_manager, "get_provisioner_for_vm",
+        lambda *a, **k: _ProxmoxProvisioner(),
+    )
+
+    vm = vm_manager._require_vm(db, "vm1")
+    with contextlib.ExitStack() as stack, pytest.raises(StateError) as exc_info:
+        vm_manager._provisioner_shell_target(db, _make_config(), vm, stack)  # type: ignore[arg-type]
+
+    err = exc_info.value
+    assert err.entity_kind == "vm"
+    hint = err.hint or ""
+    # Proxmox-specific guidance: point at the web UI's serial console as
+    # the equivalent of the per-platform escape hatch other provisioners
+    # have (limactl shell, wsl.exe, Azure public IP attach).
+    assert "serial console" in hint
+    assert "Proxmox VE web UI" in hint
     db.close()
 
 
