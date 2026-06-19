@@ -551,8 +551,9 @@ def shell_vm(db: Database, config: Config, name: str, *, provisioner: bool = Fal
     # Init failure warns instead of blocks: shelling into a partially-
     # initialized VM is exactly the kind of operation that lets the
     # operator diagnose what failed or apply a manual fix (e.g. healing
-    # the issue #117 latched DNS state) before re-running reinit.
-    _guard_failed_vm(vm, init_failure_is_warning=True)
+    # the issue #117 latched DNS state) before re-running reinit. Same
+    # rationale applies to `vm exec` (see exec_vm below).
+    _guard_failed_vm(vm, allow_failed_init=True)
     if not provisioner and vm.tailscale_host is None:
         raise StateError(
             f"VM '{name}' has no Tailscale IP",
@@ -671,6 +672,29 @@ def _provisioner_shell_target(
                 "console on the VM resource page)."
             ),
         )
+
+    # Wait for the transport to be reachable before handing it to
+    # interactive(). For Azure this gives the freshly-attached public IP
+    # time to propagate through the SDN. The Azure SDK's "NIC update
+    # succeeded" return doesn't mean packets route there yet, and
+    # without this loop the operator's first ssh attempt commonly hits
+    # "Connection refused" on a healthy VM. For local transports (Lima,
+    # WSL2) the probe succeeds on the first try and the loop is a
+    # no-op. Mirrors the established pattern in rekey_vm.
+    import time
+
+    from agentworks.ssh import SSHError
+
+    output.detail("Waiting for provisioning transport...")
+    for attempt in range(6):
+        try:
+            target.run("echo ok", timeout=10)
+            break
+        except SSHError:
+            if attempt == 5:
+                raise
+            time.sleep(3)
+
     return target
 
 
@@ -687,7 +711,11 @@ def exec_vm(db: Database, config: Config, name: str, command: list[str]) -> int:
     from agentworks.ssh import admin_exec_target
 
     vm = _require_vm(db, name)
-    _guard_failed_vm(vm)
+    # Init failure warns instead of blocks. exec is the non-interactive
+    # twin of shell: both are diagnostic primitives, and running
+    # `agw vm exec failed-vm cat /var/log/cloud-init.log` is precisely
+    # the kind of investigation an operator does on a failed-init VM.
+    _guard_failed_vm(vm, allow_failed_init=True)
     # admin_exec_target asserts tailscale_host is not None; guard first so
     # the operator gets an actionable StateError instead of an AssertionError
     # (which also disappears under python -O).
@@ -1198,17 +1226,18 @@ def _init_log_hint(vm_name: str) -> str:
     return f" See log: {logs[0]}" if logs else ""
 
 
-def _guard_failed_vm(vm: VMRow, *, init_failure_is_warning: bool = False) -> None:
+def _guard_failed_vm(vm: VMRow, *, allow_failed_init: bool = False) -> None:
     """Block operations on VMs with failed provisioning or initialization.
 
-    When ``init_failure_is_warning`` is True, an init-status failure
-    becomes a non-fatal warning instead of a hard block. Used by
-    operations that exist precisely so the operator can reach into the
-    VM to diagnose or fix the cause of the init failure (e.g.
-    ``vm shell`` opening a session on a partially-initialized VM to
-    apply a manual heal before re-running ``vm reinit``). Provisioning
-    failure is never softened: the VM may not even be reachable, and
-    the project's stance there is "delete and recreate."
+    When ``allow_failed_init`` is True, an init-status failure becomes
+    a non-fatal warning instead of a hard block. Used by operations
+    that exist precisely so the operator can reach into the VM to
+    diagnose or fix the cause of the init failure (e.g. ``vm shell``
+    opening a session on a partially-initialized VM to apply a manual
+    heal before re-running ``vm reinit``; ``vm exec`` running a one-shot
+    diagnostic command). Provisioning failure is never softened: the
+    VM may not even be reachable, and the project's stance there is
+    "delete and recreate."
     """
     if vm.provisioning_status == ProvisioningStatus.FAILED.value:
         raise StateError(
@@ -1218,7 +1247,7 @@ def _guard_failed_vm(vm: VMRow, *, init_failure_is_warning: bool = False) -> Non
             hint="Only 'vm delete' is supported on a failed-provisioning VM.",
         )
     if vm.init_status == InitStatus.FAILED.value:
-        if init_failure_is_warning:
+        if allow_failed_init:
             output.warn(
                 f"VM '{vm.name}' has failed initialization.{_init_log_hint(vm.name)} "
                 f"Continuing. Use 'vm reinit' to retry once the cause is resolved.",

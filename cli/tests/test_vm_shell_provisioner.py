@@ -55,8 +55,18 @@ def _seed_db(
 
 
 def _stub_target() -> object:
-    """Minimal ExecTarget-shaped object that interactive() will accept."""
-    return SimpleNamespace(ssh=SimpleNamespace(host="ssh-host"), lima=None, wsl2=None)
+    """Minimal ExecTarget-shaped object that interactive() and the
+    reachability probe in _provisioner_shell_target both accept.
+
+    ``run`` returns an SSHResult-shaped object so ``target.run('echo ok',
+    timeout=10)`` succeeds without invoking a real subprocess.
+    """
+    return SimpleNamespace(
+        ssh=SimpleNamespace(host="ssh-host"),
+        lima=None,
+        wsl2=None,
+        run=lambda *_a, **_k: SimpleNamespace(returncode=0, stdout="ok", stderr="", ok=True),
+    )
 
 
 class _NullCM:
@@ -302,8 +312,16 @@ def test_provisioner_shell_target_attaches_and_registers_detach_for_azure(
             detach_calls.append(getattr(vm, "name", "?"))
 
         def admin_exec_target(self, vm: object, *, config: object | None = None) -> object:
+            # Include a stub `run` so the reachability probe in
+            # _provisioner_shell_target succeeds without invoking a
+            # real ssh subprocess.
             return SimpleNamespace(
-                ssh=SimpleNamespace(host="203.0.113.42"), lima=None, wsl2=None,
+                ssh=SimpleNamespace(host="203.0.113.42"),
+                lima=None,
+                wsl2=None,
+                run=lambda *_a, **_k: SimpleNamespace(
+                    returncode=0, stdout="ok", stderr="", ok=True,
+                ),
             )
 
     monkeypatch.setattr(
@@ -322,6 +340,112 @@ def test_provisioner_shell_target_attaches_and_registers_detach_for_azure(
 
     # Stack exited: detach must have run exactly once.
     assert detach_calls == ["vm1"]
+    db.close()
+
+
+def test_provisioner_shell_target_detaches_on_exception_for_azure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The detach callback must be registered BEFORE any post-attach call
+    that could raise, so detach fires regardless of how the function
+    unwinds. Without this contract a future refactor that moves
+    stack.callback after admin_exec_target would silently leak a public
+    IP on every error path.
+
+    Test: make admin_exec_target raise after attach_public_ip ran;
+    assert detach was still called via the registered callback when the
+    surrounding ExitStack closes."""
+    import contextlib
+
+    from agentworks.vms import manager as vm_manager
+    from agentworks.vms.provisioners.azure import AzureProvisioner
+
+    db = _seed_db(tmp_path)
+    detach_calls: list[str] = []
+
+    class _AzureRaisesAfterAttach(AzureProvisioner):
+        def __init__(self) -> None:  # noqa: D401
+            pass
+
+        def attach_public_ip(self, vm: object) -> str:
+            return "203.0.113.42"
+
+        def detach_public_ip(self, vm: object) -> None:
+            detach_calls.append(getattr(vm, "name", "?"))
+
+        def admin_exec_target(self, vm: object, *, config: object | None = None) -> object:
+            raise RuntimeError("simulated post-attach failure")
+
+    monkeypatch.setattr(
+        vm_manager, "get_provisioner_for_vm",
+        lambda *a, **k: _AzureRaisesAfterAttach(),
+    )
+
+    vm = vm_manager._require_vm(db, "vm1")
+    with contextlib.ExitStack() as stack:
+        with pytest.raises(RuntimeError, match="simulated post-attach failure"):
+            vm_manager._provisioner_shell_target(db, _make_config(), vm, stack)  # type: ignore[arg-type]
+        # ExitStack still open; detach fires on stack exit, not before.
+        assert detach_calls == []
+
+    # After stack exit, detach fired despite the RuntimeError. This is
+    # the load-bearing invariant.
+    assert detach_calls == ["vm1"]
+    db.close()
+
+
+def test_provisioner_shell_target_retries_reachability_probe(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """After attach_public_ip on Azure, the new public IP can take a few
+    seconds to propagate through the SDN. The function probes the target
+    with target.run('echo ok', ...) and retries on SSHError, so the
+    operator's interactive ssh sees a reachable target rather than
+    Connection refused on the first attempt. Matches the rekey_vm pattern."""
+    import contextlib
+
+    from agentworks.ssh import SSHError
+    from agentworks.vms import manager as vm_manager
+
+    db = _seed_db(tmp_path)
+
+    # Stub time.sleep so the retry loop doesn't add real wall-time.
+    # The function imports `time` inside the function body (not at module
+    # level), so patch the module's sleep directly.
+    import time as _time
+
+    monkeypatch.setattr(_time, "sleep", lambda *_a: None)
+    # Counter for run() calls so we can simulate "fails first 3 attempts,
+    # succeeds on the 4th."
+    run_call_count = {"n": 0}
+
+    def flaky_run(*_a: object, **_k: object) -> object:
+        run_call_count["n"] += 1
+        if run_call_count["n"] < 4:
+            raise SSHError("simulated propagation delay")
+        return SimpleNamespace(returncode=0, stdout="ok", stderr="", ok=True)
+
+    class _FlakyProvisioner:
+        def admin_exec_target(self, vm: object, *, config: object | None = None) -> object:
+            return SimpleNamespace(
+                ssh=SimpleNamespace(host="203.0.113.42"),
+                lima=None, wsl2=None,
+                run=flaky_run,
+            )
+
+    monkeypatch.setattr(
+        vm_manager, "get_provisioner_for_vm",
+        lambda *a, **k: _FlakyProvisioner(),
+    )
+
+    vm = vm_manager._require_vm(db, "vm1")
+    with contextlib.ExitStack() as stack:
+        target = vm_manager._provisioner_shell_target(db, _make_config(), vm, stack)  # type: ignore[arg-type]
+
+    # The probe retried until the 4th attempt succeeded; the function
+    # returned the now-reachable target rather than raising.
+    assert run_call_count["n"] == 4
+    assert target.ssh.host == "203.0.113.42"
     db.close()
 
 
@@ -410,4 +534,48 @@ def test_shell_vm_still_raises_on_failed_provisioning(
     err = exc_info.value
     assert "failed provisioning" in str(err)
     assert "vm delete" in (err.hint or "")
+    db.close()
+
+
+def test_exec_vm_warns_but_continues_on_failed_init(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """vm exec is the non-interactive twin of vm shell: same diagnostic
+    primitive in script-friendly form. Running 'agw vm exec failed-vm
+    cat /var/log/cloud-init.log' is exactly the workflow we softened
+    vm shell for. Confirm exec also warns rather than blocks on
+    failed initialization."""
+    from agentworks.vms import manager as vm_manager
+
+    db = _seed_db(tmp_path, init_status="failed")
+
+    # Stub out everything below the guard so we can confirm the guard
+    # warns rather than raises without actually invoking SSH. exec_vm
+    # ends in target.call_streaming(remote_cmd, env=env), so the stub
+    # target has to expose that method too.
+    monkeypatch.setattr(
+        vm_manager, "_resolve_vm_admin_env_scopes",
+        lambda *a, **k: vm_manager._VmAdminEnvScopes(vm={}, admin={}),
+    )
+    monkeypatch.setattr(vm_manager, "_vm_secret_target", lambda *a, **k: object())
+    monkeypatch.setattr("agentworks.secrets.resolve_for_command", lambda *a, **k: None)
+    monkeypatch.setattr("agentworks.env.compose_env", lambda **k: {})
+    monkeypatch.setattr(vm_manager, "keep_vm_active", lambda *a, **k: _NullCM())
+
+    def exec_target_stub(*_a: object, **_k: object) -> object:
+        return SimpleNamespace(
+            ssh=SimpleNamespace(host="ssh-host"),
+            lima=None,
+            wsl2=None,
+            call_streaming=lambda *_aa, **_kk: 0,
+        )
+
+    monkeypatch.setattr("agentworks.ssh.admin_exec_target", exec_target_stub)
+
+    exit_code = vm_manager.exec_vm(db, _make_config(), "vm1", ["echo", "hi"])  # type: ignore[arg-type]
+    assert exit_code == 0  # the underlying exec returned 0
+
+    err = capsys.readouterr().err
+    assert "failed initialization" in err
+    assert "vm reinit" in err
     db.close()
