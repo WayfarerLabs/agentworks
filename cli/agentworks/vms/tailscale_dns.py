@@ -184,7 +184,11 @@ def check_vm_dns(target: ExecTarget, logger: SSHLogger) -> None:
     logger.step("VM DNS")
 
     # The actual question: can the VM resolve external names?
-    # Everything else is diagnosis-of-failure.
+    # Everything else is diagnosis-of-failure. Announce before we
+    # block on the lookup; getent over libc -> tailscaled -> upstream
+    # can take a few seconds and the operator should know what we're
+    # waiting on.
+    output.detail(f"Checking DNS resolution ({_DNS_PROBE_NAME})...")
     probe = target.run(f"getent hosts {shlex.quote(_DNS_PROBE_NAME)}", check=False)
     if getattr(probe, "ok", False):
         output.detail("VM DNS is healthy.")
