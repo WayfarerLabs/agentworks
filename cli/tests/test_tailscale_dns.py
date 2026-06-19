@@ -1,9 +1,17 @@
-"""Tests for the tailscaled cold-boot startup-ordering fix.
+"""Tests for the tailscaled cold-boot startup-ordering fix and the VM DNS
+health check that gates phase B against DNS-dependent steps.
 
 See ``agentworks.vms.tailscale_dns`` and GitHub issue #117 for the
-root-cause analysis. These tests cover the drop-in's idempotency, the
-specific systemd-unit semantics that make the fix correct, and the
-invariant that we never restart tailscaled in phase B.
+root-cause analysis. These tests cover:
+
+- the drop-in's idempotency and the specific systemd-unit semantics that
+  make the cold-boot ordering fix correct
+- the invariant that we never restart tailscaled in phase B
+- the DNS health check's per-branch behavior (silent on healthy, warn
+  on broken-but-not-#117, warn on #117-shape-without-known-heal, raise
+  with heal hint on the full #117 latch)
+- the ordering invariant (DNS probe before any diagnostic command) and
+  the read-only invariant (no writes from any branch, ever)
 """
 
 from __future__ import annotations
@@ -267,75 +275,87 @@ def _make_latch_target(
     return target
 
 
-def test_detect_silent_when_resolv_conf_unreadable() -> None:
-    """If we can't even read /etc/resolv.conf we can't make a call; stay quiet."""
-    from agentworks.vms.tailscale_dns import detect_tailscaled_dns_latched
-
-    target = _make_latch_target(resolv_readable=False)
-    detect_tailscaled_dns_latched(target, MagicMock())  # must not raise
-
-    # We never proceeded past the resolv.conf read.
-    assert not any(cmd.startswith("getent hosts") for cmd in target.run_log)
-
-
-def test_detect_silent_when_resolv_conf_not_tailscaled() -> None:
-    """A non-tailscaled /etc/resolv.conf is uniquely the wrong thing to heal."""
-    from agentworks.vms.tailscale_dns import detect_tailscaled_dns_latched
-
-    target = _make_latch_target(resolv_is_tailscaled=False)
-    detect_tailscaled_dns_latched(target, MagicMock())  # must not raise
-
-    # We bailed before probing DNS.
-    assert not any(cmd.startswith("getent hosts") for cmd in target.run_log)
-
-
-def test_detect_silent_when_dns_works() -> None:
-    """tailscaled-managed resolv.conf + working DNS = the normal weird state."""
-    from agentworks.vms.tailscale_dns import detect_tailscaled_dns_latched
+def test_check_silent_when_dns_works() -> None:
+    """The DNS probe is the gate. Working DNS = healthy VM = return silently
+    without digging into resolv.conf or the platform resolver."""
+    from agentworks.vms.tailscale_dns import check_vm_dns
 
     target = _make_latch_target(dns_probe_ok=True)
-    detect_tailscaled_dns_latched(target, MagicMock())  # must not raise
+    logger = MagicMock()
+    check_vm_dns(target, logger)  # must not raise
 
-    # We didn't gate on resolved when DNS was already fine.
-    assert not any(
-        cmd == "systemctl is-active --quiet systemd-resolved" for cmd in target.run_log
-    )
+    # Happy path stops at the DNS probe. No further diagnostic commands.
+    assert not any(cmd.startswith("cat ") for cmd in target.run_log)
+    assert not any(cmd.startswith("systemctl is-active") for cmd in target.run_log)
+    # And no warning was logged: silence on the happy path is intentional.
+    assert not logger.warning.called
 
 
-def test_detect_warns_when_resolved_not_active() -> None:
-    """First two latch signals match but resolved isn't the active resolver:
-    we saw the breakage, but the heal logic for this resolver setup isn't
-    implemented. Surface a non-fatal warning rather than raising (the hint
-    we'd suggest would be wrong) or returning silently (the operator would
-    hit a cryptic apt failure with no visible diagnosis)."""
-    from agentworks.vms.tailscale_dns import detect_tailscaled_dns_latched
+def test_check_warns_when_dns_fails_and_resolv_unreadable() -> None:
+    """DNS broken AND /etc/resolv.conf unreadable: we can't diagnose, but
+    DNS is still broken so subsequent apt steps will fail. Warn so the
+    operator has a visible link to the failure that follows."""
+    from agentworks.vms.tailscale_dns import check_vm_dns
+
+    target = _make_latch_target(resolv_readable=False)
+    logger = MagicMock()
+    check_vm_dns(target, logger)  # must not raise
+
+    assert logger.warning.called
+    warning_text = " ".join(call.args[0] for call in logger.warning.call_args_list)
+    assert "DNS" in warning_text  # the operator needs to see what we saw
+    # We bailed before checking the platform resolver. Nothing further to read.
+    assert not any(cmd.startswith("systemctl is-active") for cmd in target.run_log)
+
+
+def test_check_warns_when_dns_fails_but_resolv_not_tailscaled() -> None:
+    """DNS broken AND /etc/resolv.conf isn't tailscaled-managed: not the
+    known issue #117 shape. Warn so the operator can investigate before
+    apt fails cryptically; the known heal doesn't apply."""
+    from agentworks.vms.tailscale_dns import check_vm_dns
+
+    target = _make_latch_target(resolv_is_tailscaled=False)
+    logger = MagicMock()
+    check_vm_dns(target, logger)  # must not raise
+
+    assert logger.warning.called
+    warning_text = " ".join(call.args[0] for call in logger.warning.call_args_list)
+    assert "DNS" in warning_text
+    # We didn't gate on resolved: the issue #117 shape didn't match.
+    assert not any(cmd.startswith("systemctl is-active") for cmd in target.run_log)
+
+
+def test_check_warns_when_resolved_not_active() -> None:
+    """DNS broken AND /etc/resolv.conf is tailscaled-managed BUT resolved
+    isn't the active resolver: we recognize the issue #117 shape but the
+    heal we'd suggest doesn't apply to this platform. Surface a warning
+    that says so rather than raising with a hint we know would be wrong."""
+    from agentworks.vms.tailscale_dns import check_vm_dns
 
     target = _make_latch_target(resolved_active=False)
     logger = MagicMock()
-    detect_tailscaled_dns_latched(target, logger)  # must not raise
+    check_vm_dns(target, logger)  # must not raise
 
-    # The warning must land on the SSHLogger (so it shows up in the SSH
-    # log's warnings summary at logger.close()) AND mention the bad state.
-    # We don't pin exact wording, but the operator needs to be able to
-    # connect this warning to the apt failure they'll hit a few steps
-    # later, which means it has to name what we saw.
     assert logger.warning.called
     warning_text = " ".join(call.args[0] for call in logger.warning.call_args_list)
+    # When we do recognize the shape, the warning should name it AND
+    # explicitly call out that no heal is implemented for this resolver.
     assert "latched" in warning_text or "issue #117" in warning_text
     assert "not implemented" in warning_text or "No heal" in warning_text
 
 
-def test_detect_raises_state_error_with_heal_hint() -> None:
-    """All four latch signals present: raise with the manual heal block."""
+def test_check_raises_state_error_with_heal_hint() -> None:
+    """All issue #117 signals present (DNS broken, resolv.conf
+    tailscaled-managed, resolved active): raise with the manual heal block."""
     import pytest
 
     from agentworks.errors import StateError
-    from agentworks.vms.tailscale_dns import detect_tailscaled_dns_latched
+    from agentworks.vms.tailscale_dns import check_vm_dns
 
     target = _make_latch_target()  # defaults describe the latched state
 
     with pytest.raises(StateError) as exc_info:
-        detect_tailscaled_dns_latched(target, MagicMock())
+        check_vm_dns(target, MagicMock())
 
     err = exc_info.value
     assert err.entity_kind == "vm"
@@ -343,6 +363,27 @@ def test_detect_raises_state_error_with_heal_hint() -> None:
     assert "systemctl stop tailscaled" in (err.hint or "")
     assert "ln -sf /run/systemd/resolve/stub-resolv.conf" in (err.hint or "")
     assert "systemctl start tailscaled" in (err.hint or "")
+
+
+def test_check_dns_probe_runs_first() -> None:
+    """Ordering invariant: the DNS probe is the gate. On any failing path,
+    getent must be the first command issued; everything else is
+    diagnosis-of-failure that only matters once we know DNS is broken."""
+    from agentworks.vms.tailscale_dns import check_vm_dns
+
+    # Use the all-latched defaults so we walk the full diagnosis chain.
+    target = _make_latch_target()
+    import contextlib
+
+    from agentworks.errors import StateError
+
+    with contextlib.suppress(StateError):
+        check_vm_dns(target, MagicMock())
+
+    assert target.run_log, "expected at least one command"
+    assert target.run_log[0].startswith("getent hosts"), (
+        f"expected DNS probe first, got: {target.run_log[0]!r}"
+    )
 
 
 @pytest.mark.parametrize(
@@ -355,10 +396,10 @@ def test_detect_raises_state_error_with_heal_hint() -> None:
         ("latched", {}),  # defaults describe the all-signals-match latched state
     ],
 )
-def test_detect_does_not_modify_anything(case: str, kwargs: dict[str, bool]) -> None:
-    """Detection is read-only across every branch: no writes, no service
+def test_check_does_not_modify_anything(case: str, kwargs: dict[str, bool]) -> None:
+    """The DNS check is read-only across every branch: no writes, no service
     touches, no daemon-reloads, no file restorations. The operator decides
-    whether and how to heal; detection only surfaces the diagnosis.
+    whether and how to heal; the check only surfaces the diagnosis.
 
     Parametrized across all five branches (four no-raise paths plus the
     latched/raise path) so any future contributor who adds a side effect
@@ -374,11 +415,11 @@ def test_detect_does_not_modify_anything(case: str, kwargs: dict[str, bool]) -> 
     import contextlib
 
     from agentworks.errors import StateError
-    from agentworks.vms.tailscale_dns import detect_tailscaled_dns_latched
+    from agentworks.vms.tailscale_dns import check_vm_dns
 
     target = _make_latch_target(**kwargs)
     with contextlib.suppress(StateError):
-        detect_tailscaled_dns_latched(target, MagicMock())
+        check_vm_dns(target, MagicMock())
 
     # No file writes via either entry point. write_file is the documented
     # path; copy_to is the lower-level primitive write_file delegates to.

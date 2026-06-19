@@ -1531,16 +1531,19 @@ def _phase_b_setup(
 
     apply_vm_hardening(ts_target, logger)
 
-    # Fatal: detect the issue #117 latched DNS state and abort with a
-    # clear heal block before subsequent steps fail cryptically on apt
-    # (apt-get update needs working external DNS). Silent on healthy
-    # VMs and on platforms where the heal sequence doesn't apply.
+    # Check VM DNS works before subsequent steps that need external
+    # resolution (apt-get update, source fetches, etc.) fail cryptically.
+    # When DNS is broken AND the failure matches the known issue #117
+    # latched shape AND the heal applies to this resolver setup, raises
+    # StateError with the manual heal block as a hint. When DNS is broken
+    # for any other reason, surfaces a non-fatal warning so the operator
+    # has a visible link to the apt failure that will follow.
     from agentworks.vms.tailscale_dns import (
         apply_tailscaled_dns_fix,
-        detect_tailscaled_dns_latched,
+        check_vm_dns,
     )
 
-    detect_tailscaled_dns_latched(ts_target, logger)
+    check_vm_dns(ts_target, logger)
 
     # Non-fatal: tailscaled cold-boot DNS race fix (GitHub issue #117).
     # Drops in a systemd override that orders tailscaled after the DNS
