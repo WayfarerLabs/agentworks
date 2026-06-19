@@ -548,7 +548,11 @@ def shell_vm(db: Database, config: Config, name: str, *, provisioner: bool = Fal
     from agentworks.ssh import admin_exec_target, interactive
 
     vm = _require_vm(db, name)
-    _guard_failed_vm(vm)
+    # Init failure warns instead of blocks: shelling into a partially-
+    # initialized VM is exactly the kind of operation that lets the
+    # operator diagnose what failed or apply a manual fix (e.g. healing
+    # the issue #117 latched DNS state) before re-running reinit.
+    _guard_failed_vm(vm, init_failure_is_warning=True)
     if not provisioner and vm.tailscale_host is None:
         raise StateError(
             f"VM '{name}' has no Tailscale IP",
@@ -588,10 +592,11 @@ def shell_vm(db: Database, config: Config, name: str, *, provisioner: bool = Fal
         admin=scopes.admin,
     )
 
-    if provisioner:
-        target = _provisioner_shell_target(db, config, vm)
-    else:
-        target = admin_exec_target(vm, config)
+    target = (
+        _provisioner_shell_target(db, config, vm)
+        if provisioner
+        else admin_exec_target(vm, config)
+    )
     with keep_vm_active(db, config, vm):
         sys.exit(interactive(target, "", env=env))
 
@@ -1160,8 +1165,18 @@ def _init_log_hint(vm_name: str) -> str:
     return f" See log: {logs[0]}" if logs else ""
 
 
-def _guard_failed_vm(vm: VMRow) -> None:
-    """Block operations on VMs with failed provisioning or initialization."""
+def _guard_failed_vm(vm: VMRow, *, init_failure_is_warning: bool = False) -> None:
+    """Block operations on VMs with failed provisioning or initialization.
+
+    When ``init_failure_is_warning`` is True, an init-status failure
+    becomes a non-fatal warning instead of a hard block. Used by
+    operations that exist precisely so the operator can reach into the
+    VM to diagnose or fix the cause of the init failure (e.g.
+    ``vm shell`` opening a session on a partially-initialized VM to
+    apply a manual heal before re-running ``vm reinit``). Provisioning
+    failure is never softened: the VM may not even be reachable, and
+    the project's stance there is "delete and recreate."
+    """
     if vm.provisioning_status == ProvisioningStatus.FAILED.value:
         raise StateError(
             f"VM '{vm.name}' has failed provisioning.{_init_log_hint(vm.name)}",
@@ -1170,6 +1185,12 @@ def _guard_failed_vm(vm: VMRow) -> None:
             hint="Only 'vm delete' is supported on a failed-provisioning VM.",
         )
     if vm.init_status == InitStatus.FAILED.value:
+        if init_failure_is_warning:
+            output.warn(
+                f"VM '{vm.name}' has failed initialization.{_init_log_hint(vm.name)} "
+                f"Continuing. Use 'vm reinit' to retry once the cause is resolved.",
+            )
+            return
         raise StateError(
             f"VM '{vm.name}' has failed initialization.{_init_log_hint(vm.name)}",
             entity_kind="vm",

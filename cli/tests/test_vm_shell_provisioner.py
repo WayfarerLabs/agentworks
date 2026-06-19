@@ -26,14 +26,28 @@ if TYPE_CHECKING:
     pass
 
 
-def _seed_db(tmp_path: Path, *, tailscale_host: str | None = "100.64.0.5") -> Database:
-    """VM row in a fresh sqlite db. tailscale_host is parameterizable so we
-    can exercise both the tailscale-present and tailscale-absent branches."""
+def _seed_db(
+    tmp_path: Path,
+    *,
+    tailscale_host: str | None = "100.64.0.5",
+    init_status: str | None = None,
+    provisioning_status: str | None = None,
+) -> Database:
+    """VM row in a fresh sqlite db. Defaults paint a healthy VM; override
+    individual fields to exercise the failed-init / failed-provisioning
+    guard paths."""
     db = Database(tmp_path / "test.db")
+    cols = ["name", "platform", "admin_username", "tailscale_host"]
+    vals: list[object] = ["vm1", "lima", "admin", tailscale_host]
+    if init_status is not None:
+        cols.append("init_status")
+        vals.append(init_status)
+    if provisioning_status is not None:
+        cols.append("provisioning_status")
+        vals.append(provisioning_status)
+    placeholders = ", ".join(["?"] * len(cols))
     db._conn.execute(
-        "INSERT INTO vms (name, platform, admin_username, tailscale_host) "
-        "VALUES (?, ?, ?, ?)",
-        ("vm1", "lima", "admin", tailscale_host),
+        f"INSERT INTO vms ({', '.join(cols)}) VALUES ({placeholders})", vals,
     )
     db._conn.commit()
     return db
@@ -246,4 +260,55 @@ def test_provisioner_shell_target_raises_when_no_public_ip(
     assert err.entity_kind == "vm"
     assert "public IP" in str(err)
     assert "serial console" in (err.hint or "")
+    db.close()
+
+
+# -- Failed-init handling -----------------------------------------------------
+
+
+def test_shell_vm_warns_but_continues_on_failed_init(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Shelling into a failed-init VM is the most common reason to open a
+    shell on one (investigate, apply a manual fix, re-run reinit). The
+    operation must warn rather than raise. The warning text must mention
+    'vm reinit' so the operator knows the recovery flow."""
+    from agentworks.vms import manager as vm_manager
+
+    db = _seed_db(tmp_path, init_status="failed")
+    interactive_log: list[bool] = []
+    _patch_common(monkeypatch, vm_manager, interactive_log=interactive_log)
+    monkeypatch.setattr(
+        "agentworks.ssh.admin_exec_target", lambda *a, **k: _stub_target(),
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        vm_manager.shell_vm(db, _make_config(), "vm1")  # type: ignore[arg-type]
+    assert exc_info.value.code == 0
+    assert interactive_log == [True], "shell must still open on a failed-init VM"
+
+    # The warning should land on stderr (via output.warn) with the reinit hint.
+    err = capsys.readouterr().err
+    assert "failed initialization" in err
+    assert "vm reinit" in err
+    db.close()
+
+
+def test_shell_vm_still_raises_on_failed_provisioning(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Failed provisioning is a different beast: the VM may not even be
+    reachable, and the project's stance is 'delete and recreate.' That
+    block stays hard, even for vm shell. Confirms the warn-on-init
+    softening doesn't accidentally also soften provisioning failures."""
+    from agentworks.vms import manager as vm_manager
+
+    db = _seed_db(tmp_path, provisioning_status="failed")
+
+    with pytest.raises(StateError) as exc_info:
+        vm_manager.shell_vm(db, _make_config(), "vm1")  # type: ignore[arg-type]
+
+    err = exc_info.value
+    assert "failed provisioning" in str(err)
+    assert "vm delete" in (err.hint or "")
     db.close()
