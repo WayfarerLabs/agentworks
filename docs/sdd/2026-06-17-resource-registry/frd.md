@@ -125,8 +125,9 @@ A single resource may be the target of multiple requirements. The framework expl
 this:
 
 - **Auto-declared resources** synthesize once per `(kind, name)`. When multiple requirements would
-  trigger auto-declaration of the same name, the first-encountered requirement supplies any
-  kind-specific extras (deterministic walk order: alphabetical by section). The remaining
+  trigger auto-declaration of the same name, the **first-encountered requirement** supplies any
+  kind-specific extras and is recorded as the origin source (R4). Walk order is config-load order:
+  top-to-bottom in the TOML file, top-level sections in their declaration order. The remaining
   requirements contribute additional usages but do not re-synthesize the resource.
 - **Operator-declared resources** are unchanged by additional requirements pointing at them. The
   resource keeps the operator's fields; the requirements just add to its usage list.
@@ -153,6 +154,12 @@ The framework controls error shape; each kind only declares its policy. Migratin
 bespoke-validation kind into the framework changes the error wording but not the validation
 semantics.
 
+**Policy is per-kind, not per-source.** The same miss policy applies regardless of which requirement
+triggered the lookup. A secret requirement from an env-block reference is handled identically to one
+from `tailscale_auth_key` or a git credential `token`: if the name isn't operator-declared, the
+secret kind's auto-declare policy synthesizes it. Per-source policy divergence is intentionally not
+supported -- it would multiply the complexity and undermine the unified model.
+
 ### R3: Per-field merge between operator declarations and auto-declared defaults
 
 When a resource is **both** operator-declared and required, the merge is per-field for
@@ -160,7 +167,9 @@ operator-settable fields:
 
 - Operator-settable fields (`description`, `hint`, `backend_mappings`): operator wins per field (or
   per key, in the case of `backend_mappings`). Fields the operator omitted fall back to the
-  requirement's defaults (if any).
+  requirement's defaults (if any). Per-key provenance within `backend_mappings` (operator-set vs.
+  framework-default vs. backend-default-convention) is tracked and surfaced via
+  `agw secret describe` (R9).
 - System-collected fields (`usage`): always accumulated from the matching requirements, regardless
   of operator declaration. The operator does not set usage; the system tracks all of them.
 - Origin is `operator-declared` (the operator declared the resource; see R4), and the framework
@@ -190,13 +199,14 @@ registry. Three origin types:
   operator declared one and a requirement referenced `default`). Built-in resources carry no
   file:line; their source is agentworks itself.
 - **`operator-declared`**: the resource is declared in operator config. The origin carries the
-  **file path and line number** of the declaration's opening line (e.g.,
-  `~/.config/agentworks/config.toml:42`). When the resource is also referenced by requirements, the
-  matching requirements are retained separately (R3) but the origin stays `operator-declared`.
+  **file path and line number** of the declaration's opening line, scoped to the loaded TOML config
+  file (e.g., `~/.config/agentworks/config.toml:42`). If multi-file config (manifests, layering) is
+  added later, that SDD revisits this field. When the resource is also referenced by requirements,
+  the matching requirements are retained separately (R3) but the origin stays `operator-declared`.
 - **`auto-declared`**: the resource was synthesized at config-load time to satisfy a missing
-  requirement. The origin carries the **first matching requirement's `source`** (a `(kind, name)`
-  pair). Subsequent requirements that match the same name contribute additional usages (R1) but do
-  not alter the origin field.
+  requirement. The origin carries the **first-encountered requirement's `source`** (a `(kind, name)`
+  pair), using the same config-load walk order described in R1. Subsequent requirements that match
+  the same name contribute additional usages (R1) but do not alter the origin field.
 
 The origin field is set once when the resource is added to the registry and is never mutated
 afterwards. It is the primary signal for "where did this resource come from?" -- useful for
@@ -214,7 +224,10 @@ The validation pass detects cycles in the resource reference graph. Inheritance 
 are caught uniformly with a clear error naming the cycle and the resources involved. Cycle errors
 are config-load errors with no fallback.
 
-Today's resource graph is tree-shaped outside inheritance; the cycle check is defensive but cheap.
+Phase 1 ships the check but exercises nothing: secrets don't reference secrets, and the kinds in
+Phase 1's framework (just `secret`) have no inheritance relationships. The check matters once Phase
+2 (R11) brings template inheritance into the framework. Implementing it in Phase 1 keeps the
+framework complete from day one and lets Phase 2 land as a pure migration.
 
 ### R6: Tailscale auth key as a secret reference
 
@@ -240,6 +253,13 @@ Resolution:
 
 There is no opt-out at the VM template level. Tailscale is foundational to the system. Operators who
 don't want Tailscale auth at all don't configure agentworks at all.
+
+**Sharing semantics**: multiple VM templates with the default value
+`tailscale_auth_key = "tailscale-auth-key"` all emit `SecretRequirement` records targeting the same
+secret name. Per R1's multi-requirement handling, they share one auto-declared secret with multiple
+usages. This is intentional -- operators typically use one Tailscale tailnet across all their VMs.
+Operators wanting per-template isolation set a distinct `tailscale_auth_key` on each template (e.g.,
+`"tailscale-auth-key-prod"`, `"tailscale-auth-key-dev"`).
 
 ### R7: Git credential tokens as secret references
 
@@ -283,10 +303,11 @@ is separate from the system-collected `usage` list:
 Both surface in `agw doctor`, `agw secret list`, and `agw secret describe` (R9). The convention is
 the same for any resource type Phase 2 brings into the framework.
 
-`description` is encouraged but not required. The validation pass emits a config-load warning when a
-declared resource has no `description`, surfacing the gap. Operators who deliberately leave the
-field blank pay one warning per CLI invocation; a future iteration may upgrade this to an error if
-the encouragement-toward-discipline pays off.
+`description` is encouraged but not required. The validation pass emits a config-load warning when
+an **operator-declared** resource has no `description`, surfacing the gap so the operator can
+document their own resources. Auto-declared and built-in resources do not trigger the warning (the
+operator didn't author them; demanding a description would be noise). Operators who deliberately
+leave the field blank pay one warning per CLI invocation.
 
 ### R9: Origin and inspection via doctor, secret list, and secret describe
 
@@ -325,19 +346,52 @@ lands; until then they use the existing per-type reporting. The `describe` comma
 naturally to other resource kinds in Phase 2 (e.g., `agw template describe <name>`), though only
 `agw secret describe` is in scope for Phase 1.
 
-### R10: Eager-resolve integration
+### R10: Registry construction and eager-resolve scope
 
-No changes to the eager-prompting contract from the env-and-secrets SDD. Shell-opening commands
-continue to walk their target chains and resolve all needed secrets up front. After this SDD, the
-set of "needed secrets" expands:
+Two distinct concerns, often conflated, kept separate here:
 
-- Env-block secrets reached via `effective_env` (existing).
-- System secrets reached via `required_resources()` on the target's resolved templates (new).
+#### Registry construction: universal
 
-The orchestrator's `extra_decls` parameter (left in place by the env-and-secrets SDD as the
-migration hook) is the integration point. Manager-entry code at `vm create`, `vm reinit`,
-`agent create`, `agent reinit` walks the resolved templates' `required_resources()` and passes the
-resulting `SecretDecl`s into `resolve_for_command(extra_decls=...)`.
+At every CLI invocation, regardless of command, the validation pass walks the entire requirement
+graph and builds the registry. This is config-load-time work: cheap, deterministic, no backend
+calls. After the walk, the registry knows every declared resource and every requirement edge.
+
+The walk is not scoped by command. `agw vm list` builds the same registry as `agw vm create`.
+
+#### Eager-resolve scope: per-command
+
+Eager-resolve (asking backends for actual secret values, prompting if needed) is the existing
+mechanism from the env-and-secrets SDD. This SDD does not change _how_ eager-resolve works; it just
+adds new candidates the resolver may consider.
+
+Two kinds of secrets get eager-resolved per command:
+
+- **Env-block secrets** (existing): resolved at shell-opening commands per the env-and-secrets
+  contract. Unchanged.
+- **Provisioning secrets** (new): resolved at provisioning commands. Scope is driven by the
+  requirement subgraph of the resource(s) being provisioned in this invocation. The framework walks
+  that subgraph in the (already-built) registry, collects the secret `SecretDecl`s found, and passes
+  them as `extra_decls` to the existing orchestrator.
+
+The subgraph scoping is the natural answer to "why doesn't `agent create` prompt for the Tailscale
+auth key?" -- the agent template's requirement subgraph doesn't reach `tailscale_auth_key` (that's
+on the VM template, which is not being provisioned at `agent create` time). Resource requirements
+are walked transitively (e.g., `admin.config.git_credentials = ["github-prod"]` -->
+`git_credentials:github-prod` --> `secret:git-token-github-prod`) so the manager picks up the right
+depth.
+
+Current per-command map (Phase 1 state):
+
+| Command                                          | Resource provisioned | Subgraph root for eager-resolve             |
+| ------------------------------------------------ | -------------------- | ------------------------------------------- |
+| `vm create` / `vm reinit`                        | VM, admin user       | VM template + admin config                  |
+| `workspace create` / `reinit`                    | workspace            | workspace template (empty in P1)            |
+| `agent create` / `agent reinit`                  | agent                | agent template                              |
+| Shell-opening (sessions, consoles, shells, exec) | (no provisioning)    | -- (env-block eager-resolve only, existing) |
+
+The map is current-state, not closed: any kind that later acquires system-secret references is
+covered automatically because the framework walks subgraphs by structure, not by hardcoded command
+lookup tables.
 
 ### R11: Phase 2 scope (resource type migrations)
 
@@ -378,7 +432,9 @@ agw resource describe <kind> <name>
   `auto`).
 - `agw resource describe <kind> <name>` shows the framework-level detail view: kind, name, origin
   with full detail, all registered usages, and description. Kind-specific detail (backend mappings,
-  inheritance chain, resolved fields, ...) belongs in the kind's own `describe` command.
+  inheritance chain, resolved fields, ...) belongs in the kind's own `describe` command. The
+  two-positional shape is required because resource names are unique only _within_ a kind, not
+  across kinds (a `default` secret and a `default` vm_template are different resources).
 
 `agw resource` is gated to Phase 2 because the cross-kind view only earns its keep once multiple
 kinds are in the registry; with only secrets in Phase 1 it would be redundant with `agw secret list`
@@ -418,8 +474,17 @@ kinds are in the registry; with only secrets in Phase 1 it would be redundant wi
 
 ## Migration notes
 
-Operators upgrading across this SDD see two observable changes:
+Operators upgrading across this SDD see three observable changes:
 
+- **Undeclared env-block secret references no longer error.** Under env-and-secrets, an env-block
+  `{ secret = "foo" }` reference required an explicit `[secrets.foo]` block; an undeclared name was
+  a config-load error. Under this SDD, that reference becomes a requirement and the secret kind's
+  auto-declare policy synthesizes the missing declaration. The strict-declaration intent of
+  env-and-secrets is preserved through visibility instead: `agw doctor` and `agw secret list` show
+  every auto-declared secret with its origin source, so operators retain a complete view of what the
+  framework inferred on their behalf. Operators who relied on the strict error behavior should add
+  `[secrets.<name>]` declarations explicitly; the warning on missing `description` (R8) will prompt
+  them to.
 - **Tailscale auth key resolution moves to the framework default convention.** Set
   `AW_SECRET_TAILSCALE_AUTH_KEY` (or whichever value your active backend chain produces). Operators
   who prefer to retain their previous env var name declare:
