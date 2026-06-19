@@ -205,6 +205,8 @@ def test_provisioner_shell_target_wraps_notimplementederror(
     must convert that into a typed StateError so the CLI renders it as
     a one-liner with the provisioner's message as the hint, rather than
     leaking a Python traceback to the operator."""
+    import contextlib
+
     from agentworks.vms import manager as vm_manager
 
     db = _seed_db(tmp_path)
@@ -219,8 +221,8 @@ def test_provisioner_shell_target_wraps_notimplementederror(
     )
 
     vm = vm_manager._require_vm(db, "vm1")
-    with pytest.raises(StateError) as exc_info:
-        vm_manager._provisioner_shell_target(db, _make_config(), vm)  # type: ignore[arg-type]
+    with contextlib.ExitStack() as stack, pytest.raises(StateError) as exc_info:
+        vm_manager._provisioner_shell_target(db, _make_config(), vm, stack)  # type: ignore[arg-type]
 
     err = exc_info.value
     assert err.entity_kind == "vm"
@@ -228,38 +230,93 @@ def test_provisioner_shell_target_wraps_notimplementederror(
     db.close()
 
 
-def test_provisioner_shell_target_raises_when_no_public_ip(
+def test_provisioner_shell_target_attaches_and_registers_detach_for_azure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Azure's admin_exec_target returns an SSHTarget with host="" when
-    no public IP is attached. The wrapper must catch that empty host and
-    raise StateError pointing the operator at the Azure serial console
-    rather than letting the empty-host SSH attempt fail cryptically."""
+    """On Azure, the provisioner shell must attach a temporary public IP
+    AND register the detach as an ExitStack callback. The operator should
+    never see 'public IP required' on a healthy Azure VM, and the IP must
+    come down regardless of how shell_vm unwinds (success, SSH failure, ^C)."""
+    import contextlib
+
+    from agentworks.vms import manager as vm_manager
+    from agentworks.vms.provisioners.azure import AzureProvisioner
+
+    db = _seed_db(tmp_path)
+
+    attach_calls: list[str] = []
+    detach_calls: list[str] = []
+
+    class _FakeAzureProvisioner(AzureProvisioner):
+        # Override the constructor so we don't need a real Azure config.
+        def __init__(self) -> None:  # noqa: D401, ANN001
+            pass
+
+        def attach_public_ip(self, vm: object) -> str:
+            attach_calls.append(getattr(vm, "name", "?"))
+            return "203.0.113.42"
+
+        def detach_public_ip(self, vm: object) -> None:
+            detach_calls.append(getattr(vm, "name", "?"))
+
+        def admin_exec_target(self, vm: object, *, config: object | None = None) -> object:
+            return SimpleNamespace(
+                ssh=SimpleNamespace(host="203.0.113.42"), lima=None, wsl2=None,
+            )
+
+    monkeypatch.setattr(
+        vm_manager, "get_provisioner_for_vm",
+        lambda *a, **k: _FakeAzureProvisioner(),
+    )
+
+    vm = vm_manager._require_vm(db, "vm1")
+    with contextlib.ExitStack() as stack:
+        target = vm_manager._provisioner_shell_target(db, _make_config(), vm, stack)  # type: ignore[arg-type]
+        # Attach must have run inside the stack scope.
+        assert attach_calls == ["vm1"]
+        # Detach must NOT have run yet; it should fire on stack exit.
+        assert detach_calls == []
+        assert target.ssh.host == "203.0.113.42"
+
+    # Stack exited: detach must have run exactly once.
+    assert detach_calls == ["vm1"]
+    db.close()
+
+
+def test_provisioner_shell_target_raises_defensively_on_empty_host(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Defensive guard: if a provisioner returns an SSHTarget with host=""
+    (e.g. Azure's attach_public_ip silently failed, or a future provisioner
+    has a bug), surface a clear StateError rather than letting interactive()
+    hang trying to ssh to an empty hostname.
+
+    Uses a non-Azure stub provisioner so the attach-public-IP path doesn't
+    fire; we want to test the empty-host guard in isolation."""
+    import contextlib
+
     from agentworks.vms import manager as vm_manager
 
     db = _seed_db(tmp_path)
 
-    class _AzureNoPublicIP:
+    class _BrokenProvisioner:
         def admin_exec_target(self, vm: object, *, config: object | None = None) -> object:
-            # Shape matches what azure.py returns when _get_vm_public_ip()
-            # returns "" because no public IP is attached.
             return SimpleNamespace(
                 ssh=SimpleNamespace(host=""), lima=None, wsl2=None,
             )
 
     monkeypatch.setattr(
         vm_manager, "get_provisioner_for_vm",
-        lambda *a, **k: _AzureNoPublicIP(),
+        lambda *a, **k: _BrokenProvisioner(),
     )
 
     vm = vm_manager._require_vm(db, "vm1")
-    with pytest.raises(StateError) as exc_info:
-        vm_manager._provisioner_shell_target(db, _make_config(), vm)  # type: ignore[arg-type]
+    with contextlib.ExitStack() as stack, pytest.raises(StateError) as exc_info:
+        vm_manager._provisioner_shell_target(db, _make_config(), vm, stack)  # type: ignore[arg-type]
 
     err = exc_info.value
     assert err.entity_kind == "vm"
-    assert "public IP" in str(err)
-    assert "serial console" in (err.hint or "")
+    assert "no host" in str(err) or "not be reachable" in str(err)
     db.close()
 
 

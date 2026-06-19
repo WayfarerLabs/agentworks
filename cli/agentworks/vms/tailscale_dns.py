@@ -158,9 +158,9 @@ _LATCHED_HEAL_HINT = (
     "ordering fix.\n"
     "\n"
     "Note: `--provisioner` requires the platform-native transport to be\n"
-    "available. Lima and WSL2 work transparently. Azure requires a\n"
-    "public IP already attached (otherwise use the serial console from\n"
-    "the Azure portal). Proxmox is not yet supported."
+    "available. Lima and WSL2 work transparently. Azure transparently\n"
+    "attaches and then detaches a temporary public IP for the session.\n"
+    "Proxmox is not yet supported."
 )
 
 

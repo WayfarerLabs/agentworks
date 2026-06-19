@@ -592,26 +592,43 @@ def shell_vm(db: Database, config: Config, name: str, *, provisioner: bool = Fal
         admin=scopes.admin,
     )
 
-    target = (
-        _provisioner_shell_target(db, config, vm)
-        if provisioner
-        else admin_exec_target(vm, config)
-    )
-    with keep_vm_active(db, config, vm):
+    with contextlib.ExitStack() as stack:
+        stack.enter_context(keep_vm_active(db, config, vm))
+        target = (
+            _provisioner_shell_target(db, config, vm, stack)
+            if provisioner
+            else admin_exec_target(vm, config)
+        )
         sys.exit(interactive(target, "", env=env))
 
 
 def _provisioner_shell_target(
-    db: Database, config: Config, vm: VMRow,
+    db: Database, config: Config, vm: VMRow, stack: contextlib.ExitStack,
 ) -> ExecTarget:
     """Resolve the platform-native ExecTarget for ``vm shell --provisioner``.
 
+    On Azure, attaches a temporary public IP for the duration of the
+    supplied ExitStack and registers detach as a cleanup callback so
+    the IP is removed regardless of how the caller unwinds (success,
+    SSH failure, ^C, etc.). Other provisioners have a usable transport
+    in steady state and don't need this dance.
+
     Wraps the per-platform ``VMProvisioner.admin_exec_target`` in typed
     errors so the CLI surfaces a clear message when the transport isn't
-    available (Proxmox is not implemented; Azure requires a public IP
-    to already be attached).
+    available (Proxmox: not implemented).
     """
     prov = get_provisioner_for_vm(db, vm, config)
+
+    # Azure-specific: attach a public IP if one isn't already present.
+    # The attach/detach pair mirrors the established pattern in
+    # rekey_vm (manager.py around the rekey block): attach now,
+    # register detach on the stack so cleanup is unconditional. Other
+    # provisioners' transports work without any pre-step.
+    from agentworks.vms.provisioners.azure import AzureProvisioner
+
+    if isinstance(prov, AzureProvisioner):
+        prov.attach_public_ip(vm)
+        stack.callback(prov.detach_public_ip, vm)
     try:
         target = prov.admin_exec_target(vm, config=config)
     except NotImplementedError as e:
@@ -622,20 +639,23 @@ def _provisioner_shell_target(
             hint=str(e),
         ) from e
 
-    # Azure's admin_exec_target returns SSHTarget(host="") when no public IP
-    # is attached. Attaching one isn't free (Azure API call + propagation
-    # wait), so we don't do it implicitly; surface the gap and tell the
-    # operator the in-portal escape hatch.
+    # Defensive: Azure's admin_exec_target returns SSHTarget(host="")
+    # when no public IP is attached. After attach_public_ip above, this
+    # shouldn't happen on Azure. If it does (attach silently failed, or
+    # a future provisioner returns an SSH target without ensuring the
+    # host is set), surface clearly rather than letting interactive()
+    # hang on an empty hostname.
     if target.ssh is not None and not target.ssh.host:
         raise StateError(
-            f"Provisioner shell on platform '{vm.platform}' requires a public IP, "
-            f"but VM '{vm.name}' has none attached.",
+            f"Provisioner shell on platform '{vm.platform}' resolved to an SSH "
+            f"target with no host. VM '{vm.name}' may not be reachable.",
             entity_kind="vm",
             entity_name=vm.name,
             hint=(
-                "For Azure: attach a public IP via the Azure portal or use "
-                "the serial console (Connect > Serial console on the VM "
-                "resource page)."
+                "For Azure: the temporary public IP attach may have silently "
+                "failed; check the Azure portal for the VM's network "
+                "configuration, or use the serial console (Connect > Serial "
+                "console on the VM resource page)."
             ),
         )
     return target
