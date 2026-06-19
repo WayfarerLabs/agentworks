@@ -259,3 +259,71 @@ def test_interactive_appends_command_when_non_empty() -> None:
         interactive(target, "tmux attach -t foo")
         argv = mock_call.call_args[0][0]
         assert argv[-1] == "tmux attach -t foo"
+
+
+# ---------------------------------------------------------------------------
+# interactive(): non-SSH transport dispatch (provisioner shell)
+# ---------------------------------------------------------------------------
+
+
+def test_interactive_dispatches_to_lima() -> None:
+    """ExecTarget with lima set: dispatch to limactl shell, no SSH argv."""
+    from agentworks.ssh import ExecTarget, LimaTarget, interactive
+
+    target = ExecTarget(lima=LimaTarget(vm_name="my-vm"))
+    with patch("agentworks.ssh.subprocess.call") as mock_call:
+        mock_call.return_value = 0
+        interactive(target, "")
+        argv = mock_call.call_args[0][0]
+        assert argv == ["limactl", "shell", "my-vm"]
+
+
+def test_interactive_dispatches_to_lima_with_command() -> None:
+    """lima + non-empty command: wraps in bash -lc so the command runs."""
+    from agentworks.ssh import ExecTarget, LimaTarget, interactive
+
+    target = ExecTarget(lima=LimaTarget(vm_name="my-vm"))
+    with patch("agentworks.ssh.subprocess.call") as mock_call:
+        mock_call.return_value = 0
+        interactive(target, "tmux attach -t s1")
+        argv = mock_call.call_args[0][0]
+        assert argv == ["limactl", "shell", "my-vm", "bash", "-lc", "tmux attach -t s1"]
+
+
+def test_interactive_dispatches_to_wsl2() -> None:
+    """ExecTarget with wsl2 set: dispatch to wsl.exe with the configured user."""
+    from agentworks.ssh import ExecTarget, WSL2Target, interactive
+
+    target = ExecTarget(wsl2=WSL2Target(distro_name="my-distro", user="agentworks"))
+    with patch("agentworks.ssh.subprocess.call") as mock_call:
+        mock_call.return_value = 0
+        interactive(target, "")
+        argv = mock_call.call_args[0][0]
+        assert argv == ["wsl", "--distribution", "my-distro", "--user", "agentworks"]
+
+
+def test_interactive_dispatches_to_remote_lima() -> None:
+    """ExecTarget with remote_lima set: ssh -t to the VM host, then limactl shell."""
+    from agentworks.ssh import ExecTarget, RemoteLimaTarget, interactive
+
+    target = ExecTarget(
+        remote_lima=RemoteLimaTarget(vm_name="my-vm", vm_host_ssh="host.example"),
+    )
+    with patch("agentworks.ssh.subprocess.call") as mock_call:
+        mock_call.return_value = 0
+        interactive(target, "")
+        argv = mock_call.call_args[0][0]
+        assert argv[0] == "ssh"
+        assert "-t" in argv
+        assert "host.example" in argv
+        assert argv[-1] == "limactl shell my-vm"
+
+
+def test_interactive_raises_when_no_transport_configured() -> None:
+    """An ExecTarget with no transport field set is a programmer bug; surface
+    a clear SSHError rather than the old AssertionError shape."""
+    from agentworks.ssh import ExecTarget, SSHError, interactive
+
+    target = ExecTarget()
+    with pytest.raises(SSHError, match="no transport"):
+        interactive(target, "")

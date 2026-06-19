@@ -394,34 +394,90 @@ def interactive(
     *,
     env: dict[str, str] | None = None,
 ) -> int:
-    """Run an interactive SSH command with a TTY (for tmux attach, etc.).
+    """Run an interactive command with a TTY (for tmux attach, vm shell, etc.).
 
     If ``command`` is empty, opens a plain interactive login shell on the
-    target (no remote command argument at all). Otherwise runs ``command``
-    over a PTY-allocated SSH session.
+    target. Otherwise runs ``command`` in an interactive session.
 
-    ``env`` injects env vars via SSH SetEnv (all pairs coalesced into one
-    ``-o SetEnv="K1=V1" "K2=V2" ...`` argument; see ``_set_env_args``),
-    accepted by the remote ``AcceptEnv *`` directive deployed by VM init.
+    Dispatches by transport when given an ``ExecTarget``:
+
+    - ``ssh`` set: SSH with TTY and SetEnv (the long-standing path).
+    - ``lima`` / ``remote_lima`` / ``wsl2`` set: platform-native
+      interactive transport (``limactl shell``, ``ssh -t <host> limactl
+      shell``, ``wsl.exe``). These transports do NOT propagate ``env``;
+      the operator's identity profile on the VM (sourced from
+      ``/etc/profile.d``) still provides static identity vars (e.g.
+      AGENTWORKS_VM), but per-session env injection from the local
+      config isn't wired through. The provisioner-shell use case is
+      ``Tailscale-is-broken, reach the VM to fix it``, where per-
+      session env isn't load-bearing; we accept the gap rather than
+      build a more complex env-injection shim.
 
     Returns the process exit code. Does not raise on failure.
     """
-    target = _unwrap_ssh(target)
+    if isinstance(target, ExecTarget):
+        if target.ssh is not None:
+            ssh_target = target.ssh
+        elif target.lima is not None:
+            return _lima_interactive(target.lima, command)
+        elif target.remote_lima is not None:
+            return _remote_lima_interactive(target.remote_lima, command)
+        elif target.wsl2 is not None:
+            return _wsl2_interactive(target.wsl2, command)
+        else:
+            raise SSHError("ExecTarget has no transport configured for interactive shell")
+    else:
+        ssh_target = target
+
     # Build args without BatchMode (which rejects interactive prompts/TTY)
     args = ["ssh", "-t", "-o", "StrictHostKeyChecking=accept-new"]
-    if target.port is not None:
-        args.extend(["-p", str(target.port)])
-    if target.identity_file is not None:
-        args.extend(["-i", str(target.identity_file)])
-    if target.proxy_jump is not None:
-        args.extend(["-J", target.proxy_jump])
+    if ssh_target.port is not None:
+        args.extend(["-p", str(ssh_target.port)])
+    if ssh_target.identity_file is not None:
+        args.extend(["-i", str(ssh_target.identity_file)])
+    if ssh_target.proxy_jump is not None:
+        args.extend(["-J", ssh_target.proxy_jump])
     args.extend(_set_env_args(env))
-    if target.user:
-        args.append(f"{target.user}@{target.host}")
+    if ssh_target.user:
+        args.append(f"{ssh_target.user}@{ssh_target.host}")
     else:
-        args.append(target.host)
+        args.append(ssh_target.host)
     if command:
         args.append(command)
+    return subprocess.call(args)
+
+
+def _lima_interactive(target: LimaTarget, command: str) -> int:
+    """Interactive shell via ``limactl shell <vm>``.
+
+    Without ``command``, opens an interactive login shell on the VM.
+    With a command, runs it via ``bash -lc`` (still interactive because
+    limactl allocates a TTY by default).
+    """
+    args = ["limactl", "shell", target.vm_name]
+    if command:
+        args.extend(["bash", "-lc", command])
+    return subprocess.call(args)
+
+
+def _remote_lima_interactive(target: RemoteLimaTarget, command: str) -> int:
+    """Interactive shell via SSH-to-host + ``limactl shell <vm>``.
+
+    Two-hop interactive: ssh -t to the VM host, then have it invoke
+    limactl shell with TTY allocation.
+    """
+    inner = f"limactl shell {target.vm_name}"
+    if command:
+        inner = f"limactl shell {target.vm_name} bash -lc {shlex.quote(command)}"
+    args = ["ssh", "-t", "-o", "StrictHostKeyChecking=accept-new", target.vm_host_ssh, inner]
+    return subprocess.call(args)
+
+
+def _wsl2_interactive(target: WSL2Target, command: str) -> int:
+    """Interactive shell via ``wsl --distribution <distro> --user <user>``."""
+    args = ["wsl", "--distribution", target.distro_name, "--user", target.user]
+    if command:
+        args.extend(["--", "bash", "-lc", command])
     return subprocess.call(args)
 
 
