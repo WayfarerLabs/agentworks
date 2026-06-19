@@ -11,13 +11,15 @@ block secrets, but explicitly deferred two adjacent concerns:
    env-var-or-prompt paths. They sit outside the secrets framework, so operators get one set of
    behaviors for `[admin.env]` secrets and a parallel set of behaviors for these "system" secrets:
    different env var conventions, no backend chain, no `agw secret list` visibility, no per-secret
-   `backend_mappings`. That divergence is a wart that grows with every new system-managed secret.
+   `backend_mappings`. This leads to duplicated code paths and a bifurcated operator experience.
 
 2. A general pattern recurs across the config: resources reference other resources by name
    (templates reference parent templates, configs reference catalog entries, env entries reference
    secrets, ...) but the "what happens on unknown name" policy is bespoke per type. Some surface
    graceful errors with context; some don't. Cycle detection in inheritance chains is ad-hoc. There
-   is no uniform "who needed this?" trail for diagnostics.
+   is no uniform "who needed this?" trail for diagnostics. As the declared resource graph grows, it
+   will become increasingly more difficult for operators to understand and debug their config
+   without additional structure.
 
 This SDD addresses both, in one framework:
 
@@ -51,13 +53,15 @@ reconciliation, but that move is deliberately not part of this design.
   resources live in the DB and stay there. Resources carry their own fields (name, kind, origin,
   description, usage list, kind-specific data); they are distinct from the **requirements** that
   reference them by name.
-- **Resource registry**: the framework's single container holding every declared resource. Kind is
-  the primary dimension; within a kind, resources are looked up by name, so cross-kind identity is
-  the `(kind, name)` pair. Each kind contributes its own **miss policy** (R2) which the registry
-  applies when a requirement points at a `(kind, name)` not yet in the registry. Resources arrive in
-  the registry through three origin paths (R4): built-in instantiation, operator declarations in
-  config, and auto-declared synthesis from requirements. Queried by the validation pass and surfaced
-  via `agw doctor`, `agw secret list`, and (Phase 2) `agw resource list`.
+- **Resource registry**: the framework's single container consolidating resource definitions. For
+  this effort, it is constrained to just config-declared resources but it could be expanded to other
+  resource sources in the future. Kind is the primary dimension; within a kind, resources are looked
+  up by name, so cross-kind identity is the `(kind, name)` pair. Each kind contributes its own
+  **miss policy** (R2) which the registry applies when a requirement points at a `(kind, name)` not
+  yet in the registry. Resources arrive in the registry through three origin paths (R4): built-in
+  instantiation, operator declarations in config, and auto-declared synthesis from requirements.
+  Queried by the validation pass and surfaced via `agw doctor`, `agw secret list`, and (Phase 2)
+  `agw resource list`.
 - **Resource requirement**: a **reference declaration** -- one resource saying "I need this other
   resource by name". Distinct from the resource itself: requirements point at resources but are not
   resources. Carries the target's `name` and `kind`, a system-defined `usage`, the declaring
@@ -67,7 +71,11 @@ reconciliation, but that move is deliberately not part of this design.
 - **Usage**: the system-defined "what this resource is being used for", set by the requirement. Each
   requirement contributes one usage; a resource that is required by multiple sources accumulates a
   list of usages. Surfaced in `agw doctor` and `agw secret describe`. Distinct from the operator-set
-  description.
+  description. This should be phrased as a short noun phrase that completes the sentence template
+  `<source> uses <target> for <usage>.` -- sentence case, no leading article, no trailing period,
+  under ~50 chars. Examples: `"VM provisioning"`, `"GitHub repo cloning"`,
+  `"Codex agent API access"`. Counter-examples: `"to authenticate VMs"` (infinitive),
+  `"the Codex agent"` (consumer, not use-case), `"Used for cloning repos"` (sentence fragment).
 - **Description**: the operator-defined free-form note about a resource (already exists today on
   secrets and `git_credentials`; this SDD formalizes the convention for new resource types).
 - **Miss policy**: what the registry does when a requirement's `(kind, name)` has no match in the
@@ -166,9 +174,8 @@ description = "Prod tailnet key, owner: SRE team"
 ```
 
 The final `SecretDecl` carries the operator's `backend_mappings.env-var` and `description`, and the
-usage list `["Tailscale auth key for VM provisioning"]` from the VM-template requirement. The
-operator does not have to retype the usage; the system fills it in automatically and updates it when
-new requirements arrive.
+usage list `["VM provisioning"]` from the VM-template requirement. The operator does not have to
+retype the usage; the system fills it in automatically and updates it when new requirements arrive.
 
 ### R4: Origin tracking on every resource
 
@@ -222,7 +229,7 @@ Resolution:
 
 1. `agw vm create vm1` triggers manager-entry eager-resolve.
 2. The resolved VM template emits a `SecretRequirement` with `name=<tailscale_auth_key>`,
-   `usage="Tailscale auth key for VM provisioning"`, and `source=("vm_template", <name>)`.
+   `usage="VM provisioning"`, and `source=("vm_template", <name>)`.
 3. If the named secret isn't operator-declared, the auto-declare policy synthesizes it.
 4. The orchestrator resolves the secret through the configured backend chain (first wins).
 5. The resolved value is threaded as a function argument to the Tailscale install runner.
@@ -265,8 +272,8 @@ Every resource type that supports operator declaration carries an optional `desc
 is separate from the system-collected `usage` list:
 
 - **`usage`** (list, system-collected) comes from the matching requirements; one entry per
-  requirement. Operators do not set it. Example entry: `"Tailscale auth key for VM provisioning"`. A
-  resource required by several sources has several usages.
+  requirement. Operators do not set it. Example entry: `"VM provisioning"`. A resource required by
+  several sources has several usages.
 - **`description`** (string, operator-set) is the operator's free-form note. Example:
   `"Prod tailnet auth key, 90-day expiry, owner: SRE team"`.
 
