@@ -2,17 +2,23 @@
 
 ## The Transport ABC
 
+Lives in `agentworks/transports/base.py`. The package `__init__.py` re-exports it for
+`from agentworks.transports import Transport`. The ABC is the full operation surface every transport
+supports; helpers built on top (`wait_for_reconnect`, typically) stay as module-level functions
+taking a `Transport`.
+
 ```python
-# agentworks/transports/__init__.py (or transports/base.py)
+# agentworks/transports/base.py
 
 class Transport(abc.ABC):
     """Operator I/O channel to a VM: command exec and file movement.
 
     Each concrete subclass implements the surface for one delivery mechanism
     (SSH, limactl shell, wsl.exe, etc.). Callers obtain a Transport via the
-    two factory functions in this package: ``transport(vm, config)`` for the
-    canonical path, ``provisioner_transport(vm, config)`` for the platform-
-    native opt-in.
+    factory functions exported from this package: ``transport(vm, config)``
+    for the canonical admin path, ``agent_transport(vm, config, agent)`` for
+    the canonical agent path, ``provisioner_transport(vm, config, *, stack)``
+    for the platform-native opt-in.
     """
 
     @abc.abstractmethod
@@ -26,7 +32,9 @@ class Transport(abc.ABC):
         timeout: int | None = None,
         env: dict[str, str] | None = None,
     ) -> SSHResult:
-        ...
+        """Run ``command`` and return its result. ``sudo=True`` wraps in
+        ``sudo -n bash -c '...'`` so compound commands run wholly as root.
+        ``tty=None`` is transport default; ``tty=True/False`` overrides."""
 
     @abc.abstractmethod
     def interactive(
@@ -35,11 +43,20 @@ class Transport(abc.ABC):
         *,
         env: dict[str, str] | None = None,
     ) -> int:
-        ...
+        """Run an interactive session with a TTY. Empty ``command`` opens a
+        login shell. ``env`` is best-effort: SSH carries it via SetEnv; the
+        non-SSH transports drop it (their interactive APIs don't expose env
+        injection). Returns the process exit code."""
 
     @abc.abstractmethod
     def copy_to(self, local: Path | str, remote: str) -> None:
-        ...
+        """Copy a local file to the remote path on the VM."""
+
+    @abc.abstractmethod
+    def copy_from(self, remote: str, local: Path | str, *, timeout: int | None = None) -> None:
+        """Copy a remote file from the VM to a local path. SSH uses scp;
+        Lima uses ``limactl copy``; WSL2 uses ``wsl ... cat`` to stdout;
+        RemoteLima two-hops. ``backup.py`` is the canonical consumer."""
 
     @abc.abstractmethod
     def copy_dir_to(
@@ -50,18 +67,50 @@ class Transport(abc.ABC):
         delete: bool = True,
         timeout: int | None = None,
     ) -> None:
-        ...
+        """Copy a local directory tree to the VM."""
+
+    @abc.abstractmethod
+    def write_file(self, remote_path: str, content: str, *, mode: str | None = None) -> None:
+        """Write a small string (rcfile, authorized_keys, etc.) atomically
+        to ``remote_path``. ~15 call sites today; load-bearing for init."""
+
+    @abc.abstractmethod
+    def call_streaming(
+        self,
+        command: str,
+        *,
+        env: dict[str, str] | None = None,
+    ) -> int:
+        """Run a command with inherited stdio (no buffering). Used by
+        ``vm exec`` and ``agent exec`` so the operator sees output stream
+        in real time. SSH wraps the SSH invocation with inherited stdio;
+        the non-SSH transports do the same with their respective subprocess.
+        Returns the remote exit code."""
 ```
 
-The `SSHResult` name is preserved (semantically it's "the result of a command on the transport";
-renaming it to `TransportResult` would churn every call site for marginal gain). The `env` parameter
-on `interactive()` is documented as best-effort across transports: respected by SSH via `SetEnv`;
-not propagated by `limactl shell` / `wsl.exe` for interactive sessions because their interactive
-APIs don't expose env-injection. This is unchanged from the post-PR-#118 behavior.
+`run_as_root` is **not** a separate abstract method. Per the prior locked SDD
+(`2026-04-27-exec-target-cleanup`), `run(sudo=True)` is the unified shape; we preserve that.
 
-The logger and default-timeout fields that today live on `ExecTarget` move to each Transport
-subclass's constructor (most callers don't set them; the SSH-bootstrap path that does threads them
-through as before).
+`wait_for_reconnect` stays as a module-level function in `agentworks/transports/__init__.py` taking
+a `Transport`, not an ABC method. It's a higher-level operation (probe + retry) layered on top of
+`run()`; it doesn't need polymorphic dispatch beyond what `run()` already provides.
+
+The `SSHResult` name is preserved. We add a one-line comment at its definition explaining the name
+predates the polymorphic shape; renaming to `TransportResult` is out of scope to bound this
+refactor's diff.
+
+Each Transport subclass takes optional `logger: SSHLogger | None` and `default_timeout: int | None`
+in its constructor. These move from today's `ExecTarget` fields into the per-class constructor
+signatures.
+
+### Env handling and SSH specifics
+
+`run()`'s `env` parameter is method-level, not constructor-level. `SSHTransport.run()` translates
+`env` into `-o SetEnv="K1=V1" "K2=V2" ...` argv at call time; the SSH-specific helpers for SetEnv
+argv building (today `_set_env_args` in `ssh.py`) move into `agentworks/transports/ssh.py`. Lima /
+WSL2 / RemoteLima prepend `K1=V1 ...` to the bash -lc payload for non-interactive runs. The non-SSH
+transports drop `env` on interactive sessions (documented behavior; matches today's post-PR-#118
+shape).
 
 ## Concrete transports
 
@@ -123,56 +172,135 @@ guest-agent-exec integration that's out of scope; the typed error stays.
 
 ## Factory functions
 
+Three named factories plus one low-level helper, all exported from
+`agentworks/transports/__init__.py`:
+
 ```python
 # agentworks/transports/__init__.py
 
 def transport(vm: VMRow, config: Config) -> Transport:
-    """The canonical transport for a VM (Tailscale SSH today). Used by every
-    normal operator workflow. Raises StateError if the canonical transport is
-    unavailable for this VM. Never falls back to the provisioner transport --
-    see the SDD's R3 for why.
+    """The canonical transport for a VM as the admin user (Tailscale SSH
+    today). Used by every normal operator workflow. Raises StateError if
+    the canonical transport is unavailable. Never falls back to the
+    provisioner transport -- see the SDD's R3.
+    """
+    return transport_for_user(
+        vm, config,
+        user=vm.admin_username,
+        identity_file=config.operator.ssh_private_key,
+    )
+
+
+def agent_transport(vm: VMRow, config: Config, agent: AgentRow) -> Transport:
+    """The canonical transport for a VM as a named agent's Linux user.
+    Same Tailscale SSH mechanism as ``transport()``; just a different
+    SSH user and identity file. Used by every operator-facing operation
+    that targets an agent (agent shell, agent exec, agent-mode sessions).
+    """
+    return transport_for_user(
+        vm, config,
+        user=agent.linux_user,
+        identity_file=_agent_identity_file(config, agent),
+    )
+
+
+def transport_for_user(
+    vm: VMRow, config: Config, *,
+    user: str,
+    identity_file: Path | None = None,
+    logger: SSHLogger | None = None,
+) -> Transport:
+    """Lower-level helper: build an SSHTransport for ``user`` on this VM.
+    The two named factories above call this. Direct use is reserved for
+    the mid-create case (today's only direct caller is in agents/manager.py
+    where the agent row doesn't exist yet because we're building it).
     """
     if vm.tailscale_host is None:
         raise StateError(...)
     return SSHTransport(
         host=vm.tailscale_host,
-        user=vm.admin_username,
-        identity_file=config.operator.ssh_private_key,
+        user=user,
+        identity_file=identity_file,
         force_tty=(sys.platform == "win32"),
+        logger=logger,
     )
 
 
 def provisioner_transport(
     vm: VMRow, config: Config, *, stack: contextlib.ExitStack,
 ) -> Transport:
-    """The platform-native transport for a VM. Used only at bootstrap and via
-    the explicit operator opt-in ``vm shell --provisioner``. Most code should
-    not reach for this -- see the SDD's R3.
+    """The platform-native transport for a VM. Used only at bootstrap and
+    via the explicit operator opt-in ``vm shell --provisioner``. Most code
+    should not reach for this -- see the SDD's R3.
 
-    Azure: attaches a temporary public IP via stack.callback; the detach
-    runs on stack exit regardless of how the caller unwinds. Reachability
-    probe (echo ok with retries) before returning to give the IP time to
-    propagate. Proxmox: raises StateError with the web-UI-console hint.
+    Calls the provisioner's ``transient_route(vm)`` context manager (see
+    below) so any platform-specific transient setup (Azure attaches a
+    public IP, others are no-op) lives polymorphically inside the
+    provisioner rather than as an isinstance check here.
     """
     prov = get_provisioner_for_vm(...)
-    if isinstance(prov, AzureProvisioner):
-        prov.attach_public_ip(vm)
-        stack.callback(prov.detach_public_ip, vm)
+    stack.enter_context(prov.transient_route(vm))
     try:
         return prov.provisioner_transport(vm, config=config)
     except NotImplementedError as e:
         raise StateError(...) from e
+
+
+def wait_for_reconnect(
+    target: Transport, *, max_attempts: int = 16,
+) -> bool:
+    """Probe the transport with ``echo ok`` and retry until reachable or
+    out of attempts. Polymorphic over any Transport via its ``run()``.
+    Lives at the package root because it composes ``Transport.run()``
+    rather than implementing transport-specific behavior."""
+    ...
 ```
 
-Note: `provisioner_transport()` requires an `ExitStack` for the Azure cleanup lifecycle. Callers
-pass their own stack so the cleanup is bounded by the caller's scope (today's `shell_vm` and
-bootstrap both already use a stack). This is the same shape PR #118 settled on; it survives the
-refactor unchanged.
+`provisioner_transport()` requires an `ExitStack` for the transient lifecycle. Callers pass their
+own stack so the cleanup is bounded by the caller's scope (today's `shell_vm` and bootstrap both
+already use a stack).
 
 `VMProvisioner.admin_exec_target` is renamed to `VMProvisioner.provisioner_transport` to match the
-public-facing name, and returns a `Transport`. The isinstance check on `AzureProvisioner` stays for
-now -- a base-class hook is a follow-up best deferred until Proxmox is implemented (it'd be the
-second user of any such hook).
+public-facing name, and returns a `Transport`.
+
+### The `transient_route` hook on VMProvisioner
+
+```python
+# agentworks/vms/base.py
+
+class VMProvisioner(abc.ABC):
+    ...
+
+    def transient_route(self, vm: VMRow) -> AbstractContextManager[None]:
+        """Hold any platform-native transient network state for the
+        duration of the context.
+
+        Default no-op. Azure overrides to attach a temporary public IP on
+        enter and detach on exit. Other provisioners (Lima, RemoteLima,
+        WSL2, Proxmox) accept the default: their provisioner transports
+        don't need transient setup.
+        """
+        return contextlib.nullcontext()
+```
+
+Azure overrides:
+
+```python
+class AzureProvisioner(VMProvisioner):
+    ...
+
+    @contextlib.contextmanager
+    def transient_route(self, vm: VMRow) -> Iterator[None]:
+        self.attach_public_ip(vm)
+        try:
+            yield
+        finally:
+            self.detach_public_ip(vm)
+```
+
+This composes cleanly with `stack.enter_context(prov.transient_route(vm))` in the factory: each
+provisioner declares both halves of "what platform-native setup do I need before my transport
+works." The factory has no isinstance check.
 
 ## File layout
 
@@ -187,9 +315,20 @@ cli/agentworks/transports/
 ```
 
 `cli/agentworks/ssh.py` is reduced to whatever genuinely-SSH-specific non-Transport code remains
-(today: `SSHLogger`, `wait_for_reconnect`, plus the standalone `_unwrap_ssh` shim that the
-sessions/tmux `RunCommand` callback uses). If any of those move to `transports/ssh.py` naturally,
-they do; otherwise `cli/agentworks/ssh.py` stays as a small SSH-specific utility module.
+(today: `SSHLogger`, the `SSHResult` dataclass, top-level `run` / `run_as_root` / `copy_to` /
+`copy_from` / `write_file` functions if any callers outside ExecTarget still use them). Most of
+these are absorbed into `transports/ssh.py` during Phase 4; `SSHLogger` and `SSHResult` likely stay
+in `cli/agentworks/ssh.py` (or move to a `transports/types.py` module) because they're shared across
+transports.
+
+`wait_for_reconnect` moves to `cli/agentworks/transports/__init__.py` and takes a `Transport`
+instead of an `ExecTarget`.
+
+`_unwrap_ssh` is deleted entirely in Phase 4. Its only consumer today is
+`cli/agentworks/vms/backup.py`, which uses it to obtain a raw `SSHTarget` for driving local-side
+`scp`. Post-refactor, `backup.py` consumes the polymorphic `Transport.copy_from` instead (newly
+added to the ABC, see above); the SSH implementation of `copy_from` is the same scp call, just
+behind the polymorphic surface. No `_unwrap_ssh` callers remain.
 
 ## Migration sequencing
 
@@ -212,14 +351,25 @@ Each phase is a logical commit. The final PR is the merged result.
 
 ## What is _not_ changing
 
-- `SSHResult` keeps its name. It's already a transport-agnostic result shape.
+- `SSHResult` keeps its name. A one-line comment at its definition explains the post-refactor
+  reading. The rename to `TransportResult` is out of scope.
 - The CLI command surface. Nothing operator-visible moves.
-- `vm shell --provisioner`'s behavior, including the Azure attach/detach lifecycle and the Proxmox
-  web-console hint. They get re-expressed in terms of `provisioner_transport()` but semantically
-  unchanged.
+- `vm shell --provisioner`'s observable behavior, including the (now-polymorphic) Azure
+  attach/detach lifecycle and the Proxmox web-console hint. The shape changes (no more isinstance
+  check; `VMProvisioner.transient_route` is the new hook) but the operator sees the same outputs.
 - `SSHTarget`, `LimaTarget`, `RemoteLimaTarget`, `WSL2Target` -- these data-only classes have small
   enough surfaces that the transport classes can absorb their fields directly into constructors. The
   named-target classes go away.
-- The `_unwrap_ssh()` shim used by `sessions/tmux.py`'s `RunCommand` callback pattern. That pattern
-  wants an `SSHTarget`-like object, not a Transport, and the prior SDD explicitly deferred its
-  cleanup as out of scope. Same here.
+
+### Note on the `sessions/tmux.py` `RunCommand` Protocol
+
+The Protocol at `cli/agentworks/sessions/tmux.py:33` is a callable
+`(command, *, check, env) -> result`-shaped Protocol that the manager layer satisfies by passing a
+partial of `transport.run`. It does **not** use `_unwrap_ssh` (an earlier draft of this SDD claimed
+it did, which was wrong). The Protocol survives the refactor untouched: pass a partial of
+`Transport.run` and it works.
+
+### Note on `_unwrap_ssh`
+
+Deleted in Phase 4. The only consumer today is `vms/backup.py`, which migrates to the polymorphic
+`Transport.copy_from` in Phase 3.
