@@ -135,10 +135,11 @@ call, update type hints.
       consumer at `vms/manager.py:355` (`exec_target=result.admin_exec_target`) updates to the new
       field name.
 - [ ] **Test files** -- enumerated explicitly because the impact varies:
-  - [ ] `cli/tests/test_exec_target.py`: rewrite as `cli/tests/transports/test_abc.py` or delete
-        entirely (per-transport tests under `cli/tests/transports/test_<name>.py` from Phase 1
-        supersede most of its coverage). The sudo-wrapping, tty-resolution, and interactive-dispatch
-        tests it contains map onto the per-transport tests' scope; nothing here is irreplaceable.
+  - [ ] `cli/tests/test_exec_target.py`: delete entirely. The per-transport tests under
+        `cli/tests/transports/test_<name>.py` from Phase 1 plus the ABC-contract test at
+        `cli/tests/transports/test_abc.py` collectively cover the same ground (sudo wrapping, tty
+        resolution, interactive dispatch) without the legacy `ExecTarget` shape baggage. Reviewer
+        concurs (round 3) that delete is the cleaner answer.
   - [ ] `cli/tests/test_authorized_keys.py`, `cli/tests/test_initializer.py`,
         `cli/tests/test_initializer_env_fragments.py`, `cli/tests/test_session_liveness.py`,
         `cli/tests/test_session_transport.py`, `cli/tests/test_sessions_tmux_create.py`,

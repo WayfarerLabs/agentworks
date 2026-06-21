@@ -161,11 +161,14 @@ explicit carve-out:
   correctly names the platform but the exception class names SSH. Polymorphic transports give each
   platform a natural home to raise from, and improving the wording while the code is being moved is
   cheaper than a follow-up sweep.
-- **May be improved**: asserts at transport boundaries get promoted to typed errors. Today's
-  `assert vm.tailscale_host is not None` in `exec_target_for_user` becomes a typed `StateError` in
-  the new `transport_for_user` factory. The assert disappears under `python -O`; the typed error
-  doesn't, and surfaces a clean operator message via the existing CLI error wrapper rather than an
-  `AssertionError` traceback.
+- **May be improved**: asserts that validate caller-supplied state at factory or ABC entry points
+  get promoted to typed errors. Today's `assert vm.tailscale_host is not None` in
+  `exec_target_for_user` becomes a typed `StateError` in the new `transport_for_user` factory. The
+  assert disappears under `python -O`; the typed error doesn't, and surfaces a clean operator
+  message via the existing CLI error wrapper rather than an `AssertionError` traceback. Scope-bound:
+  this carve-out applies to entry-point asserts only. Asserts inside transport implementations (e.g.
+  defensive postconditions in `SSHTransport.run` after we expect an invariant to hold) stay as
+  asserts; they encode programmer-internal invariants that should fail loudly during development.
 
 The carve-outs are bounded: each change to error text or assert-to-typed promotion must be called
 out in the PR description so the reviewer can confirm each change improves rather than obscures.
