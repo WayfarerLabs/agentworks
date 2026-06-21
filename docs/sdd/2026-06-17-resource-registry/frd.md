@@ -28,7 +28,7 @@ This SDD addresses both, in one framework:
   tracked and surfaced via the CLI.
 - A **resource-registry** validation pass that walks all requirements, looks each up in the
   registry, and dispatches missing-name policies per kind (auto-declare for secrets; auto-declare
-  restricted to `default` for templates; error for catalogs; etc.).
+  (restricted to `default`) for templates; error for catalogs; etc.).
 - A **migration of `tailscale_auth_key` and `git_credentials.*.token`** to first-class secret
   references, using the auto-declare policy so the zero-config UX is preserved.
 
