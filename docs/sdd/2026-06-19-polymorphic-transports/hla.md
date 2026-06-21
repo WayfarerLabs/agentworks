@@ -178,7 +178,11 @@ Three named factories plus one low-level helper, all exported from
 ```python
 # agentworks/transports/__init__.py
 
-def transport(vm: VMRow, config: Config) -> Transport:
+def transport(
+    vm: VMRow, config: Config, *,
+    default_timeout: int | None = None,
+    logger: SSHLogger | None = None,
+) -> Transport:
     """The canonical transport for a VM as the admin user (Tailscale SSH
     today). Used by every normal operator workflow. Raises StateError if
     the canonical transport is unavailable. Never falls back to the
@@ -188,10 +192,16 @@ def transport(vm: VMRow, config: Config) -> Transport:
         vm, config,
         user=vm.admin_username,
         identity_file=config.operator.ssh_private_key,
+        default_timeout=default_timeout,
+        logger=logger,
     )
 
 
-def agent_transport(vm: VMRow, config: Config, agent: AgentRow) -> Transport:
+def agent_transport(
+    vm: VMRow, config: Config, agent: AgentRow, *,
+    default_timeout: int | None = None,
+    logger: SSHLogger | None = None,
+) -> Transport:
     """The canonical transport for a VM as a named agent's Linux user.
     Same Tailscale SSH mechanism as ``transport()``; just a different
     SSH user and identity file. Used by every operator-facing operation
@@ -201,6 +211,8 @@ def agent_transport(vm: VMRow, config: Config, agent: AgentRow) -> Transport:
         vm, config,
         user=agent.linux_user,
         identity_file=_agent_identity_file(config, agent),
+        default_timeout=default_timeout,
+        logger=logger,
     )
 
 
@@ -208,12 +220,18 @@ def transport_for_user(
     vm: VMRow, config: Config, *,
     user: str,
     identity_file: Path | None = None,
+    default_timeout: int | None = None,
     logger: SSHLogger | None = None,
 ) -> Transport:
     """Lower-level helper: build an SSHTransport for ``user`` on this VM.
     The two named factories above call this. Direct use is reserved for
     the mid-create case (today's only direct caller is in agents/manager.py
     where the agent row doesn't exist yet because we're building it).
+
+    Raises a typed ``StateError`` if the VM has no Tailscale IP. (Today's
+    code asserts, which disappears under ``python -O``; the new factory
+    promotes this to a typed error. R6 allows this as an improvement
+    over misleading-or-disappearing-assert behavior.)
     """
     if vm.tailscale_host is None:
         raise StateError(...)
@@ -222,6 +240,7 @@ def transport_for_user(
         user=user,
         identity_file=identity_file,
         force_tty=(sys.platform == "win32"),
+        default_timeout=default_timeout,
         logger=logger,
     )
 
@@ -302,12 +321,34 @@ This composes cleanly with `stack.enter_context(prov.transient_route(vm))` in th
 provisioner declares both halves of "what platform-native setup do I need before my transport
 works." The factory has no isinstance check.
 
+### `vm_active` vs `transient_route`
+
+`VMProvisioner` will have two context-manager methods after this refactor:
+
+- `vm_active(vm, *, config) -> AbstractContextManager[None]` (existing): "keep this VM reachable as
+  a resource for the duration of the context." Today's sole non-default override is WSL2's keepalive
+  against `vmIdleTimeout`. Concerns: lifecycle, idleness, resume-from-suspend.
+- `transient_route(vm) -> AbstractContextManager[None]` (new in this refactor): "open a
+  platform-native network route to the VM for the duration of the context." Today's sole non-default
+  override is Azure's attach/detach of a public IP. Concerns: networking, routing, transport
+  reachability.
+
+They're orthogonal: a VM can be "active" (running) without a "transient route" (Azure VM running
+with no public IP attached, reachable only over Tailscale); the route is useless without an active
+VM (WSL2 distro shut down by idle timeout has no transport, public IP or otherwise). The factory
+pattern is "enter both" when both are needed. Folding them into a single method would conflate two
+unrelated concerns and force callers to opt into both even when they only need one.
+
 ## File layout
 
 ```text
 cli/agentworks/transports/
-    __init__.py          # Transport ABC, transport(), provisioner_transport(),
-                         #   plus re-exports of the concrete classes for typing.
+    __init__.py          # Re-exports Transport (from base.py); defines
+                         #   transport(), agent_transport(),
+                         #   provisioner_transport(), transport_for_user(),
+                         #   and wait_for_reconnect(). Re-exports the
+                         #   concrete classes for typing.
+    base.py              # Transport ABC definition.
     ssh.py               # SSHTransport + SSH-specific helpers.
     lima.py              # LimaTransport.
     remote_lima.py       # RemoteLimaTransport.
