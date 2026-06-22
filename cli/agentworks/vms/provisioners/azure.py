@@ -9,17 +9,21 @@ from typing import TYPE_CHECKING, Protocol
 from agentworks import output
 from agentworks.db import VMStatus
 from agentworks.errors import ProvisionerError
-from agentworks.ssh import ExecTarget, SSHError, SSHTarget
+from agentworks.ssh import SSHError
+from agentworks.transports import SSHTransport
 from agentworks.vms.base import ProvisionResult, VMProvisioner
 from agentworks.vms.bootstrap_script import generate_bootstrap_script, vm_hostname
 from agentworks.vms.cloud_init import PROVISIONING_PACKAGES, generate_cloud_init
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from azure.mgmt.compute import ComputeManagementClient
     from azure.mgmt.network import NetworkManagementClient
 
     from agentworks.config import Config
     from agentworks.db import VMRow
+    from agentworks.transports import Transport
 
 
 class _HasSubscriptionId(Protocol):
@@ -293,13 +297,11 @@ class AzureProvisioner(VMProvisioner):
 
         import sys
 
-        exec_target = ExecTarget(
-            ssh=SSHTarget(
-                host=public_ip,
-                user=admin_username,
-                identity_file=config.operator.ssh_private_key,
-                force_tty=sys.platform == "win32",
-            )
+        prov_transport = SSHTransport(
+            host=public_ip,
+            user=admin_username,
+            identity_file=config.operator.ssh_private_key,
+            force_tty=sys.platform == "win32",
         )
 
         # If bootstrap was embedded in cloud-init, wait for it to finish
@@ -307,18 +309,18 @@ class AzureProvisioner(VMProvisioner):
         tailscale_ip = None
         bootstrap_complete = False
         if tailscale_auth_key:
-            tailscale_ip = self._wait_for_bootstrap(exec_target, vm_name)
+            tailscale_ip = self._wait_for_bootstrap(prov_transport, vm_name)
             if tailscale_ip:
                 bootstrap_complete = True
 
         return ProvisionResult(
-            admin_exec_target=exec_target,
+            provisioner_transport=prov_transport,
             azure_resource_id=resource_id or None,
             bootstrap_complete=bootstrap_complete,
             tailscale_ip=tailscale_ip,
         )
 
-    def _wait_for_bootstrap(self, exec_target: ExecTarget, vm_name: str) -> str | None:
+    def _wait_for_bootstrap(self, target: Transport, vm_name: str) -> str | None:
         """Wait for cloud-init to finish and return the Tailscale IP.
 
         SSH may not be immediately available after VM creation, so we retry.
@@ -326,15 +328,11 @@ class AzureProvisioner(VMProvisioner):
         """
         import time
 
-        from agentworks.ssh import run as ssh_run
-
         output.detail("Waiting for cloud-init bootstrap to complete (this may take several minutes)...")
 
-        # Wait for SSH to become available
-        assert exec_target.ssh is not None
         for attempt in range(30):
             try:
-                ssh_run(exec_target.ssh, "echo ok", check=True, timeout=10)
+                target.run("echo ok", check=True, timeout=10)
                 break
             except SSHError:
                 if attempt == 29:
@@ -342,22 +340,15 @@ class AzureProvisioner(VMProvisioner):
                     return None
                 time.sleep(10)
 
-        # Wait for cloud-init to finish
         try:
-            ssh_run(
-                exec_target.ssh,
-                "cloud-init status --wait",
-                check=True,
-                timeout=600,
-            )
+            target.run("cloud-init status --wait", check=True, timeout=600)
         except SSHError as e:
             output.warn(f"cloud-init wait failed: {e}")
             output.warn("Deferring bootstrap to Phase A")
             return None
 
-        # Get Tailscale IP
         try:
-            result = ssh_run(exec_target.ssh, "sudo tailscale ip -4", check=True, timeout=15)
+            result = target.run("sudo tailscale ip -4", check=True, timeout=15)
             tailscale_ip = result.stdout.strip()
             output.detail(f"Tailscale IP: {tailscale_ip}")
             return tailscale_ip
@@ -464,7 +455,9 @@ class AzureProvisioner(VMProvisioner):
         with contextlib.suppress(Exception):
             network.public_ip_addresses.begin_delete(rg, f"{name}-ip").result()
 
-    def admin_exec_target(self, vm: VMRow, *, config: object | None = None) -> ExecTarget:
+    def provisioner_transport(
+        self, vm: VMRow, *, config: object | None = None,
+    ) -> Transport:
         assert vm.azure_resource_id is not None
         rg, name, az_cfg = _parse_resource_id(vm.azure_resource_id)
         try:
@@ -477,24 +470,46 @@ class AzureProvisioner(VMProvisioner):
         except Exception as exc:
             raise _wrap_azure_error(exc) from exc
 
-        # Walk NICs to find the public IP (may not exist if detached)
+        # Walk NICs to find the public IP (may not exist if detached). An
+        # empty string here propagates to ``SSHTransport(host="")`` which
+        # the transports.provisioner_transport factory catches with a
+        # typed StateError; on the canonical path this method is reached
+        # only inside the transient_route context manager which guarantees
+        # a public IP is attached, so the empty case is a defensive guard.
         public_ip = _get_vm_public_ip(vm_info, az_cfg)
         import sys
 
         # Include identity file if config is available (needed for SSH auth
-        # via public IP, e.g., during Tailscale logout on delete)
+        # via public IP, e.g., during Tailscale logout on delete).
         identity_file = None
         if config is not None:
             identity_file = getattr(getattr(config, "operator", None), "ssh_private_key", None)
 
-        return ExecTarget(
-            ssh=SSHTarget(
-                host=public_ip,
-                user=vm.admin_username,
-                identity_file=identity_file,
-                force_tty=sys.platform == "win32",
-            ),
+        return SSHTransport(
+            host=public_ip,
+            user=vm.admin_username,
+            identity_file=identity_file,
+            force_tty=sys.platform == "win32",
         )
+
+    @contextlib.contextmanager
+    def transient_route(self, vm: VMRow) -> Iterator[None]:
+        """Attach a transient public IP for the duration of the context.
+
+        The provisioner transport for Azure reaches the VM via a
+        temporary public IP. Attach on enter, detach on exit (regardless
+        of how the caller unwinds). The
+        :func:`agentworks.transports.provisioner_transport` factory
+        wraps this around the per-platform
+        :meth:`provisioner_transport` call so the lifecycle replaces
+        what used to be an ``isinstance(prov, AzureProvisioner)`` branch
+        in the caller.
+        """
+        self.attach_public_ip(vm)
+        try:
+            yield
+        finally:
+            self.detach_public_ip(vm)
 
     def status(self, vm: VMRow) -> VMStatus:
         if vm.azure_resource_id is None:

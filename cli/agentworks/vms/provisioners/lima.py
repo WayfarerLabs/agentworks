@@ -11,8 +11,9 @@ from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.db import VMStatus
-from agentworks.ssh import ExecTarget, LimaTarget, RemoteLimaTarget, SSHError, SSHTarget, copy_to
+from agentworks.ssh import ExecTarget, SSHError, SSHTarget, copy_to
 from agentworks.ssh import run as ssh_run
+from agentworks.transports import LimaTransport, RemoteLimaTransport
 from agentworks.vms.base import ProvisionResult, VMProvisioner
 from agentworks.vms.bootstrap_script import generate_bootstrap_script, parse_bootstrap_output, vm_hostname
 from agentworks.vms.cloud_init import PROVISIONING_PACKAGES
@@ -20,6 +21,7 @@ from agentworks.vms.cloud_init import PROVISIONING_PACKAGES
 if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import VMRow
+    from agentworks.transports import Transport
 
 # Lima template for Debian cloud VMs (values substituted at create time).
 # The provision block runs the full bootstrap script (user, packages, swap,
@@ -163,15 +165,15 @@ class LimaProvisioner(VMProvisioner):
         if self.is_remote:
             assert self._vm_host_ssh is not None
             return ProvisionResult(
-                admin_exec_target=ExecTarget(
-                    remote_lima=RemoteLimaTarget(vm_name=vm_name, vm_host_ssh=self._vm_host_ssh),
+                provisioner_transport=RemoteLimaTransport(
+                    vm_name=vm_name, vm_host_ssh=self._vm_host_ssh,
                 ),
                 bootstrap_complete=bootstrap_complete,
                 tailscale_ip=tailscale_ip,
             )
         else:
             return ProvisionResult(
-                admin_exec_target=ExecTarget(lima=LimaTarget(vm_name=vm_name)),
+                provisioner_transport=LimaTransport(vm_name=vm_name),
                 bootstrap_complete=bootstrap_complete,
                 tailscale_ip=tailscale_ip,
             )
@@ -274,13 +276,13 @@ class LimaProvisioner(VMProvisioner):
         self._run_lima(f"limactl delete --force {vm.name}", check=False)
         output.info(f"Lima VM '{vm.name}' deleted")
 
-    def admin_exec_target(self, vm: VMRow, *, config: object | None = None) -> ExecTarget:
+    def provisioner_transport(
+        self, vm: VMRow, *, config: object | None = None,
+    ) -> Transport:
         if self.is_remote:
             assert self._vm_host_ssh is not None
-            return ExecTarget(
-                remote_lima=RemoteLimaTarget(vm_name=vm.name, vm_host_ssh=self._vm_host_ssh),
-            )
-        return ExecTarget(lima=LimaTarget(vm_name=vm.name))
+            return RemoteLimaTransport(vm_name=vm.name, vm_host_ssh=self._vm_host_ssh)
+        return LimaTransport(vm_name=vm.name)
 
     def status(self, vm: VMRow) -> VMStatus:
         try:

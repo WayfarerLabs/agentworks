@@ -10,14 +10,14 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import VMRow, VMStatus
-    from agentworks.ssh import ExecTarget
+    from agentworks.transports import Transport
 
 
 @dataclass
 class ProvisionResult:
-    """Result of VM provisioning -- exec target plus platform metadata."""
+    """Result of VM provisioning: provisioner transport plus platform metadata."""
 
-    admin_exec_target: ExecTarget
+    provisioner_transport: Transport
     azure_resource_id: str | None = None
     wsl_distro_name: str | None = None
     proxmox_vmid: str | None = None
@@ -49,12 +49,39 @@ class VMProvisioner(ABC):
         """Query the live runtime status of a VM."""
 
     @abstractmethod
-    def admin_exec_target(self, vm: VMRow, *, config: object | None = None) -> ExecTarget:
-        """Return an ExecTarget for the admin user for a running VM (provisioning transport).
+    def provisioner_transport(self, vm: VMRow, *, config: object | None = None) -> Transport:
+        """Return the platform-native :class:`Transport` for a running VM.
 
-        config is optional; Azure needs it for the SSH identity file when
-        connecting via public IP (e.g., during Tailscale logout on delete).
+        Used at bootstrap (Phase A) and via ``vm shell --provisioner``.
+        Callers should reach for this through
+        :func:`agentworks.transports.provisioner_transport` which wraps
+        the call in :meth:`transient_route` for the polymorphic lifecycle
+        (Azure's transient public IP, etc.) and applies the reachability
+        probe.
+
+        ``config`` is optional; Azure needs it for the SSH identity file
+        when connecting via public IP. Raises ``NotImplementedError``
+        from the Proxmox provisioner (one-shot QEMU guest agent exec
+        can't host an interactive shell).
         """
+
+    def transient_route(self, vm: VMRow) -> AbstractContextManager[None]:
+        """Hold any platform-native transient network state while the
+        provisioner transport is in use.
+
+        Default no-op (:func:`contextlib.nullcontext`) for platforms
+        whose provisioner transport works without setup (Lima, WSL2,
+        Proxmox). Azure overrides to attach a public IP on enter and
+        detach on exit so the transient state is bounded by the
+        caller's :class:`contextlib.ExitStack` scope.
+
+        Always called from
+        :func:`agentworks.transports.provisioner_transport` before the
+        per-platform :meth:`provisioner_transport` builder runs, so
+        polymorphism replaces what used to be an
+        ``isinstance(prov, AzureProvisioner)`` branch in the caller.
+        """
+        return nullcontext()
 
     def vm_active(
         self, vm: VMRow, *, config: Config | None = None

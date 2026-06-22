@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.db import VMStatus
-from agentworks.ssh import ExecTarget, SSHTarget
+from agentworks.transports import SSHTransport
 from agentworks.vms.base import ProvisionResult, VMProvisioner
 from agentworks.vms.bootstrap_script import generate_bootstrap_script, vm_hostname
 from agentworks.vms.cloud_init import PROVISIONING_PACKAGES
@@ -18,6 +18,7 @@ from agentworks.vms.provisioners.proxmox_api import ProxmoxAPI, ProxmoxAPIError
 if TYPE_CHECKING:
     from agentworks.config import Config, ProxmoxConfig
     from agentworks.db import VMRow
+    from agentworks.transports import Transport
 
 
 class ProxmoxProvisioner(VMProvisioner):
@@ -127,16 +128,14 @@ class ProxmoxProvisioner(VMProvisioner):
                 output.detail(f"Tailscale IP: {tailscale_ip}")
 
         host = tailscale_ip or ip
-        target = ExecTarget(
-            ssh=SSHTarget(
-                host=host,
-                user=admin_username,
-                identity_file=config.operator.ssh_private_key,
-            )
+        target = SSHTransport(
+            host=host,
+            user=admin_username,
+            identity_file=config.operator.ssh_private_key,
         )
 
         return ProvisionResult(
-            admin_exec_target=target,
+            provisioner_transport=target,
             proxmox_vmid=str(newid),
             bootstrap_complete=bootstrap_complete,
             tailscale_ip=tailscale_ip,
@@ -185,7 +184,9 @@ class ProxmoxProvisioner(VMProvisioner):
             return VMStatus.STOPPED
         return VMStatus.UNKNOWN
 
-    def admin_exec_target(self, vm: VMRow, *, config: object | None = None) -> ExecTarget:
+    def provisioner_transport(
+        self, vm: VMRow, *, config: object | None = None,
+    ) -> Transport:
         raise NotImplementedError(
             "Proxmox provisioning transport not yet implemented. "
             "Requires QEMU guest agent exec integration. "

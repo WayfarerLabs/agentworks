@@ -1,17 +1,45 @@
 """Polymorphic transports for reaching VMs.
 
-Phase 1 exposes the ``Transport`` ABC and the four concrete subclasses
-(``SSHTransport``, ``LimaTransport``, ``RemoteLimaTransport``,
-``WSL2Transport``). The named factory functions (``transport``,
-``agent_transport``, ``provisioner_transport``) land in Phase 2 once
-the package is in place.
+Three named factories plus one low-level helper:
+
+- :func:`transport` -- the canonical transport for a VM as the admin user
+  (Tailscale SSH). Used by every normal operator workflow.
+- :func:`agent_transport` -- the canonical transport as a named agent's
+  Linux user. Same mechanism as :func:`transport`, different SSH user.
+- :func:`provisioner_transport` -- the platform-native transport
+  (``limactl shell``, ``wsl.exe``, Azure-via-public-IP, ...). Used only
+  at bootstrap and via the explicit ``vm shell --provisioner`` opt-in.
+- :func:`transport_for_user` -- low-level helper used by the named
+  factories. Direct use is reserved for the mid-create case where the
+  agent row doesn't exist yet (today's only direct caller is
+  ``agents/manager.py``).
+
+The named factories never fall back. If the canonical transport is
+unavailable, the canonical factory raises -- it does NOT silently switch
+to the provisioner transport (SDD R3).
 """
 
+from __future__ import annotations
+
+import sys
+import time
+from typing import TYPE_CHECKING
+
+from agentworks.errors import StateError
 from agentworks.transports.base import Transport
 from agentworks.transports.lima import LimaTransport
 from agentworks.transports.remote_lima import RemoteLimaTransport
 from agentworks.transports.ssh import SSHTransport
 from agentworks.transports.wsl2 import WSL2Transport
+
+if TYPE_CHECKING:
+    import contextlib
+    from pathlib import Path
+
+    from agentworks.config import Config
+    from agentworks.db import AgentRow, Database, VMRow
+    from agentworks.ssh import SSHLogger
+
 
 __all__ = [
     "LimaTransport",
@@ -19,4 +47,206 @@ __all__ = [
     "SSHTransport",
     "Transport",
     "WSL2Transport",
+    "agent_transport",
+    "provisioner_transport",
+    "transport",
+    "transport_for_user",
+    "wait_for_reconnect",
 ]
+
+
+def transport_for_user(
+    vm: VMRow,
+    config: Config,
+    *,
+    user: str,
+    identity_file: Path | None = None,
+    default_timeout: int | None = None,
+    logger: SSHLogger | None = None,
+) -> Transport:
+    """Build an ``SSHTransport`` for ``user`` on this VM via Tailscale.
+
+    The two named factories (:func:`transport`, :func:`agent_transport`)
+    call this. Direct use is reserved for the mid-create case where an
+    agent row doesn't exist yet but the on-VM identity already accepts
+    the operator's key (see ``agents/manager.py``).
+
+    ``identity_file`` defaults to ``None`` so SSH falls through to
+    ``~/.ssh/config``; the named factories pass the operator's key
+    explicitly. Raises :class:`StateError` if the VM has no Tailscale IP
+    (today's underlying assert disappears under ``python -O``; the typed
+    error doesn't, per SDD R6).
+    """
+    if vm.tailscale_host is None:
+        raise StateError(
+            f"VM '{vm.name}' has no Tailscale host; cannot build a canonical transport.",
+            entity_kind="vm",
+            entity_name=vm.name,
+            hint="The VM may not have completed bootstrap, or Tailscale is broken on the VM.",
+        )
+    return SSHTransport(
+        host=vm.tailscale_host,
+        user=user,
+        identity_file=identity_file,
+        force_tty=sys.platform == "win32",
+        default_timeout=default_timeout,
+        logger=logger,
+    )
+
+
+def transport(
+    vm: VMRow,
+    config: Config,
+    *,
+    default_timeout: int | None = None,
+    logger: SSHLogger | None = None,
+) -> Transport:
+    """Canonical admin transport for a VM (Tailscale SSH).
+
+    Used by every normal operator workflow. Raises :class:`StateError`
+    if the canonical transport is unavailable (no Tailscale host).
+    Never falls back to the provisioner transport (SDD R3).
+    """
+    return transport_for_user(
+        vm,
+        config,
+        user=vm.admin_username,
+        identity_file=config.operator.ssh_private_key,
+        default_timeout=default_timeout,
+        logger=logger,
+    )
+
+
+def agent_transport(
+    vm: VMRow,
+    config: Config,
+    agent: AgentRow,
+    *,
+    default_timeout: int | None = None,
+    logger: SSHLogger | None = None,
+) -> Transport:
+    """Canonical transport for an agent's Linux user (Tailscale SSH).
+
+    Same mechanism as :func:`transport`; just a different SSH user. The
+    agent's authorized_keys must already accept the operator's key (see
+    ``initializer._reconcile_authorized_keys``, applied at agent create
+    and reinit).
+    """
+    return transport_for_user(
+        vm,
+        config,
+        user=agent.linux_user,
+        identity_file=config.operator.ssh_private_key,
+        default_timeout=default_timeout,
+        logger=logger,
+    )
+
+
+def provisioner_transport(
+    db: Database,
+    vm: VMRow,
+    config: Config,
+    *,
+    stack: contextlib.ExitStack,
+) -> Transport:
+    """Platform-native transport for a VM. Used only at bootstrap and
+    via the explicit ``vm shell --provisioner`` opt-in.
+
+    ``stack`` bounds the lifetime of any transient network state the
+    provisioner needs (Azure attaches a public IP on enter and detaches
+    on exit). The provisioner's :meth:`VMProvisioner.transient_route`
+    runs first; once that context is held, the per-platform transport
+    builder runs.
+
+    Catches the Proxmox :class:`NotImplementedError` and re-raises as a
+    typed :class:`StateError` with the web-console hint. Surfaces a
+    typed error if the transport resolves to an SSH target with an
+    empty host (Azure's defensive guard from PR #118).
+
+    Probes the resulting transport with ``echo ok`` and retries up to
+    six times so the Azure SDN has time to propagate a freshly-attached
+    public IP before the first real command lands. Local transports
+    (Lima, WSL2) succeed on the first probe.
+    """
+    from agentworks import output
+    from agentworks.ssh import SSHError
+    from agentworks.vms.manager import get_provisioner_for_vm
+
+    prov = get_provisioner_for_vm(db, vm, config)
+    stack.enter_context(prov.transient_route(vm))
+    try:
+        target = prov.provisioner_transport(vm, config=config)
+    except NotImplementedError as exc:
+        hint = str(exc)
+        if vm.platform == "proxmox":
+            hint = (
+                "Proxmox's QEMU guest agent exec interface is one-shot "
+                "and non-interactive, so an interactive shell can't be "
+                "exposed through it. Use the Proxmox web UI's serial "
+                "console (VM > Console in the Proxmox VE web UI) as the "
+                "equivalent escape hatch."
+            )
+        raise StateError(
+            f"Provisioner transport is not implemented for platform '{vm.platform}'.",
+            entity_kind="vm",
+            entity_name=vm.name,
+            hint=hint,
+        ) from exc
+
+    # Defensive: Azure's provisioner_transport returns an SSHTransport
+    # with host="" when no public IP is attached. After transient_route
+    # this shouldn't happen on Azure (the context manager attaches
+    # before yielding). If it does, surface clearly rather than letting
+    # downstream calls hang on an empty hostname.
+    if isinstance(target, SSHTransport) and not target.host:
+        raise StateError(
+            f"Provisioner transport on platform '{vm.platform}' resolved to an SSH "
+            f"target with no host. VM '{vm.name}' may not be reachable.",
+            entity_kind="vm",
+            entity_name=vm.name,
+            hint=(
+                "For Azure: the temporary public IP attach may have silently "
+                "failed; check the Azure portal for the VM's network "
+                "configuration, or use the serial console (Connect > Serial "
+                "console on the VM resource page)."
+            ),
+        )
+
+    output.detail("Waiting for provisioning transport...")
+    for attempt in range(6):
+        try:
+            target.run("echo ok", timeout=10)
+            break
+        except SSHError:
+            if attempt == 5:
+                raise
+            time.sleep(3)
+    return target
+
+
+def wait_for_reconnect(target: Transport, *, max_attempts: int = 16) -> bool:
+    """Poll ``target`` with ``echo ok`` until reachable or out of attempts.
+
+    Used after network disruptions (e.g. Azure public IP changes) that
+    temporarily break the transport. Double-checks once on first success
+    to handle flapping. Polymorphic over any :class:`Transport` via its
+    :meth:`Transport.run`. Returns ``True`` if the connection
+    stabilized, ``False`` if it timed out.
+    """
+    from agentworks import output
+    from agentworks.ssh import SSHError
+
+    output.detail("Waiting for Tailscale to reconnect (this may take several minutes)...")
+    for attempt in range(max_attempts):
+        try:
+            target.run("echo ok", timeout=10)
+            if attempt > 0:
+                time.sleep(2)
+                target.run("echo ok", timeout=10)
+            output.detail("Tailscale SSH reconnected")
+            return True
+        except SSHError:
+            if attempt == max_attempts - 1:
+                output.warn("Tailscale SSH did not reconnect after ~240s, proceeding anyway")
+            time.sleep(5)
+    return False

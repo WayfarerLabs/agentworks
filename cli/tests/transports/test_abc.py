@@ -72,6 +72,8 @@ def test_incomplete_subclass_cannot_be_instantiated() -> None:
 
     class BrokenTransport(Transport):
         # Implements run() but is missing the other six abstract methods.
+        # Signatures intentionally unannotated to keep the broken-subclass
+        # minimal: this is a contract test, not a runnable transport.
         def run(self, command, *, sudo=False, tty=None, check=True, timeout=None, env=None):  # type: ignore[no-untyped-def] # noqa: ANN001, ANN201
             raise NotImplementedError
 
