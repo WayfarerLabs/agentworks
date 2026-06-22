@@ -1190,4 +1190,4 @@ def _ensure_vm_running(db: Database, config: Config, vm: VMRow) -> None:
         provisioner.start(vm)
         output.info(f"VM '{vm.name}' started")
         with keep_vm_active(db, config, vm):
-            _ensure_tailscale(db, config, vm, provisioner)
+            _ensure_tailscale(db, config, vm)

@@ -338,6 +338,14 @@ def create_vm(
     # Build a callback to detach the Azure public IP once Tailscale is up
     # (before Phase B starts). This minimizes the window where the VM has
     # a public IP exposed to the internet.
+    #
+    # This is intentionally NOT routed through transient_route: the attach
+    # happens inside provisioner.create() (Azure needs the IP to drive
+    # cloud-init bootstrap), and the matching detach needs to fire at the
+    # asynchronous Tailscale-ready point inside initialize_vm. That isn't
+    # an ExitStack-shaped lifecycle. A future polymorphic refactor could
+    # expose a VMProvisioner.post_tailscale_ready(vm) hook; for now the
+    # isinstance check stays here because the asymmetry is genuine.
     def _on_tailscale_ready() -> None:
         if platform == "azure":
             from agentworks.vms.provisioners.azure import AzureProvisioner as _AP
@@ -729,7 +737,7 @@ def start_vm(db: Database, config: Config, name: str) -> None:
     # Tailscale verification runs inside the keepalive so a freshly booted
     # WSL2 distro doesn't idle-shut while we wait for tailscaled to come up.
     with keep_vm_active(db, config, vm):
-        _ensure_tailscale(db, config, vm, provisioner)
+        _ensure_tailscale(db, config, vm)
     # Only emit "is ready" on the path that actually started the VM. When
     # status was already RUNNING we already said so above, and Tailscale
     # verification is usually a no-op (handshake already valid), so an
@@ -776,8 +784,7 @@ def rekey_vm(
 
     from agentworks.ssh import SSHError
     from agentworks.ssh_config import sync_ssh_config
-    from agentworks.transports import transport, wait_for_reconnect
-    from agentworks.vms.provisioners.azure import AzureProvisioner
+    from agentworks.transports import provisioner_transport, transport, wait_for_reconnect
 
     vm = _require_vm(db, name)
     _guard_failed_vm(vm)
@@ -805,33 +812,18 @@ def rekey_vm(
 
     output.info(f"Rekeying '{name}'...")
 
-    azure_provisioner = provisioner if isinstance(provisioner, AzureProvisioner) else None
-
     with contextlib.ExitStack() as _stack:
         # Holds the VM in an active state for the duration of the rekey.
         # No-op for Lima/Azure/Proxmox; WSL2 anchors the distro against
         # vmIdleTimeout so per-step `time.sleep`s can't let it idle out.
         _stack.enter_context(keep_vm_active(db, config, vm))
-        # For Azure, attach a temporary public IP for out-of-band access;
-        # detach on exit no matter how the body unwinds.
-        if azure_provisioner is not None:
-            azure_provisioner.attach_public_ip(vm)
-            _stack.callback(azure_provisioner.detach_public_ip, vm)
 
-        exec_target = provisioner.provisioner_transport(vm, config=config)
-
-        # Wait for the provisioning transport to be reachable
-        output.detail("Waiting for provisioning transport...")
-        for attempt in range(6):
-            try:
-                exec_target.run("echo ok", timeout=10)
-                break
-            except SSHError:
-                if attempt == 5:
-                    raise
-                output.detail(f"Attempt {attempt + 1} failed, retrying...")
-                time.sleep(5)
-        output.detail("Connected.")
+        # provisioner_transport() composes transient_route (Azure attach /
+        # detach via the polymorphic hook) with the platform-native
+        # transport builder and the 6-attempt reachability probe. The
+        # caller-supplied ExitStack scopes the transient state to the
+        # duration of the rekey.
+        exec_target = provisioner_transport(db, vm, config, stack=_stack)
 
         # Restart, logout, login, restart. The initial restart clears any
         # stale daemon state (a previous interrupted rekey can leave the
@@ -967,7 +959,7 @@ def delete_vm(
         # WSL2 keepalive subprocess.
         if vm.tailscale_host:
             with keep_vm_active(db, config, vm):
-                _tailscale_logout(provisioner, vm, config)
+                _tailscale_logout(db, vm, config)
 
         provisioner.delete(vm)
     except Exception as e:
@@ -1089,45 +1081,30 @@ def reinit_vm(
         output.info(f"VM '{name}' reinitialized successfully!")
 
 
-def _tailscale_logout(provisioner: VMProvisioner, vm: VMRow, config: Config) -> None:
+def _tailscale_logout(db: Database, vm: VMRow, config: Config) -> None:
     """Best-effort: deregister from Tailscale via the provisioning transport.
 
-    Uses the provisioner's provisioner_transport (not Tailscale SSH) because we
-    can't ask Tailscale to tear itself down over the connection it provides.
-    For Azure VMs, temporarily attaches a public IP for SSH access.
-    Proxmox raises NotImplementedError (guest agent not yet wired in).
+    Uses ``provisioner_transport(db, vm, config, stack=...)`` so the
+    Azure attach/detach lifecycle (and the reachability probe) are
+    composed polymorphically. Proxmox surfaces a typed StateError out
+    of the factory; we catch that and warn.
     """
-    import time
-
-    from agentworks.ssh import SSHError as _SSHError
-    from agentworks.vms.provisioners.azure import AzureProvisioner
+    from agentworks.transports import provisioner_transport
 
     output.info("Deregistering from Tailscale...")
     try:
-        azure_provisioner = provisioner if isinstance(provisioner, AzureProvisioner) else None
-        if azure_provisioner is not None:
-            azure_provisioner.attach_public_ip(vm)
-        exec_target = provisioner.provisioner_transport(vm, config=config)
+        with contextlib.ExitStack() as stack:
+            exec_target = provisioner_transport(db, vm, config, stack=stack)
 
-        # Wait for SSH to be reachable (public IP may have just been attached)
-        for attempt in range(6):
-            try:
-                exec_target.run("echo ok", timeout=10)
-                break
-            except (_SSHError, Exception):
-                if attempt == 5:
-                    raise
-                time.sleep(5)
-
-        # Fire and forget: tailscale down + logout can disrupt networking
-        # on the VM, killing SSH-based transports before they get a response.
-        # Lima/WSL2 use local transports and are unaffected, but the nohup
-        # approach works universally.
-        exec_target.run(
-            "nohup sh -c 'tailscale down && tailscale logout' >/dev/null 2>&1 &",
-            sudo=True,
-            timeout=10,
-        )
+            # Fire and forget: tailscale down + logout can disrupt
+            # networking on the VM, killing SSH-based transports before
+            # they get a response. Lima/WSL2 use local transports and
+            # are unaffected, but the nohup approach works universally.
+            exec_target.run(
+                "nohup sh -c 'tailscale down && tailscale logout' >/dev/null 2>&1 &",
+                sudo=True,
+                timeout=10,
+            )
         output.info("Tailscale node deregistered")
     except Exception as e:
         output.warn(f"Tailscale logout failed (node may remain in admin console): {e}")
@@ -1437,7 +1414,6 @@ def _ensure_tailscale(
     db: Database,
     config: Config,
     vm: VMRow,
-    provisioner: VMProvisioner,
 ) -> None:
     """After starting a VM, verify Tailscale connectivity and rejoin if needed."""
     from agentworks.transports import transport, wait_for_reconnect
@@ -1455,27 +1431,23 @@ def _ensure_tailscale(
         output.info(f"Tailscale node {vm.tailscale_host} did not reconnect, rejoining...")
         db.clear_vm_tailscale(vm.name)
 
-    # For Azure, attach a temporary public IP for the rejoin
-    from agentworks.vms.provisioners.azure import AzureProvisioner
+    # provisioner_transport() composes Azure's attach/detach via
+    # transient_route polymorphism with the reachability probe. Other
+    # platforms have a nullcontext transient_route and just build the
+    # native transport.
+    from agentworks.transports import provisioner_transport
 
-    azure_provisioner = provisioner if isinstance(provisioner, AzureProvisioner) else None
-    if azure_provisioner is not None:
-        azure_provisioner.attach_public_ip(vm)
-
-    try:
+    with contextlib.ExitStack() as _stack:
         verify_tailscale_available()
-        exec_target = provisioner.provisioner_transport(vm, config=config)
+        exec_target = provisioner_transport(db, vm, config, stack=_stack)
         rejoin_tailscale(db, vm.name, exec_target)
-    finally:
-        if azure_provisioner is not None:
-            azure_provisioner.detach_public_ip(vm)
 
-            # Wait for Tailscale SSH to reconnect after IP change
-            from agentworks.transports import transport, wait_for_reconnect
-
-            refreshed = db.get_vm(vm.name)
-            if refreshed and refreshed.tailscale_host:
-                wait_for_reconnect(transport(refreshed, config))
+    # After the stack unwinds (Azure detach has fired), wait for
+    # Tailscale SSH on the new IP to be reachable. The probe is cheap
+    # on platforms whose IP didn't change (succeeds on the first try).
+    refreshed = db.get_vm(vm.name)
+    if refreshed and refreshed.tailscale_host:
+        wait_for_reconnect(transport(refreshed, config))
 
     # Update SSH config in case the Tailscale IP changed
     from agentworks.ssh_config import sync_ssh_config
