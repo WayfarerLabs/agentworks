@@ -246,7 +246,8 @@ def transport_for_user(
 
 
 def provisioner_transport(
-    vm: VMRow, config: Config, *, stack: contextlib.ExitStack,
+    db: Database, vm: VMRow, config: Config, *,
+    stack: contextlib.ExitStack,
 ) -> Transport:
     """The platform-native transport for a VM. Used only at bootstrap and
     via the explicit operator opt-in ``vm shell --provisioner``. Most code
@@ -256,8 +257,13 @@ def provisioner_transport(
     below) so any platform-specific transient setup (Azure attaches a
     public IP, others are no-op) lives polymorphically inside the
     provisioner rather than as an isinstance check here.
+
+    ``db`` is needed by ``get_provisioner_for_vm`` to resolve the
+    RemoteLima case (``vm.vm_host_name`` -> SSH host via
+    ``db.get_vm_host``). The three canonical factories don't need it,
+    which is why only this one takes it.
     """
-    prov = get_provisioner_for_vm(...)
+    prov = get_provisioner_for_vm(db, vm, config)
     stack.enter_context(prov.transient_route(vm))
     try:
         return prov.provisioner_transport(vm, config=config)

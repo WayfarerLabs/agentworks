@@ -164,9 +164,11 @@ def provisioner_transport(
     empty host (Azure's defensive guard from PR #118).
 
     Probes the resulting transport with ``echo ok`` and retries up to
-    six times so the Azure SDN has time to propagate a freshly-attached
-    public IP before the first real command lands. Local transports
-    (Lima, WSL2) succeed on the first probe.
+    six times with a 3-second sleep between attempts (total budget ~15s
+    of sleeps plus the per-attempt 10s timeout) so the Azure SDN has
+    time to propagate a freshly-attached public IP before the first
+    real command lands. Local transports (Lima, WSL2) succeed on the
+    first probe and skip the sleeps entirely.
     """
     from agentworks import output
     from agentworks.ssh import SSHError
@@ -193,11 +195,13 @@ def provisioner_transport(
             hint=hint,
         ) from exc
 
-    # Defensive: Azure's provisioner_transport returns an SSHTransport
-    # with host="" when no public IP is attached. After transient_route
-    # this shouldn't happen on Azure (the context manager attaches
-    # before yielding). If it does, surface clearly rather than letting
-    # downstream calls hang on an empty hostname.
+    # Defensive: any SSH-backed provisioner_transport that returns an
+    # empty host gets the same typed-error treatment. Azure is today's
+    # only such case (host="" when the public IP attach silently
+    # failed); a future SSH-backed Proxmox would inherit the guard.
+    # After transient_route this shouldn't happen on Azure (the context
+    # manager attaches before yielding). If it does, surface clearly
+    # rather than letting downstream calls hang on an empty hostname.
     if isinstance(target, SSHTransport) and not target.host:
         raise StateError(
             f"Provisioner transport on platform '{vm.platform}' resolved to an SSH "
@@ -212,12 +216,13 @@ def provisioner_transport(
             ),
         )
 
-    output.detail("Waiting for provisioning transport...")
     for attempt in range(6):
         try:
             target.run("echo ok", timeout=10)
             break
         except SSHError:
+            if attempt == 0:
+                output.detail("Waiting for provisioning transport...")
             if attempt == 5:
                 raise
             time.sleep(3)

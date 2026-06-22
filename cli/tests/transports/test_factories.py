@@ -116,15 +116,28 @@ def test_admin_and_agent_transports_differ_only_in_user() -> None:
 def test_transport_failure_does_not_invoke_provisioner_transport() -> None:
     """SDD R3 invariant. ``transport()`` raising must not silently fall
     through to ``provisioner_transport()``. The canonical path either
-    works or fails; the operator opts in to the platform-native path."""
+    works or fails; the operator opts in to the platform-native path.
+
+    Covers two error paths: the no-tailscale-host case (typed
+    ``StateError`` from the factory itself) and an arbitrary downstream
+    failure inside ``transport_for_user`` (so the pin isn't tied to one
+    specific code path).
+    """
     vm = _mock_vm(tailscale_host=None)
     config = _mock_config()
 
-    # Patch provisioner_transport on the package to record whether the
-    # canonical path silently called into it.
     with (
         patch("agentworks.transports.provisioner_transport") as mock_prov,
         pytest.raises(StateError),
+    ):
+        transport(vm, config)
+    mock_prov.assert_not_called()
+
+    vm = _mock_vm()  # has tailscale_host now
+    with (
+        patch("agentworks.transports.provisioner_transport") as mock_prov,
+        patch("agentworks.transports.transport_for_user", side_effect=RuntimeError("synthetic")),
+        pytest.raises(RuntimeError),
     ):
         transport(vm, config)
     mock_prov.assert_not_called()
