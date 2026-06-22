@@ -4,11 +4,12 @@
 
 ## Overview
 
-The framework lands as a new `agentworks.resources` package that sits beneath the existing config
-loader and beside `agentworks.secrets` / `agentworks.env`. It introduces three core types --
-`ResourceRequirement`, `ResourceKind`, and an `Origin` record on every resource -- plus a validation
-pass that runs at the end of `config.load_config()` to walk requirements, dispatch miss policies,
-build the registry, and detect cycles.
+The framework lands as a new `agentworks.resources` package that sits beneath the registry loader
+(`agentworks.registry`, formerly `agentworks.config`) and beside `agentworks.secrets` /
+`agentworks.env`. It introduces three core types -- `ResourceRequirement`, `ResourceKind`, and an
+`Origin` record on every resource -- plus a validation pass that runs at the end of
+`registry.load_registry()` to walk requirements, dispatch miss policies, populate the registry, and
+detect cycles.
 
 Existing config types (`SecretDecl`, `VMTemplate`, `GitCredentialEntry`, ...) gain an `origin` field
 and the secret-bearing ones gain a `usage` list. Each config type that references other resources by
@@ -17,7 +18,7 @@ the validation pass consumes them.
 
 ```text
 +----------------------+     +----------------------------+     +----------------------+
-|  config.py loader    |---->|  agentworks.resources      |<----|  per-kind logic      |
+|  registry.py loader  |---->|  agentworks.resources      |<----|  per-kind logic      |
 |  - parses TOML       |     |  - ResourceRequirement     |     |  - SecretKind        |
 |  - emits raw types   |     |  - ResourceKind protocol   |     |  - VMTemplateKind    |
 |  - calls validate()  |     |  - Origin                  |     |  - GitCredentialsKind|
@@ -30,7 +31,7 @@ the validation pass consumes them.
                                            |
                                            v
                              +-------------+--------------+
-                             |  Config (the registry):    |
+                             |  Registry:                 |
                              |  - secrets[name]           |
                              |  - vm_templates[name]      |
                              |  - git_credentials[name]   |
@@ -71,11 +72,17 @@ cli/agentworks/resources/
     # ... more in Phase 2
 ```
 
-Why a new package rather than extending `agentworks.config`: the registry framework has its own
-lifecycle (walk, dispatch, merge, cycle-detect) and clear boundaries with the loader. Keeping it
-separate makes the validation pass a self-contained step the loader invokes, mirrors how
-`agentworks.env` and `agentworks.secrets` extracted env/secret concerns from the loader, and keeps
-`config.py` thin.
+Why a new package rather than extending `agentworks.registry`: the framework has its own lifecycle
+(walk, dispatch, merge, cycle-detect) and clear boundaries with the loader. Keeping it separate
+makes the validation pass a self-contained step the loader invokes, mirrors how `agentworks.env` and
+`agentworks.secrets` extracted env/secret concerns from the loader, and keeps `registry.py` thin.
+
+(Note: `agentworks.config.Config` and `agentworks/config.py` are renamed to
+`agentworks.registry.Registry` and `agentworks/registry.py` as part of this work. The class name
+matches its role as a typed, queryable resource store; "config" referred to the source of the data
+(operator-typed TOML), but the framework makes the registry role more prominent. Nested sub-types
+like `AdminConfig`, `SecretConfig`, `SecretBackendConfig` keep their names -- they describe specific
+configuration of subsystems, distinct from the top-level resource container.)
 
 ## Core types
 
@@ -141,14 +148,14 @@ uses `tomli`-w-positions equivalent. This is an HLA-level decision; LLD picks th
 
 ## Validation pass
 
-The validation pass runs as the last step of `config.load_config()`, after all TOML sections are
-parsed into raw types but before the `Config` object is returned. Conceptually:
+The validation pass runs as the last step of `registry.load_registry()`, after all TOML sections are
+parsed into raw types but before the `Registry` object is returned. Conceptually:
 
 ```python
-def _run_validation_pass(config: Config) -> None:
+def _run_validation_pass(registry: Registry) -> None:
     # 1. Collect all requirements
     requirements: list[ResourceRequirement] = []
-    for resource in config.iter_all_resources():
+    for resource in registry.iter_all_resources():
         requirements.extend(resource.required_resources())
 
     # 2. Group by (kind, name); preserve first-encountered ordering for origin recording
@@ -159,18 +166,18 @@ def _run_validation_pass(config: Config) -> None:
     # 3. For each (kind, name): existing-in-registry? auto-decl? error?
     for (kind, name), reqs in by_target.items():
         kind_handler = KIND_REGISTRY[kind]
-        existing = config.lookup_resource(kind, name)
+        existing = registry.lookup_resource(kind, name)
         if existing is not None:
             # Operator-declared: per-field merge across requirements
             merged = kind_handler.merge_operator(existing, reqs)
-            config.replace_resource(kind, name, merged)
+            registry.replace_resource(kind, name, merged)
         else:
             # Missing: dispatch miss policy
             match kind_handler.miss_policy:
                 case "auto-declare":
                     if kind_handler.auto_declare_names is None or name in kind_handler.auto_declare_names:
                         synthesized = kind_handler.synthesize(reqs)
-                        config.add_resource(kind, name, synthesized)
+                        registry.add_resource(kind, name, synthesized)
                     else:
                         raise ConfigError(...)  # reserved-name restriction violated
                 case "error":
@@ -302,7 +309,7 @@ A small helper in `resources/__init__.py`:
 
 ```python
 def collect_secrets_for(
-    registry: Config,
+    registry: Registry,
     root: tuple[str, str],
 ) -> list[SecretDecl]:
     """Walk required_resources() depth-first from root; collect Secret resources."""
@@ -383,7 +390,7 @@ Schema change: VM template gains `tailscale_auth_key: str` (default `"tailscale-
 
 Flow at `vm create`:
 
-1. Config loads; the framework's validation pass auto-declares `secret:tailscale-auth-key` if no
+1. Registry loads; the framework's validation pass auto-declares `secret:tailscale-auth-key` if no
    operator block exists.
 2. Manager-entry walks the VM template subgraph; collects the `tailscale-auth-key` SecretDecl.
 3. Orchestrator's `resolve_for_command(extra_decls=[<that SecretDecl>])` resolves the value through
@@ -475,7 +482,7 @@ on the `feat/resource-registry-sdd` branch; Phase 2 is a follow-up PR/branch.
 
 ### One package, one validation pass
 
-`agentworks.resources` is a single package with a single entry point (`validate_pass(config)`)
+`agentworks.resources` is a single package with a single entry point (`validate_pass(registry)`)
 called from the loader. Alternatives considered:
 
 - Distributing the dispatch logic across the existing config types (each type's `__post_init__`
@@ -502,8 +509,8 @@ implementation registered in a `KIND_REGISTRY` dict. Adding a new kind is one ne
 
 Python's stdlib `tomllib` does not expose line numbers. The framework needs `(file, line)` for
 operator-declared origin. The LLD will pin the exact library; `tomlkit` is the strong candidate
-(actively maintained, line info exposed). Switching the loader is mechanical; the existing
-`config.py` parsing surface doesn't change shape.
+(actively maintained, line info exposed). Switching the loader is mechanical; the parsing surface in
+`registry.py` doesn't change shape.
 
 ### Origin is set once
 
