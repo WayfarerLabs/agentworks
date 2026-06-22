@@ -62,13 +62,13 @@ between. If the refactor needs to pause partway through, the pause point is the 
       the 6-attempt retry loop. NotImplementedError wrapping for Proxmox with the web-console hint.
 - [ ] `cli/agentworks/transports/__init__.py`: move `wait_for_reconnect` here from `ssh.py`; take a
       `Transport` instead of `ExecTarget`.
-- [ ] `cli/agentworks/vms/base.py`: rename `VMProvisioner.admin_exec_target` to
+- [x] `cli/agentworks/vms/base.py`: rename `VMProvisioner.admin_exec_target` to
       `VMProvisioner.provisioner_transport`. Return type changes to `Transport`.
-- [ ] `cli/agentworks/vms/base.py`: rename the `ProvisionResult.admin_exec_target` field to
+- [x] `cli/agentworks/vms/base.py`: rename the `ProvisionResult.admin_exec_target` field to
       `provisioner_transport` and retype from `ExecTarget` to `Transport`. The field's single
       consumer at `vms/manager.py:355` migrates in Phase 3; provisioner `create()` implementations
       migrate alongside the method rename in this phase.
-- [ ] `cli/agentworks/vms/base.py`: add
+- [x] `cli/agentworks/vms/base.py`: add
       `VMProvisioner.transient_route(vm) -> AbstractContextManager[None]` with default
       `nullcontext()`.
 - [ ] `cli/agentworks/vms/provisioners/lima.py`: implement `provisioner_transport` returning
@@ -97,50 +97,50 @@ Phase 3 resolves them.
 Sweep across the ~237 call sites in 23 files. Each replacement: import the right factory, swap the
 call, update type hints.
 
-- [ ] `cli/agentworks/vms/manager.py`: every `admin_exec_target` (the
+- [x] `cli/agentworks/vms/manager.py`: every `admin_exec_target` (the
       `agentworks.ssh.admin_exec_target` import) call becomes `transport(...)`. The
       `_provisioner_shell_target` helper becomes a one-liner around `provisioner_transport(...)`, or
       gets inlined. The `isinstance(prov, AzureProvisioner)` block goes away (replaced by the
       polymorphic `transient_route` hook called from inside `provisioner_transport`).
-- [ ] `cli/agentworks/vms/initializer.py`: every `admin_exec_target` and `ExecTarget` use migrates.
+- [x] `cli/agentworks/vms/initializer.py`: every `admin_exec_target` and `ExecTarget` use migrates.
       Phase A uses `provisioner.provisioner_transport(...)` returning a `Transport` directly.
-- [ ] `cli/agentworks/vms/backup.py`: replace `_unwrap_ssh(target)` with `target.copy_from(...)` for
+- [x] `cli/agentworks/vms/backup.py`: replace `_unwrap_ssh(target)` with `target.copy_from(...)` for
       each scp-from-VM call. Remove the `_unwrap_ssh` import. The scp argv building moves to
       `SSHTransport.copy_from` (Phase 1 already added it).
-- [ ] `cli/agentworks/agents/manager.py`: `agent_exec_target` calls migrate to
+- [x] `cli/agentworks/agents/manager.py`: `agent_exec_target` calls migrate to
       `agent_transport(vm, config, agent)`. `exec_target_for_user(vm, config, *, user=...)` at the
       one mid-create site migrates to `transport_for_user(vm, config, user=...)`. Function
       signatures that accept `ExecTarget` change to `Transport`.
-- [ ] `cli/agentworks/workspaces/manager.py`: type hints update to `Transport`.
-- [ ] `cli/agentworks/sessions/manager.py`: `admin_exec_target` -> `transport`, `agent_exec_target`
+- [x] `cli/agentworks/workspaces/manager.py`: type hints update to `Transport`.
+- [x] `cli/agentworks/sessions/manager.py`: `admin_exec_target` -> `transport`, `agent_exec_target`
       -> `agent_transport`. The `RunCommand` callback pattern in `sessions/tmux.py` is satisfied by
       `partial(target.run, ...)` and is unchanged.
-- [ ] `cli/agentworks/sessions/tmux.py`: type hints update to `Transport` where they reference the
+- [x] `cli/agentworks/sessions/tmux.py`: type hints update to `Transport` where they reference the
       exec target. The `RunCommand` Protocol itself is untouched.
-- [ ] `cli/agentworks/sessions/console.py`: `admin_exec_target` / `interactive` imports migrate to
+- [x] `cli/agentworks/sessions/console.py`: `admin_exec_target` / `interactive` imports migrate to
       the new factory + `Transport.interactive()`.
-- [ ] `cli/agentworks/sessions/multi_console.py`: four `admin_exec_target` calls and one
+- [x] `cli/agentworks/sessions/multi_console.py`: four `admin_exec_target` calls and one
       `interactive` call migrate to the new factory + `Transport.interactive()`.
-- [ ] `cli/agentworks/sessions/multi_console_layout.py`: seven function signatures typed
+- [x] `cli/agentworks/sessions/multi_console_layout.py`: seven function signatures typed
       `ExecTarget` change to `Transport`.
-- [ ] `cli/agentworks/sources.py`: six function signatures typed `ExecTarget` change to `Transport`.
-- [ ] `cli/agentworks/doctor.py`: similar.
-- [ ] `cli/agentworks/remote_exec.py`: similar.
-- [ ] `cli/agentworks/workspaces/backends/vm.py`: similar.
-- [ ] `cli/agentworks/vms/hardening.py`: type hints update.
-- [ ] `cli/agentworks/vms/tailscale_dns.py`: type hints update.
-- [ ] `cli/agentworks/vms/base.py`: rename `ProvisionResult.admin_exec_target` field to
+- [x] `cli/agentworks/sources.py`: six function signatures typed `ExecTarget` change to `Transport`.
+- [x] `cli/agentworks/doctor.py`: similar.
+- [x] `cli/agentworks/remote_exec.py`: similar.
+- [x] `cli/agentworks/workspaces/backends/vm.py`: similar.
+- [x] `cli/agentworks/vms/hardening.py`: type hints update.
+- [x] `cli/agentworks/vms/tailscale_dns.py`: type hints update.
+- [x] `cli/agentworks/vms/base.py`: rename `ProvisionResult.admin_exec_target` field to
       `provisioner_transport` and retype from `ExecTarget` to `Transport`. Provisioner `create()`
       implementations (azure.py, lima.py, wsl2.py, proxmox.py) update accordingly. The single
       consumer at `vms/manager.py:355` (`exec_target=result.admin_exec_target`) updates to the new
       field name.
-- [ ] **Test files** -- enumerated explicitly because the impact varies:
-  - [ ] `cli/tests/test_exec_target.py`: delete entirely. The per-transport tests under
+- [x] **Test files** -- enumerated explicitly because the impact varies:
+  - [x] `cli/tests/test_exec_target.py`: delete entirely. The per-transport tests under
         `cli/tests/transports/test_<name>.py` from Phase 1 plus the ABC-contract test at
         `cli/tests/transports/test_abc.py` collectively cover the same ground (sudo wrapping, tty
         resolution, interactive dispatch) without the legacy `ExecTarget` shape baggage. Reviewer
         concurs (round 3) that delete is the cleaner answer.
-  - [ ] `cli/tests/test_authorized_keys.py`, `cli/tests/test_initializer.py`,
+  - [x] `cli/tests/test_authorized_keys.py`, `cli/tests/test_initializer.py`,
         `cli/tests/test_initializer_env_fragments.py`, `cli/tests/test_session_liveness.py`,
         `cli/tests/test_session_transport.py`, `cli/tests/test_sessions_tmux_create.py`,
         `cli/tests/test_ssh_set_env.py`, `cli/tests/test_tailscale_dns.py`,

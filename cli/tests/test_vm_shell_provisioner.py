@@ -55,17 +55,16 @@ def _seed_db(
 
 
 def _stub_target() -> object:
-    """Minimal ExecTarget-shaped object that interactive() and the
-    reachability probe in _provisioner_shell_target both accept.
+    """Minimal ``Transport``-shaped object that ``interactive`` and the
+    reachability probe in ``provisioner_transport`` both accept.
 
     ``run`` returns an SSHResult-shaped object so ``target.run('echo ok',
     timeout=10)`` succeeds without invoking a real subprocess.
+    ``interactive`` is the polymorphic method the shell flow calls.
     """
     return SimpleNamespace(
-        ssh=SimpleNamespace(host="ssh-host"),
-        lima=None,
-        wsl2=None,
         run=lambda *_a, **_k: SimpleNamespace(returncode=0, stdout="ok", stderr="", ok=True),
+        interactive=lambda *_a, **_k: 0,
     )
 
 
@@ -105,7 +104,15 @@ def _patch_common(
         interactive_log.append(True)
         return 0
 
-    monkeypatch.setattr("agentworks.ssh.interactive", _track_interactive)
+    # The interactive call now lives on the Transport itself; patch the
+    # factory's return value to give every call site a target with our
+    # tracking interactive method.
+    def _factory(*_a: object, **_k: object) -> object:
+        t = _stub_target()
+        t.interactive = _track_interactive  # type: ignore[attr-defined]
+        return t
+
+    monkeypatch.setattr("agentworks.transports.transport", _factory)
 
 
 # -- Tailscale-host gate ------------------------------------------------------
@@ -142,9 +149,14 @@ def test_shell_vm_provisioner_flag_bypasses_tailscale_check(
     db = _seed_db(tmp_path, tailscale_host=None)
     interactive_log: list[bool] = []
     _patch_common(monkeypatch, vm_manager, interactive_log=interactive_log)
+    def _stub_provisioner_factory(*_a: object, **_k: object) -> object:
+        t = _stub_target()
+        t.interactive = lambda *_a, **_k: interactive_log.append(True) or 0  # type: ignore[attr-defined]
+        return t
+
     monkeypatch.setattr(
-        vm_manager, "_provisioner_shell_target",
-        lambda *a, **k: _stub_target(),
+        "agentworks.transports.provisioner_transport",
+        _stub_provisioner_factory,
     )
 
     # SystemExit is fine; interactive() is stubbed to return 0 and
@@ -161,39 +173,46 @@ def test_shell_vm_provisioner_flag_bypasses_tailscale_check(
 # -- Provisioner-target routing ----------------------------------------------
 
 
-def test_shell_vm_provisioner_uses_provisioner_admin_exec_target(
+def test_shell_vm_provisioner_uses_provisioner_transport(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """When --provisioner is set, shell_vm must route through
-    get_provisioner_for_vm().admin_exec_target(), NOT the
-    ssh.admin_exec_target (which would go via Tailscale)."""
+    ``transports.provisioner_transport`` (which calls
+    ``get_provisioner_for_vm().provisioner_transport``), NOT the canonical
+    ``transports.transport`` (which would go via Tailscale)."""
+    import contextlib
+
     from agentworks.vms import manager as vm_manager
 
     db = _seed_db(tmp_path)  # tailscale_host populated; should still route via provisioner
     interactive_log: list[bool] = []
     _patch_common(monkeypatch, vm_manager, interactive_log=interactive_log)
 
-    provisioner_target_calls: list[tuple[str, object]] = []
+    provisioner_calls: list[tuple[str, object]] = []
 
     class _StubProvisioner:
-        def admin_exec_target(self, vm: object, *, config: object | None = None) -> object:
-            provisioner_target_calls.append((getattr(vm, "name", "?"), config))
+        def provisioner_transport(self, vm: object, *, config: object | None = None) -> object:
+            provisioner_calls.append((getattr(vm, "name", "?"), config))
             return _stub_target()
+
+        @contextlib.contextmanager  # type: ignore[arg-type]
+        def transient_route(self, vm: object):  # type: ignore[no-untyped-def]
+            yield
 
     monkeypatch.setattr(
         vm_manager, "get_provisioner_for_vm",
         lambda *a, **k: _StubProvisioner(),
     )
 
-    # Also pin the SSH path so it would explode if accidentally taken.
-    def _ssh_admin_exec_target_must_not_be_called(*_a: object, **_k: object) -> object:
+    # Also pin the Tailscale path so it would explode if accidentally taken.
+    def _transport_must_not_be_called(*_a: object, **_k: object) -> object:
         raise AssertionError(
-            "ssh.admin_exec_target must not be called when --provisioner is set",
+            "transports.transport must not be called when --provisioner is set",
         )
 
     monkeypatch.setattr(
-        "agentworks.ssh.admin_exec_target",
-        _ssh_admin_exec_target_must_not_be_called,
+        "agentworks.transports.transport",
+        _transport_must_not_be_called,
     )
 
     with pytest.raises(SystemExit):
@@ -201,8 +220,8 @@ def test_shell_vm_provisioner_uses_provisioner_admin_exec_target(
             db, _make_config(), "vm1", provisioner=True,
         )
 
-    assert len(provisioner_target_calls) == 1
-    assert provisioner_target_calls[0][0] == "vm1"
+    assert len(provisioner_calls) == 1
+    assert provisioner_calls[0][0] == "vm1"
     db.close()
 
 
@@ -220,13 +239,18 @@ def test_provisioner_shell_target_wraps_notimplementederror(
     Proxmox-specific hint shape is tested separately below."""
     import contextlib
 
+    from agentworks.transports import provisioner_transport as _provisioner_transport
     from agentworks.vms import manager as vm_manager
 
     db = _seed_db(tmp_path, platform="lima")
 
     class _UnsupportedProvisioner:
-        def admin_exec_target(self, vm: object, *, config: object | None = None) -> object:
+        def provisioner_transport(self, vm: object, *, config: object | None = None) -> object:
             raise NotImplementedError("provisioning transport not yet implemented.")
+
+        @contextlib.contextmanager  # type: ignore[arg-type]
+        def transient_route(self, vm: object):  # type: ignore[no-untyped-def]
+            yield
 
     monkeypatch.setattr(
         vm_manager, "get_provisioner_for_vm",
@@ -235,7 +259,7 @@ def test_provisioner_shell_target_wraps_notimplementederror(
 
     vm = vm_manager._require_vm(db, "vm1")
     with contextlib.ExitStack() as stack, pytest.raises(StateError) as exc_info:
-        vm_manager._provisioner_shell_target(db, _make_config(), vm, stack)  # type: ignore[arg-type]
+        _provisioner_transport(db, vm, _make_config(), stack=stack)  # type: ignore[arg-type]
 
     err = exc_info.value
     assert err.entity_kind == "vm"
@@ -254,13 +278,18 @@ def test_provisioner_shell_target_proxmox_hint_points_at_web_console(
     operator should hear that directly rather than the generic NIE text."""
     import contextlib
 
+    from agentworks.transports import provisioner_transport as _provisioner_transport
     from agentworks.vms import manager as vm_manager
 
     db = _seed_db(tmp_path, platform="proxmox")
 
     class _ProxmoxProvisioner:
-        def admin_exec_target(self, vm: object, *, config: object | None = None) -> object:
+        def provisioner_transport(self, vm: object, *, config: object | None = None) -> object:
             raise NotImplementedError("Proxmox provisioning transport not yet implemented.")
+
+        @contextlib.contextmanager  # type: ignore[arg-type]
+        def transient_route(self, vm: object):  # type: ignore[no-untyped-def]
+            yield
 
     monkeypatch.setattr(
         vm_manager, "get_provisioner_for_vm",
@@ -269,7 +298,7 @@ def test_provisioner_shell_target_proxmox_hint_points_at_web_console(
 
     vm = vm_manager._require_vm(db, "vm1")
     with contextlib.ExitStack() as stack, pytest.raises(StateError) as exc_info:
-        vm_manager._provisioner_shell_target(db, _make_config(), vm, stack)  # type: ignore[arg-type]
+        _provisioner_transport(db, vm, _make_config(), stack=stack)  # type: ignore[arg-type]
 
     err = exc_info.value
     assert err.entity_kind == "vm"
@@ -291,6 +320,8 @@ def test_provisioner_shell_target_attaches_and_registers_detach_for_azure(
     come down regardless of how shell_vm unwinds (success, SSH failure, ^C)."""
     import contextlib
 
+    from agentworks.transports import SSHTransport
+    from agentworks.transports import provisioner_transport as _provisioner_transport
     from agentworks.vms import manager as vm_manager
     from agentworks.vms.provisioners.azure import AzureProvisioner
 
@@ -311,18 +342,16 @@ def test_provisioner_shell_target_attaches_and_registers_detach_for_azure(
         def detach_public_ip(self, vm: object) -> None:
             detach_calls.append(getattr(vm, "name", "?"))
 
-        def admin_exec_target(self, vm: object, *, config: object | None = None) -> object:
-            # Include a stub `run` so the reachability probe in
-            # _provisioner_shell_target succeeds without invoking a
-            # real ssh subprocess.
-            return SimpleNamespace(
-                ssh=SimpleNamespace(host="203.0.113.42"),
-                lima=None,
-                wsl2=None,
-                run=lambda *_a, **_k: SimpleNamespace(
-                    returncode=0, stdout="ok", stderr="", ok=True,
-                ),
+        def provisioner_transport(self, vm: object, *, config: object | None = None) -> object:
+            # The factory probes ``target.run('echo ok', ...)``; the real
+            # SSHTransport.run would invoke a subprocess, so we wrap one
+            # whose ``run`` is a stub. Subclass so isinstance(target,
+            # SSHTransport) still narrows correctly.
+            t = SSHTransport(host="203.0.113.42")
+            t.run = lambda *_a, **_k: SimpleNamespace(  # type: ignore[method-assign]
+                returncode=0, stdout="ok", stderr="", ok=True,
             )
+            return t
 
     monkeypatch.setattr(
         vm_manager, "get_provisioner_for_vm",
@@ -331,12 +360,13 @@ def test_provisioner_shell_target_attaches_and_registers_detach_for_azure(
 
     vm = vm_manager._require_vm(db, "vm1")
     with contextlib.ExitStack() as stack:
-        target = vm_manager._provisioner_shell_target(db, _make_config(), vm, stack)  # type: ignore[arg-type]
+        target = _provisioner_transport(db, vm, _make_config(), stack=stack)  # type: ignore[arg-type]
         # Attach must have run inside the stack scope.
         assert attach_calls == ["vm1"]
         # Detach must NOT have run yet; it should fire on stack exit.
         assert detach_calls == []
-        assert target.ssh.host == "203.0.113.42"
+        assert isinstance(target, SSHTransport)
+        assert target.host == "203.0.113.42"
 
     # Stack exited: detach must have run exactly once.
     assert detach_calls == ["vm1"]
@@ -349,14 +379,15 @@ def test_provisioner_shell_target_detaches_on_exception_for_azure(
     """The detach callback must be registered BEFORE any post-attach call
     that could raise, so detach fires regardless of how the function
     unwinds. Without this contract a future refactor that moves
-    stack.callback after admin_exec_target would silently leak a public
-    IP on every error path.
+    ``stack.callback`` after ``provisioner_transport`` would silently leak
+    a public IP on every error path.
 
-    Test: make admin_exec_target raise after attach_public_ip ran;
-    assert detach was still called via the registered callback when the
-    surrounding ExitStack closes."""
+    Test: make ``provisioner_transport`` raise after ``attach_public_ip``
+    ran; assert detach was still called via the registered callback when
+    the surrounding ExitStack closes."""
     import contextlib
 
+    from agentworks.transports import provisioner_transport as _provisioner_transport
     from agentworks.vms import manager as vm_manager
     from agentworks.vms.provisioners.azure import AzureProvisioner
 
@@ -373,7 +404,7 @@ def test_provisioner_shell_target_detaches_on_exception_for_azure(
         def detach_public_ip(self, vm: object) -> None:
             detach_calls.append(getattr(vm, "name", "?"))
 
-        def admin_exec_target(self, vm: object, *, config: object | None = None) -> object:
+        def provisioner_transport(self, vm: object, *, config: object | None = None) -> object:
             raise RuntimeError("simulated post-attach failure")
 
     monkeypatch.setattr(
@@ -384,7 +415,7 @@ def test_provisioner_shell_target_detaches_on_exception_for_azure(
     vm = vm_manager._require_vm(db, "vm1")
     with contextlib.ExitStack() as stack:
         with pytest.raises(RuntimeError, match="simulated post-attach failure"):
-            vm_manager._provisioner_shell_target(db, _make_config(), vm, stack)  # type: ignore[arg-type]
+            _provisioner_transport(db, vm, _make_config(), stack=stack)  # type: ignore[arg-type]
         # ExitStack still open; detach fires on stack exit, not before.
         assert detach_calls == []
 
@@ -405,6 +436,8 @@ def test_provisioner_shell_target_retries_reachability_probe(
     import contextlib
 
     from agentworks.ssh import SSHError
+    from agentworks.transports import SSHTransport
+    from agentworks.transports import provisioner_transport as _provisioner_transport
     from agentworks.vms import manager as vm_manager
 
     db = _seed_db(tmp_path)
@@ -426,12 +459,14 @@ def test_provisioner_shell_target_retries_reachability_probe(
         return SimpleNamespace(returncode=0, stdout="ok", stderr="", ok=True)
 
     class _FlakyProvisioner:
-        def admin_exec_target(self, vm: object, *, config: object | None = None) -> object:
-            return SimpleNamespace(
-                ssh=SimpleNamespace(host="203.0.113.42"),
-                lima=None, wsl2=None,
-                run=flaky_run,
-            )
+        def provisioner_transport(self, vm: object, *, config: object | None = None) -> object:
+            t = SSHTransport(host="203.0.113.42")
+            t.run = flaky_run  # type: ignore[method-assign]
+            return t
+
+        @contextlib.contextmanager  # type: ignore[arg-type]
+        def transient_route(self, vm: object):  # type: ignore[no-untyped-def]
+            yield
 
     monkeypatch.setattr(
         vm_manager, "get_provisioner_for_vm",
@@ -440,12 +475,13 @@ def test_provisioner_shell_target_retries_reachability_probe(
 
     vm = vm_manager._require_vm(db, "vm1")
     with contextlib.ExitStack() as stack:
-        target = vm_manager._provisioner_shell_target(db, _make_config(), vm, stack)  # type: ignore[arg-type]
+        target = _provisioner_transport(db, vm, _make_config(), stack=stack)  # type: ignore[arg-type]
 
     # The probe retried until the 4th attempt succeeded; the function
     # returned the now-reachable target rather than raising.
     assert run_call_count["n"] == 4
-    assert target.ssh.host == "203.0.113.42"
+    assert isinstance(target, SSHTransport)
+    assert target.host == "203.0.113.42"
     db.close()
 
 
@@ -461,15 +497,19 @@ def test_provisioner_shell_target_raises_defensively_on_empty_host(
     fire; we want to test the empty-host guard in isolation."""
     import contextlib
 
+    from agentworks.transports import SSHTransport
+    from agentworks.transports import provisioner_transport as _provisioner_transport
     from agentworks.vms import manager as vm_manager
 
     db = _seed_db(tmp_path)
 
     class _BrokenProvisioner:
-        def admin_exec_target(self, vm: object, *, config: object | None = None) -> object:
-            return SimpleNamespace(
-                ssh=SimpleNamespace(host=""), lima=None, wsl2=None,
-            )
+        def provisioner_transport(self, vm: object, *, config: object | None = None) -> object:
+            return SSHTransport(host="")
+
+        @contextlib.contextmanager  # type: ignore[arg-type]
+        def transient_route(self, vm: object):  # type: ignore[no-untyped-def]
+            yield
 
     monkeypatch.setattr(
         vm_manager, "get_provisioner_for_vm",
@@ -478,7 +518,7 @@ def test_provisioner_shell_target_raises_defensively_on_empty_host(
 
     vm = vm_manager._require_vm(db, "vm1")
     with contextlib.ExitStack() as stack, pytest.raises(StateError) as exc_info:
-        vm_manager._provisioner_shell_target(db, _make_config(), vm, stack)  # type: ignore[arg-type]
+        _provisioner_transport(db, vm, _make_config(), stack=stack)  # type: ignore[arg-type]
 
     err = exc_info.value
     assert err.entity_kind == "vm"
@@ -501,9 +541,6 @@ def test_shell_vm_warns_but_continues_on_failed_init(
     db = _seed_db(tmp_path, init_status="failed")
     interactive_log: list[bool] = []
     _patch_common(monkeypatch, vm_manager, interactive_log=interactive_log)
-    monkeypatch.setattr(
-        "agentworks.ssh.admin_exec_target", lambda *a, **k: _stub_target(),
-    )
 
     with pytest.raises(SystemExit) as exc_info:
         vm_manager.shell_vm(db, _make_config(), "vm1")  # type: ignore[arg-type]
@@ -564,13 +601,10 @@ def test_exec_vm_warns_but_continues_on_failed_init(
 
     def exec_target_stub(*_a: object, **_k: object) -> object:
         return SimpleNamespace(
-            ssh=SimpleNamespace(host="ssh-host"),
-            lima=None,
-            wsl2=None,
             call_streaming=lambda *_aa, **_kk: 0,
         )
 
-    monkeypatch.setattr("agentworks.ssh.admin_exec_target", exec_target_stub)
+    monkeypatch.setattr("agentworks.transports.transport", exec_target_stub)
 
     exit_code = vm_manager.exec_vm(db, _make_config(), "vm1", ["echo", "hi"])  # type: ignore[arg-type]
     assert exit_code == 0  # the underlying exec returned 0

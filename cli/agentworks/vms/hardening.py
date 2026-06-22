@@ -25,7 +25,8 @@ from agentworks import output
 from agentworks.ssh import SSHError
 
 if TYPE_CHECKING:
-    from agentworks.ssh import ExecTarget, SSHLogger
+    from agentworks.ssh import SSHLogger
+    from agentworks.transports import Transport
 
 
 HARDENING_SYSCTL_PATH = "/etc/sysctl.d/99-agentworks.conf"
@@ -143,7 +144,7 @@ def _ensure_proc_hidepid_in_fstab(content: str) -> tuple[str, str, int]:
     return "\n".join(lines) + "\n", action, effective
 
 
-def apply_vm_hardening(target: ExecTarget, logger: SSHLogger) -> None:
+def apply_vm_hardening(target: Transport, logger: SSHLogger) -> None:
     """Apply VM hardening: sysctl baseline + /proc hidepid=1.
 
     Idempotent: a second run is a no-op unless the on-disk content differs.
@@ -165,7 +166,7 @@ def apply_vm_hardening(target: ExecTarget, logger: SSHLogger) -> None:
         output.warn(msg)
 
 
-def _apply_hardening_sysctl(target: ExecTarget, logger: SSHLogger) -> None:
+def _apply_hardening_sysctl(target: Transport, logger: SSHLogger) -> None:
     """Write the sysctl baseline if content differs from desired; reload if changed."""
     # sudo on the read for consistency with the fstab read below; the file
     # itself is mode 0644 and would be world-readable when present.
@@ -193,7 +194,7 @@ def _apply_hardening_sysctl(target: ExecTarget, logger: SSHLogger) -> None:
     target.run("sysctl --system", sudo=True)
 
 
-def _apply_hardening_fstab(target: ExecTarget, logger: SSHLogger) -> None:
+def _apply_hardening_fstab(target: Transport, logger: SSHLogger) -> None:
     """Ensure /proc is mounted with ``hidepid>=1`` and live-remount.
 
     Parses the existing ``/etc/fstab`` /proc line (if any) and edits its

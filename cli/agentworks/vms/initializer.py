@@ -25,7 +25,14 @@ from agentworks.env import (
     vm_stable_identity_env,
 )
 from agentworks.errors import ConnectivityError, ExternalError, NotFoundError
-from agentworks.ssh import ExecTarget, SSHError, SSHLogger, SSHTarget
+from agentworks.ssh import SSHError, SSHLogger
+from agentworks.transports import (
+    LimaTransport,
+    RemoteLimaTransport,
+    SSHTransport,
+    Transport,
+    WSL2Transport,
+)
 from agentworks.vms.cloud_init import INIT_SYSTEM_PACKAGES, PROVISIONING_PACKAGES
 
 if TYPE_CHECKING:
@@ -42,7 +49,7 @@ AGENTWORKS_RC = ".agentworks-rc.sh"
 
 
 def _ensure_agentworks_files_sourced(
-    target: ExecTarget,
+    target: Transport,
     *,
     home: str,
     shell: str,
@@ -97,7 +104,7 @@ def _ensure_agentworks_files_sourced(
 
 
 def _write_agentworks_profile(
-    target: ExecTarget,
+    target: Transport,
     path_additions: list[str],
     logger: SSHLogger,
     *,
@@ -188,7 +195,7 @@ _ZSH_IDENTITY_MARKER = "# agentworks-identity"
 
 
 def _write_agentworks_identity_profile(
-    target: ExecTarget,
+    target: Transport,
     identity_env: dict[str, str],
     logger: SSHLogger,
 ) -> None:
@@ -283,7 +290,7 @@ def _write_agentworks_identity_profile(
 
 
 def _write_sshd_accept_env(
-    target: ExecTarget,
+    target: Transport,
     logger: SSHLogger,
 ) -> None:
     """Deploy ``AcceptEnv *`` to sshd_config.d/ and reload sshd.
@@ -360,7 +367,7 @@ def _write_sshd_accept_env(
 
 
 def _write_sudoers_env_keep(
-    target: ExecTarget,
+    target: Transport,
     logger: SSHLogger,
 ) -> None:
     """Deploy ``env_keep += "AGENTWORKS_* AW_*"`` to sudoers.d/.
@@ -426,7 +433,7 @@ def _write_sudoers_env_keep(
 
 
 def _write_agentworks_rc(
-    target: ExecTarget,
+    target: Transport,
     shell_snippets: list[str],
     logger: SSHLogger,
 ) -> None:
@@ -482,7 +489,7 @@ def _mise_shims_path(home: str) -> list[str]:
 
 
 def _write_mise_config(
-    target: ExecTarget,
+    target: Transport,
     packages: list[str],
     install_before: str,
     home: str,
@@ -521,7 +528,7 @@ def _write_mise_config(
 
 
 def _fetch_mise_lockfile(
-    target: ExecTarget,
+    target: Transport,
     lockfile_source: str,
     home: str,
     logger: SSHLogger,
@@ -563,7 +570,7 @@ def _parse_mise_failures(error: SSHError) -> list[str]:
 
 
 def _run_mise_install(
-    target: ExecTarget,
+    target: Transport,
     shell: str,
     home: str,
     allow_unlocked: bool,
@@ -649,7 +656,7 @@ AUTHORIZED_KEYS_HEADER = """\
 
 
 def _reconcile_authorized_keys(
-    target: ExecTarget,
+    target: Transport,
     config: Config,
     home: str,
     logger: SSHLogger,
@@ -728,7 +735,7 @@ def _reconcile_authorized_keys(
 
 
 def _configure_apt_sources(
-    target: ExecTarget,
+    target: Transport,
     config: Config,
     catalog: object,
     logger: SSHLogger,
@@ -834,7 +841,7 @@ def _configure_apt_sources(
 
 
 def _install_system_packages(
-    target: ExecTarget,
+    target: Transport,
     logger: SSHLogger,
 ) -> None:
     """Install system repos and packages. Always runs on every init/reinit."""
@@ -877,7 +884,7 @@ def _install_system_packages(
 
 
 def _install_apt_packages(
-    target: ExecTarget,
+    target: Transport,
     config: Config,
     catalog: object,
     logger: SSHLogger,
@@ -934,7 +941,7 @@ def _build_test_command(
 
 
 def _run_catalog_commands(
-    target: ExecTarget,
+    target: Transport,
     command_names: list[str],
     entries: Mapping[str, SystemInstallCommandEntry | UserInstallCommandEntry],
     shell: str,
@@ -1068,7 +1075,7 @@ def verify_git_credential_auth(providers: dict[str, GitCredentialProvider]) -> N
 def rejoin_tailscale(
     db: Database,
     vm_name: str,
-    exec_target: ExecTarget,
+    exec_target: Transport,
 ) -> str:
     """Re-join Tailscale on a VM that lost its node (e.g. ephemeral key).
 
@@ -1092,7 +1099,7 @@ def rejoin_tailscale(
 def _join_tailscale(
     db: Database,
     vm_name: str,
-    exec_target: ExecTarget,
+    exec_target: Transport,
     *,
     logger: SSHLogger | None = None,
     tailscale_auth_key: str | None = None,
@@ -1112,9 +1119,12 @@ def _join_tailscale(
     # client and only takes client-side flags.
     ts_cmd = f"tailscale up --auth-key {quoted_key}"
 
-    # Redact the auth key from any attached loggers before it appears in logs
-    if exec_target.logger is not None:
-        exec_target.logger.add_redaction(ts_auth_key)
+    # Redact the auth key from any attached loggers before it appears in logs.
+    # ``Transport`` doesn't declare ``logger`` on the ABC; every concrete
+    # subclass does. Narrow before reading.
+    attached_logger: SSHLogger | None = getattr(exec_target, "logger", None)
+    if attached_logger is not None:
+        attached_logger.add_redaction(ts_auth_key)
     if logger is not None:
         logger.add_redaction(ts_auth_key)
 
@@ -1132,16 +1142,16 @@ def _join_tailscale(
     return tailscale_ip
 
 
-def _describe_transport(exec_target: ExecTarget) -> str:
-    """Return a short description of the transport used by an ExecTarget."""
-    if exec_target.ssh is not None:
-        return f"ssh:{exec_target.ssh.host}"
-    if exec_target.lima is not None:
-        return f"lima:{exec_target.lima.vm_name}"
-    if exec_target.remote_lima is not None:
-        return f"remote-lima:{exec_target.remote_lima.vm_name}"
-    if exec_target.wsl2 is not None:
-        return f"wsl2:{exec_target.wsl2.distro_name}"
+def _describe_transport(exec_target: Transport) -> str:
+    """Return a short description of the transport used by a ``Transport``."""
+    if isinstance(exec_target, SSHTransport):
+        return f"ssh:{exec_target.host}"
+    if isinstance(exec_target, LimaTransport):
+        return f"lima:{exec_target.vm_name}"
+    if isinstance(exec_target, RemoteLimaTransport):
+        return f"remote-lima:{exec_target.vm_name}"
+    if isinstance(exec_target, WSL2Transport):
+        return f"wsl2:{exec_target.distro_name}"
     return "unknown"
 
 
@@ -1149,7 +1159,7 @@ def initialize_vm(
     db: Database,
     config: Config,
     vm_name: str,
-    exec_target: ExecTarget,
+    exec_target: Transport,
     providers: dict[str, GitCredentialProvider],
     *,
     admin_username: str = "agentworks",
@@ -1165,8 +1175,6 @@ def initialize_vm(
     Phase B (setup) steps are non-fatal -- failures are logged as warnings
     and the VM gets 'partial' status instead of 'complete'.
     """
-    from dataclasses import replace
-
     from agentworks.ssh import SSHLogger
     from agentworks.vms.manager import keep_vm_active
 
@@ -1178,8 +1186,11 @@ def initialize_vm(
         for token in git_tokens.values():
             logger.add_redaction(token)
 
-    # Attach logger to the provisioning transport
-    exec_target = replace(exec_target, logger=logger)
+    # Attach logger to the provisioning transport. All concrete Transport
+    # subclasses set ``self.logger`` in ``__init__``; the ABC doesn't
+    # declare it, so we narrow per-subclass to assign.
+    if isinstance(exec_target, (SSHTransport, LimaTransport, RemoteLimaTransport, WSL2Transport)):
+        exec_target.logger = logger
 
     transport = _describe_transport(exec_target)
 
@@ -1205,7 +1216,11 @@ def initialize_vm(
                 bootstrap_complete=bootstrap_complete,
                 tailscale_ip=tailscale_ip,
             )
-            db.insert_vm_event(vm_name, "provisioning_complete", ts_target.ssh.host if ts_target.ssh else None)
+            db.insert_vm_event(
+                vm_name,
+                "provisioning_complete",
+                ts_target.host if isinstance(ts_target, SSHTransport) else None,
+            )
         except Exception as e:
             db.update_vm_provisioning_status(vm_name, ProvisioningStatus.FAILED)
             db.insert_vm_event(vm_name, "provisioning_failed", str(e))
@@ -1225,7 +1240,7 @@ def initialize_vm(
                 output.warn(f"post-provisioning cleanup failed: {e}")
 
             # Wait for Tailscale SSH to reconnect after network changes
-            from agentworks.ssh import wait_for_reconnect
+            from agentworks.transports import wait_for_reconnect
 
             wait_for_reconnect(ts_target)
 
@@ -1247,7 +1262,7 @@ def run_initialization(
     db: Database,
     config: Config,
     vm_name: str,
-    ts_target: ExecTarget,
+    ts_target: Transport,
     providers: dict[str, GitCredentialProvider],
     home: str,
     admin_username: str,
@@ -1298,7 +1313,7 @@ def _phase_a_bootstrap(
     db: Database,
     config: Config,
     vm_name: str,
-    exec_target: ExecTarget,
+    exec_target: Transport,
     home: str,
     admin_username: str,
     platform: str,
@@ -1307,7 +1322,7 @@ def _phase_a_bootstrap(
     tailscale_auth_key: str | None = None,
     bootstrap_complete: bool = False,
     tailscale_ip: str | None = None,
-) -> ExecTarget:
+) -> Transport:
     """Phase A: Bootstrap (over provisioning transport). All steps are fatal.
 
     Three paths depending on how much the provisioner already handled:
@@ -1317,7 +1332,7 @@ def _phase_a_bootstrap(
     2. Otherwise (WSL2): Run full bootstrap script over the provisioning
        transport (user, packages, SSH key, swap, Tailscale).
 
-    Returns the Tailscale ExecTarget for Phase B.
+    Returns the Tailscale ``Transport`` for Phase B.
     """
     db.update_vm_provisioning_status(vm_name, ProvisioningStatus.IN_PROGRESS)
 
@@ -1345,15 +1360,13 @@ def _phase_a_bootstrap(
     # On Windows, force TTY to prevent zsh/login shell pipe hangs.
     import sys
 
-    ts_target = ExecTarget(
-        ssh=SSHTarget(
-            host=tailscale_ip,
-            user=admin_username,
-            identity_file=config.operator.ssh_private_key,
-            force_tty=sys.platform == "win32",
-        ),
+    ts_target = SSHTransport(
+        host=tailscale_ip,
+        user=admin_username,
+        identity_file=config.operator.ssh_private_key,
+        force_tty=sys.platform == "win32",
         default_timeout=60,
-        logger=exec_target.logger,
+        logger=logger,
     )
 
     # Verify Tailscale SSH works (retry -- peer connection may take time)
@@ -1378,7 +1391,7 @@ def _run_bootstrap_script(
     db: Database,
     config: Config,
     vm_name: str,
-    exec_target: ExecTarget,
+    exec_target: Transport,
     admin_username: str,
     platform: str,
     logger: SSHLogger,
@@ -1506,7 +1519,7 @@ def _phase_b_setup(
     db: Database,
     config: Config,
     vm_name: str,
-    ts_target: ExecTarget,
+    ts_target: Transport,
     providers: dict[str, GitCredentialProvider],
     home: str,
     admin_username: str,
@@ -1802,7 +1815,7 @@ def _phase_b_setup(
 
 RunCmd = Callable[[str, int], object]
 """Callable that runs a shell command with a timeout. Used to abstract
-the choice of ExecTarget (admin vs agent) at the call site."""
+the choice of ``Transport`` (admin vs agent) at the call site."""
 
 
 def install_claude_plugins(
@@ -1858,7 +1871,7 @@ def install_claude_plugins(
 
 def _configure_git_credentials(
     vm_name: str,
-    ts_target: ExecTarget,
+    ts_target: Transport,
     providers: dict[str, GitCredentialProvider],
     logger: SSHLogger,
     git_tokens: dict[str, str] | None = None,

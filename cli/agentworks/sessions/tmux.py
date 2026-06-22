@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Protocol
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from agentworks.ssh import ExecTarget
+    from agentworks.transports import Transport
 
 RESTRICTED_CONFIG_PATH = "/opt/agentworks/tmux-session.conf"
 DEFAULT_HISTORY_LIMIT = 50_000
@@ -31,10 +31,11 @@ ADMIN_SOCKET_ROOT = "/run/agentworks/admin-tmux-sockets"
 
 
 class RunCommand(Protocol):
-    """Callable that runs a shell command on a target (e.g. partial of ssh.run).
+    """Callable that runs a shell command on a target (e.g. partial of ``Transport.run``).
 
     The ``env`` kwarg is materialized by the underlying SSH layer as
-    ``-o SetEnv=KEY=VALUE`` arguments; see ``agentworks.ssh.run``.
+    ``-o SetEnv=KEY=VALUE`` arguments; see ``Transport.run`` /
+    ``agentworks.transports.ssh.SSHTransport.run``.
     """
 
     def __call__(
@@ -57,7 +58,7 @@ def admin_socket_path(admin_username: str, session_name: str) -> str:
 
 
 def ensure_agent_socket_root(
-    target: ExecTarget,
+    target: Transport,
     admin_username: str,
     *,
     warn_if_missing: bool = True,
@@ -113,7 +114,7 @@ def ensure_agent_socket_root(
 
 
 def ensure_agent_socket_dir(
-    target: ExecTarget,
+    target: Transport,
     linux_user: str,
     *,
     warn_if_missing: bool = True,
@@ -154,7 +155,7 @@ def ensure_agent_socket_dir(
     target.run(f"chmod 2770 {q_path}", sudo=True)
 
 
-def cleanup_stale_sockets(target: ExecTarget, linux_user: str) -> int:
+def cleanup_stale_sockets(target: Transport, linux_user: str) -> int:
     """Remove socket files whose tmux server is no longer running.
 
     Targets the per-user agent socket directory under ``AGENT_SOCKET_ROOT``.
@@ -169,7 +170,7 @@ def cleanup_stale_sockets(target: ExecTarget, linux_user: str) -> int:
     )
 
 
-def cleanup_stale_admin_sockets(target: ExecTarget, admin_username: str) -> int:
+def cleanup_stale_admin_sockets(target: Transport, admin_username: str) -> int:
     """Remove admin-side socket files whose tmux server is no longer running.
 
     Mirrors ``cleanup_stale_sockets`` for the per-session admin socket
@@ -182,7 +183,7 @@ def cleanup_stale_admin_sockets(target: ExecTarget, admin_username: str) -> int:
     )
 
 
-def _cleanup_stale_sockets_under(target: ExecTarget, dir_path: str) -> int:
+def _cleanup_stale_sockets_under(target: Transport, dir_path: str) -> int:
     """Shared implementation for cleanup_stale_{agent,admin}_sockets."""
     q_dir = shlex.quote(dir_path)
     result = target.run(f"find {q_dir} -name '*.sock' -type s 2>/dev/null", sudo=True, check=False)
@@ -203,7 +204,7 @@ def _cleanup_stale_sockets_under(target: ExecTarget, dir_path: str) -> int:
 
 
 def ensure_admin_socket_root(
-    target: ExecTarget,
+    target: Transport,
     admin_username: str,
 ) -> None:
     """Create the admin tmux socket root directory (idempotent).
@@ -391,7 +392,7 @@ def create_session(
     linux_user: str | None,
     *,
     run_command: RunCommand,
-    target: ExecTarget | None = None,
+    target: Transport | None = None,
     admin_username: str | None = None,
     is_admin: bool = True,
     env: dict[str, str] | None = None,
@@ -407,7 +408,7 @@ def create_session(
     For admin mode, ``run_command`` is admin's SSH connection. ``target`` is
     used for sudo socket-root setup (writing under ``/run/agentworks/``).
     For agent mode, ``run_command`` is the AGENT's SSH connection (FRD R1),
-    and ``target`` must be admin's ExecTarget (for AGENT_SOCKET_ROOT setup).
+    and ``target`` must be admin's ``Transport`` (for AGENT_SOCKET_ROOT setup).
 
     ``env`` flows to the pane via two channels (belt and suspenders):
     1. ``run_command`` materializes ``-o SetEnv=K=V`` args on the SSH
@@ -420,7 +421,7 @@ def create_session(
     """
     assert linux_user is not None
     assert admin_username is not None, "admin_username required for create_session"
-    assert target is not None, "target (admin's ExecTarget) required for create_session"
+    assert target is not None, "target (admin's Transport) required for create_session"
 
     q_session = shlex.quote(session_name)
     q_path = shlex.quote(workspace_path)
@@ -562,7 +563,7 @@ def _parse_pid(raw: str, context: str) -> int:
 
 def get_tmux_server_pid(
     *,
-    target: ExecTarget,
+    target: Transport,
     socket_path: str | None = None,
 ) -> int | None:
     """Retrieve the PID of a running tmux server.
@@ -586,7 +587,7 @@ def get_tmux_server_pid(
 def force_kill_tmux_server(
     pid: int,
     *,
-    target: ExecTarget,
+    target: Transport,
     socket_path: str | None = None,
     log: Callable[[str], None] | None = None,
     use_sudo: bool = True,
@@ -597,7 +598,7 @@ def force_kill_tmux_server(
 
     ``use_sudo`` defaults True for the admin path (cross-uid kill of an
     agent's tmux pid; admin's NOPASSWD sudo). Pass False when ``target`` is
-    the agent's own ExecTarget: the agent can kill its own pid and remove
+    the agent's own ``Transport``: the agent can kill its own pid and remove
     its own socket without sudo. FRD R1's carve-out for admin force-kill
     applies to batch operations; single-session agent ops go through agent
     SSH directly (no sudo).

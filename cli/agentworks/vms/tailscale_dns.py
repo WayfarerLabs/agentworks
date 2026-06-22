@@ -57,7 +57,8 @@ from agentworks.errors import StateError
 from agentworks.ssh import SSHError
 
 if TYPE_CHECKING:
-    from agentworks.ssh import ExecTarget, SSHLogger
+    from agentworks.ssh import SSHLogger
+    from agentworks.transports import Transport
 
 
 TAILSCALED_DROPIN_DIR = "/etc/systemd/system/tailscaled.service.d"
@@ -79,7 +80,7 @@ Wants=network-online.target
 """
 
 
-def apply_tailscaled_dns_fix(target: ExecTarget, logger: SSHLogger) -> None:
+def apply_tailscaled_dns_fix(target: Transport, logger: SSHLogger) -> None:
     """Apply the tailscaled cold-boot DNS race fix.
 
     Idempotent: a second run is a no-op unless on-disk content differs.
@@ -95,7 +96,7 @@ def apply_tailscaled_dns_fix(target: ExecTarget, logger: SSHLogger) -> None:
         output.warn(msg)
 
 
-def _ensure_tailscaled_dropin(target: ExecTarget, logger: SSHLogger) -> None:
+def _ensure_tailscaled_dropin(target: Transport, logger: SSHLogger) -> None:
     """Install/refresh the tailscaled startup-ordering drop-in.
 
     Writes only when content differs; runs ``daemon-reload`` only when
@@ -167,7 +168,7 @@ _LATCHED_HEAL_HINT = (
 )
 
 
-def check_vm_dns(target: ExecTarget, logger: SSHLogger) -> None:
+def check_vm_dns(target: Transport, logger: SSHLogger) -> None:
     """Check whether VM DNS is working and surface a diagnosis if it isn't.
 
     Called before any phase B step that needs external DNS (apt-get

@@ -88,7 +88,7 @@ class _StubConfig:
     Tests that don't install the ``fake_target`` fixture also use VMs seeded
     with ``with_tailscale=False`` so ``_live_target`` returns None up front
     and the SSH layer is never entered. If you set ``with_tailscale=True``
-    without monkey-patching ``admin_exec_target`` you will hit an
+    without monkey-patching ``transports.transport`` you will hit an
     AttributeError on this stub -- prefer the ``fake_target`` fixture.
 
     ``named_console`` provides only what multi_console reads from Config;

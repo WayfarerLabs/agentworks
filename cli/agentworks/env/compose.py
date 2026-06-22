@@ -3,9 +3,10 @@
 Combines AGENTWORKS_* identity vars (per-context subset only; VM-stable and
 per-user subsets live in VM-side profile fragments) with the user-defined
 env merged across the precedence ladder and then resolved through the
-SecretResolver. The resulting flat ``dict[str, str]`` is handed to the SSH
-layer (``ExecTarget.run(env=...)``), which coalesces every pair into one
-``-o SetEnv="K1=V1" "K2=V2" ...`` argument (see ``ssh._set_env_args``);
+SecretResolver. The resulting flat ``dict[str, str]`` is handed to the
+transport layer (``Transport.run(env=...)``), which coalesces every pair
+into one ``-o SetEnv="K1=V1" "K2=V2" ...`` argument (see ``_set_env_args``
+in ``agentworks/transports/ssh.py``);
 the remote sshd accepts these under the ``AcceptEnv *`` directive
 deployed by VM init.
 

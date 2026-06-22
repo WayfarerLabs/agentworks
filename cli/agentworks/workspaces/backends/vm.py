@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.errors import AlreadyExistsError
-from agentworks.ssh import admin_exec_target
+from agentworks.transports import transport
 from agentworks.workspaces.tmuxinator import console_session_name, generate_config
 
 if TYPE_CHECKING:
@@ -33,7 +33,7 @@ def create_vm_workspace(
     from agentworks.agents.manager import workspace_group
 
     assert vm.tailscale_host is not None
-    target = admin_exec_target(vm, config, logger=logger)
+    target = transport(vm, config, logger=logger)
 
     workspace_path = f"{config.paths.vm_workspaces}/{ws_name}"
     ws_group = workspace_group(ws_name)
@@ -106,10 +106,8 @@ def shell_vm_workspace(
     workspace_path: str,
 ) -> None:
     """Open a plain shell into a VM workspace."""
-    from agentworks.ssh import admin_exec_target, interactive
-
-    target = admin_exec_target(vm, config)
-    sys.exit(interactive(target, f"cd {workspace_path} && exec $SHELL -l"))
+    target = transport(vm, config)
+    sys.exit(target.interactive(f"cd {workspace_path} && exec $SHELL -l"))
 
 
 def console_vm_workspace(
@@ -120,15 +118,13 @@ def console_vm_workspace(
     recreate: bool = False,
 ) -> None:
     """Open the workspace console (tmuxinator) on a VM."""
-    from agentworks.ssh import admin_exec_target, interactive
-
     session = console_session_name(ws_name)
-    target = admin_exec_target(vm, config)
+    target = transport(vm, config)
 
     if recreate:
         target.run(f"tmux kill-session -t {session}", check=False, timeout=10)
 
-    sys.exit(interactive(target, f"tmuxinator start {session}"))
+    sys.exit(target.interactive(f"tmuxinator start {session}"))
 
 
 def delete_vm_workspace(
@@ -143,7 +139,7 @@ def delete_vm_workspace(
     from agentworks.ssh import SSHError
 
     assert vm.tailscale_host is not None
-    target = admin_exec_target(vm, config, logger=logger)
+    target = transport(vm, config, logger=logger)
 
     try:
         target.run(f"rm -rf {workspace_path}", sudo=True, timeout=30)

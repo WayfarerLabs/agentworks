@@ -22,7 +22,7 @@ import pytest
 
 
 def _make_dns_fix_target(*, dropin_content: str | None = None) -> MagicMock:
-    """ExecTarget mock parameterized by current drop-in content.
+    """``Transport`` mock parameterized by current drop-in content.
 
     - ``dropin_content=None``: the drop-in file is absent (``cat`` exits non-zero).
     - ``dropin_content="..."``: ``cat`` returns this content.
@@ -225,7 +225,7 @@ def _make_latch_target(
     dns_probe_ok: bool = False,
     resolved_active: bool = True,
 ) -> MagicMock:
-    """ExecTarget mock parameterized by the four signals the detector reads.
+    """``Transport`` mock parameterized by the four signals the detector reads.
 
     Defaults describe a latched VM with systemd-resolved as the platform
     resolver, which is the case where detection should raise.

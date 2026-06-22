@@ -24,7 +24,7 @@ from agentworks.workspaces.templates import resolve_template
 if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database, VMRow, WorkspaceRow
-    from agentworks.ssh import ExecTarget
+    from agentworks.transports import Transport
 
 
 def create_workspace(
@@ -374,7 +374,8 @@ def reinit_workspace(
     match.
     """
     from agentworks.agents.manager import AGENT_PREFIX
-    from agentworks.ssh import SSHError, admin_exec_target
+    from agentworks.ssh import SSHError
+    from agentworks.transports import transport
     ws = db.get_workspace(name)
     if ws is None:
         raise NotFoundError(
@@ -391,7 +392,7 @@ def reinit_workspace(
             entity_name=ws.vm_name,
         )
 
-    target = admin_exec_target(vm, config)
+    target = transport(vm, config)
     with keep_vm_active(db, config, vm):
         ws_group = ws.linux_group
         fixes = 0
@@ -654,7 +655,8 @@ def _rehome_vm(
 ) -> None:
     """Rehome a VM workspace."""
 
-    from agentworks.ssh import SSHError, SSHLogger, admin_exec_target
+    from agentworks.ssh import SSHError, SSHLogger
+    from agentworks.transports import transport
     from agentworks.workspaces.backends.vm import generate_vscode_workspace
 
     ws_name = ws.name
@@ -673,7 +675,7 @@ def _rehome_vm(
     _ensure_vm_running(db, config, vm)
     with keep_vm_active(db, config, vm):
 
-        target = admin_exec_target(vm, config)
+        target = transport(vm, config)
 
         # Verify source exists
         src_check = target.run(f"test -d {old_path}", check=False, timeout=10)
@@ -705,7 +707,7 @@ def _rehome_vm(
                 raise UserAbort("rehome cancelled")
 
         ssh_logger = SSHLogger(vm.name, "workspace-rehome")
-        target = admin_exec_target(vm, config, logger=ssh_logger)
+        target = transport(vm, config, logger=ssh_logger)
         ws_group = ws.linux_group
 
         # Shell-quote paths once up front; both are interpolated into many shell
@@ -881,7 +883,7 @@ def delete_workspace(
     vm = db.get_vm(ws.vm_name)
     # console_pairs is populated only when we have live SSH access; the
     # post-delete cleanup is best-effort and skips when target is None.
-    target: ExecTarget | None = None
+    target: Transport | None = None
     console_pairs: list[tuple[str, str]] = []
     with contextlib.ExitStack() as _keepalive_stack:
         if vm is not None:
@@ -894,9 +896,9 @@ def delete_workspace(
                 ensure_pids_batch,
             )
             from agentworks.sessions.tmux import force_kill_tmux_server, kill_session
-            from agentworks.ssh import admin_exec_target
+            from agentworks.transports import transport
 
-            target = admin_exec_target(vm, config, logger=ssh_logger)
+            target = transport(vm, config, logger=ssh_logger)
             sessions = db.list_sessions(workspace_name=name)
             sessions = ensure_pids_batch(sessions, db=db, config=config)
             # Snapshot console memberships before the FK cascade clears them.
@@ -977,7 +979,8 @@ def copy_workspace(
     from pathlib import Path
 
     from agentworks.agents.manager import workspace_group
-    from agentworks.ssh import SSHLogger, admin_exec_target
+    from agentworks.ssh import SSHLogger
+    from agentworks.transports import SSHTransport, transport
     validate_name(dest_name)
 
     src_ws = db.get_workspace(source_name)
@@ -1018,16 +1021,17 @@ def copy_workspace(
                     entity_name=src_vm.name,
                 )
 
-            src_exec = admin_exec_target(src_vm, config)
-            assert src_exec.ssh is not None
-            src_ssh = src_exec.ssh
+            src_exec = transport(src_vm, config)
+            # transport() returns SSHTransport for Tailscale-backed VMs; this
+            # path streams scp/tar over the SSH channel and needs the raw argv.
+            assert isinstance(src_exec, SSHTransport)
             output.info(f"Packing workspace '{source_name}' from VM '{src_vm.name}'...")
 
             # Stream tar from VM to local temp file
             ssh_args = ["ssh", "-o", "StrictHostKeyChecking=accept-new", "-o", "BatchMode=yes"]
-            if src_ssh.identity_file is not None:
-                ssh_args.extend(["-i", str(src_ssh.identity_file)])
-            ssh_args.append(f"{src_ssh.user}@{src_ssh.host}")
+            if src_exec.identity_file is not None:
+                ssh_args.extend(["-i", str(src_exec.identity_file)])
+            ssh_args.append(f"{src_exec.user}@{src_exec.host}")
             ssh_args.append(f"tar czf - -C {src_ws.workspace_path} .")
 
             with open(tmp_path, "wb") as f:
@@ -1054,7 +1058,7 @@ def copy_workspace(
                 )
 
             lg = SSHLogger(dest_vm.name, "workspace-copy")
-            dest_target = admin_exec_target(dest_vm, config, logger=lg)
+            dest_target = transport(dest_vm, config, logger=lg)
 
             workspace_path = f"{config.paths.vm_workspaces}/{dest_name}"
             ws_group = workspace_group(dest_name)

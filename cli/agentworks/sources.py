@@ -23,7 +23,8 @@ from typing import TYPE_CHECKING
 from agentworks.errors import ExternalError
 
 if TYPE_CHECKING:
-    from agentworks.ssh import ExecTarget, SSHLogger
+    from agentworks.ssh import SSHLogger
+    from agentworks.transports import Transport
 
 
 class SourceRefError(ExternalError):
@@ -125,7 +126,7 @@ def _extract_ref(query: str) -> str:
 
 def fetch_file(
     source: SourceRef,
-    target: ExecTarget,
+    target: Transport,
     dest: str,
     *,
     logger: SSHLogger | None = None,
@@ -148,7 +149,7 @@ def fetch_file(
 
 def _fetch_local(
     source: SourceRef,
-    target: ExecTarget,
+    target: Transport,
     dest: str,
     *,
     logger: SSHLogger | None = None,
@@ -165,7 +166,7 @@ def _fetch_local(
 
 def _fetch_git(
     source: SourceRef,
-    target: ExecTarget,
+    target: Transport,
     dest: str,
     *,
     logger: SSHLogger | None = None,
@@ -207,7 +208,7 @@ def _fetch_git(
 
 def fetch_dir(
     source: SourceRef,
-    target: ExecTarget,
+    target: Transport,
     dest: str,
     *,
     logger: SSHLogger | None = None,
@@ -235,7 +236,7 @@ def fetch_dir(
 
 def _fetch_local_dir(
     source: SourceRef,
-    target: ExecTarget,
+    target: Transport,
     dest: str,
     *,
     logger: SSHLogger | None = None,
@@ -260,7 +261,7 @@ def _fetch_local_dir(
 
 def _fetch_git_dir(
     source: SourceRef,
-    target: ExecTarget,
+    target: Transport,
     dest: str,
     *,
     logger: SSHLogger | None = None,

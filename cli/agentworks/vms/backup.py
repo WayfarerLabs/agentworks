@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 
     from agentworks.config import Config
     from agentworks.db import Database, WorkspaceRow
-    from agentworks.ssh import ExecTarget, SSHTarget
+    from agentworks.transports import SSHTransport, Transport
 
 
 def backup_vm(
@@ -31,7 +31,8 @@ def backup_vm(
 
     Returns the path to the backup archive.
     """
-    from agentworks.ssh import SSHError, SSHLogger, _unwrap_ssh, admin_exec_target
+    from agentworks.ssh import SSHError, SSHLogger
+    from agentworks.transports import SSHTransport, transport
     from agentworks.workspaces.manager import _ensure_vm_running
 
     vm = db.get_vm(vm_name)
@@ -59,7 +60,11 @@ def backup_vm(
 
         ssh_logger = SSHLogger(vm_name, "vm-backup")
         ssh_logger.path = backup_dir / "backup.log"
-        target = admin_exec_target(vm, config, logger=ssh_logger)
+        target = transport(vm, config, logger=ssh_logger)
+        # backup_vm runs over the admin Tailscale SSH transport, so this is
+        # always an SSHTransport. _archive_workspaces and _transfer_with_progress
+        # rely on SSH-specific scp argv building for progress reporting.
+        assert isinstance(target, SSHTransport)
 
         # Log the backup event
         db.insert_vm_event(vm_name, "backup_started")
@@ -138,7 +143,7 @@ def backup_vm(
             if workspaces:
                 local_archive = backup_dir / "workspaces.tar.zst"
                 archived_paths, skipped_paths = _archive_workspaces(
-                    target, _unwrap_ssh(target), workspaces, local_archive,
+                    target, workspaces, local_archive,
                 )
             else:
                 output.detail("No VM workspaces to archive.")
@@ -168,8 +173,7 @@ def backup_vm(
 
 
 def _archive_workspaces(
-    target: ExecTarget,
-    target_ssh: SSHTarget,
+    target: SSHTransport,
     vm_workspaces: list[WorkspaceRow],
     local_archive: Path,
 ) -> tuple[list[str], list[str]]:
@@ -230,13 +234,11 @@ def _archive_workspaces(
         q_paths_file = shlex.quote(paths_file)
         path_content = "\n".join(ws.workspace_path.lstrip("/") for ws in valid) + "\n"
 
-        from agentworks.ssh import write_file as ssh_write_file
-
         # Admin can't write to root-owned temp dir, so stage via a securely
         # created temp file (mktemp creates with mode 0600), then move as root.
         staging_paths = target.run("mktemp /tmp/_aw_paths_XXXXXX.txt").stdout.strip()
         q_staging = shlex.quote(staging_paths)
-        ssh_write_file(target_ssh, staging_paths, path_content)
+        target.write_file(staging_paths, path_content)
         target.run(f"mv {q_staging} {q_paths_file}", sudo=True)
 
         # Use run_detached in a background thread so we can poll archive size.
@@ -317,7 +319,7 @@ def _archive_workspaces(
 
         # Transfer to local. Chown the temp dir and archive to the admin
         # user so scp can read it (avoids making it world-readable).
-        admin = shlex.quote(target_ssh.user or "agentworks")
+        admin = shlex.quote(target.user or "agentworks")
         target.run(f"chown {admin} {q_tmp} {q_archive}", sudo=True)
 
         # Get remote archive size for progress reporting
@@ -325,7 +327,7 @@ def _archive_workspaces(
         remote_size = int(size_result.stdout.strip()) if size_result.ok else 0
 
         output.detail("Transferring remote archive to local...")
-        _transfer_with_progress(target_ssh, archive, local_archive, remote_size)
+        _transfer_with_progress(target, archive, local_archive, remote_size)
 
     except Exception:
         output.warn(f"Remote temp dir preserved for debugging: {tmp_dir}")
@@ -338,7 +340,7 @@ def _archive_workspaces(
 
 
 def _transfer_with_progress(
-    target_ssh: SSHTarget,
+    target: SSHTransport,
     remote_path: str,
     local_path: Path,
     remote_size: int,
@@ -346,15 +348,19 @@ def _transfer_with_progress(
     """Transfer a file via scp with progress reporting based on local file size.
 
     Uses Popen so the process can be terminated on Ctrl-C and the partially
-    downloaded file cleaned up.
+    downloaded file cleaned up. SSH-only because we bypass the polymorphic
+    ``copy_from`` to drive scp via ``Popen`` for the progress reporting.
     """
-    from agentworks.ssh import SSHError, scp_base_args
+    from agentworks.ssh import SSHError
 
-    args = scp_base_args(target_ssh)
-    if target_ssh.user:
-        src = f"{target_ssh.user}@{target_ssh.host}:{remote_path}"
-    else:
-        src = f"{target_ssh.host}:{remote_path}"
+    args = ["scp", "-q", "-o", "StrictHostKeyChecking=accept-new", "-o", "BatchMode=yes"]
+    if target.port is not None:
+        args.extend(["-P", str(target.port)])
+    if target.identity_file is not None:
+        args.extend(["-i", str(target.identity_file)])
+    if target.proxy_jump is not None:
+        args.extend(["-J", target.proxy_jump])
+    src = f"{target.user}@{target.host}:{remote_path}" if target.user else f"{target.host}:{remote_path}"
     args.append(src)
     args.append(str(local_path))
 
@@ -411,7 +417,7 @@ def _fmt_size(size_bytes: int) -> str:
     return f"{size_bytes} B"
 
 
-def _report_size(target: ExecTarget, remote_path: str) -> None:
+def _report_size(target: Transport, remote_path: str) -> None:
     """Print the size of a remote file."""
     try:
         result = target.run(f"stat -c %s {shlex.quote(remote_path)}", sudo=True, check=False)

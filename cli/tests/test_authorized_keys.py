@@ -110,7 +110,7 @@ def test_full_overwrite_semantics(tmp_path: Path) -> None:
 
 
 def _build_owner_target(staging_path: str = "/tmp/agw-ak.ABC123") -> MagicMock:
-    """ExecTarget mock whose mktemp returns a deterministic staging path."""
+    """``Transport`` mock whose mktemp returns a deterministic staging path."""
     target = MagicMock()
 
     def _run_side_effect(cmd: str, *_, **__) -> MagicMock:

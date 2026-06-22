@@ -195,7 +195,7 @@ def test_vm_active_waits_for_tailscale_when_host_known() -> None:
     fake_config = MagicMock()
     with (
         patch("agentworks.vms.provisioners.wsl2.subprocess.Popen", return_value=proc),
-        patch("agentworks.vms.provisioners.wsl2.admin_exec_target", return_value=fake_target) as build,
+        patch("agentworks.vms.provisioners.wsl2.transport", return_value=fake_target) as build,
         patch("agentworks.vms.provisioners.wsl2.wait_for_reconnect") as wait,
         _job_object_mocks(),
     ):
@@ -211,7 +211,7 @@ def test_vm_active_skips_tailscale_wait_when_host_unknown() -> None:
     proc = _running_proc()
     with (
         patch("agentworks.vms.provisioners.wsl2.subprocess.Popen", return_value=proc),
-        patch("agentworks.vms.provisioners.wsl2.admin_exec_target") as build,
+        patch("agentworks.vms.provisioners.wsl2.transport") as build,
         patch("agentworks.vms.provisioners.wsl2.wait_for_reconnect") as wait,
         _job_object_mocks(),
     ):
@@ -226,7 +226,7 @@ def test_vm_active_skips_tailscale_wait_when_config_missing() -> None:
     proc = _running_proc()
     with (
         patch("agentworks.vms.provisioners.wsl2.subprocess.Popen", return_value=proc),
-        patch("agentworks.vms.provisioners.wsl2.admin_exec_target") as build,
+        patch("agentworks.vms.provisioners.wsl2.transport") as build,
         patch("agentworks.vms.provisioners.wsl2.wait_for_reconnect") as wait,
         _job_object_mocks(),
     ):
@@ -331,7 +331,7 @@ def test_base_provisioner_vm_active_is_nullcontext() -> None:
         def status(self, vm: Any) -> Any:
             raise NotImplementedError
 
-        def admin_exec_target(self, vm: Any, *, config: object | None = None) -> Any:
+        def provisioner_transport(self, vm: Any, *, config: object | None = None) -> Any:
             raise NotImplementedError
 
     # Patch Popen at the wsl2 module level; the base default must NOT touch it.

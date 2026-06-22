@@ -11,9 +11,9 @@ from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.db import VMStatus
-from agentworks.ssh import ExecTarget, SSHError, SSHTarget, copy_to
+from agentworks.ssh import SSHError, SSHTarget, copy_to
 from agentworks.ssh import run as ssh_run
-from agentworks.transports import LimaTransport, RemoteLimaTransport
+from agentworks.transports import LimaTransport, RemoteLimaTransport, SSHTransport
 from agentworks.vms.base import ProvisionResult, VMProvisioner
 from agentworks.vms.bootstrap_script import generate_bootstrap_script, parse_bootstrap_output, vm_hostname
 from agentworks.vms.cloud_init import PROVISIONING_PACKAGES
@@ -212,11 +212,10 @@ class LimaProvisioner(VMProvisioner):
         from agentworks.ssh import SSHLogger
 
         ssh_logger = SSHLogger(vm_name, "vm-provision")
-        # ExecTarget is the legacy shape; Phase 3 of the polymorphic-transports
-        # refactor migrates ``run_detached`` to take a ``Transport`` and this
-        # site moves with it. Until then, the local ExecTarget is fine.
-        host_target = ExecTarget(
-            ssh=SSHTarget(host=self._vm_host_ssh, user=None, login_shell=True),
+        host_target = SSHTransport(
+            host=self._vm_host_ssh,
+            user=None,
+            login_shell=True,
             logger=ssh_logger,
         )
         lima_cmd = f"limactl create --name {vm_name} --tty=false {remote_template} && limactl start {vm_name}"
