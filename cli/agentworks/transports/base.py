@@ -73,7 +73,12 @@ class Transport(abc.ABC):
         *,
         timeout: int | None = None,
     ) -> None:
-        """Copy a local file to the remote path on the VM."""
+        """Copy a local file to the remote path on the VM.
+
+        ``timeout`` is best-effort: SSH honors it; transports whose
+        underlying CLI (limactl copy, wsl.exe) doesn't accept a timeout
+        silently drop it.
+        """
 
     @abc.abstractmethod
     def copy_from(
@@ -87,7 +92,10 @@ class Transport(abc.ABC):
 
         SSH uses scp; Lima uses ``limactl copy`` (reverse); WSL2 uses
         ``wsl ... cat`` to stdout; RemoteLima two-hops through the VM
-        host. ``backup.py`` is the canonical consumer.
+        host. ``backup.py`` is the canonical consumer. ``timeout`` is
+        best-effort: SSH honors it; transports whose underlying CLI
+        (limactl copy, wsl.exe) doesn't accept a timeout silently drop
+        it.
         """
 
     @abc.abstractmethod

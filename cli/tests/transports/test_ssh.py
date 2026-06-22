@@ -137,6 +137,30 @@ def test_run_per_call_timeout_overrides_default() -> None:
         assert mock_run.call_args.kwargs["timeout"] == 5
 
 
+def test_run_per_call_retries_overrides_constructor() -> None:
+    """Per-call ``retries`` widens the timeout-retry budget for one-shot
+    probes (live-resource checks, reconnect polls) without rebuilding
+    the transport. Constructor default stays the everyday norm.
+    """
+    import subprocess as _subprocess
+
+    t = SSHTransport(host="vm1", user="agentworks", retries=1)
+    call_count = 0
+
+    def raise_timeout(*_a: object, **_kw: object) -> MagicMock:
+        nonlocal call_count
+        call_count += 1
+        raise _subprocess.TimeoutExpired(cmd=["ssh"], timeout=1)
+
+    with (
+        patch("agentworks.transports.ssh.subprocess.run", side_effect=raise_timeout),
+        pytest.raises(SSHError),
+    ):
+        t.run("echo hi", retries=3)
+
+    assert call_count == 3
+
+
 # ---------------------------------------------------------------------------
 # interactive()
 # ---------------------------------------------------------------------------

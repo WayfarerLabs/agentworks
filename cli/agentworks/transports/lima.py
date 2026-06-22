@@ -16,21 +16,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from agentworks.ssh import SSHError, SSHResult
+from agentworks.transports._shared import env_assignment_prefix
 from agentworks.transports.base import Transport
 
 if TYPE_CHECKING:
     from agentworks.ssh import SSHLogger
-
-
-def _env_assignment_prefix(env: dict[str, str] | None) -> str:
-    """Return ``K1=v1 K2=v2 `` (trailing space) for ``env`` or empty string.
-
-    Used as a prefix on the bash payload (interpreted as scoped env
-    assignments) since ``limactl shell`` doesn't expose env injection.
-    """
-    if not env:
-        return ""
-    return "".join(f"{k}={shlex.quote(v)} " for k, v in env.items())
 
 
 class LimaTransport(Transport):
@@ -67,7 +57,7 @@ class LimaTransport(Transport):
         """
         if sudo:
             command = f"sudo -n bash -c {shlex.quote(command)}"
-        env_prefix = _env_assignment_prefix(env)
+        env_prefix = env_assignment_prefix(env)
         args = ["limactl", "shell", self.vm_name, "bash", "-lc", f"{env_prefix}{command}"]
         t = self._resolve_timeout(timeout)
         try:
@@ -214,6 +204,6 @@ class LimaTransport(Transport):
         env: dict[str, str] | None = None,
     ) -> int:
         """Run ``command`` inside the Lima VM with inherited stdio."""
-        env_prefix = _env_assignment_prefix(env)
+        env_prefix = env_assignment_prefix(env)
         args = ["limactl", "shell", self.vm_name, "bash", "-lc", f"{env_prefix}{command}"]
         return subprocess.call(args)

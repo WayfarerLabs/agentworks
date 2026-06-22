@@ -13,22 +13,17 @@ import shlex
 import subprocess
 import tarfile
 import tempfile
+import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from agentworks.ssh import SSHError, SSHResult
+from agentworks.transports._shared import env_assignment_prefix
 from agentworks.transports.base import Transport
 from agentworks.transports.ssh import SSHTransport
 
 if TYPE_CHECKING:
     from agentworks.ssh import SSHLogger
-
-
-def _env_assignment_prefix(env: dict[str, str] | None) -> str:
-    """``K1=v1 K2=v2 `` (trailing space) for ``env``, else empty."""
-    if not env:
-        return ""
-    return "".join(f"{k}={shlex.quote(v)} " for k, v in env.items())
 
 
 class RemoteLimaTransport(Transport):
@@ -81,7 +76,7 @@ class RemoteLimaTransport(Transport):
         del tty  # tty doesn't apply to non-interactive remote_lima
         if sudo:
             command = f"sudo -n bash -c {shlex.quote(command)}"
-        env_prefix = _env_assignment_prefix(env)
+        env_prefix = env_assignment_prefix(env)
         lima_cmd = f"limactl shell {self.vm_name} -- {env_prefix}{command}"
         host = self._host_transport()
         return host.run(lima_cmd, check=check, timeout=timeout)
@@ -108,9 +103,14 @@ class RemoteLimaTransport(Transport):
         *,
         timeout: int | None = None,
     ) -> None:
-        """Copy via scp-to-host then ``limactl copy`` host -> VM."""
+        """Copy via scp-to-host then ``limactl copy`` host -> VM.
+
+        ``host_tmp`` carries a UUID so concurrent copies of files that
+        share a basename, or a stale tmp from a crashed prior run, don't
+        collide.
+        """
         host = self._host_transport(login_shell=False)
-        host_tmp = f"/tmp/agentworks-{Path(local_path).name}"
+        host_tmp = f"/tmp/agentworks-{uuid.uuid4()}-{Path(local_path).name}"
         host.copy_to(local_path, host_tmp, timeout=timeout)
         host_login = self._host_transport()
         host_login.run(f"limactl copy {host_tmp} {self.vm_name}:{remote_path}", timeout=timeout)
@@ -123,9 +123,12 @@ class RemoteLimaTransport(Transport):
         *,
         timeout: int | None = None,
     ) -> None:
-        """Copy via ``limactl copy`` VM -> host, then scp host -> local."""
+        """Copy via ``limactl copy`` VM -> host, then scp host -> local.
+
+        ``host_tmp`` carries a UUID; see ``copy_to`` for rationale.
+        """
         host_login = self._host_transport()
-        host_tmp = f"/tmp/agentworks-{Path(remote_path).name}"
+        host_tmp = f"/tmp/agentworks-{uuid.uuid4()}-{Path(remote_path).name}"
         host_login.run(f"limactl copy {self.vm_name}:{remote_path} {host_tmp}", timeout=timeout)
         host = self._host_transport(login_shell=False)
         try:
@@ -193,7 +196,7 @@ class RemoteLimaTransport(Transport):
         env: dict[str, str] | None = None,
     ) -> int:
         """Stream a remote command via SSH-to-host + ``limactl shell``."""
-        env_prefix = _env_assignment_prefix(env)
+        env_prefix = env_assignment_prefix(env)
         lima_cmd = f"limactl shell {self.vm_name} -- {env_prefix}{command}"
         wrapped = f"$SHELL -lc {shlex.quote(lima_cmd)}"
         args = ["ssh", "-T", "-o", "StrictHostKeyChecking=accept-new", "-o", "BatchMode=yes", self.vm_host_ssh, wrapped]

@@ -60,3 +60,20 @@ def test_concrete_transports_implement_abc(transport_cls: type[Transport]) -> No
     # Concrete classes must not have any leftover abstract methods.
     leftover: frozenset[str] = getattr(transport_cls, "__abstractmethods__", frozenset())
     assert leftover == frozenset(), f"{transport_cls.__name__} missing: {leftover}"
+
+
+def test_incomplete_subclass_cannot_be_instantiated() -> None:
+    """A subclass that doesn't implement every abstract method raises
+    ``TypeError`` at construction. Locks in the ABC contract itself, so
+    a future regression that turns ``abc.ABC`` into a ``Protocol`` or
+    drops an ``@abstractmethod`` fails loudly rather than silently
+    letting incomplete classes through.
+    """
+
+    class BrokenTransport(Transport):
+        # Implements run() but is missing the other six abstract methods.
+        def run(self, command, *, sudo=False, tty=None, check=True, timeout=None, env=None):  # type: ignore[no-untyped-def] # noqa: ANN001, ANN201
+            raise NotImplementedError
+
+    with pytest.raises(TypeError):
+        BrokenTransport()  # type: ignore[abstract]

@@ -147,16 +147,25 @@ class SSHTransport(Transport):
         check: bool = True,
         timeout: int | None = None,
         env: dict[str, str] | None = None,
+        retries: int | None = None,
         on_retry: Callable[[int, int], None] | None = None,
     ) -> SSHResult:
         """Run ``command`` over SSH.
 
-        Retries on connection-level timeouts (configurable via the
-        constructor's ``retries``); remote-command failures do not
-        retry. ``sudo=True`` wraps in ``sudo -n bash -c '<command>'``;
-        ``login_shell=True`` on this transport wraps in
-        ``$SHELL -lc '<command>'`` (applied after the sudo wrap if
-        both are set).
+        Retries on connection-level timeouts; remote-command failures do
+        not retry. ``retries=None`` uses ``self.retries``; pass a per-call
+        budget for one-off probes that need a wider window (live-resource
+        probes, reconnect checks, etc.). ``sudo=True`` wraps in
+        ``sudo -n bash -c '<command>'``; ``login_shell=True`` on this
+        transport wraps in ``$SHELL -lc '<command>'`` (applied after the
+        sudo wrap if both are set).
+
+        ``retries`` and ``on_retry`` are SSH-only extensions and are not
+        part of the ``Transport`` ABC. Lima / WSL2 / RemoteLima do not
+        retry on timeout, so neither parameter has anything to bind to
+        there. May be hoisted in Phase 3 if a polymorphic caller needs
+        it; for now callers that need them type-narrow to
+        ``SSHTransport``.
         """
         if sudo:
             command = f"sudo -n bash -c {shlex.quote(command)}"
@@ -168,10 +177,11 @@ class SSHTransport(Transport):
             args.append(command)
 
         t = self._resolve_timeout(timeout)
+        attempts = retries if retries is not None else self.retries
         last_err: Exception | None = None
-        for attempt in range(self.retries):
+        for attempt in range(attempts):
             if attempt > 0 and on_retry is not None:
-                on_retry(attempt, self.retries)
+                on_retry(attempt, attempts)
             try:
                 result = subprocess.run(
                     args,
@@ -184,7 +194,7 @@ class SSHTransport(Transport):
             except subprocess.TimeoutExpired as err:
                 last_err = err
                 if self.logger is not None:
-                    self.logger.log_timeout(command, attempt + 1, self.retries)
+                    self.logger.log_timeout(command, attempt + 1, attempts)
                 continue
             ssh_result = SSHResult(
                 returncode=result.returncode,
@@ -200,7 +210,7 @@ class SSHTransport(Transport):
                 )
             return ssh_result
 
-        msg = f"SSH command timed out after {self.retries} attempts ({t}s each): {command}"
+        msg = f"SSH command timed out after {attempts} attempts ({t}s each): {command}"
         if self.logger is not None:
             self.logger.log_error(msg)
         raise SSHError(msg) from last_err
