@@ -77,33 +77,49 @@ Why a new package rather than extending `agentworks.registry`: the framework has
 makes the validation pass a self-contained step the loader invokes, mirrors how `agentworks.env` and
 `agentworks.secrets` extracted env/secret concerns from the loader, and keeps `registry.py` thin.
 
-(Note: `agentworks.config.Config` and `agentworks/config.py` are renamed to
-`agentworks.registry.Registry` and `agentworks/registry.py` as part of this work. The class name
-matches its role as a typed, queryable resource store; "config" referred to the source of the data
-(operator-typed TOML), but the framework makes the registry role more prominent. Nested sub-types
-like `AdminConfig`, `SecretConfig`, `SecretBackendConfig` keep their names -- they describe specific
-configuration of subsystems, distinct from the top-level resource container.)
+The `kinds/` subdirectory is slightly over-structured for Phase 1's single kind (`secret.py`) but
+right-sized for Phase 2's four to six kinds. Starting with the subdirectory avoids a churn-rename
+later.
+
+## Naming
+
+The top-level container is the **`Registry`**; the previous `Config` name described the _source_
+(operator-typed TOML), but the framework makes the _role_ (typed, queryable resource store) more
+prominent. Concrete renames:
+
+- `agentworks.config.Config` -> `agentworks.registry.Registry`
+- `agentworks/config.py` -> `agentworks/registry.py`
+- `load_config()` -> `load_registry()`
+
+Nested sub-types keep their `*Config` names because they describe configuration of a subsystem, not
+the registry's role: `AdminConfig` (admin user settings), `SecretConfig` (active backend chain),
+`SecretBackendConfig` (per-backend connection config). TOML paths follow the same rule:
+`[admin.config]` and `[secret_config]` remain operator-facing.
 
 ## Core types
 
 ### `ResourceRequirement`
 
-The structural protocol:
+A base immutable dataclass with kind-specific concrete subclasses. Producers (`required_resources()`
+on each source type) return concrete subclasses (`SecretRequirement`, `TemplateRequirement`, ...);
+the framework consumes them through the base class. Fields on the base:
 
 - `name: str` -- target resource name (operator-overridable or fixed per the source's field).
-- `kind: str` -- target resource kind. The string identifier (`"secret"`, `"vm_template"`, ...);
-  matches the `ResourceKind.kind` attribute. Used as the dispatch key during the validation pass.
+- `kind: str` -- target resource kind identifier (`"secret"`, `"vm_template"`, ...). The same kind
+  strings appear throughout the framework: `KIND_REGISTRY` keys, `Origin.source[0]`, error message
+  kind labels. One canonical set.
 - `usage: str` -- system-defined role per the FRD's sentence template. Frozen at requirement
   construction time.
 - `source: tuple[str, str]` -- `(kind, name)` of the declaring resource. The `kind` matches the
   declaring resource's kind (`"vm_template"` for `vm_templates.azure-prod`, `"git_credentials"` for
   `git_credentials.github-prod`); the `name` is the declaring resource's name.
-- Kind-specific extras: subclasses (`SecretRequirement`, `TemplateRequirement`, ...) carry
-  additional fields the registry's auto-declare logic may use. Phase 1 has no `SecretRequirement`
-  extras; the slot is reserved for Phase 2 kinds.
 
-Stored as immutable dataclasses. Producers (the `required_resources()` method on each source type)
-emit a flat list per call; the framework concatenates the lists.
+Concrete subclasses add kind-specific fields the registry's auto-declare logic may use. Phase 1's
+`SecretRequirement` adds none; the subclass exists so producers and the framework agree on the
+target kind without dispatch on the `kind` string. Phase 2 subclasses (`TemplateRequirement`, etc.)
+carry per-kind defaults.
+
+Producers emit a flat list per call; the framework concatenates the lists.
 
 ### `ResourceKind`
 
@@ -116,19 +132,18 @@ validation pass consults:
 - `auto_declare_names: AbstractSet[str] | None` -- when `miss_policy == "auto-declare"`, the set of
   names the kind accepts. `None` means "any name" (secrets). `{"default"}` means "only the reserved
   name `default`" (templates).
-- `synthesize(requirement) -> Resource` -- called when a missing name is being auto-declared.
-  Produces the resource instance with whatever defaults the kind wants (empty backend_mappings for
-  secrets, the kind's code-defined defaults for templates, ...). Receives the first matching
-  requirement.
-- `merge_operator(operator_resource, requirement) -> Resource` -- called when both an
+- `synthesize(requirements) -> Resource` -- called when a missing name is being auto-declared.
+  Receives the full list of matching requirements (in config-load order). Produces the resource
+  instance with whatever defaults the kind wants (empty `backend_mappings` for secrets, the kind's
+  code-defined defaults for templates, ...).
+- `merge_operator(operator_resource, requirements) -> Resource` -- called when both an
   operator-declared resource and one or more requirements exist for the same name. Implements
   per-field merge (R3): operator fields win; unspecified fields fall back to what `synthesize` would
   have produced; the `usage` list accumulates across all matching requirements.
 
-The `kind.py` module exports a registry-of-kinds dict that maps `kind` strings to `ResourceKind`
-instances. Phase 1 ships `SecretKind` (and stub registrations for the other kinds whose Phase 2
-behavior is "use existing bespoke validation; framework dispatch is a passthrough" so that the
-dispatch table is complete).
+The `kind.py` module exports a `KIND_REGISTRY` dict mapping `kind` strings to `ResourceKind`
+instances. Kinds are registered as they migrate: Phase 1 registers only `SecretKind`; other kinds
+keep their existing bespoke validation until Phase 2 brings them into the framework.
 
 ### `Origin`
 
@@ -143,8 +158,9 @@ Carried on every resource. One dataclass with a variant tag:
 Set once when the resource is added to the registry; never mutated afterwards.
 
 The loader is responsible for capturing `file` / `line` during TOML parsing. Python's stdlib
-`tomllib` does not expose line info; the implementation either switches to `tomlkit` (which does) or
-uses `tomli`-w-positions equivalent. This is an HLA-level decision; LLD picks the exact library.
+`tomllib` does not expose line info, so the loader switches to **`tomlkit`** (actively maintained,
+line info exposed via the `as_string()` / item position APIs). The existing parsing surface in
+`registry.py` doesn't change shape; only the parse step swaps libraries.
 
 ## Validation pass
 
@@ -245,7 +261,9 @@ framework's validation pass directly. This keeps kind-specific field knowledge i
 - `hint = None`
 - `backend_mappings = {}` (empty; the framework's default per-backend conventions (e.g.,
   `AW_SECRET_<NAME>`) apply at resolution time)
-- `usage = [req.usage for req in requirements]` (deduplicated for display)
+- `usage = [req.usage for req in requirements]` (stored verbatim, including duplicates;
+  deduplication happens at render time in `agw secret describe` so the underlying provenance --
+  which requirement contributed which usage -- is preserved)
 - `origin = Origin(variant="auto-declared", ...)` carrying `requirements[0].source` and the full
   `all_sources` list
 
@@ -305,7 +323,10 @@ migration hook. This SDD wires it up.
 
 ### Transitive walk
 
-A small helper in `resources/__init__.py`:
+A small helper in `resources/__init__.py`. Phase 1 ships the secret-specific form below; the
+underlying walk is kind-agnostic (DFS over `required_resources()`, dedupe by `(kind, name)`), so
+Phase 2 can add sibling helpers (or a generic `collect_resources_for(..., target_kind=...)`)
+trivially. Choosing the more specific surface for Phase 1 keeps the call-site API obvious.
 
 ```python
 def collect_secrets_for(
@@ -350,12 +371,18 @@ def _install_tailscale(ts_target, ..., *, auth_key: str) -> None:
 No `env=` injection; no profile fragment writes for these values. Hermetic provisioning contract
 from the env-and-secrets SDD is preserved end-to-end.
 
+Resolved values live in the manager's local scope for the duration of the command. No caching or
+persistence across commands; the next invocation re-resolves through the backend chain. This matches
+the env-and-secrets SDD's "values never persisted by agentworks" guarantee.
+
 ## CLI surfaces
 
 ### Phase 1: `agw secret describe`
 
-New command. Service-layer logic in `agentworks.secrets` (or a thin `agentworks.resources.cli`
-shim); CLI layer in `cli/agentworks/cli/secret/describe.py` following the existing pattern.
+New command added to the existing `cli/agentworks/cli/commands/secret.py` (which already hosts
+`agw secret list` from the env-and-secrets SDD). Service-layer logic lives in `agentworks.secrets`,
+alongside the existing list-formatting helpers. No new shim package; the CLI module imports the
+service-layer function directly.
 
 Output sections (per FRD R9):
 
@@ -379,7 +406,9 @@ agw resource list [--kind <kind1,kind2,...>] [--origin operator|auto]
 agw resource describe <kind> <name>
 ```
 
-Two-positional describe (kind + name) because names are unique only within a kind.
+Two-positional describe (kind + name) because names are unique only within a kind (FRD R11). The
+usual CLI convention has a single positional name with context flags; the two-positional shape is a
+deliberate carve-out for this command.
 
 ## Tailscale and git-credential migration shapes
 
@@ -458,7 +487,8 @@ The plan will phase the work; the full design above is the target. Anticipated s
 2. **Phase 1b: Env-block migration.** `EnvEntry`'s secret-ref form emits `SecretRequirement` via
    `required_resources()`. Validation pass auto-declares missing secrets. Existing strict "must
    declare" error behavior is removed; doctor surfaces auto-declared secrets so the visibility
-   intent is preserved.
+   intent is preserved. **Lands before Tailscale/git-creds** so the framework has a real producer of
+   `SecretRequirement` exercised end-to-end before the system-secret migrations build on it.
 3. **Phase 1c: Tailscale migration.** VM template schema gains `tailscale_auth_key`. Manager-entry
    at `vm create` / `vm reinit` walks the subgraph, resolves via the orchestrator, threads the value
    as a kwarg. Legacy resolution path removed.
@@ -469,7 +499,8 @@ The plan will phase the work; the full design above is the target. Anticipated s
 6. **Phase 2a: Template kinds.** `VMTemplateKind`, `WorkspaceTemplateKind`, `AgentTemplateKind`,
    `SessionTemplateKind` implementations. Inheritance moves into the framework. Built-in defaults
    migrate from the existing resolver fallback into `synthesize()`. Per-field merge from the
-   framework replaces the existing inheritance-resolver code.
+   framework replaces the existing inheritance-resolver code. **Operator-facing behavior is
+   unchanged** (per FRD R11); error messages get the framework's consistent shape.
 7. **Phase 2b: Catalog and provider kinds.** `CatalogKind`, `GitCredentialProviderKind`,
    `SecretBackendKindKind` (yes, the redundant name -- a kind named `secret_backend_kind`). Existing
    bespoke validation removed in favor of framework dispatch.
@@ -505,12 +536,12 @@ implementation registered in a `KIND_REGISTRY` dict. Adding a new kind is one ne
 - Plugins / entrypoints for kinds. Rejected as premature -- agentworks doesn't have a plugin system
   yet; the dict can become a plugin registry later without changing the protocol.
 
-### `tomlkit` (or equivalent) for line tracking
+### `tomlkit` for line tracking
 
-Python's stdlib `tomllib` does not expose line numbers. The framework needs `(file, line)` for
-operator-declared origin. The LLD will pin the exact library; `tomlkit` is the strong candidate
-(actively maintained, line info exposed). Switching the loader is mechanical; the parsing surface in
-`registry.py` doesn't change shape.
+The framework's `operator-declared` origin variant carries `(file, line)`, and the stdlib `tomllib`
+does not expose line info. The loader switches to `tomlkit`, which exposes positions via its item
+API and is actively maintained. Mechanical change to the parse step; rest of `registry.py` doesn't
+change shape.
 
 ### Origin is set once
 
@@ -551,9 +582,17 @@ per-type resolver shrinks to a thin shim over `KIND_REGISTRY["vm_template"].merg
 
 ### `git_credentials` legacy
 
-`agentworks.git_credentials.base.obtain_token` is removed in Phase 1d. Providers (`github.py`,
-`azdo.py`) keep their `credential_lines(token=...)` formatting methods; the token comes from the
-resolver. The `git_credentials` package shrinks but doesn't disappear.
+`agentworks.git_credentials.base.obtain_token` is removed in Phase 1d (the token now comes from the
+resolver). The `git_credentials` package keeps:
+
+- Provider classes (`github.py`, `azdo.py`) and their `credential_lines(token=...)` formatting
+  methods that produce the `https://x-access-token:<token>@github.com` lines written to
+  `~/.git-credentials`.
+- The `GitCredentialProvider` base class and the provider-name -> class registry that maps the
+  `type` field on a `[git_credentials.<name>]` entry to an implementation.
+
+Phase 2b folds the provider-name registry into the framework's `GitCredentialProviderKind`;
+formatting stays per-provider.
 
 ### DB schema impact
 
@@ -561,7 +600,6 @@ None. The registry is config-load state, not DB state.
 
 ## Open questions / for LLD
 
-- **Library for TOML line tracking**: `tomlkit` vs. alternatives. LLD decides.
 - **Per-kind error message templates**: format strings live in each kind's module; LLD lays out the
   exact strings.
 - **Phase 2 default-template `synthesize()` source-of-truth**: the existing built-in defaults live
