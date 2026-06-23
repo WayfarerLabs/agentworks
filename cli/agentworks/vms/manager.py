@@ -1085,9 +1085,9 @@ def _tailscale_logout(db: Database, vm: VMRow, config: Config) -> None:
     """Best-effort: deregister from Tailscale via the provisioning transport.
 
     Uses ``provisioner_transport(db, vm, config, stack=...)`` so the
-    Azure attach/detach lifecycle (and the reachability probe) are
-    composed polymorphically. Proxmox surfaces a typed StateError out
-    of the factory; we catch that and warn.
+    Azure attach/detach lifecycle and the reachability probe are
+    composed polymorphically. Platforms whose factory raises (Proxmox)
+    are surfaced as a typed StateError, which we catch and warn.
     """
     from agentworks.transports import provisioner_transport
 
@@ -1416,7 +1416,7 @@ def _ensure_tailscale(
     vm: VMRow,
 ) -> None:
     """After starting a VM, verify Tailscale connectivity and rejoin if needed."""
-    from agentworks.transports import transport, wait_for_reconnect
+    from agentworks.transports import provisioner_transport, transport, wait_for_reconnect
 
     # Refresh VM row in case tailscale_host was cleared on stop
     vm = _require_vm(db, vm.name)
@@ -1435,8 +1435,6 @@ def _ensure_tailscale(
     # transient_route polymorphism with the reachability probe. Other
     # platforms have a nullcontext transient_route and just build the
     # native transport.
-    from agentworks.transports import provisioner_transport
-
     with contextlib.ExitStack() as _stack:
         verify_tailscale_available()
         exec_target = provisioner_transport(db, vm, config, stack=_stack)
