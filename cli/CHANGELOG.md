@@ -1,5 +1,87 @@
 # Changelog
 
+## [0.7.0](https://github.com/WayfarerLabs/agentworks/compare/v0.6.0...v0.7.0) (2026-06-23)
+
+
+### Features
+
+* **agents:** agent shell uses direct agent SSH ([edccd6f](https://github.com/WayfarerLabs/agentworks/commit/edccd6f4a66700afa372210b30eceb676cac16af))
+* **agents:** authorized_keys + operator ssh config for agent users ([7991dc3](https://github.com/WayfarerLabs/agentworks/commit/7991dc37186c59542f8e18367831b7b9878ed13d))
+* **agents:** typed error on pre-rollout agent SSH + reviewer cleanups ([edc5552](https://github.com/WayfarerLabs/agentworks/commit/edc555233acf30d10b8a98075db4f5c1c065cbc8))
+* **cli:** AW_-prefixed env vars with legacy fallback ([ceb9e05](https://github.com/WayfarerLabs/agentworks/commit/ceb9e057f48eca5b230618d768aee0e777cb1636))
+* **cli:** AW_-prefixed env vars with legacy fallback ([62617b9](https://github.com/WayfarerLabs/agentworks/commit/62617b97e5951fa91e89a718cad5babc8ea872d4))
+* **doctor:** Secrets and Env health groups (Phase 5 - FRD R6) ([8a6dbf7](https://github.com/WayfarerLabs/agentworks/commit/8a6dbf750e8c628997a723168ab706d6eb668f45))
+* **doctor:** summary row for configured secret backends ([0dd4fe9](https://github.com/WayfarerLabs/agentworks/commit/0dd4fe9fdb4faa5fde7ebfcd379ee3dda71f3ae8))
+* **env:** `agw env show` command (Phase 5) ([06f25b6](https://github.com/WayfarerLabs/agentworks/commit/06f25b6505c96d30cdc7a2ec2cf7ef7ee4a97860))
+* **env:** env package + secrets config loaders (Phase 2) ([9c61284](https://github.com/WayfarerLabs/agentworks/commit/9c61284a5efc89c2b751a1de9e4ea182ecc83a5b))
+* **env:** env vars + pluggable secret backends (env-and-secrets SDD) ([fa67409](https://github.com/WayfarerLabs/agentworks/commit/fa67409b2ec7fa48807bffcfa9987dda057141a5))
+* **env:** wire env+secrets prelude into session create/restart (Phase 3) ([91f32db](https://github.com/WayfarerLabs/agentworks/commit/91f32dbcf0e758f645e026da7cbb345e014b8614))
+* **provisioning:** defensive 'ensure agentworks files sourced' step ([29128aa](https://github.com/WayfarerLabs/agentworks/commit/29128aa862bf88d1ac73ed63cccfd3737779eeb8))
+* **secrets:** add agw secret list for backend mapping discovery ([048f189](https://github.com/WayfarerLabs/agentworks/commit/048f189e6474a7c9eaf2c4b51f0f6ba0f1779dce))
+* **secrets:** add SecretMappingError for hard-miss backends ([29823e7](https://github.com/WayfarerLabs/agentworks/commit/29823e75234a05c548bcdd4a1cd14f9c3bf6c851))
+* **secrets:** eager-prompting orchestration module (Phase 6.1) ([4d28390](https://github.com/WayfarerLabs/agentworks/commit/4d28390a94163083e483d073162554969cdb67c9))
+* **secrets:** eager-resolve + env threading in vm/agent shell+exec (Phase 6.5) ([423512f](https://github.com/WayfarerLabs/agentworks/commit/423512f3c49634c723bb19473303426ded49aeb6))
+* **secrets:** eager-resolve in agent create/reinit (Phase 6.4) ([691d7bd](https://github.com/WayfarerLabs/agentworks/commit/691d7bd24092ad44a48464e47f4e51865b500fce))
+* **secrets:** eager-resolve in console build + restore_session (Phase 6.2b) ([e0690ca](https://github.com/WayfarerLabs/agentworks/commit/e0690ca6e65a904b8d953392a6d357fdb4b92580))
+* **secrets:** eager-resolve in session + console paths (Phase 6.2) ([ae6e68d](https://github.com/WayfarerLabs/agentworks/commit/ae6e68d2e72f31293edd19317c4b1158a14b62f4))
+* **secrets:** eager-resolve in vm create/reinit (Phase 6.3) ([41a9d43](https://github.com/WayfarerLabs/agentworks/commit/41a9d435e90b8c57048b485f00dd521ae98344a3))
+* **secrets:** Phase 1 - secrets package foundations ([1a79952](https://github.com/WayfarerLabs/agentworks/commit/1a799521c75fc40b990f825381eec0cbc595ecf6))
+* **secrets:** thread env through agent setup runners (Phase 6.4b) ([e92bb4b](https://github.com/WayfarerLabs/agentworks/commit/e92bb4bb76ac9161e3d59224377d68f4ad337fac))
+* **secrets:** thread env through vm provisioning runners (Phase 6.3b) ([0e2ef33](https://github.com/WayfarerLabs/agentworks/commit/0e2ef334c4ca612c313a360ed830583b77c26fca))
+* **sessions:** create agent-mode tmux sessions via direct agent SSH ([389141f](https://github.com/WayfarerLabs/agentworks/commit/389141f5f5a14549b7db8541a1f33144a0fe97ca))
+* **ssh:** add agent_exec_target ExecTarget builder ([8452262](https://github.com/WayfarerLabs/agentworks/commit/8452262e0c985301a81dc12574cb165d2d3ba135))
+* **vm:** expose provisioner shell via 'vm shell --provisioner' ([f2ee07f](https://github.com/WayfarerLabs/agentworks/commit/f2ee07f9b91fb2a2e3d18726f0ead6963552261e))
+* **vms:** apply VM hardening at vm create + vm reinit ([81b6dcf](https://github.com/WayfarerLabs/agentworks/commit/81b6dcf235e382b6b6ce4ce2b91994d8c1ee28a5))
+* **vms:** deploy VM-side env-and-secrets fragments (Phase 4) ([61238b0](https://github.com/WayfarerLabs/agentworks/commit/61238b01e2d6c32be205064e1c90d815d8335a1b))
+* **vms:** detect tailscaled DNS latch and abort phase B with heal hint ([3b289c8](https://github.com/WayfarerLabs/agentworks/commit/3b289c8287a6782dafe083c2b77dc0457fb5ea8f))
+
+
+### Bug Fixes
+
+* **agents:** always write the agent's ~/.agentworks-rc.sh ([4c8f602](https://github.com/WayfarerLabs/agentworks/commit/4c8f602c8b3d81f7bab0bb89489142928a54c01a))
+* **agents:** always write the agent's ~/.agentworks-rc.sh ([0f10e9c](https://github.com/WayfarerLabs/agentworks/commit/0f10e9c6e2c938db5d2d6f838060f51e586e1a9b))
+* **agents:** stop overwriting ~/.zshrc with a hardcoded PS1 ([c79a916](https://github.com/WayfarerLabs/agentworks/commit/c79a91623ad9ff2efc42d9b3ddf26c78022d3e71))
+* **agents:** wrap claude/dotfiles commands in login shell for agent PATH ([0fa1cd5](https://github.com/WayfarerLabs/agentworks/commit/0fa1cd55fc756a27aee7cb77edbceeaaf617a50f))
+* **agents:** wrap mise install/prune in login shell too ([aace97d](https://github.com/WayfarerLabs/agentworks/commit/aace97d2775d12afb8dd1690e5f191be7d059f10))
+* **doctor:** simplify secret preview, honor prompt opt-out ([ba1f583](https://github.com/WayfarerLabs/agentworks/commit/ba1f5837e76cd85113ba9acb61ab4ac2777dc5a6))
+* **env:** doctor.py legacy-aware credential check + both-set note + removal-timeline doc ([101c645](https://github.com/WayfarerLabs/agentworks/commit/101c6450039e56f685bc5023163d03329dce5664))
+* **initializer:** identity-profile zsh mirror on fresh VMs ([c0cbd27](https://github.com/WayfarerLabs/agentworks/commit/c0cbd278588538dfedec0deb1561a6325cca4b6e))
+* **logging:** route operation tracebacks to the per-op log ([bb7ea7e](https://github.com/WayfarerLabs/agentworks/commit/bb7ea7e3f2472f6a268bc77cb0b7f1aaf5c0ce87))
+* **logging:** route operation tracebacks to the per-op log ([ec1ab02](https://github.com/WayfarerLabs/agentworks/commit/ec1ab02467e4e459210bf1dafe4f1b464115c5ba))
+* **secrets:** PromptSource must respect backend_mappings.prompt=false ([bedb2ee](https://github.com/WayfarerLabs/agentworks/commit/bedb2ee6eb1655c9b0fd4ec651177bcfbbcabae0))
+* **ssh:** coalesce SetEnv pairs into one -o argument ([94f54f8](https://github.com/WayfarerLabs/agentworks/commit/94f54f87364fc9942979ea86f313f05ed77a615a))
+* **ssh:** dispatch interactive() across non-SSH transports ([3aa48a8](https://github.com/WayfarerLabs/agentworks/commit/3aa48a8dccd33e1596b5fbd60a83858b8fbd02a6))
+* **ssh:** wrap remote-lima interactive in login shell for PATH ([3e4b83c](https://github.com/WayfarerLabs/agentworks/commit/3e4b83ce2450a07eef826ef38580d32dcbc44251))
+* **transports:** default mid-create identity_file to operator key ([3b84132](https://github.com/WayfarerLabs/agentworks/commit/3b8413291240904c2463aad87e9645982c7921d3))
+* **vm:** auto-attach/detach Azure public IP for 'vm shell --provisioner' ([a1621f9](https://github.com/WayfarerLabs/agentworks/commit/a1621f92fe7370502bdb71da96e802c1a0d15fe0))
+* **vm:** point Proxmox provisioner-shell users at web UI serial console ([31d9045](https://github.com/WayfarerLabs/agentworks/commit/31d90458848a6341ee4690b309d7b148e2ed36bc))
+* **vms:** announce DNS check before the lookup pauses ([f358898](https://github.com/WayfarerLabs/agentworks/commit/f3588986c3b6cefca8e6dc0701b9e010b7e9ff85))
+* **vms:** order tailscaled after systemd-resolved to fix DNS race ([905d00a](https://github.com/WayfarerLabs/agentworks/commit/905d00a73087a0aa0c6fee385801ab40a2e2666b))
+* **vms:** restore tailscale_host guard on exec_vm + round-2 review nits ([59c7d9a](https://github.com/WayfarerLabs/agentworks/commit/59c7d9a9cd47a76781ec6c140fbd72d53ea16948))
+* **vms:** tailscaled DNS race fix and vm-shell provisioner flag ([dc147f8](https://github.com/WayfarerLabs/agentworks/commit/dc147f8a8d383eb0487051539cd492b896ea6805))
+* **vms:** warn that heal kills SSH session over Tailscale ([8fb56b4](https://github.com/WayfarerLabs/agentworks/commit/8fb56b438ffee2140c74706d4cb5b33e7a48a24c))
+* **vm:** warn instead of block on failed-init for 'vm shell' ([c84adff](https://github.com/WayfarerLabs/agentworks/commit/c84adfffd0b53e6bd012f5c0fc41401376af4434))
+
+
+### Documentation
+
+* address Copilot feedback on PR [#107](https://github.com/WayfarerLabs/agentworks/issues/107) (proper noun, EDITOR/VISUAL, doctor scope, tmux detach hint) ([b4ed925](https://github.com/WayfarerLabs/agentworks/commit/b4ed925beb62cccbcb732dc4244d5358cdd4a3f3))
+* **env:** document env + secrets in sample config and READMEs (Phase 5) ([adc32d7](https://github.com/WayfarerLabs/agentworks/commit/adc32d71b43499bebcb2328c6b73a3f9317607a0))
+* move walkthrough to cli/, collapse top-level Tmux subsections ([34dbcc2](https://github.com/WayfarerLabs/agentworks/commit/34dbcc2edd52520941805256a695d8eaa9311a4d))
+* rename remaining env_var references to env-var ([7ec1af8](https://github.com/WayfarerLabs/agentworks/commit/7ec1af86bb3ad528da2fa13772910cbbf4976542))
+* rewrite tmux detach hint to not overpromise on prefix override ([343f729](https://github.com/WayfarerLabs/agentworks/commit/343f72959f4dd7c92c97d9e89486bf01900091ec))
+* **sample-config:** #toml comment convention for uncomment-in-place ([04d6803](https://github.com/WayfarerLabs/agentworks/commit/04d6803478f7988929643bf297215809da943f1d))
+* **sample-config:** inline env tables with resources, lift secrets up ([06c1c61](https://github.com/WayfarerLabs/agentworks/commit/06c1c61a50993904880141a14c5e330744db327e))
+* **sdd:** address phase-7 review (tradeoffs, sync-ssh-config, SSH-alias placement) ([8e1c9bd](https://github.com/WayfarerLabs/agentworks/commit/8e1c9bd9d7da3e99fdd891a3b8e85d3ab09b29d8))
+* **sdd:** direct-user-ssh-access SDD ([ef1281f](https://github.com/WayfarerLabs/agentworks/commit/ef1281fb3ed1df7bf37f0eeb7252d3a9515c76d4))
+* **sdd:** drop stale nerftools references from env-and-secrets SDD ([c2b9fc4](https://github.com/WayfarerLabs/agentworks/commit/c2b9fc469bfc487c9ef90c0de961c3841590fd56))
+* **sdd:** lock env-and-secrets SDD ([672b7fa](https://github.com/WayfarerLabs/agentworks/commit/672b7fa953f4815138c50da0f66654caaee5d17c))
+* **sdd:** phase 7 deliverables (two ADR drafts + cli/README SSH alias surface) ([c984705](https://github.com/WayfarerLabs/agentworks/commit/c984705546e8a029d8cca916f0231562c0c1c21b))
+* **secrets:** clarify when PromptSource opt-out adds value ([6bc31bf](https://github.com/WayfarerLabs/agentworks/commit/6bc31bf8a14c01026aa1904f5d8dd7111fc2b92c))
+* **secrets:** tighten _agent_secret_targets docstring (Phase 6.4 polish) ([5d6b9e2](https://github.com/WayfarerLabs/agentworks/commit/5d6b9e27e3f35a4216cbebf350a2ee866d50b4ae))
+* tighten READMEs to project-vs-CLI split ([2021699](https://github.com/WayfarerLabs/agentworks/commit/2021699f4f09ec7fab9cdd51eb829e960df0c851))
+* tighten tmux detach hint to two lines ([4b549ce](https://github.com/WayfarerLabs/agentworks/commit/4b549ce2f810e7c1f13ef8ea58616b17e4e22aef))
+
 ## [0.6.0](https://github.com/WayfarerLabs/agentworks/compare/v0.5.0...v0.6.0) (2026-06-06)
 
 
