@@ -71,11 +71,19 @@ def transport_for_user(
     agent row doesn't exist yet but the on-VM identity already accepts
     the operator's key (see ``agents/manager.py``).
 
-    ``identity_file`` defaults to ``None`` so SSH falls through to
-    ``~/.ssh/config``; the named factories pass the operator's key
-    explicitly. Raises :class:`StateError` if the VM has no Tailscale IP
-    (today's underlying assert disappears under ``python -O``; the typed
-    error doesn't, per SDD R6).
+    ``identity_file`` defaults to ``config.operator.ssh_private_key`` (the
+    operator's key, which the on-VM authorized_keys reconciler installs
+    for every user agentworks manages). Pass an explicit path only for
+    the rare case where a different key is required. Without the default,
+    omitting the kwarg silently dropped the ``-i`` flag from the SSH argv
+    and OpenSSH fell back to ``~/.ssh/id_*`` defaults / ssh-agent keys --
+    works on Linux where the operator key is usually ``id_ed25519``,
+    breaks on Windows / non-standard key names with "Permission denied
+    (publickey)".
+
+    Raises :class:`StateError` if the VM has no Tailscale IP (today's
+    underlying assert disappears under ``python -O``; the typed error
+    doesn't, per SDD R6).
     """
     if vm.tailscale_host is None:
         raise StateError(
@@ -84,6 +92,8 @@ def transport_for_user(
             entity_name=vm.name,
             hint="The VM may not have completed bootstrap, or Tailscale is broken on the VM.",
         )
+    if identity_file is None:
+        identity_file = config.operator.ssh_private_key
     return SSHTransport(
         host=vm.tailscale_host,
         user=user,
