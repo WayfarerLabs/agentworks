@@ -43,7 +43,7 @@ _MANAGED_CONF = "agentworks.conf"
 # above the agentworks ``Include`` directive; ssh_config's first-match-wins
 # semantics apply.
 _CONTROL_PATH = "~/.ssh/agentworks-cm-%C"
-_CONTROL_PERSIST = "60"
+_CONTROL_PERSIST = "60s"  # OpenSSH accepts a unit suffix; the ``s`` makes it self-documenting.
 
 
 def _format_controlmaster_block(prefix: str, agent_prefix: str) -> str:
@@ -200,17 +200,16 @@ def _rebuild_config_dir(config: Config, db: Database) -> None:
                 )
             )
 
-    if host_entries:
-        # ControlMaster block precedes the per-host entries so the wildcard
-        # ``Host <prefix>*`` pattern picks up every alias below it.
-        blocks.append(_format_controlmaster_block(prefix, agent_prefix))
-        blocks.extend(host_entries)
-
     conf_path = config_d / _MANAGED_CONF
-    if host_entries:
-        _atomic_write(conf_path, "\n".join(blocks))
-    elif conf_path.exists():
-        conf_path.unlink()
+    if not host_entries:
+        conf_path.unlink(missing_ok=True)
+        return
+
+    # ControlMaster block precedes the per-host entries so the wildcard
+    # ``Host <prefix>*`` pattern picks up every alias below it.
+    blocks.append(_format_controlmaster_block(prefix, agent_prefix))
+    blocks.extend(host_entries)
+    _atomic_write(conf_path, "\n".join(blocks))
 
 
 def _ensure_include(ssh_config: Path) -> None:

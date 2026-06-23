@@ -243,6 +243,25 @@ Entries are rebuilt declaratively from the database on every agent / VM lifecycl
 fresh `agw agent create` or `agw vm delete` keeps the file in sync without manual intervention. Run
 `agw config sync-ssh-config` to force a rebuild.
 
+The managed file leads with a `Host awvm--* awagent--*` block that enables OpenSSH ControlMaster
+multiplexing for every matching alias:
+
+```ssh
+Host awvm--* awagent--*
+    ControlMaster auto
+    ControlPath ~/.ssh/agentworks-cm-%C
+    ControlPersist 60s
+```
+
+That drops per-call latency on subsequent connections from a fresh-handshake ~150-300ms to ~20-50ms,
+which is meaningful because agent / VM lifecycle operations issue dozens of sequential SSH calls
+each. The `ControlPath` is namespaced (`agentworks-cm-`) so it cannot collide with any pre-existing
+ControlMaster setup the operator may already have configured elsewhere. If the master socket cannot
+bind (read-only `~/.ssh`, network filesystems with weird locking, etc.), OpenSSH transparently falls
+back to a fresh handshake per call -- no behavior regression. To override the defaults (different
+persist, different path, disable multiplexing entirely), add a `Host *` block above the agentworks
+`Include` directive; `ssh_config` first-match-wins.
+
 ### Sessions
 
 Manage sessions (persistent tmux sessions running in workspaces). Session names are globally unique
