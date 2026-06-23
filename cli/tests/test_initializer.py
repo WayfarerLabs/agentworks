@@ -599,7 +599,7 @@ def _make_hardening_target(
     sysctl_content: str | None = None,
     fstab_content: str | None = None,
 ) -> MagicMock:
-    """ExecTarget mock parameterized by what `cat /etc/sysctl.d/...` and `cat /etc/fstab` return.
+    """``Transport`` mock parameterized by what `cat /etc/sysctl.d/...` and `cat /etc/fstab` return.
 
     `sysctl_content=None` simulates a missing file (cat exits non-zero).
     """
@@ -887,7 +887,7 @@ def test_ensure_proc_hidepid_malformed() -> None:
 
 
 def _make_reconcile_target(*, mktemp_path: str = "/tmp/agw-ak.AAAAAA") -> MagicMock:
-    """ExecTarget mock that returns a known mktemp path; logs run calls."""
+    """``Transport`` mock that returns a known mktemp path; logs run calls."""
     target = MagicMock()
     run_log: list[str] = []
     write_log: list[tuple[str, str]] = []

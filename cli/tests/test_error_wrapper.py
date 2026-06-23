@@ -214,10 +214,10 @@ def test_create_session_rolls_back_on_keyboard_interrupt(
             return _Result()
 
     fake_factory = lambda vm, config, **kwargs: _Target()  # noqa: E731
-    # Patch both locations: manager imports admin_exec_target eagerly at module
-    # load, so the agentworks.ssh-side patch alone wouldn't take effect.
-    monkeypatch.setattr("agentworks.ssh.admin_exec_target", fake_factory)
-    monkeypatch.setattr("agentworks.sessions.manager.admin_exec_target", fake_factory)
+    # Patch both locations: manager imports ``transport`` eagerly at module
+    # load, so the agentworks.transports-side patch alone wouldn't take effect.
+    monkeypatch.setattr("agentworks.transports.transport", fake_factory)
+    monkeypatch.setattr("agentworks.sessions.manager.transport", fake_factory)
     # deploy_restricted_config does its own SSH writes -- skip them.
     monkeypatch.setattr(
         session_manager,
@@ -293,13 +293,13 @@ def test_create_session_releases_group_membership_on_keyboard_interrupt(
             return _Result()
 
     fake_factory = lambda vm, config, **kwargs: _Target()  # noqa: E731
-    monkeypatch.setattr("agentworks.ssh.admin_exec_target", fake_factory)
-    monkeypatch.setattr("agentworks.sessions.manager.admin_exec_target", fake_factory)
-    # agent_exec_target is constructed in session_manager.create_session for
+    monkeypatch.setattr("agentworks.transports.transport", fake_factory)
+    monkeypatch.setattr("agentworks.sessions.manager.transport", fake_factory)
+    # agent_transport is constructed in session_manager.create_session for
     # agent-mode sessions (FRD R1, direct target-user SSH). Stub it too so
     # the SimpleNamespace config doesn't need an `operator` attribute.
     agent_factory = lambda vm, config, agent, **kwargs: _Target()  # noqa: E731
-    monkeypatch.setattr("agentworks.ssh.agent_exec_target", agent_factory)
+    monkeypatch.setattr("agentworks.transports.agent_transport", agent_factory)
     monkeypatch.setattr(
         session_manager, "_build_session_command", lambda *args, **kwargs: "true"
     )
@@ -377,8 +377,8 @@ def test_create_session_rollback_failure_does_not_mask_keyboard_interrupt(
             return _Result()
 
     fake_factory = lambda vm, config, **kwargs: _Target()  # noqa: E731
-    monkeypatch.setattr("agentworks.ssh.admin_exec_target", fake_factory)
-    monkeypatch.setattr("agentworks.sessions.manager.admin_exec_target", fake_factory)
+    monkeypatch.setattr("agentworks.transports.transport", fake_factory)
+    monkeypatch.setattr("agentworks.sessions.manager.transport", fake_factory)
     monkeypatch.setattr(
         session_manager, "_build_session_command", lambda *args, **kwargs: "true"
     )

@@ -15,7 +15,7 @@ from agentworks.errors import (
     UserAbort,
     ValidationError,
 )
-from agentworks.ssh import admin_exec_target
+from agentworks.transports import transport
 from agentworks.vms.manager import keep_vm_active
 
 if TYPE_CHECKING:
@@ -25,7 +25,8 @@ if TYPE_CHECKING:
     from agentworks.db import AgentRow, Database, VMRow, WorkspaceRow
     from agentworks.env import EnvEntry
     from agentworks.secrets import SecretTarget
-    from agentworks.ssh import ExecTarget, SSHLogger
+    from agentworks.ssh import SSHLogger
+    from agentworks.transports import Transport
 
 AGENT_PREFIX = "agt-"
 WS_GROUP_PREFIX = "ws-"
@@ -127,7 +128,7 @@ def workspace_group(workspace_name: str) -> str:
     return f"{WS_GROUP_PREFIX}{workspace_name}"
 
 
-def _assert_agent_ssh_works(target: ExecTarget, agent: AgentRow) -> None:
+def _assert_agent_ssh_works(target: Transport, agent: AgentRow) -> None:
     """Probe direct agent SSH; raise an actionable error on auth rejection.
 
     The direct-target-user-SSH rollout populates each agent's
@@ -328,9 +329,8 @@ def delete_agent(
             from agentworks.db import SessionStatus
             from agentworks.sessions.manager import check_session_status, ensure_pids_batch
             from agentworks.sessions.tmux import force_kill_tmux_server, kill_session
-            from agentworks.ssh import admin_exec_target
 
-            target = admin_exec_target(vm, config, logger=ssh_logger)
+            target = transport(vm, config, logger=ssh_logger)
             agent_sessions = ensure_pids_batch(agent_sessions, db=db, config=config)
             # Snapshot console memberships before db.delete_session cascades them.
             console_pairs = [
@@ -595,7 +595,7 @@ def shell_agent(
 
     from agentworks.env import ResourceContext, compose_env
     from agentworks.secrets import resolve_for_command
-    from agentworks.ssh import agent_exec_target, interactive
+    from agentworks.transports import agent_transport
 
     # Resolve workspace upfront (needed for authz check, env scope, AND
     # ctx) before any SSH probe so failures surface as clean validation
@@ -647,7 +647,7 @@ def shell_agent(
 
     # Direct agent SSH (FRD R1): no admin+sudo detour. The agent's
     # authorized_keys (Phase 3) accepts the operator's key set.
-    target = agent_exec_target(vm, config, agent)
+    target = agent_transport(vm, config, agent)
 
     with keep_vm_active(db, config, vm):
         # Probe direct agent SSH first so pre-rollout agents (whose
@@ -663,10 +663,10 @@ def shell_agent(
             # SSH as the agent, then cd into the workspace and exec an
             # interactive login shell. No sudo / su involved.
             shell_cmd = f"cd {q_path} && exec $SHELL -li"
-            sys.exit(interactive(target, shell_cmd, env=env))
+            sys.exit(target.interactive(shell_cmd, env=env))
         else:
             # SSH as the agent with no command -> interactive login shell.
-            sys.exit(interactive(target, "", env=env))
+            sys.exit(target.interactive("", env=env))
 
 
 def exec_agent(
@@ -687,7 +687,7 @@ def exec_agent(
 
     from agentworks.env import ResourceContext, compose_env
     from agentworks.secrets import resolve_for_command
-    from agentworks.ssh import agent_exec_target
+    from agentworks.transports import agent_transport
 
     agent = db.get_agent(name)
     if agent is None:
@@ -724,7 +724,7 @@ def exec_agent(
         agent=scopes.agent,
     )
 
-    target = agent_exec_target(vm, config, agent)
+    target = agent_transport(vm, config, agent)
 
     with keep_vm_active(db, config, vm):
         # Probe direct agent SSH first so pre-rollout agents (whose
@@ -875,7 +875,7 @@ def _add_to_workspace_group(
     logger: SSHLogger | None = None,
 ) -> None:
     """Add an agent user to a workspace's Linux group."""
-    target = admin_exec_target(vm, config, logger=logger)
+    target = transport(vm, config, logger=logger)
     ws_grp = _resolve_ws_group(db, workspace_name)
     # Ensure group exists (idempotent)
     target.run(f"sh -c 'getent group {ws_grp} >/dev/null 2>&1 || /usr/sbin/groupadd {ws_grp}'", sudo=True)
@@ -892,7 +892,7 @@ def _remove_from_workspace_group(
     logger: SSHLogger | None = None,
 ) -> None:
     """Remove an agent user from a workspace's Linux group."""
-    target = admin_exec_target(vm, config, logger=logger)
+    target = transport(vm, config, logger=logger)
     ws_grp = _resolve_ws_group(db, workspace_name)
     target.run(f"gpasswd -d {linux_user} {ws_grp}", sudo=True, check=False)
 
@@ -948,10 +948,10 @@ def _create_agent_on_vm(
         ensure_agent_socket_dir,
         ensure_agent_socket_root,
     )
-    from agentworks.ssh import exec_target_for_user
+    from agentworks.transports import transport_for_user
     from agentworks.vms.initializer import _reconcile_authorized_keys
 
-    admin_target = admin_exec_target(vm, config, logger=logger)
+    admin_target = transport(vm, config, logger=logger)
 
     output.detail(f"Creating user '{linux_user}' on VM '{vm.name}'...")
     home = f"/home/{linux_user}"
@@ -994,7 +994,7 @@ def _create_agent_on_vm(
 
     # -- Phase 2: self-configure (agent) ----------------------------------
 
-    agent_target = exec_target_for_user(vm, config, user=linux_user, logger=logger)
+    agent_target = transport_for_user(vm, config, user=linux_user, logger=logger)
 
     # Provisioning is hermetic: no operator env from [agent_templates.*.env]
     # or [vm_templates.*.env] is injected into the agent's install runners.
@@ -1195,7 +1195,7 @@ def _delete_agent_on_vm(
     """Remove an agent Linux user from a VM."""
     from agentworks.ssh import SSHError
 
-    target = admin_exec_target(vm, config, logger=logger)
+    target = transport(vm, config, logger=logger)
 
     try:
         # Kill any running processes for the user
@@ -1208,7 +1208,7 @@ def _delete_agent_on_vm(
 
 def _run_agent_install_commands(
     *,
-    agent_target: ExecTarget,
+    agent_target: Transport,
     config: Config,
     home: str,
     identity_env: dict[str, str],
@@ -1289,7 +1289,7 @@ def _run_agent_install_commands(
 
 
 def _write_agent_profile(
-    agent_target: ExecTarget,
+    agent_target: Transport,
     *,
     home: str,
     shell: str,
@@ -1368,7 +1368,7 @@ def _write_agent_shell_rc(
 
 def _run_agent_mise_setup(
     *,
-    agent_target: ExecTarget,
+    agent_target: Transport,
     config: Config,
     home: str,
 ) -> None:
@@ -1506,7 +1506,7 @@ def _build_agent_test_command(
 ) -> str | None:
     """Build a test command that runs as the agent user.
 
-    The caller runs this via the agent's ExecTarget. ``test_exec`` checks
+    The caller runs this via the agent's ``Transport``. ``test_exec`` checks
     are wrapped in a login shell so the agent's PATH (including mise shims
     and ~/.local/bin) is in scope; ``test_file`` / ``test_dir`` use plain
     POSIX tests against absolute paths in the agent's home.

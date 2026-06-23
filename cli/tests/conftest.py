@@ -160,24 +160,29 @@ class _FakeTarget:
 
 @pytest.fixture
 def fake_target(monkeypatch: pytest.MonkeyPatch) -> _FakeTarget:
-    """Install a FakeTarget for the SSH layer and stub VM-running checks."""
+    """Install a FakeTarget for the transport layer and stub VM-running checks."""
     target = _FakeTarget()
-    # `agentworks.ssh.admin_exec_target` covers lazy imports in multi_console;
-    # `agentworks.sessions.manager.admin_exec_target` covers manager's eager
-    # top-level import (used by batch_check_all_sessions and friends).
+    # ``agentworks.transports.transport`` is the canonical admin-transport
+    # factory; ``agentworks.sessions.manager.transport`` covers manager's
+    # eager top-level import (used by batch_check_all_sessions and friends).
     fake_factory = lambda vm, config, **kwargs: target  # noqa: E731
-    monkeypatch.setattr("agentworks.ssh.admin_exec_target", fake_factory)
+    monkeypatch.setattr("agentworks.transports.transport", fake_factory)
+    # ``sessions.manager`` and ``agents.manager`` import ``transport`` at module
+    # load (eager), so the agentworks.transports-side patch alone wouldn't take
+    # effect for callers that already captured the binding.
     monkeypatch.setattr(
-        "agentworks.sessions.manager.admin_exec_target", fake_factory
+        "agentworks.sessions.manager.transport", fake_factory
+    )
+    monkeypatch.setattr(
+        "agentworks.agents.manager.transport", fake_factory
     )
     monkeypatch.setattr(
         "agentworks.workspaces.manager._ensure_vm_running",
         lambda *args, **kwargs: None,
     )
-    monkeypatch.setattr(
-        "agentworks.ssh.interactive",
-        lambda target, command: 0,
-    )
+    # The interactive code path now lives on the transport itself; the
+    # fake target exposes it as a no-op so attach flows return cleanly.
+    target.interactive = lambda command, **kwargs: 0  # type: ignore[attr-defined]
     return target
 
 

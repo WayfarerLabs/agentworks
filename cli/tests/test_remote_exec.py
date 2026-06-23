@@ -15,7 +15,7 @@ def _mock_target(
     output_content: str = "hello world\n",
     exit_code: str = "0",
 ) -> MagicMock:
-    """Build a mock ExecTarget with configurable behavior."""
+    """Build a mock ``Transport`` with configurable behavior."""
     target = MagicMock()
     poll_count = 0
 

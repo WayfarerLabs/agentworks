@@ -2,7 +2,7 @@
 
 Pins the contract that ``create_session`` / ``restart_session`` /
 ``stop_session`` / ``delete_session`` route destructive tmux operations
-on agent-mode sessions through direct agent SSH (``agent_exec_target``)
+on agent-mode sessions through direct agent SSH (``agent_transport``)
 rather than admin+sudo, and that the pre-rollout SSH probe runs BEFORE
 any state mutation in each path.
 
@@ -35,7 +35,7 @@ class _Result:
 
 
 class _Target:
-    """ExecTarget stub that records every ``run`` call against a shared log."""
+    """``Transport`` stub that records every ``run`` call against a shared log."""
 
     def __init__(self, label: str, log: list[tuple[str, str]]) -> None:
         self.label = label
@@ -74,9 +74,9 @@ def _patch_common(
 
     admin_factory = lambda vm, config, **kwargs: targets["admin"]  # noqa: E731
     agent_factory = lambda vm, config, agent, **kwargs: targets["agent"]  # noqa: E731
-    monkeypatch.setattr("agentworks.ssh.admin_exec_target", admin_factory)
-    monkeypatch.setattr("agentworks.ssh.agent_exec_target", agent_factory)
-    monkeypatch.setattr("agentworks.sessions.manager.admin_exec_target", admin_factory)
+    monkeypatch.setattr("agentworks.transports.transport", admin_factory)
+    monkeypatch.setattr("agentworks.transports.agent_transport", agent_factory)
+    monkeypatch.setattr("agentworks.sessions.manager.transport", admin_factory)
     monkeypatch.setattr(
         "agentworks.workspaces.manager._ensure_vm_running",
         lambda *args, **kwargs: None,
@@ -151,7 +151,7 @@ def test_create_session_uses_agent_target_for_tmux(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The ``run_command`` passed to ``create_tmux_session`` for an agent
-    session must come from ``agent_exec_target``, not admin+sudo.
+    session must come from ``agent_transport``, not admin+sudo.
     """
     from agentworks.agents import manager as agent_mgr
     from agentworks.sessions import manager as session_manager
@@ -273,23 +273,22 @@ def test_delete_session_probes_before_confirm_prompt(
 def test_exec_agent_uses_direct_agent_ssh(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """``exec_agent`` must run through a direct-agent ExecTarget (whose
+    """``exec_agent`` must run through a direct-agent ``Transport`` (whose
     SSH user IS the agent's Linux user) and must NOT shell out through
     ``sudo --login -u``.
     """
     from agentworks.agents import manager as agent_mgr
-    from agentworks.ssh import ExecTarget, SSHTarget
+    from agentworks.transports import SSHTransport
 
     db = _seed_db(tmp_path)
 
-    # Real ExecTarget so call_streaming is exercised end-to-end; the only
+    # Real SSHTransport so call_streaming is exercised end-to-end; the only
     # thing we monkey-patch is subprocess.call (which call_streaming uses
     # to passthrough stdio).
-    ssh_t = SSHTarget(host="100.64.0.5", user="aw-a1", identity_file=None, proxy_jump=None)
-    target = ExecTarget(ssh=ssh_t)
+    target = SSHTransport(host="100.64.0.5", user="aw-a1", identity_file=None, proxy_jump=None)
 
     monkeypatch.setattr(
-        "agentworks.ssh.agent_exec_target",
+        "agentworks.transports.agent_transport",
         lambda vm, config, agent, **kwargs: target,
     )
     monkeypatch.setattr(agent_mgr, "_assert_agent_ssh_works", lambda *a, **k: None)

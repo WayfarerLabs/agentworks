@@ -4,8 +4,8 @@ See ``docs/sdd/2026-06-05-env-and-secrets/`` for design.
 
 Pure data with no Typer dependency. Consumers (sessions, consoles, vms,
 agents) assemble effective env via ``compose_env`` and hand the resulting
-``dict[str, str]`` to the SSH layer (``ExecTarget.run(env=...)`` /
-``ssh.interactive(target, command, env=...)``), which materializes one
+``dict[str, str]`` to the transport layer (``Transport.run(env=...)`` /
+``Transport.interactive(command, env=...)``), which materializes one
 ``-o SetEnv=KEY=VALUE`` argument per entry. The remote sshd accepts these
 under the ``AcceptEnv *`` directive deployed by VM init (see
 ``docs/adrs/0014-sshd-accept-env-wildcard.md``).

@@ -72,8 +72,8 @@ def _stub_session_prep(monkeypatch: pytest.MonkeyPatch) -> None:
         lambda *args, **kwargs: None,
     )
     factory = lambda *a, **k: _stub_target()  # noqa: E731
-    monkeypatch.setattr("agentworks.ssh.admin_exec_target", factory)
-    monkeypatch.setattr("agentworks.sessions.manager.admin_exec_target", factory)
+    monkeypatch.setattr("agentworks.transports.transport", factory)
+    monkeypatch.setattr("agentworks.sessions.manager.transport", factory)
 
 
 # ---------------------------------------------------------------------------
@@ -475,11 +475,15 @@ def test_vm_shell_eager_resolve_fires_before_ssh(
 
     ssh_called: list[bool] = []
 
-    def _track_interactive(*args: object, **kwargs: object) -> int:
-        ssh_called.append(True)
-        return 0
+    class _Target:
+        def interactive(self, *args: object, **kwargs: object) -> int:
+            ssh_called.append(True)
+            return 0
 
-    monkeypatch.setattr("agentworks.ssh.interactive", _track_interactive)
+    monkeypatch.setattr(
+        "agentworks.transports.transport",
+        lambda *a, **k: _Target(),
+    )
 
     config = SimpleNamespace(
         vm=SimpleNamespace(env={}),
@@ -525,7 +529,7 @@ def test_vm_exec_eager_resolve_fires_before_ssh(
             return 0
 
     monkeypatch.setattr(
-        "agentworks.ssh.admin_exec_target", lambda *a, **k: _Target()
+        "agentworks.transports.transport", lambda *a, **k: _Target()
     )
 
     config = SimpleNamespace(
@@ -575,7 +579,7 @@ def test_agent_exec_eager_resolve_fires_before_ssh(
             return 0
 
     monkeypatch.setattr(
-        "agentworks.ssh.agent_exec_target", lambda *a, **k: _Target()
+        "agentworks.transports.agent_transport", lambda *a, **k: _Target()
     )
 
     config = SimpleNamespace()
@@ -783,15 +787,15 @@ def test_attach_console_existing_tmux_session_skips_eager_resolve(
         "_prepare_vm_target_for_attach",
         lambda *a, **k: (
             SimpleNamespace(name="vm1", admin_username="admin"),
-            SimpleNamespace(run=lambda *a, **k: None),
+            SimpleNamespace(
+                run=lambda *a, **k: None,
+                interactive=lambda *a, **k: 0,
+            ),
         ),
     )
     monkeypatch.setattr(multi_console, "keep_vm_active", lambda *a, **k: _NullCM())
     monkeypatch.setattr(
         multi_console, "_console_tmux_exists", lambda *a, **k: True,
-    )
-    monkeypatch.setattr(
-        "agentworks.ssh.interactive", lambda *a, **k: 0,
     )
 
     resolve_called: list[bool] = []
@@ -852,6 +856,7 @@ def test_session_attach_does_not_eager_resolve(
     # Stub out the SSH probe + transport so we don't need a real VM.
     fake_target = SimpleNamespace(
         run=lambda *a, **k: SimpleNamespace(ok=True, returncode=0, stdout="", stderr=""),
+        interactive=lambda *a, **k: 0,
     )
     ws_row = db.get_workspace("ws1")
     vm_row = db.get_vm("vm1")
@@ -868,9 +873,6 @@ def test_session_attach_does_not_eager_resolve(
         lambda *a, **k: SessionStatus.OK,
     )
     monkeypatch.setattr(session_manager, "keep_vm_active", lambda *a, **k: _NullCM())
-    monkeypatch.setattr(
-        "agentworks.ssh.interactive", lambda *a, **k: 0,
-    )
 
     import contextlib
 

@@ -34,7 +34,7 @@ class _SpyResult:
 
 
 class _SpyTarget:
-    """ExecTarget-shaped stub that records run + write_file calls.
+    """``Transport``-shaped stub that records run + write_file calls.
 
     ``validate_ok`` controls the return of ``visudo -cf`` AND ``sshd -t``
     so tests can simulate validation failure for either helper.

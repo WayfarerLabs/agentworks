@@ -54,7 +54,7 @@ if TYPE_CHECKING:
         VMRow,
     )
     from agentworks.secrets import SecretTarget
-    from agentworks.ssh import ExecTarget
+    from agentworks.transports import Transport
 
 TMUX_PREFIX = "aw-console-"
 
@@ -1079,18 +1079,18 @@ done
 """
 
 
-def _console_tmux_exists(target: ExecTarget, console_name: str) -> bool:
+def _console_tmux_exists(target: Transport, console_name: str) -> bool:
     q = shlex.quote(tmux_session_name(console_name))
     return target.run(f"tmux has-session -t {q} 2>/dev/null", check=False).ok
 
 
-def _kill_console_tmux(target: ExecTarget, console_name: str) -> None:
+def _kill_console_tmux(target: Transport, console_name: str) -> None:
     q = shlex.quote(tmux_session_name(console_name))
     target.run(f"tmux kill-session -t {q}", check=False)
 
 
 def kill_session_windows(
-    target: ExecTarget,
+    target: Transport,
     *,
     pairs: list[tuple[str, str]],
 ) -> None:
@@ -1408,7 +1408,7 @@ def _resolve_workspace_path(db: Database, session: SessionRow) -> str | None:
 
 
 def _split_shell_pane(
-    target: ExecTarget,
+    target: Transport,
     db: Database,
     config: Config,
     *,
@@ -1542,7 +1542,7 @@ def _split_shell_pane(
 
 
 def _add_session_window(
-    target: ExecTarget,
+    target: Transport,
     db: Database,
     config: Config,
     *,
@@ -1623,7 +1623,7 @@ def _add_session_window(
 
 
 def _build_console_tmux(
-    target: ExecTarget,
+    target: Transport,
     db: Database,
     config: Config,
     console: ConsoleRow,
@@ -1713,13 +1713,13 @@ def _build_console_tmux(
 
 def _prepare_vm_target_for_attach(
     db: Database, config: Config, vm_name: str
-) -> tuple[VMRow, ExecTarget]:
+) -> tuple[VMRow, Transport]:
     """Ensure the VM is running (starting it if needed) and return (vm, target).
 
     Use this only for explicit user-driven attach flows where booting a stopped
     VM is acceptable. Raises on failure.
     """
-    from agentworks.ssh import admin_exec_target
+    from agentworks.transports import transport
     from agentworks.workspaces.manager import _ensure_vm_running
 
     vm = db.get_vm(vm_name)
@@ -1736,24 +1736,24 @@ def _prepare_vm_target_for_attach(
             entity_kind="vm",
             entity_name=vm.name,
         )
-    return vm, admin_exec_target(vm, config)
+    return vm, transport(vm, config)
 
 
 def _live_target(
     db: Database, config: Config, vm_name: str
-) -> tuple[VMRow, ExecTarget] | None:
+) -> tuple[VMRow, Transport] | None:
     """Return (vm, target) for best-effort live sync without auto-starting the VM.
 
     Returns None if the VM record is missing or has no Tailscale address.
     The first SSH command will surface a transport error if the VM is offline;
     callers should wrap that in _live_best_effort.
     """
-    from agentworks.ssh import admin_exec_target
+    from agentworks.transports import transport
 
     vm = db.get_vm(vm_name)
     if vm is None or vm.tailscale_host is None:
         return None
-    return vm, admin_exec_target(vm, config)
+    return vm, transport(vm, config)
 
 
 @contextlib.contextmanager
@@ -1791,7 +1791,6 @@ def attach_console(
     allow_nesting: bool = False,
 ) -> None:
     """Attach to a named console, building or rebuilding tmux state as needed."""
-    from agentworks.ssh import interactive
     if os.environ.get("TMUX") and not allow_nesting:
         raise StateError(
             "already inside a tmux session. Nesting is not recommended "
@@ -1831,7 +1830,7 @@ def attach_console(
             output.info(f"Attaching to running console '{name}'.")
 
         tmux_name = tmux_session_name(name)
-        sys.exit(interactive(target, f"tmux attach -t {shlex.quote(tmux_name)}"))
+        sys.exit(target.interactive(f"tmux attach -t {shlex.quote(tmux_name)}"))
 
 
 def delete_console(

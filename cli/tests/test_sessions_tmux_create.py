@@ -122,7 +122,7 @@ class _SpyRunCommand:
 
 
 class _SpyTarget:
-    """ExecTarget stub that captures runs for the socket-root setup helpers."""
+    """``Transport`` stub that captures runs for the socket-root setup helpers."""
 
     def __init__(self) -> None:
         self.calls: list[str] = []

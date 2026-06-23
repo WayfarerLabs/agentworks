@@ -36,7 +36,7 @@ from agentworks import output
 from agentworks.config import AW_SESSION_VERTICAL_LAYOUT
 
 if TYPE_CHECKING:
-    from agentworks.ssh import ExecTarget
+    from agentworks.transports import Transport
 
 
 # Tmux pane-option key used to tag a shell pane with its config index.
@@ -49,7 +49,7 @@ SHELL_INDEX_OPTION = "@agentworks-shell-index"
 
 
 def _apply_layout(
-    target: ExecTarget, q_con: str, q_win: str, layout: str
+    target: Transport, q_con: str, q_win: str, layout: str
 ) -> None:
     """Apply *layout* to a single console window.
 
@@ -76,11 +76,11 @@ def _apply_layout(
 
 
 def _apply_aw_session_vertical_layout(
-    target: ExecTarget, q_con: str, q_win: str
+    target: Transport, q_con: str, q_win: str
 ) -> None:
     """Build and apply a hand-computed tmux layout string for
     ``aw-session-vertical``. Two transport round trips through the
-    ``ExecTarget`` abstraction (one ``target.run`` chains two tmux
+    ``Transport`` abstraction (one ``target.run`` chains two tmux
     commands with ``&&`` to gather the query; the second applies the
     computed layout).
 
@@ -224,7 +224,7 @@ def _tmux_layout_checksum(s: str) -> int:
     return csum
 
 
-def _focus_session_pane(target: ExecTarget, q_con: str, q_win: str) -> None:
+def _focus_session_pane(target: Transport, q_con: str, q_win: str) -> None:
     """Move tmux's active pane to the session pane (pane 0) of a window.
 
     Called after building or repairing a window so the operator lands on
@@ -238,7 +238,7 @@ def _focus_session_pane(target: ExecTarget, q_con: str, q_win: str) -> None:
 
 
 def _list_shell_panes(
-    target: ExecTarget, q_con: str, q_win: str
+    target: Transport, q_con: str, q_win: str
 ) -> list[tuple[str, int, int | None]] | None:
     """Return live shell panes for a console window as (pane_id, pane_index,
     config_index_or_None). Excludes pane_index 0 (the session pane).
@@ -278,7 +278,7 @@ def _list_shell_panes(
 
 
 def _reorder_shell_panes(
-    target: ExecTarget, q_con: str, q_win: str, configured_count: int
+    target: Transport, q_con: str, q_win: str, configured_count: int
 ) -> None:
     """Reorder shell panes so pane_index N+1 holds the pane with
     @agentworks-shell-index N. Shell panes live at pane_index >= 1 (the
@@ -331,7 +331,7 @@ def _reorder_shell_panes(
 
 
 def _reorder_session_windows(
-    target: ExecTarget,
+    target: Transport,
     *,
     console_name: str,
     ordered_session_windows: list[str],

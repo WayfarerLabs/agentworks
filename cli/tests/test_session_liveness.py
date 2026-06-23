@@ -28,7 +28,7 @@ class _FakeResult:
 
 
 class _FakeTarget:
-    """Fake ExecTarget that returns canned responses keyed by substring match."""
+    """Fake ``Transport`` that returns canned responses keyed by substring match."""
 
     def __init__(self, responses: dict[str, _FakeResult] | None = None) -> None:
         self._responses = responses or {}
