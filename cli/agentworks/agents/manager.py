@@ -19,6 +19,7 @@ from agentworks.ssh import admin_exec_target
 from agentworks.vms.manager import keep_vm_active
 
 if TYPE_CHECKING:
+    from agentworks.agents.templates import ResolvedAgentTemplate
     from agentworks.catalog import UserInstallCommandEntry
     from agentworks.config import Config
     from agentworks.db import AgentRow, Database, VMRow, WorkspaceRow
@@ -1024,6 +1025,14 @@ def _create_agent_on_vm(
         identity_env=agent_identity,
     )
 
+    # Always write ~/.agentworks-rc.sh -- even when there are no shell
+    # hooks to install. The defensive ``_ensure_agentworks_files_sourced``
+    # step at the end of setup adds a ``. ~/.agentworks-rc.sh`` line to
+    # the agent's .bashrc/.zshrc unconditionally; if the file doesn't
+    # exist, every interactive login hits "No such file or directory".
+    # Matches the admin pattern in vms/initializer.py:_write_agentworks_rc.
+    _write_agent_shell_rc(agent_target, home=home, agent_cfg=agent_cfg)
+
     # No PS1 setup: operators who want an agent indicator can read
     # $AGENTWORKS_AGENT (exported by the per-user profile fragment we
     # just wrote) from their own prompt. A hardcoded PS1 lost against
@@ -1324,6 +1333,39 @@ def _write_agent_profile(
         output.warn(f"agent profile configuration failed: {e}")
 
 
+def _write_agent_shell_rc(
+    agent_target: ExecTarget,
+    *,
+    home: str,
+    agent_cfg: ResolvedAgentTemplate,
+) -> None:
+    """Write the agent's ``~/.agentworks-rc.sh`` and source it from the
+    agent's shell rc files.
+
+    Called unconditionally from agent setup so the source line added by
+    :func:`agentworks.vms.initializer._ensure_agentworks_files_sourced`
+    always points at an existing file. Matches the admin pattern in
+    :func:`agentworks.vms.initializer._write_agentworks_rc`: a placeholder
+    body when there's no shell hook to install, the mise-activate hook
+    when one is configured.
+    """
+    from agentworks.ssh import SSHError
+    from agentworks.vms.initializer import AGENTWORKS_RC, MISE_ACTIVATE_LINES
+
+    snippet = MISE_ACTIVATE_LINES if agent_cfg.mise_activate else "# mise activation disabled"
+    content = f"# Managed by agentworks -- do not edit\n{snippet}\n"
+    try:
+        rc_path = f"{home}/{AGENTWORKS_RC}"
+        agent_target.write_file(rc_path, content, mode="0644")
+        source_line = f". {rc_path}"
+        for rc in [f"{home}/.bashrc", f"{home}/.zshrc"]:
+            agent_target.run(
+                f"grep -q {AGENTWORKS_RC} {rc} 2>/dev/null || printf '%s\\n' '{source_line}' >> {rc}",
+            )
+    except SSHError as e:
+        output.warn(f"agent rc configuration failed: {e}")
+
+
 def _run_agent_mise_setup(
     *,
     agent_target: ExecTarget,
@@ -1355,7 +1397,7 @@ def _run_agent_mise_setup(
     if not has_packages and not has_lockfile:
         return
 
-    from agentworks.vms.initializer import AGENTWORKS_PROFILE, AGENTWORKS_RC, MISE_ACTIVATE_LINES
+    from agentworks.vms.initializer import AGENTWORKS_PROFILE
 
     # Append mise shims PATH to agent's agentworks profile
     shims_path = f"{home}/.local/share/mise/shims"
@@ -1372,19 +1414,8 @@ def _run_agent_mise_setup(
     except SSHError as e:
         output.warn(f"agent profile configuration failed: {e}")
 
-    # Write mise activation to agent's rc (interactive shell hooks)
-    if agent_cfg.mise_activate:
-        try:
-            rc_path = f"{home}/{AGENTWORKS_RC}"
-            rc_content = f"# Managed by agentworks -- do not edit\n{MISE_ACTIVATE_LINES}\n"
-            agent_target.write_file(rc_path, rc_content, mode="0644")
-            source_line = f". {rc_path}"
-            for rc in [f"{home}/.bashrc", f"{home}/.zshrc"]:
-                agent_target.run(
-                    f"grep -q {AGENTWORKS_RC} {rc} 2>/dev/null || printf '%s\\n' '{source_line}' >> {rc}",
-                )
-        except SSHError as e:
-            output.warn(f"agent rc configuration failed: {e}")
+    # ``~/.agentworks-rc.sh`` is written unconditionally by
+    # ``_write_agent_shell_rc`` earlier in setup; nothing more to do here.
 
     mise_config_dir = f"{home}/.config/mise"
 
