@@ -71,27 +71,20 @@ def test_transport_for_user_returns_ssh_transport_with_explicit_user() -> None:
     assert t.user == "alice"
 
 
-def test_transport_for_user_defaults_identity_file_to_operator_key() -> None:
-    """Regression: ``transport_for_user`` must default ``identity_file`` to
-    ``config.operator.ssh_private_key``. Without this, the mid-create
-    caller in ``agents/manager.py`` produced an SSH argv with no ``-i``
-    flag; on Linux OpenSSH found the right key under ``~/.ssh/id_ed25519``
-    by accident, but on Windows / non-standard key names the agent SSH
-    silently fell back to wrong keys and got "Permission denied (publickey)".
+def test_transport_for_user_always_uses_operator_key() -> None:
+    """``transport_for_user`` always builds the SSHTransport with
+    ``config.operator.ssh_private_key`` as the identity. There is no
+    override -- the operator's key is the only credential the on-VM
+    authorized_keys reconciler installs, so any other path would
+    fail auth anyway. Pinning this prevents the regression class
+    where a caller forgets to pass identity_file and SSH falls back
+    to ``~/.ssh/id_*`` defaults (works on Linux by accident, fails
+    on Windows / non-standard key names).
     """
     config = _mock_config()
     t = transport_for_user(_mock_vm(), config, user="alice")
     assert isinstance(t, SSHTransport)
     assert t.identity_file == config.operator.ssh_private_key
-
-
-def test_transport_for_user_honors_explicit_identity_file_override() -> None:
-    """Callers can still pass an explicit key (for the rare case where
-    something other than the operator's primary is needed)."""
-    custom = Path("/tmp/explicit-key")
-    t = transport_for_user(_mock_vm(), _mock_config(), user="alice", identity_file=custom)
-    assert isinstance(t, SSHTransport)
-    assert t.identity_file == custom
 
 
 def test_transport_for_user_raises_state_error_without_tailscale_host() -> None:

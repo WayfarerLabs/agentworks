@@ -22,10 +22,12 @@ import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from agentworks.ssh import SSHError, SSHResult
+
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from agentworks.ssh import SSHLogger, SSHResult
+    from agentworks.ssh import SSHLogger
 
 
 class Transport(abc.ABC):
@@ -197,9 +199,6 @@ class Transport(abc.ABC):
         breaks on Windows due to CRLF conversion). If ``mode`` is set,
         chmods after the write.
         """
-        from agentworks.ssh import SSHError
-        from agentworks.ssh import SSHResult as _SSHResult
-
         with tempfile.NamedTemporaryFile(mode="wb", suffix=".tmp", delete=False) as f:
             f.write(content.encode("utf-8"))
             tmp_path = f.name
@@ -208,7 +207,7 @@ class Transport(abc.ABC):
             if self.logger is not None:
                 self.logger.log_command(
                     f"({self.describe()}) write {remote_path} ({len(content)} bytes)",
-                    _SSHResult(returncode=0, stdout="", stderr=""),
+                    SSHResult(returncode=0, stdout="", stderr=""),
                 )
         except SSHError:
             if self.logger is not None:

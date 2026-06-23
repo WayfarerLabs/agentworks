@@ -34,7 +34,6 @@ from agentworks.transports.wsl2 import WSL2Transport
 
 if TYPE_CHECKING:
     import contextlib
-    from pathlib import Path
 
     from agentworks.config import Config
     from agentworks.db import AgentRow, Database, VMRow
@@ -60,7 +59,6 @@ def transport_for_user(
     config: Config,
     *,
     user: str,
-    identity_file: Path | None = None,
     default_timeout: int | None = None,
     logger: SSHLogger | None = None,
 ) -> Transport:
@@ -71,15 +69,11 @@ def transport_for_user(
     agent row doesn't exist yet but the on-VM identity already accepts
     the operator's key (see ``agents/manager.py``).
 
-    ``identity_file`` defaults to ``config.operator.ssh_private_key`` (the
-    operator's key, which the on-VM authorized_keys reconciler installs
-    for every user agentworks manages). Pass an explicit path only for
-    the rare case where a different key is required. Without the default,
-    omitting the kwarg silently dropped the ``-i`` flag from the SSH argv
-    and OpenSSH fell back to ``~/.ssh/id_*`` defaults / ssh-agent keys --
-    works on Linux where the operator key is usually ``id_ed25519``,
-    breaks on Windows / non-standard key names with "Permission denied
-    (publickey)".
+    Always uses ``config.operator.ssh_private_key`` as the SSH identity:
+    that's the key the on-VM authorized_keys reconciler installs for
+    every user agentworks manages, and it's the only credential the
+    refactor needs to know about. No override -- if a future use case
+    needs a different key, plumb it through then.
 
     Raises :class:`StateError` if the VM has no Tailscale IP (today's
     underlying assert disappears under ``python -O``; the typed error
@@ -92,12 +86,10 @@ def transport_for_user(
             entity_name=vm.name,
             hint="The VM may not have completed bootstrap, or Tailscale is broken on the VM.",
         )
-    if identity_file is None:
-        identity_file = config.operator.ssh_private_key
     return SSHTransport(
         host=vm.tailscale_host,
         user=user,
-        identity_file=identity_file,
+        identity_file=config.operator.ssh_private_key,
         force_tty=sys.platform == "win32",
         default_timeout=default_timeout,
         logger=logger,
@@ -118,10 +110,8 @@ def transport(
     Never falls back to the provisioner transport (SDD R3).
     """
     return transport_for_user(
-        vm,
-        config,
+        vm, config,
         user=vm.admin_username,
-        identity_file=config.operator.ssh_private_key,
         default_timeout=default_timeout,
         logger=logger,
     )
@@ -143,10 +133,8 @@ def agent_transport(
     and reinit).
     """
     return transport_for_user(
-        vm,
-        config,
+        vm, config,
         user=agent.linux_user,
-        identity_file=config.operator.ssh_private_key,
         default_timeout=default_timeout,
         logger=logger,
     )
