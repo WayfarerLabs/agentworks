@@ -2,29 +2,14 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
 from agentworks.ssh import SSHError, SSHResult
 from agentworks.transports import LimaTransport
-
-
-def _ok_completed(stdout: str = "", stderr: str = "") -> MagicMock:
-    cp = MagicMock()
-    cp.returncode = 0
-    cp.stdout = stdout
-    cp.stderr = stderr
-    return cp
-
-
-def _fail_completed(returncode: int = 1, stderr: str = "boom") -> MagicMock:
-    cp = MagicMock()
-    cp.returncode = returncode
-    cp.stdout = ""
-    cp.stderr = stderr
-    return cp
-
+from tests.transports.conftest import fail_completed as _fail_completed
+from tests.transports.conftest import ok_completed as _ok_completed
 
 # ---------------------------------------------------------------------------
 # run()

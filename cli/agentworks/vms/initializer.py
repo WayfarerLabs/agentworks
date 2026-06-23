@@ -27,11 +27,8 @@ from agentworks.env import (
 from agentworks.errors import ConnectivityError, ExternalError, NotFoundError
 from agentworks.ssh import SSHError, SSHLogger
 from agentworks.transports import (
-    LimaTransport,
-    RemoteLimaTransport,
     SSHTransport,
     Transport,
-    WSL2Transport,
 )
 from agentworks.vms.cloud_init import INIT_SYSTEM_PACKAGES, PROVISIONING_PACKAGES
 
@@ -1120,11 +1117,8 @@ def _join_tailscale(
     ts_cmd = f"tailscale up --auth-key {quoted_key}"
 
     # Redact the auth key from any attached loggers before it appears in logs.
-    # ``Transport`` doesn't declare ``logger`` on the ABC; every concrete
-    # subclass does. Narrow before reading.
-    attached_logger: SSHLogger | None = getattr(exec_target, "logger", None)
-    if attached_logger is not None:
-        attached_logger.add_redaction(ts_auth_key)
+    if exec_target.logger is not None:
+        exec_target.logger.add_redaction(ts_auth_key)
     if logger is not None:
         logger.add_redaction(ts_auth_key)
 
@@ -1140,19 +1134,6 @@ def _join_tailscale(
     output.detail(f"Tailscale IP: {tailscale_ip}")
     db.update_vm_tailscale(vm_name, tailscale_ip)
     return tailscale_ip
-
-
-def _describe_transport(exec_target: Transport) -> str:
-    """Return a short description of the transport used by a ``Transport``."""
-    if isinstance(exec_target, SSHTransport):
-        return f"ssh:{exec_target.host}"
-    if isinstance(exec_target, LimaTransport):
-        return f"lima:{exec_target.vm_name}"
-    if isinstance(exec_target, RemoteLimaTransport):
-        return f"remote-lima:{exec_target.vm_name}"
-    if isinstance(exec_target, WSL2Transport):
-        return f"wsl2:{exec_target.distro_name}"
-    return "unknown"
 
 
 def initialize_vm(
@@ -1186,13 +1167,11 @@ def initialize_vm(
         for token in git_tokens.values():
             logger.add_redaction(token)
 
-    # Attach logger to the provisioning transport. All concrete Transport
-    # subclasses set ``self.logger`` in ``__init__``; the ABC doesn't
-    # declare it, so we narrow per-subclass to assign.
-    if isinstance(exec_target, (SSHTransport, LimaTransport, RemoteLimaTransport, WSL2Transport)):
-        exec_target.logger = logger
+    # Attach logger to the provisioning transport. ``Transport`` declares
+    # ``logger`` on the ABC; the assignment is polymorphic.
+    exec_target.logger = logger
 
-    transport = _describe_transport(exec_target)
+    transport = exec_target.describe()
 
     # Anchor the VM in an active state for the full init span. No-op for
     # Lima/Azure/Proxmox; WSL2 holds a wsl.exe subprocess open so the distro

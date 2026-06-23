@@ -19,14 +19,17 @@ from agentworks.transports import (
 )
 
 REQUIRED_METHODS = {
+    "describe",
     "run",
     "interactive",
     "copy_to",
     "copy_from",
-    "copy_dir_to",
-    "write_file",
     "call_streaming",
 }
+# ``copy_dir_to`` and ``write_file`` are concrete defaults on the ABC
+# (tarball + ``copy_to`` + remote extract; tempfile + ``copy_to``).
+# They're not in REQUIRED_METHODS because the ABC ships a working
+# implementation; subclasses may override but don't have to.
 
 
 def test_transport_is_abstract() -> None:
@@ -71,10 +74,14 @@ def test_incomplete_subclass_cannot_be_instantiated() -> None:
     """
 
     class BrokenTransport(Transport):
-        # Implements run() but is missing the other six abstract methods.
+        # Implements run() but is missing the other abstract methods.
         # Signatures intentionally unannotated to keep the broken-subclass
         # minimal: this is a contract test, not a runnable transport.
-        def run(self, command, *, sudo=False, tty=None, check=True, timeout=None, env=None):  # type: ignore[no-untyped-def] # noqa: ANN001, ANN201
+        def run(  # type: ignore[no-untyped-def, override] # noqa: ANN001, ANN201
+            self, command, *,
+            sudo=False, tty=None, check=True, timeout=None, env=None,
+            retries=None, on_retry=None,
+        ):
             raise NotImplementedError
 
     with pytest.raises(TypeError):

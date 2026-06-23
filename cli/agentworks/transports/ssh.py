@@ -14,23 +14,16 @@ from __future__ import annotations
 
 import shlex
 import subprocess
-import tarfile
-import tempfile
-from pathlib import Path
 from typing import TYPE_CHECKING
 
-from agentworks.ssh import SSHError, SSHResult, _set_env_args
+from agentworks.ssh import SSH_DEFAULT_RETRIES, SSHError, SSHResult, _set_env_args
 from agentworks.transports.base import Transport
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from pathlib import Path
 
     from agentworks.ssh import SSHLogger
-
-
-# Transport-level SSH retry default. Connection-level timeouts trigger a
-# retry; remote-command failures do not. Matches the prior ssh.py constant.
-SSH_DEFAULT_RETRIES = 1
 
 
 def _scp_base_args(
@@ -115,8 +108,9 @@ class SSHTransport(Transport):
         args.append(target)
         return args
 
-    def _resolve_timeout(self, override: int | None) -> int | None:
-        return override if override is not None else self.default_timeout
+    def describe(self) -> str:
+        endpoint = f"{self.user}@{self.host}" if self.user else self.host
+        return f"ssh:{endpoint}"
 
     # -- Transport surface ----------------------------------------------
 
@@ -272,68 +266,6 @@ class SSHTransport(Transport):
         )
         if result.returncode != 0:
             raise SSHError(f"scp failed: {result.stderr.strip()}")
-
-    def copy_dir_to(
-        self,
-        local_path: str | Path,
-        remote_path: str,
-        *,
-        delete: bool = True,
-        timeout: int | None = None,
-    ) -> None:
-        """Copy a local directory via tar + scp + remote extract.
-
-        Uses Python's stdlib ``tarfile`` so no client tar binary is
-        required (works on Windows). With ``delete=True`` (default)
-        the destination is cleared before extraction.
-        """
-        local_path = Path(local_path)
-        with tempfile.NamedTemporaryFile(suffix=".tar.gz", delete=False) as f:
-            tmp_path = Path(f.name)
-        try:
-            with tarfile.open(tmp_path, "w:gz") as tar:
-                tar.add(local_path, arcname=".")
-            remote_tmp = f"/tmp/agentworks-copy-{tmp_path.name}"
-            self.copy_to(tmp_path, remote_tmp, timeout=timeout)
-        finally:
-            tmp_path.unlink(missing_ok=True)
-
-        if delete:
-            self.run(f"rm -rf {remote_path} && mkdir -p {remote_path}", timeout=timeout)
-        else:
-            self.run(f"mkdir -p {remote_path}", timeout=timeout)
-        self.run(f"tar -xzf {remote_tmp} -C {remote_path} && rm -f {remote_tmp}", timeout=timeout)
-
-    def write_file(
-        self,
-        remote_path: str,
-        content: str,
-        *,
-        mode: str | None = None,
-    ) -> None:
-        """Write ``content`` to ``remote_path`` via tempfile + scp.
-
-        Avoids embedding multi-line content in command argv, which
-        breaks on Windows due to CRLF conversion.
-        """
-        with tempfile.NamedTemporaryFile(mode="wb", suffix=".tmp", delete=False) as f:
-            f.write(content.encode("utf-8"))
-            tmp_path = f.name
-        try:
-            self.copy_to(tmp_path, remote_path)
-            if self.logger is not None:
-                self.logger.log_command(
-                    f"(scp) write {remote_path} ({len(content)} bytes)",
-                    SSHResult(returncode=0, stdout="", stderr=""),
-                )
-        except SSHError:
-            if self.logger is not None:
-                self.logger.log_error(f"(scp) failed to write {remote_path}")
-            raise
-        finally:
-            Path(tmp_path).unlink(missing_ok=True)
-        if mode:
-            self.run(f"chmod {mode} {remote_path}")
 
     def call_streaming(
         self,

@@ -65,6 +65,19 @@ class VMProvisioner(ABC):
         can't host an interactive shell).
         """
 
+    def post_tailscale_ready(self, vm: VMRow) -> None:  # noqa: B027 -- intentional concrete no-op
+        """Hook called once the VM's Tailscale node is up during create.
+
+        Default no-op. Azure overrides to detach the cloud-init public
+        IP at the moment Tailscale becomes reachable, minimizing the
+        window the VM is exposed to the internet. The asymmetry vs.
+        :meth:`transient_route` is genuine: the matching attach lives
+        inside :meth:`create` (cloud-init bootstrap needs the IP) and
+        the detach fires at an async Tailscale-ready point inside
+        :func:`initialize_vm`, neither of which is an ExitStack-shaped
+        lifecycle.
+        """
+
     def transient_route(self, vm: VMRow) -> AbstractContextManager[None]:
         """Hold any platform-native transient network state while the
         provisioner transport is in use.

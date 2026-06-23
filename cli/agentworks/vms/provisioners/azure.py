@@ -492,6 +492,16 @@ class AzureProvisioner(VMProvisioner):
             force_tty=sys.platform == "win32",
         )
 
+    def post_tailscale_ready(self, vm: VMRow) -> None:
+        """Detach the cloud-init public IP now that Tailscale is up.
+
+        The attach happens inside :meth:`create` (Azure needs the IP to
+        drive cloud-init bootstrap); this hook fires at the async
+        Tailscale-ready point inside ``initialize_vm`` to close the
+        public-exposure window.
+        """
+        self.detach_public_ip(vm)
+
     @contextlib.contextmanager
     def transient_route(self, vm: VMRow) -> Iterator[None]:
         """Attach a transient public IP for the duration of the context.

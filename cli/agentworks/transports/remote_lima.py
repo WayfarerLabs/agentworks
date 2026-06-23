@@ -11,19 +11,18 @@ from __future__ import annotations
 
 import shlex
 import subprocess
-import tarfile
-import tempfile
 import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from agentworks.ssh import SSHError, SSHResult
 from agentworks.transports._shared import env_assignment_prefix
 from agentworks.transports.base import Transport
 from agentworks.transports.ssh import SSHTransport
 
 if TYPE_CHECKING:
-    from agentworks.ssh import SSHLogger
+    from collections.abc import Callable
+
+    from agentworks.ssh import SSHLogger, SSHResult
 
 
 class RemoteLimaTransport(Transport):
@@ -47,15 +46,27 @@ class RemoteLimaTransport(Transport):
         self.vm_host_ssh = vm_host_ssh
         self.default_timeout = default_timeout
         self.logger = logger
-
-    def _host_transport(self, *, login_shell: bool = True) -> SSHTransport:
-        return SSHTransport(
-            host=self.vm_host_ssh,
+        # Two inner SSHTransports built once: the login-shell variant
+        # wraps every payload in ``$SHELL -lc`` (so the host's PATH
+        # finds limactl); the raw variant is used by scp where the
+        # login-shell wrap would be wrong.
+        self._host_login = SSHTransport(
+            host=vm_host_ssh,
             user=None,
-            login_shell=login_shell,
-            default_timeout=self.default_timeout,
-            logger=self.logger,
+            login_shell=True,
+            default_timeout=default_timeout,
+            logger=logger,
         )
+        self._host_raw = SSHTransport(
+            host=vm_host_ssh,
+            user=None,
+            login_shell=False,
+            default_timeout=default_timeout,
+            logger=logger,
+        )
+
+    def describe(self) -> str:
+        return f"remote_lima:{self.vm_name}@{self.vm_host_ssh}"
 
     def run(
         self,
@@ -66,20 +77,28 @@ class RemoteLimaTransport(Transport):
         check: bool = True,
         timeout: int | None = None,
         env: dict[str, str] | None = None,
+        retries: int | None = None,
+        on_retry: Callable[[int, int], None] | None = None,
     ) -> SSHResult:
         """Run ``command`` inside the remote Lima VM.
 
         ``env`` is embedded as scoped assignments in the lima payload
         (SetEnv at the host hop doesn't propagate into the limactl
-        shell on the VM side).
+        shell on the VM side). ``retries`` / ``on_retry`` propagate to
+        the inner SSH hop.
         """
         del tty  # tty doesn't apply to non-interactive remote_lima
         if sudo:
             command = f"sudo -n bash -c {shlex.quote(command)}"
         env_prefix = env_assignment_prefix(env)
         lima_cmd = f"limactl shell {self.vm_name} -- {env_prefix}{command}"
-        host = self._host_transport()
-        return host.run(lima_cmd, check=check, timeout=timeout)
+        return self._host_login.run(
+            lima_cmd,
+            check=check,
+            timeout=timeout,
+            retries=retries,
+            on_retry=on_retry,
+        )
 
     def interactive(
         self,
@@ -109,12 +128,10 @@ class RemoteLimaTransport(Transport):
         share a basename, or a stale tmp from a crashed prior run, don't
         collide.
         """
-        host = self._host_transport(login_shell=False)
         host_tmp = f"/tmp/agentworks-{uuid.uuid4()}-{Path(local_path).name}"
-        host.copy_to(local_path, host_tmp, timeout=timeout)
-        host_login = self._host_transport()
-        host_login.run(f"limactl copy {host_tmp} {self.vm_name}:{remote_path}", timeout=timeout)
-        host_login.run(f"rm -f {host_tmp}", check=False, timeout=timeout)
+        self._host_raw.copy_to(local_path, host_tmp, timeout=timeout)
+        self._host_login.run(f"limactl copy {host_tmp} {self.vm_name}:{remote_path}", timeout=timeout)
+        self._host_login.run(f"rm -f {host_tmp}", check=False, timeout=timeout)
 
     def copy_from(
         self,
@@ -127,67 +144,12 @@ class RemoteLimaTransport(Transport):
 
         ``host_tmp`` carries a UUID; see ``copy_to`` for rationale.
         """
-        host_login = self._host_transport()
         host_tmp = f"/tmp/agentworks-{uuid.uuid4()}-{Path(remote_path).name}"
-        host_login.run(f"limactl copy {self.vm_name}:{remote_path} {host_tmp}", timeout=timeout)
-        host = self._host_transport(login_shell=False)
+        self._host_login.run(f"limactl copy {self.vm_name}:{remote_path} {host_tmp}", timeout=timeout)
         try:
-            host.copy_from(host_tmp, local_path, timeout=timeout)
+            self._host_raw.copy_from(host_tmp, local_path, timeout=timeout)
         finally:
-            host_login.run(f"rm -f {host_tmp}", check=False, timeout=timeout)
-
-    def copy_dir_to(
-        self,
-        local_path: str | Path,
-        remote_path: str,
-        *,
-        delete: bool = True,
-        timeout: int | None = None,
-    ) -> None:
-        """Copy a directory via tar + ``copy_to`` + remote extract."""
-        local_path = Path(local_path)
-        with tempfile.NamedTemporaryFile(suffix=".tar.gz", delete=False) as f:
-            tmp_path = Path(f.name)
-        try:
-            with tarfile.open(tmp_path, "w:gz") as tar:
-                tar.add(local_path, arcname=".")
-            remote_tmp = f"/tmp/agentworks-copy-{tmp_path.name}"
-            self.copy_to(tmp_path, remote_tmp, timeout=timeout)
-        finally:
-            tmp_path.unlink(missing_ok=True)
-
-        if delete:
-            self.run(f"rm -rf {remote_path} && mkdir -p {remote_path}", timeout=timeout)
-        else:
-            self.run(f"mkdir -p {remote_path}", timeout=timeout)
-        self.run(f"tar -xzf {remote_tmp} -C {remote_path} && rm -f {remote_tmp}", timeout=timeout)
-
-    def write_file(
-        self,
-        remote_path: str,
-        content: str,
-        *,
-        mode: str | None = None,
-    ) -> None:
-        """Write ``content`` to ``remote_path`` via tempfile + ``copy_to``."""
-        with tempfile.NamedTemporaryFile(mode="wb", suffix=".tmp", delete=False) as f:
-            f.write(content.encode("utf-8"))
-            tmp_path = f.name
-        try:
-            self.copy_to(tmp_path, remote_path)
-            if self.logger is not None:
-                self.logger.log_command(
-                    f"(limactl copy) write {remote_path} ({len(content)} bytes)",
-                    SSHResult(returncode=0, stdout="", stderr=""),
-                )
-        except SSHError:
-            if self.logger is not None:
-                self.logger.log_error(f"(limactl copy) failed to write {remote_path}")
-            raise
-        finally:
-            Path(tmp_path).unlink(missing_ok=True)
-        if mode:
-            self.run(f"chmod {mode} {remote_path}")
+            self._host_login.run(f"rm -f {host_tmp}", check=False, timeout=timeout)
 
     def call_streaming(
         self,

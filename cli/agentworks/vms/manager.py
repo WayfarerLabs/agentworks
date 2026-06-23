@@ -335,24 +335,13 @@ def create_vm(
     # -- Initialization --
     # If this fails, the VM exists on the remote host and may be debuggable.
     # Keep the DB record so the user can reinit or delete.
-    # Build a callback to detach the Azure public IP once Tailscale is up
-    # (before Phase B starts). This minimizes the window where the VM has
-    # a public IP exposed to the internet.
-    #
-    # This is intentionally NOT routed through transient_route: the attach
-    # happens inside provisioner.create() (Azure needs the IP to drive
-    # cloud-init bootstrap), and the matching detach needs to fire at the
-    # asynchronous Tailscale-ready point inside initialize_vm. That isn't
-    # an ExitStack-shaped lifecycle. A future polymorphic refactor could
-    # expose a VMProvisioner.post_tailscale_ready(vm) hook; for now the
-    # isinstance check stays here because the asymmetry is genuine.
+    # Polymorphic post-Tailscale-ready hook. Azure overrides to detach
+    # the cloud-init public IP (closing the public-exposure window the
+    # instant Tailscale becomes reachable); other platforms are no-op.
     def _on_tailscale_ready() -> None:
-        if platform == "azure":
-            from agentworks.vms.provisioners.azure import AzureProvisioner as _AP
-
-            _created_vm = db.get_vm(vm_name)
-            assert _created_vm is not None
-            _AP().detach_public_ip(_created_vm)
+        refreshed = db.get_vm(vm_name)
+        assert refreshed is not None
+        get_provisioner_for_vm(db, refreshed, config).post_tailscale_ready(refreshed)
 
     try:
         initialize_vm(
@@ -883,21 +872,12 @@ def rekey_vm(
         output.detail(f"Verifying SSH to {new_ip}...")
         from agentworks.transports import SSHTransport
 
-        ts_target_base = transport(vm, config)
-        # ``transport()`` returns an SSHTransport for Tailscale-backed VMs;
-        # rebuild with the new IP rather than mutating the immutable host.
-        assert isinstance(ts_target_base, SSHTransport)
-        ts_target = SSHTransport(
-            host=new_ip,
-            user=ts_target_base.user,
-            port=ts_target_base.port,
-            identity_file=ts_target_base.identity_file,
-            proxy_jump=ts_target_base.proxy_jump,
-            force_tty=ts_target_base.force_tty,
-            login_shell=ts_target_base.login_shell,
-            default_timeout=ts_target_base.default_timeout,
-            logger=ts_target_base.logger,
-        )
+        ts_target = transport(vm, config)
+        # ``transport()`` returns an SSHTransport for Tailscale-backed VMs.
+        # Retarget the host in place instead of rebuilding the whole
+        # transport; the other fields (user, identity, etc.) are unchanged.
+        assert isinstance(ts_target, SSHTransport)
+        ts_target.host = new_ip
         if wait_for_reconnect(ts_target):
             output.info(f"VM '{name}' rekeyed successfully. Tailscale IP: {new_ip}")
         else:
@@ -1188,12 +1168,9 @@ def _collect_secrets(
 
 def _query_live_resources(vm: VMRow, config: Config) -> dict[str, str] | None:
     """Query live resource usage from a VM over SSH."""
-    from agentworks.transports import SSHTransport, transport
+    from agentworks.transports import transport
 
     target = transport(vm, config)
-    # transport() returns an SSHTransport for Tailscale-backed VMs; retries=
-    # is SSH-only (not on the ABC) so we narrow before passing it.
-    assert isinstance(target, SSHTransport)
     cmd = (
         "nproc && "
         "uptime | grep -oP 'load average: \\K[^,]+' && "
