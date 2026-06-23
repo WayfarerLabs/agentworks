@@ -192,7 +192,8 @@ historical SDDs); `git grep "admin_exec_target"` returns zero hits; ruff / mypy 
 Final pass.
 
 - [x] Run full pytest. Confirm no regressions vs the pre-refactor count. (882 passed)
-- [x] Run `./scripts/lint-files.sh`. (prettier auto-fixed FRD wrapping; markdownlint and cspell green)
+- [x] Run `./scripts/lint-files.sh`. (prettier auto-fixed FRD wrapping; markdownlint and cspell
+      green)
 - [x] Run `ruff` / `mypy` package-wide. (ruff agentworks/ tests/ : clean; mypy agentworks/ : 95
       files, 0 errors)
 - [x] `cli/README.md`: no stale `ExecTarget` references found in any README.
