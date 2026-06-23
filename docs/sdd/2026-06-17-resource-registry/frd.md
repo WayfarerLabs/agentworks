@@ -169,9 +169,17 @@ Operators wanting to customize one field of the auto-declared default template h
    This is the preferred shape -- it preserves the kind's default field values via template
    inheritance and isolates the operator's override.
 
-**Admin is a singleton exception.** `[admin.config]` and `[admin.env]` are sub-tables of the
-always-implicit admin resource; no root admin declaration exists or is required. The
-orphan-rejection rule does not apply within the admin namespace.
+**Singleton resources are the exception.** Some resources are singletons whose existence the
+framework treats as always-implicit. For these, sub-tables are valid without any root declaration.
+Today this applies to:
+
+- **Admin** (`[admin.config]`, `[admin.env]`, `[admin.git_credentials]`, ...): one admin user per
+  agentworks install; no `[admin]` root section is required or accepted.
+- **Secret config** (`[secret_config]`, `[secret_config.backends]` if expressed as a sub-section):
+  one secret-system config per install.
+
+For the multi-named kinds (`vm_templates`, `agent_templates`, `secrets`, `git_credentials`, etc.),
+the orphan-rejection rule applies fully.
 
 This rule is a TOML-era workaround. In a future manifest-style-config SDD (non-goal here), each
 resource is one document and the orphan problem disappears by construction.
@@ -189,7 +197,7 @@ Each kind in the registry declares its miss policy:
 Error messages include the requirement's `source` so the operator sees, e.g.:
 
 ```text
-vm_template "azure-prod" references unknown agent_template "claude-experimental"
+vm_template "azure-prod" references unknown vm_template "base"
 ```
 
 The framework controls error shape; each kind only declares its policy. Migrating an existing
@@ -202,12 +210,14 @@ from `tailscale_auth_key` or a git credential `token`: if the name isn't operato
 secret kind's auto-declare policy synthesizes it. Per-source policy divergence is intentionally not
 supported -- it would multiply the complexity and undermine the unified model.
 
-**Template default auto-declare is unconditional.** Template kinds always synthesize the
-code-defined `default` when a requirement references it. Operators customize by declaring
-`[vm_templates.default]` (or the corresponding kind) explicitly -- the operator's declaration
-replaces the auto-decl wholesale. Partial overrides go through normal template inheritance (declare
-a child template with `inherits = ["default"]` and override fields there), not through field-level
-merging on the `default` declaration itself. There is no "no default" mode.
+**Template default auto-declare is the only auto-declare path for template kinds.** When no operator
+declaration exists for `default` and a requirement references it, the kind synthesizes the
+code-defined default template (origin: `auto-declared`). When the operator declares
+`[vm_templates.default]` (or the corresponding kind), that declaration is used verbatim (origin:
+`operator-declared`) -- no auto-decl, no merge. Partial overrides flow through normal template
+inheritance (declare a child template with `inherits = ["default"]` and override fields there); the
+framework does not do field-level merging on the `default` declaration. There is no "no default"
+mode.
 
 ### R4: Framework metadata on every resource
 
@@ -216,8 +226,9 @@ operator-declared or auto-declared:
 
 - **`origin`** (R5): how the resource came to be in the registry, plus location detail. Set once at
   registration; never mutated.
-- **`usage`** (list of strings, system-collected): one entry per matching requirement. Operators do
-  not set this; the validation pass populates it from `required_resources()` walks.
+- **`usage`** (list of usage entries, system-collected): one entry per matching requirement; each
+  entry carries the requirement's `source` `(kind, name)` and the usage text (Terminology).
+  Operators do not set this; the validation pass populates it from `required_resources()` walks.
 
 These are the only fields the framework adds. The rest of a resource's fields come either from the
 operator's declaration (verbatim) or from the kind's `synthesize()` (when auto-declared). There is
@@ -499,8 +510,9 @@ Operators upgrading across this SDD see four observable changes:
 - **Orphan sub-sections now error.** Per R2, sub-sections like `[vm_templates.x.env]` require the
   parent template `[vm_templates.x]` to be explicitly declared. Configs that previously relied on
   TOML's implicit-table semantics (declaring `[vm_templates.x.env]` without `[vm_templates.x]`) get
-  a config-load error. Fix is to add the empty parent declaration or move the env into an existing
-  template.
+  a config-load error. Three fixes depending on intent: add the empty parent declaration, move the
+  env into an existing template, or (preferred for what was effectively a partial override of the
+  default template) declare a child template with `inherits = ["default"]` and put the env there.
 - **Undeclared env-block secret references no longer error.** Under env-and-secrets, an env-block
   `{ secret = "foo" }` reference required an explicit `[secrets.foo]` block; an undeclared name was
   a config-load error. Under this SDD, that reference becomes a requirement and the secret kind's

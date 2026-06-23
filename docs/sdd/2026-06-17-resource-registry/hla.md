@@ -185,15 +185,24 @@ def _compose_resources(parsed: ParsedToml, registry: Registry) -> None:
     ...
 ```
 
-Admin is the singleton exception: `[admin.config]` and `[admin.env]` are sub-tables of the
-always-implicit admin resource and require no root declaration.
+Singletons are exceptions: their root declaration is neither required nor accepted. Today these are
+`admin` (`[admin.config]`, `[admin.env]`, `[admin.git_credentials]`, ...) and `secret_config`. Their
+sub-tables are valid without any root.
+
+Sub-section composition is additive: a resource composed from `[vm_templates.x]` plus
+`[vm_templates.x.env]` carries both sets of fields. No key collisions are possible by construction
+(parent top-level fields are not under any sub-section).
 
 For secrets, `backend_mappings` is typically dot-notation inside the `[secrets.<name>]` section
-rather than a separate `[secrets.<name>.backend_mappings]` sub-section, so the rule rarely fires for
-secrets in practice. The rule still applies if someone writes the sub-section form.
+rather than a separate `[secrets.<name>.backend_mappings]` sub-section, so the orphan rule is
+effectively a no-op for secrets in current practice. The rule still applies if someone writes the
+sub-section form.
 
-This composition step runs **before** the validation pass; the validation pass operates on
-already-composed resources and never sees orphan sub-sections.
+**Registry lifecycle**: `Registry` is built incrementally: TOML parse -> `_compose_resources`
+(creates resource shells, attaches sub-sections, enforces orphan rejection) -> validation pass
+(walks requirements, applies miss policies, attaches framework metadata, detects cycles) -> return
+to caller. The validation pass operates on already-composed resources and never sees orphan
+sub-sections.
 
 ## Validation pass
 
@@ -257,8 +266,8 @@ with the standard service-layer shape -- structured fields for kind/name/source,
 CLI layer. Examples:
 
 - Unknown name in an error-policy kind:
-  `ConfigError(kind="vm_template", entity="azure-prod", source=("agent_template", "claude-exp"))`
-  rendered as: `agent_template "claude-exp" references unknown vm_template "azure-prod"`.
+  `ConfigError(kind="vm_template", entity="base", source=("vm_template", "azure-prod"))` rendered
+  as: `vm_template "azure-prod" references unknown vm_template "base"`.
 - Reserved-name restriction violated:
   `ConfigError(kind="vm_template", entity="custom-base", reason="reserved-name-restriction")`
   rendered as: `vm_template kind only auto-declares the reserved name "default"; got "custom-base"`.
