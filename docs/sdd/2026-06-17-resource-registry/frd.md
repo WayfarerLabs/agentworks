@@ -57,8 +57,8 @@ reconciliation, but that move is deliberately not part of this design.
   this effort, it is constrained to just config-declared resources but it could be expanded to other
   resource sources in the future. Kind is the primary dimension; within a kind, resources are looked
   up by name, so cross-kind identity is the `(kind, name)` pair. Each kind contributes its own
-  **miss policy** (R2) which the registry applies when a requirement points at a `(kind, name)` not
-  yet in the registry. Resources arrive in the registry through two origin paths (R4): operator
+  **miss policy** (R3) which the registry applies when a requirement points at a `(kind, name)` not
+  yet in the registry. Resources arrive in the registry through two origin paths (R5): operator
   declarations in config, and auto-declared synthesis from requirements. Queried by the validation
   pass and surfaced via `agw doctor`, `agw secret list`, and (Phase 2) `agw resource list`.
 - **Resource requirement**: a **reference declaration** -- one resource saying "I need this other
@@ -121,15 +121,62 @@ this:
 
 - **Auto-declared resources** synthesize once per `(kind, name)`. When multiple requirements would
   trigger auto-declaration of the same name, the **first-encountered requirement** supplies any
-  kind-specific extras and is recorded as the origin source (R4). Walk order is config-load order:
+  kind-specific extras and is recorded as the origin source (R5). Walk order is config-load order:
   top-to-bottom in the TOML file, top-level sections in their declaration order. The remaining
   requirements contribute additional usages but do not re-synthesize the resource.
 - **Operator-declared resources** are unchanged by additional requirements pointing at them. The
   resource keeps the operator's fields; the requirements just add to its usage list.
 - **All usages are retained**. The resource's accumulated usage list is what `agw secret describe`
-  (R9) renders. Duplicate usage strings from different requirements are deduplicated for display.
+  (R10) renders. Duplicate usage strings from different requirements are deduplicated for display.
 
-### R2: Per-kind miss policies
+### R2: Resource boundaries are framework concepts, not TOML concepts
+
+A resource is the conceptual unit (e.g., a secret with its backend mappings; a template with its
+env, dotfiles config, packages, etc.). TOML happens to split a single resource across multiple
+sections because TOML has no native nested-document model. The framework recomposes the parsed TOML
+into resources at config-load time and validates that every section belongs to an
+explicitly-declared resource.
+
+**Orphan sub-sections are config-load errors.** Declaring any sub-section of a resource path
+requires the parent resource to be explicitly declared (even if empty). Without the parent
+declaration, the loader raises a `ConfigError` like:
+
+```text
+[vm_templates.azure-prod.env] declared without [vm_templates.azure-prod].
+Either declare the template explicitly or move the env into an existing template.
+```
+
+This rule catches what TOML otherwise allows (implicit-table semantics for orphan sub-section paths)
+and forces operator intent to be explicit. It applies to every kind that supports sub-sections:
+`[vm_templates.x.env]` requires `[vm_templates.x]`, `[agent_templates.x.env]` requires
+`[agent_templates.x]`, and so on, including for the reserved `default` name:
+`[vm_templates.default.env]` requires `[vm_templates.default]`.
+
+Operators wanting to customize one field of the auto-declared default template have two options:
+
+1. Declare the parent explicitly and re-state the full content (operator takes full responsibility;
+   the framework does no field-level merge per R4).
+2. Declare a child template that inherits from the default and override the field there:
+
+   ```toml
+   [vm_templates.proxied]
+   inherits = ["default"]
+
+   [vm_templates.proxied.env]
+   HTTP_PROXY = "..."
+   ```
+
+   This is the preferred shape -- it preserves the kind's default field values via template
+   inheritance and isolates the operator's override.
+
+**Admin is a singleton exception.** `[admin.config]` and `[admin.env]` are sub-tables of the
+always-implicit admin resource; no root admin declaration exists or is required. The
+orphan-rejection rule does not apply within the admin namespace.
+
+This rule is a TOML-era workaround. In a future manifest-style-config SDD (non-goal here), each
+resource is one document and the orphan problem disappears by construction.
+
+### R3: Per-kind miss policies
 
 Each kind in the registry declares its miss policy:
 
@@ -162,12 +209,12 @@ replaces the auto-decl wholesale. Partial overrides go through normal template i
 a child template with `inherits = ["default"]` and override fields there), not through field-level
 merging on the `default` declaration itself. There is no "no default" mode.
 
-### R3: Framework metadata on every resource
+### R4: Framework metadata on every resource
 
 Every resource in the registry carries framework-attached metadata, regardless of whether it was
 operator-declared or auto-declared:
 
-- **`origin`** (R4): how the resource came to be in the registry, plus location detail. Set once at
+- **`origin`** (R5): how the resource came to be in the registry, plus location detail. Set once at
   registration; never mutated.
 - **`usage`** (list of strings, system-collected): one entry per matching requirement. Operators do
   not set this; the validation pass populates it from `required_resources()` walks.
@@ -181,7 +228,7 @@ Duplicate operator declarations are a TOML parse error (duplicate keys at the sa
 before the framework runs. The framework therefore sees at most one operator declaration per
 `(kind, name)`.
 
-### R4: Origin tracking on every resource
+### R5: Origin tracking on every resource
 
 Every resource in a registry carries an `origin` field that records how it came to be in the
 registry. Two origin types:
@@ -190,7 +237,7 @@ registry. Two origin types:
   **file path and line number** of the declaration's opening line, scoped to the loaded TOML config
   file (e.g., `~/.config/agentworks/config.toml:42`). If multi-file config (manifests, layering) is
   added later, that SDD revisits this field. When the resource is also referenced by requirements,
-  the matching requirements still contribute to the usage list (R3) but the origin stays
+  the matching requirements still contribute to the usage list (R4) but the origin stays
   `operator-declared`.
 - **`auto-declared`**: the resource was synthesized at config-load time to satisfy a missing
   requirement. The origin carries the **first matching requirement in config-load order (R1)** --
@@ -206,19 +253,19 @@ confirming an auto-declared resource came from the source the operator expected.
 
 Origin is surfaced in `agw doctor`, `agw secret list` (origin column), and `agw secret describe`
 (full origin detail, including file:line or first-requirement source as appropriate). The Phase-2
-`agw resource` commands surface origin generically (R11).
+`agw resource` commands surface origin generically (R12).
 
-### R5: Cycle detection in the validation pass
+### R6: Cycle detection in the validation pass
 
 The validation pass detects cycles in the resource reference graph. Inheritance chains
 (`vm_templates.x inherits = ["y"]` where `y inherits = ["x"]`) and any future cross-resource cycle
 are caught uniformly with a clear error naming the cycle and the resources involved. Cycle errors
 are config-load errors with no fallback.
 
-Phase 1 ships the check but exercises nothing (secrets don't reference secrets); Phase 2 (R11)
+Phase 1 ships the check but exercises nothing (secrets don't reference secrets); Phase 2 (R12)
 brings template inheritance into the framework, which is where the check earns its keep.
 
-### R6: Tailscale auth key as a secret reference
+### R7: Tailscale auth key as a secret reference
 
 The VM template schema gains:
 
@@ -250,7 +297,7 @@ usages. This is intentional -- operators typically use one Tailscale tailnet acr
 Operators wanting per-template isolation set a distinct `tailscale_auth_key` on each template (e.g.,
 `"tailscale-auth-key-prod"`, `"tailscale-auth-key-dev"`).
 
-### R7: Git credential tokens as secret references
+### R8: Git credential tokens as secret references
 
 The git credential entry schema gains:
 
@@ -274,12 +321,12 @@ description = "Personal access"
 token = "shared-github-token"   # share a secret across credentials (uncommon but supported)
 ```
 
-Resolution mirrors R6: requirement collected, auto-declared if missing, eager-resolved via the
+Resolution mirrors R7: requirement collected, auto-declared if missing, eager-resolved via the
 backend chain, resolved value threaded to the git credential install runner that writes
 `~/.git-credentials` on the VM. The default secret name relies on git credential entry names being
 unique within `[git_credentials.*]`, which they already are by config-schema.
 
-### R8: Operator description as a distinct field
+### R9: Operator description as a distinct field
 
 Every resource type that supports operator declaration carries an optional `description` field that
 is separate from the system-collected `usage` list:
@@ -290,7 +337,7 @@ is separate from the system-collected `usage` list:
 - **`description`** (string, operator-set) is the operator's free-form note. Example:
   `"Prod tailnet auth key, 90-day expiry, owner: SRE team"`.
 
-Both surface in `agw doctor`, `agw secret list`, and `agw secret describe` (R9). The convention is
+Both surface in `agw doctor`, `agw secret list`, and `agw secret describe` (R10). The convention is
 the same for any resource type Phase 2 brings into the framework.
 
 `description` is encouraged but not required. The validation pass emits a config-load warning when
@@ -299,11 +346,11 @@ document their own resources. Auto-declared resources do not trigger the warning
 didn't author them; demanding a description would be noise). Operators who deliberately leave the
 field blank pay one warning per CLI invocation.
 
-### R9: Origin and inspection via doctor, secret list, and secret describe
+### R10: Origin and inspection via doctor, secret list, and secret describe
 
 `agw doctor`'s Secrets group surfaces:
 
-- **Per-secret origin** (R4): the origin string with relevant detail. For `operator-declared`, shown
+- **Per-secret origin** (R5): the origin string with relevant detail. For `operator-declared`, shown
   as `operator-declared (config.toml:42)`. For `auto-declared`, shown as
   `auto-declared by vm_template:default`. When the resource has additional matching requirements
   beyond the one that determined the origin display, their sources (derived from the usage list) are
@@ -334,7 +381,7 @@ summary; for detail, the operator runs describe.
 
 Describe does not prompt and does not resolve secret values; it reports state.
 
-### R10: Registry construction and eager-resolve scope
+### R11: Registry construction and eager-resolve scope
 
 #### Registry construction: universal
 
@@ -379,7 +426,7 @@ The map is current-state, not closed: any kind that later acquires system-secret
 covered automatically because the framework walks subgraphs by structure, not by hardcoded command
 lookup tables.
 
-### R11: Phase 2 scope (resource type migrations)
+### R12: Phase 2 scope (resource type migrations)
 
 Phase 2 brings the remaining resource references under the framework. Each of the kinds below
 becomes a first-class kind in the registry with its own miss policy:
@@ -412,7 +459,7 @@ agw resource describe <kind> <name>
 ```
 
 - `agw resource list` shows one row per declared resource across all kinds in the registry. Columns:
-  kind, name, origin (with detail per R4: file:line for operator-declared, requirement source for
+  kind, name, origin (with detail per R5: file:line for operator-declared, requirement source for
   auto-declared), usage count (or first usage when short), description (truncated). Filters:
   `--kind` (CSV per the cli-conventions filter pattern), `--origin` (one of `operator`, `auto`).
 - `agw resource describe <kind> <name>` shows the framework-level detail view: kind, name, origin
@@ -447,8 +494,13 @@ kinds are in the registry; with only secrets in Phase 1 it would be redundant wi
 
 ## Migration notes
 
-Operators upgrading across this SDD see three observable changes:
+Operators upgrading across this SDD see four observable changes:
 
+- **Orphan sub-sections now error.** Per R2, sub-sections like `[vm_templates.x.env]` require the
+  parent template `[vm_templates.x]` to be explicitly declared. Configs that previously relied on
+  TOML's implicit-table semantics (declaring `[vm_templates.x.env]` without `[vm_templates.x]`) get
+  a config-load error. Fix is to add the empty parent declaration or move the env into an existing
+  template.
 - **Undeclared env-block secret references no longer error.** Under env-and-secrets, an env-block
   `{ secret = "foo" }` reference required an explicit `[secrets.foo]` block; an undeclared name was
   a config-load error. Under this SDD, that reference becomes a requirement and the secret kind's
@@ -456,7 +508,7 @@ Operators upgrading across this SDD see three observable changes:
   env-and-secrets is preserved through visibility instead: `agw doctor` and `agw secret list` show
   every auto-declared secret with its origin source, so operators retain a complete view of what the
   framework inferred on their behalf. Operators who relied on the strict error behavior should add
-  `[secrets.<name>]` declarations explicitly; the warning on missing `description` (R8) will prompt
+  `[secrets.<name>]` declarations explicitly; the warning on missing `description` (R9) will prompt
   them to.
 - **Tailscale auth key resolution moves to the framework default convention.** Set
   `AW_SECRET_TAILSCALE_AUTH_KEY` (or whichever value your active backend chain produces). Operators

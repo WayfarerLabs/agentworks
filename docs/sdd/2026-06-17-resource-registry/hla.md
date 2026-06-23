@@ -161,9 +161,39 @@ origin doesn't need to duplicate that data.
 The loader is responsible for capturing `file` / `line` during TOML parsing. Python's stdlib
 `tomllib` does not expose line info, so the loader switches to **`tomlkit`** (actively maintained,
 line info exposed via the item position APIs). `tomlkit` raises on duplicate keys at the same path,
-matching `tomllib` behavior, so the FRD R3 "duplicate operator declarations are TOML errors" rule
+matching `tomllib` behavior, so the FRD R4 "duplicate operator declarations are TOML errors" rule
 holds. The existing parsing surface in `registry.py` doesn't change shape; only the parse step swaps
 libraries.
+
+## Resource composition from TOML
+
+A resource is the conceptual unit; TOML splits it across sections (a template's fields plus its
+`.env` sub-section plus any future sub-tables). After parsing, the loader composes resources from
+sections before handing the `Registry` to the validation pass.
+
+The composition step also enforces the FRD R2 orphan-rejection rule:
+
+```python
+def _compose_resources(parsed: ParsedToml, registry: Registry) -> None:
+    # For each multi-named kind whose sections support sub-tables
+    # (vm_templates, agent_templates, workspace_templates, session_templates, ...),
+    # walk the parsed sections and:
+    #   - For each [<container>.<name>] section, create the resource shell.
+    #   - For each [<container>.<name>.<sub>] section, attach to the resource.
+    #   - If a sub-section's parent [<container>.<name>] is not in parsed sections,
+    #     raise ConfigError pointing at the orphan.
+    ...
+```
+
+Admin is the singleton exception: `[admin.config]` and `[admin.env]` are sub-tables of the
+always-implicit admin resource and require no root declaration.
+
+For secrets, `backend_mappings` is typically dot-notation inside the `[secrets.<name>]` section
+rather than a separate `[secrets.<name>.backend_mappings]` sub-section, so the rule rarely fires for
+secrets in practice. The rule still applies if someone writes the sub-section form.
+
+This composition step runs **before** the validation pass; the validation pass operates on
+already-composed resources and never sees orphan sub-sections.
 
 ## Validation pass
 
@@ -300,7 +330,8 @@ Phase 1 sources:
 - `VMTemplate.tailscale_auth_key`: emits `SecretRequirement` with `source=("vm_template", <name>)`
   and `usage="the VM-provisioning auth key"`.
 - `GitCredentialEntry.token`: emits `SecretRequirement` with `source=("git_credentials", <name>)`
-  and `usage="the auth token"` (or similar per the FRD's R7 sentence-template test).
+  and `usage="the auth token"` (or similar; usage phrasing follows the Terminology sentence-template
+  test).
 - `AdminConfig.git_credentials` / `AgentTemplate.git_credentials` lists: each named credential is a
   reference; emits a `GitCredentialRequirement` (Phase 2-shaped; Phase 1 still uses bespoke
   validation for the list but the requirements are emitted so the orchestrator's transitive walk
@@ -393,7 +424,7 @@ New command added to the existing `cli/agentworks/cli/commands/secret.py` (which
 alongside the existing list-formatting helpers. No new shim package; the CLI module imports the
 service-layer function directly.
 
-Output sections (per FRD R9):
+Output sections (per FRD R10):
 
 - Header: name, kind, origin, description.
 - Origin detail: file path and line for operator-declared, requirement source for auto-declared.
@@ -416,7 +447,7 @@ agw resource list [--kind <kind1,kind2,...>] [--origin operator|auto]
 agw resource describe <kind> <name>
 ```
 
-Two-positional describe (kind + name) because names are unique only within a kind (FRD R11). The
+Two-positional describe (kind + name) because names are unique only within a kind (FRD R12). The
 usual CLI convention has a single positional name with context flags; the two-positional shape is a
 deliberate carve-out for this command.
 
@@ -507,7 +538,7 @@ The plan will phase the work; the full design above is the target. Anticipated s
 6. **Phase 2a: Template kinds.** `VMTemplateKind`, `WorkspaceTemplateKind`, `AgentTemplateKind`,
    `SessionTemplateKind` implementations. Inheritance moves into the framework. Built-in defaults
    migrate from the existing resolver fallback into `synthesize()`. **Operator-facing behavior is
-   unchanged** (per FRD R11); error messages get the framework's consistent shape. Partial overrides
+   unchanged** (per FRD R12); error messages get the framework's consistent shape. Partial overrides
    continue to flow through template `inherits` (an existing mechanism), not through any framework
    field-level merge -- the framework doesn't do field-level merging at all.
 7. **Phase 2b: Catalog and provider kinds.** `CatalogKind`, `GitCredentialProviderKind`,
