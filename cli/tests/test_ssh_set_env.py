@@ -18,7 +18,8 @@ from unittest.mock import patch
 
 import pytest
 
-from agentworks.transports.ssh import SSHTransport, _set_env_args
+from agentworks.ssh import _set_env_args
+from agentworks.transports.ssh import SSHTransport
 
 
 def _target() -> SSHTransport:

@@ -19,7 +19,7 @@ import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from agentworks.ssh import SSHError, SSHResult
+from agentworks.ssh import SSHError, SSHResult, _set_env_args
 from agentworks.transports.base import Transport
 
 if TYPE_CHECKING:
@@ -31,24 +31,6 @@ if TYPE_CHECKING:
 # Transport-level SSH retry default. Connection-level timeouts trigger a
 # retry; remote-command failures do not. Matches the prior ssh.py constant.
 SSH_DEFAULT_RETRIES = 1
-
-
-def _set_env_args(env: dict[str, str] | None) -> list[str]:
-    """Build ``-o SetEnv="K1=V1" "K2=V2" ...`` for SSH.
-
-    ssh_config(5) says "for each parameter, the first obtained value
-    will be used", so emitting ``-o SetEnv=K=V`` once per pair silently
-    drops every pair after the first. We coalesce into one ``-o SetEnv``
-    argument with whitespace-separated VAR=VALUE pairs; values are
-    quoted (handles spaces, empty values, embedded ``"``/``\\``).
-    """
-    if not env:
-        return []
-    pairs = []
-    for key, value in env.items():
-        escaped = value.replace("\\", "\\\\").replace('"', '\\"')
-        pairs.append(f'{key}="{escaped}"')
-    return ["-o", "SetEnv=" + " ".join(pairs)]
 
 
 def _scp_base_args(

@@ -118,12 +118,11 @@ A test pins this invariant: when `transport(vm, config)` or `agent_transport(vm,
 raises, the calling function does not call `provisioner_transport(...)`.
 
 One acknowledged carve-out: the `_on_tailscale_ready` callback inside `create_vm` keeps a direct
-`AzureProvisioner.detach_public_ip` call (rather than routing through `transient_route`). The
-attach happens inside `provisioner.create()` because Azure needs the IP to drive cloud-init
-bootstrap, and the matching detach needs to fire at the asynchronous Tailscale-ready point inside
-`initialize_vm`. That isn't an ExitStack-shaped lifecycle, so the polymorphic hook doesn't fit
-cleanly. A future refactor could expose `VMProvisioner.post_tailscale_ready(vm)`; this SDD doesn't
-take that on.
+`AzureProvisioner.detach_public_ip` call (rather than routing through `transient_route`). The attach
+happens inside `provisioner.create()` because Azure needs the IP to drive cloud-init bootstrap, and
+the matching detach needs to fire at the asynchronous Tailscale-ready point inside `initialize_vm`.
+That isn't an ExitStack-shaped lifecycle, so the polymorphic hook doesn't fit cleanly. A future
+refactor could expose `VMProvisioner.post_tailscale_ready(vm)`; this SDD doesn't take that on.
 
 ### R4: One module per transport
 

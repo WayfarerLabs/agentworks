@@ -191,11 +191,13 @@ historical SDDs); `git grep "admin_exec_target"` returns zero hits; ruff / mypy 
 
 Final pass.
 
-- [ ] Run full pytest. Confirm no regressions vs the pre-refactor count.
-- [ ] Run `./scripts/lint-files.sh`.
-- [ ] Run `ruff` / `mypy` package-wide.
-- [ ] `cli/README.md`: no changes expected (operator-visible surface unchanged), but scan for stale
-      `ExecTarget` references in code samples.
+- [x] Run full pytest. Confirm no regressions vs the pre-refactor count. (882 passed)
+- [x] Run `./scripts/lint-files.sh`. (prettier auto-fixed FRD wrapping; markdownlint and cspell green)
+- [x] Run `ruff` / `mypy` package-wide. (ruff agentworks/ tests/ : clean; mypy agentworks/ : 95
+      files, 0 errors)
+- [x] `cli/README.md`: no stale `ExecTarget` references found in any README.
+- [x] Consolidated `_set_env_args` to live only in `agentworks/ssh.py` (per Phase 4 reviewer's
+      minor): `agentworks/transports/ssh.py` imports it.
 - [ ] `docs/sdd/2026-06-19-polymorphic-transports/locked.md`: not part of this PR. The lockfile
       lands as a follow-up commit after merge, per the SDD skill.
 - [ ] Open PR referencing issue #128.
