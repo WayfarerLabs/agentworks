@@ -157,17 +157,17 @@ codebase compiles cleanly. This is the end of the "Phase-2-and-3-together" logic
 
 Now that nothing uses the old shape, delete it.
 
-- [ ] `cli/agentworks/ssh.py`: delete `ExecTarget` dataclass.
-- [ ] `cli/agentworks/ssh.py`: delete `admin_exec_target` function (replaced by
+- [x] `cli/agentworks/ssh.py`: delete `ExecTarget` dataclass.
+- [x] `cli/agentworks/ssh.py`: delete `admin_exec_target` function (replaced by
       `transports.transport`).
-- [ ] `cli/agentworks/ssh.py`: delete per-transport helpers (`lima_run`, `_lima_interactive`,
+- [x] `cli/agentworks/ssh.py`: delete per-transport helpers (`lima_run`, `_lima_interactive`,
       `wsl2_run`, `_wsl2_interactive`, `remote_lima_run`, `_remote_lima_interactive`,
       `_lima_copy_to`, `_remote_lima_copy_to`, `_wsl2_copy_to`, plus the `LimaTarget` / `WSL2Target`
       / `RemoteLimaTarget` dataclasses).
-- [ ] `cli/agentworks/ssh.py`: delete `interactive()` (replaced by `Transport.interactive()`).
-- [ ] `cli/agentworks/ssh.py`: delete `_unwrap_ssh()`. Phase 3 migrated its only caller
+- [x] `cli/agentworks/ssh.py`: delete `interactive()` (replaced by `Transport.interactive()`).
+- [x] `cli/agentworks/ssh.py`: delete `_unwrap_ssh()`. Phase 3 migrated its only caller
       (`vms/backup.py`) to `Transport.copy_from`, so this is now unconditional.
-- [ ] `cli/agentworks/ssh.py`: keep what's genuinely SSH-specific and not Transport-shaped.
+- [x] `cli/agentworks/ssh.py`: keep what's genuinely SSH-specific and not Transport-shaped.
       `wait_for_reconnect` was already moved to `transports/__init__.py` in Phase 2 (don't delete it
       here -- it lives in the new home). Genuine survivors today include:
   - `SSHLogger` and `SSHResult` (shared across transports; consider moving to `transports/types.py`
@@ -177,9 +177,12 @@ Now that nothing uses the old shape, delete it.
     public-IP path during provisioning), and `vms/provisioners/lima.py:14-15` (`ssh_run` / `copy_to`
     against a bare `SSHTarget` for the Lima VM host). These remain bare-SSHTarget callers and aren't
     transport-shaped; the helpers stay.
-- [ ] If `cli/agentworks/ssh.py` is now small enough or has nothing left, fold it into
+- [x] If `cli/agentworks/ssh.py` is now small enough or has nothing left, fold it into
       `cli/agentworks/transports/ssh.py` or rename to `cli/agentworks/ssh_utils.py`. If it retains
-      100+ lines of SSH-specific code, leave it.
+      100+ lines of SSH-specific code, leave it. (Retained: ~343 lines covering `SSHTarget`,
+      `SSHResult`, `SSHError`, `SSHLogger`, `LOG_DIR`, `SSH_TRANSPORT_ERROR`, plus module-level
+      `run` / `copy_to` for the bare-`SSHTarget` callers in `vm_hosts/manager.py` and
+      `vms/provisioners/lima.py`. Left in place.)
 
 **Definition of done**: `git grep "ExecTarget"` returns zero hits (except in commit messages or
 historical SDDs); `git grep "admin_exec_target"` returns zero hits; ruff / mypy / pytest clean.

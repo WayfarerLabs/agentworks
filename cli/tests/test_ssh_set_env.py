@@ -18,18 +18,11 @@ from unittest.mock import patch
 
 import pytest
 
-from agentworks.ssh import (
-    ExecTarget,
-    SSHTarget,
-    _set_env_args,
-    _ssh_base_args,
-    interactive,
-    run,
-)
+from agentworks.transports.ssh import SSHTransport, _set_env_args
 
 
-def _target() -> SSHTarget:
-    return SSHTarget(host="vm.tailnet", user="agentworks")
+def _target() -> SSHTransport:
+    return SSHTransport(host="vm.tailnet", user="agentworks")
 
 
 def _set_env_value(args: list[str]) -> str | None:
@@ -41,14 +34,14 @@ def _set_env_value(args: list[str]) -> str | None:
 
 
 def test_base_args_no_env_omits_set_env_flag() -> None:
-    args = _ssh_base_args(_target())
+    args = _target()._ssh_base_args()
     assert _set_env_value(args) is None
     assert args[-1] == "agentworks@vm.tailnet"
 
 
 def test_base_args_empty_env_dict_omits_set_env_flag() -> None:
     """``env={}`` is treated the same as ``env=None``: no SetEnv arg."""
-    args = _ssh_base_args(_target(), env={})
+    args = _target()._ssh_base_args(env={})
     assert _set_env_value(args) is None
 
 
@@ -121,14 +114,14 @@ def test_set_env_args_handles_non_ascii() -> None:
 def test_base_args_set_env_precedes_host() -> None:
     """The SetEnv -o flag must appear before the user@host positional;
     otherwise OpenSSH parses it as part of the remote command."""
-    args = _ssh_base_args(_target(), env={"K": "v"})
+    args = _target()._ssh_base_args(env={"K": "v"})
     host_index = args.index("agentworks@vm.tailnet")
     o_index = next(i for i, a in enumerate(args) if a == "-o" and args[i + 1].startswith("SetEnv="))
     assert o_index < host_index
 
 
 def test_run_threads_env_to_subprocess(monkeypatch: pytest.MonkeyPatch) -> None:
-    """ssh.run with env=... ends up with a SetEnv= arg on the subprocess argv."""
+    """SSHTransport.run with env=... ends up with a SetEnv= arg on the subprocess argv."""
     captured: dict[str, Any] = {}
 
     class _CompletedStub:
@@ -141,12 +134,12 @@ def test_run_threads_env_to_subprocess(monkeypatch: pytest.MonkeyPatch) -> None:
         return _CompletedStub()
 
     monkeypatch.setattr(subprocess, "run", fake_subprocess_run)
-    run(_target(), "true", env={"AGENTWORKS_VM": "vm-1", "EDITOR": "vim"})
+    _target().run("true", env={"AGENTWORKS_VM": "vm-1", "EDITOR": "vim"})
     assert _set_env_value(captured["args"]) == 'AGENTWORKS_VM="vm-1" EDITOR="vim"'
 
 
 def test_interactive_threads_env_to_subprocess(monkeypatch: pytest.MonkeyPatch) -> None:
-    """ssh.interactive with env=... ends up with a SetEnv= arg on the subprocess argv."""
+    """SSHTransport.interactive with env=... ends up with a SetEnv= arg on the subprocess argv."""
     captured: dict[str, Any] = {}
 
     def fake_call(args: list[str]) -> int:
@@ -154,14 +147,13 @@ def test_interactive_threads_env_to_subprocess(monkeypatch: pytest.MonkeyPatch) 
         return 0
 
     monkeypatch.setattr(subprocess, "call", fake_call)
-    interactive(_target(), "tmux attach", env={"AGENTWORKS_SESSION": "s1", "EDITOR": "vim"})
+    _target().interactive("tmux attach", env={"AGENTWORKS_SESSION": "s1", "EDITOR": "vim"})
     assert _set_env_value(captured["args"]) == 'AGENTWORKS_SESSION="s1" EDITOR="vim"'
 
 
-def test_exec_target_run_threads_env_to_ssh_run() -> None:
-    """ExecTarget.run(env=...) passes env down to ssh.run, which materializes
-    a single SetEnv= arg with all pairs."""
-    target = ExecTarget(ssh=_target())
+def test_transport_run_threads_env_to_ssh_run() -> None:
+    """SSHTransport.run(env=...) materializes a single SetEnv= arg with all pairs."""
+    target = _target()
     captured: dict[str, Any] = {}
 
     class _CompletedStub:
@@ -179,14 +171,14 @@ def test_exec_target_run_threads_env_to_ssh_run() -> None:
     assert _set_env_value(captured["argv"]) == 'AGENTWORKS_AGENT="claude" K="v"'
 
 
-def test_exec_target_call_streaming_threads_env_to_subprocess() -> None:
-    """ExecTarget.call_streaming(env=...) emits a single SetEnv= arg.
+def test_transport_call_streaming_threads_env_to_subprocess() -> None:
+    """SSHTransport.call_streaming(env=...) emits a single SetEnv= arg.
 
     This path (used by ``agw vm exec`` / ``agw agent exec``) is structurally
     identical to ``run`` / ``interactive`` and must also pin the
     one-arg-per-call invariant.
     """
-    target = ExecTarget(ssh=_target())
+    target = _target()
     captured: dict[str, Any] = {}
 
     def fake_call(args: list[str]) -> int:

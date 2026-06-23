@@ -1,13 +1,13 @@
 """SSH transport implementation.
 
 Wraps ``ssh`` / ``scp`` subprocess calls in the ``Transport`` ABC's
-surface. Lifts the argv builders, SetEnv handling, sudo-wrap, and
-login-shell wrapping that used to live under ``agentworks/ssh.py`` --
-this is where they go in the polymorphic shape.
-
-Phase 1 of the polymorphic-transports refactor builds this alongside
-the existing ``ExecTarget`` / ``ssh.run`` code; Phase 4 deletes the
-old code once Phase 3 has migrated every caller.
+surface. Holds the argv builders, SetEnv handling, sudo-wrap, and
+login-shell wrapping for the canonical Tailscale SSH path.
+``agentworks/ssh.py`` retains a small surface of SSH primitives
+(``SSHTarget`` / ``SSHResult`` / ``SSHError`` / ``SSHLogger`` /
+``LOG_DIR`` / module-level ``run`` / ``copy_to``) used by
+``vm_hosts/manager.py`` against bare ``SSHTarget``s; everything
+polymorphic-transport-shaped lives here.
 """
 
 from __future__ import annotations
