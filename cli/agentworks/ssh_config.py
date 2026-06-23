@@ -26,6 +26,35 @@ _INCLUDE_COMMENT = "# Added by agentworks"
 _CONFIG_DIR_NAME = "config.d"
 _MANAGED_CONF = "agentworks.conf"
 
+# ControlMaster multiplexes subsequent SSH calls to the same (user, host) over
+# the master's existing channel, dropping per-call latency from ~150-300ms
+# (fresh handshake) to ~20-50ms. ``agent reinit`` / ``vm reinit`` issue 30+
+# sequential SSH calls; the savings are ~6-10s per reinit.
+#
+# ``%C`` is a stable hash of (host, port, user, local-username); requires
+# OpenSSH 6.7+ (every supported platform). The path is namespaced
+# (``agentworks-cm-``) so it cannot collide with a pre-existing operator
+# ControlMaster setup. ``ControlPersist 60`` covers a single reinit without
+# letting NAT-idle-kill churn the connection.
+#
+# If the master socket can't bind (read-only ``~/.ssh``, weird mounts), OpenSSH
+# falls back transparently to a fresh handshake per call -- no regression.
+# Operators who want different settings can layer their own ``Host *`` block
+# above the agentworks ``Include`` directive; ssh_config's first-match-wins
+# semantics apply.
+_CONTROL_PATH = "~/.ssh/agentworks-cm-%C"
+_CONTROL_PERSIST = "60"
+
+
+def _format_controlmaster_block(prefix: str, agent_prefix: str) -> str:
+    """Return the ``Host <prefix>* <agent_prefix>*`` ControlMaster block."""
+    return (
+        f"Host {prefix}* {agent_prefix}*\n"
+        "    ControlMaster auto\n"
+        f"    ControlPath {_CONTROL_PATH}\n"
+        f"    ControlPersist {_CONTROL_PERSIST}\n"
+    )
+
 
 def _to_ssh_path(path: Path) -> str:
     """Convert a Path to an SSH config-safe string.
@@ -106,6 +135,15 @@ def _legacy_rebuild(config: Config, db: Database) -> None:
                 user=agent.linux_user,
                 identity_file=config.operator.ssh_private_key,
             )
+
+    if entries:
+        # ControlMaster block precedes the per-host entries (insertion-order
+        # dict iteration). Synthetic key prefixed to avoid colliding with any
+        # real alias; ``_write_legacy`` only reads ``entries.values()``.
+        entries = {
+            "__agentworks_controlmaster__": _format_controlmaster_block(prefix, agent_prefix),
+            **entries,
+        }
     _write_legacy(ssh_config, user_section, entries)
 
 
@@ -133,12 +171,13 @@ def _rebuild_config_dir(config: Config, db: Database) -> None:
 
     # Build all Host blocks from DB
     blocks: list[str] = ["# Managed by agentworks -- do not edit.\n"]
+    host_entries: list[str] = []
     for vm in db.list_vms():
         if not vm.tailscale_host:
             continue
         vm_alias = ssh_host_alias(vm.name, prefix)
         # Admin alias for this VM.
-        blocks.append(
+        host_entries.append(
             _format_entry(
                 alias=vm_alias,
                 hostname=vm.tailscale_host,
@@ -152,7 +191,7 @@ def _rebuild_config_dir(config: Config, db: Database) -> None:
         # VM alias) because agents belong to exactly one VM and the
         # operator-facing handle is the agent name, not the Linux user.
         for agent in db.list_agents(vm_name=vm.name):
-            blocks.append(
+            host_entries.append(
                 _format_entry(
                     alias=ssh_agent_alias(agent.name, agent_prefix),
                     hostname=vm.tailscale_host,
@@ -161,8 +200,14 @@ def _rebuild_config_dir(config: Config, db: Database) -> None:
                 )
             )
 
+    if host_entries:
+        # ControlMaster block precedes the per-host entries so the wildcard
+        # ``Host <prefix>*`` pattern picks up every alias below it.
+        blocks.append(_format_controlmaster_block(prefix, agent_prefix))
+        blocks.extend(host_entries)
+
     conf_path = config_d / _MANAGED_CONF
-    if len(blocks) > 1:
+    if host_entries:
         _atomic_write(conf_path, "\n".join(blocks))
     elif conf_path.exists():
         conf_path.unlink()

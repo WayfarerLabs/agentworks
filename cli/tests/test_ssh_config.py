@@ -343,3 +343,105 @@ def test_legacy_rebuild_no_agents_no_per_agent_blocks(tmp_path: Path) -> None:
     assert "Host awvm--solo\n" in content
     assert "Host awvm--solo--" not in content
     assert "Host awagent--" not in content
+
+
+# -- ControlMaster block ---------------------------------------------------
+
+
+def test_rebuild_config_dir_emits_controlmaster_block(tmp_path: Path) -> None:
+    """ControlMaster multiplexes the dozens of sequential SSH calls that
+    every reinit / agent-create flow issues. The block must (a) sit at the
+    top of the file (before any per-host entries) so the wildcard pattern
+    picks them up, (b) use the operator's configured prefixes, (c) use a
+    namespaced ControlPath so we can't collide with a pre-existing operator
+    setup."""
+    from agentworks.ssh_config import _rebuild_config_dir
+
+    config, ssh_dir = _mock_config(tmp_path)
+    db = MagicMock()
+    db.list_vms.return_value = [_mock_vm("vm1", "100.64.0.1")]
+    db.list_agents.return_value = []
+
+    _rebuild_config_dir(config, db)
+
+    content = (ssh_dir / "config.d" / _MANAGED_CONF).read_text()
+    cm_idx = content.find("Host awvm--* awagent--*")
+    host_idx = content.find("Host awvm--vm1")
+    assert cm_idx != -1, f"ControlMaster block not found in:\n{content}"
+    assert host_idx != -1
+    assert cm_idx < host_idx, "ControlMaster block must precede per-host entries"
+    assert "ControlMaster auto" in content
+    assert "ControlPath ~/.ssh/agentworks-cm-%C" in content
+    assert "ControlPersist 60" in content
+
+
+def test_rebuild_config_dir_controlmaster_uses_configured_prefixes(tmp_path: Path) -> None:
+    """Operators can override ``ssh_host_prefix`` / ``ssh_agent_host_prefix``;
+    the ControlMaster wildcard must track those, not be hardcoded."""
+    from agentworks.ssh_config import _rebuild_config_dir
+
+    config, ssh_dir = _mock_config(tmp_path)
+    config.operator.ssh_host_prefix = "myvm-"
+    config.operator.ssh_agent_host_prefix = "myagent-"
+    db = MagicMock()
+    db.list_vms.return_value = [_mock_vm("vm1", "100.64.0.1")]
+    db.list_agents.return_value = []
+
+    _rebuild_config_dir(config, db)
+
+    content = (ssh_dir / "config.d" / _MANAGED_CONF).read_text()
+    assert "Host myvm-* myagent-*" in content
+
+
+def test_rebuild_config_dir_no_vms_omits_controlmaster(tmp_path: Path) -> None:
+    """No VMs means no managed file, including no ControlMaster block. A
+    bare ControlMaster wildcard matching nothing would be cruft."""
+    from agentworks.ssh_config import _rebuild_config_dir
+
+    config, ssh_dir = _mock_config(tmp_path)
+    db = MagicMock()
+    db.list_vms.return_value = []
+
+    _rebuild_config_dir(config, db)
+
+    assert not (ssh_dir / "config.d" / _MANAGED_CONF).exists()
+
+
+def test_legacy_rebuild_emits_controlmaster_block(tmp_path: Path) -> None:
+    """Legacy ssh_config_dir=False path emits the same ControlMaster block."""
+    from agentworks.ssh_config import _legacy_rebuild
+
+    config, ssh_dir = _mock_config(tmp_path)
+    config.operator.ssh_config_dir = False
+    db = MagicMock()
+    db.list_vms.return_value = [_mock_vm("vm1", "100.64.0.1")]
+    db.list_agents.return_value = []
+
+    _legacy_rebuild(config, db)
+
+    content = config.operator.ssh_config.read_text()
+    cm_idx = content.find("Host awvm--* awagent--*")
+    host_idx = content.find("Host awvm--vm1")
+    assert cm_idx != -1, f"ControlMaster block not found in:\n{content}"
+    assert host_idx != -1
+    assert cm_idx < host_idx, "ControlMaster block must precede per-host entries"
+    assert "ControlMaster auto" in content
+    assert "ControlPath ~/.ssh/agentworks-cm-%C" in content
+    assert "ControlPersist 60" in content
+
+
+def test_legacy_rebuild_no_vms_omits_controlmaster(tmp_path: Path) -> None:
+    """Legacy path with no VMs writes no managed section at all -- no
+    stranded ControlMaster block."""
+    from agentworks.ssh_config import _legacy_rebuild
+
+    config, ssh_dir = _mock_config(tmp_path)
+    config.operator.ssh_config_dir = False
+    db = MagicMock()
+    db.list_vms.return_value = []
+
+    _legacy_rebuild(config, db)
+
+    content = config.operator.ssh_config.read_text()
+    assert "ControlMaster" not in content
+    assert "Host awvm--" not in content
