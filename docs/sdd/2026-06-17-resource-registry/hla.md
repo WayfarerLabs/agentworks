@@ -149,15 +149,21 @@ Carried on every resource. One dataclass with a variant tag:
 - `variant: Literal["operator-declared", "auto-declared"]`
 - For `operator-declared`: `file: Path` and `line: int` for the declaration's opening line.
 - For `auto-declared`: `source: tuple[str, str]` -- the first matching requirement's source, per
-  R1's config-load walk order. Also captured: the list of all matching requirement sources, surfaced
-  in describe output but not used for origin identity.
+  R1's config-load walk order.
 
 Set once when the resource is added to the registry; never mutated afterwards.
 
+The full list of matching requirement sources (for `agw secret describe`'s "also required by ..."
+display) is derived from the resource's `usage` list, not stored separately on `Origin`. Each usage
+entry carries the source of the requirement that contributed it (see Terminology in the FRD), so
+origin doesn't need to duplicate that data.
+
 The loader is responsible for capturing `file` / `line` during TOML parsing. Python's stdlib
 `tomllib` does not expose line info, so the loader switches to **`tomlkit`** (actively maintained,
-line info exposed via the `as_string()` / item position APIs). The existing parsing surface in
-`registry.py` doesn't change shape; only the parse step swaps libraries.
+line info exposed via the item position APIs). `tomlkit` raises on duplicate keys at the same path,
+matching `tomllib` behavior, so the FRD R3 "duplicate operator declarations are TOML errors" rule
+holds. The existing parsing surface in `registry.py` doesn't change shape; only the parse step swaps
+libraries.
 
 ## Validation pass
 
@@ -181,8 +187,8 @@ def _run_validation_pass(registry: Registry) -> None:
         kind_handler = KIND_REGISTRY[kind]
         existing = registry.lookup_resource(kind, name)
         if existing is not None:
-            # Operator-declared: use as-is, attach framework metadata (origin already
-            # set at parse time; just populate usage list and supplemental requirement sources)
+            # Operator-declared: use as-is, attach framework metadata.
+            # Origin was set at parse time; this populates the usage list.
             registry.attach_framework_metadata(kind, name, reqs)
         else:
             # Missing: dispatch miss policy
@@ -237,9 +243,10 @@ the kind's defaults). The framework's only job in either case is attaching frame
 
 - **`origin`**: set at registration time (operator-declared with file:line, or auto-declared with
   first matching requirement source). Never mutated.
-- **`usage`**: a list populated from all matching requirements, accumulated by the validation pass.
-  Operator-declared resources get the same usage list attached as auto-declared ones; it's
-  framework-collected, not operator-settable.
+- **`usage`**: a list of `UsageEntry(source, text)` pairs populated from all matching requirements,
+  accumulated by the validation pass. Each entry carries both the requirement's source
+  `(kind, name)` and its usage text. Operator-declared resources get the same usage list attached as
+  auto-declared ones; it's framework-collected, not operator-settable.
 
 If an operator wants a partial override of a default template, they don't get it through field-level
 merging on the `default` declaration. They declare a child template with `inherits = ["default"]`
@@ -259,13 +266,17 @@ the same path); the framework never sees them.
 - `hint = None`
 - `backend_mappings = {}` (empty; the framework's default per-backend conventions (e.g.,
   `AW_SECRET_<NAME>`) apply at resolution time)
-- `usage = [req.usage for req in requirements]` (stored verbatim, including duplicates;
-  deduplication happens at render time in `agw secret describe` so the underlying provenance --
-  which requirement contributed which usage -- is preserved)
-- `origin = Origin(variant="auto-declared", ...)` carrying `requirements[0].source` and the full
-  `all_sources` list
+- `usage = [UsageEntry(source=r.source, text=r.usage) for r in requirements]` -- a list where each
+  entry pairs the requirement's source with its usage text. Duplicate text from different sources is
+  preserved (different sources are different rows in `agw secret describe`); dedup-by-text happens
+  at render time only where summary display calls for it.
+- `origin = Origin(variant="auto-declared", source=requirements[0].source)`
 
 No reserved-name restriction; any name is accepted.
+
+For operator-declared secrets, the parser produces a `SecretDecl` with empty `usage`; the validation
+pass then populates `usage` from the matching requirements using the same `UsageEntry` shape.
+`usage` is framework-set in both cases (operator declarations cannot specify it).
 
 ### Template kinds (Phase 2)
 
@@ -454,17 +465,15 @@ The TOML loader captures `(file, line)` for each `[secrets.<name>]`, `[git_crede
 
 ### Auto-declared resources
 
-After the validation pass synthesizes a resource, it records:
+After the validation pass synthesizes a resource, `Origin.source = requirements[0].source` -- the
+first matching requirement's `(kind, name)` per config-load walk order. The "first matching" rule is
+deterministic given that walk order.
 
-- `source = requirements[0].source` -- the first matching requirement's `(kind, name)`, per
-  config-load walk order.
-- `all_sources = [r.source for r in requirements]` -- complete list of matching requirements;
-  surfaced in describe output (R9), not in single-line origin display.
-
-The "first matching" rule is deterministic given the config-load walk order. For default templates
-that many things inherit from, the recorded source is essentially load-order-arbitrary within the
-set of all templates referencing `default`; the full list in `all_sources` provides the complete
-picture for inspection.
+The full set of matching requirement sources is not stored on `Origin`; the resource's `usage` list
+(one entry per matching requirement) carries that data via its per-entry `source`. For default
+templates that many things inherit from, the origin-display source is essentially
+load-order-arbitrary within the referencing set; the per-requirement detail in `usage` provides the
+complete picture for `agw secret describe`.
 
 ### Display
 

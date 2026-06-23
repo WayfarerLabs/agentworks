@@ -68,12 +68,14 @@ reconciliation, but that move is deliberately not part of this design.
   auto-declare policy may use. A resource may have many requirements pointing at it; the framework
   collects them all.
 - **Usage**: the system-defined "role this resource plays for the requirement's source", set by the
-  requirement. Each requirement contributes one usage; a resource that is required by multiple
-  sources accumulates a list of usages. Surfaced in `agw doctor` and `agw secret describe`. Distinct
-  from the operator-set description. Phrased as a short noun phrase that completes the sentence
-  template `<target> is used by <source> as <usage>.` -- no capitalization except for proper nouns
-  or acronyms, no trailing period, under ~50 chars. Examples: `"the VM-provisioning auth key"`,
-  `"the GitHub auth token"`, `"the ANTHROPIC_API_KEY env var"`, `"a parent template"`.
+  requirement. Each requirement contributes one usage entry to its target's usage list; each entry
+  carries both the requirement's `source` `(kind, name)` and the usage text. A resource required by
+  multiple sources accumulates multiple entries. Surfaced in `agw doctor` and `agw secret describe`.
+  Distinct from the operator-set description. The text is phrased as a short noun phrase that
+  completes the sentence template `<target> is used by <source> as <usage>.` -- no capitalization
+  except for proper nouns or acronyms, no trailing period, under ~50 chars. Examples:
+  `"the VM-provisioning auth key"`, `"the GitHub auth token"`, `"the ANTHROPIC_API_KEY env var"`,
+  `"a parent template"`.
 - **Description**: the operator-defined free-form note about a resource (already exists today on
   secrets and `git_credentials`; this SDD formalizes the convention for new resource types).
 - **Miss policy**: what the registry does when a requirement's `(kind, name)` has no match in the
@@ -131,11 +133,11 @@ this:
 
 Each kind in the registry declares its miss policy:
 
-| Kind                                                              | Miss policy                             | Behavior                                                                                                                                                                  |
-| ----------------------------------------------------------------- | --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Secret                                                            | Auto-declare (any name)                 | A `SecretRequirement` whose name is missing synthesizes a `SecretDecl` carrying the requirement's usage. Origin: `auto-declared`. Additional requirements add more usages |
-| VM template, workspace template, agent template, session template | Auto-declare (reserved name: `default`) | A requirement for `default` synthesizes the kind's code-defined default template. Origin: `auto-declared`. Any other missing name is a config-load error                  |
-| Catalog command, git credential provider, secret backend kind     | Error                                   | Unknown names are config-load errors                                                                                                                                      |
+| Kind                                                              | Miss policy                             | Behavior                                                                                                                                                 |
+| ----------------------------------------------------------------- | --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Secret                                                            | Auto-declare (any name)                 | A `SecretRequirement` whose name is missing synthesizes a `SecretDecl`. Origin: `auto-declared`                                                          |
+| VM template, workspace template, agent template, session template | Auto-declare (reserved name: `default`) | A requirement for `default` synthesizes the kind's code-defined default template. Origin: `auto-declared`. Any other missing name is a config-load error |
+| Catalog command, git credential provider, secret backend kind     | Error                                   | Unknown names are config-load errors                                                                                                                     |
 
 Error messages include the requirement's `source` so the operator sees, e.g.:
 
@@ -303,8 +305,9 @@ field blank pay one warning per CLI invocation.
 
 - **Per-secret origin** (R4): the origin string with relevant detail. For `operator-declared`, shown
   as `operator-declared (config.toml:42)`. For `auto-declared`, shown as
-  `auto-declared by vm_template:default`. When an operator-declared resource also has matching
-  requirements, those requirement sources are listed as supplemental "also required by ...".
+  `auto-declared by vm_template:default`. When the resource has additional matching requirements
+  beyond the one that determined the origin display, their sources (derived from the usage list) are
+  listed as supplemental "also required by ...".
 - **Usages**: count and first entry; the full list is on `agw secret describe`.
 - **Description**: operator-set, when present.
 
@@ -323,7 +326,8 @@ summary; for detail, the operator runs describe.
 - **Backend mappings**: per-backend status -- the operator-set value if declared, the backend's
   default convention (e.g. `AW_SECRET_<NAME>` for env-var) if it has one and no operator override,
   or "no mapping (skipped)" for backends that have no default convention. No framework merging; this
-  is a display of what each backend would see at resolution time.
+  is a display of what each backend would see at resolution time. Computed identically whether the
+  secret is operator-declared or auto-declared.
 - **Current resolution preview**: which active backend would resolve this secret right now
   (`would resolve via env-var`, `would prompt`, or `not available in any backend`). Mirrors the
   doctor preview but scoped to one secret.
