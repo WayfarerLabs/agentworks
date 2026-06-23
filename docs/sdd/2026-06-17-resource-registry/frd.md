@@ -155,37 +155,29 @@ supported -- it would multiply the complexity and undermine the unified model.
 
 **Template default auto-declare is unconditional.** Template kinds always synthesize the
 code-defined `default` when a requirement references it. Operators customize by declaring
-`[vm_templates.default]` (or the corresponding kind) explicitly -- per-field merge (R3) applies, so
-unspecified fields fall back to the framework's defaults. There is no "no default" mode.
+`[vm_templates.default]` (or the corresponding kind) explicitly -- the operator's declaration
+replaces the auto-decl wholesale. Partial overrides go through normal template inheritance (declare
+a child template with `inherits = ["default"]` and override fields there), not through field-level
+merging on the `default` declaration itself. There is no "no default" mode.
 
-### R3: Per-field merge between operator declarations and auto-declared defaults
+### R3: Framework metadata on every resource
 
-When a resource is **both** operator-declared and required, the merge is per-field for
-operator-settable fields:
+Every resource in the registry carries framework-attached metadata, regardless of whether it was
+operator-declared or auto-declared:
 
-- Operator-settable fields (`description`, `hint`, `backend_mappings`): operator wins per field (or
-  per key, in the case of `backend_mappings`). Fields the operator omitted fall back to the
-  requirement's defaults (if any). Per-key provenance within `backend_mappings` (operator-set vs.
-  framework-default vs. backend-default-convention) is tracked and surfaced via
-  `agw secret describe` (R9).
-- System-collected fields (`usage`): always accumulated from the matching requirements, regardless
-  of operator declaration. The operator does not set usage; the system tracks all of them.
-- Origin is `operator-declared` (the operator declared the resource; see R4), and the framework
-  retains the matching requirement sources so doctor can report "operator-declared; also required by
-  `<source>`".
+- **`origin`** (R4): how the resource came to be in the registry, plus location detail. Set once at
+  registration; never mutated.
+- **`usage`** (list of strings, system-collected): one entry per matching requirement. Operators do
+  not set this; the validation pass populates it from `required_resources()` walks.
 
-Example: operator writes
+These are the only fields the framework adds. The rest of a resource's fields come either from the
+operator's declaration (verbatim) or from the kind's `synthesize()` (when auto-declared). There is
+no per-field merge: an operator declaration replaces the auto-declared synthesis wholesale; the only
+thing the framework attaches afterward is the metadata above.
 
-```toml
-[secrets.tailscale-auth-key]
-backend_mappings.env-var = "TS_KEY"
-description = "Prod tailnet key, owner: SRE team"
-```
-
-The final `SecretDecl` carries the operator's `backend_mappings.env-var` and `description`, and the
-usage list `["the VM-provisioning auth key"]` from the VM-template requirement. The operator does
-not have to retype the usage; the system fills it in automatically and updates it when new
-requirements arrive.
+Duplicate operator declarations are a TOML parse error (duplicate keys at the same path), caught
+before the framework runs. The framework therefore sees at most one operator declaration per
+`(kind, name)`.
 
 ### R4: Origin tracking on every resource
 
@@ -196,7 +188,8 @@ registry. Two origin types:
   **file path and line number** of the declaration's opening line, scoped to the loaded TOML config
   file (e.g., `~/.config/agentworks/config.toml:42`). If multi-file config (manifests, layering) is
   added later, that SDD revisits this field. When the resource is also referenced by requirements,
-  the matching requirements are retained separately (R3) but the origin stays `operator-declared`.
+  the matching requirements still contribute to the usage list (R3) but the origin stays
+  `operator-declared`.
 - **`auto-declared`**: the resource was synthesized at config-load time to satisfy a missing
   requirement. The origin carries the **first matching requirement in config-load order (R1)** --
   its `source` `(kind, name)` is recorded. Subsequent requirements that match the same name
@@ -310,9 +303,8 @@ field blank pay one warning per CLI invocation.
 
 - **Per-secret origin** (R4): the origin string with relevant detail. For `operator-declared`, shown
   as `operator-declared (config.toml:42)`. For `auto-declared`, shown as
-  `auto-declared by vm_template:default`. For per-field-merge cases (operator declared, also
-  required) the origin remains `operator-declared` and the matching requirement sources are listed
-  as supplemental.
+  `auto-declared by vm_template:default`. When an operator-declared resource also has matching
+  requirements, those requirement sources are listed as supplemental "also required by ...".
 - **Usages**: count and first entry; the full list is on `agw secret describe`.
 - **Description**: operator-set, when present.
 
@@ -328,8 +320,10 @@ summary; for detail, the operator runs describe.
 - **All registered usages**: one row per requirement, showing the source `(kind, name)` and the
   usage text. A resource referenced by three sources shows three rows. Duplicate usage text is
   collapsed.
-- **Backend mappings**: the merged table, with the source per backend (operator-set vs.
-  framework-default vs. backend-default-convention).
+- **Backend mappings**: per-backend status -- the operator-set value if declared, the backend's
+  default convention (e.g. `AW_SECRET_<NAME>` for env-var) if it has one and no operator override,
+  or "no mapping (skipped)" for backends that have no default convention. No framework merging; this
+  is a display of what each backend would see at resolution time.
 - **Current resolution preview**: which active backend would resolve this secret right now
   (`would resolve via env-var`, `would prompt`, or `not available in any backend`). Mirrors the
   doctor preview but scoped to one secret.

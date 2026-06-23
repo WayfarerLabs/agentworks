@@ -64,7 +64,7 @@ cli/agentworks/resources/
   requirement.py         # ResourceRequirement, kind-specific subclasses
   origin.py              # Origin dataclass + factory helpers
   kind.py                # ResourceKind protocol; miss-policy machinery
-  registry.py            # validation pass: walk, dispatch, cycle-detect, merge
+  registry.py            # validation pass: walk, dispatch, cycle-detect, attach metadata
   kinds/
     __init__.py
     secret.py            # SecretKind (auto-declare any name)
@@ -73,9 +73,10 @@ cli/agentworks/resources/
 ```
 
 Why a new package rather than extending `agentworks.registry`: the framework has its own lifecycle
-(walk, dispatch, merge, cycle-detect) and clear boundaries with the loader. Keeping it separate
-makes the validation pass a self-contained step the loader invokes, mirrors how `agentworks.env` and
-`agentworks.secrets` extracted env/secret concerns from the loader, and keeps `registry.py` thin.
+(walk, dispatch, attach metadata, cycle-detect) and clear boundaries with the loader. Keeping it
+separate makes the validation pass a self-contained step the loader invokes, mirrors how
+`agentworks.env` and `agentworks.secrets` extracted env/secret concerns from the loader, and keeps
+`registry.py` thin.
 
 The `kinds/` subdirectory is slightly over-structured for Phase 1's single kind (`secret.py`) but
 right-sized for Phase 2's four to six kinds. Starting with the subdirectory avoids a churn-rename
@@ -136,10 +137,6 @@ validation pass consults:
   Receives the full list of matching requirements (in config-load order). Produces the resource
   instance with whatever defaults the kind wants (empty `backend_mappings` for secrets, the kind's
   code-defined defaults for templates, ...).
-- `merge_operator(operator_resource, requirements) -> Resource` -- called when both an
-  operator-declared resource and one or more requirements exist for the same name. Implements
-  per-field merge (R3): operator fields win; unspecified fields fall back to what `synthesize` would
-  have produced; the `usage` list accumulates across all matching requirements.
 
 The `kind.py` module exports a `KIND_REGISTRY` dict mapping `kind` strings to `ResourceKind`
 instances. Kinds are registered as they migrate: Phase 1 registers only `SecretKind`; other kinds
@@ -184,9 +181,9 @@ def _run_validation_pass(registry: Registry) -> None:
         kind_handler = KIND_REGISTRY[kind]
         existing = registry.lookup_resource(kind, name)
         if existing is not None:
-            # Operator-declared: per-field merge across requirements
-            merged = kind_handler.merge_operator(existing, reqs)
-            registry.replace_resource(kind, name, merged)
+            # Operator-declared: use as-is, attach framework metadata (origin already
+            # set at parse time; just populate usage list and supplemental requirement sources)
+            registry.attach_framework_metadata(kind, name, reqs)
         else:
             # Missing: dispatch miss policy
             match kind_handler.miss_policy:
@@ -232,23 +229,24 @@ CLI layer. Examples:
 - Cycle detected: rendered as a path
   (`vm_template:azure-prod -> vm_template:base -> vm_template:azure-prod`).
 
-## Per-field merge
+## Framework metadata attachment
 
-When both an operator declaration and one or more requirements exist for the same `(kind, name)`:
+There is no per-field merge between operator declarations and auto-declared defaults. A resource is
+either operator-declared (use what the operator wrote, verbatim) or auto-declared (synthesized from
+the kind's defaults). The framework's only job in either case is attaching framework metadata:
 
-1. Operator's resource is the starting point.
-2. Origin stays `operator-declared` (with file:line preserved).
-3. `usage` list is populated from all matching requirements (system-collected, not operator-set).
-4. For operator-settable fields (`description`, `hint`, `backend_mappings`, kind-specific): the
-   merge is per-field. Operator-specified fields win. Unspecified fields fall back to whatever the
-   kind's `synthesize()` would have produced for the first matching requirement.
-5. For `backend_mappings` specifically, the merge is per-key: operator-set keys win; unspecified
-   keys fall back to the synthesized defaults. Per-key provenance (`operator-set` vs.
-   `framework-default` vs. `backend-default-convention`) is recorded and surfaced via
-   `agw secret describe`.
+- **`origin`**: set at registration time (operator-declared with file:line, or auto-declared with
+  first matching requirement source). Never mutated.
+- **`usage`**: a list populated from all matching requirements, accumulated by the validation pass.
+  Operator-declared resources get the same usage list attached as auto-declared ones; it's
+  framework-collected, not operator-settable.
 
-The per-field merge logic lives in each kind's `merge_operator()` implementation, not in the
-framework's validation pass directly. This keeps kind-specific field knowledge inside the kind.
+If an operator wants a partial override of a default template, they don't get it through field-level
+merging on the `default` declaration. They declare a child template with `inherits = ["default"]`
+and override fields there (existing template-inheritance mechanism).
+
+Duplicate operator declarations of the same `(kind, name)` are TOML parse errors (duplicate keys at
+the same path); the framework never sees them.
 
 ## Auto-declare details
 
@@ -389,7 +387,8 @@ Output sections (per FRD R9):
 - Header: name, kind, origin, description.
 - Origin detail: file path and line for operator-declared, requirement source for auto-declared.
 - Usages: one row per matching requirement.
-- Backend mappings: merged table with per-key provenance.
+- Backend mappings: per-backend status table (operator-set value, backend convention default, or "no
+  mapping; skipped"; no merging).
 - Resolution preview: `would resolve via <backend>` or `would prompt`.
 
 Does not prompt, does not resolve values.
@@ -495,12 +494,13 @@ The plan will phase the work; the full design above is the target. Anticipated s
 4. **Phase 1d: Git-credentials migration.** `git_credentials.<name>.token` field; same flow as
    Tailscale, threaded into the git-credentials install runner. Legacy `obtain_token` path removed.
 5. **Phase 1e: `agw secret describe`.** CLI command; service-layer logic in `agentworks.secrets`.
-   Displays origin, usages, backend mapping provenance, resolution preview.
+   Displays origin, usages, per-backend mapping status, resolution preview.
 6. **Phase 2a: Template kinds.** `VMTemplateKind`, `WorkspaceTemplateKind`, `AgentTemplateKind`,
    `SessionTemplateKind` implementations. Inheritance moves into the framework. Built-in defaults
-   migrate from the existing resolver fallback into `synthesize()`. Per-field merge from the
-   framework replaces the existing inheritance-resolver code. **Operator-facing behavior is
-   unchanged** (per FRD R11); error messages get the framework's consistent shape.
+   migrate from the existing resolver fallback into `synthesize()`. **Operator-facing behavior is
+   unchanged** (per FRD R11); error messages get the framework's consistent shape. Partial overrides
+   continue to flow through template `inherits` (an existing mechanism), not through any framework
+   field-level merge -- the framework doesn't do field-level merging at all.
 7. **Phase 2b: Catalog and provider kinds.** `CatalogKind`, `GitCredentialProviderKind`,
    `SecretBackendKindKind` (yes, the redundant name -- a kind named `secret_backend_kind`). Existing
    bespoke validation removed in favor of framework dispatch.
@@ -527,9 +527,9 @@ The package owns dispatch; existing types own their fields and `required_resourc
 
 ### Kind-as-strategy, registered in a module-level dict
 
-Each kind's logic (miss policy, name restrictions, synthesize, merge_operator) lives in one
-implementation registered in a `KIND_REGISTRY` dict. Adding a new kind is one new module under
-`kinds/`. Alternatives considered:
+Each kind's logic (miss policy, name restrictions, synthesize) lives in one implementation
+registered in a `KIND_REGISTRY` dict. Adding a new kind is one new module under `kinds/`.
+Alternatives considered:
 
 - One class per resource type with abstract methods. Rejected as heavier; the strategy pattern is
   enough.
@@ -577,8 +577,11 @@ across scopes, identity vars, SetEnv) is unchanged.
 ### Existing template inheritance resolution
 
 Today's inheritance resolver in `agentworks.config` (`_resolve_template`-style helpers) stays for
-Phase 1. Phase 2 hoists the inheritance walk into the framework via `TemplateRequirement`; the
-per-type resolver shrinks to a thin shim over `KIND_REGISTRY["vm_template"].merge_operator`.
+Phase 1. Phase 2 hoists the inheritance walk into the framework via `TemplateRequirement`. The
+per-type field-merging logic that today combines parent and child template fields stays at the
+template-inheritance layer; the framework does no field-level merging. The resolver shrinks to a
+walker that follows `inherits` chains validated by the framework and combines fields per the
+existing rules.
 
 ### `git_credentials` legacy
 
