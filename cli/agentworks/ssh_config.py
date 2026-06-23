@@ -28,13 +28,22 @@ _MANAGED_CONF = "agentworks.conf"
 
 # ControlMaster multiplexes subsequent SSH calls to the same (user, host) over
 # the master's existing channel, dropping per-call latency from ~150-300ms
-# (fresh handshake) to ~20-50ms. ``agent reinit`` / ``vm reinit`` issue 30+
-# sequential SSH calls; the savings are ~6-10s per reinit.
+# (fresh handshake) to ~20-50ms. ``vm create`` / ``vm reinit`` / ``agent
+# create`` / ``agent reinit`` each issue 30+ sequential SSH calls; the
+# savings are several seconds per operation.
 #
-# ``%C`` is a stable hash of (host, port, user, local-username); requires
-# OpenSSH 6.7+ (every supported platform). The path is namespaced
+# The block keys on the VM's Tailscale IP, not the ``awvm--*`` / ``awagent--*``
+# aliases, because every agentworks-internal SSH call uses the IP directly
+# (``SSHTransport.host`` is ``vm.tailscale_host``). ``Host`` patterns match
+# the command-line argument literally; an alias wildcard would only help
+# operators who type ``ssh awvm--myvm`` interactively, not the bulk of the
+# SSH traffic this is meant to speed up. The aliases stay an operator
+# convenience and don't carry ControlMaster directives.
+#
+# ``%C`` is a stable hash of (local-user, hostname, port, remote-user);
+# requires OpenSSH 6.7+ (every supported platform). The path is namespaced
 # (``agentworks-cm-``) so it cannot collide with a pre-existing operator
-# ControlMaster setup. ``ControlPersist 60`` covers a single reinit without
+# ControlMaster setup. ``ControlPersist 60s`` covers a single reinit without
 # letting NAT-idle-kill churn the connection.
 #
 # If the master socket can't bind (read-only ``~/.ssh``, weird mounts), OpenSSH
@@ -46,10 +55,15 @@ _CONTROL_PATH = "~/.ssh/agentworks-cm-%C"
 _CONTROL_PERSIST = "60s"  # OpenSSH accepts a unit suffix; the ``s`` makes it self-documenting.
 
 
-def _format_controlmaster_block(prefix: str, agent_prefix: str) -> str:
-    """Return the ``Host <prefix>* <agent_prefix>*`` ControlMaster block."""
+def _format_ip_controlmaster_block(tailscale_host: str) -> str:
+    """Return a ``Host <tailscale_ip>`` ControlMaster block.
+
+    One block per unique VM IP; admin and agents on the same VM share one
+    block because their SSH calls hit the same IP and ``%C`` keys on the
+    remote user, so separate master sockets per user happen automatically.
+    """
     return (
-        f"Host {prefix}* {agent_prefix}*\n"
+        f"Host {tailscale_host}\n"
         "    ControlMaster auto\n"
         f"    ControlPath {_CONTROL_PATH}\n"
         f"    ControlPersist {_CONTROL_PERSIST}\n"
@@ -116,6 +130,7 @@ def _legacy_rebuild(config: Config, db: Database) -> None:
     agent_prefix = config.operator.ssh_agent_host_prefix
 
     entries: dict[str, str] = {}
+    seen_ips: set[str] = set()
     for vm in db.list_vms():
         if not vm.tailscale_host:
             continue
@@ -135,15 +150,13 @@ def _legacy_rebuild(config: Config, db: Database) -> None:
                 user=agent.linux_user,
                 identity_file=config.operator.ssh_private_key,
             )
+        # One IP-keyed ControlMaster block per VM. Admin and agents on the
+        # same VM share it because their SSH calls hit the same IP and
+        # ``%C`` keys on the remote user.
+        if vm.tailscale_host not in seen_ips:
+            seen_ips.add(vm.tailscale_host)
+            entries[f"__cm__{vm.tailscale_host}"] = _format_ip_controlmaster_block(vm.tailscale_host)
 
-    if entries:
-        # ControlMaster block precedes the per-host entries (insertion-order
-        # dict iteration). Synthetic key prefixed to avoid colliding with any
-        # real alias; ``_write_legacy`` only reads ``entries.values()``.
-        entries = {
-            "__agentworks_controlmaster__": _format_controlmaster_block(prefix, agent_prefix),
-            **entries,
-        }
     _write_legacy(ssh_config, user_section, entries)
 
 
@@ -172,6 +185,8 @@ def _rebuild_config_dir(config: Config, db: Database) -> None:
     # Build all Host blocks from DB
     blocks: list[str] = ["# Managed by agentworks -- do not edit.\n"]
     host_entries: list[str] = []
+    cm_entries: list[str] = []
+    seen_ips: set[str] = set()
     for vm in db.list_vms():
         if not vm.tailscale_host:
             continue
@@ -199,16 +214,21 @@ def _rebuild_config_dir(config: Config, db: Database) -> None:
                     identity_file=config.operator.ssh_private_key,
                 )
             )
+        # One IP-keyed ControlMaster block per VM. Admin and agents on the
+        # same VM share it because their SSH calls hit the same IP and
+        # ``%C`` keys on the remote user, so each user still gets its own
+        # master socket automatically.
+        if vm.tailscale_host not in seen_ips:
+            seen_ips.add(vm.tailscale_host)
+            cm_entries.append(_format_ip_controlmaster_block(vm.tailscale_host))
 
     conf_path = config_d / _MANAGED_CONF
     if not host_entries:
         conf_path.unlink(missing_ok=True)
         return
 
-    # ControlMaster block precedes the per-host entries so the wildcard
-    # ``Host <prefix>*`` pattern picks up every alias below it.
-    blocks.append(_format_controlmaster_block(prefix, agent_prefix))
     blocks.extend(host_entries)
+    blocks.extend(cm_entries)
     _atomic_write(conf_path, "\n".join(blocks))
 
 

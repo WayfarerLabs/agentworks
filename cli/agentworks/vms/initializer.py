@@ -1335,6 +1335,17 @@ def _phase_a_bootstrap(
             tailscale_auth_key=tailscale_auth_key,
         )
 
+    # Sync the operator's SSH config now that the VM's Tailscale IP is
+    # known. The managed config emits a ``Host <tailscale_ip>`` block with
+    # ControlMaster directives; having it in place before the verify probe
+    # and Phase B's many SSH calls means agentworks' SSH multiplexes from
+    # the very first connection instead of paying the full handshake on
+    # every call. Failure modes (read-only ~/.ssh, weird mounts) degrade
+    # gracefully -- OpenSSH falls back to fresh handshakes, no regression.
+    from agentworks.ssh_config import sync_ssh_config
+
+    sync_ssh_config(config, db)
+
     # Switch to Tailscale SSH, carrying over the SSH logger.
     # On Windows, force TTY to prevent zsh/login shell pipe hangs.
     import sys

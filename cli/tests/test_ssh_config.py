@@ -248,8 +248,10 @@ def test_rebuild_config_dir_emits_per_agent_blocks(tmp_path: Path) -> None:
     # Old ``<vm>--<linux_user>`` shape is gone.
     assert "Host awvm--vm1--claude" not in content
     assert "Host awvm--vm1--agt-claude" not in content
-    # All blocks share the VM's HostName
-    assert content.count("100.64.0.1") == 3
+    # All per-alias blocks share the VM's HostName (admin + 2 agents = 3
+    # ``HostName`` occurrences), plus one extra occurrence on the per-VM
+    # ``Host <ip>`` ControlMaster block.
+    assert content.count("100.64.0.1") == 4
 
 
 def test_rebuild_config_dir_no_agent_blocks_when_vm_has_none(tmp_path: Path) -> None:
@@ -348,54 +350,60 @@ def test_legacy_rebuild_no_agents_no_per_agent_blocks(tmp_path: Path) -> None:
 # -- ControlMaster block ---------------------------------------------------
 
 
-def test_rebuild_config_dir_emits_controlmaster_block(tmp_path: Path) -> None:
-    """ControlMaster multiplexes the dozens of sequential SSH calls that
-    every reinit / agent-create flow issues. The block must (a) sit at the
-    top of the file (before any per-host entries) so the wildcard pattern
-    picks them up, (b) use the operator's configured prefixes, (c) use a
-    namespaced ControlPath so we can't collide with a pre-existing operator
-    setup."""
+def test_rebuild_config_dir_emits_controlmaster_per_vm_ip(tmp_path: Path) -> None:
+    """ControlMaster multiplexes the dozens of sequential SSH calls every
+    create / reinit / agent-create issues. The block keys on the VM's
+    Tailscale IP (not the alias) because every agentworks-internal SSH
+    call uses the IP directly; alias-pattern Host blocks would only help
+    the operator's terminal ssh, which isn't the hot path. Lock in:
+    (a) one block per unique IP, (b) namespaced ControlPath."""
     from agentworks.ssh_config import _rebuild_config_dir
 
     config, ssh_dir = _mock_config(tmp_path)
     db = MagicMock()
-    db.list_vms.return_value = [_mock_vm("vm1", "100.64.0.1")]
+    db.list_vms.return_value = [
+        _mock_vm("vm1", "100.64.0.1"),
+        _mock_vm("vm2", "100.64.0.2"),
+    ]
     db.list_agents.return_value = []
 
     _rebuild_config_dir(config, db)
 
     content = (ssh_dir / "config.d" / _MANAGED_CONF).read_text()
-    cm_idx = content.find("Host awvm--* awagent--*")
-    host_idx = content.find("Host awvm--vm1")
-    assert cm_idx != -1, f"ControlMaster block not found in:\n{content}"
-    assert host_idx != -1
-    assert cm_idx < host_idx, "ControlMaster block must precede per-host entries"
+    assert "Host 100.64.0.1\n" in content
+    assert "Host 100.64.0.2\n" in content
     assert "ControlMaster auto" in content
     assert "ControlPath ~/.ssh/agentworks-cm-%C" in content
-    assert "ControlPersist 60" in content
+    assert "ControlPersist 60s" in content
+    # Exactly one ControlMaster block per VM (no per-agent duplicates even
+    # when agents are added below; see the per-VM-IP dedup test).
+    assert content.count("ControlMaster auto") == 2
 
 
-def test_rebuild_config_dir_controlmaster_uses_configured_prefixes(tmp_path: Path) -> None:
-    """Operators can override ``ssh_host_prefix`` / ``ssh_agent_host_prefix``;
-    the ControlMaster wildcard must track those, not be hardcoded."""
+def test_rebuild_config_dir_dedupes_controlmaster_for_agents(tmp_path: Path) -> None:
+    """Admin and agents share a VM's IP; one ControlMaster block covers
+    them all. The ``%C`` hash keys on remote user, so each user still
+    gets its own master socket -- no need for per-user blocks."""
     from agentworks.ssh_config import _rebuild_config_dir
 
     config, ssh_dir = _mock_config(tmp_path)
-    config.operator.ssh_host_prefix = "myvm-"
-    config.operator.ssh_agent_host_prefix = "myagent-"
     db = MagicMock()
     db.list_vms.return_value = [_mock_vm("vm1", "100.64.0.1")]
-    db.list_agents.return_value = []
+    db.list_agents.return_value = [
+        _mock_agent("claude", "agt-claude", "vm1"),
+        _mock_agent("aider", "agt-aider", "vm1"),
+    ]
 
     _rebuild_config_dir(config, db)
 
     content = (ssh_dir / "config.d" / _MANAGED_CONF).read_text()
-    assert "Host myvm-* myagent-*" in content
+    # One IP block despite three users (admin + two agents) on the VM.
+    assert content.count("Host 100.64.0.1\n") == 1
+    assert content.count("ControlMaster auto") == 1
 
 
 def test_rebuild_config_dir_no_vms_omits_controlmaster(tmp_path: Path) -> None:
-    """No VMs means no managed file, including no ControlMaster block. A
-    bare ControlMaster wildcard matching nothing would be cruft."""
+    """No VMs → no managed file → no ControlMaster blocks."""
     from agentworks.ssh_config import _rebuild_config_dir
 
     config, ssh_dir = _mock_config(tmp_path)
@@ -407,8 +415,9 @@ def test_rebuild_config_dir_no_vms_omits_controlmaster(tmp_path: Path) -> None:
     assert not (ssh_dir / "config.d" / _MANAGED_CONF).exists()
 
 
-def test_legacy_rebuild_emits_controlmaster_block(tmp_path: Path) -> None:
-    """Legacy ssh_config_dir=False path emits the same ControlMaster block."""
+def test_legacy_rebuild_emits_controlmaster_per_vm_ip(tmp_path: Path) -> None:
+    """Legacy ssh_config_dir=False path emits the same IP-keyed
+    ControlMaster blocks."""
     from agentworks.ssh_config import _legacy_rebuild
 
     config, ssh_dir = _mock_config(tmp_path)
@@ -420,14 +429,10 @@ def test_legacy_rebuild_emits_controlmaster_block(tmp_path: Path) -> None:
     _legacy_rebuild(config, db)
 
     content = config.operator.ssh_config.read_text()
-    cm_idx = content.find("Host awvm--* awagent--*")
-    host_idx = content.find("Host awvm--vm1")
-    assert cm_idx != -1, f"ControlMaster block not found in:\n{content}"
-    assert host_idx != -1
-    assert cm_idx < host_idx, "ControlMaster block must precede per-host entries"
+    assert "Host 100.64.0.1\n" in content
     assert "ControlMaster auto" in content
     assert "ControlPath ~/.ssh/agentworks-cm-%C" in content
-    assert "ControlPersist 60" in content
+    assert "ControlPersist 60s" in content
 
 
 def test_legacy_rebuild_no_vms_omits_controlmaster(tmp_path: Path) -> None:
