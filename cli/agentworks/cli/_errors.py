@@ -27,8 +27,14 @@ def record_unhandled_error(exc: BaseException) -> Path | None:
     Returns the log path on success, or None if writing failed (the user's
     one-line error message takes precedence over the persisted traceback).
 
-    The log appends forever -- not currently rotated. Errors are rare; a few
-    MB takes years to accumulate. Add rotation later if it becomes an issue.
+    Operation-level errors land in the per-operation ``SSHLogger`` file via
+    ``SSHLogger.close()``'s ``sys.exc_info()`` introspection. This central
+    log is the fallback for crashes that happen before any ``SSHLogger`` is
+    constructed (config-load failures, CLI argument errors, etc.).
+
+    The log appends forever -- not currently rotated. Crashes outside an
+    operation are rare; a few MB takes years to accumulate. Add rotation
+    later if it becomes an issue.
     """
     from agentworks.config import CONFIG_DIR
 

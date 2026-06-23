@@ -239,8 +239,25 @@ class SSHLogger:
         return len(self._warnings) > 0
 
     def close(self) -> None:
-        """Write a footer with summary."""
+        """Write a footer with summary.
+
+        If an exception is in flight (``close()`` called from inside an
+        ``except`` block, which the operation-level handlers in
+        ``vms/initializer.py`` and elsewhere do), append the full
+        traceback before the footer. This lands the traceback in the
+        per-operation log instead of relying on the top-level
+        ``record_unhandled_error`` fallback, which writes to a shared
+        ``error.log`` across every workspace.
+        """
+        import sys
+        import traceback
         from datetime import UTC, datetime
+
+        exc_type, exc, exc_tb = sys.exc_info()
+        if exc is not None:
+            ts_exc = datetime.now(tz=UTC).strftime("%H:%M:%S")
+            tb_text = "".join(traceback.format_exception(exc_type, exc, exc_tb))
+            self._write(f"[{ts_exc}] EXCEPTION:\n{self._sanitize(tb_text)}\n")
 
         ts = datetime.now(tz=UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
         lines = [f"\n# Finished: {ts}"]
