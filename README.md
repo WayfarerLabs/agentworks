@@ -11,54 +11,15 @@ mutually exclusive: a good platform makes it possible and straightforward to hav
 
 ## Architecture at a glance
 
-The operator runs the `agw` CLI on their workstation. Agentworks VMs can live anywhere — local
-(WSL2), on a VM host running Lima, in Azure, or on a Proxmox cluster — but every VM (and the
-workstation itself) is a member of the same Tailscale tailnet. The CLI reaches them all via SSH over
+The operator runs the `agw` CLI on their workstation. Agentworks VMs can live anywhere (local via
+WSL2, on a VM host running Lima, in Azure, or on a Proxmox cluster), but every VM and the
+workstation itself are members of the same Tailscale tailnet. The CLI reaches them all via SSH over
 that flat overlay network, regardless of where they physically run.
 
-```mermaid
-flowchart TB
-    Op(("👤<br/>Operator"))
+![Agentworks topology: the operator's workstation runs the agw CLI, which provisions VMs across local platforms (Lima or WSL), a remote Lima host, Azure, and Proxmox. Every VM and the workstation itself join a shared Tailnet overlay, which is how the CLI reaches them all.](docs/images/agw-topology.png)
 
-    subgraph WS["💻 Workstation"]
-        CLI["<b>agw</b> CLI"]
-        WSL["WSL2 VM"]
-    end
-
-    subgraph VMHost["🖥️ VM Host<br/><i>(local or remote machine)</i>"]
-        Lima["Lima VM"]
-    end
-
-    subgraph Cloud["☁️ Azure"]
-        AzureVM["Azure VM"]
-    end
-
-    subgraph Pve["🗄️ Proxmox cluster"]
-        ProxmoxVM["Proxmox VM"]
-    end
-
-    Tailnet{{"🔗 Tailnet<br/><i>(Tailscale overlay)</i>"}}
-
-    Op --> CLI
-
-    CLI -. tailscaled .- Tailnet
-    WSL -. tailscaled .- Tailnet
-    Lima -. tailscaled .- Tailnet
-    AzureVM -. tailscaled .- Tailnet
-    ProxmoxVM -. tailscaled .- Tailnet
-
-    classDef vm stroke:#333,stroke-width:1.5px
-    classDef tailnet stroke:#4d8ad8,stroke-width:2px
-    class WSL,Lima,AzureVM,ProxmoxVM vm
-    class Tailnet tailnet
-
-    linkStyle 0 stroke:#444,stroke-width:1.5px
-    linkStyle 1,2,3,4,5 stroke:#4d8ad8,stroke-width:1.5px,stroke-dasharray:6 4
-```
-
-Solid lines are physical containment (this VM lives in that host); dashed blue lines are tailnet
-membership. The asymmetry is the whole point: Tailscale collapses four different physical hosting
-shapes into one flat overlay that the CLI talks to uniformly.
+The asymmetry is the whole point: Tailscale collapses four different hosting shapes into one flat
+overlay that the CLI talks to uniformly.
 
 ## The Problem Space
 
