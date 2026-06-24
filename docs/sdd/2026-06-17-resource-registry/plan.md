@@ -77,9 +77,13 @@ synthesize.
     string-dispatch).
   - `UsageEntry(source, text)` immutable dataclass for per-resource usage list entries.
 - [ ] `cli/agentworks/resources/origin.py`:
-  - `Origin` dataclass with `variant: Literal["operator-declared", "auto-declared"]` and
-    variant-specific fields (`file`, `line` for operator-declared; `source: tuple[str, str]` for
-    auto-declared). Set once at registration; never mutated.
+  - `Origin` dataclass with
+    `variant: Literal["operator-declared", "code-declared", "auto-declared"]` and variant-specific
+    fields: `file: Path` + `line: int` for operator-declared; `source: str` (code-source identifier)
+    for code-declared; `source: tuple[str, str]` (first matching requirement) for auto-declared.
+    Factory classmethods: `Origin.operator_declared(file, line)`, `Origin.code_declared(source)`,
+    `Origin.auto_declared(source)`. Set once at publish; never mutated. The `code-declared` variant
+    supports Phase 2b's catalog publisher and any future code publishers (plugins, etc.).
 - [ ] `cli/agentworks/resources/kind.py`:
   - `ResourceKind` Protocol: `kind`, `miss_policy`, `auto_declare_names`,
     `synthesize(requirements) -> Resource`.
@@ -98,11 +102,12 @@ synthesize.
     ...). Mutable during the publish phase; frozen after `validate()`. Lookup helpers
     (`lookup(kind, name)`, `iter_kind(kind)`) available once finalized.
   - `Registry.empty() -> Registry` -- class method returning a fresh empty Registry.
-  - `Registry.add(kind, name, resource, *, declared_at: SourceLocation) -> None` -- the publish-
-    side API. Translates Config's `declared_at` into `Origin(variant="operator-declared", ...)` and
-    attaches it to the Resource at this point. Config's `publish_to(registry)` is a thin wrapper
-    that iterates Config's resources and calls `registry.add(...)` for each. Other sources (future
-    plugins / manifests) call `add` directly.
+  - `Registry.add(kind, name, resource, origin: Origin) -> None` -- the publish-side API. The
+    publisher constructs the appropriate `Origin` variant and passes it in. Config's `publish_to`
+    builds `Origin.operator_declared(file=..., line=...)` from each Resource's `declared_at`.
+    Catalog's `publish_to` (Phase 2b) builds `Origin.code_declared(source="agentworks.catalog")`.
+    Future publishers do the same with their own variants. The Registry stores; it doesn't care
+    about publisher identity beyond the Origin carried.
   - `Registry.validate() -> None` -- the framework pass. Walks requirements via
     `required_resources()`, groups by `(kind, name)`, dispatches per `KIND_REGISTRY` miss policy
     (auto-declare synthesizes a Resource with `Origin(variant="auto-declared", ...)`; error raises
@@ -121,12 +126,12 @@ synthesize.
       after publish. Resource types gain `with_origin` / `with_usage` copy methods (or
       `@dataclass(frozen=True)` + `dataclasses.replace` shapes; LLD picks).
 - [ ] `cli/agentworks/config.py`: add `Config.publish_to(self, registry: Registry) -> None`.
-      Iterates Config's per-kind dicts and calls
-      `registry.add(kind, name, resource, declared_at=resource.declared_at)` for each. This is the
-      only point at which `agentworks.config` imports from `agentworks.resources` (specifically
-      `Registry` for type hinting). The import is allowed because `publish_to` is the explicit
-      handoff between layers; the Config layer's data structures and parsing remain
-      framework-ignorant.
+      Iterates Config's per-kind dicts. For each Resource, builds
+      `origin = Origin.operator_declared(file=resource.declared_at.file,     line=resource.declared_at.line)`
+      and calls `registry.add(kind, name, resource, origin)`. Imports `Registry` and `Origin` from
+      `agentworks.resources` -- the explicit layer handoff. Config's data structures (parsed
+      Resources, `SourceLocation`, etc.) remain framework-ignorant; only this publish handoff
+      crosses the boundary.
 - [ ] `cli/agentworks/errors.py`: confirm `ConfigError` carries `entity_kind`, `entity_name`,
       `source` (a `(kind, name)` pair) fields if not already; existing shape is preserved.
 - [ ] **Tests**:
@@ -348,13 +353,26 @@ Definition of done: template inheritance flows through the framework; built-in d
 single-sourced (in `synthesize` per kind); cycle detection covers all four template kinds;
 operator-facing behavior unchanged except for error message shape; CI green; reviewer-approved.
 
-## Phase 2b: Catalog command, git credential provider, and backend kinds
+## Phase 2b: Catalog publisher + catalog / provider / backend kinds
 
-Goal: bring the remaining bespoke-validation kinds into the framework. All use the error miss
-policy.
+Goal: bring the catalog into the framework as first-class Resources via a code publisher, plus add
+the remaining bespoke-validation kinds.
 
-- [ ] `cli/agentworks/resources/kinds/catalog.py`: `CatalogKind` for catalog commands
-      (`apt_packages`, `system_install_commands`, `user_install_commands`). Error miss policy.
+- [ ] `cli/agentworks/resources/kinds/catalog.py`: `CatalogKind` for catalog commands -- three
+      sub-kinds (`apt_package`, `system_install_command`, `user_install_command`) registered in
+      `KIND_REGISTRY`. All three use the **error miss policy** (unknown names referenced from
+      `apt_packages = ["..."]` etc. error with the referencing scope cited).
+- [ ] `cli/agentworks/catalog.py` (or wherever the code-defined catalog lives today): add a
+      `publish_to(registry: Registry) -> None` function. Iterates the code-defined catalog entries
+      and calls
+      `registry.add(kind, name, resource,     Origin.code_declared(source="agentworks.catalog"))`
+      for each. Catalog Resources are now full Registry citizens:
+      `agw resource list --kind catalog_command` (Phase 2c) shows them with origin =
+      `code-declared by agentworks.catalog`.
+- [ ] `Registry.from_config(config)` is updated to invoke `catalog.publish_to(registry)` before
+      `config.publish_to(registry)` (so any operator-declared override of catalog entries -- not
+      supported today, but the order keeps the door open -- is layered on top of the code-declared
+      base).
 - [ ] `cli/agentworks/resources/kinds/git_credential_provider.py`: `GitCredentialProviderKind` for
       the `type` field on `[git_credentials.<name>]`. Error miss policy. (The provider
       implementations in `agentworks.git_credentials/` stay; the kind validates the `type` field
@@ -365,14 +383,17 @@ policy.
       framework's consistent shape.
 - [ ] **Tests**:
   - `cli/tests/resources/test_catalog_kind.py`: unknown catalog command name errors with requirement
-    source; known names resolve.
+    source; known names resolve. Catalog publisher publishes the expected set.
+  - `cli/tests/resources/test_catalog_publisher.py`: `catalog.publish_to(registry)` populates the
+    right kinds; published Resources carry `Origin.code_declared(...)`.
   - `cli/tests/resources/test_git_credential_provider_kind.py`: unknown `type` value errors;
     `"github"` and `"azdo"` resolve.
   - `cli/tests/resources/test_secret_backend_kind.py`: unknown backend kind errors; declared kinds
     resolve.
 
-Definition of done: every kind in the registry uses framework dispatch; bespoke validation removed
-from the loader; CI green; reviewer-approved.
+Definition of done: every kind in the registry uses framework dispatch; catalog publishes as
+first-class Resources via the catalog publisher; bespoke validation removed from the loader; CI
+green; reviewer-approved.
 
 ## Phase 2c: `agw resource list` / `agw resource describe`
 
