@@ -745,7 +745,7 @@ def batch_check_status(
     # legacy and new sessions still surfaces the new ones cleanly; the
     # operator-facing single-session paths (`session attach`, etc.) go
     # through `check_session_status`, which raises a typed StateError
-    # pointing at the recreate.
+    # pointing at `agw session restart` (the primitive that auto-migrates).
     legacy = [s.name for s in checkable if s.socket_path is None]
     if legacy:
         names = ", ".join(sorted(legacy))
