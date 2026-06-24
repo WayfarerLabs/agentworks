@@ -271,6 +271,13 @@ matches `Host` patterns against the command-line argument literally and agentwor
 you ssh by alias from a terminal (`ssh awvm--myvm`), you don't get ControlMaster -- that's
 intentional; operator-typed ssh is low-frequency and the convenience aliases stay simple.
 
+The ControlMaster block is skipped when the operator's local platform is Windows. Windows OpenSSH's
+ControlMaster path has long-standing bugs around named-pipe handles (the visible symptom is
+`getsockname failed: Not a socket` followed by a hang on every IP-form ssh), so Windows operators
+stick with per-call fresh handshakes and avoid the breakage. Alias-form ssh works fine on Windows --
+it never matches a block with `ControlMaster`. The skip is platform-detected at sync time and will
+flip back on once Microsoft ships a verified fix.
+
 ### Sessions
 
 Manage sessions (persistent tmux sessions running in workspaces). Session names are globally unique

@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import pytest
+
 from agentworks.ssh_config import (
     _LEGACY_MARKER,
     _MANAGED_CONF,
@@ -453,3 +455,65 @@ def test_legacy_rebuild_no_vms_omits_controlmaster(tmp_path: Path) -> None:
     content = config.operator.ssh_config.read_text()
     assert "ControlMaster" not in content
     assert "Host awvm--" not in content
+
+
+def test_rebuild_config_dir_skips_controlmaster_on_windows(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Windows OpenSSH has long-standing bugs in its ControlMaster
+    implementation (named-pipe handles vs. POSIX socket APIs). The
+    symptom on the operator side is ``getsockname failed: Not a socket``
+    plus a hang on every IP-form ssh. We skip emitting the CM block
+    when the local platform is Windows; alias blocks still land."""
+    from agentworks.ssh_config import _rebuild_config_dir
+
+    monkeypatch.setattr("agentworks.ssh_config._controlmaster_supported", lambda: False)
+    config, ssh_dir = _mock_config(tmp_path)
+    db = MagicMock()
+    db.list_vms.return_value = [_mock_vm("vm1", "100.64.0.1")]
+    db.list_agents.return_value = []
+
+    _rebuild_config_dir(config, db)
+
+    content = (ssh_dir / "config.d" / _MANAGED_CONF).read_text()
+    # Alias block still present -- ControlMaster gate doesn't touch it.
+    assert "Host awvm--vm1\n" in content
+    # No CM block of any kind.
+    assert "ControlMaster" not in content
+    assert "Host 100.64.0.1\n" not in content
+
+
+def test_legacy_rebuild_skips_controlmaster_on_windows(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Legacy path obeys the same Windows skip."""
+    from agentworks.ssh_config import _legacy_rebuild
+
+    monkeypatch.setattr("agentworks.ssh_config._controlmaster_supported", lambda: False)
+    config, ssh_dir = _mock_config(tmp_path)
+    config.operator.ssh_config_dir = False
+    db = MagicMock()
+    db.list_vms.return_value = [_mock_vm("vm1", "100.64.0.1")]
+    db.list_agents.return_value = []
+
+    _legacy_rebuild(config, db)
+
+    content = config.operator.ssh_config.read_text()
+    assert "Host awvm--vm1\n" in content
+    assert "ControlMaster" not in content
+    assert "Host 100.64.0.1\n" not in content
+
+
+def test_controlmaster_supported_returns_false_on_win32(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pin the platform check itself so a refactor can't silently
+    re-enable ControlMaster on Windows."""
+    from agentworks.ssh_config import _controlmaster_supported
+
+    monkeypatch.setattr("sys.platform", "win32")
+    assert _controlmaster_supported() is False
+
+    monkeypatch.setattr("sys.platform", "linux")
+    assert _controlmaster_supported() is True
+
+    monkeypatch.setattr("sys.platform", "darwin")
+    assert _controlmaster_supported() is True

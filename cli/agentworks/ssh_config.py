@@ -72,6 +72,28 @@ def _format_ip_controlmaster_block(tailscale_host: str) -> str:
     )
 
 
+def _controlmaster_supported() -> bool:
+    """Whether the local OpenSSH client supports ControlMaster reliably.
+
+    Returns ``False`` on Windows. Windows OpenSSH implements ControlMaster
+    via named pipes instead of Unix sockets, and the multiplex code path
+    has long-standing bugs around ``getsockname`` calls against pipe
+    handles. The symptom is ``getsockname failed: Not a socket`` followed
+    by a hang on every IP-form ssh: alias-form ssh works because it never
+    matches a ``Host`` block with ``ControlMaster``. Operators on Windows
+    therefore get today's per-call fresh-handshake behavior (no regression
+    from pre-#113); Linux and macOS operators get the multiplex speedup.
+
+    Sniffing the OpenSSH version on the client would let us re-enable on
+    a fixed Windows build, but the bug has been present across every
+    Windows OpenSSH release we've observed. Keep it simple: ``win32`` off,
+    everything else on. Flip when Microsoft ships a verified fix.
+    """
+    import sys
+
+    return sys.platform != "win32"
+
+
 def _to_ssh_path(path: Path) -> str:
     """Convert a Path to an SSH config-safe string.
 
@@ -157,8 +179,9 @@ def _legacy_rebuild(config: Config, db: Database) -> None:
             )
         # One IP-keyed ControlMaster block per VM. Admin and agents on the
         # same VM share it because their SSH calls hit the same IP and
-        # ``%C`` keys on the remote user.
-        if vm.tailscale_host not in seen_ips:
+        # ``%C`` keys on the remote user. Skipped on Windows -- see
+        # ``_controlmaster_supported``.
+        if _controlmaster_supported() and vm.tailscale_host not in seen_ips:
             seen_ips.add(vm.tailscale_host)
             cm_blocks.append(_format_ip_controlmaster_block(vm.tailscale_host))
 
@@ -222,8 +245,9 @@ def _rebuild_config_dir(config: Config, db: Database) -> None:
         # One IP-keyed ControlMaster block per VM. Admin and agents on the
         # same VM share it because their SSH calls hit the same IP and
         # ``%C`` keys on the remote user, so each user still gets its own
-        # master socket automatically.
-        if vm.tailscale_host not in seen_ips:
+        # master socket automatically. Skipped on Windows -- see
+        # ``_controlmaster_supported``.
+        if _controlmaster_supported() and vm.tailscale_host not in seen_ips:
             seen_ips.add(vm.tailscale_host)
             cm_entries.append(_format_ip_controlmaster_block(vm.tailscale_host))
 
