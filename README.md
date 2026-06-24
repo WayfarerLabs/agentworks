@@ -11,22 +11,22 @@ mutually exclusive: a good platform makes it possible and straightforward to hav
 
 ## Architecture at a glance
 
-The operator runs the `agw` CLI on their workstation. Different **provisioners** are available to
-create and manage VMs on different platforms (Lima, WSL2, Azure, Proxmox). Regardless of the
-platform, every VM runs the same base operating system (Debian Bookworm), is joined to the same
-Tailscale tailnet, and is accessible over SSH at its Tailscale IP address.
+The operator runs the `agw` CLI on their workstation. Platform-specific **provisioners** create and
+manage VMs on Lima, WSL2, Azure, and Proxmox. Regardless of the platform, every VM runs the same
+base operating system (Debian Bookworm), is joined to the same Tailscale tailnet, and is accessible
+over SSH at its Tailscale IP address.
 
 ![Agentworks topology: the operator's workstation runs the agw CLI, which provisions VMs across local platforms (Lima or WSL), a remote Lima host, Azure, and Proxmox. Every VM and the workstation itself join a shared Tailnet overlay, which is how the CLI reaches them all.](docs/images/agw-topology.png)
 
-Each VM supports several types of infrastructure aimed at supporting agentic workloads:
+Inside each VM, Agentworks provides several layered primitives for organizing agentic workloads:
 
 - Project files and repositories can be organized into **workspaces** (as filesystem subtrees).
 - **Agents** each have their own Linux user, which provides a strong isolation boundary for
   capabilities and access.
 - Agentic workloads (Claude Code, etc.) can be run as persistent **sessions** including an
   associated tmux session, which can be attached to and detached from as needed.
-- Sessions can be organized into curated **named consoles** that utilize tmux to provide a seamless
-  multitasking experience.
+- Sessions can be organized into curated **named consoles** that use tmux to group multiple sessions
+  for multitasking.
 - Both **secrets** and **config** can be managed and securely injected at any level (VM, workspace,
   agent, session) to control access and behavior.
 
