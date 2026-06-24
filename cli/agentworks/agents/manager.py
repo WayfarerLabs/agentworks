@@ -1334,7 +1334,7 @@ def _write_agent_profile(
 
 
 def _write_agent_shell_rc(
-    agent_target: ExecTarget,
+    agent_target: Transport,
     *,
     home: str,
     agent_cfg: ResolvedAgentTemplate,
