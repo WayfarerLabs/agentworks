@@ -663,8 +663,13 @@ def check_session_status(
 
     No DB side effects. Raises ``StateError`` when the session row predates
     the per-session-socket model introduced by the env-and-secrets SDD
-    (``socket_path is None`` for an admin session); the operator's only
-    recourse for such rows is to delete and recreate.
+    (``socket_path is None`` for an admin session). The hint points the
+    operator at ``agw session restart <name>``, which migrates the row to
+    the new shape via a surgical kill of the named session on the default
+    tmux server + a fresh ``create_tmux_session`` under a per-session
+    socket. Callers that aren't ``restart_session`` (attach, stop, etc.)
+    can't safely migrate, so they surface the typed error and let the
+    operator restart.
     """
     if session.pid == PID_STOPPED:
         return SessionStatus.STOPPED
@@ -683,8 +688,8 @@ def check_session_status(
         entity_name=session.name,
         hint=(
             "This session predates the per-session-socket model introduced by "
-            "the env-and-secrets SDD. Recreate it: `agw session delete "
-            f"{session.name}` then `agw session create ...`."
+            f"the env-and-secrets SDD. Run `agw session restart {session.name}` "
+            "to migrate it to the new shape."
         ),
     )
 
@@ -740,13 +745,13 @@ def batch_check_status(
     # legacy and new sessions still surfaces the new ones cleanly; the
     # operator-facing single-session paths (`session attach`, etc.) go
     # through `check_session_status`, which raises a typed StateError
-    # pointing at the recreate.
+    # pointing at `agw session restart` (the primitive that auto-migrates).
     legacy = [s.name for s in checkable if s.socket_path is None]
     if legacy:
         names = ", ".join(sorted(legacy))
         output.warn(
-            f"{len(legacy)} session(s) predate the per-session-socket model "
-            f"and need recreate (`agw session delete` then create): {names}"
+            f"{len(legacy)} session(s) predate the per-session-socket model; "
+            f"`agw session restart` migrates them to the new shape: {names}"
         )
 
     parts = []
@@ -1248,7 +1253,25 @@ def restart_session(
     )
     with keep_vm_active(db, config, vm):
         session = _ensure_pid(session, target=admin_target, db=db)
-        status = check_session_status(session, target=admin_target)
+
+        # Legacy migration: sessions predating the per-session-socket model
+        # have ``socket_path=None`` (they lived on the admin's default tmux
+        # server, where session.pid identifies the server, not this
+        # session). ``check_session_status`` would raise a typed StateError
+        # for these; instead we recognize the shape, run a surgical
+        # ``tmux kill-session -t <name>`` on the default server (no socket
+        # path), and fall through to the create step. The downstream
+        # ``create_tmux_session`` produces a per-session socket and the
+        # subsequent ``db.update_session_socket_path`` lands the migration.
+        is_legacy = session.socket_path is None and session.pid is not None and session.pid > 0
+        if is_legacy:
+            output.info(
+                f"Session '{name}' uses the legacy default-tmux-server model; "
+                "migrating to per-session socket."
+            )
+            status = SessionStatus.STOPPED  # placeholder; legacy branch owns the kill below
+        else:
+            status = check_session_status(session, target=admin_target)
 
         # Pick the destructive-op transport BEFORE any destructive action.
         # For agent sessions this builds an agent Transport and probes it
@@ -1270,7 +1293,10 @@ def restart_session(
         # --force) or declines the confirm (OK + interactive 'no').
         # Eager-resolve runs AFTER these checks so we don't ask for
         # secrets the command was about to discard.
-        # UNKNOWN is impossible here -- _ensure_pid raises on unresolvable sessions.
+        # UNKNOWN is impossible here -- _ensure_pid raises on unresolvable
+        # sessions. Legacy sessions short-circuit at ``status =
+        # SessionStatus.STOPPED`` above, so neither gate fires for them --
+        # migration is implicit in the operator's restart opt-in.
         if status == SessionStatus.BROKEN and not force:
             raise BrokenStateError(
                 f"session '{name}' is broken (PID alive but tmux unreachable).",
@@ -1306,7 +1332,19 @@ def restart_session(
             config,
         )
 
-        if status == SessionStatus.BROKEN:
+        if is_legacy:
+            # Surgical kill of the named session on the default tmux
+            # server (no socket path). ``session.pid`` identifies the
+            # SERVER for legacy admin rows, not this session, so the
+            # BROKEN path's ``force_kill_tmux_server(pid)`` would nuke
+            # every other tmux session sharing the server -- including
+            # ad-hoc tmux work and other legacy Agentworks rows. The
+            # ``kill-session -t <name>`` primitive is surgical. Failure
+            # is best-effort: if the session is already gone (only the
+            # DB row survived), kill returns False and we proceed to
+            # create the new shape.
+            _kill_session(name, run_command=session_run_command, socket_path=None)
+        elif status == SessionStatus.BROKEN:
             from agentworks.sessions.tmux import force_kill_tmux_server
 
             output.warn(f"Session '{name}' is broken (tmux unreachable), force-killing via PID")
@@ -1509,9 +1547,13 @@ def restart_all_sessions(
 
         # Error if any sessions are still unknown after auto-repair.
         # PID_STOPPED sessions are known-stopped (excluded from status_map by design).
+        # Legacy sessions (``socket_path is None``) are also excluded from
+        # status_map by ``batch_check_status``; restart_session migrates them
+        # to the new model, so don't treat them as "unknown" here.
         unknown = [
             s for s in sessions
             if s.pid != PID_STOPPED
+            and s.socket_path is not None
             and (s.pid is None or s.boot_id is None or s.name not in status_map)
         ]
         if unknown:
@@ -1522,7 +1564,27 @@ def restart_all_sessions(
             )
 
         if not include_running:
-            # Only stopped sessions
+            # Only stopped sessions. Legacy sessions are alive-ish (PID set,
+            # socket_path None) -- we can't tell whether they're stopped
+            # from status_map alone (batch_check_status skips them), so we
+            # filter them out under ``--all-stopped`` and tell the operator
+            # how to migrate (``--all``). The batch_check_status warning
+            # already named them; this second message ties that warning to
+            # an actionable next step from the command they just ran.
+            legacy_skipped = [
+                s.name
+                for s in sessions
+                if s.socket_path is None
+                and s.pid is not None
+                and s.pid > 0
+            ]
+            if legacy_skipped:
+                names = ", ".join(legacy_skipped)
+                output.warn(
+                    f"Skipping {len(legacy_skipped)} legacy session(s) under "
+                    f"--all-stopped (can't determine state without a per-session "
+                    f"socket). Use `--all` to migrate them: {names}"
+                )
             sessions = [
                 s
                 for s in sessions
