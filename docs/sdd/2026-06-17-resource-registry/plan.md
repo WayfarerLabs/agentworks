@@ -57,7 +57,10 @@ attach metadata, detect cycles), and `SecretKind`. No consumers wired yet.
 - [ ] `cli/agentworks/resources/kind.py`:
   - `ResourceKind` Protocol: `kind`, `miss_policy`, `auto_declare_names`,
     `synthesize(requirements) -> Resource`.
-  - `KIND_REGISTRY: dict[str, ResourceKind]` populated at import time.
+  - `KIND_REGISTRY: dict[str, ResourceKind]`. Each `kinds/*.py` module self-registers into the dict
+    at import; `kinds/__init__.py` imports all kinds so the registry is fully populated after a
+    single `import agentworks.resources`. Phase 2 kinds slot in by adding new files under `kinds/`
+    and importing them from `kinds/__init__.py`; no central manifest to edit.
 - [ ] `cli/agentworks/resources/kinds/__init__.py` + `kinds/secret.py`:
   - `SecretKind(ResourceKind)`: `kind="secret"`, `miss_policy="auto-declare"`,
     `auto_declare_names=None` (any name). `synthesize` builds a `SecretDecl` with framework-set
@@ -87,7 +90,9 @@ attach metadata, detect cycles), and `SecretKind`. No consumers wired yet.
   - `cli/tests/resources/test_validation_pass.py`: walk + dispatch; auto-declare on miss for
     secrets; reserved-name restriction (Phase 1 stub for templates -- the dispatch behaves correctly
     even though no Phase 2 producers yet); error miss policy; first-matching origin rule; per-key +
-    walk-order determinism.
+    walk-order determinism. Includes a synthetic-producer test that an operator-declared
+    `SecretDecl` gets its `usage` list populated by the validation pass (the
+    framework-metadata-attachment path).
   - `cli/tests/resources/test_cycle_detection.py`: synthetic cycle producer for testing; clear error
     reporting.
   - `cli/tests/resources/test_kind_registry.py`: `KIND_REGISTRY["secret"]` lookup,
@@ -114,6 +119,12 @@ showing every auto-declared secret with its origin source.
       `required_resources()` by iterating their `env` dict and aggregating per-entry requirements.
 - [ ] Remove the env-and-secrets validation that errored on undeclared env-block secret refs
       (`render` raising `ConfigError` for unknown-secret refs in the env-block path).
+- [ ] **Release-notes line**: this shifts the failure mode for env-block typos. Previously a typo in
+      `{ secret = "anthropic-api-ky" }` errored at config load; now it auto-declares
+      `anthropic-api-ky`, which surfaces at runtime as "no backend resolved the secret" (with
+      `agw doctor` and `agw secret list` showing the unexpected auto-declared name). Intentional per
+      FRD Migration notes, but operators upgrading should know to scan `agw secret list` for
+      unexpected auto-declared names after the upgrade.
 - [ ] **Tests**:
   - `cli/tests/test_env_block_requirements.py`: an env block referencing an undeclared secret no
     longer errors; the secret auto-declares; doctor / secret-list display surfaces it with origin =
@@ -143,10 +154,12 @@ Legacy resolution path removed.
       requirement subgraph via `collect_secrets_for(registry, ("vm_template",     <name>))`,
       eager-resolve the result via `resolve_for_command(extra_decls=...)`, and pass the resolved
       Tailscale auth key as a function argument into the Tailscale install runner.
-- [ ] `cli/agentworks/vms/initializer.py` (or wherever the Tailscale-install code lives after PR
-      #130's polymorphic-transports refactor): the function that runs
-      `tailscale up     --authkey=...` gains a `*, auth_key: str` keyword-only argument. No `env=`
-      injection. No profile-fragment writes for the auth key.
+- [ ] Tailscale install runner gains a `*, auth_key: str` keyword-only argument. The exact function
+      path is **pinned at Phase 1c start** by grepping for the current `tailscale up     --authkey`
+      call site: pre-PR #130 this was `_install_tailscale` in `cli/agentworks/vms/initializer.py`;
+      post-PR #130 it may have moved into the transports package or stayed in `vms/initializer.py`
+      (mechanical move only). The kwarg-threading shape is the same either way. No `env=` injection.
+      No profile-fragment writes for the auth key.
 - [ ] Remove the legacy `AW_TAILSCALE_AUTH_KEY` env-var-or-prompt resolution path. The framework's
       resolver is the only source of the auth key.
 - [ ] Update `cli/agentworks/sample-config.toml`: VM template stanza documents `tailscale_auth_key`
@@ -155,6 +168,9 @@ Legacy resolution path removed.
   - `cli/tests/test_vm_create_tailscale_eager_resolve.py`: `vm create` resolves the Tailscale secret
     BEFORE any state mutation; the install runner receives the value as a kwarg; no `env=`
     injection.
+  - `cli/tests/test_sample_config_tailscale.py`: the updated `sample-config.toml` parses cleanly
+    through the new validation pass and the Tailscale secret auto-declares from the VM-template
+    requirement.
   - `cli/tests/test_tailscale_legacy_removed.py`: source-level tripwire that `AW_TAILSCALE_AUTH_KEY`
     is no longer referenced.
   - `cli/tests/test_resolved_vm_template_requirements.py`: a resolved VM template emits the expected
@@ -170,16 +186,21 @@ Goal: each `[git_credentials.<name>]` entry gains a `token` field referencing a 
 agent provisioning walks the requirement subgraph; tokens reach the install runner as kwargs. Legacy
 `obtain_token` path removed.
 
-- [ ] `cli/agentworks/registry.py` (`GitCredentialEntry`): add `token: str = f"git-token-{name}"`
-      field. Validate: bare string. Same shape rule as `tailscale_auth_key`.
+- [ ] `cli/agentworks/registry.py` (`GitCredentialEntry`): add a `token: str` field defaulting to
+      `git-token-<name>`. The default is computed (in `__post_init__` or by the parser; a dataclass
+      literal default can't interpolate the entry's name), not hard-coded. Validate: bare string.
+      Same shape rule as `tailscale_auth_key`.
 - [ ] `GitCredentialEntry.required_resources()` emits a `SecretRequirement` for the configured
-      `token` (default `git-token-<name>`) with usage `"the auth token"` and source
-      `("git_credentials", name)`.
+      `token` with usage `"the auth token"` and source `("git_credentials", name)`.
+- [ ] **Register `GitCredentialKind` in `KIND_REGISTRY`** with miss policy `error`. This lets the
+      framework recognize `git_credentials:<name>` requirements emitted from admin / agent
+      templates' `git_credentials = [...]` lists, look them up in the (already-populated) registry,
+      and surface a clean error when the name is undeclared. The kind doesn't synthesize (no
+      auto-decl); it just validates that the named credential exists.
 - [ ] `AdminConfig.required_resources()` / `AgentTemplate.required_resources()`: when
-      `git_credentials = ["name1", "name2"]` is set, emit `GitCredentialRequirement`-shaped entries
-      per name. (Phase 2b folds these into a `GitCredentialEntry` kind in the framework with the
-      error miss policy; Phase 1d emits the requirements so the transitive walk works even with
-      bespoke validation still active.)
+      `git_credentials = ["name1", "name2"]` is set, emit a `ResourceRequirement` of kind
+      `git_credentials` per name. `GitCredentialKind`'s error miss policy catches typos that
+      previously went through bespoke validation.
 - [ ] `cli/agentworks/agents/manager.py` / `cli/agentworks/vms/manager.py`: at `agent create` /
       `agent reinit` / `vm create` / `vm reinit`, walk the requirement subgraph transitively
       (admin/agent_template -> git_credentials -> secret) and eager-resolve.
@@ -196,6 +217,13 @@ agent provisioning walks the requirement subgraph; tokens reach the install runn
     chain; `~/.git-credentials` write receives the resolved value; no `AW_GIT_CREDENTIALS_*` lookup.
   - `cli/tests/test_obtain_token_removed.py`: source-level tripwire that `obtain_token` is no longer
     defined or called.
+  - `cli/tests/test_sample_config_git_credentials.py`: the updated `sample-config.toml` parses
+    cleanly; `[git_credentials.<name>]` stanzas auto-declare their token secrets via the new
+    framework.
+  - `cli/tests/test_git_credentials_typo_errors.py`: a typo in
+    `admin.git_credentials = ["githb-prod"]` (undeclared name) errors at config load via
+    `GitCredentialKind`'s error miss policy, with the requirement source surfaced in the error
+    message.
   - `cli/tests/test_git_credentials_subgraph_walk.py`: requirement walk traverses admin ->
     git_credentials -> secret transitively.
 
@@ -228,8 +256,11 @@ Service-layer logic lives in `agentworks.secrets`.
 Definition of done: `agw secret describe <name>` works for both operator-declared and auto-declared
 secrets; output matches FRD R10; CI green; reviewer-approved.
 
-**Phase 1 ships at this point.** PR sequence on the `feat/resource-registry-sdd` branch covers
-Phases 0-1e. Lockfile authored after Phase 1e's reviewer pass.
+**Phase 1 ships at this point.** All six Phase-1 phases (0, 1a, 1b, 1c, 1d, 1e) land on
+`feat/resource-registry-sdd` as **one PR per phase**, in order, each merged after its reviewer pass
+returns "this is perfect". The branch stays open across the sequence; each phase's PR is either
+rebased onto main after the prior phase merges, or stacked. The lockfile authored after Phase 1e's
+reviewer pass covers the whole Phase 1 ship.
 
 ## Phase 2a: Template kinds
 
@@ -314,8 +345,9 @@ Goal: add the cross-kind inspection commands.
 Definition of done: `agw resource list` and `agw resource describe <kind> <name>` work across all
 kinds; CI green; reviewer-approved.
 
-**Phase 2 ships at this point.** PR sequence on `feat/resource-registry-phase-2` (separate branch /
-PR from Phase 1). Lockfile updated after Phase 2c's reviewer pass.
+**Phase 2 ships at this point.** PR sequence on `feat/resource-registry-phase-2`, branched from
+`main` **after Phase 1 merges** (not from the Phase 1 branch tip). Lockfile updated after Phase 2c's
+reviewer pass.
 
 ## Sequencing notes
 
@@ -351,5 +383,3 @@ pin:
 - The exact subclass hierarchy of `ResourceRequirement` (frozen dataclasses with `kw_only`? what
   about hashability when used as dict keys?).
 - The `UsageEntry` serialization shape for `agw secret describe` rendering.
-- Whether `KIND_REGISTRY` is mutable at import (for Phase 2 kinds to register) or built once with a
-  manifest.
