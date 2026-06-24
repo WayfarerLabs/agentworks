@@ -575,6 +575,48 @@ def test_preserve_ssh_host_keys_warns_on_failure() -> None:
     logger.warning.assert_called_once()
 
 
+def test_preserve_ssh_host_keys_emits_same_bytes_as_phase_a() -> None:
+    """Drift guard between Phase A (heredoc) and Phase B (printf).
+
+    Phase A writes SSH_PRESERVE_KEYS_CONTENT verbatim via a cloud-init
+    heredoc. Phase B writes via `printf '%s\\n' <line> <line> ...`. Both
+    produce the same on-disk bytes today; a future tweak to either
+    rendering (e.g. `printf '%s\\r\\n'`, switching to `tee`, swapping the
+    heredoc terminator) would silently diverge what cloud-init reads on
+    Phase-A VMs vs what Phase B reconciles in. Pin the helper's printf
+    format + arg list together with the byte-equivalence between
+    "printf '%s\\n' SSH_PRESERVE_KEYS_LINES" and SSH_PRESERVE_KEYS_CONTENT.
+    """
+    import shlex
+
+    from agentworks.vms.bootstrap_script import (
+        SSH_PRESERVE_KEYS_CONTENT,
+        SSH_PRESERVE_KEYS_LINES,
+    )
+
+    target = MagicMock()
+    target.run.return_value = MagicMock(stdout="", stderr="", returncode=0, ok=True)
+    logger = MagicMock()
+
+    _preserve_ssh_host_keys(target, logger)
+    cmd = target.run.call_args[0][0]
+
+    # Pin the format string and each arg so a refactor to a different
+    # builder (echo -e, tee, multi-line heredoc, %s\r\n, etc.) is loud.
+    assert "printf '%s\\n' " in cmd
+    for line in SSH_PRESERVE_KEYS_LINES:
+        assert shlex.quote(line) in cmd
+
+    # And the byte-level result of `printf '%s\n' <lines>` must equal
+    # the canonical content that Phase A writes verbatim. The constant's
+    # definition already satisfies this, but locking it as a test keeps
+    # the equivalence load-bearing rather than incidental.
+    assert (
+        "".join(f"{line}\n" for line in SSH_PRESERVE_KEYS_LINES)
+        == SSH_PRESERVE_KEYS_CONTENT
+    )
+
+
 # -- install_claude_plugins ------------------------------------------------
 
 
