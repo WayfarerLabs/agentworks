@@ -11,15 +11,27 @@ mutually exclusive: a good platform makes it possible and straightforward to hav
 
 ## Architecture at a glance
 
-The operator runs the `agw` CLI on their workstation. Agentworks VMs can live anywhere (local via
-WSL2, on a VM host running Lima, in Azure, or on a Proxmox cluster), but every VM and the
-workstation itself are members of the same Tailscale tailnet. The CLI reaches them all via SSH over
-that flat overlay network, regardless of where they physically run.
+The operator runs the `agw` CLI on their workstation. Different **provisioners** are available to
+create and manage VMs on different platforms (Lima, WSL2, Azure, Proxmox). Regardless of the
+platform, every VM runs the same base operating system (Debian Bookworm), is joined to the same
+Tailscale tailnet, and is accessible over SSH at its Tailscale IP address.
 
 ![Agentworks topology: the operator's workstation runs the agw CLI, which provisions VMs across local platforms (Lima or WSL), a remote Lima host, Azure, and Proxmox. Every VM and the workstation itself join a shared Tailnet overlay, which is how the CLI reaches them all.](docs/images/agw-topology.png)
 
-The asymmetry is the whole point: Tailscale collapses four different hosting shapes into one flat
-overlay that the CLI talks to uniformly.
+Each VM supports several types of infrastructure aimed at supporting agentic workloads:
+
+- Project files and repositories can be organized into **workspaces** (as filesystem subtrees).
+- **Agents** each have their own Linux user, which provides a strong isolation boundary for
+  capabilities and access.
+- Agentic workloads (Claude Code, etc.) can be run as persistent **sessions** including an
+  associated tmux session, which can be attached to and detached from as needed.
+- Sessions can be organized into curated **named consoles** that utilize tmux to provide a seamless
+  multitasking experience.
+- Both **secrets** and **config** can be managed and securely injected at any level (VM, workspace,
+  agent, session) to control access and behavior.
+
+And all of this is managed via a declarative, idempotent configuration system that makes it easy for
+operators to define, evolve, and scale their infrastructure over time.
 
 ## The Problem Space
 
@@ -166,67 +178,6 @@ workload, and then to stop, restart, and delete them to manage their lifecycle.
 For day-to-day work across many sessions, see [Named consoles](cli/README.md#named-consoles):
 curated tmux views that group the sessions you're actively focused on, optionally with extra shell
 panes pre-opened in each session's window.
-
-The diagram below shows how the five concepts compose inside a single VM, with the operator driving
-the CLI from the workstation:
-
-```mermaid
-flowchart LR
-    subgraph WS["💻 Operator's Workstation"]
-        CLI["<b>agw</b> CLI"]
-    end
-
-    subgraph VM["🖥️ VM (Debian)"]
-        direction TB
-
-        subgraph Admin["admin user"]
-            AdminShell["admin shell<br/>(provisioning, init)"]
-        end
-
-        subgraph BackendAgent["agent: backend<br/>(Linux user)"]
-            BSess1["session: api-claude"]
-            BSess2["session: api-codex"]
-        end
-
-        subgraph FrontendAgent["agent: frontend<br/>(Linux user)"]
-            FSess["session: ui-claude"]
-        end
-
-        subgraph Workspaces["Workspaces<br/>(Linux groups + ACLs)"]
-            WSApi["ws-api/<br/>(repo clone)"]
-            WSUi["ws-ui/<br/>(repo clone)"]
-        end
-
-        subgraph Console["Named console: 'my-work'"]
-            ConsoleView["tmux view spanning<br/>api-claude + ui-claude"]
-        end
-    end
-
-    CLI -. "Tailscale SSH" .-> AdminShell
-
-    BSess1 --- WSApi
-    BSess2 --- WSApi
-    FSess --- WSUi
-
-    BSess1 -.- ConsoleView
-    FSess -.- ConsoleView
-
-    classDef agent stroke:#d4a017,stroke-width:2px
-    classDef workspace stroke:#4d8ad8,stroke-width:2px
-    classDef session stroke:#5a8a3a,stroke-width:2px
-    classDef console stroke:#b04060,stroke-width:2px
-
-    class BackendAgent,FrontendAgent agent
-    class WSApi,WSUi workspace
-    class BSess1,BSess2,FSess session
-    class ConsoleView console
-```
-
-Yellow boxes are agents (each a separate Linux user, the isolation boundary). Blue are workspaces
-(group + ACL boundaries on disk). Green are sessions (where the actual work runs, owned by their
-agent). Pink is a named console (an operator-facing tmux view that spans sessions — not an isolation
-boundary). Solid edges are filesystem access via group membership; dashed edges are looser logical
-relationships (the console is a view, not containment).
 
 ## Key Principles
 
