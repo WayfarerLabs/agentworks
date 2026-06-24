@@ -5,38 +5,40 @@
 [![Python](https://img.shields.io/pypi/pyversions/agentworks-cli.svg)](https://pypi.org/project/agentworks-cli/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-A Swiss Army knife for managing agentic workloads: VMs, workspaces, agents, sessions, and the tools
-that glue them together. Built around the conviction that autonomy, security, and control are not
-mutually exclusive: a good platform makes it possible and straightforward to have it all.
+A Swiss Army knife for managing agentic workloads: VMs, workspaces, agents, sessions, secrets/config
+and the tools that glue them together. Built around the conviction that autonomy, security, and
+control are not mutually exclusive: a good platform makes it possible and straightforward to have it
+all.
 
 ## Architecture at a glance
 
 The operator runs the `agw` CLI on their workstation. Platform-specific **provisioners** create and
 manage VMs on Lima, WSL2, Azure, and Proxmox. Regardless of the platform, every VM runs the same
 base operating system (Debian Bookworm), is joined to the same Tailscale tailnet, and is accessible
-over SSH at its Tailscale IP address.
+over SSH at its Tailscale IP address using the operator's keys.
 
 ![Agentworks topology: the operator's workstation runs the agw CLI, which provisions VMs across local platforms (Lima or WSL2), a remote Lima host, Azure, and Proxmox. Every VM and the workstation itself join a shared Tailnet overlay, which is how the CLI reaches them all.](docs/images/agw-topology.png)
 
-Inside each VM, Agentworks provides several layered primitives for organizing agentic workloads:
+Beyond the VMs themselves, Agentworks provides several layered primitives for organizing agentic
+workloads:
 
 - Project files and repositories can be organized into **workspaces** (as filesystem subtrees).
 - **Agents** each have their own Linux user, which provides a strong isolation boundary for
   capabilities and access.
 - Agentic workloads (Claude Code, etc.) can be run as persistent **sessions** including an
   associated tmux session, which can be attached to and detached from as needed.
-- Sessions can be organized into curated **named consoles** that use tmux to group multiple sessions
-  for multitasking.
+- Sessions can be organized into **named consoles**: curated tmux views that organize active
+  sessions along with optional extra shell panes.
 - Both **secrets** and **config** can be managed and securely injected at any level (VM, workspace,
   agent, session) to control access and behavior.
 
-And all of this is managed via a declarative, idempotent configuration system that makes it easy for
-operators to define, evolve, and scale their infrastructure over time.
+And all of this is managed via a **declarative, idempotent configuration system** that makes it easy
+for operators to define, evolve, and scale their infrastructure over time.
 
 ## The Problem Space
 
 Agentworks is an attempt to address several growing problems around agentic engineering with a
-single, (hopefully) coherent framework.
+single, coherent framework.
 
 These problems are:
 
