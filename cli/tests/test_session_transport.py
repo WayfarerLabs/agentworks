@@ -344,3 +344,96 @@ class _NullCM:
 
     def __exit__(self, *args: object) -> None:
         return None
+
+
+def test_restart_migrates_legacy_session_to_per_session_socket(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Legacy admin sessions (created on the VM's default tmux server,
+    ``socket_path=None``) used to surface ``check_session_status`` as a
+    typed ``StateError`` and force the operator into a delete-then-create
+    dance. Restart now treats them like BROKEN: best-effort force-kill
+    the legacy tmux server's PID, then create a fresh session under the
+    per-session-socket model and persist the new socket_path to the DB.
+    Pins the migration so a future refactor can't quietly reintroduce
+    the abort.
+    """
+    from agentworks.db import SessionMode
+    from agentworks.sessions import manager as session_manager
+    from agentworks.sessions import tmux as tmux_mod
+
+    db = _seed_db(tmp_path)
+    db.insert_session(
+        "legacy",
+        "ws1",
+        "default",
+        SessionMode.ADMIN,
+        agent_name=None,
+        socket_path=None,  # the load-bearing legacy attribute
+    )
+    db.update_session_pid("legacy", 12345, boot_id="boot-x")
+
+    call_log: list[tuple[str, str]] = []
+    _patch_common(monkeypatch, call_log=call_log)
+
+    stub_session_resolvers(monkeypatch)
+
+    # No interactive prompts during this test.
+    monkeypatch.setattr("agentworks.output.confirm", lambda *_a, **_kw: True)
+    # Boot ID for the post-create db.update_session_pid call.
+    monkeypatch.setattr(session_manager, "_get_boot_id", lambda *_a, **_kw: "boot-x")
+    # Tmuxinator regeneration is downstream of the migration; not in scope.
+    monkeypatch.setattr(session_manager, "_regenerate_tmuxinator", lambda *_a, **_kw: None)
+    # _resolve_session_linux_user reads the VM/agent rows; stub to a literal.
+    monkeypatch.setattr(session_manager, "_resolve_session_linux_user", lambda *_a, **_kw: "admin")
+    # Restricted-config deploy fires before create; no-op for this test.
+    monkeypatch.setattr(tmux_mod, "deploy_restricted_config", lambda *_a, **_kw: None)
+    # The session command is computed from the template; stub returns a literal.
+    monkeypatch.setattr(session_manager, "_build_session_command", lambda *_a, **_kw: "true")
+
+    # Capture force-kill: legacy migration must call this with the legacy
+    # PID and ``socket_path=None`` (the operator-side smoking-gun of the
+    # default-server model).
+    force_kill_calls: list[tuple[int, str | None]] = []
+
+    def _spy_force_kill(pid, *, target, socket_path, log=None, use_sudo=True):  # type: ignore[no-untyped-def]
+        force_kill_calls.append((pid, socket_path))
+        return True
+
+    # ``force_kill_tmux_server`` is imported locally inside restart_session's
+    # BROKEN branch; patch the source module so the late import resolves to
+    # the spy.
+    monkeypatch.setattr(tmux_mod, "force_kill_tmux_server", _spy_force_kill)
+
+    # Capture create_tmux_session: returns the new socket and PID so the
+    # downstream ``db.update_session_socket_path`` lands the migration.
+    create_calls: list[dict[str, object]] = []
+
+    def _capture_create(
+        name, ws_path, command, linux_user, *, run_command, target, admin_username, is_admin, env=None
+    ):  # type: ignore[no-untyped-def]
+        create_calls.append({"name": name, "is_admin": is_admin})
+        return ("/tmp/agentworks-sessions/legacy.sock", 67890)
+
+    monkeypatch.setattr(tmux_mod, "create_session", _capture_create)
+
+    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
+
+    # Should not raise: the legacy guard now flows through the BROKEN-like
+    # path rather than the StateError exit from check_session_status.
+    session_manager.restart_session(db, config, name="legacy", yes=True)  # type: ignore[arg-type]
+
+    assert force_kill_calls == [(12345, None)], (
+        "force_kill_tmux_server must be invoked with the legacy PID and "
+        f"socket_path=None; got {force_kill_calls}"
+    )
+    assert len(create_calls) == 1, "create_tmux_session must run once"
+    assert create_calls[0]["is_admin"] is True
+
+    # Migration persisted: the row now carries a real socket_path.
+    refreshed = db.get_session("legacy")
+    assert refreshed is not None
+    assert refreshed.socket_path == "/tmp/agentworks-sessions/legacy.sock"
+    assert refreshed.pid == 67890
+
+    db.close()

@@ -683,8 +683,8 @@ def check_session_status(
         entity_name=session.name,
         hint=(
             "This session predates the per-session-socket model introduced by "
-            "the env-and-secrets SDD. Recreate it: `agw session delete "
-            f"{session.name}` then `agw session create ...`."
+            f"the env-and-secrets SDD. Run `agw session restart {session.name}` "
+            "to migrate it to the new shape."
         ),
     )
 
@@ -745,8 +745,8 @@ def batch_check_status(
     if legacy:
         names = ", ".join(sorted(legacy))
         output.warn(
-            f"{len(legacy)} session(s) predate the per-session-socket model "
-            f"and need recreate (`agw session delete` then create): {names}"
+            f"{len(legacy)} session(s) predate the per-session-socket model; "
+            f"`agw session restart` migrates them to the new shape: {names}"
         )
 
     parts = []
@@ -1248,7 +1248,25 @@ def restart_session(
     )
     with keep_vm_active(db, config, vm):
         session = _ensure_pid(session, target=admin_target, db=db)
-        status = check_session_status(session, target=admin_target)
+
+        # Legacy migration: sessions predating the per-session-socket model
+        # have ``socket_path=None`` (they lived on the VM's default tmux
+        # server). The normal restart path already calls
+        # ``create_tmux_session`` which produces a per-session socket, so
+        # migration is just "kill the legacy server, then create new."
+        # Skip the ``check_session_status`` call (which would raise) and
+        # treat legacy sessions like BROKEN: force-kill the PID
+        # best-effort, fall through to the create. No ``--force`` flag
+        # required since restart is already opt-in destructive.
+        is_legacy = session.socket_path is None and session.pid is not None and session.pid > 0
+        if is_legacy:
+            output.info(
+                f"Session '{name}' uses the legacy default-tmux-server model; "
+                "migrating to per-session socket."
+            )
+            status = SessionStatus.BROKEN
+        else:
+            status = check_session_status(session, target=admin_target)
 
         # Pick the destructive-op transport BEFORE any destructive action.
         # For agent sessions this builds an agent Transport and probes it
@@ -1271,7 +1289,9 @@ def restart_session(
         # Eager-resolve runs AFTER these checks so we don't ask for
         # secrets the command was about to discard.
         # UNKNOWN is impossible here -- _ensure_pid raises on unresolvable sessions.
-        if status == SessionStatus.BROKEN and not force:
+        # is_legacy bypasses the --force gate: migration is implicit in the
+        # restart operator's opt-in.
+        if status == SessionStatus.BROKEN and not force and not is_legacy:
             raise BrokenStateError(
                 f"session '{name}' is broken (PID alive but tmux unreachable).",
                 entity_kind="session",
@@ -1509,9 +1529,13 @@ def restart_all_sessions(
 
         # Error if any sessions are still unknown after auto-repair.
         # PID_STOPPED sessions are known-stopped (excluded from status_map by design).
+        # Legacy sessions (``socket_path is None``) are also excluded from
+        # status_map by ``batch_check_status``; restart_session migrates them
+        # to the new model, so don't treat them as "unknown" here.
         unknown = [
             s for s in sessions
             if s.pid != PID_STOPPED
+            and s.socket_path is not None
             and (s.pid is None or s.boot_id is None or s.name not in status_map)
         ]
         if unknown:
@@ -1522,7 +1546,10 @@ def restart_all_sessions(
             )
 
         if not include_running:
-            # Only stopped sessions
+            # Only stopped sessions. Legacy sessions are alive-ish (PID set,
+            # socket_path None) -- we can't tell whether they're stopped from
+            # status_map alone, so we skip them in this mode and let the
+            # operator opt into migration via --all.
             sessions = [
                 s
                 for s in sessions
