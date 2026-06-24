@@ -479,11 +479,14 @@ documented in the requirements above:
 - **Admin sessions move to per-session sockets.** Pre-SDD admin sessions used the shared default
   tmux server per admin user; after this SDD each admin session gets its own server on
   `/run/agentworks/admin-tmux-sockets/<admin>/<session>.sock`, mirroring the agent-mode pattern.
-  Sessions created before the upgrade have `socket_path = NULL` in the DB and surface as a typed
-  `StateError` from `check_session_status` pointing at recreate; `agw session list` still lists them
-  but emits a one-time warning naming the affected sessions. Existing live admin tmux sessions on
-  the default socket are not auto-migrated; operators recreate them via `agw session delete <name>`
-  then `agw session create ...`.
+  Sessions created before the upgrade have `socket_path = NULL` in the DB. `check_session_status`
+  surfaces a typed `StateError` for those rows pointing at `agw session restart <name>` (the
+  primitive that can safely migrate); `agw session list` still lists them but emits a one-time
+  warning naming the affected sessions. `agw session restart` performs the migration in place:
+  surgical `tmux kill-session -t <name>` on the default server (so other unrelated tmux sessions on
+  the shared server survive), then `create_tmux_session` produces a fresh per-session socket and the
+  new path is persisted to the DB row. Callers other than restart (attach, stop, etc.) can't safely
+  migrate and surface the typed error.
 - **Restricted tmux config sets `default-command "$SHELL -l"`.** Agentworks sessions now invoke a
   login shell for no-command panes so the Phase 4 profile fragments
   (`/etc/profile.d/agentworks-identity.sh`, `~/.agentworks-profile.sh`) get sourced. An operator who
