@@ -2,16 +2,22 @@
 
 from __future__ import annotations
 
-import os
 from abc import ABC, abstractmethod
+
+from agentworks.env_compat import read_env_with_legacy
 
 
 def env_var_for_credential(name: str) -> str:
     """Derive the environment variable name for a credential config name.
 
-    e.g. "github" -> "GIT_CREDENTIALS_GITHUB"
-         "azdo-ifc" -> "GIT_CREDENTIALS_AZDO_IFC"
+    e.g. "github" -> "AW_GIT_CREDENTIALS_GITHUB"
+         "azdo-ifc" -> "AW_GIT_CREDENTIALS_AZDO_IFC"
     """
+    return "AW_GIT_CREDENTIALS_" + name.upper().replace("-", "_")
+
+
+def legacy_env_var_for_credential(name: str) -> str:
+    """The pre-AW_ env var name for a credential, still read with a deprecation warning."""
     return "GIT_CREDENTIALS_" + name.upper().replace("-", "_")
 
 
@@ -22,8 +28,9 @@ class GitCredentialProvider(ABC):
     produce the credential line(s) for ~/.git-credentials.
 
     Token resolution order:
-      1. GIT_CREDENTIALS_<NAME> environment variable
-      2. Interactive prompt (via _prompt_token)
+      1. AW_GIT_CREDENTIALS_<NAME> environment variable
+      2. GIT_CREDENTIALS_<NAME> environment variable (deprecated; warns once)
+      3. Interactive prompt (via _prompt_token)
     """
 
     def __init__(self, config_name: str, description: str | None = None) -> None:
@@ -52,8 +59,9 @@ class GitCredentialProvider(ABC):
         """Obtain a credential token: env var first, then prompt."""
         from agentworks import output
 
-        env_name = env_var_for_credential(self._config_name)
-        token = os.environ.get(env_name)
+        new_name = env_var_for_credential(self._config_name)
+        legacy_name = legacy_env_var_for_credential(self._config_name)
+        token = read_env_with_legacy(new_name, legacy_name)
         if token:
             output.detail(f"Git credential '{self.display_name}' found in environment")
             return token

@@ -84,12 +84,16 @@ PRETTIER_IGNORES=(--ignore-path .gitignore --ignore-path .prettierignore)
 # Toml is intentionally omitted because prettier doesn't have a native TOML
 # parser. JSON/JSONC/YAML get the same prose-wrap-style consistency markdown gets.
 PRETTIER_GLOBS=('**/*.md' '**/*.json' '**/*.jsonc' '**/*.yaml' '**/*.yml')
+# Prettier 3.x defaults to erroring when any glob in the set matches zero files
+# (the project may legitimately have no .yaml at a given snapshot, etc.).
+# Disable that so the run reports on what's there without breaking on empties.
+PRETTIER_FLAGS=(--no-error-on-unmatched-pattern)
 
 # --- Fix pass ---
 
 if [[ $FIX -eq 1 ]]; then
     echo "--- prettier --write ---"
-    "${PKGRUN[@]}" prettier@"$PRETTIER_VERSION" --write "${PRETTIER_IGNORES[@]}" "${PRETTIER_GLOBS[@]}"
+    "${PKGRUN[@]}" prettier@"$PRETTIER_VERSION" --write "${PRETTIER_IGNORES[@]}" "${PRETTIER_FLAGS[@]}" "${PRETTIER_GLOBS[@]}"
 
     echo ""
     echo "--- markdownlint-cli2 --fix ---"
@@ -104,7 +108,7 @@ fi
 
 echo ""
 echo "=== prettier --check ==="
-if "${PKGRUN[@]}" prettier@"$PRETTIER_VERSION" --check "${PRETTIER_IGNORES[@]}" "${PRETTIER_GLOBS[@]}"; then
+if "${PKGRUN[@]}" prettier@"$PRETTIER_VERSION" --check "${PRETTIER_IGNORES[@]}" "${PRETTIER_FLAGS[@]}" "${PRETTIER_GLOBS[@]}"; then
     echo "  ok"
 else
     FAIL=1

@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.db import VMStatus
-from agentworks.ssh import ExecTarget, WSL2Target, admin_exec_target, wait_for_reconnect
+from agentworks.transports import WSL2Transport, transport, wait_for_reconnect
 from agentworks.vms.base import ProvisionResult, VMProvisioner
 
 if TYPE_CHECKING:
@@ -23,6 +23,7 @@ if TYPE_CHECKING:
 
     from agentworks.config import Config
     from agentworks.db import VMRow
+    from agentworks.transports import Transport
 
 
 # -- Win32 job-object machinery for orphan-proof subprocess cleanup ----------
@@ -409,7 +410,7 @@ def _keepalive(vm: VMRow, config: Config | None) -> Iterator[None]:
     output.detail(f"Preventing idle-shutdown of WSL2 distro {vm.name!r} for the duration of this command...")
     try:
         if vm.tailscale_host and config is not None:
-            target = admin_exec_target(vm, config)
+            target = transport(vm, config)
             wait_for_reconnect(target)
         yield
     finally:
@@ -576,7 +577,7 @@ class WSL2Provisioner(VMProvisioner):
 
         output.detail(f"WSL2 VM '{vm_name}' provisioned.")
         return ProvisionResult(
-            admin_exec_target=ExecTarget(wsl2=WSL2Target(distro_name=vm_name, user=admin_username)),
+            provisioner_transport=WSL2Transport(distro_name=vm_name, user=admin_username),
             wsl_distro_name=vm_name,
         )
 
@@ -601,8 +602,10 @@ class WSL2Provisioner(VMProvisioner):
         )
         output.info(f"WSL2 distro '{vm.name}' deleted")
 
-    def admin_exec_target(self, vm: VMRow, *, config: object | None = None) -> ExecTarget:
-        return ExecTarget(wsl2=WSL2Target(distro_name=vm.name, user=vm.admin_username))
+    def provisioner_transport(
+        self, vm: VMRow, *, config: object | None = None,
+    ) -> Transport:
+        return WSL2Transport(distro_name=vm.name, user=vm.admin_username)
 
     def status(self, vm: VMRow) -> VMStatus:
         try:

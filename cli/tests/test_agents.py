@@ -65,3 +65,112 @@ def test_revoke_workspaces_rejects_empty_request(db: Database) -> None:
             workspace_names=[],
             revoke_all=False,
         )
+
+
+# --------------------------------------------------------------------------
+# _assert_agent_ssh_works (Option C: pre-rollout-agent guard)
+# --------------------------------------------------------------------------
+
+
+def test_assert_agent_ssh_works_succeeds_when_probe_ok() -> None:
+    """When `true` returns exit 0 over SSH, the helper is a no-op."""
+    from unittest.mock import MagicMock
+
+    from agentworks.agents.manager import _assert_agent_ssh_works
+
+    target = MagicMock()
+    probe_result = MagicMock()
+    probe_result.ok = True
+    probe_result.returncode = 0
+    target.run.return_value = probe_result
+
+    agent = MagicMock()
+    agent.name = "claude"
+    agent.linux_user = "claude"
+
+    # Does not raise.
+    _assert_agent_ssh_works(target, agent)
+    # Probe was issued.
+    target.run.assert_called_once()
+    cmd = target.run.call_args[0][0]
+    assert cmd == "true"
+
+
+def test_assert_agent_ssh_works_raises_on_ssh_transport_failure() -> None:
+    """Exit code 255 (SSH transport / auth failure) raises StateError with reinit hint."""
+    from unittest.mock import MagicMock
+
+    import pytest as _pt
+
+    from agentworks.agents.manager import _assert_agent_ssh_works
+    from agentworks.errors import StateError
+
+    target = MagicMock()
+    probe_result = MagicMock()
+    probe_result.ok = False
+    probe_result.returncode = 255
+    target.run.return_value = probe_result
+
+    agent = MagicMock()
+    agent.name = "claude"
+    agent.linux_user = "claude"
+
+    with _pt.raises(StateError) as exc_info:
+        _assert_agent_ssh_works(target, agent)
+    assert "rejected" in str(exc_info.value).lower()
+    # Hint mentions the reinit command for this specific agent.
+    assert exc_info.value.hint is not None
+    assert "agent reinit claude" in exc_info.value.hint
+
+
+def test_assert_agent_ssh_works_passes_through_non_transport_failures() -> None:
+    """Probe failures with non-255 exit are NOT treated as auth issues.
+
+    A failure where `true` exited non-zero (impossible in practice, but
+    defensive) should not get mis-attributed to a pre-rollout agent.
+    """
+    from unittest.mock import MagicMock
+
+    from agentworks.agents.manager import _assert_agent_ssh_works
+
+    target = MagicMock()
+    probe_result = MagicMock()
+    probe_result.ok = False
+    probe_result.returncode = 1  # not 255
+    target.run.return_value = probe_result
+
+    agent = MagicMock()
+    agent.name = "claude"
+    agent.linux_user = "claude"
+
+    # No StateError raised; the helper returns quietly. The caller is
+    # responsible for handling whatever else went wrong.
+    _assert_agent_ssh_works(target, agent)
+
+
+def test_assert_agent_ssh_works_wraps_ssh_error_as_connectivity() -> None:
+    """target.run raising SSHError (timeout / unreachable) re-raises as ConnectivityError.
+
+    Without this, a probe against an unreachable VM throws raw SSHError,
+    bypassing the actionable "VM unreachable" hint and confusing the
+    surface error with the pre-rollout case.
+    """
+    from unittest.mock import MagicMock
+
+    import pytest as _pt
+
+    from agentworks.agents.manager import _assert_agent_ssh_works
+    from agentworks.errors import ConnectivityError
+    from agentworks.ssh import SSHError
+
+    target = MagicMock()
+    target.run.side_effect = SSHError("timed out after 3 attempts")
+
+    agent = MagicMock()
+    agent.name = "claude"
+    agent.linux_user = "claude"
+    agent.vm_name = "alpha"
+
+    with _pt.raises(ConnectivityError) as exc_info:
+        _assert_agent_ssh_works(target, agent)
+    assert "alpha" in (exc_info.value.hint or "")

@@ -7,7 +7,7 @@ import re
 import shlex
 import sys
 from functools import partial
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 import typer
 
@@ -24,21 +24,25 @@ from agentworks.errors import (
     ValidationError,
 )
 from agentworks.sessions.tmux import AGENT_SOCKET_ROOT
-from agentworks.ssh import SSH_TRANSPORT_ERROR, admin_exec_target
+from agentworks.ssh import SSH_TRANSPORT_ERROR
+from agentworks.transports import transport
 from agentworks.vms.manager import keep_vm_active, keep_vms_active
 
 _ENV_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
-# Template variable substitution -- uses {{var}} syntax consistent with nerftools.
+# Template variable substitution: {{var}} double-brace syntax.
 _TEMPLATE_VAR_RE = re.compile(r"\{\{(\w+)\}\}")
 _KNOWN_TEMPLATE_VARS = {"session_name", "workspace_name"}
 
 if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database, SessionRow, VMRow, WorkspaceRow
+    from agentworks.env import EnvEntry
+    from agentworks.secrets import SecretTarget
     from agentworks.sessions.templates import ResolvedSessionTemplate
     from agentworks.sessions.tmux import RunCommand
-    from agentworks.ssh import ExecTarget, SSHLogger
+    from agentworks.ssh import SSHLogger
+    from agentworks.transports import Transport
 
 
 # -- Helpers ---------------------------------------------------------------
@@ -77,10 +81,58 @@ def _kill_session(
     return kill_session(session_name, run_command=run_command, socket_path=socket_path)
 
 
+def _build_session_target(
+    session: SessionRow,
+    *,
+    vm: VMRow,
+    config: Config,
+    db: Database,
+    admin_target: Transport,
+) -> Transport:
+    """Pick the SSH transport for destructive operations on a single session.
+
+    Returns a ``Transport`` whose SSH user is the session's owning Linux user
+    (admin for admin-mode, agent for agent-mode). For agent sessions, builds
+    an agent ``Transport`` and probes it; raises StateError with a reinit hint
+    if the agent's authorized_keys aren't provisioned (FRD R1 / Phase 3).
+    For admin sessions, returns the admin target unchanged.
+
+    Single-session paths use this to make kill / restart operations
+    consistent with create: every destructive step on an agent session
+    goes via direct agent SSH. Because the returned target always owns
+    the session it will operate on, callers can issue destructive commands
+    without sudo. Batch paths intentionally don't use this helper; they
+    keep admin's target across all sessions and pass ``sudo=True`` to
+    reach into agent tmux servers (FRD R1 carve-out for batch ops).
+    """
+    if session.mode == SessionMode.ADMIN.value:
+        return admin_target
+
+    if session.agent_name is None:
+        raise NotFoundError(
+            f"session '{session.name}' is agent-mode but has no agent_name",
+            entity_kind="session",
+            entity_name=session.name,
+        )
+    agent = db.get_agent(session.agent_name)
+    if agent is None:
+        raise NotFoundError(
+            f"agent '{session.agent_name}' (referenced by session '{session.name}') not found",
+            entity_kind="agent",
+            entity_name=session.agent_name,
+        )
+    from agentworks.agents.manager import _assert_agent_ssh_works
+    from agentworks.transports import agent_transport
+
+    agent_target = agent_transport(vm, config, agent)
+    _assert_agent_ssh_works(agent_target, agent)
+    return agent_target
+
+
 def _repair_session_pid(
     session: SessionRow,
     *,
-    target: ExecTarget,
+    target: Transport,
     db: Database,
 ) -> bool:
     """Core repair logic for a single session. Returns True if the DB was updated.
@@ -146,7 +198,7 @@ def _needs_repair(session: SessionRow) -> bool:
     return session.pid is None or session.boot_id is None
 
 
-def _ensure_pid(session: SessionRow, *, target: ExecTarget, db: Database) -> SessionRow:
+def _ensure_pid(session: SessionRow, *, target: Transport, db: Database) -> SessionRow:
     """Auto-recover PID + boot ID for a session missing either.
 
     Strict gate: after this returns, the session is guaranteed to be either
@@ -167,9 +219,9 @@ def ensure_pids_batch(sessions: list[SessionRow], *, db: Database, config: Confi
     if not need_repair:
         return sessions
 
-    # Group by VM (not workspace) to reuse one ExecTarget per VM
+    # Group by VM (not workspace) to reuse one Transport per VM
     by_vm: dict[str, list[SessionRow]] = {}
-    vm_cache: dict[str, ExecTarget] = {}
+    vm_cache: dict[str, Transport] = {}
     for s in need_repair:
         ws = db.get_workspace(s.workspace_name)
         if not ws:
@@ -179,7 +231,7 @@ def ensure_pids_batch(sessions: list[SessionRow], *, db: Database, config: Confi
             if not vm or not vm.tailscale_host:
                 continue
             try:
-                vm_cache[ws.vm_name] = admin_exec_target(vm, config)
+                vm_cache[ws.vm_name] = transport(vm, config)
             except Exception as exc:
                 output.warn(f"Cannot reach VM '{ws.vm_name}': {exc}")
                 continue
@@ -234,10 +286,10 @@ def _require_vm_for_workspace(db: Database, ws: WorkspaceRow) -> VMRow:
 
 def _prepare_vm(
     db: Database, config: Config, workspace_name: str, *, operation: str | None = None
-) -> tuple[WorkspaceRow, VMRow, RunCommand, RunCommand, ExecTarget]:
+) -> tuple[WorkspaceRow, VMRow, RunCommand, RunCommand, Transport]:
     """Validate workspace/VM, ensure running, and return (ws, vm, run_command, run_as_root, target).
 
-    If operation is set, creates an SSHLogger and attaches it to the ExecTarget
+    If operation is set, creates an SSHLogger and attaches it to the Transport
     so all calls log automatically. run_command and run_as_root are bound from
     the target's methods for callers that consume RunCommand callables.
     """
@@ -258,7 +310,7 @@ def _prepare_vm(
         )
 
     logger = SSHLogger(vm.name, operation) if operation else None
-    target = admin_exec_target(vm, config, logger=logger)
+    target = transport(vm, config, logger=logger)
     run_command: RunCommand = target.run
     run_as_root: RunCommand = partial(target.run, sudo=True)
     return ws, vm, run_command, run_as_root, target
@@ -284,15 +336,14 @@ def _regenerate_tmuxinator(
     logger: SSHLogger | None = None,
 ) -> None:
     """Regenerate the workspace tmuxinator config from current session state."""
-    from agentworks.ssh import write_file
     from agentworks.workspaces.tmuxinator import generate_config
 
     sessions = db.list_sessions(workspace_name=ws.name)
     # Build socket paths for tmuxinator (admin sessions have NULL, agent sessions always set)
     socket_paths = {s.name: s.socket_path for s in sessions}
     config_text = generate_config(ws.name, ws.workspace_path, sessions=sessions, socket_paths=socket_paths)
-    target = admin_exec_target(vm, config)
-    write_file(target, f"{ws.workspace_path}/.tmuxinator.yml", config_text, logger=logger)
+    target = transport(vm, config, logger=logger)
+    target.write_file(f"{ws.workspace_path}/.tmuxinator.yml", config_text)
 
 
 def filter_sessions(
@@ -362,6 +413,205 @@ def _substitute_template_vars(text: str, variables: dict[str, str]) -> str:
     return _TEMPLATE_VAR_RE.sub(replace, text)
 
 
+def _substitute_template_vars_in_env(
+    env: dict[str, EnvEntry],
+    variables: dict[str, str],
+) -> dict[str, EnvEntry]:
+    """Apply ``{{session_name}}`` / ``{{workspace_name}}`` substitution to
+    plaintext env entry values.
+
+    Preserves the legacy template-variable hook that ``_build_session_command``
+    carried before the EnvEntry migration. Secret-ref entries pass through
+    unchanged (variable substitution applies to the resolved string at
+    backend time, not the secret name).
+    """
+    from agentworks.env import EnvEntry as _EnvEntry
+
+    result: dict[str, _EnvEntry] = {}
+    for key, entry in env.items():
+        if entry.value is None:
+            result[key] = entry
+            continue
+        new_val = _substitute_template_vars(entry.value, variables)
+        if new_val == entry.value:
+            result[key] = entry
+        else:
+            result[key] = _EnvEntry(key=key, value=new_val)
+    return result
+
+
+class _SessionEnvScopes(NamedTuple):
+    """Per-scope env dicts for a session create / restart.
+
+    Named-tuple shape (rather than a 5-tuple) keeps callers readable and
+    leaves room for a new scope without breaking unpacking sites.
+    """
+
+    vm: dict[str, EnvEntry]
+    workspace: dict[str, EnvEntry]
+    admin: dict[str, EnvEntry] | None
+    agent: dict[str, EnvEntry] | None
+    session: dict[str, EnvEntry]
+
+
+def _resolve_session_env_scopes(
+    config: Config,
+    *,
+    db: Database,
+    vm: VMRow,
+    ws: WorkspaceRow,
+    session_name: str,
+    session_template: ResolvedSessionTemplate,
+    mode: SessionMode,
+    agent_name: str | None,
+) -> _SessionEnvScopes:
+    """Resolve the per-scope env dicts (vm, workspace, admin, agent, session)
+    for a session create / restart.
+
+    Returns the dicts ``effective_env`` would consume. Shared by
+    ``_resolve_session_env`` (which composes them through
+    ``compose_env`` into the rendered shell env) and the eager-prompting
+    orchestration helper ``_session_secret_target`` (which wraps them as
+    a ``SecretTarget`` for resolve_for_command, before any state
+    mutation). Sharing this helper avoids duplicate template resolution
+    and guarantees the two consumers see identical scope state.
+    """
+    from agentworks.agents.templates import resolve_from_dict as _resolve_agent_template
+    from agentworks.vms.templates import resolve_from_dict as _resolve_vm_template
+    from agentworks.workspaces.templates import resolve_template as _resolve_ws_template
+
+    vm_template = _resolve_vm_template(config.vm_templates, vm.template)
+    workspace_template = _resolve_ws_template(config, ws.template)
+
+    admin_env: dict[str, EnvEntry] | None
+    agent_env: dict[str, EnvEntry] | None
+    if mode == SessionMode.ADMIN:
+        admin_env = config.admin.env
+        agent_env = None
+    else:
+        assert agent_name is not None  # caller enforces; agent mode requires an agent
+        admin_env = None
+        agent_row = db.get_agent(agent_name)
+        if agent_row is None:
+            raise NotFoundError(
+                f"agent '{agent_name}' not found",
+                entity_kind="agent",
+                entity_name=agent_name,
+            )
+        resolved_agent_template = _resolve_agent_template(
+            config.agent_templates, agent_row.template
+        )
+        agent_env = resolved_agent_template.env
+
+    session_env = _substitute_template_vars_in_env(
+        session_template.env,
+        variables={"session_name": session_name, "workspace_name": ws.name},
+    )
+
+    return _SessionEnvScopes(
+        vm=vm_template.env,
+        workspace=workspace_template.env,
+        admin=admin_env,
+        agent=agent_env,
+        session=session_env,
+    )
+
+
+def _session_secret_target(
+    config: Config,
+    *,
+    db: Database,
+    vm: VMRow,
+    ws: WorkspaceRow,
+    session_name: str,
+    session_template: ResolvedSessionTemplate,
+    mode: SessionMode,
+    agent_name: str | None,
+) -> SecretTarget:
+    """Build a SecretTarget for a session, for eager-prompting orchestration.
+
+    Constructed from the same template chain that ``_resolve_session_env``
+    would consume; substitution invariance (Phase 6.1) guarantees the
+    SecretDecl union is identical pre- vs post-substitution.
+    """
+    from agentworks.secrets import SecretTarget
+
+    scopes = _resolve_session_env_scopes(
+        config,
+        db=db,
+        vm=vm,
+        ws=ws,
+        session_name=session_name,
+        session_template=session_template,
+        mode=mode,
+        agent_name=agent_name,
+    )
+    return SecretTarget(
+        vm=scopes.vm,
+        workspace=scopes.workspace,
+        admin=scopes.admin,
+        agent=scopes.agent,
+        session=scopes.session,
+        label=f"session={session_name}",
+    )
+
+
+def _resolve_session_env(
+    config: Config,
+    *,
+    db: Database,
+    vm: VMRow,
+    ws: WorkspaceRow,
+    session_name: str,
+    session_template: ResolvedSessionTemplate,
+    mode: SessionMode,
+    agent_name: str | None,
+    linux_user: str,
+) -> dict[str, str]:
+    """Compose the shell-open env for a session create / restart.
+
+    Resolves the per-VM / per-workspace / per-agent templates, builds the
+    ResourceContext, applies template-variable substitution to the session
+    template's env values, and runs the merged dict through
+    ``compose_env`` (which renders secrets via the config resolver and
+    overlays per-context identity vars).
+    """
+    from agentworks.env import ResourceContext, compose_env
+
+    scopes = _resolve_session_env_scopes(
+        config,
+        db=db,
+        vm=vm,
+        ws=ws,
+        session_name=session_name,
+        session_template=session_template,
+        mode=mode,
+        agent_name=agent_name,
+    )
+
+    ctx = ResourceContext(
+        vm_name=vm.name,
+        vm_host=vm.vm_host_name,
+        platform=vm.platform,
+        user=linux_user,
+        workspace_name=ws.name,
+        workspace_dir=ws.workspace_path,
+        agent_name=agent_name,
+        session_name=session_name,
+        session_kind="admin" if mode == SessionMode.ADMIN else "agent",
+    )
+
+    return compose_env(
+        resolver=config.secret_resolver,
+        ctx=ctx,
+        vm=scopes.vm,
+        workspace=scopes.workspace,
+        admin=scopes.admin,
+        agent=scopes.agent,
+        session=scopes.session,
+    )
+
+
 def _build_session_command(
     template: ResolvedSessionTemplate,
     *,
@@ -369,10 +619,16 @@ def _build_session_command(
     workspace_name: str,
     restart: bool = False,
 ) -> str:
-    """Build the shell command string for a session from its template.
+    """Build the command for a session from its template.
 
-    Returns an empty string if the template has no command (login shell only).
-    Uses restart_command (if defined) when restart=True.
+    Returns an empty string when the template has no command (login shell
+    only). Uses restart_command (if defined) when restart=True. The
+    ``exec`` wrapping that lets the command replace the login shell is
+    applied downstream in ``sessions/tmux._pane_command``; this function
+    just returns the operator's command string (after template-var
+    substitution). Env injection is a separate concern handled by the
+    SSH layer (SetEnv) and tmux's ``-e`` flag on new-session; see
+    ``sessions/tmux.create_session``.
     """
     variables = {
         "session_name": session_name,
@@ -380,30 +636,18 @@ def _build_session_command(
     }
 
     raw_command = template.restart_command if restart and template.restart_command else template.command
-    command = _substitute_template_vars(raw_command, variables)
-
-    parts = []
-    for key, val in template.env.items():
-        if not _ENV_KEY_RE.match(key):
-            raise ValidationError(f"invalid env var name {key!r} in template '{template.name}'")
-        val = _substitute_template_vars(val, variables)
-        parts.append(f"export {key}={shlex.quote(val)}")
-
-    if command:
-        parts.append(f"exec {command}")
-
-    return " && ".join(parts)
+    return _substitute_template_vars(raw_command, variables)
 
 
 # -- Liveness checks -------------------------------------------------------
 
 
-def _pid_alive(pid: int, *, target: ExecTarget) -> bool:
+def _pid_alive(pid: int, *, target: Transport) -> bool:
     """Check if a PID is alive via /proc."""
     return target.run(f"test -d /proc/{pid}", check=False).ok
 
 
-def _get_boot_id(target: ExecTarget) -> str | None:
+def _get_boot_id(target: Transport) -> str | None:
     """Read the current VM boot ID. Returns None on failure."""
     result = target.run("cat /proc/sys/kernel/random/boot_id", check=False)
     boot_id = (getattr(result, "stdout", "") or "").strip()
@@ -413,26 +657,43 @@ def _get_boot_id(target: ExecTarget) -> str | None:
 def check_session_status(
     session: SessionRow,
     *,
-    target: ExecTarget,
+    target: Transport,
 ) -> SessionStatus:
     """Determine session status. Dispatches by session type.
 
-    Pure function -- no DB side effects.
+    No DB side effects. Raises ``StateError`` when the session row predates
+    the per-session-socket model introduced by the env-and-secrets SDD
+    (``socket_path is None`` for an admin session); the operator's only
+    recourse for such rows is to delete and recreate.
     """
     if session.pid == PID_STOPPED:
         return SessionStatus.STOPPED
     if session.pid is None or session.boot_id is None:
         return SessionStatus.UNKNOWN
 
-    if session.mode == SessionMode.AGENT.value and session.socket_path is not None:
-        return _check_dedicated_agent_session(session, target=target)
-    if session.mode == SessionMode.ADMIN.value and session.socket_path is None:
-        return _check_shared_admin_session(session, target=target)
-    raise RuntimeError(f"unexpected session config: mode={session.mode}, socket_path={session.socket_path}")
+    if session.socket_path is not None:
+        return _check_dedicated_session(session, target=target)
+    # Legacy admin session predating per-session sockets. Surface as a
+    # typed StateError so the CLI's top-level error wrapper renders it
+    # as a one-liner; the new admin-mode path always stores a
+    # socket_path.
+    raise StateError(
+        f"session '{session.name}' has no socket_path",
+        entity_kind="session",
+        entity_name=session.name,
+        hint=(
+            "This session predates the per-session-socket model introduced by "
+            "the env-and-secrets SDD. Recreate it: `agw session delete "
+            f"{session.name}` then `agw session create ...`."
+        ),
+    )
 
 
-def _check_dedicated_agent_session(session: SessionRow, *, target: ExecTarget) -> SessionStatus:
-    """Agent sessions with their own tmux server and socket."""
+def _check_dedicated_session(session: SessionRow, *, target: Transport) -> SessionStatus:
+    """Sessions with their own tmux server and socket. Applies uniformly to
+    admin and agent sessions after the env-and-secrets SDD migrated admin
+    sessions to per-session sockets.
+    """
     from agentworks.sessions.tmux import tmux_cmd
 
     q_session = shlex.quote(session.name)
@@ -455,24 +716,10 @@ def _check_dedicated_agent_session(session: SessionRow, *, target: ExecTarget) -
     return SessionStatus.BROKEN  # same boot, process alive, socket unreachable
 
 
-def _check_shared_admin_session(session: SessionRow, *, target: ExecTarget) -> SessionStatus:
-    """Admin sessions on the default tmux server. BROKEN does not apply."""
-    from agentworks.sessions.tmux import tmux_cmd
-
-    q_session = shlex.quote(session.name)
-    cmd = tmux_cmd(f"has-session -t {q_session}") + " 2>/dev/null"
-    result = target.run(cmd, check=False)
-    if result.returncode == SSH_TRANSPORT_ERROR:
-        return SessionStatus.UNKNOWN  # SSH transport failure, not a session state
-    if result.ok:
-        return SessionStatus.OK
-    return SessionStatus.STOPPED
-
-
 def batch_check_status(
     sessions: list[SessionRow],
     *,
-    target: ExecTarget,
+    target: Transport,
 ) -> dict[str, SessionStatus]:
     """Check status for multiple sessions in one SSH call per VM.
 
@@ -485,27 +732,40 @@ def batch_check_status(
     if not checkable:
         return {}
 
-    # Build compound command: has-session with inline boot_id + PID for agent failures
+    # Build compound command: has-session with inline boot_id + PID for any
+    # session whose has-session probe fails. Admin and agent sessions now
+    # follow the same dedicated-socket model after the env-and-secrets SDD.
+    # Legacy admin sessions with socket_path=None are skipped here with a
+    # one-time warning so that `agw session list` against a VM with a mix of
+    # legacy and new sessions still surfaces the new ones cleanly; the
+    # operator-facing single-session paths (`session attach`, etc.) go
+    # through `check_session_status`, which raises a typed StateError
+    # pointing at the recreate.
+    legacy = [s.name for s in checkable if s.socket_path is None]
+    if legacy:
+        names = ", ".join(sorted(legacy))
+        output.warn(
+            f"{len(legacy)} session(s) predate the per-session-socket model "
+            f"and need recreate (`agw session delete` then create): {names}"
+        )
+
     parts = []
     for s in checkable:
+        if s.socket_path is None:
+            continue
         q_session = shlex.quote(s.name)  # quoted for tmux -t argument
         name = s.name  # raw for output field (names are validated, no shell-special chars)
         has_cmd = tmux_cmd(f"has-session -t {q_session}", s.socket_path)
-        if s.mode == SessionMode.AGENT.value and s.socket_path is not None:
-            # Agent session: inline follow-up on failure
-            parts.append(
-                f"{has_cmd} 2>/dev/null; "
-                f"if [ $? -ne 0 ]; then "
-                f"BOOT=$(cat /proc/sys/kernel/random/boot_id); "
-                f"test -d /proc/{s.pid}; "
-                f"echo \"S:{name}:1:$BOOT:$?\"; "
-                f"else echo \"S:{name}:0\"; fi"
-            )
-        elif s.mode == SessionMode.ADMIN.value and s.socket_path is None:
-            # Admin session: has-session only
-            parts.append(f"{has_cmd} 2>/dev/null; echo \"S:{name}:$?\"")
-        else:
-            raise RuntimeError(f"unexpected session config: mode={s.mode}, socket_path={s.socket_path}")
+        parts.append(
+            f"{has_cmd} 2>/dev/null; "
+            f"if [ $? -ne 0 ]; then "
+            f"BOOT=$(cat /proc/sys/kernel/random/boot_id); "
+            f"test -d /proc/{s.pid}; "
+            f"echo \"S:{name}:1:$BOOT:$?\"; "
+            f"else echo \"S:{name}:0\"; fi"
+        )
+    if not parts:
+        return {}
     cmd = "; ".join(parts)
 
     result = target.run(cmd, check=False)
@@ -584,6 +844,7 @@ def create_session(
 
         # Resolve mode and linux user (no side effects; safe outside the try).
         resolved_agent_name: str | None = None
+        agent_target = None
         if agent_name is not None:
             mode = SessionMode.AGENT
             agent = db.get_agent(agent_name)
@@ -602,6 +863,17 @@ def create_session(
                 )
             linux_user = agent.linux_user
             resolved_agent_name = agent_name
+
+            # Probe direct agent SSH BEFORE any state mutation (group add,
+            # DB inserts, restricted-config write). A pre-rollout agent
+            # surfaces here as an actionable StateError; without this,
+            # the rollback path would unwind the mutations but the
+            # operator's view would just see "session create failed".
+            from agentworks.agents.manager import _assert_agent_ssh_works
+            from agentworks.transports import agent_transport
+
+            agent_target = agent_transport(vm, config, agent)
+            _assert_agent_ssh_works(agent_target, agent)
         else:
             mode = SessionMode.ADMIN
             linux_user = vm.admin_username
@@ -616,6 +888,29 @@ def create_session(
             from agentworks.sessions.tmux import agent_socket_path
 
             expected_socket = agent_socket_path(linux_user, name)
+
+        # Eager-prompting orchestration (FRD R4 / Phase 6): resolve every
+        # secret referenced by this session's env chain up front, before
+        # the auto-grant insert / DB row / restricted-config write below.
+        # Non-interactive failures surface as SecretUnavailableError with
+        # a per-secret hint, with no partial state to clean up.
+        from agentworks.secrets import resolve_for_command
+
+        resolve_for_command(
+            [
+                _session_secret_target(
+                    config,
+                    db=db,
+                    vm=vm,
+                    ws=ws,
+                    session_name=name,
+                    session_template=template,
+                    mode=mode,
+                    agent_name=resolved_agent_name,
+                ),
+            ],
+            config,
+        )
 
         def _rollback() -> None:
             # Best-effort rollback. Each step runs inside its own try/except so
@@ -683,16 +978,40 @@ def create_session(
 
             deploy_restricted_config(run_command, history_limit=config.session.history_limit)
             command = _build_session_command(template, session_name=name, workspace_name=workspace_name)
+            session_env = _resolve_session_env(
+                config,
+                db=db,
+                vm=vm,
+                ws=ws,
+                session_name=name,
+                session_template=template,
+                mode=mode,
+                agent_name=resolved_agent_name,
+                linux_user=linux_user,
+            )
+            # Pick the SSH transport for tmux operations:
+            # - admin sessions: admin's run_command (unchanged)
+            # - agent sessions: agent's run_command (FRD R1, direct
+            #   target-user SSH). agent_target was built and probed above
+            #   so a pre-rollout agent never reaches this point. admin's
+            #   ``target`` is still passed for socket-root setup which
+            #   requires root.
+            session_run_command: RunCommand
+            if mode == SessionMode.AGENT:
+                assert agent_target is not None  # set in the agent_name branch above
+                session_run_command = agent_target.run
+            else:
+                session_run_command = run_command
             sock, pid = create_tmux_session(
                 name,
                 ws.workspace_path,
                 command,
                 linux_user,
-                run_command=run_command,
+                run_command=session_run_command,
                 target=target,
-                run_as_root=run_as_root,
                 admin_username=vm.admin_username,
                 is_admin=(mode == SessionMode.ADMIN),
+                env=session_env,
             )
         except KeyboardInterrupt:
             output.warn(f"Cancelling session create '{name}'... rolling back.")
@@ -725,12 +1044,18 @@ def create_session(
 
 
 def _execute_stop(
-    targets: list[tuple[SessionRow, ExecTarget]],
+    targets: list[tuple[SessionRow, Transport, bool]],
     *,
     db: Database,
     force: bool = False,
 ) -> list[tuple[str, str]]:
     """Core stop logic: C-c all, single grace period, kill survivors.
+
+    ``targets`` is ``[(session, target, target_owns_session)]``. When
+    ``target_owns_session`` is True, the SSH user is the same uid that owns
+    the tmux server (admin sessions over admin SSH, or agent sessions over
+    agent SSH) and no sudo is needed for kill / socket cleanup. When False
+    (admin SSH for an agent session in batch ops), sudo is needed.
 
     Handles both single and batch stops. Returns list of (name, error) failures.
     """
@@ -748,7 +1073,7 @@ def _execute_stop(
     # so the C-c is rarely necessary. Consider removing the C-c + grace
     # period if the 5-second wait becomes a pain point.
     output.detail("Sending C-c to stop any running commands...")
-    for session, target in targets:
+    for session, target, _ in targets:
         sock = session.socket_path
         with contextlib.suppress(Exception):
             send_keys(session.name, "C-c", run_command=target.run, socket_path=sock)
@@ -757,9 +1082,11 @@ def _execute_stop(
     output.detail(f"Waiting {_STOP_GRACE_SECONDS}s for graceful exit...")
     time.sleep(_STOP_GRACE_SECONDS)
 
-    # Phase 3: check survivors per VM (reuse existing targets)
-    by_target: dict[int, tuple[ExecTarget, list[SessionRow]]] = {}
-    for session, target in targets:
+    # Phase 3: check survivors per VM (reuse existing targets). Status checks
+    # only read /proc; sudo not relevant here. Group by target identity for
+    # one batch-check SSH per (VM, transport).
+    by_target: dict[int, tuple[Transport, list[SessionRow]]] = {}
+    for session, target, _ in targets:
         tid = id(target)
         if tid not in by_target:
             by_target[tid] = (target, [])
@@ -771,7 +1098,10 @@ def _execute_stop(
 
     failed: list[tuple[str, str]] = []
 
-    for session, target in targets:
+    for session, target, target_owns_session in targets:
+        # Cross-uid kill/cleanup (admin SSH against an agent session) needs
+        # sudo. Same-uid ops do not.
+        kill_sudo = not target_owns_session
         status = survivor_map.get(session.name)
         if status is None:
             # Status check failed (SSH error or parse issue) -- don't assume stopped
@@ -792,7 +1122,11 @@ def _execute_stop(
                     # Escalate to PID kill for agent sessions only (admin shares PID)
                     output.detail(f"tmux kill failed for '{session.name}', force-killing PID {session.pid}")
                     if not force_kill_tmux_server(
-                        session.pid, target=target, socket_path=session.socket_path, log=output.detail,
+                        session.pid,
+                        target=target,
+                        socket_path=session.socket_path,
+                        log=output.detail,
+                        use_sudo=kill_sudo,
                     ):
                         failed.append((session.name, f"PID {session.pid} survived force-kill"))
                         continue
@@ -812,7 +1146,7 @@ def _execute_stop(
             and session.pid > 0
             and not _pid_alive(session.pid, target=target)
         ):
-            target.run(f"rm -f {shlex.quote(session.socket_path)}", sudo=True, check=False)
+            target.run(f"rm -f {shlex.quote(session.socket_path)}", sudo=kill_sudo, check=False)
 
         db.update_session_pid(session.name, PID_STOPPED)
         output.info(f"Session '{session.name}' stopped")
@@ -831,15 +1165,29 @@ def stop_session(
     from agentworks.sessions.tmux import force_kill_tmux_server
 
     session = _require_session(db, name)
-    _ws, vm, _run_command, _, target = _prepare_vm(db, config, session.workspace_name, operation="session-stop")
+    _ws, vm, _run_command, _, admin_target = _prepare_vm(
+        db, config, session.workspace_name, operation="session-stop"
+    )
     with keep_vm_active(db, config, vm):
-        session = _ensure_pid(session, target=target, db=db)
-        status = check_session_status(session, target=target)
+        session = _ensure_pid(session, target=admin_target, db=db)
+        status = check_session_status(session, target=admin_target)
 
         if status == SessionStatus.STOPPED:
             output.info(f"Session '{name}' is already stopped")
             return
         # UNKNOWN is impossible here -- _ensure_pid raises on unresolvable sessions
+
+        # Pick the destructive-op transport BEFORE doing anything destructive.
+        # For agent sessions this also probes the agent's direct SSH so a
+        # pre-rollout agent surfaces as an actionable StateError up front
+        # rather than mid-kill (FRD R1, Phase 3). _build_session_target
+        # always returns a same-uid target, so no sudo is needed for the
+        # destructive ops below.
+        target = _build_session_target(
+            session, vm=vm, config=config, db=db, admin_target=admin_target
+        )
+        kill_sudo = False
+
         if status == SessionStatus.BROKEN:
             if not force:
                 raise BrokenStateError(
@@ -851,7 +1199,11 @@ def stop_session(
             output.warn(f"Session '{name}' is broken (tmux unreachable), force-killing via PID")
             assert session.pid is not None
             killed = force_kill_tmux_server(
-                session.pid, target=target, socket_path=session.socket_path, log=output.detail,
+                session.pid,
+                target=target,
+                socket_path=session.socket_path,
+                log=output.detail,
+                use_sudo=kill_sudo,
             )
             if not killed:
                 raise ExternalError(
@@ -863,8 +1215,9 @@ def stop_session(
             output.info(f"Session '{name}' force-stopped")
             return
 
-        # OK -- delegate to shared stop logic
-        failed = _execute_stop([(session, target)], db=db, force=force)
+        # OK: delegate to shared stop logic. target_owns_session=True
+        # because _build_session_target returned a same-uid target.
+        failed = _execute_stop([(session, target, True)], db=db, force=force)
         if failed:
             raise ExternalError(
                 f"failed to stop session '{name}': {failed[0][1]}",
@@ -890,28 +1243,80 @@ def restart_session(
     )
 
     session = _require_session(db, name)
-    ws, vm, run_command, run_as_root, target = _prepare_vm(
+    ws, vm, run_command, _run_as_root, admin_target = _prepare_vm(
         db, config, session.workspace_name, operation="session-restart",
     )
     with keep_vm_active(db, config, vm):
-        session = _ensure_pid(session, target=target, db=db)
-        status = check_session_status(session, target=target)
+        session = _ensure_pid(session, target=admin_target, db=db)
+        status = check_session_status(session, target=admin_target)
 
-        # UNKNOWN is impossible here -- _ensure_pid raises on unresolvable sessions
+        # Pick the destructive-op transport BEFORE any destructive action.
+        # For agent sessions this builds an agent Transport and probes it
+        # so a pre-rollout agent surfaces as an actionable StateError up
+        # front rather than leaving us with a stopped session we can't
+        # restart. Same transport is used for kill (above) and create
+        # (below): every destructive step on an agent session goes via
+        # direct agent SSH (FRD R1, Phase 3). _build_session_target always
+        # returns a same-uid target, so no sudo is needed for kill.
+        is_admin = session.mode == SessionMode.ADMIN.value
+        session_target = _build_session_target(
+            session, vm=vm, config=config, db=db, admin_target=admin_target
+        )
+        session_run_command: RunCommand = session_target.run
+        kill_sudo = False
+
+        # Bail-before-prompt: refuse the operation up front in the cases
+        # where the operator either lacks the right flag (BROKEN + no
+        # --force) or declines the confirm (OK + interactive 'no').
+        # Eager-resolve runs AFTER these checks so we don't ask for
+        # secrets the command was about to discard.
+        # UNKNOWN is impossible here -- _ensure_pid raises on unresolvable sessions.
+        if status == SessionStatus.BROKEN and not force:
+            raise BrokenStateError(
+                f"session '{name}' is broken (PID alive but tmux unreachable).",
+                entity_kind="session",
+                entity_name=name,
+                hint="Use --force to restart.",
+            )
+        if status == SessionStatus.OK and not yes and not output.confirm(
+            f"Session '{name}' is running. Restart?"
+        ):
+            raise UserAbort("restart cancelled")
+
+        # Eager-prompting orchestration (FRD R4 / Phase 6): resolve every
+        # secret referenced by this session's env chain BEFORE any kill /
+        # destructive step. Non-interactive failures surface as
+        # SecretUnavailableError with no partial state to clean up.
+        template = _resolve_template(config, session.template)
+        from agentworks.secrets import resolve_for_command
+
+        resolve_for_command(
+            [
+                _session_secret_target(
+                    config,
+                    db=db,
+                    vm=vm,
+                    ws=ws,
+                    session_name=name,
+                    session_template=template,
+                    mode=SessionMode(session.mode),
+                    agent_name=session.agent_name,
+                ),
+            ],
+            config,
+        )
+
         if status == SessionStatus.BROKEN:
-            if not force:
-                raise BrokenStateError(
-                    f"session '{name}' is broken (PID alive but tmux unreachable).",
-                    entity_kind="session",
-                    entity_name=name,
-                    hint="Use --force to restart.",
-                )
             from agentworks.sessions.tmux import force_kill_tmux_server
 
             output.warn(f"Session '{name}' is broken (tmux unreachable), force-killing via PID")
             assert session.pid is not None
             killed = force_kill_tmux_server(
-                session.pid, target=target, socket_path=session.socket_path, log=output.detail,
+                session.pid,
+                target=session_target,
+                socket_path=session.socket_path,
+                log=output.detail,
+                use_sudo=kill_sudo,
             )
             if not killed:
                 raise ExternalError(
@@ -920,17 +1325,16 @@ def restart_session(
                     entity_name=name,
                 )
         elif status == SessionStatus.OK:
-            if not yes and not output.confirm(f"Session '{name}' is running. Restart?"):
-                raise UserAbort("restart cancelled")
+            # Confirm already happened above (before eager-resolve), so we
+            # know the operator opted in.
             sock = session.socket_path
-            if not _kill_session(name, run_command=run_command, socket_path=sock):
+            if not _kill_session(name, run_command=session_run_command, socket_path=sock):
                 raise ExternalError(
                     f"failed to stop session '{name}' for restart",
                     entity_kind="session",
                     entity_name=name,
                 )
 
-        template = _resolve_template(config, session.template)
         deploy_restricted_config(run_command, history_limit=config.session.history_limit)
 
         # Use restart_command if available, otherwise fall back to command
@@ -940,8 +1344,18 @@ def restart_session(
             workspace_name=session.workspace_name,
             restart=True,
         )
-        is_admin = session.mode == SessionMode.ADMIN.value
         linux_user = _resolve_session_linux_user(db, session, vm)
+        session_env = _resolve_session_env(
+            config,
+            db=db,
+            vm=vm,
+            ws=ws,
+            session_name=name,
+            session_template=template,
+            mode=SessionMode(session.mode),
+            agent_name=session.agent_name,
+            linux_user=linux_user,
+        )
 
         try:
             new_sock, pid = create_tmux_session(
@@ -949,11 +1363,11 @@ def restart_session(
                 ws.workspace_path,
                 command,
                 linux_user,
-                run_command=run_command,
-                target=target,
-                run_as_root=run_as_root,
+                run_command=session_run_command,
+                target=admin_target,
                 admin_username=vm.admin_username,
                 is_admin=is_admin,
+                env=session_env,
             )
         except RuntimeError as exc:
             if "already has an active tmux server" in str(exc):
@@ -969,7 +1383,9 @@ def restart_session(
         if new_sock != session.socket_path:
             db.update_session_socket_path(name, new_sock)
         if pid is not None:
-            boot_id = _get_boot_id(target)
+            # boot_id is /proc/sys/kernel/random/boot_id (world-readable);
+            # admin's target is fine and convenient.
+            boot_id = _get_boot_id(admin_target)
             if boot_id is not None:
                 db.update_session_pid(name, pid, boot_id=boot_id)
             else:
@@ -1038,20 +1454,24 @@ def stop_all_sessions(
         output.info(f"Stopping {len(alive_sessions)} session(s)...")
 
         # Resolve VM targets (reuse across sessions on the same VM)
-        vm_targets: dict[str, ExecTarget] = {}
+        vm_targets: dict[str, Transport] = {}
         for s in alive_sessions:
             ws = db.get_workspace(s.workspace_name)
             if ws and ws.vm_name not in vm_targets:
                 vm = db.get_vm(ws.vm_name)
                 if vm and vm.tailscale_host:
-                    vm_targets[ws.vm_name] = admin_exec_target(vm, config)
+                    vm_targets[ws.vm_name] = transport(vm, config)
 
-        # Build (session, target) pairs for _execute_stop
-        stop_targets: list[tuple[SessionRow, ExecTarget]] = []
+        # Build (session, target, target_owns_session) tuples for _execute_stop.
+        # Batch ops keep admin's target across all sessions for efficiency
+        # (FRD R1 carve-out): admin's path into agent tmux servers requires
+        # sudo. target_owns_session is True only for admin's own sessions.
+        stop_targets: list[tuple[SessionRow, Transport, bool]] = []
         for s in alive_sessions:
             ws = db.get_workspace(s.workspace_name)
             if ws and ws.vm_name in vm_targets:
-                stop_targets.append((s, vm_targets[ws.vm_name]))
+                target_owns_session = s.mode == SessionMode.ADMIN.value
+                stop_targets.append((s, vm_targets[ws.vm_name], target_owns_session))
 
         failed = _execute_stop(stop_targets, db=db, force=force)
         if failed:
@@ -1151,10 +1571,12 @@ def delete_session(
 ) -> None:
     """Delete a session. Prompts if running/unknown (--yes to skip). --force for BROKEN."""
     session = _require_session(db, name)
-    ws, vm, run_command, _, target = _prepare_vm(db, config, session.workspace_name, operation="session-delete")
+    ws, vm, _run_command, _run_as_root, admin_target = _prepare_vm(
+        db, config, session.workspace_name, operation="session-delete"
+    )
     with keep_vm_active(db, config, vm):
-        session = _ensure_pid(session, target=target, db=db)
-        status = check_session_status(session, target=target)
+        session = _ensure_pid(session, target=admin_target, db=db)
+        status = check_session_status(session, target=admin_target)
 
         # UNKNOWN is impossible here -- _ensure_pid raises on unresolvable sessions
         if status == SessionStatus.BROKEN and not force:
@@ -1165,6 +1587,18 @@ def delete_session(
                 hint="Use --force to delete.",
             )
 
+        # Pick the destructive-op transport BEFORE prompting the operator.
+        # For agent sessions, ``_build_session_target`` probes direct agent
+        # SSH (FRD R1, Phase 3); a pre-rollout agent surfaces here as an
+        # actionable error rather than after the operator has already
+        # confirmed the delete. The helper returns a same-uid target, so
+        # no sudo is needed for the destructive ops below.
+        session_target = _build_session_target(
+            session, vm=vm, config=config, db=db, admin_target=admin_target
+        )
+        session_run_command: RunCommand = session_target.run
+        kill_sudo = False
+
         # Confirm before any destructive action
         if not yes and not output.confirm(f"Delete session '{name}'?"):
             raise UserAbort("delete cancelled")
@@ -1172,9 +1606,9 @@ def delete_session(
         # Now kill if needed
         if status == SessionStatus.OK:
             sock = session.socket_path
-            if not _kill_session(name, run_command=run_command, socket_path=sock):
+            if not _kill_session(name, run_command=session_run_command, socket_path=sock):
                 # Race: session may have exited between check and kill. Recheck.
-                recheck = check_session_status(session, target=target)
+                recheck = check_session_status(session, target=admin_target)
                 if recheck != SessionStatus.STOPPED:
                     raise ExternalError(
                         f"failed to stop session '{name}' for deletion",
@@ -1187,7 +1621,11 @@ def delete_session(
             output.warn(f"Session '{name}' is broken (tmux unreachable), force-killing via PID")
             assert session.pid is not None
             killed = force_kill_tmux_server(
-                session.pid, target=target, socket_path=session.socket_path, log=output.detail,
+                session.pid,
+                target=session_target,
+                socket_path=session.socket_path,
+                log=output.detail,
+                use_sudo=kill_sudo,
             )
             if not killed:
                 raise ExternalError(
@@ -1199,9 +1637,9 @@ def delete_session(
         # Clean up socket if the server is dead (don't remove a live socket)
         sock = session.socket_path
         if sock and sock.startswith(AGENT_SOCKET_ROOT + "/"):
-            post_status = check_session_status(session, target=target)
+            post_status = check_session_status(session, target=admin_target)
             if post_status == SessionStatus.STOPPED:
-                target.run(f"rm -f {shlex.quote(sock)}", sudo=True, check=False)
+                session_target.run(f"rm -f {shlex.quote(sock)}", sudo=kill_sudo, check=False)
             else:
                 output.warn(f"Session '{name}' status is {post_status.value} after delete, socket preserved at {sock}")
 
@@ -1232,8 +1670,10 @@ def delete_session(
         if member_consoles:
             from agentworks.sessions.multi_console import kill_session_windows
 
+            # Consoles are admin-owned (FRD R1 carve-out): admin manages
+            # admin's tmux server. Use admin_target regardless of session mode.
             kill_session_windows(
-                target, pairs=[(c, name) for c in member_consoles]
+                admin_target, pairs=[(c, name) for c in member_consoles]
             )
 
         output.info(f"Session '{name}' deleted")
@@ -1349,7 +1789,7 @@ def batch_check_all_sessions(
 
     # Resolve each session's VM and group
     by_vm: dict[str, list[SessionRow]] = {}
-    vm_targets: dict[str, ExecTarget] = {}
+    vm_targets: dict[str, Transport] = {}
 
     for s in sessions:
         ws = db.get_workspace(s.workspace_name)
@@ -1359,7 +1799,7 @@ def batch_check_all_sessions(
             vm = db.get_vm(ws.vm_name)
             if not vm or not vm.tailscale_host:
                 continue
-            vm_targets[ws.vm_name] = admin_exec_target(vm, config)
+            vm_targets[ws.vm_name] = transport(vm, config)
         by_vm.setdefault(ws.vm_name, []).append(s)
 
     if not by_vm:
@@ -1499,7 +1939,6 @@ def attach_session(
 ) -> None:
     """Attach to a session's tmux session (interactive)."""
     from agentworks.sessions.tmux import tmux_cmd
-    from agentworks.ssh import interactive
 
     session = _require_session(db, name)
     _ws, vm, _run_command, _, target = _prepare_vm(db, config, session.workspace_name, operation="session-attach")
@@ -1521,7 +1960,7 @@ def attach_session(
             )
 
         q_session = shlex.quote(name)
-        sys.exit(interactive(target, tmux_cmd(f"attach -t {q_session}", session.socket_path)))
+        sys.exit(target.interactive(tmux_cmd(f"attach -t {q_session}", session.socket_path)))
 
 
 def session_logs(

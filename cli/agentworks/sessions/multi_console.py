@@ -53,7 +53,8 @@ if TYPE_CHECKING:
         ShellEntry,
         VMRow,
     )
-    from agentworks.ssh import ExecTarget
+    from agentworks.secrets import SecretTarget
+    from agentworks.transports import Transport
 
 TMUX_PREFIX = "aw-console-"
 
@@ -363,6 +364,47 @@ def add_sessions(
                 entity_name=spec.name,
             )
 
+    # Eager-prompting orchestration (FRD R4 / Phase 6.6 review): when
+    # any spec carries shells > 0 the live-attach path below will open
+    # new shells via _add_session_window. Resolve every referenced
+    # secret BEFORE the DB write so a failure leaves no partial state.
+    # default_shells produces {cwd: None, admin: False} entries, so the
+    # only admin-promotion path is session_user == admin_user (an
+    # admin-mode session). Skip entirely if no specs carry shells (the
+    # bare ``add-sessions s1 s2`` shape).
+    if any(spec.shells > 0 for spec in specs):
+        from agentworks.secrets import resolve_for_command
+
+        vm_row = db.get_vm(console.vm_name)
+        new_shell_targets: list[SecretTarget] = []
+        if vm_row is not None:
+            for spec in specs:
+                if spec.shells <= 0:
+                    continue
+                session = db.get_session(spec.name)
+                if session is None:
+                    continue
+                try:
+                    session_user = _session_linux_user(db, session, vm_row)
+                except NotFoundError:
+                    continue
+                # All new shells are admin=False (default_shells), so
+                # use_admin promotion only fires for admin-mode sessions.
+                use_admin = session_user == vm_row.admin_username
+                pane = _pane_secret_target(
+                    config, db,
+                    vm=vm_row, session=session, is_admin_pane=use_admin,
+                )
+                if pane is None:
+                    continue
+                # Every new shell on this session has the same scope chain,
+                # so one target covers them all. Eager-resolve unions per
+                # secret name; the resolver cache makes additional copies
+                # redundant.
+                new_shell_targets.append(pane)
+        if new_shell_targets:
+            resolve_for_command(new_shell_targets, config)
+
     with db.transaction():
         for spec in specs:
             db.add_console_session(console_name, spec.name, default_shells(spec.shells))
@@ -382,6 +424,7 @@ def add_sessions(
             _add_session_window(
                 target,
                 db,
+                config,
                 console_name=console_name,
                 member=member,
                 vm=vm,
@@ -562,6 +605,35 @@ def add_shell(
             entity_kind="console-member",
             entity_name=session_name,
         )
+
+    # Eager-prompting orchestration (FRD R4 / Phase 6): resolve any
+    # secrets referenced by this pane's env chain BEFORE the DB write +
+    # potential pane-split below. Non-interactive failures surface as
+    # SecretUnavailableError with no partial state to clean up. We
+    # always resolve (even when the console isn't live), since the
+    # operator typed add-shell expecting to use the new pane shortly.
+    # use_admin promotion matches _split_shell_pane: an admin-mode
+    # session has session_user == admin_user, so a pane on that session
+    # always runs as admin even when --admin wasn't passed. Compute the
+    # same promoted value here so the eager-resolve scope matches what
+    # _resolve_pane_env will produce at pane-split time.
+    session_row = db.get_session(session_name)
+    vm_row = db.get_vm(console.vm_name)
+    if session_row is not None and vm_row is not None:
+        session_user = _session_linux_user(db, session_row, vm_row)
+        use_admin = admin or session_user == vm_row.admin_username
+        pane_target = _pane_secret_target(
+            config,
+            db,
+            vm=vm_row,
+            session=session_row,
+            is_admin_pane=use_admin,
+        )
+        if pane_target is not None:
+            from agentworks.secrets import resolve_for_command
+
+            resolve_for_command([pane_target], config)
+
     new_shell: ShellEntry = {"cwd": cwd, "admin": admin}
     new_shells = [*cs.shells, new_shell]
     db.update_console_shells(console_name, session_name, new_shells)
@@ -589,10 +661,14 @@ def add_shell(
         session_user = _session_linux_user(db, session, vm)
         _split_shell_pane(
             target,
+            db,
+            config,
             console_name=console_name,
             window_name=session_name,
             workspace_path=workspace_path,
             shell=new_shell,
+            session=session,
+            vm=vm,
             session_user=session_user,
             admin_user=vm.admin_username,
             # new_shell is appended to cs.shells, so its index in the updated
@@ -674,9 +750,26 @@ def restore_session(
             output.info(
                 f"window '{session_name}' is missing; rebuilding from config..."
             )
+            # Eager-prompting orchestration (FRD R4 / Phase 6.6 review):
+            # the window-rebuild path also opens new shells (one per
+            # configured shell entry, via _add_session_window ->
+            # _split_shell_pane). Resolve every referenced secret BEFORE
+            # any pane is opened. Targets cover ALL configured shells in
+            # this case (the window is missing, so every pane is new).
+            from agentworks.secrets import resolve_for_command
+
+            all_indices = list(range(configured_count))
+            if all_indices:
+                resolve_for_command(
+                    _restore_session_secret_targets(
+                        db, config, vm=vm, member=member, indices=all_indices,
+                    ),
+                    config,
+                )
             _add_session_window(
                 target,
                 db,
+                config,
                 console_name=console_name,
                 member=member,
                 vm=vm,
@@ -788,6 +881,25 @@ def restore_session(
             )
         session_user = _session_linux_user(db, session, vm)
 
+        # Eager-prompting orchestration (FRD R4 / Phase 6): restore_session
+        # opens new shells for the missing pane indices. Resolve secrets
+        # NOW -- after all the validation guards (untagged-panes /
+        # duplicate-tags / out-of-range / "already matches config" no-op)
+        # so an operator with a tag-corruption gets the actionable
+        # validation error instead of being prompted for credentials they
+        # would never end up using. Targets are scoped precisely to the
+        # missing config indices (not all configured shells) so non-
+        # interactive runs only fail on secrets that actually would be
+        # consumed.
+        from agentworks.secrets import resolve_for_command
+
+        resolve_for_command(
+            _restore_session_secret_targets(
+                db, config, vm=vm, member=member, indices=missing,
+            ),
+            config,
+        )
+
         output.info(
             f"Restoring {len(missing)} shell pane(s) in '{session_name}': "
             f"config indices {missing}."
@@ -798,10 +910,14 @@ def restore_session(
         for cidx in missing:
             pane_id = _split_shell_pane(
                 target,
+                db,
+                config,
                 console_name=console_name,
                 window_name=session_name,
                 workspace_path=workspace_path,
                 shell=member.shells[cidx],
+                session=session,
+                vm=vm,
                 session_user=session_user,
                 admin_user=vm.admin_username,
                 config_index=cidx,
@@ -963,18 +1079,18 @@ done
 """
 
 
-def _console_tmux_exists(target: ExecTarget, console_name: str) -> bool:
+def _console_tmux_exists(target: Transport, console_name: str) -> bool:
     q = shlex.quote(tmux_session_name(console_name))
     return target.run(f"tmux has-session -t {q} 2>/dev/null", check=False).ok
 
 
-def _kill_console_tmux(target: ExecTarget, console_name: str) -> None:
+def _kill_console_tmux(target: Transport, console_name: str) -> None:
     q = shlex.quote(tmux_session_name(console_name))
     target.run(f"tmux kill-session -t {q}", check=False)
 
 
 def kill_session_windows(
-    target: ExecTarget,
+    target: Transport,
     *,
     pairs: list[tuple[str, str]],
 ) -> None:
@@ -1018,18 +1134,290 @@ def kill_session_windows(
         )
 
 
+def _pane_secret_target(
+    config: Config,
+    db: Database,
+    *,
+    vm: VMRow,
+    session: SessionRow,
+    is_admin_pane: bool,
+) -> SecretTarget | None:
+    """Build the SecretTarget for a console pane, for eager-prompting.
+
+    Mirrors the scope-selection logic of ``_resolve_pane_env``. Console
+    add-shell panes are sidecar shells rooted in a workspace (not in the
+    session itself), so the scope chain stops at workspace:
+
+    - Admin pane: vm + workspace + admin.
+    - Agent pane: vm + workspace + agent.
+
+    Session-template env is NOT included -- those vars are for the session
+    itself, not for sidecar shells attached to its window. Returns
+    ``None`` when the session row is missing fields the resolver would
+    need.
+
+    ``is_admin_pane`` is the PROMOTED value, not the operator-passed
+    --admin flag. Callers must apply the same promotion ``_split_shell_pane``
+    uses: ``use_admin = shell_admin_flag or session_user == admin_user``.
+    Passing the raw flag for an admin-mode session (session_user ==
+    admin_user) would route through the ``agent_name is None`` branch
+    and silently return ``None``, breaking the eager-resolve guarantee
+    for that shape.
+    """
+    from agentworks.agents.templates import resolve_from_dict as _resolve_agent_template
+    from agentworks.secrets import SecretTarget
+    from agentworks.vms.templates import resolve_from_dict as _resolve_vm_template
+    from agentworks.workspaces.templates import resolve_template as _resolve_ws_template
+
+    workspace = db.get_workspace(session.workspace_name)
+    if workspace is None:
+        return None
+
+    vm_tmpl = _resolve_vm_template(config.vm_templates, vm.template)
+    ws_tmpl = _resolve_ws_template(config, workspace.template)
+
+    if is_admin_pane:
+        return SecretTarget(
+            vm=vm_tmpl.env,
+            workspace=ws_tmpl.env,
+            admin=config.admin.env,
+            label=f"console-pane:{session.name}/admin",
+        )
+
+    if session.agent_name is None:
+        return None
+    agent = db.get_agent(session.agent_name)
+    if agent is None:
+        return None
+    agent_tmpl = _resolve_agent_template(config.agent_templates, agent.template)
+    return SecretTarget(
+        vm=vm_tmpl.env,
+        workspace=ws_tmpl.env,
+        agent=agent_tmpl.env,
+        label=f"console-pane:{session.name}/agent",
+    )
+
+
+def _admin_only_secret_target(
+    config: Config, vm: VMRow, *, label: str,
+) -> SecretTarget:
+    """SecretTarget for an admin-only console pane (no workspace context).
+
+    Used for ``console.admin_shell`` panes at build time -- a vanilla
+    admin login shell with vm + admin scope. Workspace and session
+    contexts don't apply (the admin shell isn't tied to either).
+
+    Note: today ``_build_console_tmux`` creates the admin-shell window
+    via ``tmux new-session -d ... 'exec $SHELL -l'`` with no SetEnv /
+    ``tmux new-session -e`` flags, so the resolved env doesn't yet
+    reach the admin shell. The eager-resolve here still produces the
+    right operator-facing UX (prompt up front, before any tmux work)
+    and warms the cache for when the admin-shell env-injection wiring
+    lands as a follow-up.
+    """
+    from agentworks.secrets import SecretTarget
+    from agentworks.vms.templates import resolve_from_dict as _resolve_vm_template
+
+    vm_tmpl = _resolve_vm_template(config.vm_templates, vm.template)
+    return SecretTarget(
+        vm=vm_tmpl.env,
+        admin=config.admin.env,
+        label=label,
+    )
+
+
+def _console_build_secret_targets(
+    db: Database,
+    config: Config,
+    *,
+    console: ConsoleRow,
+    vm: VMRow,
+) -> list[SecretTarget]:
+    """Build the SecretTarget list for every pane the console build path
+    would open from scratch.
+
+    The set covers panes that OPEN NEW SHELLS (per FRD R4):
+
+    - The admin shell window (when ``console.admin_shell`` is set):
+      vm + admin scope.
+    - For each session window: every configured shell pane (a session-
+      attach pane joins the session's existing tmux server and consumes
+      no new secrets -- skipped here per FRD R4).
+
+    Same ``use_admin`` promotion as ``_split_shell_pane`` (shell admin
+    flag OR session_user == admin_user) so the eager-resolve scope
+    matches what the build path will actually consume.
+
+    Sessions whose agent / workspace rows are missing get their shell
+    panes skipped (matches ``_pane_secret_target``'s defensive
+    fallthrough). The operator surfaces these via ``agw doctor``.
+    """
+    targets: list[SecretTarget] = []
+    if console.admin_shell:
+        targets.append(
+            _admin_only_secret_target(
+                config, vm,
+                label=f"console={console.name}/admin-shell",
+            ),
+        )
+    for member in db.list_console_sessions(console.name):
+        session = db.get_session(member.session_name)
+        if session is None:
+            continue
+        try:
+            session_user = _session_linux_user(db, session, vm)
+        except NotFoundError:
+            continue
+        for shell in member.shells:
+            use_admin = shell["admin"] or session_user == vm.admin_username
+            pane = _pane_secret_target(
+                config, db, vm=vm, session=session, is_admin_pane=use_admin,
+            )
+            if pane is not None:
+                targets.append(pane)
+    return targets
+
+
+def _restore_session_secret_targets(
+    db: Database,
+    config: Config,
+    *,
+    vm: VMRow,
+    member: ConsoleSessionRow,
+    indices: list[int],
+) -> list[SecretTarget]:
+    """SecretTargets for the specific missing shell-pane indices that
+    ``restore_session`` will open.
+
+    Targets are scoped precisely to the caller-supplied indices: the
+    restore path's validation guards filter down to ``missing`` before
+    invoking this helper, so over-approximating would risk prompting
+    for secrets the command never actually consumes. (The window-
+    missing rebuild path in ``restore_session`` calls
+    ``_add_session_window`` directly; that path does its own
+    enumeration and doesn't route through this helper.)
+    """
+    targets: list[SecretTarget] = []
+    session = db.get_session(member.session_name)
+    if session is None:
+        return targets
+    try:
+        session_user = _session_linux_user(db, session, vm)
+    except NotFoundError:
+        return targets
+    for idx in indices:
+        shell = member.shells[idx]
+        use_admin = shell["admin"] or session_user == vm.admin_username
+        pane = _pane_secret_target(
+            config, db, vm=vm, session=session, is_admin_pane=use_admin,
+        )
+        if pane is not None:
+            targets.append(pane)
+    return targets
+
+
+def _resolve_pane_env(
+    config: Config,
+    db: Database,
+    *,
+    vm: VMRow,
+    session: SessionRow,
+    pane_user: str,
+    is_admin_pane: bool,
+) -> dict[str, str]:
+    """Compose env for a console add-shell pane attached to a session's window.
+
+    Console add-shell panes are sidecar shells -- they're organized under
+    a session's window in the console UI, but they're not *in* the session
+    (separate process tree, not part of the session's tmux). Under the
+    env-and-secrets identity taxonomy they're "admin or agent shell rooted
+    in a workspace": they see workspace dynamic identity but NOT session
+    identity, and their operator env stops at workspace scope. The
+    sessions themselves (the agent's actual tmux server / shells) keep
+    full session context -- they ARE the workload.
+
+    Admin pane: admin + vm + workspace operator env; workspace dynamic
+    identity.
+
+    Agent pane: vm + workspace + agent operator env; workspace dynamic
+    identity. ``AGENTWORKS_AGENT`` reaches the pane via the agent's
+    per-user profile fragment (static identity), not via SetEnv.
+
+    Returns ``{}`` when the session's row is missing fields that the env
+    resolution needs (e.g. workspace lookup fails); the caller proceeds
+    without env injection rather than raising mid-pane-split.
+    """
+    from agentworks.agents.templates import resolve_from_dict as _resolve_agent_template
+    from agentworks.env import ResourceContext, compose_env
+    from agentworks.vms.templates import resolve_from_dict as _resolve_vm_template
+    from agentworks.workspaces.templates import resolve_template as _resolve_ws_template
+
+    workspace = db.get_workspace(session.workspace_name)
+    if workspace is None:
+        return {}
+
+    vm_tmpl = _resolve_vm_template(config.vm_templates, vm.template)
+    ws_tmpl = _resolve_ws_template(config, workspace.template)
+
+    # No session context: add-shell panes are sidecar shells, not part of
+    # the session itself. No agent_name in the ctx either -- the agent
+    # identifier is per-user-static and lives in the on-disk profile
+    # fragment, not in per-context SetEnv.
+    ctx = ResourceContext(
+        vm_name=vm.name,
+        vm_host=vm.vm_host_name,
+        platform=vm.platform,
+        user=pane_user,
+        workspace_name=workspace.name,
+        workspace_dir=workspace.workspace_path,
+    )
+
+    if is_admin_pane:
+        return compose_env(
+            resolver=config.secret_resolver,
+            ctx=ctx,
+            vm=vm_tmpl.env,
+            workspace=ws_tmpl.env,
+            admin=config.admin.env,
+        )
+
+    if session.agent_name is None:
+        # In theory unreachable given the caller's ``use_admin`` logic in
+        # ``_split_shell_pane`` (an admin-mode session has session_user ==
+        # admin_user, which forces is_admin_pane=True up there). Guarded
+        # here against future invariant drift so a non-admin pane on a
+        # session with no agent silently skips env rather than crashing.
+        return {}
+
+    agent = db.get_agent(session.agent_name)
+    if agent is None:
+        return {}
+    agent_tmpl = _resolve_agent_template(config.agent_templates, agent.template)
+    return compose_env(
+        resolver=config.secret_resolver,
+        ctx=ctx,
+        vm=vm_tmpl.env,
+        workspace=ws_tmpl.env,
+        agent=agent_tmpl.env,
+    )
+
+
 def _resolve_workspace_path(db: Database, session: SessionRow) -> str | None:
     ws = db.get_workspace(session.workspace_name)
     return ws.workspace_path if ws else None
 
 
 def _split_shell_pane(
-    target: ExecTarget,
+    target: Transport,
+    db: Database,
+    config: Config,
     *,
     console_name: str,
     window_name: str,
     workspace_path: str,
     shell: ShellEntry,
+    session: SessionRow,
+    vm: VMRow,
     session_user: str,
     admin_user: str,
     config_index: int,
@@ -1039,18 +1427,47 @@ def _split_shell_pane(
     restore-session detect which specific shell (out of an ordered list) is
     missing after an accidental kill.
 
+    Env reaches the pane via:
+
+    1. ``tmux split-window -e KEY=VAL`` flags (load-bearing): tmux sets
+       these vars on the pane process before exec; agentworks-managed
+       vars (``AGENTWORKS_*``, ``AW_*``) survive the sudo crossing in
+       the agent-pane branch via the sudoers env_keep fragment
+       deployed by VM init in Phase 4. Until that Phase 4 deploy
+       lands, agent-pane env injection is effectively a no-op (the
+       vars cross into the pane process but sudo strips them).
+    2. SSH SetEnv on ``target.run`` (SSH transport only;
+       non-SSH transports are a no-op because the tmux client is
+       talking to an already-running server and the client's env
+       doesn't flow into server-spawned panes). For SSH this is
+       belt-and-suspenders in the rare case where the console tmux
+       server has just been (re)started; in steady state channel (1)
+       is what reaches the pane.
+
     Returns the new pane id on full success (split + tag both completed), or
     None if either step failed (tmux refused the split, or the pane was created
     but its id couldn't be captured so the tag couldn't be set). Callers in
     best-effort paths (`add_shell`, `_add_session_window`) may ignore the
     return value; `restore_session` checks each return so a partial restore
     is loud rather than a silent exit-0."""
+    from agentworks.sessions.tmux import _tmux_env_flags
+
     cwd = shell["cwd"]
     full_path = posixpath.join(workspace_path, cwd) if cwd else workspace_path
     q_full = shlex.quote(full_path)
     q_con = shlex.quote(tmux_session_name(console_name))
     q_win = shlex.quote(window_name)
     use_admin = shell["admin"] or session_user == admin_user
+
+    pane_env = _resolve_pane_env(
+        config,
+        db,
+        vm=vm,
+        session=session,
+        pane_user=admin_user if use_admin else session_user,
+        is_admin_pane=use_admin,
+    )
+    env_flags = _tmux_env_flags(pane_env)
 
     # Login shell in both branches keeps profile/aliases consistent with the
     # session pane behavior (sessions use $SHELL -l via create_session).
@@ -1066,7 +1483,7 @@ def _split_shell_pane(
             f'exec "$SHELL" -l'
         )
         cmd = (
-            f"tmux split-window -t {q_con}:{q_win} -P -F '#{{pane_id}}' "
+            f"tmux split-window -t {q_con}:{q_win} -P -F '#{{pane_id}}'{env_flags} "
             f"-c {q_full} {shlex.quote(bootstrap)}"
         )
     else:
@@ -1079,11 +1496,11 @@ def _split_shell_pane(
             f"exec sudo --login -u {q_user} bash -c {shlex.quote(bootstrap)}"
         )
         cmd = (
-            f"tmux split-window -t {q_con}:{q_win} -P -F '#{{pane_id}}' "
+            f"tmux split-window -t {q_con}:{q_win} -P -F '#{{pane_id}}'{env_flags} "
             f"-c {q_full} {shlex.quote(pane_cmd)}"
         )
 
-    res = target.run(cmd, check=False)
+    res = target.run(cmd, check=False, env=pane_env)
     if not res.ok:
         output.warn(
             f"failed to add shell pane in '{window_name}': {res.stderr.strip()}"
@@ -1125,8 +1542,9 @@ def _split_shell_pane(
 
 
 def _add_session_window(
-    target: ExecTarget,
+    target: Transport,
     db: Database,
+    config: Config,
     *,
     console_name: str,
     member: ConsoleSessionRow,
@@ -1185,10 +1603,14 @@ def _add_session_window(
         for config_index, shell in enumerate(member.shells):
             _split_shell_pane(
                 target,
+                db,
+                config,
                 console_name=console_name,
                 window_name=session.name,
                 workspace_path=workspace_path,
                 shell=shell,
+                session=session,
+                vm=vm,
                 session_user=session_user,
                 admin_user=vm.admin_username,
                 config_index=config_index,
@@ -1201,8 +1623,9 @@ def _add_session_window(
 
 
 def _build_console_tmux(
-    target: ExecTarget,
+    target: Transport,
     db: Database,
+    config: Config,
     console: ConsoleRow,
     vm: VMRow,
     *,
@@ -1225,9 +1648,11 @@ def _build_console_tmux(
         # is impossible for any session (validate_name rejects leading hyphen,
         # consecutive hyphens, and trailing hyphen), so we don't need extra
         # logic to distinguish this internal window from real session windows.
+        # No sudo wrapper: the SSH user IS the admin user (FRD R1 direct
+        # target-user SSH), so a login shell at the pane is the goal directly.
         target.run(
             f"tmux new-session -d -s {q_con} -n {shlex.quote(ADMIN_SHELL_WINDOW)} "
-            f"{shlex.quote('exec sudo su --login ' + shlex.quote(vm.admin_username))}"
+            f"{shlex.quote('exec $SHELL -l')}"
         )
         placeholder_used = False
         placeholder = ""
@@ -1251,6 +1676,7 @@ def _build_console_tmux(
         _add_session_window(
             target,
             db,
+            config,
             console_name=console.name,
             member=member,
             vm=vm,
@@ -1287,13 +1713,13 @@ def _build_console_tmux(
 
 def _prepare_vm_target_for_attach(
     db: Database, config: Config, vm_name: str
-) -> tuple[VMRow, ExecTarget]:
+) -> tuple[VMRow, Transport]:
     """Ensure the VM is running (starting it if needed) and return (vm, target).
 
     Use this only for explicit user-driven attach flows where booting a stopped
     VM is acceptable. Raises on failure.
     """
-    from agentworks.ssh import admin_exec_target
+    from agentworks.transports import transport
     from agentworks.workspaces.manager import _ensure_vm_running
 
     vm = db.get_vm(vm_name)
@@ -1310,24 +1736,24 @@ def _prepare_vm_target_for_attach(
             entity_kind="vm",
             entity_name=vm.name,
         )
-    return vm, admin_exec_target(vm, config)
+    return vm, transport(vm, config)
 
 
 def _live_target(
     db: Database, config: Config, vm_name: str
-) -> tuple[VMRow, ExecTarget] | None:
+) -> tuple[VMRow, Transport] | None:
     """Return (vm, target) for best-effort live sync without auto-starting the VM.
 
     Returns None if the VM record is missing or has no Tailscale address.
     The first SSH command will surface a transport error if the VM is offline;
     callers should wrap that in _live_best_effort.
     """
-    from agentworks.ssh import admin_exec_target
+    from agentworks.transports import transport
 
     vm = db.get_vm(vm_name)
     if vm is None or vm.tailscale_host is None:
         return None
-    return vm, admin_exec_target(vm, config)
+    return vm, transport(vm, config)
 
 
 @contextlib.contextmanager
@@ -1365,7 +1791,6 @@ def attach_console(
     allow_nesting: bool = False,
 ) -> None:
     """Attach to a named console, building or rebuilding tmux state as needed."""
-    from agentworks.ssh import interactive
     if os.environ.get("TMUX") and not allow_nesting:
         raise StateError(
             "already inside a tmux session. Nesting is not recommended "
@@ -1379,17 +1804,33 @@ def attach_console(
     with keep_vm_active(db, config, vm):
         exists = _console_tmux_exists(target, name)
         layout = config.named_console.tmux_layout
+
+        # Eager-prompting orchestration (FRD R4 / Phase 6): the
+        # build path opens new shells (admin shell + helper shell panes
+        # per session window). Resolve every referenced secret BEFORE
+        # _build_console_tmux issues the first tmux command. The plain
+        # attach path (tmux session already exists) opens no new shells
+        # so it skips eager-resolve, matching FRD R4 / R5: "console
+        # attach joins existing shells, consumes no secrets."
+        if recreate or not exists:
+            from agentworks.secrets import resolve_for_command
+
+            resolve_for_command(
+                _console_build_secret_targets(db, config, console=console, vm=vm),
+                config,
+            )
+
         if recreate and exists:
             output.info(f"Rebuilding console '{name}' (--recreate)...")
-            _build_console_tmux(target, db, console, vm, layout=layout)
+            _build_console_tmux(target, db, config, console, vm, layout=layout)
         elif not exists:
             output.info(f"Building console '{name}' on first attach...")
-            _build_console_tmux(target, db, console, vm, layout=layout)
+            _build_console_tmux(target, db, config, console, vm, layout=layout)
         else:
             output.info(f"Attaching to running console '{name}'.")
 
         tmux_name = tmux_session_name(name)
-        sys.exit(interactive(target, f"tmux attach -t {shlex.quote(tmux_name)}"))
+        sys.exit(target.interactive(f"tmux attach -t {shlex.quote(tmux_name)}"))
 
 
 def delete_console(

@@ -28,7 +28,7 @@ class _FakeResult:
 
 
 class _FakeTarget:
-    """Fake ExecTarget that returns canned responses keyed by substring match."""
+    """Fake ``Transport`` that returns canned responses keyed by substring match."""
 
     def __init__(self, responses: dict[str, _FakeResult] | None = None) -> None:
         self._responses = responses or {}
@@ -166,16 +166,57 @@ def test_agent_broken() -> None:
 
 def test_admin_ok() -> None:
     """Admin session: has-session succeeds -> OK."""
-    session = _session("s1", pid=42, boot_id=BOOT_CURRENT)
+    session = _session("s1", pid=42, socket_path="/sock", mode="admin", boot_id=BOOT_CURRENT)
     target = _FakeTarget({"has-session": _FakeResult(ok=True)})
     assert check_session_status(session, target=target) == SessionStatus.OK
 
 
-def test_admin_stopped() -> None:
-    """Admin session: has-session fails -> STOPPED (no PID follow-up)."""
-    session = _session("s1", pid=42, boot_id=BOOT_CURRENT)
-    target = _FakeTarget({"has-session": _FakeResult(ok=False)})
+def test_admin_stopped_dead_pid() -> None:
+    """Admin session: has-session fails AND PID is dead -> STOPPED.
+
+    After the env-and-secrets SDD admin sessions also have per-session
+    sockets, so the status check uses the same path as agent sessions
+    (BROKEN applies if the PID is alive on the same boot)."""
+    session = _session("s1", pid=42, socket_path="/sock", mode="admin", boot_id=BOOT_CURRENT)
+    target = _FakeTarget({
+        "has-session": _FakeResult(ok=False),
+        "boot_id": _FakeResult(ok=True, stdout=BOOT_CURRENT + "\n"),
+        "test -d /proc/42": _FakeResult(ok=False),
+    })
     assert check_session_status(session, target=target) == SessionStatus.STOPPED
+
+
+def test_admin_broken_after_setenv_pivot() -> None:
+    """Admin session: has-session fails AND PID is alive on the same boot
+    -> BROKEN. Before the env-and-secrets SDD admin sessions never reached
+    BROKEN (they shared the default tmux server, so a PID-alive socket-
+    unreachable state didn't exist). With per-session admin sockets the
+    same BROKEN semantic that applies to agents now applies to admin."""
+    session = _session("s1", pid=42, socket_path="/sock", mode="admin", boot_id=BOOT_CURRENT)
+    target = _FakeTarget({
+        "has-session": _FakeResult(ok=False),
+        "boot_id": _FakeResult(ok=True, stdout=BOOT_CURRENT + "\n"),
+        "test -d /proc/42": _FakeResult(ok=True),
+    })
+    assert check_session_status(session, target=target) == SessionStatus.BROKEN
+
+
+def test_legacy_admin_session_without_socket_raises_state_error() -> None:
+    """A SessionRow predating the env-and-secrets SDD that has socket_path=None
+    surfaces as a typed StateError so the CLI's top-level error wrapper
+    renders it cleanly; the new admin model requires a per-session socket."""
+    import pytest
+
+    from agentworks.errors import StateError
+
+    session = _session("s1", pid=42, mode="admin", boot_id=BOOT_CURRENT)
+    target = _FakeTarget({"has-session": _FakeResult(ok=True)})
+    with pytest.raises(StateError, match="no socket_path") as exc:
+        check_session_status(session, target=target)
+    assert exc.value.entity_kind == "session"
+    assert exc.value.entity_name == "s1"
+    assert exc.value.hint is not None
+    assert "session delete" in exc.value.hint
 
 
 def test_unknown_no_pid() -> None:

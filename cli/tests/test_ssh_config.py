@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import pytest
+
 from agentworks.ssh_config import (
     _LEGACY_MARKER,
     _MANAGED_CONF,
@@ -115,6 +117,7 @@ def _mock_config(tmp_path: Path) -> tuple[MagicMock, Path]:
     config.operator.ssh_config = ssh_config
     config.operator.ssh_config_dir = True
     config.operator.ssh_host_prefix = "awvm--"
+    config.operator.ssh_agent_host_prefix = "awagent--"
     config.operator.ssh_private_key = Path("/home/user/.ssh/id_ed25519")
     return config, ssh_dir
 
@@ -211,3 +214,306 @@ def test_format_entry_no_quotes_without_spaces(tmp_path: Path) -> None:
         identity_file=Path("/home/user/.ssh/id_ed25519"),
     )
     assert '"' not in entry
+
+
+def _mock_agent(name: str, linux_user: str, vm_name: str) -> MagicMock:
+    agent = MagicMock()
+    agent.name = name
+    agent.linux_user = linux_user
+    agent.vm_name = vm_name
+    return agent
+
+
+def test_rebuild_config_dir_emits_per_agent_blocks(tmp_path: Path) -> None:
+    """Each VM's agents get one top-level ``awagent--<name>`` Host block each."""
+    config, ssh_dir = _mock_config(tmp_path)
+    db = MagicMock()
+    db.list_vms.return_value = [_mock_vm("vm1", "100.64.0.1")]
+    db.list_agents.return_value = [
+        _mock_agent("claude", "agt-claude", "vm1"),
+        _mock_agent("aider", "agt-aider", "vm1"),
+    ]
+
+    _rebuild_config_dir(config, db)
+
+    content = (ssh_dir / "config.d" / _MANAGED_CONF).read_text()
+    # Admin block still present
+    assert "Host awvm--vm1\n" in content
+    assert "User agentworks" in content
+    # Per-agent blocks use the operator-facing agent name, not the Linux user.
+    assert "Host awagent--claude\n" in content
+    assert "Host awagent--aider\n" in content
+    # User is still the on-VM Linux user (the implementation detail the
+    # alias hides).
+    assert "User agt-claude" in content
+    assert "User agt-aider" in content
+    # Old ``<vm>--<linux_user>`` shape is gone.
+    assert "Host awvm--vm1--claude" not in content
+    assert "Host awvm--vm1--agt-claude" not in content
+    # All per-alias blocks share the VM's HostName (admin + 2 agents = 3
+    # ``HostName`` occurrences), plus one extra occurrence on the per-VM
+    # ``Host <ip>`` ControlMaster block.
+    assert content.count("100.64.0.1") == 4
+
+
+def test_rebuild_config_dir_no_agent_blocks_when_vm_has_none(tmp_path: Path) -> None:
+    config, ssh_dir = _mock_config(tmp_path)
+    db = MagicMock()
+    db.list_vms.return_value = [_mock_vm("solo", "100.64.0.9")]
+    db.list_agents.return_value = []
+
+    _rebuild_config_dir(config, db)
+
+    content = (ssh_dir / "config.d" / _MANAGED_CONF).read_text()
+    assert "Host awvm--solo\n" in content
+    # No --<agent> suffix anywhere on the VM block.
+    assert "Host awvm--solo--" not in content
+    # And no awagent-- block.
+    assert "Host awagent--" not in content
+
+
+def test_rebuild_config_dir_agent_blocks_global_namespace(tmp_path: Path) -> None:
+    """Agent aliases are globally unique (agents.name is PRIMARY KEY); the
+    alias does not embed the VM name, so a single ``awagent--<name>`` block
+    is emitted per agent regardless of which VM owns them."""
+    config, ssh_dir = _mock_config(tmp_path)
+    db = MagicMock()
+    db.list_vms.return_value = [
+        _mock_vm("vm1", "100.64.0.1"),
+        _mock_vm("vm2", "100.64.0.2"),
+    ]
+
+    def list_agents_side_effect(*, vm_name: str) -> list[MagicMock]:
+        if vm_name == "vm1":
+            return [_mock_agent("a", "agt-a", "vm1")]
+        if vm_name == "vm2":
+            return [_mock_agent("b", "agt-b", "vm2")]
+        return []
+
+    db.list_agents.side_effect = list_agents_side_effect
+
+    _rebuild_config_dir(config, db)
+
+    content = (ssh_dir / "config.d" / _MANAGED_CONF).read_text()
+    assert "Host awagent--a\n" in content
+    assert "Host awagent--b\n" in content
+    # Each agent block carries its own VM's HostName.
+    assert "100.64.0.1" in content
+    assert "100.64.0.2" in content
+
+
+# -- legacy rebuild: per-agent block parity --------------------------------
+
+
+def test_legacy_rebuild_emits_per_agent_blocks(tmp_path: Path) -> None:
+    """The legacy path (ssh_config_dir=False) emits the same per-agent
+    blocks as the config.d path. Symmetry was added as part of FRD R7."""
+    from agentworks.ssh_config import _legacy_rebuild
+
+    config, ssh_dir = _mock_config(tmp_path)
+    config.operator.ssh_config_dir = False  # legacy
+    db = MagicMock()
+    db.list_vms.return_value = [_mock_vm("vm1", "100.64.0.1")]
+    db.list_agents.return_value = [
+        _mock_agent("claude", "agt-claude", "vm1"),
+        _mock_agent("aider", "agt-aider", "vm1"),
+    ]
+
+    _legacy_rebuild(config, db)
+
+    content = config.operator.ssh_config.read_text()
+    # Admin block still present (existing behavior)
+    assert "Host awvm--vm1\n" in content
+    assert "User agentworks" in content
+    # Per-agent blocks use the operator-facing agent name.
+    assert "Host awagent--claude\n" in content
+    assert "Host awagent--aider\n" in content
+    assert "User agt-claude" in content
+    assert "User agt-aider" in content
+
+
+def test_legacy_rebuild_no_agents_no_per_agent_blocks(tmp_path: Path) -> None:
+    from agentworks.ssh_config import _legacy_rebuild
+
+    config, ssh_dir = _mock_config(tmp_path)
+    config.operator.ssh_config_dir = False
+    db = MagicMock()
+    db.list_vms.return_value = [_mock_vm("solo", "100.64.0.9")]
+    db.list_agents.return_value = []
+
+    _legacy_rebuild(config, db)
+
+    content = config.operator.ssh_config.read_text()
+    assert "Host awvm--solo\n" in content
+    assert "Host awvm--solo--" not in content
+    assert "Host awagent--" not in content
+
+
+# -- ControlMaster block ---------------------------------------------------
+
+
+def test_rebuild_config_dir_emits_controlmaster_per_vm_ip(tmp_path: Path) -> None:
+    """ControlMaster multiplexes the dozens of sequential SSH calls every
+    create / reinit / agent-create issues. The block keys on the VM's
+    Tailscale IP (not the alias) because every agentworks-internal SSH
+    call uses the IP directly; alias-pattern Host blocks would only help
+    the operator's terminal ssh, which isn't the hot path. Lock in:
+    (a) one block per unique IP, (b) namespaced ControlPath."""
+    from agentworks.ssh_config import _rebuild_config_dir
+
+    config, ssh_dir = _mock_config(tmp_path)
+    db = MagicMock()
+    db.list_vms.return_value = [
+        _mock_vm("vm1", "100.64.0.1"),
+        _mock_vm("vm2", "100.64.0.2"),
+    ]
+    db.list_agents.return_value = []
+
+    _rebuild_config_dir(config, db)
+
+    content = (ssh_dir / "config.d" / _MANAGED_CONF).read_text()
+    # Set-based assertion -- doesn't depend on ``db.list_vms()`` iteration
+    # order, which is incidental SQLite behavior we don't want to lock in.
+    cm_hosts = {
+        line.split()[1]
+        for line in content.splitlines()
+        if line.startswith("Host ") and line.split()[1].startswith("100.")
+    }
+    assert cm_hosts == {"100.64.0.1", "100.64.0.2"}
+    assert "ControlMaster auto" in content
+    assert "ControlPath ~/.ssh/agentworks-cm-%C" in content
+    assert "ControlPersist 60s" in content
+
+
+def test_rebuild_config_dir_dedupes_controlmaster_for_agents(tmp_path: Path) -> None:
+    """Admin and agents share a VM's IP; one ControlMaster block covers
+    them all. The ``%C`` hash keys on remote user, so each user still
+    gets its own master socket -- no need for per-user blocks."""
+    from agentworks.ssh_config import _rebuild_config_dir
+
+    config, ssh_dir = _mock_config(tmp_path)
+    db = MagicMock()
+    db.list_vms.return_value = [_mock_vm("vm1", "100.64.0.1")]
+    db.list_agents.return_value = [
+        _mock_agent("claude", "agt-claude", "vm1"),
+        _mock_agent("aider", "agt-aider", "vm1"),
+    ]
+
+    _rebuild_config_dir(config, db)
+
+    content = (ssh_dir / "config.d" / _MANAGED_CONF).read_text()
+    # One IP block despite three users (admin + two agents) on the VM.
+    assert content.count("Host 100.64.0.1\n") == 1
+    assert content.count("ControlMaster auto") == 1
+
+
+def test_rebuild_config_dir_no_vms_omits_controlmaster(tmp_path: Path) -> None:
+    """No VMs → no managed file → no ControlMaster blocks."""
+    from agentworks.ssh_config import _rebuild_config_dir
+
+    config, ssh_dir = _mock_config(tmp_path)
+    db = MagicMock()
+    db.list_vms.return_value = []
+
+    _rebuild_config_dir(config, db)
+
+    assert not (ssh_dir / "config.d" / _MANAGED_CONF).exists()
+
+
+def test_legacy_rebuild_emits_controlmaster_per_vm_ip(tmp_path: Path) -> None:
+    """Legacy ssh_config_dir=False path emits the same IP-keyed
+    ControlMaster blocks."""
+    from agentworks.ssh_config import _legacy_rebuild
+
+    config, ssh_dir = _mock_config(tmp_path)
+    config.operator.ssh_config_dir = False
+    db = MagicMock()
+    db.list_vms.return_value = [_mock_vm("vm1", "100.64.0.1")]
+    db.list_agents.return_value = []
+
+    _legacy_rebuild(config, db)
+
+    content = config.operator.ssh_config.read_text()
+    assert "Host 100.64.0.1\n" in content
+    assert "ControlMaster auto" in content
+    assert "ControlPath ~/.ssh/agentworks-cm-%C" in content
+    assert "ControlPersist 60s" in content
+
+
+def test_legacy_rebuild_no_vms_omits_controlmaster(tmp_path: Path) -> None:
+    """Legacy path with no VMs writes no managed section at all -- no
+    stranded ControlMaster block."""
+    from agentworks.ssh_config import _legacy_rebuild
+
+    config, ssh_dir = _mock_config(tmp_path)
+    config.operator.ssh_config_dir = False
+    db = MagicMock()
+    db.list_vms.return_value = []
+
+    _legacy_rebuild(config, db)
+
+    content = config.operator.ssh_config.read_text()
+    assert "ControlMaster" not in content
+    assert "Host awvm--" not in content
+
+
+def test_rebuild_config_dir_skips_controlmaster_on_windows(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Windows OpenSSH has long-standing bugs in its ControlMaster
+    implementation (named-pipe handles vs. POSIX socket APIs). The
+    symptom on the operator side is ``getsockname failed: Not a socket``
+    plus a hang on every IP-form ssh. We skip emitting the CM block
+    when the local platform is Windows; alias blocks still land."""
+    from agentworks.ssh_config import _rebuild_config_dir
+
+    monkeypatch.setattr("agentworks.ssh_config._controlmaster_supported", lambda: False)
+    config, ssh_dir = _mock_config(tmp_path)
+    db = MagicMock()
+    db.list_vms.return_value = [_mock_vm("vm1", "100.64.0.1")]
+    db.list_agents.return_value = []
+
+    _rebuild_config_dir(config, db)
+
+    content = (ssh_dir / "config.d" / _MANAGED_CONF).read_text()
+    # Alias block still present -- ControlMaster gate doesn't touch it.
+    assert "Host awvm--vm1\n" in content
+    # No CM block of any kind.
+    assert "ControlMaster" not in content
+    assert "Host 100.64.0.1\n" not in content
+
+
+def test_legacy_rebuild_skips_controlmaster_on_windows(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Legacy path obeys the same Windows skip."""
+    from agentworks.ssh_config import _legacy_rebuild
+
+    monkeypatch.setattr("agentworks.ssh_config._controlmaster_supported", lambda: False)
+    config, ssh_dir = _mock_config(tmp_path)
+    config.operator.ssh_config_dir = False
+    db = MagicMock()
+    db.list_vms.return_value = [_mock_vm("vm1", "100.64.0.1")]
+    db.list_agents.return_value = []
+
+    _legacy_rebuild(config, db)
+
+    content = config.operator.ssh_config.read_text()
+    assert "Host awvm--vm1\n" in content
+    assert "ControlMaster" not in content
+    assert "Host 100.64.0.1\n" not in content
+
+
+def test_controlmaster_supported_returns_false_on_win32(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pin the platform check itself so a refactor can't silently
+    re-enable ControlMaster on Windows."""
+    from agentworks.ssh_config import _controlmaster_supported
+
+    monkeypatch.setattr("sys.platform", "win32")
+    assert _controlmaster_supported() is False
+
+    monkeypatch.setattr("sys.platform", "linux")
+    assert _controlmaster_supported() is True
+
+    monkeypatch.setattr("sys.platform", "darwin")
+    assert _controlmaster_supported() is True

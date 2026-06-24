@@ -20,7 +20,7 @@ from agentworks import output
 from agentworks.ssh import SSHError
 
 if TYPE_CHECKING:
-    from agentworks.ssh import ExecTarget
+    from agentworks.transports import Transport
 
 
 @dataclass
@@ -41,7 +41,7 @@ echo $? > {status_file}
 
 
 def run_detached(
-    target: ExecTarget,
+    target: Transport,
     command: str,
     *,
     label: str = "Remote command",
@@ -152,7 +152,7 @@ def run_detached(
     return DetachedResult(exit_code=exit_code, output=captured)
 
 
-def _is_running(target: ExecTarget, pid_file: str) -> bool:
+def _is_running(target: Transport, pid_file: str) -> bool:
     """Check if a detached process is still running."""
     # Check PID file exists
     result = target.run(f"test -f {pid_file}", check=False)
@@ -163,14 +163,14 @@ def _is_running(target: ExecTarget, pid_file: str) -> bool:
     return result.returncode == 0
 
 
-def _status_file_exists(target: ExecTarget, status_file: str) -> bool:
+def _status_file_exists(target: Transport, status_file: str) -> bool:
     """Check if a status file exists (process completed)."""
     result = target.run(f"test -f {status_file}", check=False)
     return result.returncode == 0
 
 
 def _poll_until_done(
-    target: ExecTarget,
+    target: Transport,
     output_file: str,
     pid_file: str,
     status_file: str,
@@ -268,7 +268,7 @@ def _poll_until_done(
     return ""
 
 
-def _read_new_output(target: ExecTarget, output_file: str, offset: int) -> str:
+def _read_new_output(target: Transport, output_file: str, offset: int) -> str:
     """Read new bytes from the output file since the given offset."""
     result = target.run(
         f"tail -c +{offset + 1} {output_file} 2>/dev/null",
@@ -277,7 +277,7 @@ def _read_new_output(target: ExecTarget, output_file: str, offset: int) -> str:
     return result.stdout if result.returncode == 0 else ""
 
 
-def _read_exit_code(target: ExecTarget, status_file: str) -> int:
+def _read_exit_code(target: Transport, status_file: str) -> int:
     """Read the exit code from the status file."""
     result = target.run(f"cat {status_file} 2>/dev/null", check=False)
     try:

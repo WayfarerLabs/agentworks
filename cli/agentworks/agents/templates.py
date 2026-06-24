@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from agentworks.config import AgentTemplate, Config
+    from agentworks.env import EnvEntry
 
 
 @dataclass
@@ -31,9 +32,9 @@ class ResolvedAgentTemplate:
     mise_allow_unlocked: bool = False
     mise_install_before: str = "7d"
     mise_prune_on_reinit: bool = True
-    nerf_install_claude_plugin: bool = False
     claude_marketplaces: list[str] = field(default_factory=list)
     claude_plugins: list[str] = field(default_factory=list)
+    env: dict[str, EnvEntry] = field(default_factory=dict)
 
 
 def resolve_from_dict(
@@ -86,11 +87,6 @@ def _append_dedupe(target: list[str], source: list[str]) -> list[str]:
     return result
 
 
-def _merge_map(target: dict[str, str], source: dict[str, str]) -> dict[str, str]:
-    """Merge source map into target. Source wins on key collision."""
-    return {**target, **source}
-
-
 def _merge(target: ResolvedAgentTemplate, source: ResolvedAgentTemplate) -> None:
     """Merge source into target. Scalars: source wins. Lists: append with dedupe."""
     target.shell = source.shell
@@ -105,9 +101,9 @@ def _merge(target: ResolvedAgentTemplate, source: ResolvedAgentTemplate) -> None
     target.mise_allow_unlocked = source.mise_allow_unlocked
     target.mise_install_before = source.mise_install_before
     target.mise_prune_on_reinit = source.mise_prune_on_reinit
-    target.nerf_install_claude_plugin = source.nerf_install_claude_plugin
     target.claude_marketplaces = _append_dedupe(target.claude_marketplaces, source.claude_marketplaces)
     target.claude_plugins = _append_dedupe(target.claude_plugins, source.claude_plugins)
+    target.env = {**target.env, **source.env}
 
 
 def _merge_template(target: ResolvedAgentTemplate, tmpl: AgentTemplate) -> None:
@@ -137,9 +133,9 @@ def _merge_template(target: ResolvedAgentTemplate, tmpl: AgentTemplate) -> None:
         target.mise_install_before = tmpl.mise_install_before
     if tmpl.mise_prune_on_reinit is not None:
         target.mise_prune_on_reinit = tmpl.mise_prune_on_reinit
-    if tmpl.nerf_install_claude_plugin is not None:
-        target.nerf_install_claude_plugin = tmpl.nerf_install_claude_plugin
     if tmpl.claude_marketplaces is not None:
         target.claude_marketplaces = _append_dedupe(target.claude_marketplaces, tmpl.claude_marketplaces)
     if tmpl.claude_plugins is not None:
         target.claude_plugins = _append_dedupe(target.claude_plugins, tmpl.claude_plugins)
+    if tmpl.env:
+        target.env = {**target.env, **tmpl.env}

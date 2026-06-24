@@ -36,6 +36,8 @@ class TestTopLevelGroups:
             "completion",
             "config",
             "console",
+            "env",
+            "secret",
             "session",
             "vm",
             "vm-host",

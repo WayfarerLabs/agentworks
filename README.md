@@ -189,6 +189,14 @@ defined once and stamped many times. The longer-lived resources (VMs and agents)
 [mostly idempotent](docs/guides/idempotency.md) "reinitialization" so that they can be reliably
 evolved over time.
 
+Environment variables and secrets are first-class in the configuration: env tables can be declared
+at vm, workspace, admin, agent, or session scope and merge in a defined precedence order. Secret
+references (`{ secret = "name" }`) resolve through a configurable backend chain (`env-var` reads
+from an `AW_SECRET_*` env var; `prompt` asks interactively at run time). Use `agw env show` to
+inspect the merged result for any context. See
+[cli/README.md](cli/README.md#environment-variables-and-secrets) for the shape, and
+`agw config sample` for the full reference.
+
 ## Tightly Integrated Tools
 
 In the spirit of opinionated consistency, Agentworks tightly integrates a small set of excellent
@@ -218,12 +226,13 @@ access (workspace shell, VM shell, initialization) goes over Tailscale, providin
 connectivity without exposing SSH ports to the public internet.
 
 During `vm create` (and `vm start` when re-joining), you will be prompted for a Tailscale auth key
-unless the `TAILSCALE_AUTH_KEY` environment variable is set. Generate keys at the
+unless the `AW_TAILSCALE_AUTH_KEY` environment variable is set (legacy `TAILSCALE_AUTH_KEY` is still
+read with a deprecation warning, and will be removed in a future release). Generate keys at the
 [Tailscale admin console](https://login.tailscale.com/admin/settings/keys).
 
 Ephemeral auth keys (with `?ephemeral=true` appended) are fully supported. The Tailscale node is
 automatically removed from the tailnet when the VM goes offline. Agentworks handles re-joining
-gracefully on `vm start` by prompting for a new auth key (or using `TAILSCALE_AUTH_KEY`).
+gracefully on `vm start` by prompting for a new auth key (or using `AW_TAILSCALE_AUTH_KEY`).
 
 ### Tmux
 

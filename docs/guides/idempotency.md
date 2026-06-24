@@ -22,6 +22,7 @@ failures produce warnings and a `partial` status.
 | Mise packages         | Installed if missing, pruned if removed (when `mise_prune_on_reinit = true`) |
 | Mise activation       | Overwritten from config (disabled comment written when off)                  |
 | PATH additions        | Overwritten from config                                                      |
+| Tailscale DNS         | Startup-ordering drop-in rewritten only when content differs                 |
 
 ### Additive only
 

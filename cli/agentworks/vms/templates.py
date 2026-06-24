@@ -11,9 +11,8 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from agentworks.config import Config, VMTemplate
+    from agentworks.env import EnvEntry
 
 
 @dataclass
@@ -32,11 +31,8 @@ class ResolvedVMTemplate:
     apt_packages: list[str] = field(default_factory=list)
     snap: list[str] = field(default_factory=list)
     system_install_commands: list[str] = field(default_factory=list)
-    # Nerf tools
-    nerf_build_claude_plugin: bool = False
-    skip_nerf_defaults: bool = False
-    nerf_addl_manifests: list[Path] = field(default_factory=list)
-    nerf_home_dir: str = "/opt/agentworks/nerf"
+    # Env (declared per-template; merged child-overrides-parent)
+    env: dict[str, EnvEntry] = field(default_factory=dict)
 
 
 def resolve_from_dict(
@@ -99,11 +95,6 @@ def _append_dedupe(target: list[str], source: list[str]) -> list[str]:
     return result
 
 
-def _merge_map(target: dict[str, str], source: dict[str, str]) -> dict[str, str]:
-    """Merge source map into target. Source wins on key collision."""
-    return {**target, **source}
-
-
 def _merge(target: ResolvedVMTemplate, source: ResolvedVMTemplate) -> None:
     """Merge source into target. Scalars: source wins. Lists: append with dedupe."""
     target.cpus = source.cpus
@@ -115,10 +106,7 @@ def _merge(target: ResolvedVMTemplate, source: ResolvedVMTemplate) -> None:
     target.apt_packages = _append_dedupe(target.apt_packages, source.apt_packages)
     target.snap = _append_dedupe(target.snap, source.snap)
     target.system_install_commands = _append_dedupe(target.system_install_commands, source.system_install_commands)
-    target.nerf_build_claude_plugin = source.nerf_build_claude_plugin
-    target.skip_nerf_defaults = source.skip_nerf_defaults
-    target.nerf_addl_manifests = list(source.nerf_addl_manifests)
-    target.nerf_home_dir = source.nerf_home_dir
+    target.env = {**target.env, **source.env}
 
 
 def _merge_template(target: ResolvedVMTemplate, tmpl: VMTemplate) -> None:
@@ -142,11 +130,5 @@ def _merge_template(target: ResolvedVMTemplate, tmpl: VMTemplate) -> None:
         target.snap = _append_dedupe(target.snap, tmpl.snap)
     if tmpl.system_install_commands is not None:
         target.system_install_commands = _append_dedupe(target.system_install_commands, tmpl.system_install_commands)
-    if tmpl.nerf_build_claude_plugin is not None:
-        target.nerf_build_claude_plugin = tmpl.nerf_build_claude_plugin
-    if tmpl.skip_nerf_defaults is not None:
-        target.skip_nerf_defaults = tmpl.skip_nerf_defaults
-    if tmpl.nerf_addl_manifests is not None:
-        target.nerf_addl_manifests = list(tmpl.nerf_addl_manifests)
-    if tmpl.nerf_home_dir is not None:
-        target.nerf_home_dir = tmpl.nerf_home_dir
+    if tmpl.env:
+        target.env = {**target.env, **tmpl.env}

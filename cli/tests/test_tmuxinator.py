@@ -127,7 +127,7 @@ class _FakeResult:
 
 
 class _FakeTarget:
-    """Fake ExecTarget that returns canned output for the first probe call
+    """Fake ``Transport`` that returns canned output for the first probe call
     (the only call that determines warning behavior) and ignores subsequent
     setup commands. Records whether sudo was requested for each call."""
 

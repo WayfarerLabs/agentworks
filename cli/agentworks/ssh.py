@@ -1,13 +1,26 @@
 """SSH execution primitive.
 
-All remote operations use native ssh/scp subprocess calls, respecting
-the operator's SSH config and agent.
+After Phase 4 of the polymorphic-transports refactor, the
+``ExecTarget`` / Lima / WSL2 / RemoteLima surfaces in this module are
+gone. ``agentworks.transports.ssh.SSHTransport`` is the
+``Transport``-shaped replacement for the per-command surface; this
+module retains the small set of bare-``SSHTarget`` helpers that aren't
+``Transport``-shaped:
+
+- ``SSHTarget`` / ``SSHResult`` / ``SSHError`` / ``SSH_TRANSPORT_ERROR``:
+  shared data shapes still used across the codebase (and by
+  ``SSHTransport`` itself).
+- ``SSHLogger`` / ``LOG_DIR``: the unified command logger.
+- Module-level ``run`` / ``copy_to``: called from
+  ``vm_hosts/manager.py`` (host probe) and ``vms/provisioners/lima.py``
+  (Lima VM host control plane) where the caller has a bare
+  ``SSHTarget`` and doesn't want to construct a full ``SSHTransport``.
 """
 
 from __future__ import annotations
 
+import shlex
 import subprocess
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -16,9 +29,6 @@ from agentworks.errors import ConnectivityError
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-
-    from agentworks.config import Config
-    from agentworks.db import VMRow
 
 
 @dataclass(frozen=True)
@@ -37,33 +47,6 @@ class SSHTarget:
     proxy_jump: str | None = None
     login_shell: bool = False
     force_tty: bool = False
-
-
-def admin_exec_target(
-    vm: VMRow,
-    config: Config,
-    *,
-    logger: SSHLogger | None = None,
-    default_timeout: int | None = None,
-) -> ExecTarget:
-    """Build an ExecTarget for the admin user via Tailscale SSH.
-
-    On Windows, forces TTY allocation to prevent zsh from hanging on
-    non-interactive piped SSH commands.
-    """
-    import sys
-
-    assert vm.tailscale_host is not None, f"VM {vm.name} has no Tailscale host"
-    return ExecTarget(
-        ssh=SSHTarget(
-            host=vm.tailscale_host,
-            user=vm.admin_username,
-            identity_file=config.operator.ssh_private_key,
-            force_tty=sys.platform == "win32",
-        ),
-        logger=logger,
-        default_timeout=default_timeout,
-    )
 
 
 # SSH transport failure exit code (connection refused, host unreachable, etc.)
@@ -190,8 +173,25 @@ class SSHLogger:
         return len(self._warnings) > 0
 
     def close(self) -> None:
-        """Write a footer with summary."""
+        """Write a footer with summary.
+
+        If an exception is in flight (``close()`` called from inside an
+        ``except`` block, which the operation-level handlers in
+        ``vms/initializer.py`` and elsewhere do), append the full
+        traceback before the footer. This lands the traceback in the
+        per-operation log instead of relying on the top-level
+        ``record_unhandled_error`` fallback, which writes to a shared
+        ``error.log`` across every workspace.
+        """
+        import sys
+        import traceback
         from datetime import UTC, datetime
+
+        exc_type, exc, exc_tb = sys.exc_info()
+        if exc is not None:
+            ts_exc = datetime.now(tz=UTC).strftime("%H:%M:%S")
+            tb_text = "".join(traceback.format_exception(exc_type, exc, exc_tb))
+            self._write(f"[{ts_exc}] EXCEPTION:\n{self._sanitize(tb_text)}\n")
 
         ts = datetime.now(tz=UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
         lines = [f"\n# Finished: {ts}"]
@@ -210,7 +210,34 @@ SSH_CONNECT_TIMEOUT = 30
 SSH_DEFAULT_RETRIES = 1
 
 
-def _ssh_base_args(target: SSHTarget) -> list[str]:
+def _set_env_args(env: dict[str, str] | None) -> list[str]:
+    """Build the ``-o SetEnv=...`` ssh-client args for a (key, value) dict.
+
+    ssh_config(5) says "for each parameter, the first obtained value will
+    be used" -- so emitting ``-o SetEnv=K=V`` once per pair silently drops
+    every pair after the first. We coalesce all pairs into a single
+    ``-o SetEnv="K1=V1" "K2=V2" ...`` argument; the option's value is
+    parsed by OpenSSH as whitespace-separated VAR=VALUE pairs with
+    double-quote grouping. Values are always quoted (handles spaces, empty
+    values, and embedded ``"``/``\\``) with the standard escapes.
+
+    The remote sshd accepts the pairs under the ``AcceptEnv *`` directive
+    deployed by VM init (see ADR 0014).
+    """
+    if not env:
+        return []
+    pairs = []
+    for key, value in env.items():
+        escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+        pairs.append(f'{key}="{escaped}"')
+    return ["-o", "SetEnv=" + " ".join(pairs)]
+
+
+def _ssh_base_args(
+    target: SSHTarget,
+    *,
+    env: dict[str, str] | None = None,
+) -> list[str]:
     args = ["ssh", "-o", "StrictHostKeyChecking=accept-new", "-o", "BatchMode=yes"]
     if target.force_tty:
         args.insert(1, "-tt")
@@ -220,6 +247,7 @@ def _ssh_base_args(target: SSHTarget) -> list[str]:
         args.extend(["-i", str(target.identity_file)])
     if target.proxy_jump is not None:
         args.extend(["-J", target.proxy_jump])
+    args.extend(_set_env_args(env))
     if target.user:
         args.append(f"{target.user}@{target.host}")
     else:
@@ -227,16 +255,8 @@ def _ssh_base_args(target: SSHTarget) -> list[str]:
     return args
 
 
-def _unwrap_ssh(target: SSHTarget | ExecTarget) -> SSHTarget:
-    """Extract SSHTarget from an ExecTarget. Temporary shim for migration."""
-    if isinstance(target, ExecTarget):
-        assert target.ssh is not None, "ExecTarget has no SSH target"
-        return target.ssh
-    return target
-
-
 def run(
-    target: SSHTarget | ExecTarget,
+    target: SSHTarget,
     command: str,
     *,
     check: bool = True,
@@ -244,6 +264,7 @@ def run(
     retries: int = SSH_DEFAULT_RETRIES,
     on_retry: Callable[[int, int], None] | None = None,
     logger: SSHLogger | None = None,
+    env: dict[str, str] | None = None,
 ) -> SSHResult:
     """Execute a command on a remote host via SSH.
 
@@ -258,14 +279,15 @@ def run(
         retries: Number of attempts (default: SSH_RETRIES).
         on_retry: Optional callback(attempt, max_retries) called before each retry.
         logger: Optional SSHLogger to record command output.
+        env: Env vars to inject via SSH SetEnv. All pairs are coalesced
+            into a single ``-o SetEnv="K1=V1" "K2=V2" ...`` argument (see
+            ``_set_env_args``); agentworks-managed VMs accept these via
+            the ``AcceptEnv *`` directive deployed by VM init.
 
     Returns:
         SSHResult with exit code, stdout, and stderr.
     """
-    target = _unwrap_ssh(target)
-    import shlex
-
-    args = _ssh_base_args(target)
+    args = _ssh_base_args(target, env=env)
     if target.login_shell:
         args.append(f"$SHELL -lc {shlex.quote(command)}")
     else:
@@ -308,55 +330,7 @@ def run(
     raise SSHError(msg) from last_err
 
 
-def interactive(target: SSHTarget | ExecTarget, command: str) -> int:
-    """Run an interactive SSH command with a TTY (for tmux attach, etc.).
-
-    Returns the process exit code. Does not raise on failure.
-    """
-    target = _unwrap_ssh(target)
-    # Build args without BatchMode (which rejects interactive prompts/TTY)
-    args = ["ssh", "-t", "-o", "StrictHostKeyChecking=accept-new"]
-    if target.port is not None:
-        args.extend(["-p", str(target.port)])
-    if target.identity_file is not None:
-        args.extend(["-i", str(target.identity_file)])
-    if target.proxy_jump is not None:
-        args.extend(["-J", target.proxy_jump])
-    if target.user:
-        args.append(f"{target.user}@{target.host}")
-    else:
-        args.append(target.host)
-    args.append(command)
-    return subprocess.call(args)
-
-
-def run_as_root(
-    target: SSHTarget | ExecTarget,
-    command: str,
-    *,
-    check: bool = True,
-    timeout: int | None = None,
-    logger: SSHLogger | None = None,
-) -> SSHResult:
-    """Execute a command as root via sudo on a remote host.
-
-    The entire command runs as root by wrapping in ``sudo -n bash -c '...'``,
-    so pipelines and ``&&`` chains are fully privileged. This matches
-    ``ExecTarget.run(sudo=True)``.
-    """
-    import shlex as _shlex
-
-    target = _unwrap_ssh(target)
-    return run(
-        target,
-        f"sudo -n bash -c {_shlex.quote(command)}",
-        check=check,
-        timeout=timeout,
-        logger=logger,
-    )
-
-
-def scp_base_args(target: SSHTarget) -> list[str]:
+def _scp_base_args(target: SSHTarget) -> list[str]:
     """Build the base scp argument list (flags and options, no paths)."""
     args = ["scp", "-q", "-o", "StrictHostKeyChecking=accept-new", "-o", "BatchMode=yes"]
     if target.port is not None:
@@ -369,15 +343,14 @@ def scp_base_args(target: SSHTarget) -> list[str]:
 
 
 def copy_to(
-    target: SSHTarget | ExecTarget,
+    target: SSHTarget,
     local_path: str | Path,
     remote_path: str,
     *,
     timeout: int | None = None,
 ) -> None:
     """Copy a file to a remote host via scp."""
-    target = _unwrap_ssh(target)
-    args = scp_base_args(target)
+    args = _scp_base_args(target)
     args.append(str(local_path))
     dest = f"{target.user}@{target.host}:{remote_path}" if target.user else f"{target.host}:{remote_path}"
     args.append(dest)
@@ -385,385 +358,3 @@ def copy_to(
     result = subprocess.run(args, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout)
     if result.returncode != 0:
         raise SSHError(f"scp failed: {result.stderr.strip()}")
-
-
-def copy_from(
-    target: SSHTarget,
-    remote_path: str,
-    local_path: str | Path,
-    *,
-    timeout: int | None = None,
-) -> None:
-    """Copy a file from a remote host via scp."""
-    args = scp_base_args(target)
-    src = f"{target.user}@{target.host}:{remote_path}" if target.user else f"{target.host}:{remote_path}"
-    args.append(src)
-    args.append(str(local_path))
-
-    result = subprocess.run(args, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout)
-    if result.returncode != 0:
-        raise SSHError(f"scp failed: {result.stderr.strip()}")
-
-
-def write_file(
-    target: SSHTarget | ExecTarget,
-    remote_path: str,
-    content: str,
-    *,
-    mode: str | None = None,
-    logger: SSHLogger | None = None,
-) -> None:
-    """Write string content to a remote file safely.
-
-    Writes to a local temp file in binary mode (preserving Unix line endings
-    even on Windows) and copies via scp. This avoids embedding multi-line
-    content in SSH command strings, which breaks on Windows due to \\r\\n
-    conversion.
-    """
-    target = _unwrap_ssh(target)
-    with tempfile.NamedTemporaryFile(mode="wb", suffix=".tmp", delete=False) as f:
-        f.write(content.encode("utf-8"))
-        tmp_path = f.name
-    try:
-        copy_to(target, tmp_path, remote_path)
-        if logger is not None:
-            logger.log_command(
-                f"(scp) write {remote_path} ({len(content)} bytes)",
-                SSHResult(returncode=0, stdout="", stderr=""),
-            )
-    except SSHError:
-        if logger is not None:
-            logger.log_error(f"(scp) failed to write {remote_path}")
-        raise
-    finally:
-        Path(tmp_path).unlink(missing_ok=True)
-    if mode:
-        run(target, f"chmod {mode} {remote_path}", logger=logger)
-
-
-@dataclass
-class LimaTarget:
-    """Execution target for local Lima VMs (used pre-Tailscale)."""
-
-    vm_name: str
-
-
-def lima_run(
-    target: LimaTarget,
-    command: str,
-    *,
-    check: bool = True,
-    timeout: int | None = None,
-    logger: SSHLogger | None = None,
-) -> SSHResult:
-    """Execute a command inside a local Lima VM via limactl shell."""
-    args = ["limactl", "shell", target.vm_name, "bash", "-lc", command]
-    try:
-        result = subprocess.run(
-            args, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout
-        )
-    except subprocess.TimeoutExpired as err:
-        raise SSHError(f"Lima command timed out after {timeout}s: {command}") from err
-    ssh_result = SSHResult(
-        returncode=result.returncode,
-        stdout=result.stdout,
-        stderr=result.stderr,
-    )
-    if logger is not None:
-        logger.log_command(command, ssh_result)
-    if check and not ssh_result.ok:
-        raise SSHError(f"Lima command failed (exit {result.returncode}): {command}\nstderr: {result.stderr.strip()}")
-    return ssh_result
-
-
-@dataclass
-class RemoteLimaTarget:
-    """Execution target for Lima VMs on a remote VM host.
-
-    Commands are run by SSHing to the VM host and invoking limactl shell
-    there. This avoids needing the Lima SSH key on the local machine.
-    """
-
-    vm_name: str
-    vm_host_ssh: str
-
-
-def remote_lima_run(
-    target: RemoteLimaTarget,
-    command: str,
-    *,
-    check: bool = True,
-    timeout: int | None = None,
-    logger: SSHLogger | None = None,
-) -> SSHResult:
-    """Execute a command inside a remote Lima VM via the VM host.
-
-    SSH sends argv as a single concatenated string to the remote shell,
-    so we can pass multiple args after the host and they become one
-    command line. This avoids nested single-quote escaping while still
-    letting the VM host's login shell find limactl on PATH.
-    """
-    host_target = SSHTarget(host=target.vm_host_ssh, user=None, login_shell=True)
-    lima_cmd = f"limactl shell {target.vm_name} -- {command}"
-    return run(host_target, lima_cmd, check=check, timeout=timeout, logger=logger)
-
-
-@dataclass
-class WSL2Target:
-    """Execution target for WSL2 distros (used pre-Tailscale)."""
-
-    distro_name: str
-    user: str = "agentworks"
-
-
-def wsl2_run(
-    target: WSL2Target,
-    command: str,
-    *,
-    check: bool = True,
-    timeout: int | None = None,
-    logger: SSHLogger | None = None,
-) -> SSHResult:
-    """Execute a command inside a WSL2 distro."""
-    args = [
-        "wsl",
-        "--distribution",
-        target.distro_name,
-        "--user",
-        target.user,
-        "--",
-        "bash",
-        "-lc",
-        command,
-    ]
-    try:
-        result = subprocess.run(
-            args, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout
-        )
-    except subprocess.TimeoutExpired as err:
-        raise SSHError(f"WSL2 command timed out after {timeout}s: {command}") from err
-    ssh_result = SSHResult(
-        returncode=result.returncode,
-        stdout=result.stdout,
-        stderr=result.stderr,
-    )
-    if logger is not None:
-        logger.log_command(command, ssh_result)
-    if check and not ssh_result.ok:
-        raise SSHError(f"WSL2 command failed (exit {result.returncode}): {command}\nstderr: {result.stderr.strip()}")
-    return ssh_result
-
-
-def _lima_copy_to(target: LimaTarget, local_path: str | Path, remote_path: str) -> None:
-    """Copy a file into a local Lima VM via limactl copy."""
-    result = subprocess.run(
-        ["limactl", "copy", str(local_path), f"{target.vm_name}:{remote_path}"],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-    )
-    if result.returncode != 0:
-        raise SSHError(f"limactl copy failed: {result.stderr.strip()}")
-
-
-def _remote_lima_copy_to(target: RemoteLimaTarget, local_path: str | Path, remote_path: str) -> None:
-    """Copy a file into a remote Lima VM (two-hop: scp to host, then limactl copy)."""
-    host_target = SSHTarget(host=target.vm_host_ssh, user=None)
-    host_tmp = f"/tmp/agentworks-{Path(local_path).name}"
-    copy_to(host_target, local_path, host_tmp)
-    host_login = SSHTarget(host=target.vm_host_ssh, user=None, login_shell=True)
-    run(host_login, f"limactl copy {host_tmp} {target.vm_name}:{remote_path}")
-    run(host_login, f"rm -f {host_tmp}", check=False)
-
-
-def _wsl2_copy_to(target: WSL2Target, local_path: str | Path, remote_path: str) -> None:
-    """Copy a file into a WSL2 distro via stdin to avoid path translation issues."""
-    content = Path(local_path).read_bytes()
-    result = subprocess.run(
-        ["wsl", "--distribution", target.distro_name, "--user", "root", "--", "bash", "-c", f"cat > {remote_path}"],
-        input=content,
-        capture_output=True,
-    )
-    if result.returncode != 0:
-        raise SSHError(f"WSL2 copy failed: {result.stderr.decode().strip()}")
-
-
-@dataclass(frozen=True)
-class ExecTarget:
-    """Union-like wrapper for SSH, Lima, RemoteLima, or WSL2 execution targets.
-
-    Set default_timeout (seconds) to apply a timeout to all run/run_as_root
-    calls automatically. Individual calls can override with their own timeout.
-    """
-
-    ssh: SSHTarget | None = None
-    lima: LimaTarget | None = None
-    remote_lima: RemoteLimaTarget | None = None
-    wsl2: WSL2Target | None = None
-    default_timeout: int | None = None
-    logger: SSHLogger | None = None
-
-    def _timeout(self, override: int | None) -> int | None:
-        return override if override is not None else self.default_timeout
-
-    def run(
-        self,
-        command: str,
-        *,
-        sudo: bool = False,
-        tty: bool | None = None,
-        check: bool = True,
-        timeout: int | None = None,
-    ) -> SSHResult:
-        """Run a command on the target.
-
-        Args:
-            command: Shell command to execute.
-            sudo: Wrap in sudo -n bash -c '...' so the entire command runs as root.
-            tty: None = transport default, True = request TTY, False = suppress TTY.
-                 Only meaningful for SSH transport (controls -tt flag).
-            check: Raise SSHError on non-zero exit.
-            timeout: Timeout in seconds.
-        """
-        import shlex as _shlex
-
-        if sudo:
-            command = f"sudo -n bash -c {_shlex.quote(command)}"
-
-        t = self._timeout(timeout)
-        lg = self.logger
-
-        if self.ssh is not None:
-            # Resolve tty: None -> SSHTarget.force_tty, True/False override
-            effective_tty = self.ssh.force_tty if tty is None else tty
-            from dataclasses import replace as _replace
-
-            ssh = _replace(self.ssh, force_tty=effective_tty) if effective_tty != self.ssh.force_tty else self.ssh
-            return run(ssh, command, check=check, timeout=t, logger=lg)
-        if self.lima is not None:
-            return lima_run(self.lima, command, check=check, timeout=t, logger=lg)
-        if self.remote_lima is not None:
-            return remote_lima_run(self.remote_lima, command, check=check, timeout=t, logger=lg)
-        if self.wsl2 is not None:
-            return wsl2_run(self.wsl2, command, check=check, timeout=t, logger=lg)
-        msg = "ExecTarget has no target configured"
-        raise SSHError(msg)
-
-    def copy_to(self, local_path: str | Path, remote_path: str, *, timeout: int | None = None) -> None:
-        """Copy a local file to the target."""
-        if self.ssh is not None:
-            copy_to(self.ssh, local_path, remote_path, timeout=timeout)
-        elif self.lima is not None:
-            _lima_copy_to(self.lima, local_path, remote_path)
-        elif self.remote_lima is not None:
-            _remote_lima_copy_to(self.remote_lima, local_path, remote_path)
-        elif self.wsl2 is not None:
-            _wsl2_copy_to(self.wsl2, local_path, remote_path)
-        else:
-            msg = "ExecTarget has no target configured"
-            raise SSHError(msg)
-
-    def copy_from(self, remote_path: str, local_path: str | Path, *, timeout: int | None = None) -> None:
-        """Copy a remote file to a local path."""
-        if self.ssh is not None:
-            copy_from(self.ssh, remote_path, local_path, timeout=timeout)
-        else:
-            # For non-SSH targets, use a shell command to cat the file
-            msg = "copy_from is only supported for SSH targets"
-            raise SSHError(msg)
-
-    def copy_dir_to(
-        self,
-        local_path: str | Path,
-        remote_path: str,
-        *,
-        delete: bool = True,
-        timeout: int | None = None,
-    ) -> None:
-        """Copy a local directory to the target via tar + scp.
-
-        Creates a gzip tarball with Python's stdlib tarfile (no client-side tar
-        binary required -- works on Windows), scps it to the remote, and
-        extracts it there.
-
-        With delete=True (default), the remote directory is cleared before
-        extraction so stale files do not linger. Pass delete=False to extract
-        on top of existing contents, preserving unmanaged files.
-        """
-        import tarfile as tarfile_mod
-
-        local_path = Path(local_path)
-        with tempfile.NamedTemporaryFile(suffix=".tar.gz", delete=False) as f:
-            tmp_path = Path(f.name)
-
-        try:
-            with tarfile_mod.open(tmp_path, "w:gz") as tar:
-                tar.add(local_path, arcname=".")
-
-            remote_tmp = f"/tmp/agentworks-copy-{tmp_path.name}"
-            self.copy_to(tmp_path, remote_tmp, timeout=timeout)
-        finally:
-            tmp_path.unlink(missing_ok=True)
-
-        if delete:
-            self.run(f"rm -rf {remote_path} && mkdir -p {remote_path}", timeout=timeout)
-        else:
-            self.run(f"mkdir -p {remote_path}", timeout=timeout)
-
-        self.run(f"tar -xzf {remote_tmp} -C {remote_path} && rm -f {remote_tmp}", timeout=timeout)
-
-    def write_file(self, remote_path: str, content: str, *, mode: str | None = None) -> None:
-        """Write string content to a remote file safely.
-
-        Uses copy_to under the hood to avoid embedding multi-line content
-        in command strings (which breaks on Windows due to line endings).
-        """
-        with tempfile.NamedTemporaryFile(mode="wb", suffix=".tmp", delete=False) as f:
-            f.write(content.encode("utf-8"))
-            tmp_path = f.name
-        try:
-            self.copy_to(tmp_path, remote_path)
-            if self.logger is not None:
-                self.logger.log_command(
-                    f"(scp) write {remote_path} ({len(content)} bytes)",
-                    SSHResult(returncode=0, stdout="", stderr=""),
-                )
-        except SSHError:
-            if self.logger is not None:
-                self.logger.log_error(f"(scp) failed to write {remote_path}")
-            raise
-        finally:
-            Path(tmp_path).unlink(missing_ok=True)
-        if mode:
-            self.run(f"chmod {mode} {remote_path}")
-
-
-def wait_for_reconnect(target: ExecTarget, *, max_attempts: int = 16) -> bool:
-    """Wait for an ExecTarget to become reachable over SSH.
-
-    Used after network disruptions (e.g., Azure public IP changes) that
-    temporarily break Tailscale connectivity. Polls with a double-check
-    to handle flapping.
-
-    Returns True if the connection stabilized, False if it timed out.
-    """
-    import time
-
-    from agentworks import output
-
-    output.detail("Waiting for Tailscale to reconnect (this may take several minutes)...")
-    for attempt in range(max_attempts):
-        try:
-            target.run("echo ok", timeout=10)
-            # One success isn't enough; the network can flap.
-            if attempt > 0:
-                time.sleep(2)
-                target.run("echo ok", timeout=10)
-            output.detail("Tailscale SSH reconnected")
-            return True
-        except SSHError:
-            if attempt == max_attempts - 1:
-                output.warn("Tailscale SSH did not reconnect after ~240s, proceeding anyway")
-            time.sleep(5)
-    return False

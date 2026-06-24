@@ -12,6 +12,8 @@ from agentworks.cli import _record_unhandled_error
 from agentworks.output import AgentworksError
 from agentworks.ssh import SSHError
 
+from .conftest import stub_session_resolvers
+
 
 def test_ssh_error_is_agentworks_error() -> None:
     """SSHError must be an AgentworksError subclass so main()'s wrapper catches
@@ -212,10 +214,10 @@ def test_create_session_rolls_back_on_keyboard_interrupt(
             return _Result()
 
     fake_factory = lambda vm, config, **kwargs: _Target()  # noqa: E731
-    # Patch both locations: manager imports admin_exec_target eagerly at module
-    # load, so the agentworks.ssh-side patch alone wouldn't take effect.
-    monkeypatch.setattr("agentworks.ssh.admin_exec_target", fake_factory)
-    monkeypatch.setattr("agentworks.sessions.manager.admin_exec_target", fake_factory)
+    # Patch both locations: manager imports ``transport`` eagerly at module
+    # load, so the agentworks.transports-side patch alone wouldn't take effect.
+    monkeypatch.setattr("agentworks.transports.transport", fake_factory)
+    monkeypatch.setattr("agentworks.sessions.manager.transport", fake_factory)
     # deploy_restricted_config does its own SSH writes -- skip them.
     monkeypatch.setattr(
         session_manager,
@@ -230,15 +232,7 @@ def test_create_session_rolls_back_on_keyboard_interrupt(
 
     monkeypatch.setattr(tmux_mod, "create_session", _explode)
 
-    # Stub the template resolver so we don't need a real config on disk
-    # (CI runs without ~/.config/agentworks/config.toml).
-    class _Tmpl:
-        name = "default"
-        command = ""
-        restart_command = None
-        env: dict[str, str] = {}
-
-    monkeypatch.setattr(session_manager, "_resolve_template", lambda *a, **k: _Tmpl())
+    stub_session_resolvers(monkeypatch)
 
     # Stand-in Config: only the few attributes the code path under test reads.
     config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
@@ -299,8 +293,13 @@ def test_create_session_releases_group_membership_on_keyboard_interrupt(
             return _Result()
 
     fake_factory = lambda vm, config, **kwargs: _Target()  # noqa: E731
-    monkeypatch.setattr("agentworks.ssh.admin_exec_target", fake_factory)
-    monkeypatch.setattr("agentworks.sessions.manager.admin_exec_target", fake_factory)
+    monkeypatch.setattr("agentworks.transports.transport", fake_factory)
+    monkeypatch.setattr("agentworks.sessions.manager.transport", fake_factory)
+    # agent_transport is constructed in session_manager.create_session for
+    # agent-mode sessions (FRD R1, direct target-user SSH). Stub it too so
+    # the SimpleNamespace config doesn't need an `operator` attribute.
+    agent_factory = lambda vm, config, agent, **kwargs: _Target()  # noqa: E731
+    monkeypatch.setattr("agentworks.transports.agent_transport", agent_factory)
     monkeypatch.setattr(
         session_manager, "_build_session_command", lambda *args, **kwargs: "true"
     )
@@ -319,13 +318,7 @@ def test_create_session_releases_group_membership_on_keyboard_interrupt(
 
     monkeypatch.setattr(tmux_mod, "create_session", _explode)
 
-    class _Tmpl:
-        name = "default"
-        command = ""
-        restart_command = None
-        env: dict[str, str] = {}
-
-    monkeypatch.setattr(session_manager, "_resolve_template", lambda *a, **k: _Tmpl())
+    stub_session_resolvers(monkeypatch)
 
     config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
 
@@ -384,8 +377,8 @@ def test_create_session_rollback_failure_does_not_mask_keyboard_interrupt(
             return _Result()
 
     fake_factory = lambda vm, config, **kwargs: _Target()  # noqa: E731
-    monkeypatch.setattr("agentworks.ssh.admin_exec_target", fake_factory)
-    monkeypatch.setattr("agentworks.sessions.manager.admin_exec_target", fake_factory)
+    monkeypatch.setattr("agentworks.transports.transport", fake_factory)
+    monkeypatch.setattr("agentworks.sessions.manager.transport", fake_factory)
     monkeypatch.setattr(
         session_manager, "_build_session_command", lambda *args, **kwargs: "true"
     )
@@ -409,13 +402,7 @@ def test_create_session_rollback_failure_does_not_mask_keyboard_interrupt(
 
     db.delete_session = _failing_delete_session  # type: ignore[method-assign]
 
-    class _Tmpl:
-        name = "default"
-        command = ""
-        restart_command = None
-        env: dict[str, str] = {}
-
-    monkeypatch.setattr(session_manager, "_resolve_template", lambda *a, **k: _Tmpl())
+    stub_session_resolvers(monkeypatch)
 
     config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
 
