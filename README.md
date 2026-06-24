@@ -16,7 +16,7 @@ manage VMs on Lima, WSL2, Azure, and Proxmox. Regardless of the platform, every 
 base operating system (Debian Bookworm), is joined to the same Tailscale tailnet, and is accessible
 over SSH at its Tailscale IP address.
 
-![Agentworks topology: the operator's workstation runs the agw CLI, which provisions VMs across local platforms (Lima or WSL), a remote Lima host, Azure, and Proxmox. Every VM and the workstation itself join a shared Tailnet overlay, which is how the CLI reaches them all.](docs/images/agw-topology.png)
+![Agentworks topology: the operator's workstation runs the agw CLI, which provisions VMs across local platforms (Lima or WSL2), a remote Lima host, Azure, and Proxmox. Every VM and the workstation itself join a shared Tailnet overlay, which is how the CLI reaches them all.](docs/images/agw-topology.png)
 
 Inside each VM, Agentworks provides several layered primitives for organizing agentic workloads:
 
