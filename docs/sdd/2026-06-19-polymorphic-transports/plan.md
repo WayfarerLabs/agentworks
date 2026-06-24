@@ -1,35 +1,38 @@
 # Polymorphic transports -- implementation plan
 
+**Status**: complete. All phases shipped via PR #130; see [locked.md](locked.md) for the post-merge
+follow-ups.
+
 ## Phase 1: Transport ABC + concrete classes
 
 Build the new package alongside the existing code. No call site changes yet.
 
-- [ ] `cli/agentworks/transports/__init__.py`: stub (will hold `Transport` re-export + factories).
-- [ ] `cli/agentworks/transports/base.py`: `Transport` `abc.ABC` with the full operation surface as
+- [x] `cli/agentworks/transports/__init__.py`: stub (will hold `Transport` re-export + factories).
+- [x] `cli/agentworks/transports/base.py`: `Transport` `abc.ABC` with the full operation surface as
       abstract methods: `run` (with `sudo` / `tty` / `check` / `timeout` / `env` kwargs),
       `interactive`, `copy_to`, `copy_from`, `copy_dir_to`, `write_file`, `call_streaming`.
       `run_as_root` is **not** a separate method (per the prior locked SDD, `run(sudo=True)` is the
       unified shape). `SSHResult` stays in its current home; import it from `agentworks.ssh` for
       now.
-- [ ] `cli/agentworks/transports/ssh.py`: `SSHTransport`. Lifts the SSH argv builders, `SetEnv`
+- [x] `cli/agentworks/transports/ssh.py`: `SSHTransport`. Lifts the SSH argv builders, `SetEnv`
       handling, sudo-wrap, login-shell wrapping from `cli/agentworks/ssh.py`. Implements every
       abstract method, including `copy_from` (via scp), `write_file` (via mktemp + scp +
       atomic-install or via cat-stdin-redirect), and `call_streaming` (via subprocess with inherited
       stdio).
-- [ ] `cli/agentworks/transports/lima.py`: `LimaTransport`. Local `limactl shell`. Implements
+- [x] `cli/agentworks/transports/lima.py`: `LimaTransport`. Local `limactl shell`. Implements
       `copy_from` via `limactl copy` (reverse direction), `write_file` via the existing local-file +
       `limactl copy` path, `call_streaming` via subprocess with inherited stdio.
-- [ ] `cli/agentworks/transports/remote_lima.py`: `RemoteLimaTransport`. SSH-to-host plus
+- [x] `cli/agentworks/transports/remote_lima.py`: `RemoteLimaTransport`. SSH-to-host plus
       `limactl shell`, with the `$SHELL -lc` wrapping baked in for both interactive and
       non-interactive paths. `copy_from` two-hops: `limactl copy` to host temp, scp host to local;
       `write_file` symmetric.
-- [ ] `cli/agentworks/transports/wsl2.py`: `WSL2Transport`. `wsl.exe` with the configured user.
+- [x] `cli/agentworks/transports/wsl2.py`: `WSL2Transport`. `wsl.exe` with the configured user.
       `copy_from` via `wsl ... cat` to stdout; `write_file` via `wsl ... bash -c 'cat > path'` with
       stdin.
-- [ ] `cli/tests/transports/test_<ssh|lima|remote_lima|wsl2>.py`: each transport tested in isolation
+- [x] `cli/tests/transports/test_<ssh|lima|remote_lima|wsl2>.py`: each transport tested in isolation
       against the ABC contract (`run`, `interactive`, `copy_to`, `copy_from`, `copy_dir_to`,
       `write_file`, `call_streaming`). Subprocess calls mocked via `unittest.mock.patch`.
-- [ ] `cli/tests/transports/test_abc.py`: each concrete transport claims to be a `Transport`
+- [x] `cli/tests/transports/test_abc.py`: each concrete transport claims to be a `Transport`
       subclass (`isinstance` check); the ABC enforces all abstract methods are implemented
       (instantiating a transport without one of the abstract methods should raise `TypeError` at
       construction).
@@ -49,18 +52,18 @@ Phase 3 is the resolution. The codebase compiles at the END of Phase 2 + Phase 3
 logical commit boundary spread across two phases for review-size reasons); it does NOT compile in
 between. If the refactor needs to pause partway through, the pause point is the end of Phase 3.
 
-- [ ] `cli/agentworks/transports/__init__.py`: define `transport(vm, config) -> Transport` (admin
+- [x] `cli/agentworks/transports/__init__.py`: define `transport(vm, config) -> Transport` (admin
       via Tailscale SSH).
-- [ ] `cli/agentworks/transports/__init__.py`: define
+- [x] `cli/agentworks/transports/__init__.py`: define
       `agent_transport(vm, config, agent) -> Transport` (named agent via Tailscale SSH).
-- [ ] `cli/agentworks/transports/__init__.py`: define
+- [x] `cli/agentworks/transports/__init__.py`: define
       `transport_for_user(vm, config, *, user, identity_file=None, logger=None) -> Transport`
       (low-level shared core).
-- [ ] `cli/agentworks/transports/__init__.py`: define
+- [x] `cli/agentworks/transports/__init__.py`: define
       `provisioner_transport(vm, config, *, stack) -> Transport`. Uses
       `stack.enter_context(prov.transient_route(vm))` (no isinstance check). Reachability probe with
       the 6-attempt retry loop. NotImplementedError wrapping for Proxmox with the web-console hint.
-- [ ] `cli/agentworks/transports/__init__.py`: move `wait_for_reconnect` here from `ssh.py`; take a
+- [x] `cli/agentworks/transports/__init__.py`: move `wait_for_reconnect` here from `ssh.py`; take a
       `Transport` instead of `ExecTarget`.
 - [x] `cli/agentworks/vms/base.py`: rename `VMProvisioner.admin_exec_target` to
       `VMProvisioner.provisioner_transport`. Return type changes to `Transport`.
@@ -71,19 +74,19 @@ between. If the refactor needs to pause partway through, the pause point is the 
 - [x] `cli/agentworks/vms/base.py`: add
       `VMProvisioner.transient_route(vm) -> AbstractContextManager[None]` with default
       `nullcontext()`.
-- [ ] `cli/agentworks/vms/provisioners/lima.py`: implement `provisioner_transport` returning
+- [x] `cli/agentworks/vms/provisioners/lima.py`: implement `provisioner_transport` returning
       `LimaTransport` (local) or `RemoteLimaTransport` (remote). Default `transient_route` is fine.
-- [ ] `cli/agentworks/vms/provisioners/wsl2.py`: implement `provisioner_transport` returning
+- [x] `cli/agentworks/vms/provisioners/wsl2.py`: implement `provisioner_transport` returning
       `WSL2Transport`. Default `transient_route` is fine.
-- [ ] `cli/agentworks/vms/provisioners/azure.py`: implement `provisioner_transport` returning
+- [x] `cli/agentworks/vms/provisioners/azure.py`: implement `provisioner_transport` returning
       `SSHTransport` (against the attached public IP). Override `transient_route` as a
       `@contextlib.contextmanager` that calls `attach_public_ip` on enter and `detach_public_ip` on
       exit. The defensive empty-host check (PR #118) lives in the factory function.
-- [ ] `cli/agentworks/vms/provisioners/proxmox.py`: keep the `NotImplementedError` in
+- [x] `cli/agentworks/vms/provisioners/proxmox.py`: keep the `NotImplementedError` in
       `provisioner_transport`. The inherited `transient_route` no-op fires first (`nullcontext()`
       unwinds cleanly); then the `provisioner_transport` call raises and the factory wraps that into
       a typed `StateError` with the web-console hint.
-- [ ] `cli/tests/transports/test_factories.py`: tests cover all three factories, the no-failover
+- [x] `cli/tests/transports/test_factories.py`: tests cover all three factories, the no-failover
       invariant (R3), the Azure `transient_route` lifecycle (success + exception paths), the Proxmox
       typed-error hint, the reachability-probe retry loop, the defensive empty-host guard.
 
@@ -199,9 +202,9 @@ Final pass.
 - [x] `cli/README.md`: no stale `ExecTarget` references found in any README.
 - [x] Consolidated `_set_env_args` to live only in `agentworks/ssh.py` (per Phase 4 reviewer's
       minor): `agentworks/transports/ssh.py` imports it.
-- [ ] `docs/sdd/2026-06-19-polymorphic-transports/locked.md`: not part of this PR. The lockfile
+- [x] `docs/sdd/2026-06-19-polymorphic-transports/locked.md`: not part of this PR. The lockfile
       lands as a follow-up commit after merge, per the SDD skill.
-- [ ] Open PR referencing issue #128.
+- [x] Open PR referencing issue #128.
 
 **Definition of done**: PR open, CI green, ready for the agentworks-reviewer pass.
 
