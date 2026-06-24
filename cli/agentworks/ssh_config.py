@@ -11,6 +11,7 @@ cleaned up automatically.
 
 from __future__ import annotations
 
+import sys
 import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -51,10 +52,12 @@ _MANAGED_CONF = "agentworks.conf"
 # Operators who want different settings can layer their own ``Host *`` block
 # above the agentworks ``Include`` directive; ssh_config's first-match-wins
 # semantics apply.
+
 # OpenSSH expands ``~`` client-side at connect time; no need to route this
 # literal through ``_to_ssh_path`` like the IdentityFile paths.
 _CONTROL_PATH = "~/.ssh/agentworks-cm-%C"
-_CONTROL_PERSIST = "60s"  # OpenSSH accepts a unit suffix; the ``s`` makes it self-documenting.
+# OpenSSH accepts a unit suffix; the ``s`` makes it self-documenting.
+_CONTROL_PERSIST = "60s"
 
 
 def _format_ip_controlmaster_block(tailscale_host: str) -> str:
@@ -89,8 +92,6 @@ def _controlmaster_supported() -> bool:
     Windows OpenSSH release we've observed. Keep it simple: ``win32`` off,
     everything else on. Flip when Microsoft ships a verified fix.
     """
-    import sys
-
     return sys.platform != "win32"
 
 
