@@ -5,8 +5,8 @@
 [![Python](https://img.shields.io/pypi/pyversions/agentworks-cli.svg)](https://pypi.org/project/agentworks-cli/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-A Swiss Army knife for managing agentic workloads: VMs, workspaces, agents, sessions, secrets/config
-and the tools that glue them together. Built around the conviction that autonomy, security, and
+A Swiss Army knife for managing agentic workloads: VMs, workspaces, agents, sessions,
+secrets/config, and the tools that glue them together. Built around the conviction that autonomy, security, and
 control are not mutually exclusive: a good platform makes it possible and straightforward to have it
 all.
 
