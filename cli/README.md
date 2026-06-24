@@ -243,6 +243,41 @@ Entries are rebuilt declaratively from the database on every agent / VM lifecycl
 fresh `agw agent create` or `agw vm delete` keeps the file in sync without manual intervention. Run
 `agw config sync-ssh-config` to force a rebuild.
 
+The managed file also emits one `Host <tailscale-ip>` block per VM, enabling OpenSSH ControlMaster
+multiplexing on the IP path that agentworks itself uses:
+
+```ssh
+Host 100.64.0.1
+    ControlMaster auto
+    ControlPath ~/.ssh/agentworks-cm-%C
+    ControlPersist 60s
+```
+
+`SSHTransport` connects directly by Tailscale IP (`ssh agentworks@100.64.0.1`), so the IP-keyed
+block is what actually multiplexes the dozens of sequential SSH calls each VM / agent lifecycle
+operation issues. Per-call latency drops from a fresh-handshake ~150-300ms to ~20-50ms once the
+master is up. The `%C` hash keys on remote user, so admin and agents on the same VM each get their
+own master socket from the single block. The `ControlPath` is namespaced (`agentworks-cm-`) so it
+cannot collide with any pre-existing ControlMaster setup the operator may already have configured
+elsewhere. If the master socket cannot bind (read-only `~/.ssh`, network filesystems with weird
+locking, etc.), OpenSSH transparently falls back to a fresh handshake per call -- no behavior
+regression. To override the defaults (different persist, different path, disable multiplexing
+entirely), add a `Host 100.*` or `Host *` block in your own `~/.ssh/config` above the agentworks
+`Include` directive (agentworks places the `Include` at the top on first run; you may need to move
+it below your override block). `ssh_config` first-match-wins.
+
+The IP-keyed block deliberately doesn't ride on the `awvm--*` / `awagent--*` aliases because OpenSSH
+matches `Host` patterns against the command-line argument literally and agentworks SSHs by IP. If
+you ssh by alias from a terminal (`ssh awvm--myvm`), you don't get ControlMaster -- that's
+intentional; operator-typed ssh is low-frequency and the convenience aliases stay simple.
+
+The ControlMaster block is skipped when the operator's local platform is Windows. Windows OpenSSH's
+ControlMaster path has long-standing bugs around named-pipe handles (the visible symptom is
+`getsockname failed: Not a socket` followed by a hang on every IP-form ssh), so Windows operators
+stick with per-call fresh handshakes and avoid the breakage. Alias-form ssh works fine on Windows --
+it never matches a block with `ControlMaster`. The skip is platform-detected at sync time and will
+flip back on once Microsoft ships a verified fix.
+
 ### Sessions
 
 Manage sessions (persistent tmux sessions running in workspaces). Session names are globally unique

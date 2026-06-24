@@ -11,6 +11,7 @@ cleaned up automatically.
 
 from __future__ import annotations
 
+import sys
 import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -25,6 +26,73 @@ _LEGACY_MARKER = "# --- Managed by agentworks. Do not edit below this line. ---"
 _INCLUDE_COMMENT = "# Added by agentworks"
 _CONFIG_DIR_NAME = "config.d"
 _MANAGED_CONF = "agentworks.conf"
+
+# ControlMaster multiplexes subsequent SSH calls to the same (user, host) over
+# the master's existing channel, dropping per-call latency from ~150-300ms
+# (fresh handshake) to ~20-50ms. ``vm create`` / ``vm reinit`` / ``agent
+# create`` / ``agent reinit`` each issue 30+ sequential SSH calls; the
+# savings are several seconds per operation.
+#
+# The block keys on the VM's Tailscale IP, not the ``awvm--*`` / ``awagent--*``
+# aliases, because every agentworks-internal SSH call uses the IP directly
+# (``SSHTransport.host`` is ``vm.tailscale_host``). ``Host`` patterns match
+# the command-line argument literally; an alias wildcard would only help
+# operators who type ``ssh awvm--myvm`` interactively, not the bulk of the
+# SSH traffic this is meant to speed up. The aliases stay an operator
+# convenience and don't carry ControlMaster directives.
+#
+# ``%C`` is a stable hash of (local-user, hostname, port, remote-user);
+# requires OpenSSH 6.7+ (every supported platform). The path is namespaced
+# (``agentworks-cm-``) so it cannot collide with a pre-existing operator
+# ControlMaster setup. ``ControlPersist 60s`` covers a single reinit without
+# letting NAT-idle-kill churn the connection.
+#
+# If the master socket can't bind (read-only ``~/.ssh``, weird mounts), OpenSSH
+# falls back transparently to a fresh handshake per call -- no regression.
+# Operators who want different settings can layer their own ``Host *`` block
+# above the agentworks ``Include`` directive; ssh_config's first-match-wins
+# semantics apply.
+
+# OpenSSH expands ``~`` client-side at connect time; no need to route this
+# literal through ``_to_ssh_path`` like the IdentityFile paths.
+_CONTROL_PATH = "~/.ssh/agentworks-cm-%C"
+# OpenSSH accepts a unit suffix; the ``s`` makes it self-documenting.
+_CONTROL_PERSIST = "60s"
+
+
+def _format_ip_controlmaster_block(tailscale_host: str) -> str:
+    """Return a ``Host <tailscale_ip>`` ControlMaster block.
+
+    One block per unique VM IP; admin and agents on the same VM share one
+    block because their SSH calls hit the same IP and ``%C`` keys on the
+    remote user, so separate master sockets per user happen automatically.
+    """
+    return (
+        f"Host {tailscale_host}\n"
+        "    ControlMaster auto\n"
+        f"    ControlPath {_CONTROL_PATH}\n"
+        f"    ControlPersist {_CONTROL_PERSIST}\n"
+    )
+
+
+def _controlmaster_supported() -> bool:
+    """Whether the local OpenSSH client supports ControlMaster reliably.
+
+    Returns ``False`` on Windows. Windows OpenSSH implements ControlMaster
+    via named pipes instead of Unix sockets, and the multiplex code path
+    has long-standing bugs around ``getsockname`` calls against pipe
+    handles. The symptom is ``getsockname failed: Not a socket`` followed
+    by a hang on every IP-form ssh: alias-form ssh works because it never
+    matches a ``Host`` block with ``ControlMaster``. Operators on Windows
+    therefore get today's per-call fresh-handshake behavior (no regression
+    from pre-#113); Linux and macOS operators get the multiplex speedup.
+
+    Sniffing the OpenSSH version on the client would let us re-enable on
+    a fixed Windows build, but the bug has been present across every
+    Windows OpenSSH release we've observed. Keep it simple: ``win32`` off,
+    everything else on. Flip when Microsoft ships a verified fix.
+    """
+    return sys.platform != "win32"
 
 
 def _to_ssh_path(path: Path) -> str:
@@ -86,27 +154,39 @@ def _legacy_rebuild(config: Config, db: Database) -> None:
     prefix = config.operator.ssh_host_prefix
     agent_prefix = config.operator.ssh_agent_host_prefix
 
-    entries: dict[str, str] = {}
+    host_blocks: list[str] = []
+    cm_blocks: list[str] = []
+    seen_ips: set[str] = set()
     for vm in db.list_vms():
         if not vm.tailscale_host:
             continue
-        vm_alias = ssh_host_alias(vm.name, prefix)
-        entries[vm_alias] = _format_entry(
-            alias=vm_alias,
-            hostname=vm.tailscale_host,
-            user=vm.admin_username,
-            identity_file=config.operator.ssh_private_key,
+        host_blocks.append(
+            _format_entry(
+                alias=ssh_host_alias(vm.name, prefix),
+                hostname=vm.tailscale_host,
+                user=vm.admin_username,
+                identity_file=config.operator.ssh_private_key,
+            )
         )
         # Per-agent aliases on this VM (parity with _rebuild_config_dir).
         for agent in db.list_agents(vm_name=vm.name):
-            agent_alias = ssh_agent_alias(agent.name, agent_prefix)
-            entries[agent_alias] = _format_entry(
-                alias=agent_alias,
-                hostname=vm.tailscale_host,
-                user=agent.linux_user,
-                identity_file=config.operator.ssh_private_key,
+            host_blocks.append(
+                _format_entry(
+                    alias=ssh_agent_alias(agent.name, agent_prefix),
+                    hostname=vm.tailscale_host,
+                    user=agent.linux_user,
+                    identity_file=config.operator.ssh_private_key,
+                )
             )
-    _write_legacy(ssh_config, user_section, entries)
+        # One IP-keyed ControlMaster block per VM. Admin and agents on the
+        # same VM share it because their SSH calls hit the same IP and
+        # ``%C`` keys on the remote user. Skipped on Windows -- see
+        # ``_controlmaster_supported``.
+        if _controlmaster_supported() and vm.tailscale_host not in seen_ips:
+            seen_ips.add(vm.tailscale_host)
+            cm_blocks.append(_format_ip_controlmaster_block(vm.tailscale_host))
+
+    _write_legacy(ssh_config, user_section, host_blocks, cm_blocks)
 
 
 # -- config.d approach -----------------------------------------------------
@@ -133,12 +213,15 @@ def _rebuild_config_dir(config: Config, db: Database) -> None:
 
     # Build all Host blocks from DB
     blocks: list[str] = ["# Managed by agentworks -- do not edit.\n"]
+    host_entries: list[str] = []
+    cm_entries: list[str] = []
+    seen_ips: set[str] = set()
     for vm in db.list_vms():
         if not vm.tailscale_host:
             continue
         vm_alias = ssh_host_alias(vm.name, prefix)
         # Admin alias for this VM.
-        blocks.append(
+        host_entries.append(
             _format_entry(
                 alias=vm_alias,
                 hostname=vm.tailscale_host,
@@ -152,7 +235,7 @@ def _rebuild_config_dir(config: Config, db: Database) -> None:
         # VM alias) because agents belong to exactly one VM and the
         # operator-facing handle is the agent name, not the Linux user.
         for agent in db.list_agents(vm_name=vm.name):
-            blocks.append(
+            host_entries.append(
                 _format_entry(
                     alias=ssh_agent_alias(agent.name, agent_prefix),
                     hostname=vm.tailscale_host,
@@ -160,12 +243,23 @@ def _rebuild_config_dir(config: Config, db: Database) -> None:
                     identity_file=config.operator.ssh_private_key,
                 )
             )
+        # One IP-keyed ControlMaster block per VM. Admin and agents on the
+        # same VM share it because their SSH calls hit the same IP and
+        # ``%C`` keys on the remote user, so each user still gets its own
+        # master socket automatically. Skipped on Windows -- see
+        # ``_controlmaster_supported``.
+        if _controlmaster_supported() and vm.tailscale_host not in seen_ips:
+            seen_ips.add(vm.tailscale_host)
+            cm_entries.append(_format_ip_controlmaster_block(vm.tailscale_host))
 
     conf_path = config_d / _MANAGED_CONF
-    if len(blocks) > 1:
-        _atomic_write(conf_path, "\n".join(blocks))
-    elif conf_path.exists():
-        conf_path.unlink()
+    if not host_entries:
+        conf_path.unlink(missing_ok=True)
+        return
+
+    blocks.extend(host_entries)
+    blocks.extend(cm_entries)
+    _atomic_write(conf_path, "\n".join(blocks))
 
 
 def _ensure_include(ssh_config: Path) -> None:
@@ -278,17 +372,27 @@ def _read_managed(ssh_config: Path) -> tuple[str, dict[str, str]]:
 def _write_legacy(
     ssh_config: Path,
     user_section: str,
-    entries: dict[str, str],
+    host_blocks: list[str],
+    cm_blocks: list[str] | None = None,
 ) -> None:
-    """Write the SSH config file with operator-managed section + agentworks-managed section."""
+    """Write the SSH config file with operator-managed section + agentworks-managed section.
+
+    ``host_blocks`` are the per-alias Host blocks (VMs and agents);
+    ``cm_blocks`` are the per-VM-IP ControlMaster blocks (one per
+    unique Tailscale IP). They're written in that order so the file
+    layout mirrors ``_rebuild_config_dir``: all aliases first, then
+    all ControlMaster blocks.
+    """
     ssh_config.parent.mkdir(parents=True, exist_ok=True)
 
     parts = [user_section.rstrip("\n")]
 
-    if entries:
+    if host_blocks:
         parts.append("")
         parts.append(_LEGACY_MARKER)
-        for block in entries.values():
+        for block in host_blocks:
+            parts.append(block.rstrip("\n"))
+        for block in cm_blocks or []:
             parts.append(block.rstrip("\n"))
 
     content = "\n".join(parts)
