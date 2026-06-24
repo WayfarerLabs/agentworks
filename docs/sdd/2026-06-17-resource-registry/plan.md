@@ -58,9 +58,11 @@ miss policies, attach metadata, detect cycles), and `SecretKind`. No consumers w
   - `ResourceKind` Protocol: `kind`, `miss_policy`, `auto_declare_names`,
     `synthesize(requirements) -> Resource`.
   - `KIND_REGISTRY: dict[str, ResourceKind]`. Each `kinds/*.py` module self-registers into the dict
-    at import; `kinds/__init__.py` imports all kinds so the registry is fully populated after a
-    single `import agentworks.resources`. Phase 2 kinds slot in by adding new files under `kinds/`
-    and importing them from `kinds/__init__.py`; no central manifest to edit.
+    at import; `kinds/__init__.py` imports all kinds. `agentworks/resources/__init__.py` imports
+    `.kinds` so that a single `import agentworks.resources` (or any
+    `from agentworks.resources import ...`) populates the registry. Phase 2 kinds slot in by adding
+    new files under `kinds/` and importing them from `kinds/__init__.py`; no central manifest to
+    edit.
 - [ ] `cli/agentworks/resources/kinds/__init__.py` + `kinds/secret.py`:
   - `SecretKind(ResourceKind)`: `kind="secret"`, `miss_policy="auto-declare"`,
     `auto_declare_names=None` (any name). `synthesize` builds a `SecretDecl` with framework-set
@@ -81,8 +83,12 @@ miss policies, attach metadata, detect cycles), and `SecretKind`. No consumers w
     requirements), runs cycle detection (DFS three-coloring), and returns the final `Registry`.
 - [ ] `cli/agentworks/secrets/base.py`: `SecretDecl` gains `origin: Origin` and
       `usage: list[UsageEntry]` fields. Frozen dataclass updated; defaults preserve backward-compat
-      for any existing construction sites that don't set them (operator-declared parsed in Phase 0;
-      auto-declared synthesized in Phase 1a).
+      for any existing construction sites that don't set them. Phase 0 captures the raw
+      `(file, line)` tuple on the parsed sub-type instances (as a private field, not `Origin` yet).
+      Phase 1a's `build_registry` is where the raw tuple gets wrapped into an
+      `Origin(variant="operator-declared", file=..., line=...)` and attached to the Registry's copy
+      of the resource. Auto-declared resources also get `Origin` constructed in Phase 1a via the
+      kind's `synthesize`.
 - [ ] `cli/agentworks/errors.py`: confirm `ConfigError` carries `entity_kind`, `entity_name`,
       `source` (a `(kind, name)` pair) fields if not already; existing shape is preserved.
 - [ ] **Tests**:
@@ -190,11 +196,11 @@ Goal: each `[git_credentials.<name>]` entry gains a `token` field referencing a 
 agent provisioning walks the requirement subgraph; tokens reach the install runner as kwargs. Legacy
 `obtain_token` path removed.
 
-- [ ] `cli/agentworks/config.py` (`GitCredentialEntry`): add a `token: str` field defaulting to
+- [ ] `cli/agentworks/config.py` (`GitCredentialConfig`): add a `token: str` field defaulting to
       `git-token-<name>`. The default is computed (in `__post_init__` or by the parser; a dataclass
       literal default can't interpolate the entry's name), not hard-coded. Validate: bare string.
       Same shape rule as `tailscale_auth_key`.
-- [ ] `GitCredentialEntry.required_resources()` emits a `SecretRequirement` for the configured
+- [ ] `GitCredentialConfig.required_resources()` emits a `SecretRequirement` for the configured
       `token` with usage `"the auth token"` and source `("git_credentials", name)`.
 - [ ] **Register `GitCredentialKind` in `KIND_REGISTRY`** with miss policy `error`. This lets the
       framework recognize `git_credentials:<name>` requirements emitted from admin / agent

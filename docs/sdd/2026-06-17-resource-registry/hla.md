@@ -21,10 +21,10 @@ The framework operates on `Registry`. Manager-entry code consumes `Registry` whe
 framework queries (e.g., requirement subgraph walks for eager-resolve); other call sites continue
 taking `config: Config` and migrate gradually as needed.
 
-Existing config types (`SecretDecl`, `VMTemplate`, `GitCredentialEntry`, ...) gain an `origin` field
-and the secret-bearing ones gain a `usage` list. Each config type that references other resources by
-name implements a `required_resources()` method emitting one `ResourceRequirement` per reference;
-`build_registry` consumes them.
+Existing config types (`SecretDecl`, `VMTemplate`, `GitCredentialConfig`, ...) gain an `origin`
+field and the secret-bearing ones gain a `usage` list. Each config type that references other
+resources by name implements a `required_resources()` method emitting one `ResourceRequirement` per
+reference; `build_registry` consumes them.
 
 ```text
 +----------------------+     +----------------------------+     +----------------------+
@@ -121,7 +121,15 @@ layer) and **what the framework sees** (`Registry`, runtime layer).
   by the framework. Resources carry full `origin` and `usage` metadata.
 - The framework's lookup surface lives here: `registry.lookup(kind, name)`, iter helpers, subgraph
   walks for eager-resolve, the data backing `agw doctor` / `agw secret describe` /
-  `agw resource list|describe`.
+  `agw resource list|describe`. Surface sufficient for `collect_secrets_for(registry, root)`:
+  `lookup` resolves the root and each transitive target; each resource's `required_resources()`
+  provides the edges to walk.
+
+**Copy, not mutate.** Resources in `Registry` are immutable copies of their `Config` counterparts
+with `Origin` and `usage` attached. The `Config` layer's instances stay pristine (no in-place
+mutation). The two layers may hold references to logically-equivalent resources under the same name,
+but they are distinct objects: `Config.secrets["foo"]` carries raw parse-time fields;
+`Registry.secrets["foo"]` carries the same data plus the framework metadata.
 
 ### Why two layers, not a rename
 
@@ -150,8 +158,10 @@ framework consumes the `Registry`, not the producer. The validation pass -- orph
 becomes structurally moot in YAML), miss policies, origin attachment, cycle detection -- is the same
 regardless of source format.
 
-`Origin` generalizes naturally: `Origin.file` is already a `Path` and works for any source. TOML's
-`[file:line]` becomes YAML's `[manifest.yaml:line]` with no framework changes.
+`Origin` generalizes naturally: `Origin.file` is already a `Path` and works for any source. The
+framework's API stays identical; `Origin` either keeps `line` (per-line manifests), makes it
+optional (per-resource-per-file manifests where the whole file is the resource), or grows a new
+variant. Implementation detail for a future SDD.
 
 ## Core types
 
@@ -405,7 +415,7 @@ Phase 1 sources:
   `usage` text is derived from the env-block context (e.g., `"the ANTHROPIC_API_KEY env var"`).
 - `VMTemplate.tailscale_auth_key`: emits `SecretRequirement` with `source=("vm_template", <name>)`
   and `usage="the VM-provisioning auth key"`.
-- `GitCredentialEntry.token`: emits `SecretRequirement` with `source=("git_credentials", <name>)`
+- `GitCredentialConfig.token`: emits `SecretRequirement` with `source=("git_credentials", <name>)`
   and `usage="the auth token"` (or similar; usage phrasing follows the Terminology sentence-template
   test).
 - `AdminConfig.git_credentials` / `AgentTemplate.git_credentials` lists: each named credential is a
@@ -622,14 +632,15 @@ The plan will phase the work; the full design above is the target. Anticipated s
    bespoke validation removed in favor of framework dispatch.
 8. **Phase 2c: `agw resource list` / `agw resource describe`.** CLI command group.
 
-Each phase ends at a green CI and a usable intermediate state. Phase 1a-1e ship as one PR sequence
-on the `feat/resource-registry-sdd` branch; Phase 2 is a follow-up PR/branch.
+Each phase ends at a green CI and a usable intermediate state. Phase 0 through 1e ship as one PR per
+phase on the `feat/resource-registry-sdd` branch, each merged after its reviewer pass; Phase 2 is a
+follow-up PR sequence on a separate branch.
 
 ## Design decisions
 
 ### One package, one validation pass
 
-`agentworks.resources` is a single package with a single entry point (`validate_pass(registry)`)
+`agentworks.resources` is a single package with a single entry point (`build_registry(config)`)
 called from the loader. Alternatives considered:
 
 - Distributing the dispatch logic across the existing config types (each type's `__post_init__`
