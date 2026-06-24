@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.8.0](https://github.com/WayfarerLabs/agentworks/compare/v0.7.0...v0.8.0) (2026-06-24)
+
+
+### Features
+
+* **ssh:** enable SSH ControlMaster on managed Host blocks ([34d2b1c](https://github.com/WayfarerLabs/agentworks/commit/34d2b1ce4df3cc35a67a0c5a6cc50d4a41737fd9))
+
+
+### Bug Fixes
+
+* **sessions:** restart auto-migrates legacy default-server sessions ([7ddc8f2](https://github.com/WayfarerLabs/agentworks/commit/7ddc8f2dec6c1c0046511437b68e0ab916695ee1))
+* **sessions:** restart auto-migrates legacy default-server sessions ([ffacd80](https://github.com/WayfarerLabs/agentworks/commit/ffacd80e8186b3e21050d93076dcf8ff448c6f7e))
+* **sessions:** use surgical kill_session for legacy migration ([340d2e6](https://github.com/WayfarerLabs/agentworks/commit/340d2e6a751a32b4029be521bbb974cdffe3c36e))
+* **vms:** reconcile SSH host-key preservation on reinit ([6cf8a9a](https://github.com/WayfarerLabs/agentworks/commit/6cf8a9a90b5ae03c3c7bf8b7994260dfa37605f2))
+
 ## [0.7.0](https://github.com/WayfarerLabs/agentworks/compare/v0.6.0...v0.7.0) (2026-06-24)
 
 
