@@ -9,37 +9,58 @@ Reviewer pass with the `agentworks-reviewer` agent runs after each phase. The ba
 perfect" (per the user's standing direction); iterate until findings are addressed before moving to
 the next phase.
 
-## Phase 0: `tomlkit` + line capture on parsed Config
+## Phase 0: `tomlkit` + Resource composition + orphan rejection + Origin at Config layer
 
 Goal: prepare the parser layer for the framework. No rename. `Config` stays in
-`agentworks/config.py`; the framework's `Registry` is introduced in Phase 1a as a new layer built
-from `Config`.
+`agentworks/config.py`; per the HLA's "Two layers", Config is the Resource-producing layer. Phase 0
+makes that responsibility explicit by switching the parser to `tomlkit`, capturing file/line,
+composing Resources from top-level + sub-section pairs, enforcing orphan rejection, and attaching
+`Origin(variant="operator-declared", ...)` to each composed Resource. The framework's `Registry`
+(new layer) is introduced in Phase 1a.
 
 - [ ] `cli/pyproject.toml`: add `tomlkit` dependency (latest stable).
 - [ ] `agentworks/config.py`: switch the parse step from `tomllib` to `tomlkit`. Existing
-      `load_config()` and `Config` keep their signatures; only the internal parser changes. The
-      parsed-types surface that downstream code consumes doesn't change shape.
+      `load_config()` and `Config` keep their signatures; only the internal parser changes.
 - [ ] `agentworks/config.py`: capture `(file: Path, line: int)` for each top-level resource
-      section's opening line, threaded into the parsed sub-type instances (`AdminConfig`,
-      `SecretConfig`, `SecretBackendConfig`, per-kind dicts of declared resources). Phase 0 just
-      captures the data; Phase 1a's `build_registry` consumes it when building `Origin`.
+      section's opening line.
+- [ ] `agentworks/config.py`: **enforce orphan rejection** (FRD R2). After parse, walk the `tomlkit`
+      document and detect sub-sections like `[vm_templates.x.env]` whose parent `[vm_templates.x]`
+      is not explicitly declared. Raise `ConfigError` pointing at the orphan with a "declare the
+      parent or move the content" message. Singletons (`admin`, `secret_config`) are exempt.
+- [ ] `agentworks/config.py`: each composed Resource (the existing `VMTemplate`,
+      `WorkspaceTemplate`, `AgentTemplate`, `SessionTemplate`, `AdminConfig`, `SecretConfig`,
+      `SecretBackendConfig`, `GitCredentialConfig`, etc., and the per-kind dicts of declared
+      `SecretDecl`s) carries `Origin(variant="operator-declared", file=..., line=...)` at
+      construction time. This requires adding an `origin: Origin` field to each Resource type. The
+      `Origin` dataclass itself ships in Phase 1a (`agentworks/resources/origin.py`); Phase 0
+      imports it -- the resources package is a Phase 1a artifact but the `Origin` type can land in
+      Phase 0 to support the field. Alternative: Phase 0 ships a private tuple
+      `_origin: tuple[Path, int]` field; Phase 1a converts to `Origin` and adds the proper type.
+      **Pin in commit notes which option Phase 0 takes**; reviewer-approved either way.
 - [ ] **Tests**: existing suite stays green. Add `cli/tests/test_config_line_capture.py` pinning
-      that every operator-declared resource carries a `(file, line)` tuple after load, across all
+      that every operator-declared Resource carries a `(file, line)` origin after load, across all
       kinds today (`secrets`, `vm_templates`, `agent_templates`, `workspace_templates`,
-      `session_templates`, `git_credentials`).
-- [ ] **Tests**: add a comment-roundtrip test or similar to confirm the `tomlkit` migration doesn't
-      regress operator-facing behavior on the existing sample-config.
+      `session_templates`, `git_credentials`, admin, secret_config, secret_backends).
+- [ ] **Tests**: add `cli/tests/test_config_orphan_rejection.py` covering: orphan
+      `[vm_templates.x.env]` errors; admin singleton sub-tables (`[admin.env]`,
+      `[admin.git_credentials]`) accepted without a root `[admin]`; secret_config singleton accepted
+      without explicit `[secret_config]` parent if anyone writes `[secret_config.backends]`
+      directly.
+- [ ] **Tests**: add a comment-roundtrip / sample-config-parse test confirming the `tomlkit`
+      migration doesn't regress operator-facing behavior on the existing sample-config.
 
-Definition of done: `from agentworks.config import Config, load_config` works as before; the parsed
-types carry `(file, line)` on every operator-declared section; `tomlkit` is on `cli/pyproject.toml`;
-CI green; reviewer-approved.
+Definition of done: `from agentworks.config import Config, load_config` works as before; every
+operator-declared Resource carries `Origin(variant="operator-declared", file=..., line=...)` or the
+agreed-upon private placeholder; orphan sub-sections error at config-load; `tomlkit` is on
+`cli/pyproject.toml`; CI green; reviewer-approved.
 
 ## Phase 1a: Framework foundations
 
-Goal: stand up the `agentworks.resources` package with the core types, the new `Registry` class, the
-`_compose_resources` step (with orphan-rejection), the validation pass (walk requirements, dispatch
-miss policies, attach metadata, detect cycles), and `SecretKind`. No consumers wired yet beyond
-`build_registry(config)` -> `Registry`.
+Goal: stand up the `agentworks.resources` package with the core types, the new `Registry` class, and
+`build_registry(config) -> Registry` (walk requirements, dispatch miss policies, attach `usage`,
+detect cycles), plus `SecretKind`. Resource composition and orphan rejection already live at the
+Config layer per Phase 0; `build_registry` operates on Config's already- composed Resources. No
+producers of `SecretRequirement` wired yet beyond what tests synthesize.
 
 - [ ] `cli/agentworks/resources/__init__.py`: public surface re-exports (`ResourceRequirement`,
       `SecretRequirement`, `ResourceKind`, `Origin`, `UsageEntry`, `Registry`, `build_registry`,
@@ -68,41 +89,33 @@ miss policies, attach metadata, detect cycles), and `SecretKind`. No consumers w
     `auto_declare_names=None` (any name). `synthesize` builds a `SecretDecl` with framework-set
     `usage` list (paired `UsageEntry`s) and `origin=auto-declared`.
 - [ ] `cli/agentworks/resources/registry.py`:
-  - `Registry` immutable dataclass: per-kind dicts of resources (`secrets`, `vm_templates`,
+  - `Registry` immutable dataclass: per-kind dicts of Resources (`secrets`, `vm_templates`,
     `agent_templates`, ...) each with `Origin` and `usage` attached. Lookup helpers
     (`lookup(kind, name)`, `iter_kind(kind)`).
-  - `build_registry(config: Config) -> Registry`: the entry point. Internally calls
-    `_compose_resources(config)` then runs the validation pass.
-  - `_compose_resources(config)`: walks the parsed `Config` sections, composes resources from
-    top-level + sub-section pairs, enforces orphan-rejection (R2) -- sub-sections without an
-    explicit parent raise `ConfigError` with a clear "declare the parent or move the content"
-    message. Singletons (`admin`, `secret_config`) are exempt.
-  - Validation pass (inside `build_registry`): collects requirements via `required_resources()`
-    across composed resources, groups by `(kind, name)`, dispatches per `KIND_REGISTRY` miss policy,
-    attaches framework metadata (`origin` from Config's file:line capture; `usage` list from
-    requirements), runs cycle detection (DFS three-coloring), and returns the final `Registry`.
-- [ ] `cli/agentworks/secrets/base.py`: `SecretDecl` gains `origin: Origin` and
-      `usage: list[UsageEntry]` fields. Frozen dataclass updated; defaults preserve backward-compat
-      for any existing construction sites that don't set them. Phase 0 captures the raw
-      `(file, line)` tuple on the parsed sub-type instances (as a private field, not `Origin` yet).
-      Phase 1a's `build_registry` is where the raw tuple gets wrapped into an
-      `Origin(variant="operator-declared", file=..., line=...)` and attached to the Registry's copy
-      of the resource. Auto-declared resources also get `Origin` constructed in Phase 1a via the
-      kind's `synthesize`.
+  - `build_registry(config: Config) -> Registry`: the entry point. Starts from Config's
+    already-composed Resources (Origin already set per Phase 0), walks requirements via
+    `required_resources()`, groups by `(kind, name)`, dispatches per `KIND_REGISTRY` miss policy
+    (auto-declare synthesizes a Resource with `Origin(variant="auto-declared", ...)`; error raises
+    `ConfigError`), attaches `usage` to each Resource, runs cycle detection (DFS three-coloring),
+    returns the final immutable `Registry`. Does NOT compose Resources -- that's Config's
+    responsibility.
+- [ ] `cli/agentworks/secrets/base.py`: `SecretDecl` gains `usage: list[UsageEntry]` field.
+      (`origin: Origin` was added in Phase 0 alongside the equivalent fields on every other Resource
+      type.) `usage` defaults to empty; Phase 1a's `build_registry` populates it on
+      operator-declared Resources via `with_usage(...)` and on auto-declared Resources via
+      `SecretKind.synthesize`.
 - [ ] `cli/agentworks/errors.py`: confirm `ConfigError` carries `entity_kind`, `entity_name`,
       `source` (a `(kind, name)` pair) fields if not already; existing shape is preserved.
 - [ ] **Tests**:
   - `cli/tests/resources/test_requirement.py`: dataclass invariants, base-vs-subclass shape.
   - `cli/tests/resources/test_origin.py`: variant invariants, immutability.
-  - `cli/tests/resources/test_compose.py`: orphan-rejection across kinds; singleton exceptions for
-    admin and secret_config; additive sub-section composition (`[vm_templates.x]` +
-    `[vm_templates.x.env]` produces a single resource).
   - `cli/tests/resources/test_validation_pass.py`: walk + dispatch; auto-declare on miss for
     secrets; reserved-name restriction (Phase 1 stub for templates -- the dispatch behaves correctly
     even though no Phase 2 producers yet); error miss policy; first-matching origin rule; per-key +
     walk-order determinism. Includes a synthetic-producer test that an operator-declared
-    `SecretDecl` gets its `usage` list populated by the validation pass (the
-    framework-metadata-attachment path).
+    `SecretDecl` gets its `usage` list populated by `build_registry` (the `with_usage` attachment
+    path). Composition + orphan rejection are tested at the Config layer (Phase 0 tests);
+    `build_registry` operates on already-composed Resources.
   - `cli/tests/resources/test_cycle_detection.py`: synthetic cycle producer for testing; clear error
     reporting.
   - `cli/tests/resources/test_kind_registry.py`: `KIND_REGISTRY["secret"]` lookup,

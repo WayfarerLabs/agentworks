@@ -101,43 +101,62 @@ layer) and **what the framework sees** (`Registry`, runtime layer).
 ### `Config` (parsing layer)
 
 - Lives in `agentworks/config.py`. Unchanged location and class name. No mechanical rename.
-- Mirrors the on-disk TOML structure: top-level sections, dot-notation paths, sub-tables.
-- Holds the existing sub-type instances: `AdminConfig` (the parsed `[admin.config]` section),
-  `SecretConfig` (the parsed `[secret_config]` section), `SecretBackendConfig` (per-backend), plus
-  per-kind dicts of raw declarations (`secrets`, `vm_templates`, etc.).
-- Each parsed section carries `(file, line)` of its opening line, captured by the `tomlkit` parser.
-  This data feeds `Origin` at the Registry layer.
+- Parses TOML and **composes Resources** from top-level + sub-section pairs. Output is per-kind
+  dicts of Resources, not raw TOML sections: `Config.secrets: dict[str, Secret]`,
+  `Config.vm_templates: dict[str, VMTemplate]`, `Config.git_credentials: dict[str, GitCredential]`,
+  plus singletons (`Config.admin`, `Config.secret_system`). The Resource types (today named
+  `VMTemplate`, `AdminConfig`, `SecretConfig`, `SecretBackendConfig`, `GitCredentialConfig`) **are
+  the Resources** -- they happen to live in `config.py` today; their naming is a minor cleanup item
+  (see "Naming follow-up" below) but the framework treats them as Resources regardless.
+- **Enforces orphan rejection** (FRD R2). If `[vm_templates.x.env]` is parsed without a parent
+  `[vm_templates.x]`, Config errors at parse-time: it cannot publish a Resource that only has the
+  env sub-section. Structural enforcement happens here because Config has the schema knowledge of
+  which kinds support which sub-sections.
+- Each composed Resource carries `Origin(variant="operator-declared", file=..., line=...)` attached
+  at construction time from the `tomlkit` line capture. Operator-declared Resources are fully
+  Origin-tagged at the Config layer.
 - The existing `load_config()` function and `Config` class stay; all current imports continue to
   work.
 
 ### `Registry` (framework layer)
 
 - Lives in `agentworks/resources/registry.py`. New class introduced by this SDD.
-- Built from `Config` by `build_registry(config: Config) -> Registry`. Construction runs the full
-  validation pass (compose resources, enforce orphan rejection, walk requirements, dispatch miss
-  policies, synthesize auto-declared resources, attach `origin` + `usage`, detect cycles).
+- Built from `Config` by `build_registry(config: Config) -> Registry`. Construction takes Config's
+  already-composed Resources, walks the requirement graph, dispatches miss policies for references
+  that don't resolve to operator-declared Resources, synthesizes auto-declared Resources, attaches
+  the `usage` list to each Resource, and detects cycles.
 - Exposes per-kind queries: `registry.secrets`, `registry.vm_templates`, etc. Each per-kind view
-  contains operator-declared resources (from `Config`) **plus** auto-declared resources synthesized
-  by the framework. Resources carry full `origin` and `usage` metadata.
+  contains operator-declared Resources (from `Config`) **plus** auto-declared Resources synthesized
+  by the framework. All Resources carry full `origin` and `usage` metadata.
 - The framework's lookup surface lives here: `registry.lookup(kind, name)`, iter helpers, subgraph
   walks for eager-resolve, the data backing `agw doctor` / `agw secret describe` /
   `agw resource list|describe`. Surface sufficient for `collect_secrets_for(registry, root)`:
-  `lookup` resolves the root and each transitive target; each resource's `required_resources()`
+  `lookup` resolves the root and each transitive target; each Resource's `required_resources()`
   provides the edges to walk.
 
 **Copy, not mutate.** Resources in `Registry` are immutable copies of their `Config` counterparts
-with `Origin` and `usage` attached. The `Config` layer's instances stay pristine (no in-place
-mutation). The two layers may hold references to logically-equivalent resources under the same name,
-but they are distinct objects: `Config.secrets["foo"]` carries raw parse-time fields;
-`Registry.secrets["foo"]` carries the same data plus the framework metadata.
+with `usage` attached (Origin was already set at Config layer). The `Config` layer's instances stay
+pristine. The two layers may hold references to logically-equivalent Resources under the same name,
+but they are distinct objects: `Config.secrets["foo"]` has `usage=[]`; `Registry.secrets["foo"]` has
+`usage=[...]` populated from the requirement walks.
+
+### Naming follow-up
+
+The Resource types in `config.py` today are named for the "config" framing rather than the Resource
+framing. After Phase 0 lands and the framework's Resource semantics are clear, a follow-up cleanup
+PR can rename them to drop the `*Config` suffix where it's misleading: `AdminConfig` -> `Admin`,
+`SecretConfig` -> `SecretSystem` (the secret-system singleton), `SecretBackendConfig` ->
+`SecretBackend`, `GitCredentialConfig` -> `GitCredential`. `VMTemplate` / `WorkspaceTemplate` /
+`AgentTemplate` / `SessionTemplate` already follow the Resource naming. The rename is optional and
+orthogonal to the framework's behavior; deferred to keep this SDD's diff bounded.
 
 ### Validation responsibilities
 
 Each layer owns a specific class of validation. Both raise `ConfigError`; the layer that catches the
 issue determines the error's framing.
 
-**Config-layer validation** (in `agentworks.config`, today's behavior plus the new file:line capture
-from Phase 0):
+**Config-layer validation** (in `agentworks.config`, today's parse-time checks plus the new
+composition / orphan-rejection / Origin-attachment from Phase 0):
 
 - TOML parse errors (syntax, duplicate keys at the same path).
 - Field types per the schema (`str`/`int`/`bool`/`list`/inline-table shapes).
@@ -145,16 +164,26 @@ from Phase 0):
 - Name regex / kebab-case validation for operator-typed identifiers.
 - Operator-typed value validation (e.g., URL formats, enum values like
   `git_credentials.type in {"github", "azdo"}`).
-- All checks operate per-section; no cross-resource awareness.
+- **Resource composition**: top-level + sub-section pairs combined into single Resource instances
+  per kind.
+- **Orphan rejection** (FRD R2): a sub-section like `[vm_templates.x.env]` without
+  `[vm_templates.x]` cannot produce a valid Resource, so Config errors. Lives here because Config
+  has the schema knowledge of which kinds support which sub-sections.
+- **Origin attachment**: each operator-declared Resource gets
+  `Origin(variant="operator-declared", file=..., line=...)` set at construction time from the
+  `tomlkit` line capture.
 
 **Registry-layer validation** (in `build_registry`, new with this SDD):
 
-- Resource composition from parsed sections (top-level + sub-section pairs into one resource).
-- Orphan rejection (sub-section without an explicit parent) -- structural in nature but requires
-  framework knowledge of which kinds support sub-sections, so it lives at the Registry layer.
-- Requirement walks via each resource's `required_resources()`.
-- Miss policy dispatch (auto-declare with optional reserved-name restriction; error).
+- Requirement walks via each Resource's `required_resources()` (a Resource may declare it depends on
+  others by `(kind, name)`).
+- Miss policy dispatch (auto-declare with optional reserved-name restriction; error). Operator-
+  declared Resources from `Config` satisfy requirements directly; missing ones trigger the kind's
+  miss policy.
 - Reserved-name restrictions per kind (e.g., template kinds accept auto-decl only for `default`).
+- Synthesis of auto-declared Resources (with `Origin(variant="auto-declared", source=...)`).
+- Usage attachment: each Resource accumulates a `usage` list with one entry per matching
+  requirement.
 - Cycle detection across the requirement graph.
 - All semantic / cross-resource checks.
 
@@ -164,14 +193,15 @@ Same exception type; consistent rendering at the CLI layer; the message body dis
 
 ### Why two layers, not a rename
 
-The original draft renamed `Config` to `Registry`. That conflated two concepts (parsing vs.
-framework view) in one class, forced a 1300-line / 59-file rename, and tied the framework's runtime
-API to the on-disk format. The layered split:
+The original draft renamed `Config` to `Registry`. That conflated two concepts (parsing-with-
+composition vs. framework view) in one class, forced a 1300-line / 59-file rename, and tied the
+framework's runtime API to the on-disk format. The layered split:
 
-- Keeps parsing and framework-view responsibilities separate; each layer has a focused test surface.
-- Avoids the rename churn and avoids re-labeling `AdminConfig` / `SecretConfig` /
-  `SecretBackendConfig` (their names accurately describe parsed sections; the Registry doesn't need
-  its own copies).
+- Keeps parsing-with-composition and framework-view responsibilities separate; each layer has a
+  focused test surface.
+- Avoids the rename churn on the top-level container. The Resource sub-types in `config.py` keep
+  their existing names through Phase 0/1; renaming them to drop the `*Config` suffix is an optional
+  follow-up (see "Naming follow-up" above).
 - Makes the source format (TOML vs. future YAML manifests) substitutable without changing the
   framework's API.
 
@@ -262,25 +292,29 @@ matching `tomllib` behavior, so the FRD R4 "duplicate operator declarations are 
 holds. The existing parsing surface in `config.py` doesn't change shape; only the parse step swaps
 libraries.
 
-## Resource composition from Config
+## Resource composition (Config layer)
 
-A resource is the conceptual unit; TOML splits it across sections (a template's fields plus its
-`.env` sub-section plus any future sub-tables). `build_registry(config)` composes resources from
-parsed `Config` sections before the validation pass walks requirements.
+A Resource is the conceptual unit; TOML splits it across sections (a template's fields plus its
+`.env` sub-section plus any future sub-tables). The Config layer parses TOML and composes Resources
+from sections, publishing per-kind dicts of fully-composed Resources.
 
-The composition step also enforces the FRD R2 orphan-rejection rule:
+The composition step enforces the FRD R2 orphan-rejection rule at the Config layer (not at
+`build_registry`):
 
 ```python
-def _compose_resources(config: Config) -> dict[str, dict[str, Resource]]:
-    """Walks the parsed Config and returns per-kind dicts of composed resources.
+def _compose_resources(parsed_sections) -> Config:
+    """Inside agentworks.config's load_config(). Walks the parsed TOML sections and
+    builds per-kind dicts of composed Resources.
 
     For each multi-named kind whose sections support sub-tables (vm_templates,
-    agent_templates, workspace_templates, session_templates, ...), walks the parsed
-    sections and:
-      - For each [<container>.<name>] section, creates the resource shell.
-      - For each [<container>.<name>.<sub>] section, attaches to the resource.
+    agent_templates, workspace_templates, session_templates, ...):
+      - For each [<container>.<name>] section, creates the Resource (with Origin
+        attached from the (file, line) tuple captured at parse time).
+      - For each [<container>.<name>.<sub>] section, attaches the sub-section's
+        fields to the existing Resource.
       - If a sub-section's parent [<container>.<name>] is not in parsed sections,
-        raises ConfigError pointing at the orphan.
+        raises ConfigError pointing at the orphan. Config cannot publish a Resource
+        from just a sub-section.
     """
 ```
 
@@ -288,7 +322,7 @@ Singletons are exceptions: their root declaration is neither required nor accept
 `admin` (`[admin.config]`, `[admin.env]`, `[admin.git_credentials]`, ...) and `secret_config`. Their
 sub-tables are valid without any root.
 
-Sub-section composition is additive: a resource composed from `[vm_templates.x]` plus
+Sub-section composition is additive: a Resource composed from `[vm_templates.x]` plus
 `[vm_templates.x.env]` carries both sets of fields. No key collisions are possible by construction
 (parent top-level fields are not under any sub-section).
 
@@ -297,25 +331,25 @@ rather than a separate `[secrets.<name>.backend_mappings]` sub-section, so the o
 effectively a no-op for secrets in current practice. The rule still applies if someone writes the
 sub-section form.
 
-**Pipeline**: `load_config() -> Config` (existing parser) -> `build_registry(config)` runs
-`_compose_resources` (creates resource shells, attaches sub-sections, enforces orphan rejection) ->
-validation pass (walks requirements, applies miss policies, attaches framework metadata, detects
-cycles) -> returns `Registry`. The validation pass operates on already-composed resources and never
-sees orphan sub-sections.
+**Pipeline**: `load_config()` parses TOML, composes Resources, enforces orphan rejection, attaches
+`Origin(variant="operator-declared", ...)` to each composed Resource -> returns `Config` (a registry
+of operator-declared Resources). `build_registry(config)` adds auto-declared Resources, attaches
+`usage` lists, detects cycles -> returns `Registry`.
 
 ## Validation pass
 
-`build_registry(config)` runs the validation pass after composition; the pass walks requirements,
-dispatches miss policies, attaches framework metadata, and detects cycles. Conceptually:
+`build_registry(config)` runs the validation pass on Config's already-composed Resources; the pass
+walks requirements, dispatches miss policies, attaches `usage`, and detects cycles. Conceptually:
 
 ```python
 def build_registry(config: Config) -> Registry:
-    # 1. Compose resources from the parsed Config (composition step above).
-    composed: dict[str, dict[str, Resource]] = _compose_resources(config)
+    # 1. Start with operator-declared resources from Config (already composed, with Origin
+    # set; the only thing missing is the usage list).
+    resources: dict[str, dict[str, Resource]] = config.as_resource_dicts()
 
-    # 2. Collect all requirements across composed resources.
+    # 2. Collect all requirements across operator-declared resources.
     requirements: list[ResourceRequirement] = []
-    for kind_dict in composed.values():
+    for kind_dict in resources.values():
         for resource in kind_dict.values():
             requirements.extend(resource.required_resources())
 
@@ -324,20 +358,20 @@ def build_registry(config: Config) -> Registry:
     for req in requirements:
         by_target.setdefault((req.kind, req.name), []).append(req)
 
-    # 4. For each (kind, name): existing-in-composed? auto-decl? error?
+    # 4. For each (kind, name): existing-in-config? auto-decl? error?
     for (kind, name), reqs in by_target.items():
         kind_handler = KIND_REGISTRY[kind]
-        existing = composed.get(kind, {}).get(name)
+        existing = resources.get(kind, {}).get(name)
         if existing is not None:
-            # Operator-declared: attach framework metadata (origin already set from
-            # the Config's file:line capture; this populates the usage list).
-            composed[kind][name] = existing.with_usage(_usage_list(reqs))
+            # Operator-declared (already has Origin from Config layer). Attach usage.
+            resources[kind][name] = existing.with_usage(_usage_list(reqs))
         else:
             # Missing: dispatch miss policy.
             match kind_handler.miss_policy:
                 case "auto-declare":
                     if kind_handler.auto_declare_names is None or name in kind_handler.auto_declare_names:
-                        composed.setdefault(kind, {})[name] = kind_handler.synthesize(reqs)
+                        # Synthesize with Origin(variant="auto-declared", source=reqs[0].source).
+                        resources.setdefault(kind, {})[name] = kind_handler.synthesize(reqs)
                     else:
                         raise ConfigError(...)  # reserved-name restriction violated
                 case "error":
@@ -346,9 +380,9 @@ def build_registry(config: Config) -> Registry:
     # 5. Cycle detection across the now-complete requirement graph.
     _detect_cycles(by_target)
 
-    # 6. Build the immutable Registry from the composed dicts.
-    return Registry(secrets=composed.get("secret", {}),
-                    vm_templates=composed.get("vm_template", {}),
+    # 6. Build the immutable Registry from the per-kind dicts.
+    return Registry(secrets=resources.get("secret", {}),
+                    vm_templates=resources.get("vm_template", {}),
                     # ... per-kind fields
                     )
 ```
