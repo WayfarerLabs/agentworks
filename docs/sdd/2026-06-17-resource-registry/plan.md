@@ -9,38 +9,39 @@ Reviewer pass with the `agentworks-reviewer` agent runs after each phase. The ba
 perfect" (per the user's standing direction); iterate until findings are addressed before moving to
 the next phase.
 
-## Phase 0: `tomlkit` + Resource composition + orphan rejection + Origin at Config layer
+## Phase 0: `tomlkit` + Resource composition + orphan rejection + `SourceLocation` at Config
 
 Goal: prepare the parser layer for the framework. No rename. `Config` stays in
 `agentworks/config.py`; per the HLA's "Two layers", Config is the Resource-producing layer. Phase 0
 makes that responsibility explicit by switching the parser to `tomlkit`, capturing file/line,
 composing Resources from top-level + sub-section pairs, enforcing orphan rejection, and attaching
-`Origin(variant="operator-declared", ...)` to each composed Resource. The framework's `Registry`
-(new layer) is introduced in Phase 1a.
+Config's own `SourceLocation(file, line)` to each composed Resource. The framework's `Origin` type
+(with two variants) is a Registry-layer concept; the Registry translates Config's `SourceLocation`
+into `Origin(variant="operator-declared", ...)` when Resources are published into it. Config does
+not depend on `agentworks.resources`.
 
 - [ ] `cli/pyproject.toml`: add `tomlkit` dependency (latest stable).
 - [ ] `agentworks/config.py`: switch the parse step from `tomllib` to `tomlkit`. Existing
       `load_config()` and `Config` keep their signatures; only the internal parser changes.
+- [ ] `agentworks/config.py`: add a Config-layer `SourceLocation` dataclass (frozen, two fields:
+      `file: Path`, `line: int`). Lives in `config.py` (or a sibling module if file size warrants).
+      This is Config's own representation of where a Resource was declared; the framework's `Origin`
+      is constructed from it later, when the Resource is published into a Registry.
 - [ ] `agentworks/config.py`: capture `(file: Path, line: int)` for each top-level resource
-      section's opening line.
+      section's opening line and store it as a `SourceLocation` instance.
 - [ ] `agentworks/config.py`: **enforce orphan rejection** (FRD R2). After parse, walk the `tomlkit`
       document and detect sub-sections like `[vm_templates.x.env]` whose parent `[vm_templates.x]`
       is not explicitly declared. Raise `ConfigError` pointing at the orphan with a "declare the
       parent or move the content" message. Singletons (`admin`, `secret_config`) are exempt.
-- [ ] `agentworks/config.py`: each composed Resource (the existing `VMTemplate`,
-      `WorkspaceTemplate`, `AgentTemplate`, `SessionTemplate`, `AdminConfig`, `SecretConfig`,
-      `SecretBackendConfig`, `GitCredentialConfig`, etc., and the per-kind dicts of declared
-      `SecretDecl`s) carries `Origin(variant="operator-declared", file=..., line=...)` at
-      construction time. This requires adding an `origin: Origin` field to each Resource type. The
-      `Origin` dataclass itself ships in Phase 1a (`agentworks/resources/origin.py`); Phase 0
-      imports it -- the resources package is a Phase 1a artifact but the `Origin` type can land in
-      Phase 0 to support the field. Alternative: Phase 0 ships a private tuple
-      `_origin: tuple[Path, int]` field; Phase 1a converts to `Origin` and adds the proper type.
-      **Pin in commit notes which option Phase 0 takes**; reviewer-approved either way.
+- [ ] `agentworks/config.py`: add `declared_at: SourceLocation` field to each Resource type
+      (`VMTemplate`, `WorkspaceTemplate`, `AgentTemplate`, `SessionTemplate`, `AdminConfig`,
+      `SecretConfig`, `SecretBackendConfig`, `GitCredentialConfig`, `SecretDecl`). Composition sets
+      `declared_at` from the section's `SourceLocation` at construction time.
 - [ ] **Tests**: existing suite stays green. Add `cli/tests/test_config_line_capture.py` pinning
-      that every operator-declared Resource carries a `(file, line)` origin after load, across all
-      kinds today (`secrets`, `vm_templates`, `agent_templates`, `workspace_templates`,
-      `session_templates`, `git_credentials`, admin, secret_config, secret_backends).
+      that every operator-declared Resource carries a `declared_at: SourceLocation` after load, with
+      the right file path and line, across all kinds today (`secrets`, `vm_templates`,
+      `agent_templates`, `workspace_templates`, `session_templates`, `git_credentials`, admin,
+      secret_config, secret_backends).
 - [ ] **Tests**: add `cli/tests/test_config_orphan_rejection.py` covering: orphan
       `[vm_templates.x.env]` errors; admin singleton sub-tables (`[admin.env]`,
       `[admin.git_credentials]`) accepted without a root `[admin]`; secret_config singleton accepted
@@ -49,22 +50,26 @@ composing Resources from top-level + sub-section pairs, enforcing orphan rejecti
 - [ ] **Tests**: add a comment-roundtrip / sample-config-parse test confirming the `tomlkit`
       migration doesn't regress operator-facing behavior on the existing sample-config.
 
-Definition of done: `from agentworks.config import Config, load_config` works as before; every
-operator-declared Resource carries `Origin(variant="operator-declared", file=..., line=...)` or the
-agreed-upon private placeholder; orphan sub-sections error at config-load; `tomlkit` is on
-`cli/pyproject.toml`; CI green; reviewer-approved.
+Definition of done: `from agentworks.config import Config, load_config, SourceLocation` works; every
+operator-declared Resource carries `declared_at: SourceLocation(file=..., line=...)`; orphan
+sub-sections error at config-load; `tomlkit` is on `cli/pyproject.toml`; `agentworks.config` has no
+import of `agentworks.resources`; CI green; reviewer-approved.
 
 ## Phase 1a: Framework foundations
 
-Goal: stand up the `agentworks.resources` package with the core types, the new `Registry` class, and
-`build_registry(config) -> Registry` (walk requirements, dispatch miss policies, attach `usage`,
-detect cycles), plus `SecretKind`. Resource composition and orphan rejection already live at the
-Config layer per Phase 0; `build_registry` operates on Config's already- composed Resources. No
-producers of `SecretRequirement` wired yet beyond what tests synthesize.
+Goal: stand up the `agentworks.resources` package with the core types and the new `Registry` class.
+The Registry exposes a **publish / validate** API: starts empty, accepts Resources from any source
+(Config in Phase 1; future plugins / manifests later), then `validate()` runs the framework pass
+(walk requirements, dispatch miss policies, attach `usage`, detect cycles).
+`Registry.from_config(config)` wraps the common Config-only path. Plus `SecretKind`. Resource
+composition and orphan rejection already live at the Config layer per Phase 0; the Registry operates
+on already-composed Resources. No producers of `SecretRequirement` wired yet beyond what tests
+synthesize.
 
 - [ ] `cli/agentworks/resources/__init__.py`: public surface re-exports (`ResourceRequirement`,
-      `SecretRequirement`, `ResourceKind`, `Origin`, `UsageEntry`, `Registry`, `build_registry`,
-      `collect_secrets_for`).
+      `SecretRequirement`, `ResourceKind`, `Origin`, `UsageEntry`, `Registry`,
+      `collect_secrets_for`). `Registry.from_config` is the convenience entry point; the
+      `publish_to` / `validate` split is reachable via `Registry.empty()` + method calls.
 - [ ] `cli/agentworks/resources/requirement.py`:
   - `ResourceRequirement` immutable dataclass (base): `name`, `kind`, `usage`, `source`.
   - `SecretRequirement(ResourceRequirement)` concrete subclass (no extra fields in Phase 1; the
@@ -89,42 +94,59 @@ producers of `SecretRequirement` wired yet beyond what tests synthesize.
     `auto_declare_names=None` (any name). `synthesize` builds a `SecretDecl` with framework-set
     `usage` list (paired `UsageEntry`s) and `origin=auto-declared`.
 - [ ] `cli/agentworks/resources/registry.py`:
-  - `Registry` immutable dataclass: per-kind dicts of Resources (`secrets`, `vm_templates`,
-    `agent_templates`, ...) each with `Origin` and `usage` attached. Lookup helpers
-    (`lookup(kind, name)`, `iter_kind(kind)`).
-  - `build_registry(config: Config) -> Registry`: the entry point. Starts from Config's
-    already-composed Resources (Origin already set per Phase 0), walks requirements via
+  - `Registry` class: per-kind dicts of Resources (`secrets`, `vm_templates`, `agent_templates`,
+    ...). Mutable during the publish phase; frozen after `validate()`. Lookup helpers
+    (`lookup(kind, name)`, `iter_kind(kind)`) available once finalized.
+  - `Registry.empty() -> Registry` -- class method returning a fresh empty Registry.
+  - `Registry.add(kind, name, resource, *, declared_at: SourceLocation) -> None` -- the publish-
+    side API. Translates Config's `declared_at` into `Origin(variant="operator-declared", ...)` and
+    attaches it to the Resource at this point. Config's `publish_to(registry)` is a thin wrapper
+    that iterates Config's resources and calls `registry.add(...)` for each. Other sources (future
+    plugins / manifests) call `add` directly.
+  - `Registry.validate() -> None` -- the framework pass. Walks requirements via
     `required_resources()`, groups by `(kind, name)`, dispatches per `KIND_REGISTRY` miss policy
     (auto-declare synthesizes a Resource with `Origin(variant="auto-declared", ...)`; error raises
     `ConfigError`), attaches `usage` to each Resource, runs cycle detection (DFS three-coloring),
-    returns the final immutable `Registry`. Does NOT compose Resources -- that's Config's
-    responsibility.
+    and freezes the Registry. Does NOT compose Resources -- that's Config's responsibility.
+  - `Registry.from_config(config: Config) -> Registry` (classmethod): the convenience entry point.
+    Equivalent to `r = cls.empty(); config.publish_to(r); r.validate(); return r`.
 - [ ] `cli/agentworks/secrets/base.py`: `SecretDecl` gains `usage: list[UsageEntry]` field.
-      (`origin: Origin` was added in Phase 0 alongside the equivalent fields on every other Resource
-      type.) `usage` defaults to empty; Phase 1a's `build_registry` populates it on
-      operator-declared Resources via `with_usage(...)` and on auto-declared Resources via
-      `SecretKind.synthesize`.
+      (`declared_at: SourceLocation` was added in Phase 0 at the Config layer; `Origin` is attached
+      when the Resource is published into a Registry.) `usage` defaults to empty; the Registry's
+      `validate()` populates it on operator-declared Resources via `with_usage(...)` and on
+      auto-declared Resources via `SecretKind.synthesize`.
+- [ ] `cli/agentworks/config.py`: add `Config.publish_to(self, registry: Registry) -> None`.
+      Iterates Config's per-kind dicts and calls
+      `registry.add(kind, name, resource,     declared_at=resource.declared_at)` for each. This is
+      the only point at which `agentworks.config` imports from `agentworks.resources` (specifically
+      `Registry` for type hinting). The import is allowed because `publish_to` is the explicit
+      handoff between layers; the Config layer's data structures and parsing remain
+      framework-ignorant.
 - [ ] `cli/agentworks/errors.py`: confirm `ConfigError` carries `entity_kind`, `entity_name`,
       `source` (a `(kind, name)` pair) fields if not already; existing shape is preserved.
 - [ ] **Tests**:
   - `cli/tests/resources/test_requirement.py`: dataclass invariants, base-vs-subclass shape.
   - `cli/tests/resources/test_origin.py`: variant invariants, immutability.
-  - `cli/tests/resources/test_validation_pass.py`: walk + dispatch; auto-declare on miss for
-    secrets; reserved-name restriction (Phase 1 stub for templates -- the dispatch behaves correctly
-    even though no Phase 2 producers yet); error miss policy; first-matching origin rule; per-key +
-    walk-order determinism. Includes a synthetic-producer test that an operator-declared
-    `SecretDecl` gets its `usage` list populated by `build_registry` (the `with_usage` attachment
-    path). Composition + orphan rejection are tested at the Config layer (Phase 0 tests);
-    `build_registry` operates on already-composed Resources.
+  - `cli/tests/resources/test_validation_pass.py`: walk + dispatch in `Registry.validate()`;
+    auto-declare on miss for secrets; reserved-name restriction (Phase 1 stub for templates -- the
+    dispatch behaves correctly even though no Phase 2 producers yet); error miss policy;
+    first-matching origin rule; per-key + walk-order determinism. Includes a synthetic-publisher
+    test that an operator-declared `SecretDecl` gets its `usage` list populated after publish +
+    validate (the `with_usage` attachment path). Composition + orphan rejection are tested at the
+    Config layer (Phase 0 tests); `Registry.validate()` operates on already-composed Resources.
+  - `cli/tests/resources/test_registry_lifecycle.py`: empty Registry -> publish via `add` ->
+    `validate` -> queryable; double-`validate` errors; `add` after `validate` errors;
+    `Registry.from_config(config)` convenience equivalent to manual steps.
   - `cli/tests/resources/test_cycle_detection.py`: synthetic cycle producer for testing; clear error
     reporting.
   - `cli/tests/resources/test_kind_registry.py`: `KIND_REGISTRY["secret"]` lookup,
     `SecretKind.synthesize` shape.
 
 Definition of done: the public surface (`ResourceRequirement`, `ResourceKind`, `Origin`, `Registry`,
-`build_registry`, `collect_secrets_for`, etc.) is importable from `agentworks.resources`;
-`build_registry(config)` runs on every config load (no-op for current configs since no producers
-wired yet); orphan-rejection fires on synthetic test configs; CI green; reviewer-approved.
+`UsageEntry`, `collect_secrets_for`, etc.) is importable from `agentworks.resources`;
+`Registry.from_config(config)` runs on every config load (no-op for current configs since no
+producers wired yet); `publish_to` / `validate` lifecycle pinned by tests; CI green;
+reviewer-approved.
 
 ## Phase 1b: Env-block secret-reference migration
 

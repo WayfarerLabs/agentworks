@@ -8,59 +8,63 @@ The framework lands as a new `agentworks.resources` package that introduces a **
 between the existing `agentworks.config` parser and the runtime / manager layers. Two layers,
 distinct responsibilities:
 
-- **`Config`** (existing, in `agentworks/config.py`): the parsed source. Mirrors the on-disk TOML
-  structure. Holds raw operator-declared sections (`AdminConfig`, `SecretConfig`, secrets dict,
-  vm_templates dict, ...) and captures `(file, line)` per top-level section. Today's parser; minimal
-  changes (line-info capture, tomlkit migration).
+- **`Config`** (existing, in `agentworks/config.py`): the parsed source. Composes Resources from
+  on-disk TOML sections (top-level + sub-sections) and attaches a Config-layer
+  `declared_at: SourceLocation` to each. Enforces orphan rejection at parse time. Today's parser
+  plus the Phase 0 additions (tomlkit migration, file:line capture, composition).
 - **`Registry`** (new, in `agentworks/resources/registry.py`): the framework's typed, queryable
-  resource store. Built from `Config` via `build_registry(config) -> Registry`. Holds the same
-  per-kind resources but with framework metadata attached (`origin` + `usage`), auto-declared
-  resources synthesized, requirement graph validated, cycles caught.
+  Resource store. **Exists independently of any particular source**; starts empty. Sources publish
+  into it (`config.publish_to(registry)`); other sources can publish too (future plugins, manifests,
+  etc.). After publishers finish, `registry.validate()` runs the framework pass: auto-declares
+  missing references, attaches `origin` and `usage`, detects cycles. The convenience
+  `Registry.from_config(config)` wraps the common Config-only case.
 
 The framework operates on `Registry`. Manager-entry code consumes `Registry` where it needs
 framework queries (e.g., requirement subgraph walks for eager-resolve); other call sites continue
 taking `config: Config` and migrate gradually as needed.
 
-Existing config types (`SecretDecl`, `VMTemplate`, `GitCredentialConfig`, ...) gain an `origin`
-field and the secret-bearing ones gain a `usage` list. Each config type that references other
-resources by name implements a `required_resources()` method emitting one `ResourceRequirement` per
-reference; `build_registry` consumes them.
+Existing config types (`SecretDecl`, `VMTemplate`, `GitCredentialConfig`, ...) gain a
+`declared_at: SourceLocation` field at the Config layer; the Registry's copies gain `origin`
+(framework type, translated from `declared_at` at publish) and `usage` (populated during validate).
+Each config type that references other resources by name implements a `required_resources()` method
+emitting one `ResourceRequirement` per reference; the Registry consumes them during validate.
 
 ```text
-+----------------------+     +----------------------------+     +----------------------+
-|  agentworks.config   |---->|  agentworks.resources      |<----|  per-kind logic      |
-|  - parses TOML       |     |  - ResourceRequirement     |     |  - SecretKind        |
-|  - Config object     |     |  - ResourceKind protocol   |     |  - VMTemplateKind    |
-|  - raw declarations  |     |  - Origin                  |     |  - GitCredentialsKind|
-|  - file:line capture |     |  - build_registry(config)  |     |  ...                 |
-+----------------------+     |    * composes resources    |     +----------------------+
-                             |    * walks requirements    |
-                             |    * applies miss policies |
-                             |    * detects cycles        |
-                             |    * attaches Origin/usage |
-                             +-------------+--------------+
-                                           |
-                                           v
-                             +-------------+--------------+
-                             |  Registry (new layer):     |
-                             |  - secrets[name]           |
-                             |  - vm_templates[name]      |
-                             |  - git_credentials[name]   |
-                             |  ... each with origin set  |
-                             +-------------+--------------+
-                                           |
-                          +----------------+----------------+
-                          |                |                |
-                          v                v                v
-                  +---------------+ +---------------+ +-----------------+
-                  | agw doctor    | | manager-entry | | eager-resolve   |
-                  | agw secret    | | walks subgraph| | (existing       |
-                  |   list/desc.  | | for command-  | |  orchestrator   |
-                  | (Phase 1)     | | scoped secrets| |  + extra_decls) |
-                  | agw resource  | +---------------+ +-----------------+
-                  |   list/desc.  |
-                  | (Phase 2)     |
-                  +---------------+
++----------------------+         +----------------------------+
+|  agentworks.config   | publish |  agentworks.resources      |
+|  - parses TOML       |-------->|  - ResourceRequirement     |<--+
+|  - composes Resources|         |  - ResourceKind / Origin   |   |
+|  - declared_at:      |         |  - Registry (empty)        |   | per-kind logic
+|    SourceLocation    |         |    * accepts publishes     |   | SecretKind, etc.
++----------------------+         |    * .validate() runs the  |   |
+                                 |      framework pass:       |   |
+   (future publishers:           |        - walks reqs        |   |
+   plugins, manifests, ...)      |        - auto-declares     |---+
+                                 |        - attaches usage    |
+                                 |        - detects cycles    |
+                                 +-------------+--------------+
+                                               |
+                                               v
+                                 +-------------+--------------+
+                                 |  Registry (validated):     |
+                                 |  - secrets[name]           |
+                                 |  - vm_templates[name]      |
+                                 |  - git_credentials[name]   |
+                                 |  ... each with origin+usage|
+                                 +-------------+--------------+
+                                               |
+                              +----------------+----------------+
+                              |                |                |
+                              v                v                v
+                      +---------------+ +---------------+ +-----------------+
+                      | agw doctor    | | manager-entry | | eager-resolve   |
+                      | agw secret    | | walks subgraph| | (existing       |
+                      |   list/desc.  | | for command-  | |  orchestrator   |
+                      | (Phase 1)     | | scoped secrets| |  + extra_decls) |
+                      | agw resource  | +---------------+ +-----------------+
+                      |   list/desc.  |
+                      | (Phase 2)     |
+                      +---------------+
 ```
 
 The package is pure Python with no Typer dependency, consistent with the typer-isolation rule. The
@@ -112,33 +116,65 @@ layer) and **what the framework sees** (`Registry`, runtime layer).
   `[vm_templates.x]`, Config errors at parse-time: it cannot publish a Resource that only has the
   env sub-section. Structural enforcement happens here because Config has the schema knowledge of
   which kinds support which sub-sections.
-- Each composed Resource carries `Origin(variant="operator-declared", file=..., line=...)` attached
-  at construction time from the `tomlkit` line capture. Operator-declared Resources are fully
-  Origin-tagged at the Config layer.
+- Each composed Resource carries a Config-layer `declared_at: SourceLocation` field, where
+  `SourceLocation = (file: Path, line: int)` is defined in `agentworks/config.py`. This is the
+  Config layer's own representation of "where the operator declared this Resource" -- the
+  framework's `Origin` type is a separate concept owned by the Registry layer (see below). Config
+  does not depend on `agentworks.resources`.
 - The existing `load_config()` function and `Config` class stay; all current imports continue to
   work.
 
 ### `Registry` (framework layer)
 
 - Lives in `agentworks/resources/registry.py`. New class introduced by this SDD.
-- Built from `Config` by `build_registry(config: Config) -> Registry`. Construction takes Config's
-  already-composed Resources, walks the requirement graph, dispatches miss policies for references
-  that don't resolve to operator-declared Resources, synthesizes auto-declared Resources, attaches
-  the `usage` list to each Resource, and detects cycles.
+- **The Registry exists independently of any particular source.** It starts empty; publishers add
+  Resources to it; after all publishers have contributed, the Registry validates itself. This
+  decoupling leaves the door open for future sources (plugins, manifests, etc.) without changing the
+  Registry's API.
+- **Publish phase** (Config-side): Config (and any future publisher) provides Resources to the
+  Registry via a `publish_to(registry)` call. The Registry accumulates them, translating Config's
+  `declared_at: SourceLocation` into the framework's
+  `Origin(variant="operator-declared", file=..., line=...)` at the time of publish. Multiple
+  publishers can contribute; the Registry just keeps adding.
+- **Validate phase** (Registry-side): after publishing completes, `registry.validate()` runs the
+  framework pass: walks the requirement graph, dispatches miss policies for references that don't
+  resolve to a published Resource, synthesizes auto-declared Resources (with
+  `Origin(variant="auto-declared", source=...)` from the kind's `synthesize`), attaches the `usage`
+  list to each Resource, and detects cycles. The Registry is mutable during publish; validate
+  finalizes it.
+- **Convenience entry point** for the common Config-only case:
+
+  ```python
+  def Registry.from_config(config: Config) -> Registry:
+      registry = Registry.empty()
+      config.publish_to(registry)
+      registry.validate()
+      return registry
+  ```
+
+  Most current call sites (the CLI's existing `load_config()`-style entry path) use this
+  convenience. The lower-level `publish_to` / `validate` split is exposed for future multi-source
+  scenarios.
+
+- **Layering rule**: Config does not depend on `agentworks.resources`. The publish call is on the
+  Registry's surface: `registry.publish_resources(kind, dict_of_resources)` (or similar), invoked by
+  Config's `publish_to(registry)` method. The translation from `SourceLocation` to `Origin` happens
+  in the Registry's accept-side, not in Config. Config remains framework-ignorant.
 - Exposes per-kind queries: `registry.secrets`, `registry.vm_templates`, etc. Each per-kind view
-  contains operator-declared Resources (from `Config`) **plus** auto-declared Resources synthesized
-  by the framework. All Resources carry full `origin` and `usage` metadata.
+  contains operator-declared Resources (from publishers) **plus** auto-declared Resources
+  synthesized during validate. All Resources in `Registry` carry full `origin` (framework type) and
+  `usage` metadata.
 - The framework's lookup surface lives here: `registry.lookup(kind, name)`, iter helpers, subgraph
   walks for eager-resolve, the data backing `agw doctor` / `agw secret describe` /
   `agw resource list|describe`. Surface sufficient for `collect_secrets_for(registry, root)`:
   `lookup` resolves the root and each transitive target; each Resource's `required_resources()`
   provides the edges to walk.
 
-**Copy, not mutate.** Resources in `Registry` are immutable copies of their `Config` counterparts
-with `usage` attached (Origin was already set at Config layer). The `Config` layer's instances stay
-pristine. The two layers may hold references to logically-equivalent Resources under the same name,
-but they are distinct objects: `Config.secrets["foo"]` has `usage=[]`; `Registry.secrets["foo"]` has
-`usage=[...]` populated from the requirement walks.
+**Copy, not mutate (across layers).** Resources in `Registry` are distinct objects from their
+`Config` counterparts. The Registry's Resource has `origin: Origin` (framework type, translated from
+Config's `declared_at` at publish time) and `usage: list[UsageEntry]` (populated during `validate`).
+The `Config` layer's instances stay pristine and carry only `declared_at`. The two layers hold
+distinct objects under the same name.
 
 ### Naming follow-up
 
@@ -169,19 +205,25 @@ composition / orphan-rejection / Origin-attachment from Phase 0):
 - **Orphan rejection** (FRD R2): a sub-section like `[vm_templates.x.env]` without
   `[vm_templates.x]` cannot produce a valid Resource, so Config errors. Lives here because Config
   has the schema knowledge of which kinds support which sub-sections.
-- **Origin attachment**: each operator-declared Resource gets
-  `Origin(variant="operator-declared", file=..., line=...)` set at construction time from the
-  `tomlkit` line capture.
+- **`declared_at` attachment**: each operator-declared Resource gets
+  `declared_at: SourceLocation(file=..., line=...)` set at construction time from the `tomlkit` line
+  capture. `SourceLocation` is Config's own type; the framework's `Origin` is a separate
+  Registry-layer concept constructed from `declared_at` when Resources are published into the
+  Registry (in `Registry.add` / `publish_to`).
 
-**Registry-layer validation** (in `build_registry`, new with this SDD):
+**Registry-layer validation** (in `Registry.validate`, new with this SDD; runs after all publishers
+have contributed via `publish_to`):
 
 - Requirement walks via each Resource's `required_resources()` (a Resource may declare it depends on
   others by `(kind, name)`).
-- Miss policy dispatch (auto-declare with optional reserved-name restriction; error). Operator-
-  declared Resources from `Config` satisfy requirements directly; missing ones trigger the kind's
-  miss policy.
+- Miss policy dispatch (auto-declare with optional reserved-name restriction; error).
+  Operator-declared Resources from publishers satisfy requirements directly; missing ones trigger
+  the kind's miss policy.
 - Reserved-name restrictions per kind (e.g., template kinds accept auto-decl only for `default`).
-- Synthesis of auto-declared Resources (with `Origin(variant="auto-declared", source=...)`).
+- **Origin attachment**: operator-declared Resources received
+  `Origin(variant="operator-declared", file=..., line=...)` at publish time (Registry translated
+  `declared_at` -> `Origin` then). Auto-declared Resources get
+  `Origin(variant="auto-declared", source=...)` from the kind's `synthesize` during validate.
 - Usage attachment: each Resource accumulates a `usage` list with one entry per matching
   requirement.
 - Cycle detection across the requirement graph.
@@ -210,7 +252,7 @@ framework's runtime API to the on-disk format. The layered split:
 When resources eventually move to per-resource YAML manifests, only the producer changes:
 
 ```text
-N YAML manifests -> parse each -> raw declarations -> build_registry() -> Registry
+N YAML manifests -> parse each -> manifest.publish_to(registry) -> registry.validate()
 ```
 
 The `Config` layer fragments (one parsed object per manifest file, or merged by `(kind, name)`) or
@@ -298,8 +340,8 @@ A Resource is the conceptual unit; TOML splits it across sections (a template's 
 `.env` sub-section plus any future sub-tables). The Config layer parses TOML and composes Resources
 from sections, publishing per-kind dicts of fully-composed Resources.
 
-The composition step enforces the FRD R2 orphan-rejection rule at the Config layer (not at
-`build_registry`):
+The composition step enforces the FRD R2 orphan-rejection rule at the Config layer (not in the
+Registry's publish/validate flow):
 
 ```python
 def _compose_resources(parsed_sections) -> Config:
@@ -308,8 +350,8 @@ def _compose_resources(parsed_sections) -> Config:
 
     For each multi-named kind whose sections support sub-tables (vm_templates,
     agent_templates, workspace_templates, session_templates, ...):
-      - For each [<container>.<name>] section, creates the Resource (with Origin
-        attached from the (file, line) tuple captured at parse time).
+      - For each [<container>.<name>] section, creates the Resource with
+        declared_at=SourceLocation(file, line) attached from the parse-time capture.
       - For each [<container>.<name>.<sub>] section, attaches the sub-section's
         fields to the existing Resource.
       - If a sub-section's parent [<container>.<name>] is not in parsed sections,
@@ -332,59 +374,91 @@ effectively a no-op for secrets in current practice. The rule still applies if s
 sub-section form.
 
 **Pipeline**: `load_config()` parses TOML, composes Resources, enforces orphan rejection, attaches
-`Origin(variant="operator-declared", ...)` to each composed Resource -> returns `Config` (a registry
-of operator-declared Resources). `build_registry(config)` adds auto-declared Resources, attaches
-`usage` lists, detects cycles -> returns `Registry`.
+`declared_at: SourceLocation` to each composed Resource -> returns `Config` (a registry of
+operator-declared Resources with parse-time location). The Registry starts empty;
+`config.publish_to(registry)` contributes Config's Resources (translating `declared_at` into
+`Origin` at the publish boundary). Future sources (plugins, manifests) would publish similarly.
+`registry.validate()` adds auto-declared Resources with
+`Origin(variant="auto-declared", source=...)`, attaches `usage` lists, detects cycles -> the
+Registry is now queryable. The CLI's typical entry point is the `Registry.from_config(config)`
+convenience, which wraps this pipeline.
 
-## Validation pass
+## Publish and validate
 
-`build_registry(config)` runs the validation pass on Config's already-composed Resources; the pass
-walks requirements, dispatches miss policies, attaches `usage`, and detects cycles. Conceptually:
+The Registry's lifecycle has two phases. **Publish** accepts Resources from any source; the Registry
+is mutable during this phase. **Validate** runs the framework pass and finalizes the Registry; once
+`validate()` returns, the Registry is queryable but no longer mutable.
 
 ```python
-def build_registry(config: Config) -> Registry:
-    # 1. Start with operator-declared resources from Config (already composed, with Origin
-    # set; the only thing missing is the usage list).
-    resources: dict[str, dict[str, Resource]] = config.as_resource_dicts()
+# Config-side: publish operator-declared Resources to the Registry.
+class Config:
+    def publish_to(self, registry: Registry) -> None:
+        """Publish each operator-declared Resource. Registry translates declared_at
+        into Origin(variant="operator-declared", ...) on its side."""
+        for kind, kind_dict in self.as_resource_dicts().items():
+            for name, resource in kind_dict.items():
+                registry.add(kind, name, resource, declared_at=resource.declared_at)
 
-    # 2. Collect all requirements across operator-declared resources.
-    requirements: list[ResourceRequirement] = []
-    for kind_dict in resources.values():
-        for resource in kind_dict.values():
-            requirements.extend(resource.required_resources())
+# Registry-side: accept publishes, then validate.
+class Registry:
+    def add(self, kind: str, name: str, resource: Resource, *,
+            declared_at: SourceLocation) -> None:
+        """Add an operator-declared Resource. Translates declared_at -> Origin here,
+        so Config doesn't depend on agentworks.resources."""
+        origin = Origin.operator_declared(
+            file=declared_at.file, line=declared_at.line,
+        )
+        self._resources.setdefault(kind, {})[name] = resource.with_origin(origin)
 
-    # 3. Group by (kind, name); preserve first-encountered ordering for origin recording.
-    by_target: dict[tuple[str, str], list[ResourceRequirement]] = {}
-    for req in requirements:
-        by_target.setdefault((req.kind, req.name), []).append(req)
+    def validate(self) -> None:
+        """Run the framework pass over already-published Resources. Auto-declares,
+        attaches usage, detects cycles. After return, the Registry is queryable but
+        no longer accepts publishes."""
+        # 1. Collect all requirements across published resources.
+        requirements: list[ResourceRequirement] = []
+        for kind_dict in self._resources.values():
+            for resource in kind_dict.values():
+                requirements.extend(resource.required_resources())
 
-    # 4. For each (kind, name): existing-in-config? auto-decl? error?
-    for (kind, name), reqs in by_target.items():
-        kind_handler = KIND_REGISTRY[kind]
-        existing = resources.get(kind, {}).get(name)
-        if existing is not None:
-            # Operator-declared (already has Origin from Config layer). Attach usage.
-            resources[kind][name] = existing.with_usage(_usage_list(reqs))
-        else:
-            # Missing: dispatch miss policy.
-            match kind_handler.miss_policy:
-                case "auto-declare":
-                    if kind_handler.auto_declare_names is None or name in kind_handler.auto_declare_names:
-                        # Synthesize with Origin(variant="auto-declared", source=reqs[0].source).
-                        resources.setdefault(kind, {})[name] = kind_handler.synthesize(reqs)
-                    else:
-                        raise ConfigError(...)  # reserved-name restriction violated
-                case "error":
-                    raise ConfigError(...)
+        # 2. Group by (kind, name); preserve first-encountered ordering for origin
+        # recording.
+        by_target: dict[tuple[str, str], list[ResourceRequirement]] = {}
+        for req in requirements:
+            by_target.setdefault((req.kind, req.name), []).append(req)
 
-    # 5. Cycle detection across the now-complete requirement graph.
-    _detect_cycles(by_target)
+        # 3. For each (kind, name): existing-in-registry? auto-decl? error?
+        for (kind, name), reqs in by_target.items():
+            kind_handler = KIND_REGISTRY[kind]
+            existing = self._resources.get(kind, {}).get(name)
+            if existing is not None:
+                # Operator-declared (Origin already attached at publish). Attach usage.
+                self._resources[kind][name] = existing.with_usage(_usage_list(reqs))
+            else:
+                # Missing: dispatch miss policy.
+                match kind_handler.miss_policy:
+                    case "auto-declare":
+                        if (kind_handler.auto_declare_names is None
+                                or name in kind_handler.auto_declare_names):
+                            # synthesize attaches Origin(variant="auto-declared", ...).
+                            self._resources.setdefault(kind, {})[name] = (
+                                kind_handler.synthesize(reqs)
+                            )
+                        else:
+                            raise ConfigError(...)  # reserved-name restriction violated
+                    case "error":
+                        raise ConfigError(...)
 
-    # 6. Build the immutable Registry from the per-kind dicts.
-    return Registry(secrets=resources.get("secret", {}),
-                    vm_templates=resources.get("vm_template", {}),
-                    # ... per-kind fields
-                    )
+        # 4. Cycle detection across the now-complete requirement graph.
+        _detect_cycles(by_target)
+        self._frozen = True
+
+# Convenience for the common Config-only case.
+@classmethod
+def from_config(cls, config: Config) -> Registry:
+    registry = cls.empty()
+    config.publish_to(registry)
+    registry.validate()
+    return registry
 ```
 
 Walk order for `requirements` is config-load order: top-to-bottom in the TOML file, top-level
@@ -705,8 +779,8 @@ follow-up PR sequence on a separate branch.
 
 ### One package, one validation pass
 
-`agentworks.resources` is a single package with a single entry point (`build_registry(config)`)
-called from the loader. Alternatives considered:
+`agentworks.resources` is a single package whose Registry exposes a publish/validate API (plus the
+`Registry.from_config(config)` convenience). Alternatives considered:
 
 - Distributing the dispatch logic across the existing config types (each type's `__post_init__`
   validates its own references). Rejected because it scatters validation logic and makes cycle

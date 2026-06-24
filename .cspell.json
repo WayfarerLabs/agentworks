@@ -15,6 +15,7 @@
     "buildx",
     "chsh",
     "ciuser",
+    "classmethod",
     "cmdline",
     "cpus",
     "creds",
