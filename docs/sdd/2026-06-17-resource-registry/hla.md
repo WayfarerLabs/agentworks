@@ -131,6 +131,40 @@ mutation). The two layers may hold references to logically-equivalent resources 
 but they are distinct objects: `Config.secrets["foo"]` carries raw parse-time fields;
 `Registry.secrets["foo"]` carries the same data plus the framework metadata.
 
+### Validation responsibilities
+
+Each layer owns a specific class of validation. Both raise `ConfigError`; the layer that catches
+the issue determines the error's framing.
+
+**Config-layer validation** (in `agentworks.config`, today's behavior plus the new file:line
+capture from Phase 0):
+
+- TOML parse errors (syntax, duplicate keys at the same path).
+- Field types per the schema (`str`/`int`/`bool`/`list`/inline-table shapes).
+- Required fields present per resource type.
+- Name regex / kebab-case validation for operator-typed identifiers.
+- Operator-typed value validation (e.g., URL formats, enum values like
+  `git_credentials.type in {"github", "azdo"}`).
+- All checks operate per-section; no cross-resource awareness.
+
+**Registry-layer validation** (in `build_registry`, new with this SDD):
+
+- Resource composition from parsed sections (top-level + sub-section pairs into one resource).
+- Orphan rejection (sub-section without an explicit parent) -- structural in nature but
+  requires framework knowledge of which kinds support sub-sections, so it lives at the Registry
+  layer.
+- Requirement walks via each resource's `required_resources()`.
+- Miss policy dispatch (auto-declare with optional reserved-name restriction; error).
+- Reserved-name restrictions per kind (e.g., template kinds accept auto-decl only for
+  `default`).
+- Cycle detection across the requirement graph.
+- All semantic / cross-resource checks.
+
+`ConfigError` from the Config layer carries parse-time context (file/line, field name).
+`ConfigError` from the Registry layer carries framework context (kind, name, requirement
+source). Same exception type; consistent rendering at the CLI layer; the message body
+distinguishes.
+
 ### Why two layers, not a rename
 
 The original draft renamed `Config` to `Registry`. That conflated two concepts (parsing vs.
