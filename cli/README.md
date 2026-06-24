@@ -262,8 +262,9 @@ cannot collide with any pre-existing ControlMaster setup the operator may alread
 elsewhere. If the master socket cannot bind (read-only `~/.ssh`, network filesystems with weird
 locking, etc.), OpenSSH transparently falls back to a fresh handshake per call -- no behavior
 regression. To override the defaults (different persist, different path, disable multiplexing
-entirely), add a `Host 100.*` or `Host *` block above the agentworks `Include` directive;
-`ssh_config` first-match-wins.
+entirely), add a `Host 100.*` or `Host *` block in your own `~/.ssh/config` above the agentworks
+`Include` directive (agentworks places the `Include` at the top on first run; you may need to move
+it below your override block). `ssh_config` first-match-wins.
 
 The IP-keyed block deliberately doesn't ride on the `awvm--*` / `awagent--*` aliases because OpenSSH
 matches `Host` patterns against the command-line argument literally and agentworks SSHs by IP. If

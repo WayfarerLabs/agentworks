@@ -51,6 +51,8 @@ _MANAGED_CONF = "agentworks.conf"
 # Operators who want different settings can layer their own ``Host *`` block
 # above the agentworks ``Include`` directive; ssh_config's first-match-wins
 # semantics apply.
+# OpenSSH expands ``~`` client-side at connect time; no need to route this
+# literal through ``_to_ssh_path`` like the IdentityFile paths.
 _CONTROL_PATH = "~/.ssh/agentworks-cm-%C"
 _CONTROL_PERSIST = "60s"  # OpenSSH accepts a unit suffix; the ``s`` makes it self-documenting.
 
@@ -129,35 +131,38 @@ def _legacy_rebuild(config: Config, db: Database) -> None:
     prefix = config.operator.ssh_host_prefix
     agent_prefix = config.operator.ssh_agent_host_prefix
 
-    entries: dict[str, str] = {}
+    host_blocks: list[str] = []
+    cm_blocks: list[str] = []
     seen_ips: set[str] = set()
     for vm in db.list_vms():
         if not vm.tailscale_host:
             continue
-        vm_alias = ssh_host_alias(vm.name, prefix)
-        entries[vm_alias] = _format_entry(
-            alias=vm_alias,
-            hostname=vm.tailscale_host,
-            user=vm.admin_username,
-            identity_file=config.operator.ssh_private_key,
+        host_blocks.append(
+            _format_entry(
+                alias=ssh_host_alias(vm.name, prefix),
+                hostname=vm.tailscale_host,
+                user=vm.admin_username,
+                identity_file=config.operator.ssh_private_key,
+            )
         )
         # Per-agent aliases on this VM (parity with _rebuild_config_dir).
         for agent in db.list_agents(vm_name=vm.name):
-            agent_alias = ssh_agent_alias(agent.name, agent_prefix)
-            entries[agent_alias] = _format_entry(
-                alias=agent_alias,
-                hostname=vm.tailscale_host,
-                user=agent.linux_user,
-                identity_file=config.operator.ssh_private_key,
+            host_blocks.append(
+                _format_entry(
+                    alias=ssh_agent_alias(agent.name, agent_prefix),
+                    hostname=vm.tailscale_host,
+                    user=agent.linux_user,
+                    identity_file=config.operator.ssh_private_key,
+                )
             )
         # One IP-keyed ControlMaster block per VM. Admin and agents on the
         # same VM share it because their SSH calls hit the same IP and
         # ``%C`` keys on the remote user.
         if vm.tailscale_host not in seen_ips:
             seen_ips.add(vm.tailscale_host)
-            entries[f"__cm__{vm.tailscale_host}"] = _format_ip_controlmaster_block(vm.tailscale_host)
+            cm_blocks.append(_format_ip_controlmaster_block(vm.tailscale_host))
 
-    _write_legacy(ssh_config, user_section, entries)
+    _write_legacy(ssh_config, user_section, host_blocks, cm_blocks)
 
 
 # -- config.d approach -----------------------------------------------------
@@ -342,17 +347,27 @@ def _read_managed(ssh_config: Path) -> tuple[str, dict[str, str]]:
 def _write_legacy(
     ssh_config: Path,
     user_section: str,
-    entries: dict[str, str],
+    host_blocks: list[str],
+    cm_blocks: list[str] | None = None,
 ) -> None:
-    """Write the SSH config file with operator-managed section + agentworks-managed section."""
+    """Write the SSH config file with operator-managed section + agentworks-managed section.
+
+    ``host_blocks`` are the per-alias Host blocks (VMs and agents);
+    ``cm_blocks`` are the per-VM-IP ControlMaster blocks (one per
+    unique Tailscale IP). They're written in that order so the file
+    layout mirrors ``_rebuild_config_dir``: all aliases first, then
+    all ControlMaster blocks.
+    """
     ssh_config.parent.mkdir(parents=True, exist_ok=True)
 
     parts = [user_section.rstrip("\n")]
 
-    if entries:
+    if host_blocks:
         parts.append("")
         parts.append(_LEGACY_MARKER)
-        for block in entries.values():
+        for block in host_blocks:
+            parts.append(block.rstrip("\n"))
+        for block in cm_blocks or []:
             parts.append(block.rstrip("\n"))
 
     content = "\n".join(parts)

@@ -370,14 +370,17 @@ def test_rebuild_config_dir_emits_controlmaster_per_vm_ip(tmp_path: Path) -> Non
     _rebuild_config_dir(config, db)
 
     content = (ssh_dir / "config.d" / _MANAGED_CONF).read_text()
-    assert "Host 100.64.0.1\n" in content
-    assert "Host 100.64.0.2\n" in content
+    # Set-based assertion -- doesn't depend on ``db.list_vms()`` iteration
+    # order, which is incidental SQLite behavior we don't want to lock in.
+    cm_hosts = {
+        line.split()[1]
+        for line in content.splitlines()
+        if line.startswith("Host ") and line.split()[1].startswith("100.")
+    }
+    assert cm_hosts == {"100.64.0.1", "100.64.0.2"}
     assert "ControlMaster auto" in content
     assert "ControlPath ~/.ssh/agentworks-cm-%C" in content
     assert "ControlPersist 60s" in content
-    # Exactly one ControlMaster block per VM (no per-agent duplicates even
-    # when agents are added below; see the per-VM-IP dedup test).
-    assert content.count("ControlMaster auto") == 2
 
 
 def test_rebuild_config_dir_dedupes_controlmaster_for_agents(tmp_path: Path) -> None:
