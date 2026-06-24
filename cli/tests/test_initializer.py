@@ -14,6 +14,7 @@ from agentworks.catalog import (
 from agentworks.vms.initializer import (
     _configure_apt_sources,
     _install_apt_packages,
+    _preserve_ssh_host_keys,
     _run_catalog_commands,
 )
 
@@ -531,6 +532,89 @@ def test_run_catalog_commands_runs_when_test_dir_missing() -> None:
     assert result == []
     run_calls = [str(c) for c in target.run.call_args_list]
     assert any("sh -c" in c for c in run_calls)
+
+
+# -- SSH host key preservation ---------------------------------------------
+
+
+def test_preserve_ssh_host_keys_writes_dropin() -> None:
+    """Writes the cloud-init drop-in as root with the canonical content."""
+    from agentworks.vms.bootstrap_script import (
+        SSH_PRESERVE_KEYS_LINES,
+        SSH_PRESERVE_KEYS_PATH,
+    )
+
+    target = MagicMock()
+    target.run.return_value = MagicMock(stdout="", stderr="", returncode=0, ok=True)
+    logger = MagicMock()
+    logger.has_warnings = False
+
+    _preserve_ssh_host_keys(target, logger)
+
+    assert target.run.call_count == 1
+    cmd = target.run.call_args[0][0]
+    assert target.run.call_args.kwargs.get("sudo") is True
+    assert SSH_PRESERVE_KEYS_PATH in cmd
+    assert "/etc/cloud/cloud.cfg.d" in cmd  # parent created
+    for line in SSH_PRESERVE_KEYS_LINES:
+        assert line in cmd
+    logger.warning.assert_not_called()
+
+
+def test_preserve_ssh_host_keys_warns_on_failure() -> None:
+    """A failure is non-fatal: logged as a warning, no exception raised."""
+    from agentworks.ssh import SSHError
+
+    target = MagicMock()
+    target.run.side_effect = SSHError("permission denied")
+    logger = MagicMock()
+    logger.has_warnings = False
+
+    _preserve_ssh_host_keys(target, logger)
+
+    logger.warning.assert_called_once()
+
+
+def test_preserve_ssh_host_keys_emits_same_bytes_as_phase_a() -> None:
+    """Drift guard between Phase A (heredoc) and Phase B (printf).
+
+    Phase A writes SSH_PRESERVE_KEYS_CONTENT verbatim via a cloud-init
+    heredoc. Phase B writes via `printf '%s\\n' <line> <line> ...`. Both
+    produce the same on-disk bytes today; a future tweak to either
+    rendering (e.g. `printf '%s\\r\\n'`, switching to `tee`, swapping the
+    heredoc terminator) would silently diverge what cloud-init reads on
+    Phase-A VMs vs what Phase B reconciles in. Pin the helper's printf
+    format + arg list together with the byte-equivalence between
+    "printf '%s\\n' SSH_PRESERVE_KEYS_LINES" and SSH_PRESERVE_KEYS_CONTENT.
+    """
+    import shlex
+
+    from agentworks.vms.bootstrap_script import (
+        SSH_PRESERVE_KEYS_CONTENT,
+        SSH_PRESERVE_KEYS_LINES,
+    )
+
+    target = MagicMock()
+    target.run.return_value = MagicMock(stdout="", stderr="", returncode=0, ok=True)
+    logger = MagicMock()
+
+    _preserve_ssh_host_keys(target, logger)
+    cmd = target.run.call_args[0][0]
+
+    # Pin the format string and each arg so a refactor to a different
+    # builder (echo -e, tee, multi-line heredoc, %s\r\n, etc.) is loud.
+    assert "printf '%s\\n' " in cmd
+    for line in SSH_PRESERVE_KEYS_LINES:
+        assert shlex.quote(line) in cmd
+
+    # And the byte-level result of `printf '%s\n' <lines>` must equal
+    # the canonical content that Phase A writes verbatim. The constant's
+    # definition already satisfies this, but locking it as a test keeps
+    # the equivalence load-bearing rather than incidental.
+    assert (
+        "".join(f"{line}\n" for line in SSH_PRESERVE_KEYS_LINES)
+        == SSH_PRESERVE_KEYS_CONTENT
+    )
 
 
 # -- install_claude_plugins ------------------------------------------------

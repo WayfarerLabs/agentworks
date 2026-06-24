@@ -731,6 +731,42 @@ def _reconcile_authorized_keys(
         target.run(f"rm -f {shlex.quote(staging)}", check=False)
 
 
+def _preserve_ssh_host_keys(
+    target: Transport,
+    logger: SSHLogger,
+) -> None:
+    """Stop cloud-init from regenerating SSH host keys on stop/start.
+
+    Writes the cloud-init drop-in that pins existing host keys. This also runs
+    during Phase A bootstrap, but reconciling it here means VMs provisioned
+    before the drop-in existed get repaired on ``vm reinit`` -- otherwise their
+    host key changes on the next reboot and SSH fails with a changed-host-key
+    error until the operator clears known_hosts by hand.
+
+    Inert on platforms without cloud-init (e.g. WSL2): the file is simply never
+    read. Written unconditionally to keep the step platform-agnostic, matching
+    the Phase A bootstrap step.
+    """
+    from pathlib import PurePosixPath
+
+    from agentworks.vms.bootstrap_script import SSH_PRESERVE_KEYS_LINES, SSH_PRESERVE_KEYS_PATH
+
+    logger.step("Preserve SSH host keys")
+    output.detail("Ensuring SSH host key preservation...")
+
+    parent = str(PurePosixPath(SSH_PRESERVE_KEYS_PATH).parent)
+    printf_args = " ".join(shlex.quote(line) for line in SSH_PRESERVE_KEYS_LINES)
+    try:
+        target.run(
+            f"mkdir -p {shlex.quote(parent)} && printf '%s\\n' {printf_args} > {shlex.quote(SSH_PRESERVE_KEYS_PATH)}",
+            sudo=True,
+        )
+    except SSHError as e:
+        msg = f"SSH host key preservation failed: {e}"
+        logger.warning(msg)
+        output.warn(msg)
+
+
 def _configure_apt_sources(
     target: Transport,
     config: Config,
@@ -1526,10 +1562,17 @@ def _phase_b_setup(
     catalog = load_catalog(config)
     validate_selections(config, catalog)
 
+    # Non-fatal: ensure cloud-init won't regenerate SSH host keys on reboot.
+    # Runs first so VMs predating the Phase A step are repaired on reinit
+    # even if a later step warns. Idempotent overwrite with identical
+    # content.
+    _preserve_ssh_host_keys(ts_target, logger)
+
     # Non-fatal: VM hardening (sysctl baseline + /proc hidepid>=1).
-    # First step in Phase B so the rest of init runs under the hardened
-    # baseline. Depends only on coreutils + procps (always present);
-    # nothing here needs apt-installed packages. Idempotent on reinit.
+    # Runs before the rest of init so subsequent steps execute under the
+    # hardened baseline. Depends only on coreutils + procps (always
+    # present); nothing here needs apt-installed packages. Idempotent on
+    # reinit.
     from agentworks.vms.hardening import apply_vm_hardening
 
     apply_vm_hardening(ts_target, logger)
@@ -1791,9 +1834,7 @@ def _phase_b_setup(
         inner = shlex.quote(cmd)
         return ts_target.run(f"{admin_shell} -lc {inner}", timeout=timeout)
 
-    install_claude_plugins(
-        _admin_run_cmd, config.admin.claude_marketplaces, config.admin.claude_plugins, logger
-    )
+    install_claude_plugins(_admin_run_cmd, config.admin.claude_marketplaces, config.admin.claude_plugins, logger)
 
     # Defensive final step: re-ensure source lines in case any earlier
     # step (dotfiles install in particular) overwrote a shell rc file
