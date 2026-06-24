@@ -156,10 +156,13 @@ layer) and **what the framework sees** (`Registry`, runtime layer).
   convenience. The lower-level `publish_to` / `validate` split is exposed for future multi-source
   scenarios.
 
-- **Layering rule**: Config does not depend on `agentworks.resources`. The publish call is on the
-  Registry's surface: `registry.publish_resources(kind, dict_of_resources)` (or similar), invoked by
-  Config's `publish_to(registry)` method. The translation from `SourceLocation` to `Origin` happens
-  in the Registry's accept-side, not in Config. Config remains framework-ignorant.
+- **Layering rule**: Config's parsing-and-composition logic does not depend on
+  `agentworks.resources`. The one exception is `Config.publish_to(registry: Registry)` (added in
+  Phase 1a), which is the explicit layer handoff and needs `Registry` for the type hint. The publish
+  call is on the Registry's surface: `registry.add(kind, name, resource, *, declared_at=...)` --
+  per-Resource, not per-kind-dict. Config's `publish_to` iterates its per-kind dicts and calls
+  `registry.add(...)` for each Resource. The translation from `SourceLocation` to `Origin` happens
+  inside `Registry.add`, not in Config. Config's data structures remain framework-ignorant.
 - Exposes per-kind queries: `registry.secrets`, `registry.vm_templates`, etc. Each per-kind view
   contains operator-declared Resources (from publishers) **plus** auto-declared Resources
   synthesized during validate. All Resources in `Registry` carry full `origin` (framework type) and

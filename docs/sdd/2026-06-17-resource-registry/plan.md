@@ -110,15 +110,20 @@ synthesize.
     and freezes the Registry. Does NOT compose Resources -- that's Config's responsibility.
   - `Registry.from_config(config: Config) -> Registry` (classmethod): the convenience entry point.
     Equivalent to `r = cls.empty(); config.publish_to(r); r.validate(); return r`.
-- [ ] `cli/agentworks/secrets/base.py`: `SecretDecl` gains `usage: list[UsageEntry]` field.
-      (`declared_at: SourceLocation` was added in Phase 0 at the Config layer; `Origin` is attached
-      when the Resource is published into a Registry.) `usage` defaults to empty; the Registry's
-      `validate()` populates it on operator-declared Resources via `with_usage(...)` and on
-      auto-declared Resources via `SecretKind.synthesize`.
+- [ ] **Add `origin: Origin | None` and `usage: list[UsageEntry]` fields to every Resource type**:
+      `SecretDecl` in `agentworks/secrets/base.py`; `VMTemplate`, `WorkspaceTemplate`,
+      `AgentTemplate`, `SessionTemplate`, `AdminConfig`, `SecretConfig`, `SecretBackendConfig`,
+      `GitCredentialConfig` in `agentworks/config.py`. Both default to `None` / empty list at
+      construction; the Registry populates them (origin at publish via `Registry.add` calling
+      `with_origin(...)`; usage during validate via `with_usage(...)`). The Config-layer
+      `declared_at: SourceLocation` (Phase 0) stays as Config's representation; the Registry-layer
+      `origin: Origin` is the framework's representation. Both exist on the same Resource instance
+      after publish. Resource types gain `with_origin` / `with_usage` copy methods (or
+      `@dataclass(frozen=True)` + `dataclasses.replace` shapes; LLD picks).
 - [ ] `cli/agentworks/config.py`: add `Config.publish_to(self, registry: Registry) -> None`.
       Iterates Config's per-kind dicts and calls
-      `registry.add(kind, name, resource,     declared_at=resource.declared_at)` for each. This is
-      the only point at which `agentworks.config` imports from `agentworks.resources` (specifically
+      `registry.add(kind, name, resource, declared_at=resource.declared_at)` for each. This is the
+      only point at which `agentworks.config` imports from `agentworks.resources` (specifically
       `Registry` for type hinting). The import is allowed because `publish_to` is the explicit
       handoff between layers; the Config layer's data structures and parsing remain
       framework-ignorant.
@@ -428,3 +433,6 @@ pin:
 - The exact subclass hierarchy of `ResourceRequirement` (frozen dataclasses with `kw_only`? what
   about hashability when used as dict keys?).
 - The `UsageEntry` serialization shape for `agw secret describe` rendering.
+- The exact shape of `with_origin` / `with_usage` on Resource types: shared mixin / base class with
+  the framework-attached fields, or per-type `@dataclass(frozen=True)` + `dataclasses.replace`
+  calls? Affects how invasive the Phase 1a edits to existing Resource types are.
