@@ -133,11 +133,11 @@ but they are distinct objects: `Config.secrets["foo"]` carries raw parse-time fi
 
 ### Validation responsibilities
 
-Each layer owns a specific class of validation. Both raise `ConfigError`; the layer that catches
-the issue determines the error's framing.
+Each layer owns a specific class of validation. Both raise `ConfigError`; the layer that catches the
+issue determines the error's framing.
 
-**Config-layer validation** (in `agentworks.config`, today's behavior plus the new file:line
-capture from Phase 0):
+**Config-layer validation** (in `agentworks.config`, today's behavior plus the new file:line capture
+from Phase 0):
 
 - TOML parse errors (syntax, duplicate keys at the same path).
 - Field types per the schema (`str`/`int`/`bool`/`list`/inline-table shapes).
@@ -150,20 +150,17 @@ capture from Phase 0):
 **Registry-layer validation** (in `build_registry`, new with this SDD):
 
 - Resource composition from parsed sections (top-level + sub-section pairs into one resource).
-- Orphan rejection (sub-section without an explicit parent) -- structural in nature but
-  requires framework knowledge of which kinds support sub-sections, so it lives at the Registry
-  layer.
+- Orphan rejection (sub-section without an explicit parent) -- structural in nature but requires
+  framework knowledge of which kinds support sub-sections, so it lives at the Registry layer.
 - Requirement walks via each resource's `required_resources()`.
 - Miss policy dispatch (auto-declare with optional reserved-name restriction; error).
-- Reserved-name restrictions per kind (e.g., template kinds accept auto-decl only for
-  `default`).
+- Reserved-name restrictions per kind (e.g., template kinds accept auto-decl only for `default`).
 - Cycle detection across the requirement graph.
 - All semantic / cross-resource checks.
 
 `ConfigError` from the Config layer carries parse-time context (file/line, field name).
-`ConfigError` from the Registry layer carries framework context (kind, name, requirement
-source). Same exception type; consistent rendering at the CLI layer; the message body
-distinguishes.
+`ConfigError` from the Registry layer carries framework context (kind, name, requirement source).
+Same exception type; consistent rendering at the CLI layer; the message body distinguishes.
 
 ### Why two layers, not a rename
 
