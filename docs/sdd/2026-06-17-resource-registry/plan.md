@@ -9,41 +9,41 @@ Reviewer pass with the `agentworks-reviewer` agent runs after each phase. The ba
 perfect" (per the user's standing direction); iterate until findings are addressed before moving to
 the next phase.
 
-## Phase 0: Rename `Config` -> `Registry`; add `tomlkit`
+## Phase 0: `tomlkit` + line capture on parsed Config
 
-Goal: prepare the codebase for the framework. Pure refactor / dependency add; no behavior change.
+Goal: prepare the parser layer for the framework. No rename. `Config` stays in
+`agentworks/config.py`; the framework's `Registry` is introduced in Phase 1a as a new layer built
+from `Config`.
 
-- [ ] **Rename**: `agentworks.config.Config` -> `agentworks.registry.Registry`;
-      `agentworks/config.py` -> `agentworks/registry.py`; `load_config()` -> `load_registry()`.
-      Mechanical refactor via VSCode language server (or `ruff`-aware AST rename). Every import,
-      every `Config` typed parameter, every test reference, every docstring mention.
-- [ ] Nested sub-types keep their `*Config` names: `AdminConfig`, `SecretConfig`,
-      `SecretBackendConfig`, etc. Only the top-level container renames. TOML paths
-      (`[admin.config]`, `[secret_config]`) are unchanged operator-facing surface.
-- [ ] `cli/pyproject.toml`: add `tomlkit` dependency. The loader switches to it for line-number
-      capture (per HLA "tomlkit for line tracking"). Existing `tomllib` calls migrate mechanically;
-      the parsed-types surface that downstream code consumes doesn't change shape.
-- [ ] `agentworks/registry.py` (formerly `config.py`): the parse step now captures
-      `(file: Path, line: int)` for each top-level resource section's opening line, threaded into
-      the parsed-types so the validation pass can populate `Origin`. Phase 0 just captures the data;
-      Phase 1a uses it.
-- [ ] **Tests**: existing test suite stays green. Add `cli/tests/test_registry_line_capture.py`
-      pinning that every operator-declared resource carries a `(file, line)` tuple after load,
-      across all kinds today (`secrets`, `vm_templates`, `agent_templates`, `workspace_templates`,
+- [ ] `cli/pyproject.toml`: add `tomlkit` dependency (latest stable).
+- [ ] `agentworks/config.py`: switch the parse step from `tomllib` to `tomlkit`. Existing
+      `load_config()` and `Config` keep their signatures; only the internal parser changes. The
+      parsed-types surface that downstream code consumes doesn't change shape.
+- [ ] `agentworks/config.py`: capture `(file: Path, line: int)` for each top-level resource
+      section's opening line, threaded into the parsed sub-type instances (`AdminConfig`,
+      `SecretConfig`, `SecretBackendConfig`, per-kind dicts of declared resources). Phase 0 just
+      captures the data; Phase 1a's `build_registry` consumes it when building `Origin`.
+- [ ] **Tests**: existing suite stays green. Add `cli/tests/test_config_line_capture.py` pinning
+      that every operator-declared resource carries a `(file, line)` tuple after load, across all
+      kinds today (`secrets`, `vm_templates`, `agent_templates`, `workspace_templates`,
       `session_templates`, `git_credentials`).
+- [ ] **Tests**: add a comment-roundtrip test or similar to confirm the `tomlkit` migration doesn't
+      regress operator-facing behavior on the existing sample-config.
 
-Definition of done: `from agentworks.registry import Registry, load_registry` works; the parsed
+Definition of done: `from agentworks.config import Config, load_config` works as before; the parsed
 types carry `(file, line)` on every operator-declared section; `tomlkit` is on `cli/pyproject.toml`;
 CI green; reviewer-approved.
 
 ## Phase 1a: Framework foundations
 
-Goal: stand up the `agentworks.resources` package with the core types, the `_compose_resources`
-loader step (with orphan-rejection), the validation pass (walk requirements, dispatch miss policies,
-attach metadata, detect cycles), and `SecretKind`. No consumers wired yet.
+Goal: stand up the `agentworks.resources` package with the core types, the new `Registry` class, the
+`_compose_resources` step (with orphan-rejection), the validation pass (walk requirements, dispatch
+miss policies, attach metadata, detect cycles), and `SecretKind`. No consumers wired yet beyond
+`build_registry(config)` -> `Registry`.
 
 - [ ] `cli/agentworks/resources/__init__.py`: public surface re-exports (`ResourceRequirement`,
-      `SecretRequirement`, `ResourceKind`, `Origin`, `UsageEntry`, `collect_secrets_for`).
+      `SecretRequirement`, `ResourceKind`, `Origin`, `UsageEntry`, `Registry`, `build_registry`,
+      `collect_secrets_for`).
 - [ ] `cli/agentworks/resources/requirement.py`:
   - `ResourceRequirement` immutable dataclass (base): `name`, `kind`, `usage`, `source`.
   - `SecretRequirement(ResourceRequirement)` concrete subclass (no extra fields in Phase 1; the
@@ -66,15 +66,19 @@ attach metadata, detect cycles), and `SecretKind`. No consumers wired yet.
     `auto_declare_names=None` (any name). `synthesize` builds a `SecretDecl` with framework-set
     `usage` list (paired `UsageEntry`s) and `origin=auto-declared`.
 - [ ] `cli/agentworks/resources/registry.py`:
-  - `_compose_resources(parsed, registry)`: composes parsed TOML sections into resources; enforces
-    orphan-rejection (R2) -- sub-sections without explicit parent raise `ConfigError` with a clear
-    "declare the parent or move the content" message. Singletons (`admin`, `secret_config`) are
-    exempt.
-  - `_run_validation_pass(registry)`: collects requirements via `required_resources()` across all
-    resources, groups by `(kind, name)`, dispatches per `KIND_REGISTRY` miss policy, populates
-    registry, attaches framework metadata (`origin` + `usage` list) to operator-declared resources,
-    then runs cycle detection (DFS three-coloring).
-  - Both functions called from `registry.load_registry()`: parse -> compose -> validate -> return.
+  - `Registry` immutable dataclass: per-kind dicts of resources (`secrets`, `vm_templates`,
+    `agent_templates`, ...) each with `Origin` and `usage` attached. Lookup helpers
+    (`lookup(kind, name)`, `iter_kind(kind)`).
+  - `build_registry(config: Config) -> Registry`: the entry point. Internally calls
+    `_compose_resources(config)` then runs the validation pass.
+  - `_compose_resources(config)`: walks the parsed `Config` sections, composes resources from
+    top-level + sub-section pairs, enforces orphan-rejection (R2) -- sub-sections without an
+    explicit parent raise `ConfigError` with a clear "declare the parent or move the content"
+    message. Singletons (`admin`, `secret_config`) are exempt.
+  - Validation pass (inside `build_registry`): collects requirements via `required_resources()`
+    across composed resources, groups by `(kind, name)`, dispatches per `KIND_REGISTRY` miss policy,
+    attaches framework metadata (`origin` from Config's file:line capture; `usage` list from
+    requirements), runs cycle detection (DFS three-coloring), and returns the final `Registry`.
 - [ ] `cli/agentworks/secrets/base.py`: `SecretDecl` gains `origin: Origin` and
       `usage: list[UsageEntry]` fields. Frozen dataclass updated; defaults preserve backward-compat
       for any existing construction sites that don't set them (operator-declared parsed in Phase 0;
@@ -98,9 +102,9 @@ attach metadata, detect cycles), and `SecretKind`. No consumers wired yet.
   - `cli/tests/resources/test_kind_registry.py`: `KIND_REGISTRY["secret"]` lookup,
     `SecretKind.synthesize` shape.
 
-Definition of done:
-`from agentworks.resources import ResourceRequirement, ResourceKind, Origin, collect_secrets_for`
-works; the validation pass runs on every config load (no-op for current configs since no producers
+Definition of done: the public surface (`ResourceRequirement`, `ResourceKind`, `Origin`, `Registry`,
+`build_registry`, `collect_secrets_for`, etc.) is importable from `agentworks.resources`;
+`build_registry(config)` runs on every config load (no-op for current configs since no producers
 wired yet); orphan-rejection fires on synthetic test configs; CI green; reviewer-approved.
 
 ## Phase 1b: Env-block secret-reference migration
@@ -114,7 +118,7 @@ showing every auto-declared secret with its origin source.
       `required_resources(source: tuple[str, str]) -> list[ResourceRequirement]`. Returns one
       `SecretRequirement` per referenced secret. Usage text derived from the env-block context
       (e.g., `"the ANTHROPIC_API_KEY env var"`).
-- [ ] `cli/agentworks/registry.py`: env-block resources (admin, vm_template, workspace_template,
+- [ ] `cli/agentworks/config.py`: env-block resources (admin, vm_template, workspace_template,
       agent_template, session_template -- each of which has an env block) implement
       `required_resources()` by iterating their `env` dict and aggregating per-entry requirements.
 - [ ] Remove the env-and-secrets validation that errored on undeclared env-block secret refs
@@ -142,7 +146,7 @@ Goal: VM template gains `tailscale_auth_key`; `vm create` / `vm reinit` walk the
 subgraph, eager-resolve the auth-key secret, thread it as a kwarg to the Tailscale install runner.
 Legacy resolution path removed.
 
-- [ ] `cli/agentworks/registry.py` (VMTemplate parsed type): add
+- [ ] `cli/agentworks/config.py` (VMTemplate parsed type): add
       `tailscale_auth_key: str = "tailscale-auth-key"` field. Validate: must be a bare string (no
       `{ secret = "..." }` polymorphism, no plaintext-literal heuristic). Sample config updated.
 - [ ] `cli/agentworks/vms/templates.py` (`ResolvedVMTemplate`): same field; threaded through
@@ -186,7 +190,7 @@ Goal: each `[git_credentials.<name>]` entry gains a `token` field referencing a 
 agent provisioning walks the requirement subgraph; tokens reach the install runner as kwargs. Legacy
 `obtain_token` path removed.
 
-- [ ] `cli/agentworks/registry.py` (`GitCredentialEntry`): add a `token: str` field defaulting to
+- [ ] `cli/agentworks/config.py` (`GitCredentialEntry`): add a `token: str` field defaulting to
       `git-token-<name>`. The default is computed (in `__post_init__` or by the parser; a dataclass
       literal default can't interpolate the entry's name), not hard-coded. Validate: bare string.
       Same shape rule as `tailscale_auth_key`.

@@ -4,34 +4,45 @@
 
 ## Overview
 
-The framework lands as a new `agentworks.resources` package that sits beneath the registry loader
-(`agentworks.registry`, formerly `agentworks.config`) and beside `agentworks.secrets` /
-`agentworks.env`. It introduces three core types -- `ResourceRequirement`, `ResourceKind`, and an
-`Origin` record on every resource -- plus a validation pass that runs at the end of
-`registry.load_registry()` to walk requirements, dispatch miss policies, populate the registry, and
-detect cycles.
+The framework lands as a new `agentworks.resources` package that introduces a **second layer**
+between the existing `agentworks.config` parser and the runtime / manager layers. Two layers,
+distinct responsibilities:
+
+- **`Config`** (existing, in `agentworks/config.py`): the parsed source. Mirrors the on-disk TOML
+  structure. Holds raw operator-declared sections (`AdminConfig`, `SecretConfig`, secrets dict,
+  vm_templates dict, ...) and captures `(file, line)` per top-level section. Today's parser; minimal
+  changes (line-info capture, tomlkit migration).
+- **`Registry`** (new, in `agentworks/resources/registry.py`): the framework's typed, queryable
+  resource store. Built from `Config` via `build_registry(config) -> Registry`. Holds the same
+  per-kind resources but with framework metadata attached (`origin` + `usage`), auto-declared
+  resources synthesized, requirement graph validated, cycles caught.
+
+The framework operates on `Registry`. Manager-entry code consumes `Registry` where it needs
+framework queries (e.g., requirement subgraph walks for eager-resolve); other call sites continue
+taking `config: Config` and migrate gradually as needed.
 
 Existing config types (`SecretDecl`, `VMTemplate`, `GitCredentialEntry`, ...) gain an `origin` field
 and the secret-bearing ones gain a `usage` list. Each config type that references other resources by
 name implements a `required_resources()` method emitting one `ResourceRequirement` per reference;
-the validation pass consumes them.
+`build_registry` consumes them.
 
 ```text
 +----------------------+     +----------------------------+     +----------------------+
-|  registry.py loader  |---->|  agentworks.resources      |<----|  per-kind logic      |
+|  agentworks.config   |---->|  agentworks.resources      |<----|  per-kind logic      |
 |  - parses TOML       |     |  - ResourceRequirement     |     |  - SecretKind        |
-|  - emits raw types   |     |  - ResourceKind protocol   |     |  - VMTemplateKind    |
-|  - calls validate()  |     |  - Origin                  |     |  - GitCredentialsKind|
-+----------------------+     |  - validation pass         |     |  ...                 |
-                             |    * walks requirements    |     +----------------------+
+|  - Config object     |     |  - ResourceKind protocol   |     |  - VMTemplateKind    |
+|  - raw declarations  |     |  - Origin                  |     |  - GitCredentialsKind|
+|  - file:line capture |     |  - build_registry(config)  |     |  ...                 |
++----------------------+     |    * composes resources    |     +----------------------+
+                             |    * walks requirements    |
                              |    * applies miss policies |
                              |    * detects cycles        |
-                             |    * sets Origin           |
+                             |    * attaches Origin/usage |
                              +-------------+--------------+
                                            |
                                            v
                              +-------------+--------------+
-                             |  Registry:                 |
+                             |  Registry (new layer):     |
                              |  - secrets[name]           |
                              |  - vm_templates[name]      |
                              |  - git_credentials[name]   |
@@ -72,30 +83,75 @@ cli/agentworks/resources/
     # ... more in Phase 2
 ```
 
-Why a new package rather than extending `agentworks.registry`: the framework has its own lifecycle
-(walk, dispatch, attach metadata, cycle-detect) and clear boundaries with the loader. Keeping it
-separate makes the validation pass a self-contained step the loader invokes, mirrors how
-`agentworks.env` and `agentworks.secrets` extracted env/secret concerns from the loader, and keeps
-`registry.py` thin.
+Why a new package rather than extending `agentworks.config`: the framework has its own lifecycle
+(walk, dispatch, attach metadata, cycle-detect) and clear boundaries with the parser. Keeping it
+separate keeps `config.py` focused on parsing, mirrors how `agentworks.env` and `agentworks.secrets`
+extracted env/secret concerns into their own packages, and makes `Registry` substitutable when the
+source format changes (see "Future: YAML manifests" below).
 
 The `kinds/` subdirectory is slightly over-structured for Phase 1's single kind (`secret.py`) but
 right-sized for Phase 2's four to six kinds. Starting with the subdirectory avoids a churn-rename
 later.
 
-## Naming
+## Two layers: Config and Registry
 
-The top-level container is the **`Registry`**; the previous `Config` name described the _source_
-(operator-typed TOML), but the framework makes the _role_ (typed, queryable resource store) more
-prominent. Concrete renames:
+The framework introduces a deliberate split between **what the operator typed** (`Config`, parsing
+layer) and **what the framework sees** (`Registry`, runtime layer).
 
-- `agentworks.config.Config` -> `agentworks.registry.Registry`
-- `agentworks/config.py` -> `agentworks/registry.py`
-- `load_config()` -> `load_registry()`
+### `Config` (parsing layer)
 
-Nested sub-types keep their `*Config` names because they describe configuration of a subsystem, not
-the registry's role: `AdminConfig` (admin user settings), `SecretConfig` (active backend chain),
-`SecretBackendConfig` (per-backend connection config). TOML paths follow the same rule:
-`[admin.config]` and `[secret_config]` remain operator-facing.
+- Lives in `agentworks/config.py`. Unchanged location and class name. No mechanical rename.
+- Mirrors the on-disk TOML structure: top-level sections, dot-notation paths, sub-tables.
+- Holds the existing sub-type instances: `AdminConfig` (the parsed `[admin.config]` section),
+  `SecretConfig` (the parsed `[secret_config]` section), `SecretBackendConfig` (per-backend), plus
+  per-kind dicts of raw declarations (`secrets`, `vm_templates`, etc.).
+- Each parsed section carries `(file, line)` of its opening line, captured by the `tomlkit` parser.
+  This data feeds `Origin` at the Registry layer.
+- The existing `load_config()` function and `Config` class stay; all current imports continue to
+  work.
+
+### `Registry` (framework layer)
+
+- Lives in `agentworks/resources/registry.py`. New class introduced by this SDD.
+- Built from `Config` by `build_registry(config: Config) -> Registry`. Construction runs the full
+  validation pass (compose resources, enforce orphan rejection, walk requirements, dispatch miss
+  policies, synthesize auto-declared resources, attach `origin` + `usage`, detect cycles).
+- Exposes per-kind queries: `registry.secrets`, `registry.vm_templates`, etc. Each per-kind view
+  contains operator-declared resources (from `Config`) **plus** auto-declared resources synthesized
+  by the framework. Resources carry full `origin` and `usage` metadata.
+- The framework's lookup surface lives here: `registry.lookup(kind, name)`, iter helpers, subgraph
+  walks for eager-resolve, the data backing `agw doctor` / `agw secret describe` /
+  `agw resource list|describe`.
+
+### Why two layers, not a rename
+
+The original draft renamed `Config` to `Registry`. That conflated two concepts (parsing vs.
+framework view) in one class, forced a 1300-line / 59-file rename, and tied the framework's runtime
+API to the on-disk format. The layered split:
+
+- Keeps parsing and framework-view responsibilities separate; each layer has a focused test surface.
+- Avoids the rename churn and avoids re-labeling `AdminConfig` / `SecretConfig` /
+  `SecretBackendConfig` (their names accurately describe parsed sections; the Registry doesn't need
+  its own copies).
+- Makes the source format (TOML vs. future YAML manifests) substitutable without changing the
+  framework's API.
+
+### Future: YAML manifests
+
+When resources eventually move to per-resource YAML manifests, only the producer changes:
+
+```text
+N YAML manifests -> parse each -> raw declarations -> build_registry() -> Registry
+```
+
+The `Config` layer fragments (one parsed object per manifest file, or merged by `(kind, name)`) or
+is replaced by a thinner parsed-manifests aggregate; the `Registry` interface stays identical. The
+framework consumes the `Registry`, not the producer. The validation pass -- orphan rejection (which
+becomes structurally moot in YAML), miss policies, origin attachment, cycle detection -- is the same
+regardless of source format.
+
+`Origin` generalizes naturally: `Origin.file` is already a `Path` and works for any source. TOML's
+`[file:line]` becomes YAML's `[manifest.yaml:line]` with no framework changes.
 
 ## Core types
 
@@ -162,27 +218,29 @@ The loader is responsible for capturing `file` / `line` during TOML parsing. Pyt
 `tomllib` does not expose line info, so the loader switches to **`tomlkit`** (actively maintained,
 line info exposed via the item position APIs). `tomlkit` raises on duplicate keys at the same path,
 matching `tomllib` behavior, so the FRD R4 "duplicate operator declarations are TOML errors" rule
-holds. The existing parsing surface in `registry.py` doesn't change shape; only the parse step swaps
+holds. The existing parsing surface in `config.py` doesn't change shape; only the parse step swaps
 libraries.
 
-## Resource composition from TOML
+## Resource composition from Config
 
 A resource is the conceptual unit; TOML splits it across sections (a template's fields plus its
-`.env` sub-section plus any future sub-tables). After parsing, the loader composes resources from
-sections before handing the `Registry` to the validation pass.
+`.env` sub-section plus any future sub-tables). `build_registry(config)` composes resources from
+parsed `Config` sections before the validation pass walks requirements.
 
 The composition step also enforces the FRD R2 orphan-rejection rule:
 
 ```python
-def _compose_resources(parsed: ParsedToml, registry: Registry) -> None:
-    # For each multi-named kind whose sections support sub-tables
-    # (vm_templates, agent_templates, workspace_templates, session_templates, ...),
-    # walk the parsed sections and:
-    #   - For each [<container>.<name>] section, create the resource shell.
-    #   - For each [<container>.<name>.<sub>] section, attach to the resource.
-    #   - If a sub-section's parent [<container>.<name>] is not in parsed sections,
-    #     raise ConfigError pointing at the orphan.
-    ...
+def _compose_resources(config: Config) -> dict[str, dict[str, Resource]]:
+    """Walks the parsed Config and returns per-kind dicts of composed resources.
+
+    For each multi-named kind whose sections support sub-tables (vm_templates,
+    agent_templates, workspace_templates, session_templates, ...), walks the parsed
+    sections and:
+      - For each [<container>.<name>] section, creates the resource shell.
+      - For each [<container>.<name>.<sub>] section, attaches to the resource.
+      - If a sub-section's parent [<container>.<name>] is not in parsed sections,
+        raises ConfigError pointing at the orphan.
+    """
 ```
 
 Singletons are exceptions: their root declaration is neither required nor accepted. Today these are
@@ -198,51 +256,60 @@ rather than a separate `[secrets.<name>.backend_mappings]` sub-section, so the o
 effectively a no-op for secrets in current practice. The rule still applies if someone writes the
 sub-section form.
 
-**Registry lifecycle**: `Registry` is built incrementally: TOML parse -> `_compose_resources`
-(creates resource shells, attaches sub-sections, enforces orphan rejection) -> validation pass
-(walks requirements, applies miss policies, attaches framework metadata, detects cycles) -> return
-to caller. The validation pass operates on already-composed resources and never sees orphan
-sub-sections.
+**Pipeline**: `load_config() -> Config` (existing parser) -> `build_registry(config)` runs
+`_compose_resources` (creates resource shells, attaches sub-sections, enforces orphan rejection) ->
+validation pass (walks requirements, applies miss policies, attaches framework metadata, detects
+cycles) -> returns `Registry`. The validation pass operates on already-composed resources and never
+sees orphan sub-sections.
 
 ## Validation pass
 
-The validation pass runs as the last step of `registry.load_registry()`, after all TOML sections are
-parsed into raw types but before the `Registry` object is returned. Conceptually:
+`build_registry(config)` runs the validation pass after composition; the pass walks requirements,
+dispatches miss policies, attaches framework metadata, and detects cycles. Conceptually:
 
 ```python
-def _run_validation_pass(registry: Registry) -> None:
-    # 1. Collect all requirements
-    requirements: list[ResourceRequirement] = []
-    for resource in registry.iter_all_resources():
-        requirements.extend(resource.required_resources())
+def build_registry(config: Config) -> Registry:
+    # 1. Compose resources from the parsed Config (composition step above).
+    composed: dict[str, dict[str, Resource]] = _compose_resources(config)
 
-    # 2. Group by (kind, name); preserve first-encountered ordering for origin recording
+    # 2. Collect all requirements across composed resources.
+    requirements: list[ResourceRequirement] = []
+    for kind_dict in composed.values():
+        for resource in kind_dict.values():
+            requirements.extend(resource.required_resources())
+
+    # 3. Group by (kind, name); preserve first-encountered ordering for origin recording.
     by_target: dict[tuple[str, str], list[ResourceRequirement]] = {}
     for req in requirements:
         by_target.setdefault((req.kind, req.name), []).append(req)
 
-    # 3. For each (kind, name): existing-in-registry? auto-decl? error?
+    # 4. For each (kind, name): existing-in-composed? auto-decl? error?
     for (kind, name), reqs in by_target.items():
         kind_handler = KIND_REGISTRY[kind]
-        existing = registry.lookup_resource(kind, name)
+        existing = composed.get(kind, {}).get(name)
         if existing is not None:
-            # Operator-declared: use as-is, attach framework metadata.
-            # Origin was set at parse time; this populates the usage list.
-            registry.attach_framework_metadata(kind, name, reqs)
+            # Operator-declared: attach framework metadata (origin already set from
+            # the Config's file:line capture; this populates the usage list).
+            composed[kind][name] = existing.with_usage(_usage_list(reqs))
         else:
-            # Missing: dispatch miss policy
+            # Missing: dispatch miss policy.
             match kind_handler.miss_policy:
                 case "auto-declare":
                     if kind_handler.auto_declare_names is None or name in kind_handler.auto_declare_names:
-                        synthesized = kind_handler.synthesize(reqs)
-                        registry.add_resource(kind, name, synthesized)
+                        composed.setdefault(kind, {})[name] = kind_handler.synthesize(reqs)
                     else:
                         raise ConfigError(...)  # reserved-name restriction violated
                 case "error":
                     raise ConfigError(...)
 
-    # 4. Cycle detection across the now-complete requirement graph
+    # 5. Cycle detection across the now-complete requirement graph.
     _detect_cycles(by_target)
+
+    # 6. Build the immutable Registry from the composed dicts.
+    return Registry(secrets=composed.get("secret", {}),
+                    vm_templates=composed.get("vm_template", {}),
+                    # ... per-kind fields
+                    )
 ```
 
 Walk order for `requirements` is config-load order: top-to-bottom in the TOML file, top-level
@@ -589,7 +656,7 @@ Alternatives considered:
 
 The framework's `operator-declared` origin variant carries `(file, line)`, and the stdlib `tomllib`
 does not expose line info. The loader switches to `tomlkit`, which exposes positions via its item
-API and is actively maintained. Mechanical change to the parse step; rest of `registry.py` doesn't
+API and is actively maintained. Mechanical change to the parse step; rest of `config.py` doesn't
 change shape.
 
 ### Origin is set once
