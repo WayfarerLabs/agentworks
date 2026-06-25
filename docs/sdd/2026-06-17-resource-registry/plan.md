@@ -9,58 +9,63 @@ Reviewer pass with the `agentworks-reviewer` agent runs after each phase. The ba
 perfect" (per the user's standing direction); iterate until findings are addressed before moving to
 the next phase.
 
-## Phase 0: `tomlkit` + Resource composition + orphan rejection + `SourceLocation` at Config
+## Phase 0: `SourceLocation` + section-line scanner at Config
 
 Goal: prepare the parser layer for the framework. No rename. `Config` stays in
 `agentworks/config.py`; per the HLA's "Two layers", Config is the Resource-producing layer. Phase 0
-makes that responsibility explicit by switching the parser to `tomlkit`, capturing file/line,
-composing Resources from top-level + sub-section pairs, enforcing orphan rejection, and attaching
-Config's own `SourceLocation(file, line)` to each composed Resource. The framework's `Origin` type
-is a Registry-layer concept; the Registry translates Config's `SourceLocation` into
-`Origin(variant="operator-declared", ...)` when Resources are published into it. Config does not
-depend on `agentworks.resources`.
+makes that responsibility explicit by introducing `SourceLocation`, adding a small regex section-
+line scanner that runs alongside the existing `tomllib` parse, and attaching `declared_at` to each
+composed Resource. The framework's `Origin` type is a Registry-layer concept; the Registry
+translates Config's `SourceLocation` into `Origin(variant="operator-declared", ...)` when Resources
+are published into it. Config does not depend on `agentworks.resources`.
 
-- [ ] `cli/pyproject.toml`: add `tomlkit` dependency (latest stable).
-- [ ] `agentworks/config.py`: switch the parse step from `tomllib` to `tomlkit`. Existing
-      `load_config()` and `Config` keep their signatures; only the internal parser changes.
-- [ ] `agentworks/config.py`: add a Config-layer `SourceLocation` dataclass (frozen, two fields:
-      `file: Path`, `line: int`). Lives in `config.py` (or a sibling module if file size warrants).
-      This is Config's own representation of where a Resource was declared; the framework's `Origin`
-      is constructed from it later, when the Resource is published into a Registry.
-- [ ] `agentworks/config.py`: capture `(file: Path, line: int)` for each top-level resource
-      section's opening line and store it as a `SourceLocation` instance.
-- [ ] `agentworks/config.py`: **enforce orphan rejection** (FRD R2). After parse, walk the `tomlkit`
-      document and detect sub-sections like `[vm_templates.x.env]` whose parent `[vm_templates.x]`
-      is not explicitly declared. Raise `ConfigError` pointing at the orphan with a "declare the
-      parent or move the content" message. Singletons (`admin`, `named_console`, `secret_config`)
-      are exempt.
-- [ ] `agentworks/config.py`: add `declared_at: SourceLocation` field to each Resource type
-      (`VMTemplate`, `WorkspaceTemplate`, `AgentTemplate`, `SessionTemplate`, `AdminConfig`,
-      `NamedConsoleConfig`, `SecretConfig`, `SecretBackendConfig`, `GitCredentialConfig`,
-      `SecretDecl`). Composition sets `declared_at` from the section's `SourceLocation` at
-      construction time. For singletons where the operator may omit the section entirely, Config
-      synthesizes an empty-defaults instance with `declared_at` pointing at the config file's first
-      line (or a sentinel `<defaults>` location -- LLD picks).
+TOML's implicit-parent semantics are accepted as-is per the revised FRD R2: writing
+`[vm_templates.x.env]` without a separate `[vm_templates.x]` header produces a valid (if minimal)
+`vm_templates.x` Resource. No orphan-rejection check.
+
+- [ ] `agentworks/source_location.py` (new): frozen `SourceLocation` dataclass with two fields:
+      `file: Path`, `line: int`. Lives outside `config.py` because `config.py` is already past the
+      1000-line soft target and types like `SecretDecl` in `secrets/base.py` need to import
+      `SourceLocation` too (a definition in `config.py` would create a circular import via the
+      existing `agentworks.config` -> `agentworks.secrets` edge). The module is intentionally tiny.
+- [ ] `agentworks/config.py`: add a regex section-line scanner
+      (`_scan_section_lines(text: str) ->     dict[tuple[str, ...], int]`) that walks the raw TOML
+      text matching `[section]` and `[section.sub]` header lines and returns a map from dotted
+      section paths to opening-line numbers. Handles bare and quoted key segments per the TOML
+      grammar; ignores commented lines and inline-table syntax. `[[array.of.tables]]` headers are
+      tolerated (Phase 0 has no kind that uses them, but the scanner doesn't have to special-case).
+- [ ] `agentworks/config.py`: call the scanner once inside `load_config` (after reading the raw
+      text, before `tomllib.load`). Pass the resulting `section_lines` map through the loader so
+      every `_load_*` helper can look up its declared-line.
+- [ ] `agentworks/config.py`: add `declared_at: SourceLocation` field to `VMTemplate`,
+      `WorkspaceTemplate`, `AgentTemplate`, `SessionTemplate`, `AdminConfig`, `NamedConsoleConfig`,
+      `GitCredentialConfig`. Composition sets `declared_at` from
+      `section_lines[(<container>,     <name>)]` at construction time, or -- when the operator
+      declared only a sub-section like `[vm_templates.x.env]` -- the first matching
+      `(<container>, <name>, <sub>)` entry by line. For singletons where the operator may omit the
+      section entirely (`admin` with no `[admin.*]`; `named_console` with no `[named_console]`),
+      Config synthesizes the empty-defaults instance with a sentinel
+      `declared_at = SourceLocation(file=<config-path>,     line=0)` so the field is always
+      populated.
+- [ ] `agentworks/secrets/base.py`: add `declared_at: SourceLocation` field to `SecretDecl`,
+      `SecretBackendConfig`, `SecretConfig`. Imports from `agentworks.source_location` (no cycle).
 - [ ] **Tests**: existing suite stays green. Add `cli/tests/test_config_line_capture.py` pinning
       that every operator-declared Resource carries a `declared_at: SourceLocation` after load, with
       the right file path and line, across all kinds today (`secrets`, `vm_templates`,
       `agent_templates`, `workspace_templates`, `session_templates`, `git_credentials`, admin,
       named_console, secret_config, secret_backends). Also covers the singleton-omitted case:
-      configs with no `[admin.*]` / no `[named_console]` still produce default instances with a
-      sensible `declared_at`.
-- [ ] **Tests**: add `cli/tests/test_config_orphan_rejection.py` covering: orphan
-      `[vm_templates.x.env]` errors; admin singleton sub-tables (`[admin.env]`,
-      `[admin.git_credentials]`) accepted without a root `[admin]`; `[named_console]` (which is
-      itself a single section, not a parent of sub-tables today) accepted; secret_config singleton
-      accepted without explicit `[secret_config]` parent if anyone writes `[secret_config.backends]`
-      directly.
-- [ ] **Tests**: add a comment-roundtrip / sample-config-parse test confirming the `tomlkit`
-      migration doesn't regress operator-facing behavior on the existing sample-config.
+      configs with no `[admin.*]` / no `[named_console]` still produce default instances with the
+      sentinel `declared_at`. Covers the implicit-parent case: `[vm_templates.x.env]` alone produces
+      `vm_templates.x` with `declared_at` pointing at the env header line.
+- [ ] **Tests**: add `cli/tests/test_config_section_line_scanner.py` covering the regex scanner
+      directly: top-level sections, dotted sub-sections, quoted-segment paths, commented headers
+      ignored, array-of-tables headers tolerated, file with no sections.
 
-Definition of done: `from agentworks.config import Config, load_config, SourceLocation` works; every
-operator-declared Resource carries `declared_at: SourceLocation(file=..., line=...)`; orphan
-sub-sections error at config-load; `tomlkit` is on `cli/pyproject.toml`; `agentworks.config` has no
-import of `agentworks.resources`; CI green; reviewer-approved.
+Definition of done: `from agentworks.config import Config, load_config` works unchanged for
+operators; `from agentworks.source_location import SourceLocation` is importable; every
+operator-declared Resource (and every singleton-synthesized default) carries a
+`declared_at: SourceLocation(file=..., line=...)`; `agentworks.config` has no import of
+`agentworks.resources`; CI green; reviewer-approved.
 
 ## Phase 1a: Framework foundations
 
@@ -69,9 +74,8 @@ The Registry exposes a **publish / validate** API: starts empty, accepts Resourc
 (Config in Phase 1; future plugins / manifests later), then `validate()` runs the framework pass
 (walk requirements, dispatch miss policies, attach `usage`, detect cycles).
 `Registry.from_config(config)` wraps the common Config-only path. Plus `SecretKind`. Resource
-composition and orphan rejection already live at the Config layer per Phase 0; the Registry operates
-on already-composed Resources. No producers of `SecretRequirement` wired yet beyond what tests
-synthesize.
+composition already lives at the Config layer per Phase 0; the Registry operates on already-composed
+Resources. No producers of `SecretRequirement` wired yet beyond what tests synthesize.
 
 - [ ] `cli/agentworks/resources/__init__.py`: public surface re-exports (`ResourceRequirement`,
       `SecretRequirement`, `ResourceKind`, `Origin`, `UsageEntry`, `Registry`,
@@ -170,8 +174,8 @@ synthesize.
     dispatch behaves correctly even though no Phase 2 producers yet); error miss policy;
     first-matching origin rule; per-key + walk-order determinism. Includes a synthetic-publisher
     test that an operator-declared `SecretDecl` gets its `usage` list populated after publish +
-    validate (the `with_usage` attachment path). Composition + orphan rejection are tested at the
-    Config layer (Phase 0 tests); `Registry.validate()` operates on already-composed Resources.
+    validate (the `with_usage` attachment path). Composition is tested at the Config layer (Phase 0
+    tests); `Registry.validate()` operates on already-composed Resources.
   - `cli/tests/resources/test_registry_lifecycle.py`: empty Registry -> publish via `add` ->
     `validate` -> queryable; double-`validate` errors; `add` after `validate` errors;
     `Registry.from_config(config)` convenience equivalent to manual steps. Includes a
@@ -489,8 +493,8 @@ reviewer pass.
 The plan above stays at HLA fidelity; the LLD (or commit-by-commit notes during Phase 1a) should
 pin:
 
-- The exact `tomlkit` API surface used for `(file, line)` capture (token positions vs. document
-  walk).
+- The exact regex grammar for the section-line scanner (bare keys are universal in agentworks
+  configs today; quoted-segment support is a small extension worth getting right in the LLD).
 - Per-kind error message templates (string format) for the framework's `ConfigError`.
 - The exact subclass hierarchy of `ResourceRequirement` (frozen dataclasses with `kw_only`? what
   about hashability when used as dict keys?).

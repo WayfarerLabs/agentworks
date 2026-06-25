@@ -134,23 +134,14 @@ this:
 A resource is the conceptual unit (e.g., a secret with its backend mappings; a template with its
 env, dotfiles config, packages, etc.). TOML happens to split a single resource across multiple
 sections because TOML has no native nested-document model. The framework recomposes the parsed TOML
-into resources at config-load time and validates that every section belongs to an
-explicitly-declared resource.
+into resources at config-load time.
 
-**Orphan sub-sections are config-load errors.** Declaring any sub-section of a resource path
-requires the parent resource to be explicitly declared (even if empty). Without the parent
-declaration, the loader raises a `ConfigError` like:
-
-```text
-[vm_templates.azure-prod.env] declared without [vm_templates.azure-prod].
-Either declare the template explicitly or move the env into an existing template.
-```
-
-This rule catches what TOML otherwise allows (implicit-table semantics for orphan sub-section paths)
-and forces operator intent to be explicit. It applies to every kind that supports sub-sections:
-`[vm_templates.x.env]` requires `[vm_templates.x]`, `[agent_templates.x.env]` requires
-`[agent_templates.x]`, and so on, including for the reserved `default` name:
-`[vm_templates.default.env]` requires `[vm_templates.default]`.
+**TOML's implicit-parent semantics are accepted as-is.** Writing `[vm_templates.azure-prod.env]`
+without a separate `[vm_templates.azure-prod]` header declares `vm_templates.azure-prod` as a
+Resource with the env field populated and the other body fields at their defaults. That is a valid
+(if minimal) Resource declaration; the framework treats it identically to one composed from both
+sections. Operators who want body fields beyond env include a `[vm_templates.azure-prod]` header
+explicitly.
 
 Operators wanting to customize one field of the auto-declared default template have two options:
 
@@ -169,20 +160,21 @@ Operators wanting to customize one field of the auto-declared default template h
    This is the preferred shape -- it preserves the kind's default field values via template
    inheritance and isolates the operator's override.
 
-**Singleton resources are the exception.** Some resources are singletons whose existence the
-framework treats as always-implicit. For these, sub-tables are valid without any root declaration.
-Today this applies to:
+The recompose step still distinguishes singletons (which never have a root header) from multi-named
+kinds:
 
 - **Admin** (`[admin.config]`, `[admin.env]`, `[admin.git_credentials]`, ...): one admin user per
   agentworks install; no `[admin]` root section is required or accepted.
-- **Secret config** (`[secret_config]`, `[secret_config.backends]` if expressed as a sub-section):
-  one secret-system config per install.
+- **Named console** (`[named_console]`): one named-console policy per install.
+- **Secret config** (`[secret_config]`, `[secret_config.backends]`): one secret-system config per
+  install.
 
 For the multi-named kinds (`vm_templates`, `agent_templates`, `secrets`, `git_credentials`, etc.),
-the orphan-rejection rule applies fully.
+each operator-typed `<container>.<name>` (whether declared via its own header or implicitly via a
+sub-section) becomes one Resource.
 
-This rule is a TOML-era workaround. In a future manifest-style-config SDD (non-goal here), each
-resource is one document and the orphan problem disappears by construction.
+In a future manifest-style-config SDD (non-goal here), each resource is one document and the
+TOML-section recompose step goes away by construction.
 
 ### R3: Per-kind miss policies
 

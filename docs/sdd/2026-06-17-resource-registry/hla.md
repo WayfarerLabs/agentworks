@@ -10,8 +10,8 @@ distinct responsibilities:
 
 - **`Config`** (existing, in `agentworks/config.py`): the parsed source. Composes Resources from
   on-disk TOML sections (top-level + sub-sections) and attaches a Config-layer
-  `declared_at: SourceLocation` to each. Enforces orphan rejection at parse time. Today's parser
-  plus the Phase 0 additions (tomlkit migration, file:line capture, composition).
+  `declared_at: SourceLocation` to each. Today's `tomllib`-based parser plus the Phase 0 additions
+  (a regex section-line scanner over the raw text for `(file, line)` capture, composition).
 - **`Registry`** (new, in `agentworks/resources/registry.py`): the framework's typed, queryable
   Resource store. **Exists independently of any particular source**; starts empty. Multiple
   publishers contribute: `config.publish_to(registry)` for operator-declared Resources from TOML,
@@ -137,15 +137,22 @@ layer) and **what the framework sees** (`Registry`, runtime layer).
   uniformly. If a config omits all `[admin.*]` sections, Config still publishes an empty-defaults
   `admin_template:default`; same for `named_console_template:default`. There is no auto-decl OF
   admin or named_console themselves -- only their referenced secrets can auto-declare.
-- **Enforces orphan rejection** (FRD R2). If `[vm_templates.x.env]` is parsed without a parent
-  `[vm_templates.x]`, Config errors at parse-time: it cannot publish a Resource that only has the
-  env sub-section. Structural enforcement happens here because Config has the schema knowledge of
-  which kinds support which sub-sections.
+- **Accepts TOML's implicit-parent semantics** (FRD R2). A sub-section like `[vm_templates.x.env]`
+  declared without a separate `[vm_templates.x]` header still composes into a valid (if minimal)
+  `vm_templates.x` Resource with only the env field populated. No orphan-rejection check; the
+  framework treats every operator-typed `(<container>, <name>)` pair as one Resource regardless of
+  which TOML header line introduced it.
 - Each composed Resource carries a Config-layer `declared_at: SourceLocation` field, where
-  `SourceLocation = (file: Path, line: int)` is defined in `agentworks/config.py`. This is the
-  Config layer's own representation of "where the operator declared this Resource" -- the
-  framework's `Origin` type is a separate concept owned by the Registry layer (see below). Config
-  does not depend on `agentworks.resources`.
+  `SourceLocation = (file: Path, line: int)` is defined in `agentworks/source_location.py` (a
+  lightweight sibling module to `config.py`; `config.py` is already past the project's 1000-line
+  soft target and types like `SecretDecl` that live outside `config.py` need to import
+  `SourceLocation` too, which would create a circular import if it lived in `config.py`). This is
+  the Config layer's own representation of "where the operator declared this Resource" -- the
+  framework's `Origin` type is a separate concept owned by the Registry layer (see below). For a
+  Resource composed from multiple TOML sections, `declared_at` points at the earliest section header
+  (by line) that contributed to the Resource -- typically the `[<container>.<name>]` header, or the
+  first sub-section header if no root header exists. Config does not depend on
+  `agentworks.resources`.
 - The existing `load_config()` function and `Config` class stay; all current imports continue to
   work.
 
@@ -229,7 +236,7 @@ Each layer owns a specific class of validation. Both raise `ConfigError`; the la
 issue determines the error's framing.
 
 **Config-layer validation** (in `agentworks.config`, today's parse-time checks plus the new
-composition / orphan-rejection / Origin-attachment from Phase 0):
+composition / `declared_at`-attachment from Phase 0):
 
 - TOML parse errors (syntax, duplicate keys at the same path).
 - Field types per the schema (`str`/`int`/`bool`/`list`/inline-table shapes).
@@ -238,15 +245,14 @@ composition / orphan-rejection / Origin-attachment from Phase 0):
 - Operator-typed value validation (e.g., URL formats, enum values like
   `git_credentials.type in {"github", "azdo"}`).
 - **Resource composition**: top-level + sub-section pairs combined into single Resource instances
-  per kind.
-- **Orphan rejection** (FRD R2): a sub-section like `[vm_templates.x.env]` without
-  `[vm_templates.x]` cannot produce a valid Resource, so Config errors. Lives here because Config
-  has the schema knowledge of which kinds support which sub-sections.
+  per kind. TOML's implicit-parent semantics apply unchanged (a sub-section alone is a valid
+  Resource with default body fields).
 - **`declared_at` attachment**: each operator-declared Resource gets
-  `declared_at: SourceLocation(file=..., line=...)` set at construction time from the `tomlkit` line
-  capture. `SourceLocation` is Config's own type; the framework's `Origin` is a Registry- layer
-  concept constructed by each publisher (in `Config.publish_to`, the operator-declared `Origin` is
-  built from `declared_at` before calling `registry.add(...)`).
+  `declared_at: SourceLocation(file=..., line=...)` set at construction time from a regex pass over
+  the raw TOML text (the stdlib `tomllib` parser doesn't surface line info, and Phase 0 adds a small
+  section-line scanner alongside it). `SourceLocation` is Config's own type; the framework's
+  `Origin` is a Registry-layer concept constructed by each publisher (in `Config.publish_to`, the
+  operator-declared `Origin` is built from `declared_at` before calling `registry.add(...)`).
 
 **Registry-layer validation** (in `Registry.validate`, new with this SDD; runs after all publishers
 have contributed via `publish_to`):
@@ -294,9 +300,8 @@ N YAML manifests -> parse each -> manifest.publish_to(registry) -> registry.vali
 
 The `Config` layer fragments (one parsed object per manifest file, or merged by `(kind, name)`) or
 is replaced by a thinner parsed-manifests aggregate; the `Registry` interface stays identical. The
-framework consumes the `Registry`, not the producer. The validation pass -- orphan rejection (which
-becomes structurally moot in YAML), miss policies, origin attachment, cycle detection -- is the same
-regardless of source format.
+framework consumes the `Registry`, not the producer. The validation pass -- miss policies, origin
+attachment, cycle detection -- is the same regardless of source format.
 
 `Origin` generalizes naturally: `Origin.file` is already a `Path` and works for any source. The
 framework's API stays identical; `Origin` either keeps `line` (per-line manifests), makes it
@@ -372,11 +377,12 @@ entry carries the source of the requirement that contributed it (see Terminology
 origin doesn't need to duplicate that data.
 
 The loader is responsible for capturing `file` / `line` during TOML parsing. Python's stdlib
-`tomllib` does not expose line info, so the loader switches to **`tomlkit`** (actively maintained,
-line info exposed via the item position APIs). `tomlkit` raises on duplicate keys at the same path,
-matching `tomllib` behavior, so the FRD R4 "duplicate operator declarations are TOML errors" rule
-holds. The existing parsing surface in `config.py` doesn't change shape; only the parse step swaps
-libraries.
+`tomllib` doesn't expose line info, and no add-on parser library (including `tomlkit`) surfaces
+section-opening positions on the parsed objects either. The loader keeps `tomllib` for the actual
+parse and adds a small regex pre-pass over the raw text that scans `[section]` / `[section.sub]`
+headers and builds `dict[tuple[str, ...], int]` mapping each section's dotted path to its opening
+line. Composition consults that map to attach `declared_at` to each Resource. The existing parsing
+surface in `config.py` doesn't change shape; the regex scanner is additive.
 
 ## Resource composition (Config layer)
 
@@ -384,23 +390,24 @@ A Resource is the conceptual unit; TOML splits it across sections (a template's 
 `.env` sub-section plus any future sub-tables). The Config layer parses TOML and composes Resources
 from sections, publishing per-kind dicts of fully-composed Resources.
 
-The composition step enforces the FRD R2 orphan-rejection rule at the Config layer (not in the
-Registry's publish/validate flow):
-
 ```python
-def _compose_resources(parsed_sections) -> Config:
-    """Inside agentworks.config's load_config(). Walks the parsed TOML sections and
-    builds per-kind dicts of composed Resources.
+def _compose_resources(parsed_sections, section_lines) -> Config:
+    """Inside agentworks.config's load_config(). Walks the parsed TOML sections
+    and builds per-kind dicts of composed Resources. `section_lines` is the
+    regex scanner's output: dict[tuple[str, ...], int] mapping dotted section
+    paths to opening-line numbers.
 
     For each multi-named kind whose sections support sub-tables (vm_templates,
     agent_templates, workspace_templates, session_templates, ...):
-      - For each [<container>.<name>] section, creates the Resource with
-        declared_at=SourceLocation(file, line) attached from the parse-time capture.
-      - For each [<container>.<name>.<sub>] section, attaches the sub-section's
-        fields to the existing Resource.
-      - If a sub-section's parent [<container>.<name>] is not in parsed sections,
-        raises ConfigError pointing at the orphan. Config cannot publish a Resource
-        from just a sub-section.
+      - The parsed-TOML side yields every operator-typed (<container>, <name>)
+        as one composed Resource, regardless of whether the operator wrote a
+        [<container>.<name>] header explicitly or only sub-section headers
+        underneath. TOML's implicit-parent semantics already produce the
+        composed dict; we just consume it.
+      - declared_at points at the earliest section-header line that contributed
+        to the Resource. That is the line of [<container>.<name>] when present;
+        otherwise the line of the first encountered [<container>.<name>.<sub>].
+        The section_lines map answers both questions.
     """
 ```
 
@@ -415,20 +422,19 @@ Sub-section composition is additive: a Resource composed from `[vm_templates.x]`
 (parent top-level fields are not under any sub-section).
 
 For secrets, `backend_mappings` is typically dot-notation inside the `[secrets.<name>]` section
-rather than a separate `[secrets.<name>.backend_mappings]` sub-section, so the orphan rule is
-effectively a no-op for secrets in current practice. The rule still applies if someone writes the
-sub-section form.
+rather than a separate `[secrets.<name>.backend_mappings]` sub-section, so the composition step is
+effectively a no-op for secrets in current practice.
 
-**Pipeline**: `load_config()` parses TOML, composes Resources, enforces orphan rejection, attaches
-`declared_at: SourceLocation` to each composed Resource -> returns `Config` (a registry of
-operator-declared Resources with parse-time location). The Registry starts empty; multiple
-publishers contribute: `catalog.publish_to(registry)` adds code-declared catalog commands (Phase
-2b); `config.publish_to(registry)` adds operator-declared Resources (translating `declared_at` into
-`Origin.operator_declared(...)` before each `registry.add`); future publishers (plugins, manifests)
-follow the same shape. `registry.validate()` then adds auto-declared Resources with
-`Origin.auto_declared(source=...)`, attaches `usage` lists, detects cycles -> the Registry is
-queryable. `Registry.from_config(config)` orchestrates the standard publishers; lower-level `add` /
-`validate` is exposed for custom orchestration.
+**Pipeline**: `load_config()` parses TOML with `tomllib`, runs the regex scanner over the raw text
+to build `section_lines`, composes Resources, attaches `declared_at: SourceLocation` to each ->
+returns `Config` (a registry of operator-declared Resources with parse-time location). The Registry
+starts empty; multiple publishers contribute: `catalog.publish_to(registry)` adds code-declared
+catalog commands (Phase 2b); `config.publish_to(registry)` adds operator-declared Resources
+(translating `declared_at` into `Origin.operator_declared(...)` before each `registry.add`); future
+publishers (plugins, manifests) follow the same shape. `registry.validate()` then adds auto-declared
+Resources with `Origin.auto_declared(source=...)`, attaches `usage` lists, detects cycles -> the
+Registry is queryable. `Registry.from_config(config)` orchestrates the standard publishers;
+lower-level `add` / `validate` is exposed for custom orchestration.
 
 ## Publish and validate
 
@@ -869,12 +875,16 @@ Alternatives considered:
 - Plugins / entrypoints for kinds. Rejected as premature -- agentworks doesn't have a plugin system
   yet; the dict can become a plugin registry later without changing the protocol.
 
-### `tomlkit` for line tracking
+### Regex section-line scanner instead of a parser swap
 
-The framework's `operator-declared` origin variant carries `(file, line)`, and the stdlib `tomllib`
-does not expose line info. The loader switches to `tomlkit`, which exposes positions via its item
-API and is actively maintained. Mechanical change to the parse step; rest of `config.py` doesn't
-change shape.
+The framework's `operator-declared` origin variant carries `(file, line)`. The stdlib `tomllib` does
+not expose line info; the leading add-on libraries (`tomlkit`, `tomli_w`, etc.) don't either --
+`tomlkit.items.Table.trivia` only carries whitespace and comments, with no source position. Rather
+than take on a dep purely for an API tomlkit doesn't actually have, Phase 0 keeps `tomllib` and adds
+a ~30-line regex pre-pass over the raw text that builds `dict[tuple[str, ...], int]` mapping each
+`[section]` / `[section.sub]` header's dotted path to its opening line. Composition then attaches
+`declared_at` from that map. The scanner uses standard TOML header grammar (bare keys plus quoted
+segments); agentworks configs in practice use only bare keys.
 
 ### Origin is set once
 
