@@ -204,7 +204,8 @@ def test_admin_broken_after_setenv_pivot() -> None:
 def test_legacy_admin_session_without_socket_raises_state_error() -> None:
     """A SessionRow predating the env-and-secrets SDD that has socket_path=None
     surfaces as a typed StateError so the CLI's top-level error wrapper
-    renders it cleanly; the new admin model requires a per-session socket."""
+    renders it cleanly. The hint points the operator at ``session restart``
+    (which migrates the row to the new shape), not ``session delete``."""
     import pytest
 
     from agentworks.errors import StateError
@@ -216,7 +217,8 @@ def test_legacy_admin_session_without_socket_raises_state_error() -> None:
     assert exc.value.entity_kind == "session"
     assert exc.value.entity_name == "s1"
     assert exc.value.hint is not None
-    assert "session delete" in exc.value.hint
+    assert "session restart" in exc.value.hint
+    assert "session delete" not in exc.value.hint
 
 
 def test_unknown_no_pid() -> None:

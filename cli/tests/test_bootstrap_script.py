@@ -41,6 +41,31 @@ def test_generate_bootstrap_script_all_steps() -> None:
     assert "lima--myvm" in script
 
 
+def test_generate_bootstrap_script_preserves_ssh_host_keys() -> None:
+    """Bootstrap writes the cloud-init drop-in that pins SSH host keys.
+
+    Guards against drift between the bootstrap template and the constants
+    reused by the Phase B reconcile step (initializer._preserve_ssh_host_keys).
+    """
+    from agentworks.vms.bootstrap_script import (
+        SSH_PRESERVE_KEYS_LINES,
+        SSH_PRESERVE_KEYS_PATH,
+    )
+
+    script = generate_bootstrap_script(
+        admin_username="testuser",
+        ssh_public_key="ssh-ed25519 AAAA testkey",
+        provisioning_packages=["curl"],
+        tailscale_auth_key="tskey-auth-test123",
+        hostname="lima--myvm",
+    )
+
+    assert "##STEP## Preserve SSH host keys" in script
+    assert f"cat > {SSH_PRESERVE_KEYS_PATH} <<'CLOUDCFG'" in script
+    for line in SSH_PRESERVE_KEYS_LINES:
+        assert line in script
+
+
 def test_generate_bootstrap_script_swap_disabled() -> None:
     """swap=0 still includes the step but skips creation."""
     script = generate_bootstrap_script(
