@@ -123,12 +123,15 @@ layer) and **what the framework sees** (`Registry`, runtime layer).
   `SecretConfig`, `SecretBackendConfig`, `GitCredentialConfig`) **are the Resources** -- they happen
   to live in `config.py` today; their naming is a minor cleanup item (see "Naming follow-up" below)
   but the framework treats them as Resources regardless.
-- **Singletons publish as one-row kinds.** The Config-layer singletons (`Config.admin`,
-  `Config.named_console`) translate into one-row Registry kinds at publish: `admin_template` with
-  the reserved name `default`, and `named_console_template` with the reserved name `default`. Config
-  schema is unchanged (`[admin.env]`, `[admin.git_credentials]`, `[named_console]` work exactly as
-  today); only the Registry-side modeling treats them as first-class Resources so they appear in
-  `agw resource list`, can be the source of auto-declared secrets (e.g.,
+- **Singletons publish as one-row kinds.** Two of the Config-layer singletons -- `Config.admin` and
+  `Config.named_console` -- translate into one-row Registry kinds at publish: `admin_template` with
+  the reserved name `default`, and `named_console_template` with the reserved name `default`. (The
+  third singleton, `Config.secret_config`, is the secret-system policy config consumed directly by
+  `agentworks.secrets`; its individual `secret_backends` entries are full Registry Resources from
+  Phase 2b on, but the `secret_config` envelope itself doesn't publish as a kind.) Config schema is
+  unchanged (`[admin.env]`, `[admin.git_credentials]`, `[named_console]` work exactly as today);
+  only the Registry-side modeling treats `admin` / `named_console` as first-class Resources so they
+  appear in `agw resource list`, can be the source of auto-declared secrets (e.g.,
   `[admin.env] = { MY_VAR = { secret = "..." } }` emits
   `SecretRequirement(source=("admin_template", "default"))`), and route through framework dispatch
   uniformly. If a config omits all `[admin.*]` sections, Config still publishes an empty-defaults
