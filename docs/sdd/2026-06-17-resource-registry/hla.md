@@ -54,8 +54,8 @@ emitting one `ResourceRequirement` per reference; the Registry consumes them dur
                                   |  - admin_template[default]  |
                                   |  - named_console_template[..|
                                   |  - apt_packages[name]       |
-                                  |  - system_install_cmds[..]  |
-                                  |  - user_install_cmds[..]    |
+                                  |  - system_install_commands  |
+                                  |  - user_install_commands    |
                                   |  ... each with origin+usage |
                                   +--------------+--------------+
                                                  |
@@ -130,7 +130,7 @@ layer) and **what the framework sees** (`Registry`, runtime layer).
   today); only the Registry-side modeling treats them as first-class Resources so they appear in
   `agw resource list`, can be the source of auto-declared secrets (e.g.,
   `[admin.env] = { MY_VAR = { secret = "..." } }` emits
-  `SecretRequirement(source=("admin_ template", "default"))`), and route through framework dispatch
+  `SecretRequirement(source=("admin_template", "default"))`), and route through framework dispatch
   uniformly. If a config omits all `[admin.*]` sections, Config still publishes an empty-defaults
   `admin_template:default`; same for `named_console_template:default`. There is no auto-decl OF
   admin or named_console themselves -- only their referenced secrets can auto-declare.
@@ -402,8 +402,10 @@ def _compose_resources(parsed_sections) -> Config:
 ```
 
 Singletons are exceptions: their root declaration is neither required nor accepted. Today these are
-`admin` (`[admin.config]`, `[admin.env]`, `[admin.git_credentials]`, ...) and `secret_config`. Their
-sub-tables are valid without any root.
+`admin` (`[admin.config]`, `[admin.env]`, `[admin.git_credentials]`, ...), `named_console`
+(`[named_console]` itself, no sub-tables today), and `secret_config` (`[secret_config.backends]` and
+the like). Their sub-tables (or, for `named_console`, the single section itself) are valid without
+any root.
 
 Sub-section composition is additive: a Resource composed from `[vm_templates.x]` plus
 `[vm_templates.x.env]` carries both sets of fields. No key collisions are possible by construction

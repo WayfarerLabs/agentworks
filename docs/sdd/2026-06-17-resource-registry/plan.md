@@ -146,11 +146,14 @@ synthesize.
       (or `@dataclass(frozen=True)` + `dataclasses.replace` shapes; LLD picks).
 - [ ] `cli/agentworks/config.py`: add `Config.publish_to(self, registry: Registry) -> None`.
       Iterates Config's per-kind dicts. For each Resource, builds
-      `origin = Origin.operator_declared(file=resource.declared_at.file,     line=resource.declared_at.line)`
+      `origin = Origin.operator_declared(file=resource.declared_at.file, line=resource.declared_at.line)`
       and calls `registry.add(kind, name, resource, origin)`. **Singleton publishing**: also
-      publishes the two singleton-backed kinds as one-row entries -- `Config.admin` ->
-      `registry.add("admin_template", "default", config.admin, origin)`, and `Config.named_console`
-      -> `registry.add("named_console_template", "default",     config.named_console, origin)`.
+      publishes the two singleton-backed kinds as one-row entries, each with its own origin derived
+      from its own `declared_at` -- for `Config.admin`, builds
+      `Origin.operator_declared(file=config.admin.declared_at.file, line=config.admin.declared_at.line)`
+      then calls `registry.add("admin_template", "default", config.admin, admin_origin)`;
+      analogously for `Config.named_console` ->
+      `registry.add("named_console_template", "default", config.named_console, named_console_origin)`.
       Imports `Registry` and `Origin` from `agentworks.resources` -- the explicit layer handoff.
       Config's data structures (parsed Resources, `SourceLocation`, etc.) remain framework-ignorant;
       only this publish handoff crosses the boundary.
@@ -184,8 +187,8 @@ synthesize.
     `Registry.from_config(load_config(<config with no admin.*>))`, the Registry contains exactly one
     `admin_template:default` (operator-declared, with empty-defaults `AdminConfig`) and one
     `named_console_template:default` (same shape); after
-    `Registry.from_config(load_config(<config     with [admin.env]>))`, the same single entry exists
-    but its `env` block is populated.
+    `Registry.from_config(load_config(<config with [admin.env]>))`, the same single entry exists but
+    its `env` block is populated.
 
 Definition of done: the public surface (`ResourceRequirement`, `ResourceKind`, `Origin`, `Registry`,
 `UsageEntry`, `collect_secrets_for`, etc.) is importable from `agentworks.resources`;
@@ -244,12 +247,12 @@ Legacy resolution path removed.
       `tailscale_auth_key` (default `"tailscale-auth-key"`) with usage
       `"the VM-provisioning auth key"` and source `("vm_template", template.name)`.
 - [ ] `cli/agentworks/vms/manager.py`: `create_vm` and `reinit_vm` walk the resolved VM template's
-      requirement subgraph via `collect_secrets_for(registry, ("vm_template",     <name>))`,
+      requirement subgraph via `collect_secrets_for(registry, ("vm_template", <name>))`,
       eager-resolve the result via `resolve_for_command(extra_decls=...)`, and pass the resolved
       Tailscale auth key as a function argument into the Tailscale install runner.
 - [ ] Tailscale install runner gains a `*, auth_key: str` keyword-only argument. The exact function
-      path is **pinned at Phase 1c start** by grepping for the current `tailscale up     --authkey`
-      call site: pre-PR #130 this was `_install_tailscale` in `cli/agentworks/vms/initializer.py`;
+      path is **pinned at Phase 1c start** by grepping for the current `tailscale up --authkey` call
+      site: pre-PR #130 this was `_install_tailscale` in `cli/agentworks/vms/initializer.py`;
       post-PR #130 it may have moved into the transports package or stayed in `vms/initializer.py`
       (mechanical move only). The kwarg-threading shape is the same either way. No `env=` injection.
       No profile-fragment writes for the auth key.
@@ -403,8 +406,8 @@ the remaining bespoke-validation kinds.
 - [ ] `cli/agentworks/catalog.py` (or wherever the code-defined catalog lives today): add a
       `publish_to(registry: Registry) -> None` function. Iterates the code-defined catalog entries
       and calls
-      `registry.add(kind, name, resource,     Origin.code_declared(source="agentworks.catalog"))`
-      for each. Catalog Resources are now full Registry citizens:
+      `registry.add(kind, name, resource, Origin.code_declared(source="agentworks.catalog"))` for
+      each. Catalog Resources are now full Registry citizens:
       `agw resource list --kind apt_package,system_install_command,user_install_command` (Phase 2c)
       shows them with origin = `code-declared by agentworks.catalog`.
 - [ ] `Registry.from_config(config)` is updated to invoke `catalog.publish_to(registry)` before
