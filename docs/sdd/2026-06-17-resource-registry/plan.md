@@ -70,17 +70,26 @@ operator-declared Resource (and every singleton-synthesized default) carries a
 ## Phase 1a: Framework foundations
 
 Goal: stand up the `agentworks.resources` package with the core types and the new `Registry` class.
-The Registry exposes a **publish / validate** API: starts empty, accepts Resources from any source
-(Config in Phase 1; future plugins / manifests later), then `validate()` runs the framework pass
-(walk requirements, dispatch miss policies, attach `usage`, detect cycles).
-`Registry.from_config(config)` wraps the common Config-only path. Plus `SecretKind`. Resource
+The Registry exposes a **publish / finalize** API: starts empty, accepts Resources from any source
+(Config in Phase 1; future plugins / manifests later), then `finalize()` runs the framework pass
+(walk requirements, dispatch miss policies that may synthesize auto-declared Resources, attach
+`usage`, detect cycles, freeze). A small `build_registry(config)` free function in
+`agentworks/bootstrap.py` orchestrates the standard publishers. Plus `SecretKind`. Resource
 composition already lives at the Config layer per Phase 0; the Registry operates on already-composed
 Resources. No producers of `SecretRequirement` wired yet beyond what tests synthesize.
 
 - [ ] `cli/agentworks/resources/__init__.py`: public surface re-exports (`ResourceRequirement`,
       `SecretRequirement`, `ResourceKind`, `Origin`, `UsageEntry`, `Registry`,
-      `collect_secrets_for`). `Registry.from_config` is the convenience entry point; the
-      `publish_to` / `validate` split is reachable via `Registry.empty()` + method calls.
+      `collect_secrets_for`). The lower-level `Registry.empty()` + `add` + `finalize` triad is
+      exposed for tests and multi-source orchestration; the convenience `build_registry(config)`
+      lives in `agentworks/bootstrap.py` (next bullet) so the Registry stays publisher-agnostic.
+- [ ] `cli/agentworks/bootstrap.py` (new): `build_registry(config: Config) -> Registry` free
+      function that imports `Registry`, the catalog publisher (Phase 2b -- stubbed to no-op in Phase
+      1a), and any future standard publishers, and orchestrates them in order. The module is the
+      application-level glue that holds the "standard set of publishers" knowledge; this knowledge
+      isn't Config's (Config shouldn't know about catalog) and isn't Registry's (Registry shouldn't
+      know about its publishers). Call sites use this for the common case; tests can either use this
+      helper or assemble Registry by hand with `Registry.empty()` + explicit `publish_to` calls.
 - [ ] `cli/agentworks/resources/requirement.py`:
   - `ResourceRequirement` immutable dataclass (base): `name`, `kind`, `usage`, `source`.
   - `SecretRequirement(ResourceRequirement)` concrete subclass (no extra fields in Phase 1; the
@@ -122,7 +131,7 @@ Resources. No producers of `SecretRequirement` wired yet beyond what tests synth
     `AdminTemplateKind`; Config always publishes `named_console_template:default`.
 - [ ] `cli/agentworks/resources/registry.py`:
   - `Registry` class: per-kind dicts of Resources (`secrets`, `vm_templates`, `agent_templates`,
-    ...). Mutable during the publish phase; frozen after `validate()`. Lookup helpers
+    ...). Mutable during the publish phase; frozen after `finalize()`. Lookup helpers
     (`lookup(kind, name)`, `iter_kind(kind)`) available once finalized.
   - `Registry.empty() -> Registry` -- class method returning a fresh empty Registry.
   - `Registry.add(kind, name, resource, origin: Origin) -> None` -- the publish-side API. The
@@ -131,19 +140,23 @@ Resources. No producers of `SecretRequirement` wired yet beyond what tests synth
     Catalog's `publish_to` (Phase 2b) builds `Origin.code_declared(source="agentworks.catalog")`.
     Future publishers do the same with their own variants. The Registry stores; it doesn't care
     about publisher identity beyond the Origin carried.
-  - `Registry.validate() -> None` -- the framework pass. Walks requirements via
+  - `Registry.finalize() -> None` -- the framework pass. Walks requirements via
     `required_resources()`, groups by `(kind, name)`, dispatches per `KIND_REGISTRY` miss policy
     (auto-declare synthesizes a Resource with `Origin(variant="auto-declared", ...)`; error raises
     `ConfigError`), attaches `usage` to each Resource, runs cycle detection (DFS three-coloring),
-    and freezes the Registry. Does NOT compose Resources -- that's Config's responsibility.
-  - `Registry.from_config(config: Config) -> Registry` (classmethod): the convenience entry point.
-    Equivalent to `r = cls.empty(); config.publish_to(r); r.validate(); return r`.
+    and freezes the Registry. The name covers the whole lifecycle terminator -- not just validation
+    but also the auto-declaration synthesis. Does NOT compose Resources from raw parsed data --
+    that's the source publisher's responsibility, established in Phase 0.
+  - The convenience that wraps `Registry.empty()` + publishers + `finalize()` lives in
+    `agentworks/bootstrap.py`'s `build_registry(config)` -- see the earlier bullet. The Registry
+    class itself does not expose a `from_config` classmethod; doing so would make Registry import
+    Config (the wrong direction; Registry should be publisher-agnostic).
 - [ ] **Add `origin: Origin | None` and `usage: list[UsageEntry]` fields to every Resource type**:
       `SecretDecl` in `agentworks/secrets/base.py`; `VMTemplate`, `WorkspaceTemplate`,
       `AgentTemplate`, `SessionTemplate`, `AdminConfig`, `NamedConsoleConfig`, `SecretConfig`,
       `SecretBackendConfig`, `GitCredentialConfig` in `agentworks/config.py`. Both default to `None`
       / empty list at construction; the Registry populates them (origin at publish via
-      `Registry.add` calling `with_origin(...)`; usage during validate via `with_usage(...)`). The
+      `Registry.add` calling `with_origin(...)`; usage during `finalize` via `with_usage(...)`). The
       Config-layer `declared_at: SourceLocation` (Phase 0) stays as Config's representation; the
       Registry-layer `origin: Origin` is the framework's representation. Both exist on the same
       Resource instance after publish. Resource types gain `with_origin` / `with_usage` copy methods
@@ -169,36 +182,35 @@ Resources. No producers of `SecretRequirement` wired yet beyond what tests synth
     variants (`operator-declared`, `code-declared`, `auto-declared`); the `code-declared` factory is
     exercised here even though its first real producer (the catalog publisher) lands in Phase 2b --
     the framework type is defined in Phase 1a, so its invariants are pinned here.
-  - `cli/tests/resources/test_validation_pass.py`: walk + dispatch in `Registry.validate()`;
+  - `cli/tests/resources/test_finalize_pass.py`: walk + dispatch in `Registry.finalize()`;
     auto-declare on miss for secrets; reserved-name restriction (Phase 1 stub for templates -- the
     dispatch behaves correctly even though no Phase 2 producers yet); error miss policy;
     first-matching origin rule; per-key + walk-order determinism. Includes a synthetic-publisher
     test that an operator-declared `SecretDecl` gets its `usage` list populated after publish +
-    validate (the `with_usage` attachment path). Composition is tested at the Config layer (Phase 0
-    tests); `Registry.validate()` operates on already-composed Resources.
+    finalize (the `with_usage` attachment path). Composition is tested at the Config layer (Phase 0
+    tests); `Registry.finalize()` operates on already-composed Resources.
   - `cli/tests/resources/test_registry_lifecycle.py`: empty Registry -> publish via `add` ->
-    `validate` -> queryable; double-`validate` errors; `add` after `validate` errors;
-    `Registry.from_config(config)` convenience equivalent to manual steps. Includes a
-    Phase-1-specific assertion that `Registry.from_config` invokes only `config.publish_to` (no
-    catalog publisher yet); Phase 2b updates this test to also assert `catalog.publish_to` runs
-    first.
+    `finalize` -> queryable; double-`finalize` errors; `add` after `finalize` errors;
+    `build_registry(config)` convenience equivalent to manual steps. Includes a Phase-1-specific
+    assertion that `build_registry` invokes only `config.publish_to` (no catalog publisher yet);
+    Phase 2b updates this test to also assert `catalog.publish_to` runs first.
   - `cli/tests/resources/test_cycle_detection.py`: synthetic cycle producer for testing; clear error
     reporting.
   - `cli/tests/resources/test_kind_registry.py`: `KIND_REGISTRY["secret"]` /
     `KIND_REGISTRY["admin_template"]` / `KIND_REGISTRY["named_console_template"]` lookups; each
     kind's `synthesize` shape.
   - `cli/tests/resources/test_singleton_publishing.py`: after
-    `Registry.from_config(load_config(<config with no admin.*>))`, the Registry contains exactly one
+    `build_registry(load_config(<config with no admin.*>))`, the Registry contains exactly one
     `admin_template:default` (operator-declared, with empty-defaults `AdminConfig`) and one
     `named_console_template:default` (same shape); after
-    `Registry.from_config(load_config(<config with [admin.env]>))`, the same single entry exists but
-    its `env` block is populated.
+    `build_registry(load_config(<config with [admin.env]>))`, the same single entry exists but its
+    `env` block is populated.
 
 Definition of done: the public surface (`ResourceRequirement`, `ResourceKind`, `Origin`, `Registry`,
 `UsageEntry`, `collect_secrets_for`, etc.) is importable from `agentworks.resources`;
-`Registry.from_config(config)` runs on every config load (no-op for current configs since no
-producers wired yet); `publish_to` / `validate` lifecycle pinned by tests; CI green;
-reviewer-approved.
+`build_registry(config)` from `agentworks.bootstrap` runs on every config load (no-op for current
+configs since no producers wired yet); `publish_to` / `finalize` lifecycle pinned by tests; CI
+green; reviewer-approved.
 
 ## Phase 1b: Env-block secret-reference migration
 
@@ -414,10 +426,11 @@ the remaining bespoke-validation kinds.
       each. Catalog Resources are now full Registry citizens:
       `agw resource list --kind apt_package,system_install_command,user_install_command` (Phase 2c)
       shows them with origin = `code-declared by agentworks.catalog`.
-- [ ] `Registry.from_config(config)` is updated to invoke `catalog.publish_to(registry)` before
-      `config.publish_to(registry)` (so any operator-declared override of catalog entries -- not
-      supported today, but the order keeps the door open -- is layered on top of the code-declared
-      base).
+- [ ] `agentworks/bootstrap.py` `build_registry(config)` is updated to invoke
+      `catalog.publish_to(registry)` before `config.publish_to(registry)` (so any operator-declared
+      override of catalog entries -- not supported today, but the order keeps the door open -- is
+      layered on top of the code-declared base). The Phase 1a stub of the catalog publisher becomes
+      a real publisher here.
 - [ ] `cli/agentworks/resources/kinds/git_credential_provider.py`: `GitCredentialProviderKind` for
       the `type` field on `[git_credentials.<name>]`. Error miss policy. (The provider
       implementations in `agentworks.git_credentials/` stay; the kind validates the `type` field

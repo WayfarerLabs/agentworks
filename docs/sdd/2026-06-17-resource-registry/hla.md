@@ -16,9 +16,11 @@ distinct responsibilities:
   Resource store. **Exists independently of any particular source**; starts empty. Multiple
   publishers contribute: `config.publish_to(registry)` for operator-declared Resources from TOML,
   `catalog.publish_to(registry)` (Phase 2b) for code-declared catalog commands, and future
-  publishers for plugins / manifests. After publishers finish, `registry.validate()` runs the
-  framework pass: auto-declares missing references, attaches `usage`, detects cycles. The
-  convenience `Registry.from_config(config)` orchestrates the standard publishers.
+  publishers for plugins / manifests. After publishers finish, `registry.finalize()` runs the
+  framework pass: auto-declares missing references, attaches `usage`, detects cycles, and freezes
+  the Registry. A small application-level `build_registry(config)` free function (in
+  `agentworks/bootstrap.py`) orchestrates the standard publishers so most call sites get a finalized
+  Registry in one call.
 
 The framework operates on `Registry`. Manager-entry code consumes `Registry` where it needs
 framework queries (e.g., requirement subgraph walks for eager-resolve); other call sites continue
@@ -37,7 +39,7 @@ emitting one `ResourceRequirement` per reference; the Registry consumes them dur
 |  - parses TOML       |          |  - ResourceKind / Origin    |  |
 |  - composes Resources|          |  - Registry (empty)         |  | per-kind logic
 |  - declared_at       |          |    * .add(.., origin)       |  | SecretKind etc.
-+----------------------+          |    * .validate() runs the   |  |
++----------------------+          |    * .finalize() runs the   |  |
 +----------------------+ publish  |      framework pass:        |--+
 |  agentworks.catalog  |--------->|        - walks reqs         |
 |  (code-declared,     |          |        - auto-declares      |
@@ -163,7 +165,7 @@ layer) and **what the framework sees** (`Registry`, runtime layer).
   Resources to it; after all publishers have contributed, the Registry validates itself. Resources
   arriving in the Registry carry one of three Origin variants depending on the publisher:
   `operator-declared` (Config, future operator-typed publishers), `code-declared` (catalog, future
-  code publishers like plugins), or `auto-declared` (synthesized inside `validate()` by a kind's
+  code publishers like plugins), or `auto-declared` (synthesized inside `finalize()` by a kind's
   miss policy). Multiple publishers contribute independently:
   - **Config publisher** (`config.publish_to(registry)`): publishes operator-declared Resources
     parsed from TOML. Constructs `Origin.operator_declared(file=..., line=...)` from each Resource's
@@ -178,26 +180,34 @@ layer) and **what the framework sees** (`Registry`, runtime layer).
 - **Publish API**: `Registry.add(kind: str, name: str, resource: Resource, origin: Origin)`.
   Per-Resource, not per-kind-dict. Each publisher constructs the right `Origin` variant and passes
   it in; the Registry just stores. This keeps the Registry agnostic of publisher internals.
-- **Validate phase**: after all publishers have contributed, `registry.validate()` runs the
+- **Finalize phase**: after all publishers have contributed, `registry.finalize()` runs the
   framework pass: walks the requirement graph, dispatches miss policies for references that don't
   resolve to a published Resource, synthesizes auto-declared Resources (with
   `Origin.auto_declared(source=...)` from the kind's `synthesize`), attaches the `usage` list to
-  each Resource, and detects cycles. The Registry is mutable during publish; `validate` finalizes
-  it.
-- **Convenience entry point** for the common Config + catalog case:
+  each Resource, detects cycles, and freezes the Registry. The Registry is mutable during publish;
+  `finalize` makes it immutable. The name captures the whole lifecycle terminator -- not just
+  validation but also the auto-declaration synthesis that the framework's miss policies trigger.
+- **Convenience entry point** for the common Config + catalog case: a free function
+  `build_registry(config)` in `agentworks/bootstrap.py` (the application-level glue module that
+  knows the standard set of publishers; the Registry itself stays publisher-agnostic):
 
   ```python
-  def Registry.from_config(config: Config) -> Registry:
+  # agentworks/bootstrap.py
+  from agentworks import catalog
+  from agentworks.config import Config
+  from agentworks.resources import Registry
+
+  def build_registry(config: Config) -> Registry:
       registry = Registry.empty()
       catalog.publish_to(registry)   # code-declared catalog commands (Phase 2b)
       config.publish_to(registry)    # operator-declared Resources from TOML
       # future: plugins.publish_to(registry), manifests.publish_to(registry), ...
-      registry.validate()            # auto-declares, validates, freezes
+      registry.finalize()            # auto-declares, validates, freezes
       return registry
   ```
 
-  Most current call sites use this convenience. The lower-level `add` / `validate` split is exposed
-  for future multi-source scenarios.
+  Most call sites use this convenience. The lower-level `Registry.empty()` + `publish_to` +
+  `finalize` triad is exposed for multi-source scenarios and tests that need to swap publishers.
 
 - **Layering rule**: Config's parsing-and-composition logic doesn't depend on
   `agentworks.resources`. The one exception is `Config.publish_to(registry: Registry)` (Phase 1a),
@@ -295,7 +305,7 @@ framework's runtime API to the on-disk format. The layered split:
 When resources eventually move to per-resource YAML manifests, only the producer changes:
 
 ```text
-N YAML manifests -> parse each -> manifest.publish_to(registry) -> registry.validate()
+N YAML manifests -> parse each -> manifest.publish_to(registry) -> registry.finalize()
 ```
 
 The `Config` layer fragments (one parsed object per manifest file, or merged by `(kind, name)`) or
@@ -431,31 +441,36 @@ returns `Config` (a registry of operator-declared Resources with parse-time loca
 starts empty; multiple publishers contribute: `catalog.publish_to(registry)` adds code-declared
 catalog commands (Phase 2b); `config.publish_to(registry)` adds operator-declared Resources
 (translating `declared_at` into `Origin.operator_declared(...)` before each `registry.add`); future
-publishers (plugins, manifests) follow the same shape. `registry.validate()` then adds auto-declared
-Resources with `Origin.auto_declared(source=...)`, attaches `usage` lists, detects cycles -> the
-Registry is queryable. `Registry.from_config(config)` orchestrates the standard publishers;
-lower-level `add` / `validate` is exposed for custom orchestration.
+publishers (plugins, manifests) follow the same shape. `registry.finalize()` then adds auto-declared
+Resources with `Origin.auto_declared(source=...)`, attaches `usage` lists, detects cycles, and
+freezes the Registry -> queryable. `build_registry(config)` in `agentworks/bootstrap.py`
+orchestrates the standard publishers; the lower-level `Registry.empty()` + `add` + `finalize` triad
+is exposed for custom orchestration.
 
-## Publish and validate
+## Publish and finalize
 
 The Registry's lifecycle has two phases. **Publish** accepts Resources from any source; the Registry
-is mutable during this phase. **Validate** runs the framework pass and finalizes the Registry; once
-`validate()` returns, the Registry is queryable but no longer mutable.
+is mutable during this phase. **Finalize** runs the framework pass and locks the Registry; once
+`finalize()` returns, the Registry is queryable but no longer mutable.
 
 ```python
-# Registry-side: accept publishes (with each publisher's Origin), then validate.
+# Registry-side: accept publishes (with each publisher's Origin), then finalize.
 class Registry:
     def add(self, kind: str, name: str, resource: Resource, origin: Origin) -> None:
         """Add a Resource from any publisher. The publisher constructs the Origin
         variant appropriate to its source type and passes it in."""
         if self._frozen:
-            raise RuntimeError("registry is frozen; add must precede validate")
+            raise RuntimeError("registry is frozen; add must precede finalize")
         self._resources.setdefault(kind, {})[name] = resource.with_origin(origin)
 
-    def validate(self) -> None:
-        """Run the framework pass over already-published Resources. Auto-declares,
-        attaches usage, detects cycles. After return, the Registry is queryable but
-        no longer accepts publishes."""
+    def finalize(self) -> None:
+        """Run the framework pass over already-published Resources. Walks the
+        requirement graph, dispatches miss policies (synthesizing auto-declared
+        Resources), attaches usage, detects cycles, and locks the Registry. After
+        return, the Registry is queryable but no longer accepts publishes. The
+        name covers the whole lifecycle terminator -- the work isn't just
+        validation but also the auto-declaration synthesis the miss policies
+        trigger."""
         # 1. Collect all requirements across published resources.
         requirements: list[ResourceRequirement] = []
         for kind_dict in self._resources.values():
@@ -515,13 +530,14 @@ def publish_to(registry: Registry) -> None:
             origin = Origin.code_declared(source="agentworks.catalog")
             registry.add(kind, name, resource, origin)
 
-# Convenience for the standard Config + catalog case.
-@classmethod
-def from_config(cls, config: Config) -> Registry:
-    registry = cls.empty()
+# Application-level convenience: lives in agentworks/bootstrap.py because the
+# "standard set of publishers" is application knowledge, not Registry knowledge.
+# Registry stays publisher-agnostic; Config stays unaware of catalog.
+def build_registry(config: Config) -> Registry:
+    registry = Registry.empty()
     catalog.publish_to(registry)  # code-declared catalog commands (Phase 2b)
     config.publish_to(registry)   # operator-declared Resources
-    registry.validate()
+    registry.finalize()
     return registry
 ```
 
@@ -850,10 +866,11 @@ follow-up PR sequence on a separate branch.
 
 ## Design decisions
 
-### One package, one validation pass
+### One package, one finalize pass
 
-`agentworks.resources` is a single package whose Registry exposes a publish/validate API (plus the
-`Registry.from_config(config)` convenience). Alternatives considered:
+`agentworks.resources` is a single package whose Registry exposes a publish/finalize API. The
+standard-set orchestrator `build_registry(config)` lives in `agentworks/bootstrap.py` (not on
+Registry) so the Registry stays publisher-agnostic. Alternatives considered:
 
 - Distributing the dispatch logic across the existing config types (each type's `__post_init__`
   validates its own references). Rejected because it scatters validation logic and makes cycle
