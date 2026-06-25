@@ -281,7 +281,7 @@ Legacy resolution path removed.
     BEFORE any state mutation; the install runner receives the value as a kwarg; no `env=`
     injection.
   - `cli/tests/test_sample_config_tailscale.py`: the updated `sample-config.toml` parses cleanly
-    through the new validation pass and the Tailscale secret auto-declares from the VM-template
+    through the new finalize pass and the Tailscale secret auto-declares from the VM-template
     requirement.
   - `cli/tests/test_tailscale_legacy_removed.py`: source-level tripwire that `AW_TAILSCALE_AUTH_KEY`
     is no longer referenced.
@@ -484,7 +484,7 @@ reviewer pass.
   Phase 2. Each phase ends at a green CI and a usable intermediate state.
 - **Why env-block migration before system secrets**: Phase 1b gives the framework a real producer of
   `SecretRequirement` exercised end-to-end before Phase 1c / 1d wire in the system-secret producers.
-  Bugs in the validation pass surface against the larger surface area first.
+  Bugs in the finalize pass surface against the larger surface area first.
 - **Why Phase 2 in a separate PR**: Phase 2 is primarily a refactor with no operator-facing config
   changes; bundling it with Phase 1 would inflate the diff without adding feature value. Splitting
   also lets Phase 1 reviewer feedback iterate without holding up the refactor work.

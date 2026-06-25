@@ -26,9 +26,9 @@ This SDD addresses both, in one framework:
 - A **resource-requirement contract** where each resource type declares what other resources it
   needs (by name, with a system-defined usage). One resource may be required by many; all usages are
   tracked and surfaced via the CLI.
-- A **resource-registry** validation pass that walks all requirements, looks each up in the
-  registry, and dispatches missing-name policies per kind (auto-declare for secrets; auto-declare
-  (restricted to `default`) for templates; error for catalogs; etc.).
+- A **resource-registry** finalize pass that walks all requirements, looks each up in the registry,
+  and dispatches missing-name policies per kind (auto-declare for secrets; auto-declare (restricted
+  to `default`) for templates; error for catalogs; etc.).
 - A **migration of `tailscale_auth_key` and `git_credentials.*.token`** to first-class secret
   references, using the auto-declare policy so the zero-config UX is preserved.
 
@@ -59,7 +59,7 @@ reconciliation, but that move is deliberately not part of this design.
   up by name, so cross-kind identity is the `(kind, name)` pair. Each kind contributes its own
   **miss policy** (R3) which the registry applies when a requirement points at a `(kind, name)` not
   yet in the registry. Resources arrive in the registry through two origin paths (R5): operator
-  declarations in config, and auto-declared synthesis from requirements. Queried by the validation
+  declarations in config, and auto-declared synthesis from requirements. Queried by the finalize
   pass and surfaced via `agw doctor`, `agw secret list`, and (Phase 2) `agw resource list`.
 - **Resource requirement**: a **reference declaration** -- one resource saying "I need this other
   resource by name". Distinct from the resource itself: requirements point at resources but are not
@@ -113,7 +113,7 @@ Every resource type that references other resources by name declares those refer
   common case.
 
 A resource's `required_resources()` method returns the full list (one per reference, no
-deduplication at the producer side). The validation pass collects requirements across the entire
+deduplication at the producer side). The finalize pass collects requirements across the entire
 config, keyed by `(kind, name)`, and feeds them into the registry.
 
 #### Multi-requirement resources
@@ -222,7 +222,7 @@ operator-declared or auto-declared:
   registration; never mutated.
 - **`usage`** (list of usage entries, system-collected): one entry per matching requirement; each
   entry carries the requirement's `source` `(kind, name)` and the usage text (Terminology).
-  Operators do not set this; the validation pass populates it from `required_resources()` walks.
+  Operators do not set this; the finalize pass populates it from `required_resources()` walks.
 
 These are the only fields the framework adds. The rest of a resource's fields come either from the
 operator's declaration (verbatim) or from the kind's `synthesize()` (when auto-declared). There is
@@ -260,9 +260,9 @@ Origin is surfaced in `agw doctor`, `agw secret list` (origin column), and `agw 
 (full origin detail, including file:line or first-requirement source as appropriate). The Phase-2
 `agw resource` commands surface origin generically (R12).
 
-### R6: Cycle detection in the validation pass
+### R6: Cycle detection in the finalize pass
 
-The validation pass detects cycles in the resource reference graph. Inheritance chains
+The finalize pass detects cycles in the resource reference graph. Inheritance chains
 (`vm_templates.x inherits = ["y"]` where `y inherits = ["x"]`) and any future cross-resource cycle
 are caught uniformly with a clear error naming the cycle and the resources involved. Cycle errors
 are config-load errors with no fallback.
@@ -345,11 +345,11 @@ is separate from the system-collected `usage` list:
 Both surface in `agw doctor`, `agw secret list`, and `agw secret describe` (R10). The convention is
 the same for any resource type Phase 2 brings into the framework.
 
-`description` is encouraged but not required. The validation pass emits a config-load warning when
-an **operator-declared** resource has no `description`, surfacing the gap so the operator can
-document their own resources. Auto-declared resources do not trigger the warning (the operator
-didn't author them; demanding a description would be noise). Operators who deliberately leave the
-field blank pay one warning per CLI invocation.
+`description` is encouraged but not required. The finalize pass emits a config-load warning when an
+**operator-declared** resource has no `description`, surfacing the gap so the operator can document
+their own resources. Auto-declared resources do not trigger the warning (the operator didn't author
+them; demanding a description would be noise). Operators who deliberately leave the field blank pay
+one warning per CLI invocation.
 
 ### R10: Origin and inspection via doctor, secret list, and secret describe
 
@@ -390,9 +390,9 @@ Describe does not prompt and does not resolve secret values; it reports state.
 
 #### Registry construction: universal
 
-At every CLI invocation, regardless of command, the validation pass walks the entire requirement
-graph and builds the registry. This is config-load-time work: cheap, deterministic, no backend
-calls. After the walk, the registry knows every declared resource and every requirement edge.
+At every CLI invocation, regardless of command, the finalize pass walks the entire requirement graph
+and builds the registry. This is config-load-time work: cheap, deterministic, no backend calls.
+After the walk, the registry knows every declared resource and every requirement edge.
 
 The walk is not scoped by command. `agw vm list` builds the same registry as `agw vm create`.
 
@@ -437,7 +437,7 @@ Phase 2 brings the remaining resource references under the framework. Each of th
 becomes a first-class kind in the registry with its own miss policy:
 
 - **Template inheritance**: `inherits = ["..."]` resolution for VM, workspace, agent, and session
-  templates moves into the framework's validation pass. Each template kind uses the auto-declare
+  templates moves into the framework's finalize pass. Each template kind uses the auto-declare
   (reserved name: `default`) miss policy so the implicit `default` template is formalized.
   Operator-facing behavior is unchanged; error messages get the framework's consistent shape.
 - **Catalog commands**: references to catalog command names (`apt_packages = ["gh"]`,
@@ -480,7 +480,7 @@ kinds are in the registry; with only secrets in Phase 1 it would be redundant wi
 ## Non-goals
 
 - **Manifest-style multi-file config**. The framework's `(kind, name)` identity and
-  parser-independent validation pass leave the door open; the loader migration is its own SDD.
+  parser-independent finalize pass leave the door open; the loader migration is its own SDD.
 - **Bringing lifecycle resources into the Resource Registry**. VMs, agents, sessions, and consoles
   are resources but live in the DB and are managed via CLI commands today. Migrating them into the
   registry (with reconciliation against DB state) is reserved for a future manifest-style-config SDD

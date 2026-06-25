@@ -28,9 +28,9 @@ taking `config: Config` and migrate gradually as needed.
 
 Existing config types (`SecretDecl`, `VMTemplate`, `GitCredentialConfig`, ...) gain a
 `declared_at: SourceLocation` field at the Config layer; the Registry's copies gain `origin`
-(framework type, translated from `declared_at` at publish) and `usage` (populated during validate).
+(framework type, translated from `declared_at` at publish) and `usage` (populated during finalize).
 Each config type that references other resources by name implements a `required_resources()` method
-emitting one `ResourceRequirement` per reference; the Registry consumes them during validate.
+emitting one `ResourceRequirement` per reference; the Registry consumes them during finalize.
 
 ```text
 +----------------------+          +-----------------------------+
@@ -49,7 +49,7 @@ emitting one `ResourceRequirement` per reference; the Registry consumes them dur
    plugins, manifests, ...)                      |
                                                  v
                                   +--------------+--------------+
-                                  |  Registry (validated):      |
+                                  |  Registry (finalized):      |
                                   |  - secrets[name]            |
                                   |  - vm_templates[name]       |
                                   |  - git_credentials[name]    |
@@ -87,7 +87,7 @@ cli/agentworks/resources/
   requirement.py         # ResourceRequirement, kind-specific subclasses
   origin.py              # Origin dataclass + factory helpers
   kind.py                # ResourceKind protocol; miss-policy machinery
-  registry.py            # validation pass: walk, dispatch, cycle-detect, attach metadata
+  registry.py            # finalize pass: walk, dispatch, cycle-detect, attach metadata
   kinds/
     __init__.py
     secret.py                  # SecretKind (auto-declare any name) -- Phase 1a
@@ -216,7 +216,7 @@ layer) and **what the framework sees** (`Registry`, runtime layer).
   framework-ignorant; only the explicit publish handoff crosses the boundary.
 - Exposes per-kind queries: `registry.secrets`, `registry.vm_templates`, etc. Each per-kind view
   contains operator-declared Resources (from publishers) **plus** auto-declared Resources
-  synthesized during validate. All Resources in `Registry` carry full `origin` (framework type) and
+  synthesized during finalize. All Resources in `Registry` carry full `origin` (framework type) and
   `usage` metadata.
 - The framework's lookup surface lives here: `registry.lookup(kind, name)`, iter helpers, subgraph
   walks for eager-resolve, the data backing `agw doctor` / `agw secret describe` /
@@ -226,7 +226,7 @@ layer) and **what the framework sees** (`Registry`, runtime layer).
 
 **Copy, not mutate (across layers).** Resources in `Registry` are distinct objects from their
 `Config` counterparts. The Registry's Resource has `origin: Origin` (framework type, translated from
-Config's `declared_at` at publish time) and `usage: list[UsageEntry]` (populated during `validate`).
+Config's `declared_at` at publish time) and `usage: list[UsageEntry]` (populated during `finalize`).
 The `Config` layer's instances stay pristine and carry only `declared_at`. The two layers hold
 distinct objects under the same name.
 
@@ -264,7 +264,7 @@ composition / `declared_at`-attachment from Phase 0):
   `Origin` is a Registry-layer concept constructed by each publisher (in `Config.publish_to`, the
   operator-declared `Origin` is built from `declared_at` before calling `registry.add(...)`).
 
-**Registry-layer validation** (in `Registry.validate`, new with this SDD; runs after all publishers
+**Registry-layer validation** (in `Registry.finalize`, new with this SDD; runs after all publishers
 have contributed via `publish_to`):
 
 - Requirement walks via each Resource's `required_resources()` (a Resource may declare it depends on
@@ -276,7 +276,7 @@ have contributed via `publish_to`):
 - **Origin attachment**: operator-declared Resources received
   `Origin(variant="operator-declared", file=..., line=...)` at publish time (Registry translated
   `declared_at` -> `Origin` then). Auto-declared Resources get
-  `Origin(variant="auto-declared", source=...)` from the kind's `synthesize` during validate.
+  `Origin(variant="auto-declared", source=...)` from the kind's `synthesize` during finalize.
 - Usage attachment: each Resource accumulates a `usage` list with one entry per matching
   requirement.
 - Cycle detection across the requirement graph.
@@ -310,7 +310,7 @@ N YAML manifests -> parse each -> manifest.publish_to(registry) -> registry.fina
 
 The `Config` layer fragments (one parsed object per manifest file, or merged by `(kind, name)`) or
 is replaced by a thinner parsed-manifests aggregate; the `Registry` interface stays identical. The
-framework consumes the `Registry`, not the producer. The validation pass -- miss policies, origin
+framework consumes the `Registry`, not the producer. The finalize pass -- miss policies, origin
 attachment, cycle detection -- is the same regardless of source format.
 
 `Origin` generalizes naturally: `Origin.file` is already a `Path` and works for any source. The
@@ -346,10 +346,10 @@ Producers emit a flat list per call; the framework concatenates the lists.
 ### `ResourceKind`
 
 A protocol implemented per kind. One instance per kind, registered in a module-level dict the
-validation pass consults:
+finalize pass consults:
 
 - `kind: str` -- the kind identifier matching `ResourceRequirement.kind`.
-- `miss_policy: Literal["auto-declare", "error"]` -- which branch the validation pass takes when a
+- `miss_policy: Literal["auto-declare", "error"]` -- which branch the finalize pass takes when a
   requirement points at a missing name.
 - `auto_declare_names: AbstractSet[str] | None` -- when `miss_policy == "auto-declare"`, the set of
   names the kind accepts. `None` means "any name" (secrets). `{"default"}` means "only the reserved
@@ -557,7 +557,7 @@ completeness; Phase 2's template inheritance is where it earns its keep.
 
 ### Errors
 
-All errors raised during the validation pass are `ConfigError` (existing `agentworks.errors` type)
+All errors raised during the finalize pass are `ConfigError` (existing `agentworks.errors` type)
 with the standard service-layer shape -- structured fields for kind/name/source, formatted by the
 CLI layer. Examples:
 
@@ -579,9 +579,9 @@ the kind's defaults). The framework's only job in either case is attaching frame
 - **`origin`**: set at registration time (operator-declared with file:line, or auto-declared with
   first matching requirement source). Never mutated.
 - **`usage`**: a list of `UsageEntry(source, text)` pairs populated from all matching requirements,
-  accumulated by the validation pass. Each entry carries both the requirement's source
-  `(kind, name)` and its usage text. Operator-declared resources get the same usage list attached as
-  auto-declared ones; it's framework-collected, not operator-settable.
+  accumulated by the finalize pass. Each entry carries both the requirement's source `(kind, name)`
+  and its usage text. Operator-declared resources get the same usage list attached as auto-declared
+  ones; it's framework-collected, not operator-settable.
 
 If an operator wants a partial override of a default template, they don't get it through field-level
 merging on the `default` declaration. They declare a child template with `inherits = ["default"]`
@@ -609,7 +609,7 @@ the same path); the framework never sees them.
 
 No reserved-name restriction; any name is accepted.
 
-For operator-declared secrets, the parser produces a `SecretDecl` with empty `usage`; the validation
+For operator-declared secrets, the parser produces a `SecretDecl` with empty `usage`; the finalize
 pass then populates `usage` from the matching requirements using the same `UsageEntry` shape.
 `usage` is framework-set in both cases (operator declarations cannot specify it).
 
@@ -620,7 +620,7 @@ defaults (the same defaults currently encoded in the resolver's "implicit defaul
 into one place). The `requirements[0].source` is recorded as origin.
 
 `auto_declare_names = {"default"}` -- only the reserved name. Any other missing name from a
-`TemplateRequirement` triggers an error at the validation pass.
+`TemplateRequirement` triggers an error at the finalize pass.
 
 Same shape applies for `WorkspaceTemplateKind`, `AgentTemplateKind`, `SessionTemplateKind`.
 
@@ -769,7 +769,7 @@ Schema change: VM template gains `tailscale_auth_key: str` (default `"tailscale-
 
 Flow at `vm create`:
 
-1. Registry loads; the framework's validation pass auto-declares `secret:tailscale-auth-key` if no
+1. Registry loads; the framework's finalize pass auto-declares `secret:tailscale-auth-key` if no
    operator block exists.
 2. Manager-entry walks the VM template subgraph; collects the `tailscale-auth-key` SecretDecl.
 3. Orchestrator's `resolve_for_command(extra_decls=[<that SecretDecl>])` resolves the value through
@@ -805,7 +805,7 @@ The TOML loader captures `(file, line)` for each `[secrets.<name>]`, `[git_crede
 
 ### Auto-declared resources
 
-After the validation pass synthesizes a resource, `Origin.source = requirements[0].source` -- the
+After the finalize pass synthesizes a resource, `Origin.source = requirements[0].source` -- the
 first matching requirement's `(kind, name)` per config-load walk order. The "first matching" rule is
 deterministic given that walk order.
 
@@ -829,7 +829,7 @@ complete picture for `agw secret describe`.
 The plan will phase the work; the full design above is the target. Anticipated shape:
 
 1. **Phase 1a: Framework foundations.** `resources/` package with `ResourceRequirement`,
-   `ResourceKind`, `Origin`, validation pass with cycle detection, kind registry. `SecretKind`,
+   `ResourceKind`, `Origin`, finalize pass with cycle detection, kind registry. `SecretKind`,
    `AdminTemplateKind`, `NamedConsoleTemplateKind` implementations -- the two singleton-backed kinds
    ship in 1a because Phase 1b (env-block secret refs from `admin.env`) needs the
    `admin_template:default` Resource present in the Registry to walk requirements from it. Config's
