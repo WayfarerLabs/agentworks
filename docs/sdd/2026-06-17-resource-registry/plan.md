@@ -23,21 +23,21 @@ TOML's implicit-parent semantics are accepted as-is per the revised FRD R2: writ
 `[vm_templates.x.env]` without a separate `[vm_templates.x]` header produces a valid (if minimal)
 `vm_templates.x` Resource. No orphan-rejection check.
 
-- [ ] `agentworks/source_location.py` (new): frozen `SourceLocation` dataclass with two fields:
+- [x] `agentworks/source_location.py` (new): frozen `SourceLocation` dataclass with two fields:
       `file: Path`, `line: int`. Lives outside `config.py` because `config.py` is already past the
       1000-line soft target and types like `SecretDecl` in `secrets/base.py` need to import
       `SourceLocation` too (a definition in `config.py` would create a circular import via the
       existing `agentworks.config` -> `agentworks.secrets` edge). The module is intentionally tiny.
-- [ ] `agentworks/config.py`: add a regex section-line scanner
+- [x] `agentworks/config.py`: add a regex section-line scanner
       (`_scan_section_lines(text: str) ->     dict[tuple[str, ...], int]`) that walks the raw TOML
       text matching `[section]` and `[section.sub]` header lines and returns a map from dotted
       section paths to opening-line numbers. Handles bare and quoted key segments per the TOML
       grammar; ignores commented lines and inline-table syntax. `[[array.of.tables]]` headers are
       tolerated (Phase 0 has no kind that uses them, but the scanner doesn't have to special-case).
-- [ ] `agentworks/config.py`: call the scanner once inside `load_config` (after reading the raw
+- [x] `agentworks/config.py`: call the scanner once inside `load_config` (after reading the raw
       text, before `tomllib.load`). Pass the resulting `section_lines` map through the loader so
       every `_load_*` helper can look up its declared-line.
-- [ ] `agentworks/config.py`: add `declared_at: SourceLocation` field to `VMTemplate`,
+- [x] `agentworks/config.py`: add `declared_at: SourceLocation` field to `VMTemplate`,
       `WorkspaceTemplate`, `AgentTemplate`, `SessionTemplate`, `AdminConfig`, `NamedConsoleConfig`,
       `GitCredentialConfig`. Composition sets `declared_at` from
       `section_lines[(<container>,     <name>)]` at construction time, or -- when the operator
@@ -47,9 +47,9 @@ TOML's implicit-parent semantics are accepted as-is per the revised FRD R2: writ
       Config synthesizes the empty-defaults instance with a sentinel
       `declared_at = SourceLocation(file=<config-path>,     line=0)` so the field is always
       populated.
-- [ ] `agentworks/secrets/base.py`: add `declared_at: SourceLocation` field to `SecretDecl`,
+- [x] `agentworks/secrets/base.py`: add `declared_at: SourceLocation` field to `SecretDecl`,
       `SecretBackendConfig`, `SecretConfig`. Imports from `agentworks.source_location` (no cycle).
-- [ ] **Tests**: existing suite stays green. Add `cli/tests/test_config_line_capture.py` pinning
+- [x] **Tests**: existing suite stays green. Add `cli/tests/test_config_line_capture.py` pinning
       that every operator-declared Resource carries a `declared_at: SourceLocation` after load, with
       the right file path and line, across all kinds today (`secrets`, `vm_templates`,
       `agent_templates`, `workspace_templates`, `session_templates`, `git_credentials`, admin,
@@ -57,7 +57,7 @@ TOML's implicit-parent semantics are accepted as-is per the revised FRD R2: writ
       configs with no `[admin.*]` / no `[named_console]` still produce default instances with the
       sentinel `declared_at`. Covers the implicit-parent case: `[vm_templates.x.env]` alone produces
       `vm_templates.x` with `declared_at` pointing at the env header line.
-- [ ] **Tests**: add `cli/tests/test_config_section_line_scanner.py` covering the regex scanner
+- [x] **Tests**: add `cli/tests/test_config_section_line_scanner.py` covering the regex scanner
       directly: top-level sections, dotted sub-sections, quoted-segment paths, commented headers
       ignored, array-of-tables headers tolerated, file with no sections.
 
