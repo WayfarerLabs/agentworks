@@ -12,6 +12,8 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Literal, Protocol
 
+from agentworks.source_location import SourceLocation, synthesized
+
 
 @dataclass(frozen=True)
 class SecretDecl:
@@ -36,6 +38,7 @@ class SecretDecl:
     backend_mappings: dict[str, str | dict[str, object] | Literal[False]] = field(
         default_factory=dict
     )
+    declared_at: SourceLocation = field(default_factory=synthesized)
 
 
 @dataclass(frozen=True)
@@ -48,6 +51,7 @@ class SecretBackendConfig:
     """
 
     kind: str
+    declared_at: SourceLocation = field(default_factory=synthesized)
 
 
 DEFAULT_BACKEND_CHAIN: tuple[str, ...] = ("env-var", "prompt")
@@ -75,6 +79,7 @@ class SecretConfig:
     """
 
     backends: tuple[str, ...] = DEFAULT_BACKEND_CHAIN
+    declared_at: SourceLocation = field(default_factory=synthesized)
 
 
 class SecretSource(Protocol):
