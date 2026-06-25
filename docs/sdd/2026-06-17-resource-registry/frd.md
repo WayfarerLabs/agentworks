@@ -84,11 +84,13 @@ reconciliation, but that move is deliberately not part of this design.
     The resulting resource has `origin = auto-declared`. A kind may restrict which names it accepts
     (e.g., template kinds accept only the reserved name `default`); requests for other names error.
   - **Error**: raise a config-load error citing the requirement source.
-- **Origin**: the per-resource record of where the resource came from. Two values:
-  `operator-declared` (from operator config; carries file path and line number for traceability) and
-  `auto-declared` (synthesized to satisfy a requirement; carries the first matching requirement's
-  source `(kind, name)`). Set once when the resource is added to the registry; never mutated
-  afterwards. Surfaced in `agw doctor`, `agw secret list`, and `agw secret describe`.
+- **Origin**: the per-resource record of where the resource came from. Three values:
+  `operator-declared` (from operator config; carries file path and line number for traceability),
+  `code-declared` (from a code publisher like the catalog publisher introduced in Phase 2b; carries
+  a code-source identifier such as `"agentworks.catalog"`), and `auto-declared` (synthesized to
+  satisfy a requirement; carries the first matching requirement's source `(kind, name)`). Set once
+  when the resource is added to the registry; never mutated afterwards. Surfaced in `agw doctor`,
+  `agw secret list`, and `agw secret describe`.
 
 ## Requirements
 
@@ -497,14 +499,8 @@ kinds are in the registry; with only secrets in Phase 1 it would be redundant wi
 
 ## Migration notes
 
-Operators upgrading across this SDD see four observable changes:
+Operators upgrading across this SDD see three observable changes:
 
-- **Orphan sub-sections now error.** Per R2, sub-sections like `[vm_templates.x.env]` require the
-  parent template `[vm_templates.x]` to be explicitly declared. Configs that previously relied on
-  TOML's implicit-table semantics (declaring `[vm_templates.x.env]` without `[vm_templates.x]`) get
-  a config-load error. Three fixes depending on intent: add the empty parent declaration, move the
-  env into an existing template, or (preferred for what was effectively a partial override of the
-  default template) declare a child template with `inherits = ["default"]` and put the env there.
 - **Undeclared env-block secret references no longer error.** Under env-and-secrets, an env-block
   `{ secret = "foo" }` reference required an explicit `[secrets.foo]` block; an undeclared name was
   a config-load error. Under this SDD, that reference becomes a requirement and the secret kind's

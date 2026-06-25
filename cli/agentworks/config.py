@@ -642,6 +642,12 @@ def _load_vm_templates(
             "[vm.config] has been replaced by [vm_templates.default]."
         )
 
+    # TOML's implicit-parent semantics already populate this dict: writing
+    # `[vm_templates.x.env]` alone produces `raw == {"x": {"env": {...}}}` even
+    # without a separate `[vm_templates.x]` header, and the loop iterates `x`
+    # like any other template. Per the revised FRD R2, that minimal form is a
+    # valid Resource; declared_at picks the earliest contributing header (the
+    # env line, in that case) via `_SectionLineMap.lookup`.
     templates: dict[str, VMTemplate] = {}
     for name, tdata in raw.items():
         if not isinstance(tdata, dict):
