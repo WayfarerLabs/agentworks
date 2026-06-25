@@ -51,7 +51,11 @@ emitting one `ResourceRequirement` per reference; the Registry consumes them dur
                                   |  - secrets[name]            |
                                   |  - vm_templates[name]       |
                                   |  - git_credentials[name]    |
-                                  |  - catalog_command[name]    |
+                                  |  - admin_template[default]  |
+                                  |  - named_console_template[..|
+                                  |  - apt_packages[name]       |
+                                  |  - system_install_cmds[..]  |
+                                  |  - user_install_cmds[..]    |
                                   |  ... each with origin+usage |
                                   +--------------+--------------+
                                                  |
@@ -84,8 +88,10 @@ cli/agentworks/resources/
   registry.py            # validation pass: walk, dispatch, cycle-detect, attach metadata
   kinds/
     __init__.py
-    secret.py            # SecretKind (auto-declare any name)
-    vm_template.py       # VMTemplateKind (Phase 2: auto-declare reserved 'default')
+    secret.py                  # SecretKind (auto-declare any name) -- Phase 1a
+    admin_template.py          # AdminTemplateKind (singleton; reserved 'default') -- Phase 1a
+    named_console_template.py  # NamedConsoleTemplateKind (singleton; reserved 'default') -- 1a
+    vm_template.py             # VMTemplateKind (reserved 'default') -- Phase 2a
     # ... more in Phase 2
 ```
 
@@ -95,9 +101,10 @@ separate keeps `config.py` focused on parsing, mirrors how `agentworks.env` and 
 extracted env/secret concerns into their own packages, and makes `Registry` substitutable when the
 source format changes (see "Future: YAML manifests" below).
 
-The `kinds/` subdirectory is slightly over-structured for Phase 1's single kind (`secret.py`) but
-right-sized for Phase 2's four to six kinds. Starting with the subdirectory avoids a churn-rename
-later.
+The `kinds/` subdirectory holds three kinds in Phase 1a (`secret`, `admin_template`,
+`named_console_template`) and grows to roughly a dozen in Phase 2 as template inheritance, catalog
+commands, git-credential providers, and secret backends migrate into the framework. Starting with
+the subdirectory avoids a churn-rename later.
 
 ## Two layers: Config and Registry
 
@@ -110,10 +117,23 @@ layer) and **what the framework sees** (`Registry`, runtime layer).
 - Parses TOML and **composes Resources** from top-level + sub-section pairs. Output is per-kind
   dicts of Resources, not raw TOML sections: `Config.secrets: dict[str, Secret]`,
   `Config.vm_templates: dict[str, VMTemplate]`, `Config.git_credentials: dict[str, GitCredential]`,
-  plus singletons (`Config.admin`, `Config.secret_system`). The Resource types (today named
-  `VMTemplate`, `AdminConfig`, `SecretConfig`, `SecretBackendConfig`, `GitCredentialConfig`) **are
-  the Resources** -- they happen to live in `config.py` today; their naming is a minor cleanup item
-  (see "Naming follow-up" below) but the framework treats them as Resources regardless.
+  plus singletons `Config.admin` and `Config.named_console` and `Config.secret_config` (the last is
+  the rename target's `Config.secret_system`; see "Naming follow-up" below -- the rename is
+  deferred). The Resource types (today named `VMTemplate`, `AdminConfig`, `NamedConsoleConfig`,
+  `SecretConfig`, `SecretBackendConfig`, `GitCredentialConfig`) **are the Resources** -- they happen
+  to live in `config.py` today; their naming is a minor cleanup item (see "Naming follow-up" below)
+  but the framework treats them as Resources regardless.
+- **Singletons publish as one-row kinds.** The Config-layer singletons (`Config.admin`,
+  `Config.named_console`) translate into one-row Registry kinds at publish: `admin_template` with
+  the reserved name `default`, and `named_console_template` with the reserved name `default`. Config
+  schema is unchanged (`[admin.env]`, `[admin.git_credentials]`, `[named_console]` work exactly as
+  today); only the Registry-side modeling treats them as first-class Resources so they appear in
+  `agw resource list`, can be the source of auto-declared secrets (e.g.,
+  `[admin.env] = { MY_VAR = { secret = "..." } }` emits
+  `SecretRequirement(source=("admin_ template", "default"))`), and route through framework dispatch
+  uniformly. If a config omits all `[admin.*]` sections, Config still publishes an empty-defaults
+  `admin_template:default`; same for `named_console_template:default`. There is no auto-decl OF
+  admin or named_console themselves -- only their referenced secrets can auto-declare.
 - **Enforces orphan rejection** (FRD R2). If `[vm_templates.x.env]` is parsed without a parent
   `[vm_templates.x]`, Config errors at parse-time: it cannot publish a Resource that only has the
   env sub-section. Structural enforcement happens here because Config has the schema knowledge of
@@ -130,8 +150,11 @@ layer) and **what the framework sees** (`Registry`, runtime layer).
 
 - Lives in `agentworks/resources/registry.py`. New class introduced by this SDD.
 - **The Registry exists independently of any particular source.** It starts empty; publishers add
-  Resources to it; after all publishers have contributed, the Registry validates itself. Multiple
-  publishers contribute independently:
+  Resources to it; after all publishers have contributed, the Registry validates itself. Resources
+  arriving in the Registry carry one of three Origin variants depending on the publisher:
+  `operator-declared` (Config, future operator-typed publishers), `code-declared` (catalog, future
+  code publishers like plugins), or `auto-declared` (synthesized inside `validate()` by a kind's
+  miss policy). Multiple publishers contribute independently:
   - **Config publisher** (`config.publish_to(registry)`): publishes operator-declared Resources
     parsed from TOML. Constructs `Origin.operator_declared(file=..., line=...)` from each Resource's
     `declared_at: SourceLocation`.
@@ -331,7 +354,9 @@ Carried on every Resource. One dataclass with a variant tag matching the publish
   for the declaration's opening line.
 - For `code-declared` (catalog, future code publishers like plugins): `source: str` -- a code-
   source identifier like `"agentworks.catalog"`. Catalog commands and similar code-published
-  Resources eagerly exist regardless of operator config; they're published by a code source.
+  Resources eagerly exist regardless of operator config; they're published by a code source. The
+  string shape is sufficient for Phase 2b; future plugin sources may warrant a structured
+  `(package, version)` form, deferred to that SDD.
 - For `auto-declared`: `source: tuple[str, str]` -- the first matching requirement's source, per
   R1's config-load walk order.
 
@@ -471,8 +496,9 @@ class Config:
                 registry.add(kind, name, resource, origin)
 
 # Catalog-side (Phase 2b): publish code-declared catalog commands.
-# Lives inside agentworks.resources / agentworks.catalog; imports Origin freely.
-def catalog_publish_to(registry: Registry) -> None:
+# `publish_to` lives in the agentworks.catalog module; import as `from agentworks
+# import catalog` and call `catalog.publish_to(registry)`. Mirrors Config.publish_to.
+def publish_to(registry: Registry) -> None:
     for kind, kind_dict in CODE_DEFINED_CATALOG.items():
         for name, resource in kind_dict.items():
             origin = Origin.code_declared(source="agentworks.catalog")
@@ -482,7 +508,7 @@ def catalog_publish_to(registry: Registry) -> None:
 @classmethod
 def from_config(cls, config: Config) -> Registry:
     registry = cls.empty()
-    catalog_publish_to(registry)  # code-declared catalog commands (Phase 2b)
+    catalog.publish_to(registry)  # code-declared catalog commands (Phase 2b)
     config.publish_to(registry)   # operator-declared Resources
     registry.validate()
     return registry
@@ -578,7 +604,11 @@ Phase 1 sources:
 
 - `SecretRefEnvEntry` (the `{ secret = "..." }` form of `EnvEntry`): emits one
   `SecretRequirement(name=<ref>, usage=<...>, source=(<scope>, <scope-name>))` per reference. The
-  `usage` text is derived from the env-block context (e.g., `"the ANTHROPIC_API_KEY env var"`).
+  scope kind for env blocks on singleton-backed Resources is the singleton's kind name:
+  `("admin_template", "default")` for `[admin.env]`, `("named_console_template", "default")` for
+  `[named_console]` env entries. Multi-named templates use their natural source:
+  `("vm_template", "<name>")`, `("agent_template", "<name>")`, etc. The `usage` text is derived from
+  the env-block context (e.g., `"the ANTHROPIC_API_KEY env var"`).
 - `VMTemplate.tailscale_auth_key`: emits `SecretRequirement` with `source=("vm_template", <name>)`
   and `usage="the VM-provisioning auth key"`.
 - `GitCredentialConfig.token`: emits `SecretRequirement` with `source=("git_credentials", <name>)`
@@ -772,9 +802,14 @@ complete picture for `agw secret describe`.
 The plan will phase the work; the full design above is the target. Anticipated shape:
 
 1. **Phase 1a: Framework foundations.** `resources/` package with `ResourceRequirement`,
-   `ResourceKind`, `Origin`, validation pass with cycle detection, kind registry. `SecretKind`
-   implementation. Existing `SecretDecl` augmented with `origin` and `usage` fields. No consumer
-   wiring yet.
+   `ResourceKind`, `Origin`, validation pass with cycle detection, kind registry. `SecretKind`,
+   `AdminTemplateKind`, `NamedConsoleTemplateKind` implementations -- the two singleton-backed kinds
+   ship in 1a because Phase 1b (env-block secret refs from `admin.env`) needs the
+   `admin_template:default` Resource present in the Registry to walk requirements from it. Config's
+   `publish_to` translates each singleton into a one-row Registry entry (`(admin_template, default)`
+   and `(named_console_template, default)`). Existing `SecretDecl`, `AdminConfig`,
+   `NamedConsoleConfig` augmented with `origin` and `usage` fields. No env-block / system-secret
+   producers of `SecretRequirement` wired yet (those land in Phase 1b/1c/1d).
 2. **Phase 1b: Env-block migration.** `EnvEntry`'s secret-ref form emits `SecretRequirement` via
    `required_resources()`. Validation pass auto-declares missing secrets. Existing strict "must
    declare" error behavior is removed; doctor surfaces auto-declared secrets so the visibility

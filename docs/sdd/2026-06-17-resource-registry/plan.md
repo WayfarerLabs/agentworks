@@ -16,9 +16,9 @@ Goal: prepare the parser layer for the framework. No rename. `Config` stays in
 makes that responsibility explicit by switching the parser to `tomlkit`, capturing file/line,
 composing Resources from top-level + sub-section pairs, enforcing orphan rejection, and attaching
 Config's own `SourceLocation(file, line)` to each composed Resource. The framework's `Origin` type
-(with two variants) is a Registry-layer concept; the Registry translates Config's `SourceLocation`
-into `Origin(variant="operator-declared", ...)` when Resources are published into it. Config does
-not depend on `agentworks.resources`.
+is a Registry-layer concept; the Registry translates Config's `SourceLocation` into
+`Origin(variant="operator-declared", ...)` when Resources are published into it. Config does not
+depend on `agentworks.resources`.
 
 - [ ] `cli/pyproject.toml`: add `tomlkit` dependency (latest stable).
 - [ ] `agentworks/config.py`: switch the parse step from `tomllib` to `tomlkit`. Existing
@@ -32,20 +32,27 @@ not depend on `agentworks.resources`.
 - [ ] `agentworks/config.py`: **enforce orphan rejection** (FRD R2). After parse, walk the `tomlkit`
       document and detect sub-sections like `[vm_templates.x.env]` whose parent `[vm_templates.x]`
       is not explicitly declared. Raise `ConfigError` pointing at the orphan with a "declare the
-      parent or move the content" message. Singletons (`admin`, `secret_config`) are exempt.
+      parent or move the content" message. Singletons (`admin`, `named_console`, `secret_config`)
+      are exempt.
 - [ ] `agentworks/config.py`: add `declared_at: SourceLocation` field to each Resource type
       (`VMTemplate`, `WorkspaceTemplate`, `AgentTemplate`, `SessionTemplate`, `AdminConfig`,
-      `SecretConfig`, `SecretBackendConfig`, `GitCredentialConfig`, `SecretDecl`). Composition sets
-      `declared_at` from the section's `SourceLocation` at construction time.
+      `NamedConsoleConfig`, `SecretConfig`, `SecretBackendConfig`, `GitCredentialConfig`,
+      `SecretDecl`). Composition sets `declared_at` from the section's `SourceLocation` at
+      construction time. For singletons where the operator may omit the section entirely, Config
+      synthesizes an empty-defaults instance with `declared_at` pointing at the config file's first
+      line (or a sentinel `<defaults>` location -- LLD picks).
 - [ ] **Tests**: existing suite stays green. Add `cli/tests/test_config_line_capture.py` pinning
       that every operator-declared Resource carries a `declared_at: SourceLocation` after load, with
       the right file path and line, across all kinds today (`secrets`, `vm_templates`,
       `agent_templates`, `workspace_templates`, `session_templates`, `git_credentials`, admin,
-      secret_config, secret_backends).
+      named_console, secret_config, secret_backends). Also covers the singleton-omitted case:
+      configs with no `[admin.*]` / no `[named_console]` still produce default instances with a
+      sensible `declared_at`.
 - [ ] **Tests**: add `cli/tests/test_config_orphan_rejection.py` covering: orphan
       `[vm_templates.x.env]` errors; admin singleton sub-tables (`[admin.env]`,
-      `[admin.git_credentials]`) accepted without a root `[admin]`; secret_config singleton accepted
-      without explicit `[secret_config]` parent if anyone writes `[secret_config.backends]`
+      `[admin.git_credentials]`) accepted without a root `[admin]`; `[named_console]` (which is
+      itself a single section, not a parent of sub-tables today) accepted; secret_config singleton
+      accepted without explicit `[secret_config]` parent if anyone writes `[secret_config.backends]`
       directly.
 - [ ] **Tests**: add a comment-roundtrip / sample-config-parse test confirming the `tomlkit`
       migration doesn't regress operator-facing behavior on the existing sample-config.
@@ -97,6 +104,18 @@ synthesize.
   - `SecretKind(ResourceKind)`: `kind="secret"`, `miss_policy="auto-declare"`,
     `auto_declare_names=None` (any name). `synthesize` builds a `SecretDecl` with framework-set
     `usage` list (paired `UsageEntry`s) and `origin=auto-declared`.
+- [ ] `cli/agentworks/resources/kinds/admin_template.py`:
+  - `AdminTemplateKind(ResourceKind)`: `kind="admin_template"`, `miss_policy="auto-declare"`,
+    `auto_declare_names={"default"}`. `synthesize` builds an empty-defaults `AdminConfig` with
+    `origin=auto-declared`. In practice Config always publishes `admin_template:default` (even when
+    no `[admin.*]` sections exist), so the miss-policy path is a safety net; pinning auto-declare
+    - reserved-name `default` keeps the framework-dispatch shape uniform with the other template
+      kinds and prevents typo'd names like `admin_template:custom`.
+- [ ] `cli/agentworks/resources/kinds/named_console_template.py`:
+  - `NamedConsoleTemplateKind(ResourceKind)`: `kind="named_console_template"`,
+    `miss_policy="auto-declare"`, `auto_declare_names={"default"}`. `synthesize` builds an
+    empty-defaults `NamedConsoleConfig` with `origin=auto-declared`. Same safety-net reasoning as
+    `AdminTemplateKind`; Config always publishes `named_console_template:default`.
 - [ ] `cli/agentworks/resources/registry.py`:
   - `Registry` class: per-kind dicts of Resources (`secrets`, `vm_templates`, `agent_templates`,
     ...). Mutable during the publish phase; frozen after `validate()`. Lookup helpers
@@ -117,26 +136,32 @@ synthesize.
     Equivalent to `r = cls.empty(); config.publish_to(r); r.validate(); return r`.
 - [ ] **Add `origin: Origin | None` and `usage: list[UsageEntry]` fields to every Resource type**:
       `SecretDecl` in `agentworks/secrets/base.py`; `VMTemplate`, `WorkspaceTemplate`,
-      `AgentTemplate`, `SessionTemplate`, `AdminConfig`, `SecretConfig`, `SecretBackendConfig`,
-      `GitCredentialConfig` in `agentworks/config.py`. Both default to `None` / empty list at
-      construction; the Registry populates them (origin at publish via `Registry.add` calling
-      `with_origin(...)`; usage during validate via `with_usage(...)`). The Config-layer
-      `declared_at: SourceLocation` (Phase 0) stays as Config's representation; the Registry-layer
-      `origin: Origin` is the framework's representation. Both exist on the same Resource instance
-      after publish. Resource types gain `with_origin` / `with_usage` copy methods (or
-      `@dataclass(frozen=True)` + `dataclasses.replace` shapes; LLD picks).
+      `AgentTemplate`, `SessionTemplate`, `AdminConfig`, `NamedConsoleConfig`, `SecretConfig`,
+      `SecretBackendConfig`, `GitCredentialConfig` in `agentworks/config.py`. Both default to `None`
+      / empty list at construction; the Registry populates them (origin at publish via
+      `Registry.add` calling `with_origin(...)`; usage during validate via `with_usage(...)`). The
+      Config-layer `declared_at: SourceLocation` (Phase 0) stays as Config's representation; the
+      Registry-layer `origin: Origin` is the framework's representation. Both exist on the same
+      Resource instance after publish. Resource types gain `with_origin` / `with_usage` copy methods
+      (or `@dataclass(frozen=True)` + `dataclasses.replace` shapes; LLD picks).
 - [ ] `cli/agentworks/config.py`: add `Config.publish_to(self, registry: Registry) -> None`.
       Iterates Config's per-kind dicts. For each Resource, builds
       `origin = Origin.operator_declared(file=resource.declared_at.file,     line=resource.declared_at.line)`
-      and calls `registry.add(kind, name, resource, origin)`. Imports `Registry` and `Origin` from
-      `agentworks.resources` -- the explicit layer handoff. Config's data structures (parsed
-      Resources, `SourceLocation`, etc.) remain framework-ignorant; only this publish handoff
-      crosses the boundary.
+      and calls `registry.add(kind, name, resource, origin)`. **Singleton publishing**: also
+      publishes the two singleton-backed kinds as one-row entries -- `Config.admin` ->
+      `registry.add("admin_template", "default", config.admin, origin)`, and `Config.named_console`
+      -> `registry.add("named_console_template", "default",     config.named_console, origin)`.
+      Imports `Registry` and `Origin` from `agentworks.resources` -- the explicit layer handoff.
+      Config's data structures (parsed Resources, `SourceLocation`, etc.) remain framework-ignorant;
+      only this publish handoff crosses the boundary.
 - [ ] `cli/agentworks/errors.py`: confirm `ConfigError` carries `entity_kind`, `entity_name`,
       `source` (a `(kind, name)` pair) fields if not already; existing shape is preserved.
 - [ ] **Tests**:
   - `cli/tests/resources/test_requirement.py`: dataclass invariants, base-vs-subclass shape.
-  - `cli/tests/resources/test_origin.py`: variant invariants, immutability.
+  - `cli/tests/resources/test_origin.py`: variant invariants and immutability across all three
+    variants (`operator-declared`, `code-declared`, `auto-declared`); the `code-declared` factory is
+    exercised here even though its first real producer (the catalog publisher) lands in Phase 2b --
+    the framework type is defined in Phase 1a, so its invariants are pinned here.
   - `cli/tests/resources/test_validation_pass.py`: walk + dispatch in `Registry.validate()`;
     auto-declare on miss for secrets; reserved-name restriction (Phase 1 stub for templates -- the
     dispatch behaves correctly even though no Phase 2 producers yet); error miss policy;
@@ -146,11 +171,21 @@ synthesize.
     Config layer (Phase 0 tests); `Registry.validate()` operates on already-composed Resources.
   - `cli/tests/resources/test_registry_lifecycle.py`: empty Registry -> publish via `add` ->
     `validate` -> queryable; double-`validate` errors; `add` after `validate` errors;
-    `Registry.from_config(config)` convenience equivalent to manual steps.
+    `Registry.from_config(config)` convenience equivalent to manual steps. Includes a
+    Phase-1-specific assertion that `Registry.from_config` invokes only `config.publish_to` (no
+    catalog publisher yet); Phase 2b updates this test to also assert `catalog.publish_to` runs
+    first.
   - `cli/tests/resources/test_cycle_detection.py`: synthetic cycle producer for testing; clear error
     reporting.
-  - `cli/tests/resources/test_kind_registry.py`: `KIND_REGISTRY["secret"]` lookup,
-    `SecretKind.synthesize` shape.
+  - `cli/tests/resources/test_kind_registry.py`: `KIND_REGISTRY["secret"]` /
+    `KIND_REGISTRY["admin_template"]` / `KIND_REGISTRY["named_console_template"]` lookups; each
+    kind's `synthesize` shape.
+  - `cli/tests/resources/test_singleton_publishing.py`: after
+    `Registry.from_config(load_config(<config with no admin.*>))`, the Registry contains exactly one
+    `admin_template:default` (operator-declared, with empty-defaults `AdminConfig`) and one
+    `named_console_template:default` (same shape); after
+    `Registry.from_config(load_config(<config     with [admin.env]>))`, the same single entry exists
+    but its `env` block is populated.
 
 Definition of done: the public surface (`ResourceRequirement`, `ResourceKind`, `Origin`, `Registry`,
 `UsageEntry`, `collect_secrets_for`, etc.) is importable from `agentworks.resources`;
@@ -169,9 +204,12 @@ showing every auto-declared secret with its origin source.
       `required_resources(source: tuple[str, str]) -> list[ResourceRequirement]`. Returns one
       `SecretRequirement` per referenced secret. Usage text derived from the env-block context
       (e.g., `"the ANTHROPIC_API_KEY env var"`).
-- [ ] `cli/agentworks/config.py`: env-block resources (admin, vm_template, workspace_template,
-      agent_template, session_template -- each of which has an env block) implement
-      `required_resources()` by iterating their `env` dict and aggregating per-entry requirements.
+- [ ] `cli/agentworks/config.py`: env-block resources implement `required_resources()` by iterating
+      their `env` dict and aggregating per-entry requirements. Covers `AdminConfig` (source
+      `("admin_template", "default")`), `NamedConsoleConfig` (source
+      `("named_console_template", "default")`), and the four multi-named template types `VMTemplate`
+      / `WorkspaceTemplate` / `AgentTemplate` / `SessionTemplate` (source `("<kind>", "<name>")` per
+      their existing kind/name).
 - [ ] Remove the env-and-secrets validation that errored on undeclared env-block secret refs
       (`render` raising `ConfigError` for unknown-secret refs in the env-block path).
 - [ ] **Release-notes line**: this shifts the failure mode for env-block typos. Previously a typo in
@@ -367,8 +405,8 @@ the remaining bespoke-validation kinds.
       and calls
       `registry.add(kind, name, resource,     Origin.code_declared(source="agentworks.catalog"))`
       for each. Catalog Resources are now full Registry citizens:
-      `agw resource list --kind catalog_command` (Phase 2c) shows them with origin =
-      `code-declared by agentworks.catalog`.
+      `agw resource list --kind apt_package,system_install_command,user_install_command` (Phase 2c)
+      shows them with origin = `code-declared by agentworks.catalog`.
 - [ ] `Registry.from_config(config)` is updated to invoke `catalog.publish_to(registry)` before
       `config.publish_to(registry)` (so any operator-declared override of catalog entries -- not
       supported today, but the order keeps the door open -- is layered on top of the code-declared
