@@ -204,9 +204,12 @@ def test_session_restart_broken_no_force_bails_before_eager_resolve(
     db = _seed_basic_db(tmp_path)
     _stub_session_prep(monkeypatch)
 
+    # A non-NULL socket_path keeps this session on the new per-session-socket
+    # model; with socket_path=None, restart_session treats the row as a
+    # legacy migration target and skips the gates these tests exist to pin.
     db._conn.execute(
-        "INSERT INTO sessions (name, workspace_name, template, mode, pid) "
-        "VALUES ('s1', 'ws1', 'default', ?, 9999)",
+        "INSERT INTO sessions (name, workspace_name, template, mode, pid, socket_path) "
+        "VALUES ('s1', 'ws1', 'default', ?, 9999, '/tmp/sock')",
         (SessionMode.ADMIN.value,),
     )
     db._conn.commit()
@@ -262,9 +265,12 @@ def test_session_restart_eager_resolve_fires_before_kill(
     db = _seed_basic_db(tmp_path)
     _stub_session_prep(monkeypatch)
 
+    # A non-NULL socket_path keeps this session on the new per-session-socket
+    # model; with socket_path=None, restart_session treats the row as a
+    # legacy migration target and skips the gates these tests exist to pin.
     db._conn.execute(
-        "INSERT INTO sessions (name, workspace_name, template, mode, pid) "
-        "VALUES ('s1', 'ws1', 'default', ?, 9999)",
+        "INSERT INTO sessions (name, workspace_name, template, mode, pid, socket_path) "
+        "VALUES ('s1', 'ws1', 'default', ?, 9999, '/tmp/sock')",
         (SessionMode.ADMIN.value,),
     )
     db._conn.commit()
