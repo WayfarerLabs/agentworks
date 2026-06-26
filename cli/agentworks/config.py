@@ -28,6 +28,9 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
     from agentworks.agents.templates import ResolvedAgentTemplate
+    from agentworks.resources.origin import Origin
+    from agentworks.resources.registry import Registry
+    from agentworks.resources.requirement import UsageEntry
     from agentworks.secrets import SecretResolver, SecretSource
     from agentworks.vms.templates import ResolvedVMTemplate
 
@@ -157,6 +160,8 @@ class NamedConsoleConfig:
 
     tmux_layout: str = AW_SESSION_VERTICAL_LAYOUT
     declared_at: SourceLocation = field(default_factory=synthesized)
+    origin: Origin | None = None
+    usage: tuple[UsageEntry, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -180,6 +185,8 @@ class VMTemplate:
     # Plaintext or secret references; the loader produces EnvEntry instances.
     env: dict[str, EnvEntry] = field(default_factory=dict)
     declared_at: SourceLocation = field(default_factory=synthesized)
+    origin: Origin | None = None
+    usage: tuple[UsageEntry, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -206,6 +213,8 @@ class AdminConfig:
     # Env that applies whenever a shell is opened as the admin user.
     env: dict[str, EnvEntry] = field(default_factory=dict)
     declared_at: SourceLocation = field(default_factory=synthesized)
+    origin: Origin | None = None
+    usage: tuple[UsageEntry, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -230,6 +239,8 @@ class AgentTemplate:
     claude_plugins: list[str] | None = None
     env: dict[str, EnvEntry] = field(default_factory=dict)
     declared_at: SourceLocation = field(default_factory=synthesized)
+    origin: Origin | None = None
+    usage: tuple[UsageEntry, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -240,6 +251,8 @@ class WorkspaceTemplate:
     tmuxinator: bool | None = None  # None = not explicitly set (inherit/default to True)
     env: dict[str, EnvEntry] = field(default_factory=dict)
     declared_at: SourceLocation = field(default_factory=synthesized)
+    origin: Origin | None = None
+    usage: tuple[UsageEntry, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -249,6 +262,8 @@ class GitCredentialConfig:
     org: str | None = None
     description: str | None = None
     declared_at: SourceLocation = field(default_factory=synthesized)
+    origin: Origin | None = None
+    usage: tuple[UsageEntry, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -262,6 +277,8 @@ class SessionTemplate:
     restart_command: str | None = None
     env: dict[str, EnvEntry] | None = None
     declared_at: SourceLocation = field(default_factory=synthesized)
+    origin: Origin | None = None
+    usage: tuple[UsageEntry, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -325,6 +342,65 @@ class Config:
     # empty-chain shape never has to face a secret-ref env entry.
     secret_resolver: SecretResolver = field(default_factory=lambda: _empty_resolver())
     config_issues: tuple[str, ...] = ()
+
+    def publish_to(self, registry: Registry) -> None:
+        """Publish every operator-declared Resource into ``registry``.
+
+        Iterates Config's per-kind dicts and pushes each Resource with an
+        ``Origin.operator_declared(file=..., line=...)`` built from its
+        ``declared_at: SourceLocation``. Singleton-backed kinds
+        (``admin_template:default``, ``named_console_template:default``)
+        are also published from ``Config.admin`` and
+        ``Config.named_console`` respectively, so admin / named_console
+        appear in the Registry as first-class one-row Resources even when
+        the operator's TOML omits all their sections (Phase 0's loader
+        always produces an instance; Config.publish_to always publishes
+        it).
+
+        ``secret_config`` is the secret-system policy envelope consumed
+        directly by ``agentworks.secrets``; it is NOT published as a
+        Registry kind. Its individual ``secret_backends`` entries are
+        published under the ``"secret_backend"`` kind.
+
+        Imports ``Registry`` and ``Origin`` from ``agentworks.resources``
+        -- the explicit layer handoff. Config's data structures (parsed
+        Resources, ``SourceLocation``, etc.) remain framework-ignorant
+        otherwise; only this publish handoff crosses the boundary.
+        """
+        # Import locally to keep ``agentworks.config`` import-light at
+        # module load: bootstrap code paths that don't touch Resources
+        # (e.g., `from agentworks.config import CONFIG_PATH`) avoid
+        # pulling in the full framework.
+        from agentworks.resources import Origin
+
+        def op_origin(declared_at: SourceLocation) -> Origin:
+            return Origin.operator_declared(
+                file=declared_at.file, line=declared_at.line
+            )
+
+        # Multi-named kinds: one Resource per (container, name) pair.
+        for kind, kind_dict in (
+            ("secret", self.secrets),
+            ("vm_template", self.vm_templates),
+            ("agent_template", self.agent_templates),
+            ("workspace_template", self.workspace_templates),
+            ("session_template", self.session_templates),
+            ("git_credentials", self.git_credentials),
+            ("secret_backend", self.secret_backends),
+        ):
+            for name, resource in kind_dict.items():
+                registry.add(kind, name, resource, op_origin(resource.declared_at))
+
+        # Singleton-backed kinds: one row each, name "default".
+        registry.add(
+            "admin_template", "default", self.admin, op_origin(self.admin.declared_at)
+        )
+        registry.add(
+            "named_console_template",
+            "default",
+            self.named_console,
+            op_origin(self.named_console.declared_at),
+        )
 
 
 # -- Loading ---------------------------------------------------------------
