@@ -288,6 +288,9 @@ def run(
         SSHResult with exit code, stdout, and stderr.
     """
     args = _ssh_base_args(target, env=env)
+    # Fence the remote command from ssh's option parser. See
+    # ``SSHTransport.run`` in ``transports/ssh.py`` for the rationale.
+    args.append("--")
     if target.login_shell:
         args.append(f"$SHELL -lc {shlex.quote(command)}")
     else:

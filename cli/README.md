@@ -124,19 +124,20 @@ Manage virtual machines across Lima (local or remote), Azure, and WSL2.
 > long-lived VMs (e.g. Lima, Azure, Proxmox, etc.) if you need a VM that survives independent of
 > your workstation.
 
-| Command                                   | Description                                |
-| ----------------------------------------- | ------------------------------------------ |
-| `agw vm create <name>`                    | Create a new VM (provision + initialize)   |
-| `agw vm list`                             | List VMs with status and resources         |
-| `agw vm describe <name>`                  | Show VM details, workspaces, and event log |
-| `agw vm shell <name>`                     | SSH into a VM's home directory             |
-| `agw vm start <name>`                     | Start a stopped VM                         |
-| `agw vm stop <name>`                      | Stop a running VM                          |
-| `agw vm reinit <name>`                    | Re-run initialization on a provisioned VM  |
-| `agw vm delete <name>`                    | Delete a VM (with confirmation)            |
-| `agw vm logs <name>`                      | Show SSH logs for a VM                     |
-| `agw vm console <name>`                   | _Deprecated_: use `agw console`            |
-| `agw vm add-git-credential <name> <cred>` | Add or update a git credential             |
+| Command                                             | Description                                                   |
+| --------------------------------------------------- | ------------------------------------------------------------- |
+| `agw vm create <name>`                              | Create a new VM (provision + initialize)                      |
+| `agw vm list`                                       | List VMs with status and resources                            |
+| `agw vm describe <name>`                            | Show VM details, workspaces, and event log                    |
+| `agw vm shell <name> [--workspace <ws>]`            | Admin shell on a VM (optionally rooted in a workspace)        |
+| `agw vm exec <name> [--workspace <ws>] -- <cmd...>` | Run a one-shot command as admin (optionally from a workspace) |
+| `agw vm start <name>`                               | Start a stopped VM                                            |
+| `agw vm stop <name>`                                | Stop a running VM                                             |
+| `agw vm reinit <name>`                              | Re-run initialization on a provisioned VM                     |
+| `agw vm delete <name>`                              | Delete a VM (with confirmation)                               |
+| `agw vm logs <name>`                                | Show SSH logs for a VM                                        |
+| `agw vm console <name>`                             | _Deprecated_: use `agw console`                               |
+| `agw vm add-git-credential <name> <cred>`           | Add or update a git credential                                |
 
 `vm create <name>` takes the VM name as a required positional. Optional flags: `--platform`,
 `--vm-host`, `--admin-username`, `--cpus`, `--memory`, `--disk`, and `--azure-vm-size`. These are
@@ -152,6 +153,17 @@ message shows what will be deleted. Pass `--yes` to skip the prompt.
 `agw vm shell` is the agentworks-wrapped entry point; for raw SSH (VS Code Remote-SSH, `scp`, etc.),
 use the `awvm--<vm>` alias documented under [Direct SSH aliases](#direct-ssh-aliases).
 
+`vm shell` and `vm exec` both accept `--workspace <ws>` to root the admin session in a workspace
+directory on this VM. The workspace's template env joins the env chain (between vm and admin), and
+`AGENTWORKS_WORKSPACE` / `AGENTWORKS_WORKSPACE_DIR` are set in the session. The shell variant `cd`s
+into the workspace; the exec variant runs the command from the workspace directory. A workspace that
+lives on a different VM is rejected with a `ValidationError` before any SSH work.
+
+Combining `--workspace` with `--provisioner` works (the shell still `cd`s into the workspace) but
+the workspace's template env and the `AGENTWORKS_WORKSPACE` identity vars are not delivered: the
+platform-native transports (`limactl shell`, `wsl.exe`) drop the `env=` kwarg by design. Treat
+`--provisioner` as a transport-repair escape hatch, not a routine combination.
+
 `agw vm shell --provisioner` opens the same shell over the platform-native transport
 (`limactl shell` for Lima, `wsl.exe` for WSL2, SSH via a temporarily-attached public IP for Azure)
 instead of Tailscale. Useful when Tailscale itself is the thing you need to reach the VM to fix (the
@@ -165,24 +177,20 @@ console (`VM > Console` in the Proxmox VE web UI) as the equivalent escape hatch
 
 Manage workspaces on VMs.
 
-| Command                              | Description                         |
-| ------------------------------------ | ----------------------------------- |
-| `agw workspace create <name>`        | Create a workspace on a VM          |
-| `agw workspace describe <name>`      | Show workspace details and sessions |
-| `agw workspace shell <name>`         | Open a plain shell into a workspace |
-| `agw workspace console <name>`       | Open the workspace console (tmux)   |
-| `agw workspace list`                 | List workspaces                     |
-| `agw workspace copy <source> <name>` | Copy a workspace to a new VM        |
-| `agw workspace rehome <name>`        | Move workspace to a new path        |
-| `agw workspace reinit <name>`        | Reinit workspace infrastructure     |
-| `agw workspace delete <name>`        | Delete a workspace                  |
+| Command                              | Description                                                           |
+| ------------------------------------ | --------------------------------------------------------------------- |
+| `agw workspace create <name>`        | Create a workspace on a VM                                            |
+| `agw workspace describe <name>`      | Show workspace details and sessions                                   |
+| `agw workspace list`                 | List workspaces                                                       |
+| `agw workspace copy <source> <name>` | Copy a workspace to a new VM                                          |
+| `agw workspace rehome <name>`        | Move workspace to a new path                                          |
+| `agw workspace reinit <name>`        | Reinit workspace infrastructure                                       |
+| `agw workspace delete <name>`        | Delete a workspace                                                    |
+| `agw workspace shell <name>`         | _Deprecated_: use `vm shell --workspace` or `agent shell --workspace` |
+| `agw workspace console <name>`       | _Deprecated_: use `agw console`                                       |
 
 `workspace create <name>` takes the workspace name as a required positional. Optional flags: `--vm`,
 `--template`, and `--open-vscode`.
-
-`workspace console` opens a tmuxinator session (`ws-<name>-console`) with an admin-shell window plus
-one window per session in the workspace. Pass `--recreate` to kill and rebuild the console. This is
-the recommended way to interact with sessions from within VS Code or any terminal on the VM.
 
 `workspace copy <source> <name>` copies a workspace to a new VM workspace. Accepts `--vm`. Source
 and destination can be the same VM (a clone) or different VMs.
@@ -190,32 +198,44 @@ and destination can be the same VM (a clone) or different VMs.
 `workspace delete` requires `--force` if the workspace has sessions. Running sessions are killed
 during deletion. Pass `--yes` to skip the confirmation prompt.
 
+`workspace shell` and `workspace console` are deprecated: a shell rooted in a workspace is always
+_somebody's_ shell. Use `agw vm shell <vm> --workspace <ws>` for an admin shell or
+`agw agent shell <agent> --workspace <ws>` for an agent shell. For curated tmux views over a
+workspace's sessions, use `agw console create` + `agw console attach`.
+
 ### Agents
 
 Manage agents (isolated Linux users) on VMs. Agents are VM-scoped and access workspaces via grants.
 
-| Command                                      | Description                              |
-| -------------------------------------------- | ---------------------------------------- |
-| `agw agent create <name> [--vm]`             | Create an agent on a VM                  |
-| `agw agent list [--vm <vm>]`                 | List agents                              |
-| `agw agent describe <name>`                  | Show agent details and grants            |
-| `agw agent reinit <name>`                    | Re-run agent setup                       |
-| `agw agent grant-workspaces <name> <ws>...`  | Grant workspace access                   |
-| `agw agent grant-workspaces <name> --all`    | Grant access to all workspaces           |
-| `agw agent revoke-workspaces <name> <ws>...` | Revoke workspace access                  |
-| `agw agent revoke-workspaces <name> --all`   | Revoke all explicit grants               |
-| `agw agent shell <name> [--workspace <ws>]`  | Open an interactive shell as the agent   |
-| `agw agent exec <name> -- <cmd...>`          | Run a one-shot command non-interactively |
-| `agw agent delete <name>`                    | Delete an agent                          |
+| Command                                                | Description                              |
+| ------------------------------------------------------ | ---------------------------------------- |
+| `agw agent create <name> [--vm]`                       | Create an agent on a VM                  |
+| `agw agent list [--vm <vm>]`                           | List agents                              |
+| `agw agent describe <name>`                            | Show agent details and grants            |
+| `agw agent reinit <name>`                              | Re-run agent setup                       |
+| `agw agent grant-workspaces <name> <ws>...`            | Grant workspace access                   |
+| `agw agent grant-workspaces <name> --all`              | Grant access to all workspaces           |
+| `agw agent revoke-workspaces <name> <ws>...`           | Revoke workspace access                  |
+| `agw agent revoke-workspaces <name> --all`             | Revoke all explicit grants               |
+| `agw agent shell <name> [--workspace <ws>]`            | Open an interactive shell as the agent   |
+| `agw agent exec <name> [--workspace <ws>] -- <cmd...>` | Run a one-shot command non-interactively |
+| `agw agent delete <name>`                              | Delete an agent                          |
 
 `agent create <name>` takes the agent name as a required positional. Optional flags: `--vm`,
 `--template`, and `--grant-all-workspaces`.
 
 `agent shell` and `agent exec` both SSH directly as the agent's Linux user. `agent shell` opens an
-interactive login shell (sources the agent's profile; pass `--workspace <ws>` to `cd` into a granted
-workspace first). `agent exec` runs a single command non-interactively but still wraps it in the
-agent's login shell so the agent's `PATH` (mise shims, `~/.local/bin`, etc.) is in scope. Useful for
-scripted invocations like `agw agent exec myagent -- claude -p "..."`.
+interactive login shell (sources the agent's profile). `agent exec` runs a single command
+non-interactively but still wraps it in the agent's login shell so the agent's `PATH` (mise shims,
+`~/.local/bin`, etc.) is in scope. Useful for scripted invocations like
+`agw agent exec myagent -- claude -p "..."`.
+
+Both accept `--workspace <ws>` to root the session in a workspace the agent has access to. The
+workspace's template env joins the env chain (between vm and agent), and `AGENTWORKS_WORKSPACE` /
+`AGENTWORKS_WORKSPACE_DIR` are set in the session. The shell variant `cd`s into the workspace; the
+exec variant runs the command from the workspace directory. A workspace on a different VM is
+rejected with a `ValidationError`; a workspace the agent lacks access to raises `AuthorizationError`
+with a hint to run `agent grant-workspaces`.
 
 `agent delete` requires `--force` if the agent has running sessions. Pass `--yes` to skip the
 confirmation prompt.
@@ -355,12 +375,12 @@ on next attach.
 Each session runs in its own locked-down tmux session on the VM. There are several ways to interact
 with sessions, at different scopes:
 
-| Method                    | Scope                            | tmux session name        | Entry point                 |
-| ------------------------- | -------------------------------- | ------------------------ | --------------------------- |
-| `session attach`          | One session                      | `<session-name>`         | Operator's machine          |
-| `console`                 | Curated subset across workspaces | `aw-console-<name>`      | Operator's machine          |
-| `workspace console`       | One workspace                    | `ws-<workspace>-console` | On-VM or operator's machine |
-| `vm console` (deprecated) | All sessions on the VM           | `vm-console`             | Operator's machine          |
+| Method                           | Scope                            | tmux session name        | Entry point                 |
+| -------------------------------- | -------------------------------- | ------------------------ | --------------------------- |
+| `session attach`                 | One session                      | `<session-name>`         | Operator's machine          |
+| `console`                        | Curated subset across workspaces | `aw-console-<name>`      | Operator's machine          |
+| `workspace console` (deprecated) | One workspace                    | `ws-<workspace>-console` | On-VM or operator's machine |
+| `vm console` (deprecated)        | All sessions on the VM           | `vm-console`             | Operator's machine          |
 
 #### Session tmux sessions
 
@@ -394,13 +414,14 @@ the DB is touched and changes appear on next attach. The mutation commands (`add
 attach/repair commands (`attach`, `restore-session`) do start a stopped VM, since their job is to
 bring live state up.
 
-#### Workspace console
+#### Workspace console (deprecated)
 
 `workspace console` uses tmuxinator to create or attach to a `ws-<name>-console` session. The
 tmuxinator config (`.tmuxinator.yml` in the workspace root) is regenerated whenever sessions change,
 so the console always reflects the current set of sessions. Best for in-VM work scoped to a single
-workspace (e.g. inside VS Code's integrated terminal). For curated views that span workspaces, use a
-named console (`console attach <name>`).
+workspace (e.g. inside VS Code's integrated terminal). Predates the multi-console design and lacks
+env-and-secrets integration; superseded by named consoles (`console attach <name>`). Will be removed
+in a future release.
 
 ```text
 ws-myproject-console (tmuxinator, full tmux)
@@ -418,8 +439,8 @@ future release.
 
 #### Shells
 
-`workspace shell` and `vm shell` open plain login shells with no tmux. Use these when you just need
-a terminal without the console structure.
+`vm shell` and `agent shell` open plain login shells with no tmux (optionally rooted in a workspace
+via `--workspace <ws>`). Use these when you just need a terminal without the console structure.
 
 #### Key behaviors
 

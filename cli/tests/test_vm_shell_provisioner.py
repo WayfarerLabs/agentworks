@@ -91,7 +91,7 @@ def _patch_common(
     env resolution, secrets, interactive, keep_vm_active."""
     monkeypatch.setattr(
         vm_manager, "_resolve_vm_admin_env_scopes",
-        lambda *a, **k: vm_manager._VmAdminEnvScopes(vm={}, admin={}),
+        lambda *a, **k: vm_manager._VmAdminEnvScopes(vm={}, workspace=None, admin={}),
     )
     monkeypatch.setattr(vm_manager, "_vm_secret_target", lambda *a, **k: object())
     monkeypatch.setattr("agentworks.secrets.resolve_for_command", lambda *a, **k: None)
@@ -592,7 +592,7 @@ def test_exec_vm_warns_but_continues_on_failed_init(
     # target has to expose that method too.
     monkeypatch.setattr(
         vm_manager, "_resolve_vm_admin_env_scopes",
-        lambda *a, **k: vm_manager._VmAdminEnvScopes(vm={}, admin={}),
+        lambda *a, **k: vm_manager._VmAdminEnvScopes(vm={}, workspace=None, admin={}),
     )
     monkeypatch.setattr(vm_manager, "_vm_secret_target", lambda *a, **k: object())
     monkeypatch.setattr("agentworks.secrets.resolve_for_command", lambda *a, **k: None)

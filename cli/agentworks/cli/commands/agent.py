@@ -127,6 +127,10 @@ def agent_revoke_workspaces(
 def agent_exec(
     ctx: typer.Context,
     name: Annotated[str, typer.Argument(help="Agent name")],
+    workspace: Annotated[
+        str | None,
+        typer.Option("--workspace", help="Run from a workspace"),
+    ] = None,
 ) -> None:
     """Execute a command as an agent user."""
     from agentworks.agents.manager import exec_agent
@@ -135,7 +139,15 @@ def agent_exec(
     if not ctx.args:
         typer.echo("Error: missing command", err=True)
         raise typer.Exit(1)
-    raise typer.Exit(exec_agent(get_db(), load_config(), name=name, command=ctx.args))
+    raise typer.Exit(
+        exec_agent(
+            get_db(),
+            load_config(),
+            name=name,
+            command=ctx.args,
+            workspace_name=workspace,
+        )
+    )
 
 
 @agent_app.command("shell")

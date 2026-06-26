@@ -155,15 +155,21 @@ def vm_reinit(
 def vm_exec(
     ctx: typer.Context,
     name: Annotated[str, typer.Argument(help="VM name")],
+    workspace: Annotated[
+        str | None,
+        typer.Option("--workspace", help="Run from a workspace"),
+    ] = None,
 ) -> None:
-    """Execute a command on a VM."""
+    """Execute a command on a VM as the admin user."""
     from agentworks.config import load_config
     from agentworks.vms.manager import exec_vm
 
     if not ctx.args:
         typer.echo("Error: missing command", err=True)
         raise typer.Exit(1)
-    raise typer.Exit(exec_vm(get_db(), load_config(), name, ctx.args))
+    raise typer.Exit(
+        exec_vm(get_db(), load_config(), name, ctx.args, workspace_name=workspace)
+    )
 
 
 @vm_app.command("shell")
@@ -181,12 +187,22 @@ def vm_shell(
             ),
         ),
     ] = False,
+    workspace: Annotated[
+        str | None,
+        typer.Option("--workspace", help="cd into a workspace"),
+    ] = None,
 ) -> None:
-    """Open a shell on a VM (home directory)."""
+    """Open a shell on a VM as the admin user."""
     from agentworks.config import load_config
     from agentworks.vms.manager import shell_vm
 
-    shell_vm(get_db(), load_config(), name, provisioner=provisioner)
+    shell_vm(
+        get_db(),
+        load_config(),
+        name,
+        provisioner=provisioner,
+        workspace_name=workspace,
+    )
 
 
 @vm_app.command("port-forward")
