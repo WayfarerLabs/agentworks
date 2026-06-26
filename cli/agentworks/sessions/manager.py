@@ -670,8 +670,7 @@ def _assert_required_commands(
     The probe runs over the SSH command channel without a PTY, so shells
     may emit a "no job control in this shell" warning when started
     interactive. The warning lands on stderr and doesn't change the exit
-    status, so the result is unaffected; ``run_command`` doesn't surface
-    that stderr to the operator either way.
+    status; this call uses ``check=False`` so stderr is discarded.
 
     One residual gap: tools that gate PATH on ``[[ -t 0 ]]`` (real TTY
     check) won't be visible to the probe. Closing that would require
@@ -681,7 +680,7 @@ def _assert_required_commands(
     missing: list[str] = []
     for cmd in template.required_commands:
         inner = f"command -v {shlex.quote(cmd)} >/dev/null 2>&1"
-        probe = run_command(f'"${{SHELL:-/bin/sh}}" -lic {shlex.quote(inner)}', check=False)
+        probe = run_command(f'"$SHELL" -lic {shlex.quote(inner)}', check=False)
         if not getattr(probe, "ok", False):
             missing.append(cmd)
     if not missing:

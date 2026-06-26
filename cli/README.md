@@ -479,6 +479,7 @@ custom templates in config:
 [session_templates.default]            # override the built-in default
 command = "claude --name {{session_name}}"
 restart_command = "claude --resume {{session_name}}"
+required_commands = ["claude"]
 description = "Claude Code interactive session"
 ```
 
@@ -486,6 +487,12 @@ Template commands support `{{session_name}}` and `{{workspace_name}}` variable s
 (double-brace syntax). The optional `restart_command` is used by `session restart` -- useful for
 tools like Claude Code where `--resume` picks up the previous conversation. If omitted, the regular
 `command` is used.
+
+The optional `required_commands` list names executables the template needs. They are checked on the
+session's launch target (the agent, or the VM admin for admin sessions) before any state mutation,
+so launching a `claude` session on an agent that doesn't have `claude` installed fails fast with a
+clear error instead of a cryptic downstream tmux failure. `required_commands` is merged (de-duped,
+order-preserving) across template inheritance.
 
 ### Catalog
 

@@ -893,19 +893,16 @@ def _load_session_templates(data: dict[str, object], issues: list[str]) -> dict[
                 context=f"session_templates.{name}",
                 issues=issues,
             )
-        required_commands: list[str] | None = None
-        if "required_commands" in tdata:
-            raw_required = tdata["required_commands"]
-            if not isinstance(raw_required, list):
-                raise ConfigError(f"session_templates.{name}.required_commands must be a list of strings")
-            required_commands = [str(c) for c in raw_required]
         templates[name] = SessionTemplate(
             name=name,
             inherits=list(tdata.get("inherits", [])),
             command=str(tdata["command"]) if "command" in tdata else None,
             description=str(tdata["description"]) if "description" in tdata else None,
             restart_command=str(tdata["restart_command"]) if "restart_command" in tdata else None,
-            required_commands=required_commands,
+            required_commands=(
+                _require_string_list(tdata, "required_commands", f"session_templates.{name}")
+                if "required_commands" in tdata else None
+            ),
             env=env,
         )
 

@@ -550,6 +550,26 @@ def test_session_template_required_commands_must_be_list(tmp_path: Path) -> None
         load_config(cfg_file, warn_issues=False)
 
 
+def test_session_template_required_commands_must_be_strings(tmp_path: Path) -> None:
+    """Non-string elements (e.g. ints) are rejected at load time -- not
+    silently coerced via ``str()``. Pinning the type-strict behavior so a
+    future refactor that drops the ``_require_string_list`` helper would
+    surface here."""
+    from agentworks.errors import ConfigError
+
+    cfg_file = tmp_path / "config.toml"
+    _write_base(
+        cfg_file,
+        extras="""
+        [session_templates.claude]
+        command = "claude"
+        required_commands = [123]
+        """,
+    )
+    with pytest.raises(ConfigError, match="required_commands must be a list of strings"):
+        load_config(cfg_file, warn_issues=False)
+
+
 def test_session_template_required_commands_union_on_inherit(tmp_path: Path) -> None:
     """``required_commands`` is unioned (parents + child, de-duplicated) across
     the inheritance chain, matching the merge semantics of other list fields."""
