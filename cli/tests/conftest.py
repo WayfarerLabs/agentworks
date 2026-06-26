@@ -192,6 +192,7 @@ class _StubSessionTemplate:
     name = "default"
     command = ""
     restart_command = None
+    required_commands: list[str] = []  # noqa: RUF012 - mutable class attr is fine for a stub
     env: dict[str, str] = {}  # noqa: RUF012 - mutable class attr is fine for a stub
 
 

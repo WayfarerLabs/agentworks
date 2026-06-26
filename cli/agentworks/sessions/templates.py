@@ -23,6 +23,7 @@ class ResolvedSessionTemplate:
     command: str = ""
     description: str = "Login shell"
     restart_command: str = ""
+    required_commands: list[str] = field(default_factory=list)
     env: dict[str, EnvEntry] = field(default_factory=dict)
 
 
@@ -82,21 +83,26 @@ def _resolve(templates: dict[str, SessionTemplate], name: str) -> ResolvedSessio
 
 
 def _merge(target: ResolvedSessionTemplate, source: ResolvedSessionTemplate) -> None:
-    """Merge source into target. Scalars: source wins. Maps: merge with source wins."""
+    """Merge source into target. Scalars: source wins. Maps: merge with source
+    wins. Lists (required_commands): unioned, preserving order."""
     target.command = source.command
     target.description = source.description
     target.restart_command = source.restart_command
+    target.required_commands = _append_dedupe(target.required_commands, source.required_commands)
     target.env = _merge_map(target.env, source.env)
 
 
 def _merge_template(target: ResolvedSessionTemplate, tmpl: SessionTemplate) -> None:
     """Merge a raw SessionTemplate into a ResolvedSessionTemplate. None = not set, skip.
-    Scalars: child overrides. Maps: merge with child wins."""
+    Scalars: child overrides. Maps: merge with child wins. Lists
+    (required_commands): unioned, preserving order."""
     if tmpl.command is not None:
         target.command = tmpl.command
     if tmpl.description is not None:
         target.description = tmpl.description
     if tmpl.restart_command is not None:
         target.restart_command = tmpl.restart_command
+    if tmpl.required_commands is not None:
+        target.required_commands = _append_dedupe(target.required_commands, tmpl.required_commands)
     if tmpl.env is not None:
         target.env = _merge_map(target.env, tmpl.env)

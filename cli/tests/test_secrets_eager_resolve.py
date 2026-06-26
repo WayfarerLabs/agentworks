@@ -96,6 +96,7 @@ def test_session_create_eager_resolve_fires_before_db_insert(
         name = "default"
         command = ""
         restart_command = None
+        required_commands: list[str] = []
         env: dict[str, str] = {}
 
     monkeypatch.setattr(session_manager, "_resolve_template", lambda *a, **k: _Tmpl())
@@ -148,6 +149,7 @@ def test_session_create_calls_resolve_with_session_target(
         name = "default"
         command = ""
         restart_command = None
+        required_commands: list[str] = []
         env: dict[str, str] = {}
 
     monkeypatch.setattr(session_manager, "_resolve_template", lambda *a, **k: _Tmpl())
@@ -294,6 +296,7 @@ def test_session_restart_eager_resolve_fires_before_kill(
         name = "default"
         command = ""
         restart_command = None
+        required_commands: list[str] = []
         env: dict[str, str] = {}
 
     monkeypatch.setattr(session_manager, "_resolve_template", lambda *a, **k: _Tmpl())

@@ -203,6 +203,94 @@ def test_create_session_uses_agent_target_for_tmux(
     db.close()
 
 
+def test_create_session_aborts_on_missing_required_command(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A template whose ``required_commands`` aren't installed on the agent must
+    abort with a clear ``StateError`` BEFORE any state mutation, rather than
+    leaving the operator with the cryptic downstream tmux server-access failure.
+    """
+    from agentworks.agents import manager as agent_mgr
+    from agentworks.errors import StateError
+    from agentworks.sessions import manager as session_manager
+
+    db = _seed_db(tmp_path)
+
+    # Agent target whose `command -v` probe reports the binary as missing.
+    class _MissingCmdResult:
+        def __init__(self, ok: bool) -> None:
+            self.ok = ok
+            self.returncode = 0 if ok else 1
+            self.stdout = ""
+            self.stderr = ""
+
+    seen_probes: list[str] = []
+
+    class _MissingCmdTarget:
+        def run(self, cmd: str, *_a: object, **_k: object) -> _MissingCmdResult:
+            if "command -v" in cmd:
+                seen_probes.append(cmd)
+                return _MissingCmdResult(ok=False)
+            return _MissingCmdResult(ok=True)
+
+    monkeypatch.setattr(
+        "agentworks.transports.transport", lambda *a, **k: _MissingCmdTarget()
+    )
+    monkeypatch.setattr("agentworks.sessions.manager.transport", lambda *a, **k: _MissingCmdTarget())
+    monkeypatch.setattr(
+        "agentworks.transports.agent_transport", lambda *a, **k: _MissingCmdTarget()
+    )
+    monkeypatch.setattr(
+        "agentworks.workspaces.manager._ensure_vm_running", lambda *a, **k: None
+    )
+    monkeypatch.setattr(agent_mgr, "_assert_agent_ssh_works", lambda *a, **k: None)
+
+    add_calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        agent_mgr,
+        "_add_to_workspace_group",
+        lambda vm, config, db, lu, ws, **k: add_calls.append((lu, ws)),
+    )
+
+    stub_session_resolvers(monkeypatch)
+    # Template that requires `claude` (not on the agent per the stub above).
+    monkeypatch.setattr(
+        session_manager,
+        "_resolve_template",
+        lambda *a, **k: SimpleNamespace(
+            name="claude",
+            command="claude",
+            restart_command=None,
+            required_commands=["claude"],
+            env={},
+        ),
+    )
+
+    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
+
+    with pytest.raises(StateError, match="requires 'claude'.*agent 'a1'"):
+        session_manager.create_session(
+            db,
+            config,  # type: ignore[arg-type]
+            name="s1",
+            workspace_name="ws1",
+            template_name="claude",
+            agent_name="a1",
+        )
+
+    # Fail-fast: no session row, no implicit grant, no group add.
+    assert db.get_session("s1") is None
+    assert not db.has_any_grant("a1", "ws1")
+    assert add_calls == [], "agent added to workspace group before command preflight"
+
+    # Pin the probe's shell flags to `-lic`: same flags `tmux._pane_command`
+    # uses for the actual pane. A regression to `-lc` would silently skip
+    # PATH additions hidden behind interactive-only shell config.
+    assert len(seen_probes) == 1
+    assert " -lic " in seen_probes[0]
+    db.close()
+
+
 def test_delete_session_probes_before_confirm_prompt(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -316,17 +316,26 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # the regular command is used. This is useful for tools like Claude Code
 # where --resume picks up the previous conversation.
 #
+# required_commands lists the executables the template's command needs. They
+# are checked on the session's launch target (the agent, or the VM admin for
+# admin sessions) BEFORE the session is created, so launching a "claude"
+# session on an agent that doesn't have claude installed fails fast with a
+# clear error instead of a cryptic tmux failure. required_commands are unioned
+# during inheritance (parents + child, de-duplicated).
+#
 # env maps are merged during inheritance (child wins on key collision).
 
 #[session_templates.default]               # override the built-in default
 #command = "claude --name {{session_name}}"
 #restart_command = "claude --resume {{session_name}}"
+#required_commands = ["claude"]
 #description = "Claude Code interactive session"
 
 #[session_templates.claude]
 #inherits = ["default"]
 #command = "claude --name {{session_name}}"
 #restart_command = "claude --resume {{session_name}}"
+#required_commands = ["claude"]
 #description = "Claude Code interactive session"
 
 #[session_templates.default.env]
@@ -334,6 +343,7 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 
 #[session_templates.custom-tool]
 #command = "my-tool --flag"
+#required_commands = ["my-tool"]
 #description = "Custom tool"
 #
 #[session_templates.custom-tool.env]

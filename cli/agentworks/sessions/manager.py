@@ -639,6 +639,67 @@ def _build_session_command(
     return _substitute_template_vars(raw_command, variables)
 
 
+def _assert_required_commands(
+    run_command: RunCommand,
+    template: ResolvedSessionTemplate,
+    *,
+    session_name: str,
+    target_label: str,
+) -> None:
+    """Verify every command the template declares as required exists on the
+    session's launch target, before any tmux work happens.
+
+    A template lists the executables its command needs via ``required_commands``
+    (e.g. the ``claude`` template requires ``claude``). Without this check, a
+    missing binary surfaces only as a cryptic downstream failure: the pane
+    command dies instantly, the fresh per-session tmux server exits, and the
+    next ``server-access`` call fails against a now-dead socket (see
+    ``sessions/tmux._grant_server_access``). Checking up front turns that into
+    an actionable error with no partial state to roll back.
+
+    Probes with ``$SHELL -lic 'command -v <cmd>'`` -- the same shell flags
+    ``tmux._pane_command`` uses for the actual pane. Matters because PATH
+    additions can live in any of the dotfiles those flags source:
+
+    - ``-l`` (login): /etc/profile, ~/.profile, ~/.bash_profile -- where
+      mise activation and the agentworks profile fragments live.
+    - ``-i`` (interactive): ~/.bashrc, ~/.zshrc, and any user PATH addition
+      guarded by ``[[ $- == *i* ]]`` or ``[ -n "$PS1" ]``.
+    - ``-c``: run the probe and exit.
+
+    The probe runs over the SSH command channel without a PTY, so shells
+    may emit a "no job control in this shell" warning when started
+    interactive. The warning lands on stderr and doesn't change the exit
+    status; this call uses ``check=False`` so stderr is discarded.
+
+    One residual gap: tools that gate PATH on ``[[ -t 0 ]]`` (real TTY
+    check) won't be visible to the probe. Closing that would require
+    requesting a PTY for the probe, which has its own side effects. PATH
+    mutations gated on a real TTY are rare; leaving uncovered for now.
+    """
+    missing: list[str] = []
+    for cmd in template.required_commands:
+        inner = f"command -v {shlex.quote(cmd)} >/dev/null 2>&1"
+        probe = run_command(f'"$SHELL" -lic {shlex.quote(inner)}', check=False)
+        if not getattr(probe, "ok", False):
+            missing.append(cmd)
+    if not missing:
+        return
+
+    joined = ", ".join(repr(c) for c in missing)
+    verb = "is" if len(missing) == 1 else "are"
+    raise StateError(
+        f"template '{template.name}' requires {joined}, which {verb} not "
+        f"installed or not on PATH for {target_label}.",
+        entity_kind="session",
+        entity_name=session_name,
+        hint=(
+            f"Install the missing command(s) on {target_label}, or create the "
+            "session with a different template (--template)."
+        ),
+    )
+
+
 # -- Liveness checks -------------------------------------------------------
 
 
@@ -884,6 +945,28 @@ def create_session(
             linux_user = vm.admin_username
 
         template = _resolve_template(config, template_name)
+
+        # Pre-flight: verify the template's required commands exist on the
+        # launch target BEFORE any state mutation. A missing binary otherwise
+        # only surfaces as a cryptic tmux server-access failure downstream
+        # (see _assert_required_commands). For agent mode the probe runs over
+        # the agent's own SSH (already proven by _assert_agent_ssh_works);
+        # for admin mode over the admin connection.
+        if mode == SessionMode.AGENT:
+            assert agent_target is not None  # set in the agent_name branch above
+            _assert_required_commands(
+                agent_target.run,
+                template,
+                session_name=name,
+                target_label=f"agent '{resolved_agent_name}'",
+            )
+        else:
+            _assert_required_commands(
+                run_command,
+                template,
+                session_name=name,
+                target_label=f"VM '{vm.name}'",
+            )
 
         # Compute socket path up front (deterministic from linux_user + session name).
         # Needed for the DB insert since the CHECK constraint requires agent sessions
@@ -1314,6 +1397,18 @@ def restart_session(
         # destructive step. Non-interactive failures surface as
         # SecretUnavailableError with no partial state to clean up.
         template = _resolve_template(config, session.template)
+
+        # Pre-flight the template's required commands before the destructive
+        # kill below, so a missing binary aborts the restart with a clear
+        # error instead of tearing down the old session and then failing to
+        # bring up the new one (see _assert_required_commands).
+        _assert_required_commands(
+            session_run_command,
+            template,
+            session_name=name,
+            target_label=(f"agent '{session.agent_name}'" if session.agent_name else f"VM '{vm.name}'"),
+        )
+
         from agentworks.secrets import resolve_for_command
 
         resolve_for_command(

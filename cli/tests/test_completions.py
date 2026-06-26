@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from agentworks.cli import app
@@ -263,7 +265,9 @@ class TestInstall:
         symlink so both names trigger the same script."""
         from typer.testing import CliRunner
 
-        monkeypatch.setenv("HOME", str(tmp_path))
+        # Redirect home via Path.home itself: setenv("HOME") only works on
+        # POSIX; Path.home() reads USERPROFILE on Windows.
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
         result = CliRunner().invoke(
             app, ["completion", "install", "--shell", "bash"]
         )
@@ -275,8 +279,10 @@ class TestInstall:
         primary = completions_dir / "agentworks"
         alias = completions_dir / "agw"
         assert primary.is_file()
-        assert alias.is_symlink()
-        assert alias.resolve() == primary.resolve()
+        # POSIX gets a symlink; Windows (no symlink privilege) falls back to a
+        # content copy. Either way the alias resolves to the same script.
+        assert alias.is_symlink() or alias.is_file()
+        assert alias.read_text() == primary.read_text()
 
     def test_zsh_install_drops_agw_alias_symlink(
         self, monkeypatch, tmp_path
@@ -287,7 +293,9 @@ class TestInstall:
         reached for the short name."""
         from typer.testing import CliRunner
 
-        monkeypatch.setenv("HOME", str(tmp_path))
+        # Redirect home via Path.home itself: setenv("HOME") only works on
+        # POSIX; Path.home() reads USERPROFILE on Windows.
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
         # Steer install away from Oh My Zsh detection so we land in ~/.zfunc.
         monkeypatch.delenv("ZSH_CUSTOM", raising=False)
 
@@ -300,8 +308,10 @@ class TestInstall:
         primary = zfunc / "_agentworks"
         alias = zfunc / "_agw"
         assert primary.is_file()
-        assert alias.is_symlink()
-        assert alias.resolve() == primary.resolve()
+        # POSIX gets a symlink; Windows (no symlink privilege) falls back to a
+        # content copy. Either way the alias resolves to the same script.
+        assert alias.is_symlink() or alias.is_file()
+        assert alias.read_text() == primary.read_text()
 
 
 class TestVariadicPositionalCompletion:
