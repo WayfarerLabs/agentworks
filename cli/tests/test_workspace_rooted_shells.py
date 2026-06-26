@@ -409,13 +409,28 @@ def test_exec_agent_workspace_prefixes_cd(
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.parametrize(
+    "command",
+    [
+        # Misplaced agw long flag (the common case).
+        ["--workspace", "ws1", "pwd"],
+        # Misplaced agw flag with a remote command that also has its own
+        # short flags downstream.
+        ["--workspace", "ws1", "-x", "foo"],
+        # Bare ``-``-prefixed remote command -- not an agw flag, but
+        # still rejected because the remote shell would choke.
+        ["-weird", "args"],
+        # Lone short flag.
+        ["-x"],
+    ],
+)
 def test_exec_vm_rejects_dash_prefixed_command(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, command: list[str],
 ) -> None:
-    """``vm exec aavm1 --workspace ws1 pwd`` (misplaced ``--workspace``)
-    must raise ValidationError before any SSH work. The hint must
-    explain that agw args belong before the first positional, since the
-    exec CLI uses ``allow_interspersed_args=False``."""
+    """Any ``vm exec`` whose remote-command argv starts with ``-`` is
+    rejected before any SSH work. The hint is the same regardless of
+    whether the leading token is an agw flag or some other ``-``-
+    prefixed token; the operator decides whether the hint applies."""
     from agentworks.vms import manager as vm_manager
 
     db = _seed_db(tmp_path)
@@ -423,34 +438,9 @@ def test_exec_vm_rejects_dash_prefixed_command(
     config = SimpleNamespace(secret_resolver=None)
 
     with pytest.raises(ValidationError, match="cannot start with '-'") as exc_info:
-        vm_manager.exec_vm(  # type: ignore[arg-type]
-            db, config, "vm1", ["--workspace", "ws1", "pwd"],
-        )
+        vm_manager.exec_vm(db, config, "vm1", command)  # type: ignore[arg-type]
     hint = exc_info.value.hint or ""
     assert "agentworks args must come before the first positional argument" in hint
-
-
-def test_exec_vm_rejects_dash_prefixed_command_generic_hint(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A `-` command that doesn't include a recognized agw flag still
-    rejects, but with the generic './-name' workaround hint. The
-    misplaced-flag hint must NOT fire here -- the user wasn't trying to
-    pass an agw flag, and showing the args-must-come-first hint would
-    be misleading."""
-    from agentworks.vms import manager as vm_manager
-
-    db = _seed_db(tmp_path)
-    _patch_vm_common(monkeypatch)
-    config = SimpleNamespace(secret_resolver=None)
-
-    with pytest.raises(ValidationError, match="cannot start with '-'") as exc_info:
-        vm_manager.exec_vm(  # type: ignore[arg-type]
-            db, config, "vm1", ["-weird", "args"],
-        )
-    hint = exc_info.value.hint or ""
-    assert "./-name" in hint
-    assert "agentworks args" not in hint
 
 
 def test_exec_agent_rejects_dash_prefixed_command(
@@ -467,28 +457,6 @@ def test_exec_agent_rejects_dash_prefixed_command(
     with pytest.raises(ValidationError, match="cannot start with '-'") as exc_info:
         agent_manager.exec_agent(  # type: ignore[arg-type]
             db, config, name="a1", command=["--workspace", "ws1", "pwd"],
-        )
-    hint = exc_info.value.hint or ""
-    assert "agentworks args must come before the first positional argument" in hint
-
-
-def test_exec_vm_misplaced_flag_with_short_flag_token(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """When ``--workspace`` coexists with another ``-``-prefixed token
-    in the passthrough argv (e.g. ``--workspace ws1 -x foo``), the
-    misplaced-flag hint must still fire -- the user clearly tried to
-    pass an agw flag, and the presence of a short flag in the rest of
-    the command doesn't change that diagnosis."""
-    from agentworks.vms import manager as vm_manager
-
-    db = _seed_db(tmp_path)
-    _patch_vm_common(monkeypatch)
-    config = SimpleNamespace(secret_resolver=None)
-
-    with pytest.raises(ValidationError, match="cannot start with '-'") as exc_info:
-        vm_manager.exec_vm(  # type: ignore[arg-type]
-            db, config, "vm1", ["--workspace", "ws1", "-x", "foo"],
         )
     hint = exc_info.value.hint or ""
     assert "agentworks args must come before the first positional argument" in hint
