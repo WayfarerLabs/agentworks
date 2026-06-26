@@ -518,6 +518,60 @@ def test_session_template_inherits_parent_env(tmp_path: Path) -> None:
     assert resolved.env["EDITOR"].value == "nvim"
 
 
+def test_session_template_required_commands_parsed(tmp_path: Path) -> None:
+    """``required_commands`` parses into a list of strings on the template."""
+    cfg_file = tmp_path / "config.toml"
+    _write_base(
+        cfg_file,
+        extras="""
+        [session_templates.claude]
+        command = "claude --name {{session_name}}"
+        required_commands = ["claude"]
+        """,
+    )
+    cfg = load_config(cfg_file, warn_issues=False)
+    assert cfg.session_templates["claude"].required_commands == ["claude"]
+
+
+def test_session_template_required_commands_must_be_list(tmp_path: Path) -> None:
+    """A non-list ``required_commands`` is rejected at load time."""
+    from agentworks.errors import ConfigError
+
+    cfg_file = tmp_path / "config.toml"
+    _write_base(
+        cfg_file,
+        extras="""
+        [session_templates.claude]
+        command = "claude"
+        required_commands = "claude"
+        """,
+    )
+    with pytest.raises(ConfigError, match="required_commands must be a list"):
+        load_config(cfg_file, warn_issues=False)
+
+
+def test_session_template_required_commands_union_on_inherit(tmp_path: Path) -> None:
+    """``required_commands`` is unioned (parents + child, de-duplicated) across
+    the inheritance chain, matching the merge semantics of other list fields."""
+    cfg_file = tmp_path / "config.toml"
+    _write_base(
+        cfg_file,
+        extras="""
+        [session_templates.parent]
+        required_commands = ["tmux", "claude"]
+
+        [session_templates.child]
+        inherits = ["parent"]
+        required_commands = ["claude", "jq"]
+        """,
+    )
+    cfg = load_config(cfg_file, warn_issues=False)
+    from agentworks.sessions.templates import resolve_from_dict
+
+    resolved = resolve_from_dict(cfg.session_templates, "child")
+    assert resolved.required_commands == ["tmux", "claude", "jq"]
+
+
 def test_undeclared_secret_in_parent_caught_even_if_child_overrides(
     tmp_path: Path,
 ) -> None:

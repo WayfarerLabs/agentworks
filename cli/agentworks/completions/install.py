@@ -10,6 +10,22 @@ from pathlib import Path
 import typer
 
 
+def _link_alias(alias_link: Path, target_name: str) -> None:
+    """Point an alias completion entry at the primary script in the same dir.
+
+    Uses a symlink where the OS permits it (POSIX). On Windows, creating a
+    symlink needs elevation or Developer Mode, so fall back to copying the
+    primary script's content under the alias name. The fallback is
+    functionally identical for shell completion lookup, which keys purely on
+    the file name, not on whether the entry is a link.
+    """
+    alias_link.unlink(missing_ok=True)
+    try:
+        alias_link.symlink_to(target_name)
+    except OSError:
+        shutil.copyfile(alias_link.with_name(target_name), alias_link)
+
+
 def install_completions(shell: str, script: str) -> None:
     """Write the completion script to the appropriate location."""
     if shell == "bash":
@@ -36,8 +52,7 @@ def _install_bash(script: str) -> None:
     # reached when typing `agw<TAB>` (bash looks for a file literally named
     # `agw`). Drop a symlink so either command triggers the same script.
     alias_link = target_dir / "agw"
-    alias_link.unlink(missing_ok=True)
-    alias_link.symlink_to("agentworks")
+    _link_alias(alias_link, "agentworks")
     typer.echo(f"Linked    {alias_link} -> agentworks")
 
     # Check if bash-completion is likely available
@@ -74,8 +89,7 @@ def _install_zsh(script: str) -> None:
     # without a `_agw` entry point. Drop a symlink so either command triggers
     # the same script.
     alias_link = target_dir / "_agw"
-    alias_link.unlink(missing_ok=True)
-    alias_link.symlink_to("_agentworks")
+    _link_alias(alias_link, "_agentworks")
     typer.echo(f"Linked    {alias_link} -> _agentworks")
 
     # Check if ~/.zfunc needs fpath setup (not needed for Oh My Zsh)

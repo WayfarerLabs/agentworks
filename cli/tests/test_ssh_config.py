@@ -224,8 +224,13 @@ def _mock_agent(name: str, linux_user: str, vm_name: str) -> MagicMock:
     return agent
 
 
-def test_rebuild_config_dir_emits_per_agent_blocks(tmp_path: Path) -> None:
+def test_rebuild_config_dir_emits_per_agent_blocks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Each VM's agents get one top-level ``awagent--<name>`` Host block each."""
+    # Pin ControlMaster support on so the count assertion below is independent
+    # of the host platform (it's gated off on Windows; see _controlmaster_supported).
+    monkeypatch.setattr("agentworks.ssh_config._controlmaster_supported", lambda: True)
     config, ssh_dir = _mock_config(tmp_path)
     db = MagicMock()
     db.list_vms.return_value = [_mock_vm("vm1", "100.64.0.1")]
@@ -352,7 +357,9 @@ def test_legacy_rebuild_no_agents_no_per_agent_blocks(tmp_path: Path) -> None:
 # -- ControlMaster block ---------------------------------------------------
 
 
-def test_rebuild_config_dir_emits_controlmaster_per_vm_ip(tmp_path: Path) -> None:
+def test_rebuild_config_dir_emits_controlmaster_per_vm_ip(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """ControlMaster multiplexes the dozens of sequential SSH calls every
     create / reinit / agent-create issues. The block keys on the VM's
     Tailscale IP (not the alias) because every agentworks-internal SSH
@@ -361,6 +368,9 @@ def test_rebuild_config_dir_emits_controlmaster_per_vm_ip(tmp_path: Path) -> Non
     (a) one block per unique IP, (b) namespaced ControlPath."""
     from agentworks.ssh_config import _rebuild_config_dir
 
+    # ControlMaster is gated off on Windows; pin it on so this test exercises
+    # the content logic on every platform (see _controlmaster_supported).
+    monkeypatch.setattr("agentworks.ssh_config._controlmaster_supported", lambda: True)
     config, ssh_dir = _mock_config(tmp_path)
     db = MagicMock()
     db.list_vms.return_value = [
@@ -385,12 +395,16 @@ def test_rebuild_config_dir_emits_controlmaster_per_vm_ip(tmp_path: Path) -> Non
     assert "ControlPersist 60s" in content
 
 
-def test_rebuild_config_dir_dedupes_controlmaster_for_agents(tmp_path: Path) -> None:
+def test_rebuild_config_dir_dedupes_controlmaster_for_agents(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Admin and agents share a VM's IP; one ControlMaster block covers
     them all. The ``%C`` hash keys on remote user, so each user still
     gets its own master socket -- no need for per-user blocks."""
     from agentworks.ssh_config import _rebuild_config_dir
 
+    # ControlMaster is gated off on Windows; pin it on (see _controlmaster_supported).
+    monkeypatch.setattr("agentworks.ssh_config._controlmaster_supported", lambda: True)
     config, ssh_dir = _mock_config(tmp_path)
     db = MagicMock()
     db.list_vms.return_value = [_mock_vm("vm1", "100.64.0.1")]
@@ -420,11 +434,15 @@ def test_rebuild_config_dir_no_vms_omits_controlmaster(tmp_path: Path) -> None:
     assert not (ssh_dir / "config.d" / _MANAGED_CONF).exists()
 
 
-def test_legacy_rebuild_emits_controlmaster_per_vm_ip(tmp_path: Path) -> None:
+def test_legacy_rebuild_emits_controlmaster_per_vm_ip(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Legacy ssh_config_dir=False path emits the same IP-keyed
     ControlMaster blocks."""
     from agentworks.ssh_config import _legacy_rebuild
 
+    # ControlMaster is gated off on Windows; pin it on (see _controlmaster_supported).
+    monkeypatch.setattr("agentworks.ssh_config._controlmaster_supported", lambda: True)
     config, ssh_dir = _mock_config(tmp_path)
     config.operator.ssh_config_dir = False
     db = MagicMock()
