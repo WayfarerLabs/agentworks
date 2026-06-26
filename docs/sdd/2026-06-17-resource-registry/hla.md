@@ -786,7 +786,7 @@ Schema change: `git_credentials.<name>` entries gain `token: str` (default
 
 Reference flow at `vm create`:
 
-1. Validation pass: auto-declares any `git-token-<name>` secrets not operator-declared.
+1. Finalize pass: auto-declares any `git-token-<name>` secrets not operator-declared.
 2. Manager-entry walks the admin config subgraph: `admin.config.git_credentials = ["github-prod"]`
    -> `git_credentials:github-prod` -> `secret:git-token-github-prod`. Same for agent template's
    git_credentials at `agent create`.
@@ -838,7 +838,7 @@ The plan will phase the work; the full design above is the target. Anticipated s
    `NamedConsoleConfig` augmented with `origin` and `usage` fields. No env-block / system-secret
    producers of `SecretRequirement` wired yet (those land in Phase 1b/1c/1d).
 2. **Phase 1b: Env-block migration.** `EnvEntry`'s secret-ref form emits `SecretRequirement` via
-   `required_resources()`. Validation pass auto-declares missing secrets. Existing strict "must
+   `required_resources()`. Finalize pass auto-declares missing secrets. Existing strict "must
    declare" error behavior is removed; doctor surfaces auto-declared secrets so the visibility
    intent is preserved. **Lands before Tailscale/git-creds** so the framework has a real producer of
    `SecretRequirement` exercised end-to-end before the system-secret migrations build on it.
