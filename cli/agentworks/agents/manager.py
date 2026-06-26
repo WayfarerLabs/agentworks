@@ -117,6 +117,41 @@ def _agent_direct_secret_target(
     )
 
 
+def _resolve_workspace_for_agent(
+    db: Database, vm: VMRow, agent: AgentRow, workspace_name: str | None,
+) -> WorkspaceRow | None:
+    """Resolve a ``--workspace`` flag for ``agent shell`` / ``agent exec``.
+
+    Returns ``None`` when ``workspace_name`` is ``None``. Otherwise loads
+    the workspace and validates (in order) that it exists, belongs to the
+    agent's VM, and the agent has access. All failures surface as clean
+    typed errors before any SSH work.
+    """
+    if workspace_name is None:
+        return None
+    ws = db.get_workspace(workspace_name)
+    if ws is None:
+        raise NotFoundError(
+            f"workspace '{workspace_name}' not found",
+            entity_kind="workspace",
+            entity_name=workspace_name,
+        )
+    if ws.vm_name != vm.name:
+        raise ValidationError(
+            f"workspace '{workspace_name}' belongs to VM '{ws.vm_name}', not '{vm.name}'",
+            entity_kind="workspace",
+            entity_name=workspace_name,
+        )
+    if not db.has_any_grant(agent.name, workspace_name):
+        raise AuthorizationError(
+            f"agent '{agent.name}' does not have access to workspace '{workspace_name}'",
+            entity_kind="agent",
+            entity_name=agent.name,
+            hint=f"Run 'agent grant-workspaces {agent.name} {workspace_name}' to grant access.",
+        )
+    return ws
+
+
 def workspace_group(workspace_name: str) -> str:
     """Derive the Linux group name for a newly-created workspace: ws-<name>.
 
@@ -600,22 +635,7 @@ def shell_agent(
     # Resolve workspace upfront (needed for authz check, env scope, AND
     # ctx) before any SSH probe so failures surface as clean validation
     # errors and the eager-resolve below sees the right scope chain.
-    ws: WorkspaceRow | None = None
-    if workspace_name:
-        ws = db.get_workspace(workspace_name)
-        if ws is None:
-            raise NotFoundError(
-                f"workspace '{workspace_name}' not found",
-                entity_kind="workspace",
-                entity_name=workspace_name,
-            )
-        if not db.has_any_grant(name, workspace_name):
-            raise AuthorizationError(
-                f"agent '{name}' does not have access to workspace '{workspace_name}'",
-                entity_kind="agent",
-                entity_name=name,
-                hint=f"Run 'agent grant-workspaces {name} {workspace_name}' to grant access.",
-            )
+    ws = _resolve_workspace_for_agent(db, vm, agent, workspace_name)
 
     # Eager-prompting orchestration (FRD R4 / Phase 6): resolve every
     # secret referenced by the agent shell's env chain BEFORE opening
@@ -675,6 +695,7 @@ def exec_agent(
     *,
     name: str,
     command: list[str],
+    workspace_name: str | None = None,
 ) -> int:
     """Execute a command as an agent user on a VM via direct agent SSH.
 
@@ -682,6 +703,11 @@ def exec_agent(
     (FRD R1) and runs the command in a login shell so the agent's PATH /
     profile is in scope. Stdout / stderr stream through to the caller; the
     return value is the remote command's exit code.
+
+    When ``workspace_name`` is set, the command runs from the workspace
+    directory and the workspace template's env joins the env chain. The
+    workspace must belong to the agent's VM and the agent must have
+    access.
     """
     import shlex
 
@@ -699,11 +725,16 @@ def exec_agent(
 
     vm = _require_vm(db, agent.vm_name)
 
+    # Resolve workspace upfront so cross-VM / authz failures surface as
+    # clean typed errors before any SSH work and the eager-resolve below
+    # sees the right scope chain.
+    ws = _resolve_workspace_for_agent(db, vm, agent, workspace_name)
+
     # Eager-prompting orchestration (FRD R4 / Phase 6): resolve every
     # secret referenced by the agent exec env chain BEFORE running the
     # remote command. The same scope dicts feed both the SecretTarget
     # and compose_env below so the two consumers can't drift.
-    scopes = _resolve_agent_direct_env_scopes(config, vm, agent)
+    scopes = _resolve_agent_direct_env_scopes(config, vm, agent, ws=ws)
     resolve_for_command(
         [_agent_direct_secret_target(scopes, label=f"agent-exec={agent.name}")],
         config,
@@ -714,6 +745,8 @@ def exec_agent(
         vm_host=vm.vm_host_name,
         platform=vm.platform,
         user=agent.linux_user,
+        workspace_name=ws.name if ws else None,
+        workspace_dir=ws.workspace_path if ws else None,
         agent_name=agent.name,
     )
     env = compose_env(
@@ -732,6 +765,8 @@ def exec_agent(
         _assert_agent_ssh_works(target, agent)
 
         remote_cmd = command[0] if len(command) == 1 else shlex.join(command)
+        if ws is not None:
+            remote_cmd = f"cd {shlex.quote(ws.workspace_path)} && {remote_cmd}"
         # Wrap in a login shell so the agent's PATH (mise shims,
         # ~/.local/bin, etc.) is set up. This matches the env an operator
         # gets via `agent shell`.

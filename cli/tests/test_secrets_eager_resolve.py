@@ -461,7 +461,7 @@ def test_vm_shell_eager_resolve_fires_before_ssh(
 
     monkeypatch.setattr(
         vm_manager, "_resolve_vm_admin_env_scopes",
-        lambda *a, **k: vm_manager._VmAdminEnvScopes(vm={}, admin={}),
+        lambda *a, **k: vm_manager._VmAdminEnvScopes(vm={}, workspace=None, admin={}),
     )
     monkeypatch.setattr(vm_manager, "_vm_secret_target", lambda *a, **k: object())
 
@@ -509,7 +509,7 @@ def test_vm_exec_eager_resolve_fires_before_ssh(
 
     monkeypatch.setattr(
         vm_manager, "_resolve_vm_admin_env_scopes",
-        lambda *a, **k: vm_manager._VmAdminEnvScopes(vm={}, admin={}),
+        lambda *a, **k: vm_manager._VmAdminEnvScopes(vm={}, workspace=None, admin={}),
     )
     monkeypatch.setattr(vm_manager, "_vm_secret_target", lambda *a, **k: object())
 

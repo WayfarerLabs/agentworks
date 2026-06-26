@@ -45,9 +45,21 @@ def workspace_create(
 def workspace_shell(
     name: Annotated[str, typer.Argument(help="Workspace name")],
 ) -> None:
-    """Open a plain shell into a workspace."""
+    """[Deprecated] Open an admin shell rooted in a workspace.
+
+    Prefer 'agw vm shell <vm> --workspace <ws>' (admin shell) or
+    'agw agent shell <agent> --workspace <ws>' (agent shell). A shell is
+    always somebody's shell; the workspace is just where it's rooted.
+    """
+    from agentworks import output
     from agentworks.config import load_config
     from agentworks.workspaces.manager import shell_workspace
+
+    output.warn(
+        "'agw workspace shell' is deprecated; use 'agw vm shell <vm> --workspace "
+        f"{name}' (admin) or 'agw agent shell <agent> --workspace {name}' (agent). "
+        "This command will be removed in a future release."
+    )
 
     shell_workspace(get_db(), load_config(), name)
 
@@ -58,9 +70,21 @@ def workspace_console(
     recreate: Annotated[bool, typer.Option("--recreate", help="Kill and rebuild the console")] = False,
     allow_nesting: Annotated[bool, typer.Option("--allow-nesting", help="Allow running inside tmux")] = False,
 ) -> None:
-    """Open the workspace console (tmux session with sessions)."""
+    """[Deprecated] Open the workspace tmuxinator console.
+
+    Predates the multi-console design and lacks env-and-secrets
+    integration. Prefer 'agw console create' + 'agw console attach'
+    (see 'agw console --help').
+    """
+    from agentworks import output
     from agentworks.config import load_config
     from agentworks.workspaces.manager import console_workspace
+
+    output.warn(
+        "'agw workspace console' is deprecated; use 'agw console create' "
+        "and 'agw console attach' (see 'agw console --help'). This command "
+        "will be removed in a future release."
+    )
 
     console_workspace(
         get_db(),
