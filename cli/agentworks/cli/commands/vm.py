@@ -157,7 +157,7 @@ def vm_exec(
     name: Annotated[str, typer.Argument(help="VM name")],
     workspace: Annotated[
         str | None,
-        typer.Option("--workspace", help="Run from a workspace on this VM"),
+        typer.Option("--workspace", help="Run from a workspace"),
     ] = None,
 ) -> None:
     """Execute a command on a VM as the admin user."""
@@ -189,7 +189,7 @@ def vm_shell(
     ] = False,
     workspace: Annotated[
         str | None,
-        typer.Option("--workspace", help="cd into a workspace on this VM"),
+        typer.Option("--workspace", help="cd into a workspace"),
     ] = None,
 ) -> None:
     """Open a shell on a VM as the admin user."""

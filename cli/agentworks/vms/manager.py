@@ -40,12 +40,12 @@ if TYPE_CHECKING:
 
 
 class _VmAdminEnvScopes(NamedTuple):
-    """Per-scope env dicts for vm-level commands (provisioning, shell, exec).
+    """Per-scope env dicts for vm-level commands (shell, exec).
 
     The ``workspace`` field is ``None`` for vm-level commands without a
-    workspace pin (``vm reinit``, ``vm shell`` / ``vm exec`` without
-    ``--workspace``). When set, workspace-template env enters the FRD R2
-    precedence ladder between vm and admin.
+    workspace pin (``vm shell`` / ``vm exec`` without ``--workspace``).
+    When set, workspace-template env enters the FRD R2 precedence ladder
+    between vm and admin.
     """
 
     vm: dict[str, EnvEntry]
@@ -613,9 +613,10 @@ def shell_vm(
     # rationale applies to `vm exec` (see exec_vm below).
     _guard_failed_vm(vm, allow_failed_init=True)
 
-    # Resolve workspace upfront so cross-VM mismatch surfaces as a clean
-    # ValidationError before any SSH work, and so the scope chain sees
-    # the workspace before secret resolution.
+    # Resolve workspace before the transport-state guard: a cross-VM
+    # mismatch is more diagnostic than "no Tailscale", so it should
+    # surface first. The scope chain also needs the workspace before
+    # secret resolution.
     ws = _resolve_workspace_for_vm(db, vm, workspace_name)
 
     if not provisioner and vm.tailscale_host is None:

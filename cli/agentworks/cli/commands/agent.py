@@ -129,7 +129,7 @@ def agent_exec(
     name: Annotated[str, typer.Argument(help="Agent name")],
     workspace: Annotated[
         str | None,
-        typer.Option("--workspace", help="Run from a workspace the agent has access to"),
+        typer.Option("--workspace", help="Run from a workspace"),
     ] = None,
 ) -> None:
     """Execute a command as an agent user."""

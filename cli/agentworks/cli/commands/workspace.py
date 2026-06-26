@@ -55,13 +55,16 @@ def workspace_shell(
     from agentworks.config import load_config
     from agentworks.workspaces.manager import shell_workspace
 
+    db = get_db()
+    ws = db.get_workspace(name)
+    vm_hint = ws.vm_name if ws else "<vm>"
     output.warn(
-        "'agw workspace shell' is deprecated; use 'agw vm shell <vm> --workspace "
+        f"'agw workspace shell' is deprecated; use 'agw vm shell {vm_hint} --workspace "
         f"{name}' (admin) or 'agw agent shell <agent> --workspace {name}' (agent). "
         "This command will be removed in a future release."
     )
 
-    shell_workspace(get_db(), load_config(), name)
+    shell_workspace(db, load_config(), name)
 
 
 @workspace_app.command("console")

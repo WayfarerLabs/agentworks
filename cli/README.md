@@ -159,6 +159,11 @@ directory on this VM. The workspace's template env joins the env chain (between 
 into the workspace; the exec variant runs the command from the workspace directory. A workspace that
 lives on a different VM is rejected with a `ValidationError` before any SSH work.
 
+Combining `--workspace` with `--provisioner` works (the shell still `cd`s into the workspace) but
+the workspace's template env and the `AGENTWORKS_WORKSPACE` identity vars are not delivered: the
+platform-native transports (`limactl shell`, `wsl.exe`) drop the `env=` kwarg by design. Treat
+`--provisioner` as a transport-repair escape hatch, not a routine combination.
+
 `agw vm shell --provisioner` opens the same shell over the platform-native transport
 (`limactl shell` for Lima, `wsl.exe` for WSL2, SSH via a temporarily-attached public IP for Azure)
 instead of Tailscale. Useful when Tailscale itself is the thing you need to reach the VM to fix (the
