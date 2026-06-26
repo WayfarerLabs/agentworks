@@ -219,25 +219,25 @@ Undeclared secrets auto-declare (per the new framework). The env-and-secrets SDD
 declare" error path is removed; visibility is preserved via `agw doctor` and `agw secret list`
 showing every auto-declared secret with its origin source.
 
-- [ ] `cli/agentworks/env/entry.py`: `EnvEntry`'s secret-ref form gains
+- [x] `cli/agentworks/env/entry.py`: `EnvEntry`'s secret-ref form gains
       `required_resources(source: tuple[str, str]) -> list[ResourceRequirement]`. Returns one
       `SecretRequirement` per referenced secret. Usage text derived from the env-block context
       (e.g., `"the ANTHROPIC_API_KEY env var"`).
-- [ ] `cli/agentworks/config.py`: env-block resources implement `required_resources()` by iterating
+- [x] `cli/agentworks/config.py`: env-block resources implement `required_resources()` by iterating
       their `env` dict and aggregating per-entry requirements. Covers `AdminConfig` (source
       `("admin_template", "default")`), `NamedConsoleConfig` (source
       `("named_console_template", "default")`), and the four multi-named template types `VMTemplate`
       / `WorkspaceTemplate` / `AgentTemplate` / `SessionTemplate` (source `("<kind>", "<name>")` per
       their existing kind/name).
-- [ ] Remove the env-and-secrets validation that errored on undeclared env-block secret refs
+- [x] Remove the env-and-secrets validation that errored on undeclared env-block secret refs
       (`render` raising `ConfigError` for unknown-secret refs in the env-block path).
-- [ ] **Release-notes line**: this shifts the failure mode for env-block typos. Previously a typo in
+- [x] **Release-notes line**: this shifts the failure mode for env-block typos. Previously a typo in
       `{ secret = "anthropic-api-ky" }` errored at config load; now it auto-declares
       `anthropic-api-ky`, which surfaces at runtime as "no backend resolved the secret" (with
       `agw doctor` and `agw secret list` showing the unexpected auto-declared name). Intentional per
       FRD Migration notes, but operators upgrading should know to scan `agw secret list` for
       unexpected auto-declared names after the upgrade.
-- [ ] **Tests**:
+- [x] **Tests**:
   - `cli/tests/test_env_block_requirements.py`: an env block referencing an undeclared secret no
     longer errors; the secret auto-declares; doctor / secret-list display surfaces it with origin =
     `auto-declared by <scope>:<name>`.
