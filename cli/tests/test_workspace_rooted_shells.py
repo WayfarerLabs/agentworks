@@ -472,6 +472,119 @@ def test_exec_agent_rejects_dash_prefixed_command(
     assert "agentworks args must come before the first positional argument" in hint
 
 
+def test_exec_vm_misplaced_flag_with_short_flag_token(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When ``--workspace`` coexists with another ``-``-prefixed token
+    in the passthrough argv (e.g. ``--workspace ws1 -x foo``), the
+    misplaced-flag hint must still fire -- the user clearly tried to
+    pass an agw flag, and the presence of a short flag in the rest of
+    the command doesn't change that diagnosis."""
+    from agentworks.vms import manager as vm_manager
+
+    db = _seed_db(tmp_path)
+    _patch_vm_common(monkeypatch)
+    config = SimpleNamespace(secret_resolver=None)
+
+    with pytest.raises(ValidationError, match="cannot start with '-'") as exc_info:
+        vm_manager.exec_vm(  # type: ignore[arg-type]
+            db, config, "vm1", ["--workspace", "ws1", "-x", "foo"],
+        )
+    hint = exc_info.value.hint or ""
+    assert "agentworks args must come before the first positional argument" in hint
+
+
+# ---------------------------------------------------------------------------
+# Shell commands DO NOT have the misplaced-flag constraint
+# ---------------------------------------------------------------------------
+#
+# Only the exec CLI commands set ``allow_interspersed_args=False``. The shell
+# commands use Click's default parsing, which accepts ``--workspace`` either
+# before or after the positional. The tests below pin that contract so a
+# future refactor that flips ``allow_interspersed_args`` on the shell
+# commands -- and silently breaks both invocation orders -- has to update a
+# test.
+
+
+def test_vm_shell_accepts_workspace_flag_in_either_position(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``vm shell`` must accept ``--workspace`` whether it comes before
+    or after the VM positional. Default Click parsing handles this; the
+    test pins the contract so the constraint isn't accidentally added."""
+    from typer.testing import CliRunner
+
+    from agentworks.cli import app
+    from agentworks.vms import manager as vm_manager
+
+    captured: list[str | None] = []
+
+    def _capture(
+        db: object,
+        config: object,
+        name: str,
+        *,
+        provisioner: bool = False,
+        workspace_name: str | None = None,
+    ) -> None:
+        captured.append(workspace_name)
+
+    monkeypatch.setattr(vm_manager, "shell_vm", _capture)
+    # The cli command body calls get_db() and load_config() before
+    # delegating; stub both so the test stays hermetic.
+    monkeypatch.setattr("agentworks.cli._helpers.get_db", lambda: object())
+    monkeypatch.setattr("agentworks.config.load_config", lambda: object())
+
+    runner = CliRunner()
+
+    result_before = runner.invoke(app, ["vm", "shell", "--workspace", "ws1", "vm1"])
+    assert result_before.exit_code == 0, result_before.output
+
+    result_after = runner.invoke(app, ["vm", "shell", "vm1", "--workspace", "ws1"])
+    assert result_after.exit_code == 0, result_after.output
+
+    assert captured == ["ws1", "ws1"], (
+        "shell_vm must receive workspace_name='ws1' regardless of "
+        "whether --workspace came before or after the positional"
+    )
+
+
+def test_agent_shell_accepts_workspace_flag_in_either_position(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``agent shell`` mirrors ``vm shell``: ``--workspace`` is
+    accepted in either position."""
+    from typer.testing import CliRunner
+
+    from agentworks.agents import manager as agent_manager
+    from agentworks.cli import app
+
+    captured: list[str | None] = []
+
+    def _capture(
+        db: object,
+        config: object,
+        *,
+        name: str,
+        workspace_name: str | None = None,
+    ) -> None:
+        captured.append(workspace_name)
+
+    monkeypatch.setattr(agent_manager, "shell_agent", _capture)
+    monkeypatch.setattr("agentworks.cli._helpers.get_db", lambda: object())
+    monkeypatch.setattr("agentworks.config.load_config", lambda: object())
+
+    runner = CliRunner()
+
+    result_before = runner.invoke(app, ["agent", "shell", "--workspace", "ws1", "a1"])
+    assert result_before.exit_code == 0, result_before.output
+
+    result_after = runner.invoke(app, ["agent", "shell", "a1", "--workspace", "ws1"])
+    assert result_after.exit_code == 0, result_after.output
+
+    assert captured == ["ws1", "ws1"]
+
+
 def test_shell_vm_passes_workspace_scope_to_secret_target(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

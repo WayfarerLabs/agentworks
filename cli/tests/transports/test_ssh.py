@@ -300,6 +300,21 @@ def test_interactive_omits_fence_for_empty_command() -> None:
         assert "--" not in argv
 
 
+def test_run_login_shell_still_emits_fence() -> None:
+    """The ``login_shell=True`` branch wraps the command in
+    ``$SHELL -lc <quoted>`` -- the ``--`` fence must still go between
+    the destination and that wrapped command. Different argv branch
+    from the plain ``run`` case above, so worth pinning."""
+    t = SSHTransport(host="vm1", user="agentworks", login_shell=True)
+    with patch("agentworks.transports.ssh.subprocess.run") as mock_run:
+        mock_run.return_value = _ok_completed()
+        t.run("echo hi")
+        argv = mock_run.call_args[0][0]
+        assert argv[-1] == "$SHELL -lc 'echo hi'"
+        assert argv[-2] == "--"
+        assert argv[-3] == "agentworks@vm1"
+
+
 # ---------------------------------------------------------------------------
 # write_file()
 # ---------------------------------------------------------------------------
