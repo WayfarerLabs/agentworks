@@ -714,6 +714,9 @@ def exec_agent(
     from agentworks.env import ResourceContext, compose_env
     from agentworks.secrets import resolve_for_command
     from agentworks.transports import agent_transport
+    from agentworks.vms.manager import _reject_dash_prefixed_command
+
+    _reject_dash_prefixed_command(command, kind="agent", name=name)
 
     agent = db.get_agent(name)
     if agent is None:

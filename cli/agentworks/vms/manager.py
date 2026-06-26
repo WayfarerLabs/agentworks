@@ -107,6 +107,42 @@ def _vm_secret_target(
     )
 
 
+def _reject_dash_prefixed_command(
+    command: list[str], *, kind: str, name: str,
+) -> None:
+    """Reject ``exec`` commands whose first token starts with ``-``.
+
+    sshd executes the remote command via ``$SHELL -c <command>``, and
+    both zsh and bash parse the script string as further shell options
+    when it starts with ``-``, producing cryptic errors (zsh: "no such
+    option: ...", bash: "--: invalid option"). The common cause is an
+    operator placing an agentworks flag (e.g. ``--workspace``) after the
+    VM / agent positional, where ``allow_interspersed_args=False``
+    leaves it in the passthrough argv. No legitimate remote command
+    starts with ``-`` (files with such names are addressable via
+    ``./-name``), so we reject upfront with a hint.
+    """
+    if not command or not command[0].startswith("-"):
+        return
+    hint: str | None = None
+    if "--workspace" in command:
+        hint = (
+            f"--workspace must come before the {kind} name. "
+            f"Try: 'agw {kind} exec --workspace <ws> {name} -- <command>'."
+        )
+    else:
+        hint = (
+            "Remote commands cannot start with '-'. For a file whose "
+            "name starts with '-', address it as './-name'."
+        )
+    raise ValidationError(
+        f"remote command cannot start with '-' (got: {command[0]!r})",
+        entity_kind=kind,
+        entity_name=name,
+        hint=hint,
+    )
+
+
 def _resolve_workspace_for_vm(
     db: Database, vm: VMRow, workspace_name: str | None,
 ) -> WorkspaceRow | None:
@@ -697,6 +733,8 @@ def exec_vm(
     from agentworks.env import ResourceContext, compose_env
     from agentworks.secrets import resolve_for_command
     from agentworks.transports import transport
+
+    _reject_dash_prefixed_command(command, kind="vm", name=name)
 
     vm = _require_vm(db, name)
     # Init failure warns instead of blocks. exec is the non-interactive

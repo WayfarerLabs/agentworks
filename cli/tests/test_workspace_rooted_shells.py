@@ -409,6 +409,63 @@ def test_exec_agent_workspace_prefixes_cd(
 # ---------------------------------------------------------------------------
 
 
+def test_exec_vm_rejects_dash_prefixed_command(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``vm exec aavm1 --workspace ws1 pwd`` (misplaced ``--workspace``)
+    must raise ValidationError before any SSH work. The hint must point
+    at the right invocation shape."""
+    from agentworks.vms import manager as vm_manager
+
+    db = _seed_db(tmp_path)
+    _patch_vm_common(monkeypatch)
+    config = SimpleNamespace(secret_resolver=None)
+
+    with pytest.raises(ValidationError, match="cannot start with '-'") as exc_info:
+        vm_manager.exec_vm(  # type: ignore[arg-type]
+            db, config, "vm1", ["--workspace", "ws1", "pwd"],
+        )
+    assert "--workspace must come before the vm name" in (exc_info.value.hint or "")
+
+
+def test_exec_vm_rejects_dash_prefixed_command_generic_hint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A `-` command that doesn't include a recognized agw flag still
+    rejects, but with the generic './-name' workaround hint."""
+    from agentworks.vms import manager as vm_manager
+
+    db = _seed_db(tmp_path)
+    _patch_vm_common(monkeypatch)
+    config = SimpleNamespace(secret_resolver=None)
+
+    with pytest.raises(ValidationError, match="cannot start with '-'") as exc_info:
+        vm_manager.exec_vm(  # type: ignore[arg-type]
+            db, config, "vm1", ["-weird", "args"],
+        )
+    hint = exc_info.value.hint or ""
+    assert "./-name" in hint
+    assert "--workspace" not in hint
+
+
+def test_exec_agent_rejects_dash_prefixed_command(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``agent exec`` mirrors the same rejection with an agent-flavored
+    hint."""
+    from agentworks.agents import manager as agent_manager
+
+    db = _seed_db(tmp_path)
+    _patch_agent_common(monkeypatch)
+    config = SimpleNamespace(secret_resolver=None)
+
+    with pytest.raises(ValidationError, match="cannot start with '-'") as exc_info:
+        agent_manager.exec_agent(  # type: ignore[arg-type]
+            db, config, name="a1", command=["--workspace", "ws1", "pwd"],
+        )
+    assert "--workspace must come before the agent name" in (exc_info.value.hint or "")
+
+
 def test_shell_vm_passes_workspace_scope_to_secret_target(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
