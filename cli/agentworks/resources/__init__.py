@@ -1,0 +1,41 @@
+"""``agentworks.resources``: the Resource Registry framework.
+
+The Registry is the framework's typed, queryable Resource store. Publishers
+(``agentworks.config``'s ``Config.publish_to``, ``agentworks.catalog``'s
+``publish_to``, future plugins / YAML manifest publishers) push composed
+Resources into it; ``Registry.finalize()`` runs the framework pass that walks
+the requirement graph, dispatches miss policies (potentially synthesizing
+auto-declared Resources), attaches ``usage`` lists, detects cycles, and
+freezes the Registry.
+
+For the common Config + catalog case, ``agentworks.bootstrap.build_registry``
+orchestrates the standard set of publishers. The lower-level
+``Registry.empty()`` / ``add`` / ``finalize`` triad is exposed for tests and
+multi-source orchestration.
+"""
+
+from __future__ import annotations
+
+# Importing .kinds populates KIND_REGISTRY at module-load time via each kind
+# module's self-registration. Phase 1a registers SecretKind, AdminTemplateKind,
+# and NamedConsoleTemplateKind; Phase 2 kinds slot in by adding new files
+# under kinds/ and importing them from kinds/__init__.py.
+from agentworks.resources import kinds  # noqa: F401
+from agentworks.resources.kind import KIND_REGISTRY, ResourceKind
+from agentworks.resources.origin import Origin
+from agentworks.resources.registry import Registry
+from agentworks.resources.requirement import (
+    ResourceRequirement,
+    SecretRequirement,
+    UsageEntry,
+)
+
+__all__ = [
+    "KIND_REGISTRY",
+    "Origin",
+    "Registry",
+    "ResourceKind",
+    "ResourceRequirement",
+    "SecretRequirement",
+    "UsageEntry",
+]

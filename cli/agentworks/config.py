@@ -22,11 +22,15 @@ from agentworks.secrets import (
     SecretConfig,
     SecretDecl,
 )
+from agentworks.source_location import SourceLocation, scan_section_lines, synthesized
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
     from agentworks.agents.templates import ResolvedAgentTemplate
+    from agentworks.resources.origin import Origin
+    from agentworks.resources.registry import Registry
+    from agentworks.resources.requirement import UsageEntry
     from agentworks.secrets import SecretResolver, SecretSource
     from agentworks.vms.templates import ResolvedVMTemplate
 
@@ -155,6 +159,9 @@ class NamedConsoleConfig:
     """
 
     tmux_layout: str = AW_SESSION_VERTICAL_LAYOUT
+    declared_at: SourceLocation = field(default_factory=synthesized)
+    origin: Origin | None = None
+    usage: tuple[UsageEntry, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -177,6 +184,9 @@ class VMTemplate:
     # Env (declared per-template; merged child-overrides-parent at resolution).
     # Plaintext or secret references; the loader produces EnvEntry instances.
     env: dict[str, EnvEntry] = field(default_factory=dict)
+    declared_at: SourceLocation = field(default_factory=synthesized)
+    origin: Origin | None = None
+    usage: tuple[UsageEntry, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -202,6 +212,9 @@ class AdminConfig:
     claude_plugins: list[str] = field(default_factory=list)
     # Env that applies whenever a shell is opened as the admin user.
     env: dict[str, EnvEntry] = field(default_factory=dict)
+    declared_at: SourceLocation = field(default_factory=synthesized)
+    origin: Origin | None = None
+    usage: tuple[UsageEntry, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -225,6 +238,9 @@ class AgentTemplate:
     claude_marketplaces: list[str] | None = None
     claude_plugins: list[str] | None = None
     env: dict[str, EnvEntry] = field(default_factory=dict)
+    declared_at: SourceLocation = field(default_factory=synthesized)
+    origin: Origin | None = None
+    usage: tuple[UsageEntry, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -234,6 +250,9 @@ class WorkspaceTemplate:
     repo: str | None = None
     tmuxinator: bool | None = None  # None = not explicitly set (inherit/default to True)
     env: dict[str, EnvEntry] = field(default_factory=dict)
+    declared_at: SourceLocation = field(default_factory=synthesized)
+    origin: Origin | None = None
+    usage: tuple[UsageEntry, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -242,6 +261,9 @@ class GitCredentialConfig:
     type: str
     org: str | None = None
     description: str | None = None
+    declared_at: SourceLocation = field(default_factory=synthesized)
+    origin: Origin | None = None
+    usage: tuple[UsageEntry, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -254,6 +276,9 @@ class SessionTemplate:
     description: str | None = None
     restart_command: str | None = None
     env: dict[str, EnvEntry] | None = None
+    declared_at: SourceLocation = field(default_factory=synthesized)
+    origin: Origin | None = None
+    usage: tuple[UsageEntry, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -318,8 +343,96 @@ class Config:
     secret_resolver: SecretResolver = field(default_factory=lambda: _empty_resolver())
     config_issues: tuple[str, ...] = ()
 
+    def publish_to(self, registry: Registry) -> None:
+        """Publish every operator-declared Resource into ``registry``.
+
+        Iterates Config's per-kind dicts and pushes each Resource with an
+        ``Origin.operator_declared(file=..., line=...)`` built from its
+        ``declared_at: SourceLocation``. Singleton-backed kinds
+        (``admin_template:default``, ``named_console_template:default``)
+        are also published from ``Config.admin`` and
+        ``Config.named_console`` respectively, so admin / named_console
+        appear in the Registry as first-class one-row Resources even when
+        the operator's TOML omits all their sections (Phase 0's loader
+        always produces an instance; Config.publish_to always publishes
+        it).
+
+        ``secret_config`` is the secret-system policy envelope consumed
+        directly by ``agentworks.secrets``; it is NOT published as a
+        Registry kind. Its individual ``secret_backends`` entries are
+        published under the ``"secret_backend"`` kind.
+
+        Imports ``Registry`` and ``Origin`` from ``agentworks.resources``
+        -- the explicit layer handoff. Config's data structures (parsed
+        Resources, ``SourceLocation``, etc.) remain framework-ignorant
+        otherwise; only this publish handoff crosses the boundary.
+        """
+        # Import locally to keep ``agentworks.config`` import-light at
+        # module load: bootstrap code paths that don't touch Resources
+        # (e.g., `from agentworks.config import CONFIG_PATH`) avoid
+        # pulling in the full framework.
+        from agentworks.resources import Origin
+
+        def op_origin(declared_at: SourceLocation) -> Origin:
+            return Origin.operator_declared(
+                file=declared_at.file, line=declared_at.line
+            )
+
+        # Multi-named kinds: one Resource per (container, name) pair.
+        for kind, kind_dict in (
+            ("secret", self.secrets),
+            ("vm_template", self.vm_templates),
+            ("agent_template", self.agent_templates),
+            ("workspace_template", self.workspace_templates),
+            ("session_template", self.session_templates),
+            ("git_credentials", self.git_credentials),
+            ("secret_backend", self.secret_backends),
+        ):
+            for name, resource in kind_dict.items():
+                registry.add(kind, name, resource, op_origin(resource.declared_at))
+
+        # Singleton-backed kinds: one row each, name "default".
+        registry.add(
+            "admin_template", "default", self.admin, op_origin(self.admin.declared_at)
+        )
+        registry.add(
+            "named_console_template",
+            "default",
+            self.named_console,
+            op_origin(self.named_console.declared_at),
+        )
+
 
 # -- Loading ---------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class _SectionLineMap:
+    """Resolves ``declared_at`` for a Resource from the pre-scanned section
+    -line map. Bundles the config file path with the dotted-section-path ->
+    line map so loaders can call ``decls.lookup("vm_templates", name)``
+    and get a fully-populated ``SourceLocation`` back.
+    """
+
+    config_path: Path
+    section_lines: dict[tuple[str, ...], int]
+
+    def lookup(self, *path: str) -> SourceLocation:
+        """Return ``SourceLocation`` for the Resource at the given section
+        path. Picks the earliest contributing header (the section itself or
+        any sub-section under it) per Phase 0's design. If nothing matches
+        (the Resource is synthesized by code rather than declared by the
+        operator), returns ``SourceLocation(config_path, line=0)``.
+        """
+        n = len(path)
+        candidates = [
+            line
+            for p, line in self.section_lines.items()
+            if len(p) >= n and p[:n] == path
+        ]
+        if not candidates:
+            return SourceLocation(file=self.config_path, line=0)
+        return SourceLocation(file=self.config_path, line=min(candidates))
 
 
 def _expand(path_str: str) -> Path:
@@ -553,7 +666,9 @@ _NAMED_CONSOLE_KEYS = {"tmux_layout"}
 
 
 def _load_named_console(
-    data: dict[str, object], issues: list[str]
+    data: dict[str, object],
+    issues: list[str],
+    decls: _SectionLineMap,
 ) -> NamedConsoleConfig:
     raw = data.get("named_console", {})
     if not isinstance(raw, dict):
@@ -568,7 +683,10 @@ def _load_named_console(
             f"got: {layout}"
         )
 
-    return NamedConsoleConfig(tmux_layout=str(layout))
+    return NamedConsoleConfig(
+        tmux_layout=str(layout),
+        declared_at=decls.lookup("named_console"),
+    )
 
 
 _VM_TEMPLATE_KEYS = {
@@ -586,7 +704,11 @@ _VM_TEMPLATE_KEYS = {
 }
 
 
-def _load_vm_templates(data: dict[str, object], issues: list[str]) -> dict[str, VMTemplate]:
+def _load_vm_templates(
+    data: dict[str, object],
+    issues: list[str],
+    decls: _SectionLineMap,
+) -> dict[str, VMTemplate]:
     raw = data.get("vm_templates", {})
     if not isinstance(raw, dict):
         raise ConfigError("[vm_templates] must be a table")
@@ -596,6 +718,12 @@ def _load_vm_templates(data: dict[str, object], issues: list[str]) -> dict[str, 
             "[vm.config] has been replaced by [vm_templates.default]."
         )
 
+    # TOML's implicit-parent semantics already populate this dict: writing
+    # `[vm_templates.x.env]` alone produces `raw == {"x": {"env": {...}}}` even
+    # without a separate `[vm_templates.x]` header, and the loop iterates `x`
+    # like any other template. Per the revised FRD R2, that minimal form is a
+    # valid Resource; declared_at picks the earliest contributing header (the
+    # env line, in that case) via `_SectionLineMap.lookup`.
     templates: dict[str, VMTemplate] = {}
     for name, tdata in raw.items():
         if not isinstance(tdata, dict):
@@ -617,6 +745,7 @@ def _load_vm_templates(data: dict[str, object], issues: list[str]) -> dict[str, 
                 list(tdata["system_install_commands"]) if "system_install_commands" in tdata else None
             ),
             env=_parse_env_table(tdata.get("env"), context=f"vm_templates.{name}", issues=issues),
+            declared_at=decls.lookup("vm_templates", name),
         )
 
     # Validate inherits references and cycles
@@ -649,7 +778,11 @@ _USER_CONFIG_KEYS = {
 }
 
 
-def _load_admin_config(data: dict[str, object], issues: list[str]) -> AdminConfig:
+def _load_admin_config(
+    data: dict[str, object],
+    issues: list[str],
+    decls: _SectionLineMap,
+) -> AdminConfig:
     """Load admin per-user config from [admin.config]."""
     top = data.get("admin", {})
     if not isinstance(top, dict):
@@ -678,13 +811,18 @@ def _load_admin_config(data: dict[str, object], issues: list[str]) -> AdminConfi
         claude_marketplaces=_require_string_list(raw, "claude_marketplaces", "admin.config"),
         claude_plugins=_require_string_list(raw, "claude_plugins", "admin.config"),
         env=_parse_env_table(top.get("env"), context="admin", issues=issues),
+        declared_at=decls.lookup("admin"),
     )
 
 
 _AGENT_TEMPLATE_KEYS = _USER_CONFIG_KEYS | {"inherits", "env"}
 
 
-def _load_agent_templates(data: dict[str, object], issues: list[str]) -> dict[str, AgentTemplate]:
+def _load_agent_templates(
+    data: dict[str, object],
+    issues: list[str],
+    decls: _SectionLineMap,
+) -> dict[str, AgentTemplate]:
     raw = data.get("agent_templates", {})
     if not isinstance(raw, dict):
         raise ConfigError("[agent_templates] must be a table")
@@ -724,6 +862,7 @@ def _load_agent_templates(data: dict[str, object], issues: list[str]) -> dict[st
                 if "claude_plugins" in tdata else None
             ),
             env=_parse_env_table(tdata.get("env"), context=f"agent_templates.{name}", issues=issues),
+            declared_at=decls.lookup("agent_templates", name),
         )
 
     for name, tmpl in templates.items():
@@ -768,6 +907,7 @@ def _load_catalog_sections(
 def _load_workspace_templates(
     data: dict[str, object],
     issues: list[str],
+    decls: _SectionLineMap,
 ) -> dict[str, WorkspaceTemplate]:
     raw = data.get("workspace_templates", {})
     if not isinstance(raw, dict):
@@ -787,6 +927,7 @@ def _load_workspace_templates(
                 context=f"workspace_templates.{name}",
                 issues=issues,
             ),
+            declared_at=decls.lookup("workspace_templates", name),
         )
 
     # validate inherits references and cycles
@@ -825,7 +966,10 @@ def _detect_template_cycles(templates: Mapping[str, _HasInherits], label: str) -
         visit(name)
 
 
-def _load_git_credentials(data: dict[str, object]) -> dict[str, GitCredentialConfig]:
+def _load_git_credentials(
+    data: dict[str, object],
+    decls: _SectionLineMap,
+) -> dict[str, GitCredentialConfig]:
     raw = data.get("git_credentials", {})
     if not isinstance(raw, dict):
         raise ConfigError("[git_credentials] must be a table")
@@ -846,6 +990,7 @@ def _load_git_credentials(data: dict[str, object]) -> dict[str, GitCredentialCon
             type=cred_type,
             org=str(cdata["org"]) if "org" in cdata else None,
             description=str(cdata["description"]) if "description" in cdata else None,
+            declared_at=decls.lookup("git_credentials", name),
         )
     return creds
 
@@ -875,7 +1020,11 @@ def _load_session_config(data: dict[str, object], issues: list[str]) -> SessionC
 _SESSION_TEMPLATE_KEYS = {"inherits", "command", "description", "restart_command", "env"}
 
 
-def _load_session_templates(data: dict[str, object], issues: list[str]) -> dict[str, SessionTemplate]:
+def _load_session_templates(
+    data: dict[str, object],
+    issues: list[str],
+    decls: _SectionLineMap,
+) -> dict[str, SessionTemplate]:
     raw = data.get("session_templates", {})
     if not isinstance(raw, dict):
         raise ConfigError("[session_templates] must be a table")
@@ -899,6 +1048,7 @@ def _load_session_templates(data: dict[str, object], issues: list[str]) -> dict[
             description=str(tdata["description"]) if "description" in tdata else None,
             restart_command=str(tdata["restart_command"]) if "restart_command" in tdata else None,
             env=env,
+            declared_at=decls.lookup("session_templates", name),
         )
 
     for name, tmpl in templates.items():
@@ -942,14 +1092,18 @@ def _load_proxmox(data: dict[str, object]) -> ProxmoxConfig | None:
     )
 
 
-def _load_secrets(data: dict[str, object], issues: list[str]) -> dict[str, SecretDecl]:
+def _load_secrets(
+    data: dict[str, object],
+    issues: list[str],
+    decls: _SectionLineMap,
+) -> dict[str, SecretDecl]:
     """Load [secrets.*] declarations into SecretDecls keyed by name."""
     raw = data.get("secrets", {})
     if not isinstance(raw, dict):
         raise ConfigError("[secrets] must be a table")
 
     expected = {"description", "hint", "backend_mappings"}
-    decls: dict[str, SecretDecl] = {}
+    secret_decls: dict[str, SecretDecl] = {}
     for name, sdata in raw.items():
         name_str = str(name)
         if not isinstance(sdata, dict):
@@ -991,18 +1145,20 @@ def _load_secrets(data: dict[str, object], issues: list[str]) -> dict[str, Secre
                     "must be a string, inline table, or false"
                 )
 
-        decls[name_str] = SecretDecl(
+        secret_decls[name_str] = SecretDecl(
             name=name_str,
             description=description,
             hint=hint,
             backend_mappings=backend_mappings,
+            declared_at=decls.lookup("secrets", name_str),
         )
-    return decls
+    return secret_decls
 
 
 def _load_secret_backends(
     data: dict[str, object],
     issues: list[str],
+    decls: _SectionLineMap,
 ) -> dict[str, SecretBackendConfig]:
     """Load [secret_backends.*] sections into SecretBackendConfig entries.
 
@@ -1029,11 +1185,18 @@ def _load_secret_backends(
                 f"[secret_backends.{kind_str}] declares an unknown backend kind; "
                 f"v1 supports {sorted(known_kinds)}"
             )
-        backends[kind_str] = SecretBackendConfig(kind=kind_str)
+        backends[kind_str] = SecretBackendConfig(
+            kind=kind_str,
+            declared_at=decls.lookup("secret_backends", kind_str),
+        )
     return backends
 
 
-def _load_secret_config(data: dict[str, object], issues: list[str]) -> SecretConfig:
+def _load_secret_config(
+    data: dict[str, object],
+    issues: list[str],
+    decls: _SectionLineMap,
+) -> SecretConfig:
     """Load [secret_config] with the enabled-backends precedence list.
 
     Absence of the [secret_config] table OR absence of the ``backends`` key
@@ -1041,20 +1204,21 @@ def _load_secret_config(data: dict[str, object], issues: list[str]) -> SecretCon
     (``DEFAULT_BACKEND_CHAIN``). An explicit ``backends = []`` is respected
     as "no backends" (operator opts out of resolution entirely).
     """
+    declared_at = decls.lookup("secret_config")
     if "secret_config" not in data:
-        return SecretConfig()  # absence -> default chain
+        return SecretConfig(declared_at=declared_at)
     raw = data["secret_config"]
     if not isinstance(raw, dict):
         raise ConfigError("[secret_config] must be a table")
     _warn_unexpected_keys(raw, {"backends"}, "secret_config", issues)
     if "backends" not in raw:
-        return SecretConfig()  # table present but no key -> default chain
+        return SecretConfig(declared_at=declared_at)
     backends_raw = raw["backends"]
     if not isinstance(backends_raw, list) or not all(
         isinstance(b, str) for b in backends_raw
     ):
         raise ConfigError("[secret_config].backends must be a list of strings")
-    return SecretConfig(backends=tuple(backends_raw))
+    return SecretConfig(backends=tuple(backends_raw), declared_at=declared_at)
 
 
 def _empty_resolver() -> SecretResolver:
@@ -1233,12 +1397,20 @@ def load_config(path: Path | None = None, *, warn_issues: bool = True) -> Config
         print("Create it to get started. See the documentation for the schema.", file=sys.stderr)
         raise SystemExit(1)
 
-    with open(config_path, "rb") as f:
-        try:
-            data = tomllib.load(f)
-        except tomllib.TOMLDecodeError as e:
-            print(f"Error: invalid config file {config_path}: {e}", file=sys.stderr)
-            raise SystemExit(1) from None
+    raw_text = config_path.read_text()
+    try:
+        data = tomllib.loads(raw_text)
+    except tomllib.TOMLDecodeError as e:
+        print(f"Error: invalid config file {config_path}: {e}", file=sys.stderr)
+        raise SystemExit(1) from None
+
+    # Pre-scan the raw text for section-header line numbers so we can attach
+    # ``declared_at: SourceLocation`` to every composed Resource. tomllib loses
+    # this info on parse; the scanner is a small regex pre-pass.
+    decls = _SectionLineMap(
+        config_path=config_path,
+        section_lines=scan_section_lines(raw_text),
+    )
 
     issues: list[str] = []
 
@@ -1250,14 +1422,14 @@ def load_config(path: Path | None = None, *, warn_issues: bool = True) -> Config
             "[admin.config] (dotfiles_source, dotfiles_destination, dotfiles_install_cmd)."
         )
 
-    git_credentials = _load_git_credentials(data)
+    git_credentials = _load_git_credentials(data, decls)
     apt_sources, apt_packages, system_cmds, user_cmds = _load_catalog_sections(data)
 
     session_config = _load_session_config(data, issues)
-    session_templates = _load_session_templates(data, issues)
+    session_templates = _load_session_templates(data, issues, decls)
 
-    loaded_vm_templates = _load_vm_templates(data, issues)
-    loaded_agent_templates = _load_agent_templates(data, issues)
+    loaded_vm_templates = _load_vm_templates(data, issues, decls)
+    loaded_agent_templates = _load_agent_templates(data, issues, decls)
 
     # Resolve default templates eagerly so config.vm / config.agent work everywhere
     from agentworks.vms.templates import resolve_from_dict as _resolve_vm
@@ -1268,12 +1440,12 @@ def load_config(path: Path | None = None, *, warn_issues: bool = True) -> Config
 
     resolved_agent = _resolve_agent(loaded_agent_templates)
 
-    admin = _load_admin_config(data, issues)
-    workspace_templates = _load_workspace_templates(data, issues)
+    admin = _load_admin_config(data, issues, decls)
+    workspace_templates = _load_workspace_templates(data, issues, decls)
 
-    secrets = _load_secrets(data, issues)
-    secret_backends = _load_secret_backends(data, issues)
-    secret_config_data = _load_secret_config(data, issues)
+    secrets = _load_secrets(data, issues, decls)
+    secret_backends = _load_secret_backends(data, issues, decls)
+    secret_config_data = _load_secret_config(data, issues, decls)
     _validate_env_secret_refs(
         secrets=secrets,
         admin=admin,
@@ -1290,7 +1462,7 @@ def load_config(path: Path | None = None, *, warn_issues: bool = True) -> Config
         operator=_load_operator(data, issues),
         paths=_load_paths(data),
         defaults=_load_defaults(data, issues),
-        named_console=_load_named_console(data, issues),
+        named_console=_load_named_console(data, issues, decls),
         vm_templates=loaded_vm_templates,
         vm=resolved_vm,
         admin=admin,
