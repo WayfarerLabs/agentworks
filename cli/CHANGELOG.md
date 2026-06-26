@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.9.0](https://github.com/WayfarerLabs/agentworks/compare/v0.8.0...v0.9.0) (2026-06-26)
+
+
+### Features
+
+* **cli:** reject exec commands that start with '-' ([7fec1db](https://github.com/WayfarerLabs/agentworks/commit/7fec1db3ee406a559f2c48119b454d631eed9055))
+* **cli:** root vm/agent shell+exec in a workspace via --workspace ([90ca54c](https://github.com/WayfarerLabs/agentworks/commit/90ca54c95b09111416408e88b88071ac31408ad8))
+* **cli:** root vm/agent shell+exec in a workspace via --workspace ([6226881](https://github.com/WayfarerLabs/agentworks/commit/62268814c6c4ac818bb5fe075a992126d26e2aee))
+* **sessions:** validate template required_commands before launch ([2150ffa](https://github.com/WayfarerLabs/agentworks/commit/2150ffa866c43eacda7f616d59cb465557a8a050))
+* **sessions:** validate template required_commands before launch ([e31295e](https://github.com/WayfarerLabs/agentworks/commit/e31295e5dc81908fad3da3cb421a4874fa35c374))
+
+
+### Bug Fixes
+
+* **sessions:** match pane's -lic on required-commands probe ([51c0ab0](https://github.com/WayfarerLabs/agentworks/commit/51c0ab0a4049c4a1909980e70df04be581709e25))
+* **sessions:** reviewer-driven polish on required_commands ([ea8e340](https://github.com/WayfarerLabs/agentworks/commit/ea8e340a80b0eb6055f44c5c39e0729f33f2bd46))
+* **ssh:** fence remote command from ssh client's option parser ([22b6269](https://github.com/WayfarerLabs/agentworks/commit/22b626923b6c6238a9f1d430dc4069ee1274700f))
+* **ssh:** remove SSH ControlMaster from managed ssh config ([c4807bf](https://github.com/WayfarerLabs/agentworks/commit/c4807bf62c0cc3cb72428746b820df071fa79ae3))
+* **ssh:** remove SSH ControlMaster from managed ssh config ([70cc157](https://github.com/WayfarerLabs/agentworks/commit/70cc157e8af3b13ac194583e4ca42616f7bc096a))
+
 ## [0.8.0](https://github.com/WayfarerLabs/agentworks/compare/v0.7.0...v0.8.0) (2026-06-24)
 
 
