@@ -30,7 +30,11 @@ if TYPE_CHECKING:
     from agentworks.agents.templates import ResolvedAgentTemplate
     from agentworks.resources.origin import Origin
     from agentworks.resources.registry import Registry
-    from agentworks.resources.requirement import UsageEntry
+    from agentworks.resources.requirement import (
+        ResourceRequirement,
+        SecretRequirement,
+        UsageEntry,
+    )
     from agentworks.secrets import SecretResolver, SecretSource
     from agentworks.vms.templates import ResolvedVMTemplate
 
@@ -150,6 +154,25 @@ VALID_TMUX_LAYOUTS = (
 )
 
 
+def _env_requirements(
+    env: dict[str, EnvEntry] | None,
+    source: tuple[str, str],
+) -> list[SecretRequirement]:
+    """Aggregate ``EnvEntry.required_resources(source)`` across an env table.
+
+    Module-level helper shared by every env-bearing Resource type's
+    ``required_resources()`` method so the per-type method body stays
+    one line. ``env`` may be ``None`` (``SessionTemplate.env`` is
+    optional) or empty, in which case the result is an empty list.
+    """
+    if not env:
+        return []
+    out: list[SecretRequirement] = []
+    for entry in env.values():
+        out.extend(entry.required_resources(source))
+    return out
+
+
 @dataclass(frozen=True)
 class NamedConsoleConfig:
     """Settings for the `console` subcommand group (named multi-session
@@ -162,6 +185,13 @@ class NamedConsoleConfig:
     declared_at: SourceLocation = field(default_factory=synthesized)
     origin: Origin | None = None
     usage: tuple[UsageEntry, ...] = ()
+
+    def required_resources(self) -> list[ResourceRequirement]:
+        # Named console has no env block today; returning an empty list
+        # keeps the framework-dispatch shape uniform with the other
+        # singleton-backed kinds and future-proofs the type if/when
+        # named-console fields gain secret refs.
+        return []
 
 
 @dataclass(frozen=True)
@@ -187,6 +217,9 @@ class VMTemplate:
     declared_at: SourceLocation = field(default_factory=synthesized)
     origin: Origin | None = None
     usage: tuple[UsageEntry, ...] = ()
+
+    def required_resources(self) -> list[ResourceRequirement]:
+        return list(_env_requirements(self.env, ("vm_template", self.name)))
 
 
 @dataclass(frozen=True)
@@ -216,6 +249,9 @@ class AdminConfig:
     origin: Origin | None = None
     usage: tuple[UsageEntry, ...] = ()
 
+    def required_resources(self) -> list[ResourceRequirement]:
+        return list(_env_requirements(self.env, ("admin_template", "default")))
+
 
 @dataclass(frozen=True)
 class AgentTemplate:
@@ -242,6 +278,9 @@ class AgentTemplate:
     origin: Origin | None = None
     usage: tuple[UsageEntry, ...] = ()
 
+    def required_resources(self) -> list[ResourceRequirement]:
+        return list(_env_requirements(self.env, ("agent_template", self.name)))
+
 
 @dataclass(frozen=True)
 class WorkspaceTemplate:
@@ -253,6 +292,9 @@ class WorkspaceTemplate:
     declared_at: SourceLocation = field(default_factory=synthesized)
     origin: Origin | None = None
     usage: tuple[UsageEntry, ...] = ()
+
+    def required_resources(self) -> list[ResourceRequirement]:
+        return list(_env_requirements(self.env, ("workspace_template", self.name)))
 
 
 @dataclass(frozen=True)
@@ -279,6 +321,9 @@ class SessionTemplate:
     declared_at: SourceLocation = field(default_factory=synthesized)
     origin: Origin | None = None
     usage: tuple[UsageEntry, ...] = ()
+
+    def required_resources(self) -> list[ResourceRequirement]:
+        return list(_env_requirements(self.env, ("session_template", self.name)))
 
 
 @dataclass(frozen=True)
@@ -1309,37 +1354,6 @@ def _build_secret_resolver(
     return resolver
 
 
-def _validate_env_secret_refs(
-    *,
-    secrets: dict[str, SecretDecl],
-    admin: AdminConfig,
-    vm_templates: dict[str, VMTemplate],
-    workspace_templates: dict[str, WorkspaceTemplate],
-    agent_templates: dict[str, AgentTemplate],
-    session_templates: dict[str, SessionTemplate],
-) -> None:
-    """Verify every env entry's secret reference points at a declared secret."""
-
-    def _check(env: dict[str, EnvEntry], context: str) -> None:
-        for key, entry in env.items():
-            if entry.secret is not None and entry.secret not in secrets:
-                raise ConfigError(
-                    f"{context}.{key} references undeclared secret "
-                    f"{entry.secret!r}; declare it under [secrets.{entry.secret}]"
-                )
-
-    _check(admin.env, "admin.env")
-    for tname, vt in vm_templates.items():
-        _check(vt.env, f"vm_templates.{tname}.env")
-    for tname, wt in workspace_templates.items():
-        _check(wt.env, f"workspace_templates.{tname}.env")
-    for tname, at in agent_templates.items():
-        _check(at.env, f"agent_templates.{tname}.env")
-    for tname, st in session_templates.items():
-        if st.env:
-            _check(st.env, f"session_templates.{tname}.env")
-
-
 EXPECTED_TOP_LEVEL_KEYS = {
     "operator",
     "paths",
@@ -1446,14 +1460,14 @@ def load_config(path: Path | None = None, *, warn_issues: bool = True) -> Config
     secrets = _load_secrets(data, issues, decls)
     secret_backends = _load_secret_backends(data, issues, decls)
     secret_config_data = _load_secret_config(data, issues, decls)
-    _validate_env_secret_refs(
-        secrets=secrets,
-        admin=admin,
-        vm_templates=loaded_vm_templates,
-        workspace_templates=workspace_templates,
-        agent_templates=loaded_agent_templates,
-        session_templates=session_templates,
-    )
+    # Phase 1b: env-block secret references no longer error at config load
+    # when they don't match a [secrets.<name>] block. The Resource Registry's
+    # finalize pass auto-declares missing secrets (per the framework's
+    # miss policy for the "secret" kind); operators see them in
+    # `agw secret list` with origin = auto-declared. Render-time resolution
+    # falls through the backend chain naturally; an unresolved secret
+    # raises `SecretUnavailableError` ("no active backend resolved ...")
+    # at command time rather than `ConfigError` at config load.
     secret_resolver = _build_secret_resolver(
         secret_config_data, secret_backends, secrets
     )

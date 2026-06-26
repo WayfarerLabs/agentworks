@@ -8,12 +8,13 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from agentworks.errors import ConfigError, SecretUnavailableError
+from agentworks.secrets.base import SecretDecl
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from agentworks.env.entry import EnvEntry
-    from agentworks.secrets.base import SecretDecl, SecretSource
+    from agentworks.secrets.base import SecretSource
 
 
 class SecretResolver:
@@ -170,27 +171,38 @@ class SecretResolver:
         shape: a mapping of env-var name to EnvEntry (which carries either
         ``.value`` plaintext or ``.secret`` reference).
 
-        Raises ``ConfigError`` if an entry references an unknown secret
-        name. The exhaustive-or-else case (entry has neither value nor
-        secret) cannot happen by construction because EnvEntry's
+        Phase 1b of the Resource Registry SDD relaxes the strict
+        "must declare" rule: a secret reference whose name has no
+        ``[secrets.<name>]`` block is treated as auto-declared
+        (synthesized ``SecretDecl`` with empty ``backend_mappings``) and
+        runs through the same backend chain. If no backend resolves it,
+        the existing ``SecretUnavailableError`` path fires at command
+        time rather than ``ConfigError`` at config load. Operators see
+        the auto-declared secret in ``agw secret list`` with origin =
+        auto-declared so typo'd names surface visibly.
+
+        The exhaustive-or-else case (entry has neither value nor secret)
+        cannot happen by construction because EnvEntry's
         ``__post_init__`` enforces the exactly-one invariant.
         """
         seen: set[str] = set()
         needed: list[SecretDecl] = []
         for entry in env.values():
-            if entry.secret is not None and entry.secret not in seen and entry.secret in self._decls:
+            if entry.secret is not None and entry.secret not in seen:
                 seen.add(entry.secret)
-                needed.append(self._decls[entry.secret])
+                # Use the operator-declared SecretDecl if present (carries
+                # backend_mappings overrides); otherwise synthesize a
+                # bare one (auto-declare semantics: backends apply their
+                # default conventions).
+                needed.append(
+                    self._decls.get(entry.secret)
+                    or SecretDecl(name=entry.secret, description="")
+                )
         resolved = self.resolve_all(needed) if needed else {}
 
         out: dict[str, str] = {}
         for key, entry in env.items():
             if entry.secret is not None:
-                if entry.secret not in self._decls:
-                    raise ConfigError(
-                        f"env key {key!r} references unknown secret {entry.secret!r}",
-                        hint=f"declare it under [secrets.{entry.secret}]",
-                    )
                 out[key] = resolved[entry.secret]
             else:
                 # EnvEntry invariant: exactly one of value/secret set, so

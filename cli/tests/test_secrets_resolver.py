@@ -350,12 +350,33 @@ def test_render_mixed_plaintext_and_secret_entries() -> None:
     assert out == {"PLAIN": "plain-val", "SECRET": "resolved"}
 
 
-def test_render_raises_on_unknown_secret_reference() -> None:
-    """An env entry referencing a secret name not in self._decls is a
-    ConfigError rather than a silent drop or KeyError."""
+def test_render_falls_through_to_backend_for_unknown_secret_reference() -> None:
+    """Phase 1b: an env entry referencing a secret name not in
+    ``self._decls`` is no longer a ``ConfigError`` -- it's treated as
+    auto-declared (synthesized ``SecretDecl`` with empty
+    ``backend_mappings``) and resolved through the backend chain. If no
+    backend resolves it, the existing ``SecretUnavailableError`` path
+    fires (covered by other tests in this module).
+
+    This test exercises the success branch: a backend that recognizes
+    the auto-declared name yields a value, render returns it normally.
+    """
+    s = _FakeSource("env-var", values={"unknown-secret": "from-backend"})
+    r = SecretResolver([s], _decls("known"))
+    env = {"BAD": EnvEntry(key="BAD", secret="unknown-secret")}
+    out = r.render(env)
+    assert out["BAD"] == "from-backend"
+
+
+def test_render_unresolved_unknown_secret_surfaces_unavailable_error() -> None:
+    """Same shape: unknown-secret reference, but no backend yields a
+    value. The framework reports it as ``SecretUnavailableError`` (the
+    "no active backend resolved" path) -- a clearer runtime error than
+    the old "must declare" ConfigError at config load.
+    """
+    from agentworks.errors import SecretUnavailableError
+
     r = SecretResolver([_FakeSource("env-var")], _decls("known"))
     env = {"BAD": EnvEntry(key="BAD", secret="unknown-secret")}
-    with pytest.raises(ConfigError) as exc:
+    with pytest.raises(SecretUnavailableError, match="unknown-secret"):
         r.render(env)
-    assert "BAD" in str(exc.value)
-    assert "unknown-secret" in str(exc.value)
