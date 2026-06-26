@@ -35,7 +35,9 @@ if TYPE_CHECKING:
     from agentworks.db import Database, VMRow
     from agentworks.env import EnvEntry
     from agentworks.git_credentials.base import GitCredentialProvider
+    from agentworks.resources import Registry
     from agentworks.secrets import SecretTarget
+    from agentworks.secrets.base import SecretDecl
     from agentworks.vms.base import VMProvisioner
     from agentworks.vms.templates import ResolvedVMTemplate
 
@@ -795,35 +797,17 @@ def rekey_vm(
     # masking the env-var (the env-var source reads ``os.environ`` at
     # ``would_attempt`` time, so removing the var skips it cleanly and
     # the next backend in the chain takes over).
-    import os
-
     from agentworks.bootstrap import build_registry
     from agentworks.secrets import resolve_for_command
     from agentworks.vms.templates import resolve_template
 
     rekey_vm_tmpl = resolve_template(config, vm.template)
     registry = build_registry(config)
-    ts_decl = registry.lookup("secret", rekey_vm_tmpl.tailscale_auth_key)
+    ts_decl = _lookup_or_synthesize_secret(
+        registry, rekey_vm_tmpl.tailscale_auth_key
+    )
 
-    @contextlib.contextmanager
-    def _ignore_env_vars() -> Iterator[None]:
-        """When ``ignore_env`` is set, mask the env-var backend's view
-        of any pre-existing Tailscale auth key for the duration of the
-        resolve. The other backends in the chain (prompt) still run.
-        """
-        if not ignore_env:
-            yield
-            return
-        saved: dict[str, str] = {}
-        for var in ("AW_TAILSCALE_AUTH_KEY", "TAILSCALE_AUTH_KEY"):
-            if var in os.environ:
-                saved[var] = os.environ.pop(var)
-        try:
-            yield
-        finally:
-            os.environ.update(saved)
-
-    with _ignore_env_vars():
+    with _mask_env_var_backend_for(ts_decl, masked=ignore_env):
         resolved = resolve_for_command([], config, extra_decls=[ts_decl])
     ts_auth_key = resolved[rekey_vm_tmpl.tailscale_auth_key]
 
@@ -1163,6 +1147,77 @@ def _guard_failed_vm(vm: VMRow, *, allow_failed_init: bool = False) -> None:
         )
 
 
+@contextlib.contextmanager
+def _mask_env_var_backend_for(
+    decl: SecretDecl,
+    *,
+    masked: bool,
+) -> Iterator[None]:
+    """Mask the env-var backend's view of ``decl`` for the duration of
+    the block when ``masked`` is True; pass-through otherwise.
+
+    Used by ``vm rekey --ignore-env`` to force the resolver chain to
+    skip the env-var backend and fall through to the prompt backend.
+    The env-var source reads ``os.environ`` at ``would_attempt`` time,
+    so popping the matching env vars during the resolve call makes the
+    backend silently skip; the next backend in the chain takes over.
+
+    The masked names cover (a) the framework's default convention
+    ``AW_SECRET_<UPPER_NAME>`` for ``decl.name``, plus (b) any
+    operator-typed string override at ``decl.backend_mappings["env-var"]``.
+    Both names are restored on exit, even on exception, so a
+    ``KeyboardInterrupt`` during a prompt doesn't leave the operator's
+    shell with the var missing.
+    """
+    import os
+
+    if not masked:
+        yield
+        return
+
+    from agentworks.secrets.env_var import env_var_name_for
+
+    masked_names: list[str] = [env_var_name_for(decl.name)]
+    mapping = decl.backend_mappings.get("env-var")
+    if isinstance(mapping, str):
+        masked_names.append(mapping)
+
+    saved: dict[str, str] = {}
+    for var in masked_names:
+        if var in os.environ:
+            saved[var] = os.environ.pop(var)
+    try:
+        yield
+    finally:
+        os.environ.update(saved)
+
+
+def _lookup_or_synthesize_secret(registry: Registry, name: str) -> SecretDecl:
+    """Return the ``SecretDecl`` for ``name`` from the framework
+    Registry, or synthesize a bare one matching the auto-declare shape
+    if no Resource was published or auto-declared under that name.
+
+    Used by the Tailscale eager-resolve sites (``_collect_secrets`` for
+    ``vm create``, ``rekey_vm``, ``_ensure_tailscale``). All three need
+    the same fallback semantics: an operator who omits every
+    ``[vm_templates.*]`` section AND every ``[secrets.*]`` section
+    leaves the registry empty under the ``secret`` kind, so a strict
+    lookup raises ``KeyError``. Synthesizing a bare ``SecretDecl`` (the
+    same shape ``_SecretKind.synthesize`` would produce, minus
+    ``origin`` which resolution doesn't read) keeps the backend chain
+    callable. The Phase 2a ``VMTemplateKind`` will publish the default
+    template's requirements and make this fallback redundant for the
+    common case.
+    """
+    from agentworks.secrets.base import SecretDecl
+
+    try:
+        found: SecretDecl = registry.lookup("secret", name)
+        return found
+    except KeyError:
+        return SecretDecl(name=name, description="")
+
+
 def _collect_secrets(
     config: Config,
     providers: dict[str, GitCredentialProvider],
@@ -1202,25 +1257,17 @@ def _collect_secrets(
     """
     from agentworks.bootstrap import build_registry
     from agentworks.secrets import resolve_for_command
-    from agentworks.secrets.base import SecretDecl
 
     output.info("Collecting credentials...")
 
-    # Tailscale via the framework.
+    # Tailscale via the framework. See _lookup_or_synthesize_secret
+    # for the missing-default-template fallback semantics.
     registry = build_registry(config)
-    ts_name = vm_tmpl.tailscale_auth_key
-    try:
-        ts_decl = registry.lookup("secret", ts_name)
-    except KeyError:
-        # No operator-typed [secrets.<name>] and no framework requirement
-        # auto-declared it during finalize (e.g., operator omitted the
-        # vm_template's section entirely). Synthesize a bare SecretDecl
-        # matching the auto-declare shape so the backend chain still
-        # gets a chance to resolve.
-        ts_decl = SecretDecl(name=ts_name, description="")
-
+    ts_decl = _lookup_or_synthesize_secret(
+        registry, vm_tmpl.tailscale_auth_key
+    )
     resolved = resolve_for_command([], config, extra_decls=[ts_decl])
-    ts_auth_key = resolved[ts_name]
+    ts_auth_key = resolved[vm_tmpl.tailscale_auth_key]
 
     # Git credentials (legacy path; Phase 1d migrates to framework).
     git_tokens: dict[str, str] = {}
@@ -1483,7 +1530,9 @@ def _ensure_tailscale(
 
     rejoin_vm_tmpl = resolve_template(config, vm.template)
     registry = build_registry(config)
-    ts_decl = registry.lookup("secret", rejoin_vm_tmpl.tailscale_auth_key)
+    ts_decl = _lookup_or_synthesize_secret(
+        registry, rejoin_vm_tmpl.tailscale_auth_key
+    )
     resolved = resolve_for_command([], config, extra_decls=[ts_decl])
     auth_key = resolved[rejoin_vm_tmpl.tailscale_auth_key]
 

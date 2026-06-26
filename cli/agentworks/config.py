@@ -815,18 +815,28 @@ def _load_vm_templates(
             raise ConfigError(f"vm_templates.{name} must be a table")
         _warn_unexpected_keys(tdata, _VM_TEMPLATE_KEYS, f"vm_templates.{name}", issues)
 
-        # tailscale_auth_key must be a bare string secret name; no
-        # `{ secret = "..." }` polymorphism per the SDD (the field IS the
-        # secret reference, not a value-or-ref discriminator). Absence
-        # means "inherit" via the raw-template's None sentinel; the
-        # resolver applies the default ``"tailscale-auth-key"`` when no
-        # ancestor set it explicitly.
+        # tailscale_auth_key must be a non-empty bare string secret
+        # name; no `{ secret = "..." }` polymorphism per the SDD (the
+        # field IS the secret reference, not a value-or-ref
+        # discriminator). Absence means "inherit" via the raw-template's
+        # None sentinel; the resolver applies the default
+        # ``"tailscale-auth-key"`` when no ancestor set it explicitly.
+        # Empty-string is rejected: it would derive an env-var name
+        # ``AW_SECRET_`` (empty suffix) and prompt the operator for a
+        # secret called ``""`` -- a usability footgun on a security-
+        # relevant field.
         ts_key_raw: str | None = None
         if "tailscale_auth_key" in tdata:
             if not isinstance(tdata["tailscale_auth_key"], str):
                 raise ConfigError(
                     f"vm_templates.{name}.tailscale_auth_key must be a bare secret "
                     f"name (string), got {type(tdata['tailscale_auth_key']).__name__}"
+                )
+            if not tdata["tailscale_auth_key"]:
+                raise ConfigError(
+                    f"vm_templates.{name}.tailscale_auth_key must not be empty; "
+                    f"omit the key to inherit the default secret name "
+                    f"\"tailscale-auth-key\""
                 )
             ts_key_raw = tdata["tailscale_auth_key"]
 

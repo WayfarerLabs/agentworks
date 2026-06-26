@@ -17,6 +17,7 @@ from pathlib import Path
 # help text, comment-only references describing the removal).
 _MODULES_TO_SCAN = (
     "agentworks.vms.initializer",
+    "agentworks.vms.manager",
     "agentworks.secrets.resolver",
 )
 
@@ -46,6 +47,20 @@ def test_initializer_has_no_read_env_with_legacy_for_tailscale() -> None:
     assert "read_env_with_legacy" not in src, (
         "found read_env_with_legacy call in agentworks.vms.initializer; "
         "Tailscale must resolve via the framework"
+    )
+
+
+def test_vm_manager_module_does_not_reference_legacy_tailscale_env_var() -> None:
+    """``AW_TAILSCALE_AUTH_KEY`` is gone from ``agentworks.vms.manager``
+    too. The only places the name should appear are operator-facing
+    strings (CLI help text in ``cli/commands/vm.py``, etc.).
+    """
+    src = _read_module_source("agentworks.vms.manager")
+    assert "AW_TAILSCALE_AUTH_KEY" not in src, (
+        "found legacy env var name AW_TAILSCALE_AUTH_KEY in "
+        "agentworks.vms.manager; ``--ignore-env`` must mask the "
+        "framework's AW_SECRET_<NAME> convention, not the removed "
+        "legacy name"
     )
 
 

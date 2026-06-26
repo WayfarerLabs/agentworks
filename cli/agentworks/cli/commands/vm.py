@@ -129,7 +129,12 @@ def vm_rekey(
         bool,
         typer.Option(
             "--ignore-env",
-            help="Ignore AW_TAILSCALE_AUTH_KEY (and legacy TAILSCALE_AUTH_KEY) env var and prompt for key",
+            help=(
+                "Skip the env-var backend for the Tailscale auth-key secret "
+                "and prompt for the new value. Masks AW_SECRET_TAILSCALE_AUTH_KEY "
+                "(or the operator-typed backend_mappings.env-var override) so the "
+                "resolver's prompt backend takes over."
+            ),
         ),
     ] = False,
 ) -> None:

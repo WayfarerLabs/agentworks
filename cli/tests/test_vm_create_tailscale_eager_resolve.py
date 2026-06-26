@@ -149,3 +149,108 @@ def test_join_tailscale_signature_requires_auth_key_kwarg() -> None:
     assert param.kind == inspect.Parameter.KEYWORD_ONLY
     # No default; required.
     assert param.default is inspect.Parameter.empty
+
+
+# -- --ignore-env (rekey) masking ------------------------------------------
+
+
+def test_mask_env_var_backend_pops_framework_default_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The ``--ignore-env`` masker pops the framework's
+    ``AW_SECRET_<UPPER_NAME>`` convention for the resolved secret name,
+    so the env-var backend silently skips and the next backend runs.
+    """
+    import os
+
+    from agentworks.secrets.base import SecretDecl
+    from agentworks.vms.manager import _mask_env_var_backend_for
+
+    monkeypatch.setenv("AW_SECRET_TAILSCALE_AUTH_KEY", "stale-value")
+    decl = SecretDecl(name="tailscale-auth-key", description="")
+    with _mask_env_var_backend_for(decl, masked=True):
+        assert "AW_SECRET_TAILSCALE_AUTH_KEY" not in os.environ
+    # Restored on exit.
+    assert os.environ["AW_SECRET_TAILSCALE_AUTH_KEY"] == "stale-value"
+
+
+def test_mask_env_var_backend_pops_operator_typed_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When the operator sets ``backend_mappings.env-var = "CUSTOM_VAR"``
+    in ``[secrets.<name>]``, the masker pops THAT name (in addition to
+    the framework's default convention).
+    """
+    import os
+
+    from agentworks.secrets.base import SecretDecl
+    from agentworks.vms.manager import _mask_env_var_backend_for
+
+    monkeypatch.setenv("AW_SECRET_TAILSCALE_AUTH_KEY", "default-stale")
+    monkeypatch.setenv("CUSTOM_TS_VAR", "operator-stale")
+    decl = SecretDecl(
+        name="tailscale-auth-key",
+        description="",
+        backend_mappings={"env-var": "CUSTOM_TS_VAR"},
+    )
+    with _mask_env_var_backend_for(decl, masked=True):
+        assert "AW_SECRET_TAILSCALE_AUTH_KEY" not in os.environ
+        assert "CUSTOM_TS_VAR" not in os.environ
+    # Restored on exit.
+    assert os.environ["AW_SECRET_TAILSCALE_AUTH_KEY"] == "default-stale"
+    assert os.environ["CUSTOM_TS_VAR"] == "operator-stale"
+
+
+def test_mask_env_var_backend_no_op_when_unmasked(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``masked=False`` (the default ``vm rekey`` shape) is a pass-through
+    -- the env vars stay set throughout the block.
+    """
+    import os
+
+    from agentworks.secrets.base import SecretDecl
+    from agentworks.vms.manager import _mask_env_var_backend_for
+
+    monkeypatch.setenv("AW_SECRET_TAILSCALE_AUTH_KEY", "present")
+    decl = SecretDecl(name="tailscale-auth-key", description="")
+    with _mask_env_var_backend_for(decl, masked=False):
+        assert os.environ["AW_SECRET_TAILSCALE_AUTH_KEY"] == "present"
+    assert os.environ["AW_SECRET_TAILSCALE_AUTH_KEY"] == "present"
+
+
+def test_mask_env_var_backend_no_error_when_var_unset() -> None:
+    """When neither the framework name nor the operator override is set
+    in the environment, masking is a no-op rather than a KeyError.
+    """
+    import os
+
+    from agentworks.secrets.base import SecretDecl
+    from agentworks.vms.manager import _mask_env_var_backend_for
+
+    # Make sure no relevant var is set; monkeypatch isn't needed since we
+    # don't introduce one. (Best-effort hygiene if the test runner inherits
+    # a polluted env.)
+    os.environ.pop("AW_SECRET_TAILSCALE_AUTH_KEY", None)
+    decl = SecretDecl(name="tailscale-auth-key", description="")
+    with _mask_env_var_backend_for(decl, masked=True):
+        pass  # no exception is the assertion
+
+
+def test_mask_env_var_backend_restores_on_exception(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A raise inside the block (e.g., operator hits Ctrl-C during a
+    prompt) must still restore the masked env vars.
+    """
+    import os
+
+    from agentworks.secrets.base import SecretDecl
+    from agentworks.vms.manager import _mask_env_var_backend_for
+
+    monkeypatch.setenv("AW_SECRET_TAILSCALE_AUTH_KEY", "before-raise")
+    decl = SecretDecl(name="tailscale-auth-key", description="")
+    with pytest.raises(KeyboardInterrupt), _mask_env_var_backend_for(decl, masked=True):
+        assert "AW_SECRET_TAILSCALE_AUTH_KEY" not in os.environ
+        raise KeyboardInterrupt
+    assert os.environ["AW_SECRET_TAILSCALE_AUTH_KEY"] == "before-raise"
