@@ -139,18 +139,17 @@ def _assert_agent_ssh_works(target: Transport, agent: AgentRow) -> None:
     opaque SSH transport failure into a clear "run ``agw agent reinit``"
     instruction.
 
-    A probe round-trip costs ~50ms over Tailscale + ControlMaster. Cheaper
-    than letting the failure surface mid-operation with partial state.
+    A probe round-trip is cheap relative to letting the failure surface
+    mid-operation with partial state.
 
     Two failure shapes are distinguished:
 
     - Non-zero exit (SSH_TRANSPORT_ERROR = 255 typically): SSH connected
       and ``ssh`` itself reported an auth / transport failure. Treated as
       the pre-rollout case and raised as ``StateError`` with a reinit hint.
-    - ``SSHError`` from ``target.run`` (timeout / unreachable host /
-      ControlMaster-down): the VM itself isn't reachable. Re-raised as
-      ``ConnectivityError`` so the operator sees "VM unreachable" rather
-      than "agent needs reinit."
+    - ``SSHError`` from ``target.run`` (timeout / unreachable host): the
+      VM itself isn't reachable. Re-raised as ``ConnectivityError`` so the
+      operator sees "VM unreachable" rather than "agent needs reinit."
     """
     from agentworks.errors import ConnectivityError
     from agentworks.ssh import SSH_TRANSPORT_ERROR, SSHError
