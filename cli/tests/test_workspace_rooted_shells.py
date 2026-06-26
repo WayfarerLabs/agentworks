@@ -413,8 +413,9 @@ def test_exec_vm_rejects_dash_prefixed_command(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """``vm exec aavm1 --workspace ws1 pwd`` (misplaced ``--workspace``)
-    must raise ValidationError before any SSH work. The hint must point
-    at the right invocation shape."""
+    must raise ValidationError before any SSH work. The hint must
+    explain that agw args belong before the first positional, since the
+    exec CLI uses ``allow_interspersed_args=False``."""
     from agentworks.vms import manager as vm_manager
 
     db = _seed_db(tmp_path)
@@ -425,14 +426,18 @@ def test_exec_vm_rejects_dash_prefixed_command(
         vm_manager.exec_vm(  # type: ignore[arg-type]
             db, config, "vm1", ["--workspace", "ws1", "pwd"],
         )
-    assert "--workspace must come before the vm name" in (exc_info.value.hint or "")
+    hint = exc_info.value.hint or ""
+    assert "agentworks args must come before the first positional argument" in hint
 
 
 def test_exec_vm_rejects_dash_prefixed_command_generic_hint(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A `-` command that doesn't include a recognized agw flag still
-    rejects, but with the generic './-name' workaround hint."""
+    rejects, but with the generic './-name' workaround hint. The
+    misplaced-flag hint must NOT fire here -- the user wasn't trying to
+    pass an agw flag, and showing the args-must-come-first hint would
+    be misleading."""
     from agentworks.vms import manager as vm_manager
 
     db = _seed_db(tmp_path)
@@ -445,14 +450,14 @@ def test_exec_vm_rejects_dash_prefixed_command_generic_hint(
         )
     hint = exc_info.value.hint or ""
     assert "./-name" in hint
-    assert "--workspace" not in hint
+    assert "agentworks args" not in hint
 
 
 def test_exec_agent_rejects_dash_prefixed_command(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """``agent exec`` mirrors the same rejection with an agent-flavored
-    hint."""
+    """``agent exec`` mirrors the same rejection and hint shape as
+    ``vm exec``."""
     from agentworks.agents import manager as agent_manager
 
     db = _seed_db(tmp_path)
@@ -463,7 +468,8 @@ def test_exec_agent_rejects_dash_prefixed_command(
         agent_manager.exec_agent(  # type: ignore[arg-type]
             db, config, name="a1", command=["--workspace", "ws1", "pwd"],
         )
-    assert "--workspace must come before the agent name" in (exc_info.value.hint or "")
+    hint = exc_info.value.hint or ""
+    assert "agentworks args must come before the first positional argument" in hint
 
 
 def test_shell_vm_passes_workspace_scope_to_secret_target(

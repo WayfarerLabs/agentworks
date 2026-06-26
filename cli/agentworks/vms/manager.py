@@ -116,19 +116,33 @@ def _reject_dash_prefixed_command(
     both zsh and bash parse the script string as further shell options
     when it starts with ``-``, producing cryptic errors (zsh: "no such
     option: ...", bash: "--: invalid option"). The common cause is an
-    operator placing an agentworks flag (e.g. ``--workspace``) after the
-    VM / agent positional, where ``allow_interspersed_args=False``
-    leaves it in the passthrough argv. No legitimate remote command
-    starts with ``-`` (files with such names are addressable via
-    ``./-name``), so we reject upfront with a hint.
+    operator placing an agentworks flag (e.g. ``--workspace``) after
+    the VM / agent positional, where the exec command's
+    ``allow_interspersed_args=False`` leaves it in the passthrough
+    argv. No legitimate remote command starts with ``-`` (files with
+    such names are addressable via ``./-name``), so we reject upfront
+    with a hint.
+
+    Only the ``exec`` CLI commands set ``allow_interspersed_args=False``;
+    the shell commands accept ``--workspace`` in any position. The
+    "args must come before the first positional" hint is therefore
+    only emitted when an agentworks flag is detected in the
+    passthrough argv (the misplaced-flag case). For other ``-``-
+    prefixed commands we give the generic file-naming hint.
     """
     if not command or not command[0].startswith("-"):
         return
-    hint: str | None = None
-    if "--workspace" in command:
+    # Detect known agentworks long flags for the exec commands so the
+    # hint only fires when it's actually the right diagnosis. Other
+    # ``-``-prefixed cases (single-dash short flags, ``--`` separator
+    # used by mistake, etc.) get the generic file-naming workaround
+    # instead. Keep this list in sync with the ``--`` Typer options on
+    # the exec commands in ``cli/commands/{vm,agent}.py``.
+    known_agw_flags = {"--workspace"}
+    if any(arg in known_agw_flags for arg in command):
         hint = (
-            f"--workspace must come before the {kind} name. "
-            f"Try: 'agw {kind} exec --workspace <ws> {name} -- <command>'."
+            "agentworks args must come before the first positional "
+            "argument for this command."
         )
     else:
         hint = (
