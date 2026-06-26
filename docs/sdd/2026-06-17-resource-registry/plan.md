@@ -254,29 +254,29 @@ Goal: VM template gains `tailscale_auth_key`; `vm create` / `vm reinit` walk the
 subgraph, eager-resolve the auth-key secret, thread it as a kwarg to the Tailscale install runner.
 Legacy resolution path removed.
 
-- [ ] `cli/agentworks/config.py` (VMTemplate parsed type): add
+- [x] `cli/agentworks/config.py` (VMTemplate parsed type): add
       `tailscale_auth_key: str = "tailscale-auth-key"` field. Validate: must be a bare string (no
       `{ secret = "..." }` polymorphism, no plaintext-literal heuristic). Sample config updated.
-- [ ] `cli/agentworks/vms/templates.py` (`ResolvedVMTemplate`): same field; threaded through
+- [x] `cli/agentworks/vms/templates.py` (`ResolvedVMTemplate`): same field; threaded through
       template-inheritance resolution like other fields.
-- [ ] `ResolvedVMTemplate.required_resources()` emits a `SecretRequirement` for the configured
+- [x] `ResolvedVMTemplate.required_resources()` emits a `SecretRequirement` for the configured
       `tailscale_auth_key` (default `"tailscale-auth-key"`) with usage
       `"the VM-provisioning auth key"` and source `("vm_template", template.name)`.
-- [ ] `cli/agentworks/vms/manager.py`: `create_vm` and `reinit_vm` walk the resolved VM template's
+- [x] `cli/agentworks/vms/manager.py`: `create_vm` and `reinit_vm` walk the resolved VM template's
       requirement subgraph via `collect_secrets_for(registry, ("vm_template", <name>))`,
       eager-resolve the result via `resolve_for_command(extra_decls=...)`, and pass the resolved
       Tailscale auth key as a function argument into the Tailscale install runner.
-- [ ] Tailscale install runner gains a `*, auth_key: str` keyword-only argument. The exact function
+- [x] Tailscale install runner gains a `*, auth_key: str` keyword-only argument. The exact function
       path is **pinned at Phase 1c start** by grepping for the current `tailscale up --authkey` call
       site: pre-PR #130 this was `_install_tailscale` in `cli/agentworks/vms/initializer.py`;
       post-PR #130 it may have moved into the transports package or stayed in `vms/initializer.py`
       (mechanical move only). The kwarg-threading shape is the same either way. No `env=` injection.
       No profile-fragment writes for the auth key.
-- [ ] Remove the legacy `AW_TAILSCALE_AUTH_KEY` env-var-or-prompt resolution path. The framework's
+- [x] Remove the legacy `AW_TAILSCALE_AUTH_KEY` env-var-or-prompt resolution path. The framework's
       resolver is the only source of the auth key.
-- [ ] Update `cli/agentworks/sample-config.toml`: VM template stanza documents `tailscale_auth_key`
+- [x] Update `cli/agentworks/sample-config.toml`: VM template stanza documents `tailscale_auth_key`
       and the default secret name; remove any legacy `AW_TAILSCALE_AUTH_KEY` mention.
-- [ ] **Tests**:
+- [x] **Tests**:
   - `cli/tests/test_vm_create_tailscale_eager_resolve.py`: `vm create` resolves the Tailscale secret
     BEFORE any state mutation; the install runner receives the value as a kwarg; no `env=`
     injection.
