@@ -193,7 +193,12 @@ class SecretResolver:
                 # Use the operator-declared SecretDecl if present (carries
                 # backend_mappings overrides); otherwise synthesize a
                 # bare one (auto-declare semantics: backends apply their
-                # default conventions).
+                # default conventions). The synthesized shape matches
+                # ``_SecretKind.synthesize`` (in
+                # ``agentworks.resources.kinds.secret``) modulo ``origin``,
+                # which the resolver doesn't read -- so render-side
+                # synthesize and registry-side synthesize converge on the
+                # same resolution outcome by construction.
                 needed.append(
                     self._decls.get(entry.secret)
                     or SecretDecl(name=entry.secret, description="")
@@ -212,10 +217,17 @@ class SecretResolver:
         return out
 
     def required_for(self, env: Mapping[str, EnvEntry]) -> list[SecretDecl]:
-        """Return deduplicated SecretDecls referenced by ``env``.
+        """Return deduplicated SecretDecls referenced by ``env``, filtered
+        to those operator-declared in ``self._decls``.
 
         Used by eager-prompting orchestration to compute the union of
         needed secrets across a candidate target set before resolving.
+        Phase 1b note: secret refs whose names are NOT in ``self._decls``
+        (auto-declarable via the Registry's miss policy) are intentionally
+        excluded -- eager prompting walks operator-declared secrets only,
+        since auto-declared ones carry no operator-set description / hint
+        worth pre-flighting. ``render`` handles the auto-declarable case
+        on demand at command time.
         """
         seen: set[str] = set()
         out: list[SecretDecl] = []

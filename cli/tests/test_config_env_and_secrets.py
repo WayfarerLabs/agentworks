@@ -12,7 +12,10 @@ These cover:
 - [secret_config].backends drives resolver assembly; precedence preserved.
 - Unknown backend kinds in [secret_config].backends raise ConfigError.
 - Unreachable secrets raise ConfigError at load time.
-- Env entries referencing undeclared secrets raise ConfigError.
+- Env entries referencing undeclared secrets load cleanly (Phase 1b of the
+  Resource Registry SDD removed the strict-error path; auto-decl coverage
+  lives in tests/test_env_block_requirements.py, runtime-failure coverage
+  in tests/test_secrets_resolver.py).
 - Mid-config without any [secrets] / [secret_config] still loads cleanly with
   ``secret_resolver is None``.
 """

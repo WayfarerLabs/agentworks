@@ -186,13 +186,6 @@ class NamedConsoleConfig:
     origin: Origin | None = None
     usage: tuple[UsageEntry, ...] = ()
 
-    def required_resources(self) -> list[ResourceRequirement]:
-        # Named console has no env block today; returning an empty list
-        # keeps the framework-dispatch shape uniform with the other
-        # singleton-backed kinds and future-proofs the type if/when
-        # named-console fields gain secret refs.
-        return []
-
 
 @dataclass(frozen=True)
 class VMTemplate:
@@ -383,8 +376,10 @@ class Config:
     # An empty SecretResolver (no sources, no secrets) is constructed when the
     # operator hasn't opted into secrets - callers always get a usable resolver,
     # so call sites can `.render(env)` unconditionally instead of branching on
-    # None. _validate_env_secret_refs runs before resolver assembly, so this
-    # empty-chain shape never has to face a secret-ref env entry.
+    # None. Plaintext env entries resolve trivially; secret-ref env entries fall
+    # through to an empty backend chain and surface `SecretUnavailableError` at
+    # command time. Phase 1b of the Resource Registry SDD made that the intended
+    # runtime failure mode (no longer a `ConfigError` at config load).
     secret_resolver: SecretResolver = field(default_factory=lambda: _empty_resolver())
     config_issues: tuple[str, ...] = ()
 
@@ -1270,9 +1265,11 @@ def _empty_resolver() -> SecretResolver:
     """A no-op SecretResolver used as the default when no secrets are configured.
 
     Lets call sites depend on `Config.secret_resolver` always being a valid
-    SecretResolver instead of branching on None. Safe because
-    `_validate_env_secret_refs` runs before resolver assembly, so an empty
-    chain never has to face a secret-ref env entry.
+    SecretResolver instead of branching on None. Plaintext env entries
+    resolve trivially through `render`; secret-ref env entries fall through
+    to the (empty) backend chain and raise `SecretUnavailableError` at
+    command time -- the intended runtime failure mode per Phase 1b of the
+    Resource Registry SDD.
     """
     from agentworks.secrets import SecretResolver
 
@@ -1463,11 +1460,12 @@ def load_config(path: Path | None = None, *, warn_issues: bool = True) -> Config
     # Phase 1b: env-block secret references no longer error at config load
     # when they don't match a [secrets.<name>] block. The Resource Registry's
     # finalize pass auto-declares missing secrets (per the framework's
-    # miss policy for the "secret" kind); operators see them in
-    # `agw secret list` with origin = auto-declared. Render-time resolution
-    # falls through the backend chain naturally; an unresolved secret
-    # raises `SecretUnavailableError` ("no active backend resolved ...")
-    # at command time rather than `ConfigError` at config load.
+    # miss policy for the "secret" kind, in `agentworks/resources/kinds/
+    # secret.py`); operators see them in `agw secret list` with origin =
+    # auto-declared. Render-time resolution falls through the backend chain
+    # naturally; an unresolved secret raises `SecretUnavailableError`
+    # ("no active backend resolved ...") at command time rather than
+    # `ConfigError` at config load.
     secret_resolver = _build_secret_resolver(
         secret_config_data, secret_backends, secrets
     )
