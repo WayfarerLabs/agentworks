@@ -59,7 +59,13 @@ def _exec_agw_long_options() -> frozenset[str]:
             continue
         for param in exec_cmd.params:
             if isinstance(param, click.Option):
-                flags.update(opt for opt in param.opts if opt.startswith("--"))
+                # Include secondary_opts so bool flags declared as
+                # ``--foo/--no-foo`` register both forms; today every
+                # exec option is value-bearing, but the cost of being
+                # future-proof here is one extra iteration.
+                for opt in (*param.opts, *param.secondary_opts):
+                    if opt.startswith("--"):
+                        flags.add(opt)
     return frozenset(flags)
 
 
