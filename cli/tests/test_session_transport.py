@@ -224,10 +224,14 @@ def test_create_session_aborts_on_missing_required_command(
             self.stdout = ""
             self.stderr = ""
 
+    seen_probes: list[str] = []
+
     class _MissingCmdTarget:
         def run(self, cmd: str, *_a: object, **_k: object) -> _MissingCmdResult:
-            # Only the `command -v` preflight should fail.
-            return _MissingCmdResult(ok="command -v" not in cmd)
+            if "command -v" in cmd:
+                seen_probes.append(cmd)
+                return _MissingCmdResult(ok=False)
+            return _MissingCmdResult(ok=True)
 
     monkeypatch.setattr(
         "agentworks.transports.transport", lambda *a, **k: _MissingCmdTarget()
@@ -278,6 +282,12 @@ def test_create_session_aborts_on_missing_required_command(
     assert db.get_session("s1") is None
     assert not db.has_any_grant("a1", "ws1")
     assert add_calls == [], "agent added to workspace group before command preflight"
+
+    # Pin the probe's shell flags to `-lic`: same flags `tmux._pane_command`
+    # uses for the actual pane. A regression to `-lc` would silently skip
+    # PATH additions hidden behind interactive-only shell config.
+    assert len(seen_probes) == 1
+    assert " -lic " in seen_probes[0]
     db.close()
 
 

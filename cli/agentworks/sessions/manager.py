@@ -657,15 +657,31 @@ def _assert_required_commands(
     ``sessions/tmux._grant_server_access``). Checking up front turns that into
     an actionable error with no partial state to roll back.
 
-    Probes with ``$SHELL -lc 'command -v <cmd>'`` so PATH resolution matches
-    how the pane is launched (``$SHELL -lic`` in ``tmux._pane_command``):
-    login dotfiles that extend PATH (mise shims, the agentworks profile
-    fragments) are loaded.
+    Probes with ``$SHELL -lic 'command -v <cmd>'`` -- the same shell flags
+    ``tmux._pane_command`` uses for the actual pane. Matters because PATH
+    additions can live in any of the dotfiles those flags source:
+
+    - ``-l`` (login): /etc/profile, ~/.profile, ~/.bash_profile -- where
+      mise activation and the agentworks profile fragments live.
+    - ``-i`` (interactive): ~/.bashrc, ~/.zshrc, and any user PATH addition
+      guarded by ``[[ $- == *i* ]]`` or ``[ -n "$PS1" ]``.
+    - ``-c``: run the probe and exit.
+
+    The probe runs over the SSH command channel without a PTY, so shells
+    may emit a "no job control in this shell" warning when started
+    interactive. The warning lands on stderr and doesn't change the exit
+    status, so the result is unaffected; ``run_command`` doesn't surface
+    that stderr to the operator either way.
+
+    One residual gap: tools that gate PATH on ``[[ -t 0 ]]`` (real TTY
+    check) won't be visible to the probe. Closing that would require
+    requesting a PTY for the probe, which has its own side effects. PATH
+    mutations gated on a real TTY are rare; leaving uncovered for now.
     """
     missing: list[str] = []
     for cmd in template.required_commands:
         inner = f"command -v {shlex.quote(cmd)} >/dev/null 2>&1"
-        probe = run_command(f'"${{SHELL:-/bin/sh}}" -lc {shlex.quote(inner)}', check=False)
+        probe = run_command(f'"${{SHELL:-/bin/sh}}" -lic {shlex.quote(inner)}', check=False)
         if not getattr(probe, "ok", False):
             missing.append(cmd)
     if not missing:
