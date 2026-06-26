@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from agentworks.config import Config, VMTemplate
     from agentworks.env import EnvEntry
+    from agentworks.resources.requirement import ResourceRequirement
 
 
 @dataclass
@@ -33,6 +34,26 @@ class ResolvedVMTemplate:
     system_install_commands: list[str] = field(default_factory=list)
     # Env (declared per-template; merged child-overrides-parent)
     env: dict[str, EnvEntry] = field(default_factory=dict)
+    # Secret name for the Tailscale auth key (default ``"tailscale-auth-key"``).
+    # Inheritance applies like other scalar fields: child overrides parent.
+    tailscale_auth_key: str = "tailscale-auth-key"
+
+    def required_resources(self) -> list[ResourceRequirement]:
+        """Emit the resolved template's requirements: env-block secret
+        refs (with inheritance applied via the merged ``env`` dict) plus
+        the Tailscale auth-key secret. Used by ``vm create`` / ``vm     reinit``
+        for the eager-resolve subgraph walk.
+        """
+        from agentworks.config import (
+            _env_requirements,
+            _tailscale_secret_requirement,
+        )
+
+        reqs: list[ResourceRequirement] = list(
+            _env_requirements(self.env, ("vm_template", self.name))
+        )
+        reqs.append(_tailscale_secret_requirement(self.tailscale_auth_key, self.name))
+        return reqs
 
 
 def resolve_from_dict(
@@ -107,11 +128,13 @@ def _merge(target: ResolvedVMTemplate, source: ResolvedVMTemplate) -> None:
     target.snap = _append_dedupe(target.snap, source.snap)
     target.system_install_commands = _append_dedupe(target.system_install_commands, source.system_install_commands)
     target.env = {**target.env, **source.env}
+    target.tailscale_auth_key = source.tailscale_auth_key
 
 
 def _merge_template(target: ResolvedVMTemplate, tmpl: VMTemplate) -> None:
     """Merge a raw VMTemplate into a ResolvedVMTemplate. None = not set, skip.
-    Scalars: child overrides. Lists: append with dedupe."""
+    Scalars: child overrides. Lists: append with dedupe.
+    """
     if tmpl.cpus is not None:
         target.cpus = tmpl.cpus
     if tmpl.memory is not None:
@@ -132,3 +155,5 @@ def _merge_template(target: ResolvedVMTemplate, tmpl: VMTemplate) -> None:
         target.system_install_commands = _append_dedupe(target.system_install_commands, tmpl.system_install_commands)
     if tmpl.env:
         target.env = {**target.env, **tmpl.env}
+    if tmpl.tailscale_auth_key is not None:
+        target.tailscale_auth_key = tmpl.tailscale_auth_key

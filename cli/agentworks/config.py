@@ -173,6 +173,26 @@ def _env_requirements(
     return out
 
 
+def _tailscale_secret_requirement(
+    tailscale_auth_key: str,
+    template_name: str,
+) -> SecretRequirement:
+    """Build the ``SecretRequirement`` a VMTemplate publishes for its
+    Tailscale auth key. Used by both ``VMTemplate.required_resources``
+    (raw, in this module) and ``ResolvedVMTemplate.required_resources``
+    (resolved, in ``agentworks.vms.templates``) so the requirement shape
+    is single-sourced.
+    """
+    from agentworks.resources.requirement import SecretRequirement
+
+    return SecretRequirement(
+        name=tailscale_auth_key,
+        kind="secret",
+        usage="the VM-provisioning auth key",
+        source=("vm_template", template_name),
+    )
+
+
 @dataclass(frozen=True)
 class NamedConsoleConfig:
     """Settings for the `console` subcommand group (named multi-session
@@ -189,7 +209,13 @@ class NamedConsoleConfig:
 
 @dataclass(frozen=True)
 class VMTemplate:
-    """VM template definition. All fields are optional (None = inherit/default)."""
+    """VM template definition. All optional fields use ``None = inherit``
+    semantics except ``tailscale_auth_key``, which is a non-optional
+    bare-string secret name (default ``"tailscale-auth-key"``). The
+    tailscale field carries no inherit shape because the secret name is a
+    deployment-wide convention; operators who want a different name per
+    template set it on the specific template.
+    """
 
     name: str
     inherits: list[str] = field(default_factory=list)
@@ -207,12 +233,30 @@ class VMTemplate:
     # Env (declared per-template; merged child-overrides-parent at resolution).
     # Plaintext or secret references; the loader produces EnvEntry instances.
     env: dict[str, EnvEntry] = field(default_factory=dict)
+    # Secret name for the Tailscale auth key. ``None = inherit`` per the
+    # convention used by VMTemplate's other optional fields; the loader
+    # sets it to the operator's string when explicit, to ``None`` when
+    # omitted. ResolvedVMTemplate (in agentworks.vms.templates) carries
+    # the post-inheritance resolved string (default ``"tailscale-auth-key"``).
+    # Bare-string only -- no ``{ secret = "..." }`` polymorphism per the
+    # SDD; the field IS the secret reference.
+    tailscale_auth_key: str | None = None
     declared_at: SourceLocation = field(default_factory=synthesized)
     origin: Origin | None = None
     usage: tuple[UsageEntry, ...] = ()
 
     def required_resources(self) -> list[ResourceRequirement]:
-        return list(_env_requirements(self.env, ("vm_template", self.name)))
+        reqs: list[ResourceRequirement] = list(
+            _env_requirements(self.env, ("vm_template", self.name))
+        )
+        # When the raw template doesn't set tailscale_auth_key, emit the
+        # default secret name's requirement so the registry finalizes
+        # cleanly even before any inheritance walk. ResolvedVMTemplate's
+        # required_resources emits the inherited value at manager-entry
+        # call time.
+        ts_name = self.tailscale_auth_key or "tailscale-auth-key"
+        reqs.append(_tailscale_secret_requirement(ts_name, self.name))
+        return reqs
 
 
 @dataclass(frozen=True)
@@ -741,6 +785,7 @@ _VM_TEMPLATE_KEYS = {
     "snap",
     "system_install_commands",
     "env",
+    "tailscale_auth_key",
 }
 
 
@@ -770,6 +815,21 @@ def _load_vm_templates(
             raise ConfigError(f"vm_templates.{name} must be a table")
         _warn_unexpected_keys(tdata, _VM_TEMPLATE_KEYS, f"vm_templates.{name}", issues)
 
+        # tailscale_auth_key must be a bare string secret name; no
+        # `{ secret = "..." }` polymorphism per the SDD (the field IS the
+        # secret reference, not a value-or-ref discriminator). Absence
+        # means "inherit" via the raw-template's None sentinel; the
+        # resolver applies the default ``"tailscale-auth-key"`` when no
+        # ancestor set it explicitly.
+        ts_key_raw: str | None = None
+        if "tailscale_auth_key" in tdata:
+            if not isinstance(tdata["tailscale_auth_key"], str):
+                raise ConfigError(
+                    f"vm_templates.{name}.tailscale_auth_key must be a bare secret "
+                    f"name (string), got {type(tdata['tailscale_auth_key']).__name__}"
+                )
+            ts_key_raw = tdata["tailscale_auth_key"]
+
         templates[name] = VMTemplate(
             name=name,
             inherits=list(tdata.get("inherits", [])),
@@ -784,6 +844,7 @@ def _load_vm_templates(
             system_install_commands=(
                 list(tdata["system_install_commands"]) if "system_install_commands" in tdata else None
             ),
+            tailscale_auth_key=ts_key_raw,
             env=_parse_env_table(tdata.get("env"), context=f"vm_templates.{name}", issues=issues),
             declared_at=decls.lookup("vm_templates", name),
         )

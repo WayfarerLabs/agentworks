@@ -391,22 +391,32 @@ def test_console_add_shell_eager_resolve_fires_before_db_update(
 
 def test_vm_create_does_not_eager_resolve_operator_env() -> None:
     """Provisioning is hermetic: operator [admin.env] / [vm_templates.*.env]
-    secrets are NOT prompted at vm create. Verify by source inspection
-    that create_vm doesn't call resolve_for_command (operator env only
-    reaches runtime shells, where it gets prompted at the use site).
+    secrets are NOT prompted at vm create. Phase 1c of the Resource
+    Registry SDD routes Tailscale through ``resolve_for_command`` with
+    ``targets=[]`` and ``extra_decls=[tailscale_decl]`` -- a tight call
+    shape that resolves ONLY the system secret without walking any
+    SecretTarget env scopes. Verify by source inspection that no
+    ``SecretTarget(...)`` constructor appears in the vm-create call path
+    (no env scope handed to the resolver).
 
-    Tailscale auth key / git credentials remain prompted upfront via the
-    legacy _collect_secrets path; they're provisioning-time secrets that
-    live outside the env-block system."""
+    Tailscale auth key / git credentials remain provisioning-time
+    secrets; Phase 1c moved Tailscale to the framework, Phase 1d will
+    move git credentials.
+    """
     import inspect
 
     from agentworks.vms import manager as vm_manager
 
-    src = inspect.getsource(vm_manager.create_vm)
-    assert "resolve_for_command" not in src, (
-        "found resolve_for_command in create_vm; provisioning should not "
-        "prompt for operator-env secrets. Operator env reaches runtime "
-        "shells only; they get prompted at the use site."
+    # Walk the call chain explicitly so the check survives refactors.
+    sources = [
+        inspect.getsource(vm_manager.create_vm),
+        inspect.getsource(vm_manager._collect_secrets),
+    ]
+    joined = "\n".join(sources)
+    assert "SecretTarget(" not in joined, (
+        "found SecretTarget(...) constructed in the vm-create path; "
+        "provisioning should not walk operator-env scopes. Operator env "
+        "reaches runtime shells only; they get prompted at the use site."
     )
 
 
@@ -419,9 +429,9 @@ def test_vm_reinit_does_not_eager_resolve_operator_env() -> None:
     from agentworks.vms import manager as vm_manager
 
     src = inspect.getsource(vm_manager.reinit_vm)
-    assert "resolve_for_command" not in src, (
-        "found resolve_for_command in reinit_vm; provisioning should not "
-        "prompt for operator-env secrets."
+    assert "SecretTarget(" not in src, (
+        "found SecretTarget(...) constructed in reinit_vm; provisioning "
+        "should not walk operator-env scopes."
     )
 
 

@@ -196,12 +196,18 @@ def _check_tailscale() -> HealthGroup:
             timeout=10,
         )
         if result.returncode == 0:
-            from agentworks.env_compat import read_env_with_legacy
-
-            if read_env_with_legacy("AW_TAILSCALE_AUTH_KEY", "TAILSCALE_AUTH_KEY"):
-                g.ok("Connected to tailnet", "auth key env var set")
-            else:
-                g.ok("Connected to tailnet", "will prompt for auth key during VM init")
+            # Phase 1c of the Resource Registry SDD routed the Tailscale
+            # auth key through the framework; the legacy hard-coded
+            # `AW_TAILSCALE_AUTH_KEY` env var no longer has a special
+            # name. The auth key is now a `secret` Resource (default
+            # name `tailscale-auth-key`); its resolution path is the
+            # configured backend chain. `agw secret describe
+            # tailscale-auth-key` (Phase 1e) is the right diagnostic
+            # surface; this section just reports connectivity.
+            g.ok(
+                "Connected to tailnet",
+                "auth key resolved via the secret framework at VM-init time",
+            )
         else:
             g.fail("Not connected", "run 'tailscale up'")
     except subprocess.TimeoutExpired:

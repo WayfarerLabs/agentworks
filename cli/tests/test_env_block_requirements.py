@@ -91,13 +91,26 @@ def test_admin_config_required_resources_aggregates_env() -> None:
 
 
 def test_vm_template_required_resources_uses_template_name_in_source() -> None:
+    """VMTemplate emits an env-block requirement plus the framework's
+    Phase-1c-added Tailscale auth-key requirement (default name).
+    """
     tmpl = VMTemplate(
         name="azure-prod",
         env={"KEY": EnvEntry(key="KEY", secret="ts-key")},
     )
     reqs = tmpl.required_resources()
-    assert len(reqs) == 1
-    assert reqs[0].source == ("vm_template", "azure-prod")
+    # 1 env-block + 1 tailscale (Phase 1c)
+    assert len(reqs) == 2
+    # All requirements carry the template's source.
+    assert all(r.source == ("vm_template", "azure-prod") for r in reqs)
+    # The env-block requirement is for the secret `ts-key`.
+    env_reqs = [r for r in reqs if r.name == "ts-key"]
+    assert len(env_reqs) == 1
+    # The Tailscale requirement uses the default secret name when the
+    # template doesn't override `tailscale_auth_key`.
+    ts_reqs = [r for r in reqs if r.name == "tailscale-auth-key"]
+    assert len(ts_reqs) == 1
+    assert ts_reqs[0].usage == "the VM-provisioning auth key"
 
 
 def test_workspace_template_required_resources() -> None:

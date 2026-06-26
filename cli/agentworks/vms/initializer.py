@@ -1109,11 +1109,14 @@ def rejoin_tailscale(
     db: Database,
     vm_name: str,
     exec_target: Transport,
+    *,
+    auth_key: str,
 ) -> str:
     """Re-join Tailscale on a VM that lost its node (e.g. ephemeral key).
 
-    Installs Tailscale if needed, prompts for an auth key, joins the tailnet,
-    and updates the DB with the new Tailscale IP.
+    Installs Tailscale if needed, joins the tailnet, and updates the DB
+    with the new Tailscale IP. ``auth_key`` is resolved by the caller via
+    the framework's eager-resolve (Phase 1c).
 
     Returns the new Tailscale IP.
     """
@@ -1126,7 +1129,7 @@ def rejoin_tailscale(
         check=False,
     )
 
-    return _join_tailscale(db, vm_name, exec_target)
+    return _join_tailscale(db, vm_name, exec_target, auth_key=auth_key)
 
 
 def _join_tailscale(
@@ -1134,19 +1137,18 @@ def _join_tailscale(
     vm_name: str,
     exec_target: Transport,
     *,
+    auth_key: str,
     logger: SSHLogger | None = None,
-    tailscale_auth_key: str | None = None,
 ) -> str:
-    """Join Tailscale, update DB. Returns the Tailscale IP."""
-    from agentworks.env_compat import read_env_with_legacy
+    """Join Tailscale, update DB. Returns the Tailscale IP.
 
-    ts_auth_key = tailscale_auth_key or read_env_with_legacy("AW_TAILSCALE_AUTH_KEY", "TAILSCALE_AUTH_KEY")
-    if not ts_auth_key:
-        ts_auth_key = output.prompt_secret(
-            "  Tailscale auth key",
-            hint="Generate a key at https://login.tailscale.com/admin/settings/keys",
-        )
-    quoted_key = shlex.quote(ts_auth_key)
+    Phase 1c of the Resource Registry SDD: the Tailscale auth key
+    arrives via the ``auth_key`` keyword argument from the framework's
+    eager-resolve at manager-entry. The legacy env-var fallback and
+    prompt-here-if-missing path are gone; callers must thread the
+    resolved value in.
+    """
+    quoted_key = shlex.quote(auth_key)
     # Daemon-side flags (e.g. --tun=userspace-networking for WSL2) live in
     # /etc/default/tailscaled, set during bootstrap. `tailscale up` is the
     # client and only takes client-side flags.
@@ -1154,9 +1156,9 @@ def _join_tailscale(
 
     # Redact the auth key from any attached loggers before it appears in logs.
     if exec_target.logger is not None:
-        exec_target.logger.add_redaction(ts_auth_key)
+        exec_target.logger.add_redaction(auth_key)
     if logger is not None:
-        logger.add_redaction(ts_auth_key)
+        logger.add_redaction(auth_key)
 
     exec_target.run(ts_cmd, sudo=True)
     result = exec_target.run("tailscale ip -4", sudo=True)
@@ -1180,7 +1182,7 @@ def initialize_vm(
     providers: dict[str, GitCredentialProvider],
     *,
     admin_username: str = "agentworks",
-    tailscale_auth_key: str | None = None,
+    tailscale_auth_key: str,
     git_tokens: dict[str, str] | None = None,
     bootstrap_complete: bool = False,
     tailscale_ip: str | None = None,
@@ -1191,14 +1193,17 @@ def initialize_vm(
     Phase A (bootstrap) steps are fatal -- any failure aborts initialization.
     Phase B (setup) steps are non-fatal -- failures are logged as warnings
     and the VM gets 'partial' status instead of 'complete'.
+
+    Phase 1c of the Resource Registry SDD: ``tailscale_auth_key`` is
+    required; ``create_vm`` resolves it via the framework at
+    manager-entry and threads it in.
     """
     from agentworks.ssh import SSHLogger
     from agentworks.vms.manager import keep_vm_active
 
     home = f"/home/{admin_username}"
     logger = SSHLogger(vm_name, "vm-create")
-    if tailscale_auth_key:
-        logger.add_redaction(tailscale_auth_key)
+    logger.add_redaction(tailscale_auth_key)
     if git_tokens:
         for token in git_tokens.values():
             logger.add_redaction(token)
@@ -1334,7 +1339,7 @@ def _phase_a_bootstrap(
     platform: str,
     logger: SSHLogger,
     *,
-    tailscale_auth_key: str | None = None,
+    tailscale_auth_key: str,
     bootstrap_complete: bool = False,
     tailscale_ip: str | None = None,
 ) -> Transport:
@@ -1422,12 +1427,14 @@ def _run_bootstrap_script(
     platform: str,
     logger: SSHLogger,
     *,
-    tailscale_auth_key: str | None = None,
+    tailscale_auth_key: str,
 ) -> str:
     """Generate, copy, and run a bootstrap script on the VM. Returns Tailscale IP.
 
     Used for WSL2 where the bootstrap cannot be embedded in a provisioner's
-    native mechanism (Lima provision block, Azure cloud-init).
+    native mechanism (Lima provision block, Azure cloud-init). Phase 1c:
+    ``tailscale_auth_key`` is required; the framework-resolved value
+    arrives from ``create_vm`` -> ``initialize_vm`` -> ``_phase_a_bootstrap``.
     """
     import tempfile
 
@@ -1435,15 +1442,12 @@ def _run_bootstrap_script(
 
     output.info("Bootstrapping VM...")
 
-    # Resolve Tailscale auth key
-    ts_auth_key = _resolve_tailscale_auth_key(tailscale_auth_key)
-
     ssh_public_key = config.operator.ssh_public_key.read_text().strip()
     script = generate_bootstrap_script(
         admin_username=admin_username,
         ssh_public_key=ssh_public_key,
         provisioning_packages=PROVISIONING_PACKAGES,
-        tailscale_auth_key=ts_auth_key,
+        tailscale_auth_key=tailscale_auth_key,
         hostname=vm_hostname(platform, vm_name),
         # WSL2 provisioner handles swap natively before bootstrap; every other
         # platform lets the script create the swapfile.
@@ -1526,19 +1530,6 @@ def _run_bootstrap_script(
     db.update_vm_provisioning_status(vm_name, ProvisioningStatus.COMPLETE)
 
     return tailscale_ip
-
-
-def _resolve_tailscale_auth_key(tailscale_auth_key: str | None = None) -> str:
-    """Resolve Tailscale auth key from argument, env var, or prompt."""
-    from agentworks.env_compat import read_env_with_legacy
-
-    key = tailscale_auth_key or read_env_with_legacy("AW_TAILSCALE_AUTH_KEY", "TAILSCALE_AUTH_KEY")
-    if key:
-        return key
-    return output.prompt_secret(
-        "  Tailscale auth key",
-        hint="Generate a key at https://login.tailscale.com/admin/settings/keys",
-    )
 
 
 def _phase_b_setup(

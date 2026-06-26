@@ -37,6 +37,7 @@ if TYPE_CHECKING:
     from agentworks.git_credentials.base import GitCredentialProvider
     from agentworks.secrets import SecretTarget
     from agentworks.vms.base import VMProvisioner
+    from agentworks.vms.templates import ResolvedVMTemplate
 
 
 class _VmAdminEnvScopes(NamedTuple):
@@ -230,10 +231,11 @@ def create_vm(
     # Collect provisioning-time secrets upfront (tailscale auth, git creds).
     # Provisioning is hermetic: operator [admin.env] / [vm_templates.*.env]
     # secrets are NOT prompted here -- they're not used until runtime
-    # shells. The legacy _collect_secrets path remains because the
-    # provisioning-required secrets it covers (tailscale, git) live
-    # outside the env-block system today.
-    tailscale_auth_key, git_tokens = _collect_secrets(providers, vm_name)
+    # shells, and the resolver caches them when the shell-opening code
+    # invokes resolve_for_command later.
+    tailscale_auth_key, git_tokens = _collect_secrets(
+        config, providers, vm_name, vm_tmpl
+    )
 
     # Create DB record with as-provisioned resource values
     db.insert_vm(
@@ -787,17 +789,43 @@ def rekey_vm(
             entity_name=name,
         )
 
-    # Collect new auth key
-    from agentworks.env_compat import read_env_with_legacy
+    # Collect the new auth key via the framework (Phase 1c). The
+    # resolver chain handles env-var lookup, then falls through to the
+    # prompt backend. ``ignore_env`` is preserved by temporarily
+    # masking the env-var (the env-var source reads ``os.environ`` at
+    # ``would_attempt`` time, so removing the var skips it cleanly and
+    # the next backend in the chain takes over).
+    import os
 
-    ts_auth_key = read_env_with_legacy("AW_TAILSCALE_AUTH_KEY", "TAILSCALE_AUTH_KEY") if not ignore_env else None
-    if ts_auth_key:
-        output.detail("Tailscale auth key found in environment")
-    else:
-        ts_auth_key = output.prompt_secret(
-            "Tailscale auth key",
-            hint="Generate a key at https://login.tailscale.com/admin/settings/keys",
-        )
+    from agentworks.bootstrap import build_registry
+    from agentworks.secrets import resolve_for_command
+    from agentworks.vms.templates import resolve_template
+
+    rekey_vm_tmpl = resolve_template(config, vm.template)
+    registry = build_registry(config)
+    ts_decl = registry.lookup("secret", rekey_vm_tmpl.tailscale_auth_key)
+
+    @contextlib.contextmanager
+    def _ignore_env_vars() -> Iterator[None]:
+        """When ``ignore_env`` is set, mask the env-var backend's view
+        of any pre-existing Tailscale auth key for the duration of the
+        resolve. The other backends in the chain (prompt) still run.
+        """
+        if not ignore_env:
+            yield
+            return
+        saved: dict[str, str] = {}
+        for var in ("AW_TAILSCALE_AUTH_KEY", "TAILSCALE_AUTH_KEY"):
+            if var in os.environ:
+                saved[var] = os.environ.pop(var)
+        try:
+            yield
+        finally:
+            os.environ.update(saved)
+
+    with _ignore_env_vars():
+        resolved = resolve_for_command([], config, extra_decls=[ts_decl])
+    ts_auth_key = resolved[rekey_vm_tmpl.tailscale_auth_key]
 
     output.info(f"Rekeying '{name}'...")
 
@@ -1136,28 +1164,65 @@ def _guard_failed_vm(vm: VMRow, *, allow_failed_init: bool = False) -> None:
 
 
 def _collect_secrets(
+    config: Config,
     providers: dict[str, GitCredentialProvider],
     vm_name: str,
-) -> tuple[str | None, dict[str, str]]:
+    vm_tmpl: ResolvedVMTemplate,
+) -> tuple[str, dict[str, str]]:
     """Collect all secrets upfront before provisioning starts.
 
-    Returns (tailscale_auth_key, git_tokens).
+    Phase 1c of the Resource Registry SDD: the Tailscale auth key now
+    flows through the framework. ``build_registry`` finalizes the
+    Resource Registry (auto-declaring the auth-key secret when its
+    requirement emission lands during the finalize pass);
+    ``resolve_for_command`` resolves the secret through the backend
+    chain (or prompts) and caches the value on the resolver.
+    Provisioning stays hermetic per FRD R4: ``[admin.env]`` /
+    ``[vm_templates.*.env]`` secrets are NOT eager-resolved here --
+    they're resolved at the shell-opening site at runtime, by the
+    existing ``SecretTarget`` path.
+
+    The Tailscale SecretDecl lookup uses the resolved VM template's
+    ``required_resources()`` directly rather than the registry-walk
+    ``collect_secrets_for`` helper. This matters when the operator
+    omits ``[vm_templates.default]`` entirely: the raw default template
+    isn't published to the registry, so a registry-rooted walk from
+    ``("vm_template", "default")`` would error. The resolved template
+    always exists (built-in defaults apply); walking its requirements
+    directly is the right shape and aligns with the lenient-render
+    pattern. Phase 2a's ``VMTemplateKind`` will move the auto-decl
+    plumbing into the registry so the registry-walk path becomes
+    uniformly available.
+
+    Git credentials still use the legacy ``provider.obtain_token``
+    pathway; Phase 1d migrates them to the framework alongside this
+    pattern.
+
+    Returns ``(tailscale_auth_key, git_tokens)``.
     """
-    from agentworks.env_compat import read_env_with_legacy
+    from agentworks.bootstrap import build_registry
+    from agentworks.secrets import resolve_for_command
+    from agentworks.secrets.base import SecretDecl
 
     output.info("Collecting credentials...")
 
-    # Tailscale
-    ts_auth_key = read_env_with_legacy("AW_TAILSCALE_AUTH_KEY", "TAILSCALE_AUTH_KEY")
-    if ts_auth_key:
-        output.detail("Tailscale auth key found in environment")
-    else:
-        ts_auth_key = output.prompt_secret(
-            "  Tailscale auth key",
-            hint="Generate a key at https://login.tailscale.com/admin/settings/keys",
-        )
+    # Tailscale via the framework.
+    registry = build_registry(config)
+    ts_name = vm_tmpl.tailscale_auth_key
+    try:
+        ts_decl = registry.lookup("secret", ts_name)
+    except KeyError:
+        # No operator-typed [secrets.<name>] and no framework requirement
+        # auto-declared it during finalize (e.g., operator omitted the
+        # vm_template's section entirely). Synthesize a bare SecretDecl
+        # matching the auto-declare shape so the backend chain still
+        # gets a chance to resolve.
+        ts_decl = SecretDecl(name=ts_name, description="")
 
-    # Git credentials
+    resolved = resolve_for_command([], config, extra_decls=[ts_decl])
+    ts_auth_key = resolved[ts_name]
+
+    # Git credentials (legacy path; Phase 1d migrates to framework).
     git_tokens: dict[str, str] = {}
     for name, provider in providers.items():
         token = provider.obtain_token(vm_name)
@@ -1408,6 +1473,20 @@ def _ensure_tailscale(
         output.info(f"Tailscale node {vm.tailscale_host} did not reconnect, rejoining...")
         db.clear_vm_tailscale(vm.name)
 
+    # Resolve a fresh Tailscale auth key via the framework before
+    # entering the provisioner-transport block; the resolver handles
+    # backend chain + prompt fallback. Phase 1c plumbed this through
+    # the kwarg path so initializer.py has no env-var fallback.
+    from agentworks.bootstrap import build_registry
+    from agentworks.secrets import resolve_for_command
+    from agentworks.vms.templates import resolve_template
+
+    rejoin_vm_tmpl = resolve_template(config, vm.template)
+    registry = build_registry(config)
+    ts_decl = registry.lookup("secret", rejoin_vm_tmpl.tailscale_auth_key)
+    resolved = resolve_for_command([], config, extra_decls=[ts_decl])
+    auth_key = resolved[rejoin_vm_tmpl.tailscale_auth_key]
+
     # provisioner_transport() composes Azure's attach/detach via
     # transient_route polymorphism with the reachability probe. Other
     # platforms have a nullcontext transient_route and just build the
@@ -1415,7 +1494,7 @@ def _ensure_tailscale(
     with contextlib.ExitStack() as _stack:
         verify_tailscale_available()
         exec_target = provisioner_transport(db, vm, config, stack=_stack)
-        rejoin_tailscale(db, vm.name, exec_target)
+        rejoin_tailscale(db, vm.name, exec_target, auth_key=auth_key)
 
     # After the stack unwinds (Azure detach has fired), wait for
     # Tailscale SSH on the new IP to be reachable. The probe is cheap

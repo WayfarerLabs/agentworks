@@ -29,6 +29,7 @@ from agentworks.resources.requirement import (
     SecretRequirement,
     UsageEntry,
 )
+from agentworks.resources.walk import collect_secrets_for
 
 __all__ = [
     "KIND_REGISTRY",
@@ -38,4 +39,5 @@ __all__ = [
     "ResourceRequirement",
     "SecretRequirement",
     "UsageEntry",
+    "collect_secrets_for",
 ]

@@ -201,6 +201,13 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 #azure_vm_size = "Standard_B2s"             # Azure VM size (determines cpu and memory for Azure)
 #disk = 50                                  # disk size in GiB
 #swap = 4                                   # swap file size in GiB (0 to disable)
+# -- Provisioning-time secret references --
+# Name of the secret declaration whose value is used as the Tailscale
+# auth key during `vm create` / `vm reinit`. Default: "tailscale-auth-key".
+# Resolved via the framework's backend chain (operator-declared
+# [secrets.<name>] or auto-declared via miss policy). Bare string only;
+# no { secret = "..." } polymorphism.
+#tailscale_auth_key = "tailscale-auth-key"
 # -- System-wide initialization (applied on create and reinit) --
 #apt = [                                    # direct apt packages
 #    "zsh",
