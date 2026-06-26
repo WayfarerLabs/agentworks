@@ -146,6 +146,13 @@ class SSHTransport(Transport):
             command = f"sudo -n bash -c {shlex.quote(command)}"
 
         args = self._ssh_base_args(force_tty=tty, env=env)
+        # Fence the remote command from ssh's option parser. Some
+        # glibc-getopt platforms permute non-options to the end, so an
+        # argv element starting with `-` (e.g. `--workspace` flowing
+        # through `vm exec aavm1 --workspace ws1 pwd`) is misparsed as
+        # an ssh client option. `--` makes ssh treat everything after
+        # as the remote command.
+        args.append("--")
         if self.login_shell:
             args.append(f"$SHELL -lc {shlex.quote(command)}")
         else:
@@ -210,6 +217,7 @@ class SSHTransport(Transport):
         target = f"{self.user}@{self.host}" if self.user else self.host
         args.append(target)
         if command:
+            args.append("--")  # fence: see run() for rationale
             args.append(command)
         return subprocess.call(args)
 
@@ -289,5 +297,6 @@ class SSHTransport(Transport):
         args.extend(_set_env_args(env))
         target = f"{self.user}@{self.host}" if self.user else self.host
         args.append(target)
+        args.append("--")  # fence: see run() for rationale
         args.append(command)
         return subprocess.call(args)

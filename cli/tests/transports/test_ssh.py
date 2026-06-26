@@ -236,6 +236,71 @@ def test_call_streaming_uses_minus_T_no_batchmode_violation() -> None:
 
 
 # ---------------------------------------------------------------------------
+# `--` fence between destination and remote command
+# ---------------------------------------------------------------------------
+#
+# Some glibc-getopt platforms permute non-options to the end of argv and
+# keep scanning for options past the destination. A remote command that
+# starts with `-` (e.g. ``--workspace ws1 pwd`` flowing through
+# ``vm exec aavm1 --workspace ws1 pwd``) then gets misparsed as an ssh
+# client option ("unknown option -- -"). The ``--`` fence between
+# destination and command is the standard POSIX cure.
+
+
+def test_run_fences_remote_command_with_double_dash() -> None:
+    t = SSHTransport(host="vm1", user="agentworks")
+    with patch("agentworks.transports.ssh.subprocess.run") as mock_run:
+        mock_run.return_value = _ok_completed()
+        t.run("--anything-starting-with-dashes")
+        argv = mock_run.call_args[0][0]
+        # ``--`` immediately before the remote command, after the
+        # destination.
+        assert argv[-1] == "--anything-starting-with-dashes"
+        assert argv[-2] == "--"
+        assert argv[-3] == "agentworks@vm1"
+
+
+def test_call_streaming_fences_remote_command_with_double_dash() -> None:
+    """Regression test for `vm exec <vm> --workspace <ws> <cmd>`: when
+    `--workspace` isn't consumed by Click and flows through into the
+    remote-command string, the ssh argv must fence it with ``--`` so the
+    local ssh client doesn't parse it as a client option."""
+    t = SSHTransport(host="vm1", user="agentworks")
+    with patch("agentworks.transports.ssh.subprocess.call") as mock_call:
+        mock_call.return_value = 0
+        t.call_streaming("--workspace ws1 pwd")
+        argv = mock_call.call_args[0][0]
+        assert argv[-1] == "--workspace ws1 pwd"
+        assert argv[-2] == "--"
+        assert argv[-3] == "agentworks@vm1"
+
+
+def test_interactive_fences_remote_command_with_double_dash() -> None:
+    """Interactive shells get the same fence treatment when a remote
+    command is supplied (e.g. the ``cd <ws> && exec $SHELL -l`` wrap
+    used by ``shell_vm --workspace``)."""
+    t = SSHTransport(host="vm1", user="agentworks")
+    with patch("agentworks.transports.ssh.subprocess.call") as mock_call:
+        mock_call.return_value = 0
+        t.interactive("cd /ws1 && exec $SHELL -l")
+        argv = mock_call.call_args[0][0]
+        assert argv[-1] == "cd /ws1 && exec $SHELL -l"
+        assert argv[-2] == "--"
+
+
+def test_interactive_omits_fence_for_empty_command() -> None:
+    """No command → no fence. The destination remains the last argv
+    element so ssh opens a plain login shell."""
+    t = SSHTransport(host="vm1", user="agentworks")
+    with patch("agentworks.transports.ssh.subprocess.call") as mock_call:
+        mock_call.return_value = 0
+        t.interactive("")
+        argv = mock_call.call_args[0][0]
+        assert argv[-1] == "agentworks@vm1"
+        assert "--" not in argv
+
+
+# ---------------------------------------------------------------------------
 # write_file()
 # ---------------------------------------------------------------------------
 
