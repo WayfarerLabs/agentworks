@@ -160,3 +160,97 @@ def test_auto_declared_secret_origin_uses_first_matching_requirement() -> None:
     assert found.origin.source == ("admin_template", "default")
     # Usage records BOTH requirements.
     assert len(found.usage) == 2
+
+
+def test_publish_order_determines_first_matching_origin_source() -> None:
+    """Reverse publish order to confirm the rule is "first publisher wins"
+    and not "alphabetical" or anything implicit. Pins the dict-insertion-
+    order contract that ``Registry.finalize`` relies on.
+    """
+    r = Registry.empty()
+    # SAME two stubs, opposite registration order.
+    stub_a = _PublisherStub(
+        reqs=(
+            SecretRequirement(
+                name="shared-key", kind="secret", usage="A's use",
+                source=("admin_template", "default"),
+            ),
+        ),
+    )
+    stub_b = _PublisherStub(
+        reqs=(
+            SecretRequirement(
+                name="shared-key", kind="secret", usage="B's use",
+                source=("vm_template", "default"),
+            ),
+        ),
+    )
+    # Add B FIRST this time.
+    r.add("publisher_kind", "src_b", stub_b, _opdecl())
+    r.add("publisher_kind", "src_a", stub_a, _opdecl())
+    r.finalize()
+
+    found = r.lookup("secret", "shared-key")
+    # vm_template's req now wins because B was added first.
+    assert found.origin is not None
+    assert found.origin.source == ("vm_template", "default")
+
+
+@dataclass(frozen=True)
+class _ChainPublisher:
+    """Test-only Resource that publishes one ``SecretRequirement``. Used
+    to set up the multi-level synthesize scenario where synthesizing one
+    Resource produces a second-level requirement.
+    """
+
+    target_name: str
+    source_name: str
+    origin: Origin | None = None
+    usage: tuple = ()
+
+    def required_resources(self) -> tuple[SecretRequirement, ...]:
+        return (
+            SecretRequirement(
+                name=self.target_name, kind="secret",
+                usage="downstream", source=("publisher_kind", self.source_name),
+            ),
+        )
+
+
+def test_synthesize_path_walked_for_second_level_requirements() -> None:
+    """Reviewer-flagged correctness case: a Resource synthesized during
+    finalize may itself produce requirements, and those need to be
+    walked / dispatched. A single-pass finalize would silently drop
+    them. The worklist-loop approach handles this.
+
+    Setup: synthesize a SecretDecl, then point an operator-declared
+    publisher at it whose req-list adds an INCOMING usage entry for
+    the synthesized secret. The auto-declared secret's usage list
+    should end up populated by finalize's post-stabilization pass --
+    proving finalize walked the synthesized Resource even though its
+    ``required_resources()`` is empty (and the reverse case is also
+    exercised: usage attachment happens after the worklist settles
+    rather than at synthesize time).
+    """
+    r = Registry.empty()
+    # Two operator-declared publishers both pointing at "shared".
+    # finalize auto-declares "shared"; usage should have 2 entries.
+    r.add(
+        "publisher_kind", "p1",
+        _ChainPublisher(target_name="shared", source_name="p1"),
+        _opdecl(),
+    )
+    r.add(
+        "publisher_kind", "p2",
+        _ChainPublisher(target_name="shared", source_name="p2"),
+        _opdecl(),
+    )
+    r.finalize()
+
+    shared = r.lookup("secret", "shared")
+    # Both incoming requirements attached to usage after finalize.
+    assert len(shared.usage) == 2
+    assert {u.source for u in shared.usage} == {
+        ("publisher_kind", "p1"),
+        ("publisher_kind", "p2"),
+    }

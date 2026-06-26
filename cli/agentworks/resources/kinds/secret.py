@@ -15,7 +15,6 @@ from typing import TYPE_CHECKING, Literal
 
 from agentworks.resources.kind import KIND_REGISTRY
 from agentworks.resources.origin import Origin
-from agentworks.resources.requirement import UsageEntry
 from agentworks.secrets.base import SecretDecl
 
 if TYPE_CHECKING:
@@ -38,13 +37,19 @@ class _SecretKind:
         """Build a ``SecretDecl`` for an auto-declared secret. ``requirements``
         is non-empty (the Registry never calls ``synthesize`` for an
         unreferenced name) and ordered by config-load walk order.
+
+        Only ``origin`` (auto-declared, source = first matching
+        requirement's source) is attached here. ``usage`` is centralized
+        in ``Registry.finalize``'s post-stabilization pass so the kind
+        doesn't need to know the final requirement map -- a synthesized
+        Resource that goes on to publish requirements of its own may
+        gather later incoming edges that this initial call can't see.
         """
         first = requirements[0]
         return SecretDecl(
             name=first.name,
             description="",
             origin=Origin.auto_declared(source=first.source),
-            usage=tuple(UsageEntry(source=r.source, text=r.usage) for r in requirements),
         )
 
 

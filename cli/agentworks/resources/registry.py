@@ -93,23 +93,34 @@ class Registry:
 
         Steps:
 
-        1. Walk every Resource's ``required_resources()`` (if defined;
-           Phase 1a has no producers wired beyond what tests synthesize,
-           so most Resources return an empty list).
-        2. Group requirements by ``(kind, name)`` target, preserving
-           first-encountered order for the ``Origin.auto_declared``
-           source rule.
-        3. For each ``(kind, name)``:
-           - If a Resource is already published, attach a ``usage`` list
-             built from the matching requirements via
-             ``dataclasses.replace``.
-           - Otherwise, look up the kind in ``KIND_REGISTRY`` and
-             dispatch its ``miss_policy``: ``auto-declare`` (subject to
-             ``auto_declare_names``) synthesizes a Resource via the
-             kind's ``synthesize``; ``error`` raises ``ConfigError``.
-        4. Detect cycles in the now-complete requirement graph via DFS
-           three-coloring; raise ``ConfigError`` on the first cycle.
-        5. Freeze.
+        1. **Worklist loop**: walk ``required_resources()`` on every
+           Resource not yet visited, accumulating requirements by
+           ``(kind, name)`` target. For any target that resolves to no
+           Resource currently in the Registry, dispatch the kind's miss
+           policy: ``"auto-declare"`` (subject to ``auto_declare_names``)
+           calls ``synthesize`` and inserts the result; ``"error"`` raises
+           ``ConfigError``. Loop until a pass adds no new Resources --
+           synthesized Resources may themselves produce requirements, so
+           a single pass would silently drop their unresolved edges. The
+           accumulated requirement map is preserved across iterations so
+           the post-loop usage-attachment pass sees the complete graph.
+        2. **Usage attachment**: every Resource (operator-declared,
+           code-declared, auto-declared) that has incoming requirements
+           gets a ``usage`` tuple attached via ``dataclasses.replace``.
+           Both publish-time Origin and synthesize-time Origin already
+           landed; usage is centralized here so the kind's ``synthesize``
+           doesn't have to know the final requirement map.
+        3. **Cycle detection** in the now-complete requirement graph via
+           iterative DFS three-coloring; raises ``ConfigError`` on the
+           first cycle with the offending path.
+        4. **Freeze**.
+
+        First-encountered requirement order (for the
+        ``Origin.auto_declared(source=...)`` rule) is preserved by
+        ``dict``'s guaranteed insertion order in CPython 3.7+. The
+        worklist loop appends to the accumulated requirement map; the
+        order in which requirements first appear is the order the
+        framework records.
 
         Raises ``RuntimeError`` if already finalized. Raises
         ``ConfigError`` for unresolved references under an error policy,
@@ -118,30 +129,66 @@ class Registry:
         if self._frozen:
             raise RuntimeError("registry has already been finalized")
 
-        # 1 + 2: collect and group.
-        by_target: dict[tuple[str, str], list[ResourceRequirement]] = {}
-        for kind_dict in self._resources.values():
-            for resource in kind_dict.values():
-                for req in _required_resources(resource):
-                    by_target.setdefault((req.kind, req.name), []).append(req)
+        # 1: worklist loop. ``walked`` tracks which Resources have had
+        # their required_resources() walked so we don't double-count.
+        all_reqs: dict[tuple[str, str], list[ResourceRequirement]] = {}
+        walked: set[tuple[str, str]] = set()
 
-        # 3: dispatch.
-        for (kind, name), reqs in by_target.items():
-            kind_handler = _lookup_kind(kind, reqs[0])
-            existing = self._resources.get(kind, {}).get(name)
-            if existing is not None:
-                stamped = dataclasses.replace(
-                    existing, usage=_usage_tuple(reqs)
-                )
-                self._resources[kind][name] = stamped
-            else:
-                self._handle_miss(kind, name, kind_handler, reqs)
+        while True:
+            new_walks = self._collect_new_requirements(all_reqs, walked)
+            if not new_walks:
+                # No new Resources to walk. We're stable.
+                break
+            # Dispatch miss policies for any targets not yet in the
+            # Registry. A miss-handler may add a Resource whose own
+            # required_resources() the next iteration will walk.
+            for target, reqs in list(all_reqs.items()):
+                target_kind, target_name = target
+                if target_name in self._resources.get(target_kind, {}):
+                    continue
+                kind_handler = _lookup_kind(target_kind, reqs[0])
+                self._handle_miss(target_kind, target_name, kind_handler, reqs)
 
-        # 4: cycle detection across the now-complete graph.
+        # 2: usage attachment. Every Resource with incoming requirements
+        # gets its usage tuple set via dataclasses.replace.
+        for (kind, name), reqs in all_reqs.items():
+            existing = self._resources[kind][name]
+            self._resources[kind][name] = dataclasses.replace(
+                existing, usage=_usage_tuple(reqs)
+            )
+
+        # 3: cycle detection across the now-complete graph.
         _detect_cycles(self._resources)
 
-        # 5: freeze.
+        # 4: freeze.
         self._frozen = True
+
+    def _collect_new_requirements(
+        self,
+        all_reqs: dict[tuple[str, str], list[ResourceRequirement]],
+        walked: set[tuple[str, str]],
+    ) -> bool:
+        """Walk ``required_resources()`` on every Resource not yet in
+        ``walked``, appending discovered requirements into ``all_reqs``
+        (in first-encountered order). Returns True if any Resource was
+        walked this pass; False means the worklist has stabilized.
+        """
+        any_walked = False
+        # Snapshot the current per-kind dicts so iteration is safe
+        # against concurrent additions by miss-policy dispatch in this
+        # outer pass.
+        snapshot: list[tuple[tuple[str, str], Any]] = []
+        for kind, kind_dict in self._resources.items():
+            for name, resource in kind_dict.items():
+                key = (kind, name)
+                if key not in walked:
+                    snapshot.append((key, resource))
+        for key, resource in snapshot:
+            walked.add(key)
+            any_walked = True
+            for req in _required_resources(resource):
+                all_reqs.setdefault((req.kind, req.name), []).append(req)
+        return any_walked
 
     def _handle_miss(
         self,
@@ -242,37 +289,70 @@ def _usage_tuple(
 
 
 def _detect_cycles(resources: dict[str, dict[str, Any]]) -> None:
-    """Detect cycles across the requirement graph via DFS three-coloring.
+    """Detect cycles across the requirement graph via iterative DFS
+    three-coloring.
 
     Phase 1 has no producers that introduce cycles (secrets don't
     reference secrets); the check runs for completeness and is the
-    backbone of Phase 2's template-inheritance validation. Raises
-    ``ConfigError`` with the cycle path on the first cycle.
+    backbone of Phase 2's template-inheritance validation. Implemented
+    iteratively so deep inheritance chains in Phase 2 don't risk
+    CPython's default recursion limit.
+
+    Raises ``ConfigError`` with the cycle path on the first cycle.
     """
     WHITE, GRAY, BLACK = 0, 1, 2
     color: dict[tuple[str, str], int] = {}
-    stack: list[tuple[str, str]] = []
 
-    def visit(node: tuple[str, str]) -> None:
-        color[node] = GRAY
-        stack.append(node)
-        kind, name = node
-        resource = resources.get(kind, {}).get(name)
-        if resource is not None:
-            for req in _required_resources(resource):
-                target = (req.kind, req.name)
+    for start_kind, kind_dict in resources.items():
+        for start_name in kind_dict:
+            start_node = (start_kind, start_name)
+            if color.get(start_node, WHITE) != WHITE:
+                continue
+
+            # Iterative DFS via a work stack. Each frame is a tuple of
+            # (node, edge_iterator). When we descend, push the parent
+            # frame back with its iterator; when we exhaust the iterator,
+            # color the node BLACK and pop.
+            color[start_node] = GRAY
+            path: list[tuple[str, str]] = [start_node]
+            edge_stack: list[Any] = [
+                iter(_edges_from(resources, start_node))
+            ]
+            while edge_stack:
+                edges = edge_stack[-1]
+                try:
+                    target = next(edges)
+                except StopIteration:
+                    color[path[-1]] = BLACK
+                    path.pop()
+                    edge_stack.pop()
+                    continue
                 target_color = color.get(target, WHITE)
                 if target_color == GRAY:
-                    cycle = stack[stack.index(target):] + [target]
-                    path = " -> ".join(f"{k}:{n}" for k, n in cycle)
-                    raise ConfigError(f"resource reference cycle detected: {path}")
-                if target_color == WHITE:
-                    visit(target)
-        stack.pop()
-        color[node] = BLACK
+                    cycle = path[path.index(target):] + [target]
+                    cycle_path = " -> ".join(f"{k}:{n}" for k, n in cycle)
+                    raise ConfigError(
+                        f"resource reference cycle detected: {cycle_path}"
+                    )
+                if target_color == BLACK:
+                    continue
+                color[target] = GRAY
+                path.append(target)
+                edge_stack.append(iter(_edges_from(resources, target)))
 
-    for kind, kind_dict in resources.items():
-        for name in kind_dict:
-            node = (kind, name)
-            if color.get(node, WHITE) == WHITE:
-                visit(node)
+
+def _edges_from(
+    resources: dict[str, dict[str, Any]],
+    node: tuple[str, str],
+) -> Iterator[tuple[str, str]]:
+    """Yield outgoing edges from ``node`` (``(kind, name)`` -> target
+    ``(kind, name)``) via the Resource's ``required_resources()``.
+    Empty iterator if the node isn't in the Registry (defensive; the
+    finalize worklist ensures every reachable node has a Resource).
+    """
+    kind, name = node
+    resource = resources.get(kind, {}).get(name)
+    if resource is None:
+        return
+    for req in _required_resources(resource):
+        yield (req.kind, req.name)

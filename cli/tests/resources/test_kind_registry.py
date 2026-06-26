@@ -49,6 +49,12 @@ def test_named_console_template_kind_attributes() -> None:
 
 
 def test_secret_kind_synthesize_builds_auto_declared_decl() -> None:
+    """``synthesize`` attaches Origin but NOT usage. Usage is centralized
+    in ``Registry.finalize``'s post-stabilization pass so synthesized
+    Resources that go on to publish requirements of their own can still
+    accrue incoming edges from those second-round requirements.
+    ``test_finalize_pass.py`` covers the end-to-end usage attachment.
+    """
     reqs = [
         _secret_req("api-key", ("vm_template", "default"), "the auth key"),
         _secret_req("api-key", ("admin_template", "default"), "the admin env var"),
@@ -60,11 +66,8 @@ def test_secret_kind_synthesize_builds_auto_declared_decl() -> None:
     assert decl.origin is not None
     assert decl.origin.variant == "auto-declared"
     assert decl.origin.source == ("vm_template", "default")  # first-matching
-    assert len(decl.usage) == 2
-    assert decl.usage[0].source == ("vm_template", "default")
-    assert decl.usage[0].text == "the auth key"
-    assert decl.usage[1].source == ("admin_template", "default")
-    assert decl.usage[1].text == "the admin env var"
+    # Usage attached at finalize, not at synthesize.
+    assert decl.usage == ()
 
 
 def test_admin_template_kind_synthesize_builds_empty_admin() -> None:

@@ -15,7 +15,6 @@ from typing import TYPE_CHECKING, Literal
 from agentworks.config import NamedConsoleConfig
 from agentworks.resources.kind import KIND_REGISTRY
 from agentworks.resources.origin import Origin
-from agentworks.resources.requirement import UsageEntry
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -36,13 +35,11 @@ class _NamedConsoleTemplateKind:
         requirements: Sequence[ResourceRequirement],
     ) -> NamedConsoleConfig:
         """Build an empty-defaults ``NamedConsoleConfig`` for an
-        auto-declared ``named_console_template:default``.
+        auto-declared ``named_console_template:default``. ``usage`` is
+        attached centrally by ``Registry.finalize``.
         """
         first = requirements[0]
-        return NamedConsoleConfig(
-            origin=Origin.auto_declared(source=first.source),
-            usage=tuple(UsageEntry(source=r.source, text=r.usage) for r in requirements),
-        )
+        return NamedConsoleConfig(origin=Origin.auto_declared(source=first.source))
 
 
 KIND_REGISTRY["named_console_template"] = _NamedConsoleTemplateKind()

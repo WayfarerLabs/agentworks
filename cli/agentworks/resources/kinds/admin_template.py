@@ -24,7 +24,6 @@ from typing import TYPE_CHECKING, Literal
 from agentworks.config import AdminConfig
 from agentworks.resources.kind import KIND_REGISTRY
 from agentworks.resources.origin import Origin
-from agentworks.resources.requirement import UsageEntry
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -44,13 +43,11 @@ class _AdminTemplateKind:
         """Build an empty-defaults ``AdminConfig`` for an auto-declared
         ``admin_template:default``. In practice ``Config.publish_to``
         always publishes a real one before ``finalize`` runs, so this is
-        a safety net the Registry should rarely take.
+        a safety net the Registry should rarely take. ``usage`` is
+        attached centrally by ``Registry.finalize``.
         """
         first = requirements[0]
-        return AdminConfig(
-            origin=Origin.auto_declared(source=first.source),
-            usage=tuple(UsageEntry(source=r.source, text=r.usage) for r in requirements),
-        )
+        return AdminConfig(origin=Origin.auto_declared(source=first.source))
 
 
 KIND_REGISTRY["admin_template"] = _AdminTemplateKind()

@@ -20,14 +20,19 @@ from agentworks.resources.requirement import ResourceRequirement
 
 @dataclass(frozen=True)
 class _NodeWithReq:
-    """Test-only Resource: publishes one requirement pointing at another node."""
+    """Test-only Resource: publishes zero or one outgoing requirements.
+    ``target_name=None`` produces a leaf (no outgoing edges) for the
+    auto-declare synthesize stub.
+    """
 
-    target_name: str
     self_name: str
+    target_name: str | None = None
     origin: Origin | None = None
     usage: tuple = ()
 
     def required_resources(self) -> tuple[ResourceRequirement, ...]:
+        if self.target_name is None:
+            return ()
         return (
             ResourceRequirement(
                 name=self.target_name,
@@ -43,51 +48,45 @@ def _opdecl() -> Origin:
 
 
 def _add_node(r: Registry, name: str, target: str) -> None:
-    r.add("node", name, _NodeWithReq(target_name=target, self_name=name), _opdecl())
+    r.add("node", name, _NodeWithReq(self_name=name, target_name=target), _opdecl())
 
 
-def test_two_node_cycle_detected() -> None:
-    r = Registry.empty()
-    # Register a custom kind so finalize doesn't error on unknown "node" kind.
+@pytest.fixture()
+def node_kind_registered(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Register the ``_StubKind`` in ``KIND_REGISTRY`` for the duration of
+    a test. ``monkeypatch.setitem`` restores the prior state automatically,
+    which is safer than try/finally if test execution is ever parallelized.
+    """
     from agentworks.resources.kind import KIND_REGISTRY
-    KIND_REGISTRY["node"] = _StubKind()
-    try:
-        _add_node(r, "a", "b")
-        _add_node(r, "b", "a")
-        with pytest.raises(ConfigError, match="cycle"):
-            r.finalize()
-    finally:
-        del KIND_REGISTRY["node"]
+    monkeypatch.setitem(KIND_REGISTRY, "node", _StubKind())
 
 
-def test_three_node_cycle_detected() -> None:
+def test_two_node_cycle_detected(node_kind_registered: None) -> None:
     r = Registry.empty()
-    from agentworks.resources.kind import KIND_REGISTRY
-    KIND_REGISTRY["node"] = _StubKind()
-    try:
-        _add_node(r, "a", "b")
-        _add_node(r, "b", "c")
-        _add_node(r, "c", "a")
-        with pytest.raises(ConfigError, match="cycle"):
-            r.finalize()
-    finally:
-        del KIND_REGISTRY["node"]
-
-
-def test_acyclic_chain_does_not_error() -> None:
-    r = Registry.empty()
-    from agentworks.resources.kind import KIND_REGISTRY
-    KIND_REGISTRY["node"] = _StubKind()
-    try:
-        # a -> b -> c, no cycle (c has no outgoing edge in this test)
-        _add_node(r, "a", "b")
-        _add_node(r, "b", "c")
-        # c gets auto-declared by the miss policy
+    _add_node(r, "a", "b")
+    _add_node(r, "b", "a")
+    with pytest.raises(ConfigError, match="cycle"):
         r.finalize()
-        # c is present in the registry post-finalize via auto-declare
-        assert r.lookup("node", "c") is not None
-    finally:
-        del KIND_REGISTRY["node"]
+
+
+def test_three_node_cycle_detected(node_kind_registered: None) -> None:
+    r = Registry.empty()
+    _add_node(r, "a", "b")
+    _add_node(r, "b", "c")
+    _add_node(r, "c", "a")
+    with pytest.raises(ConfigError, match="cycle"):
+        r.finalize()
+
+
+def test_acyclic_chain_does_not_error(node_kind_registered: None) -> None:
+    r = Registry.empty()
+    # a -> b -> c, no cycle (c gets auto-declared as a leaf)
+    _add_node(r, "a", "b")
+    _add_node(r, "b", "c")
+    r.finalize()
+    # c is present post-finalize via auto-declare; its synthesize stub
+    # produces a leaf (target_name=None), so the chain terminates.
+    assert r.lookup("node", "c") is not None
 
 
 @dataclass(frozen=True)
@@ -103,8 +102,7 @@ class _StubKind:
     def synthesize(self, requirements):
         first = requirements[0]
         return _NodeWithReq(
-            target_name="__leaf__",
             self_name=first.name,
+            target_name=None,  # leaf: no outgoing edges
             origin=Origin.auto_declared(source=first.source),
-            usage=tuple(),
         )
