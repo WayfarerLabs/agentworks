@@ -78,25 +78,25 @@ The Registry exposes a **publish / finalize** API: starts empty, accepts Resourc
 composition already lives at the Config layer per Phase 0; the Registry operates on already-composed
 Resources. No producers of `SecretRequirement` wired yet beyond what tests synthesize.
 
-- [ ] `cli/agentworks/resources/__init__.py`: public surface re-exports (`ResourceRequirement`,
+- [x] `cli/agentworks/resources/__init__.py`: public surface re-exports (`ResourceRequirement`,
       `SecretRequirement`, `ResourceKind`, `Origin`, `UsageEntry`, `Registry`,
       `collect_secrets_for`). The lower-level `Registry.empty()` + `add` + `finalize` triad is
       exposed for tests and multi-source orchestration; the convenience `build_registry(config)`
       lives in `agentworks/bootstrap.py` (next bullet) so the Registry stays publisher-agnostic.
-- [ ] `cli/agentworks/bootstrap.py` (new): `build_registry(config: Config) -> Registry` free
+- [x] `cli/agentworks/bootstrap.py` (new): `build_registry(config: Config) -> Registry` free
       function that imports `Registry`, the catalog publisher (Phase 2b -- stubbed to no-op in Phase
       1a), and any future standard publishers, and orchestrates them in order. The module is the
       application-level glue that holds the "standard set of publishers" knowledge; this knowledge
       isn't Config's (Config shouldn't know about catalog) and isn't Registry's (Registry shouldn't
       know about its publishers). Call sites use this for the common case; tests can either use this
       helper or assemble Registry by hand with `Registry.empty()` + explicit `publish_to` calls.
-- [ ] `cli/agentworks/resources/requirement.py`:
+- [x] `cli/agentworks/resources/requirement.py`:
   - `ResourceRequirement` immutable dataclass (base): `name`, `kind`, `usage`, `source`.
   - `SecretRequirement(ResourceRequirement)` concrete subclass (no extra fields in Phase 1; the
     subclass exists so producers and the framework agree on the target kind without
     string-dispatch).
   - `UsageEntry(source, text)` immutable dataclass for per-resource usage list entries.
-- [ ] `cli/agentworks/resources/origin.py`:
+- [x] `cli/agentworks/resources/origin.py`:
   - `Origin` dataclass with
     `variant: Literal["operator-declared", "code-declared", "auto-declared"]` and variant-specific
     fields: `file: Path` + `line: int` for operator-declared; `source: str` (code-source identifier)
@@ -104,7 +104,7 @@ Resources. No producers of `SecretRequirement` wired yet beyond what tests synth
     Factory classmethods: `Origin.operator_declared(file, line)`, `Origin.code_declared(source)`,
     `Origin.auto_declared(source)`. Set once at publish; never mutated. The `code-declared` variant
     supports Phase 2b's catalog publisher and any future code publishers (plugins, etc.).
-- [ ] `cli/agentworks/resources/kind.py`:
+- [x] `cli/agentworks/resources/kind.py`:
   - `ResourceKind` Protocol: `kind`, `miss_policy`, `auto_declare_names`,
     `synthesize(requirements) -> Resource`.
   - `KIND_REGISTRY: dict[str, ResourceKind]`. Each `kinds/*.py` module self-registers into the dict
@@ -113,23 +113,23 @@ Resources. No producers of `SecretRequirement` wired yet beyond what tests synth
     `from agentworks.resources import ...`) populates the registry. Phase 2 kinds slot in by adding
     new files under `kinds/` and importing them from `kinds/__init__.py`; no central manifest to
     edit.
-- [ ] `cli/agentworks/resources/kinds/__init__.py` + `kinds/secret.py`:
+- [x] `cli/agentworks/resources/kinds/__init__.py` + `kinds/secret.py`:
   - `SecretKind(ResourceKind)`: `kind="secret"`, `miss_policy="auto-declare"`,
     `auto_declare_names=None` (any name). `synthesize` builds a `SecretDecl` with framework-set
     `usage` list (paired `UsageEntry`s) and `origin=auto-declared`.
-- [ ] `cli/agentworks/resources/kinds/admin_template.py`:
+- [x] `cli/agentworks/resources/kinds/admin_template.py`:
   - `AdminTemplateKind(ResourceKind)`: `kind="admin_template"`, `miss_policy="auto-declare"`,
     `auto_declare_names={"default"}`. `synthesize` builds an empty-defaults `AdminConfig` with
     `origin=auto-declared`. In practice Config always publishes `admin_template:default` (even when
     no `[admin.*]` sections exist), so the miss-policy path is a safety net; pinning auto-declare
     - reserved-name `default` keeps the framework-dispatch shape uniform with the other template
       kinds and prevents typo'd names like `admin_template:custom`.
-- [ ] `cli/agentworks/resources/kinds/named_console_template.py`:
+- [x] `cli/agentworks/resources/kinds/named_console_template.py`:
   - `NamedConsoleTemplateKind(ResourceKind)`: `kind="named_console_template"`,
     `miss_policy="auto-declare"`, `auto_declare_names={"default"}`. `synthesize` builds an
     empty-defaults `NamedConsoleConfig` with `origin=auto-declared`. Same safety-net reasoning as
     `AdminTemplateKind`; Config always publishes `named_console_template:default`.
-- [ ] `cli/agentworks/resources/registry.py`:
+- [x] `cli/agentworks/resources/registry.py`:
   - `Registry` class: per-kind dicts of Resources (`secrets`, `vm_templates`, `agent_templates`,
     ...). Mutable during the publish phase; frozen after `finalize()`. Lookup helpers
     (`lookup(kind, name)`, `iter_kind(kind)`) available once finalized.
@@ -151,7 +151,7 @@ Resources. No producers of `SecretRequirement` wired yet beyond what tests synth
     `agentworks/bootstrap.py`'s `build_registry(config)` -- see the earlier bullet. The Registry
     class itself does not expose a `from_config` classmethod; doing so would make Registry import
     Config (the wrong direction; Registry should be publisher-agnostic).
-- [ ] **Add `origin: Origin | None` and `usage: list[UsageEntry]` fields to every Resource type**:
+- [x] **Add `origin: Origin | None` and `usage: list[UsageEntry]` fields to every Resource type**:
       `SecretDecl` in `agentworks/secrets/base.py`; `VMTemplate`, `WorkspaceTemplate`,
       `AgentTemplate`, `SessionTemplate`, `AdminConfig`, `NamedConsoleConfig`, `SecretConfig`,
       `SecretBackendConfig`, `GitCredentialConfig` in `agentworks/config.py`. Both default to `None`
@@ -161,7 +161,7 @@ Resources. No producers of `SecretRequirement` wired yet beyond what tests synth
       Registry-layer `origin: Origin` is the framework's representation. Both exist on the same
       Resource instance after publish. Resource types gain `with_origin` / `with_usage` copy methods
       (or `@dataclass(frozen=True)` + `dataclasses.replace` shapes; LLD picks).
-- [ ] `cli/agentworks/config.py`: add `Config.publish_to(self, registry: Registry) -> None`.
+- [x] `cli/agentworks/config.py`: add `Config.publish_to(self, registry: Registry) -> None`.
       Iterates Config's per-kind dicts. For each Resource, builds
       `origin = Origin.operator_declared(file=resource.declared_at.file, line=resource.declared_at.line)`
       and calls `registry.add(kind, name, resource, origin)`. **Singleton publishing**: also
@@ -174,9 +174,9 @@ Resources. No producers of `SecretRequirement` wired yet beyond what tests synth
       Imports `Registry` and `Origin` from `agentworks.resources` -- the explicit layer handoff.
       Config's data structures (parsed Resources, `SourceLocation`, etc.) remain framework-ignorant;
       only this publish handoff crosses the boundary.
-- [ ] `cli/agentworks/errors.py`: confirm `ConfigError` carries `entity_kind`, `entity_name`,
+- [x] `cli/agentworks/errors.py`: confirm `ConfigError` carries `entity_kind`, `entity_name`,
       `source` (a `(kind, name)` pair) fields if not already; existing shape is preserved.
-- [ ] **Tests**:
+- [x] **Tests**:
   - `cli/tests/resources/test_requirement.py`: dataclass invariants, base-vs-subclass shape.
   - `cli/tests/resources/test_origin.py`: variant invariants and immutability across all three
     variants (`operator-declared`, `code-declared`, `auto-declared`); the `code-declared` factory is
