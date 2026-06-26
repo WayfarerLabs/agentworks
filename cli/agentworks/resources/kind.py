@@ -40,9 +40,12 @@ class ResourceKind(Protocol):
       error.
     - ``synthesize(requirements)``: called when an auto-declare-allowed
       missing name is being synthesized. Receives all matching requirements
-      in config-load walk order. Returns the synthesized Resource instance
-      with framework metadata (``origin = Origin.auto_declared(...)``,
-      ``usage`` built from the requirements) already attached.
+      known so far (in config-load walk order). Returns the synthesized
+      Resource with ``origin = Origin.auto_declared(...)`` attached.
+      ``usage`` is NOT attached here -- ``Registry.finalize`` centralizes
+      usage attachment in a post-stabilization pass so synthesized
+      Resources can accrue later-discovered incoming edges from
+      second-level dispatches uniformly with operator-declared ones.
 
     The return type of ``synthesize`` is ``Any`` because Resources are
     diverse types from different modules (``SecretDecl`` from
