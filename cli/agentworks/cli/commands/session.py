@@ -224,6 +224,7 @@ def session_stop(
     all_sessions: Annotated[bool, typer.Option("--all", help="Stop all running sessions")] = False,
     vm: Annotated[str | None, typer.Option("--vm", help="Filter by VM (with --all)")] = None,
     workspace: Annotated[str | None, typer.Option("--workspace", help="Filter by workspace (with --all)")] = None,
+    agent: Annotated[str | None, typer.Option("--agent", help="Filter by agent (with --all)")] = None,
     force: Annotated[bool, typer.Option("--force", help="Force-stop broken sessions via PID kill")] = False,
 ) -> None:
     """Stop a running session, or all running sessions with --all."""
@@ -232,10 +233,17 @@ def session_stop(
 
     if name and all_sessions:
         raise typer.BadParameter("provide a session name or --all, not both")
-    if (vm or workspace) and not all_sessions:
-        raise typer.BadParameter("--vm and --workspace require --all")
+    if (vm or workspace or agent) and not all_sessions:
+        raise typer.BadParameter("--vm, --workspace, and --agent require --all")
     if all_sessions:
-        stop_all_sessions(get_db(), load_config(), vm_name=vm, workspace_name=workspace, force=force)
+        stop_all_sessions(
+            get_db(),
+            load_config(),
+            vm_name=vm,
+            workspace_name=workspace,
+            agent_name=agent,
+            force=force,
+        )
     elif name:
         stop_session(get_db(), load_config(), name=name, force=force)
     else:
@@ -249,6 +257,10 @@ def session_restart(
     all_sessions: Annotated[bool, typer.Option("--all", help="Restart all sessions (prompts for running)")] = False,
     vm: Annotated[str | None, typer.Option("--vm", help="Filter by VM (with --all/--all-stopped)")] = None,
     workspace: Annotated[str | None, typer.Option("--workspace", help="Filter by workspace")] = None,
+    agent: Annotated[
+        str | None,
+        typer.Option("--agent", help="Filter by agent (with --all/--all-stopped)"),
+    ] = None,
     force: Annotated[bool, typer.Option("--force", help="Force-kill broken sessions via PID")] = False,
     yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip confirmation prompts")] = False,
 ) -> None:
@@ -260,8 +272,8 @@ def session_restart(
         raise typer.BadParameter("provide a session name or a batch flag (--all/--all-stopped), not both")
     if all_stopped and all_sessions:
         raise typer.BadParameter("use --all or --all-stopped, not both")
-    if (vm or workspace) and not (all_stopped or all_sessions):
-        raise typer.BadParameter("--vm and --workspace require --all or --all-stopped")
+    if (vm or workspace or agent) and not (all_stopped or all_sessions):
+        raise typer.BadParameter("--vm, --workspace, and --agent require --all or --all-stopped")
     if all_stopped or all_sessions:
         db = get_db()
         config = load_config()
@@ -276,7 +288,9 @@ def session_restart(
                 filter_sessions,
             )
 
-            sessions = filter_sessions(db, workspace_name=workspace, vm_name=vm)
+            sessions = filter_sessions(
+                db, workspace_name=workspace, vm_name=vm, agent_name=agent,
+            )
             sessions = ensure_pids_batch(sessions, db=db, config=config)
             from agentworks.db import SessionStatus
 
@@ -295,7 +309,13 @@ def session_restart(
                     raise UserAbort("restart cancelled")
 
         restart_all_sessions(
-            db, config, vm_name=vm, workspace_name=workspace, include_running=include_running, force=force,
+            db,
+            config,
+            vm_name=vm,
+            workspace_name=workspace,
+            agent_name=agent,
+            include_running=include_running,
+            force=force,
         )
     elif name:
         restart_session(get_db(), load_config(), name=name, force=force, yes=yes)

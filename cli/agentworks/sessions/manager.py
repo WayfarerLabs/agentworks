@@ -1541,10 +1541,16 @@ def stop_all_sessions(
     *,
     vm_name: str | None = None,
     workspace_name: str | None = None,
+    agent_name: str | None = None,
     force: bool = False,
 ) -> None:
-    """Stop all running sessions, optionally filtered by VM or workspace."""
-    sessions = filter_sessions(db, workspace_name=workspace_name, vm_name=vm_name)
+    """Stop all running sessions, optionally filtered by VM, workspace, or agent."""
+    sessions = filter_sessions(
+        db,
+        workspace_name=workspace_name,
+        vm_name=vm_name,
+        agent_name=agent_name,
+    )
 
     # Resolve distinct VMs from the filtered session set and enter the
     # keepalive BEFORE the SSH probes. The probes (ensure_pids_batch,
@@ -1617,16 +1623,22 @@ def restart_all_sessions(
     *,
     vm_name: str | None = None,
     workspace_name: str | None = None,
+    agent_name: str | None = None,
     include_running: bool = False,
     force: bool = False,
 ) -> None:
-    """Restart sessions, optionally filtered by VM or workspace.
+    """Restart sessions, optionally filtered by VM, workspace, or agent.
 
     With include_running=False (--all-stopped), only stopped sessions are
     restarted. With include_running=True (--all), all sessions are targeted;
     if any are running, the caller should have prompted or passed yes=True.
     """
-    sessions = filter_sessions(db, workspace_name=workspace_name, vm_name=vm_name)
+    sessions = filter_sessions(
+        db,
+        workspace_name=workspace_name,
+        vm_name=vm_name,
+        agent_name=agent_name,
+    )
 
     # Resolve distinct VMs from the filtered set and anchor them BEFORE the
     # SSH probes. Each restart_session call also enters its own keepalive;
