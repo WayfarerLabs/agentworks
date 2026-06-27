@@ -100,12 +100,8 @@ _agentworks_agent_templates() {
 }""",
     "secrets": """\
 _agentworks_secrets() {
-    local -a secrets config_file
-    config_file="${HOME}/.config/agentworks/config.toml"
-    secrets=()
-    if [[ -f "$config_file" ]]; then
-        secrets+=(${(f)"$(sed -n 's/^\\[secrets\\.\\([^]]*\\)\\]/\\1/p' "$config_file" 2>/dev/null)"})
-    fi
+    local -a secrets
+    secrets=(${(f)"$(agw secret list --names-only 2>/dev/null)"})
     _describe 'secret' secrets
 }""",
 }

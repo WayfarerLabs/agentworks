@@ -188,6 +188,46 @@ def test_column_order_matches_backend_chain_precedence(tmp_path: Path) -> None:
     assert table.backend_kinds == ("prompt", "env-var")
 
 
+def test_names_only_lists_every_registry_secret(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """``agw secret list --names-only`` is the source for shell
+    completion; it must include auto-declared names like
+    ``tailscale-auth-key`` so completion matches what ``agw secret
+    describe`` accepts. Names print one per line in the same order as
+    the table's rows."""
+    from typer.testing import CliRunner
+
+    from agentworks.cli import app
+
+    cfg_file = tmp_path / "config.toml"
+    _write_base(
+        cfg_file,
+        extras="""
+        [admin.env]
+        TOKEN = { secret = "z-token" }
+        OTHER = { secret = "a-token" }
+
+        [secrets.z-token]
+        description = "Z"
+
+        [secrets.a-token]
+        description = "A"
+        """,
+    )
+    monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg_file)
+
+    result = CliRunner().invoke(app, ["secret", "list", "--names-only"])
+    assert result.exit_code == 0, result.stdout
+    names = [line for line in result.stdout.splitlines() if line]
+    # Operator-declared names appear alphabetized; the framework-
+    # auto-declared ``tailscale-auth-key`` (VMTemplate requirement) is
+    # present too -- the prior completer was sed-over-TOML and missed it.
+    assert "a-token" in names
+    assert "z-token" in names
+    assert "tailscale-auth-key" in names
+
+
 def test_empty_backend_chain_yields_no_columns(tmp_path: Path) -> None:
     """``backends = []`` opts out of all resolution; the table has no
     backend columns. Operator-declared secrets in this state would

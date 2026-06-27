@@ -15,7 +15,14 @@ app.add_typer(secret_app)
 
 
 @secret_app.command("list")
-def secret_list() -> None:
+def secret_list(
+    names_only: bool = typer.Option(
+        False,
+        "--names-only",
+        help="Emit one secret name per line (no header, no formatting). "
+        "Used by shell completion; the order matches the table's row order.",
+    ),
+) -> None:
     """Show declared secrets and how each active backend would look them up.
 
     Rows are declared secrets; columns are the active backends in
@@ -24,13 +31,19 @@ def secret_list() -> None:
     ``disabled`` / ``enabled`` for backends with no static identifier or
     an explicit opt-out. Values are never resolved.
     """
+    from agentworks import output
     from agentworks.bootstrap import build_registry
     from agentworks.config import load_config
     from agentworks.secrets.inspect import build_secret_table, render_secret_table
 
     config = load_config()
     registry = build_registry(config)
-    render_secret_table(build_secret_table(config, registry))
+    table = build_secret_table(config, registry)
+    if names_only:
+        for row in table.rows:
+            output.info(row.name)
+        return
+    render_secret_table(table)
 
 
 @secret_app.command("describe")

@@ -82,11 +82,8 @@ DYNAMIC_SNIPPETS: dict[str, str] = {
         ' $t | Where-Object { $_ -like "$wordToComplete*" } }'
     ),
     "secrets": (
-        "& { $f = Join-Path $env:USERPROFILE '.config/agentworks/config.toml';"
-        " $s = @(); if (Test-Path $f) {"
-        " $s = Get-Content $f | Select-String '^\\[secrets\\.([^\\]]+)\\]'"
-        " | ForEach-Object { $_.Matches[0].Groups[1].Value } }"
-        ' $s | Where-Object { $_ -like "$wordToComplete*" } }'
+        "(agw secret list --names-only 2>$null |"
+        ' Where-Object { $_ -like "$wordToComplete*" })'
     ),
 }
 
