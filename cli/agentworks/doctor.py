@@ -304,19 +304,19 @@ def _check_git_credentials(config: Config) -> HealthGroup:
         g.warn("Git credentials", f"could not resolve providers: {e}")
         return g
 
-    from agentworks.env_compat import read_env_with_legacy
-    from agentworks.git_credentials.base import env_var_for_credential, legacy_env_var_for_credential
-
-    for name, provider in providers.items():
+    # Phase 1d: tokens flow through the framework's resolver chain
+    # (env-var backend + prompt fallback by default; operator-typed
+    # backends layered in via [secret_config].backends). Doctor stays
+    # at the connectivity / authn-precondition layer; per-credential
+    # token diagnostic detail lives in `agw secret describe
+    # git-token-<name>` (Phase 1e).
+    for provider in providers.values():
         label = provider.display_name
         try:
             if not provider.verify_auth():
                 g.warn(label, f"auth check failed ({provider.auth_hint()})")
                 continue
-            if read_env_with_legacy(env_var_for_credential(name), legacy_env_var_for_credential(name)):
-                g.ok(label, "ready (token set via environment)")
-            else:
-                g.ok(label, "ready (will prompt for token during VM init)")
+            g.ok(label, "ready (token resolved via the secret framework at VM-init time)")
         except Exception as e:
             g.warn(label, f"auth check error: {e}")
 

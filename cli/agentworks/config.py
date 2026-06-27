@@ -173,6 +173,32 @@ def _env_requirements(
     return out
 
 
+def _git_credential_requirements(
+    git_credentials: list[str] | None,
+    source: tuple[str, str],
+) -> list[ResourceRequirement]:
+    """Emit a ``ResourceRequirement`` of kind ``"git_credentials"`` per
+    name in ``git_credentials``. Used by ``AdminConfig.required_resources``
+    and ``AgentTemplate.required_resources`` to feed the
+    ``GitCredentialKind``'s error miss policy: a typo'd or undeclared
+    name errors at finalize with the requirement source pointing at the
+    declaring Resource.
+    """
+    from agentworks.resources.requirement import ResourceRequirement
+
+    if not git_credentials:
+        return []
+    return [
+        ResourceRequirement(
+            name=cred_name,
+            kind="git_credentials",
+            usage="the git credential",
+            source=source,
+        )
+        for cred_name in git_credentials
+    ]
+
+
 def _tailscale_secret_requirement(
     tailscale_auth_key: str,
     template_name: str,
@@ -287,7 +313,12 @@ class AdminConfig:
     usage: tuple[UsageEntry, ...] = ()
 
     def required_resources(self) -> list[ResourceRequirement]:
-        return list(_env_requirements(self.env, ("admin_template", "default")))
+        source = ("admin_template", "default")
+        reqs: list[ResourceRequirement] = list(
+            _env_requirements(self.env, source)
+        )
+        reqs.extend(_git_credential_requirements(self.git_credentials, source))
+        return reqs
 
 
 @dataclass(frozen=True)
@@ -316,7 +347,12 @@ class AgentTemplate:
     usage: tuple[UsageEntry, ...] = ()
 
     def required_resources(self) -> list[ResourceRequirement]:
-        return list(_env_requirements(self.env, ("agent_template", self.name)))
+        source = ("agent_template", self.name)
+        reqs: list[ResourceRequirement] = list(
+            _env_requirements(self.env, source)
+        )
+        reqs.extend(_git_credential_requirements(self.git_credentials, source))
+        return reqs
 
 
 @dataclass(frozen=True)
@@ -340,9 +376,37 @@ class GitCredentialConfig:
     type: str
     org: str | None = None
     description: str | None = None
+    # Secret name for the auth token. Default ``"git-token-<name>"`` is
+    # computed in ``__post_init__`` (the per-credential default depends
+    # on the credential's own name, which a class-level literal can't
+    # express). Operators may override with a custom secret name; the
+    # framework's ``"secret"`` kind then resolves the value. Bare-string
+    # only per Phase 1c's pattern; no ``{ secret = "..." }``
+    # polymorphism.
+    token: str = ""
     declared_at: SourceLocation = field(default_factory=synthesized)
     origin: Origin | None = None
     usage: tuple[UsageEntry, ...] = ()
+
+    def __post_init__(self) -> None:
+        # Frozen dataclasses can still ``object.__setattr__`` during
+        # construction. The default ``""`` sentinel triggers the
+        # name-interpolated default; an operator-typed string survives
+        # unchanged.
+        if not self.token:
+            object.__setattr__(self, "token", f"git-token-{self.name}")
+
+    def required_resources(self) -> list[ResourceRequirement]:
+        from agentworks.resources.requirement import SecretRequirement
+
+        return [
+            SecretRequirement(
+                name=self.token,
+                kind="secret",
+                usage="the auth token",
+                source=("git_credentials", self.name),
+            )
+        ]
 
 
 @dataclass(frozen=True)
@@ -1096,11 +1160,33 @@ def _load_git_credentials(
             )
         if cred_type == "azdo" and "org" not in cdata:
             raise ConfigError(f"git_credentials.{name}.org is required for azdo type")
+
+        # ``token`` is a bare secret name; same rules as
+        # ``tailscale_auth_key``. Omission triggers GitCredentialConfig's
+        # ``__post_init__`` default (``git-token-<name>``). Empty-string
+        # is rejected so an operator who types ``token = ""`` doesn't
+        # silently get a default-named secret behind their back.
+        token_raw: str = ""
+        if "token" in cdata:
+            if not isinstance(cdata["token"], str):
+                raise ConfigError(
+                    f"git_credentials.{name}.token must be a bare secret "
+                    f"name (string), got {type(cdata['token']).__name__}"
+                )
+            if not cdata["token"]:
+                raise ConfigError(
+                    f"git_credentials.{name}.token must not be empty; "
+                    f"omit the key to inherit the default secret name "
+                    f"\"git-token-{name}\""
+                )
+            token_raw = cdata["token"]
+
         creds[name] = GitCredentialConfig(
             name=name,
             type=cred_type,
             org=str(cdata["org"]) if "org" in cdata else None,
             description=str(cdata["description"]) if "description" in cdata else None,
+            token=token_raw,
             declared_at=decls.lookup("git_credentials", name),
         )
     return creds

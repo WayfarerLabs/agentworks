@@ -898,16 +898,23 @@ def _remove_from_workspace_group(
 
 
 def _collect_agent_credentials(config: Config) -> dict[str, str]:
-    """Collect git credentials up front before any SSH work begins."""
-    agent_cfg = config.agent
-    git_tokens: dict[str, str] = {}
-    if agent_cfg.git_credentials:
-        from agentworks.vms.initializer import resolve_git_credential_providers
+    """Collect git credentials up front before any SSH work begins.
 
-        providers = resolve_git_credential_providers(config, agent_cfg.git_credentials)
-        for cred_name, provider in providers.items():
-            git_tokens[cred_name] = provider.obtain_token("agent")
-    return git_tokens
+    Phase 1d of the Resource Registry SDD: tokens flow through the
+    framework (``_collect_git_tokens`` walks each credential's
+    ``token`` field, resolves through the backend chain, returns the
+    ``{credential_name: value}`` map). The legacy provider-side
+    resolution path is gone.
+    """
+    agent_cfg = config.agent
+    if not agent_cfg.git_credentials:
+        return {}
+
+    from agentworks.bootstrap import build_registry
+    from agentworks.vms.manager import _collect_git_tokens
+
+    registry = build_registry(config)
+    return _collect_git_tokens(config, registry, agent_cfg.git_credentials)
 
 
 def _create_agent_on_vm(

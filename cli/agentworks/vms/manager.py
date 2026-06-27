@@ -686,7 +686,14 @@ def add_git_credential(db: Database, config: Config, name: str, credential_name:
     providers = resolve_git_credential_providers(config, [credential_name])
     provider = providers[credential_name]
 
-    token = provider.obtain_token(name)
+    # Phase 1d: resolve the token via the framework (the resolver chain
+    # handles env-var lookup + prompt fallback uniformly across every
+    # site that needs a token).
+    from agentworks.bootstrap import build_registry
+
+    registry = build_registry(config)
+    tokens = _collect_git_tokens(config, registry, [credential_name])
+    token = tokens[credential_name]
     new_lines = provider.credential_lines(token)
 
     with keep_vm_active(db, config, vm):
@@ -1016,10 +1023,11 @@ def reinit_vm(
     providers = resolve_git_credential_providers(config, config.admin.git_credentials)
     verify_git_credential_auth(providers)
 
-    # Collect git tokens upfront
-    git_tokens: dict[str, str] = {}
-    for cred_name, provider in providers.items():
-        git_tokens[cred_name] = provider.obtain_token(name)
+    # Collect git tokens via the framework (Phase 1d).
+    from agentworks.bootstrap import build_registry
+
+    registry = build_registry(config)
+    git_tokens = _collect_git_tokens(config, registry, providers.keys())
 
     # Provisioning is hermetic: no operator-env secrets are prompted at
     # reinit. They get prompted at the use site (vm shell, session
@@ -1192,6 +1200,59 @@ def _mask_env_var_backend_for(
         os.environ.update(saved)
 
 
+def _collect_git_tokens(
+    config: Config,
+    registry: Registry,
+    credential_names: Iterable[str],
+) -> dict[str, str]:
+    """Resolve token values for the named git credentials via the
+    framework's backend chain.
+
+    Phase 1d of the Resource Registry SDD. Returns ``{credential_name:     token_value}``.
+    Each credential's ``token`` field (default ``"git-token-<name>"``;
+    operator-overridable per ``[git_credentials.<name>]``) names a
+    secret; the registry's finalize pass auto-declared each one via
+    ``GitCredentialConfig.required_resources``. The resolver chain
+    resolves them all in one batched call so the cache picks up every
+    token in one prompt (or one round-trip to a persistent store).
+
+    Missing-from-registry secrets get a synthesized ``SecretDecl``
+    matching the auto-declare shape -- same fallback as
+    ``_lookup_or_synthesize_secret`` -- so this helper works even on
+    edge cases where the operator's TOML left the registry sparse.
+
+    Raises ``ConfigError`` if any name in ``credential_names`` isn't
+    declared in ``[git_credentials.*]`` -- the framework's
+    ``GitCredentialKind`` should have errored at config-load, but this
+    guard catches direct-API call sites that bypass load.
+    """
+    names = list(credential_names)
+    if not names:
+        return {}
+
+    from agentworks.secrets import resolve_for_command
+
+    decls: list[SecretDecl] = []
+    token_name_for: dict[str, str] = {}
+    for cred_name in names:
+        cred = config.git_credentials.get(cred_name)
+        if cred is None:
+            raise ConfigError(
+                f"git credential {cred_name!r} not declared; "
+                f"declare it under [git_credentials.{cred_name}]",
+                entity_kind="git-credential",
+                entity_name=cred_name,
+            )
+        token_name_for[cred_name] = cred.token
+        decls.append(_lookup_or_synthesize_secret(registry, cred.token))
+
+    resolved = resolve_for_command([], config, extra_decls=decls)
+    return {
+        cred_name: resolved[token_name]
+        for cred_name, token_name in token_name_for.items()
+    }
+
+
 def _lookup_or_synthesize_secret(registry: Registry, name: str) -> SecretDecl:
     """Return the ``SecretDecl`` for ``name`` from the framework
     Registry, or synthesize a bare one matching the auto-declare shape
@@ -1226,32 +1287,27 @@ def _collect_secrets(
 ) -> tuple[str, dict[str, str]]:
     """Collect all secrets upfront before provisioning starts.
 
-    Phase 1c of the Resource Registry SDD: the Tailscale auth key now
-    flows through the framework. ``build_registry`` finalizes the
-    Resource Registry (auto-declaring the auth-key secret when its
-    requirement emission lands during the finalize pass);
-    ``resolve_for_command`` resolves the secret through the backend
-    chain (or prompts) and caches the value on the resolver.
+    Phase 1c (Tailscale) + Phase 1d (git credentials) of the Resource
+    Registry SDD: both flow through the framework now. ``build_registry``
+    finalizes the Resource Registry (auto-declaring the auth-key secret
+    and each git-credential's token secret via their
+    ``required_resources`` emissions); ``resolve_for_command`` batches
+    them all in one call through the backend chain (or prompts).
     Provisioning stays hermetic per FRD R4: ``[admin.env]`` /
     ``[vm_templates.*.env]`` secrets are NOT eager-resolved here --
     they're resolved at the shell-opening site at runtime, by the
     existing ``SecretTarget`` path.
 
-    The Tailscale SecretDecl lookup uses the resolved VM template's
-    ``required_resources()`` directly rather than the registry-walk
-    ``collect_secrets_for`` helper. This matters when the operator
-    omits ``[vm_templates.default]`` entirely: the raw default template
-    isn't published to the registry, so a registry-rooted walk from
-    ``("vm_template", "default")`` would error. The resolved template
-    always exists (built-in defaults apply); walking its requirements
-    directly is the right shape and aligns with the lenient-render
-    pattern. Phase 2a's ``VMTemplateKind`` will move the auto-decl
-    plumbing into the registry so the registry-walk path becomes
-    uniformly available.
-
-    Git credentials still use the legacy ``provider.obtain_token``
-    pathway; Phase 1d migrates them to the framework alongside this
-    pattern.
+    The Tailscale SecretDecl lookup uses ``_lookup_or_synthesize_secret``
+    rather than ``collect_secrets_for`` (registry walk). This matters
+    when the operator omits ``[vm_templates.default]`` entirely: the
+    raw default template isn't published to the registry, so a
+    registry-rooted walk from ``("vm_template", "default")`` would
+    error. The resolved template always exists (built-in defaults
+    apply); a direct secret lookup with fallback is the right shape.
+    Phase 2a's ``VMTemplateKind`` will move the auto-decl plumbing
+    into the registry so the registry-walk path becomes uniformly
+    available.
 
     Returns ``(tailscale_auth_key, git_tokens)``.
     """
@@ -1269,11 +1325,9 @@ def _collect_secrets(
     resolved = resolve_for_command([], config, extra_decls=[ts_decl])
     ts_auth_key = resolved[vm_tmpl.tailscale_auth_key]
 
-    # Git credentials (legacy path; Phase 1d migrates to framework).
-    git_tokens: dict[str, str] = {}
-    for name, provider in providers.items():
-        token = provider.obtain_token(vm_name)
-        git_tokens[name] = token
+    # Git credentials via the framework (Phase 1d). Pulls token values
+    # for every credential the admin or agent templates reference.
+    git_tokens = _collect_git_tokens(config, registry, providers.keys())
 
     return ts_auth_key, git_tokens
 

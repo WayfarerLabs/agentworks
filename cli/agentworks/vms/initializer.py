@@ -1183,7 +1183,7 @@ def initialize_vm(
     *,
     admin_username: str = "agentworks",
     tailscale_auth_key: str,
-    git_tokens: dict[str, str] | None = None,
+    git_tokens: dict[str, str],
     bootstrap_complete: bool = False,
     tailscale_ip: str | None = None,
     on_tailscale_ready: Callable[[], None] | None = None,
@@ -1194,9 +1194,9 @@ def initialize_vm(
     Phase B (setup) steps are non-fatal -- failures are logged as warnings
     and the VM gets 'partial' status instead of 'complete'.
 
-    Phase 1c of the Resource Registry SDD: ``tailscale_auth_key`` is
-    required; ``create_vm`` resolves it via the framework at
-    manager-entry and threads it in.
+    Phase 1c (Tailscale) + Phase 1d (git credentials): both
+    ``tailscale_auth_key`` and ``git_tokens`` are required; ``create_vm``
+    resolves them via the framework at manager-entry and threads them in.
     """
     from agentworks.ssh import SSHLogger
     from agentworks.vms.manager import keep_vm_active
@@ -1288,7 +1288,7 @@ def run_initialization(
     admin_username: str,
     logger: SSHLogger,
     *,
-    git_tokens: dict[str, str] | None = None,
+    git_tokens: dict[str, str],
     is_first_init: bool = False,
 ) -> None:
     """Run Phase B (initialization) with status tracking and event logging.
@@ -1297,6 +1297,8 @@ def run_initialization(
     from reinit_vm() for repeatable re-initialization. Pass
     ``is_first_init=True`` from initialize_vm so steps that expect prior
     state (e.g. tmux socket dirs) can skip warnings on missing state.
+    Phase 1d: ``git_tokens`` is required (no provider-side fallback);
+    callers must thread the framework-resolved dict in.
     """
     db.insert_vm_event(vm_name, "init_started")
 
@@ -1542,10 +1544,14 @@ def _phase_b_setup(
     admin_username: str,
     logger: SSHLogger,
     *,
-    git_tokens: dict[str, str] | None = None,
+    git_tokens: dict[str, str],
     is_first_init: bool = False,
 ) -> None:
-    """Phase B: Setup (over Tailscale SSH). Non-fatal steps warn and continue."""
+    """Phase B: Setup (over Tailscale SSH). Non-fatal steps warn and continue.
+
+    ``git_tokens`` is required (Phase 1d): every provider listed in
+    ``providers`` must have a pre-resolved token value in the dict.
+    """
     from agentworks.catalog import load_catalog, validate_selections
 
     output.info("Initializing VM...")
@@ -1896,20 +1902,39 @@ def _configure_git_credentials(
     ts_target: Transport,
     providers: dict[str, GitCredentialProvider],
     logger: SSHLogger,
-    git_tokens: dict[str, str] | None = None,
+    *,
+    git_tokens: dict[str, str],
 ) -> None:
-    """Configure git credential store on the VM with pre-collected or prompted tokens."""
+    """Configure git credential store on the VM with the pre-resolved
+    framework tokens.
+
+    Phase 1d of the Resource Registry SDD: ``git_tokens`` is required
+    (no more provider-side fallback); the framework resolves every
+    token at manager-entry and threads the ``{credential_name: value}``
+    dict in. Any name in ``providers`` that doesn't have a matching
+    key in ``git_tokens`` is a logic error the caller is expected to
+    have prevented; we raise loudly rather than silently dropping the
+    credential.
+    """
     logger.step("Git credentials")
     output.detail("Configuring git credentials...")
 
-    tokens = git_tokens or {}
-
-    # Collect credential lines from all providers
+    # Collect credential lines from all providers.
     credential_lines: list[str] = []
     for name, provider in providers.items():
+        if name not in git_tokens:
+            msg = (
+                f"git credential setup failed for {name}: token not "
+                f"resolved by the framework (caller must pre-resolve "
+                f"every provider's token)"
+            )
+            logger.warning(msg)
+            output.warn(msg)
+            continue
         try:
-            token = tokens.get(name) or provider.obtain_token(vm_name)
-            credential_lines.extend(provider.credential_lines(token))
+            credential_lines.extend(
+                provider.credential_lines(git_tokens[name])
+            )
         except Exception as e:
             msg = f"git credential setup failed for {name}: {e}"
             logger.warning(msg)

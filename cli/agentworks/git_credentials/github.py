@@ -1,8 +1,11 @@
-"""GitHub git credential provider -- prompt for a personal access token."""
+"""GitHub git credential provider -- formats credentials for ``~/.git-credentials``.
+
+Token resolution lives in the framework (Phase 1d); this class just
+formats the URL line and pre-flights authn.
+"""
 
 from __future__ import annotations
 
-from agentworks import output
 from agentworks.git_credentials.base import GitCredentialProvider
 
 
@@ -14,9 +17,6 @@ class GitHubCredentialProvider(GitCredentialProvider):
 
     def auth_hint(self) -> str:
         return "Create a PAT at https://github.com/settings/tokens (repo scope)"
-
-    def _prompt_token(self, vm_name: str) -> str:
-        return output.prompt_secret(f"  GitHub PAT for '{self.display_name}'", hint=self.auth_hint())
 
     def credential_lines(self, token: str) -> list[str]:
         return [f"https://x-access-token:{token}@github.com"]

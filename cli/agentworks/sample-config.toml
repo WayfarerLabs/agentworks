@@ -87,19 +87,23 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 
 # --- Git credential providers ---
 # Define how to obtain git tokens. Referenced by name in admin.config and
-# agent_templates. Tokens are prompted during VM init (or read from env vars)
-# and stored via git credential-store on the VM.
+# agent_templates. Each entry's `token` field names a secret (default
+# `git-token-<name>`) that the framework resolves through the backend chain
+# (env-var, prompt, ...) at VM-init time; the resolved value is written to
+# `~/.git-credentials` via git's credential-store helper.
 
 #[git_credentials.github]
 #type = "github"
 #description = "GitHub full access"               # optional, shown in prompts and logs
-# Token: create at https://github.com/settings/tokens (repo scope)
+#token = "git-token-github"                       # optional; default is `git-token-<name>` (bare secret name; no { secret = "..." } polymorphism)
+# Resolved secret value is the PAT (create at https://github.com/settings/tokens, repo scope).
 
 #[git_credentials.azdo]
 #type = "azdo"
 #org = "my-org"
 #description = "Azure DevOps for my-org"          # optional, shown in prompts and logs
-# Token: create at https://dev.azure.com/{org}/_usersSettings/tokens
+#token = "git-token-azdo"                         # optional; default is `git-token-<name>`
+# Resolved secret value is the PAT (create at https://dev.azure.com/{org}/_usersSettings/tokens).
 
 # --- Secrets ---
 # A pluggable, named-secret system used by env tables on resources below.
