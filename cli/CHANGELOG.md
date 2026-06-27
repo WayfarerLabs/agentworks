@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.10.0](https://github.com/WayfarerLabs/agentworks/compare/v0.9.0...v0.10.0) (2026-06-27)
+
+
+### Features
+
+* **cli:** add --admin filter to session stop and session restart ([098f1f8](https://github.com/WayfarerLabs/agentworks/commit/098f1f892d24529beca3b5c7aeb03a6554245c73))
+* **cli:** add --agent filter to session stop and session restart ([c2857e5](https://github.com/WayfarerLabs/agentworks/commit/c2857e54d59d50c40996495c11e6a6811364fb58))
+* **cli:** add --agent filter to session stop and session restart ([cc16b60](https://github.com/WayfarerLabs/agentworks/commit/cc16b60d9c8abc35a2d3ab5f016ddbf4e5475925))
+
 ## [0.9.0](https://github.com/WayfarerLabs/agentworks/compare/v0.8.0...v0.9.0) (2026-06-26)
 
 
