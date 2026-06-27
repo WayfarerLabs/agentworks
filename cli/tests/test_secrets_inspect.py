@@ -48,9 +48,11 @@ def test_no_operator_secrets_still_shows_auto_declared(tmp_path: Path) -> None:
     assert table.backend_kinds == ("env-var", "prompt")
     names = [r.name for r in table.rows]
     assert "tailscale-auth-key" in names
-    # The auto-declared row carries its origin breadcrumb.
+    # The auto-declared row carries a synthesized description so the
+    # list view's Description column is populated without an operator
+    # having to write one in ``[secrets.<name>]``.
     ts = next(r for r in table.rows if r.name == "tailscale-auth-key")
-    assert ts.origin_text == "auto-declared by vm_template:default"
+    assert ts.description == "auto-declared by vm_template:default"
     # Counts match the operator/auto split.
     assert table.operator_count == 0
     assert table.auto_count >= 1

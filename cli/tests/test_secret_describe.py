@@ -68,23 +68,23 @@ def test_operator_declared_secret_shows_file_and_line(
     assert desc.name == "api-key"
     assert desc.kind == "secret"
     assert desc.description == "API key for the operator's service"
-    # operator-declared shows the config file path and line number.
-    # The path renders relative to ``$HOME`` with a ``~/`` prefix when
-    # under the user's home directory; otherwise an absolute path. The
-    # test fixture's ``tmp_path`` is typically under ``$HOME`` on CI but
-    # not always, so accept either shape.
-    assert desc.origin_text.startswith("operator-declared (")
-    assert cfg.name in desc.origin_text  # file name appears regardless
-    # Line should be a positive integer (the [secrets.api-key] header line).
-    line_str = desc.origin_text.rsplit(":", 1)[1].rstrip(")")
-    assert int(line_str) > 0
+    # operator-declared origin carries structured file + line fields;
+    # the renderer formats them as separate sub-lines. The describe
+    # service returns the raw Origin.
+    assert desc.origin is not None
+    assert desc.origin.variant == "operator-declared"
+    assert desc.origin.file is not None
+    assert str(desc.origin.file).endswith(cfg.name)
+    assert desc.origin.line > 0
 
 
 def test_auto_declared_secret_shows_first_requirement_source(
     tmp_path: Path, ssh_keys: tuple[Path, Path]
 ) -> None:
     """A secret referenced from `[admin.env]` but not declared in
-    ``[secrets.*]`` auto-declares; origin shows the requirement source.
+    ``[secrets.*]`` auto-declares; the origin carries the structured
+    source tuple and the description is synthesized so the list view
+    has something meaningful to show.
     """
     cfg = _write_cfg(
         tmp_path,
@@ -101,9 +101,54 @@ def test_auto_declared_secret_shows_first_requirement_source(
     registry = build_registry(config)
     desc = describe_secret(registry, config, "auto-key")
 
-    assert desc.origin_text == "auto-declared by admin_template:default"
-    # No operator description on an auto-declared secret.
-    assert desc.description == ""
+    assert desc.origin is not None
+    assert desc.origin.variant == "auto-declared"
+    assert desc.origin.source == ("admin_template", "default")
+    # Description synthesized at finalize time (no other sources require
+    # this secret, so no " (and N more)" suffix).
+    assert desc.description == "auto-declared by admin_template:default"
+
+
+def test_auto_declared_description_suffix_counts_other_sources(
+    tmp_path: Path, ssh_keys: tuple[Path, Path]
+) -> None:
+    """An auto-declared secret required by N distinct sources gets a
+    ``" (and N-1 more)"`` suffix on the synthesized description (Origin
+    names the first source; the suffix accounts for the rest). N
+    counts distinct ``(kind, name)`` source tuples; duplicate references
+    from the same source (e.g. multiple env-block lookups in one
+    template) do not inflate the count.
+    """
+    cfg = _write_cfg(
+        tmp_path,
+        """\
+        [admin.env]
+        SHARED_KEY = { secret = "shared" }
+
+        [vm_templates.azure-prod]
+        cpus = 2
+
+        [vm_templates.azure-prod.env]
+        TEMPLATE_KEY = { secret = "shared" }
+        OTHER_KEY = { secret = "shared" }
+
+        [secret_config]
+        backends = ["env-var", "prompt"]
+        """,
+        ssh_keys,
+    )
+    config = load_config(cfg, warn_issues=False)
+    registry = build_registry(config)
+    desc = describe_secret(registry, config, "shared")
+
+    # Two distinct sources require this secret: admin_template:default
+    # (which Origin names) and vm_template:azure-prod (the "1 more").
+    # The two references inside azure-prod's env block share a source
+    # and do not inflate the count.
+    assert desc.origin is not None
+    assert desc.origin.variant == "auto-declared"
+    assert desc.description.endswith("(and 1 more)")
+    assert "auto-declared by " in desc.description
 
 
 # -- Usages section ---------------------------------------------------------
@@ -423,8 +468,11 @@ def test_render_emits_header_usages_mappings_preview(
     out = capsys.readouterr().out
     # Header
     assert "Secret: api-key" in out
-    assert "Kind:        secret" in out
-    assert "operator-declared" in out
+    assert "Kind: secret" in out
+    # Origin is structured: variant on its own line, sub-fields indented.
+    assert "Origin: operator-declared" in out
+    assert "File: " in out
+    assert "Line: " in out
     assert "API key for the operator's service" in out
     # Usages
     assert "Usages:" in out

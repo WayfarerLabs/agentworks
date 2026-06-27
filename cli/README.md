@@ -599,34 +599,35 @@ var name does this secret read from?") with `agw secret list`:
 agw secret list
 # 4 secrets (2 operator-declared, 2 auto-declared)
 #
-# NAME                 ORIGIN                                env-var                       prompt
-# ----                 ------                                -------                       ------
-# api-key              operator-declared (~/.config/...:42)  OPENAI_API_KEY                enabled
-# force-prompt         operator-declared (~/.config/...:48)  disabled                      enabled
-# git-token-github     auto-declared by git_credentials:...  AW_SECRET_GIT_TOKEN_GITHUB    enabled
-# tailscale-auth-key   auto-declared by vm_template:default  AW_SECRET_TAILSCALE_AUTH_KEY  enabled
+# NAME                 DESCRIPTION                                       env-var                       prompt
+# ----                 -----------                                       -------                       ------
+# api-key              OpenAI key for the operator's service             OPENAI_API_KEY                enabled
+# force-prompt         Always prompted at command time                   disabled                      enabled
+# git-token-github     auto-declared by git_credentials:github           AW_SECRET_GIT_TOKEN_GITHUB    enabled
+# tailscale-auth-key   auto-declared by vm_template:default (and 1 more) AW_SECRET_TAILSCALE_AUTH_KEY  enabled
 ```
 
 Columns are the active backends in `[secret_config].backends` precedence order. Cells show each
 backend's static lookup identifier (env var name, vault path, `op://` URI) or `disabled` / `enabled`
-for backends with an explicit opt-out or no static identifier (prompt). The `Origin` column shows
-whether the secret came from `[secrets.<name>]` (operator-declared, with file:line) or was
-auto-declared via the Resource Registry's miss policy (e.g., a VM template's `tailscale_auth_key`
-requirement, a git-credential's `token`, an env-block `{ secret = "..." }`). Values are never
-resolved.
+for backends with an explicit opt-out or no static identifier (prompt). The Description column shows
+the operator-supplied text for operator-declared secrets, or a framework-synthesized
+`auto-declared by <kind>:<name>` (plus `(and N more)` when more than one source requires the secret)
+for auto-declared ones. The summary line breaks the rows down by origin. Values are never resolved.
 
-For the full per-secret detail view, including usage list (who requires this secret), per-backend
-mapping table, and a resolution preview, use `agw secret describe`:
+For the full per-secret detail view, including the structured origin block, usage list (who requires
+this secret), per-backend mapping table, and a resolution preview, use `agw secret describe`:
 
 ```bash
 agw secret describe tailscale-auth-key
 # Secret: tailscale-auth-key
-#   Kind:        secret
-#   Origin:      auto-declared by vm_template:default
-#   Description: (none)
+#   Kind: secret
+#   Origin: auto-declared
+#     Source: vm_template:default
+#   Description: auto-declared by vm_template:default (and 1 more)
 #
 # Usages:
 #   - vm_template:default -- the VM-provisioning auth key
+#   - vm_template:heavy -- the VM-provisioning auth key
 #
 # Backend mappings:
 #   - env-var: AW_SECRET_TAILSCALE_AUTH_KEY

@@ -150,12 +150,16 @@ class Registry:
                 self._handle_miss(target_kind, target_name, kind_handler, reqs)
 
         # 2: usage attachment. Every Resource with incoming requirements
-        # gets its usage tuple set via dataclasses.replace.
+        # gets its usage tuple set via dataclasses.replace. Auto-declared
+        # secrets additionally get a synthesized description so the list
+        # view's Description column has meaningful text (the polish needs
+        # the final usage tuple, so it lands here rather than at the
+        # kind's synthesize-time call site).
         for (kind, name), reqs in all_reqs.items():
             existing = self._resources[kind][name]
-            self._resources[kind][name] = dataclasses.replace(
-                existing, usage=_usage_tuple(reqs)
-            )
+            polished = dataclasses.replace(existing, usage=_usage_tuple(reqs))
+            polished = _polish_auto_declared_description(polished)
+            self._resources[kind][name] = polished
 
         # 3: cycle detection across the now-complete graph.
         _detect_cycles(self._resources)
@@ -272,6 +276,36 @@ def _lookup_kind(kind: str, req: ResourceRequirement) -> Any:
             f"{req.source[0]} {req.source[1]!r} references "
             f"unregistered kind {kind!r}"
         ) from None
+
+
+def _polish_auto_declared_description(resource: Any) -> Any:
+    """Synthesize a description for an auto-declared SecretDecl when its
+    description is empty. Operators rely on a non-empty Description in
+    ``agw secret list``; the framework picks one derived from origin +
+    usage count when there's no operator-supplied text to use.
+
+    Format: ``"auto-declared by <kind>:<name>"`` plus, when more than
+    one distinct usage source exists, ``" (and N more)"`` (N counts
+    distinct sources other than the one Origin already names). No-op
+    for non-secrets, operator-declared resources, code-declared
+    resources, or any SecretDecl whose description is already set.
+    """
+    from agentworks.secrets.base import SecretDecl
+
+    if not isinstance(resource, SecretDecl):
+        return resource
+    if resource.description:
+        return resource
+    origin = resource.origin
+    if origin is None or origin.variant != "auto-declared":
+        return resource
+    source = origin.source
+    if not (isinstance(source, tuple) and len(source) == 2):
+        return resource
+    distinct_other = {u.source for u in resource.usage} - {source}
+    suffix = f" (and {len(distinct_other)} more)" if distinct_other else ""
+    description = f"auto-declared by {source[0]}:{source[1]}{suffix}"
+    return dataclasses.replace(resource, description=description)
 
 
 def _usage_tuple(

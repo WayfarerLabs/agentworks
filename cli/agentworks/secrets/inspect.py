@@ -20,6 +20,7 @@ from agentworks import output
 if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.resources import Registry
+    from agentworks.resources.origin import Origin
     from agentworks.resources.requirement import UsageEntry
 
 
@@ -39,11 +40,16 @@ class SecretCell:
 
 @dataclass(frozen=True)
 class SecretRow:
-    """One declared secret, with a cell per active backend."""
+    """One declared secret, with a cell per active backend.
+
+    ``description`` is the operator-supplied text for operator-declared
+    secrets, or the framework-synthesized ``"auto-declared by k:n[ (and
+    N more)]"`` for auto-declared ones (set during ``Registry.finalize``
+    so the list view's Description column is always populated).
+    """
 
     name: str
     description: str
-    origin_text: str
     cells: tuple[SecretCell, ...]
 
 
@@ -86,7 +92,6 @@ def build_secret_table(config: Config, registry: Registry) -> SecretTable:
     auto_count = 0
     rows: list[SecretRow] = []
     for decl in sorted(registry.iter_kind("secret"), key=lambda d: d.name):
-        origin_text = _format_origin(decl)
         # Variant-based counter; defensive on missing origin.
         variant = getattr(getattr(decl, "origin", None), "variant", None)
         if variant == "operator-declared":
@@ -108,7 +113,6 @@ def build_secret_table(config: Config, registry: Registry) -> SecretTable:
             SecretRow(
                 name=decl.name,
                 description=decl.description,
-                origin_text=origin_text,
                 cells=cells,
             )
         )
@@ -161,7 +165,7 @@ def render_secret_table(table: SecretTable) -> None:
     # Render cells to strings up front so column widths can be measured.
     rendered: list[tuple[str, ...]] = []
     for row in table.rows:
-        cells: list[str] = [row.name, row.origin_text]
+        cells: list[str] = [row.name, row.description]
         for cell in row.cells:
             if not cell.would_attempt:
                 cells.append("disabled")
@@ -171,7 +175,7 @@ def render_secret_table(table: SecretTable) -> None:
                 cells.append("enabled")
         rendered.append(tuple(cells))
 
-    headers = ("NAME", "ORIGIN", *table.backend_kinds)
+    headers = ("NAME", "DESCRIPTION", *table.backend_kinds)
     widths = [
         max(len(headers[i]), *(len(r[i]) for r in rendered))
         for i in range(len(headers))
@@ -234,18 +238,18 @@ class ResolutionPreview:
 class SecretDescription:
     """Structured per-secret detail view backing ``agw secret describe``.
 
-    ``origin_text`` is pre-rendered ("operator-declared (config.toml:42)"
-    or "auto-declared by vm_template:default") so the CLI renderer is
-    purely a formatter. The supplemental "also required by ..." list
-    is derived from ``usages`` at render time. ``hint`` is the
-    operator-set prompt hint (``[secrets.<name>].hint``), surfaced for
-    debugging "why isn't my prompt showing the helpful hint" without
-    triggering a prompt.
+    ``origin`` is the raw structured ``Origin``; the renderer formats it
+    as a multi-line block (variant + sub-fields). ``description`` is the
+    operator-supplied text or the framework-synthesized text for
+    auto-declared secrets (set during ``Registry.finalize``). ``hint``
+    is the operator-set prompt hint (``[secrets.<name>].hint``),
+    surfaced for debugging "why isn't my prompt showing the helpful
+    hint" without triggering a prompt.
     """
 
     name: str
     kind: str
-    origin_text: str
+    origin: Origin | None
     description: str
     hint: str | None
     usages: tuple[UsageEntry, ...]
@@ -253,42 +257,27 @@ class SecretDescription:
     resolution: ResolutionPreview
 
 
-def _format_origin(decl: object) -> str:
-    """Render a Resource's ``origin: Origin`` field as the
-    ``"operator-declared (path:line)"`` / ``"auto-declared by k:n"`` /
-    ``"code-declared by source"`` string per FRD R10.
-
-    The path is rendered relative to ``$HOME`` with a ``~/`` prefix
-    when it falls under the user's home directory; otherwise the bare
-    absolute path. (Operator configs live at ``~/.config/agentworks/
-    config.toml`` so the common case becomes the short, FRD-example-
-    shaped form.)
+def _render_origin_block(origin: Origin | None) -> None:
+    """Emit ``Origin: <variant>`` followed by the variant's structured
+    sub-fields. ``unknown`` when ``origin`` is None (defensive for
+    Resources constructed outside the framework path).
     """
-    origin = getattr(decl, "origin", None)
     if origin is None:
-        # Defensive: a Resource constructed outside the framework path
-        # may not carry an origin yet. Surfaces as "unknown" rather
-        # than crashing.
-        return "unknown"
-    variant = getattr(origin, "variant", None)
-    if variant == "operator-declared":
-        file = origin.file
-        line = origin.line
-        if file is not None and line:
-            return f"operator-declared ({_format_file_path(file)}:{line})"
-        return "operator-declared"
-    if variant == "auto-declared":
-        source = origin.source
-        if isinstance(source, tuple) and len(source) == 2:
-            return f"auto-declared by {source[0]}:{source[1]}"
-        return "auto-declared"
-    if variant == "code-declared":
-        source = origin.source
-        return f"code-declared by {source}" if source else "code-declared"
-    # Unreachable under the Origin dataclass's Literal[...] variant
-    # constraint; surface loudly if it ever fires rather than emitting
-    # a confusing string in front of an operator.
-    raise AssertionError(f"unhandled Origin variant: {variant!r}")
+        output.info("  Origin: unknown")
+        return
+    output.info(f"  Origin: {origin.variant}")
+    if origin.variant == "operator-declared":
+        if origin.file is not None:
+            output.info(f"    File: {_format_file_path(origin.file)}")
+        if origin.line is not None:
+            output.info(f"    Line: {origin.line}")
+        return
+    # code-declared / auto-declared both carry a ``source`` payload.
+    source = origin.source
+    if isinstance(source, tuple) and len(source) == 2:
+        output.info(f"    Source: {source[0]}:{source[1]}")
+    elif source is not None:
+        output.info(f"    Source: {source}")
 
 
 def _format_file_path(file: object) -> str:
@@ -337,7 +326,7 @@ def describe_secret(
             entity_name=name,
             hint="check `agw secret list` for declared and auto-declared names",
         ) from None
-    origin_text = _format_origin(decl)
+    origin = getattr(decl, "origin", None)
     description = getattr(decl, "description", "") or ""
     # Usages come from the finalize pass's attachment (one entry per
     # requirement that contributed). Defensive: a Resource constructed
@@ -369,7 +358,7 @@ def describe_secret(
     return SecretDescription(
         name=name,
         kind="secret",
-        origin_text=origin_text,
+        origin=origin,
         description=description,
         hint=getattr(decl, "hint", None),
         usages=usages,
@@ -388,14 +377,14 @@ def render_secret_description(desc: SecretDescription) -> None:
     """
     # --- Header ---
     output.info(f"Secret: {desc.name}")
-    output.info(f"  Kind:        {desc.kind}")
-    output.info(f"  Origin:      {desc.origin_text}")
+    output.info(f"  Kind: {desc.kind}")
+    _render_origin_block(desc.origin)
     if desc.description:
         output.info(f"  Description: {desc.description}")
     else:
         output.info("  Description: (none)")
     if desc.hint:
-        output.info(f"  Hint:        {desc.hint}")
+        output.info(f"  Hint: {desc.hint}")
 
     # --- Usages ---
     output.info("")
