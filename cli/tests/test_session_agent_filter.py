@@ -71,6 +71,49 @@ def test_session_stop_agent_filter_composes_with_other_filters(
     assert captured["agent_name"] == "a1"
 
 
+def test_session_stop_admin_filter_composes_with_name_filters(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``--admin`` AND-composes with ``--vm`` and ``--workspace`` (and
+    is the four-way completion of the three-way agent-side test
+    above). Catches any future refactor that drops ``admin_only=``
+    from the kwarg-forwarding path."""
+    captured: dict[str, Any] = {}
+    monkeypatch.setattr(session_manager, "stop_all_sessions", _capture_kwargs(captured))
+    monkeypatch.setattr("agentworks.cli._helpers.get_db", lambda: object())
+    monkeypatch.setattr("agentworks.config.load_config", lambda: object())
+
+    result = CliRunner().invoke(
+        app,
+        ["session", "stop", "--all", "--vm", "vm1", "--workspace", "ws1", "--admin"],
+    )
+    assert result.exit_code == 0, result.output
+    assert captured["vm_name"] == "vm1"
+    assert captured["workspace_name"] == "ws1"
+    assert captured["admin_only"] is True
+    assert captured["agent_name"] is None
+
+
+def test_session_stop_filter_accepts_csv_list(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``--vm vm1,vm2`` parses into a list so the manager OR-composes
+    within the filter. The same convention applies to ``--workspace``
+    and ``--agent``; pins parity with ``session list``."""
+    captured: dict[str, Any] = {}
+    monkeypatch.setattr(session_manager, "stop_all_sessions", _capture_kwargs(captured))
+    monkeypatch.setattr("agentworks.cli._helpers.get_db", lambda: object())
+    monkeypatch.setattr("agentworks.config.load_config", lambda: object())
+
+    result = CliRunner().invoke(
+        app,
+        ["session", "stop", "--all", "--vm", "vm1,vm2", "--workspace", "ws1,ws2"],
+    )
+    assert result.exit_code == 0, result.output
+    assert captured["vm_name"] == ["vm1", "vm2"]
+    assert captured["workspace_name"] == ["ws1", "ws2"]
+
+
 def test_session_stop_agent_without_all_errors(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

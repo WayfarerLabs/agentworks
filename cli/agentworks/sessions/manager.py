@@ -1544,16 +1544,18 @@ def stop_all_sessions(
     db: Database,
     config: Config,
     *,
-    vm_name: str | None = None,
-    workspace_name: str | None = None,
-    agent_name: str | None = None,
+    vm_name: str | list[str] | None = None,
+    workspace_name: str | list[str] | None = None,
+    agent_name: str | list[str] | None = None,
     admin_only: bool = False,
     force: bool = False,
 ) -> None:
-    """Stop all running sessions, optionally filtered by VM, workspace, agent, or mode.
+    """Stop all running sessions, optionally filtered by VM, workspace, agent, and/or mode.
 
-    ``agent_name`` and ``admin_only`` are mutually exclusive; the
-    caller enforces the mutex.
+    Each name filter accepts a single name or a list of names; lists
+    OR within a filter, filters AND across the call. ``agent_name``
+    and ``admin_only`` are mutually exclusive; the caller enforces
+    the mutex.
     """
     sessions = filter_sessions(
         db,
@@ -1632,21 +1634,23 @@ def restart_all_sessions(
     db: Database,
     config: Config,
     *,
-    vm_name: str | None = None,
-    workspace_name: str | None = None,
-    agent_name: str | None = None,
+    vm_name: str | list[str] | None = None,
+    workspace_name: str | list[str] | None = None,
+    agent_name: str | list[str] | None = None,
     admin_only: bool = False,
     include_running: bool = False,
     force: bool = False,
 ) -> None:
-    """Restart sessions, optionally filtered by VM, workspace, agent, or mode.
+    """Restart sessions, optionally filtered by VM, workspace, agent, and/or mode.
 
     With include_running=False (--all-stopped), only stopped sessions are
     restarted. With include_running=True (--all), all sessions are targeted;
     if any are running, the caller should have prompted or passed yes=True.
 
-    ``agent_name`` and ``admin_only`` are mutually exclusive; the
-    caller enforces the mutex.
+    Each name filter accepts a single name or a list of names; lists
+    OR within a filter, filters AND across the call. ``agent_name``
+    and ``admin_only`` are mutually exclusive; the caller enforces
+    the mutex.
     """
     sessions = filter_sessions(
         db,
@@ -2022,7 +2026,8 @@ def list_sessions(
     Status resolution is has-session-first; PID/boot_id are only used as a
     follow-up when agent checks fail.
     """
-    sessions = db.list_sessions(
+    sessions = filter_sessions(
+        db,
         workspace_name=workspace_name,
         vm_name=vm_name,
         agent_name=agent_name,
