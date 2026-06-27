@@ -469,11 +469,11 @@ def test_render_emits_header_usages_mappings_preview(
     # Header
     assert "Secret: api-key" in out
     assert "Kind: secret" in out
-    # Origin is structured: variant on its own line, sub-fields indented.
-    assert "Origin: operator-declared" in out
-    assert "File: " in out
-    assert "Line: " in out
-    assert "API key for the operator's service" in out
+    assert "Description: API key for the operator's service" in out
+    # Origin is one line: variant + parenthetical with the file:line.
+    assert "Origin: operator-declared (" in out
+    # Description comes before Origin (Description is the primary info).
+    assert out.index("Description:") < out.index("Origin:")
     # Usages
     assert "Usages:" in out
     assert "admin_template:default" in out

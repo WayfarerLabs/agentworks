@@ -621,9 +621,8 @@ this secret), per-backend mapping table, and a resolution preview, use `agw secr
 agw secret describe tailscale-auth-key
 # Secret: tailscale-auth-key
 #   Kind: secret
-#   Origin: auto-declared
-#     Source: vm_template:default
 #   Description: auto-declared by vm_template:default (and 1 more)
+#   Origin: auto-declared (vm_template:default)
 #
 # Usages:
 #   - vm_template:default -- the VM-provisioning auth key

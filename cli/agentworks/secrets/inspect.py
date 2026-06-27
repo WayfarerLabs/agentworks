@@ -257,27 +257,27 @@ class SecretDescription:
     resolution: ResolutionPreview
 
 
-def _render_origin_block(origin: Origin | None) -> None:
-    """Emit ``Origin: <variant>`` followed by the variant's structured
-    sub-fields. ``unknown`` when ``origin`` is None (defensive for
-    Resources constructed outside the framework path).
+def _format_origin_line(origin: Origin | None) -> str:
+    """Render an ``Origin`` as a single-line parenthetical:
+    ``"operator-declared (~/path:42)"``, ``"auto-declared (kind:name)"``,
+    ``"code-declared (source)"``. ``"unknown"`` when ``origin`` is None
+    (defensive for Resources constructed outside the framework path).
     """
     if origin is None:
-        output.info("  Origin: unknown")
-        return
-    output.info(f"  Origin: {origin.variant}")
+        return "unknown"
     if origin.variant == "operator-declared":
-        if origin.file is not None:
-            output.info(f"    File: {_format_file_path(origin.file)}")
-        if origin.line is not None:
-            output.info(f"    Line: {origin.line}")
-        return
-    # code-declared / auto-declared both carry a ``source`` payload.
-    source = origin.source
-    if isinstance(source, tuple) and len(source) == 2:
-        output.info(f"    Source: {source[0]}:{source[1]}")
-    elif source is not None:
-        output.info(f"    Source: {source}")
+        if origin.file is not None and origin.line:
+            return f"operator-declared ({_format_file_path(origin.file)}:{origin.line})"
+        return "operator-declared"
+    if origin.variant == "auto-declared":
+        source = origin.source
+        if isinstance(source, tuple) and len(source) == 2:
+            return f"auto-declared ({source[0]}:{source[1]})"
+        return "auto-declared"
+    if origin.variant == "code-declared":
+        source = origin.source
+        return f"code-declared ({source})" if source else "code-declared"
+    raise AssertionError(f"unhandled Origin variant: {origin.variant!r}")
 
 
 def _format_file_path(file: object) -> str:
@@ -378,11 +378,11 @@ def render_secret_description(desc: SecretDescription) -> None:
     # --- Header ---
     output.info(f"Secret: {desc.name}")
     output.info(f"  Kind: {desc.kind}")
-    _render_origin_block(desc.origin)
     if desc.description:
         output.info(f"  Description: {desc.description}")
     else:
         output.info("  Description: (none)")
+    output.info(f"  Origin: {_format_origin_line(desc.origin)}")
     if desc.hint:
         output.info(f"  Hint: {desc.hint}")
 
