@@ -28,3 +28,40 @@ def secret_list() -> None:
     from agentworks.secrets.inspect import build_secret_table, render_secret_table
 
     render_secret_table(build_secret_table(load_config()))
+
+
+@secret_app.command("describe")
+def secret_describe(
+    name: str = typer.Argument(..., help="Secret name to describe."),
+) -> None:
+    """Show the full per-secret detail view.
+
+    Four sections per FRD R10: header (name, kind, origin,
+    description), usages (one row per matching requirement), backend
+    mappings (per-active-backend disposition without merging),
+    resolution preview (which active backend would resolve, or
+    "not available"). Does not prompt, does not resolve values.
+
+    The secret must be in the Resource Registry -- either
+    operator-declared via ``[secrets.<name>]`` or auto-declared via a
+    requirement's miss policy (the framework auto-declares missing
+    names that something references; ``agw secret list`` shows every
+    such name).
+    """
+    from agentworks.bootstrap import build_registry
+    from agentworks.config import load_config
+    from agentworks.errors import NotFoundError
+    from agentworks.secrets.inspect import describe_secret, render_secret_description
+
+    config = load_config()
+    registry = build_registry(config)
+    try:
+        desc = describe_secret(registry, config, name)
+    except KeyError:
+        raise NotFoundError(
+            f"secret {name!r} is not in the resource registry; check "
+            f"`agw secret list` for declared and auto-declared names",
+            entity_kind="secret",
+            entity_name=name,
+        ) from None
+    render_secret_description(desc)

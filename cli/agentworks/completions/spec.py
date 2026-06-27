@@ -56,6 +56,12 @@ class CommandSpec:
 #   "vm_templates"    -> [vm_templates.*] sections in config.toml
 #   "agent_templates" -> [agent_templates.*] sections in config.toml
 #   "consoles"        -> agw console list
+#   "secrets"         -> [secrets.*] sections in config.toml
+#                        (operator-declared only; auto-declared names
+#                        are reachable via the framework but not
+#                        listed for completion -- operators who type
+#                        a name a Resource references implicitly will
+#                        skip the completion list, which is fine)
 
 DYNAMIC_COMPLETIONS: dict[tuple[str, str], str] = {
     ("vm.start", "name"): "vms",
@@ -148,6 +154,9 @@ DYNAMIC_COMPLETIONS: dict[tuple[str, str], str] = {
     ("console.add-shell", "session"): "sessions",
     ("console.restore-session", "name"): "consoles",
     ("console.restore-session", "session"): "sessions",
+
+    # Secret inspection
+    ("secret.describe", "name"): "secrets",
 }
 
 

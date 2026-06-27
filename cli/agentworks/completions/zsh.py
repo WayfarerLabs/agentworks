@@ -98,6 +98,16 @@ _agentworks_agent_templates() {
     fi
     _describe 'agent-template' templates
 }""",
+    "secrets": """\
+_agentworks_secrets() {
+    local -a secrets config_file
+    config_file="${HOME}/.config/agentworks/config.toml"
+    secrets=()
+    if [[ -f "$config_file" ]]; then
+        secrets+=(${(f)"$(sed -n 's/^\\[secrets\\.\\([^]]*\\)\\]/\\1/p' "$config_file" 2>/dev/null)"})
+    fi
+    _describe 'secret' secrets
+}""",
 }
 
 # Maps completer identifiers to their zsh function names.
@@ -114,6 +124,7 @@ COMPLETER_FUNC_NAMES: dict[str, str] = {
     "agent_templates": "_agentworks_agent_templates",
     "agents": "_agentworks_agents",
     "consoles": "_agentworks_consoles",
+    "secrets": "_agentworks_secrets",
 }
 
 

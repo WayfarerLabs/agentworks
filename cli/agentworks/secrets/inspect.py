@@ -1,14 +1,13 @@
 """Service-layer introspection and rendering for ``agw secret`` commands.
 
-``build_secret_table`` produces the structured view (tested without
-rendering); ``render_secret_table`` formats it for an operator. The CLI
-command stays thin: build, render, done. Matches the shape of
-``env.show.show_env`` (build rows + emit through ``agentworks.output``).
+``build_secret_table`` / ``render_secret_table`` back ``agw secret list``;
+``describe_secret`` / ``render_secret_description`` back the Phase-1e
+``agw secret describe <name>``. Both follow the same "build structured
+view, render via ``agentworks.output``" pattern.
 
-The table is the only discovery path operators have for "which env var
-is this secret read from?" -- per the env-and-secrets SDD design,
-env-var is just another backend, so the table treats every backend
-uniformly via the ``SecretSource.describe_lookup`` protocol method.
+Per FRD R10, neither command prompts the operator nor resolves a secret
+value; they report state by walking the registry and the resolver's
+configured backend chain.
 """
 
 from __future__ import annotations
@@ -20,6 +19,8 @@ from agentworks import output
 
 if TYPE_CHECKING:
     from agentworks.config import Config
+    from agentworks.resources import Registry
+    from agentworks.resources.requirement import UsageEntry
 
 
 @dataclass(frozen=True)
@@ -140,3 +141,221 @@ def render_secret_table(table: SecretTable) -> None:
     output.info(_fmt(tuple("-" * w for w in widths)))
     for r in rendered:
         output.info(_fmt(r))
+
+
+# -- agw secret describe ---------------------------------------------------
+
+
+@dataclass(frozen=True)
+class BackendMapping:
+    """One backend's view of a secret for the describe view's mapping table.
+
+    Fields express what the backend would do at resolution time without
+    actually resolving (no I/O):
+
+    - ``backend_kind``: the backend identifier (``"env-var"``,
+      ``"prompt"``, future backends).
+    - ``would_attempt``: True if the backend would try this secret at
+      resolution time. False = explicit opt-out via
+      ``backend_mappings.<kind> = false``, or the backend has no
+      default convention for this secret and no operator override.
+    - ``identifier``: the backend's lookup identifier (env-var name,
+      ``op://`` URI, vault path, etc.) when meaningful. ``None`` for
+      backends with no static identifier (prompt) or for backends that
+      won't attempt.
+    """
+
+    backend_kind: str
+    would_attempt: bool
+    identifier: str | None
+
+
+@dataclass(frozen=True)
+class ResolutionPreview:
+    """What the active backend chain would do at resolution time.
+
+    - ``resolved_by``: the kind of the first backend that would attempt
+      the secret with a static identifier (``"env-var"`` with an
+      identifier set, or any backend with a known mapping). ``None``
+      means no backend has a static identifier; the chain falls to a
+      prompt-style backend or no backend at all.
+    - ``would_prompt``: True if the first attempting backend is a
+      prompt-style backend (no static identifier).
+    - ``available``: True if at least one active backend would attempt
+      the secret. False = the chain has no opt-in for this secret
+      (every backend either has no convention or is explicitly
+      opted out).
+    """
+
+    resolved_by: str | None
+    would_prompt: bool
+    available: bool
+
+
+@dataclass(frozen=True)
+class SecretDescription:
+    """Structured per-secret detail view backing ``agw secret describe``.
+
+    ``origin_text`` is pre-rendered ("operator-declared (config.toml:42)"
+    or "auto-declared by vm_template:default") so the CLI renderer is
+    purely a formatter. The supplemental "also required by ..." list
+    is derived from ``usages`` at render time.
+    """
+
+    name: str
+    kind: str
+    origin_text: str
+    description: str
+    usages: tuple[UsageEntry, ...]
+    backend_mappings: tuple[BackendMapping, ...]
+    resolution: ResolutionPreview
+
+
+def _format_origin(decl: object) -> str:
+    """Render a Resource's ``origin: Origin`` field as the
+    ``"operator-declared (file:line)"`` / ``"auto-declared by k:n"`` /
+    ``"code-declared by source"`` string per FRD R10. Defensive
+    fallback when ``origin`` is missing or unrecognized.
+    """
+    origin = getattr(decl, "origin", None)
+    if origin is None:
+        return "unknown"
+    variant = getattr(origin, "variant", None)
+    if variant == "operator-declared":
+        file = origin.file
+        line = origin.line
+        if file is not None and line:
+            return f"operator-declared ({file}:{line})"
+        return "operator-declared"
+    if variant == "auto-declared":
+        source = origin.source
+        if isinstance(source, tuple) and len(source) == 2:
+            return f"auto-declared by {source[0]}:{source[1]}"
+        return "auto-declared"
+    if variant == "code-declared":
+        source = origin.source
+        return f"code-declared by {source}" if source else "code-declared"
+    return f"origin variant {variant!r}"
+
+
+def describe_secret(
+    registry: Registry,
+    config: Config,
+    name: str,
+) -> SecretDescription:
+    """Build a ``SecretDescription`` for one secret in the registry.
+
+    Per FRD R10. Pure config + registry derived; no I/O, no prompting,
+    no resolution. Raises ``KeyError`` if ``name`` isn't a published
+    secret -- the CLI command wraps this in a typed ``ConfigError`` /
+    ``NotFoundError`` for operator-facing rendering.
+    """
+    decl = registry.lookup("secret", name)
+    origin_text = _format_origin(decl)
+    description = getattr(decl, "description", "") or ""
+    # Usages come from the finalize pass's attachment (one entry per
+    # requirement that contributed). Defensive: a Resource constructed
+    # outside the framework path may not have the field.
+    usages: tuple[UsageEntry, ...] = tuple(getattr(decl, "usage", ()))
+
+    # Backend mappings: walk the active source chain and ask each
+    # source how it would handle this secret.
+    mappings: list[BackendMapping] = []
+    for source in config.secret_resolver.sources:
+        mappings.append(
+            BackendMapping(
+                backend_kind=source.kind,
+                would_attempt=source.would_attempt(decl),
+                identifier=source.describe_lookup(decl),
+            )
+        )
+
+    # Resolution preview: which active backend would resolve right now.
+    # Walk the chain in precedence order; the first attempting backend
+    # wins. A prompt-style backend (no static identifier) is reported
+    # separately so the renderer can show "would prompt" instead of an
+    # identifier.
+    resolved_by: str | None = None
+    would_prompt = False
+    available = False
+    for mapping in mappings:
+        if not mapping.would_attempt:
+            continue
+        available = True
+        if mapping.identifier is None:
+            # Prompt-style: would attempt without a static lookup name.
+            would_prompt = True
+            resolved_by = mapping.backend_kind
+        else:
+            resolved_by = mapping.backend_kind
+        break
+
+    return SecretDescription(
+        name=name,
+        kind="secret",
+        origin_text=origin_text,
+        description=description,
+        usages=usages,
+        backend_mappings=tuple(mappings),
+        resolution=ResolutionPreview(
+            resolved_by=resolved_by,
+            would_prompt=would_prompt,
+            available=available,
+        ),
+    )
+
+
+def render_secret_description(desc: SecretDescription) -> None:
+    """Emit a ``SecretDescription`` as four operator-friendly sections:
+    header, usages, backend mappings, resolution preview. Mirrors FRD
+    R10's documented shape.
+    """
+    # --- Header ---
+    output.info(f"Secret: {desc.name}")
+    output.info(f"  Kind:        {desc.kind}")
+    output.info(f"  Origin:      {desc.origin_text}")
+    if desc.description:
+        output.info(f"  Description: {desc.description}")
+    else:
+        output.info("  Description: (none)")
+
+    # --- Usages ---
+    output.info("")
+    output.info("Usages:")
+    if not desc.usages:
+        output.info("  (none recorded)")
+    else:
+        # Dedupe by (source, text) preserving first-encounter order.
+        seen: set[tuple[tuple[str, str], str]] = set()
+        for entry in desc.usages:
+            key = (entry.source, entry.text)
+            if key in seen:
+                continue
+            seen.add(key)
+            src = f"{entry.source[0]}:{entry.source[1]}"
+            output.info(f"  - {src} -- {entry.text}")
+
+    # --- Backend mappings ---
+    output.info("")
+    output.info("Backend mappings:")
+    if not desc.backend_mappings:
+        output.info("  (no active backends in [secret_config].backends)")
+    else:
+        for mapping in desc.backend_mappings:
+            if not mapping.would_attempt:
+                status = "no mapping (skipped)"
+            elif mapping.identifier is not None:
+                status = mapping.identifier
+            else:
+                status = "(prompt at resolution time)"
+            output.info(f"  - {mapping.backend_kind}: {status}")
+
+    # --- Resolution preview ---
+    output.info("")
+    output.info("Resolution preview:")
+    if not desc.resolution.available:
+        output.info("  not available in any active backend")
+    elif desc.resolution.would_prompt:
+        output.info(f"  would prompt (via {desc.resolution.resolved_by})")
+    else:
+        output.info(f"  would resolve via {desc.resolution.resolved_by}")
