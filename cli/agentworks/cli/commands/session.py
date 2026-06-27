@@ -10,7 +10,7 @@ from agentworks.cli._app import app, require_interactive
 from agentworks.cli._helpers import get_db, parse_csv_filter, prompt_vm, prompt_workspace
 
 if TYPE_CHECKING:
-    from agentworks.db import Database, VMRow, WorkspaceRow
+    from agentworks.db import Database, WorkspaceRow
 
 session_app = typer.Typer(
     name="session",
@@ -41,8 +41,7 @@ def session_create(
 ) -> None:
     """Create and start a session in a workspace."""
     from agentworks.config import load_config
-    from agentworks.sessions.manager import create_session
-    from agentworks.workspaces.manager import create_workspace
+    from agentworks.sessions.manager import NewAgentArgs, NewWorkspaceArgs, create_session
 
     # Validate flag combinations before any prompts
     if admin and agent:
@@ -73,18 +72,28 @@ def session_create(
     db = get_db()
     config = load_config()
 
-    resolved_vm: VMRow | None = None
+    # Interactive resource selection lives in the CLI; the service layer
+    # receives already-resolved names. ``create_session`` handles
+    # cross-checks, secret resolution, ephemeral resource creation, and
+    # rollback in one atomic flow.
+    resolved_vm_name: str | None = None
+    resolved_workspace_name: str | None = None
+    resolved_agent: str | None = agent
+    new_workspace_args: NewWorkspaceArgs | None = None
+    new_agent_args: NewAgentArgs | None = None
 
     if new_workspace:
-        resolved_vm = prompt_vm(db, vm)
-        resolved_workspace = workspace_name  # may be None, resolved after session name
+        resolved_vm_row = prompt_vm(db, vm)
+        resolved_vm_name = resolved_vm_row.name
+        resolved_workspace_name = workspace_name  # may be None; defaults to session name
+        new_workspace_args = NewWorkspaceArgs(template_name=workspace_template)
 
-        # Resolve mode (need VM name for agent lookup). Skip the prompt when
-        # --new-agent is set -- the user has already chosen to create a new agent.
-        resolved_agent: str | None = agent
+        # Mode resolution (admin vs agent) only needs to happen here when
+        # --new-agent isn't set; that flag has already chosen agent mode.
         if not admin and agent is None and not new_agent:
-            # Look up agents on the target VM
-            vm_agents = db.list_agents(vm_name=resolved_vm.name)
+            # No existing workspace to consult — pick from agents on the
+            # target VM (or default to admin if none exist).
+            vm_agents = db.list_agents(vm_name=resolved_vm_row.name)
             if vm_agents:
                 require_interactive("--admin or --agent")
                 from agentworks import output
@@ -97,55 +106,26 @@ def session_create(
                     options.append(label)
                 idx = output.choose("Run session as:", options)
                 resolved_agent = None if idx == 0 else vm_agents[idx - 1].name
-
-        resolved_ws_name = resolved_workspace or name
-
-        create_workspace(
-            db,
-            config,
-            name=resolved_ws_name,
-            vm_name=resolved_vm.name,
-            template_name=workspace_template,
-        )
-        resolved_workspace = resolved_ws_name
     else:
         ws = prompt_workspace(db, workspace)
-        resolved_workspace = ws.name
-
-        # Resolve mode. Skip the prompt when --new-agent is set.
-        resolved_agent: str | None = agent  # type: ignore[no-redef]
+        resolved_workspace_name = ws.name
         if not admin and agent is None and not new_agent:
             resolved_agent = _prompt_session_mode(db, ws)
 
-        if new_agent:
-            # Agents are VM-scoped; pick up the workspace's VM.
-            vm_row = db.get_vm(ws.vm_name)
-            assert vm_row is not None  # FK guarantees existence
-            resolved_vm = vm_row
-
     if new_agent:
-        assert resolved_vm is not None
-        from agentworks.agents.manager import create_agent
-
-        resolved_agent_name = agent_name or name
-        create_agent(
-            db,
-            config,
-            name=resolved_agent_name,
-            vm_name=resolved_vm.name,
-            template=agent_template,
-        )
-        resolved_agent = resolved_agent_name
+        new_agent_args = NewAgentArgs(template_name=agent_template)
+        resolved_agent = agent_name or name
 
     create_session(
         db,
         config,
         name=name,
-        workspace_name=resolved_workspace,
         template_name=template,
+        workspace_name=resolved_workspace_name,
+        new_workspace=new_workspace_args,
         agent_name=resolved_agent,
-        created_workspace=new_workspace,
-        created_agent=new_agent,
+        new_agent=new_agent_args,
+        vm_name=resolved_vm_name,
     )
 
 

@@ -222,6 +222,9 @@ def stub_session_resolvers(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         session_manager, "_session_secret_target", lambda *a, **k: None
     )
+    monkeypatch.setattr(
+        session_manager, "_session_secret_target_pre_create", lambda *a, **k: None
+    )
     # ``resolve_for_command`` is imported locally inside create_session /
     # restart_session, so patch its module-level home; the import inside
     # the function picks up the patched version.

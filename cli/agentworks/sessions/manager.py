@@ -6,6 +6,7 @@ import contextlib
 import re
 import shlex
 import sys
+from dataclasses import dataclass
 from functools import partial
 from typing import TYPE_CHECKING, NamedTuple
 
@@ -36,7 +37,7 @@ _KNOWN_TEMPLATE_VARS = {"session_name", "workspace_name"}
 
 if TYPE_CHECKING:
     from agentworks.config import Config
-    from agentworks.db import Database, SessionRow, VMRow, WorkspaceRow
+    from agentworks.db import AgentRow, Database, SessionRow, VMRow, WorkspaceRow
     from agentworks.env import EnvEntry
     from agentworks.secrets import SecretTarget
     from agentworks.sessions.templates import ResolvedSessionTemplate
@@ -517,6 +518,63 @@ def _resolve_session_env_scopes(
     )
 
 
+def _session_secret_target_pre_create(
+    config: Config,
+    *,
+    name: str,
+    workspace_name: str,
+    vm: VMRow,
+    session_template: ResolvedSessionTemplate,
+    new_workspace: NewWorkspaceArgs | None,
+    existing_workspace: WorkspaceRow | None,
+    new_agent: NewAgentArgs | None,
+    existing_agent: AgentRow | None,
+    is_admin_mode: bool,
+) -> SecretTarget:
+    """Build a SecretTarget for ``create_session`` *before* any state mutation.
+
+    Unlike :func:`_session_secret_target`, which takes the post-create
+    workspace and agent rows, this resolves the env chain from a mix of
+    template-name inputs (for ephemeral resources) and existing rows. Used
+    once at the top of ``create_session`` so the eager-resolve runs before
+    any of the optional ephemeral creates.
+    """
+    from agentworks.agents.templates import resolve_template as _resolve_agent_tmpl
+    from agentworks.secrets import SecretTarget
+    from agentworks.vms.templates import resolve_from_dict as _resolve_vm_tmpl
+    from agentworks.workspaces.templates import resolve_template as _resolve_ws_tmpl
+
+    vm_template = _resolve_vm_tmpl(config.vm_templates, vm.template)
+
+    if new_workspace is not None:
+        workspace_env = _resolve_ws_tmpl(config, new_workspace.template_name).env
+    else:
+        assert existing_workspace is not None
+        workspace_env = _resolve_ws_tmpl(config, existing_workspace.template).env
+
+    agent_env: dict[str, EnvEntry] | None = None
+    admin_scope: dict[str, EnvEntry] | None = None
+    if is_admin_mode:
+        admin_scope = config.admin.env
+    elif new_agent is not None:
+        agent_env = _resolve_agent_tmpl(config, new_agent.template_name).env
+    elif existing_agent is not None:
+        agent_env = _resolve_agent_tmpl(config, existing_agent.template).env
+
+    session_env = _substitute_template_vars_in_env(
+        session_template.env,
+        variables={"session_name": name, "workspace_name": workspace_name},
+    )
+    return SecretTarget(
+        vm=vm_template.env,
+        workspace=workspace_env,
+        admin=admin_scope,
+        agent=agent_env,
+        session=session_env,
+        label=f"session={name}",
+    )
+
+
 def _session_secret_target(
     config: Config,
     *,
@@ -877,18 +935,72 @@ def batch_check_status(
 # -- Public API ------------------------------------------------------------
 
 
+@dataclass(frozen=True)
+class NewWorkspaceArgs:
+    """Inputs for creating a workspace as part of ``create_session``.
+
+    Bundled in a dataclass (rather than scattered as sibling kwargs) so the
+    "create new" intent is one toggle and the related arguments travel
+    together. ``workspace_name`` on ``create_session`` holds the resulting
+    workspace's name; this struct carries the template choice.
+    """
+
+    template_name: str | None = None
+
+
+@dataclass(frozen=True)
+class NewAgentArgs:
+    """Inputs for creating an agent as part of ``create_session``.
+
+    Bundled in a dataclass for the same reason as ``NewWorkspaceArgs``.
+    ``agent_name`` on ``create_session`` holds the resulting agent's name;
+    this struct carries the template choice.
+    """
+
+    template_name: str | None = None
+
+
 def create_session(
     db: Database,
     config: Config,
     *,
     name: str,
-    workspace_name: str,
     template_name: str | None = None,
+    workspace_name: str | None = None,
+    new_workspace: NewWorkspaceArgs | None = None,
     agent_name: str | None = None,
-    created_workspace: bool = False,
-    created_agent: bool = False,
+    new_agent: NewAgentArgs | None = None,
+    vm_name: str | None = None,
 ) -> None:
-    """Create and start a session."""
+    """Create and start a session.
+
+    Optionally provisions an ephemeral workspace and/or agent as part of
+    the same call. When ``new_workspace`` / ``new_agent`` are set, the
+    full flow (validate → resolve secrets → create resources → create
+    session) runs atomically: validation failures and Ctrl-C at the
+    secret prompt leave no state mutated, and any failure after
+    state mutation begins rolls back every ephemeral resource that
+    was created.
+
+    Args:
+        name: Session name.
+        template_name: Session template (defaults to the operator's default).
+        workspace_name: Name of the workspace this session lives in. When
+            ``new_workspace`` is None, must reference an existing workspace.
+            When ``new_workspace`` is set, names the workspace to create
+            (defaults to ``name``).
+        new_workspace: When set, create a new workspace before the session.
+        agent_name: Existing agent for agent-mode sessions. When
+            ``new_agent`` is set, names the agent to create (defaults to
+            ``name``). When both ``agent_name`` and ``new_agent`` are None,
+            the session runs in admin mode.
+        new_agent: When set, create a new agent before the session.
+        vm_name: Target VM. Optional when an existing workspace or agent
+            pins the VM; required when no other anchor does
+            (e.g. ``new_workspace`` + admin mode, or ``new_workspace`` +
+            ``new_agent``). When specified alongside other anchors, must
+            agree with them, else ``ValidationError``.
+    """
     from agentworks.config import validate_name
     from agentworks.sessions.tmux import (
         create_session as create_tmux_session,
@@ -897,238 +1009,428 @@ def create_session(
         deploy_restricted_config,
     )
 
+    # ===== Pure validation (no SSH, no mutations) ===========================
+
+    if agent_name is not None and new_agent is not None:
+        raise ValidationError(
+            "agent_name and new_agent are mutually exclusive",
+            entity_kind="session",
+            entity_name=name,
+        )
+    if workspace_name is None and new_workspace is None:
+        raise ValidationError(
+            "must specify workspace_name or new_workspace",
+            entity_kind="session",
+            entity_name=name,
+        )
+
+    # Default ephemeral resource names to the session name when omitted.
+    # After this block, ``workspace_name`` is always set; ``agent_name``
+    # is None only in admin mode.
+    if new_workspace is not None and workspace_name is None:
+        workspace_name = name
+    if new_agent is not None and agent_name is None:
+        agent_name = name
+    assert workspace_name is not None  # invariant after the defaulting above
+
     validate_name(name)
-    ws, vm, run_command, run_as_root, target = _prepare_vm(db, config, workspace_name, operation="session-create")
-    with keep_vm_active(db, config, vm):
+    if new_workspace is not None:
+        validate_name(workspace_name)
+    if new_agent is not None:
+        assert agent_name is not None
+        validate_name(agent_name)
 
-        if db.get_session(name) is not None:
+    # DB existence checks. Session must not exist. Ephemeral workspace /
+    # agent must not exist; existing workspace / agent must exist.
+    if db.get_session(name) is not None:
+        raise AlreadyExistsError(
+            f"session '{name}' already exists",
+            entity_kind="session",
+            entity_name=name,
+        )
+    if new_workspace is not None and db.get_workspace(workspace_name) is not None:
+        raise AlreadyExistsError(
+            f"workspace '{workspace_name}' already exists",
+            entity_kind="workspace",
+            entity_name=workspace_name,
+        )
+    if new_agent is not None:
+        assert agent_name is not None  # defaulted to ``name`` above
+        if db.get_agent(agent_name) is not None:
             raise AlreadyExistsError(
-                f"session '{name}' already exists",
-                entity_kind="session",
-                entity_name=name,
+                f"agent '{agent_name}' already exists",
+                entity_kind="agent",
+                entity_name=agent_name,
             )
 
-        # Resolve mode and linux user (no side effects; safe outside the try).
-        resolved_agent_name: str | None = None
-        agent_target = None
-        if agent_name is not None:
-            mode = SessionMode.AGENT
-            agent = db.get_agent(agent_name)
-            if agent is None:
-                raise NotFoundError(
-                    f"agent '{agent_name}' not found",
-                    entity_kind="agent",
-                    entity_name=agent_name,
+    # VM anchor resolution. Each specified resource pins a candidate VM;
+    # they must all agree. By the end of this block we have one VMRow.
+    vm_anchors: list[tuple[str, str]] = []  # (source_label, vm_name)
+    if vm_name is not None:
+        vm_anchors.append(("vm_name", vm_name))
+
+    existing_ws: WorkspaceRow | None = None
+    if new_workspace is None:
+        existing_ws = db.get_workspace(workspace_name)
+        if existing_ws is None:
+            raise NotFoundError(
+                f"workspace '{workspace_name}' not found",
+                entity_kind="workspace",
+                entity_name=workspace_name,
+            )
+        vm_anchors.append((f"workspace '{workspace_name}'", existing_ws.vm_name))
+
+    existing_agent: AgentRow | None = None
+    if new_agent is None and agent_name is not None:
+        existing_agent = db.get_agent(agent_name)
+        if existing_agent is None:
+            raise NotFoundError(
+                f"agent '{agent_name}' not found",
+                entity_kind="agent",
+                entity_name=agent_name,
+            )
+        vm_anchors.append((f"agent '{agent_name}'", existing_agent.vm_name))
+
+    if not vm_anchors:
+        # No existing resources and no explicit vm_name: nothing pins the VM.
+        # Happens for ``new_workspace + admin`` or ``new_workspace + new_agent``
+        # without ``vm_name``.
+        raise ValidationError(
+            "VM anchor required: pass vm_name, or reference an existing workspace or agent",
+            entity_kind="session",
+            entity_name=name,
+        )
+    target_vm_name = vm_anchors[0][1]
+    if any(candidate != target_vm_name for _, candidate in vm_anchors):
+        detail = ", ".join(f"{src}={vm}" for src, vm in vm_anchors)
+        raise ValidationError(
+            f"VM mismatch: {detail}",
+            entity_kind="session",
+            entity_name=name,
+        )
+    vm = db.get_vm(target_vm_name)
+    if vm is None:
+        raise NotFoundError(
+            f"VM '{target_vm_name}' not found",
+            entity_kind="vm",
+            entity_name=target_vm_name,
+        )
+
+    # ===== Template resolution (no SSH, no mutations) =======================
+
+    template = _resolve_template(config, template_name)
+
+    # ===== Ensure VM running + Tailscale reachable (SSH, no mutations) ======
+
+    from agentworks.workspaces.manager import _ensure_vm_running as _ensure_vm_up
+
+    _ensure_vm_up(db, config, vm)
+    if vm.tailscale_host is None:
+        raise StateError(
+            f"VM '{vm.name}' has no Tailscale address",
+            entity_kind="vm",
+            entity_name=vm.name,
+        )
+
+    # ===== Eager-resolve secrets (single call, before any state mutation) ===
+
+    from agentworks.secrets import resolve_for_command
+
+    resolve_for_command(
+        [
+            _session_secret_target_pre_create(
+                config,
+                name=name,
+                workspace_name=workspace_name,
+                vm=vm,
+                session_template=template,
+                new_workspace=new_workspace,
+                existing_workspace=existing_ws,
+                new_agent=new_agent,
+                existing_agent=existing_agent,
+                is_admin_mode=(agent_name is None),
+            ),
+        ],
+        config,
+    )
+    # If we reach here, every secret prompt is done and the resolver cache
+    # is warm. The downstream create_workspace / create_agent / inner
+    # session-internal block will not re-prompt the operator.
+
+    # ===== Atomic state mutations with rollback =============================
+
+    workspace_created = False
+    agent_created = False
+
+    def _rollback_ephemerals() -> None:
+        """Undo ephemeral resource creates on later failure. Order is
+        reverse-of-create (agent before workspace) so the agent's
+        workspace-group membership is cleaned up before the group
+        itself goes away. Each step wrapped so a rollback failure
+        doesn't mask the original exception."""
+        if agent_created:
+            assert agent_name is not None  # set when new_agent is not None
+            try:
+                from agentworks.agents.manager import delete_agent
+
+                delete_agent(db, config, name=agent_name, force=True, yes=True)
+            except Exception as e:
+                output.warn(
+                    f"rollback: failed to delete ephemeral agent '{agent_name}': {e}"
                 )
-            if agent.vm_name != vm.name:
-                raise ValidationError(
-                    f"agent '{agent_name}' is on VM '{agent.vm_name}', "
-                    f"but workspace '{workspace_name}' is on VM '{vm.name}'",
-                    entity_kind="session",
-                    entity_name=name,
+        if workspace_created:
+            try:
+                from agentworks.workspaces.manager import delete_workspace
+
+                delete_workspace(db, config, workspace_name, force=True, yes=True)
+            except Exception as e:
+                output.warn(
+                    f"rollback: failed to delete ephemeral workspace '{workspace_name}': {e}"
                 )
-            linux_user = agent.linux_user
-            resolved_agent_name = agent_name
 
-            # Probe direct agent SSH BEFORE any state mutation (group add,
-            # DB inserts, restricted-config write). A pre-rollout agent
-            # surfaces here as an actionable StateError; without this,
-            # the rollback path would unwind the mutations but the
-            # operator's view would just see "session create failed".
-            from agentworks.agents.manager import _assert_agent_ssh_works
-            from agentworks.transports import agent_transport
+    try:
+        # ---- Ephemeral creates -------------------------------------------------
+        if new_workspace is not None:
+            from agentworks.workspaces.manager import create_workspace
 
-            agent_target = agent_transport(vm, config, agent)
-            _assert_agent_ssh_works(agent_target, agent)
-        else:
-            mode = SessionMode.ADMIN
-            linux_user = vm.admin_username
-
-        template = _resolve_template(config, template_name)
-
-        # Pre-flight: verify the template's required commands exist on the
-        # launch target BEFORE any state mutation. A missing binary otherwise
-        # only surfaces as a cryptic tmux server-access failure downstream
-        # (see _assert_required_commands). For agent mode the probe runs over
-        # the agent's own SSH (already proven by _assert_agent_ssh_works);
-        # for admin mode over the admin connection.
-        if mode == SessionMode.AGENT:
-            assert agent_target is not None  # set in the agent_name branch above
-            _assert_required_commands(
-                agent_target.run,
-                template,
-                session_name=name,
-                target_label=f"agent '{resolved_agent_name}'",
+            create_workspace(
+                db,
+                config,
+                name=workspace_name,
+                vm_name=vm.name,
+                template_name=new_workspace.template_name,
             )
-        else:
-            _assert_required_commands(
-                run_command,
-                template,
-                session_name=name,
-                target_label=f"VM '{vm.name}'",
+            workspace_created = True
+        if new_agent is not None:
+            assert agent_name is not None  # defaulted to ``name`` above
+            from agentworks.agents.manager import create_agent
+
+            create_agent(
+                db,
+                config,
+                name=agent_name,
+                vm_name=vm.name,
+                template=new_agent.template_name,
             )
+            agent_created = True
 
-        # Compute socket path up front (deterministic from linux_user + session name).
-        # Needed for the DB insert since the CHECK constraint requires agent sessions
-        # to have a socket_path.
-        expected_socket: str | None = None
-        if mode == SessionMode.AGENT:
-            from agentworks.sessions.tmux import agent_socket_path
+        # ---- Session-internal mutations ---------------------------------------
+        ws, vm_check, run_command, run_as_root, target = _prepare_vm(
+            db, config, workspace_name, operation="session-create"
+        )
+        with keep_vm_active(db, config, vm_check):
+            # Resolve mode and linux user (no side effects; safe outside the try).
+            resolved_agent_name: str | None = None
+            agent_target = None
+            if agent_name is not None:
+                mode = SessionMode.AGENT
+                agent = db.get_agent(agent_name)
+                if agent is None:
+                    raise NotFoundError(
+                        f"agent '{agent_name}' not found",
+                        entity_kind="agent",
+                        entity_name=agent_name,
+                    )
+                # Cross-VM defense-in-depth (already validated upfront for
+                # existing agents; trivially true for fresh ephemeral agents).
+                if agent.vm_name != vm_check.name:
+                    raise ValidationError(
+                        f"agent '{agent_name}' is on VM '{agent.vm_name}', "
+                        f"but workspace '{workspace_name}' is on VM '{vm_check.name}'",
+                        entity_kind="session",
+                        entity_name=name,
+                    )
+                linux_user = agent.linux_user
+                resolved_agent_name = agent_name
 
-            expected_socket = agent_socket_path(linux_user, name)
+                # Probe direct agent SSH BEFORE any state mutation (group add,
+                # DB inserts, restricted-config write). A pre-rollout agent
+                # surfaces here as an actionable StateError; without this,
+                # the rollback path would unwind the mutations but the
+                # operator's view would just see "session create failed".
+                from agentworks.agents.manager import _assert_agent_ssh_works
+                from agentworks.transports import agent_transport
 
-        # Eager-prompting orchestration (FRD R4 / Phase 6): resolve every
-        # secret referenced by this session's env chain up front, before
-        # the auto-grant insert / DB row / restricted-config write below.
-        # Non-interactive failures surface as SecretUnavailableError with
-        # a per-secret hint, with no partial state to clean up.
-        from agentworks.secrets import resolve_for_command
+                agent_target = agent_transport(vm_check, config, agent)
+                _assert_agent_ssh_works(agent_target, agent)
+            else:
+                mode = SessionMode.ADMIN
+                linux_user = vm_check.admin_username
 
-        resolve_for_command(
-            [
-                _session_secret_target(
+            # Pre-flight: verify the template's required commands exist on the
+            # launch target BEFORE any state mutation. A missing binary otherwise
+            # only surfaces as a cryptic tmux server-access failure downstream
+            # (see _assert_required_commands). For agent mode the probe runs over
+            # the agent's own SSH (already proven by _assert_agent_ssh_works);
+            # for admin mode over the admin connection.
+            if mode == SessionMode.AGENT:
+                assert agent_target is not None  # set in the agent_name branch above
+                _assert_required_commands(
+                    agent_target.run,
+                    template,
+                    session_name=name,
+                    target_label=f"agent '{resolved_agent_name}'",
+                )
+            else:
+                _assert_required_commands(
+                    run_command,
+                    template,
+                    session_name=name,
+                    target_label=f"VM '{vm_check.name}'",
+                )
+
+            # Compute socket path up front (deterministic from linux_user + session name).
+            # Needed for the DB insert since the CHECK constraint requires agent sessions
+            # to have a socket_path.
+            expected_socket: str | None = None
+            if mode == SessionMode.AGENT:
+                from agentworks.sessions.tmux import agent_socket_path
+
+                expected_socket = agent_socket_path(linux_user, name)
+
+            def _rollback() -> None:
+                # Best-effort rollback for the session-internal mutations only;
+                # ephemeral resources (workspace / agent created above) are
+                # unwound by the outer ``_rollback_ephemerals``. Each step
+                # wrapped so a cleanup failure surfaces as a warning instead of
+                # masking the original exception.
+                try:
+                    db.delete_session(name)
+                except Exception as e:
+                    output.warn(f"rollback: failed to delete session row '{name}': {e}")
+                if not resolved_agent_name:
+                    return
+                try:
+                    db.delete_agent_grant(
+                        resolved_agent_name, workspace_name, "implicit", session_name=name
+                    )
+                    remaining = db.has_any_grant(resolved_agent_name, workspace_name)
+                except Exception as e:
+                    output.warn(
+                        f"rollback: failed to revoke implicit grant for agent "
+                        f"'{resolved_agent_name}' on workspace '{workspace_name}': {e}"
+                    )
+                    return
+                if not remaining:
+                    try:
+                        from agentworks.agents.manager import _remove_from_workspace_group
+
+                        _remove_from_workspace_group(
+                            vm_check, config, db, linux_user, workspace_name, logger=None
+                        )
+                    except Exception as e:
+                        output.warn(
+                            f"rollback: failed to remove agent '{resolved_agent_name}' from "
+                            f"workspace '{workspace_name}' group: {e}"
+                        )
+
+            try:
+                # Everything that creates partial session state (on-VM group
+                # membership, implicit-grant row, session row, restricted-config
+                # write, tmux session) runs inside this block so a KI /
+                # exception anywhere here triggers ``_rollback()``.
+                if resolved_agent_name is not None:
+                    # Auto-grant implicit workspace access if the agent has no
+                    # existing grant on this workspace.
+                    if not db.has_any_grant(resolved_agent_name, workspace_name):
+                        from agentworks.agents.manager import _add_to_workspace_group
+
+                        _add_to_workspace_group(
+                            vm_check, config, db, linux_user, workspace_name
+                        )
+                    db.insert_agent_grant(
+                        resolved_agent_name, workspace_name, "implicit", session_name=name
+                    )
+
+                # Insert DB record before any tmux work so a crash mid-create
+                # leaves a recoverable row (and ``_rollback`` can find it to
+                # delete).
+                db.insert_session(
+                    name,
+                    workspace_name,
+                    template.name,
+                    mode,
+                    agent_name=resolved_agent_name,
+                    created_workspace=workspace_created,
+                    created_agent=agent_created,
+                    socket_path=expected_socket,
+                )
+
+                deploy_restricted_config(run_command, history_limit=config.session.history_limit)
+                command = _build_session_command(
+                    template, session_name=name, workspace_name=workspace_name
+                )
+                session_env = _resolve_session_env(
                     config,
                     db=db,
-                    vm=vm,
+                    vm=vm_check,
                     ws=ws,
                     session_name=name,
                     session_template=template,
                     mode=mode,
                     agent_name=resolved_agent_name,
-                ),
-            ],
-            config,
-        )
-
-        def _rollback() -> None:
-            # Best-effort rollback. Each step runs inside its own try/except so
-            # that a cleanup failure surfaces as a warning instead of masking
-            # the KeyboardInterrupt or exception that triggered the rollback.
-            # Without this, e.g. a DB error during delete_agent_grant would
-            # replace the user's Ctrl-C with an opaque error exit. Each step
-            # is also idempotent / safe-when-partial: a no-op delete is fine,
-            # has_any_grant accurately decides group removal even if the
-            # implicit-grant insert never ran.
-            try:
-                db.delete_session(name)
-            except Exception as e:
-                output.warn(f"rollback: failed to delete session row '{name}': {e}")
-            if not resolved_agent_name:
-                return
-            try:
-                db.delete_agent_grant(resolved_agent_name, workspace_name, "implicit", session_name=name)
-                remaining = db.has_any_grant(resolved_agent_name, workspace_name)
-            except Exception as e:
-                output.warn(
-                    f"rollback: failed to revoke implicit grant for agent "
-                    f"'{resolved_agent_name}' on workspace '{workspace_name}': {e}"
+                    linux_user=linux_user,
                 )
-                return
-            if not remaining:
-                try:
-                    from agentworks.agents.manager import _remove_from_workspace_group
+                # Pick the SSH transport for tmux operations:
+                # - admin sessions: admin's run_command (unchanged)
+                # - agent sessions: agent's run_command (FRD R1, direct
+                #   target-user SSH). agent_target was built and probed above
+                #   so a pre-rollout agent never reaches this point. admin's
+                #   ``target`` is still passed for socket-root setup which
+                #   requires root.
+                session_run_command: RunCommand
+                if mode == SessionMode.AGENT:
+                    assert agent_target is not None  # set in the agent_name branch above
+                    session_run_command = agent_target.run
+                else:
+                    session_run_command = run_command
+                sock, pid = create_tmux_session(
+                    name,
+                    ws.workspace_path,
+                    command,
+                    linux_user,
+                    run_command=session_run_command,
+                    target=target,
+                    admin_username=vm_check.admin_username,
+                    is_admin=(mode == SessionMode.ADMIN),
+                    env=session_env,
+                )
+            except KeyboardInterrupt:
+                output.warn(f"Cancelling session create '{name}'... rolling back.")
+                _rollback()
+                raise
+            except Exception:
+                _rollback()
+                raise
 
-                    _remove_from_workspace_group(vm, config, db, linux_user, workspace_name, logger=None)
-                except Exception as e:
-                    output.warn(
-                        f"rollback: failed to remove agent '{resolved_agent_name}' from "
-                        f"workspace '{workspace_name}' group: {e}"
-                    )
-
-        try:
-            # Everything that creates partial state (on-VM group membership,
-            # implicit-grant row, session row, restricted-config write, tmux
-            # session) runs inside this block so a KI / exception anywhere here
-            # triggers _rollback(). Without this, a Ctrl-C between the
-            # auto-grant insert and the session insert would leak both a grant
-            # row and a Linux group membership with no session to anchor them.
-            if resolved_agent_name is not None:
-                # Auto-grant implicit workspace access if the agent has no
-                # existing grant on this workspace.
-                if not db.has_any_grant(resolved_agent_name, workspace_name):
-                    from agentworks.agents.manager import _add_to_workspace_group
-
-                    _add_to_workspace_group(vm, config, db, linux_user, workspace_name)
-                db.insert_agent_grant(resolved_agent_name, workspace_name, "implicit", session_name=name)
-
-            # Insert DB record before any tmux work so a crash mid-create leaves
-            # a recoverable row (and _rollback can find it to delete).
-            db.insert_session(
-                name,
-                workspace_name,
-                template.name,
-                mode,
-                agent_name=resolved_agent_name,
-                created_workspace=created_workspace,
-                created_agent=created_agent,
-                socket_path=expected_socket,
-            )
-
-            deploy_restricted_config(run_command, history_limit=config.session.history_limit)
-            command = _build_session_command(template, session_name=name, workspace_name=workspace_name)
-            session_env = _resolve_session_env(
-                config,
-                db=db,
-                vm=vm,
-                ws=ws,
-                session_name=name,
-                session_template=template,
-                mode=mode,
-                agent_name=resolved_agent_name,
-                linux_user=linux_user,
-            )
-            # Pick the SSH transport for tmux operations:
-            # - admin sessions: admin's run_command (unchanged)
-            # - agent sessions: agent's run_command (FRD R1, direct
-            #   target-user SSH). agent_target was built and probed above
-            #   so a pre-rollout agent never reaches this point. admin's
-            #   ``target`` is still passed for socket-root setup which
-            #   requires root.
-            session_run_command: RunCommand
-            if mode == SessionMode.AGENT:
-                assert agent_target is not None  # set in the agent_name branch above
-                session_run_command = agent_target.run
+            # Persist socket path, PID, and boot ID
+            if sock:
+                db.update_session_socket_path(name, sock)
+            if pid is not None:
+                boot_id = _get_boot_id(target)
+                if boot_id is not None:
+                    db.update_session_pid(name, pid, boot_id=boot_id)
+                else:
+                    output.warn(f"Could not read boot ID for session '{name}', PID not stored")
             else:
-                session_run_command = run_command
-            sock, pid = create_tmux_session(
-                name,
-                ws.workspace_path,
-                command,
-                linux_user,
-                run_command=session_run_command,
-                target=target,
-                admin_username=vm.admin_username,
-                is_admin=(mode == SessionMode.ADMIN),
-                env=session_env,
-            )
-        except KeyboardInterrupt:
-            output.warn(f"Cancelling session create '{name}'... rolling back.")
-            _rollback()
-            raise
-        except Exception:
-            _rollback()
-            raise
+                output.warn(
+                    f"Could not capture PID for session '{name}', will auto-repair on next access"
+                )
 
-        # Persist socket path, PID, and boot ID
-        if sock:
-            db.update_session_socket_path(name, sock)
-        if pid is not None:
-            boot_id = _get_boot_id(target)
-            if boot_id is not None:
-                db.update_session_pid(name, pid, boot_id=boot_id)
-            else:
-                output.warn(f"Could not read boot ID for session '{name}', PID not stored")
-        else:
-            output.warn(f"Could not capture PID for session '{name}', will auto-repair on next access")
+            mode_label = f"agent: {resolved_agent_name}" if resolved_agent_name else "admin"
+            output.info(f"Session '{name}' started ({mode_label}, template: {template.name})")
 
-        mode_label = f"agent: {resolved_agent_name}" if resolved_agent_name else "admin"
-        output.info(f"Session '{name}' started ({mode_label}, template: {template.name})")
+            # Update tmuxinator config and add to console if it exists
+            _regenerate_tmuxinator(db, config, vm_check, ws)
+            from agentworks.sessions.console import add_session_to_console
 
-        # Update tmuxinator config and add to console if it exists
-        _regenerate_tmuxinator(db, config, vm, ws)
-        from agentworks.sessions.console import add_session_to_console
-
-        add_session_to_console(name, run_command=run_command, socket_path=sock)
+            add_session_to_console(name, run_command=run_command, socket_path=sock)
+    except KeyboardInterrupt:
+        _rollback_ephemerals()
+        raise
+    except Exception:
+        _rollback_ephemerals()
+        raise
 
 
 def _execute_stop(
