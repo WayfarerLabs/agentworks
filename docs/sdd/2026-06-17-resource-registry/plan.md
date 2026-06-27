@@ -475,8 +475,36 @@ Definition of done: `agw resource list` and `agw resource describe <kind> <name>
 kinds; CI green; reviewer-approved.
 
 **Phase 2 ships at this point.** PR sequence on `feat/resource-registry-phase-2`, branched from
-`main` **after Phase 1 merges** (not from the Phase 1 branch tip). Lockfile updated after Phase 2c's
-reviewer pass.
+`main` **after Phase 1 merges** (not from the Phase 1 branch tip). A single `locked.md` lands at the
+end of Phase 2c covering the whole SDD.
+
+## Phase 1 follow-ups (deferred at ship; non-blocking)
+
+Items the reviewer flagged as worth landing but explicitly safe to defer past Phase 1 ship. None
+gates Phase 2 work; pick them off opportunistically alongside Phase 2 phases that touch the relevant
+code.
+
+- **Synthesize-on-the-fly duplication.** `SecretResolver.render` (Phase 1b),
+  `_lookup_or_synthesize_secret` in `vms/manager.py` (Phase 1c), and `_collect_git_tokens`'s
+  fallback (Phase 1d) all build a bare `SecretDecl(name=..., description="")` matching the
+  `_SecretKind.synthesize` shape (sans `origin`). A `SecretDecl.auto_declared(name)` classmethod on
+  `secrets/base.py` would single-source the shape so every fallback site converges by construction;
+  lands cleanly alongside Phase 2a's `VMTemplateKind` (which closes most of the fallback sites'
+  practical need anyway).
+- **`_collect_git_tokens` placement.** Lives in `vms/manager.py` today, cross-imported by
+  `agents/manager.py`. A neutral location (e.g. `agentworks/git_credentials/resolve.py`) reads more
+  naturally; move when Phase 2 touches the helper.
+- **`output.detail` vs `output.info` for nested sections.** `render_secret_description` uses
+  `output.info` with hand-indented strings; the rest of the codebase uses `output.detail`. Pure
+  style; do it when Phase 2c's `agw resource describe` lands the cross-kind renderer.
+- **`SecretDescription.kind = "secret"` hard-coded.** Use the kind registry constant so a
+  hypothetical rename can't drift the describe output silently.
+- **FRD R10 dedupe wording is ambiguous.** "Duplicate usage text is collapsed" doesn't pin whether
+  dedupe is by `(source, text)` (current implementation) or by `text` alone. Resolve in the FRD when
+  Phase 2c's `agw resource describe` reuses the same `usage` rendering. The current read is
+  `(source, text)`; the FRD edit can either confirm or flip and update the renderer.
+- **Pre-existing `agents/manager.py:1337` `ExecTarget` reference.** Confirmed already fixed on main
+  when PR #136 landed and was merged into this branch via `eb3724e`. No action.
 
 ## Sequencing notes
 
@@ -495,9 +523,9 @@ reviewer pass.
 - **Reviewer cadence**: `agentworks-reviewer` agent runs after each phase. Aim for "this is
   perfect"; iterate until findings are addressed before moving to the next phase. Capture per-phase
   findings as commits with descriptive messages so the lockfile can summarize the iteration trail.
-- **Lockfile**: written after Phase 1e (covers Phase 1 ship) and updated after Phase 2c (covers
-  Phase 2 ship). Each lockfile records the framework shape as shipped, deferred items, ADRs (none
-  anticipated for this SDD).
+- **Lockfile**: a single `locked.md` lands once at the end of Phase 2c covering the whole SDD. The
+  plan itself is the running log across Phase 1 + Phase 2 (checkboxes mark progress; the Phase 1
+  follow-ups section above tracks items deferred at Phase 1 ship). No per-phase milestone files.
 - **Out-of-scope reminders**: no plugin source (future SDD); no DB-backed resources (future manifest
   SDD); no namespaces; no per-source miss policies; no per-field merge.
 
