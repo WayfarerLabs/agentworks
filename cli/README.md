@@ -592,21 +592,51 @@ agw env show --session my-session              # secrets redacted as <from secre
 agw env show --vm my-vm --reveal-secrets       # resolves through the active backend chain
 ```
 
-Inspect how each active backend would resolve each declared secret (e.g. "which env var name does
-this secret read from?") with `agw secret list`:
+Inspect how each active backend would resolve each declared or auto-declared secret (e.g. "which env
+var name does this secret read from?") with `agw secret list`:
 
 ```bash
 agw secret list
-# NAME           env-var                  prompt
-# ----           -------                  ------
-# github-token   AW_SECRET_GITHUB_TOKEN   enabled
-# force-prompt   disabled                 enabled
-# api-key        OPENAI_API_KEY           enabled
+# 4 secrets (2 operator-declared, 2 auto-declared)
+#
+# NAME                 ORIGIN                                env-var                       prompt
+# ----                 ------                                -------                       ------
+# api-key              operator-declared (~/.config/...:42)  OPENAI_API_KEY                enabled
+# force-prompt         operator-declared (~/.config/...:48)  disabled                      enabled
+# git-token-github     auto-declared by git_credentials:...  AW_SECRET_GIT_TOKEN_GITHUB    enabled
+# tailscale-auth-key   auto-declared by vm_template:default  AW_SECRET_TAILSCALE_AUTH_KEY  enabled
 ```
 
 Columns are the active backends in `[secret_config].backends` precedence order. Cells show each
 backend's static lookup identifier (env var name, vault path, `op://` URI) or `disabled` / `enabled`
-for backends with an explicit opt-out or no static identifier (prompt). Values are never resolved.
+for backends with an explicit opt-out or no static identifier (prompt). The `Origin` column shows
+whether the secret came from `[secrets.<name>]` (operator-declared, with file:line) or was
+auto-declared via the Resource Registry's miss policy (e.g., a VM template's `tailscale_auth_key`
+requirement, a git-credential's `token`, an env-block `{ secret = "..." }`). Values are never
+resolved.
+
+For the full per-secret detail view, including usage list (who requires this secret), per-backend
+mapping table, and a resolution preview, use `agw secret describe`:
+
+```bash
+agw secret describe tailscale-auth-key
+# Secret: tailscale-auth-key
+#   Kind:        secret
+#   Origin:      auto-declared by vm_template:default
+#   Description: (none)
+#
+# Usages:
+#   - vm_template:default -- the VM-provisioning auth key
+#
+# Backend mappings:
+#   - env-var: AW_SECRET_TAILSCALE_AUTH_KEY
+#   - prompt: (prompt at resolution time)
+#
+# Resolution preview:
+#   would resolve via env-var
+```
+
+`describe` reports state -- it does not prompt and does not resolve the secret's value.
 
 `agw doctor`'s Secrets group leads with one row naming the active backend chain
 (`Configured backends: env-var, prompt`). Then one row per declared secret showing whether the chain

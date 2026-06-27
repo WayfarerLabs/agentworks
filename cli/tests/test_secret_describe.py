@@ -69,8 +69,12 @@ def test_operator_declared_secret_shows_file_and_line(
     assert desc.kind == "secret"
     assert desc.description == "API key for the operator's service"
     # operator-declared shows the config file path and line number.
+    # The path renders relative to ``$HOME`` with a ``~/`` prefix when
+    # under the user's home directory; otherwise an absolute path. The
+    # test fixture's ``tmp_path`` is typically under ``$HOME`` on CI but
+    # not always, so accept either shape.
     assert desc.origin_text.startswith("operator-declared (")
-    assert str(cfg) in desc.origin_text
+    assert cfg.name in desc.origin_text  # file name appears regardless
     # Line should be a positive integer (the [secrets.api-key] header line).
     line_str = desc.origin_text.rsplit(":", 1)[1].rstrip(")")
     assert int(line_str) > 0
@@ -401,15 +405,22 @@ def test_render_emits_header_usages_mappings_preview(
 # -- Missing-name behavior --------------------------------------------------
 
 
-def test_describe_secret_raises_key_error_for_unknown_name(
+def test_describe_secret_raises_not_found_for_unknown_name(
     tmp_path: Path, ssh_keys: tuple[Path, Path]
 ) -> None:
-    """The service-layer function raises ``KeyError`` for an unknown
-    secret name; the CLI wraps that in a typed ``NotFoundError`` for
-    operator-facing rendering. Verified here at the service layer.
+    """The service-layer function raises ``NotFoundError`` for an
+    unknown secret name (typed at the service layer per the project's
+    service-layer-is-the-authority rule; CLI / future web/API clients
+    render uniformly).
     """
+    from agentworks.errors import NotFoundError
+
     cfg = _write_cfg(tmp_path, "", ssh_keys)
     config = load_config(cfg, warn_issues=False)
     registry = build_registry(config)
-    with pytest.raises(KeyError):
+    with pytest.raises(NotFoundError) as exc:
         describe_secret(registry, config, "no-such-secret")
+    assert exc.value.entity_kind == "secret"
+    assert exc.value.entity_name == "no-such-secret"
+    assert exc.value.hint is not None
+    assert "agw secret list" in exc.value.hint

@@ -43,6 +43,7 @@ class SecretRow:
 
     name: str
     description: str
+    origin_text: str
     cells: tuple[SecretCell, ...]
 
 
@@ -51,29 +52,50 @@ class SecretTable:
     """Full table for ``agw secret list``.
 
     ``backend_kinds`` lists the columns in the configured chain order
-    (precedence order). ``rows`` is one per declared secret. Empty rows
-    or backends are surfaced by the renderer, not filtered here.
+    (precedence order). ``rows`` is one per Registry-published secret
+    (operator-declared and auto-declared alike). ``operator_count`` /
+    ``auto_count`` drive the header summary per FRD R10.
     """
 
     backend_kinds: tuple[str, ...]
     rows: tuple[SecretRow, ...]
+    operator_count: int
+    auto_count: int
 
 
-def build_secret_table(config: Config) -> SecretTable:
-    """Build a (secrets x backends) table from the loaded Config.
+def build_secret_table(config: Config, registry: Registry) -> SecretTable:
+    """Build a (secrets x backends) table from the Registry.
 
-    Walks ``config.secret_resolver``'s active source chain in precedence
-    order; for each declared secret asks each source whether it would
-    attempt and what identifier it would use. Pure config-derived; never
-    probes the backend or resolves a value.
+    Phase 1e of the Resource Registry SDD: the table iterates the
+    Registry's ``"secret"`` kind so auto-declared secrets surface in
+    ``agw secret list`` alongside operator-declared ones (FRD R10).
+    Each row carries an Origin string so operators can tell which
+    secret came from where; the header summary reports the counts.
+
+    Walks ``config.secret_resolver``'s active source chain in
+    precedence order; for each Registry-published secret asks each
+    source whether it would attempt and what identifier it would use.
+    Pure config + registry derived; never probes the backend or
+    resolves a value.
     """
     resolver = config.secret_resolver
     sources = resolver.sources
     backend_kinds = tuple(s.kind for s in sources)
 
+    operator_count = 0
+    auto_count = 0
     rows: list[SecretRow] = []
-    for name in sorted(config.secrets):
-        decl = config.secrets[name]
+    for decl in sorted(registry.iter_kind("secret"), key=lambda d: d.name):
+        origin_text = _format_origin(decl)
+        # Variant-based counter; defensive on missing origin.
+        variant = getattr(getattr(decl, "origin", None), "variant", None)
+        if variant == "operator-declared":
+            operator_count += 1
+        elif variant == "auto-declared":
+            auto_count += 1
+        # code-declared not yet a path for secrets; Phase 2b's catalog
+        # publisher emits code-declared but for non-secret kinds.
+
         cells = tuple(
             SecretCell(
                 backend_kind=s.kind,
@@ -83,10 +105,20 @@ def build_secret_table(config: Config) -> SecretTable:
             for s in sources
         )
         rows.append(
-            SecretRow(name=name, description=decl.description, cells=cells)
+            SecretRow(
+                name=decl.name,
+                description=decl.description,
+                origin_text=origin_text,
+                cells=cells,
+            )
         )
 
-    return SecretTable(backend_kinds=backend_kinds, rows=tuple(rows))
+    return SecretTable(
+        backend_kinds=backend_kinds,
+        rows=tuple(rows),
+        operator_count=operator_count,
+        auto_count=auto_count,
+    )
 
 
 def render_secret_table(table: SecretTable) -> None:
@@ -106,7 +138,7 @@ def render_secret_table(table: SecretTable) -> None:
     (e.g. ``prompt``).
     """
     if not table.rows:
-        output.info("No secrets declared in config.")
+        output.info("No secrets in the resource registry.")
         return
     if not table.backend_kinds:
         output.info(
@@ -115,10 +147,21 @@ def render_secret_table(table: SecretTable) -> None:
         )
         return
 
+    # Header summary per FRD R10: total + per-origin counts.
+    total = len(table.rows)
+    parts: list[str] = []
+    if table.operator_count:
+        parts.append(f"{table.operator_count} operator-declared")
+    if table.auto_count:
+        parts.append(f"{table.auto_count} auto-declared")
+    breakdown = f" ({', '.join(parts)})" if parts else ""
+    output.info(f"{total} secret{'s' if total != 1 else ''}{breakdown}")
+    output.info("")
+
     # Render cells to strings up front so column widths can be measured.
     rendered: list[tuple[str, ...]] = []
     for row in table.rows:
-        cells: list[str] = [row.name]
+        cells: list[str] = [row.name, row.origin_text]
         for cell in row.cells:
             if not cell.would_attempt:
                 cells.append("disabled")
@@ -128,7 +171,7 @@ def render_secret_table(table: SecretTable) -> None:
                 cells.append("enabled")
         rendered.append(tuple(cells))
 
-    headers = ("NAME", *table.backend_kinds)
+    headers = ("NAME", "ORIGIN", *table.backend_kinds)
     widths = [
         max(len(headers[i]), *(len(r[i]) for r in rendered))
         for i in range(len(headers))
@@ -199,13 +242,17 @@ class SecretDescription:
     ``origin_text`` is pre-rendered ("operator-declared (config.toml:42)"
     or "auto-declared by vm_template:default") so the CLI renderer is
     purely a formatter. The supplemental "also required by ..." list
-    is derived from ``usages`` at render time.
+    is derived from ``usages`` at render time. ``hint`` is the
+    operator-set prompt hint (``[secrets.<name>].hint``), surfaced for
+    debugging "why isn't my prompt showing the helpful hint" without
+    triggering a prompt.
     """
 
     name: str
     kind: str
     origin_text: str
     description: str
+    hint: str | None
     usages: tuple[UsageEntry, ...]
     backend_mappings: tuple[BackendMapping, ...]
     resolution: ResolutionPreview
@@ -213,19 +260,27 @@ class SecretDescription:
 
 def _format_origin(decl: object) -> str:
     """Render a Resource's ``origin: Origin`` field as the
-    ``"operator-declared (file:line)"`` / ``"auto-declared by k:n"`` /
-    ``"code-declared by source"`` string per FRD R10. Defensive
-    fallback when ``origin`` is missing or unrecognized.
+    ``"operator-declared (path:line)"`` / ``"auto-declared by k:n"`` /
+    ``"code-declared by source"`` string per FRD R10.
+
+    The path is rendered relative to ``$HOME`` with a ``~/`` prefix
+    when it falls under the user's home directory; otherwise the bare
+    absolute path. (Operator configs live at ``~/.config/agentworks/
+    config.toml`` so the common case becomes the short, FRD-example-
+    shaped form.)
     """
     origin = getattr(decl, "origin", None)
     if origin is None:
+        # Defensive: a Resource constructed outside the framework path
+        # may not carry an origin yet. Surfaces as "unknown" rather
+        # than crashing.
         return "unknown"
     variant = getattr(origin, "variant", None)
     if variant == "operator-declared":
         file = origin.file
         line = origin.line
         if file is not None and line:
-            return f"operator-declared ({file}:{line})"
+            return f"operator-declared ({_format_file_path(file)}:{line})"
         return "operator-declared"
     if variant == "auto-declared":
         source = origin.source
@@ -235,7 +290,31 @@ def _format_origin(decl: object) -> str:
     if variant == "code-declared":
         source = origin.source
         return f"code-declared by {source}" if source else "code-declared"
-    return f"origin variant {variant!r}"
+    # Unreachable under the Origin dataclass's Literal[...] variant
+    # constraint; surface loudly if it ever fires rather than emitting
+    # a confusing string in front of an operator.
+    raise AssertionError(f"unhandled Origin variant: {variant!r}")
+
+
+def _format_file_path(file: object) -> str:
+    """Render a file path operator-friendly: ``~/path`` when under
+    ``$HOME``, else the bare absolute path. Falls back to ``str(file)``
+    on any unexpected shape (defensive; Origin's file field is typed
+    ``Path | None`` so this only fires on truly weird construction).
+    """
+    from pathlib import Path
+
+    try:
+        path = Path(str(file))
+        home = Path.home()
+        if path.is_absolute():
+            try:
+                return f"~/{path.relative_to(home)}"
+            except ValueError:
+                return str(path)
+        return str(path)
+    except Exception:
+        return str(file)
 
 
 def describe_secret(
@@ -246,11 +325,23 @@ def describe_secret(
     """Build a ``SecretDescription`` for one secret in the registry.
 
     Per FRD R10. Pure config + registry derived; no I/O, no prompting,
-    no resolution. Raises ``KeyError`` if ``name`` isn't a published
-    secret -- the CLI command wraps this in a typed ``ConfigError`` /
-    ``NotFoundError`` for operator-facing rendering.
+    no resolution. Raises ``NotFoundError`` if ``name`` isn't a
+    published secret -- typed at the service layer so CLI / future
+    web/API clients all see the same error shape (per the project's
+    service-layer-is-the-authority rule). The ``hint`` attribute
+    points operators at ``agw secret list``.
     """
-    decl = registry.lookup("secret", name)
+    from agentworks.errors import NotFoundError
+
+    try:
+        decl = registry.lookup("secret", name)
+    except KeyError:
+        raise NotFoundError(
+            f"secret {name!r} is not in the resource registry",
+            entity_kind="secret",
+            entity_name=name,
+            hint="check `agw secret list` for declared and auto-declared names",
+        ) from None
     origin_text = _format_origin(decl)
     description = getattr(decl, "description", "") or ""
     # Usages come from the finalize pass's attachment (one entry per
@@ -295,6 +386,7 @@ def describe_secret(
         kind="secret",
         origin_text=origin_text,
         description=description,
+        hint=getattr(decl, "hint", None),
         usages=usages,
         backend_mappings=tuple(mappings),
         resolution=ResolutionPreview(
@@ -318,6 +410,8 @@ def render_secret_description(desc: SecretDescription) -> None:
         output.info(f"  Description: {desc.description}")
     else:
         output.info("  Description: (none)")
+    if desc.hint:
+        output.info(f"  Hint:        {desc.hint}")
 
     # --- Usages ---
     output.info("")

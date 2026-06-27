@@ -24,10 +24,13 @@ def secret_list() -> None:
     ``disabled`` / ``enabled`` for backends with no static identifier or
     an explicit opt-out. Values are never resolved.
     """
+    from agentworks.bootstrap import build_registry
     from agentworks.config import load_config
     from agentworks.secrets.inspect import build_secret_table, render_secret_table
 
-    render_secret_table(build_secret_table(load_config()))
+    config = load_config()
+    registry = build_registry(config)
+    render_secret_table(build_secret_table(config, registry))
 
 
 @secret_app.command("describe")
@@ -50,18 +53,9 @@ def secret_describe(
     """
     from agentworks.bootstrap import build_registry
     from agentworks.config import load_config
-    from agentworks.errors import NotFoundError
     from agentworks.secrets.inspect import describe_secret, render_secret_description
 
     config = load_config()
     registry = build_registry(config)
-    try:
-        desc = describe_secret(registry, config, name)
-    except KeyError:
-        raise NotFoundError(
-            f"secret {name!r} is not in the resource registry; check "
-            f"`agw secret list` for declared and auto-declared names",
-            entity_kind="secret",
-            entity_name=name,
-        ) from None
+    desc = describe_secret(registry, config, name)
     render_secret_description(desc)
