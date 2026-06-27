@@ -720,10 +720,12 @@ forward-only and run automatically.
 
 ## Environment Variables
 
-| Variable                         | Description                                                                               |
-| -------------------------------- | ----------------------------------------------------------------------------------------- |
-| `AW_TAILSCALE_AUTH_KEY`          | Tailscale auth key (skips prompt). Legacy `TAILSCALE_AUTH_KEY` still read; warns once.    |
-| `AW_GIT_CREDENTIALS_<CRED_NAME>` | Git credential for `<CRED_NAME>`. Legacy `GIT_CREDENTIALS_<CRED_NAME>` still read; warns. |
+Secret values are read from the operator's shell via the `env-var` backend, which follows the
+convention `AW_SECRET_<UPPER_SNAKE_CASE>` derived from the secret's name. The Tailscale auth key
+(secret `tailscale-auth-key`) reads from `AW_SECRET_TAILSCALE_AUTH_KEY`; a git credential's PAT
+(secret `git-token-<name>`) reads from `AW_SECRET_GIT_TOKEN_<NAME>`; and so on. Override the
+convention per secret via `[secrets.<name>].backend_mappings.env-var = "CUSTOM_NAME"`.
 
-Legacy env-var names continue to work with a one-time deprecation warning per process per name, and
-will be removed in a future release.
+Use `agw secret list` to see the exact env var name for each declared or auto-declared secret, and
+`agw secret describe <name>` for the full per-secret view (origin, usages, backend mappings,
+resolution preview).
