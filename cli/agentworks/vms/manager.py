@@ -225,7 +225,13 @@ def create_vm(
     resolved_admin_username = admin_username or config.admin.username
     validate_admin_username(resolved_admin_username)
 
-    # Pre-flight checks
+    # Pre-flight checks. ``build_registry`` runs FIRST so the
+    # framework's miss-policy errors (typo'd git credential, etc.)
+    # surface with full source attribution before any other check
+    # raises a less-specific error.
+    from agentworks.bootstrap import build_registry
+
+    registry = build_registry(config)
     verify_tailscale_available()
     providers = resolve_git_credential_providers(config, config.admin.git_credentials)
     verify_git_credential_auth(providers)
@@ -236,7 +242,7 @@ def create_vm(
     # shells, and the resolver caches them when the shell-opening code
     # invokes resolve_for_command later.
     tailscale_auth_key, git_tokens = _collect_secrets(
-        config, providers, vm_name, vm_tmpl
+        config, registry, providers, vm_name, vm_tmpl
     )
 
     # Create DB record with as-provisioned resource values
@@ -683,15 +689,17 @@ def add_git_credential(db: Database, config: Config, name: str, credential_name:
             entity_name=credential_name,
         )
 
+    # build_registry runs first so framework typo errors fire before
+    # resolve_git_credential_providers' generic NotFoundError.
+    from agentworks.bootstrap import build_registry
+
+    registry = build_registry(config)
     providers = resolve_git_credential_providers(config, [credential_name])
     provider = providers[credential_name]
 
     # Phase 1d: resolve the token via the framework (the resolver chain
     # handles env-var lookup + prompt fallback uniformly across every
     # site that needs a token).
-    from agentworks.bootstrap import build_registry
-
-    registry = build_registry(config)
     tokens = _collect_git_tokens(config, registry, [credential_name])
     token = tokens[credential_name]
     new_lines = provider.credential_lines(token)
@@ -1018,15 +1026,17 @@ def reinit_vm(
             entity_name=name,
         )
 
-    # Pre-flight checks
+    # Pre-flight checks. build_registry runs first so framework
+    # typo errors fire before resolve_git_credential_providers'
+    # generic NotFoundError.
+    from agentworks.bootstrap import build_registry
+
+    registry = build_registry(config)
     verify_tailscale_available()
     providers = resolve_git_credential_providers(config, config.admin.git_credentials)
     verify_git_credential_auth(providers)
 
     # Collect git tokens via the framework (Phase 1d).
-    from agentworks.bootstrap import build_registry
-
-    registry = build_registry(config)
     git_tokens = _collect_git_tokens(config, registry, providers.keys())
 
     # Provisioning is hermetic: no operator-env secrets are prompted at
@@ -1281,6 +1291,7 @@ def _lookup_or_synthesize_secret(registry: Registry, name: str) -> SecretDecl:
 
 def _collect_secrets(
     config: Config,
+    registry: Registry,
     providers: dict[str, GitCredentialProvider],
     vm_name: str,
     vm_tmpl: ResolvedVMTemplate,
@@ -1311,14 +1322,14 @@ def _collect_secrets(
 
     Returns ``(tailscale_auth_key, git_tokens)``.
     """
-    from agentworks.bootstrap import build_registry
     from agentworks.secrets import resolve_for_command
 
     output.info("Collecting credentials...")
 
     # Tailscale via the framework. See _lookup_or_synthesize_secret
-    # for the missing-default-template fallback semantics.
-    registry = build_registry(config)
+    # for the missing-default-template fallback semantics. The registry
+    # was built upstream so its finalize-pass typo errors fire before
+    # any other precondition check.
     ts_decl = _lookup_or_synthesize_secret(
         registry, vm_tmpl.tailscale_auth_key
     )

@@ -24,7 +24,7 @@ from agentworks.env import (
     ResourceContext,
     vm_stable_identity_env,
 )
-from agentworks.errors import ConnectivityError, ExternalError, NotFoundError
+from agentworks.errors import ConnectivityError, ExternalError, NotFoundError, StateError
 from agentworks.ssh import SSHError, SSHLogger
 from agentworks.transports import (
     SSHTransport,
@@ -1909,28 +1909,30 @@ def _configure_git_credentials(
     framework tokens.
 
     Phase 1d of the Resource Registry SDD: ``git_tokens`` is required
-    (no more provider-side fallback); the framework resolves every
-    token at manager-entry and threads the ``{credential_name: value}``
+    (no provider-side fallback); the framework resolves every token
+    at manager-entry and threads the ``{credential_name: value}``
     dict in. Any name in ``providers`` that doesn't have a matching
-    key in ``git_tokens`` is a logic error the caller is expected to
-    have prevented; we raise loudly rather than silently dropping the
-    credential.
+    key in ``git_tokens`` is a contract violation (caller bug); we
+    raise loudly rather than silently dropping the credential, since
+    silently shipping a VM with a missing credential the operator
+    asked for is the worst kind of footgun.
     """
     logger.step("Git credentials")
     output.detail("Configuring git credentials...")
 
+    missing = [name for name in providers if name not in git_tokens]
+    if missing:
+        raise StateError(
+            f"git credential setup: token(s) not resolved by the framework "
+            f"for {missing!r}; caller must pre-resolve every provider's "
+            f"token via _collect_git_tokens before invoking this function",
+            entity_kind="git-credential",
+            entity_name=missing[0],
+        )
+
     # Collect credential lines from all providers.
     credential_lines: list[str] = []
     for name, provider in providers.items():
-        if name not in git_tokens:
-            msg = (
-                f"git credential setup failed for {name}: token not "
-                f"resolved by the framework (caller must pre-resolve "
-                f"every provider's token)"
-            )
-            logger.warning(msg)
-            output.warn(msg)
-            continue
         try:
             credential_lines.extend(
                 provider.credential_lines(git_tokens[name])

@@ -66,10 +66,14 @@ def test_collect_secrets_resolves_tailscale_from_env_var(
     monkeypatch.setenv("AW_SECRET_TAILSCALE_AUTH_KEY", "tskey-from-env")
 
     # Build a resolved template instance directly (no DB scaffolding).
+    from agentworks.bootstrap import build_registry
     from agentworks.vms.templates import resolve_template
 
+    registry = build_registry(config)
     vm_tmpl = resolve_template(config, "default")
-    ts_auth_key, git_tokens = _collect_secrets(config, {}, "test-vm", vm_tmpl)
+    ts_auth_key, git_tokens = _collect_secrets(
+        config, registry, {}, "test-vm", vm_tmpl
+    )
     assert ts_auth_key == "tskey-from-env"
     assert git_tokens == {}
 
@@ -98,10 +102,14 @@ def test_collect_secrets_uses_custom_tailscale_secret_name(
 
     monkeypatch.setenv("AW_SECRET_CUSTOM_TS", "tskey-custom")
 
+    from agentworks.bootstrap import build_registry
     from agentworks.vms.templates import resolve_template
 
+    registry = build_registry(config)
     vm_tmpl = resolve_template(config, "azure-prod")
-    ts_auth_key, _ = _collect_secrets(config, {}, "test-vm", vm_tmpl)
+    ts_auth_key, _ = _collect_secrets(
+        config, registry, {}, "test-vm", vm_tmpl
+    )
     assert ts_auth_key == "tskey-custom"
 
 
@@ -125,10 +133,14 @@ def test_collect_secrets_signature_is_keyword_safe(
     config = load_config(cfg, warn_issues=False)
     monkeypatch.setenv("AW_SECRET_TAILSCALE_AUTH_KEY", "non-empty")
 
+    from agentworks.bootstrap import build_registry
     from agentworks.vms.templates import resolve_template
 
+    registry = build_registry(config)
     vm_tmpl = resolve_template(config, "default")
-    ts_auth_key, _ = _collect_secrets(config, {}, "test-vm", vm_tmpl)
+    ts_auth_key, _ = _collect_secrets(
+        config, registry, {}, "test-vm", vm_tmpl
+    )
     assert ts_auth_key is not None
     assert isinstance(ts_auth_key, str)
 
