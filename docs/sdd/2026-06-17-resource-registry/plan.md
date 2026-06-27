@@ -298,33 +298,33 @@ Goal: each `[git_credentials.<name>]` entry gains a `token` field referencing a 
 agent provisioning walks the requirement subgraph; tokens reach the install runner as kwargs. Legacy
 `obtain_token` path removed.
 
-- [ ] `cli/agentworks/config.py` (`GitCredentialConfig`): add a `token: str` field defaulting to
+- [x] `cli/agentworks/config.py` (`GitCredentialConfig`): add a `token: str` field defaulting to
       `git-token-<name>`. The default is computed (in `__post_init__` or by the parser; a dataclass
       literal default can't interpolate the entry's name), not hard-coded. Validate: bare string.
       Same shape rule as `tailscale_auth_key`.
-- [ ] `GitCredentialConfig.required_resources()` emits a `SecretRequirement` for the configured
+- [x] `GitCredentialConfig.required_resources()` emits a `SecretRequirement` for the configured
       `token` with usage `"the auth token"` and source `("git_credentials", name)`.
-- [ ] **Register `GitCredentialKind` in `KIND_REGISTRY`** with miss policy `error`. This lets the
+- [x] **Register `GitCredentialKind` in `KIND_REGISTRY`** with miss policy `error`. This lets the
       framework recognize `git_credentials:<name>` requirements emitted from admin / agent
       templates' `git_credentials = [...]` lists, look them up in the (already-populated) registry,
       and surface a clean error when the name is undeclared. The kind doesn't synthesize (no
       auto-decl); it just validates that the named credential exists.
-- [ ] `AdminConfig.required_resources()` / `AgentTemplate.required_resources()`: when
+- [x] `AdminConfig.required_resources()` / `AgentTemplate.required_resources()`: when
       `git_credentials = ["name1", "name2"]` is set, emit a `ResourceRequirement` of kind
       `git_credentials` per name. `GitCredentialKind`'s error miss policy catches typos that
       previously went through bespoke validation.
-- [ ] `cli/agentworks/agents/manager.py` / `cli/agentworks/vms/manager.py`: at `agent create` /
+- [x] `cli/agentworks/agents/manager.py` / `cli/agentworks/vms/manager.py`: at `agent create` /
       `agent reinit` / `vm create` / `vm reinit`, walk the requirement subgraph transitively
       (admin/agent_template -> git_credentials -> secret) and eager-resolve.
-- [ ] The git-credentials install runner gains a `*, tokens: dict[str, str]` (name -> token)
+- [x] The git-credentials install runner gains a `*, tokens: dict[str, str]` (name -> token)
       keyword-only argument; the function that writes `~/.git-credentials` reads from the passed
       dict, not from `obtain_token`.
-- [ ] Remove `agentworks.git_credentials.base.obtain_token` and any related env-var / prompt
+- [x] Remove `agentworks.git_credentials.base.obtain_token` and any related env-var / prompt
       resolution code. Provider classes (`github.py`, `azdo.py`) keep their
       `credential_lines(token=...)` formatting methods.
-- [ ] Update `cli/agentworks/sample-config.toml`: `[git_credentials.<name>]` stanzas document the
+- [x] Update `cli/agentworks/sample-config.toml`: `[git_credentials.<name>]` stanzas document the
       new `token` field and the default secret-name convention.
-- [ ] **Tests**:
+- [x] **Tests**:
   - `cli/tests/test_git_credentials_token_resolve.py`: token resolves via the framework's backend
     chain; `~/.git-credentials` write receives the resolved value; no `AW_GIT_CREDENTIALS_*` lookup.
   - `cli/tests/test_obtain_token_removed.py`: source-level tripwire that `obtain_token` is no longer
