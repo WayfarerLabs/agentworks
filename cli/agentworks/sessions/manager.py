@@ -352,16 +352,21 @@ def filter_sessions(
     workspace_name: str | list[str] | None = None,
     vm_name: str | list[str] | None = None,
     agent_name: str | list[str] | None = None,
+    admin_only: bool = False,
 ) -> list[SessionRow]:
-    """Load sessions with optional workspace, VM, and/or agent filters.
+    """Load sessions with optional workspace, VM, agent, and/or admin filters.
 
-    Each filter accepts a single name or a list of names; lists OR within
-    a filter, filters AND across the call. See `Database.list_sessions`.
+    Each name filter accepts a single name or a list of names; lists
+    OR within a filter, filters AND across the call. ``admin_only``
+    restricts to admin-mode sessions (no agent); it is mutually
+    exclusive with ``agent_name`` at the caller level. See
+    ``Database.list_sessions``.
     """
     return db.list_sessions(
         workspace_name=workspace_name,
         vm_name=vm_name,
         agent_name=agent_name,
+        admin_only=admin_only,
     )
 
 
@@ -1539,12 +1544,26 @@ def stop_all_sessions(
     db: Database,
     config: Config,
     *,
-    vm_name: str | None = None,
-    workspace_name: str | None = None,
+    vm_name: str | list[str] | None = None,
+    workspace_name: str | list[str] | None = None,
+    agent_name: str | list[str] | None = None,
+    admin_only: bool = False,
     force: bool = False,
 ) -> None:
-    """Stop all running sessions, optionally filtered by VM or workspace."""
-    sessions = filter_sessions(db, workspace_name=workspace_name, vm_name=vm_name)
+    """Stop all running sessions, optionally filtered by VM, workspace, agent, and/or mode.
+
+    Each name filter accepts a single name or a list of names; lists
+    OR within a filter, filters AND across the call. ``agent_name``
+    and ``admin_only`` are mutually exclusive; the caller enforces
+    the mutex.
+    """
+    sessions = filter_sessions(
+        db,
+        workspace_name=workspace_name,
+        vm_name=vm_name,
+        agent_name=agent_name,
+        admin_only=admin_only,
+    )
 
     # Resolve distinct VMs from the filtered session set and enter the
     # keepalive BEFORE the SSH probes. The probes (ensure_pids_batch,
@@ -1615,18 +1634,31 @@ def restart_all_sessions(
     db: Database,
     config: Config,
     *,
-    vm_name: str | None = None,
-    workspace_name: str | None = None,
+    vm_name: str | list[str] | None = None,
+    workspace_name: str | list[str] | None = None,
+    agent_name: str | list[str] | None = None,
+    admin_only: bool = False,
     include_running: bool = False,
     force: bool = False,
 ) -> None:
-    """Restart sessions, optionally filtered by VM or workspace.
+    """Restart sessions, optionally filtered by VM, workspace, agent, and/or mode.
 
     With include_running=False (--all-stopped), only stopped sessions are
     restarted. With include_running=True (--all), all sessions are targeted;
     if any are running, the caller should have prompted or passed yes=True.
+
+    Each name filter accepts a single name or a list of names; lists
+    OR within a filter, filters AND across the call. ``agent_name``
+    and ``admin_only`` are mutually exclusive; the caller enforces
+    the mutex.
     """
-    sessions = filter_sessions(db, workspace_name=workspace_name, vm_name=vm_name)
+    sessions = filter_sessions(
+        db,
+        workspace_name=workspace_name,
+        vm_name=vm_name,
+        agent_name=agent_name,
+        admin_only=admin_only,
+    )
 
     # Resolve distinct VMs from the filtered set and anchor them BEFORE the
     # SSH probes. Each restart_session call also enters its own keepalive;
@@ -1994,7 +2026,8 @@ def list_sessions(
     Status resolution is has-session-first; PID/boot_id are only used as a
     follow-up when agent checks fail.
     """
-    sessions = db.list_sessions(
+    sessions = filter_sessions(
+        db,
         workspace_name=workspace_name,
         vm_name=vm_name,
         agent_name=agent_name,

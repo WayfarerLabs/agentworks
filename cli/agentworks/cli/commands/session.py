@@ -224,18 +224,41 @@ def session_stop(
     all_sessions: Annotated[bool, typer.Option("--all", help="Stop all running sessions")] = False,
     vm: Annotated[str | None, typer.Option("--vm", help="Filter by VM (with --all)")] = None,
     workspace: Annotated[str | None, typer.Option("--workspace", help="Filter by workspace (with --all)")] = None,
+    agent: Annotated[str | None, typer.Option("--agent", help="Filter by agent (with --all)")] = None,
+    admin: Annotated[
+        bool, typer.Option("--admin", help="Only admin-mode sessions (with --all)"),
+    ] = False,
     force: Annotated[bool, typer.Option("--force", help="Force-stop broken sessions via PID kill")] = False,
 ) -> None:
-    """Stop a running session, or all running sessions with --all."""
+    """Stop a running session, or all running sessions with --all.
+
+    Filters compose with AND. ``--vm``, ``--workspace``, and ``--agent``
+    accept a single value or a comma-separated list (e.g.
+    ``--vm vm1,vm2``); commas within a filter are OR-ed together.
+    """
     from agentworks.config import load_config
     from agentworks.sessions.manager import stop_all_sessions, stop_session
 
+    parsed_vm = parse_csv_filter(vm)
+    parsed_workspace = parse_csv_filter(workspace)
+    parsed_agent = parse_csv_filter(agent)
+
     if name and all_sessions:
         raise typer.BadParameter("provide a session name or --all, not both")
-    if (vm or workspace) and not all_sessions:
-        raise typer.BadParameter("--vm and --workspace require --all")
+    if admin and parsed_agent is not None:
+        raise typer.BadParameter("--admin and --agent are mutually exclusive")
+    if (parsed_vm or parsed_workspace or parsed_agent or admin) and not all_sessions:
+        raise typer.BadParameter("--vm, --workspace, --agent, and --admin require --all")
     if all_sessions:
-        stop_all_sessions(get_db(), load_config(), vm_name=vm, workspace_name=workspace, force=force)
+        stop_all_sessions(
+            get_db(),
+            load_config(),
+            vm_name=parsed_vm,
+            workspace_name=parsed_workspace,
+            agent_name=parsed_agent,
+            admin_only=admin,
+            force=force,
+        )
     elif name:
         stop_session(get_db(), load_config(), name=name, force=force)
     else:
@@ -248,20 +271,44 @@ def session_restart(
     all_stopped: Annotated[bool, typer.Option("--all-stopped", help="Restart all stopped sessions")] = False,
     all_sessions: Annotated[bool, typer.Option("--all", help="Restart all sessions (prompts for running)")] = False,
     vm: Annotated[str | None, typer.Option("--vm", help="Filter by VM (with --all/--all-stopped)")] = None,
-    workspace: Annotated[str | None, typer.Option("--workspace", help="Filter by workspace")] = None,
+    workspace: Annotated[
+        str | None,
+        typer.Option("--workspace", help="Filter by workspace (with --all/--all-stopped)"),
+    ] = None,
+    agent: Annotated[
+        str | None,
+        typer.Option("--agent", help="Filter by agent (with --all/--all-stopped)"),
+    ] = None,
+    admin: Annotated[
+        bool,
+        typer.Option("--admin", help="Only admin-mode sessions (with --all/--all-stopped)"),
+    ] = False,
     force: Annotated[bool, typer.Option("--force", help="Force-kill broken sessions via PID")] = False,
     yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip confirmation prompts")] = False,
 ) -> None:
-    """Restart a session, or batch restart with --all-stopped / --all."""
+    """Restart a session, or batch restart with --all-stopped / --all.
+
+    Filters compose with AND. ``--vm``, ``--workspace``, and ``--agent``
+    accept a single value or a comma-separated list (e.g.
+    ``--vm vm1,vm2``); commas within a filter are OR-ed together.
+    """
     from agentworks.config import load_config
     from agentworks.sessions.manager import restart_all_sessions, restart_session
+
+    parsed_vm = parse_csv_filter(vm)
+    parsed_workspace = parse_csv_filter(workspace)
+    parsed_agent = parse_csv_filter(agent)
 
     if name and (all_stopped or all_sessions):
         raise typer.BadParameter("provide a session name or a batch flag (--all/--all-stopped), not both")
     if all_stopped and all_sessions:
         raise typer.BadParameter("use --all or --all-stopped, not both")
-    if (vm or workspace) and not (all_stopped or all_sessions):
-        raise typer.BadParameter("--vm and --workspace require --all or --all-stopped")
+    if admin and parsed_agent is not None:
+        raise typer.BadParameter("--admin and --agent are mutually exclusive")
+    if (parsed_vm or parsed_workspace or parsed_agent or admin) and not (all_stopped or all_sessions):
+        raise typer.BadParameter(
+            "--vm, --workspace, --agent, and --admin require --all or --all-stopped"
+        )
     if all_stopped or all_sessions:
         db = get_db()
         config = load_config()
@@ -276,7 +323,13 @@ def session_restart(
                 filter_sessions,
             )
 
-            sessions = filter_sessions(db, workspace_name=workspace, vm_name=vm)
+            sessions = filter_sessions(
+                db,
+                workspace_name=parsed_workspace,
+                vm_name=parsed_vm,
+                agent_name=parsed_agent,
+                admin_only=admin,
+            )
             sessions = ensure_pids_batch(sessions, db=db, config=config)
             from agentworks.db import SessionStatus
 
@@ -295,7 +348,14 @@ def session_restart(
                     raise UserAbort("restart cancelled")
 
         restart_all_sessions(
-            db, config, vm_name=vm, workspace_name=workspace, include_running=include_running, force=force,
+            db,
+            config,
+            vm_name=parsed_vm,
+            workspace_name=parsed_workspace,
+            agent_name=parsed_agent,
+            admin_only=admin,
+            include_running=include_running,
+            force=force,
         )
     elif name:
         restart_session(get_db(), load_config(), name=name, force=force, yes=yes)
