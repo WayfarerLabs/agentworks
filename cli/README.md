@@ -288,9 +288,10 @@ two are mutually exclusive).
 
 `session stop` and `session restart` operate on a single session by default. Pass `--all`
 (`session stop`/`session restart`) or `--all-stopped` (`session restart`) to batch over the sessions
-on the VM. The batch form accepts `--vm <vm>`, `--workspace <ws>`, and `--agent <agent>` to narrow
-the set; filters compose with AND and require one of the batch flags. Pass `--force` to stop/restart
-broken sessions via PID kill.
+on the VM. The batch form accepts `--vm <vm>`, `--workspace <ws>`, `--agent <agent>`, and `--admin`
+to narrow the set; filters compose with AND and require one of the batch flags. `--agent` matches
+agent-mode sessions only; `--admin` matches admin-mode sessions only (the two are mutually
+exclusive). Pass `--force` to stop/restart broken sessions via PID kill.
 
 `session create <name>` takes the session name as a required positional. Optional flags:
 `--workspace`, `--template`, `--admin`, and `--agent`. Workspace and mode (admin vs agent) are
