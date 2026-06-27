@@ -10,6 +10,7 @@ precondition that the batch filters (``--vm``, ``--workspace``,
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 import pytest
@@ -17,6 +18,18 @@ from typer.testing import CliRunner
 
 from agentworks.cli import app
 from agentworks.sessions import manager as session_manager
+
+# Typer renders error messages through rich, which inserts ANSI color
+# escapes around individual tokens (e.g. ``--admin`` becomes
+# ``\x1b[1;36m-\x1b[0m\x1b[1;36m-admin\x1b[0m``). Color is suppressed
+# locally for non-TTY output but stays enabled in CI; strip ANSI before
+# substring assertions so the tests pin the intended text without
+# depending on the runtime's TTY heuristic.
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _plain(s: str) -> str:
+    return _ANSI_RE.sub("", s)
 
 
 def _capture_kwargs(captured: dict[str, Any]):
@@ -124,7 +137,7 @@ def test_session_stop_agent_without_all_errors(
 
     result = CliRunner().invoke(app, ["session", "stop", "--agent", "a1"])
     assert result.exit_code != 0
-    assert "--agent" in result.output
+    assert "--agent" in _plain(result.output)
 
 
 # ---------------------------------------------------------------------------
@@ -162,7 +175,7 @@ def test_session_restart_agent_without_batch_errors(
 
     result = CliRunner().invoke(app, ["session", "restart", "--agent", "a1"])
     assert result.exit_code != 0
-    assert "--agent" in result.output
+    assert "--agent" in _plain(result.output)
 
 
 # ---------------------------------------------------------------------------
@@ -242,8 +255,8 @@ def test_session_stop_admin_and_agent_are_mutually_exclusive(
         app, ["session", "stop", "--all", "--admin", "--agent", "a1"],
     )
     assert result.exit_code != 0
-    assert "--admin" in result.output
-    assert "--agent" in result.output
+    assert "--admin" in _plain(result.output)
+    assert "--agent" in _plain(result.output)
 
 
 def test_session_stop_admin_without_all_errors(
@@ -256,7 +269,7 @@ def test_session_stop_admin_without_all_errors(
 
     result = CliRunner().invoke(app, ["session", "stop", "--admin"])
     assert result.exit_code != 0
-    assert "--admin" in result.output
+    assert "--admin" in _plain(result.output)
 
 
 # ---------------------------------------------------------------------------
@@ -295,8 +308,8 @@ def test_session_restart_admin_and_agent_are_mutually_exclusive(
         ["session", "restart", "--all-stopped", "--admin", "--agent", "a1"],
     )
     assert result.exit_code != 0
-    assert "--admin" in result.output
-    assert "--agent" in result.output
+    assert "--admin" in _plain(result.output)
+    assert "--agent" in _plain(result.output)
 
 
 # ---------------------------------------------------------------------------
