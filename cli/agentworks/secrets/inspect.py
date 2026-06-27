@@ -217,21 +217,16 @@ class BackendMapping:
 class ResolutionPreview:
     """What the active backend chain would do at resolution time.
 
-    - ``resolved_by``: the kind of the first backend that would attempt
-      the secret with a static identifier (``"env-var"`` with an
-      identifier set, or any backend with a known mapping). ``None``
-      means no backend has a static identifier; the chain falls to a
-      prompt-style backend or no backend at all.
-    - ``would_prompt``: True if the first attempting backend is a
-      prompt-style backend (no static identifier).
-    - ``available``: True if at least one active backend would attempt
-      the secret. False = the chain has no opt-in for this secret
-      (every backend either has no convention or is explicitly
-      opted out).
+    - ``resolved_by``: the kind of the first backend in the chain that
+      would yield a value for this secret right now (e.g. ``"env-var"``
+      when ``AW_SECRET_<NAME>`` is set, ``"prompt"`` when the chain
+      falls through to an interactive prompt). ``None`` = no active
+      backend would resolve the secret.
+    - ``available``: True iff ``resolved_by`` is not None. Convenience
+      flag for the renderer (mirrors ``resolved_by is not None``).
     """
 
     resolved_by: str | None
-    would_prompt: bool
     available: bool
 
 
@@ -361,25 +356,15 @@ def describe_secret(
             )
         )
 
-    # Resolution preview: which active backend would resolve right now.
-    # Walk the chain in precedence order; the first attempting backend
-    # wins. A prompt-style backend (no static identifier) is reported
-    # separately so the renderer can show "would prompt" instead of an
-    # identifier.
-    resolved_by: str | None = None
-    would_prompt = False
-    available = False
-    for mapping in mappings:
-        if not mapping.would_attempt:
-            continue
-        available = True
-        if mapping.identifier is None:
-            # Prompt-style: would attempt without a static lookup name.
-            would_prompt = True
-            resolved_by = mapping.backend_kind
-        else:
-            resolved_by = mapping.backend_kind
-        break
+    # Resolution preview: which active backend would actually yield a
+    # value right now. Delegate to the resolver's ``preview_resolution``
+    # so the answer reflects runtime presence (e.g. is the env var set?),
+    # not just whether the backend is configured. The local
+    # ``backend_mappings`` list above already covers configuration shape;
+    # this layer is the live probe.
+    preview_kind = config.secret_resolver.preview_resolution(decl)
+    resolved_by = preview_kind
+    available = preview_kind is not None
 
     return SecretDescription(
         name=name,
@@ -391,7 +376,6 @@ def describe_secret(
         backend_mappings=tuple(mappings),
         resolution=ResolutionPreview(
             resolved_by=resolved_by,
-            would_prompt=would_prompt,
             available=available,
         ),
     )
@@ -449,7 +433,5 @@ def render_secret_description(desc: SecretDescription) -> None:
     output.info("Resolution preview:")
     if not desc.resolution.available:
         output.info("  not available in any active backend")
-    elif desc.resolution.would_prompt:
-        output.info(f"  would prompt (via {desc.resolution.resolved_by})")
     else:
         output.info(f"  would resolve via {desc.resolution.resolved_by}")

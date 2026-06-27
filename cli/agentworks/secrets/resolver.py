@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from agentworks import output
 from agentworks.errors import ConfigError, SecretUnavailableError
 from agentworks.secrets.base import SecretDecl
 
@@ -121,6 +122,19 @@ class SecretResolver:
             if not still_attemptable:
                 continue
             resolved = source.batch_get(still_attemptable)
+            # Surface which source + identifier won so operators can tell
+            # env-var-from-shell apart from a fall-through to prompt. For
+            # backends without a static identifier (prompt) the parenthetical
+            # is omitted; for env-var / vault / op:// it shows the lookup
+            # name. Never includes the resolved value.
+            decl_by_name = {s.name: s for s in still_attemptable}
+            for resolved_name in sorted(resolved):
+                decl = decl_by_name[resolved_name]
+                ident = source.describe_lookup(decl)
+                suffix = f" ({ident})" if ident else ""
+                output.detail(
+                    f"Resolved {resolved_name} via {source.kind}{suffix}"
+                )
             for name, value in resolved.items():
                 # ADR 0014: embedded newlines would corrupt SSH
                 # `-o SetEnv=KEY=VALUE` arguments. The env-var source

@@ -46,6 +46,11 @@ class _FakeSource:
                 out[s.name] = v
         return out
 
+    def describe_lookup(self, secret: SecretDecl) -> str | None:  # noqa: ARG002 - test stub
+        # Tests don't assert on identifiers; return a fixed sentinel so
+        # resolver's resolution-detail line has something to print.
+        return f"<{self.kind}>"
+
 
 def _decl(name: str, **kw: object) -> SecretDecl:
     return SecretDecl(name=name, description=f"{name} description", **kw)  # type: ignore[arg-type]

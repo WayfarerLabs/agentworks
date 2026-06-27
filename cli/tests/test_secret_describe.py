@@ -262,9 +262,13 @@ def test_backend_mapping_respects_opt_out(
 # -- Resolution preview section --------------------------------------------
 
 
-def test_resolution_preview_uses_first_attempting_backend(
-    tmp_path: Path, ssh_keys: tuple[Path, Path]
+def test_resolution_preview_picks_env_var_when_var_is_set(
+    tmp_path: Path, ssh_keys: tuple[Path, Path], monkeypatch
 ) -> None:
+    """Env-var first in the chain; the var is actually set. Preview
+    reports env-var. This is the case where the operator's shell already
+    holds the value and ``vm create`` will resolve silently.
+    """
     cfg = _write_cfg(
         tmp_path,
         """\
@@ -276,13 +280,44 @@ def test_resolution_preview_uses_first_attempting_backend(
         """,
         ssh_keys,
     )
+    monkeypatch.setenv("AW_SECRET_API_KEY", "from-shell")
     config = load_config(cfg, warn_issues=False)
     registry = build_registry(config)
     desc = describe_secret(registry, config, "api-key")
 
     assert desc.resolution.available
     assert desc.resolution.resolved_by == "env-var"
-    assert desc.resolution.would_prompt is False
+
+
+def test_resolution_preview_falls_through_when_env_var_is_unset(
+    tmp_path: Path, ssh_keys: tuple[Path, Path], monkeypatch
+) -> None:
+    """Env-var is configured (would_attempt is True) but the operator
+    hasn't set ``AW_SECRET_API_KEY`` in their shell. Preview must not
+    claim env-var would resolve -- it must fall through to the next
+    backend (prompt), matching what would actually happen at runtime.
+    Regression test: the prior implementation only checked
+    ``would_attempt`` and reported env-var as the resolver, misleading
+    operators whose shell didn't hold the value.
+    """
+    cfg = _write_cfg(
+        tmp_path,
+        """\
+        [secrets.api-key]
+        description = "API key"
+
+        [secret_config]
+        backends = ["env-var", "prompt"]
+        """,
+        ssh_keys,
+    )
+    monkeypatch.delenv("AW_SECRET_API_KEY", raising=False)
+    config = load_config(cfg, warn_issues=False)
+    registry = build_registry(config)
+    desc = describe_secret(registry, config, "api-key")
+
+    assert desc.resolution.available
+    assert desc.resolution.resolved_by == "prompt"
 
 
 def test_resolution_preview_falls_through_to_prompt(
@@ -306,7 +341,6 @@ def test_resolution_preview_falls_through_to_prompt(
 
     assert desc.resolution.available
     assert desc.resolution.resolved_by == "prompt"
-    assert desc.resolution.would_prompt is True
 
 
 def test_resolution_preview_not_available_when_no_backend_attempts(
@@ -351,7 +385,6 @@ def test_resolution_preview_not_available_when_no_backend_attempts(
     desc = describe_secret(registry, config, "api-key")
     assert desc.resolution.available is False
     assert desc.resolution.resolved_by is None
-    assert desc.resolution.would_prompt is False
 
 
 # -- Renderer outputs the four sections -------------------------------------
@@ -361,6 +394,7 @@ def test_render_emits_header_usages_mappings_preview(
     tmp_path: Path,
     ssh_keys: tuple[Path, Path],
     capsys: pytest.CaptureFixture[str],
+    monkeypatch,
 ) -> None:
     from agentworks.secrets.inspect import render_secret_description
 
@@ -378,6 +412,9 @@ def test_render_emits_header_usages_mappings_preview(
         """,
         ssh_keys,
     )
+    # Resolution preview now reflects runtime presence -- set the var so
+    # the assertion ``would resolve via env-var`` is meaningful.
+    monkeypatch.setenv("AW_SECRET_API_KEY", "from-shell")
     config = load_config(cfg, warn_issues=False)
     registry = build_registry(config)
     desc = describe_secret(registry, config, "api-key")
