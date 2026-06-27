@@ -347,18 +347,18 @@ time; legacy path removed; provider formatting unchanged; CI green; reviewer-app
 Goal: add the per-secret detail view to the existing `cli/agentworks/cli/commands/secret.py`.
 Service-layer logic lives in `agentworks.secrets`.
 
-- [ ] `cli/agentworks/secrets/inspect.py`: add `describe_secret(registry, name)` that returns a
+- [x] `cli/agentworks/secrets/inspect.py`: add `describe_secret(registry, name)` that returns a
       structured `SecretDescription` (name, kind, origin with full detail, usage list with per-entry
       source + text, per-backend mapping status, resolution preview). No prompting, no value
       resolution.
-- [ ] `cli/agentworks/cli/commands/secret.py`: add the `describe` typer subcommand. Calls the
+- [x] `cli/agentworks/cli/commands/secret.py`: add the `describe` typer subcommand. Calls the
       service-layer function; renders the structured result using the existing table / panel
       helpers.
-- [ ] Renderer covers all four output sections (header, usages, backend mappings, resolution
+- [x] Renderer covers all four output sections (header, usages, backend mappings, resolution
       preview). Per FRD R10.
-- [ ] Update `cli/agentworks/completions/`: the shell-completion tree picks up the new subcommand
+- [x] Update `cli/agentworks/completions/`: the shell-completion tree picks up the new subcommand
       automatically (or via the project's regen step).
-- [ ] **Tests**:
+- [x] **Tests**:
   - `cli/tests/test_secret_describe.py`: per-section rendering; operator-declared shows file:line;
     auto-declared shows the first requirement source; multiple usages render one row each; backend
     status shows the per-backend disposition without merging.
