@@ -44,6 +44,9 @@ if TYPE_CHECKING:
 AGENTWORKS_PROFILE = ".agentworks-profile.sh"
 AGENTWORKS_RC = ".agentworks-rc.sh"
 
+SKEL_BASHRC_PATH = "/etc/skel/.bashrc"
+SKEL_ZSHRC_PATH = "/etc/skel/.zshrc"
+
 
 def _ensure_agentworks_files_sourced(
     target: Transport,
@@ -189,6 +192,46 @@ AGENTWORKS_SUDOERS_ENV_KEEP_PATH = "/etc/sudoers.d/50-agentworks-env-keep"
 # Marker comment used to find and replace the identity block in
 # /etc/zsh/zprofile across reinit cycles.
 _ZSH_IDENTITY_MARKER = "# agentworks-identity"
+
+
+def _write_skel_seeds(
+    target: Transport,
+    logger: SSHLogger,
+) -> None:
+    """Write the agentworks-managed shell rc seeds to ``/etc/skel``.
+
+    Both ``/etc/skel/.bashrc`` and ``/etc/skel/.zshrc`` are
+    agentworks-owned on the VM: every reinit refreshes them. Future
+    ``useradd -m`` calls (e.g. agent creation) inherit the seed
+    automatically -- no explicit copy in agent setup needed.
+
+    Operators install their own dotfiles directly into a user's home
+    AFTER user creation; the seed only ever lands in ``/etc/skel`` and,
+    once, at user-create time. agentworks never writes shell rc files
+    into a user's home after that initial seed (see issue #121).
+    """
+    from agentworks.vms.skel import BASHRC, ZSHRC
+
+    logger.step("Shell rc skel")
+    output.detail(f"Writing {SKEL_BASHRC_PATH} and {SKEL_ZSHRC_PATH}...")
+
+    try:
+        for path, content in (
+            (SKEL_BASHRC_PATH, BASHRC),
+            (SKEL_ZSHRC_PATH, ZSHRC),
+        ):
+            q_content = shlex.quote(content)
+            target.run(
+                f"printf '%s' {q_content} | sudo tee {path} > /dev/null",
+            )
+            target.run(f"sudo chmod 644 {path}")
+    except SSHError as e:
+        msg = (
+            f"skel seed write failed: {e}. "
+            "Re-run `agw vm reinit` to retry."
+        )
+        logger.warning(msg)
+        output.warn(msg)
 
 
 def _write_agentworks_identity_profile(
@@ -1602,6 +1645,7 @@ def _phase_b_setup(
     # so dpkg conffile handling doesn't apply.
     _write_sshd_accept_env(ts_target, logger)
     _write_sudoers_env_keep(ts_target, logger)
+    _write_skel_seeds(ts_target, logger)
     vm_row = db.get_vm(vm_name)
     # Init runs against a VM that exists in the DB (initialize_vm fetches the
     # row up front). A None here is an internal invariant violation, not a
@@ -1655,15 +1699,14 @@ def _phase_b_setup(
                 output.warn(msg)
 
     # Non-fatal: set default shell (before install commands so installers
-    # write to the correct rc file)
+    # write to the correct rc file). The zsh first-run wizard (which the
+    # touch ~/.zshrc hack used to suppress) no longer applies: the skel
+    # seed gives admin's home a real .zshrc at provision time and seeds
+    # /etc/skel on reinit, so any user useradd creates inherits it.
     logger.step("Shell configuration")
     admin_shell = config.admin.shell
     output.detail(f"Setting shell to {admin_shell}...")
     try:
-        # Touch .zshrc before chsh to prevent zsh's first-run wizard
-        # (zsh-newuser-install) from prompting interactively on next login
-        if admin_shell == "zsh":
-            ts_target.run(f"touch {home}/.zshrc", check=False)
         ts_target.run(
             f"usermod -s $(which {shlex.quote(admin_shell)}) {shlex.quote(admin_username)}",
             sudo=True,
