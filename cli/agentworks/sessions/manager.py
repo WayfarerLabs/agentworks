@@ -974,12 +974,10 @@ def _prompt_workspace_choice(
             output.info(f"Only showing workspaces on VM '{vm_filter}'")
     else:
         workspaces = all_workspaces
-    options = []
-    for ws in workspaces:
-        label = f"{ws.name}  (vm: {ws.vm_name})"
-        if ws.template:
-            label += f" [template: {ws.template}]"
-        options.append(label)
+    options = [
+        f"{ws.name}  (vm: {ws.vm_name}, template: {ws.template or '<none>'})"
+        for ws in workspaces
+    ]
     options.append("[Create new workspace]")
     idx = output.choose("Select a workspace:", options)
     if idx == len(options) - 1:
@@ -1025,12 +1023,9 @@ def _prompt_mode_choice(
         candidates = all_agents
     options = ["admin"]
     for a in candidates:
-        label = f"agent: {a.name}"
-        if vm is None:
-            label += f"  (vm: {a.vm_name})"
-        if a.template:
-            label += f" [template: {a.template}]"
-        options.append(label)
+        options.append(
+            f"agent: {a.name}  (vm: {a.vm_name}, template: {a.template or '<none>'})"
+        )
     options.append("[Create new agent]")
     idx = output.choose("Run session as:", options)
     if idx == 0:
