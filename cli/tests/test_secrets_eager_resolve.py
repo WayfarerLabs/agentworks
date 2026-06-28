@@ -100,13 +100,12 @@ def test_session_create_eager_resolve_fires_before_db_insert(
         env: dict[str, str] = {}
 
     monkeypatch.setattr(session_manager, "_resolve_template", lambda *a, **k: _Tmpl())
-    # _session_secret_target needs config attributes the SimpleNamespace
-    # below doesn't have; stub it to a sentinel value (the orchestrator
-    # treats None as "no target", but here we want resolve_for_command
-    # to be called regardless).
+    # _session_secret_target_pre_create reads config.vm_templates /
+    # agent_templates which the SimpleNamespace below doesn't have; stub
+    # it to a sentinel so the orchestrator still calls resolve_for_command.
     sentinel_target = object()
     monkeypatch.setattr(
-        session_manager, "_session_secret_target", lambda *a, **k: sentinel_target
+        session_manager, "_session_secret_target_pre_create", lambda *a, **k: sentinel_target
     )
 
     def _explode(*args: object, **kwargs: object) -> None:
@@ -124,9 +123,10 @@ def test_session_create_eager_resolve_fires_before_db_insert(
             db,
             config,  # type: ignore[arg-type]
             name="s1",
-            workspace_name="ws1",
+            workspace="ws1",
             template_name=None,
             agent_name=None,
+            admin=True,
         )
 
     # State must be untouched.
@@ -138,8 +138,8 @@ def test_session_create_calls_resolve_with_session_target(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """create_session passes a single SecretTarget (the one returned by
-    ``_session_secret_target``) into resolve_for_command. Verifies the
-    glue that turns a session command into a candidate set."""
+    ``_session_secret_target_pre_create``) into resolve_for_command.
+    Verifies the glue that turns a session command into a candidate set."""
     from agentworks.sessions import manager as session_manager
 
     db = _seed_basic_db(tmp_path)
@@ -156,7 +156,7 @@ def test_session_create_calls_resolve_with_session_target(
 
     sentinel_target = object()
     monkeypatch.setattr(
-        session_manager, "_session_secret_target", lambda *a, **k: sentinel_target
+        session_manager, "_session_secret_target_pre_create", lambda *a, **k: sentinel_target
     )
 
     class _Sentinel(Exception):
@@ -178,9 +178,10 @@ def test_session_create_calls_resolve_with_session_target(
             db,
             config,  # type: ignore[arg-type]
             name="s1",
-            workspace_name="ws1",
+            workspace="ws1",
             template_name=None,
             agent_name=None,
+            admin=True,
         )
 
     assert len(calls) == 1, f"expected exactly one eager-resolve call, got {len(calls)}"
