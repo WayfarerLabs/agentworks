@@ -761,14 +761,14 @@ def test_mode_required_no_flag_raises(tmp_path: Path) -> None:
     db.close()
 
 
-def test_no_workspace_specified_raises_in_non_interactive(tmp_path: Path) -> None:
-    """When neither --workspace nor --new-workspace is specified and
-    there's more than one workspace on disk, the service has to prompt
-    to pick. In non-interactive mode (the test default), the prompt
-    raises rather than hanging."""
+def test_workspace_required(tmp_path: Path) -> None:
+    """Workspace is part of the session's identity; sessions do not
+    auto-resolve it even when there's exactly one workspace on the
+    operator's host. The service demands explicit
+    --workspace or --new-workspace."""
     from agentworks.sessions.manager import create_session
 
-    db = _seed_two_vms(tmp_path)  # 2 workspaces → prompt would fire
+    db = _seed_one_vm(tmp_path)  # vm1 + ws1, exactly one workspace
     config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
 
     with pytest.raises(ValidationError, match="--workspace or --new-workspace"):
@@ -776,7 +776,7 @@ def test_no_workspace_specified_raises_in_non_interactive(tmp_path: Path) -> Non
             db,
             config,  # type: ignore[arg-type]
             name="s1",
-            admin=True,  # mode is required; workspace prompt is what's under test
+            admin=True,  # mode is required; workspace is what's under test
         )
     db.close()
 

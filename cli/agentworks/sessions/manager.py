@@ -941,40 +941,16 @@ def batch_check_status(
 # -- Interactive prompts (used by create_session) --------------------------
 
 
-def _prompt_existing_workspace(db: Database) -> str:
-    """Pick an existing workspace by name.
-
-    Mirrors ``cli._helpers.prompt_workspace``: if exactly one workspace
-    exists, log "Using ..." and return it; if multiple, prompt; if none,
-    raise so the operator gets an actionable error rather than an empty
-    chooser.
-    """
-    workspaces = db.list_workspaces()
-    if not workspaces:
-        raise NotFoundError(
-            "no workspaces found",
-            entity_kind="workspace",
-            hint="Create one with 'agw workspace create' or pass --new-workspace.",
-        )
-    if len(workspaces) == 1:
-        output.info(f"Using workspace '{workspaces[0].name}'")
-        return workspaces[0].name
-    if not output.is_interactive():
-        raise ValidationError(
-            "--workspace or --new-workspace is required in non-interactive mode",
-            entity_kind="session",
-        )
-    options = [f"{ws.name}  (vm: {ws.vm_name})" for ws in workspaces]
-    idx = output.choose("Select a workspace:", options)
-    return workspaces[idx].name
-
-
 def _prompt_vm(db: Database) -> VMRow:
     """Pick a VM when nothing else pins it.
 
-    Symmetric with :func:`_prompt_existing_workspace` /
-    :func:`_prompt_session_mode`. Reached only when the operator hasn't
-    passed ``--vm`` and no workspace / agent anchor was available to
+    The only auto-resolution helper that survives for sessions:
+    workspace and mode are session-semantic and demand explicit
+    operator intent (``--workspace``/``--new-workspace``,
+    ``--admin``/``--agent``/``--new-agent``). VM is infrastructure --
+    pick a host; the choice doesn't change what the session IS, just
+    where it runs. Reached only when the operator hasn't passed
+    ``--vm`` and no workspace / agent anchor was available to
     pin the VM (e.g. ``--new-workspace --admin`` or
     ``--new-workspace --new-agent``, both without ``--vm``). Filters
     out VMs whose init is incomplete: a session on a half-initialized
@@ -1127,11 +1103,21 @@ def create_session(
         agent_name = None
         new_agent = False
 
-    # ===== Workspace prompt (mode prompt lives later, after VM is known) ===
+    # ===== Workspace anchor required (no auto-select for sessions) =========
+    #
+    # Workspace is part of the session's identity (where it lives, what
+    # group it joins, what env it inherits). Auto-selecting because there's
+    # exactly one workspace today bakes in an assumption that "one" is the
+    # common case -- Agentworks' design encourages multiple workspaces,
+    # and the auto-select would silently change behavior the day the
+    # operator adds a second one. Demand explicit intent.
 
     if not workspace_name and not new_workspace:
-        # No workspace specified; pick from existing.
-        workspace_name = _prompt_existing_workspace(db)
+        raise ValidationError(
+            "specify --workspace or --new-workspace",
+            entity_kind="session",
+            entity_name=name,
+        )
 
     # ===== Pure validation (no SSH, no mutations) ===========================
 
