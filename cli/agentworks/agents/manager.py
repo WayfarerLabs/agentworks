@@ -217,6 +217,9 @@ def create_agent(
 
     from agentworks.ssh import SSHLogger
     ssh_logger = SSHLogger(vm.name, "agent-create")
+    output.info(
+        f"Creating agent '{name}' on VM '{vm_name}' (template: {agent_tmpl.name})..."
+    )
     with keep_vm_active(db, config, vm):
 
         def _safe_rollback() -> None:
