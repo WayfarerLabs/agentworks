@@ -1716,8 +1716,8 @@ def _phase_b_setup(
                 output.warn(msg)
 
     # Non-fatal: set default shell (before install commands so installers
-    # write to the correct rc file). The zsh first-run wizard is
-    # pre-empted by the skel seed.
+    # write to the correct rc file). The zsh ``zsh-newuser-install``
+    # first-run wizard is pre-empted by the skel seed.
     logger.step("Shell configuration")
     admin_shell = config.admin.shell
     output.detail(f"Setting shell to {admin_shell}...")

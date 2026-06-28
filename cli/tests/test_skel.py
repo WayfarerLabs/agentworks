@@ -35,8 +35,10 @@ from agentworks.vms.skel import BASHRC, SKEL_HEADER, ZSHRC
 
 def test_seeds_open_with_managed_by_agentworks_marker() -> None:
     """Both seeds start with the agentworks-owned marker comment so an
-    operator inspecting their .bashrc / .zshrc knows the file is owned
-    by agentworks and will be clobbered on reinit."""
+    operator inspecting their ``.bashrc`` / ``.zshrc`` knows the file is
+    agentworks-shipped. The ``/etc/skel`` copies are rewritten on every
+    reinit; the user-home copies are not refreshed after the initial
+    seed lands at provision / useradd time."""
     assert BASHRC.startswith(SKEL_HEADER + "\n")
     assert ZSHRC.startswith(SKEL_HEADER + "\n")
 
@@ -145,17 +147,22 @@ def test_write_skel_seeds_runs_after_apt_install_in_initializer() -> None:
     two calls so a refactor that reorders them has to update a test.
     """
     import inspect
+    import re
 
     from agentworks.vms import initializer
 
-    # Inspect the init source -- the call ordering inside
-    # `run_initialization` is what's load-bearing.
+    # Inspect ``_phase_b_setup`` -- the function that actually houses
+    # both calls. ``run_initialization`` is the public entry; the
+    # ordering constraint is on the helper.
     src = inspect.getsource(initializer._phase_b_setup)
-    skel_idx = src.find("_write_skel_seeds(")
-    apt_idx = src.find("_install_apt_packages(")
-    assert skel_idx != -1, "expected _write_skel_seeds call in _phase_b_setup"
-    assert apt_idx != -1, "expected _install_apt_packages call in _phase_b_setup"
-    assert skel_idx > apt_idx, (
+    # Match only actual call sites (line starts with whitespace + the
+    # function name + ``(``) so a stray reference inside a comment
+    # can't trip the assertion.
+    skel = re.search(r"^\s+_write_skel_seeds\(", src, re.MULTILINE)
+    apt = re.search(r"^\s+_install_apt_packages\(", src, re.MULTILINE)
+    assert skel is not None, "expected _write_skel_seeds call in _phase_b_setup"
+    assert apt is not None, "expected _install_apt_packages call in _phase_b_setup"
+    assert skel.start() > apt.start(), (
         "_write_skel_seeds must run AFTER _install_apt_packages so apt's "
         "--force-confnew doesn't replace /etc/skel/.bashrc (a bash-package "
         "conffile) with Debian's stock skel."

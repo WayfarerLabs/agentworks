@@ -20,11 +20,13 @@ history, the same prompt convention, and the same source-line.
 Both files are marked ``# Managed by agentworks`` at the top so an
 operator inspecting them knows where they came from. Operators with
 their own dotfiles (e.g. oh-my-zsh, starship) replace the user-home
-copy directly; agentworks won't rewrite it. The grep-or-append shell
-hooks (``_write_agentworks_rc`` / ``_ensure_agentworks_files_sourced``
-in ``initializer.py``) continue to idempotently maintain the
-``. ~/.agentworks-rc.sh`` source-line on every reinit -- that's the
-one continuing hook (see issue #121).
+copy directly; agentworks won't rewrite the seed content there. The
+only continuing hook is the ``. ~/.agentworks-rc.sh`` source-line,
+maintained idempotently on every reinit by
+``_write_agentworks_rc`` / ``_ensure_agentworks_files_sourced`` in
+``initializer.py`` -- a one-line append that no-ops cleanly when the
+seed (or a previous reinit) has already added the substring (see
+issue #121).
 """
 
 from __future__ import annotations
