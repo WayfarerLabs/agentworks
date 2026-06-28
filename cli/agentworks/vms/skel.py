@@ -56,9 +56,6 @@ HISTFILESIZE=10000
 shopt -s histappend
 shopt -s checkwinsize
 
-# Identity-aware prompt: [<agent-or-admin>@<vm>] <cwd> $
-PS1='[${AGENTWORKS_AGENT:-admin}@${AGENTWORKS_VM:-\\h}] \\w \\$ '
-
 # Color support for ls / grep
 if [ -x /usr/bin/dircolors ]; then
     test -r ~/.dircolors && eval "$(dircolors -b ~/.dircolors)" || eval "$(dircolors -b)"
@@ -80,6 +77,50 @@ if ! shopt -oq posix; then
     fi
 fi
 
+# Git prompt support (silently no-op if git isn't installed).
+for __agw_gp in /usr/lib/git-core/git-sh-prompt /etc/bash_completion.d/git-prompt; do
+    [ -r "$__agw_gp" ] && . "$__agw_gp" && break
+done
+unset __agw_gp
+GIT_PS1_SHOWDIRTYSTATE=1
+GIT_PS1_SHOWUNTRACKEDFILES=1
+
+# Build PS1 before each prompt render. The mode-coded bracket
+# (cyan for ADMIN, bold yellow for AGENT) is the visual signal an
+# operator uses to tell at a glance which identity is driving the
+# shell. The ``AGW`` prefix makes clear that the ``<x>@<vm>`` shape
+# is NOT a standard Unix user@host pair.
+__agw_prompt_command() {
+    local last=$?
+
+    local vm="${AGENTWORKS_VM:-$HOSTNAME}"
+    local ws=''
+    [ -n "${AGENTWORKS_WORKSPACE-}" ] && ws=" $AGENTWORKS_WORKSPACE"
+
+    local id
+    if [ -n "${AGENTWORKS_AGENT-}" ]; then
+        # Agent mode: bold yellow bracket -- visually distinct from
+        # admin so the operator knows this shell is running as the
+        # agent's automated identity.
+        id='\\[\\e[1;33m\\][AGW AGENT '"$AGENTWORKS_AGENT"'@'"$vm$ws"']\\[\\e[0m\\]'
+    else
+        # Admin mode: cyan bracket -- the operator's normal identity.
+        id='\\[\\e[36m\\][AGW ADMIN@'"$vm$ws"']\\[\\e[0m\\]'
+    fi
+
+    local err=''
+    [ "$last" -ne 0 ] && err=' \\[\\e[31m\\]✗'"$last"'\\[\\e[0m\\]'
+
+    # Build PS1 in pieces for readability. Each segment's escape
+    # sequences are wrapped in \\[ \\] so bash counts visible width
+    # correctly for line wrapping.
+    local p_path='\\[\\e[34m\\]\\w\\[\\e[0m\\]'
+    local p_git='\\[\\e[32m\\]$(declare -F __git_ps1 >/dev/null && __git_ps1 " (%s)")\\[\\e[0m\\]'
+    # Layout: <id> <blue path><green git><red err> $
+    PS1="$id $p_path$p_git$err"' \\$ '
+}
+PROMPT_COMMAND='__agw_prompt_command'
+
 # Agentworks shell hooks (mise activate, etc.) -- written by reinit
 [ -f ~/.agentworks-rc.sh ] && . ~/.agentworks-rc.sh
 """
@@ -100,15 +141,47 @@ setopt APPEND_HISTORY
 # Completion
 autoload -Uz compinit && compinit
 
-# Identity-aware prompt: [<agent-or-admin>@<vm>] <cwd> %
-PS1='[${AGENTWORKS_AGENT:-admin}@${AGENTWORKS_VM:-%m}] %~ %# '
-
 # Color support for ls / grep
 if [ -x /usr/bin/dircolors ]; then
     test -r ~/.dircolors && eval "$(dircolors -b ~/.dircolors)" || eval "$(dircolors -b)"
     alias ls='ls --color=auto'
     alias grep='grep --color=auto'
 fi
+
+# Git branch in the prompt via zsh's built-in vcs_info.
+autoload -Uz vcs_info
+zstyle ':vcs_info:*' enable git
+zstyle ':vcs_info:git:*' formats ' (%b)'
+zstyle ':vcs_info:git:*' actionformats ' (%b|%a)'
+
+# PROMPT_SUBST: expand ${...} in PS1 at render time. Prompt escapes
+# (%F, %B, etc.) are always processed.
+setopt PROMPT_SUBST
+
+# precmd hook: build the identity prefix (mode-coded color) with
+# concrete substitutions for VM and workspace. zsh parameter
+# expansion isn't recursive in prompts, so we pre-substitute here.
+# The mode-coded bracket (cyan for ADMIN, bold yellow for AGENT) is
+# the visual signal an operator uses to tell at a glance which
+# identity is driving the shell. The ``AGW`` prefix makes clear that
+# the ``<x>@<vm>`` shape is NOT a standard Unix user@host pair.
+__agw_precmd() {
+    local vm="${AGENTWORKS_VM:-$HOST}"
+    local ws=''
+    [ -n "${AGENTWORKS_WORKSPACE-}" ] && ws=" ${AGENTWORKS_WORKSPACE}"
+
+    if [ -n "${AGENTWORKS_AGENT-}" ]; then
+        # Agent mode: bold yellow bracket.
+        __agw_id="%F{yellow}%B[AGW AGENT ${AGENTWORKS_AGENT}@${vm}${ws}]%b%f"
+    else
+        # Admin mode: cyan bracket.
+        __agw_id="%F{cyan}[AGW ADMIN@${vm}${ws}]%f"
+    fi
+}
+precmd_functions+=(__agw_precmd vcs_info)
+
+# Layout: <id> <blue path><green git><red err> %
+PS1='${__agw_id} %F{blue}%~%f%F{green}${vcs_info_msg_0_}%f%(?.. %F{red}✗%?%f) %# '
 
 # Agentworks shell hooks (mise activate, etc.) -- written by reinit
 [ -f ~/.agentworks-rc.sh ] && . ~/.agentworks-rc.sh

@@ -65,16 +65,86 @@ def test_seeds_use_guarded_source_line() -> None:
     assert guarded in ZSHRC
 
 
-def test_seeds_identity_aware_prompt_with_fallbacks() -> None:
-    """The prompts reference ``AGENTWORKS_AGENT`` and ``AGENTWORKS_VM``
-    with shell fallbacks so a user who opens a shell before the
-    identity profile is populated still gets a meaningful prompt
-    (admin / hostname instead of ``[@] $``)."""
-    assert "${AGENTWORKS_AGENT:-admin}" in BASHRC
-    assert "${AGENTWORKS_AGENT:-admin}" in ZSHRC
-    # bash uses \h for hostname; zsh uses %m.
-    assert "${AGENTWORKS_VM:-\\h}" in BASHRC
-    assert "${AGENTWORKS_VM:-%m}" in ZSHRC
+def test_seeds_identity_prompt_has_agw_prefix_and_mode_label() -> None:
+    """The identity bracket reads ``[AGW ADMIN@<vm>]`` or
+    ``[AGW AGENT <name>@<vm>]`` so it doesn't look like a stock
+    ``user@host`` pair. Both branches must be present in each seed:
+    the bash PROMPT_COMMAND / zsh precmd picks the right one at
+    runtime based on whether ``AGENTWORKS_AGENT`` is set."""
+    # Both seeds present both branches.
+    assert "[AGW ADMIN@" in BASHRC
+    assert "[AGW AGENT " in BASHRC
+    assert "[AGW ADMIN@" in ZSHRC
+    assert "[AGW AGENT " in ZSHRC
+
+
+def test_seeds_mode_coded_colors() -> None:
+    """ADMIN and AGENT modes use visually distinct colors so an
+    operator can tell at a glance which identity is driving the
+    shell. ADMIN uses cyan (\\e[36m / %F{cyan}); AGENT uses bold
+    yellow (\\e[1;33m / %F{yellow}%B)."""
+    # bash: ANSI escape sequences in PS1.
+    assert "\\e[36m" in BASHRC      # cyan for ADMIN
+    assert "\\e[1;33m" in BASHRC    # bold yellow for AGENT
+    # zsh: zsh prompt-escape color names.
+    assert "%F{cyan}" in ZSHRC
+    assert "%F{yellow}%B" in ZSHRC
+
+
+def test_seeds_vm_hostname_fallback() -> None:
+    """Both seeds fall back to the shell's hostname variable when
+    ``AGENTWORKS_VM`` isn't set (e.g. a shell opened before
+    identity profile population). bash uses ``$HOSTNAME``; zsh
+    uses ``$HOST``. Parameter expansion inside the prompt builder
+    isn't recursive, so we can't lean on bash's ``\\h`` /
+    zsh's ``%m`` escapes after a substitution -- a plain variable
+    reference works in both directions."""
+    assert "${AGENTWORKS_VM:-$HOSTNAME}" in BASHRC
+    assert "${AGENTWORKS_VM:-$HOST}" in ZSHRC
+
+
+def test_seeds_workspace_tail_only_when_set() -> None:
+    """When ``AGENTWORKS_WORKSPACE`` is set (e.g. an agent shell
+    opened with ``--workspace``), the identity bracket grows to
+    ``[AGW ADMIN@vm ws-name]``. When unset, the bracket is clean.
+    Both seeds use ``${VAR:+ $VAR}`` shape so the workspace name
+    is prefixed by a single space, no leading separator."""
+    assert "AGENTWORKS_WORKSPACE" in BASHRC
+    assert "AGENTWORKS_WORKSPACE" in ZSHRC
+
+
+def test_seeds_have_git_branch_support() -> None:
+    """Both shells emit a ``(branch)`` indicator when the cwd is
+    inside a git repo. bash sources git's contrib ``git-sh-prompt``
+    (silently no-ops if git isn't installed); zsh uses its
+    built-in ``vcs_info``."""
+    # bash: source __git_ps1 from git's contrib.
+    assert "__git_ps1" in BASHRC
+    assert "/usr/lib/git-core/git-sh-prompt" in BASHRC
+    # zsh: vcs_info is built-in to zsh.
+    assert "autoload -Uz vcs_info" in ZSHRC
+    assert "vcs_info_msg_0_" in ZSHRC
+
+
+def test_seeds_have_exit_code_badge_on_failure() -> None:
+    """Both shells render a red ``✗N`` badge after the prompt
+    when the last command exited nonzero; nothing when zero. bash
+    captures ``$?`` in the prompt builder; zsh uses ``%(?..%?...)``
+    ternary."""
+    # bash: \[\e[31m\] + ✗ symbol in the prompt builder.
+    assert "\\e[31m" in BASHRC
+    assert "✗" in BASHRC
+    # zsh: %(?..%F{red}✗%?%f) ternary -- empty when $? = 0.
+    assert "%(?.. %F{red}✗%?%f)" in ZSHRC
+
+
+def test_seeds_use_prompt_command_or_precmd_hooks() -> None:
+    """The dynamic parts of the prompt (mode-coded bracket,
+    exit-code badge) need to be recomputed before each prompt
+    render. bash uses ``PROMPT_COMMAND``; zsh uses
+    ``precmd_functions``."""
+    assert "PROMPT_COMMAND='__agw_prompt_command'" in BASHRC
+    assert "precmd_functions+=(__agw_precmd vcs_info)" in ZSHRC
 
 
 def test_bash_seed_keeps_debian_baselines() -> None:
