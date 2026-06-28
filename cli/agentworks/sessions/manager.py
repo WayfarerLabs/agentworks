@@ -1295,6 +1295,12 @@ def create_session(
 
                 expected_socket = agent_socket_path(linux_user, name)
 
+            mode_label = f"agent: {resolved_agent_name}" if resolved_agent_name else "admin"
+            output.info(
+                f"Starting session '{name}' on workspace '{workspace_name}' "
+                f"({mode_label}, template: {template.name})..."
+            )
+
             def _rollback() -> None:
                 # Best-effort rollback for the session-internal mutations only;
                 # ephemeral resources (workspace / agent created above) are
@@ -1735,6 +1741,8 @@ def restart_session(
             ],
             config,
         )
+
+        output.info(f"Restarting session '{name}'...")
 
         if is_legacy:
             # Surgical kill of the named session on the default tmux
