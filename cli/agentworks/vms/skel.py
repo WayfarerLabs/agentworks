@@ -3,10 +3,13 @@
 Two consumers share the constants in this module:
 
 - ``vms/bootstrap_script.py`` writes ``~admin/.bashrc`` and
-  ``~admin/.zshrc`` once at provision time, before init runs.
+  ``~admin/.zshrc`` once at provision time, before init runs. Once
+  written, agentworks never refreshes them: operator edits in the
+  admin's home survive every subsequent reinit.
 - ``vms/initializer.py`` writes ``/etc/skel/.bashrc`` and
   ``/etc/skel/.zshrc`` on every init / reinit so future ``useradd -m``
-  calls (i.e. new agents) inherit the seed automatically.
+  (i.e. new agents) inherits the seed automatically. The ``/etc/skel``
+  copies ARE refreshed on every reinit; the user-home copies are not.
 
 The seed is intentionally light: Debian's stock ``.bashrc`` augmented
 with an identity-aware prompt and a guarded source-line for
@@ -14,22 +17,27 @@ with an identity-aware prompt and a guarded source-line for
 the minimum a zsh user needs to be productive -- completions,
 history, the same prompt convention, and the same source-line.
 
-Both files are marked ``# Managed by agentworks -- edits will be
-clobbered on reinit``. Operators with their own dotfiles (e.g.
-oh-my-zsh, starship) replace these files; agentworks never writes
-shell rc files into a user's home after the initial seed, so the
-operator's installer wins automatically (see issue #121).
+Both files are marked ``# Managed by agentworks`` at the top so an
+operator inspecting them knows where they came from. Operators with
+their own dotfiles (e.g. oh-my-zsh, starship) replace the user-home
+copy directly; agentworks won't rewrite it. The grep-or-append shell
+hooks (``_write_agentworks_rc`` / ``_ensure_agentworks_files_sourced``
+in ``initializer.py``) continue to idempotently maintain the
+``. ~/.agentworks-rc.sh`` source-line on every reinit -- that's the
+one continuing hook (see issue #121).
 """
 
 from __future__ import annotations
 
-# Marker line at the top of each seed. The reinit-writer matches on
-# this so an operator who replaces a seed file with their own dotfiles
-# isn't clobbered on the next reinit.
-SKEL_HEADER = "# Managed by agentworks -- edits will be clobbered on reinit."
+# Marker line at the top of each seed so an operator inspecting their
+# .bashrc / .zshrc knows the file is agentworks-shipped. The marker
+# is informational only -- the in-/etc/skel copies are rewritten on
+# every reinit, the user-home copies are not (agentworks never
+# refreshes shell rc files in a user's home after the initial seed).
+SKEL_HEADER = "# Managed by agentworks."
 
 BASHRC = """\
-# Managed by agentworks -- edits will be clobbered on reinit.
+# Managed by agentworks.
 # Sourced by interactive non-login bash shells. Login shells source
 # ~/.bash_profile (or ~/.profile), which itself sources this file.
 
@@ -75,7 +83,7 @@ fi
 """
 
 ZSHRC = """\
-# Managed by agentworks -- edits will be clobbered on reinit.
+# Managed by agentworks.
 # Sourced by interactive zsh shells.
 
 # History

@@ -129,3 +129,34 @@ def test_write_skel_seeds_skel_paths_are_etc_skel() -> None:
     wouldn't propagate to future agents automatically."""
     assert SKEL_BASHRC_PATH == "/etc/skel/.bashrc"
     assert SKEL_ZSHRC_PATH == "/etc/skel/.zshrc"
+
+
+def test_write_skel_seeds_runs_after_apt_install_in_initializer() -> None:
+    """Regression guard: ``/etc/skel/.bashrc`` is a Debian conffile
+    shipped by ``bash``. Running ``_write_skel_seeds`` BEFORE
+    ``_install_apt_packages`` would let apt's ``--force-confnew``
+    silently replace the seed on any reinit that upgrades bash
+    (the seed lands at ``/etc/skel/.bashrc.dpkg-old`` and future
+    ``useradd -m`` inherits Debian's stock skel instead). Same
+    conffile-clobber pattern as ``_write_agentworks_identity_profile``,
+    which carries an explanatory comment for exactly this reason.
+
+    This test scans the init source for the relative positions of the
+    two calls so a refactor that reorders them has to update a test.
+    """
+    import inspect
+
+    from agentworks.vms import initializer
+
+    # Inspect the init source -- the call ordering inside
+    # `run_initialization` is what's load-bearing.
+    src = inspect.getsource(initializer._phase_b_setup)
+    skel_idx = src.find("_write_skel_seeds(")
+    apt_idx = src.find("_install_apt_packages(")
+    assert skel_idx != -1, "expected _write_skel_seeds call in _phase_b_setup"
+    assert apt_idx != -1, "expected _install_apt_packages call in _phase_b_setup"
+    assert skel_idx > apt_idx, (
+        "_write_skel_seeds must run AFTER _install_apt_packages so apt's "
+        "--force-confnew doesn't replace /etc/skel/.bashrc (a bash-package "
+        "conffile) with Debian's stock skel."
+    )

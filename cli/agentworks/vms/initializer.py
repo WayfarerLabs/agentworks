@@ -31,6 +31,7 @@ from agentworks.transports import (
     Transport,
 )
 from agentworks.vms.cloud_init import INIT_SYSTEM_PACKAGES, PROVISIONING_PACKAGES
+from agentworks.vms.skel import BASHRC, ZSHRC
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -201,17 +202,26 @@ def _write_skel_seeds(
     """Write the agentworks-managed shell rc seeds to ``/etc/skel``.
 
     Both ``/etc/skel/.bashrc`` and ``/etc/skel/.zshrc`` are
-    agentworks-owned on the VM: every reinit refreshes them. Future
-    ``useradd -m`` calls (e.g. agent creation) inherit the seed
+    agentworks-owned on the VM: every reinit overwrites them. Future
+    ``useradd -m`` (e.g. agent creation) inherits the seed
     automatically -- no explicit copy in agent setup needed.
 
-    Operators install their own dotfiles directly into a user's home
-    AFTER user creation; the seed only ever lands in ``/etc/skel`` and,
-    once, at user-create time. agentworks never writes shell rc files
-    into a user's home after that initial seed (see issue #121).
-    """
-    from agentworks.vms.skel import BASHRC, ZSHRC
+    Caller MUST schedule this AFTER ``_install_apt_packages``:
+    ``/etc/skel/.bashrc`` is a Debian conffile shipped by ``bash``, so
+    an apt upgrade under ``--force-confnew`` (the standard install
+    flag) would silently replace the seed if we wrote it earlier.
+    Same constraint -- and same rationale -- as
+    ``_write_agentworks_identity_profile`` for ``/etc/zsh/zprofile``.
 
+    Operators install their own dotfiles directly into a user's home
+    AFTER user creation. The seed only ever lands in user homes ONCE
+    (at provision / useradd time); agentworks never refreshes the
+    user-home copies (see issue #121). The grep-or-append source-line
+    machinery in ``_write_agentworks_rc`` /
+    ``_ensure_agentworks_files_sourced`` continues to no-op cleanly
+    on a seeded user because the seed already contains the
+    ``.agentworks-rc.sh`` substring the grep matches against.
+    """
     logger.step("Shell rc skel")
     output.detail(f"Writing {SKEL_BASHRC_PATH} and {SKEL_ZSHRC_PATH}...")
 
@@ -1645,7 +1655,6 @@ def _phase_b_setup(
     # so dpkg conffile handling doesn't apply.
     _write_sshd_accept_env(ts_target, logger)
     _write_sudoers_env_keep(ts_target, logger)
-    _write_skel_seeds(ts_target, logger)
     vm_row = db.get_vm(vm_name)
     # Init runs against a VM that exists in the DB (initialize_vm fetches the
     # row up front). A None here is an internal invariant violation, not a
@@ -1686,6 +1695,14 @@ def _phase_b_setup(
         ts_target, vm_stable_identity_env(identity_ctx), logger,
     )
 
+    # /etc/skel seeds. MUST run AFTER apt for the same reason as the
+    # identity profile above: `/etc/skel/.bashrc` is a Debian conffile
+    # shipped by the `bash` package. Running before apt's
+    # `--force-confnew` would let a bash upgrade silently replace the
+    # seed with Debian's stock skel (saving ours as .dpkg-old). Future
+    # `useradd -m` would then inherit Debian's skel instead.
+    _write_skel_seeds(ts_target, logger)
+
     # Non-fatal: snap packages
     if config.vm.snap:
         logger.step("Snap packages")
@@ -1699,10 +1716,8 @@ def _phase_b_setup(
                 output.warn(msg)
 
     # Non-fatal: set default shell (before install commands so installers
-    # write to the correct rc file). The zsh first-run wizard (which the
-    # touch ~/.zshrc hack used to suppress) no longer applies: the skel
-    # seed gives admin's home a real .zshrc at provision time and seeds
-    # /etc/skel on reinit, so any user useradd creates inherits it.
+    # write to the correct rc file). The zsh first-run wizard is
+    # pre-empted by the skel seed.
     logger.step("Shell configuration")
     admin_shell = config.admin.shell
     output.detail(f"Setting shell to {admin_shell}...")
