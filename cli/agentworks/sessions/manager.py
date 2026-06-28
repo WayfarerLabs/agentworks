@@ -6,7 +6,6 @@ import contextlib
 import re
 import shlex
 import sys
-from dataclasses import dataclass
 from functools import partial
 from typing import TYPE_CHECKING, NamedTuple
 
@@ -525,9 +524,11 @@ def _session_secret_target_pre_create(
     workspace_name: str,
     vm: VMRow,
     session_template: ResolvedSessionTemplate,
-    new_workspace: NewWorkspaceArgs | None,
+    new_workspace: bool,
+    workspace_template: str | None,
     existing_workspace: WorkspaceRow | None,
-    new_agent: NewAgentArgs | None,
+    new_agent: bool,
+    agent_template: str | None,
     existing_agent: AgentRow | None,
     is_admin_mode: bool,
 ) -> SecretTarget:
@@ -546,8 +547,8 @@ def _session_secret_target_pre_create(
 
     vm_template = _resolve_vm_tmpl(config.vm_templates, vm.template)
 
-    if new_workspace is not None:
-        workspace_env = _resolve_ws_tmpl(config, new_workspace.template_name).env
+    if new_workspace:
+        workspace_env = _resolve_ws_tmpl(config, workspace_template).env
     else:
         assert existing_workspace is not None
         workspace_env = _resolve_ws_tmpl(config, existing_workspace.template).env
@@ -556,8 +557,8 @@ def _session_secret_target_pre_create(
     admin_scope: dict[str, EnvEntry] | None = None
     if is_admin_mode:
         admin_scope = config.admin.env
-    elif new_agent is not None:
-        agent_env = _resolve_agent_tmpl(config, new_agent.template_name).env
+    elif new_agent:
+        agent_env = _resolve_agent_tmpl(config, agent_template).env
     elif existing_agent is not None:
         agent_env = _resolve_agent_tmpl(config, existing_agent.template).env
 
@@ -932,32 +933,60 @@ def batch_check_status(
     return status_map
 
 
+# -- Interactive prompts (used by create_session) --------------------------
+
+
+def _prompt_existing_workspace(db: Database) -> str:
+    """Pick an existing workspace by name.
+
+    Mirrors ``cli._helpers.prompt_workspace``: if exactly one workspace
+    exists, log "Using ..." and return it; if multiple, prompt; if none,
+    raise so the operator gets an actionable error rather than an empty
+    chooser.
+    """
+    workspaces = db.list_workspaces()
+    if not workspaces:
+        raise NotFoundError(
+            "no workspaces found",
+            entity_kind="workspace",
+            hint="Create one with 'agw workspace create' or pass --new-workspace.",
+        )
+    if len(workspaces) == 1:
+        output.info(f"Using workspace '{workspaces[0].name}'")
+        return workspaces[0].name
+    if not output.is_interactive():
+        raise ValidationError(
+            "--workspace or --new-workspace is required in non-interactive mode",
+            entity_kind="session",
+        )
+    options = [f"{ws.name}  (vm: {ws.vm_name})" for ws in workspaces]
+    idx = output.choose("Select a workspace:", options)
+    return workspaces[idx].name
+
+
+def _prompt_session_mode(vm_agents: list[AgentRow]) -> str | None:
+    """Pick "admin" or one of the existing agents on the resolved VM.
+
+    Caller is responsible for short-circuiting when ``vm_agents`` is
+    empty (the VM has no agents → admin mode quietly). Returns the
+    chosen agent name, or ``None`` for admin mode.
+    """
+    if not output.is_interactive():
+        raise ValidationError(
+            "--admin, --agent, or --new-agent is required in non-interactive mode",
+            entity_kind="session",
+        )
+    options = ["admin"]
+    for a in vm_agents:
+        label = f"agent: {a.name}"
+        if a.template:
+            label += f" [{a.template}]"
+        options.append(label)
+    idx = output.choose("Run session as:", options)
+    return None if idx == 0 else vm_agents[idx - 1].name
+
+
 # -- Public API ------------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class NewWorkspaceArgs:
-    """Inputs for creating a workspace as part of ``create_session``.
-
-    Bundled in a dataclass (rather than scattered as sibling kwargs) so the
-    "create new" intent is one toggle and the related arguments travel
-    together. ``workspace_name`` on ``create_session`` holds the resulting
-    workspace's name; this struct carries the template choice.
-    """
-
-    template_name: str | None = None
-
-
-@dataclass(frozen=True)
-class NewAgentArgs:
-    """Inputs for creating an agent as part of ``create_session``.
-
-    Bundled in a dataclass for the same reason as ``NewWorkspaceArgs``.
-    ``agent_name`` on ``create_session`` holds the resulting agent's name;
-    this struct carries the template choice.
-    """
-
-    template_name: str | None = None
 
 
 def create_session(
@@ -966,40 +995,51 @@ def create_session(
     *,
     name: str,
     template_name: str | None = None,
+    # Workspace selection (CLI-flag-shaped; service consolidates):
+    workspace: str | None = None,
+    new_workspace: bool = False,
     workspace_name: str | None = None,
-    new_workspace: NewWorkspaceArgs | None = None,
+    workspace_template: str | None = None,
+    # Agent / admin selection (CLI-flag-shaped; service consolidates):
+    agent: str | None = None,
+    new_agent: bool = False,
     agent_name: str | None = None,
-    new_agent: NewAgentArgs | None = None,
+    agent_template: str | None = None,
+    admin: bool = False,
+    # VM anchor (validated against workspace/agent VMs when both specified):
     vm_name: str | None = None,
 ) -> None:
     """Create and start a session.
 
-    Optionally provisions an ephemeral workspace and/or agent as part of
-    the same call. When ``new_workspace`` / ``new_agent`` are set, the
-    full flow (validate → resolve secrets → create resources → create
-    session) runs atomically: validation failures and Ctrl-C at the
-    secret prompt leave no state mutated, and any failure after
-    state mutation begins rolls back every ephemeral resource that
-    was created.
+    Accepts the same flag combinations the ``agw session create`` CLI
+    surfaces, validates them, prompts the operator for anything left
+    unspecified (where interactive), and atomically provisions whichever
+    ephemeral resources (workspace, agent) the operator requested
+    alongside the session itself. On any failure after a mutation
+    begins, every ephemeral resource created during the call is rolled
+    back.
 
     Args:
         name: Session name.
         template_name: Session template (defaults to the operator's default).
-        workspace_name: Name of the workspace this session lives in. When
-            ``new_workspace`` is None, must reference an existing workspace.
-            When ``new_workspace`` is set, names the workspace to create
-            (defaults to ``name``).
-        new_workspace: When set, create a new workspace before the session.
-        agent_name: Existing agent for agent-mode sessions. When
-            ``new_agent`` is set, names the agent to create (defaults to
-            ``name``). When both ``agent_name`` and ``new_agent`` are None,
-            the session runs in admin mode.
-        new_agent: When set, create a new agent before the session.
+        workspace: Existing workspace to attach this session to. Mutex
+            with ``new_workspace``.
+        new_workspace: When ``True``, create a new workspace.
+        workspace_name: Name for the new workspace (defaults to ``name``
+            when omitted). Requires ``new_workspace=True``.
+        workspace_template: Template for the new workspace. Requires
+            ``new_workspace=True``.
+        agent: Existing agent name. Mutex with ``new_agent`` and ``admin``.
+        new_agent: When ``True``, create a new agent.
+        agent_name: Name for the new agent (defaults to ``name`` when
+            omitted). Requires ``new_agent=True``.
+        agent_template: Template for the new agent. Requires
+            ``new_agent=True``.
+        admin: When ``True``, run the session as the VM admin (no agent).
+            Mutex with ``agent`` and ``new_agent``.
         vm_name: Target VM. Optional when an existing workspace or agent
-            pins the VM; required when no other anchor does
-            (e.g. ``new_workspace`` + admin mode, or ``new_workspace`` +
-            ``new_agent``). When specified alongside other anchors, must
-            agree with them, else ``ValidationError``.
+            pins the VM; required when no other anchor does. When
+            specified alongside other anchors, must agree with them.
     """
     from agentworks.config import validate_name
     from agentworks.sessions.tmux import (
@@ -1009,28 +1049,79 @@ def create_session(
         deploy_restricted_config,
     )
 
-    # ===== Pure validation (no SSH, no mutations) ===========================
+    # ===== Flag-shape validation (mutexes + ephemeral-arg gating) ===========
 
-    if workspace_name is None and new_workspace is None:
+    if workspace and new_workspace:
         raise ValidationError(
-            "must specify workspace_name or new_workspace",
+            "specify --workspace or --new-workspace, not both",
+            entity_kind="session",
+            entity_name=name,
+        )
+    if not new_workspace and (workspace_name or workspace_template):
+        raise ValidationError(
+            "--workspace-name and --workspace-template require --new-workspace",
+            entity_kind="session",
+            entity_name=name,
+        )
+    agent_modes = sum(1 for x in (bool(agent), new_agent, admin) if x)
+    if agent_modes > 1:
+        raise ValidationError(
+            "specify at most one of --agent, --new-agent, or --admin",
+            entity_kind="session",
+            entity_name=name,
+        )
+    if not new_agent and (agent_name or agent_template):
+        raise ValidationError(
+            "--agent-name and --agent-template require --new-agent",
             entity_kind="session",
             entity_name=name,
         )
 
+    # ===== Canonicalize CLI-flag shape into internal form ===================
+    #
+    # After this block:
+    #   workspace_name : str | None   -- the workspace's name (None until
+    #                                    DB lookup / default-to-session-name)
+    #   new_workspace  : bool         -- True iff we're creating it
+    #   workspace_template : str | None
+    #   agent_name : str | None       -- the agent's name (None == admin mode)
+    #   new_agent  : bool
+    #   agent_template : str | None
+    #
+    # ``workspace`` / ``agent`` / ``admin`` are consumed here and unused below.
+
+    if workspace:
+        workspace_name = workspace
+    if agent:
+        agent_name = agent
+    if admin:
+        agent_name = None
+        new_agent = False
+
+    # ===== Prompts (when interactive and operator left choices open) =======
+
+    if not workspace_name and not new_workspace:
+        # No workspace specified; pick from existing.
+        workspace_name = _prompt_existing_workspace(db)
+    if agent_name is None and not new_agent and not admin and not workspace:
+        # Mode unspecified AND we're attaching to a fresh workspace (no
+        # existing-ws-derived agent context yet); see the post-VM mode
+        # prompt below if we end up needing one against the resolved VM.
+        pass  # handled below once we know the VM
+
+    # ===== Pure validation (no SSH, no mutations) ===========================
+
     # Default ephemeral resource names to the session name when omitted.
-    # After this block, ``workspace_name`` is always set; ``agent_name``
-    # is None only in admin mode.
-    if new_workspace is not None and workspace_name is None:
+    if new_workspace and workspace_name is None:
         workspace_name = name
-    if new_agent is not None and agent_name is None:
+    if new_agent and agent_name is None:
         agent_name = name
-    assert workspace_name is not None  # invariant after the defaulting above
+    assert workspace_name is not None  # invariant after canonicalize + prompt
 
     validate_name(name)
-    if new_workspace is not None:
+    if new_workspace:
         validate_name(workspace_name)
-    if new_agent is not None:
+    if new_agent:
         assert agent_name is not None
         validate_name(agent_name)
 
@@ -1042,13 +1133,13 @@ def create_session(
             entity_kind="session",
             entity_name=name,
         )
-    if new_workspace is not None and db.get_workspace(workspace_name) is not None:
+    if new_workspace and db.get_workspace(workspace_name) is not None:
         raise AlreadyExistsError(
             f"workspace '{workspace_name}' already exists",
             entity_kind="workspace",
             entity_name=workspace_name,
         )
-    if new_agent is not None:
+    if new_agent:
         assert agent_name is not None  # defaulted to ``name`` above
         if db.get_agent(agent_name) is not None:
             raise AlreadyExistsError(
@@ -1061,10 +1152,10 @@ def create_session(
     # they must all agree. By the end of this block we have one VMRow.
     vm_anchors: list[tuple[str, str]] = []  # (source_label, vm_name)
     if vm_name is not None:
-        vm_anchors.append(("vm_name", vm_name))
+        vm_anchors.append(("--vm", vm_name))
 
     existing_ws: WorkspaceRow | None = None
-    if new_workspace is None:
+    if not new_workspace:
         existing_ws = db.get_workspace(workspace_name)
         if existing_ws is None:
             raise NotFoundError(
@@ -1075,7 +1166,7 @@ def create_session(
         vm_anchors.append((f"workspace '{workspace_name}'", existing_ws.vm_name))
 
     existing_agent: AgentRow | None = None
-    if new_agent is None and agent_name is not None:
+    if not new_agent and agent_name is not None:
         existing_agent = db.get_agent(agent_name)
         if existing_agent is None:
             raise NotFoundError(
@@ -1109,6 +1200,21 @@ def create_session(
             entity_kind="vm",
             entity_name=target_vm_name,
         )
+
+    # ===== Mode prompt (admin vs existing agent) when none specified ========
+    #
+    # Fires only when the operator didn't pass --admin / --agent / --new-agent
+    # and isn't creating an ephemeral agent. The set of options is "admin"
+    # plus the existing agents on this VM. If the VM has no agents, the
+    # session quietly defaults to admin mode (no prompt).
+
+    if agent_name is None and not new_agent:
+        vm_agents = db.list_agents(vm_name=vm.name)
+        if vm_agents:
+            agent_name = _prompt_session_mode(vm_agents)
+        if agent_name is not None:
+            existing_agent = db.get_agent(agent_name)
+            assert existing_agent is not None  # came from list_agents
 
     # ===== Template resolution (no SSH, no mutations) =======================
 
@@ -1146,8 +1252,10 @@ def create_session(
                 vm=vm,
                 session_template=template,
                 new_workspace=new_workspace,
+                workspace_template=workspace_template,
                 existing_workspace=existing_ws,
                 new_agent=new_agent,
+                agent_template=agent_template,
                 existing_agent=existing_agent,
                 is_admin_mode=(agent_name is None),
             ),
@@ -1193,7 +1301,7 @@ def create_session(
 
     try:
         # ---- Ephemeral creates -------------------------------------------------
-        if new_workspace is not None:
+        if new_workspace:
             from agentworks.workspaces.manager import create_workspace
 
             create_workspace(
@@ -1201,10 +1309,10 @@ def create_session(
                 config,
                 name=workspace_name,
                 vm_name=vm.name,
-                template_name=new_workspace.template_name,
+                template_name=workspace_template,
             )
             workspace_created = True
-        if new_agent is not None:
+        if new_agent:
             assert agent_name is not None  # defaulted to ``name`` above
             from agentworks.agents.manager import create_agent
 
@@ -1213,7 +1321,7 @@ def create_session(
                 config,
                 name=agent_name,
                 vm_name=vm.name,
-                template=new_agent.template_name,
+                template=agent_template,
             )
             agent_created = True
 
@@ -1227,8 +1335,8 @@ def create_session(
             agent_target = None
             if agent_name is not None:
                 mode = SessionMode.AGENT
-                agent = db.get_agent(agent_name)
-                if agent is None:
+                agent_row = db.get_agent(agent_name)
+                if agent_row is None:
                     raise NotFoundError(
                         f"agent '{agent_name}' not found",
                         entity_kind="agent",
@@ -1240,14 +1348,14 @@ def create_session(
                 # a tripwire so a future refactor that reorders or drops the
                 # upfront check fails loudly rather than silently corrupting
                 # cross-VM state.
-                if agent.vm_name != vm_check.name:
+                if agent_row.vm_name != vm_check.name:
                     raise ValidationError(
-                        f"agent '{agent_name}' is on VM '{agent.vm_name}', "
+                        f"agent '{agent_name}' is on VM '{agent_row.vm_name}', "
                         f"but workspace '{workspace_name}' is on VM '{vm_check.name}'",
                         entity_kind="session",
                         entity_name=name,
                     )
-                linux_user = agent.linux_user
+                linux_user = agent_row.linux_user
                 resolved_agent_name = agent_name
 
                 # Probe direct agent SSH BEFORE any state mutation (group add,
@@ -1258,8 +1366,8 @@ def create_session(
                 from agentworks.agents.manager import _assert_agent_ssh_works
                 from agentworks.transports import agent_transport
 
-                agent_target = agent_transport(vm_check, config, agent)
-                _assert_agent_ssh_works(agent_target, agent)
+                agent_target = agent_transport(vm_check, config, agent_row)
+                _assert_agent_ssh_works(agent_target, agent_row)
             else:
                 mode = SessionMode.ADMIN
                 linux_user = vm_check.admin_username

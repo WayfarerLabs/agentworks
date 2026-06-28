@@ -18,22 +18,24 @@ Also pins parity between the two SecretTarget builders so the new
 pre-create helper can't silently diverge from the existing post-create
 one for the inputs they both handle (existing workspace + existing
 agent or admin mode).
+
+create_session accepts CLI-flag-shaped args (workspace / new_workspace /
+workspace_name / workspace_template / agent / new_agent / agent_name /
+agent_template / admin / vm_name) and runs all validation, prompts,
+and orchestration in the service layer. The CLI handler is a pure
+pass-through.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
-from typing import TYPE_CHECKING
 
 import pytest
 
+from agentworks import output
 from agentworks.db import Database
 from agentworks.errors import ValidationError
-from agentworks.sessions.manager import NewAgentArgs, NewWorkspaceArgs
-
-if TYPE_CHECKING:
-    pass
 
 
 def _seed_two_vms(tmp_path: Path) -> Database:
@@ -74,6 +76,15 @@ def _seed_one_vm(tmp_path: Path) -> Database:
     return db
 
 
+@pytest.fixture(autouse=True)
+def _non_interactive(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Force non-interactive output for tests so missing-arg prompts raise
+    ValidationError instead of hanging on a chooser. Individual tests that
+    want to exercise prompting can override via monkeypatch on
+    ``output.is_interactive`` or seed enough args to skip the prompt."""
+    monkeypatch.setattr(output, "is_interactive", lambda: False)
+
+
 # ---------------------------------------------------------------------------
 # Validation
 # ---------------------------------------------------------------------------
@@ -94,8 +105,8 @@ def test_cross_vm_existing_workspace_and_agent_fails_upfront(tmp_path: Path) -> 
             db,
             config,  # type: ignore[arg-type]
             name="s1",
-            workspace_name="ws-A",
-            agent_name="agt-B",
+            workspace="ws-A",
+            agent="agt-B",
         )
 
     # No state mutated: no session row written.
@@ -104,7 +115,7 @@ def test_cross_vm_existing_workspace_and_agent_fails_upfront(tmp_path: Path) -> 
 
 
 def test_explicit_vm_disagreeing_with_workspace_fails_upfront(tmp_path: Path) -> None:
-    """vm_name="vm-B" alongside workspace_name="ws-A" (which lives on vm-A)
+    """--vm vm-B alongside --workspace ws-A (which lives on vm-A)
     fails the anchor cross-check before any mutation."""
     from agentworks.sessions.manager import create_session
 
@@ -116,7 +127,7 @@ def test_explicit_vm_disagreeing_with_workspace_fails_upfront(tmp_path: Path) ->
             db,
             config,  # type: ignore[arg-type]
             name="s1",
-            workspace_name="ws-A",
+            workspace="ws-A",
             vm_name="vm-B",
         )
 
@@ -127,9 +138,9 @@ def test_explicit_vm_disagreeing_with_workspace_fails_upfront(tmp_path: Path) ->
 def test_explicit_vm_agreeing_with_workspace_passes_anchor_check(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """vm_name="vm-A" plus workspace_name="ws-A" agree, so the anchor
-    check passes. The first downstream call (_ensure_vm_running) is what
-    we use as a sentinel that we got past validation."""
+    """--vm vm-A + --workspace ws-A agree, so the anchor check passes.
+    The first downstream call (_ensure_vm_running) is what we use as a
+    sentinel that we got past validation."""
     from agentworks.sessions import manager as session_manager
     from agentworks.sessions.manager import create_session
 
@@ -154,7 +165,8 @@ def test_explicit_vm_agreeing_with_workspace_passes_anchor_check(
             db,
             config,  # type: ignore[arg-type]
             name="s1",
-            workspace_name="ws-A",
+            workspace="ws-A",
+            agent="agt-A",  # also on vm-A; pins the mode so no mode prompt fires
             vm_name="vm-A",
         )
     assert called == ["ensure_vm_up"]
@@ -173,36 +185,91 @@ def test_no_vm_anchor_raises(tmp_path: Path) -> None:
             db,
             config,  # type: ignore[arg-type]
             name="s1",
-            new_workspace=NewWorkspaceArgs(),
-            # admin mode (no agent_name, no new_agent), no vm_name
+            new_workspace=True,
+            admin=True,
         )
     db.close()
 
 
-def test_workspace_and_new_workspace_both_none_raises(tmp_path: Path) -> None:
-    """Operator must specify which workspace to use."""
+def test_workspace_and_new_workspace_mutex(tmp_path: Path) -> None:
+    """Cannot specify both --workspace (existing) and --new-workspace."""
     from agentworks.sessions.manager import create_session
 
     db = _seed_one_vm(tmp_path)
     config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
 
-    with pytest.raises(ValidationError, match="workspace_name or new_workspace"):
+    with pytest.raises(ValidationError, match="--workspace or --new-workspace, not both"):
         create_session(
             db,
             config,  # type: ignore[arg-type]
             name="s1",
+            workspace="ws1",
+            new_workspace=True,
         )
     db.close()
 
 
-def test_agent_name_with_new_agent_creates_new_agent_with_given_name(
+def test_workspace_template_requires_new_workspace(tmp_path: Path) -> None:
+    """--workspace-template only makes sense with --new-workspace."""
+    from agentworks.sessions.manager import create_session
+
+    db = _seed_one_vm(tmp_path)
+    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
+
+    with pytest.raises(ValidationError, match="require --new-workspace"):
+        create_session(
+            db,
+            config,  # type: ignore[arg-type]
+            name="s1",
+            workspace="ws1",
+            workspace_template="some-template",
+        )
+    db.close()
+
+
+def test_admin_and_agent_mutex(tmp_path: Path) -> None:
+    """Cannot specify --admin alongside --agent (or --new-agent)."""
+    from agentworks.sessions.manager import create_session
+
+    db = _seed_one_vm(tmp_path)
+    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
+
+    with pytest.raises(ValidationError, match="at most one of --agent, --new-agent, or --admin"):
+        create_session(
+            db,
+            config,  # type: ignore[arg-type]
+            name="s1",
+            workspace="ws1",
+            admin=True,
+            agent="something",
+        )
+    db.close()
+
+
+def test_agent_template_requires_new_agent(tmp_path: Path) -> None:
+    """--agent-template only makes sense with --new-agent."""
+    from agentworks.sessions.manager import create_session
+
+    db = _seed_one_vm(tmp_path)
+    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
+
+    with pytest.raises(ValidationError, match="require --new-agent"):
+        create_session(
+            db,
+            config,  # type: ignore[arg-type]
+            name="s1",
+            workspace="ws1",
+            agent_template="some-template",
+        )
+    db.close()
+
+
+def test_new_agent_with_explicit_agent_name(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """``agent_name`` carries the agent's name (existing OR new);
-    ``new_agent`` toggles meaning. Together they mean "create a new
-    agent with the given name." This is the call shape the CLI uses
-    when ``--new-agent`` + ``--agent-name`` is passed, so a bogus
-    mutex check here regresses the operator-facing flow."""
+    """``--new-agent --agent-name X`` creates a new agent named X (not
+    a lookup of existing). Regression for the bogus agent_name/new_agent
+    mutex check that briefly existed."""
     from agentworks.sessions import manager as session_manager
     from agentworks.sessions.manager import create_session
 
@@ -231,12 +298,10 @@ def test_agent_name_with_new_agent_creates_new_agent_with_given_name(
             db,
             config,  # type: ignore[arg-type]
             name="s1",
-            workspace_name="ws1",
+            workspace="ws1",
+            new_agent=True,
             agent_name="my-named-agent",
-            new_agent=NewAgentArgs(),
         )
-    # The given name was used to create the new agent, not interpreted
-    # as a lookup.
     assert create_agent_calls == [
         {"name": "my-named-agent", "vm_name": "vm1", "template": None}
     ]
@@ -246,14 +311,10 @@ def test_agent_name_with_new_agent_creates_new_agent_with_given_name(
 def test_ephemeral_agent_name_defaults_to_session_name(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """When ``new_agent`` is set without ``agent_name``, the new agent's
-    name defaults to the session name. The service layer owns this
-    default; the CLI passes ``agent_name=None`` through when
-    ``--agent-name`` isn't supplied (single source of truth).
-
-    Regression for the bogus ``agent_name`` / ``new_agent`` mutex check
-    that rejected the CLI's natural shape for
-    ``--vm X --new-workspace --new-agent SESSION_NAME``."""
+    """When ``new_agent=True`` is set without ``agent_name``, the new
+    agent's name defaults to the session name. The service layer owns
+    this default; the CLI just forwards None when --agent-name wasn't
+    supplied."""
     from agentworks.sessions import manager as session_manager
     from agentworks.sessions.manager import create_session
 
@@ -292,10 +353,9 @@ def test_ephemeral_agent_name_defaults_to_session_name(
             db,
             config,  # type: ignore[arg-type]
             name="bbs3",
-            new_workspace=NewWorkspaceArgs(),
-            new_agent=NewAgentArgs(),
+            new_workspace=True,
+            new_agent=True,
             vm_name="bbvm1",
-            # No agent_name -- CLI didn't pre-default. Service does.
         )
 
     # Both ephemerals defaulted to the session name.
@@ -318,8 +378,8 @@ def test_ephemeral_workspace_name_collision_raises(tmp_path: Path) -> None:
             db,
             config,  # type: ignore[arg-type]
             name="s1",
+            new_workspace=True,
             workspace_name="ws1",  # collides
-            new_workspace=NewWorkspaceArgs(),
             vm_name="vm1",
         )
     db.close()
@@ -360,10 +420,10 @@ def _install_session_prep_stubs(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_eager_resolve_fires_exactly_once_for_new_workspace_and_new_agent(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """``--new-workspace --new-agent`` must prompt at most once for the union
-    of all secrets across the three creations. Asserts the orchestrator
-    calls resolve_for_command exactly once and that the call happens BEFORE
-    create_workspace / create_agent run."""
+    """``new_workspace=True + new_agent=True`` must prompt at most once
+    for the union of all secrets across the three creations. Asserts the
+    orchestrator calls resolve_for_command exactly once and that the
+    call happens BEFORE create_workspace / create_agent run."""
     from agentworks.sessions.manager import create_session
 
     db = Database(tmp_path / "test.db")
@@ -382,7 +442,6 @@ def test_eager_resolve_fires_exactly_once_for_new_workspace_and_new_agent(
 
     def _ws_spy(db: object, config: object, **kwargs: object) -> None:
         sequence.append("create_workspace")
-        # Pretend the workspace was created by inserting a stub row.
         db._conn.execute(  # type: ignore[attr-defined]
             "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group) "
             "VALUES (?, ?, ?, ?)",
@@ -398,8 +457,6 @@ def test_eager_resolve_fires_exactly_once_for_new_workspace_and_new_agent(
     monkeypatch.setattr("agentworks.workspaces.manager.create_workspace", _ws_spy)
     monkeypatch.setattr("agentworks.agents.manager.create_agent", _ag_spy)
 
-    # Stop the flow right after the ephemeral creates so we don't have to
-    # stub the entire inner state-mutation block.
     class _Stop(Exception):
         pass
 
@@ -416,14 +473,12 @@ def test_eager_resolve_fires_exactly_once_for_new_workspace_and_new_agent(
             db,
             config,  # type: ignore[arg-type]
             name="s1",
-            new_workspace=NewWorkspaceArgs(),
-            new_agent=NewAgentArgs(),
+            new_workspace=True,
+            new_agent=True,
             vm_name="vm1",
         )
 
-    # Exactly one eager-resolve call, before the creates.
     assert sequence.count("resolve_for_command") == 1
-    # Order: resolve, then create_workspace, then create_agent, then prepare_vm.
     assert sequence == [
         "resolve_for_command",
         "create_workspace",
@@ -473,7 +528,6 @@ def test_failure_after_ephemeral_create_rolls_back_ephemerals(
     monkeypatch.setattr("agentworks.workspaces.manager.delete_workspace", _ws_delete)
     monkeypatch.setattr("agentworks.agents.manager.delete_agent", _ag_delete)
 
-    # Make the session-internal block fail (after both ephemerals are created).
     def _explode(*a: object, **k: object) -> None:
         raise RuntimeError("simulated session-internal failure")
 
@@ -486,12 +540,11 @@ def test_failure_after_ephemeral_create_rolls_back_ephemerals(
             db,
             config,  # type: ignore[arg-type]
             name="s1",
-            new_workspace=NewWorkspaceArgs(),
-            new_agent=NewAgentArgs(),
+            new_workspace=True,
+            new_agent=True,
             vm_name="vm1",
         )
 
-    # Rollback ran for both. Order is reverse-of-create: agent then workspace.
     assert deletes == ["agent:s1", "workspace:s1"]
     db.close()
 
@@ -499,20 +552,14 @@ def test_failure_after_ephemeral_create_rolls_back_ephemerals(
 def test_new_agent_inherits_vm_from_existing_workspace(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """``--new-agent`` against an existing workspace pins the VM via the
-    workspace anchor; no ``vm_name`` is required. Closes the matrix the
-    other validation tests cover (existing workspace + existing agent,
-    new workspace + ephemeral resources)."""
+    """``new_agent=True`` against an existing workspace pins the VM via
+    the workspace anchor; no ``vm_name`` is required."""
     from agentworks.sessions import manager as session_manager
     from agentworks.sessions.manager import create_session
 
-    db = _seed_one_vm(tmp_path)  # vm1 + ws1 already seeded
+    db = _seed_one_vm(tmp_path)  # vm1 + ws1
     config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
 
-    # Stub template resolution + the VM up-state probe so we get past
-    # validation. The sentinel below proves we reached the create_agent
-    # call, which only happens after the anchor cross-check accepts the
-    # workspace's VM as the target.
     monkeypatch.setattr(session_manager, "_resolve_template", lambda *a, **k: None)
     monkeypatch.setattr(
         session_manager, "_session_secret_target_pre_create", lambda *a, **k: None
@@ -535,12 +582,11 @@ def test_new_agent_inherits_vm_from_existing_workspace(
             db,
             config,  # type: ignore[arg-type]
             name="s1",
-            workspace_name="ws1",
-            new_agent=NewAgentArgs(),
-            # NO vm_name -- inherited from ws1's VM
+            workspace="ws1",
+            new_agent=True,
         )
     assert len(create_agent_calls) == 1
-    assert create_agent_calls[0]["vm_name"] == "vm1"  # inherited from ws1
+    assert create_agent_calls[0]["vm_name"] == "vm1"
     db.close()
 
 
@@ -548,8 +594,7 @@ def test_validation_failure_does_not_trigger_rollback(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Cross-VM mismatch fails during validation, BEFORE any create_*
-    is called. Rollback must not run -- there's nothing to undo, and
-    triggering it would attempt to delete resources that don't exist."""
+    is called. Rollback must not run."""
     from agentworks.sessions.manager import create_session
 
     db = _seed_two_vms(tmp_path)
@@ -570,8 +615,8 @@ def test_validation_failure_does_not_trigger_rollback(
             db,
             config,  # type: ignore[arg-type]
             name="s1",
-            workspace_name="ws-A",
-            agent_name="agt-B",
+            workspace="ws-A",
+            agent="agt-B",
         )
 
     assert deletes == [], "no rollback should run when nothing was created"
@@ -579,16 +624,31 @@ def test_validation_failure_does_not_trigger_rollback(
 
 
 # ---------------------------------------------------------------------------
+# Prompt behavior
+# ---------------------------------------------------------------------------
+
+
+def test_no_workspace_specified_raises_in_non_interactive(tmp_path: Path) -> None:
+    """When neither --workspace nor --new-workspace is specified and
+    there's more than one workspace on disk, the service has to prompt
+    to pick. In non-interactive mode (the test default), the prompt
+    raises rather than hanging."""
+    from agentworks.sessions.manager import create_session
+
+    db = _seed_two_vms(tmp_path)  # 2 workspaces → prompt would fire
+    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
+
+    with pytest.raises(ValidationError, match="--workspace or --new-workspace"):
+        create_session(
+            db,
+            config,  # type: ignore[arg-type]
+            name="s1",
+        )
+    db.close()
+
+
+# ---------------------------------------------------------------------------
 # SecretTarget builder parity
-#
-# ``_session_secret_target`` (post-create, from DB rows) and
-# ``_session_secret_target_pre_create`` (pre-create, from template-name
-# inputs) must return SecretTargets with identical env-scope content for
-# the inputs they both handle: existing workspace + existing agent, or
-# existing workspace + admin mode. If they ever diverge, the eager-
-# resolve in ``create_session`` will see a different secret-decl union
-# depending on which code path ran, and FRD R4 (eager prompting before
-# any state mutation) silently regresses for one of the two flows.
 # ---------------------------------------------------------------------------
 
 
@@ -662,9 +722,8 @@ def test_secret_target_pre_create_parity_with_session_secret_target(
     tmp_path: Path, mode: str
 ) -> None:
     """For existing workspace + (existing agent | admin mode), the two
-    SecretTarget builders must produce equal targets (label excluded
-    from equality by the dataclass) so ``compute_needed_secrets`` is
-    invariant across the two helpers."""
+    SecretTarget builders must produce equal targets so
+    ``compute_needed_secrets`` is invariant across the two helpers."""
     from agentworks.config import load_config
     from agentworks.db import SessionMode
     from agentworks.secrets import compute_needed_secrets
@@ -699,20 +758,16 @@ def test_secret_target_pre_create_parity_with_session_secret_target(
         workspace_name="ws1",
         vm=vm,
         session_template=session_template,
-        new_workspace=None,
+        new_workspace=False,
+        workspace_template=None,
         existing_workspace=ws,
-        new_agent=None,
+        new_agent=False,
+        agent_template=None,
         existing_agent=agent,
         is_admin_mode=(mode == "admin"),
     )
 
-    # SecretTarget compares without label (see secrets.orchestration:89).
-    # Equality on the dataclass covers the env-scope content for vm /
-    # workspace / admin / agent / session.
     assert pre == post
-
-    # Belt-and-suspenders: the operator-visible invariant is that the
-    # set of declared secrets the resolver would prompt for is identical.
     assert compute_needed_secrets([pre], config) == compute_needed_secrets([post], config)
 
     db.close()

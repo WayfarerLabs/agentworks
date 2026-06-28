@@ -123,7 +123,7 @@ def test_session_create_eager_resolve_fires_before_db_insert(
             db,
             config,  # type: ignore[arg-type]
             name="s1",
-            workspace_name="ws1",
+            workspace="ws1",
             template_name=None,
             agent_name=None,
         )
@@ -177,7 +177,7 @@ def test_session_create_calls_resolve_with_session_target(
             db,
             config,  # type: ignore[arg-type]
             name="s1",
-            workspace_name="ws1",
+            workspace="ws1",
             template_name=None,
             agent_name=None,
         )

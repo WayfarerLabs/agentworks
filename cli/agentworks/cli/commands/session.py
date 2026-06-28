@@ -2,15 +2,12 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Annotated
+from typing import Annotated
 
 import typer
 
-from agentworks.cli._app import app, require_interactive
-from agentworks.cli._helpers import get_db, parse_csv_filter, prompt_vm, prompt_workspace
-
-if TYPE_CHECKING:
-    from agentworks.db import Database, WorkspaceRow
+from agentworks.cli._app import app
+from agentworks.cli._helpers import get_db, parse_csv_filter
 
 session_app = typer.Typer(
     name="session",
@@ -41,113 +38,24 @@ def session_create(
 ) -> None:
     """Create and start a session in a workspace."""
     from agentworks.config import load_config
-    from agentworks.sessions.manager import NewAgentArgs, NewWorkspaceArgs, create_session
-
-    # Validate flag combinations before any prompts
-    if admin and agent:
-        raise typer.BadParameter("--admin and --agent are mutually exclusive")
-    if admin and new_agent:
-        raise typer.BadParameter("--admin and --new-agent are mutually exclusive")
-    if agent and new_agent:
-        raise typer.BadParameter("--agent and --new-agent are mutually exclusive")
-    if workspace and new_workspace:
-        raise typer.BadParameter("--workspace and --new-workspace are mutually exclusive")
-    if not new_workspace and (workspace_name or workspace_template):
-        raise typer.BadParameter(
-            "--workspace-name and --workspace-template require --new-workspace"
-        )
-    if not new_agent and (agent_name or agent_template):
-        raise typer.BadParameter("--agent-name and --agent-template require --new-agent")
-
-    db = get_db()
-    config = load_config()
-
-    # Interactive resource selection lives in the CLI; the service layer
-    # receives already-resolved names. ``create_session`` handles
-    # cross-checks, secret resolution, ephemeral resource creation, and
-    # rollback in one atomic flow.
-    resolved_vm_name: str | None = None
-    resolved_workspace_name: str | None = None
-    resolved_agent: str | None = agent
-    new_workspace_args: NewWorkspaceArgs | None = None
-    new_agent_args: NewAgentArgs | None = None
-
-    if new_workspace:
-        resolved_vm_row = prompt_vm(db, vm)
-        resolved_vm_name = resolved_vm_row.name
-        resolved_workspace_name = workspace_name  # may be None; defaults to session name
-        new_workspace_args = NewWorkspaceArgs(template_name=workspace_template)
-
-        # Mode resolution (admin vs agent) only needs to happen here when
-        # --new-agent isn't set; that flag has already chosen agent mode.
-        if not admin and agent is None and not new_agent:
-            # No existing workspace to consult — pick from agents on the
-            # target VM (or default to admin if none exist).
-            vm_agents = db.list_agents(vm_name=resolved_vm_row.name)
-            if vm_agents:
-                require_interactive("--admin or --agent")
-                from agentworks import output
-
-                options = ["admin"]
-                for a in vm_agents:
-                    label = f"agent: {a.name}"
-                    if a.template:
-                        label += f" [{a.template}]"
-                    options.append(label)
-                idx = output.choose("Run session as:", options)
-                resolved_agent = None if idx == 0 else vm_agents[idx - 1].name
-    else:
-        ws = prompt_workspace(db, workspace)
-        resolved_workspace_name = ws.name
-        # ``--vm`` is allowed alongside ``--workspace`` as a redundant
-        # anchor; the service layer cross-checks that it matches the
-        # workspace's VM and surfaces a clear error if it doesn't.
-        resolved_vm_name = vm
-        if not admin and agent is None and not new_agent:
-            resolved_agent = _prompt_session_mode(db, ws)
-
-    if new_agent:
-        new_agent_args = NewAgentArgs(template_name=agent_template)
-        # Pass the operator-supplied name through; the service layer
-        # defaults to the session name when None. Defaulting here too
-        # would shadow that single-source-of-truth.
-        resolved_agent = agent_name
+    from agentworks.sessions.manager import create_session
 
     create_session(
-        db,
-        config,
+        get_db(),
+        load_config(),
         name=name,
         template_name=template,
-        workspace_name=resolved_workspace_name,
-        new_workspace=new_workspace_args,
-        agent_name=resolved_agent,
-        new_agent=new_agent_args,
-        vm_name=resolved_vm_name,
+        workspace=workspace,
+        new_workspace=new_workspace,
+        workspace_name=workspace_name,
+        workspace_template=workspace_template,
+        agent=agent,
+        new_agent=new_agent,
+        agent_name=agent_name,
+        agent_template=agent_template,
+        admin=admin,
+        vm_name=vm,
     )
-
-
-def _prompt_session_mode(db: Database, ws: WorkspaceRow) -> str | None:
-    """Prompt for admin vs agent mode. Returns agent name or None for admin."""
-    from agentworks import output
-
-    agents = db.list_agents(vm_name=ws.vm_name)
-    if not agents:
-        # No agents on this VM, default to admin
-        return None
-
-    require_interactive("--admin or --agent")
-
-    options = ["admin"]
-    for a in agents:
-        label = f"agent: {a.name}"
-        if a.template:
-            label += f" [{a.template}]"
-        options.append(label)
-
-    idx = output.choose("Run session as:", options)
-    if idx == 0:
-        return None
-    return agents[idx - 1].name
 
 
 @session_app.command("describe")
