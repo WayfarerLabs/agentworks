@@ -941,6 +941,68 @@ def batch_check_status(
 # -- Interactive prompts (used by create_session) --------------------------
 
 
+def _prompt_workspace_choice(db: Database) -> tuple[str | None, bool]:
+    """Pick an existing workspace or commit to creating a new one.
+
+    Returns ``(workspace_name, new_workspace)`` where exactly one is the
+    operator's choice: either an existing-workspace name (and
+    ``new_workspace=False``) or ``new_workspace=True`` with no name (the
+    caller defaults the new workspace's name to the session name).
+
+    Always prompts -- no single-workspace auto-select. Including
+    ``[Create new]`` as the last option makes interactive mode the
+    functional equivalent of passing ``--new-workspace`` / ``--workspace``
+    on the CLI.
+    """
+    if not output.is_interactive():
+        raise ValidationError(
+            "specify --workspace or --new-workspace",
+            entity_kind="session",
+        )
+    workspaces = db.list_workspaces()
+    options = [f"{ws.name}  (vm: {ws.vm_name})" for ws in workspaces]
+    options.append("[Create new workspace]")
+    idx = output.choose("Select a workspace:", options)
+    if idx == len(options) - 1:
+        return None, True
+    return workspaces[idx].name, False
+
+
+def _prompt_mode_choice(
+    vm_agents: list[AgentRow],
+) -> tuple[str | None, bool, bool]:
+    """Pick admin, an existing agent on the resolved VM, or commit to
+    creating a new agent.
+
+    Returns ``(agent_name, new_agent, admin)``. Exactly one of these
+    encodes the operator's choice:
+    - ``agent_name=<name>, new_agent=False, admin=False`` for an
+      existing agent.
+    - ``agent_name=None, new_agent=True, admin=False`` for ``[Create new]``.
+    - ``agent_name=None, new_agent=False, admin=True`` for ``admin``.
+
+    Always prompts -- no single-option auto-select. Non-interactive: raise.
+    """
+    if not output.is_interactive():
+        raise ValidationError(
+            "specify --admin, --agent, or --new-agent",
+            entity_kind="session",
+        )
+    options = ["admin"]
+    for a in vm_agents:
+        label = f"agent: {a.name}"
+        if a.template:
+            label += f" [{a.template}]"
+        options.append(label)
+    options.append("[Create new agent]")
+    idx = output.choose("Run session as:", options)
+    if idx == 0:
+        return None, False, True  # admin
+    if idx == len(options) - 1:
+        return None, True, False  # new agent
+    return vm_agents[idx - 1].name, False, False  # existing agent
+
+
 def _prompt_vm(db: Database) -> VMRow:
     """Pick a VM when nothing else pins it.
 
@@ -1069,18 +1131,6 @@ def create_session(
             entity_kind="session",
             entity_name=name,
         )
-    # Mode is strictly required -- admin and agent mode are materially
-    # different (different Linux user, env, security boundary), and the
-    # other auto-resolution paths in this function (workspace single-
-    # select, VM single-select) don't apply here because admin-mode is
-    # only ever a valid choice if the operator explicitly asks for it.
-    # Departure from the workspace/VM prompt pattern is intentional.
-    if not admin and not new_agent and not agent:
-        raise ValidationError(
-            "specify --admin, --agent, or --new-agent",
-            entity_kind="session",
-            entity_name=name,
-        )
 
     # ===== Canonicalize CLI-flag shape into internal form ===================
     #
@@ -1103,21 +1153,18 @@ def create_session(
         agent_name = None
         new_agent = False
 
-    # ===== Workspace anchor required (no auto-select for sessions) =========
+    # ===== Workspace prompt (force explicit choice even with one option) ===
     #
-    # Workspace is part of the session's identity (where it lives, what
-    # group it joins, what env it inherits). Auto-selecting because there's
-    # exactly one workspace today bakes in an assumption that "one" is the
-    # common case -- Agentworks' design encourages multiple workspaces,
-    # and the auto-select would silently change behavior the day the
-    # operator adds a second one. Demand explicit intent.
+    # No auto-select: workspace is part of the session's identity, and a
+    # single-workspace "shortcut" today silently changes behavior the day
+    # the operator adds a second one. Always prompt. Include a
+    # ``[Create new]`` option so the interactive UX is fully equivalent
+    # to passing ``--new-workspace`` on the CLI. Non-interactive: raise.
 
     if not workspace_name and not new_workspace:
-        raise ValidationError(
-            "specify --workspace or --new-workspace",
-            entity_kind="session",
-            entity_name=name,
-        )
+        chosen_existing, new_workspace = _prompt_workspace_choice(db)
+        if chosen_existing is not None:
+            workspace_name = chosen_existing
 
     # ===== Pure validation (no SSH, no mutations) ===========================
 
@@ -1212,6 +1259,22 @@ def create_session(
         # mode prompts.
         vm = _prompt_vm(db)
         target_vm_name = vm.name
+
+    # ===== Mode prompt (force explicit choice; no silent default) ==========
+    #
+    # Like the workspace prompt: no auto-select even when only "admin" is
+    # available, because admin and agent modes are materially different
+    # and the choice deserves explicit acknowledgement. The chooser lists
+    # ``admin`` first, then existing agents on the resolved VM, then
+    # ``[Create new]``. Non-interactive: raise.
+
+    if agent_name is None and not new_agent and not admin:
+        vm_agents = db.list_agents(vm_name=vm.name)
+        chosen_agent, new_agent, admin = _prompt_mode_choice(vm_agents)
+        if chosen_agent is not None:
+            agent_name = chosen_agent
+            existing_agent = db.get_agent(agent_name)
+            assert existing_agent is not None  # came from list_agents
 
     # ===== Template resolution (no SSH, no mutations) =======================
 

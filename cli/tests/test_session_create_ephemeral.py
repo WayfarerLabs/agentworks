@@ -739,12 +739,12 @@ def test_admin_non_interactive_on_vm_with_agents_does_not_prompt(
     db.close()
 
 
-def test_mode_required_no_flag_raises(tmp_path: Path) -> None:
+def test_mode_required_in_non_interactive(tmp_path: Path) -> None:
     """admin and agent mode are materially different (different Linux
-    user, env, security boundary). Mode is strictly required; the
-    service does not prompt for it and does not default. Even with a
-    fully specified workspace and a VM that happens to have no agents,
-    omitting the mode flag raises."""
+    user, env, security boundary). The service prompts in interactive
+    mode (with ``admin`` / existing agents / ``[Create new agent]`` as
+    options) but never auto-selects -- omitting the flag in
+    non-interactive mode raises."""
     from agentworks.sessions.manager import create_session
 
     db = _seed_one_vm(tmp_path)  # vm1 + ws1, no agents
@@ -761,23 +761,173 @@ def test_mode_required_no_flag_raises(tmp_path: Path) -> None:
     db.close()
 
 
-def test_workspace_required(tmp_path: Path) -> None:
-    """Workspace is part of the session's identity; sessions do not
-    auto-resolve it even when there's exactly one workspace on the
-    operator's host. The service demands explicit
-    --workspace or --new-workspace."""
+def test_workspace_required_in_non_interactive(tmp_path: Path) -> None:
+    """Workspace is part of the session's identity; sessions don't
+    auto-select it even when there's exactly one workspace on disk.
+    The service prompts in interactive mode (with existing workspaces
+    + ``[Create new workspace]`` as options) but raises in
+    non-interactive mode."""
     from agentworks.sessions.manager import create_session
 
     db = _seed_one_vm(tmp_path)  # vm1 + ws1, exactly one workspace
     config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
 
-    with pytest.raises(ValidationError, match="--workspace or --new-workspace"):
+    with pytest.raises(ValidationError, match="specify --workspace or --new-workspace"):
         create_session(
             db,
             config,  # type: ignore[arg-type]
             name="s1",
-            admin=True,  # mode is required; workspace is what's under test
+            admin=True,  # mode is specified; workspace is what's under test
         )
+    db.close()
+
+
+# ---------------------------------------------------------------------------
+# Interactive prompt behavior
+# ---------------------------------------------------------------------------
+
+
+def _stub_for_post_prompt_flow(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Stub the downstream flow so a prompt-driven test can exit cleanly
+    once the prompt has returned. Returns the call-log list the test can
+    inspect."""
+    from agentworks.sessions import manager as session_manager
+
+    called: list[str] = []
+    monkeypatch.setattr(session_manager, "_resolve_template", lambda *a, **k: None)
+
+    def _spy(*a: object, **k: object) -> None:
+        called.append("ensure_vm_up")
+        raise RuntimeError("stop after prompt")
+
+    monkeypatch.setattr("agentworks.workspaces.manager._ensure_vm_running", _spy)
+    return called
+
+
+def test_workspace_prompt_picks_existing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """In interactive mode, the workspace prompt offers existing
+    workspaces + ``[Create new]``. Picking an existing one continues
+    the flow with that workspace as the anchor."""
+    from agentworks.sessions.manager import create_session
+
+    db = _seed_one_vm(tmp_path)  # vm1 + ws1
+    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
+
+    monkeypatch.setattr(output, "is_interactive", lambda: True)
+    monkeypatch.setattr(output, "choose", lambda msg, opts: 0)  # ws1
+    called = _stub_for_post_prompt_flow(monkeypatch)
+
+    with pytest.raises(RuntimeError, match="stop after prompt"):
+        create_session(
+            db,
+            config,  # type: ignore[arg-type]
+            name="s1",
+            admin=True,
+        )
+    assert called == ["ensure_vm_up"]
+    db.close()
+
+
+def test_workspace_prompt_picks_create_new(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Picking the ``[Create new workspace]`` option (last in the list)
+    sets ``new_workspace=True``, so interactive mode is functionally
+    equivalent to passing ``--new-workspace`` on the CLI."""
+    from agentworks.sessions import manager as session_manager
+    from agentworks.sessions.manager import create_session
+
+    db = _seed_one_vm(tmp_path)
+    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
+
+    monkeypatch.setattr(output, "is_interactive", lambda: True)
+    # One workspace + [Create new] = 2 options; index 1 is [Create new].
+    monkeypatch.setattr(output, "choose", lambda msg, opts: len(opts) - 1)
+
+    # Stub the path up through eager-resolve so we land on the
+    # ephemeral-create step cleanly.
+    monkeypatch.setattr(session_manager, "_resolve_template", lambda *a, **k: None)
+    monkeypatch.setattr(
+        session_manager, "_session_secret_target_pre_create", lambda *a, **k: None
+    )
+    monkeypatch.setattr("agentworks.secrets.resolve_for_command", lambda *a, **k: {})
+    monkeypatch.setattr(
+        "agentworks.workspaces.manager._ensure_vm_running", lambda *a, **k: None
+    )
+
+    create_workspace_calls: list[dict[str, object]] = []
+
+    def _ws_spy(db: object, config: object, **kwargs: object) -> None:
+        create_workspace_calls.append(dict(kwargs))
+        raise RuntimeError("stop after create_workspace")
+
+    monkeypatch.setattr("agentworks.workspaces.manager.create_workspace", _ws_spy)
+
+    with pytest.raises(RuntimeError, match="stop after create_workspace"):
+        create_session(
+            db,
+            config,  # type: ignore[arg-type]
+            name="s1",
+            admin=True,
+        )
+    # The flow reached create_workspace, which means new_workspace=True was set
+    # by the prompt-driven path.
+    assert create_workspace_calls == [{"name": "s1", "vm_name": "vm1", "template_name": None}]
+    db.close()
+
+
+def test_mode_prompt_picks_admin(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """In interactive mode, the mode prompt offers ``admin`` + existing
+    agents on the resolved VM + ``[Create new agent]``. Picking
+    ``admin`` continues in admin mode."""
+    from agentworks.sessions.manager import create_session
+
+    db = _seed_one_vm(tmp_path)
+    db.insert_agent("agt1", "vm1", "aw-agt1")
+    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
+
+    monkeypatch.setattr(output, "is_interactive", lambda: True)
+    monkeypatch.setattr(output, "choose", lambda msg, opts: 0)  # admin
+    called = _stub_for_post_prompt_flow(monkeypatch)
+
+    with pytest.raises(RuntimeError, match="stop after prompt"):
+        create_session(
+            db,
+            config,  # type: ignore[arg-type]
+            name="s1",
+            workspace="ws1",
+        )
+    assert called == ["ensure_vm_up"]
+    db.close()
+
+
+def test_mode_prompt_picks_existing_agent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Picking an existing agent (option > 0, not [Create new]) sets
+    ``agent_name`` to that agent."""
+    from agentworks.sessions.manager import create_session
+
+    db = _seed_one_vm(tmp_path)
+    db.insert_agent("agt1", "vm1", "aw-agt1")
+    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
+
+    monkeypatch.setattr(output, "is_interactive", lambda: True)
+    monkeypatch.setattr(output, "choose", lambda msg, opts: 1)  # agt1
+    called = _stub_for_post_prompt_flow(monkeypatch)
+
+    with pytest.raises(RuntimeError, match="stop after prompt"):
+        create_session(
+            db,
+            config,  # type: ignore[arg-type]
+            name="s1",
+            workspace="ws1",
+        )
+    assert called == ["ensure_vm_up"]
     db.close()
 
 
