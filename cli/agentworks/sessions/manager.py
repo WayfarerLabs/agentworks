@@ -941,7 +941,9 @@ def batch_check_status(
 # -- Interactive prompts (used by create_session) --------------------------
 
 
-def _prompt_workspace_choice(db: Database) -> tuple[str | None, bool]:
+def _prompt_workspace_choice(
+    db: Database, vm_filter: str | None
+) -> tuple[str | None, bool]:
     """Pick an existing workspace or commit to creating a new one.
 
     Returns ``(workspace_name, new_workspace)`` where exactly one is the
@@ -953,6 +955,11 @@ def _prompt_workspace_choice(db: Database) -> tuple[str | None, bool]:
     ``[Create new]`` as the last option makes interactive mode the
     functional equivalent of passing ``--new-workspace`` / ``--workspace``
     on the CLI.
+
+    ``vm_filter`` narrows the chooser to workspaces on that VM when any
+    other anchor (``--vm`` or ``--agent``) has already pinned one. The
+    info line above the chooser tells the operator the filter is active
+    so a missing workspace doesn't look like a bug.
     """
     if not output.is_interactive():
         raise ValidationError(
@@ -960,7 +967,13 @@ def _prompt_workspace_choice(db: Database) -> tuple[str | None, bool]:
             entity_kind="session",
             hint="pass --workspace <name> or --new-workspace",
         )
-    workspaces = db.list_workspaces()
+    all_workspaces = db.list_workspaces()
+    if vm_filter is not None:
+        workspaces = [w for w in all_workspaces if w.vm_name == vm_filter]
+        if len(workspaces) < len(all_workspaces):
+            output.info(f"Only showing workspaces on VM '{vm_filter}'")
+    else:
+        workspaces = all_workspaces
     options = [f"{ws.name}  (vm: {ws.vm_name})" for ws in workspaces]
     options.append("[Create new workspace]")
     idx = output.choose("Select a workspace:", options)
@@ -970,10 +983,10 @@ def _prompt_workspace_choice(db: Database) -> tuple[str | None, bool]:
 
 
 def _prompt_mode_choice(
-    vm_agents: list[AgentRow],
+    db: Database, vm: VMRow
 ) -> tuple[str | None, bool, bool]:
-    """Pick admin, an existing agent on the resolved VM, or commit to
-    creating a new agent.
+    """Pick admin, an existing agent on ``vm``, or commit to creating a
+    new agent.
 
     Returns ``(agent_name, new_agent, admin)``. Exactly one of these
     encodes the operator's choice:
@@ -982,7 +995,10 @@ def _prompt_mode_choice(
     - ``agent_name=None, new_agent=True, admin=False`` for ``[Create new]``.
     - ``agent_name=None, new_agent=False, admin=True`` for ``admin``.
 
-    Always prompts -- no single-option auto-select. Non-interactive: raise.
+    Always prompts -- no single-option auto-select. Filters the agent
+    list to the resolved VM and prints an info line above the chooser
+    when other-VM agents are being omitted (so the operator knows
+    why an expected agent isn't in the list).
     """
     if not output.is_interactive():
         raise ValidationError(
@@ -990,6 +1006,10 @@ def _prompt_mode_choice(
             entity_kind="session",
             hint="pass --admin, --agent <name>, or --new-agent",
         )
+    all_agents = db.list_agents()
+    vm_agents = [a for a in all_agents if a.vm_name == vm.name]
+    if len(vm_agents) < len(all_agents):
+        output.info(f"Only showing agents on VM '{vm.name}'")
     options = ["admin"]
     for a in vm_agents:
         label = f"agent: {a.name}"
@@ -1155,16 +1175,46 @@ def create_session(
         agent_name = None
         new_agent = False
 
+    # ===== Early VM-anchor narrowing for the workspace prompt ===============
+    #
+    # If ``--vm`` and/or ``--agent`` were specified, they already pin a VM.
+    # Load the agent row now (rather than in the later VM-anchor block) so
+    # we can:
+    #   1. Cross-check ``--vm`` against the agent's VM before any prompt
+    #      fires (no point prompting for a workspace when we know the
+    #      command is inconsistent).
+    #   2. Filter the workspace chooser to workspaces on the known VM,
+    #      so the operator doesn't have to mentally exclude irrelevant
+    #      entries (and so picking one on the wrong VM isn't reachable).
+    existing_agent: AgentRow | None = None
+    known_vm: str | None = vm_name
+    if not new_agent and agent_name is not None:
+        existing_agent = db.get_agent(agent_name)
+        if existing_agent is None:
+            raise NotFoundError(
+                f"agent '{agent_name}' not found",
+                entity_kind="agent",
+                entity_name=agent_name,
+            )
+        if known_vm is not None and known_vm != existing_agent.vm_name:
+            raise ValidationError(
+                f"VM mismatch: --vm={known_vm}, agent '{agent_name}'={existing_agent.vm_name}",
+                entity_kind="session",
+                entity_name=name,
+            )
+        known_vm = existing_agent.vm_name
+
     # ===== Workspace prompt (force explicit choice even with one option) ===
     #
     # No auto-select: workspace is part of the session's identity, and a
     # single-workspace "shortcut" today silently changes behavior the day
     # the operator adds a second one. Always prompt. Include a
     # ``[Create new]`` option so the interactive UX is fully equivalent
-    # to passing ``--new-workspace`` on the CLI. Non-interactive: raise.
+    # to passing ``--new-workspace`` on the CLI. Filter to ``known_vm``
+    # when other anchors pin one. Non-interactive: raise.
 
     if not workspace_name and not new_workspace:
-        chosen_existing, new_workspace = _prompt_workspace_choice(db)
+        chosen_existing, new_workspace = _prompt_workspace_choice(db, known_vm)
         if chosen_existing is not None:
             workspace_name = chosen_existing
 
@@ -1224,15 +1274,10 @@ def create_session(
             )
         vm_anchors.append((f"workspace '{workspace_name}'", existing_ws.vm_name))
 
-    existing_agent: AgentRow | None = None
-    if not new_agent and agent_name is not None:
-        existing_agent = db.get_agent(agent_name)
-        if existing_agent is None:
-            raise NotFoundError(
-                f"agent '{agent_name}' not found",
-                entity_kind="agent",
-                entity_name=agent_name,
-            )
+    # ``existing_agent`` was already loaded by the early-narrowing block
+    # above (so the workspace prompt could filter on it). Just contribute
+    # its VM to the anchor list if we have it.
+    if existing_agent is not None:
         vm_anchors.append((f"agent '{agent_name}'", existing_agent.vm_name))
 
     if vm_anchors:
@@ -1271,8 +1316,7 @@ def create_session(
     # ``[Create new]``. Non-interactive: raise.
 
     if agent_name is None and not new_agent and not admin:
-        vm_agents = db.list_agents(vm_name=vm.name)
-        chosen_agent, new_agent, admin = _prompt_mode_choice(vm_agents)
+        chosen_agent, new_agent, admin = _prompt_mode_choice(db, vm)
         if chosen_agent is not None:
             agent_name = chosen_agent
             existing_agent = db.get_agent(agent_name)

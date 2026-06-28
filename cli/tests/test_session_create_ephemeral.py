@@ -982,6 +982,165 @@ def test_mode_prompt_picks_create_new(
 
 
 # ---------------------------------------------------------------------------
+# Prompt filtering by known VM anchors
+# ---------------------------------------------------------------------------
+
+
+def test_workspace_prompt_filters_by_vm_flag(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With ``--vm vm-A`` set, the workspace chooser only shows
+    workspaces on vm-A. Workspaces on other VMs are filtered out so the
+    operator can't pick one that the cross-check would reject."""
+    from agentworks.sessions.manager import create_session
+
+    db = _seed_two_vms(tmp_path)  # vm-A has ws-A; vm-B has ws-B
+    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
+
+    monkeypatch.setattr(output, "is_interactive", lambda: True)
+
+    captured_choose: list[tuple[str, list[str]]] = []
+
+    def _choose_spy(msg: str, opts: list[str]) -> int:
+        captured_choose.append((msg, list(opts)))
+        return 0  # pick the (one) filtered workspace
+
+    info_messages: list[str] = []
+    monkeypatch.setattr(output, "info", lambda m: info_messages.append(m))
+    monkeypatch.setattr(output, "choose", _choose_spy)
+
+    _stub_for_post_prompt_flow(monkeypatch)
+
+    with pytest.raises(RuntimeError, match="stop after prompt"):
+        create_session(
+            db,
+            config,  # type: ignore[arg-type]
+            name="s1",
+            vm_name="vm-A",  # pins VM upfront
+            admin=True,
+        )
+    # Exactly one choose call: the workspace prompt.
+    assert len(captured_choose) == 1
+    _msg, opts = captured_choose[0]
+    # The chooser saw only ws-A + [Create new], not ws-B.
+    assert any("ws-A" in o for o in opts)
+    assert not any("ws-B" in o for o in opts)
+    assert opts[-1] == "[Create new workspace]"
+    # And the operator got told why the list is short.
+    assert any("Only showing workspaces on VM 'vm-A'" in m for m in info_messages)
+    db.close()
+
+
+def test_workspace_prompt_filters_by_existing_agent_vm(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With ``--agent agt-A`` (on vm-A) set, the workspace chooser
+    filters to workspaces on vm-A even when ``--vm`` was not passed.
+    The agent's VM is the anchor."""
+    from agentworks.sessions.manager import create_session
+
+    db = _seed_two_vms(tmp_path)
+    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
+
+    monkeypatch.setattr(output, "is_interactive", lambda: True)
+
+    captured_choose: list[list[str]] = []
+
+    def _choose_spy(msg: str, opts: list[str]) -> int:
+        captured_choose.append(list(opts))
+        return 0
+
+    info_messages: list[str] = []
+    monkeypatch.setattr(output, "info", lambda m: info_messages.append(m))
+    monkeypatch.setattr(output, "choose", _choose_spy)
+
+    _stub_for_post_prompt_flow(monkeypatch)
+
+    with pytest.raises(RuntimeError, match="stop after prompt"):
+        create_session(
+            db,
+            config,  # type: ignore[arg-type]
+            name="s1",
+            agent="agt-A",  # agt-A lives on vm-A
+        )
+    opts = captured_choose[0]
+    assert any("ws-A" in o for o in opts)
+    assert not any("ws-B" in o for o in opts)
+    assert any("Only showing workspaces on VM 'vm-A'" in m for m in info_messages)
+    db.close()
+
+
+def test_mode_prompt_filters_by_resolved_vm_with_info_line(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Mode prompt lists only agents on the resolved VM, and prints the
+    'Only showing agents on VM X' info line when other-VM agents are
+    being omitted."""
+    from agentworks.sessions.manager import create_session
+
+    db = _seed_two_vms(tmp_path)  # agt-A on vm-A, agt-B on vm-B
+    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
+
+    monkeypatch.setattr(output, "is_interactive", lambda: True)
+
+    captured_choose: list[list[str]] = []
+    info_messages: list[str] = []
+
+    def _choose_spy(msg: str, opts: list[str]) -> int:
+        captured_choose.append(list(opts))
+        return 0  # admin
+
+    monkeypatch.setattr(output, "info", lambda m: info_messages.append(m))
+    monkeypatch.setattr(output, "choose", _choose_spy)
+    _stub_for_post_prompt_flow(monkeypatch)
+
+    with pytest.raises(RuntimeError, match="stop after prompt"):
+        create_session(
+            db,
+            config,  # type: ignore[arg-type]
+            name="s1",
+            workspace="ws-A",  # pins VM to vm-A
+            # No mode flag → mode prompt fires.
+        )
+    opts = captured_choose[0]
+    assert opts[0] == "admin"
+    assert any("agt-A" in o for o in opts)
+    assert not any("agt-B" in o for o in opts)
+    assert opts[-1] == "[Create new agent]"
+    assert any("Only showing agents on VM 'vm-A'" in m for m in info_messages)
+    db.close()
+
+
+def test_vm_and_existing_agent_mismatch_fails_before_workspace_prompt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``--vm vm-A --agent agt-B`` (where agt-B lives on vm-B) is
+    internally inconsistent; the service has to catch this before any
+    prompt fires (no point asking for a workspace when we already know
+    the command is impossible)."""
+    from agentworks.sessions.manager import create_session
+
+    db = _seed_two_vms(tmp_path)
+    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
+
+    # If a prompt fires, this raises — proves the validation came first.
+    monkeypatch.setattr(output, "is_interactive", lambda: True)
+    monkeypatch.setattr(
+        output, "choose", lambda *a, **k: (_ for _ in ()).throw(AssertionError("no prompt should fire"))
+    )
+
+    with pytest.raises(ValidationError, match="VM mismatch"):
+        create_session(
+            db,
+            config,  # type: ignore[arg-type]
+            name="s1",
+            vm_name="vm-A",
+            agent="agt-B",  # lives on vm-B
+        )
+    db.close()
+
+
+# ---------------------------------------------------------------------------
 # SecretTarget builder parity
 # ---------------------------------------------------------------------------
 
