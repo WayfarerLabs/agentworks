@@ -32,7 +32,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator
 
     from agentworks.config import Config
-    from agentworks.db import Database, VMRow
+    from agentworks.db import Database, VMRow, WorkspaceRow
     from agentworks.env import EnvEntry
     from agentworks.git_credentials.base import GitCredentialProvider
     from agentworks.resources import Registry
@@ -43,14 +43,24 @@ if TYPE_CHECKING:
 
 
 class _VmAdminEnvScopes(NamedTuple):
-    """Per-scope env dicts for vm-level commands (provisioning, shell, exec)."""
+    """Per-scope env dicts for vm-level commands (shell, exec).
+
+    The ``workspace`` field is ``None`` for vm-level commands without a
+    workspace pin (``vm shell`` / ``vm exec`` without ``--workspace``).
+    When set, workspace-template env enters the FRD R2 precedence ladder
+    between vm and admin.
+    """
 
     vm: dict[str, EnvEntry]
+    workspace: dict[str, EnvEntry] | None
     admin: dict[str, EnvEntry]
 
 
 def _resolve_vm_admin_env_scopes(
-    config: Config, vm: VMRow | None = None,
+    config: Config,
+    vm: VMRow | None = None,
+    *,
+    ws: WorkspaceRow | None = None,
 ) -> _VmAdminEnvScopes:
     """Resolve per-scope env dicts for vm-level commands.
 
@@ -63,13 +73,22 @@ def _resolve_vm_admin_env_scopes(
     DB yet), the caller is expected to have already
     ``_replace(config, vm=resolved_template)``'d from the operator's
     ``--template`` flag, so ``config.vm`` is authoritative.
+
+    When ``ws`` is supplied (``vm shell --workspace`` / ``vm exec
+    --workspace``), the workspace template's env enters the chain.
     """
     if vm is None:
         vm_env = config.vm.env
     else:
         from agentworks.vms.templates import resolve_from_dict as _resolve_vm_template
         vm_env = _resolve_vm_template(config.vm_templates, vm.template).env
-    return _VmAdminEnvScopes(vm=vm_env, admin=config.admin.env)
+
+    ws_env: dict[str, EnvEntry] | None = None
+    if ws is not None:
+        from agentworks.workspaces.templates import resolve_template as _resolve_ws_template
+        ws_env = _resolve_ws_template(config, ws.template).env
+
+    return _VmAdminEnvScopes(vm=vm_env, workspace=ws_env, admin=config.admin.env)
 
 
 def _vm_secret_target(
@@ -85,9 +104,40 @@ def _vm_secret_target(
 
     return SecretTarget(
         vm=scopes.vm,
+        workspace=scopes.workspace,
         admin=scopes.admin,
         label=label,
     )
+
+
+def _resolve_workspace_for_vm(
+    db: Database, vm: VMRow, workspace_name: str | None,
+) -> WorkspaceRow | None:
+    """Resolve a ``--workspace`` flag against a target VM.
+
+    Returns ``None`` when ``workspace_name`` is ``None``. Otherwise loads
+    the workspace and validates that it belongs to ``vm``; cross-VM
+    mismatch raises ``ValidationError`` upfront so the caller fails
+    before any SSH work. Shared by ``shell_vm`` and ``exec_vm``; the
+    agent variants do their own (authz-bearing) resolution in
+    ``agents.manager``.
+    """
+    if workspace_name is None:
+        return None
+    ws = db.get_workspace(workspace_name)
+    if ws is None:
+        raise NotFoundError(
+            f"workspace '{workspace_name}' not found",
+            entity_kind="workspace",
+            entity_name=workspace_name,
+        )
+    if ws.vm_name != vm.name:
+        raise ValidationError(
+            f"workspace '{workspace_name}' belongs to VM '{ws.vm_name}', not '{vm.name}'",
+            entity_kind="workspace",
+            entity_name=workspace_name,
+        )
+    return ws
 
 
 @contextlib.contextmanager
@@ -537,8 +587,15 @@ def describe_vm(db: Database, config: Config, name: str) -> None:
         output.detail("(none)")
 
 
-def shell_vm(db: Database, config: Config, name: str, *, provisioner: bool = False) -> None:
-    """Open a shell on a VM's home directory.
+def shell_vm(
+    db: Database,
+    config: Config,
+    name: str,
+    *,
+    provisioner: bool = False,
+    workspace_name: str | None = None,
+) -> None:
+    """Open a shell on a VM as the admin user.
 
     By default uses the Tailscale SSH transport. Pass ``provisioner=True``
     to use the platform-native transport instead (``limactl shell`` for
@@ -546,7 +603,12 @@ def shell_vm(db: Database, config: Config, name: str, *, provisioner: bool = Fal
     provisioner shell is the right choice when Tailscale connectivity is
     the thing you need to fix (e.g. healing the issue #117 latched DNS
     state, which involves restarting tailscaled itself).
+
+    When ``workspace_name`` is set, the shell ``cd``s into the workspace
+    directory and the workspace template's env joins the env chain. The
+    workspace must belong to this VM.
     """
+    import shlex
     import sys
 
     from agentworks.env import ResourceContext, compose_env
@@ -560,6 +622,13 @@ def shell_vm(db: Database, config: Config, name: str, *, provisioner: bool = Fal
     # the issue #117 latched DNS state) before re-running reinit. Same
     # rationale applies to `vm exec` (see exec_vm below).
     _guard_failed_vm(vm, allow_failed_init=True)
+
+    # Resolve workspace before the transport-state guard: a cross-VM
+    # mismatch is more diagnostic than "no Tailscale", so it should
+    # surface first. The scope chain also needs the workspace before
+    # secret resolution.
+    ws = _resolve_workspace_for_vm(db, vm, workspace_name)
+
     if not provisioner and vm.tailscale_host is None:
         raise StateError(
             f"VM '{name}' has no Tailscale IP",
@@ -581,7 +650,7 @@ def shell_vm(db: Database, config: Config, name: str, *, provisioner: bool = Fal
     # vm.template (DB row), not config.vm (which is the config-default
     # template and would silently route the wrong env into a shell on a
     # non-default-template VM).
-    scopes = _resolve_vm_admin_env_scopes(config, vm)
+    scopes = _resolve_vm_admin_env_scopes(config, vm, ws=ws)
     resolve_for_command(
         [_vm_secret_target(scopes, label=f"vm-shell={vm.name}")], config,
     )
@@ -591,11 +660,14 @@ def shell_vm(db: Database, config: Config, name: str, *, provisioner: bool = Fal
         vm_host=vm.vm_host_name,
         platform=vm.platform,
         user=vm.admin_username,
+        workspace_name=ws.name if ws else None,
+        workspace_dir=ws.workspace_path if ws else None,
     )
     env = compose_env(
         resolver=config.secret_resolver,
         ctx=ctx,
         vm=scopes.vm,
+        workspace=scopes.workspace,
         admin=scopes.admin,
     )
 
@@ -606,20 +678,38 @@ def shell_vm(db: Database, config: Config, name: str, *, provisioner: bool = Fal
             if provisioner
             else transport(vm, config)
         )
-        sys.exit(target.interactive("", env=env))
+        if ws is not None:
+            cmd = f"cd {shlex.quote(ws.workspace_path)} && exec $SHELL -l"
+            sys.exit(target.interactive(cmd, env=env))
+        else:
+            sys.exit(target.interactive("", env=env))
 
 
-def exec_vm(db: Database, config: Config, name: str, command: list[str]) -> int:
-    """Execute a command on a VM via direct admin SSH.
+def exec_vm(
+    db: Database,
+    config: Config,
+    name: str,
+    command: list[str],
+    *,
+    workspace_name: str | None = None,
+) -> int:
+    """Execute a command on a VM as the admin user via direct admin SSH.
 
     Uses inherited stdio for streaming output without buffering.
     Returns the remote exit code.
+
+    When ``workspace_name`` is set, the command runs from the workspace
+    directory and the workspace template's env joins the env chain. The
+    workspace must belong to this VM.
     """
     import shlex
 
     from agentworks.env import ResourceContext, compose_env
+    from agentworks.exec_validation import reject_dash_prefixed_command
     from agentworks.secrets import resolve_for_command
     from agentworks.transports import transport
+
+    reject_dash_prefixed_command(command, kind="vm", name=name)
 
     vm = _require_vm(db, name)
     # Init failure warns instead of blocks. exec is the non-interactive
@@ -627,6 +717,9 @@ def exec_vm(db: Database, config: Config, name: str, command: list[str]) -> int:
     # `agw vm exec failed-vm cat /var/log/cloud-init.log` is precisely
     # the kind of investigation an operator does on a failed-init VM.
     _guard_failed_vm(vm, allow_failed_init=True)
+
+    ws = _resolve_workspace_for_vm(db, vm, workspace_name)
+
     # transport() raises StateError when tailscale_host is None; guard first so
     # the operator gets an actionable StateError instead of an AssertionError
     # (which also disappears under python -O).
@@ -643,7 +736,7 @@ def exec_vm(db: Database, config: Config, name: str, command: list[str]) -> int:
     # remote command. The same scope dicts feed both the SecretTarget
     # and compose_env so the two consumers can't drift. The vm scope
     # comes from vm.template (DB row), not config.vm.
-    scopes = _resolve_vm_admin_env_scopes(config, vm)
+    scopes = _resolve_vm_admin_env_scopes(config, vm, ws=ws)
     resolve_for_command(
         [_vm_secret_target(scopes, label=f"vm-exec={vm.name}")], config,
     )
@@ -653,16 +746,21 @@ def exec_vm(db: Database, config: Config, name: str, command: list[str]) -> int:
         vm_host=vm.vm_host_name,
         platform=vm.platform,
         user=vm.admin_username,
+        workspace_name=ws.name if ws else None,
+        workspace_dir=ws.workspace_path if ws else None,
     )
     env = compose_env(
         resolver=config.secret_resolver,
         ctx=ctx,
         vm=scopes.vm,
+        workspace=scopes.workspace,
         admin=scopes.admin,
     )
 
     target = transport(vm, config)
     remote_cmd = command[0] if len(command) == 1 else shlex.join(command)
+    if ws is not None:
+        remote_cmd = f"cd {shlex.quote(ws.workspace_path)} && {remote_cmd}"
     with keep_vm_active(db, config, vm):
         return target.call_streaming(remote_cmd, env=env)
 

@@ -352,16 +352,21 @@ def filter_sessions(
     workspace_name: str | list[str] | None = None,
     vm_name: str | list[str] | None = None,
     agent_name: str | list[str] | None = None,
+    admin_only: bool = False,
 ) -> list[SessionRow]:
-    """Load sessions with optional workspace, VM, and/or agent filters.
+    """Load sessions with optional workspace, VM, agent, and/or admin filters.
 
-    Each filter accepts a single name or a list of names; lists OR within
-    a filter, filters AND across the call. See `Database.list_sessions`.
+    Each name filter accepts a single name or a list of names; lists
+    OR within a filter, filters AND across the call. ``admin_only``
+    restricts to admin-mode sessions (no agent); it is mutually
+    exclusive with ``agent_name`` at the caller level. See
+    ``Database.list_sessions``.
     """
     return db.list_sessions(
         workspace_name=workspace_name,
         vm_name=vm_name,
         agent_name=agent_name,
+        admin_only=admin_only,
     )
 
 
@@ -639,6 +644,67 @@ def _build_session_command(
     return _substitute_template_vars(raw_command, variables)
 
 
+def _assert_required_commands(
+    run_command: RunCommand,
+    template: ResolvedSessionTemplate,
+    *,
+    session_name: str,
+    target_label: str,
+) -> None:
+    """Verify every command the template declares as required exists on the
+    session's launch target, before any tmux work happens.
+
+    A template lists the executables its command needs via ``required_commands``
+    (e.g. the ``claude`` template requires ``claude``). Without this check, a
+    missing binary surfaces only as a cryptic downstream failure: the pane
+    command dies instantly, the fresh per-session tmux server exits, and the
+    next ``server-access`` call fails against a now-dead socket (see
+    ``sessions/tmux._grant_server_access``). Checking up front turns that into
+    an actionable error with no partial state to roll back.
+
+    Probes with ``$SHELL -lic 'command -v <cmd>'`` -- the same shell flags
+    ``tmux._pane_command`` uses for the actual pane. Matters because PATH
+    additions can live in any of the dotfiles those flags source:
+
+    - ``-l`` (login): /etc/profile, ~/.profile, ~/.bash_profile -- where
+      mise activation and the agentworks profile fragments live.
+    - ``-i`` (interactive): ~/.bashrc, ~/.zshrc, and any user PATH addition
+      guarded by ``[[ $- == *i* ]]`` or ``[ -n "$PS1" ]``.
+    - ``-c``: run the probe and exit.
+
+    The probe runs over the SSH command channel without a PTY, so shells
+    may emit a "no job control in this shell" warning when started
+    interactive. The warning lands on stderr and doesn't change the exit
+    status; this call uses ``check=False`` so stderr is discarded.
+
+    One residual gap: tools that gate PATH on ``[[ -t 0 ]]`` (real TTY
+    check) won't be visible to the probe. Closing that would require
+    requesting a PTY for the probe, which has its own side effects. PATH
+    mutations gated on a real TTY are rare; leaving uncovered for now.
+    """
+    missing: list[str] = []
+    for cmd in template.required_commands:
+        inner = f"command -v {shlex.quote(cmd)} >/dev/null 2>&1"
+        probe = run_command(f'"$SHELL" -lic {shlex.quote(inner)}', check=False)
+        if not getattr(probe, "ok", False):
+            missing.append(cmd)
+    if not missing:
+        return
+
+    joined = ", ".join(repr(c) for c in missing)
+    verb = "is" if len(missing) == 1 else "are"
+    raise StateError(
+        f"template '{template.name}' requires {joined}, which {verb} not "
+        f"installed or not on PATH for {target_label}.",
+        entity_kind="session",
+        entity_name=session_name,
+        hint=(
+            f"Install the missing command(s) on {target_label}, or create the "
+            "session with a different template (--template)."
+        ),
+    )
+
+
 # -- Liveness checks -------------------------------------------------------
 
 
@@ -884,6 +950,28 @@ def create_session(
             linux_user = vm.admin_username
 
         template = _resolve_template(config, template_name)
+
+        # Pre-flight: verify the template's required commands exist on the
+        # launch target BEFORE any state mutation. A missing binary otherwise
+        # only surfaces as a cryptic tmux server-access failure downstream
+        # (see _assert_required_commands). For agent mode the probe runs over
+        # the agent's own SSH (already proven by _assert_agent_ssh_works);
+        # for admin mode over the admin connection.
+        if mode == SessionMode.AGENT:
+            assert agent_target is not None  # set in the agent_name branch above
+            _assert_required_commands(
+                agent_target.run,
+                template,
+                session_name=name,
+                target_label=f"agent '{resolved_agent_name}'",
+            )
+        else:
+            _assert_required_commands(
+                run_command,
+                template,
+                session_name=name,
+                target_label=f"VM '{vm.name}'",
+            )
 
         # Compute socket path up front (deterministic from linux_user + session name).
         # Needed for the DB insert since the CHECK constraint requires agent sessions
@@ -1314,6 +1402,18 @@ def restart_session(
         # destructive step. Non-interactive failures surface as
         # SecretUnavailableError with no partial state to clean up.
         template = _resolve_template(config, session.template)
+
+        # Pre-flight the template's required commands before the destructive
+        # kill below, so a missing binary aborts the restart with a clear
+        # error instead of tearing down the old session and then failing to
+        # bring up the new one (see _assert_required_commands).
+        _assert_required_commands(
+            session_run_command,
+            template,
+            session_name=name,
+            target_label=(f"agent '{session.agent_name}'" if session.agent_name else f"VM '{vm.name}'"),
+        )
+
         from agentworks.secrets import resolve_for_command
 
         resolve_for_command(
@@ -1444,12 +1544,26 @@ def stop_all_sessions(
     db: Database,
     config: Config,
     *,
-    vm_name: str | None = None,
-    workspace_name: str | None = None,
+    vm_name: str | list[str] | None = None,
+    workspace_name: str | list[str] | None = None,
+    agent_name: str | list[str] | None = None,
+    admin_only: bool = False,
     force: bool = False,
 ) -> None:
-    """Stop all running sessions, optionally filtered by VM or workspace."""
-    sessions = filter_sessions(db, workspace_name=workspace_name, vm_name=vm_name)
+    """Stop all running sessions, optionally filtered by VM, workspace, agent, and/or mode.
+
+    Each name filter accepts a single name or a list of names; lists
+    OR within a filter, filters AND across the call. ``agent_name``
+    and ``admin_only`` are mutually exclusive; the caller enforces
+    the mutex.
+    """
+    sessions = filter_sessions(
+        db,
+        workspace_name=workspace_name,
+        vm_name=vm_name,
+        agent_name=agent_name,
+        admin_only=admin_only,
+    )
 
     # Resolve distinct VMs from the filtered session set and enter the
     # keepalive BEFORE the SSH probes. The probes (ensure_pids_batch,
@@ -1520,18 +1634,31 @@ def restart_all_sessions(
     db: Database,
     config: Config,
     *,
-    vm_name: str | None = None,
-    workspace_name: str | None = None,
+    vm_name: str | list[str] | None = None,
+    workspace_name: str | list[str] | None = None,
+    agent_name: str | list[str] | None = None,
+    admin_only: bool = False,
     include_running: bool = False,
     force: bool = False,
 ) -> None:
-    """Restart sessions, optionally filtered by VM or workspace.
+    """Restart sessions, optionally filtered by VM, workspace, agent, and/or mode.
 
     With include_running=False (--all-stopped), only stopped sessions are
     restarted. With include_running=True (--all), all sessions are targeted;
     if any are running, the caller should have prompted or passed yes=True.
+
+    Each name filter accepts a single name or a list of names; lists
+    OR within a filter, filters AND across the call. ``agent_name``
+    and ``admin_only`` are mutually exclusive; the caller enforces
+    the mutex.
     """
-    sessions = filter_sessions(db, workspace_name=workspace_name, vm_name=vm_name)
+    sessions = filter_sessions(
+        db,
+        workspace_name=workspace_name,
+        vm_name=vm_name,
+        agent_name=agent_name,
+        admin_only=admin_only,
+    )
 
     # Resolve distinct VMs from the filtered set and anchor them BEFORE the
     # SSH probes. Each restart_session call also enters its own keepalive;
@@ -1899,7 +2026,8 @@ def list_sessions(
     Status resolution is has-session-first; PID/boot_id are only used as a
     follow-up when agent checks fail.
     """
-    sessions = db.list_sessions(
+    sessions = filter_sessions(
+        db,
         workspace_name=workspace_name,
         vm_name=vm_name,
         agent_name=agent_name,

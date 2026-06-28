@@ -211,8 +211,26 @@ def shell_workspace(
     config: Config,
     name: str,
 ) -> None:
-    """Open a plain shell into a workspace."""
+    """Open a plain shell into a workspace.
+
+    .. deprecated::
+        A shell is always somebody's shell; the workspace is just where
+        it's rooted. Use :func:`agentworks.vms.manager.shell_vm` with
+        ``workspace_name=`` (admin) or
+        :func:`agentworks.agents.manager.shell_agent` with
+        ``workspace_name=`` (agent) instead. This function will be
+        removed in a future release.
+    """
+    import warnings
+
     from agentworks.workspaces.backends.vm import shell_vm_workspace
+
+    warnings.warn(
+        "shell_workspace is deprecated; use shell_vm(..., workspace_name=...) "
+        "or shell_agent(..., workspace_name=...) instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
 
     ws = db.get_workspace(name)
     if ws is None:
@@ -245,10 +263,26 @@ def console_workspace(
     allow_nesting: bool = False,
     recreate: bool = False,
 ) -> None:
-    """Open the workspace console (tmuxinator session with sessions)."""
+    """Open the workspace console (tmuxinator session with sessions).
+
+    .. deprecated::
+        Predates the multi-console design and lacks env-and-secrets
+        integration. Use named consoles via
+        :mod:`agentworks.sessions.console` (``console create`` +
+        ``console attach``) instead. This function will be removed in a
+        future release.
+    """
     import os
+    import warnings
 
     from agentworks.workspaces.backends.vm import console_vm_workspace
+
+    warnings.warn(
+        "console_workspace is deprecated; use the named-console API "
+        "(console create / console attach) instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
 
     if os.environ.get("TMUX") and not allow_nesting:
         raise StateError(

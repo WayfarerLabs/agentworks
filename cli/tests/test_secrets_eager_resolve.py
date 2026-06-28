@@ -96,6 +96,7 @@ def test_session_create_eager_resolve_fires_before_db_insert(
         name = "default"
         command = ""
         restart_command = None
+        required_commands: list[str] = []
         env: dict[str, str] = {}
 
     monkeypatch.setattr(session_manager, "_resolve_template", lambda *a, **k: _Tmpl())
@@ -148,6 +149,7 @@ def test_session_create_calls_resolve_with_session_target(
         name = "default"
         command = ""
         restart_command = None
+        required_commands: list[str] = []
         env: dict[str, str] = {}
 
     monkeypatch.setattr(session_manager, "_resolve_template", lambda *a, **k: _Tmpl())
@@ -294,6 +296,7 @@ def test_session_restart_eager_resolve_fires_before_kill(
         name = "default"
         command = ""
         restart_command = None
+        required_commands: list[str] = []
         env: dict[str, str] = {}
 
     monkeypatch.setattr(session_manager, "_resolve_template", lambda *a, **k: _Tmpl())
@@ -477,7 +480,7 @@ def test_vm_shell_eager_resolve_fires_before_ssh(
 
     monkeypatch.setattr(
         vm_manager, "_resolve_vm_admin_env_scopes",
-        lambda *a, **k: vm_manager._VmAdminEnvScopes(vm={}, admin={}),
+        lambda *a, **k: vm_manager._VmAdminEnvScopes(vm={}, workspace=None, admin={}),
     )
     monkeypatch.setattr(vm_manager, "_vm_secret_target", lambda *a, **k: object())
 
@@ -525,7 +528,7 @@ def test_vm_exec_eager_resolve_fires_before_ssh(
 
     monkeypatch.setattr(
         vm_manager, "_resolve_vm_admin_env_scopes",
-        lambda *a, **k: vm_manager._VmAdminEnvScopes(vm={}, admin={}),
+        lambda *a, **k: vm_manager._VmAdminEnvScopes(vm={}, workspace=None, admin={}),
     )
     monkeypatch.setattr(vm_manager, "_vm_secret_target", lambda *a, **k: object())
 

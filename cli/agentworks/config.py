@@ -418,6 +418,7 @@ class SessionTemplate:
     command: str | None = None
     description: str | None = None
     restart_command: str | None = None
+    required_commands: list[str] | None = None
     env: dict[str, EnvEntry] | None = None
     declared_at: SourceLocation = field(default_factory=synthesized)
     origin: Origin | None = None
@@ -1214,7 +1215,7 @@ def _load_session_config(data: dict[str, object], issues: list[str]) -> SessionC
     )
 
 
-_SESSION_TEMPLATE_KEYS = {"inherits", "command", "description", "restart_command", "env"}
+_SESSION_TEMPLATE_KEYS = {"inherits", "command", "description", "restart_command", "required_commands", "env"}
 
 
 def _load_session_templates(
@@ -1244,6 +1245,10 @@ def _load_session_templates(
             command=str(tdata["command"]) if "command" in tdata else None,
             description=str(tdata["description"]) if "description" in tdata else None,
             restart_command=str(tdata["restart_command"]) if "restart_command" in tdata else None,
+            required_commands=(
+                _require_string_list(tdata, "required_commands", f"session_templates.{name}")
+                if "required_commands" in tdata else None
+            ),
             env=env,
             declared_at=decls.lookup("session_templates", name),
         )
