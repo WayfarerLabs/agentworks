@@ -13,6 +13,11 @@ Pins issue #124's two operator-facing guarantees:
    leaves no orphan workspace or agent. Any failure after state
    mutation begins rolls back every ephemeral resource that was
    created.
+
+Also pins parity between the two SecretTarget builders so the new
+pre-create helper can't silently diverge from the existing post-create
+one for the inputs they both handle (existing workspace + existing
+agent or admin mode).
 """
 
 from __future__ import annotations
@@ -401,6 +406,54 @@ def test_failure_after_ephemeral_create_rolls_back_ephemerals(
     db.close()
 
 
+def test_new_agent_inherits_vm_from_existing_workspace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``--new-agent`` against an existing workspace pins the VM via the
+    workspace anchor; no ``vm_name`` is required. Closes the matrix the
+    other validation tests cover (existing workspace + existing agent,
+    new workspace + ephemeral resources)."""
+    from agentworks.sessions import manager as session_manager
+    from agentworks.sessions.manager import create_session
+
+    db = _seed_one_vm(tmp_path)  # vm1 + ws1 already seeded
+    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
+
+    # Stub template resolution + the VM up-state probe so we get past
+    # validation. The sentinel below proves we reached the create_agent
+    # call, which only happens after the anchor cross-check accepts the
+    # workspace's VM as the target.
+    monkeypatch.setattr(session_manager, "_resolve_template", lambda *a, **k: None)
+    monkeypatch.setattr(
+        session_manager, "_session_secret_target_pre_create", lambda *a, **k: None
+    )
+    monkeypatch.setattr("agentworks.secrets.resolve_for_command", lambda *a, **k: {})
+    monkeypatch.setattr(
+        "agentworks.workspaces.manager._ensure_vm_running", lambda *a, **k: None
+    )
+
+    create_agent_calls: list[dict[str, object]] = []
+
+    def _spy(db: object, config: object, **kwargs: object) -> None:
+        create_agent_calls.append(dict(kwargs))
+        raise RuntimeError("stop after agent create")
+
+    monkeypatch.setattr("agentworks.agents.manager.create_agent", _spy)
+
+    with pytest.raises(RuntimeError, match="stop after agent create"):
+        create_session(
+            db,
+            config,  # type: ignore[arg-type]
+            name="s1",
+            workspace_name="ws1",
+            new_agent=NewAgentArgs(),
+            # NO vm_name -- inherited from ws1's VM
+        )
+    assert len(create_agent_calls) == 1
+    assert create_agent_calls[0]["vm_name"] == "vm1"  # inherited from ws1
+    db.close()
+
+
 def test_validation_failure_does_not_trigger_rollback(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -432,4 +485,144 @@ def test_validation_failure_does_not_trigger_rollback(
         )
 
     assert deletes == [], "no rollback should run when nothing was created"
+    db.close()
+
+
+# ---------------------------------------------------------------------------
+# SecretTarget builder parity
+#
+# ``_session_secret_target`` (post-create, from DB rows) and
+# ``_session_secret_target_pre_create`` (pre-create, from template-name
+# inputs) must return SecretTargets with identical env-scope content for
+# the inputs they both handle: existing workspace + existing agent, or
+# existing workspace + admin mode. If they ever diverge, the eager-
+# resolve in ``create_session`` will see a different secret-decl union
+# depending on which code path ran, and FRD R4 (eager prompting before
+# any state mutation) silently regresses for one of the two flows.
+# ---------------------------------------------------------------------------
+
+
+def _write_parity_config(tmp_path: Path) -> Path:
+    """Config with secrets referenced at every env scope so the parity
+    test exercises vm / workspace / admin / agent / session scopes."""
+    from textwrap import dedent
+
+    pub = tmp_path / "id.pub"
+    priv = tmp_path / "id"
+    pub.write_text("ssh-ed25519 AAAA...")
+    priv.write_text("-----BEGIN OPENSSH PRIVATE KEY-----")
+
+    cfg = tmp_path / "config.toml"
+    cfg.write_text(
+        dedent(f"""\
+        [operator]
+        ssh_public_key = "{pub.as_posix()}"
+        ssh_private_key = "{priv.as_posix()}"
+
+        [vm_templates.default]
+        env = {{ VM_TOKEN = {{ secret = "vm-secret" }} }}
+
+        [workspace_templates.default]
+        env = {{ WS_TOKEN = {{ secret = "ws-secret" }} }}
+
+        [agent_templates.default]
+        env = {{ AGENT_TOKEN = {{ secret = "agent-secret" }} }}
+
+        [admin.config]
+        shell = "zsh"
+
+        [admin.env]
+        ADMIN_TOKEN = {{ secret = "admin-secret" }}
+
+        [session_templates.default]
+        env = {{ SESSION_TOKEN = {{ secret = "session-secret" }} }}
+
+        [secrets.vm-secret]
+        description = "vm-scope secret"
+        [secrets.ws-secret]
+        description = "workspace-scope secret"
+        [secrets.agent-secret]
+        description = "agent-scope secret"
+        [secrets.admin-secret]
+        description = "admin-scope secret"
+        [secrets.session-secret]
+        description = "session-scope secret"
+        """)
+    )
+    return cfg
+
+
+def _seed_parity_db(tmp_path: Path) -> Database:
+    db = Database(tmp_path / "parity.db")
+    db._conn.execute(
+        "INSERT INTO vms (name, platform, admin_username, tailscale_host, template) "
+        "VALUES ('vm1', 'lima', 'admin', '100.64.0.5', 'default')"
+    )
+    db._conn.execute(
+        "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group, template) "
+        "VALUES ('ws1', 'vm1', '/home/me/ws1', 'ws-ws1', 'default')"
+    )
+    db._conn.commit()
+    db.insert_agent("agt1", "vm1", "aw-agt1", template="default")
+    return db
+
+
+@pytest.mark.parametrize("mode", ["admin", "agent"])
+def test_secret_target_pre_create_parity_with_session_secret_target(
+    tmp_path: Path, mode: str
+) -> None:
+    """For existing workspace + (existing agent | admin mode), the two
+    SecretTarget builders must produce equal targets (label excluded
+    from equality by the dataclass) so ``compute_needed_secrets`` is
+    invariant across the two helpers."""
+    from agentworks.config import load_config
+    from agentworks.db import SessionMode
+    from agentworks.secrets import compute_needed_secrets
+    from agentworks.sessions.manager import (
+        _resolve_template,
+        _session_secret_target,
+        _session_secret_target_pre_create,
+    )
+
+    config = load_config(_write_parity_config(tmp_path), warn_issues=False)
+    db = _seed_parity_db(tmp_path)
+    vm = db.get_vm("vm1")
+    ws = db.get_workspace("ws1")
+    assert vm is not None
+    assert ws is not None
+    agent = db.get_agent("agt1") if mode == "agent" else None
+    session_template = _resolve_template(config, None)
+
+    post = _session_secret_target(
+        config,
+        db=db,
+        vm=vm,
+        ws=ws,
+        session_name="s1",
+        session_template=session_template,
+        mode=SessionMode.AGENT if mode == "agent" else SessionMode.ADMIN,
+        agent_name="agt1" if mode == "agent" else None,
+    )
+    pre = _session_secret_target_pre_create(
+        config,
+        name="s1",
+        workspace_name="ws1",
+        vm=vm,
+        session_template=session_template,
+        new_workspace=None,
+        existing_workspace=ws,
+        new_agent=None,
+        existing_agent=agent,
+        is_admin_mode=(mode == "admin"),
+    )
+
+    # SecretTarget compares without label (see secrets.orchestration:89).
+    # Equality on the dataclass covers the env-scope content for vm /
+    # workspace / admin / agent / session.
+    assert pre == post
+
+    # Belt-and-suspenders: the operator-visible invariant is that the
+    # set of declared secrets the resolver would prompt for is identical.
+    assert compute_needed_secrets([pre], config) == compute_needed_secrets([post], config)
+
     db.close()

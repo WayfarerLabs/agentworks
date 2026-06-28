@@ -1125,6 +1125,13 @@ def create_session(
     from agentworks.workspaces.manager import _ensure_vm_running as _ensure_vm_up
 
     _ensure_vm_up(db, config, vm)
+    # Reload the VM row: ``_ensure_vm_running`` may have rejoined Tailscale
+    # (only when the VM was stopped/deallocated) and updated
+    # ``vms.tailscale_host``. The in-memory ``vm`` from our pre-check would
+    # otherwise read stale and the check below could spuriously raise.
+    refreshed_vm = db.get_vm(target_vm_name)
+    assert refreshed_vm is not None  # existed two lines ago; provisioner.start() can't remove it
+    vm = refreshed_vm
     if vm.tailscale_host is None:
         raise StateError(
             f"VM '{vm.name}' has no Tailscale address",
@@ -1176,16 +1183,18 @@ def create_session(
                 delete_agent(db, config, name=agent_name, force=True, yes=True)
             except Exception as e:
                 output.warn(
-                    f"rollback: failed to delete ephemeral agent '{agent_name}': {e}"
+                    f"rollback: failed to delete ephemeral agent '{agent_name}': {e}. "
+                    f"Recover with 'agw agent delete --force {agent_name}'."
                 )
         if workspace_created:
             try:
                 from agentworks.workspaces.manager import delete_workspace
 
-                delete_workspace(db, config, workspace_name, force=True, yes=True)
+                delete_workspace(db, config, name=workspace_name, force=True, yes=True)
             except Exception as e:
                 output.warn(
-                    f"rollback: failed to delete ephemeral workspace '{workspace_name}': {e}"
+                    f"rollback: failed to delete ephemeral workspace '{workspace_name}': {e}. "
+                    f"Recover with 'agw workspace delete --force {workspace_name}'."
                 )
 
     try:
@@ -1231,8 +1240,12 @@ def create_session(
                         entity_kind="agent",
                         entity_name=agent_name,
                     )
-                # Cross-VM defense-in-depth (already validated upfront for
-                # existing agents; trivially true for fresh ephemeral agents).
+                # Unreachable in practice: existing-agent VM was already
+                # cross-checked in the upfront anchor block, and a fresh
+                # ephemeral agent was just created on this same VM. Kept as
+                # a tripwire so a future refactor that reorders or drops the
+                # upfront check fails loudly rather than silently corrupting
+                # cross-VM state.
                 if agent.vm_name != vm_check.name:
                     raise ValidationError(
                         f"agent '{agent_name}' is on VM '{agent.vm_name}', "

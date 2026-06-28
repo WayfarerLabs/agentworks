@@ -45,29 +45,19 @@ def session_create(
 
     # Validate flag combinations before any prompts
     if admin and agent:
-        typer.echo("Error: --admin and --agent are mutually exclusive", err=True)
-        raise typer.Exit(1)
+        raise typer.BadParameter("--admin and --agent are mutually exclusive")
     if admin and new_agent:
-        typer.echo("Error: --admin and --new-agent are mutually exclusive", err=True)
-        raise typer.Exit(1)
+        raise typer.BadParameter("--admin and --new-agent are mutually exclusive")
     if agent and new_agent:
-        typer.echo("Error: --agent and --new-agent are mutually exclusive", err=True)
-        raise typer.Exit(1)
+        raise typer.BadParameter("--agent and --new-agent are mutually exclusive")
     if workspace and new_workspace:
-        typer.echo("Error: --workspace and --new-workspace are mutually exclusive", err=True)
-        raise typer.Exit(1)
+        raise typer.BadParameter("--workspace and --new-workspace are mutually exclusive")
     if not new_workspace and (workspace_name or workspace_template or vm):
-        typer.echo(
-            "Error: --workspace-name, --workspace-template, and --vm require --new-workspace",
-            err=True,
+        raise typer.BadParameter(
+            "--workspace-name, --workspace-template, and --vm require --new-workspace"
         )
-        raise typer.Exit(1)
     if not new_agent and (agent_name or agent_template):
-        typer.echo(
-            "Error: --agent-name and --agent-template require --new-agent",
-            err=True,
-        )
-        raise typer.Exit(1)
+        raise typer.BadParameter("--agent-name and --agent-template require --new-agent")
 
     db = get_db()
     config = load_config()
