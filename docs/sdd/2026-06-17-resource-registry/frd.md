@@ -74,7 +74,7 @@ reconciliation, but that move is deliberately not part of this design.
   Distinct from the operator-set description. The text is phrased as a short noun phrase that
   completes the sentence template `<target> is used by <source> as <usage>.` -- no capitalization
   except for proper nouns or acronyms, no trailing period, under ~50 chars. Examples:
-  `"the VM-provisioning auth key"`, `"the GitHub auth token"`, `"the ANTHROPIC_API_KEY env var"`,
+  `"the Tailscale auth key"`, `"the GitHub auth token"`, `"the ANTHROPIC_API_KEY env var"`,
   `"a parent template"`.
 - **Description**: the operator-defined free-form note about a resource (already exists today on
   secrets and `git_credentials`; this SDD formalizes the convention for new resource types).
@@ -286,7 +286,7 @@ Resolution:
 
 1. `agw vm create vm1` triggers manager-entry eager-resolve.
 2. The resolved VM template emits a `SecretRequirement` with `name=<tailscale_auth_key>`,
-   `usage="the VM-provisioning auth key"`, and `source=("vm_template", <name>)`.
+   `usage="the Tailscale auth key"`, and `source=("vm_template", <name>)`.
 3. If the named secret isn't operator-declared, the auto-declare policy synthesizes it.
 4. The orchestrator resolves the secret through the configured backend chain (first wins).
 5. The resolved value is threaded as a function argument to the Tailscale install runner.
@@ -337,7 +337,7 @@ Every resource type that supports operator declaration carries an optional `desc
 is separate from the system-collected `usage` list:
 
 - **`usage`** (list, system-collected) comes from the matching requirements; one entry per
-  requirement. Operators do not set it. Example entry: `"the VM-provisioning auth key"`. A resource
+  requirement. Operators do not set it. Example entry: `"the Tailscale auth key"`. A resource
   required by several sources has several usages.
 - **`description`** (string, operator-set) is the operator's free-form note. Example:
   `"Prod tailnet auth key, 90-day expiry, owner: SRE team"`.

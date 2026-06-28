@@ -604,7 +604,7 @@ agw secret list
 # api-key              OpenAI key for the operator's service                                      OPENAI_API_KEY                enabled
 # force-prompt         Always prompted at command time                                            disabled                      enabled
 # git-token-github     (auto) the auth token for git_credentials:github                           AW_SECRET_GIT_TOKEN_GITHUB    enabled
-# tailscale-auth-key   (auto) the VM-provisioning auth key for vm_template:default (and 1 more)   AW_SECRET_TAILSCALE_AUTH_KEY  enabled
+# tailscale-auth-key   (auto) the Tailscale auth key for vm_template:default (and 1 more)   AW_SECRET_TAILSCALE_AUTH_KEY  enabled
 ```
 
 Columns are the active backends in `[secret_config].backends` precedence order. Cells show each
@@ -622,12 +622,12 @@ this secret), per-backend mapping table, and a resolution preview, use `agw secr
 agw secret describe tailscale-auth-key
 # Secret: tailscale-auth-key
 #   Kind: secret
-#   Description: (auto) the VM-provisioning auth key for vm_template:default (and 1 more)
+#   Description: (auto) the Tailscale auth key for vm_template:default (and 1 more)
 #   Origin: auto-declared (vm_template:default)
 #
 # Usages:
-#   - vm_template:default -- the VM-provisioning auth key
-#   - vm_template:heavy -- the VM-provisioning auth key
+#   - vm_template:default -- the Tailscale auth key
+#   - vm_template:heavy -- the Tailscale auth key
 #
 # Backend mappings:
 #   - env-var: AW_SECRET_TAILSCALE_AUTH_KEY

@@ -110,7 +110,7 @@ def test_vm_template_required_resources_uses_template_name_in_source() -> None:
     # template doesn't override `tailscale_auth_key`.
     ts_reqs = [r for r in reqs if r.name == "tailscale-auth-key"]
     assert len(ts_reqs) == 1
-    assert ts_reqs[0].usage == "the VM-provisioning auth key"
+    assert ts_reqs[0].usage == "the Tailscale auth key"
 
 
 def test_workspace_template_required_resources() -> None:

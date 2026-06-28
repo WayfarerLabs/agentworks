@@ -637,7 +637,7 @@ Phase 1 sources:
   `("vm_template", "<name>")`, `("agent_template", "<name>")`, etc. The `usage` text is derived from
   the env-block context (e.g., `"the ANTHROPIC_API_KEY env var"`).
 - `VMTemplate.tailscale_auth_key`: emits `SecretRequirement` with `source=("vm_template", <name>)`
-  and `usage="the VM-provisioning auth key"`.
+  and `usage="the Tailscale auth key"`.
 - `GitCredentialConfig.token`: emits `SecretRequirement` with `source=("git_credentials", <name>)`
   and `usage="the auth token"` (or similar; usage phrasing follows the Terminology sentence-template
   test).

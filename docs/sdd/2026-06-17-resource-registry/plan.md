@@ -260,8 +260,8 @@ Legacy resolution path removed.
 - [x] `cli/agentworks/vms/templates.py` (`ResolvedVMTemplate`): same field; threaded through
       template-inheritance resolution like other fields.
 - [x] `ResolvedVMTemplate.required_resources()` emits a `SecretRequirement` for the configured
-      `tailscale_auth_key` (default `"tailscale-auth-key"`) with usage
-      `"the VM-provisioning auth key"` and source `("vm_template", template.name)`.
+      `tailscale_auth_key` (default `"tailscale-auth-key"`) with usage `"the Tailscale auth key"`
+      and source `("vm_template", template.name)`.
 - [x] `cli/agentworks/vms/manager.py`: `create_vm` and `reinit_vm` walk the resolved VM template's
       requirement subgraph via `collect_secrets_for(registry, ("vm_template", <name>))`,
       eager-resolve the result via `resolve_for_command(extra_decls=...)`, and pass the resolved

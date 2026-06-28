@@ -17,12 +17,12 @@ def test_resource_requirement_fields() -> None:
     req = ResourceRequirement(
         name="tailscale-auth-key",
         kind="secret",
-        usage="the VM-provisioning auth key",
+        usage="the Tailscale auth key",
         source=("vm_template", "default"),
     )
     assert req.name == "tailscale-auth-key"
     assert req.kind == "secret"
-    assert req.usage == "the VM-provisioning auth key"
+    assert req.usage == "the Tailscale auth key"
     assert req.source == ("vm_template", "default")
 
 

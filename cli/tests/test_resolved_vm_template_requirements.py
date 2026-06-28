@@ -21,7 +21,7 @@ def test_resolved_vm_template_emits_tailscale_requirement_by_default() -> None:
     assert isinstance(ts, SecretRequirement)
     assert ts.name == "tailscale-auth-key"
     assert ts.kind == "secret"
-    assert ts.usage == "the VM-provisioning auth key"
+    assert ts.usage == "the Tailscale auth key"
     assert ts.source == ("vm_template", "azure-prod")
 
 
@@ -31,7 +31,7 @@ def test_resolved_vm_template_emits_custom_tailscale_secret_name() -> None:
         tailscale_auth_key="custom-ts-key",
     )
     reqs = tmpl.required_resources()
-    ts_reqs = [r for r in reqs if r.usage == "the VM-provisioning auth key"]
+    ts_reqs = [r for r in reqs if r.usage == "the Tailscale auth key"]
     assert len(ts_reqs) == 1
     assert ts_reqs[0].name == "custom-ts-key"
 

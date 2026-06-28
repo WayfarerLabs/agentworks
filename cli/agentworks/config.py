@@ -214,7 +214,7 @@ def _tailscale_secret_requirement(
     return SecretRequirement(
         name=tailscale_auth_key,
         kind="secret",
-        usage="the VM-provisioning auth key",
+        usage="the Tailscale auth key",
         source=("vm_template", template_name),
     )
 
