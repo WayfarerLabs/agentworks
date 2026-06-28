@@ -407,6 +407,19 @@ behavior is unchanged.
       no operator-visible change in Phase 2a itself; the change earns its keep when a future kind
       acquires a description (and avoids needing a second per-kind branch). See FRD R9 and HLA's
       Framework metadata attachment section for the generalized contract.
+- [ ] **Sweep command entry points to hoist `build_registry(config)`.** Phase 1c/1d hoisted
+      `build_registry` to the top of `create_vm`, `reinit_vm`, and `add_git_credential` so the
+      framework's per-kind miss-policies (e.g. `GitCredentialKind`'s `error` policy) fire before any
+      business logic runs and the operator gets a clean typo error instead of a downstream
+      `NotFoundError`. Other manager entry points -- notably `create_session` (which post-merge with
+      PR #146 owns ephemeral workspace/agent creation and the secret eager-resolve), plus
+      `create_workspace`, `create_agent`, `reinit_agent`, and any new commands -- haven't been
+      swept. With Phase 2a introducing `TemplateRequirement` and the kind handlers' default-only
+      `auto_declare_names`, a typo on `inherits = ["defualt"]` should surface as a framework error
+      here too. Audit each manager-entry function; hoist `build_registry(config)` to the top of any
+      that touches resources whose miss-policy could throw. Trivial cost (one call that's already
+      memoization-friendly inside `bootstrap.py`); high payoff in error-shape consistency across the
+      surface.
 - [ ] **Tests**:
   - `cli/tests/resources/test_template_kinds.py`: each kind's `synthesize` produces the expected
     defaults; reserved-name restriction errors on non-default missing names.
