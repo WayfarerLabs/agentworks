@@ -104,9 +104,11 @@ def test_auto_declared_secret_shows_first_requirement_source(
     assert desc.origin is not None
     assert desc.origin.variant == "auto-declared"
     assert desc.origin.source == ("admin_template", "default")
-    # Description synthesized at finalize time (no other sources require
-    # this secret, so no " (and N more)" suffix).
-    assert desc.description == "auto-declared by admin_template:default"
+    # Description synthesized at finalize time from the first
+    # requirement's usage text + source. Reads as "what this is for,
+    # who's asking". No "(and N more)" suffix when there's only one
+    # source.
+    assert desc.description == "(auto) the API_KEY env var for admin_template:default"
 
 
 def test_auto_declared_description_suffix_counts_other_sources(
@@ -142,13 +144,20 @@ def test_auto_declared_description_suffix_counts_other_sources(
     desc = describe_secret(registry, config, "shared")
 
     # Two distinct sources require this secret: admin_template:default
-    # (which Origin names) and vm_template:azure-prod (the "1 more").
-    # The two references inside azure-prod's env block share a source
-    # and do not inflate the count.
+    # and vm_template:azure-prod. Whichever the framework walks first
+    # is named in the description (publish order, not asserted here);
+    # the second contributes to "(and 1 more)". The two references
+    # inside azure-prod's env block share a source and do not inflate
+    # the count.
     assert desc.origin is not None
     assert desc.origin.variant == "auto-declared"
+    assert desc.description.startswith("(auto) ")
     assert desc.description.endswith("(and 1 more)")
-    assert "auto-declared by " in desc.description
+    # First-named source is one of the two requiring templates.
+    assert (
+        " for admin_template:default " in desc.description
+        or " for vm_template:azure-prod " in desc.description
+    )
 
 
 # -- Usages section ---------------------------------------------------------

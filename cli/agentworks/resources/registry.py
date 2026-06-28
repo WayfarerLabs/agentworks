@@ -281,14 +281,16 @@ def _lookup_kind(kind: str, req: ResourceRequirement) -> Any:
 def _polish_auto_declared_description(resource: Any) -> Any:
     """Synthesize a description for an auto-declared SecretDecl when its
     description is empty. Operators rely on a non-empty Description in
-    ``agw secret list``; the framework picks one derived from origin +
-    usage count when there's no operator-supplied text to use.
+    ``agw secret list``; the framework derives one from the first
+    requirement's usage text + source so the row reads as "what this
+    secret is for and who's asking".
 
-    Format: ``"auto-declared by <kind>:<name>"`` plus, when more than
-    one distinct usage source exists, ``" (and N more)"`` (N counts
-    distinct sources other than the one Origin already names). No-op
-    for non-secrets, operator-declared resources, code-declared
-    resources, or any SecretDecl whose description is already set.
+    Format: ``"(auto) <usage> for <kind>:<name>"`` plus, when more than
+    one distinct source requires this secret, ``" (and N more)"`` (N
+    counts distinct sources other than the first one already named).
+    No-op for non-secrets, operator-declared resources, code-declared
+    resources, secrets with no recorded usage, or any SecretDecl whose
+    description is already set.
     """
     from agentworks.secrets.base import SecretDecl
 
@@ -299,12 +301,16 @@ def _polish_auto_declared_description(resource: Any) -> Any:
     origin = resource.origin
     if origin is None or origin.variant != "auto-declared":
         return resource
-    source = origin.source
-    if not (isinstance(source, tuple) and len(source) == 2):
+    if not resource.usage:
         return resource
-    distinct_other = {u.source for u in resource.usage} - {source}
+    first = resource.usage[0]
+    if not (isinstance(first.source, tuple) and len(first.source) == 2):
+        return resource
+    distinct_other = {u.source for u in resource.usage} - {first.source}
     suffix = f" (and {len(distinct_other)} more)" if distinct_other else ""
-    description = f"auto-declared by {source[0]}:{source[1]}{suffix}"
+    description = (
+        f"(auto) {first.text} for {first.source[0]}:{first.source[1]}{suffix}"
+    )
     return dataclasses.replace(resource, description=description)
 
 
