@@ -100,8 +100,7 @@ def session_list(
     # trip the mutex.
     parsed_agent = parse_csv_filter(agent)
     if admin and parsed_agent is not None:
-        typer.echo("Error: --admin and --agent are mutually exclusive", err=True)
-        raise typer.Exit(1)
+        raise typer.BadParameter("--admin and --agent are mutually exclusive")
 
     list_sessions(
         get_db(),
