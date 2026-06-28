@@ -974,7 +974,12 @@ def _prompt_workspace_choice(
             output.info(f"Only showing workspaces on VM '{vm_filter}'")
     else:
         workspaces = all_workspaces
-    options = [f"{ws.name}  (vm: {ws.vm_name})" for ws in workspaces]
+    options = []
+    for ws in workspaces:
+        label = f"{ws.name}  (vm: {ws.vm_name})"
+        if ws.template:
+            label += f" [template: {ws.template}]"
+        options.append(label)
     options.append("[Create new workspace]")
     idx = output.choose("Select a workspace:", options)
     if idx == len(options) - 1:
