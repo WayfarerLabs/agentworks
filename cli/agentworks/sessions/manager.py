@@ -974,7 +974,10 @@ def _prompt_workspace_choice(
             output.info(f"Only showing workspaces on VM '{vm_filter}'")
     else:
         workspaces = all_workspaces
-    options = [f"{ws.name}  (vm: {ws.vm_name})" for ws in workspaces]
+    options = [
+        f"{ws.name}  (vm: {ws.vm_name}, template: {ws.template or '<none>'})"
+        for ws in workspaces
+    ]
     options.append("[Create new workspace]")
     idx = output.choose("Select a workspace:", options)
     if idx == len(options) - 1:
@@ -983,10 +986,9 @@ def _prompt_workspace_choice(
 
 
 def _prompt_mode_choice(
-    db: Database, vm: VMRow
+    db: Database, vm: VMRow | None
 ) -> tuple[str | None, bool, bool]:
-    """Pick admin, an existing agent on ``vm``, or commit to creating a
-    new agent.
+    """Pick admin, an existing agent, or commit to creating a new agent.
 
     Returns ``(agent_name, new_agent, admin)``. Exactly one of these
     encodes the operator's choice:
@@ -995,10 +997,16 @@ def _prompt_mode_choice(
     - ``agent_name=None, new_agent=True, admin=False`` for ``[Create new]``.
     - ``agent_name=None, new_agent=False, admin=True`` for ``admin``.
 
-    Always prompts -- no single-option auto-select. Filters the agent
-    list to the resolved VM and prints an info line above the chooser
-    when other-VM agents are being omitted (so the operator knows
-    why an expected agent isn't in the list).
+    When ``vm`` is known, lists only agents on that VM (and prints an
+    info line if other-VM agents got filtered out). When ``vm`` is
+    ``None`` -- the VM hasn't been determined yet -- lists agents
+    across all VMs, labeling each with its VM so an operator's pick
+    of an existing agent pins the VM downstream. This is the path
+    that lets ``agw session create my-sess --new-workspace`` resolve
+    the VM via the mode prompt's agent pick rather than a separate
+    VM prompt.
+
+    Always prompts -- no single-option auto-select.
     """
     if not output.is_interactive():
         raise ValidationError(
@@ -1007,22 +1015,24 @@ def _prompt_mode_choice(
             hint="pass --admin, --agent <name>, or --new-agent",
         )
     all_agents = db.list_agents()
-    vm_agents = [a for a in all_agents if a.vm_name == vm.name]
-    if len(vm_agents) < len(all_agents):
-        output.info(f"Only showing agents on VM '{vm.name}'")
+    if vm is not None:
+        candidates = [a for a in all_agents if a.vm_name == vm.name]
+        if len(candidates) < len(all_agents):
+            output.info(f"Only showing agents on VM '{vm.name}'")
+    else:
+        candidates = all_agents
     options = ["admin"]
-    for a in vm_agents:
-        label = f"agent: {a.name}"
-        if a.template:
-            label += f" [{a.template}]"
-        options.append(label)
+    for a in candidates:
+        options.append(
+            f"agent: {a.name}  (vm: {a.vm_name}, template: {a.template or '<none>'})"
+        )
     options.append("[Create new agent]")
     idx = output.choose("Run session as:", options)
     if idx == 0:
         return None, False, True  # admin
     if idx == len(options) - 1:
         return None, True, False  # new agent
-    return vm_agents[idx - 1].name, False, False  # existing agent
+    return candidates[idx - 1].name, False, False  # existing agent
 
 
 def _prompt_vm(db: Database) -> VMRow:
@@ -1257,12 +1267,13 @@ def create_session(
                 entity_name=agent_name,
             )
 
-    # VM anchor resolution. Each specified resource pins a candidate VM;
-    # they must all agree. By the end of this block we have one VMRow.
-    vm_anchors: list[tuple[str, str]] = []  # (source_label, vm_name)
-    if vm_name is not None:
-        vm_anchors.append(("--vm", vm_name))
-
+    # ===== Existing-workspace lookup + VM-anchor accretion =================
+    #
+    # If the operator named an existing workspace, load it now -- both
+    # to validate it exists and to contribute its VM to ``known_vm``
+    # before the mode prompt fires. This lets the mode prompt filter
+    # agents by the workspace's VM, and lets a downstream VM mismatch
+    # surface before the mode prompt rather than after.
     existing_ws: WorkspaceRow | None = None
     if not new_workspace:
         existing_ws = db.get_workspace(workspace_name)
@@ -1272,70 +1283,51 @@ def create_session(
                 entity_kind="workspace",
                 entity_name=workspace_name,
             )
-        vm_anchors.append((f"workspace '{workspace_name}'", existing_ws.vm_name))
-
-    # ``existing_agent`` was already loaded by the early-narrowing block
-    # above (so the workspace prompt could filter on it). Just contribute
-    # its VM to the anchor list if we have it.
-    if existing_agent is not None:
-        vm_anchors.append((f"agent '{agent_name}'", existing_agent.vm_name))
-
-    if vm_anchors:
-        # Operator named at least one anchor (vm_name and/or an existing
-        # workspace/agent). All anchors must agree, then load the row.
-        target_vm_name = vm_anchors[0][1]
-        if any(candidate != target_vm_name for _, candidate in vm_anchors):
-            detail = ", ".join(f"{src}={v}" for src, v in vm_anchors)
+        if known_vm is not None and known_vm != existing_ws.vm_name:
+            anchor_label = "--vm" if vm_name is not None else f"agent '{agent_name}'"
             raise ValidationError(
-                f"VM mismatch: {detail}",
+                f"VM mismatch: {anchor_label}={known_vm}, "
+                f"workspace '{workspace_name}'={existing_ws.vm_name}",
                 entity_kind="session",
                 entity_name=name,
             )
-        vm = db.get_vm(target_vm_name)
-        if vm is None:
-            raise NotFoundError(
-                f"VM '{target_vm_name}' not found",
-                entity_kind="vm",
-                entity_name=target_vm_name,
-            )
-    else:
-        # No anchor (happens for new_workspace + admin or
-        # new_workspace + new_agent without --vm). Departure from the
-        # workspace / mode prompts: VM is infrastructure, so auto-select
-        # when exactly one usable VM exists. Prompt when multiple,
-        # raise in non-interactive multi or zero-VM cases.
-        vm = _prompt_vm(db)
-        target_vm_name = vm.name
+        known_vm = existing_ws.vm_name
 
     # ===== Mode prompt (force explicit choice; no silent default) ==========
     #
-    # Like the workspace prompt: no auto-select even when only "admin" is
-    # available, because admin and agent modes are materially different
-    # and the choice deserves explicit acknowledgement. The chooser lists
-    # ``admin`` first, then existing agents on the resolved VM, then
-    # ``[Create new]``. Non-interactive: raise.
+    # Fires before VM resolution so the operator's pick of an existing
+    # agent can pin the VM (one less prompt for the common case). When
+    # ``known_vm`` is set, the chooser filters to that VM's agents; when
+    # not, it shows agents across all VMs (each labeled with its VM) and
+    # picking one sets the VM. ``admin`` and ``[Create new agent]`` don't
+    # pin a VM -- those paths fall through to the VM-prompt at the end.
 
     if agent_name is None and not new_agent and not admin:
-        chosen_agent, new_agent, admin = _prompt_mode_choice(db, vm)
+        vm_for_mode_prompt: VMRow | None = None
+        if known_vm is not None:
+            vm_for_mode_prompt = db.get_vm(known_vm)
+            assert vm_for_mode_prompt is not None  # known_vm was sourced from a real row
+
+        chosen_agent, new_agent, admin = _prompt_mode_choice(db, vm_for_mode_prompt)
         if chosen_agent is not None:
-            # Existing-agent pick: the prompt already filtered to
-            # ``vm.name``, so no vm-anchor cross-check is needed here
-            # (it would be redundant). The upfront vm/agent cross-check
-            # only fires for the --agent flag path.
+            # Existing-agent pick: the prompt already filtered by
+            # ``known_vm`` (if set) OR the picked agent's VM becomes
+            # the new known_vm. No vm-anchor cross-check needed -- the
+            # filter / pick path enforces agreement by construction.
             agent_name = chosen_agent
             existing_agent = db.get_agent(agent_name)
             assert existing_agent is not None  # came from list_agents
+            known_vm = existing_agent.vm_name
 
         # Re-run the agent-specific default / validation / existence
         # checks that the upfront block did for the flag path. The
         # workspace equivalents ran already because the workspace
         # prompt sits BEFORE that block; the mode prompt sits AFTER
-        # because it needs the resolved VM, so it has to redo this
-        # work for the ``[Create new agent]`` branch. Without this,
-        # a ``[Create new agent]`` pick lands at the eager-resolve
-        # SecretTarget with ``is_admin_mode=True`` (wrong scope) and
-        # asserts ``agent_name is not None`` inside the ephemeral-
-        # create block.
+        # because it may need to pin the VM via an existing-agent
+        # pick. Without this, a ``[Create new agent]`` pick lands at
+        # the eager-resolve SecretTarget with ``is_admin_mode=True``
+        # (wrong scope) and asserts ``agent_name is not None``
+        # inside the ephemeral-create block.
         if new_agent:
             if agent_name is None:
                 agent_name = name
@@ -1346,6 +1338,44 @@ def create_session(
                     entity_kind="agent",
                     entity_name=agent_name,
                 )
+
+    # ===== VM resolution (final step; prompts only if nothing pinned it) ===
+    #
+    # By this point every anchor (vm_name, existing workspace, existing
+    # agent -- whether passed as a flag or picked from a prompt) has
+    # contributed to ``known_vm`` and the cross-checks fired as each
+    # anchor was loaded. If ``known_vm`` is still ``None`` we genuinely
+    # have no anchor (e.g. ``--new-workspace --admin`` with no ``--vm``),
+    # so prompt for VM. The cross-check below is defense-in-depth: a
+    # future refactor that adds a new anchor without piping it through
+    # ``known_vm`` would trip it.
+    if known_vm is None:
+        vm = _prompt_vm(db)
+    else:
+        loaded_vm = db.get_vm(known_vm)
+        if loaded_vm is None:
+            raise NotFoundError(
+                f"VM '{known_vm}' not found",
+                entity_kind="vm",
+                entity_name=known_vm,
+            )
+        vm = loaded_vm
+    target_vm_name = vm.name
+
+    vm_anchors: list[tuple[str, str]] = []
+    if vm_name is not None:
+        vm_anchors.append(("--vm", vm_name))
+    if existing_ws is not None:
+        vm_anchors.append((f"workspace '{workspace_name}'", existing_ws.vm_name))
+    if existing_agent is not None:
+        vm_anchors.append((f"agent '{agent_name}'", existing_agent.vm_name))
+    if any(candidate != target_vm_name for _, candidate in vm_anchors):
+        detail = ", ".join(f"{src}={v}" for src, v in vm_anchors)
+        raise ValidationError(
+            f"VM mismatch: {detail}",
+            entity_kind="session",
+            entity_name=name,
+        )
 
     # ===== Template resolution (no SSH, no mutations) =======================
 
