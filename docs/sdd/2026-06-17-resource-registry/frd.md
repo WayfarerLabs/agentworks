@@ -213,6 +213,20 @@ inheritance (declare a child template with `inherits = ["default"]` and override
 framework does not do field-level merging on the `default` declaration. There is no "no default"
 mode.
 
+**Reserved auto-declare names are always materialized at finalize.** A kind whose
+`auto_declare_names` is a non-None set (e.g., `{"default"}` for template kinds) guarantees those
+names exist in the registry after finalize, regardless of whether any resource referenced them. The
+framework's finalize pass adds a pre-step: for every kind, for every name in `auto_declare_names`,
+if no resource exists at `(kind, name)`, dispatch `synthesize(requirements=())` and add the result.
+This closes the gap where a config with no `[vm_templates.*]` blocks (and no incoming references
+during config-load) would leave `vm_template:default` unmaterialized, then crash at command time
+when `agw vm create my-vm` (no `--template` flag, falling back to `default`) tries to look it up.
+Kinds with `auto_declare_names = None` (e.g., the secret kind) are unaffected -- their resources
+remain requirement-driven and only exist when something declares or references them. Producers'
+`synthesize` methods MUST tolerate `requirements=()`: kinds that have reserved auto-declare names
+build code-defined defaults (no per-requirement data needed); kinds with `auto_declare_names = None`
+never get called this way so the contract doesn't bind them.
+
 ### R4: Framework metadata on every resource
 
 Every resource in the registry carries framework-attached metadata, regardless of whether it was

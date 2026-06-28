@@ -378,8 +378,11 @@ reviewer pass covers the whole Phase 1 ship.
 
 Goal: bring template inheritance into the framework. Define `VMTemplateKind`,
 `WorkspaceTemplateKind`, `AgentTemplateKind`, `SessionTemplateKind`. `inherits = [...]` becomes
-`TemplateRequirement` emission. Built-in defaults migrate into `synthesize()`. Operator-facing
-behavior is unchanged.
+`TemplateRequirement` emission. Built-in defaults migrate into `synthesize()`. Plurify
+`AdminTemplateKind` from singleton to named-multi-instance (framework-only; operator surface stays
+single `[admin]`-shaped). Add the always-materialize pre-step to finalize so reserved-default names
+exist in the registry even when nothing references them. Sweep manager entry points to hoist
+`build_registry`. Operator-facing behavior is unchanged.
 
 - [ ] `cli/agentworks/resources/requirement.py`: add `TemplateRequirement(ResourceRequirement)` with
       no extra fields (the template kind handles its own defaults inside `synthesize`).
@@ -420,11 +423,41 @@ behavior is unchanged.
       that touches resources whose miss-policy could throw. Trivial cost (one call that's already
       memoization-friendly inside `bootstrap.py`); high payoff in error-shape consistency across the
       surface.
+- [ ] **Always-materialize reserved-default names in `Registry.finalize`.** Today's finalize
+      auto-declares only when something emits an incoming `ResourceRequirement` for a missing name.
+      That works for `secret` (which has `auto_declare_names = None` and is correctly
+      requirement-driven), but breaks for the template kinds Phase 2a introduces: a config with no
+      `[vm_templates.*]` blocks and nothing referencing `vm_template:default` would leave the
+      default unmaterialized, then crash at `agw vm create my-vm` (no `--template`, falls back to
+      `default`) when the manager calls `registry.lookup("vm_template", "default")`. Today's
+      pre-framework resolver hides this with an "implicit default" fallback; Phase 2a moves that
+      fallback into `synthesize()` but tying it only to incoming-reference auto-declare opens the
+      gap. Fix in finalize itself, not at every manager call site: add a pre-step that, for every
+      kind whose `auto_declare_names` is a non-None set, materializes any reserved name not already
+      in the registry by calling `synthesize(requirements=())`. Kinds with
+      `auto_declare_names = None` (secrets) are unaffected. The kind's `synthesize` MUST tolerate
+      `requirements=()` -- template kinds build code-defined defaults so this is straightforward;
+      `SecretKind.synthesize` never gets called this way and stays requirement-driven. See FRD R3
+      and HLA's `Publish and finalize` section.
+- [ ] **Plurify `AdminTemplateKind`** from singleton (today) to named-multi-instance, alongside the
+      four template kinds being formalized in this phase. `auto_declare_names = {"default"}` stays.
+      No operator-facing change in Phase 2a: the Config parser still only accepts `[admin]`
+      (singleton) and publishes it as `admin_template:default`; the CLI doesn't gain
+      `--admin-template`; the VM DB row doesn't gain `admin_template_name`. The framework just stops
+      treating `admin_template` as a singleton kind so a future SDD can add
+      `[admin_templates.<name>]` parsing, the CLI flag, and the DB column without re-touching the
+      framework. The always-materialize pre-step above subsumes Config's current synthesize-on-omit
+      for admin (and named_console); optional Config cleanup to retire those paths -- not required
+      for behavior, follows naturally with the YAML resource config SDD.
 - [ ] **Tests**:
   - `cli/tests/resources/test_template_kinds.py`: each kind's `synthesize` produces the expected
     defaults; reserved-name restriction errors on non-default missing names.
   - `cli/tests/resources/test_template_cycle_detection.py`: inheritance cycles caught uniformly;
     error messages match the framework's shape.
+  - `cli/tests/resources/test_always_materialize.py`: every reserved auto-declare name exists in the
+    registry after `finalize` even when nothing references it (empty config publishes nothing
+    referencing `vm_template:default` -- the row still lands with origin=auto-declared); kinds with
+    `auto_declare_names = None` (secrets) do not get spurious rows.
   - Update `cli/tests/test_vm_templates.py` / `test_agent_templates.py` / etc. to reflect the new
     error shape.
 

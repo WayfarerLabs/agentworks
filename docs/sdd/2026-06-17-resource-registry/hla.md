@@ -464,13 +464,30 @@ class Registry:
         self._resources.setdefault(kind, {})[name] = resource.with_origin(origin)
 
     def finalize(self) -> None:
-        """Run the framework pass over already-published Resources. Walks the
-        requirement graph, dispatches miss policies (synthesizing auto-declared
-        Resources), attaches usage, detects cycles, and locks the Registry. After
-        return, the Registry is queryable but no longer accepts publishes. The
-        name covers the whole lifecycle terminator -- the work isn't just
-        validation but also the auto-declaration synthesis the miss policies
-        trigger."""
+        """Run the framework pass over already-published Resources. Materializes
+        reserved-default names, walks the requirement graph, dispatches miss
+        policies (synthesizing auto-declared Resources), attaches usage, detects
+        cycles, and locks the Registry. After return, the Registry is queryable
+        but no longer accepts publishes. The name covers the whole lifecycle
+        terminator -- the work isn't just validation but also the
+        auto-declaration synthesis the miss policies trigger."""
+        # 0. Materialize reserved-default names. Kinds whose ``auto_declare_names``
+        # is a non-None set guarantee those names exist in the registry after
+        # finalize, regardless of whether anything referenced them. Synthesizes
+        # with ``requirements=()`` so the kind builds its code-defined default.
+        # Closes the gap where an unreferenced default would otherwise crash at
+        # command time. Kinds with ``auto_declare_names = None`` (secrets) are
+        # untouched -- their resources remain requirement-driven.
+        for kind, kind_handler in KIND_REGISTRY.items():
+            if kind_handler.auto_declare_names is None:
+                continue
+            for name in kind_handler.auto_declare_names:
+                if name in self._resources.get(kind, {}):
+                    continue
+                self._resources.setdefault(kind, {})[name] = (
+                    kind_handler.synthesize(())
+                )
+
         # 1. Collect all requirements across published resources.
         requirements: list[ResourceRequirement] = []
         for kind_dict in self._resources.values():
@@ -488,7 +505,8 @@ class Registry:
             kind_handler = KIND_REGISTRY[kind]
             existing = self._resources.get(kind, {}).get(name)
             if existing is not None:
-                # Already-published (Origin set at publish). Attach usage.
+                # Already-published (Origin set at publish, or auto-declared in
+                # step 0 above for reserved defaults). Attach usage.
                 self._resources[kind][name] = existing.with_usage(_usage_list(reqs))
             else:
                 # Missing: dispatch miss policy.
@@ -620,7 +638,10 @@ the same path); the framework never sees them.
   at render time only where summary display calls for it.
 - `origin = Origin(variant="auto-declared", source=requirements[0].source)`
 
-No reserved-name restriction; any name is accepted.
+`auto_declare_names = None` (any name accepted). Because `auto_declare_names` is None, secrets do
+**not** participate in finalize's always-materialize pre-step -- a secret only exists if something
+references it or the operator declared it. `SecretKind.synthesize` is therefore always called with
+`requirements` non-empty; the `requirements[0].name` / `requirements[0].source` accesses are safe.
 
 For operator-declared secrets, the parser produces a `SecretDecl` with empty `usage`; the finalize
 pass then populates `usage` from the matching requirements using the same `UsageEntry` shape.
@@ -630,12 +651,19 @@ pass then populates `usage` from the matching requirements using the same `Usage
 
 `VMTemplateKind.synthesize(requirements)` builds a `VMTemplate` with the kind's code-defined
 defaults (the same defaults currently encoded in the resolver's "implicit default" fallback, hoisted
-into one place). The `requirements[0].source` is recorded as origin.
+into one place). When called with `requirements` non-empty (the incoming-reference path), the first
+requirement's source is recorded as origin. When called with `requirements=()` (the
+always-materialize pre-step for `default`), origin is `auto-declared` with a synthetic source
+(`("framework", "always-materialize")`) so the breadcrumb shows where the row came from.
 
-`auto_declare_names = {"default"}` -- only the reserved name. Any other missing name from a
-`TemplateRequirement` triggers an error at the finalize pass.
+`auto_declare_names = {"default"}` -- only the reserved name. The always-materialize pre-step in
+finalize uses this set to determine which names to guarantee; any other missing name surfaces from a
+`TemplateRequirement` and triggers an error.
 
-Same shape applies for `WorkspaceTemplateKind`, `AgentTemplateKind`, `SessionTemplateKind`.
+Same shape applies for `WorkspaceTemplateKind`, `AgentTemplateKind`, `SessionTemplateKind`. The
+existing singletons (`AdminTemplateKind`, `NamedConsoleTemplateKind`) also benefit -- Phase 2a can
+optionally retire Config's synthesize-on-omit for those two kinds since the framework now guarantees
+the same default-materialization (not required for behavior; a cleanup follow-up).
 
 ## Requirement sources
 
