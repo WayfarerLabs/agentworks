@@ -750,7 +750,7 @@ def test_mode_required_in_non_interactive(tmp_path: Path) -> None:
     db = _seed_one_vm(tmp_path)  # vm1 + ws1, no agents
     config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
 
-    with pytest.raises(ValidationError, match="specify --admin, --agent, or --new-agent"):
+    with pytest.raises(ValidationError, match="session mode is required in non-interactive mode"):
         create_session(
             db,
             config,  # type: ignore[arg-type]
@@ -772,7 +772,7 @@ def test_workspace_required_in_non_interactive(tmp_path: Path) -> None:
     db = _seed_one_vm(tmp_path)  # vm1 + ws1, exactly one workspace
     config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
 
-    with pytest.raises(ValidationError, match="specify --workspace or --new-workspace"):
+    with pytest.raises(ValidationError, match="workspace is required in non-interactive mode"):
         create_session(
             db,
             config,  # type: ignore[arg-type]
@@ -928,6 +928,56 @@ def test_mode_prompt_picks_existing_agent(
             workspace="ws1",
         )
     assert called == ["ensure_vm_up"]
+    db.close()
+
+
+def test_mode_prompt_picks_create_new(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Picking the ``[Create new agent]`` option (last in the list)
+    sets ``new_agent=True`` AND defaults ``agent_name`` to the session
+    name. Regression: a prior shape sat the mode prompt after the
+    agent-default/validation/existence block, so ``[Create new agent]``
+    landed at the ephemeral-create step with ``agent_name=None`` and
+    crashed on an internal assertion."""
+    from agentworks.sessions import manager as session_manager
+    from agentworks.sessions.manager import create_session
+
+    db = _seed_one_vm(tmp_path)  # vm1 + ws1, no agents
+    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
+
+    monkeypatch.setattr(output, "is_interactive", lambda: True)
+    # No agents on VM: options are [admin, [Create new agent]] = 2 entries.
+    # Last index is [Create new agent].
+    monkeypatch.setattr(output, "choose", lambda msg, opts: len(opts) - 1)
+
+    # Stub the path so we land on create_agent cleanly.
+    monkeypatch.setattr(session_manager, "_resolve_template", lambda *a, **k: None)
+    monkeypatch.setattr(
+        session_manager, "_session_secret_target_pre_create", lambda *a, **k: None
+    )
+    monkeypatch.setattr("agentworks.secrets.resolve_for_command", lambda *a, **k: {})
+    monkeypatch.setattr(
+        "agentworks.workspaces.manager._ensure_vm_running", lambda *a, **k: None
+    )
+
+    create_agent_calls: list[dict[str, object]] = []
+
+    def _ag_spy(db: object, config: object, **kwargs: object) -> None:
+        create_agent_calls.append(dict(kwargs))
+        raise RuntimeError("stop after create_agent")
+
+    monkeypatch.setattr("agentworks.agents.manager.create_agent", _ag_spy)
+
+    with pytest.raises(RuntimeError, match="stop after create_agent"):
+        create_session(
+            db,
+            config,  # type: ignore[arg-type]
+            name="s1",
+            workspace="ws1",
+        )
+    # The flow reached create_agent with the session name defaulted in.
+    assert create_agent_calls == [{"name": "s1", "vm_name": "vm1", "template": None}]
     db.close()
 
 

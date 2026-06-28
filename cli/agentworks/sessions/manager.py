@@ -956,8 +956,9 @@ def _prompt_workspace_choice(db: Database) -> tuple[str | None, bool]:
     """
     if not output.is_interactive():
         raise ValidationError(
-            "specify --workspace or --new-workspace",
+            "workspace is required in non-interactive mode",
             entity_kind="session",
+            hint="pass --workspace <name> or --new-workspace",
         )
     workspaces = db.list_workspaces()
     options = [f"{ws.name}  (vm: {ws.vm_name})" for ws in workspaces]
@@ -985,8 +986,9 @@ def _prompt_mode_choice(
     """
     if not output.is_interactive():
         raise ValidationError(
-            "specify --admin, --agent, or --new-agent",
+            "session mode is required in non-interactive mode",
             entity_kind="session",
+            hint="pass --admin, --agent <name>, or --new-agent",
         )
     options = ["admin"]
     for a in vm_agents:
@@ -1253,10 +1255,10 @@ def create_session(
             )
     else:
         # No anchor (happens for new_workspace + admin or
-        # new_workspace + new_agent without --vm). Prompt the operator
-        # to pick a VM, auto-select when there's exactly one, and raise
-        # in non-interactive mode -- symmetric with the workspace and
-        # mode prompts.
+        # new_workspace + new_agent without --vm). Departure from the
+        # workspace / mode prompts: VM is infrastructure, so auto-select
+        # when exactly one usable VM exists. Prompt when multiple,
+        # raise in non-interactive multi or zero-VM cases.
         vm = _prompt_vm(db)
         target_vm_name = vm.name
 
@@ -1275,6 +1277,28 @@ def create_session(
             agent_name = chosen_agent
             existing_agent = db.get_agent(agent_name)
             assert existing_agent is not None  # came from list_agents
+
+        # Re-run the agent-specific default / validation / existence
+        # checks that the upfront block did for the flag path. The
+        # workspace equivalents ran already because the workspace
+        # prompt sits BEFORE that block; the mode prompt sits AFTER
+        # because it needs the resolved VM, so it has to redo this
+        # work for the ``[Create new agent]`` branch. Without this,
+        # a ``[Create new agent]`` pick lands at the eager-resolve
+        # SecretTarget with ``is_admin_mode=True`` (wrong scope) and
+        # asserts ``agent_name is not None`` inside the ephemeral-
+        # create block.
+        if new_agent and agent_name is None:
+            agent_name = name
+        if new_agent:
+            assert agent_name is not None
+            validate_name(agent_name)
+            if db.get_agent(agent_name) is not None:
+                raise AlreadyExistsError(
+                    f"agent '{agent_name}' already exists",
+                    entity_kind="agent",
+                    entity_name=agent_name,
+                )
 
     # ===== Template resolution (no SSH, no mutations) =======================
 

@@ -34,10 +34,12 @@ def session_create(
         typer.Option(
             "--vm",
             help=(
-                "VM anchor. Required when nothing else pins the VM "
-                "(--new-workspace + --admin or --new-workspace + --new-agent); "
-                "otherwise optional but cross-checked against the "
-                "workspace's / agent's VM."
+                "VM anchor. Optional. When omitted: pinned by the workspace or "
+                "agent if either resolves to one; otherwise auto-selected from "
+                "the single usable VM, or prompted from the list. Required only "
+                "in non-interactive mode when nothing else pins the VM and more "
+                "than one usable VM exists. When passed alongside other anchors, "
+                "must agree with them."
             ),
         ),
     ] = None,

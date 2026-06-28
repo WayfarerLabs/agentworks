@@ -295,16 +295,22 @@ together. `--agent` matches agent-mode sessions only; `--admin` matches admin-mo
 (the two are mutually exclusive). Pass `--force` to stop/restart broken sessions via PID kill.
 
 `session create <name>` takes the session name as a required positional. Optional flags:
-`--workspace`, `--template`, `--admin`, and `--agent`. Workspace and mode (admin vs agent) are
-prompted interactively if omitted; if agents exist on the VM and neither `--admin` nor `--agent` is
-specified, you are prompted to choose. Pass `--new-workspace` to create a workspace on the fly (with
-optional `--workspace-name`, `--workspace-template`, and `--vm`; `--workspace-name` defaults to the
-session name). Pass `--new-agent` to create a new agent for the session (with optional
-`--agent-name` and `--agent-template`; `--agent-name` defaults to the session name); the new agent
-is provisioned on the workspace's VM. When a session created with `--new-workspace` or `--new-agent`
-is later deleted, you are offered the option to delete the workspace and/or agent as well -- the
-workspace if no other sessions remain on it, the agent if it has no other sessions and no explicit
-grants.
+`--workspace`, `--template`, `--admin`, and `--agent`. If `--workspace` / `--new-workspace` is
+omitted, you are prompted to pick from the existing workspaces or `[Create new workspace]`. If
+`--admin` / `--agent` / `--new-agent` is omitted, you are prompted with `admin`, the existing agents
+on the resolved VM, and `[Create new agent]`. The prompts always fire when the flags are absent --
+there is no single-option auto-select for workspace or mode, since both are part of the session's
+identity. `--vm` works differently: it auto-selects when exactly one usable VM exists (logged as
+`Using VM 'X'`), prompts when multiple, and is required only in non-interactive mode when no
+workspace or agent anchor pins the VM. In non-interactive mode (`--non-interactive` or no TTY), any
+required prompt raises a `ValidationError` directing you to pass the corresponding flag. Pass
+`--new-workspace` to create a workspace on the fly (with optional `--workspace-name`,
+`--workspace-template`, and `--vm`; `--workspace-name` defaults to the session name). Pass
+`--new-agent` to create a new agent for the session (with optional `--agent-name` and
+`--agent-template`; `--agent-name` defaults to the session name); the new agent is provisioned on
+the workspace's VM. When a session created with `--new-workspace` or `--new-agent` is later deleted,
+you are offered the option to delete the workspace and/or agent as well -- the workspace if no other
+sessions remain on it, the agent if it has no other sessions and no explicit grants.
 
 <!-- Linked from the top-level README; rename only if you also update README.md. -->
 
