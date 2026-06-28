@@ -1011,12 +1011,6 @@ def create_session(
 
     # ===== Pure validation (no SSH, no mutations) ===========================
 
-    if agent_name is not None and new_agent is not None:
-        raise ValidationError(
-            "agent_name and new_agent are mutually exclusive",
-            entity_kind="session",
-            entity_name=name,
-        )
     if workspace_name is None and new_workspace is None:
         raise ValidationError(
             "must specify workspace_name or new_workspace",

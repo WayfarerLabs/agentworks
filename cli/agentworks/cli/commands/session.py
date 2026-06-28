@@ -104,7 +104,10 @@ def session_create(
 
     if new_agent:
         new_agent_args = NewAgentArgs(template_name=agent_template)
-        resolved_agent = agent_name or name
+        # Pass the operator-supplied name through; the service layer
+        # defaults to the session name when None. Defaulting here too
+        # would shadow that single-source-of-truth.
+        resolved_agent = agent_name
 
     create_session(
         db,

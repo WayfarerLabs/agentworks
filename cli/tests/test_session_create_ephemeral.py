@@ -195,22 +195,112 @@ def test_workspace_and_new_workspace_both_none_raises(tmp_path: Path) -> None:
     db.close()
 
 
-def test_agent_name_and_new_agent_mutually_exclusive(tmp_path: Path) -> None:
-    """Cannot say "use existing agent X" AND "create new agent" at once."""
+def test_agent_name_with_new_agent_creates_new_agent_with_given_name(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``agent_name`` carries the agent's name (existing OR new);
+    ``new_agent`` toggles meaning. Together they mean "create a new
+    agent with the given name." This is the call shape the CLI uses
+    when ``--new-agent`` + ``--agent-name`` is passed, so a bogus
+    mutex check here regresses the operator-facing flow."""
+    from agentworks.sessions import manager as session_manager
     from agentworks.sessions.manager import create_session
 
     db = _seed_one_vm(tmp_path)
     config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
 
-    with pytest.raises(ValidationError, match="mutually exclusive"):
+    monkeypatch.setattr(session_manager, "_resolve_template", lambda *a, **k: None)
+    monkeypatch.setattr(
+        session_manager, "_session_secret_target_pre_create", lambda *a, **k: None
+    )
+    monkeypatch.setattr("agentworks.secrets.resolve_for_command", lambda *a, **k: {})
+    monkeypatch.setattr(
+        "agentworks.workspaces.manager._ensure_vm_running", lambda *a, **k: None
+    )
+
+    create_agent_calls: list[dict[str, object]] = []
+
+    def _spy(db: object, config: object, **kwargs: object) -> None:
+        create_agent_calls.append(dict(kwargs))
+        raise RuntimeError("stop after agent create")
+
+    monkeypatch.setattr("agentworks.agents.manager.create_agent", _spy)
+
+    with pytest.raises(RuntimeError, match="stop after agent create"):
         create_session(
             db,
             config,  # type: ignore[arg-type]
             name="s1",
             workspace_name="ws1",
-            agent_name="some-existing",
+            agent_name="my-named-agent",
             new_agent=NewAgentArgs(),
         )
+    # The given name was used to create the new agent, not interpreted
+    # as a lookup.
+    assert create_agent_calls == [
+        {"name": "my-named-agent", "vm_name": "vm1", "template": None}
+    ]
+    db.close()
+
+
+def test_ephemeral_agent_name_defaults_to_session_name(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When ``new_agent`` is set without ``agent_name``, the new agent's
+    name defaults to the session name. The service layer owns this
+    default; the CLI passes ``agent_name=None`` through when
+    ``--agent-name`` isn't supplied (single source of truth).
+
+    Regression for the bogus ``agent_name`` / ``new_agent`` mutex check
+    that rejected the CLI's natural shape for
+    ``--vm X --new-workspace --new-agent SESSION_NAME``."""
+    from agentworks.sessions import manager as session_manager
+    from agentworks.sessions.manager import create_session
+
+    db = Database(tmp_path / "test.db")
+    db._conn.execute(
+        "INSERT INTO vms (name, platform, admin_username, tailscale_host) "
+        "VALUES ('bbvm1', 'azure', 'admin', '100.64.0.5')"
+    )
+    db._conn.commit()
+    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
+
+    monkeypatch.setattr(session_manager, "_resolve_template", lambda *a, **k: None)
+    monkeypatch.setattr(
+        session_manager, "_session_secret_target_pre_create", lambda *a, **k: None
+    )
+    monkeypatch.setattr("agentworks.secrets.resolve_for_command", lambda *a, **k: {})
+    monkeypatch.setattr(
+        "agentworks.workspaces.manager._ensure_vm_running", lambda *a, **k: None
+    )
+
+    workspace_calls: list[dict[str, object]] = []
+    agent_calls: list[dict[str, object]] = []
+
+    def _ws_spy(db: object, config: object, **kwargs: object) -> None:
+        workspace_calls.append(dict(kwargs))
+
+    def _ag_spy(db: object, config: object, **kwargs: object) -> None:
+        agent_calls.append(dict(kwargs))
+        raise RuntimeError("stop after agent create")
+
+    monkeypatch.setattr("agentworks.workspaces.manager.create_workspace", _ws_spy)
+    monkeypatch.setattr("agentworks.agents.manager.create_agent", _ag_spy)
+
+    with pytest.raises(RuntimeError, match="stop after"):
+        create_session(
+            db,
+            config,  # type: ignore[arg-type]
+            name="bbs3",
+            new_workspace=NewWorkspaceArgs(),
+            new_agent=NewAgentArgs(),
+            vm_name="bbvm1",
+            # No agent_name -- CLI didn't pre-default. Service does.
+        )
+
+    # Both ephemerals defaulted to the session name.
+    assert workspace_calls[0]["name"] == "bbs3"
+    assert agent_calls[0]["name"] == "bbs3"
     db.close()
 
 
