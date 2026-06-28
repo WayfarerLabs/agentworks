@@ -46,9 +46,9 @@ def _seed_two_vms(tmp_path: Path) -> Database:
     """
     db = Database(tmp_path / "test.db")
     db._conn.execute(
-        "INSERT INTO vms (name, platform, admin_username, tailscale_host) VALUES "
-        "('vm-A', 'lima', 'admin', '100.64.0.1'),"
-        "('vm-B', 'lima', 'admin', '100.64.0.2')"
+        "INSERT INTO vms (name, platform, admin_username, tailscale_host, init_status) VALUES "
+        "('vm-A', 'lima', 'admin', '100.64.0.1', 'complete'),"
+        "('vm-B', 'lima', 'admin', '100.64.0.2', 'complete')"
     )
     db._conn.execute(
         "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group) VALUES "
@@ -65,8 +65,8 @@ def _seed_one_vm(tmp_path: Path) -> Database:
     """Single VM with one workspace."""
     db = Database(tmp_path / "test.db")
     db._conn.execute(
-        "INSERT INTO vms (name, platform, admin_username, tailscale_host) "
-        "VALUES ('vm1', 'lima', 'admin', '100.64.0.5')"
+        "INSERT INTO vms (name, platform, admin_username, tailscale_host, init_status) "
+        "VALUES ('vm1', 'lima', 'admin', '100.64.0.5', 'complete')"
     )
     db._conn.execute(
         "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group) "
@@ -173,14 +173,18 @@ def test_explicit_vm_agreeing_with_workspace_passes_anchor_check(
     db.close()
 
 
-def test_no_vm_anchor_raises(tmp_path: Path) -> None:
-    """new_workspace + admin mode + no vm_name = nothing pins the VM."""
+def test_no_vm_anchor_with_multiple_vms_raises_in_non_interactive(
+    tmp_path: Path,
+) -> None:
+    """new_workspace + admin + no vm_name with multiple VMs would need to
+    prompt; the autouse non-interactive fixture forces a clean
+    ValidationError instead of hanging."""
     from agentworks.sessions.manager import create_session
 
-    db = _seed_one_vm(tmp_path)
+    db = _seed_two_vms(tmp_path)  # vm-A and vm-B, both fully initialized
     config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
 
-    with pytest.raises(ValidationError, match="VM anchor required"):
+    with pytest.raises(ValidationError, match="--vm is required in non-interactive mode"):
         create_session(
             db,
             config,  # type: ignore[arg-type]
@@ -188,6 +192,67 @@ def test_no_vm_anchor_raises(tmp_path: Path) -> None:
             new_workspace=True,
             admin=True,
         )
+    db.close()
+
+
+def test_no_vm_anchor_with_zero_vms_raises(tmp_path: Path) -> None:
+    """new_workspace + admin + no vm_name with zero VMs raises with
+    actionable hint."""
+    from agentworks.errors import NotFoundError
+    from agentworks.sessions.manager import create_session
+
+    db = Database(tmp_path / "test.db")  # no VMs at all
+    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
+
+    with pytest.raises(NotFoundError, match="no VMs available"):
+        create_session(
+            db,
+            config,  # type: ignore[arg-type]
+            name="s1",
+            new_workspace=True,
+            admin=True,
+        )
+    db.close()
+
+
+def test_no_vm_anchor_with_single_vm_auto_selects(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """new_workspace + admin + no vm_name with exactly one VM auto-
+    selects that VM without prompting (matches workspace/agent prompt
+    helpers' single-item shortcut). Non-interactive mode is irrelevant
+    here: no prompt is shown."""
+    from agentworks.sessions import manager as session_manager
+    from agentworks.sessions.manager import create_session
+
+    db = _seed_one_vm(tmp_path)  # exactly vm1
+    # Drop the workspace so the workspace-prompt path isn't entered
+    # (it'd otherwise auto-select ws1 and pin the VM via that anchor,
+    # bypassing the path under test).
+    db._conn.execute("DELETE FROM workspaces WHERE name = 'ws1'")
+    db._conn.commit()
+
+    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
+
+    monkeypatch.setattr(session_manager, "_resolve_template", lambda *a, **k: None)
+
+    called: list[str] = []
+
+    def _spy(*args: object, **kwargs: object) -> None:
+        called.append("ensure_vm_up")
+        raise RuntimeError("stop after VM resolution")
+
+    monkeypatch.setattr("agentworks.workspaces.manager._ensure_vm_running", _spy)
+
+    with pytest.raises(RuntimeError, match="stop after VM resolution"):
+        create_session(
+            db,
+            config,  # type: ignore[arg-type]
+            name="s1",
+            new_workspace=True,
+            admin=True,
+        )
+    assert called == ["ensure_vm_up"]
     db.close()
 
 

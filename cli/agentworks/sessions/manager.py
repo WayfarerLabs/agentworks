@@ -991,6 +991,40 @@ def _prompt_session_mode(vm_agents: list[AgentRow]) -> str | None:
     return None if idx == 0 else vm_agents[idx - 1].name
 
 
+def _prompt_vm(db: Database) -> VMRow:
+    """Pick a VM when nothing else pins it.
+
+    Symmetric with :func:`_prompt_existing_workspace` /
+    :func:`_prompt_session_mode`. Reached only when the operator hasn't
+    passed ``--vm`` and no workspace / agent anchor was available to
+    pin the VM (e.g. ``--new-workspace --admin`` or
+    ``--new-workspace --new-agent``, both without ``--vm``). Filters
+    out VMs whose init is incomplete: a session on a half-initialized
+    VM would just fail downstream.
+    """
+    from agentworks.db import InitStatus
+
+    vms = db.list_vms()
+    usable = [v for v in vms if v.init_status in {InitStatus.COMPLETE.value, InitStatus.PARTIAL.value}]
+    if not usable:
+        raise NotFoundError(
+            "no VMs available",
+            entity_kind="vm",
+            hint="Create one with 'agw vm create', or pass --vm to override.",
+        )
+    if len(usable) == 1:
+        output.info(f"Using VM '{usable[0].name}'")
+        return usable[0]
+    if not output.is_interactive():
+        raise ValidationError(
+            "--vm is required in non-interactive mode when no workspace or agent pins the VM",
+            entity_kind="session",
+        )
+    options = [f"{v.name}  ({v.platform})" for v in usable]
+    idx = output.choose("Select a VM:", options)
+    return usable[idx]
+
+
 # -- Public API ------------------------------------------------------------
 
 
@@ -1176,30 +1210,32 @@ def create_session(
             )
         vm_anchors.append((f"agent '{agent_name}'", existing_agent.vm_name))
 
-    if not vm_anchors:
-        # No existing resources and no explicit vm_name: nothing pins the VM.
-        # Happens for ``new_workspace + admin`` or ``new_workspace + new_agent``
-        # without ``vm_name``.
-        raise ValidationError(
-            "VM anchor required: pass vm_name, or reference an existing workspace or agent",
-            entity_kind="session",
-            entity_name=name,
-        )
-    target_vm_name = vm_anchors[0][1]
-    if any(candidate != target_vm_name for _, candidate in vm_anchors):
-        detail = ", ".join(f"{src}={vm}" for src, vm in vm_anchors)
-        raise ValidationError(
-            f"VM mismatch: {detail}",
-            entity_kind="session",
-            entity_name=name,
-        )
-    vm = db.get_vm(target_vm_name)
-    if vm is None:
-        raise NotFoundError(
-            f"VM '{target_vm_name}' not found",
-            entity_kind="vm",
-            entity_name=target_vm_name,
-        )
+    if vm_anchors:
+        # Operator named at least one anchor (vm_name and/or an existing
+        # workspace/agent). All anchors must agree, then load the row.
+        target_vm_name = vm_anchors[0][1]
+        if any(candidate != target_vm_name for _, candidate in vm_anchors):
+            detail = ", ".join(f"{src}={v}" for src, v in vm_anchors)
+            raise ValidationError(
+                f"VM mismatch: {detail}",
+                entity_kind="session",
+                entity_name=name,
+            )
+        vm = db.get_vm(target_vm_name)
+        if vm is None:
+            raise NotFoundError(
+                f"VM '{target_vm_name}' not found",
+                entity_kind="vm",
+                entity_name=target_vm_name,
+            )
+    else:
+        # No anchor (happens for new_workspace + admin or
+        # new_workspace + new_agent without --vm). Prompt the operator
+        # to pick a VM, auto-select when there's exactly one, and raise
+        # in non-interactive mode -- symmetric with the workspace and
+        # mode prompts.
+        vm = _prompt_vm(db)
+        target_vm_name = vm.name
 
     # ===== Mode prompt (admin vs existing agent) when none specified ========
     #
