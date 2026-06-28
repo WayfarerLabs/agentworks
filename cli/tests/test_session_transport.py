@@ -132,9 +132,9 @@ def test_create_session_probes_before_state_mutation(
             db,
             config,  # type: ignore[arg-type]
             name="s1",
-            workspace_name="ws1",
+            workspace="ws1",
             template_name=None,
-            agent_name="a1",
+            agent="a1",
         )
 
     # No state mutated: no session row, no implicit grant, no group add.
@@ -191,9 +191,9 @@ def test_create_session_uses_agent_target_for_tmux(
         db,
         config,  # type: ignore[arg-type]
         name="s1",
-        workspace_name="ws1",
+        workspace="ws1",
         template_name=None,
-        agent_name="a1",
+        agent="a1",
     )
 
     # run_command must be agent_target.run, not admin_target.run.
@@ -273,9 +273,9 @@ def test_create_session_aborts_on_missing_required_command(
             db,
             config,  # type: ignore[arg-type]
             name="s1",
-            workspace_name="ws1",
+            workspace="ws1",
             template_name="claude",
-            agent_name="a1",
+            agent="a1",
         )
 
     # Fail-fast: no session row, no implicit grant, no group add.

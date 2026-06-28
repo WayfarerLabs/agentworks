@@ -912,6 +912,7 @@ def delete_workspace(
 
     from agentworks.ssh import SSHLogger
     ssh_logger = SSHLogger(ws.vm_name, "workspace-delete")
+    output.info(f"Deleting workspace '{name}' on VM '{ws.vm_name}'...")
 
     # Kill running sessions (status-aware) and delete session records
     vm = db.get_vm(ws.vm_name)

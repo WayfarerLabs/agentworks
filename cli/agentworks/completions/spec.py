@@ -111,6 +111,7 @@ DYNAMIC_COMPLETIONS: dict[tuple[str, str], str] = {
     ("session.create", "workspace"): "workspaces",
     ("session.create", "template"): "session_templates",
     ("session.create", "workspace_template"): "ws_templates",
+    ("session.create", "agent_template"): "agent_templates",
     ("session.create", "vm"): "vms",
     ("session.describe", "name"): "sessions",
     ("session.list", "workspace"): "workspaces",
