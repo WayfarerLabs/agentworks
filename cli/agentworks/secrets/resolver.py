@@ -7,13 +7,15 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from agentworks import output
 from agentworks.errors import ConfigError, SecretUnavailableError
+from agentworks.secrets.base import SecretDecl
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from agentworks.env.entry import EnvEntry
-    from agentworks.secrets.base import SecretDecl, SecretSource
+    from agentworks.secrets.base import SecretSource
 
 
 class SecretResolver:
@@ -120,6 +122,19 @@ class SecretResolver:
             if not still_attemptable:
                 continue
             resolved = source.batch_get(still_attemptable)
+            # Surface which source + identifier won so operators can tell
+            # env-var-from-shell apart from a fall-through to prompt. For
+            # backends without a static identifier (prompt) the parenthetical
+            # is omitted; for env-var / vault / op:// it shows the lookup
+            # name. Never includes the resolved value.
+            decl_by_name = {s.name: s for s in still_attemptable}
+            for resolved_name in sorted(resolved):
+                decl = decl_by_name[resolved_name]
+                ident = source.describe_lookup(decl)
+                suffix = f" ({ident})" if ident else ""
+                output.detail(
+                    f"Resolved {resolved_name} via {source.kind}{suffix}"
+                )
             for name, value in resolved.items():
                 # ADR 0014: embedded newlines would corrupt SSH
                 # `-o SetEnv=KEY=VALUE` arguments. The env-var source
@@ -170,27 +185,43 @@ class SecretResolver:
         shape: a mapping of env-var name to EnvEntry (which carries either
         ``.value`` plaintext or ``.secret`` reference).
 
-        Raises ``ConfigError`` if an entry references an unknown secret
-        name. The exhaustive-or-else case (entry has neither value nor
-        secret) cannot happen by construction because EnvEntry's
+        Phase 1b of the Resource Registry SDD relaxes the strict
+        "must declare" rule: a secret reference whose name has no
+        ``[secrets.<name>]`` block is treated as auto-declared
+        (synthesized ``SecretDecl`` with empty ``backend_mappings``) and
+        runs through the same backend chain. If no backend resolves it,
+        the existing ``SecretUnavailableError`` path fires at command
+        time rather than ``ConfigError`` at config load. Operators see
+        the auto-declared secret in ``agw secret list`` with origin =
+        auto-declared so typo'd names surface visibly.
+
+        The exhaustive-or-else case (entry has neither value nor secret)
+        cannot happen by construction because EnvEntry's
         ``__post_init__`` enforces the exactly-one invariant.
         """
         seen: set[str] = set()
         needed: list[SecretDecl] = []
         for entry in env.values():
-            if entry.secret is not None and entry.secret not in seen and entry.secret in self._decls:
+            if entry.secret is not None and entry.secret not in seen:
                 seen.add(entry.secret)
-                needed.append(self._decls[entry.secret])
+                # Use the operator-declared SecretDecl if present (carries
+                # backend_mappings overrides); otherwise synthesize a
+                # bare one (auto-declare semantics: backends apply their
+                # default conventions). The synthesized shape matches
+                # ``_SecretKind.synthesize`` (in
+                # ``agentworks.resources.kinds.secret``) modulo ``origin``,
+                # which the resolver doesn't read -- so render-side
+                # synthesize and registry-side synthesize converge on the
+                # same resolution outcome by construction.
+                needed.append(
+                    self._decls.get(entry.secret)
+                    or SecretDecl(name=entry.secret, description="")
+                )
         resolved = self.resolve_all(needed) if needed else {}
 
         out: dict[str, str] = {}
         for key, entry in env.items():
             if entry.secret is not None:
-                if entry.secret not in self._decls:
-                    raise ConfigError(
-                        f"env key {key!r} references unknown secret {entry.secret!r}",
-                        hint=f"declare it under [secrets.{entry.secret}]",
-                    )
                 out[key] = resolved[entry.secret]
             else:
                 # EnvEntry invariant: exactly one of value/secret set, so
@@ -200,10 +231,17 @@ class SecretResolver:
         return out
 
     def required_for(self, env: Mapping[str, EnvEntry]) -> list[SecretDecl]:
-        """Return deduplicated SecretDecls referenced by ``env``.
+        """Return deduplicated SecretDecls referenced by ``env``, filtered
+        to those operator-declared in ``self._decls``.
 
         Used by eager-prompting orchestration to compute the union of
         needed secrets across a candidate target set before resolving.
+        Phase 1b note: secret refs whose names are NOT in ``self._decls``
+        (auto-declarable via the Registry's miss policy) are intentionally
+        excluded -- eager prompting walks operator-declared secrets only,
+        since auto-declared ones carry no operator-set description / hint
+        worth pre-flighting. ``render`` handles the auto-declarable case
+        on demand at command time.
         """
         seen: set[str] = set()
         out: list[SecretDecl] = []

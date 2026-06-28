@@ -1,36 +1,27 @@
-"""Base interface for git credential providers."""
+"""Base interface for git credential providers.
+
+Phase 1d of the Resource Registry SDD: providers now own only the
+type-specific formatting (``credential_lines``) and authn pre-flight
+(``verify_auth`` / ``auth_hint``). Token resolution moved to the
+framework -- each ``GitCredentialConfig`` emits a ``SecretRequirement``
+for its ``token`` field; the resolver chain (env-var / 1Password /
+prompt / ...) handles the lookup. The previous provider-side env-var
+helpers and prompt method are gone.
+"""
 
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
-from agentworks.env_compat import read_env_with_legacy
-
-
-def env_var_for_credential(name: str) -> str:
-    """Derive the environment variable name for a credential config name.
-
-    e.g. "github" -> "AW_GIT_CREDENTIALS_GITHUB"
-         "azdo-ifc" -> "AW_GIT_CREDENTIALS_AZDO_IFC"
-    """
-    return "AW_GIT_CREDENTIALS_" + name.upper().replace("-", "_")
-
-
-def legacy_env_var_for_credential(name: str) -> str:
-    """The pre-AW_ env var name for a credential, still read with a deprecation warning."""
-    return "GIT_CREDENTIALS_" + name.upper().replace("-", "_")
-
 
 class GitCredentialProvider(ABC):
     """Interface for configuring git credentials on VMs.
 
-    Each provider knows how to obtain a token (via prompt or CLI) and
-    produce the credential line(s) for ~/.git-credentials.
-
-    Token resolution order:
-      1. AW_GIT_CREDENTIALS_<NAME> environment variable
-      2. GIT_CREDENTIALS_<NAME> environment variable (deprecated; warns once)
-      3. Interactive prompt (via _prompt_token)
+    Each provider knows how to format the credential line(s) for
+    ``~/.git-credentials`` and how to pre-flight authn (e.g., warn
+    the operator before provisioning if their CLI / browser state
+    isn't ready to mint a token). Tokens themselves come from the
+    framework's resolver chain, not from this class.
     """
 
     def __init__(self, config_name: str, description: str | None = None) -> None:
@@ -54,22 +45,6 @@ class GitCredentialProvider(ABC):
     @abstractmethod
     def auth_hint(self) -> str:
         """Return a human-readable hint for how to authenticate."""
-
-    def obtain_token(self, vm_name: str) -> str:
-        """Obtain a credential token: env var first, then prompt."""
-        from agentworks import output
-
-        new_name = env_var_for_credential(self._config_name)
-        legacy_name = legacy_env_var_for_credential(self._config_name)
-        token = read_env_with_legacy(new_name, legacy_name)
-        if token:
-            output.detail(f"Git credential '{self.display_name}' found in environment")
-            return token
-        return self._prompt_token(vm_name)
-
-    @abstractmethod
-    def _prompt_token(self, vm_name: str) -> str:
-        """Interactively prompt for a token."""
 
     @abstractmethod
     def credential_lines(self, token: str) -> list[str]:

@@ -21,6 +21,9 @@ class _FakeSource:
     def batch_get(self, secrets: list[SecretDecl]) -> dict[str, str]:
         return {s.name: v for s in secrets if (v := self.get(s)) is not None}
 
+    def describe_lookup(self, secret: SecretDecl) -> str | None:  # noqa: ARG002 - test stub
+        return None
+
 
 def _ctx(**overrides: object) -> ResourceContext:
     base: dict[str, object] = {

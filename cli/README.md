@@ -603,21 +603,52 @@ agw env show --session my-session              # secrets redacted as <from secre
 agw env show --vm my-vm --reveal-secrets       # resolves through the active backend chain
 ```
 
-Inspect how each active backend would resolve each declared secret (e.g. "which env var name does
-this secret read from?") with `agw secret list`:
+Inspect how each active backend would resolve each declared or auto-declared secret (e.g. "which env
+var name does this secret read from?") with `agw secret list`:
 
 ```bash
 agw secret list
-# NAME           env-var                  prompt
-# ----           -------                  ------
-# github-token   AW_SECRET_GITHUB_TOKEN   enabled
-# force-prompt   disabled                 enabled
-# api-key        OPENAI_API_KEY           enabled
+# 4 secrets (2 operator-declared, 2 auto-declared)
+#
+# NAME                 DESCRIPTION                                                                env-var                       prompt
+# ----                 -----------                                                                -------                       ------
+# api-key              OpenAI key for the operator's service                                      OPENAI_API_KEY                enabled
+# force-prompt         Always prompted at command time                                            disabled                      enabled
+# git-token-github     (auto) the auth token for git_credentials:github                           AW_SECRET_GIT_TOKEN_GITHUB    enabled
+# tailscale-auth-key   (auto) the Tailscale auth key for vm_template:default (and 1 more)   AW_SECRET_TAILSCALE_AUTH_KEY  enabled
 ```
 
 Columns are the active backends in `[secret_config].backends` precedence order. Cells show each
 backend's static lookup identifier (env var name, vault path, `op://` URI) or `disabled` / `enabled`
-for backends with an explicit opt-out or no static identifier (prompt). Values are never resolved.
+for backends with an explicit opt-out or no static identifier (prompt). The Description column shows
+the operator-supplied text for operator-declared secrets, or a framework-synthesized
+`(auto) <usage> for <kind>:<name>` (plus `(and N more)` when more than one source requires the
+secret) for auto-declared ones. The synthesized text reads as "what this secret is for, and who's
+asking." The summary line breaks the rows down by origin. Values are never resolved.
+
+For the full per-secret detail view, including the structured origin block, usage list (who requires
+this secret), per-backend mapping table, and a resolution preview, use `agw secret describe`:
+
+```bash
+agw secret describe tailscale-auth-key
+# Secret: tailscale-auth-key
+#   Kind: secret
+#   Description: (auto) the Tailscale auth key for vm_template:default (and 1 more)
+#   Origin: auto-declared (vm_template:default)
+#
+# Usages:
+#   - vm_template:default -- the Tailscale auth key
+#   - vm_template:heavy -- the Tailscale auth key
+#
+# Backend mappings:
+#   - env-var: AW_SECRET_TAILSCALE_AUTH_KEY
+#   - prompt: (prompt at resolution time)
+#
+# Resolution preview:
+#   would resolve via env-var
+```
+
+`describe` reports state -- it does not prompt and does not resolve the secret's value.
 
 `agw doctor`'s Secrets group leads with one row naming the active backend chain
 (`Configured backends: env-var, prompt`). Then one row per declared secret showing whether the chain
@@ -701,10 +732,12 @@ forward-only and run automatically.
 
 ## Environment Variables
 
-| Variable                         | Description                                                                               |
-| -------------------------------- | ----------------------------------------------------------------------------------------- |
-| `AW_TAILSCALE_AUTH_KEY`          | Tailscale auth key (skips prompt). Legacy `TAILSCALE_AUTH_KEY` still read; warns once.    |
-| `AW_GIT_CREDENTIALS_<CRED_NAME>` | Git credential for `<CRED_NAME>`. Legacy `GIT_CREDENTIALS_<CRED_NAME>` still read; warns. |
+Secret values are read from the operator's shell via the `env-var` backend, which follows the
+convention `AW_SECRET_<UPPER_SNAKE_CASE>` derived from the secret's name. The Tailscale auth key
+(secret `tailscale-auth-key`) reads from `AW_SECRET_TAILSCALE_AUTH_KEY`; a git credential's PAT
+(secret `git-token-<name>`) reads from `AW_SECRET_GIT_TOKEN_<NAME>`; and so on. Override the
+convention per secret via `[secrets.<name>].backend_mappings.env-var = "CUSTOM_NAME"`.
 
-Legacy env-var names continue to work with a one-time deprecation warning per process per name, and
-will be removed in a future release.
+Use `agw secret list` to see the exact env var name for each declared or auto-declared secret, and
+`agw secret describe <name>` for the full per-secret view (origin, usages, backend mappings,
+resolution preview).
