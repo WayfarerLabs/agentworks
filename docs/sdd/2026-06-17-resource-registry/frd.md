@@ -351,6 +351,17 @@ their own resources. Auto-declared resources do not trigger the warning (the ope
 them; demanding a description would be noise). Operators who deliberately leave the field blank pay
 one warning per CLI invocation.
 
+**Auto-declared resources get a synthesized `description`.** When the finalize pass auto-declares a
+resource of a kind that carries a `description` field, and the field is empty, the framework
+populates it from the first matching requirement's `usage` text and `source`:
+`"(auto) <usage> for <kind>:<name>"`, plus `" (and N more)"` when more than one distinct source
+requires the resource. This is the generic version of the pattern (initially landed in Phase 1 for
+secrets, generalized in Phase 2). It works because producers write good `usage` strings -- they know
+what the requirement will be used for -- so the synthesized description reads as "what this resource
+is for, and who's asking" without any kind-specific knowledge. Operator-set descriptions are honored
+verbatim; the polish only fires when the description is empty after the publish phase. Kinds without
+a `description` field skip the polish (no-op).
+
 ### R10: Origin and inspection via doctor, secret list, and secret describe
 
 `agw doctor`'s Secrets group surfaces:
@@ -467,11 +478,16 @@ agw resource describe <kind> <name>
   kind, name, origin (with detail per R5: file:line for operator-declared, requirement source for
   auto-declared), usage count (or first usage when short), description (truncated). Filters:
   `--kind` (CSV per the cli-conventions filter pattern), `--origin` (one of `operator`, `auto`).
+  Because R9's synthesis polish fills `description` for auto-declared resources, the column is
+  reliably populated across all kinds; operators see "what this resource is for and who's asking"
+  without the renderer needing kind-specific knowledge.
 - `agw resource describe <kind> <name>` shows the framework-level detail view: kind, name, origin
-  with full detail, all registered usages, and description. Kind-specific detail (backend mappings,
-  inheritance chain, resolved fields, ...) belongs in the kind's own `describe` command. The
-  two-positional shape is required because resource names are unique only _within_ a kind, not
-  across kinds (a `default` secret and a `default` vm_template are different resources).
+  with full detail, all registered usages, and description. **Stops at framework-uniform fields.**
+  Kind-specific detail (secret backend mappings, template inheritance chain, resolved fields, ...)
+  belongs in the kind's own `describe` command -- rendering them would require semantic knowledge of
+  the kind that the cross-kind command intentionally doesn't carry. The two-positional shape is
+  required because resource names are unique only _within_ a kind, not across kinds (a `default`
+  secret and a `default` vm_template are different resources).
 
 `agw resource` is gated to Phase 2 because the cross-kind view only earns its keep once multiple
 kinds are in the registry; with only secrets in Phase 1 it would be redundant with `agw secret list`

@@ -398,6 +398,15 @@ behavior is unchanged.
       template-inheritance behavior, not framework behavior).
 - [ ] Sweep existing template tests for any that asserted on the bespoke validation's error
       messages; update to match the framework's consistent error shape.
+- [ ] **Generalize the auto-declared `description` polish.** The Phase 1 implementation in
+      `Registry.finalize` checks `isinstance(resource, SecretDecl)`; loosen to a structural check
+      (`hasattr(resource, "description")` + empty-string test) so any kind that carries a
+      `description: str` field benefits automatically. The format
+      (`"(auto) <usage> for <kind>:<name>" + " (and N more)"`) stays the same. Template kinds in
+      this phase don't have a `description` field today, so this is a framework-level cleanup with
+      no operator-visible change in Phase 2a itself; the change earns its keep when a future kind
+      acquires a description (and avoids needing a second per-kind branch). See FRD R9 and HLA's
+      Framework metadata attachment section for the generalized contract.
 - [ ] **Tests**:
   - `cli/tests/resources/test_template_kinds.py`: each kind's `synthesize` produces the expected
     defaults; reserved-name restriction errors on non-default missing names.
@@ -463,8 +472,12 @@ Goal: add the cross-kind inspection commands.
 - [ ] `cli/agentworks/cli/commands/resource.py` (new): typer command group with `list` and
       `describe` subcommands. Two-positional `describe <kind> <name>` (FRD R12 rationale).
 - [ ] Renderers cover columns per HLA: list shows kind, name, origin, usage count, description;
-      describe shows kind, name, full origin detail, full usage list, description (no kind-specific
-      detail -- that belongs in `agw secret describe` et al.).
+      describe shows kind, name, full origin detail, full usage list, description. **Stops at
+      framework-uniform fields** -- no backend mappings, no inheritance chains, no resolved field
+      lookups. Rendering those would require kind-specific knowledge that the cross-kind command
+      intentionally doesn't carry; operators reach for `agw secret describe` etc. when they need it.
+      The `description` column reads reliably across kinds because Phase 2a generalized the
+      auto-declared description polish (see Phase 2a checkbox; FRD R9 / R12).
 - [ ] Update `cli/agentworks/completions/`.
 - [ ] **Tests**:
   - `cli/tests/test_resource_list.py`: kind filter (CSV), origin filter, header summary.
@@ -505,6 +518,11 @@ code.
   `(source, text)`; the FRD edit can either confirm or flip and update the renderer.
 - **Pre-existing `agents/manager.py:1337` `ExecTarget` reference.** Confirmed already fixed on main
   when PR #136 landed and was merged into this branch via `eb3724e`. No action.
+- **Auto-declared `description` polish is secret-specific.** `Registry.finalize`'s
+  `_polish_auto_declared_description` does `isinstance(resource, SecretDecl)`. Phase 2a generalizes
+  it to a structural check so any kind with a `description: str` field benefits automatically (FRD
+  R9, HLA Framework metadata attachment). The Phase 2a plan carries the checkbox; no Phase 1 action
+  needed.
 
 ## Sequencing notes
 

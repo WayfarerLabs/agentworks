@@ -582,6 +582,17 @@ the kind's defaults). The framework's only job in either case is attaching frame
   accumulated by the finalize pass. Each entry carries both the requirement's source `(kind, name)`
   and its usage text. Operator-declared resources get the same usage list attached as auto-declared
   ones; it's framework-collected, not operator-settable.
+- **`description`** (auto-declared only, kinds with a `description: str` field only): when the field
+  is empty after the publish phase, the finalize pass sets it from the first matching requirement:
+  `"(auto) <usage> for <kind>:<name>"` plus `" (and N more)"` when more than one distinct source
+  matches. The polish runs after `usage` attachment so it sees the complete requirement set.
+  Operator-declared descriptions are honored verbatim. Kinds without a `description` field skip the
+  polish (no-op). The framework checks structurally (`hasattr(resource, "description")` +
+  empty-string test), not by kind, so any future kind that acquires a `description` field benefits
+  automatically. This is the mechanism that makes `agw resource list`'s `description` column
+  reliably populated across kinds (FRD R9 / R12). Producers carry the responsibility of writing good
+  `usage` strings -- they're well-positioned to, because they know what the requirement will be used
+  for.
 
 If an operator wants a partial override of a default template, they don't get it through field-level
 merging on the `default` declaration. They declare a child template with `inherits = ["default"]`
@@ -597,7 +608,9 @@ the same path); the framework never sees them.
 `SecretKind.synthesize(requirements)` builds a `SecretDecl` with:
 
 - `name = requirements[0].name`
-- `description = None` (operator-set field; auto-decl leaves blank)
+- `description = ""` initially; the finalize pass's description-polish step (see Framework metadata
+  attachment) populates it from the first requirement's `(usage, source)` before the registry
+  freezes
 - `hint = None`
 - `backend_mappings = {}` (empty; the framework's default per-backend conventions (e.g.,
   `AW_SECRET_<NAME>`) apply at resolution time)
