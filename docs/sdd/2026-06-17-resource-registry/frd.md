@@ -131,6 +131,16 @@ this:
 - **All usages are retained**. The resource's accumulated usage list is what `agw secret describe`
   (R10) renders. Duplicate usage strings from different requirements are deduplicated for display.
 
+**Usage is static-only in this SDD.** The `usage` list captures only config-load-time references --
+one entry per `ResourceRequirement` emitted by a published resource. **Dynamic** uses (CLI args at
+command time like `agw vm create --template foo`, DB-level resource pointers like
+`workspaces.vm_name`, secrets actually consumed during a session run) are NOT captured. An
+always-materialized default with no operator references and no agent that ever used it ends up with
+an empty `usage` list even if every VM in the fleet was provisioned from it. Operators reach for
+`agw vm list` etc. to answer "what's actually consuming this?" Closing this gap is a future
+direction (see Non-goals); the framework's static usage list is the foundation a future "observed
+usage" layer would build on.
+
 ### R2: Resource boundaries are framework concepts, not TOML concepts
 
 A resource is the conceptual unit (e.g., a secret with its backend mappings; a template with its
@@ -226,6 +236,15 @@ remain requirement-driven and only exist when something declares or references t
 `synthesize` methods MUST tolerate `requirements=()`: kinds that have reserved auto-declare names
 build code-defined defaults (no per-requirement data needed); kinds with `auto_declare_names = None`
 never get called this way so the contract doesn't bind them.
+
+An always-materialized resource carries: `usage = ()` (no static reference asked for it at
+config-load); `origin = Origin.auto_declared(source=("framework", "always-materialize"))` so the
+breadcrumb shows where the row came from without naming a fake source; and the existing
+description-polish (R9) extends to cover this case -- when `usage` is empty and the description is
+empty, the polish sets `description = "(auto) auto-declared default <kind>"` (e.g.,
+`"(auto) auto-declared default vm_template"`). The usage-driven format from R9
+(`"(auto) <usage> for <kind>:<name> [(and N more)]"`) and this empty-usage fallback share the polish
+step; the framework dispatches on whether `usage` is empty.
 
 ### R4: Framework metadata on every resource
 
@@ -375,6 +394,11 @@ what the requirement will be used for -- so the synthesized description reads as
 is for, and who's asking" without any kind-specific knowledge. Operator-set descriptions are honored
 verbatim; the polish only fires when the description is empty after the publish phase. Kinds without
 a `description` field skip the polish (no-op).
+
+For always-materialized reserved-default rows (see R3) the polish handles the no-usage case: it sets
+`description = "(auto) auto-declared default <kind>"` (e.g.,
+`"(auto) auto-declared default vm_template"`). Honest about the lack of static incoming references
+while still giving operators a meaningful row in `agw resource list`.
 
 ### R10: Origin and inspection via doctor, secret list, and secret describe
 
@@ -526,6 +550,14 @@ kinds are in the registry; with only secrets in Phase 1 it would be redundant wi
 - **Plaintext or polymorphic forms for `tailscale_auth_key` and `git_credentials.*.token`**. Both
   fields accept secret names only. EnvEntry-style `{ secret = "..." }` polymorphism is intentionally
   not extended to these fields.
+- **Dynamic (observed) usage tracking on `usage`** (see R1). This SDD's `usage` list is
+  config-load-time only -- one entry per static `ResourceRequirement`. Dynamic uses (CLI args at
+  command time, DB pointers like `workspaces.vm_name`, secrets resolved during a session run) are
+  out of scope here but a clear future direction. A future enhancement could plumb DB-derived
+  references and CLI-time references into a separate "observed usage" surface, layered alongside the
+  static list so `agw resource describe` shows both "who declared they need this" and "who actually
+  used this." The static-usage data model is the foundation; no design change in this SDD precludes
+  the addition.
 
 ## Migration notes
 

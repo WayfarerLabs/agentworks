@@ -601,11 +601,14 @@ the kind's defaults). The framework's only job in either case is attaching frame
   and its usage text. Operator-declared resources get the same usage list attached as auto-declared
   ones; it's framework-collected, not operator-settable.
 - **`description`** (auto-declared only, kinds with a `description: str` field only): when the field
-  is empty after the publish phase, the finalize pass sets it from the first matching requirement:
-  `"(auto) <usage> for <kind>:<name>"` plus `" (and N more)"` when more than one distinct source
-  matches. The polish runs after `usage` attachment so it sees the complete requirement set.
-  Operator-declared descriptions are honored verbatim. Kinds without a `description` field skip the
-  polish (no-op). The framework checks structurally (`hasattr(resource, "description")` +
+  is empty after the publish phase, the finalize pass sets it. Two cases share the polish step:
+  **usage-driven** (auto-declared via incoming requirement) sets from the first matching requirement
+  as `"(auto) <usage> for <kind>:<name>"` plus `" (and N more)"` when more than one distinct source
+  matches; **empty-usage** (always-materialized reserved default; no incoming references) sets as
+  `"(auto) auto-declared default <kind>"` (e.g., `"(auto) auto-declared default vm_template"`). The
+  polish runs after `usage` attachment so it sees the complete requirement set (or knows it's
+  empty). Operator-declared descriptions are honored verbatim. Kinds without a `description` field
+  skip the polish (no-op). The framework checks structurally (`hasattr(resource, "description")` +
   empty-string test), not by kind, so any future kind that acquires a `description` field benefits
   automatically. This is the mechanism that makes `agw resource list`'s `description` column
   reliably populated across kinds (FRD R9 / R12). Producers carry the responsibility of writing good
@@ -654,16 +657,21 @@ defaults (the same defaults currently encoded in the resolver's "implicit defaul
 into one place). When called with `requirements` non-empty (the incoming-reference path), the first
 requirement's source is recorded as origin. When called with `requirements=()` (the
 always-materialize pre-step for `default`), origin is `auto-declared` with a synthetic source
-(`("framework", "always-materialize")`) so the breadcrumb shows where the row came from.
+(`("framework", "always-materialize")`) so the breadcrumb shows where the row came from. The
+resulting `usage = ()`. The framework's description-polish (Framework metadata attachment section)
+sets `description = "(auto) auto-declared default vm_template"` for the empty-usage case.
 
 `auto_declare_names = {"default"}` -- only the reserved name. The always-materialize pre-step in
 finalize uses this set to determine which names to guarantee; any other missing name surfaces from a
 `TemplateRequirement` and triggers an error.
 
-Same shape applies for `WorkspaceTemplateKind`, `AgentTemplateKind`, `SessionTemplateKind`. The
-existing singletons (`AdminTemplateKind`, `NamedConsoleTemplateKind`) also benefit -- Phase 2a can
-optionally retire Config's synthesize-on-omit for those two kinds since the framework now guarantees
-the same default-materialization (not required for behavior; a cleanup follow-up).
+Same shape applies for `WorkspaceTemplateKind`, `AgentTemplateKind`, `SessionTemplateKind`, plus
+`AdminTemplateKind` (plurified from singleton to named-multi-instance in Phase 2a per FRD R12) and
+`NamedConsoleTemplateKind` (still effectively single-row in Phase 2a; the kind shape just no longer
+requires it). The always-materialize rule subsumes Config's synthesize-on-omit for admin and
+named_console; Config-side cleanup to retire those paths is an optional follow-up (not required for
+behavior; the synthesize-on-omit path becomes a no-op once the framework materializes the default
+itself).
 
 ## Requirement sources
 

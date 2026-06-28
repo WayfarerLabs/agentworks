@@ -437,8 +437,12 @@ exist in the registry even when nothing references them. Sweep manager entry poi
       in the registry by calling `synthesize(requirements=())`. Kinds with
       `auto_declare_names = None` (secrets) are unaffected. The kind's `synthesize` MUST tolerate
       `requirements=()` -- template kinds build code-defined defaults so this is straightforward;
-      `SecretKind.synthesize` never gets called this way and stays requirement-driven. See FRD R3
-      and HLA's `Publish and finalize` section.
+      `SecretKind.synthesize` never gets called this way and stays requirement-driven. Resources
+      materialized this way carry `usage = ()`,
+      `origin = Origin.auto_declared(source=("framework", "always-materialize"))`, and the
+      description-polish (extended in this phase per the bullet above) gives them
+      `description = "(auto) auto-declared default <kind>"`. See FRD R3 / R9 and HLA's
+      `Publish and finalize` and Framework-metadata-attachment sections.
 - [ ] **Plurify `AdminTemplateKind`** from singleton (today) to named-multi-instance, alongside the
       four template kinds being formalized in this phase. `auto_declare_names = {"default"}` stays.
       No operator-facing change in Phase 2a: the Config parser still only accepts `[admin]`
@@ -455,8 +459,9 @@ exist in the registry even when nothing references them. Sweep manager entry poi
   - `cli/tests/resources/test_template_cycle_detection.py`: inheritance cycles caught uniformly;
     error messages match the framework's shape.
   - `cli/tests/resources/test_always_materialize.py`: every reserved auto-declare name exists in the
-    registry after `finalize` even when nothing references it (empty config publishes nothing
-    referencing `vm_template:default` -- the row still lands with origin=auto-declared); kinds with
+    registry after `finalize` even when nothing references it. The row carries origin=auto-declared
+    with synthetic source `("framework", "always-materialize")`, `usage=()`, and (for kinds with a
+    description field) the polished `description="(auto) auto-declared default <kind>"`. Kinds with
     `auto_declare_names = None` (secrets) do not get spurious rows.
   - Update `cli/tests/test_vm_templates.py` / `test_agent_templates.py` / etc. to reflect the new
     error shape.
