@@ -1318,6 +1318,10 @@ def create_session(
     if agent_name is None and not new_agent and not admin:
         chosen_agent, new_agent, admin = _prompt_mode_choice(db, vm)
         if chosen_agent is not None:
+            # Existing-agent pick: the prompt already filtered to
+            # ``vm.name``, so no vm-anchor cross-check is needed here
+            # (it would be redundant). The upfront vm/agent cross-check
+            # only fires for the --agent flag path.
             agent_name = chosen_agent
             existing_agent = db.get_agent(agent_name)
             assert existing_agent is not None  # came from list_agents
@@ -1332,10 +1336,9 @@ def create_session(
         # SecretTarget with ``is_admin_mode=True`` (wrong scope) and
         # asserts ``agent_name is not None`` inside the ephemeral-
         # create block.
-        if new_agent and agent_name is None:
-            agent_name = name
         if new_agent:
-            assert agent_name is not None
+            if agent_name is None:
+                agent_name = name
             validate_name(agent_name)
             if db.get_agent(agent_name) is not None:
                 raise AlreadyExistsError(
@@ -1644,11 +1647,12 @@ def create_session(
                     is_admin=(mode == SessionMode.ADMIN),
                     env=session_env,
                 )
-            except KeyboardInterrupt:
-                output.warn(f"Cancelling session create '{name}'... rolling back.")
-                _rollback()
-                raise
-            except Exception:
+            except (KeyboardInterrupt, Exception):
+                # Session-internal cleanup only (DB row, grant, group
+                # membership). The operator-visible warn lives on the
+                # outer handler so a failure anywhere in the function
+                # (not just here) prints one clean reason line before
+                # the rollback's delete messages start landing.
                 _rollback()
                 raise
 
@@ -1675,9 +1679,17 @@ def create_session(
 
             add_session_to_console(name, run_command=run_command, socket_path=sock)
     except KeyboardInterrupt:
+        output.warn(f"Cancelling session create '{name}'... rolling back.")
         _rollback_ephemerals()
         raise
-    except Exception:
+    except Exception as e:
+        # Print the reason BEFORE the rollback's delete-* messages so the
+        # operator sees the failure context first, not after a stream of
+        # 'Agent deleted' / 'Workspace deleted' lines. The CLI's
+        # exception handler still prints the canonical 'Error: ...' line
+        # with the typed hint at the very end -- this warn just bridges
+        # the silence between "thing X created" and the rollback output.
+        output.warn(f"Session create '{name}' failed; rolling back. Reason: {e}")
         _rollback_ephemerals()
         raise
 

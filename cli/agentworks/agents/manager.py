@@ -359,6 +359,7 @@ def delete_agent(
 
     from agentworks.ssh import SSHLogger
     ssh_logger = SSHLogger(vm.name, "agent-delete")
+    output.info(f"Deleting agent '{name}' on VM '{vm.name}'...")
     with keep_vm_active(db, config, vm):
 
         # Kill running sessions for this agent (status-aware)
