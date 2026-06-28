@@ -465,19 +465,19 @@ class Registry:
 
     def finalize(self) -> None:
         """Run the framework pass over already-published Resources. Materializes
-        reserved-default names, walks the requirement graph, dispatches miss
-        policies (synthesizing auto-declared Resources), attaches usage, detects
-        cycles, and locks the Registry. After return, the Registry is queryable
-        but no longer accepts publishes. The name covers the whole lifecycle
-        terminator -- the work isn't just validation but also the
-        auto-declaration synthesis the miss policies trigger."""
+        reserved-default names, walks the requirement graph (iteratively, since
+        synthesized resources can themselves emit requirements), dispatches miss
+        policies, attaches usage, detects cycles, and locks the Registry. After
+        return, the Registry is queryable but no longer accepts publishes."""
         # 0. Materialize reserved-default names. Kinds whose ``auto_declare_names``
         # is a non-None set guarantee those names exist in the registry after
         # finalize, regardless of whether anything referenced them. Synthesizes
         # with ``requirements=()`` so the kind builds its code-defined default.
         # Closes the gap where an unreferenced default would otherwise crash at
         # command time. Kinds with ``auto_declare_names = None`` (secrets) are
-        # untouched -- their resources remain requirement-driven.
+        # untouched -- their resources remain requirement-driven. Done before
+        # the worklist loop so the first pass walks these resources alongside
+        # the operator-published ones.
         for kind, kind_handler in KIND_REGISTRY.items():
             if kind_handler.auto_declare_names is None:
                 continue
@@ -485,47 +485,75 @@ class Registry:
                 if name in self._resources.get(kind, {}):
                     continue
                 self._resources.setdefault(kind, {})[name] = (
-                    kind_handler.synthesize(())
+                    kind_handler.synthesize(requirements=())
                 )
 
-        # 1. Collect all requirements across published resources.
-        requirements: list[ResourceRequirement] = []
-        for kind_dict in self._resources.values():
-            for resource in kind_dict.values():
-                requirements.extend(resource.required_resources())
+        # 1. Worklist loop. Walk required_resources() on every resource not yet
+        # visited; for each newly-discovered (kind, name) target not in the
+        # registry, dispatch the kind's miss policy. The miss handler may
+        # synthesize a new resource whose own required_resources() the next
+        # iteration walks. Loop until a pass adds no new resources -- a single
+        # pass would silently drop synthesized resources' unresolved edges.
+        # The accumulated requirement map is preserved across iterations so
+        # the post-loop usage-attachment pass (step 2) sees the complete graph.
+        all_reqs: dict[tuple[str, str], list[ResourceRequirement]] = {}
+        walked: set[tuple[str, str]] = set()
+        while True:
+            new_walks = self._collect_new_requirements(all_reqs, walked)
+            if not new_walks:
+                break
+            # Dispatch miss policies for any targets not yet in the registry.
+            for target, reqs in list(all_reqs.items()):
+                target_kind, target_name = target
+                if target_name in self._resources.get(target_kind, {}):
+                    continue
+                kind_handler = KIND_REGISTRY[target_kind]
+                if kind_handler.miss_policy == "auto-declare":
+                    allowed = kind_handler.auto_declare_names
+                    if allowed is not None and target_name not in allowed:
+                        raise ConfigError(...)  # reserved-name restriction
+                    self._resources.setdefault(target_kind, {})[target_name] = (
+                        kind_handler.synthesize(requirements=reqs)
+                    )
+                else:  # miss_policy == "error"
+                    raise ConfigError(...)  # unknown name under error policy
 
-        # 2. Group by (kind, name); preserve first-encountered ordering for origin
-        # recording.
-        by_target: dict[tuple[str, str], list[ResourceRequirement]] = {}
-        for req in requirements:
-            by_target.setdefault((req.kind, req.name), []).append(req)
+        # 2. Usage attachment. Every resource with incoming requirements gets
+        # its usage tuple set; the description-polish step (see Framework
+        # metadata attachment) also runs here so auto-declared resources get
+        # their synthesized descriptions before freeze.
+        for (kind, name), reqs in all_reqs.items():
+            existing = self._resources[kind][name]
+            polished = existing.with_usage(_usage_list(reqs))
+            polished = _polish_auto_declared_description(polished, kind)
+            self._resources[kind][name] = polished
 
-        # 3. For each (kind, name): existing-in-registry? auto-decl? error?
-        for (kind, name), reqs in by_target.items():
-            kind_handler = KIND_REGISTRY[kind]
-            existing = self._resources.get(kind, {}).get(name)
-            if existing is not None:
-                # Already-published (Origin set at publish, or auto-declared in
-                # step 0 above for reserved defaults). Attach usage.
-                self._resources[kind][name] = existing.with_usage(_usage_list(reqs))
-            else:
-                # Missing: dispatch miss policy.
-                match kind_handler.miss_policy:
-                    case "auto-declare":
-                        if (kind_handler.auto_declare_names is None
-                                or name in kind_handler.auto_declare_names):
-                            # synthesize attaches Origin.auto_declared(source=...).
-                            self._resources.setdefault(kind, {})[name] = (
-                                kind_handler.synthesize(reqs)
-                            )
-                        else:
-                            raise ConfigError(...)  # reserved-name restriction violated
-                    case "error":
-                        raise ConfigError(...)
-
-        # 4. Cycle detection across the now-complete requirement graph.
-        _detect_cycles(by_target)
+        # 3. Cycle detection across the now-complete requirement graph.
+        _detect_cycles(self._resources)
         self._frozen = True
+
+    def _collect_new_requirements(
+        self,
+        all_reqs: dict[tuple[str, str], list[ResourceRequirement]],
+        walked: set[tuple[str, str]],
+    ) -> bool:
+        """Walk required_resources() on every resource not yet in ``walked``,
+        appending discovered requirements into ``all_reqs`` (preserving first-
+        encountered order). Returns True if any resource was walked this pass.
+        """
+        any_walked = False
+        snapshot = [
+            ((kind, name), resource)
+            for kind, kind_dict in self._resources.items()
+            for name, resource in kind_dict.items()
+            if (kind, name) not in walked
+        ]
+        for key, resource in snapshot:
+            walked.add(key)
+            any_walked = True
+            for req in resource.required_resources():
+                all_reqs.setdefault((req.kind, req.name), []).append(req)
+        return any_walked
 
 # Config-side: publish operator-declared Resources. Imports Origin to build the
 # operator-declared variant; this is the explicit layer handoff.
@@ -601,19 +629,16 @@ the kind's defaults). The framework's only job in either case is attaching frame
   and its usage text. Operator-declared resources get the same usage list attached as auto-declared
   ones; it's framework-collected, not operator-settable.
 - **`description`** (auto-declared only, kinds with a `description: str` field only): when the field
-  is empty after the publish phase, the finalize pass sets it. Two cases share the polish step:
-  **usage-driven** (auto-declared via incoming requirement) sets from the first matching requirement
-  as `"(auto) <usage> for <kind>:<name>"` plus `" (and N more)"` when more than one distinct source
-  matches; **empty-usage** (always-materialized reserved default; no incoming references) sets as
-  `"(auto) auto-declared default <kind>"` (e.g., `"(auto) auto-declared default vm_template"`). The
-  polish runs after `usage` attachment so it sees the complete requirement set (or knows it's
-  empty). Operator-declared descriptions are honored verbatim. Kinds without a `description` field
-  skip the polish (no-op). The framework checks structurally (`hasattr(resource, "description")` +
-  empty-string test), not by kind, so any future kind that acquires a `description` field benefits
-  automatically. This is the mechanism that makes `agw resource list`'s `description` column
-  reliably populated across kinds (FRD R9 / R12). Producers carry the responsibility of writing good
-  `usage` strings -- they're well-positioned to, because they know what the requirement will be used
-  for.
+  is falsy after the publish phase, the finalize pass sets it. Format details (usage-driven vs
+  empty-usage cases) are pinned in FRD R9; the HLA's responsibility is the dispatch shape: empty
+  `usage` -> empty-usage fallback, non-empty `usage` -> usage-driven format. The polish runs after
+  `usage` attachment so it sees the complete requirement set (or knows it's empty).
+  Operator-declared descriptions are honored verbatim. Kinds without a `description` field skip the
+  polish (no-op). The framework checks structurally (`hasattr(resource, "description")` + falsy
+  test), not by kind, so any future kind that acquires a `description` field benefits automatically.
+  This is the mechanism that makes `agw resource list`'s `description` column reliably populated
+  across kinds (FRD R9 / R12). Producers carry the responsibility of writing good `usage` strings --
+  they're well-positioned to, because they know what the requirement will be used for.
 
 If an operator wants a partial override of a default template, they don't get it through field-level
 merging on the `default` declaration. They declare a child template with `inherits = ["default"]`
@@ -630,8 +655,8 @@ the same path); the framework never sees them.
 
 - `name = requirements[0].name`
 - `description = ""` initially; the finalize pass's description-polish step (see Framework metadata
-  attachment) populates it from the first requirement's `(usage, source)` before the registry
-  freezes
+  attachment + FRD R9) populates it from the first requirement's `(usage, source)` before the
+  registry freezes
 - `hint = None`
 - `backend_mappings = {}` (empty; the framework's default per-backend conventions (e.g.,
   `AW_SECRET_<NAME>`) apply at resolution time)
@@ -656,22 +681,22 @@ pass then populates `usage` from the matching requirements using the same `Usage
 defaults (the same defaults currently encoded in the resolver's "implicit default" fallback, hoisted
 into one place). When called with `requirements` non-empty (the incoming-reference path), the first
 requirement's source is recorded as origin. When called with `requirements=()` (the
-always-materialize pre-step for `default`), origin is `auto-declared` with a synthetic source
-(`("framework", "always-materialize")`) so the breadcrumb shows where the row came from. The
-resulting `usage = ()`. The framework's description-polish (Framework metadata attachment section)
-sets `description = "(auto) auto-declared default vm_template"` for the empty-usage case.
+always-materialize pre-step for `default`), origin is `auto-declared` with the reserved synthetic
+source `("framework", "always-materialize")` so the breadcrumb shows where the row came from. The
+resulting `usage = ()`. The framework's description-polish (Framework metadata attachment + FRD R9)
+sets the empty-usage description on this row.
 
 `auto_declare_names = {"default"}` -- only the reserved name. The always-materialize pre-step in
 finalize uses this set to determine which names to guarantee; any other missing name surfaces from a
 `TemplateRequirement` and triggers an error.
 
 Same shape applies for `WorkspaceTemplateKind`, `AgentTemplateKind`, `SessionTemplateKind`, plus
-`AdminTemplateKind` (plurified from singleton to named-multi-instance in Phase 2a per FRD R12) and
-`NamedConsoleTemplateKind` (still effectively single-row in Phase 2a; the kind shape just no longer
-requires it). The always-materialize rule subsumes Config's synthesize-on-omit for admin and
-named_console; Config-side cleanup to retire those paths is an optional follow-up (not required for
-behavior; the synthesize-on-omit path becomes a no-op once the framework materializes the default
-itself).
+`AdminTemplateKind` (plurified from singleton to named-multi-instance in Phase 2a per FRD R12).
+`NamedConsoleTemplateKind` stays singleton in Phase 2a; plurification waits for a future SDD if and
+when there's an operator need. The always-materialize rule subsumes Config's synthesize-on-omit for
+admin and named_console; Config-side cleanup to retire those paths is an optional follow-up (not
+required for behavior; the synthesize-on-omit path becomes a no-op once the framework materializes
+the default itself).
 
 ## Requirement sources
 

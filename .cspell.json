@@ -86,6 +86,7 @@
     "pipx",
     "pkgrun",
     "pkgs",
+    "plurification",
     "plurified",
     "Plurify",
     "pryce",
@@ -146,6 +147,8 @@
     "vmbr",
     "vmid",
     "wcid",
+    "worklist",
+    "Worklist",
     "workstream",
     "workstreams",
     "worktree"

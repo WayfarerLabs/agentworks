@@ -410,19 +410,36 @@ exist in the registry even when nothing references them. Sweep manager entry poi
       no operator-visible change in Phase 2a itself; the change earns its keep when a future kind
       acquires a description (and avoids needing a second per-kind branch). See FRD R9 and HLA's
       Framework metadata attachment section for the generalized contract.
-- [ ] **Sweep command entry points to hoist `build_registry(config)`.** Phase 1c/1d hoisted
-      `build_registry` to the top of `create_vm`, `reinit_vm`, and `add_git_credential` so the
-      framework's per-kind miss-policies (e.g. `GitCredentialKind`'s `error` policy) fire before any
-      business logic runs and the operator gets a clean typo error instead of a downstream
-      `NotFoundError`. Other manager entry points -- notably `create_session` (which post-merge with
-      PR #146 owns ephemeral workspace/agent creation and the secret eager-resolve), plus
-      `create_workspace`, `create_agent`, `reinit_agent`, and any new commands -- haven't been
-      swept. With Phase 2a introducing `TemplateRequirement` and the kind handlers' default-only
-      `auto_declare_names`, a typo on `inherits = ["defualt"]` should surface as a framework error
-      here too. Audit each manager-entry function; hoist `build_registry(config)` to the top of any
-      that touches resources whose miss-policy could throw. Trivial cost (one call that's already
-      memoization-friendly inside `bootstrap.py`); high payoff in error-shape consistency across the
-      surface.
+- [ ] **Sweep command entry points so `build_registry(config)` runs before any business logic.**
+      Phase 1c/1d hoisted `build_registry` to the top of `create_vm`, `reinit_vm`, and
+      `add_git_credential` so the framework's per-kind miss-policies (e.g. `GitCredentialKind`'s
+      `error` policy) fire before any other validation and the operator gets a clean typo error
+      instead of a downstream `NotFoundError`. Other manager entry points -- `create_session` (which
+      post-PR-#146 owns ephemeral workspace/agent creation and the secret eager-resolve),
+      `create_workspace`, `create_agent`, `reinit_agent`, and any new commands -- partially hoist:
+      `create_agent` and `reinit_agent` call `build_registry` but only after `resolve_template`,
+      `_require_vm`, etc. With Phase 2a introducing `TemplateRequirement` and the kind handlers'
+      default-only `auto_declare_names`, a typo on `inherits = ["defualt"]` should surface as a
+      framework error before those calls, not after. Audit every manager-entry function and move
+      `build_registry(config)` above the first non-cheap call (template resolution, DB lookups, VM
+      requirements) so framework miss-policies are the first thing that can fail. Scope is
+      intentionally `*/manager.py` only -- CLI command bodies delegate to managers per the
+      service-layer-is-the-authority rule and don't need their own hoist. Trivial cost (one call
+      that's already memoization-friendly inside `bootstrap.py`); high payoff in error-shape
+      consistency across the surface.
+- [ ] **Update every kind's `synthesize` to tolerate `requirements=()`.** Today's
+      `_SecretKind.synthesize`, `_AdminTemplateKind.synthesize`, and
+      `_NamedConsoleTemplateKind.synthesize` all index into `requirements[0]` and would crash on
+      empty input. Under the strengthened contract (FRD R3, "the `synthesize(requirements=())`
+      contract applies to every kind"), every kind's synthesize must have defined behavior in this
+      case: kinds with `auto_declare_names` non-None set produce a code-defined default; kinds with
+      `auto_declare_names = None` raise a typed error naming the kind. Concretely in this phase:
+      update `_AdminTemplateKind` and `_NamedConsoleTemplateKind` to build code-defined defaults
+      when called empty
+      (`origin = Origin.auto_declared(source=("framework", "always-materialize"))`); add the same
+      behavior to the four new template kinds being introduced; update `_SecretKind` to raise on
+      empty (defensive even though the framework never calls it that way today). Tests in
+      `cli/tests/resources/test_kind_synthesize_empty.py` pin both shapes.
 - [ ] **Always-materialize reserved-default names in `Registry.finalize`.** Today's finalize
       auto-declares only when something emits an incoming `ResourceRequirement` for a missing name.
       That works for `secret` (which has `auto_declare_names = None` and is correctly
@@ -567,8 +584,6 @@ code.
   dedupe is by `(source, text)` (current implementation) or by `text` alone. Resolve in the FRD when
   Phase 2c's `agw resource describe` reuses the same `usage` rendering. The current read is
   `(source, text)`; the FRD edit can either confirm or flip and update the renderer.
-- **Pre-existing `agents/manager.py:1337` `ExecTarget` reference.** Confirmed already fixed on main
-  when PR #136 landed and was merged into this branch via `eb3724e`. No action.
 - **Auto-declared `description` polish is secret-specific.** `Registry.finalize`'s
   `_polish_auto_declared_description` does `isinstance(resource, SecretDecl)`. Phase 2a generalizes
   it to a structural check so any kind with a `description: str` field benefits automatically (FRD

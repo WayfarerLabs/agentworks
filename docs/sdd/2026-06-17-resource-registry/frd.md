@@ -88,9 +88,13 @@ reconciliation, but that move is deliberately not part of this design.
   `operator-declared` (from operator config; carries file path and line number for traceability),
   `code-declared` (from a code publisher like the catalog publisher introduced in Phase 2b; carries
   a code-source identifier such as `"agentworks.catalog"`), and `auto-declared` (synthesized to
-  satisfy a requirement; carries the first matching requirement's source `(kind, name)`). Set once
-  when the resource is added to the registry; never mutated afterwards. Surfaced in `agw doctor`,
-  `agw secret list`, and `agw secret describe`.
+  satisfy a requirement; carries the first matching requirement's source `(kind, name)`, OR the
+  reserved sentinel `("framework", "always-materialize")` for reserved-default rows that the
+  framework guaranteed at finalize without any incoming reference -- see R3). The string
+  `"framework"` is reserved at the kind-identifier position of an Origin source tuple and must not
+  be used as a real kind name in `KIND_REGISTRY`. Origin is set once when the resource is added to
+  the registry; never mutated afterwards. Surfaced in `agw doctor`, `agw secret list`, and
+  `agw secret describe`.
 
 ## Requirements
 
@@ -135,11 +139,11 @@ this:
 one entry per `ResourceRequirement` emitted by a published resource. **Dynamic** uses (CLI args at
 command time like `agw vm create --template foo`, DB-level resource pointers like
 `workspaces.vm_name`, secrets actually consumed during a session run) are NOT captured. An
-always-materialized default with no operator references and no agent that ever used it ends up with
-an empty `usage` list even if every VM in the fleet was provisioned from it. Operators reach for
-`agw vm list` etc. to answer "what's actually consuming this?" Closing this gap is a future
-direction (see Non-goals); the framework's static usage list is the foundation a future "observed
-usage" layer would build on.
+always-materialized default with no operator references ends up with an empty `usage` list even if
+`agw vm create my-vm` (no `--template`, picking up `default` from the CLI) is the only way the
+operator ever provisions VMs. Operators reach for `agw vm list` etc. to answer "what's actually
+consuming this?" Closing this gap is a future direction (see Non-goals); the framework's static
+usage list is the foundation a future "observed usage" layer would build on.
 
 ### R2: Resource boundaries are framework concepts, not TOML concepts
 
@@ -231,11 +235,25 @@ if no resource exists at `(kind, name)`, dispatch `synthesize(requirements=())` 
 This closes the gap where a config with no `[vm_templates.*]` blocks (and no incoming references
 during config-load) would leave `vm_template:default` unmaterialized, then crash at command time
 when `agw vm create my-vm` (no `--template` flag, falling back to `default`) tries to look it up.
-Kinds with `auto_declare_names = None` (e.g., the secret kind) are unaffected -- their resources
-remain requirement-driven and only exist when something declares or references them. Producers'
-`synthesize` methods MUST tolerate `requirements=()`: kinds that have reserved auto-declare names
-build code-defined defaults (no per-requirement data needed); kinds with `auto_declare_names = None`
-never get called this way so the contract doesn't bind them.
+Kinds with `auto_declare_names = None` (e.g., the secret kind) are unaffected by the
+always-materialize pre-step -- their resources remain requirement-driven and only exist when
+something declares or references them.
+
+**The `synthesize(requirements=())` contract applies to every kind.** Defensive uniformity: the
+framework calls synthesize with empty requirements only for kinds whose `auto_declare_names` is a
+non-None set, but a kind's `auto_declare_names` declaration may change over the SDD's lifetime
+(e.g., a future need to materialize a secret kind's default), and the contract should hold so those
+changes are safe. Two acceptable handlings:
+
+- Kinds with `auto_declare_names` non-None set: build a code-defined default (no per-requirement
+  data needed). Template kinds and the singleton-shaped kinds (admin, named_console) do this.
+- Kinds with `auto_declare_names = None`: raise a typed error (e.g., `ValueError` or a small
+  framework-defined `NoUnreferencedDefaultError`) that names the kind. Today's `SecretKind` falls
+  here. The framework never calls this path under current config, but the kind's `synthesize` must
+  still raise rather than crash on a missing index access.
+
+The "no `requirements`" case is internal-framework-only -- operator-typed code never invokes
+synthesize directly. Both handlings keep the framework's behavior defined.
 
 An always-materialized resource carries: `usage = ()` (no static reference asked for it at
 config-load); `origin = Origin.auto_declared(source=("framework", "always-materialize"))` so the
@@ -520,12 +538,14 @@ agw resource describe <kind> <name>
   reliably populated across all kinds; operators see "what this resource is for and who's asking"
   without the renderer needing kind-specific knowledge.
 - `agw resource describe <kind> <name>` shows the framework-level detail view: kind, name, origin
-  with full detail, all registered usages, and description. **Stops at framework-uniform fields.**
-  Kind-specific detail (secret backend mappings, template inheritance chain, resolved fields, ...)
-  belongs in the kind's own `describe` command -- rendering them would require semantic knowledge of
-  the kind that the cross-kind command intentionally doesn't carry. The two-positional shape is
-  required because resource names are unique only _within_ a kind, not across kinds (a `default`
-  secret and a `default` vm_template are different resources).
+  with full detail, all registered usages, and description. **Stops at framework-uniform fields** --
+  the set the framework knows how to render without semantic knowledge of the kind: name, kind,
+  origin, usage, and description (the operator-set or polish-synthesized text per R9). Kind-specific
+  detail (secret backend mappings, template inheritance chain, resolved fields, ...) belongs in the
+  kind's own `describe` command -- rendering them would require semantic knowledge of the kind that
+  the cross-kind command intentionally doesn't carry. The two-positional shape is required because
+  resource names are unique only _within_ a kind, not across kinds (a `default` secret and a
+  `default` vm_template are different resources).
 
 `agw resource` is gated to Phase 2 because the cross-kind view only earns its keep once multiple
 kinds are in the registry; with only secrets in Phase 1 it would be redundant with `agw secret list`
