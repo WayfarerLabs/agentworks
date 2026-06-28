@@ -1098,16 +1098,11 @@ def create_session(
         agent_name = None
         new_agent = False
 
-    # ===== Prompts (when interactive and operator left choices open) =======
+    # ===== Workspace prompt (mode prompt lives later, after VM is known) ===
 
     if not workspace_name and not new_workspace:
         # No workspace specified; pick from existing.
         workspace_name = _prompt_existing_workspace(db)
-    if agent_name is None and not new_agent and not admin and not workspace:
-        # Mode unspecified AND we're attaching to a fresh workspace (no
-        # existing-ws-derived agent context yet); see the post-VM mode
-        # prompt below if we end up needing one against the resolved VM.
-        pass  # handled below once we know the VM
 
     # ===== Pure validation (no SSH, no mutations) ===========================
 
@@ -1204,11 +1199,17 @@ def create_session(
     # ===== Mode prompt (admin vs existing agent) when none specified ========
     #
     # Fires only when the operator didn't pass --admin / --agent / --new-agent
-    # and isn't creating an ephemeral agent. The set of options is "admin"
-    # plus the existing agents on this VM. If the VM has no agents, the
-    # session quietly defaults to admin mode (no prompt).
+    # and isn't creating an ephemeral agent. Notably ``admin=True`` is honored
+    # explicitly: the canonicalize block above sets ``agent_name = None`` and
+    # ``new_agent = False`` for admin mode, which looks identical here to
+    # "operator didn't specify anything", so the ``not admin`` clause is the
+    # tripwire that distinguishes the two.
+    #
+    # The set of options is "admin" plus the existing agents on this VM. If
+    # the VM has no agents, the session quietly defaults to admin mode
+    # (no prompt).
 
-    if agent_name is None and not new_agent:
+    if agent_name is None and not new_agent and not admin:
         vm_agents = db.list_agents(vm_name=vm.name)
         if vm_agents:
             agent_name = _prompt_session_mode(vm_agents)

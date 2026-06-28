@@ -628,6 +628,84 @@ def test_validation_failure_does_not_trigger_rollback(
 # ---------------------------------------------------------------------------
 
 
+def test_admin_non_interactive_on_vm_with_agents_does_not_prompt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Explicit ``admin=True`` must bypass the mode prompt even when the
+    target VM has agents that would otherwise be offered as options.
+    Regression: an earlier shape erased ``admin`` during canonicalization,
+    and the mode-prompt gate couldn't distinguish "operator chose admin"
+    from "operator didn't say", causing a spurious ValidationError in
+    non-interactive mode."""
+    from agentworks.sessions import manager as session_manager
+    from agentworks.sessions.manager import create_session
+
+    # vm1 with ws1 AND an existing agent on it.
+    db = _seed_one_vm(tmp_path)
+    db.insert_agent("agt1", "vm1", "aw-agt1")
+    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
+
+    # Stub template resolution so the SimpleNamespace doesn't need
+    # session_templates; the call we want to land at is _ensure_vm_running.
+    monkeypatch.setattr(session_manager, "_resolve_template", lambda *a, **k: None)
+
+    called: list[str] = []
+
+    def _spy(*args: object, **kwargs: object) -> None:
+        called.append("ensure_vm_up")
+        raise RuntimeError("stop after mode-prompt gate")
+
+    monkeypatch.setattr("agentworks.workspaces.manager._ensure_vm_running", _spy)
+
+    # If admin is honored, we reach _ensure_vm_running. If admin is
+    # erased and the prompt fires, the autouse non-interactive fixture
+    # makes it raise ValidationError first.
+    with pytest.raises(RuntimeError, match="stop after mode-prompt gate"):
+        create_session(
+            db,
+            config,  # type: ignore[arg-type]
+            name="s1",
+            workspace="ws1",
+            admin=True,
+        )
+    assert called == ["ensure_vm_up"]
+    db.close()
+
+
+def test_no_agents_on_vm_defaults_to_admin_without_prompt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When no mode flag is given and the target VM has zero agents, the
+    session quietly defaults to admin mode (no prompt). Even in
+    non-interactive mode this must succeed."""
+    from agentworks.sessions import manager as session_manager
+    from agentworks.sessions.manager import create_session
+
+    db = _seed_one_vm(tmp_path)  # vm1 + ws1, no agents
+    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
+
+    monkeypatch.setattr(session_manager, "_resolve_template", lambda *a, **k: None)
+
+    called: list[str] = []
+
+    def _spy(*args: object, **kwargs: object) -> None:
+        called.append("ensure_vm_up")
+        raise RuntimeError("stop after mode-prompt gate")
+
+    monkeypatch.setattr("agentworks.workspaces.manager._ensure_vm_running", _spy)
+
+    with pytest.raises(RuntimeError, match="stop after mode-prompt gate"):
+        create_session(
+            db,
+            config,  # type: ignore[arg-type]
+            name="s1",
+            workspace="ws1",
+            # No --admin, no --agent, no --new-agent. VM has no agents.
+        )
+    assert called == ["ensure_vm_up"]
+    db.close()
+
+
 def test_no_workspace_specified_raises_in_non_interactive(tmp_path: Path) -> None:
     """When neither --workspace nor --new-workspace is specified and
     there's more than one workspace on disk, the service has to prompt

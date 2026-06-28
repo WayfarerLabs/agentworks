@@ -29,7 +29,18 @@ def session_create(
     workspace_template: Annotated[
         str | None, typer.Option("--workspace-template", help="Template for new workspace")
     ] = None,
-    vm: Annotated[str | None, typer.Option("--vm", help="VM for new workspace")] = None,
+    vm: Annotated[
+        str | None,
+        typer.Option(
+            "--vm",
+            help=(
+                "VM anchor. Required when nothing else pins the VM "
+                "(--new-workspace + --admin or --new-workspace + --new-agent); "
+                "otherwise optional but cross-checked against the "
+                "workspace's / agent's VM."
+            ),
+        ),
+    ] = None,
     new_agent: Annotated[bool, typer.Option("--new-agent", help="Create a new agent for this session")] = False,
     agent_name: Annotated[str | None, typer.Option("--agent-name", help="Name for new agent")] = None,
     agent_template: Annotated[
