@@ -52,9 +52,9 @@ def session_create(
         raise typer.BadParameter("--agent and --new-agent are mutually exclusive")
     if workspace and new_workspace:
         raise typer.BadParameter("--workspace and --new-workspace are mutually exclusive")
-    if not new_workspace and (workspace_name or workspace_template or vm):
+    if not new_workspace and (workspace_name or workspace_template):
         raise typer.BadParameter(
-            "--workspace-name, --workspace-template, and --vm require --new-workspace"
+            "--workspace-name and --workspace-template require --new-workspace"
         )
     if not new_agent and (agent_name or agent_template):
         raise typer.BadParameter("--agent-name and --agent-template require --new-agent")
@@ -99,6 +99,10 @@ def session_create(
     else:
         ws = prompt_workspace(db, workspace)
         resolved_workspace_name = ws.name
+        # ``--vm`` is allowed alongside ``--workspace`` as a redundant
+        # anchor; the service layer cross-checks that it matches the
+        # workspace's VM and surfaces a clear error if it doesn't.
+        resolved_vm_name = vm
         if not admin and agent is None and not new_agent:
             resolved_agent = _prompt_session_mode(db, ws)
 
