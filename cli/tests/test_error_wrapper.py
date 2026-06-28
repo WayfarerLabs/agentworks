@@ -245,6 +245,7 @@ def test_create_session_rolls_back_on_keyboard_interrupt(
             workspace="ws1",
             template_name=None,
             agent_name=None,
+            admin=True,
         )
 
     # Rollback ran: the session row that was inserted before create_tmux_session
@@ -416,6 +417,7 @@ def test_create_session_rollback_failure_does_not_mask_keyboard_interrupt(
             workspace="ws1",
             template_name=None,
             agent_name=None,
+            admin=True,
         )
 
     # The poisoned delete_session was called (confirming we did exercise

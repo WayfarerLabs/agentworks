@@ -126,6 +126,7 @@ def test_session_create_eager_resolve_fires_before_db_insert(
             workspace="ws1",
             template_name=None,
             agent_name=None,
+            admin=True,
         )
 
     # State must be untouched.
@@ -180,6 +181,7 @@ def test_session_create_calls_resolve_with_session_target(
             workspace="ws1",
             template_name=None,
             agent_name=None,
+            admin=True,
         )
 
     assert len(calls) == 1, f"expected exactly one eager-resolve call, got {len(calls)}"

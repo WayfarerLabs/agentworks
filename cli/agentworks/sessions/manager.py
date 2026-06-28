@@ -969,28 +969,6 @@ def _prompt_existing_workspace(db: Database) -> str:
     return workspaces[idx].name
 
 
-def _prompt_session_mode(vm_agents: list[AgentRow]) -> str | None:
-    """Pick "admin" or one of the existing agents on the resolved VM.
-
-    Caller is responsible for short-circuiting when ``vm_agents`` is
-    empty (the VM has no agents → admin mode quietly). Returns the
-    chosen agent name, or ``None`` for admin mode.
-    """
-    if not output.is_interactive():
-        raise ValidationError(
-            "--admin, --agent, or --new-agent is required in non-interactive mode",
-            entity_kind="session",
-        )
-    options = ["admin"]
-    for a in vm_agents:
-        label = f"agent: {a.name}"
-        if a.template:
-            label += f" [{a.template}]"
-        options.append(label)
-    idx = output.choose("Run session as:", options)
-    return None if idx == 0 else vm_agents[idx - 1].name
-
-
 def _prompt_vm(db: Database) -> VMRow:
     """Pick a VM when nothing else pins it.
 
@@ -1115,6 +1093,18 @@ def create_session(
             entity_kind="session",
             entity_name=name,
         )
+    # Mode is strictly required -- admin and agent mode are materially
+    # different (different Linux user, env, security boundary), and the
+    # other auto-resolution paths in this function (workspace single-
+    # select, VM single-select) don't apply here because admin-mode is
+    # only ever a valid choice if the operator explicitly asks for it.
+    # Departure from the workspace/VM prompt pattern is intentional.
+    if not admin and not new_agent and not agent:
+        raise ValidationError(
+            "specify --admin, --agent, or --new-agent",
+            entity_kind="session",
+            entity_name=name,
+        )
 
     # ===== Canonicalize CLI-flag shape into internal form ===================
     #
@@ -1236,27 +1226,6 @@ def create_session(
         # mode prompts.
         vm = _prompt_vm(db)
         target_vm_name = vm.name
-
-    # ===== Mode prompt (admin vs existing agent) when none specified ========
-    #
-    # Fires only when the operator didn't pass --admin / --agent / --new-agent
-    # and isn't creating an ephemeral agent. Notably ``admin=True`` is honored
-    # explicitly: the canonicalize block above sets ``agent_name = None`` and
-    # ``new_agent = False`` for admin mode, which looks identical here to
-    # "operator didn't specify anything", so the ``not admin`` clause is the
-    # tripwire that distinguishes the two.
-    #
-    # The set of options is "admin" plus the existing agents on this VM. If
-    # the VM has no agents, the session quietly defaults to admin mode
-    # (no prompt).
-
-    if agent_name is None and not new_agent and not admin:
-        vm_agents = db.list_agents(vm_name=vm.name)
-        if vm_agents:
-            agent_name = _prompt_session_mode(vm_agents)
-        if agent_name is not None:
-            existing_agent = db.get_agent(agent_name)
-            assert existing_agent is not None  # came from list_agents
 
     # ===== Template resolution (no SSH, no mutations) =======================
 

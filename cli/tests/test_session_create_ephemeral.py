@@ -129,6 +129,7 @@ def test_explicit_vm_disagreeing_with_workspace_fails_upfront(tmp_path: Path) ->
             name="s1",
             workspace="ws-A",
             vm_name="vm-B",
+            admin=True,  # mode is now required; admin doesn't affect VM check
         )
 
     assert db.get_session("s1") is None
@@ -446,6 +447,7 @@ def test_ephemeral_workspace_name_collision_raises(tmp_path: Path) -> None:
             new_workspace=True,
             workspace_name="ws1",  # collides
             vm_name="vm1",
+            admin=True,  # mode is required
         )
     db.close()
 
@@ -737,37 +739,25 @@ def test_admin_non_interactive_on_vm_with_agents_does_not_prompt(
     db.close()
 
 
-def test_no_agents_on_vm_defaults_to_admin_without_prompt(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """When no mode flag is given and the target VM has zero agents, the
-    session quietly defaults to admin mode (no prompt). Even in
-    non-interactive mode this must succeed."""
-    from agentworks.sessions import manager as session_manager
+def test_mode_required_no_flag_raises(tmp_path: Path) -> None:
+    """admin and agent mode are materially different (different Linux
+    user, env, security boundary). Mode is strictly required; the
+    service does not prompt for it and does not default. Even with a
+    fully specified workspace and a VM that happens to have no agents,
+    omitting the mode flag raises."""
     from agentworks.sessions.manager import create_session
 
     db = _seed_one_vm(tmp_path)  # vm1 + ws1, no agents
     config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
 
-    monkeypatch.setattr(session_manager, "_resolve_template", lambda *a, **k: None)
-
-    called: list[str] = []
-
-    def _spy(*args: object, **kwargs: object) -> None:
-        called.append("ensure_vm_up")
-        raise RuntimeError("stop after mode-prompt gate")
-
-    monkeypatch.setattr("agentworks.workspaces.manager._ensure_vm_running", _spy)
-
-    with pytest.raises(RuntimeError, match="stop after mode-prompt gate"):
+    with pytest.raises(ValidationError, match="specify --admin, --agent, or --new-agent"):
         create_session(
             db,
             config,  # type: ignore[arg-type]
             name="s1",
             workspace="ws1",
-            # No --admin, no --agent, no --new-agent. VM has no agents.
+            # No --admin, no --agent, no --new-agent.
         )
-    assert called == ["ensure_vm_up"]
     db.close()
 
 
@@ -786,6 +776,7 @@ def test_no_workspace_specified_raises_in_non_interactive(tmp_path: Path) -> Non
             db,
             config,  # type: ignore[arg-type]
             name="s1",
+            admin=True,  # mode is required; workspace prompt is what's under test
         )
     db.close()
 
