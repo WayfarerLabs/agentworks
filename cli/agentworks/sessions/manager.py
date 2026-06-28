@@ -1023,11 +1023,8 @@ def _prompt_mode_choice(
         label = f"agent: {a.name}"
         if vm is None:
             label += f"  (vm: {a.vm_name})"
-        # Suppress the [default] label -- it's the no-special-template
-        # case and the operator already assumes it. Only show the
-        # template suffix when it carries real signal.
-        if a.template and a.template != "default":
-            label += f" [{a.template}]"
+        if a.template:
+            label += f" [template: {a.template}]"
         options.append(label)
     options.append("[Create new agent]")
     idx = output.choose("Run session as:", options)
