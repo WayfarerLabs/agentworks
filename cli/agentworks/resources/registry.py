@@ -194,6 +194,14 @@ class Registry:
         ``auto_declare_names = None`` are skipped -- their resources
         stay requirement-driven.
 
+        Origin convention: the kind owns origin assignment for the
+        empty-requirements path. By contract (FRD R3), kinds with
+        ``auto_declare_names`` non-None synthesize with
+        ``Origin.auto_declared(source=ALWAYS_MATERIALIZE_SOURCE)``
+        themselves. The Registry does NOT stamp origin here, distinct
+        from ``add``'s stamp-by-the-registry pattern -- the seeded row
+        already carries its origin when it reaches this method.
+
         Called at the start of ``finalize`` before the worklist loop so
         the seeded Resources participate in the requirement walk
         alongside operator-published ones (FRD R3, HLA Publish-and-
@@ -355,8 +363,8 @@ def _polish_auto_declared_description(resource: Any, kind: str) -> Any:
         description = f"(auto) auto-declared default {kind}"
     else:
         first = usage[0]
-        if not (isinstance(first.source, tuple) and len(first.source) == 2):
-            return resource
+        # UsageEntry.source is typed tuple[str, str]; the framework
+        # guarantees the shape at finalize time. No runtime guard.
         distinct_other = {u.source for u in usage} - {first.source}
         suffix = f" (and {len(distinct_other)} more)" if distinct_other else ""
         description = (

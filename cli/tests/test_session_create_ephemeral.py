@@ -37,17 +37,14 @@ from agentworks import output
 from agentworks.db import Database
 from agentworks.errors import ValidationError
 
+from .conftest import stub_build_registry
+
 
 @pytest.fixture(autouse=True)
 def _stub_build_registry(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Tests in this module use ``SimpleNamespace`` configs that don't
-    carry ``publish_to``. Phase 2a's manager-entry hoist calls
-    ``build_registry(config)`` at the top of ``create_session`` before
-    any flag validation; stub it to a no-op so the mock-config style
-    keeps working. Real ``Config`` flows still exercise the hoist's
-    framework-error guarantee via tests/resources/.
-    """
-    monkeypatch.setattr("agentworks.bootstrap.build_registry", lambda config: None)
+    """SimpleNamespace configs don't carry publish_to; Phase 2a's
+    manager-entry hoist is no-op'd via the shared helper."""
+    stub_build_registry(monkeypatch)
 
 
 def _seed_two_vms(tmp_path: Path) -> Database:

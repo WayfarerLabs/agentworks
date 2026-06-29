@@ -18,7 +18,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
-from agentworks.resources.kind import KIND_REGISTRY
+from agentworks.resources.kind import KIND_REGISTRY, NoUnreferencedDefaultError
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -38,13 +38,16 @@ class _GitCredentialKind:
         self,
         requirements: Sequence[ResourceRequirement],
     ) -> None:
-        # Unreachable under the "error" miss policy. The Registry's
-        # finalize pass raises ConfigError before calling synthesize on
-        # error-policy kinds, so this method exists only to satisfy the
-        # Protocol; never called in practice.
-        raise NotImplementedError(
-            "git_credentials kind uses error miss policy; synthesize "
-            "is never invoked"
+        # Unreachable under the "error" miss policy: the Registry's
+        # finalize pass raises ConfigError before dispatching to
+        # synthesize for error-policy kinds. The method exists to
+        # satisfy the Protocol; honors the Phase 2a empty-requirements
+        # contract (FRD R3) by raising the typed framework error so a
+        # hypothetical future change that gives the kind a reserved
+        # default has an obvious landing pad.
+        raise NoUnreferencedDefaultError(
+            "the git_credentials kind has no reserved default name; "
+            "synthesize is never invoked under the error miss policy"
         )
 
 

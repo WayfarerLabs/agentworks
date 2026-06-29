@@ -231,11 +231,28 @@ def stub_session_resolvers(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "agentworks.secrets.resolve_for_command", lambda *a, **k: {}
     )
-    # Phase 2a's manager-entry hoist calls ``build_registry(config)`` at
-    # the top of ``create_session`` before any business logic. Stub it
-    # to a no-op for SimpleNamespace configs that don't carry
-    # ``publish_to``. Real Config flows still exercise the hoist's
-    # framework-error guarantee in the tests under tests/resources/.
+
+
+def stub_build_registry(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Stub ``agentworks.bootstrap.build_registry`` to a no-op.
+
+    Phase 2a's manager-entry hoist (Phase 2a.0) calls
+    ``build_registry(config)`` at the top of ``create_session``,
+    ``create_agent``, ``reinit_agent``, ``create_workspace``,
+    ``reinit_workspace``, ``create_vm``, ``reinit_vm``, and
+    ``add_git_credential`` before any business logic. Tests that pass
+    ``SimpleNamespace`` configs (which don't carry ``publish_to``) need
+    this stub so the hoist doesn't crash on the mock config. Real
+    ``Config`` flows still exercise the hoist's framework-error
+    guarantee via ``tests/resources/``.
+
+    Usage: bind to an autouse fixture in each test module that uses
+    mock configs::
+
+        @pytest.fixture(autouse=True)
+        def _stub_build_registry(monkeypatch: pytest.MonkeyPatch) -> None:
+            stub_build_registry(monkeypatch)
+    """
     monkeypatch.setattr(
         "agentworks.bootstrap.build_registry", lambda config: None
     )

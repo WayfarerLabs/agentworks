@@ -220,7 +220,13 @@ def create_vm(
     """Create a new VM: provision + initialize."""
     from dataclasses import replace as _replace
 
+    from agentworks.bootstrap import build_registry
     from agentworks.vms.templates import resolve_template
+
+    # build_registry runs first so framework miss-policies (typo'd git
+    # credential, future TemplateRequirement typos on inherits, etc.)
+    # surface before any template / DB / VM business logic.
+    registry = build_registry(config)
 
     vm_tmpl = resolve_template(config, template)
 
@@ -275,13 +281,6 @@ def create_vm(
     resolved_admin_username = admin_username or config.admin.username
     validate_admin_username(resolved_admin_username)
 
-    # Pre-flight checks. ``build_registry`` runs FIRST so the
-    # framework's miss-policy errors (typo'd git credential, etc.)
-    # surface with full source attribution before any other check
-    # raises a less-specific error.
-    from agentworks.bootstrap import build_registry
-
-    registry = build_registry(config)
     verify_tailscale_available()
     providers = resolve_git_credential_providers(config, config.admin.git_credentials)
     verify_git_credential_auth(providers)
@@ -767,7 +766,13 @@ def exec_vm(
 
 def add_git_credential(db: Database, config: Config, name: str, credential_name: str) -> None:
     """Add or update a git credential on a VM."""
+    from agentworks.bootstrap import build_registry
     from agentworks.transports import transport
+
+    # build_registry runs first so framework miss-policies (e.g.
+    # GitCredentialKind's error policy on a typo'd credential name)
+    # surface before any DB / VM / config-key business logic.
+    registry = build_registry(config)
 
     vm = _require_vm(db, name)
     _guard_failed_vm(vm)
@@ -787,11 +792,6 @@ def add_git_credential(db: Database, config: Config, name: str, credential_name:
             entity_name=credential_name,
         )
 
-    # build_registry runs first so framework typo errors fire before
-    # resolve_git_credential_providers' generic NotFoundError.
-    from agentworks.bootstrap import build_registry
-
-    registry = build_registry(config)
     providers = resolve_git_credential_providers(config, [credential_name])
     provider = providers[credential_name]
 
@@ -1097,7 +1097,12 @@ def reinit_vm(
 
     Requires provisioning_status == complete and a valid Tailscale connection.
     """
+    from agentworks.bootstrap import build_registry
     from agentworks.transports import transport
+
+    # build_registry runs first so framework miss-policies surface
+    # before any template / DB / VM business logic.
+    registry = build_registry(config)
 
     vm = _require_vm(db, name)
 
@@ -1124,12 +1129,6 @@ def reinit_vm(
             entity_name=name,
         )
 
-    # Pre-flight checks. build_registry runs first so framework
-    # typo errors fire before resolve_git_credential_providers'
-    # generic NotFoundError.
-    from agentworks.bootstrap import build_registry
-
-    registry = build_registry(config)
     verify_tailscale_available()
     providers = resolve_git_credential_providers(config, config.admin.git_credentials)
     verify_git_credential_auth(providers)

@@ -12,15 +12,14 @@ from agentworks.cli import _record_unhandled_error
 from agentworks.output import AgentworksError
 from agentworks.ssh import SSHError
 
-from .conftest import stub_session_resolvers
+from .conftest import stub_build_registry, stub_session_resolvers
 
 
 @pytest.fixture(autouse=True)
 def _stub_build_registry(monkeypatch: pytest.MonkeyPatch) -> None:
-    """SimpleNamespace configs in this module don't carry publish_to;
-    bypass the Phase 2a manager-entry hoist for the mock-config style.
-    """
-    monkeypatch.setattr("agentworks.bootstrap.build_registry", lambda config: None)
+    """SimpleNamespace configs don't carry publish_to; Phase 2a's
+    manager-entry hoist is no-op'd via the shared helper."""
+    stub_build_registry(monkeypatch)
 
 
 def test_ssh_error_is_agentworks_error() -> None:

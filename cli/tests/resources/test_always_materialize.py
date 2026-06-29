@@ -73,11 +73,14 @@ def test_unreferenced_default_lands_with_framework_source(tmp_path: Path) -> Non
     assert admin.origin.source == ALWAYS_MATERIALIZE_SOURCE
 
 
-def test_always_materialized_resource_gets_empty_usage(tmp_path: Path) -> None:
-    """Unreferenced default goes through finalize's polish step with
-    empty usage. AdminConfig has no description field today so the
-    polish is a no-op for it; the empty-usage format is exercised
-    directly in ``test_polish_empty_usage_format`` below.
+def test_always_materialized_row_gets_empty_usage_tuple_in_finalize(
+    tmp_path: Path,
+) -> None:
+    """Unreferenced default goes through finalize's usage-attachment
+    pass with ``usage=()``. AdminConfig has no ``description`` field so
+    the polish is a no-op for it; the empty-usage description format is
+    exercised against the helper directly in
+    ``test_polish_empty_usage_format`` below.
     """
     from agentworks.resources import Registry
 
