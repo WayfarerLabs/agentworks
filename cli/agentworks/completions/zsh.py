@@ -98,6 +98,12 @@ _agentworks_agent_templates() {
     fi
     _describe 'agent-template' templates
 }""",
+    "secrets": """\
+_agentworks_secrets() {
+    local -a secrets
+    secrets=(${(f)"$(agw secret list --names-only 2>/dev/null)"})
+    _describe 'secret' secrets
+}""",
 }
 
 # Maps completer identifiers to their zsh function names.
@@ -114,6 +120,7 @@ COMPLETER_FUNC_NAMES: dict[str, str] = {
     "agent_templates": "_agentworks_agent_templates",
     "agents": "_agentworks_agents",
     "consoles": "_agentworks_consoles",
+    "secrets": "_agentworks_secrets",
 }
 
 

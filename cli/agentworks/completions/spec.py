@@ -56,6 +56,10 @@ class CommandSpec:
 #   "vm_templates"    -> [vm_templates.*] sections in config.toml
 #   "agent_templates" -> [agent_templates.*] sections in config.toml
 #   "consoles"        -> agw console list
+#   "secrets"         -> agw secret list --names-only
+#                        (sources from the Resource Registry so
+#                        auto-declared names like tailscale-auth-key
+#                        complete the same as operator-declared ones)
 
 DYNAMIC_COMPLETIONS: dict[tuple[str, str], str] = {
     ("vm.start", "name"): "vms",
@@ -107,6 +111,7 @@ DYNAMIC_COMPLETIONS: dict[tuple[str, str], str] = {
     ("session.create", "workspace"): "workspaces",
     ("session.create", "template"): "session_templates",
     ("session.create", "workspace_template"): "ws_templates",
+    ("session.create", "agent_template"): "agent_templates",
     ("session.create", "vm"): "vms",
     ("session.describe", "name"): "sessions",
     ("session.list", "workspace"): "workspaces",
@@ -153,6 +158,9 @@ DYNAMIC_COMPLETIONS: dict[tuple[str, str], str] = {
     ("console.add-shell", "session"): "sessions",
     ("console.restore-session", "name"): "consoles",
     ("console.restore-session", "session"): "sessions",
+
+    # Secret inspection
+    ("secret.describe", "name"): "secrets",
 }
 
 

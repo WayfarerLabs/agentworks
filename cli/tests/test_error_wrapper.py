@@ -242,9 +242,10 @@ def test_create_session_rolls_back_on_keyboard_interrupt(
             db,
             config,  # type: ignore[arg-type]
             name="s1",
-            workspace_name="ws1",
+            workspace="ws1",
             template_name=None,
             agent_name=None,
+            admin=True,
         )
 
     # Rollback ran: the session row that was inserted before create_tmux_session
@@ -327,9 +328,9 @@ def test_create_session_releases_group_membership_on_keyboard_interrupt(
             db,
             config,  # type: ignore[arg-type]
             name="s1",
-            workspace_name="ws1",
+            workspace="ws1",
             template_name=None,
-            agent_name="a1",
+            agent="a1",
         )
 
     assert db.get_session("s1") is None
@@ -413,9 +414,10 @@ def test_create_session_rollback_failure_does_not_mask_keyboard_interrupt(
             db,
             config,  # type: ignore[arg-type]
             name="s1",
-            workspace_name="ws1",
+            workspace="ws1",
             template_name=None,
             agent_name=None,
+            admin=True,
         )
 
     # The poisoned delete_session was called (confirming we did exercise

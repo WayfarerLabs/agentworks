@@ -71,8 +71,10 @@ agw console delete my-console              # Extra shells are lost but sessions 
 
 When `--non-interactive` is set (or stdin is not a TTY), commands that would normally prompt for
 missing values (VM selection, workspace selection, name generation) will fail with a clear error
-indicating which flag is required. Auto-selection still works: if there is exactly one VM or
-workspace, it is used without prompting.
+indicating which flag is required. VM auto-selection still works: if there is exactly one usable VM,
+it is used without prompting. `session create` is an intentional exception -- it always prompts for
+workspace and mode (even when only one choice exists) since those are part of the session's identity
+and should be an explicit operator decision.
 
 Domain errors (SSH timeouts, validation failures, missing resources, etc.) surface as a single clean
 line: `Error: <message>`. Truly unexpected failures (internal bugs, OS-level errors, third-party
@@ -295,16 +297,24 @@ together. `--agent` matches agent-mode sessions only; `--admin` matches admin-mo
 (the two are mutually exclusive). Pass `--force` to stop/restart broken sessions via PID kill.
 
 `session create <name>` takes the session name as a required positional. Optional flags:
-`--workspace`, `--template`, `--admin`, and `--agent`. Workspace and mode (admin vs agent) are
-prompted interactively if omitted; if agents exist on the VM and neither `--admin` nor `--agent` is
-specified, you are prompted to choose. Pass `--new-workspace` to create a workspace on the fly (with
-optional `--workspace-name`, `--workspace-template`, and `--vm`; `--workspace-name` defaults to the
-session name). Pass `--new-agent` to create a new agent for the session (with optional
-`--agent-name` and `--agent-template`; `--agent-name` defaults to the session name); the new agent
-is provisioned on the workspace's VM. When a session created with `--new-workspace` or `--new-agent`
-is later deleted, you are offered the option to delete the workspace and/or agent as well -- the
-workspace if no other sessions remain on it, the agent if it has no other sessions and no explicit
-grants.
+`--workspace`, `--template`, `--admin`, and `--agent`. If `--workspace` / `--new-workspace` is
+omitted, you are prompted to pick from the existing workspaces or `[Create new workspace]` --
+filtered to the known VM when `--vm` or `--agent` already pins one (the prompt prints
+`Only showing workspaces on VM 'X'` when a filter is active). If `--admin` / `--agent` /
+`--new-agent` is omitted, you are prompted with `admin`, the existing agents on the resolved VM, and
+`[Create new agent]`. The prompts always fire when the flags are absent -- there is no single-option
+auto-select for workspace or mode, since both are part of the session's identity. `--vm` works
+differently: it auto-selects when exactly one usable VM exists (logged as `Using VM 'X'`), prompts
+when multiple, and is required only in non-interactive mode when no workspace or agent anchor pins
+the VM. In non-interactive mode (`--non-interactive` or no TTY), any required prompt raises a
+`ValidationError` directing you to pass the corresponding flag. Pass `--new-workspace` to create a
+workspace on the fly (with optional `--workspace-name`, `--workspace-template`, and `--vm`;
+`--workspace-name` defaults to the session name). Pass `--new-agent` to create a new agent for the
+session (with optional `--agent-name` and `--agent-template`; `--agent-name` defaults to the session
+name); the new agent is provisioned on the workspace's VM. When a session created with
+`--new-workspace` or `--new-agent` is later deleted, you are offered the option to delete the
+workspace and/or agent as well -- the workspace if no other sessions remain on it, the agent if it
+has no other sessions and no explicit grants.
 
 <!-- Linked from the top-level README; rename only if you also update README.md. -->
 
@@ -593,21 +603,52 @@ agw env show --session my-session              # secrets redacted as <from secre
 agw env show --vm my-vm --reveal-secrets       # resolves through the active backend chain
 ```
 
-Inspect how each active backend would resolve each declared secret (e.g. "which env var name does
-this secret read from?") with `agw secret list`:
+Inspect how each active backend would resolve each declared or auto-declared secret (e.g. "which env
+var name does this secret read from?") with `agw secret list`:
 
 ```bash
 agw secret list
-# NAME           env-var                  prompt
-# ----           -------                  ------
-# github-token   AW_SECRET_GITHUB_TOKEN   enabled
-# force-prompt   disabled                 enabled
-# api-key        OPENAI_API_KEY           enabled
+# 4 secrets (2 operator-declared, 2 auto-declared)
+#
+# NAME                 DESCRIPTION                                                                env-var                       prompt
+# ----                 -----------                                                                -------                       ------
+# api-key              OpenAI key for the operator's service                                      OPENAI_API_KEY                enabled
+# force-prompt         Always prompted at command time                                            disabled                      enabled
+# git-token-github     (auto) the auth token for git_credentials:github                           AW_SECRET_GIT_TOKEN_GITHUB    enabled
+# tailscale-auth-key   (auto) the Tailscale auth key for vm_template:default (and 1 more)   AW_SECRET_TAILSCALE_AUTH_KEY  enabled
 ```
 
 Columns are the active backends in `[secret_config].backends` precedence order. Cells show each
 backend's static lookup identifier (env var name, vault path, `op://` URI) or `disabled` / `enabled`
-for backends with an explicit opt-out or no static identifier (prompt). Values are never resolved.
+for backends with an explicit opt-out or no static identifier (prompt). The Description column shows
+the operator-supplied text for operator-declared secrets, or a framework-synthesized
+`(auto) <usage> for <kind>:<name>` (plus `(and N more)` when more than one source requires the
+secret) for auto-declared ones. The synthesized text reads as "what this secret is for, and who's
+asking." The summary line breaks the rows down by origin. Values are never resolved.
+
+For the full per-secret detail view, including the structured origin block, usage list (who requires
+this secret), per-backend mapping table, and a resolution preview, use `agw secret describe`:
+
+```bash
+agw secret describe tailscale-auth-key
+# Secret: tailscale-auth-key
+#   Kind: secret
+#   Description: (auto) the Tailscale auth key for vm_template:default (and 1 more)
+#   Origin: auto-declared (vm_template:default)
+#
+# Usages:
+#   - vm_template:default -- the Tailscale auth key
+#   - vm_template:heavy -- the Tailscale auth key
+#
+# Backend mappings:
+#   - env-var: AW_SECRET_TAILSCALE_AUTH_KEY
+#   - prompt: (prompt at resolution time)
+#
+# Resolution preview:
+#   would resolve via env-var
+```
+
+`describe` reports state -- it does not prompt and does not resolve the secret's value.
 
 `agw doctor`'s Secrets group leads with one row naming the active backend chain
 (`Configured backends: env-var, prompt`). Then one row per declared secret showing whether the chain
@@ -691,10 +732,12 @@ forward-only and run automatically.
 
 ## Environment Variables
 
-| Variable                         | Description                                                                               |
-| -------------------------------- | ----------------------------------------------------------------------------------------- |
-| `AW_TAILSCALE_AUTH_KEY`          | Tailscale auth key (skips prompt). Legacy `TAILSCALE_AUTH_KEY` still read; warns once.    |
-| `AW_GIT_CREDENTIALS_<CRED_NAME>` | Git credential for `<CRED_NAME>`. Legacy `GIT_CREDENTIALS_<CRED_NAME>` still read; warns. |
+Secret values are read from the operator's shell via the `env-var` backend, which follows the
+convention `AW_SECRET_<UPPER_SNAKE_CASE>` derived from the secret's name. The Tailscale auth key
+(secret `tailscale-auth-key`) reads from `AW_SECRET_TAILSCALE_AUTH_KEY`; a git credential's PAT
+(secret `git-token-<name>`) reads from `AW_SECRET_GIT_TOKEN_<NAME>`; and so on. Override the
+convention per secret via `[secrets.<name>].backend_mappings.env-var = "CUSTOM_NAME"`.
 
-Legacy env-var names continue to work with a one-time deprecation warning per process per name, and
-will be removed in a future release.
+Use `agw secret list` to see the exact env var name for each declared or auto-declared secret, and
+`agw secret describe <name>` for the full per-secret view (origin, usages, backend mappings,
+resolution preview).

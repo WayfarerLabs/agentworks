@@ -35,8 +35,11 @@ if TYPE_CHECKING:
     from agentworks.db import Database, VMRow, WorkspaceRow
     from agentworks.env import EnvEntry
     from agentworks.git_credentials.base import GitCredentialProvider
+    from agentworks.resources import Registry
     from agentworks.secrets import SecretTarget
+    from agentworks.secrets.base import SecretDecl
     from agentworks.vms.base import VMProvisioner
+    from agentworks.vms.templates import ResolvedVMTemplate
 
 
 class _VmAdminEnvScopes(NamedTuple):
@@ -272,7 +275,13 @@ def create_vm(
     resolved_admin_username = admin_username or config.admin.username
     validate_admin_username(resolved_admin_username)
 
-    # Pre-flight checks
+    # Pre-flight checks. ``build_registry`` runs FIRST so the
+    # framework's miss-policy errors (typo'd git credential, etc.)
+    # surface with full source attribution before any other check
+    # raises a less-specific error.
+    from agentworks.bootstrap import build_registry
+
+    registry = build_registry(config)
     verify_tailscale_available()
     providers = resolve_git_credential_providers(config, config.admin.git_credentials)
     verify_git_credential_auth(providers)
@@ -280,10 +289,11 @@ def create_vm(
     # Collect provisioning-time secrets upfront (tailscale auth, git creds).
     # Provisioning is hermetic: operator [admin.env] / [vm_templates.*.env]
     # secrets are NOT prompted here -- they're not used until runtime
-    # shells. The legacy _collect_secrets path remains because the
-    # provisioning-required secrets it covers (tailscale, git) live
-    # outside the env-block system today.
-    tailscale_auth_key, git_tokens = _collect_secrets(providers, vm_name)
+    # shells, and the resolver caches them when the shell-opening code
+    # invokes resolve_for_command later.
+    tailscale_auth_key, git_tokens = _collect_secrets(
+        config, registry, providers, vm_name, vm_tmpl
+    )
 
     # Create DB record with as-provisioned resource values
     db.insert_vm(
@@ -777,10 +787,19 @@ def add_git_credential(db: Database, config: Config, name: str, credential_name:
             entity_name=credential_name,
         )
 
+    # build_registry runs first so framework typo errors fire before
+    # resolve_git_credential_providers' generic NotFoundError.
+    from agentworks.bootstrap import build_registry
+
+    registry = build_registry(config)
     providers = resolve_git_credential_providers(config, [credential_name])
     provider = providers[credential_name]
 
-    token = provider.obtain_token(name)
+    # Phase 1d: resolve the token via the framework (the resolver chain
+    # handles env-var lookup + prompt fallback uniformly across every
+    # site that needs a token).
+    tokens = _collect_git_tokens(config, registry, [credential_name])
+    token = tokens[credential_name]
     new_lines = provider.credential_lines(token)
 
     with keep_vm_active(db, config, vm):
@@ -885,17 +904,25 @@ def rekey_vm(
             entity_name=name,
         )
 
-    # Collect new auth key
-    from agentworks.env_compat import read_env_with_legacy
+    # Collect the new auth key via the framework (Phase 1c). The
+    # resolver chain handles env-var lookup, then falls through to the
+    # prompt backend. ``ignore_env`` is preserved by temporarily
+    # masking the env-var (the env-var source reads ``os.environ`` at
+    # ``would_attempt`` time, so removing the var skips it cleanly and
+    # the next backend in the chain takes over).
+    from agentworks.bootstrap import build_registry
+    from agentworks.secrets import resolve_for_command
+    from agentworks.vms.templates import resolve_template
 
-    ts_auth_key = read_env_with_legacy("AW_TAILSCALE_AUTH_KEY", "TAILSCALE_AUTH_KEY") if not ignore_env else None
-    if ts_auth_key:
-        output.detail("Tailscale auth key found in environment")
-    else:
-        ts_auth_key = output.prompt_secret(
-            "Tailscale auth key",
-            hint="Generate a key at https://login.tailscale.com/admin/settings/keys",
-        )
+    rekey_vm_tmpl = resolve_template(config, vm.template)
+    registry = build_registry(config)
+    ts_decl = _lookup_or_synthesize_secret(
+        registry, rekey_vm_tmpl.tailscale_auth_key
+    )
+
+    with _mask_env_var_backend_for(ts_decl, masked=ignore_env):
+        resolved = resolve_for_command([], config, extra_decls=[ts_decl])
+    ts_auth_key = resolved[rekey_vm_tmpl.tailscale_auth_key]
 
     output.info(f"Rekeying '{name}'...")
 
@@ -1097,15 +1124,18 @@ def reinit_vm(
             entity_name=name,
         )
 
-    # Pre-flight checks
+    # Pre-flight checks. build_registry runs first so framework
+    # typo errors fire before resolve_git_credential_providers'
+    # generic NotFoundError.
+    from agentworks.bootstrap import build_registry
+
+    registry = build_registry(config)
     verify_tailscale_available()
     providers = resolve_git_credential_providers(config, config.admin.git_credentials)
     verify_git_credential_auth(providers)
 
-    # Collect git tokens upfront
-    git_tokens: dict[str, str] = {}
-    for cred_name, provider in providers.items():
-        git_tokens[cred_name] = provider.obtain_token(name)
+    # Collect git tokens via the framework (Phase 1d).
+    git_tokens = _collect_git_tokens(config, registry, providers.keys())
 
     # Provisioning is hermetic: no operator-env secrets are prompted at
     # reinit. They get prompted at the use site (vm shell, session
@@ -1233,33 +1263,180 @@ def _guard_failed_vm(vm: VMRow, *, allow_failed_init: bool = False) -> None:
         )
 
 
+@contextlib.contextmanager
+def _mask_env_var_backend_for(
+    decl: SecretDecl,
+    *,
+    masked: bool,
+) -> Iterator[None]:
+    """Mask the env-var backend's view of ``decl`` for the duration of
+    the block when ``masked`` is True; pass-through otherwise.
+
+    Used by ``vm rekey --ignore-env`` to force the resolver chain to
+    skip the env-var backend and fall through to the prompt backend.
+    The env-var source reads ``os.environ`` at ``would_attempt`` time,
+    so popping the matching env vars during the resolve call makes the
+    backend silently skip; the next backend in the chain takes over.
+
+    The masked names cover (a) the framework's default convention
+    ``AW_SECRET_<UPPER_NAME>`` for ``decl.name``, plus (b) any
+    operator-typed string override at ``decl.backend_mappings["env-var"]``.
+    Both names are restored on exit, even on exception, so a
+    ``KeyboardInterrupt`` during a prompt doesn't leave the operator's
+    shell with the var missing.
+    """
+    import os
+
+    if not masked:
+        yield
+        return
+
+    from agentworks.secrets.env_var import env_var_name_for
+
+    masked_names: list[str] = [env_var_name_for(decl.name)]
+    mapping = decl.backend_mappings.get("env-var")
+    if isinstance(mapping, str):
+        masked_names.append(mapping)
+
+    saved: dict[str, str] = {}
+    for var in masked_names:
+        if var in os.environ:
+            saved[var] = os.environ.pop(var)
+    try:
+        yield
+    finally:
+        os.environ.update(saved)
+
+
+def _collect_git_tokens(
+    config: Config,
+    registry: Registry,
+    credential_names: Iterable[str],
+) -> dict[str, str]:
+    """Resolve token values for the named git credentials via the
+    framework's backend chain.
+
+    Phase 1d of the Resource Registry SDD. Returns ``{credential_name:     token_value}``.
+    Each credential's ``token`` field (default ``"git-token-<name>"``;
+    operator-overridable per ``[git_credentials.<name>]``) names a
+    secret; the registry's finalize pass auto-declared each one via
+    ``GitCredentialConfig.required_resources``. The resolver chain
+    resolves them all in one batched call so the cache picks up every
+    token in one prompt (or one round-trip to a persistent store).
+
+    Missing-from-registry secrets get a synthesized ``SecretDecl``
+    matching the auto-declare shape -- same fallback as
+    ``_lookup_or_synthesize_secret`` -- so this helper works even on
+    edge cases where the operator's TOML left the registry sparse.
+
+    Raises ``ConfigError`` if any name in ``credential_names`` isn't
+    declared in ``[git_credentials.*]`` -- the framework's
+    ``GitCredentialKind`` should have errored at config-load, but this
+    guard catches direct-API call sites that bypass load.
+    """
+    names = list(credential_names)
+    if not names:
+        return {}
+
+    from agentworks.secrets import resolve_for_command
+
+    decls: list[SecretDecl] = []
+    token_name_for: dict[str, str] = {}
+    for cred_name in names:
+        cred = config.git_credentials.get(cred_name)
+        if cred is None:
+            raise ConfigError(
+                f"git credential {cred_name!r} not declared; "
+                f"declare it under [git_credentials.{cred_name}]",
+                entity_kind="git-credential",
+                entity_name=cred_name,
+            )
+        token_name_for[cred_name] = cred.token
+        decls.append(_lookup_or_synthesize_secret(registry, cred.token))
+
+    resolved = resolve_for_command([], config, extra_decls=decls)
+    return {
+        cred_name: resolved[token_name]
+        for cred_name, token_name in token_name_for.items()
+    }
+
+
+def _lookup_or_synthesize_secret(registry: Registry, name: str) -> SecretDecl:
+    """Return the ``SecretDecl`` for ``name`` from the framework
+    Registry, or synthesize a bare one matching the auto-declare shape
+    if no Resource was published or auto-declared under that name.
+
+    Used by the Tailscale eager-resolve sites (``_collect_secrets`` for
+    ``vm create``, ``rekey_vm``, ``_ensure_tailscale``). All three need
+    the same fallback semantics: an operator who omits every
+    ``[vm_templates.*]`` section AND every ``[secrets.*]`` section
+    leaves the registry empty under the ``secret`` kind, so a strict
+    lookup raises ``KeyError``. Synthesizing a bare ``SecretDecl`` (the
+    same shape ``_SecretKind.synthesize`` would produce, minus
+    ``origin`` which resolution doesn't read) keeps the backend chain
+    callable. The Phase 2a ``VMTemplateKind`` will publish the default
+    template's requirements and make this fallback redundant for the
+    common case.
+    """
+    from agentworks.secrets.base import SecretDecl
+
+    try:
+        found: SecretDecl = registry.lookup("secret", name)
+        return found
+    except KeyError:
+        return SecretDecl(name=name, description="")
+
+
 def _collect_secrets(
+    config: Config,
+    registry: Registry,
     providers: dict[str, GitCredentialProvider],
     vm_name: str,
-) -> tuple[str | None, dict[str, str]]:
+    vm_tmpl: ResolvedVMTemplate,
+) -> tuple[str, dict[str, str]]:
     """Collect all secrets upfront before provisioning starts.
 
-    Returns (tailscale_auth_key, git_tokens).
+    Phase 1c (Tailscale) + Phase 1d (git credentials) of the Resource
+    Registry SDD: both flow through the framework now. ``build_registry``
+    finalizes the Resource Registry (auto-declaring the auth-key secret
+    and each git-credential's token secret via their
+    ``required_resources`` emissions); ``resolve_for_command`` batches
+    them all in one call through the backend chain (or prompts).
+    Provisioning stays hermetic per FRD R4: ``[admin.env]`` /
+    ``[vm_templates.*.env]`` secrets are NOT eager-resolved here --
+    they're resolved at the shell-opening site at runtime, by the
+    existing ``SecretTarget`` path.
+
+    The Tailscale SecretDecl lookup uses ``_lookup_or_synthesize_secret``
+    rather than ``collect_secrets_for`` (registry walk). This matters
+    when the operator omits ``[vm_templates.default]`` entirely: the
+    raw default template isn't published to the registry, so a
+    registry-rooted walk from ``("vm_template", "default")`` would
+    error. The resolved template always exists (built-in defaults
+    apply); a direct secret lookup with fallback is the right shape.
+    Phase 2a's ``VMTemplateKind`` will move the auto-decl plumbing
+    into the registry so the registry-walk path becomes uniformly
+    available.
+
+    Returns ``(tailscale_auth_key, git_tokens)``.
     """
-    from agentworks.env_compat import read_env_with_legacy
+    from agentworks.secrets import resolve_for_command
 
     output.info("Collecting credentials...")
 
-    # Tailscale
-    ts_auth_key = read_env_with_legacy("AW_TAILSCALE_AUTH_KEY", "TAILSCALE_AUTH_KEY")
-    if ts_auth_key:
-        output.detail("Tailscale auth key found in environment")
-    else:
-        ts_auth_key = output.prompt_secret(
-            "  Tailscale auth key",
-            hint="Generate a key at https://login.tailscale.com/admin/settings/keys",
-        )
+    # Tailscale via the framework. See _lookup_or_synthesize_secret
+    # for the missing-default-template fallback semantics. The registry
+    # was built upstream so its finalize-pass typo errors fire before
+    # any other precondition check.
+    ts_decl = _lookup_or_synthesize_secret(
+        registry, vm_tmpl.tailscale_auth_key
+    )
+    resolved = resolve_for_command([], config, extra_decls=[ts_decl])
+    ts_auth_key = resolved[vm_tmpl.tailscale_auth_key]
 
-    # Git credentials
-    git_tokens: dict[str, str] = {}
-    for name, provider in providers.items():
-        token = provider.obtain_token(vm_name)
-        git_tokens[name] = token
+    # Git credentials via the framework (Phase 1d). Pulls token values
+    # for every credential the admin or agent templates reference.
+    git_tokens = _collect_git_tokens(config, registry, providers.keys())
 
     return ts_auth_key, git_tokens
 
@@ -1506,6 +1683,22 @@ def _ensure_tailscale(
         output.info(f"Tailscale node {vm.tailscale_host} did not reconnect, rejoining...")
         db.clear_vm_tailscale(vm.name)
 
+    # Resolve a fresh Tailscale auth key via the framework before
+    # entering the provisioner-transport block; the resolver handles
+    # backend chain + prompt fallback. Phase 1c plumbed this through
+    # the kwarg path so initializer.py has no env-var fallback.
+    from agentworks.bootstrap import build_registry
+    from agentworks.secrets import resolve_for_command
+    from agentworks.vms.templates import resolve_template
+
+    rejoin_vm_tmpl = resolve_template(config, vm.template)
+    registry = build_registry(config)
+    ts_decl = _lookup_or_synthesize_secret(
+        registry, rejoin_vm_tmpl.tailscale_auth_key
+    )
+    resolved = resolve_for_command([], config, extra_decls=[ts_decl])
+    auth_key = resolved[rejoin_vm_tmpl.tailscale_auth_key]
+
     # provisioner_transport() composes Azure's attach/detach via
     # transient_route polymorphism with the reachability probe. Other
     # platforms have a nullcontext transient_route and just build the
@@ -1513,7 +1706,7 @@ def _ensure_tailscale(
     with contextlib.ExitStack() as _stack:
         verify_tailscale_available()
         exec_target = provisioner_transport(db, vm, config, stack=_stack)
-        rejoin_tailscale(db, vm.name, exec_target)
+        rejoin_tailscale(db, vm.name, exec_target, auth_key=auth_key)
 
     # After the stack unwinds (Azure detach has fired), wait for
     # Tailscale SSH on the new IP to be reachable. The probe is cheap

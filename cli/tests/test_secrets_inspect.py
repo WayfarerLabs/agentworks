@@ -6,8 +6,15 @@ from __future__ import annotations
 from pathlib import Path
 from textwrap import dedent
 
+from agentworks.bootstrap import build_registry
 from agentworks.config import load_config
 from agentworks.secrets.inspect import build_secret_table
+
+
+def _build_table(cfg_file: Path):
+    cfg = load_config(cfg_file, warn_issues=False)
+    registry = build_registry(cfg)
+    return build_secret_table(cfg, registry)
 
 
 def _write_base(config_path: Path, *, extras: str = "") -> None:
@@ -28,17 +35,29 @@ def _write_base(config_path: Path, *, extras: str = "") -> None:
     )
 
 
-def test_no_secrets_returns_empty_rows_but_active_backends(tmp_path: Path) -> None:
-    """No declared secrets: backend chain is still present (default
-    env-var + prompt) but rows is empty. CLI renders the empty-state
-    message off of this shape."""
+def test_no_operator_secrets_still_shows_auto_declared(tmp_path: Path) -> None:
+    """No operator-declared secrets, but Phase 1c's VMTemplate
+    ``tailscale_auth_key`` requirement always auto-declares the
+    ``tailscale-auth-key`` secret. The table iterates the Registry
+    (per Phase 1e) so that auto-declared row is surfaced.
+    """
     cfg_file = tmp_path / "config.toml"
     _write_base(cfg_file)
-    cfg = load_config(cfg_file, warn_issues=False)
 
-    table = build_secret_table(cfg)
+    table = _build_table(cfg_file)
     assert table.backend_kinds == ("env-var", "prompt")
-    assert table.rows == ()
+    names = [r.name for r in table.rows]
+    assert "tailscale-auth-key" in names
+    # The auto-declared row carries a synthesized description so the
+    # list view's Description column is populated without an operator
+    # having to write one in ``[secrets.<name>]``. The text is derived
+    # from the first requirement's usage + source: "what this secret
+    # is for, and who's asking".
+    ts = next(r for r in table.rows if r.name == "tailscale-auth-key")
+    assert ts.description == "(auto) the Tailscale auth key for vm_template:default"
+    # Counts match the operator/auto split.
+    assert table.operator_count == 0
+    assert table.auto_count >= 1
 
 
 def test_rows_sorted_alphabetically_by_secret_name(tmp_path: Path) -> None:
@@ -61,9 +80,14 @@ def test_rows_sorted_alphabetically_by_secret_name(tmp_path: Path) -> None:
         description = "M"
         """,
     )
-    cfg = load_config(cfg_file, warn_issues=False)
-    table = build_secret_table(cfg)
-    assert [r.name for r in table.rows] == ["a-token", "m-token", "z-token"]
+    table = _build_table(cfg_file)
+    # Operator-declared secrets are sorted alphabetically; the
+    # registry also auto-declares ``tailscale-auth-key`` via Phase 1c's
+    # VMTemplate requirement, so filter to only the operator-typed
+    # names for the order assertion.
+    operator_typed = {"a-token", "m-token", "z-token"}
+    seen = [r.name for r in table.rows if r.name in operator_typed]
+    assert seen == ["a-token", "m-token", "z-token"]
 
 
 def test_env_var_cell_shows_default_convention_identifier(tmp_path: Path) -> None:
@@ -79,8 +103,7 @@ def test_env_var_cell_shows_default_convention_identifier(tmp_path: Path) -> Non
         description = "GitHub PAT"
         """,
     )
-    cfg = load_config(cfg_file, warn_issues=False)
-    table = build_secret_table(cfg)
+    table = _build_table(cfg_file)
     row = table.rows[0]
     env_var_cell = next(c for c in row.cells if c.backend_kind == "env-var")
     assert env_var_cell.would_attempt is True
@@ -102,8 +125,7 @@ def test_env_var_cell_shows_mapping_override(tmp_path: Path) -> None:
         backend_mappings.env-var = "GITHUB_TOKEN"
         """,
     )
-    cfg = load_config(cfg_file, warn_issues=False)
-    table = build_secret_table(cfg)
+    table = _build_table(cfg_file)
     env_var_cell = next(c for c in table.rows[0].cells if c.backend_kind == "env-var")
     assert env_var_cell.identifier == "GITHUB_TOKEN"
 
@@ -123,8 +145,7 @@ def test_env_var_cell_when_opted_out_reports_disabled(tmp_path: Path) -> None:
         backend_mappings.env-var = false
         """,
     )
-    cfg = load_config(cfg_file, warn_issues=False)
-    table = build_secret_table(cfg)
+    table = _build_table(cfg_file)
     env_var_cell = next(c for c in table.rows[0].cells if c.backend_kind == "env-var")
     assert env_var_cell.would_attempt is False
     assert env_var_cell.identifier is None
@@ -144,8 +165,7 @@ def test_prompt_cell_has_no_static_identifier(tmp_path: Path) -> None:
         description = "any"
         """,
     )
-    cfg = load_config(cfg_file, warn_issues=False)
-    table = build_secret_table(cfg)
+    table = _build_table(cfg_file)
     prompt_cell = next(c for c in table.rows[0].cells if c.backend_kind == "prompt")
     assert prompt_cell.would_attempt is True
     assert prompt_cell.identifier is None
@@ -168,17 +188,58 @@ def test_column_order_matches_backend_chain_precedence(tmp_path: Path) -> None:
         backends = ["prompt", "env-var"]
         """,
     )
-    cfg = load_config(cfg_file, warn_issues=False)
-    table = build_secret_table(cfg)
+    table = _build_table(cfg_file)
     assert table.backend_kinds == ("prompt", "env-var")
+
+
+def test_names_only_lists_every_registry_secret(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """``agw secret list --names-only`` is the source for shell
+    completion; it must include auto-declared names like
+    ``tailscale-auth-key`` so completion matches what ``agw secret
+    describe`` accepts. Names print one per line in the same order as
+    the table's rows."""
+    from typer.testing import CliRunner
+
+    from agentworks.cli import app
+
+    cfg_file = tmp_path / "config.toml"
+    _write_base(
+        cfg_file,
+        extras="""
+        [admin.env]
+        TOKEN = { secret = "z-token" }
+        OTHER = { secret = "a-token" }
+
+        [secrets.z-token]
+        description = "Z"
+
+        [secrets.a-token]
+        description = "A"
+        """,
+    )
+    monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg_file)
+
+    result = CliRunner().invoke(app, ["secret", "list", "--names-only"])
+    assert result.exit_code == 0, result.stdout
+    names = [line for line in result.stdout.splitlines() if line]
+    # Operator-declared names appear alphabetized; the framework-
+    # auto-declared ``tailscale-auth-key`` (VMTemplate requirement) is
+    # present too -- the prior completer was sed-over-TOML and missed it.
+    assert "a-token" in names
+    assert "z-token" in names
+    assert "tailscale-auth-key" in names
 
 
 def test_empty_backend_chain_yields_no_columns(tmp_path: Path) -> None:
     """``backends = []`` opts out of all resolution; the table has no
-    backend columns. (An operator who declares secrets in this state
-    would have already hit the unreachable-secret config error at load,
-    so this test uses no-declared-secrets to exercise the empty-chain
-    shape in isolation.)"""
+    backend columns. Operator-declared secrets in this state would
+    trip the unreachable-secret config-load error. The
+    auto-declared ``tailscale-auth-key`` row (Phase 1c) is still
+    surfaced in the table since the env-and-secrets reachability check
+    only inspects operator-declared secrets.
+    """
     cfg_file = tmp_path / "config.toml"
     _write_base(
         cfg_file,
@@ -187,7 +248,9 @@ def test_empty_backend_chain_yields_no_columns(tmp_path: Path) -> None:
         backends = []
         """,
     )
-    cfg = load_config(cfg_file, warn_issues=False)
-    table = build_secret_table(cfg)
+    table = _build_table(cfg_file)
     assert table.backend_kinds == ()
-    assert table.rows == ()
+    # Auto-declared rows still appear (each with empty cells, since
+    # there are no backend columns).
+    assert all(r.cells == () for r in table.rows)
+    assert table.operator_count == 0

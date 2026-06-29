@@ -1,8 +1,11 @@
-"""Azure DevOps git credential provider -- prompt for a personal access token."""
+"""Azure DevOps git credential provider -- formats credentials for ``~/.git-credentials``.
+
+Token resolution lives in the framework (Phase 1d); this class just
+formats the URL line and pre-flights authn.
+"""
 
 from __future__ import annotations
 
-from agentworks import output
 from agentworks.git_credentials.base import GitCredentialProvider
 
 
@@ -18,12 +21,6 @@ class AzDOCredentialProvider(GitCredentialProvider):
 
     def auth_hint(self) -> str:
         return f"Create a PAT at https://dev.azure.com/{self._org}/_usersSettings/tokens (Code Read & Write scope)"
-
-    def _prompt_token(self, vm_name: str) -> str:
-        return output.prompt_secret(
-            f"  Azure DevOps PAT for '{self.display_name}'",
-            hint=self.auth_hint(),
-        )
 
     def credential_lines(self, token: str) -> list[str]:
         return [f"https://{self._org}:{token}@dev.azure.com/{self._org}"]

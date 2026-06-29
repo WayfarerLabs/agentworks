@@ -196,12 +196,18 @@ def _check_tailscale() -> HealthGroup:
             timeout=10,
         )
         if result.returncode == 0:
-            from agentworks.env_compat import read_env_with_legacy
-
-            if read_env_with_legacy("AW_TAILSCALE_AUTH_KEY", "TAILSCALE_AUTH_KEY"):
-                g.ok("Connected to tailnet", "auth key env var set")
-            else:
-                g.ok("Connected to tailnet", "will prompt for auth key during VM init")
+            # Phase 1c of the Resource Registry SDD routed the Tailscale
+            # auth key through the framework; the legacy hard-coded
+            # `AW_TAILSCALE_AUTH_KEY` env var no longer has a special
+            # name. The auth key is now a `secret` Resource (default
+            # name `tailscale-auth-key`); its resolution path is the
+            # configured backend chain. `agw secret describe
+            # tailscale-auth-key` (Phase 1e) is the right diagnostic
+            # surface; this section just reports connectivity.
+            g.ok(
+                "Connected to tailnet",
+                "auth key resolved via the secret framework at VM-init time",
+            )
         else:
             g.fail("Not connected", "run 'tailscale up'")
     except subprocess.TimeoutExpired:
@@ -298,19 +304,19 @@ def _check_git_credentials(config: Config) -> HealthGroup:
         g.warn("Git credentials", f"could not resolve providers: {e}")
         return g
 
-    from agentworks.env_compat import read_env_with_legacy
-    from agentworks.git_credentials.base import env_var_for_credential, legacy_env_var_for_credential
-
-    for name, provider in providers.items():
+    # Phase 1d: tokens flow through the framework's resolver chain
+    # (env-var backend + prompt fallback by default; operator-typed
+    # backends layered in via [secret_config].backends). Doctor stays
+    # at the connectivity / authn-precondition layer; per-credential
+    # token diagnostic detail lives in `agw secret describe
+    # git-token-<name>` (Phase 1e).
+    for provider in providers.values():
         label = provider.display_name
         try:
             if not provider.verify_auth():
                 g.warn(label, f"auth check failed ({provider.auth_hint()})")
                 continue
-            if read_env_with_legacy(env_var_for_credential(name), legacy_env_var_for_credential(name)):
-                g.ok(label, "ready (token set via environment)")
-            else:
-                g.ok(label, "ready (will prompt for token during VM init)")
+            g.ok(label, "ready (token resolved via the secret framework at VM-init time)")
         except Exception as e:
             g.warn(label, f"auth check error: {e}")
 

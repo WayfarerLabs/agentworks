@@ -12,7 +12,10 @@ These cover:
 - [secret_config].backends drives resolver assembly; precedence preserved.
 - Unknown backend kinds in [secret_config].backends raise ConfigError.
 - Unreachable secrets raise ConfigError at load time.
-- Env entries referencing undeclared secrets raise ConfigError.
+- Env entries referencing undeclared secrets load cleanly (Phase 1b of the
+  Resource Registry SDD removed the strict-error path; auto-decl coverage
+  lives in tests/test_env_block_requirements.py, runtime-failure coverage
+  in tests/test_secrets_resolver.py).
 - Mid-config without any [secrets] / [secret_config] still loads cleanly with
   ``secret_resolver is None``.
 """
@@ -270,7 +273,16 @@ def test_env_secret_must_be_string(tmp_path: Path) -> None:
         load_config(cfg_file, warn_issues=False)
 
 
-def test_env_referencing_undeclared_secret_raises(tmp_path: Path) -> None:
+def test_env_referencing_undeclared_secret_does_not_error_at_load(
+    tmp_path: Path,
+) -> None:
+    """Phase 1b of the Resource Registry SDD removed the strict
+    config-load error for env-block secret refs that have no
+    ``[secrets.<name>]`` block; the Registry's auto-declare miss policy
+    handles the missing name at finalize. Verifying the load no longer
+    errors; the auto-declare path is covered by
+    ``tests/test_env_block_requirements.py``.
+    """
     cfg_file = tmp_path / "config.toml"
     _write_base(
         cfg_file,
@@ -282,8 +294,9 @@ def test_env_referencing_undeclared_secret_raises(tmp_path: Path) -> None:
         backends = ["env-var"]
         """,
     )
-    with pytest.raises(ConfigError, match="undeclared secret"):
-        load_config(cfg_file, warn_issues=False)
+    # No longer raises -- the secret auto-declares through the framework.
+    cfg = load_config(cfg_file, warn_issues=False)
+    assert cfg.admin.env["API_KEY"].secret == "missing"
 
 
 def test_secret_declared_with_all_mapping_forms(tmp_path: Path) -> None:
@@ -592,12 +605,17 @@ def test_session_template_required_commands_union_on_inherit(tmp_path: Path) -> 
     assert resolved.required_commands == ["tmux", "claude", "jq"]
 
 
-def test_undeclared_secret_in_parent_caught_even_if_child_overrides(
+def test_undeclared_secret_in_parent_no_longer_errors_at_load(
     tmp_path: Path,
 ) -> None:
-    """A parent template with a secret-ref pointing at an undeclared secret is
-    rejected at load time even when a child template overrides that key with
-    plaintext. _validate_env_secret_refs walks every template independently."""
+    """Phase 1b: a parent template's env secret-ref to an undeclared name
+    no longer errors at config load. The Registry's auto-declare miss
+    policy handles it at finalize regardless of whether a child template
+    overrides the key with plaintext. The override semantics still apply
+    at resolution time -- if the child overrides with a literal, the
+    parent's secret-ref doesn't actually need resolution -- but that's a
+    runtime concern, not a config-load concern.
+    """
     cfg_file = tmp_path / "config.toml"
     _write_base(
         cfg_file,
@@ -615,5 +633,7 @@ def test_undeclared_secret_in_parent_caught_even_if_child_overrides(
         backends = ["env-var", "prompt"]
         """,
     )
-    with pytest.raises(ConfigError, match="missing-secret"):
-        load_config(cfg_file, warn_issues=False)
+    # No longer raises.
+    cfg = load_config(cfg_file, warn_issues=False)
+    assert cfg.agent_templates["parent"].env["TOKEN"].secret == "missing-secret"
+    assert cfg.agent_templates["child"].env["TOKEN"].value == "literal-value"

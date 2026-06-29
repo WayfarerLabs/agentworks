@@ -24,6 +24,7 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import AgentRow, Database, VMRow, WorkspaceRow
     from agentworks.env import EnvEntry
+    from agentworks.resources import Registry
     from agentworks.secrets import SecretTarget
     from agentworks.ssh import SSHLogger
     from agentworks.transports import Transport
@@ -248,10 +249,16 @@ def create_agent(
     # outside the env-block system). Operator env secrets are NOT
     # prompted at agent create -- provisioning is hermetic. They get
     # prompted at the use site (agent shell, session create, etc.).
-    git_tokens = _collect_agent_credentials(config)
+    from agentworks.bootstrap import build_registry
+
+    registry = build_registry(config)
+    git_tokens = _collect_agent_credentials(config, registry)
 
     from agentworks.ssh import SSHLogger
     ssh_logger = SSHLogger(vm.name, "agent-create")
+    output.info(
+        f"Creating agent '{name}' on VM '{vm_name}' (template: {agent_tmpl.name})..."
+    )
     with keep_vm_active(db, config, vm):
 
         def _safe_rollback() -> None:
@@ -356,6 +363,7 @@ def delete_agent(
 
     from agentworks.ssh import SSHLogger
     ssh_logger = SSHLogger(vm.name, "agent-delete")
+    output.info(f"Deleting agent '{name}' on VM '{vm.name}'...")
     with keep_vm_active(db, config, vm):
 
         # Kill running sessions for this agent (status-aware)
@@ -454,7 +462,10 @@ def reinit_agent(
     vm = _require_vm(db, agent.vm_name)
 
     # Collect credentials up front before any SSH work
-    git_tokens = _collect_agent_credentials(config)
+    from agentworks.bootstrap import build_registry
+
+    registry = build_registry(config)
+    git_tokens = _collect_agent_credentials(config, registry)
 
     # Provisioning is hermetic: no operator-env secrets are prompted at
     # agent reinit. They get prompted at the use site (agent shell,
@@ -934,17 +945,26 @@ def _remove_from_workspace_group(
     target.run(f"gpasswd -d {linux_user} {ws_grp}", sudo=True, check=False)
 
 
-def _collect_agent_credentials(config: Config) -> dict[str, str]:
-    """Collect git credentials up front before any SSH work begins."""
-    agent_cfg = config.agent
-    git_tokens: dict[str, str] = {}
-    if agent_cfg.git_credentials:
-        from agentworks.vms.initializer import resolve_git_credential_providers
+def _collect_agent_credentials(
+    config: Config,
+    registry: Registry,
+) -> dict[str, str]:
+    """Collect git credentials up front before any SSH work begins.
 
-        providers = resolve_git_credential_providers(config, agent_cfg.git_credentials)
-        for cred_name, provider in providers.items():
-            git_tokens[cred_name] = provider.obtain_token("agent")
-    return git_tokens
+    Phase 1d of the Resource Registry SDD: tokens flow through the
+    framework (``_collect_git_tokens`` walks each credential's
+    ``token`` field, resolves through the backend chain, returns the
+    ``{credential_name: value}`` map). The legacy provider-side
+    resolution path is gone. The registry is built upstream so its
+    finalize-pass typo errors fire before any other precondition.
+    """
+    agent_cfg = config.agent
+    if not agent_cfg.git_credentials:
+        return {}
+
+    from agentworks.vms.manager import _collect_git_tokens
+
+    return _collect_git_tokens(config, registry, agent_cfg.git_credentials)
 
 
 def _create_agent_on_vm(
@@ -1084,24 +1104,40 @@ def _create_agent_on_vm(
         except Exception as e:
             output.warn(f"agent git safe.directory setup failed: {e}")
 
-    # Git credentials for the agent (tokens collected up front).
-    if agent_cfg.git_credentials and git_tokens:
+    # Git credentials for the agent (tokens pre-resolved by the
+    # framework upstream in agents/manager.create_agent / reinit_agent
+    # via _collect_agent_credentials). Phase 1d invariant: if the
+    # agent template declares git_credentials, the caller MUST have
+    # resolved every token; a missing entry is a caller bug and
+    # raises loudly rather than shipping a VM with a silently-dropped
+    # credential the operator asked for.
+    if agent_cfg.git_credentials:
         from agentworks.vms.initializer import resolve_git_credential_providers
 
         output.detail("Configuring git credentials for agent...")
-        try:
-            providers = resolve_git_credential_providers(config, agent_cfg.git_credentials)
-            cred_lines: list[str] = []
-            for cred_name, provider in providers.items():
-                token = git_tokens.get(cred_name)
-                if token:
-                    cred_lines.extend(provider.credential_lines(token))
-            if cred_lines:
-                cred_content = "\n".join(cred_lines) + "\n"
-                agent_target.write_file(f"{home}/.git-credentials", cred_content, mode="0600")
-                agent_target.run("git config --global credential.helper store")
-        except Exception as e:
-            output.warn(f"agent git credential setup failed: {e}")
+        providers = resolve_git_credential_providers(config, agent_cfg.git_credentials)
+        missing = [
+            cred_name for cred_name in providers
+            if not git_tokens or cred_name not in git_tokens
+        ]
+        if missing:
+            from agentworks.errors import StateError
+
+            raise StateError(
+                f"agent git credential setup: token(s) not resolved by "
+                f"the framework for {missing!r}; caller must pre-resolve "
+                f"every provider's token before invoking this function",
+                entity_kind="git-credential",
+                entity_name=missing[0],
+            )
+        cred_lines: list[str] = []
+        for cred_name, provider in providers.items():
+            assert git_tokens is not None  # missing-check above narrows it
+            cred_lines.extend(provider.credential_lines(git_tokens[cred_name]))
+        if cred_lines:
+            cred_content = "\n".join(cred_lines) + "\n"
+            agent_target.write_file(f"{home}/.git-credentials", cred_content, mode="0600")
+            agent_target.run("git config --global credential.helper store")
 
     # User install commands + login-shell PATH profile fragment.
     _run_agent_install_commands(

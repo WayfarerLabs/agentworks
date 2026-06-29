@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from agentworks.resources.requirement import SecretRequirement
 
 
 @dataclass(frozen=True)
@@ -30,3 +34,32 @@ class EnvEntry:
             raise ValueError(
                 f"EnvEntry for {self.key!r} cannot set both value and secret",
             )
+
+    def required_resources(
+        self, source: tuple[str, str]
+    ) -> list[SecretRequirement]:
+        """Emit a ``SecretRequirement`` for this entry's secret reference,
+        or an empty list for plaintext entries.
+
+        Called by the Resource that owns this env entry's table (admin,
+        the four template kinds, named_console). ``source`` is the
+        declaring Resource's ``(kind, name)`` identity. The usage text is
+        derived from the env-var key, so a typo'd KEY surfaces in
+        diagnostics with the actual variable name.
+
+        The import of ``SecretRequirement`` is ``TYPE_CHECKING``-only to
+        keep ``EnvEntry`` framework-ignorant at runtime; constructed
+        lazily inside the method.
+        """
+        if self.secret is None:
+            return []
+        from agentworks.resources.requirement import SecretRequirement
+
+        return [
+            SecretRequirement(
+                name=self.secret,
+                kind="secret",
+                usage=f"the {self.key} env var",
+                source=source,
+            )
+        ]

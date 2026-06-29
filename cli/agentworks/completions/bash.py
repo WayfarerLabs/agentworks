@@ -33,6 +33,7 @@ DYNAMIC_SNIPPETS: dict[str, str] = {
     "agent_templates": (
         "$(sed -n 's/^\\[agent_templates\\.\\([^]]*\\)\\]/\\1/p' \"$HOME/.config/agentworks/config.toml\" 2>/dev/null)"
     ),
+    "secrets": ("$(agw secret list --names-only 2>/dev/null)"),
 }
 
 

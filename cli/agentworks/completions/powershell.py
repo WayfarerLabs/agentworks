@@ -81,6 +81,10 @@ DYNAMIC_SNIPPETS: dict[str, str] = {
         " | ForEach-Object { $_.Matches[0].Groups[1].Value } }"
         ' $t | Where-Object { $_ -like "$wordToComplete*" } }'
     ),
+    "secrets": (
+        "(agw secret list --names-only 2>$null |"
+        ' Where-Object { $_ -like "$wordToComplete*" })'
+    ),
 }
 
 

@@ -2,15 +2,12 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Annotated
+from typing import Annotated
 
 import typer
 
-from agentworks.cli._app import app, require_interactive
-from agentworks.cli._helpers import get_db, parse_csv_filter, prompt_vm, prompt_workspace
-
-if TYPE_CHECKING:
-    from agentworks.db import Database, VMRow, WorkspaceRow
+from agentworks.cli._app import app
+from agentworks.cli._helpers import get_db, parse_csv_filter
 
 session_app = typer.Typer(
     name="session",
@@ -32,7 +29,20 @@ def session_create(
     workspace_template: Annotated[
         str | None, typer.Option("--workspace-template", help="Template for new workspace")
     ] = None,
-    vm: Annotated[str | None, typer.Option("--vm", help="VM for new workspace")] = None,
+    vm: Annotated[
+        str | None,
+        typer.Option(
+            "--vm",
+            help=(
+                "VM anchor. Optional. When omitted: pinned by the workspace or "
+                "agent if either resolves to one; otherwise auto-selected from "
+                "the single usable VM, or prompted from the list. Required only "
+                "in non-interactive mode when nothing else pins the VM and more "
+                "than one usable VM exists. When passed alongside other anchors, "
+                "must agree with them."
+            ),
+        ),
+    ] = None,
     new_agent: Annotated[bool, typer.Option("--new-agent", help="Create a new agent for this session")] = False,
     agent_name: Annotated[str | None, typer.Option("--agent-name", help="Name for new agent")] = None,
     agent_template: Annotated[
@@ -42,135 +52,23 @@ def session_create(
     """Create and start a session in a workspace."""
     from agentworks.config import load_config
     from agentworks.sessions.manager import create_session
-    from agentworks.workspaces.manager import create_workspace
-
-    # Validate flag combinations before any prompts
-    if admin and agent:
-        typer.echo("Error: --admin and --agent are mutually exclusive", err=True)
-        raise typer.Exit(1)
-    if admin and new_agent:
-        typer.echo("Error: --admin and --new-agent are mutually exclusive", err=True)
-        raise typer.Exit(1)
-    if agent and new_agent:
-        typer.echo("Error: --agent and --new-agent are mutually exclusive", err=True)
-        raise typer.Exit(1)
-    if workspace and new_workspace:
-        typer.echo("Error: --workspace and --new-workspace are mutually exclusive", err=True)
-        raise typer.Exit(1)
-    if not new_workspace and (workspace_name or workspace_template or vm):
-        typer.echo(
-            "Error: --workspace-name, --workspace-template, and --vm require --new-workspace",
-            err=True,
-        )
-        raise typer.Exit(1)
-    if not new_agent and (agent_name or agent_template):
-        typer.echo(
-            "Error: --agent-name and --agent-template require --new-agent",
-            err=True,
-        )
-        raise typer.Exit(1)
-
-    db = get_db()
-    config = load_config()
-
-    resolved_vm: VMRow | None = None
-
-    if new_workspace:
-        resolved_vm = prompt_vm(db, vm)
-        resolved_workspace = workspace_name  # may be None, resolved after session name
-
-        # Resolve mode (need VM name for agent lookup). Skip the prompt when
-        # --new-agent is set -- the user has already chosen to create a new agent.
-        resolved_agent: str | None = agent
-        if not admin and agent is None and not new_agent:
-            # Look up agents on the target VM
-            vm_agents = db.list_agents(vm_name=resolved_vm.name)
-            if vm_agents:
-                require_interactive("--admin or --agent")
-                from agentworks import output
-
-                options = ["admin"]
-                for a in vm_agents:
-                    label = f"agent: {a.name}"
-                    if a.template:
-                        label += f" [{a.template}]"
-                    options.append(label)
-                idx = output.choose("Run session as:", options)
-                resolved_agent = None if idx == 0 else vm_agents[idx - 1].name
-
-        resolved_ws_name = resolved_workspace or name
-
-        create_workspace(
-            db,
-            config,
-            name=resolved_ws_name,
-            vm_name=resolved_vm.name,
-            template_name=workspace_template,
-        )
-        resolved_workspace = resolved_ws_name
-    else:
-        ws = prompt_workspace(db, workspace)
-        resolved_workspace = ws.name
-
-        # Resolve mode. Skip the prompt when --new-agent is set.
-        resolved_agent: str | None = agent  # type: ignore[no-redef]
-        if not admin and agent is None and not new_agent:
-            resolved_agent = _prompt_session_mode(db, ws)
-
-        if new_agent:
-            # Agents are VM-scoped; pick up the workspace's VM.
-            vm_row = db.get_vm(ws.vm_name)
-            assert vm_row is not None  # FK guarantees existence
-            resolved_vm = vm_row
-
-    if new_agent:
-        assert resolved_vm is not None
-        from agentworks.agents.manager import create_agent
-
-        resolved_agent_name = agent_name or name
-        create_agent(
-            db,
-            config,
-            name=resolved_agent_name,
-            vm_name=resolved_vm.name,
-            template=agent_template,
-        )
-        resolved_agent = resolved_agent_name
 
     create_session(
-        db,
-        config,
+        get_db(),
+        load_config(),
         name=name,
-        workspace_name=resolved_workspace,
         template_name=template,
-        agent_name=resolved_agent,
-        created_workspace=new_workspace,
-        created_agent=new_agent,
+        workspace=workspace,
+        new_workspace=new_workspace,
+        workspace_name=workspace_name,
+        workspace_template=workspace_template,
+        agent=agent,
+        new_agent=new_agent,
+        agent_name=agent_name,
+        agent_template=agent_template,
+        admin=admin,
+        vm_name=vm,
     )
-
-
-def _prompt_session_mode(db: Database, ws: WorkspaceRow) -> str | None:
-    """Prompt for admin vs agent mode. Returns agent name or None for admin."""
-    from agentworks import output
-
-    agents = db.list_agents(vm_name=ws.vm_name)
-    if not agents:
-        # No agents on this VM, default to admin
-        return None
-
-    require_interactive("--admin or --agent")
-
-    options = ["admin"]
-    for a in agents:
-        label = f"agent: {a.name}"
-        if a.template:
-            label += f" [{a.template}]"
-        options.append(label)
-
-    idx = output.choose("Run session as:", options)
-    if idx == 0:
-        return None
-    return agents[idx - 1].name
 
 
 @session_app.command("describe")
@@ -204,8 +102,7 @@ def session_list(
     # trip the mutex.
     parsed_agent = parse_csv_filter(agent)
     if admin and parsed_agent is not None:
-        typer.echo("Error: --admin and --agent are mutually exclusive", err=True)
-        raise typer.Exit(1)
+        raise typer.BadParameter("--admin and --agent are mutually exclusive")
 
     list_sessions(
         get_db(),

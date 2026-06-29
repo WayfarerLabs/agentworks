@@ -24,7 +24,7 @@ from agentworks.env import (
     ResourceContext,
     vm_stable_identity_env,
 )
-from agentworks.errors import ConnectivityError, ExternalError, NotFoundError
+from agentworks.errors import ConnectivityError, ExternalError, NotFoundError, StateError
 from agentworks.ssh import SSHError, SSHLogger
 from agentworks.transports import (
     SSHTransport,
@@ -1162,11 +1162,14 @@ def rejoin_tailscale(
     db: Database,
     vm_name: str,
     exec_target: Transport,
+    *,
+    auth_key: str,
 ) -> str:
     """Re-join Tailscale on a VM that lost its node (e.g. ephemeral key).
 
-    Installs Tailscale if needed, prompts for an auth key, joins the tailnet,
-    and updates the DB with the new Tailscale IP.
+    Installs Tailscale if needed, joins the tailnet, and updates the DB
+    with the new Tailscale IP. ``auth_key`` is resolved by the caller via
+    the framework's eager-resolve (Phase 1c).
 
     Returns the new Tailscale IP.
     """
@@ -1179,7 +1182,7 @@ def rejoin_tailscale(
         check=False,
     )
 
-    return _join_tailscale(db, vm_name, exec_target)
+    return _join_tailscale(db, vm_name, exec_target, auth_key=auth_key)
 
 
 def _join_tailscale(
@@ -1187,19 +1190,18 @@ def _join_tailscale(
     vm_name: str,
     exec_target: Transport,
     *,
+    auth_key: str,
     logger: SSHLogger | None = None,
-    tailscale_auth_key: str | None = None,
 ) -> str:
-    """Join Tailscale, update DB. Returns the Tailscale IP."""
-    from agentworks.env_compat import read_env_with_legacy
+    """Join Tailscale, update DB. Returns the Tailscale IP.
 
-    ts_auth_key = tailscale_auth_key or read_env_with_legacy("AW_TAILSCALE_AUTH_KEY", "TAILSCALE_AUTH_KEY")
-    if not ts_auth_key:
-        ts_auth_key = output.prompt_secret(
-            "  Tailscale auth key",
-            hint="Generate a key at https://login.tailscale.com/admin/settings/keys",
-        )
-    quoted_key = shlex.quote(ts_auth_key)
+    Phase 1c of the Resource Registry SDD: the Tailscale auth key
+    arrives via the ``auth_key`` keyword argument from the framework's
+    eager-resolve at manager-entry. The legacy env-var fallback and
+    prompt-here-if-missing path are gone; callers must thread the
+    resolved value in.
+    """
+    quoted_key = shlex.quote(auth_key)
     # Daemon-side flags (e.g. --tun=userspace-networking for WSL2) live in
     # /etc/default/tailscaled, set during bootstrap. `tailscale up` is the
     # client and only takes client-side flags.
@@ -1207,9 +1209,9 @@ def _join_tailscale(
 
     # Redact the auth key from any attached loggers before it appears in logs.
     if exec_target.logger is not None:
-        exec_target.logger.add_redaction(ts_auth_key)
+        exec_target.logger.add_redaction(auth_key)
     if logger is not None:
-        logger.add_redaction(ts_auth_key)
+        logger.add_redaction(auth_key)
 
     exec_target.run(ts_cmd, sudo=True)
     result = exec_target.run("tailscale ip -4", sudo=True)
@@ -1233,8 +1235,8 @@ def initialize_vm(
     providers: dict[str, GitCredentialProvider],
     *,
     admin_username: str = "agentworks",
-    tailscale_auth_key: str | None = None,
-    git_tokens: dict[str, str] | None = None,
+    tailscale_auth_key: str,
+    git_tokens: dict[str, str],
     bootstrap_complete: bool = False,
     tailscale_ip: str | None = None,
     on_tailscale_ready: Callable[[], None] | None = None,
@@ -1244,14 +1246,17 @@ def initialize_vm(
     Phase A (bootstrap) steps are fatal -- any failure aborts initialization.
     Phase B (setup) steps are non-fatal -- failures are logged as warnings
     and the VM gets 'partial' status instead of 'complete'.
+
+    Phase 1c (Tailscale) + Phase 1d (git credentials): both
+    ``tailscale_auth_key`` and ``git_tokens`` are required; ``create_vm``
+    resolves them via the framework at manager-entry and threads them in.
     """
     from agentworks.ssh import SSHLogger
     from agentworks.vms.manager import keep_vm_active
 
     home = f"/home/{admin_username}"
     logger = SSHLogger(vm_name, "vm-create")
-    if tailscale_auth_key:
-        logger.add_redaction(tailscale_auth_key)
+    logger.add_redaction(tailscale_auth_key)
     if git_tokens:
         for token in git_tokens.values():
             logger.add_redaction(token)
@@ -1336,7 +1341,7 @@ def run_initialization(
     admin_username: str,
     logger: SSHLogger,
     *,
-    git_tokens: dict[str, str] | None = None,
+    git_tokens: dict[str, str],
     is_first_init: bool = False,
 ) -> None:
     """Run Phase B (initialization) with status tracking and event logging.
@@ -1345,6 +1350,8 @@ def run_initialization(
     from reinit_vm() for repeatable re-initialization. Pass
     ``is_first_init=True`` from initialize_vm so steps that expect prior
     state (e.g. tmux socket dirs) can skip warnings on missing state.
+    Phase 1d: ``git_tokens`` is required (no provider-side fallback);
+    callers must thread the framework-resolved dict in.
     """
     db.insert_vm_event(vm_name, "init_started")
 
@@ -1387,7 +1394,7 @@ def _phase_a_bootstrap(
     platform: str,
     logger: SSHLogger,
     *,
-    tailscale_auth_key: str | None = None,
+    tailscale_auth_key: str,
     bootstrap_complete: bool = False,
     tailscale_ip: str | None = None,
 ) -> Transport:
@@ -1472,12 +1479,14 @@ def _run_bootstrap_script(
     platform: str,
     logger: SSHLogger,
     *,
-    tailscale_auth_key: str | None = None,
+    tailscale_auth_key: str,
 ) -> str:
     """Generate, copy, and run a bootstrap script on the VM. Returns Tailscale IP.
 
     Used for WSL2 where the bootstrap cannot be embedded in a provisioner's
-    native mechanism (Lima provision block, Azure cloud-init).
+    native mechanism (Lima provision block, Azure cloud-init). Phase 1c:
+    ``tailscale_auth_key`` is required; the framework-resolved value
+    arrives from ``create_vm`` -> ``initialize_vm`` -> ``_phase_a_bootstrap``.
     """
     import tempfile
 
@@ -1485,15 +1494,12 @@ def _run_bootstrap_script(
 
     output.info("Bootstrapping VM...")
 
-    # Resolve Tailscale auth key
-    ts_auth_key = _resolve_tailscale_auth_key(tailscale_auth_key)
-
     ssh_public_key = config.operator.ssh_public_key.read_text().strip()
     script = generate_bootstrap_script(
         admin_username=admin_username,
         ssh_public_key=ssh_public_key,
         provisioning_packages=PROVISIONING_PACKAGES,
-        tailscale_auth_key=ts_auth_key,
+        tailscale_auth_key=tailscale_auth_key,
         hostname=vm_hostname(platform, vm_name),
         # WSL2 provisioner handles swap natively before bootstrap; every other
         # platform lets the script create the swapfile.
@@ -1578,19 +1584,6 @@ def _run_bootstrap_script(
     return tailscale_ip
 
 
-def _resolve_tailscale_auth_key(tailscale_auth_key: str | None = None) -> str:
-    """Resolve Tailscale auth key from argument, env var, or prompt."""
-    from agentworks.env_compat import read_env_with_legacy
-
-    key = tailscale_auth_key or read_env_with_legacy("AW_TAILSCALE_AUTH_KEY", "TAILSCALE_AUTH_KEY")
-    if key:
-        return key
-    return output.prompt_secret(
-        "  Tailscale auth key",
-        hint="Generate a key at https://login.tailscale.com/admin/settings/keys",
-    )
-
-
 def _phase_b_setup(
     db: Database,
     config: Config,
@@ -1601,10 +1594,14 @@ def _phase_b_setup(
     admin_username: str,
     logger: SSHLogger,
     *,
-    git_tokens: dict[str, str] | None = None,
+    git_tokens: dict[str, str],
     is_first_init: bool = False,
 ) -> None:
-    """Phase B: Setup (over Tailscale SSH). Non-fatal steps warn and continue."""
+    """Phase B: Setup (over Tailscale SSH). Non-fatal steps warn and continue.
+
+    ``git_tokens`` is required (Phase 1d): every provider listed in
+    ``providers`` must have a pre-resolved token value in the dict.
+    """
     from agentworks.catalog import load_catalog, validate_selections
 
     output.info("Initializing VM...")
@@ -1960,20 +1957,41 @@ def _configure_git_credentials(
     ts_target: Transport,
     providers: dict[str, GitCredentialProvider],
     logger: SSHLogger,
-    git_tokens: dict[str, str] | None = None,
+    *,
+    git_tokens: dict[str, str],
 ) -> None:
-    """Configure git credential store on the VM with pre-collected or prompted tokens."""
+    """Configure git credential store on the VM with the pre-resolved
+    framework tokens.
+
+    Phase 1d of the Resource Registry SDD: ``git_tokens`` is required
+    (no provider-side fallback); the framework resolves every token
+    at manager-entry and threads the ``{credential_name: value}``
+    dict in. Any name in ``providers`` that doesn't have a matching
+    key in ``git_tokens`` is a contract violation (caller bug); we
+    raise loudly rather than silently dropping the credential, since
+    silently shipping a VM with a missing credential the operator
+    asked for is the worst kind of footgun.
+    """
     logger.step("Git credentials")
     output.detail("Configuring git credentials...")
 
-    tokens = git_tokens or {}
+    missing = [name for name in providers if name not in git_tokens]
+    if missing:
+        raise StateError(
+            f"git credential setup: token(s) not resolved by the framework "
+            f"for {missing!r}; caller must pre-resolve every provider's "
+            f"token via _collect_git_tokens before invoking this function",
+            entity_kind="git-credential",
+            entity_name=missing[0],
+        )
 
-    # Collect credential lines from all providers
+    # Collect credential lines from all providers.
     credential_lines: list[str] = []
     for name, provider in providers.items():
         try:
-            token = tokens.get(name) or provider.obtain_token(vm_name)
-            credential_lines.extend(provider.credential_lines(token))
+            credential_lines.extend(
+                provider.credential_lines(git_tokens[name])
+            )
         except Exception as e:
             msg = f"git credential setup failed for {name}: {e}"
             logger.warning(msg)

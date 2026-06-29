@@ -251,14 +251,15 @@ VMs join a [Tailscale](https://tailscale.com/) tailnet during provisioning. All 
 access (workspace shell, VM shell, initialization) goes over Tailscale, providing secure
 connectivity without exposing SSH ports to the public internet.
 
-During `vm create` (and `vm start` when re-joining), you will be prompted for a Tailscale auth key
-unless the `AW_TAILSCALE_AUTH_KEY` environment variable is set (legacy `TAILSCALE_AUTH_KEY` is still
-read with a deprecation warning, and will be removed in a future release). Generate keys at the
-[Tailscale admin console](https://login.tailscale.com/admin/settings/keys).
+During `vm create` (and `vm start` when re-joining), the Tailscale auth key is resolved as the
+`tailscale-auth-key` secret via the framework's backend chain (see
+[Environment Variables and Secrets](cli/README.md#environment-variables-and-secrets)). The default
+chain reads from `AW_SECRET_TAILSCALE_AUTH_KEY` first and falls through to an interactive prompt.
+Generate keys at the [Tailscale admin console](https://login.tailscale.com/admin/settings/keys).
 
 Ephemeral auth keys (with `?ephemeral=true` appended) are fully supported. The Tailscale node is
 automatically removed from the tailnet when the VM goes offline. Agentworks handles re-joining
-gracefully on `vm start` by prompting for a new auth key (or using `AW_TAILSCALE_AUTH_KEY`).
+gracefully on `vm start` by re-resolving the same secret through the chain.
 
 ### Tmux
 
