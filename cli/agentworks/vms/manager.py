@@ -475,15 +475,15 @@ def list_vms(db: Database) -> None:
 
     header = (
         f"{'NAME':<20} {'PLATFORM':<10} {'TEMPLATE':<12} {'HOST':<15} {'PROV':<12} {'INIT':<12} "
-        f"{'WS/AG/TS':<10} {'TAILSCALE':<20} {'CREATED'}"
+        f"{'WS/AG/SE':<10} {'TAILSCALE':<20} {'CREATED'}"
     )
     output.info(header)
     output.info("-" * len(header))
     for vm in vms:
         ws = db.count_workspaces_on_vm(vm.name)
         ag = db.count_agents_on_vm(vm.name)
-        ts = db.count_sessions_on_vm(vm.name)
-        counts = f"{ws}/{ag}/{ts}"
+        se = db.count_sessions_on_vm(vm.name)
+        counts = f"{ws}/{ag}/{se}"
         output.info(
             f"{vm.name:<20} {vm.platform:<10} {vm.template or '-':<12} {vm.vm_host_name or '-':<15} "
             f"{vm.provisioning_status:<12} {vm.init_status:<12} "

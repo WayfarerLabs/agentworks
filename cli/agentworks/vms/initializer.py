@@ -31,6 +31,7 @@ from agentworks.transports import (
     Transport,
 )
 from agentworks.vms.cloud_init import INIT_SYSTEM_PACKAGES, PROVISIONING_PACKAGES
+from agentworks.vms.skel import BASHRC, ZSHRC
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -43,6 +44,9 @@ if TYPE_CHECKING:
 
 AGENTWORKS_PROFILE = ".agentworks-profile.sh"
 AGENTWORKS_RC = ".agentworks-rc.sh"
+
+SKEL_BASHRC_PATH = "/etc/skel/.bashrc"
+SKEL_ZSHRC_PATH = "/etc/skel/.zshrc"
 
 
 def _ensure_agentworks_files_sourced(
@@ -189,6 +193,55 @@ AGENTWORKS_SUDOERS_ENV_KEEP_PATH = "/etc/sudoers.d/50-agentworks-env-keep"
 # Marker comment used to find and replace the identity block in
 # /etc/zsh/zprofile across reinit cycles.
 _ZSH_IDENTITY_MARKER = "# agentworks-identity"
+
+
+def _write_skel_seeds(
+    target: Transport,
+    logger: SSHLogger,
+) -> None:
+    """Write the agentworks-managed shell rc seeds to ``/etc/skel``.
+
+    Both ``/etc/skel/.bashrc`` and ``/etc/skel/.zshrc`` are
+    agentworks-owned on the VM: every reinit overwrites them. Future
+    ``useradd -m`` (e.g. agent creation) inherits the seed
+    automatically -- no explicit copy in agent setup needed.
+
+    Caller MUST schedule this AFTER ``_install_apt_packages``:
+    ``/etc/skel/.bashrc`` is a Debian conffile shipped by ``bash``, so
+    an apt upgrade under ``--force-confnew`` (the standard install
+    flag) would silently replace the seed if we wrote it earlier.
+    Same constraint -- and same rationale -- as
+    ``_write_agentworks_identity_profile`` for ``/etc/zsh/zprofile``.
+
+    Operators install their own dotfiles directly into a user's home
+    AFTER user creation. The seed only ever lands in user homes ONCE
+    (at provision / useradd time); agentworks never refreshes the
+    user-home copies (see issue #121). The grep-or-append source-line
+    machinery in ``_write_agentworks_rc`` /
+    ``_ensure_agentworks_files_sourced`` continues to no-op cleanly
+    on a seeded user because the seed already contains the
+    ``.agentworks-rc.sh`` substring the grep matches against.
+    """
+    logger.step("Shell rc skel")
+    output.detail(f"Writing {SKEL_BASHRC_PATH} and {SKEL_ZSHRC_PATH}...")
+
+    try:
+        for path, content in (
+            (SKEL_BASHRC_PATH, BASHRC),
+            (SKEL_ZSHRC_PATH, ZSHRC),
+        ):
+            q_content = shlex.quote(content)
+            target.run(
+                f"printf '%s' {q_content} | sudo tee {path} > /dev/null",
+            )
+            target.run(f"sudo chmod 644 {path}")
+    except SSHError as e:
+        msg = (
+            f"skel seed write failed: {e}. "
+            "Re-run `agw vm reinit` to retry."
+        )
+        logger.warning(msg)
+        output.warn(msg)
 
 
 def _write_agentworks_identity_profile(
@@ -1639,6 +1692,14 @@ def _phase_b_setup(
         ts_target, vm_stable_identity_env(identity_ctx), logger,
     )
 
+    # /etc/skel seeds. MUST run AFTER apt for the same reason as the
+    # identity profile above: `/etc/skel/.bashrc` is a Debian conffile
+    # shipped by the `bash` package. Running before apt's
+    # `--force-confnew` would let a bash upgrade silently replace the
+    # seed with Debian's stock skel (saving ours as .dpkg-old). Future
+    # `useradd -m` would then inherit Debian's skel instead.
+    _write_skel_seeds(ts_target, logger)
+
     # Non-fatal: snap packages
     if config.vm.snap:
         logger.step("Snap packages")
@@ -1652,15 +1713,12 @@ def _phase_b_setup(
                 output.warn(msg)
 
     # Non-fatal: set default shell (before install commands so installers
-    # write to the correct rc file)
+    # write to the correct rc file). The zsh ``zsh-newuser-install``
+    # first-run wizard is pre-empted by the skel seed.
     logger.step("Shell configuration")
     admin_shell = config.admin.shell
     output.detail(f"Setting shell to {admin_shell}...")
     try:
-        # Touch .zshrc before chsh to prevent zsh's first-run wizard
-        # (zsh-newuser-install) from prompting interactively on next login
-        if admin_shell == "zsh":
-            ts_target.run(f"touch {home}/.zshrc", check=False)
         ts_target.run(
             f"usermod -s $(which {shlex.quote(admin_shell)}) {shlex.quote(admin_username)}",
             sudo=True,

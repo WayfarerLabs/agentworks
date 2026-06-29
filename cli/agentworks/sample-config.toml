@@ -241,7 +241,7 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 
 #[admin.config]
 #username = "agentworks"                    # admin username on VMs (default: agentworks)
-#shell = "zsh"                              # admin shell (default: zsh)
+#shell = "bash"                             # admin shell (default: bash, matches Debian's user-default; "zsh" also supported)
 #git_credentials = ["github"]              # git credential providers to configure
 #user_install_commands = ["bun"]             # per-user commands from catalog
 # -- Dotfiles (source refs: local path or git::, see docs/guides/source-refs.md) --
