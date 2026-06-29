@@ -1,10 +1,17 @@
 """``NamedConsoleTemplateKind``: the framework's strategy for the
-``"named_console_template"`` singleton-backed kind.
+``"named_console_template"`` kind.
 
-Same shape as ``admin_template``: ``Config.publish_to`` always publishes
+Operator-surface-singleton today: ``Config.publish_to`` always publishes
 ``named_console_template:default`` (even when no ``[named_console]``
 section exists), so the auto-declare path is a safety net for typo'd
-references rather than a routine occurrence.
+references rather than a routine occurrence. Phase 2a.3 plurified
+``admin_template`` at the framework level (matching the other template
+kinds) but deliberately scoped that change to admin only; this kind
+follows when there's an operator need to declare named console
+templates. The kind shape (``auto_declare_names = {"default"}``,
+synthesize tolerating ``requirements=()``) is already aligned with the
+named-multi-instance template kinds, so plurifying the operator surface
+later is a parser/loader change, not a framework change.
 """
 
 from __future__ import annotations

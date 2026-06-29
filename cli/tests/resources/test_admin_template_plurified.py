@@ -92,19 +92,17 @@ def test_admin_required_resources_sources_from_self_name() -> None:
 
 
 # -- Framework kind shape ---------------------------------------------------
-
-
-def test_admin_template_kind_attributes() -> None:
-    kind = KIND_REGISTRY["admin_template"]
-    assert kind.kind == "admin_template"
-    assert kind.miss_policy == "auto-declare"
-    assert kind.auto_declare_names == frozenset({"default"})
+# Kind attributes (kind / miss_policy / auto_declare_names) are pinned in
+# tests/resources/test_kind_registry.py; this file pins only the
+# plurification-specific behavior layered on top.
 
 
 def test_admin_template_kind_synthesize_returns_admin_config_with_name() -> None:
     """``_AdminTemplateKind.synthesize(())`` builds an empty-defaults
     ``AdminConfig`` with ``name="default"`` -- the only reserved
-    auto-declare name.
+    auto-declare name. Pinning the explicit ``name="default"`` because
+    Phase 2a.3 added the field; a future change that drops it would
+    silently regress the named-multi-instance shape.
     """
     kind = KIND_REGISTRY["admin_template"]
     result = kind.synthesize(())
@@ -140,13 +138,15 @@ def test_registry_can_hold_multiple_admin_template_rows(tmp_path: Path) -> None:
     assert names == ["default", "work"]
 
 
-def test_admin_template_kind_errors_on_typo_in_inherits_style_reference(
+def test_admin_template_kind_errors_on_unreserved_name_reference(
     tmp_path: Path,
 ) -> None:
-    """The reserved-name restriction still applies: a requirement
-    targeting ``admin_template:custom`` (without a matching publisher)
-    errors via the framework's miss policy. Proves the plurification
-    doesn't loosen the auto-declare guard.
+    """The reserved-name restriction still applies after plurification:
+    a downstream Resource whose ``required_resources()`` points at
+    ``admin_template:custom`` (without a matching publisher) errors
+    via the framework's miss policy. Proves the plurification doesn't
+    loosen the auto-declare guard -- ``"default"`` is still the only
+    name the framework will synthesize on demand.
     """
     from dataclasses import dataclass
 
@@ -212,3 +212,30 @@ def test_loader_admin_config_section_still_parses(tmp_path: Path) -> None:
     cfg = load_config(cfg_file, warn_issues=False)
     assert cfg.admin.name == "default"
     assert cfg.admin.shell == "fish"
+
+
+def test_plurified_operator_surface_not_yet_parsed(tmp_path: Path) -> None:
+    """Today's loader doesn't recognize ``[admin_templates.<name>]``;
+    the section silently passes through (no top-level recognized-keys
+    sweep) and ``cfg.admin`` is unchanged. Pinning this so a future
+    SDD that wires the plurified parsing has a known starting state.
+    """
+    cfg_file = _write_cfg(
+        tmp_path / "config.toml",
+        """
+        [admin.config]
+        shell = "zsh"
+
+        [admin_templates.work]
+        shell = "bash"
+        """,
+    )
+    cfg = load_config(cfg_file, warn_issues=False)
+    # The singleton admin still parses normally.
+    assert cfg.admin.name == "default"
+    assert cfg.admin.shell == "zsh"
+    # The unrecognized [admin_templates.*] block doesn't produce
+    # additional admin_template Resources today.
+    registry = build_registry(cfg)
+    names = sorted(r.name for r in registry.iter_kind("admin_template"))
+    assert names == ["default"]

@@ -593,6 +593,14 @@ code.
   it to a structural check so any kind with a `description: str` field benefits automatically (FRD
   R9, HLA Framework metadata attachment). The Phase 2a plan carries the checkbox; no Phase 1 action
   needed.
+- **`NamedConsoleConfig` plurification is reserved for a future SDD.** Phase 2a.3 plurified
+  `AdminTemplateKind` at the framework level (matching the four named template kinds); the kind
+  shape for `NamedConsoleTemplateKind` is already aligned (`auto_declare_names = {"default"}`,
+  `synthesize` tolerating `requirements=()`), but `NamedConsoleConfig` itself wasn't given a `name`
+  field. When operator demand for named console templates lands, the same shape Phase 2a.3 used for
+  admin applies: add `name: str = "default"` to `NamedConsoleConfig`; update `Config.publish_to` to
+  use `self.named_console.name` (currently hardcoded `"default"`); update the kind module's
+  docstring to drop the singleton framing. No framework-side work needed.
 
 ## Sequencing notes
 

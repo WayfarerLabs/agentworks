@@ -39,8 +39,11 @@ class ResourceRequirement:
     - ``source``: ``(kind, name)`` pair identifying the declaring
       Resource. ``kind`` matches the declaring Resource's kind (e.g.,
       ``"vm_template"`` for ``vm_templates.azure-prod``); ``name`` is the
-      declaring Resource's name. Singleton kinds use ``"default"`` as the
-      name (e.g., ``("admin_template", "default")``).
+      declaring Resource's name. Kinds whose operator surface is still
+      a singleton today (``admin_template``, ``named_console_template``)
+      always source from ``"default"``; the framework treats those kinds
+      as named-multi-instance under the hood, so a future plurified
+      operator surface flows through the same shape unchanged.
     """
 
     name: str

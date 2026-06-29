@@ -43,11 +43,16 @@ class _AdminTemplateKind:
 
     def synthesize(self, requirements: Sequence[ResourceRequirement]) -> AdminConfig:
         """Build an empty-defaults ``AdminConfig`` for an auto-declared
-        ``admin_template:default``. In practice ``Config.publish_to``
-        always publishes a real one before ``finalize`` runs, so the
-        always-materialize pre-step short-circuits and this call is
-        rare. See ``vm_template.py``'s ``synthesize`` for the rationale
-        on why the non-empty-``requirements`` path is preserved.
+        ``admin_template:default``.
+
+        Rarely actually called: ``Config.publish_to`` always publishes a
+        real ``admin_template:default`` from ``Config.admin`` (even when
+        the operator omits every ``[admin.*]`` section -- the loader
+        synthesizes an empty-defaults instance), so the always-materialize
+        pre-step's "is the name already in the registry?" short-circuits
+        before reaching this method. See ``vm_template.py``'s
+        ``synthesize`` for the rationale on why the non-empty-
+        ``requirements`` path is preserved.
         """
         source = requirements[0].source if requirements else ALWAYS_MATERIALIZE_SOURCE
         return AdminConfig(name="default", origin=Origin.auto_declared(source=source))
