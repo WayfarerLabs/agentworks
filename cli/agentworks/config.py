@@ -1478,7 +1478,7 @@ def _load_secrets(
 
 def _load_secret_backends(
     data: dict[str, object],
-    issues: list[str],
+    issues: list[str],  # noqa: ARG001 - kept for caller-symmetry with _load_secret_config
     decls: _SectionLineMap,
 ) -> dict[str, SecretBackendConfig]:
     """Load [secret_backends.*] sections into SecretBackendConfig entries.
@@ -1501,8 +1501,14 @@ def _load_secret_backends(
         kind_str = str(kind)
         if not isinstance(bdata, dict):
             raise ConfigError(f"secret_backends.{kind_str} must be a table")
+        # Phase 2b.2: unknown backend kinds in [secret_backends.<kind>]
+        # are a hard error (matching git_credentials.<name>.type's
+        # treatment). Previously a soft config-load warning; the
+        # asymmetry between "operator typo'd a provider type" (error)
+        # and "operator typo'd a backend kind" (warn) wasn't earning
+        # its keep.
         if kind_str not in known_kinds:
-            issues.append(
+            raise ConfigError(
                 f"[secret_backends.{kind_str}] declares an unknown backend kind; "
                 f"v1 supports {sorted(known_kinds)}"
             )

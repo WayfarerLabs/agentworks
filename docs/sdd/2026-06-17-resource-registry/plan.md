@@ -534,6 +534,13 @@ Definition of done: every kind in the registry uses framework dispatch; catalog 
 first-class Resources via the catalog publisher; bespoke validation removed from the loader; CI
 green; reviewer-approved.
 
+**Out of scope by design**: `claude_marketplaces` / `claude_plugins` on `AdminConfig` /
+`AgentTemplate` are string lists naming Claude Code marketplaces / plugins; validation is the Claude
+CLI's job at install time, so making them framework kinds would add an empty surface with no
+validation upside. `apt_sources` is also intentionally not a framework kind: it's an internal
+cross-reference inside the catalog (validated by `catalog._validate_references`), never directly
+referenced from operator-facing config fields.
+
 ## Phase 2c: `agw resource list` / `agw resource describe`
 
 Goal: add the cross-kind inspection commands.

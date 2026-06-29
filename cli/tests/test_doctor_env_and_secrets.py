@@ -269,7 +269,13 @@ backends = ["env-var", "prompt"]
 def test_mapping_to_declared_but_inactive_kind_warns(tmp_path: Path) -> None:
     """A backend_mappings entry referencing a kind that IS declared in
     [secret_backends.*] but NOT listed in [secret_config].backends is
-    reported as a warning (mapping has no effect)."""
+    reported as a warning (mapping has no effect).
+
+    Phase 2b.2 made unknown backend kinds in [secret_backends.*] a hard
+    error, so this test uses 'prompt' (a known kind) declared but
+    excluded from the active chain to keep exercising the
+    declared-but-inactive warning path.
+    """
     cfg = _write_config(
         tmp_path,
         extras="""
@@ -278,19 +284,19 @@ TOKEN = { secret = "shared" }
 
 [secrets.shared]
 description = "shared token"
-backend_mappings.onepassword = "op://Personal/x/y"
+backend_mappings.prompt = false
 
-[secret_backends.onepassword]
+[secret_backends.prompt]
 
 [secret_config]
-backends = ["env-var", "prompt"]
+backends = ["env-var"]
 """,
     )
     config = load_config(cfg, warn_issues=False)
     g = _check_secrets(config)
     warns = [c for c in g.checks if c.status == Status.WARN]
     assert any(
-        "maps onepassword" in c.name and "not active" in (c.message or "")
+        "maps prompt" in c.name and "not active" in (c.message or "")
         for c in warns
     ), [(c.name, c.message) for c in warns]
 

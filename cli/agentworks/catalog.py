@@ -10,6 +10,7 @@ from __future__ import annotations
 import re
 import tomllib
 from dataclasses import dataclass, field
+from functools import cache
 from pathlib import Path
 from typing import TYPE_CHECKING, TypedDict
 
@@ -203,8 +204,19 @@ def _load_toml(path: Path) -> dict[str, object]:
         return tomllib.load(f)
 
 
+@cache
 def load_builtin_catalog() -> ResolvedCatalog:
-    """Load the built-in catalog bundled with the package."""
+    """Load the built-in catalog bundled with the package.
+
+    Memoized via ``@cache`` because every command path now parses it
+    twice: once via ``catalog.publish_to(registry)`` at
+    ``build_registry`` time and again via ``load_catalog(config)`` at
+    initializer time (which still needs the resolved entries' payloads
+    to drive installs). The built-in catalog is a ship-time artifact
+    so the cache holds for the process lifetime; the cache is
+    file-bound through ``_BUILTIN_CATALOG_PATH`` which is itself a
+    module-level constant.
+    """
     if not _BUILTIN_CATALOG_PATH.exists():
         raise CatalogError(f"Built-in catalog not found: {_BUILTIN_CATALOG_PATH}")
 
@@ -303,29 +315,8 @@ def publish_to(registry: Registry) -> None:
         registry.add("user_install_command", user_name, user_cmd, code_origin)
 
 
-def validate_selections(config: Config, catalog: ResolvedCatalog) -> None:
-    """Validate that vm.config and agent.config selections resolve in the catalog.
-
-    Phase 2b makes this a thin compatibility wrapper. The canonical
-    validation has moved to the framework: each template's
-    ``required_resources()`` emits ``ResourceRequirement`` records for
-    each ``apt_packages`` / ``system_install_commands`` /
-    ``user_install_commands`` reference, and the framework's miss
-    policy errors at ``build_registry`` time. This function is kept
-    so legacy call sites that haven't migrated to ``build_registry``
-    still get the same coverage, but it's redundant with the framework
-    path; future cleanup can drop it once every caller goes through
-    build_registry.
-    """
-    for ref in config.vm.apt_packages:
-        if ref not in catalog.apt_packages:
-            raise CatalogError(f"vm.config.apt_packages references unknown entry: {ref}")
-    for ref in config.vm.system_install_commands:
-        if ref not in catalog.system_install_commands:
-            raise CatalogError(f"vm.config.system_install_commands references unknown entry: {ref}")
-    for ref in config.admin.user_install_commands:
-        if ref not in catalog.user_install_commands:
-            raise CatalogError(f"admin.config.user_install_commands references unknown entry: {ref}")
-    for ref in config.agent.user_install_commands:
-        if ref not in catalog.user_install_commands:
-            raise CatalogError(f"agent.config.user_install_commands references unknown entry: {ref}")
+# validate_selections removed in Phase 2b.0: the framework's catalog
+# kinds + miss policy validate these references at build_registry time,
+# which every manager-entry function calls before any business logic
+# (per Phase 2a.0's hoist sweep). The function had no remaining
+# production callers; tests covering the old contract were also dropped.

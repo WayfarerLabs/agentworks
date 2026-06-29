@@ -13,7 +13,7 @@ per known provider, code-declared with source
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
 from agentworks.resources.kind import KIND_REGISTRY, NoUnreferencedDefaultError
@@ -39,7 +39,7 @@ class GitCredentialProviderEntry:
 
     name: str
     origin: Origin | None = None
-    usage: tuple[UsageEntry, ...] = field(default_factory=tuple)
+    usage: tuple[UsageEntry, ...] = ()
 
 
 @dataclass(frozen=True)

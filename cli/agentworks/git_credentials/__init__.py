@@ -26,6 +26,13 @@ def publish_to(registry: Registry) -> None:
 
     Each entry lands as a ``GitCredentialProviderEntry`` row, code-declared
     with source ``"agentworks.git_credentials"``. Phase 2b.1.
+
+    Unlike the catalog and secret_backend publishers, this kind has no
+    operator-override path today: ``Config.publish_to`` publishes
+    ``git_credentials`` entries (the per-credential config), not
+    ``git_credential_provider`` rows. The kind is read-only from the
+    operator's perspective; a future SDD that wants to let operators
+    register new provider types would add an operator-publish path.
     """
     from agentworks.resources import Origin
     from agentworks.resources.kinds.git_credential_provider import (
