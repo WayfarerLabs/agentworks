@@ -470,18 +470,22 @@ exist in the registry even when nothing references them. Sweep manager entry poi
       framework. The always-materialize pre-step above subsumes Config's current synthesize-on-omit
       for admin (and named_console); optional Config cleanup to retire those paths -- not required
       for behavior, follows naturally with the YAML resource config SDD.
-- [ ] **Tests**:
-  - `cli/tests/resources/test_template_kinds.py`: each kind's `synthesize` produces the expected
-    defaults; reserved-name restriction errors on non-default missing names.
-  - `cli/tests/resources/test_template_cycle_detection.py`: inheritance cycles caught uniformly;
-    error messages match the framework's shape.
+- [x] **Tests**:
+  - `cli/tests/resources/test_vm_template_kind.py` (Phase 2a.1) and
+    `cli/tests/resources/test_template_kinds.py` (Phase 2a.2 parametrized across the other three):
+    each kind's `synthesize` produces the expected defaults; reserved-name restriction errors on
+    non-default missing names; framework miss-policy fires on typos; cycle detection caught either
+    by the framework's pass at build_registry time or by the resolver's internal visited-set guard
+    for the load-time eager-resolve path (kinds that have one). Note: the planned standalone
+    `test_template_cycle_detection.py` is folded into these two files since each kind's cycle
+    behavior tests cleanly alongside its other kind-level coverage.
   - `cli/tests/resources/test_always_materialize.py`: every reserved auto-declare name exists in the
     registry after `finalize` even when nothing references it. The row carries origin=auto-declared
     with synthetic source `("framework", "always-materialize")`, `usage=()`, and (for kinds with a
     description field) the polished `description="(auto) auto-declared default <kind>"`. Kinds with
     `auto_declare_names = None` (secrets) do not get spurious rows.
-  - Update `cli/tests/test_vm_templates.py` / `test_agent_templates.py` / etc. to reflect the new
-    error shape.
+  - Update `cli/tests/test_config.py` cycle-detection test to use build_registry (the only
+    pre-existing test that asserted on the bespoke load-time validation shape).
 
 Definition of done: template inheritance flows through the framework; built-in defaults are
 single-sourced (in `synthesize` per kind); cycle detection covers all four template kinds;

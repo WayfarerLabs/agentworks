@@ -34,12 +34,10 @@ class _AgentTemplateKind:
     auto_declare_names: frozenset[str] | None = frozenset({"default"})
 
     def synthesize(self, requirements: Sequence[ResourceRequirement]) -> AgentTemplate:
-        """Build the code-defined default ``AgentTemplate``.
-
-        Tolerates ``requirements=()`` (the always-materialize pre-step's
-        path) per the Phase 2a empty-requirements contract; uses the
-        reserved ``("framework", "always-materialize")`` source so the
-        breadcrumb is honest about where the row came from.
+        """Build the code-defined default ``AgentTemplate``. See
+        ``vm_template.py``'s ``synthesize`` for the rationale on why the
+        non-empty-``requirements`` path is preserved even though the
+        always-materialize pre-step makes it unreachable today.
         """
         source = requirements[0].source if requirements else ALWAYS_MATERIALIZE_SOURCE
         return AgentTemplate(name="default", origin=Origin.auto_declared(source=source))

@@ -74,7 +74,9 @@ def test_kind_attributes(spec: _KindSpec) -> None:
 def test_synthesize_empty_builds_default(spec: _KindSpec) -> None:
     """The always-materialize path: synthesize empty yields the kind's
     code-defined default template with the framework's reserved
-    sentinel source.
+    sentinel source. All inherit-shaped fields at their defaults; the
+    per-template resolver layer applies concrete defaults via the
+    Resolved* type.
     """
     kind = KIND_REGISTRY[spec.kind]
     result = kind.synthesize(())
@@ -83,6 +85,16 @@ def test_synthesize_empty_builds_default(spec: _KindSpec) -> None:
     assert result.origin is not None
     assert result.origin.variant == "auto-declared"
     assert result.origin.source == ALWAYS_MATERIALIZE_SOURCE
+    assert result.inherits == []
+
+
+@pytest.mark.parametrize("spec", SPECS, ids=lambda s: s.kind)
+def test_no_inherits_produces_no_template_requirements(spec: _KindSpec) -> None:
+    tmpl = spec.expected_type(name="alone")
+    template_reqs = [
+        r for r in tmpl.required_resources() if isinstance(r, TemplateRequirement)
+    ]
+    assert template_reqs == []
 
 
 @pytest.mark.parametrize("spec", SPECS, ids=lambda s: s.kind)
@@ -199,6 +211,14 @@ def test_agent_template_default_cycle_caught_at_load(tmp_path: Path) -> None:
     through ``default`` therefore hits the resolver's internal
     visited-set guard at load time, not the framework's pass at
     build_registry time.
+
+    Non-parametrized because only ``agent_template`` (and
+    ``vm_template``, tested in ``test_vm_template_kind.py``) is
+    eagerly resolved at load time. ``workspace_template`` and
+    ``session_template`` resolve lazily; cycles in them slip past
+    load_config and are caught by the framework instead, which the
+    parametrized ``test_inherits_cycle_caught_by_framework`` above
+    covers for all three.
     """
     cfg_file = _write_cfg(
         tmp_path / "config.toml",

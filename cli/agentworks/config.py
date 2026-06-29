@@ -1100,7 +1100,8 @@ def _load_agent_templates(
     # to the framework (AgentTemplateKind's miss policy +
     # Registry.finalize's cycle pass). The agents/templates.py resolver
     # also has its own visited-set guard for the load-time eager-resolve
-    # path (load_config's resolve_agent at line ~1639).
+    # path (load_config calls ``resolve_from_dict`` to populate
+    # ``config.agent`` before any registry is built).
     return templates
 
 

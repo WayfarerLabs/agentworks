@@ -29,12 +29,9 @@ class _SessionTemplateKind:
         self,
         requirements: Sequence[ResourceRequirement],
     ) -> SessionTemplate:
-        """Build the code-defined default ``SessionTemplate``.
-
-        Tolerates ``requirements=()`` per the Phase 2a empty-requirements
-        contract; uses the reserved
-        ``("framework", "always-materialize")`` source when called that
-        way.
+        """Build the code-defined default ``SessionTemplate``. See
+        ``vm_template.py``'s ``synthesize`` for the rationale on why the
+        non-empty-``requirements`` path is preserved.
         """
         source = requirements[0].source if requirements else ALWAYS_MATERIALIZE_SOURCE
         return SessionTemplate(
