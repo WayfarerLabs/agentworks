@@ -1488,8 +1488,9 @@ def _load_secret_backends(
     sections are accepted but ignored.
 
     A declared kind not in the known-factory map (e.g. typo ``envvar`` for
-    ``env-var``) emits a load-time warning so operators discover it before
-    they reach for the section in ``[secret_config].backends``.
+    ``env-var``) is a load-time ``ConfigError`` -- Phase 2b.2 elevated
+    this from a soft warning to a hard error so the surface treats it
+    the same as ``[git_credentials.<name>].type`` typos.
     """
     raw = data.get("secret_backends", {})
     if not isinstance(raw, dict):
