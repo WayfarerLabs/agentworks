@@ -133,25 +133,35 @@ def test_build_registry_equivalent_to_manual_steps(example_config: Path) -> None
     assert manual.lookup("secret", "api-key").name == "api-key"
 
 
-def test_build_registry_phase_1a_invokes_only_config_publish_to(
+def test_build_registry_publishes_catalog_before_config(
     example_config: Path,
 ) -> None:
-    """Phase 1a invariant: ``build_registry`` does not invoke catalog or any
-    other publisher beyond ``Config.publish_to``. This guard prevents Phase
-    2b's catalog-publisher addition from going unnoticed in Phase 1; Phase
-    2b updates this test to also assert ``catalog.publish_to`` runs first.
+    """Phase 2b invariant: ``build_registry`` invokes
+    ``catalog.publish_to`` before ``Config.publish_to`` so any
+    operator-declared catalog override layers on top of the
+    code-declared base. Verified end-to-end: every catalog kind has
+    at least one row after build_registry, and those rows carry
+    ``Origin.code_declared(source="agentworks.catalog")``.
     """
     from agentworks.bootstrap import build_registry
 
     cfg = load_config(example_config, warn_issues=False)
     r = build_registry(cfg)
 
-    # No catalog kinds should have been published in Phase 1a (they ship in
-    # 2b). The Phase-1a-registered kinds in KIND_REGISTRY are secret,
-    # admin_template, named_console_template; the Resources in the
-    # Registry come from Config only.
-    for catalog_kind in ("apt_package", "system_install_command", "user_install_command"):
-        assert list(r.iter_kind(catalog_kind)) == []
+    for catalog_kind in (
+        "apt_package",
+        "system_install_command",
+        "user_install_command",
+    ):
+        rows = list(r.iter_kind(catalog_kind))
+        assert rows, f"expected at least one {catalog_kind} row from the catalog publisher"
+        # The built-in catalog rows are code-declared. Operator overrides
+        # (if any) would re-publish the same name with operator-declared
+        # origin; the test's example_config doesn't exercise that path.
+        for row in rows:
+            assert row.origin is not None
+            assert row.origin.variant == "code-declared"
+            assert row.origin.source == "agentworks.catalog"
 
 
 def test_unknown_kind_in_requirement_errors_clearly(tmp_path: Path) -> None:

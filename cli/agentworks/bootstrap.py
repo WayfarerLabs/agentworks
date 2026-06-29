@@ -27,17 +27,18 @@ if TYPE_CHECKING:
 def build_registry(config: Config) -> Registry:
     """Build a finalized ``Registry`` from the standard set of publishers.
 
-    Phase 1a runs only ``Config.publish_to``. Phase 2b extends this to
-    run ``catalog.publish_to(registry)`` first so any operator-declared
-    override of catalog entries (not supported today, but the order
-    keeps the door open) layers on top of the code-declared base.
-    Future publishers (plugins, YAML manifests, ...) join the
-    same sequence by being added here.
+    Publisher order: ``catalog.publish_to`` first (code-declared base
+    of built-in apt_package / system_install_command /
+    user_install_command entries), then ``Config.publish_to`` (operator-
+    declared resources, including any operator-declared catalog
+    override that re-publishes the same ``(kind, name)`` with
+    operator-declared Origin). Future publishers (plugins, YAML
+    manifests, ...) join the same sequence by being added here.
     """
+    from agentworks import catalog
+
     registry = Registry.empty()
-    # Phase 2b: catalog.publish_to(registry) goes here, before
-    # config.publish_to, so config can override catalog-declared
-    # Resources by re-publishing with operator-declared Origin.
+    catalog.publish_to(registry)
     config.publish_to(registry)
     registry.finalize()
     return registry

@@ -11,12 +11,14 @@ import re
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypedDict
 
 from agentworks.errors import ExternalError
 
 if TYPE_CHECKING:
     from agentworks.config import Config
+    from agentworks.resources import Origin, Registry
+    from agentworks.resources.requirement import UsageEntry
 
 
 class CatalogError(ExternalError):
@@ -43,6 +45,12 @@ class AptPackageEntry:
     description: str
     apt: list[str]
     apt_sources: list[str] = field(default_factory=list)
+    # Phase 2b: catalog entries become first-class Registry citizens.
+    # ``origin`` is set by the publisher (``code-declared by
+    # agentworks.catalog`` for built-in entries); ``usage`` is attached
+    # by the framework's finalize pass from incoming references.
+    origin: Origin | None = None
+    usage: tuple[UsageEntry, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -54,6 +62,8 @@ class SystemInstallCommandEntry:
     test_exec: str | None = None
     test_file: str | None = None
     test_dir: str | None = None
+    origin: Origin | None = None
+    usage: tuple[UsageEntry, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -65,6 +75,8 @@ class UserInstallCommandEntry:
     test_exec: str | None = None
     test_file: str | None = None
     test_dir: str | None = None
+    origin: Origin | None = None
+    usage: tuple[UsageEntry, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -132,14 +144,20 @@ def _load_apt_packages(raw: dict[str, object]) -> dict[str, AptPackageEntry]:
     return entries
 
 
-def _load_test_fields(data: dict[str, object], ctx: str) -> dict[str, str | None]:
+class _TestFields(TypedDict):
+    test_exec: str | None
+    test_file: str | None
+    test_dir: str | None
+
+
+def _load_test_fields(data: dict[str, object], ctx: str) -> _TestFields:
     """Load and validate test_exec/test_file/test_dir fields. At most one may be set."""
     if "test" in data:
         raise CatalogError(f"{ctx}: 'test' is not a valid field. Use 'test_exec', 'test_file', or 'test_dir'.")
-    fields: dict[str, str | None] = {}
+    fields: _TestFields = {"test_exec": None, "test_file": None, "test_dir": None}
     for key in ("test_exec", "test_file", "test_dir"):
         raw = str(data[key]).strip() if key in data else None
-        fields[key] = raw if raw else None
+        fields[key] = raw if raw else None  # type: ignore[literal-required,unused-ignore]
     set_count = sum(1 for v in fields.values() if v is not None)
     if set_count > 1:
         raise CatalogError(f"{ctx}: at most one of test_exec, test_file, test_dir may be set")
@@ -250,8 +268,55 @@ def _validate_references(catalog: ResolvedCatalog) -> None:
                 raise CatalogError(f"apt_packages.{name} references unknown apt source: {src_name}")
 
 
+def publish_to(registry: Registry) -> None:
+    """Publish the code-defined catalog entries into the registry as
+    first-class Resources.
+
+    Phase 2b: built-in catalog entries become Registry citizens with
+    ``Origin.code_declared(source="agentworks.catalog")``. The three
+    catalog kinds (``apt_package``, ``system_install_command``,
+    ``user_install_command``) use the framework's error miss policy,
+    so a typo'd reference from
+    ``[vm_templates.*].apt_packages = ["..."]`` etc. surfaces as a
+    framework error citing the requirement's source.
+
+    Called from ``agentworks.bootstrap.build_registry`` BEFORE
+    ``Config.publish_to`` so any operator-declared override of a
+    catalog entry (re-publishing the same ``(kind, name)`` with
+    operator-declared origin) layers on top of the code-declared base.
+
+    ``apt_sources`` is intentionally not a framework kind: it's an
+    internal cross-reference inside the catalog (validated by
+    ``_validate_references``), not directly referenced by any
+    operator-facing config field.
+    """
+    from agentworks.resources import Origin
+
+    builtin = load_builtin_catalog()
+    code_origin = Origin.code_declared(source="agentworks.catalog")
+
+    for pkg_name, pkg in builtin.apt_packages.items():
+        registry.add("apt_package", pkg_name, pkg, code_origin)
+    for sys_name, sys_cmd in builtin.system_install_commands.items():
+        registry.add("system_install_command", sys_name, sys_cmd, code_origin)
+    for user_name, user_cmd in builtin.user_install_commands.items():
+        registry.add("user_install_command", user_name, user_cmd, code_origin)
+
+
 def validate_selections(config: Config, catalog: ResolvedCatalog) -> None:
-    """Validate that vm.config and agent.config selections resolve in the catalog."""
+    """Validate that vm.config and agent.config selections resolve in the catalog.
+
+    Phase 2b makes this a thin compatibility wrapper. The canonical
+    validation has moved to the framework: each template's
+    ``required_resources()`` emits ``ResourceRequirement`` records for
+    each ``apt_packages`` / ``system_install_commands`` /
+    ``user_install_commands`` reference, and the framework's miss
+    policy errors at ``build_registry`` time. This function is kept
+    so legacy call sites that haven't migrated to ``build_registry``
+    still get the same coverage, but it's redundant with the framework
+    path; future cleanup can drop it once every caller goes through
+    build_registry.
+    """
     for ref in config.vm.apt_packages:
         if ref not in catalog.apt_packages:
             raise CatalogError(f"vm.config.apt_packages references unknown entry: {ref}")

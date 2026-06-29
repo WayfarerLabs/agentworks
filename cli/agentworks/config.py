@@ -272,11 +272,15 @@ class VMTemplate:
     usage: tuple[UsageEntry, ...] = ()
 
     def required_resources(self) -> list[ResourceRequirement]:
-        from agentworks.resources.requirement import TemplateRequirement
-
-        reqs: list[ResourceRequirement] = list(
-            _env_requirements(self.env, ("vm_template", self.name))
+        from agentworks.resources.requirement import (
+            ResourceRequirement as _ResourceReq,
         )
+        from agentworks.resources.requirement import (
+            TemplateRequirement,
+        )
+
+        source = ("vm_template", self.name)
+        reqs: list[ResourceRequirement] = list(_env_requirements(self.env, source))
         # Inherits: each parent template name in ``inherits = [...]`` is a
         # TemplateRequirement targeting the same kind. The framework's
         # VMTemplateKind miss policy auto-declares "default" when missing
@@ -289,7 +293,29 @@ class VMTemplate:
                     name=parent,
                     kind="vm_template",
                     usage="a parent template",
-                    source=("vm_template", self.name),
+                    source=source,
+                )
+            )
+        # Catalog references: each name in apt_packages /
+        # system_install_commands resolves to a code-declared catalog
+        # Resource via the framework's miss policy (error on typo,
+        # citing this template's source). Phase 2b.
+        for pkg in self.apt_packages or []:
+            reqs.append(
+                _ResourceReq(
+                    name=pkg,
+                    kind="apt_package",
+                    usage="an apt package",
+                    source=source,
+                )
+            )
+        for cmd in self.system_install_commands or []:
+            reqs.append(
+                _ResourceReq(
+                    name=cmd,
+                    kind="system_install_command",
+                    usage="a system install command",
+                    source=source,
                 )
             )
         # When the raw template doesn't set tailscale_auth_key, emit the
@@ -342,11 +368,25 @@ class AdminConfig:
     usage: tuple[UsageEntry, ...] = ()
 
     def required_resources(self) -> list[ResourceRequirement]:
+        from agentworks.resources.requirement import (
+            ResourceRequirement as _ResourceReq,
+        )
+
         source = ("admin_template", self.name)
         reqs: list[ResourceRequirement] = list(
             _env_requirements(self.env, source)
         )
         reqs.extend(_git_credential_requirements(self.git_credentials, source))
+        # Catalog references for user_install_commands (Phase 2b).
+        for cmd in self.user_install_commands:
+            reqs.append(
+                _ResourceReq(
+                    name=cmd,
+                    kind="user_install_command",
+                    usage="a user install command",
+                    source=source,
+                )
+            )
         return reqs
 
 
@@ -376,7 +416,12 @@ class AgentTemplate:
     usage: tuple[UsageEntry, ...] = ()
 
     def required_resources(self) -> list[ResourceRequirement]:
-        from agentworks.resources.requirement import TemplateRequirement
+        from agentworks.resources.requirement import (
+            ResourceRequirement as _ResourceReq,
+        )
+        from agentworks.resources.requirement import (
+            TemplateRequirement,
+        )
 
         source = ("agent_template", self.name)
         reqs: list[ResourceRequirement] = list(
@@ -389,6 +434,16 @@ class AgentTemplate:
                     name=parent,
                     kind="agent_template",
                     usage="a parent template",
+                    source=source,
+                )
+            )
+        # Catalog references for user_install_commands (Phase 2b).
+        for cmd in self.user_install_commands or []:
+            reqs.append(
+                _ResourceReq(
+                    name=cmd,
+                    kind="user_install_command",
+                    usage="a user install command",
                     source=source,
                 )
             )
