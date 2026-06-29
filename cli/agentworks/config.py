@@ -96,9 +96,11 @@ def validate_admin_username(admin_username: str) -> None:
         )
 
 
-# Valid values for enum-like fields
+# Valid values for enum-like fields. Git credential ``type`` validation
+# moved to the framework's ``git_credential_provider`` kind in Phase 2b.1
+# (see ``agentworks.git_credentials.PROVIDER_TYPES`` for the canonical
+# list).
 VALID_PLATFORMS = ("lima", "azure", "wsl2", "proxmox")
-VALID_GIT_CREDENTIAL_TYPES = ("azdo", "github")
 
 
 # -- Data classes ----------------------------------------------------------
@@ -505,15 +507,27 @@ class GitCredentialConfig:
             object.__setattr__(self, "token", f"git-token-{self.name}")
 
     def required_resources(self) -> list[ResourceRequirement]:
+        from agentworks.resources.requirement import (
+            ResourceRequirement as _ResourceReq,
+        )
         from agentworks.resources.requirement import SecretRequirement
 
+        source = ("git_credentials", self.name)
         return [
             SecretRequirement(
                 name=self.token,
                 kind="secret",
                 usage="the auth token",
-                source=("git_credentials", self.name),
-            )
+                source=source,
+            ),
+            # Phase 2b.1: the ``type`` field references a known provider
+            # kind; framework miss policy catches typos.
+            _ResourceReq(
+                name=self.type,
+                kind="git_credential_provider",
+                usage="the provider type",
+                source=source,
+            ),
         ]
 
 
@@ -1258,11 +1272,14 @@ def _load_git_credentials(
     for name, cdata in raw.items():
         if not isinstance(cdata, dict):
             raise ConfigError(f"git_credentials.{name} must be a table")
+        # Phase 2b.1: the ``type`` field's reference-existence check
+        # moves to the framework via
+        # ``GitCredentialConfig.required_resources`` emitting a
+        # ``ResourceRequirement(kind="git_credential_provider", ...)``;
+        # ``_GitCredentialProviderKind``'s error miss policy fires at
+        # build_registry time with the framework's consistent error
+        # shape if the type isn't a known provider.
         cred_type = str(_require(cdata, "type", f"git_credentials.{name}"))
-        if cred_type not in VALID_GIT_CREDENTIAL_TYPES:
-            raise ConfigError(
-                f"git_credentials.{name}.type must be one of {VALID_GIT_CREDENTIAL_TYPES}, got: {cred_type}"
-            )
         if cred_type == "azdo" and "org" not in cdata:
             raise ConfigError(f"git_credentials.{name}.org is required for azdo type")
 

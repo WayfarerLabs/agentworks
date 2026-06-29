@@ -496,31 +496,31 @@ operator-facing behavior unchanged except for error message shape; CI green; rev
 Goal: bring the catalog into the framework as first-class Resources via a code publisher, plus add
 the remaining bespoke-validation kinds.
 
-- [ ] `cli/agentworks/resources/kinds/catalog.py`: `CatalogKind` for catalog commands -- three
+- [x] `cli/agentworks/resources/kinds/catalog.py`: `CatalogKind` for catalog commands -- three
       sub-kinds (`apt_package`, `system_install_command`, `user_install_command`) registered in
       `KIND_REGISTRY`. All three use the **error miss policy** (unknown names referenced from
       `apt_packages = ["..."]` etc. error with the referencing scope cited).
-- [ ] `cli/agentworks/catalog.py` (or wherever the code-defined catalog lives today): add a
+- [x] `cli/agentworks/catalog.py` (or wherever the code-defined catalog lives today): add a
       `publish_to(registry: Registry) -> None` function. Iterates the code-defined catalog entries
       and calls
       `registry.add(kind, name, resource, Origin.code_declared(source="agentworks.catalog"))` for
       each. Catalog Resources are now full Registry citizens:
       `agw resource list --kind apt_package,system_install_command,user_install_command` (Phase 2c)
       shows them with origin = `code-declared by agentworks.catalog`.
-- [ ] `agentworks/bootstrap.py` `build_registry(config)` is updated to invoke
+- [x] `agentworks/bootstrap.py` `build_registry(config)` is updated to invoke
       `catalog.publish_to(registry)` before `config.publish_to(registry)` (so any operator-declared
       override of catalog entries -- not supported today, but the order keeps the door open -- is
       layered on top of the code-declared base). The Phase 1a stub of the catalog publisher becomes
       a real publisher here.
-- [ ] `cli/agentworks/resources/kinds/git_credential_provider.py`: `GitCredentialProviderKind` for
+- [x] `cli/agentworks/resources/kinds/git_credential_provider.py`: `GitCredentialProviderKind` for
       the `type` field on `[git_credentials.<name>]`. Error miss policy. (The provider
       implementations in `agentworks.git_credentials/` stay; the kind validates the `type` field
       against the known set.)
-- [ ] `cli/agentworks/resources/kinds/secret_backend.py`: `SecretBackendKind` for
+- [x] `cli/agentworks/resources/kinds/secret_backend.py`: `SecretBackendKind` for
       `[secret_backends.<kind>]` and `secret_config.backends` references. Error miss policy.
-- [ ] Existing bespoke validation removed in favor of framework dispatch. Error messages get the
+- [x] Existing bespoke validation removed in favor of framework dispatch. Error messages get the
       framework's consistent shape.
-- [ ] **Tests**:
+- [x] **Tests**:
   - `cli/tests/resources/test_catalog_kind.py`: unknown catalog command name errors with requirement
     source; known names resolve. Catalog publisher publishes the expected set.
   - `cli/tests/resources/test_catalog_publisher.py`: `catalog.publish_to(registry)` populates the
@@ -551,7 +551,7 @@ Goal: add the cross-kind inspection commands.
       The `description` column reads reliably across kinds because Phase 2a generalized the
       auto-declared description polish (see Phase 2a checkbox; FRD R9 / R12).
 - [ ] Update `cli/agentworks/completions/`.
-- [ ] **Tests**:
+- [x] **Tests**:
   - `cli/tests/test_resource_list.py`: kind filter (CSV), origin filter, header summary.
   - `cli/tests/test_resource_describe.py`: per-section rendering for each kind; two-positional
     parsing; useful error message when `<kind>` is unknown.

@@ -27,18 +27,19 @@ if TYPE_CHECKING:
 def build_registry(config: Config) -> Registry:
     """Build a finalized ``Registry`` from the standard set of publishers.
 
-    Publisher order: ``catalog.publish_to`` first (code-declared base
-    of built-in apt_package / system_install_command /
-    user_install_command entries), then ``Config.publish_to`` (operator-
-    declared resources, including any operator-declared catalog
-    override that re-publishes the same ``(kind, name)`` with
-    operator-declared Origin). Future publishers (plugins, YAML
-    manifests, ...) join the same sequence by being added here.
+    Publisher order: code-declared publishers first (``catalog``,
+    ``git_credentials``, ``secrets``), then ``Config.publish_to``
+    (operator-declared resources, which can re-publish any
+    code-declared ``(kind, name)`` with operator-declared Origin to
+    override). Future publishers (plugins, YAML manifests, ...) join
+    the same sequence by being added here.
     """
-    from agentworks import catalog
+    from agentworks import catalog, git_credentials, secrets
 
     registry = Registry.empty()
     catalog.publish_to(registry)
+    git_credentials.publish_to(registry)
+    secrets.publish_to(registry)
     config.publish_to(registry)
     registry.finalize()
     return registry
