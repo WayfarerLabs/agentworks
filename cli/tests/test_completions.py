@@ -39,6 +39,7 @@ class TestTopLevelGroups:
             "config",
             "console",
             "env",
+            "resource",
             "secret",
             "session",
             "vm",

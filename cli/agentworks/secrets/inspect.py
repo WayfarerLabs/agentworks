@@ -377,20 +377,20 @@ def render_secret_description(desc: SecretDescription) -> None:
     """
     # --- Header ---
     output.info(f"Secret: {desc.name}")
-    output.info(f"  Kind: {desc.kind}")
+    output.detail(f"Kind: {desc.kind}")
     if desc.description:
-        output.info(f"  Description: {desc.description}")
+        output.detail(f"Description: {desc.description}")
     else:
-        output.info("  Description: (none)")
-    output.info(f"  Origin: {_format_origin_line(desc.origin)}")
+        output.detail("Description: (none)")
+    output.detail(f"Origin: {_format_origin_line(desc.origin)}")
     if desc.hint:
-        output.info(f"  Hint: {desc.hint}")
+        output.detail(f"Hint: {desc.hint}")
 
     # --- Usages ---
     output.info("")
     output.info("Usages:")
     if not desc.usages:
-        output.info("  (none recorded)")
+        output.detail("(none recorded)")
     else:
         # Dedupe by (source, text) preserving first-encounter order.
         seen: set[tuple[tuple[str, str], str]] = set()
@@ -400,13 +400,13 @@ def render_secret_description(desc: SecretDescription) -> None:
                 continue
             seen.add(key)
             src = f"{entry.source[0]}:{entry.source[1]}"
-            output.info(f"  - {src} -- {entry.text}")
+            output.detail(f"- {src} -- {entry.text}")
 
     # --- Backend mappings ---
     output.info("")
     output.info("Backend mappings:")
     if not desc.backend_mappings:
-        output.info("  (no active backends in [secret_config].backends)")
+        output.detail("(no active backends in [secret_config].backends)")
     else:
         for mapping in desc.backend_mappings:
             if not mapping.would_attempt:
@@ -415,12 +415,12 @@ def render_secret_description(desc: SecretDescription) -> None:
                 status = mapping.identifier
             else:
                 status = "(prompt at resolution time)"
-            output.info(f"  - {mapping.backend_kind}: {status}")
+            output.detail(f"- {mapping.backend_kind}: {status}")
 
     # --- Resolution preview ---
     output.info("")
     output.info("Resolution preview:")
     if not desc.resolution.available:
-        output.info("  not available in any active backend")
+        output.detail("not available in any active backend")
     else:
-        output.info(f"  would resolve via {desc.resolution.resolved_by}")
+        output.detail(f"would resolve via {desc.resolution.resolved_by}")

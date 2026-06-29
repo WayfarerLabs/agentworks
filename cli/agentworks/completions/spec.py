@@ -161,6 +161,9 @@ DYNAMIC_COMPLETIONS: dict[tuple[str, str], str] = {
 
     # Secret inspection
     ("secret.describe", "name"): "secrets",
+    # Resource inspection (Phase 2c)
+    ("resource.describe", "kind"): "resource_kinds",
+    ("resource.describe", "name"): "resource_names",
 }
 
 

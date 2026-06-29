@@ -104,6 +104,20 @@ _agentworks_secrets() {
     secrets=(${(f)"$(agw secret list --names-only 2>/dev/null)"})
     _describe 'secret' secrets
 }""",
+    "resource_kinds": """\
+_agentworks_resource_kinds() {
+    local -a kinds
+    kinds=(${(f)"$(agw resource list --names-only 2>/dev/null | awk -F: '{print $1}' | sort -u)"})
+    _describe 'kind' kinds
+}""",
+    "resource_names": """\
+_agentworks_resource_names() {
+    local -a names kind
+    kind="${words[CURRENT-1]}"
+    [[ -z "$kind" ]] && return
+    names=(${(f)"$(agw resource list --kind "$kind" --names-only 2>/dev/null | awk -F: '{print $2}')"})
+    _describe 'name' names
+}""",
 }
 
 # Maps completer identifiers to their zsh function names.
@@ -121,6 +135,8 @@ COMPLETER_FUNC_NAMES: dict[str, str] = {
     "agents": "_agentworks_agents",
     "consoles": "_agentworks_consoles",
     "secrets": "_agentworks_secrets",
+    "resource_kinds": "_agentworks_resource_kinds",
+    "resource_names": "_agentworks_resource_names",
 }
 
 

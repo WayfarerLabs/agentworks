@@ -293,6 +293,24 @@ class Registry:
         """
         return iter(self._resources.get(kind, {}).values())
 
+    def iter_kind_items(self, kind: str) -> Iterator[tuple[str, Any]]:
+        """Iterate ``(name, Resource)`` pairs under one ``kind``. Used by
+        the cross-kind ``agw resource list`` / ``describe`` commands which
+        need the framework's canonical name (the Registry's per-kind
+        dict key) regardless of whether the Resource type carries it on
+        a ``.name`` field (most do) or on a different field
+        (``SecretBackendConfig.kind``). Empty iterator if the kind has
+        no Resources.
+        """
+        return iter(self._resources.get(kind, {}).items())
+
+    def iter_kinds(self) -> Iterator[str]:
+        """Iterate the kind identifiers that currently have at least one
+        published Resource. Used by ``agw resource list`` to enumerate
+        all kinds when no ``--kind`` filter is given.
+        """
+        return iter(self._resources.keys())
+
     @property
     def is_finalized(self) -> bool:
         """True after ``finalize`` has run."""

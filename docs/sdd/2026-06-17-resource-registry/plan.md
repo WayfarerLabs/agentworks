@@ -545,19 +545,22 @@ referenced from operator-facing config fields.
 
 Goal: add the cross-kind inspection commands.
 
-- [ ] `cli/agentworks/resources/inspect.py`: add
+- [x] `cli/agentworks/resources/inspect.py`: add
       `list_resources(registry, kinds=None, origin=None) -> list[ResourceSummary]` and
       `describe_resource(registry, kind, name) -> ResourceDescription`.
-- [ ] `cli/agentworks/cli/commands/resource.py` (new): typer command group with `list` and
+- [x] `cli/agentworks/cli/commands/resource.py` (new): typer command group with `list` and
       `describe` subcommands. Two-positional `describe <kind> <name>` (FRD R12 rationale).
-- [ ] Renderers cover columns per HLA: list shows kind, name, origin, usage count, description;
+- [x] Renderers cover columns per HLA: list shows kind, name, origin, usage count, description;
       describe shows kind, name, full origin detail, full usage list, description. **Stops at
       framework-uniform fields** -- no backend mappings, no inheritance chains, no resolved field
       lookups. Rendering those would require kind-specific knowledge that the cross-kind command
       intentionally doesn't carry; operators reach for `agw secret describe` etc. when they need it.
       The `description` column reads reliably across kinds because Phase 2a generalized the
       auto-declared description polish (see Phase 2a checkbox; FRD R9 / R12).
-- [ ] Update `cli/agentworks/completions/`.
+- [x] Update `cli/agentworks/completions/`: bash / zsh / powershell pick up new `resource_kinds` and
+      `resource_names` completer ids (the latter scopes by the typed kind via shell context);
+      `agw resource list --names-only` emits `<kind>:<name>` per line so completion snippets can
+      slice with `awk -F:` consistently.
 - [x] **Tests**:
   - `cli/tests/test_resource_list.py`: kind filter (CSV), origin filter, header summary.
   - `cli/tests/test_resource_describe.py`: per-section rendering for each kind; two-positional
@@ -586,9 +589,11 @@ code.
 - **`_collect_git_tokens` placement.** Lives in `vms/manager.py` today, cross-imported by
   `agents/manager.py`. A neutral location (e.g. `agentworks/git_credentials/resolve.py`) reads more
   naturally; move when Phase 2 touches the helper.
-- **`output.detail` vs `output.info` for nested sections.** `render_secret_description` uses
-  `output.info` with hand-indented strings; the rest of the codebase uses `output.detail`. Pure
-  style; do it when Phase 2c's `agw resource describe` lands the cross-kind renderer.
+- **`output.detail` vs `output.info` for nested sections.** ~~`render_secret_description` uses
+  `output.info` with hand-indented strings; the rest of the codebase uses `output.detail`.~~
+  Resolved in Phase 2c alongside the new `render_resource_description`: both renderers now delegate
+  indent to `output.detail`, so the cross-kind and per-kind describe views share the same
+  convention.
 - **`SecretDescription.kind = "secret"` hard-coded.** Use the kind registry constant so a
   hypothetical rename can't drift the describe output silently.
 - **FRD R10 dedupe wording is ambiguous.** "Duplicate usage text is collapsed" doesn't pin whether
