@@ -15,6 +15,14 @@ from agentworks.ssh import SSHError
 from .conftest import stub_session_resolvers
 
 
+@pytest.fixture(autouse=True)
+def _stub_build_registry(monkeypatch: pytest.MonkeyPatch) -> None:
+    """SimpleNamespace configs in this module don't carry publish_to;
+    bypass the Phase 2a manager-entry hoist for the mock-config style.
+    """
+    monkeypatch.setattr("agentworks.bootstrap.build_registry", lambda config: None)
+
+
 def test_ssh_error_is_agentworks_error() -> None:
     """SSHError must be an AgentworksError subclass so main()'s wrapper catches
     it (otherwise SSH timeouts leak as tracebacks)."""

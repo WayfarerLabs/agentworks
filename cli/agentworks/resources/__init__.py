@@ -21,7 +21,12 @@ from __future__ import annotations
 # and NamedConsoleTemplateKind; Phase 2 kinds slot in by adding new files
 # under kinds/ and importing them from kinds/__init__.py.
 from agentworks.resources import kinds  # noqa: F401
-from agentworks.resources.kind import KIND_REGISTRY, ResourceKind
+from agentworks.resources.kind import (
+    ALWAYS_MATERIALIZE_SOURCE,
+    KIND_REGISTRY,
+    NoUnreferencedDefaultError,
+    ResourceKind,
+)
 from agentworks.resources.origin import Origin
 from agentworks.resources.registry import Registry
 from agentworks.resources.requirement import (
@@ -32,7 +37,9 @@ from agentworks.resources.requirement import (
 from agentworks.resources.walk import collect_secrets_for
 
 __all__ = [
+    "ALWAYS_MATERIALIZE_SOURCE",
     "KIND_REGISTRY",
+    "NoUnreferencedDefaultError",
     "Origin",
     "Registry",
     "ResourceKind",

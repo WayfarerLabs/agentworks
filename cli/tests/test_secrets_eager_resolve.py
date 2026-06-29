@@ -22,6 +22,15 @@ import pytest
 from agentworks.db import Database
 from agentworks.errors import SecretUnavailableError
 
+
+@pytest.fixture(autouse=True)
+def _stub_build_registry(monkeypatch: pytest.MonkeyPatch) -> None:
+    """SimpleNamespace configs in this module don't carry publish_to;
+    bypass the Phase 2a manager-entry hoist for the mock-config style.
+    """
+    monkeypatch.setattr("agentworks.bootstrap.build_registry", lambda config: None)
+
+
 if TYPE_CHECKING:
     pass
 

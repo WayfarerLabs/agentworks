@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
 from agentworks.config import NamedConsoleConfig
-from agentworks.resources.kind import KIND_REGISTRY
+from agentworks.resources.kind import ALWAYS_MATERIALIZE_SOURCE, KIND_REGISTRY
 from agentworks.resources.origin import Origin
 
 if TYPE_CHECKING:
@@ -35,11 +35,16 @@ class _NamedConsoleTemplateKind:
         requirements: Sequence[ResourceRequirement],
     ) -> NamedConsoleConfig:
         """Build an empty-defaults ``NamedConsoleConfig`` for an
-        auto-declared ``named_console_template:default``. ``usage`` is
-        attached centrally by ``Registry.finalize``.
+        auto-declared ``named_console_template:default``. Same shape as
+        the admin template kind: ``Config.publish_to`` always publishes
+        a real one so the always-materialize pre-step short-circuits.
+
+        Tolerates ``requirements=()`` per the Phase 2a contract; uses
+        the synthetic ``("framework", "always-materialize")`` source
+        when called that way.
         """
-        first = requirements[0]
-        return NamedConsoleConfig(origin=Origin.auto_declared(source=first.source))
+        source = requirements[0].source if requirements else ALWAYS_MATERIALIZE_SOURCE
+        return NamedConsoleConfig(origin=Origin.auto_declared(source=source))
 
 
 KIND_REGISTRY["named_console_template"] = _NamedConsoleTemplateKind()

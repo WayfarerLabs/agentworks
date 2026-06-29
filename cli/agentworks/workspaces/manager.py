@@ -38,12 +38,17 @@ def create_workspace(
 ) -> None:
     """Create a workspace on a VM."""
     from agentworks.agents.manager import workspace_group
+    from agentworks.bootstrap import build_registry
     from agentworks.ssh import SSHLogger
     from agentworks.workspaces.backends.vm import (
         create_vm_workspace,
         delete_vm_workspace,
         generate_vscode_workspace,
     )
+
+    # build_registry runs first so framework miss-policies fire before
+    # any template / DB / VM business logic.
+    build_registry(config)
 
     ws_name = name
     validate_name(ws_name)
@@ -408,8 +413,14 @@ def reinit_workspace(
     match.
     """
     from agentworks.agents.manager import AGENT_PREFIX
+    from agentworks.bootstrap import build_registry
     from agentworks.ssh import SSHError
     from agentworks.transports import transport
+
+    # build_registry runs first so framework miss-policies fire before
+    # any DB / VM business logic.
+    build_registry(config)
+
     ws = db.get_workspace(name)
     if ws is None:
         raise NotFoundError(

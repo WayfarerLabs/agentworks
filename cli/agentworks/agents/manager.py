@@ -227,6 +227,14 @@ def create_agent(
     from dataclasses import replace as _replace
 
     from agentworks.agents.templates import resolve_template
+    from agentworks.bootstrap import build_registry
+
+    # build_registry runs first so framework miss-policies (e.g.
+    # GitCredentialKind's error policy on agent template's
+    # git_credentials list, future TemplateRequirement typos on
+    # inherits) fire before any template / DB / VM business logic
+    # surfaces its own NotFoundError.
+    registry = build_registry(config)
 
     agent_tmpl = resolve_template(config, template)
 
@@ -245,13 +253,10 @@ def create_agent(
     vm = _require_vm(db, vm_name)
     linux_user = derive_linux_user(name)
 
-    # Collect agent-provisioning credentials up front (git tokens live
-    # outside the env-block system). Operator env secrets are NOT
-    # prompted at agent create -- provisioning is hermetic. They get
-    # prompted at the use site (agent shell, session create, etc.).
-    from agentworks.bootstrap import build_registry
-
-    registry = build_registry(config)
+    # Collect agent-provisioning credentials (git tokens live outside
+    # the env-block system). Operator env secrets are NOT prompted at
+    # agent create -- provisioning is hermetic. They get prompted at
+    # the use site (agent shell, session create, etc.).
     git_tokens = _collect_agent_credentials(config, registry)
 
     from agentworks.ssh import SSHLogger
@@ -446,6 +451,11 @@ def reinit_agent(
     from dataclasses import replace as _replace
 
     from agentworks.agents.templates import resolve_template
+    from agentworks.bootstrap import build_registry
+
+    # build_registry runs first so framework miss-policies fire before
+    # template / DB / VM business logic.
+    registry = build_registry(config)
 
     agent = db.get_agent(name)
     if agent is None:
@@ -461,10 +471,7 @@ def reinit_agent(
 
     vm = _require_vm(db, agent.vm_name)
 
-    # Collect credentials up front before any SSH work
-    from agentworks.bootstrap import build_registry
-
-    registry = build_registry(config)
+    # Collect credentials up front before any SSH work.
     git_tokens = _collect_agent_credentials(config, registry)
 
     # Provisioning is hermetic: no operator-env secrets are prompted at

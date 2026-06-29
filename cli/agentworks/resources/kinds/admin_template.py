@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
 from agentworks.config import AdminConfig
-from agentworks.resources.kind import KIND_REGISTRY
+from agentworks.resources.kind import ALWAYS_MATERIALIZE_SOURCE, KIND_REGISTRY
 from agentworks.resources.origin import Origin
 
 if TYPE_CHECKING:
@@ -42,12 +42,18 @@ class _AdminTemplateKind:
     def synthesize(self, requirements: Sequence[ResourceRequirement]) -> AdminConfig:
         """Build an empty-defaults ``AdminConfig`` for an auto-declared
         ``admin_template:default``. In practice ``Config.publish_to``
-        always publishes a real one before ``finalize`` runs, so this is
-        a safety net the Registry should rarely take. ``usage`` is
-        attached centrally by ``Registry.finalize``.
+        always publishes a real one before ``finalize`` runs, so the
+        always-materialize pre-step short-circuits and this call is rare.
+
+        Tolerates ``requirements=()`` per the Phase 2a contract: the
+        framework's always-materialize pre-step calls it that way for
+        kinds with a non-None ``auto_declare_names`` set. With no
+        incoming requirement, the synthetic
+        ``("framework", "always-materialize")`` source is used so the
+        breadcrumb shows where the row came from.
         """
-        first = requirements[0]
-        return AdminConfig(origin=Origin.auto_declared(source=first.source))
+        source = requirements[0].source if requirements else ALWAYS_MATERIALIZE_SOURCE
+        return AdminConfig(origin=Origin.auto_declared(source=source))
 
 
 KIND_REGISTRY["admin_template"] = _AdminTemplateKind()

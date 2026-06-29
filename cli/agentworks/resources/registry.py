@@ -93,6 +93,14 @@ class Registry:
 
         Steps:
 
+        0. **Always-materialize reserved-default names** (Phase 2a):
+           Kinds whose ``auto_declare_names`` is a non-None set guarantee
+           those names exist in the registry after finalize, regardless
+           of whether anything referenced them. Seeded before the
+           worklist loop so the first pass walks these Resources
+           alongside operator-published ones. Kinds with
+           ``auto_declare_names = None`` (secrets) are unaffected --
+           they stay requirement-driven.
         1. **Worklist loop**: walk ``required_resources()`` on every
            Resource not yet visited, accumulating requirements by
            ``(kind, name)`` target. For any target that resolves to no
@@ -104,12 +112,16 @@ class Registry:
            a single pass would silently drop their unresolved edges. The
            accumulated requirement map is preserved across iterations so
            the post-loop usage-attachment pass sees the complete graph.
-        2. **Usage attachment**: every Resource (operator-declared,
-           code-declared, auto-declared) that has incoming requirements
-           gets a ``usage`` tuple attached via ``dataclasses.replace``.
-           Both publish-time Origin and synthesize-time Origin already
-           landed; usage is centralized here so the kind's ``synthesize``
-           doesn't have to know the final requirement map.
+        2. **Usage attachment + description polish**: every Resource
+           (operator-declared, code-declared, auto-declared) gets a
+           ``usage`` tuple attached via ``dataclasses.replace`` -- empty
+           if nothing referenced it. The kind-agnostic
+           description-polish runs in the same pass: for any Resource
+           with a ``description`` field that's empty and an
+           auto-declared origin, the framework synthesizes a
+           description from the requirement graph (or, when ``usage``
+           is empty, falls back to ``"(auto) auto-declared default
+           <kind>"``).
         3. **Cycle detection** in the now-complete requirement graph via
            iterative DFS three-coloring; raises ``ConfigError`` on the
            first cycle with the offending path.
@@ -128,6 +140,10 @@ class Registry:
         """
         if self._frozen:
             raise RuntimeError("registry has already been finalized")
+
+        # 0: always-materialize reserved-default names. Seeds the worklist
+        # so unreferenced defaults still land in the registry (FRD R3).
+        self._materialize_reserved_defaults()
 
         # 1: worklist loop. ``walked`` tracks which Resources have had
         # their required_resources() walked so we don't double-count.
@@ -149,23 +165,49 @@ class Registry:
                 kind_handler = _lookup_kind(target_kind, reqs[0])
                 self._handle_miss(target_kind, target_name, kind_handler, reqs)
 
-        # 2: usage attachment. Every Resource with incoming requirements
-        # gets its usage tuple set via dataclasses.replace. Auto-declared
-        # secrets additionally get a synthesized description so the list
-        # view's Description column has meaningful text (the polish needs
-        # the final usage tuple, so it lands here rather than at the
-        # kind's synthesize-time call site).
-        for (kind, name), reqs in all_reqs.items():
-            existing = self._resources[kind][name]
-            polished = dataclasses.replace(existing, usage=_usage_tuple(reqs))
-            polished = _polish_auto_declared_description(polished)
-            self._resources[kind][name] = polished
+        # 2: usage attachment + description polish for every Resource.
+        # Iterate all currently-published Resources (not just those with
+        # incoming requirements) so always-materialized rows get
+        # ``usage=()`` plus the empty-usage description fallback too.
+        for kind in list(self._resources.keys()):
+            for name in list(self._resources[kind].keys()):
+                existing = self._resources[kind][name]
+                reqs = all_reqs.get((kind, name), [])
+                polished = dataclasses.replace(existing, usage=_usage_tuple(reqs))
+                polished = _polish_auto_declared_description(polished, kind)
+                self._resources[kind][name] = polished
 
         # 3: cycle detection across the now-complete graph.
         _detect_cycles(self._resources)
 
         # 4: freeze.
         self._frozen = True
+
+    def _materialize_reserved_defaults(self) -> None:
+        """Seed the registry with reserved-default rows for every kind
+        whose ``auto_declare_names`` is a non-None set.
+
+        For each ``(kind, name)`` pair in a kind's reserved set, if the
+        name isn't already in the registry (operator-declared or
+        published by another publisher), dispatch
+        ``synthesize(requirements=())`` and add the result. Kinds with
+        ``auto_declare_names = None`` are skipped -- their resources
+        stay requirement-driven.
+
+        Called at the start of ``finalize`` before the worklist loop so
+        the seeded Resources participate in the requirement walk
+        alongside operator-published ones (FRD R3, HLA Publish-and-
+        finalize section).
+        """
+        for kind, kind_handler in KIND_REGISTRY.items():
+            if kind_handler.auto_declare_names is None:
+                continue
+            for name in kind_handler.auto_declare_names:
+                if name in self._resources.get(kind, {}):
+                    continue
+                self._resources.setdefault(kind, {})[name] = (
+                    kind_handler.synthesize(())
+                )
 
     def _collect_new_requirements(
         self,
@@ -278,39 +320,48 @@ def _lookup_kind(kind: str, req: ResourceRequirement) -> Any:
         ) from None
 
 
-def _polish_auto_declared_description(resource: Any) -> Any:
-    """Synthesize a description for an auto-declared SecretDecl when its
+def _polish_auto_declared_description(resource: Any, kind: str) -> Any:
+    """Synthesize a description for an auto-declared Resource when its
     description is empty. Operators rely on a non-empty Description in
-    ``agw secret list``; the framework derives one from the first
-    requirement's usage text + source so the row reads as "what this
-    secret is for and who's asking".
+    ``agw resource list`` / ``agw secret list``; the framework derives
+    one so the row reads as "what this resource is for and who's asking".
 
-    Format: ``"(auto) <usage> for <kind>:<name>"`` plus, when more than
-    one distinct source requires this secret, ``" (and N more)"`` (N
-    counts distinct sources other than the first one already named).
-    No-op for non-secrets, operator-declared resources, code-declared
-    resources, secrets with no recorded usage, or any SecretDecl whose
-    description is already set.
+    Two cases share this polish step:
+
+    - **Usage-driven** (auto-declared via incoming requirement): set
+      from the first matching requirement as
+      ``"(auto) <usage> for <kind>:<name>"`` plus ``" (and N more)"``
+      when more than one distinct source matches.
+    - **Empty-usage** (always-materialized reserved default; no incoming
+      references): set as ``"(auto) auto-declared default <kind>"``,
+      e.g. ``"(auto) auto-declared default vm_template"``.
+
+    Kind-agnostic by design: the framework checks structurally
+    (``hasattr(resource, "description")`` + falsy test), not by kind, so
+    any future kind that acquires a ``description`` field benefits
+    automatically. No-op for resources without a ``description`` field,
+    operator-set descriptions, or non-auto-declared origins.
     """
-    from agentworks.secrets.base import SecretDecl
-
-    if not isinstance(resource, SecretDecl):
+    if not hasattr(resource, "description"):
         return resource
-    if resource.description:
+    if resource.description:  # operator-set description honored verbatim
         return resource
-    origin = resource.origin
+    origin = getattr(resource, "origin", None)
     if origin is None or origin.variant != "auto-declared":
         return resource
-    if not resource.usage:
-        return resource
-    first = resource.usage[0]
-    if not (isinstance(first.source, tuple) and len(first.source) == 2):
-        return resource
-    distinct_other = {u.source for u in resource.usage} - {first.source}
-    suffix = f" (and {len(distinct_other)} more)" if distinct_other else ""
-    description = (
-        f"(auto) {first.text} for {first.source[0]}:{first.source[1]}{suffix}"
-    )
+    usage = getattr(resource, "usage", ())
+    if not usage:
+        # Always-materialized default with no static incoming references.
+        description = f"(auto) auto-declared default {kind}"
+    else:
+        first = usage[0]
+        if not (isinstance(first.source, tuple) and len(first.source) == 2):
+            return resource
+        distinct_other = {u.source for u in usage} - {first.source}
+        suffix = f" (and {len(distinct_other)} more)" if distinct_other else ""
+        description = (
+            f"(auto) {first.text} for {first.source[0]}:{first.source[1]}{suffix}"
+        )
     return dataclasses.replace(resource, description=description)
 
 

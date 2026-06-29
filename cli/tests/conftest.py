@@ -231,3 +231,11 @@ def stub_session_resolvers(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "agentworks.secrets.resolve_for_command", lambda *a, **k: {}
     )
+    # Phase 2a's manager-entry hoist calls ``build_registry(config)`` at
+    # the top of ``create_session`` before any business logic. Stub it
+    # to a no-op for SimpleNamespace configs that don't carry
+    # ``publish_to``. Real Config flows still exercise the hoist's
+    # framework-error guarantee in the tests under tests/resources/.
+    monkeypatch.setattr(
+        "agentworks.bootstrap.build_registry", lambda config: None
+    )

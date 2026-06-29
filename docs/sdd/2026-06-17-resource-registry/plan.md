@@ -401,7 +401,7 @@ exist in the registry even when nothing references them. Sweep manager entry poi
       template-inheritance behavior, not framework behavior).
 - [ ] Sweep existing template tests for any that asserted on the bespoke validation's error
       messages; update to match the framework's consistent error shape.
-- [ ] **Generalize the auto-declared `description` polish.** The Phase 1 implementation in
+- [x] **Generalize the auto-declared `description` polish.** The Phase 1 implementation in
       `Registry.finalize` checks `isinstance(resource, SecretDecl)`; loosen to a structural check
       (`hasattr(resource, "description")` + empty-string test) so any kind that carries a
       `description: str` field benefits automatically. The format
@@ -410,7 +410,7 @@ exist in the registry even when nothing references them. Sweep manager entry poi
       no operator-visible change in Phase 2a itself; the change earns its keep when a future kind
       acquires a description (and avoids needing a second per-kind branch). See FRD R9 and HLA's
       Framework metadata attachment section for the generalized contract.
-- [ ] **Sweep command entry points so `build_registry(config)` runs before any business logic.**
+- [x] **Sweep command entry points so `build_registry(config)` runs before any business logic.**
       Phase 1c/1d hoisted `build_registry` to the top of `create_vm`, `reinit_vm`, and
       `add_git_credential` so the framework's per-kind miss-policies (e.g. `GitCredentialKind`'s
       `error` policy) fire before any other validation and the operator gets a clean typo error
@@ -427,7 +427,7 @@ exist in the registry even when nothing references them. Sweep manager entry poi
       service-layer-is-the-authority rule and don't need their own hoist. Trivial cost (one call
       that's already memoization-friendly inside `bootstrap.py`); high payoff in error-shape
       consistency across the surface.
-- [ ] **Update every kind's `synthesize` to tolerate `requirements=()`.** Today's
+- [x] **Update every kind's `synthesize` to tolerate `requirements=()`.** Today's
       `_SecretKind.synthesize`, `_AdminTemplateKind.synthesize`, and
       `_NamedConsoleTemplateKind.synthesize` all index into `requirements[0]` and would crash on
       empty input. Under the strengthened contract (FRD R3, "the `synthesize(requirements=())`
@@ -440,7 +440,7 @@ exist in the registry even when nothing references them. Sweep manager entry poi
       behavior to the four new template kinds being introduced; update `_SecretKind` to raise on
       empty (defensive even though the framework never calls it that way today). Tests in
       `cli/tests/resources/test_kind_synthesize_empty.py` pin both shapes.
-- [ ] **Always-materialize reserved-default names in `Registry.finalize`.** Today's finalize
+- [x] **Always-materialize reserved-default names in `Registry.finalize`.** Today's finalize
       auto-declares only when something emits an incoming `ResourceRequirement` for a missing name.
       That works for `secret` (which has `auto_declare_names = None` and is correctly
       requirement-driven), but breaks for the template kinds Phase 2a introduces: a config with no

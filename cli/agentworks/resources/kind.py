@@ -47,6 +47,19 @@ class ResourceKind(Protocol):
       Resources can accrue later-discovered incoming edges from
       second-level dispatches uniformly with operator-declared ones.
 
+      **Empty-requirements contract** (Phase 2a): every kind's
+      ``synthesize`` must have defined behavior when called with
+      ``requirements=()``. Kinds whose ``auto_declare_names`` is a
+      non-None set MUST build a code-defined default in this case (the
+      framework's always-materialize pre-step calls them this way to
+      guarantee reserved-default names exist in the registry); they use
+      the reserved sentinel ``Origin.auto_declared(source=("framework",
+      "always-materialize"))`` so the breadcrumb shows where the row came
+      from. Kinds with ``auto_declare_names = None`` raise
+      ``NoUnreferencedDefaultError`` -- the framework never calls them
+      that way, but the kind's contract must still be defined
+      (defensive against future ``auto_declare_names`` changes).
+
     The return type of ``synthesize`` is ``Any`` because Resources are
     diverse types from different modules (``SecretDecl`` from
     ``agentworks.secrets.base``, ``AdminConfig`` from ``agentworks.config``,
@@ -68,6 +81,26 @@ class ResourceKind(Protocol):
     def auto_declare_names(self) -> frozenset[str] | None: ...
 
     def synthesize(self, requirements: Sequence[ResourceRequirement]) -> Any: ...
+
+
+class NoUnreferencedDefaultError(Exception):
+    """Raised by a ``ResourceKind.synthesize`` when called with
+    ``requirements=()`` and the kind has no notion of an unreferenced
+    default (i.e., ``auto_declare_names is None``).
+
+    The framework's always-materialize pre-step in ``Registry.finalize``
+    only calls ``synthesize(requirements=())`` for kinds whose
+    ``auto_declare_names`` is a non-None set, so this error is never
+    raised in normal operation. The error exists so a kind's contract
+    stays well-defined under future changes: if a kind that today has
+    ``auto_declare_names = None`` gains a reserved name, the kind's
+    ``synthesize`` already has an obvious "fix me" landing pad.
+    """
+
+
+# Reserved Origin source kind for always-materialized rows. The string
+# "framework" must not be used as a real kind name in ``KIND_REGISTRY``.
+ALWAYS_MATERIALIZE_SOURCE: tuple[str, str] = ("framework", "always-materialize")
 
 
 KIND_REGISTRY: dict[str, ResourceKind] = {}
