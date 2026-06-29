@@ -9,6 +9,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from agentworks.errors import ConfigError
+
 if TYPE_CHECKING:
     from agentworks.config import Config, WorkspaceTemplate
     from agentworks.env import EnvEntry
@@ -44,17 +46,35 @@ def resolve_template(config: Config, template_name: str | None = None) -> Resolv
     return ResolvedTemplate(name="default")
 
 
-def _resolve(config: Config, name: str) -> ResolvedTemplate:
-    """Depth-first, left-to-right resolution of a template."""
+def _resolve(
+    config: Config,
+    name: str,
+    _visiting: tuple[str, ...] = (),
+) -> ResolvedTemplate:
+    """Depth-first, left-to-right resolution of a template.
+
+    ``_visiting`` carries the chain of in-progress resolves so cycles
+    raise ``ConfigError`` instead of ``RecursionError``. The framework's
+    cycle pass at build_registry time is the canonical check; this guard
+    is the safety net for callers that resolve without going through
+    build_registry (Phase 2a.2).
+    """
+    if name in _visiting:
+        path = " -> ".join((*_visiting, name))
+        raise ConfigError(
+            f"workspace_templates inheritance cycle detected: {path}"
+        )
+
     if name not in config.workspace_templates:
         return ResolvedTemplate(name=name)
 
     tmpl = config.workspace_templates[name]
     result = ResolvedTemplate(name=name)
+    next_visiting = (*_visiting, name)
 
     # Walk parents first
     for parent_name in tmpl.inherits:
-        parent = _resolve(config, parent_name)
+        parent = _resolve(config, parent_name, next_visiting)
         _merge(result, parent)
 
     # Apply this template's own values (last-one-wins)

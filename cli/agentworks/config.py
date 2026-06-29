@@ -10,7 +10,7 @@ import sys
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal, Protocol
+from typing import TYPE_CHECKING, Literal
 
 # ConfigError is defined in agentworks.errors and re-exported here for backward
 # compatibility with existing `from agentworks.config import ConfigError` users.
@@ -25,7 +25,7 @@ from agentworks.secrets import (
 from agentworks.source_location import SourceLocation, scan_section_lines, synthesized
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping
+    from collections.abc import Callable
 
     from agentworks.agents.templates import ResolvedAgentTemplate
     from agentworks.resources.origin import Origin
@@ -364,11 +364,22 @@ class AgentTemplate:
     usage: tuple[UsageEntry, ...] = ()
 
     def required_resources(self) -> list[ResourceRequirement]:
+        from agentworks.resources.requirement import TemplateRequirement
+
         source = ("agent_template", self.name)
         reqs: list[ResourceRequirement] = list(
             _env_requirements(self.env, source)
         )
         reqs.extend(_git_credential_requirements(self.git_credentials, source))
+        for parent in self.inherits:
+            reqs.append(
+                TemplateRequirement(
+                    name=parent,
+                    kind="agent_template",
+                    usage="a parent template",
+                    source=source,
+                )
+            )
         return reqs
 
 
@@ -384,7 +395,20 @@ class WorkspaceTemplate:
     usage: tuple[UsageEntry, ...] = ()
 
     def required_resources(self) -> list[ResourceRequirement]:
-        return list(_env_requirements(self.env, ("workspace_template", self.name)))
+        from agentworks.resources.requirement import TemplateRequirement
+
+        source = ("workspace_template", self.name)
+        reqs: list[ResourceRequirement] = list(_env_requirements(self.env, source))
+        for parent in self.inherits:
+            reqs.append(
+                TemplateRequirement(
+                    name=parent,
+                    kind="workspace_template",
+                    usage="a parent template",
+                    source=source,
+                )
+            )
+        return reqs
 
 
 @dataclass(frozen=True)
@@ -442,7 +466,20 @@ class SessionTemplate:
     usage: tuple[UsageEntry, ...] = ()
 
     def required_resources(self) -> list[ResourceRequirement]:
-        return list(_env_requirements(self.env, ("session_template", self.name)))
+        from agentworks.resources.requirement import TemplateRequirement
+
+        source = ("session_template", self.name)
+        reqs: list[ResourceRequirement] = list(_env_requirements(self.env, source))
+        for parent in self.inherits:
+            reqs.append(
+                TemplateRequirement(
+                    name=parent,
+                    kind="session_template",
+                    usage="a parent template",
+                    source=source,
+                )
+            )
+        return reqs
 
 
 @dataclass(frozen=True)
@@ -1059,12 +1096,11 @@ def _load_agent_templates(
             declared_at=decls.lookup("agent_templates", name),
         )
 
-    for name, tmpl in templates.items():
-        for parent in tmpl.inherits:
-            if parent not in templates and parent != "default":
-                raise ConfigError(f"agent_templates.{name}.inherits references unknown template: {parent}")
-    _detect_template_cycles(templates, "agent_templates")
-
+    # Phase 2a.2: inherits-reference validation and cycle detection move
+    # to the framework (AgentTemplateKind's miss policy +
+    # Registry.finalize's cycle pass). The agents/templates.py resolver
+    # also has its own visited-set guard for the load-time eager-resolve
+    # path (load_config's resolve_agent at line ~1639).
     return templates
 
 
@@ -1124,40 +1160,11 @@ def _load_workspace_templates(
             declared_at=decls.lookup("workspace_templates", name),
         )
 
-    # validate inherits references and cycles
-    for name, tmpl in templates.items():
-        for parent in tmpl.inherits:
-            if parent not in templates and parent != "default":
-                raise ConfigError(f"workspace_templates.{name}.inherits references unknown template: {parent}")
-    _detect_template_cycles(templates, "workspace_templates")
-
+    # Phase 2a.2: inherits-reference validation and cycle detection move
+    # to the framework (WorkspaceTemplateKind's miss policy +
+    # Registry.finalize's cycle pass). The workspaces/templates.py
+    # resolver also has its own visited-set guard.
     return templates
-
-
-class _HasInherits(Protocol):
-    @property
-    def inherits(self) -> list[str]: ...
-
-
-def _detect_template_cycles(templates: Mapping[str, _HasInherits], label: str) -> None:
-    visited: set[str] = set()
-    in_stack: set[str] = set()
-
-    def visit(name: str) -> None:
-        if name not in templates:
-            return  # implicit default or already validated
-        if name in in_stack:
-            raise ConfigError(f"{label} inheritance cycle detected involving: {name}")
-        if name in visited:
-            return
-        in_stack.add(name)
-        for parent in templates[name].inherits:
-            visit(parent)
-        in_stack.remove(name)
-        visited.add(name)
-
-    for name in templates:
-        visit(name)
 
 
 def _load_git_credentials(
@@ -1271,12 +1278,10 @@ def _load_session_templates(
             declared_at=decls.lookup("session_templates", name),
         )
 
-    for name, tmpl in templates.items():
-        for parent in tmpl.inherits:
-            if parent not in templates and parent != "default":
-                raise ConfigError(f"session_templates.{name}.inherits references unknown template: {parent}")
-    _detect_template_cycles(templates, "session_templates")
-
+    # Phase 2a.2: inherits-reference validation and cycle detection move
+    # to the framework (SessionTemplateKind's miss policy +
+    # Registry.finalize's cycle pass). The sessions/templates.py
+    # resolver also has its own visited-set guard.
     return templates
 
 

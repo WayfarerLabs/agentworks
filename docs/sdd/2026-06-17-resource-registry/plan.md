@@ -384,22 +384,22 @@ single `[admin]`-shaped). Add the always-materialize pre-step to finalize so res
 exist in the registry even when nothing references them. Sweep manager entry points to hoist
 `build_registry`. Operator-facing behavior is unchanged.
 
-- [ ] `cli/agentworks/resources/requirement.py`: add `TemplateRequirement(ResourceRequirement)` with
+- [x] `cli/agentworks/resources/requirement.py`: add `TemplateRequirement(ResourceRequirement)` with
       no extra fields (the template kind handles its own defaults inside `synthesize`).
-- [ ] `cli/agentworks/resources/kinds/vm_template.py`, `workspace_template.py`, `agent_template.py`,
+- [x] `cli/agentworks/resources/kinds/vm_template.py`, `workspace_template.py`, `agent_template.py`,
       `session_template.py`:
   - Each `XxxKind` declares `miss_policy="auto-declare"`, `auto_declare_names={"default"}`.
   - `synthesize(requirements)` produces the kind's code-defined default template (the same defaults
     today live in the existing resolver's "implicit default" fallback; move them here verbatim in
     Phase 2a).
-- [ ] Each `XxxTemplate.required_resources()` emits `TemplateRequirement` entries for each name in
+- [x] Each `XxxTemplate.required_resources()` emits `TemplateRequirement` entries for each name in
       `inherits = [...]`.
-- [ ] The existing inheritance resolver in `agentworks.config` / template modules shrinks:
+- [x] The existing inheritance resolver in `agentworks.config` / template modules shrinks:
       requirement-emission now happens via `required_resources()`; the framework's cycle-detection
       runs uniformly; the resolver walks `inherits` with the framework having already validated
       names and reachability. Per-template field-merging logic stays where it is (it's
       template-inheritance behavior, not framework behavior).
-- [ ] Sweep existing template tests for any that asserted on the bespoke validation's error
+- [x] Sweep existing template tests for any that asserted on the bespoke validation's error
       messages; update to match the framework's consistent error shape.
 - [x] **Generalize the auto-declared `description` polish.** The Phase 1 implementation in
       `Registry.finalize` checks `isinstance(resource, SecretDecl)`; loosen to a structural check
