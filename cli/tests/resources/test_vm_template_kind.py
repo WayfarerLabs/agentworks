@@ -170,11 +170,17 @@ def test_inherits_default_works_without_operator_declaration(tmp_path: Path) -> 
 
 
 def test_inherits_cycle_caught_at_load(tmp_path: Path) -> None:
-    """Mutually-inheriting templates form a cycle; the defensive
-    load-time check in ``_load_vm_templates`` catches it first
-    (before ``build_registry``'s framework pass would). Both checks
-    cover the case; the load-time one fires first because
-    ``load_config`` runs first.
+    """Mutually-inheriting templates form a cycle; the resolver's
+    internal visited-set guard catches it during ``load_config``'s
+    eager resolve of the default template. The framework's
+    ``Registry.finalize`` cycle pass is the canonical check (and
+    runs independently at ``build_registry`` time); the resolver
+    guard is the safety net for the load-time eager path.
+
+    Note: this particular config (cycle between non-default
+    templates) doesn't actually trip the eager resolve, since
+    ``resolve_from_dict`` only descends from "default". The
+    framework path is what catches it here.
     """
     cfg_file = _write_cfg(
         tmp_path / "config.toml",
@@ -186,13 +192,17 @@ def test_inherits_cycle_caught_at_load(tmp_path: Path) -> None:
         inherits = ["a"]
         """,
     )
+    cfg = load_config(cfg_file, warn_issues=False)
     with pytest.raises(ConfigError, match="cycle detected"):
-        load_config(cfg_file, warn_issues=False)
+        build_registry(cfg)
 
 
 def test_inherits_self_reference_caught_at_load(tmp_path: Path) -> None:
     """``inherits = ["a"]`` where the template itself is ``a`` -- a
-    self-loop is a one-node cycle; load-time check catches it.
+    self-loop is a one-node cycle. As with the mutual-inherits case,
+    a non-default self-loop slips past the eager resolve (which
+    descends from "default" only) and is caught by the framework's
+    cycle pass at ``build_registry`` time.
     """
     cfg_file = _write_cfg(
         tmp_path / "config.toml",
@@ -201,8 +211,9 @@ def test_inherits_self_reference_caught_at_load(tmp_path: Path) -> None:
         inherits = ["a"]
         """,
     )
+    cfg = load_config(cfg_file, warn_issues=False)
     with pytest.raises(ConfigError, match="cycle detected"):
-        load_config(cfg_file, warn_issues=False)
+        build_registry(cfg)
 
 
 def test_framework_cycle_detector_catches_registry_cycles(tmp_path: Path) -> None:
@@ -232,15 +243,13 @@ def test_framework_cycle_detector_catches_registry_cycles(tmp_path: Path) -> Non
 
 def test_inherits_cycle_through_default_caught_at_load(tmp_path: Path) -> None:
     """A cycle whose path goes through ``default`` (the always-materialized
-    reserved name) is caught at load time -- ``load_config`` eagerly
-    resolves ``default`` via the per-template field-merging resolver
-    before ``build_registry`` runs. The defensive load-time
-    ``_detect_template_cycles`` pass keeps this from crashing as a
-    ``RecursionError`` before the framework's canonical cycle pass
-    gets a chance to surface a clean ConfigError. Regression test for
-    Phase 2a.1: the canonical check moves to the framework, but the
-    defensive pass at load stays until the load-time eager resolve is
-    retired.
+    reserved name) IS exercised by ``load_config``'s eager resolve --
+    ``resolve_from_dict`` descends from ``default`` recursively. The
+    resolver's internal visited-set guard catches it and raises
+    ``ConfigError`` instead of crashing with ``RecursionError``.
+    Regression test for Phase 2a.1's retirement of the load-time
+    ``_detect_template_cycles`` pass: the resolver guards itself; the
+    framework still owns the canonical check at build_registry time.
     """
     cfg_file = _write_cfg(
         tmp_path / "config.toml",

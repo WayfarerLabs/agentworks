@@ -76,17 +76,40 @@ def resolve_from_dict(
     return ResolvedVMTemplate(name="default")
 
 
-def _resolve_from_dict(templates: dict[str, VMTemplate], name: str) -> ResolvedVMTemplate:
-    """Depth-first resolution using a templates dict."""
+def _resolve_from_dict(
+    templates: dict[str, VMTemplate],
+    name: str,
+    _visiting: tuple[str, ...] = (),
+) -> ResolvedVMTemplate:
+    """Depth-first resolution using a templates dict.
+
+    ``_visiting`` carries the chain of in-progress resolves so cycles
+    raise a clean ``ConfigError`` (matching the framework's cycle-pass
+    error shape) instead of crashing with ``RecursionError``. This is
+    the resolver's internal safety net -- the canonical cycle check
+    lives in ``Registry.finalize`` at build_registry time, but this
+    resolver is also called eagerly by ``load_config`` before any
+    registry is built (FRD R6 / Phase 2a.1), so it needs its own
+    guard.
+    """
+    if name in _visiting:
+        from agentworks.errors import ConfigError
+
+        path = " -> ".join((*_visiting, name))
+        raise ConfigError(
+            f"vm_templates inheritance cycle detected: {path}"
+        )
+
     if name not in templates:
         # Implicit default: return built-in defaults
         return ResolvedVMTemplate(name=name)
 
     tmpl = templates[name]
     result = ResolvedVMTemplate(name=name)
+    next_visiting = (*_visiting, name)
 
     for parent_name in tmpl.inherits:
-        parent = _resolve_from_dict(templates, parent_name)
+        parent = _resolve_from_dict(templates, parent_name, next_visiting)
         _merge(result, parent)
 
     _merge_template(result, tmpl)
