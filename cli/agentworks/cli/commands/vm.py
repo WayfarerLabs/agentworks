@@ -55,11 +55,20 @@ def vm_create(
 
 
 @vm_app.command("list")
-def vm_list() -> None:
+def vm_list(
+    names_only: Annotated[
+        bool,
+        typer.Option(
+            "--names-only",
+            help="Emit one VM name per line (no header, no formatting). "
+            "Used by shell completion; the order matches the table's row order.",
+        ),
+    ] = False,
+) -> None:
     """List VMs."""
     from agentworks.vms.manager import list_vms
 
-    list_vms(get_db())
+    list_vms(get_db(), names_only=names_only)
 
 
 @vm_app.command("backup")

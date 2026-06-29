@@ -83,6 +83,20 @@ to narrow to admin-mode sessions, not `--mode admin`. The bare-flag shape compos
 the name filters and matches how `session create --admin` already shapes the admin/agent mode
 selection elsewhere on the surface.
 
+## `--names-only` on list commands
+
+Every `<resource> list` command exposes a `--names-only` flag that emits one resource name per line
+with no header and no formatting. Shell completion (`completions/{bash,zsh,powershell}.py`) shells
+out to the CLI via this flag rather than parsing the human-readable table. The output order matches
+the table's row order, and filters compose as usual -- `--names-only` is a presentation switch, not
+a filter (`agw session list --vm my-vm --names-only` is the intersection of the VM filter and the
+names-only render).
+
+The convention exists because table layout is a UX concern that should be free to change without
+silently breaking completion. New list commands should ship `--names-only` from day one; the
+service-layer `list_*` function takes a `names_only: bool = False` kwarg and short-circuits the
+table render in favor of one `output.info(row.name)` per row when set.
+
 ## Service layer is the authority
 
 CLI command bodies should be thin: argv to kwargs, then call the service-layer function on the

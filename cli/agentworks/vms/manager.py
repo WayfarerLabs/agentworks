@@ -466,9 +466,22 @@ def create_vm(
         output.info(f"VM '{vm_name}' is ready!")
 
 
-def list_vms(db: Database) -> None:
-    """List all VMs with their init and runtime status."""
+def list_vms(db: Database, *, names_only: bool = False) -> None:
+    """List all VMs with their init and runtime status.
+
+    With ``names_only=True``, emit one VM name per line and skip the
+    table render. Used by shell completion (see issue #147).
+    """
     vms = db.list_vms()
+
+    if names_only:
+        # Names-only short-circuits BEFORE the empty check so an
+        # empty db prints nothing (not the friendly "No VMs"
+        # message), keeping the completion candidate set clean.
+        for vm in vms:
+            output.info(vm.name)
+        return
+
     if not vms:
         output.info("No VMs registered.")
         return
