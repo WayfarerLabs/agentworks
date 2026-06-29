@@ -304,8 +304,20 @@ class VMTemplate:
 
 @dataclass(frozen=True)
 class AdminConfig:
-    """Per-user config for the admin user on VMs."""
+    """Per-user config for the admin user on VMs.
 
+    Phase 2a.3 plurified the underlying ``admin_template`` kind from
+    singleton-conceptual to named-multi-instance: ``AdminConfig`` now
+    carries its own ``name`` (default ``"default"``) just like the other
+    template kinds. The operator-facing surface is unchanged in this
+    phase -- the loader only accepts the ``[admin]`` block and produces
+    one instance with name ``"default"``. A future SDD adds
+    ``[admin_templates.<name>]`` parsing, the ``--admin-template`` CLI
+    flag, and the VM DB column; that work can land without re-touching
+    the framework.
+    """
+
+    name: str = "default"
     username: str = "agentworks"
     shell: str = "zsh"
     git_credentials: list[str] = field(default_factory=list)
@@ -330,7 +342,7 @@ class AdminConfig:
     usage: tuple[UsageEntry, ...] = ()
 
     def required_resources(self) -> list[ResourceRequirement]:
-        source = ("admin_template", "default")
+        source = ("admin_template", self.name)
         reqs: list[ResourceRequirement] = list(
             _env_requirements(self.env, source)
         )
@@ -551,14 +563,16 @@ class Config:
 
         Iterates Config's per-kind dicts and pushes each Resource with an
         ``Origin.operator_declared(file=..., line=...)`` built from its
-        ``declared_at: SourceLocation``. Singleton-backed kinds
-        (``admin_template:default``, ``named_console_template:default``)
-        are also published from ``Config.admin`` and
-        ``Config.named_console`` respectively, so admin / named_console
-        appear in the Registry as first-class one-row Resources even when
-        the operator's TOML omits all their sections (Phase 0's loader
-        always produces an instance; Config.publish_to always publishes
-        it).
+        ``declared_at: SourceLocation``. ``Config.admin`` and
+        ``Config.named_console`` are operator-surface singletons today
+        (one TOML block, one row published as ``admin_template:default``
+        / ``named_console_template:default``), but their kinds are
+        named-multi-instance in the framework: a future SDD can grow the
+        operator surface to ``[admin_templates.<name>]`` /
+        ``[named_console_templates.<name>]`` without re-touching the
+        framework. Phase 0's loader always produces an instance even
+        when the operator's TOML omits all sections; Config.publish_to
+        always publishes it.
 
         ``secret_config`` is the secret-system policy envelope consumed
         directly by ``agentworks.secrets``; it is NOT published as a
@@ -594,9 +608,18 @@ class Config:
             for name, resource in kind_dict.items():
                 registry.add(kind, name, resource, op_origin(resource.declared_at))
 
-        # Singleton-backed kinds: one row each, name "default".
+        # Operator-surface-singleton kinds: framework treats them as
+        # named-multi-instance per Phase 2a.3, but today's loader only
+        # produces one row each (``admin_template:default`` /
+        # ``named_console_template:default``). admin_template's name is
+        # carried on the AdminConfig itself now -- still defaults to
+        # "default" -- so the future plurified surface can land without
+        # changing this publish line.
         registry.add(
-            "admin_template", "default", self.admin, op_origin(self.admin.declared_at)
+            "admin_template",
+            self.admin.name,
+            self.admin,
+            op_origin(self.admin.declared_at),
         )
         registry.add(
             "named_console_template",

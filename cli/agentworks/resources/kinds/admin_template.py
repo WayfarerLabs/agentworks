@@ -1,19 +1,21 @@
 """``AdminTemplateKind``: the framework's strategy for the
-``"admin_template"`` singleton-backed kind.
+``"admin_template"`` kind.
 
-The admin Resource is a singleton in the operator's TOML schema
-(``[admin.config]``, ``[admin.env]``, etc., with no explicit ``[admin]``
-header). The Registry models it as a one-row kind with reserved name
-``"default"`` so it appears in ``agw resource list``, can be the source of
-auto-declared secrets via its env block, and routes through framework
-dispatch uniformly with the multi-named template kinds.
+Phase 2a.3 plurified this kind from singleton-conceptual to
+named-multi-instance, matching the shape of ``vm_template`` /
+``agent_template`` / ``workspace_template`` / ``session_template``. The
+operator-facing surface is unchanged in Phase 2a: the loader still only
+accepts the singleton ``[admin]`` block and publishes one
+``admin_template:default`` row. A future SDD adds
+``[admin_templates.<name>]`` parsing, the ``--admin-template`` CLI flag,
+and the VM DB column without re-touching the framework.
 
-Miss policy is ``auto-declare`` with reserved name ``"default"`` -- a
-safety net, because ``Config.publish_to`` always publishes
-``admin_template:default`` (even when no ``[admin.*]`` sections exist,
-Config publishes an empty-defaults instance). Pinning auto-declare keeps
-the framework-dispatch shape uniform with the Phase 2a template kinds and
-errors loudly on typo'd names like ``admin_template:custom``.
+Miss policy is ``auto-declare`` with reserved name ``"default"`` -- the
+always-materialize pre-step seeds ``admin_template:default`` when it
+isn't already published (Config publishes the empty-defaults instance
+even when no ``[admin.*]`` sections exist, so the pre-step usually
+short-circuits). Typo'd names like ``admin_template:custom`` referenced
+from somewhere error via the framework's miss-policy dispatch.
 """
 
 from __future__ import annotations
@@ -43,17 +45,12 @@ class _AdminTemplateKind:
         """Build an empty-defaults ``AdminConfig`` for an auto-declared
         ``admin_template:default``. In practice ``Config.publish_to``
         always publishes a real one before ``finalize`` runs, so the
-        always-materialize pre-step short-circuits and this call is rare.
-
-        Tolerates ``requirements=()`` per the Phase 2a contract: the
-        framework's always-materialize pre-step calls it that way for
-        kinds with a non-None ``auto_declare_names`` set. With no
-        incoming requirement, the synthetic
-        ``("framework", "always-materialize")`` source is used so the
-        breadcrumb shows where the row came from.
+        always-materialize pre-step short-circuits and this call is
+        rare. See ``vm_template.py``'s ``synthesize`` for the rationale
+        on why the non-empty-``requirements`` path is preserved.
         """
         source = requirements[0].source if requirements else ALWAYS_MATERIALIZE_SOURCE
-        return AdminConfig(origin=Origin.auto_declared(source=source))
+        return AdminConfig(name="default", origin=Origin.auto_declared(source=source))
 
 
 KIND_REGISTRY["admin_template"] = _AdminTemplateKind()

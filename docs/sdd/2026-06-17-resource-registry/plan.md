@@ -460,7 +460,7 @@ exist in the registry even when nothing references them. Sweep manager entry poi
       description-polish (extended in this phase per the bullet above) gives them
       `description = "(auto) auto-declared default <kind>"`. See FRD R3 / R9 and HLA's
       `Publish and finalize` and Framework-metadata-attachment sections.
-- [ ] **Plurify `AdminTemplateKind`** from singleton (today) to named-multi-instance, alongside the
+- [x] **Plurify `AdminTemplateKind`** from singleton (today) to named-multi-instance, alongside the
       four template kinds being formalized in this phase. `auto_declare_names = {"default"}` stays.
       No operator-facing change in Phase 2a: the Config parser still only accepts `[admin]`
       (singleton) and publishes it as `admin_template:default`; the CLI doesn't gain
