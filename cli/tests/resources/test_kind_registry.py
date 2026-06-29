@@ -77,7 +77,7 @@ def test_admin_template_kind_synthesize_builds_empty_admin() -> None:
     assert admin.origin.variant == "auto-declared"
     # Default AdminConfig fields:
     assert admin.username == "agentworks"
-    assert admin.shell == "zsh"
+    assert admin.shell == "bash"
 
 
 def test_named_console_template_kind_synthesize_builds_empty_named_console() -> None:
