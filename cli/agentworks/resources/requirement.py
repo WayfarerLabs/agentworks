@@ -76,6 +76,9 @@ class TemplateRequirement(ResourceRequirement):
     producers and the framework agree on the target kind via the type.
     """
 
+    # Empty body intentional; ``@dataclass(frozen=True)`` on the subclass
+    # picks up the parent's fields.
+
 
 @dataclass(frozen=True)
 class UsageEntry:

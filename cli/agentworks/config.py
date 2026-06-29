@@ -941,11 +941,20 @@ def _load_vm_templates(
             declared_at=decls.lookup("vm_templates", name),
         )
 
-    # Inherits-reference validation and cycle detection moved to the
-    # framework in Phase 2a.1: VMTemplate.required_resources() emits a
-    # TemplateRequirement for each name in inherits; VMTemplateKind's
-    # miss policy auto-declares "default" and errors on other typos;
-    # Registry.finalize's cycle detection catches inheritance loops.
+    # Phase 2a.1: the framework's miss policy + cycle detection own the
+    # canonical inherits-reference validation (VMTemplate.required_resources
+    # emits TemplateRequirement; VMTemplateKind auto-declares "default" and
+    # errors on other typos; Registry.finalize detects cycles). The
+    # load-time cycle check below is defensive: ``load_config`` eagerly
+    # resolves the default VM template via ``_resolve_vm`` (line ~1626)
+    # without going through ``build_registry``, and the per-template
+    # field-merging resolver in ``agentworks.vms.templates`` has no
+    # cycle guard of its own. Until that eager resolve is retired or
+    # the resolver grows a visited set, this check prevents a config
+    # like ``[vm_templates.default] inherits = ["default"]`` from
+    # crashing ``load_config`` with RecursionError before any framework
+    # error can fire.
+    _detect_template_cycles(templates, "vm_templates")
 
     return templates
 

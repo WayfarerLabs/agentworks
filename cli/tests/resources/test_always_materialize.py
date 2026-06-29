@@ -184,7 +184,20 @@ def test_secret_kind_not_materialized_by_pre_step(tmp_path: Path) -> None:
     registry = Registry.empty()
     registry.finalize()
 
-    for secret in registry.iter_kind("secret"):
+    secrets = list(registry.iter_kind("secret"))
+    # Positive assertion: Phase 2a.1's always-materialized
+    # vm_template:default emits a SecretRequirement for
+    # tailscale-auth-key via its required_resources, so the cascade
+    # produces at least one secret row. Pinning this defends against a
+    # future regression where the materialize-then-walk interaction
+    # silently breaks (e.g. always-materialize lands rows but their
+    # required_resources doesn't run).
+    secret_names = {s.name for s in secrets}
+    assert "tailscale-auth-key" in secret_names, (
+        "expected vm_template:default's tailscale requirement to "
+        "auto-declare 'tailscale-auth-key' via the cascade"
+    )
+    for secret in secrets:
         assert secret.usage, (
             f"secret {secret.name!r} has empty usage; suggests "
             f"always-materialize fired (which would be a contract "

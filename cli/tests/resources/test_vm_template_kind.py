@@ -169,9 +169,12 @@ def test_inherits_default_works_without_operator_declaration(tmp_path: Path) -> 
     assert child.origin.variant == "operator-declared"
 
 
-def test_inherits_cycle_caught_by_framework(tmp_path: Path) -> None:
-    """Mutually-inheriting templates form a cycle in the requirement
-    graph; the framework's cycle-detection pass catches it.
+def test_inherits_cycle_caught_at_load(tmp_path: Path) -> None:
+    """Mutually-inheriting templates form a cycle; the defensive
+    load-time check in ``_load_vm_templates`` catches it first
+    (before ``build_registry``'s framework pass would). Both checks
+    cover the case; the load-time one fires first because
+    ``load_config`` runs first.
     """
     cfg_file = _write_cfg(
         tmp_path / "config.toml",
@@ -183,14 +186,13 @@ def test_inherits_cycle_caught_by_framework(tmp_path: Path) -> None:
         inherits = ["a"]
         """,
     )
-    cfg = load_config(cfg_file, warn_issues=False)
     with pytest.raises(ConfigError, match="cycle detected"):
-        build_registry(cfg)
+        load_config(cfg_file, warn_issues=False)
 
 
-def test_inherits_self_reference_caught(tmp_path: Path) -> None:
+def test_inherits_self_reference_caught_at_load(tmp_path: Path) -> None:
     """``inherits = ["a"]`` where the template itself is ``a`` -- a
-    self-loop is a one-node cycle; the framework catches it.
+    self-loop is a one-node cycle; load-time check catches it.
     """
     cfg_file = _write_cfg(
         tmp_path / "config.toml",
@@ -199,6 +201,76 @@ def test_inherits_self_reference_caught(tmp_path: Path) -> None:
         inherits = ["a"]
         """,
     )
-    cfg = load_config(cfg_file, warn_issues=False)
     with pytest.raises(ConfigError, match="cycle detected"):
-        build_registry(cfg)
+        load_config(cfg_file, warn_issues=False)
+
+
+def test_framework_cycle_detector_catches_registry_cycles(tmp_path: Path) -> None:
+    """The framework's cycle detector is the canonical check (per
+    Phase 2a.1's design). Bypass the defensive load-time check by
+    publishing VMTemplates directly into a Registry, then finalize.
+    The framework pass should detect the cycle and raise.
+    """
+    from agentworks.config import VMTemplate
+    from agentworks.resources import Origin, Registry
+
+    registry = Registry.empty()
+    fake_origin = Origin.operator_declared(file=tmp_path / "c.toml", line=1)
+    registry.add(
+        "vm_template", "a",
+        VMTemplate(name="a", inherits=["b"]),
+        fake_origin,
+    )
+    registry.add(
+        "vm_template", "b",
+        VMTemplate(name="b", inherits=["a"]),
+        fake_origin,
+    )
+    with pytest.raises(ConfigError, match="cycle detected"):
+        registry.finalize()
+
+
+def test_inherits_cycle_through_default_caught_at_load(tmp_path: Path) -> None:
+    """A cycle whose path goes through ``default`` (the always-materialized
+    reserved name) is caught at load time -- ``load_config`` eagerly
+    resolves ``default`` via the per-template field-merging resolver
+    before ``build_registry`` runs. The defensive load-time
+    ``_detect_template_cycles`` pass keeps this from crashing as a
+    ``RecursionError`` before the framework's canonical cycle pass
+    gets a chance to surface a clean ConfigError. Regression test for
+    Phase 2a.1: the canonical check moves to the framework, but the
+    defensive pass at load stays until the load-time eager resolve is
+    retired.
+    """
+    cfg_file = _write_cfg(
+        tmp_path / "config.toml",
+        """
+        [vm_templates.default]
+        inherits = ["a"]
+
+        [vm_templates.a]
+        inherits = ["default"]
+        """,
+    )
+    with pytest.raises(ConfigError, match="cycle"):
+        load_config(cfg_file, warn_issues=False)
+
+
+def test_unreferenced_vm_template_default_lands_with_framework_source(
+    tmp_path: Path,
+) -> None:
+    """Direct positive: a config that declares NO ``[vm_templates.*]``
+    blocks and nothing referencing ``vm_template:default`` still lands
+    the default row in the registry with the synthetic
+    ``("framework", "always-materialize")`` source. Mirrors the
+    admin-template test in ``test_always_materialize.py`` for the
+    Phase 2a.1 kind.
+    """
+    cfg_file = _write_cfg(tmp_path / "config.toml", "")
+    cfg = load_config(cfg_file, warn_issues=False)
+    registry = build_registry(cfg)
+
+    default = registry.lookup("vm_template", "default")
+    assert default.origin is not None
+    assert default.origin.variant == "auto-declared"
+    assert default.origin.source == ALWAYS_MATERIALIZE_SOURCE

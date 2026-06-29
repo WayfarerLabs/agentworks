@@ -49,11 +49,14 @@ class _VMTemplateKind:
         Tolerates ``requirements=()`` (the always-materialize pre-step's
         path): synthesizes with the reserved
         ``("framework", "always-materialize")`` source so the
-        breadcrumb shows where the row came from. With non-empty
-        ``requirements`` (the worklist-driven path -- a child template's
-        ``inherits = ["default"]`` triggers auto-declare when no
-        operator declaration exists), the first requirement's source is
-        recorded as origin.
+        breadcrumb shows where the row came from. This is the only path
+        the framework actually takes for VMTemplateKind today: the
+        always-materialize pre-step seeds ``vm_template:default`` before
+        the worklist loop, so by the time any child requirement is
+        dispatched the target is a hit, not a miss. The non-empty path
+        is kept for symmetry with other kinds and to keep the door open
+        for future cases (e.g. operator-declared kinds whose default
+        isn't always-materialized).
         """
         source = requirements[0].source if requirements else ALWAYS_MATERIALIZE_SOURCE
         return VMTemplate(name="default", origin=Origin.auto_declared(source=source))
