@@ -85,39 +85,40 @@ unset __agw_gp
 GIT_PS1_SHOWDIRTYSTATE=1
 GIT_PS1_SHOWUNTRACKEDFILES=1
 
-# Build PS1 before each prompt render. The mode-coded bracket
-# (cyan for ADMIN, bold yellow for AGENT) is the visual signal an
-# operator uses to tell at a glance which identity is driving the
-# shell. The ``AGW`` prefix makes clear that the ``<x>@<vm>`` shape
-# is NOT a standard Unix user@host pair.
+# Build PS1 before each prompt render. Two-line layout:
+#   [AGW ADMIN vm:<vm> ws:<ws> se:<session>]    <- agentworks banner
+#   <user>@<host>:<cwd> (branch) $              <- Debian-stock prompt + git
+# The mode-coded banner (cyan for ADMIN, bold yellow for AGENT) is
+# the visual signal an operator uses to tell at a glance which
+# identity is driving the shell. The ``AGW`` prefix makes clear
+# that the bracket is NOT a stock Unix ``user@host`` pair. The
+# status fields (ag/vm/ws/se) are labeled so there is no ambiguity
+# about what each value means; ag/ws/se render only when their env
+# var is set. The command line below is Debian's stock colored PS1
+# (green ``user@host``, blue ``path``) with a yellow git branch
+# segment appended -- the only non-Debian addition.
 __agw_prompt_command() {
-    local last=$?
+    local fields=''
+    [ -n "${AGENTWORKS_AGENT-}" ] && fields+=" ag:$AGENTWORKS_AGENT"
+    fields+=" vm:${AGENTWORKS_VM:-$HOSTNAME}"
+    [ -n "${AGENTWORKS_WORKSPACE-}" ] && fields+=" ws:$AGENTWORKS_WORKSPACE"
+    [ -n "${AGENTWORKS_SESSION-}" ] && fields+=" se:$AGENTWORKS_SESSION"
 
-    local vm="${AGENTWORKS_VM:-$HOSTNAME}"
-    local ws=''
-    [ -n "${AGENTWORKS_WORKSPACE-}" ] && ws=" $AGENTWORKS_WORKSPACE"
-
-    local id
+    local banner
     if [ -n "${AGENTWORKS_AGENT-}" ]; then
-        # Agent mode: bold yellow bracket -- visually distinct from
-        # admin so the operator knows this shell is running as the
-        # agent's automated identity.
-        id='\\[\\e[1;33m\\][AGW AGENT '"$AGENTWORKS_AGENT"'@'"$vm$ws"']\\[\\e[0m\\]'
+        # Agent mode: bold yellow banner.
+        banner='\\[\\e[1;33m\\][AGW AGENT'"$fields"']\\[\\e[0m\\]'
     else
-        # Admin mode: cyan bracket -- the operator's normal identity.
-        id='\\[\\e[36m\\][AGW ADMIN@'"$vm$ws"']\\[\\e[0m\\]'
+        # Admin mode: cyan banner.
+        banner='\\[\\e[36m\\][AGW ADMIN'"$fields"']\\[\\e[0m\\]'
     fi
 
-    local err=''
-    [ "$last" -ne 0 ] && err=' \\[\\e[31m\\]✗'"$last"'\\[\\e[0m\\]'
+    # Debian-stock colored prompt + git branch (the only addition).
+    local p_userhost='\\[\\e[01;32m\\]\\u@\\h\\[\\e[00m\\]'
+    local p_path='\\[\\e[01;34m\\]\\w\\[\\e[00m\\]'
+    local p_git='\\[\\e[33m\\]$(declare -F __git_ps1 >/dev/null && __git_ps1 " (%s)")\\[\\e[00m\\]'
 
-    # Build PS1 in pieces for readability. Each segment's escape
-    # sequences are wrapped in \\[ \\] so bash counts visible width
-    # correctly for line wrapping.
-    local p_path='\\[\\e[34m\\]\\w\\[\\e[0m\\]'
-    local p_git='\\[\\e[32m\\]$(declare -F __git_ps1 >/dev/null && __git_ps1 " (%s)")\\[\\e[0m\\]'
-    # Layout: <id> <blue path><green git><red err> $
-    PS1="$id $p_path$p_git$err"' \\$ '
+    PS1="$banner"$'\\n'"$p_userhost:$p_path$p_git"' \\$ '
 }
 PROMPT_COMMAND='__agw_prompt_command'
 
@@ -158,30 +159,40 @@ zstyle ':vcs_info:git:*' actionformats ' (%b|%a)'
 # (%F, %B, etc.) are always processed.
 setopt PROMPT_SUBST
 
-# precmd hook: build the identity prefix (mode-coded color) with
-# concrete substitutions for VM and workspace. zsh parameter
-# expansion isn't recursive in prompts, so we pre-substitute here.
-# The mode-coded bracket (cyan for ADMIN, bold yellow for AGENT) is
+# precmd hook: build the banner line with concrete substitutions
+# for vm/workspace/session/agent. zsh parameter expansion isn't
+# recursive in prompts, so we pre-substitute here.
+#
+# Two-line layout:
+#   [AGW ADMIN vm:<vm> ws:<ws> se:<session>]    <- agentworks banner
+#   <user>@<host>:<cwd> (branch) %              <- standard prompt + git
+#
+# The mode-coded banner (cyan for ADMIN, bold yellow for AGENT) is
 # the visual signal an operator uses to tell at a glance which
-# identity is driving the shell. The ``AGW`` prefix makes clear that
-# the ``<x>@<vm>`` shape is NOT a standard Unix user@host pair.
+# identity is driving the shell. The ``AGW`` prefix makes clear
+# that the bracket is NOT a stock Unix ``user@host`` pair. ag/ws/se
+# fields render only when their env var is set. The command line
+# below is a standard zsh prompt (green user@host, blue path) with
+# a yellow git branch segment -- the only non-standard addition.
 __agw_precmd() {
-    local vm="${AGENTWORKS_VM:-$HOST}"
-    local ws=''
-    [ -n "${AGENTWORKS_WORKSPACE-}" ] && ws=" ${AGENTWORKS_WORKSPACE}"
+    local fields=''
+    [ -n "${AGENTWORKS_AGENT-}" ] && fields+=" ag:${AGENTWORKS_AGENT}"
+    fields+=" vm:${AGENTWORKS_VM:-$HOST}"
+    [ -n "${AGENTWORKS_WORKSPACE-}" ] && fields+=" ws:${AGENTWORKS_WORKSPACE}"
+    [ -n "${AGENTWORKS_SESSION-}" ] && fields+=" se:${AGENTWORKS_SESSION}"
 
     if [ -n "${AGENTWORKS_AGENT-}" ]; then
-        # Agent mode: bold yellow bracket.
-        __agw_id="%F{yellow}%B[AGW AGENT ${AGENTWORKS_AGENT}@${vm}${ws}]%b%f"
+        # Agent mode: bold yellow banner.
+        __agw_banner="%F{yellow}%B[AGW AGENT${fields}]%b%f"
     else
-        # Admin mode: cyan bracket.
-        __agw_id="%F{cyan}[AGW ADMIN@${vm}${ws}]%f"
+        # Admin mode: cyan banner.
+        __agw_banner="%F{cyan}[AGW ADMIN${fields}]%f"
     fi
 }
 precmd_functions+=(__agw_precmd vcs_info)
 
-# Layout: <id> <blue path><green git><red err> %
-PS1='${__agw_id} %F{blue}%~%f%F{green}${vcs_info_msg_0_}%f%(?.. %F{red}✗%?%f) %# '
+# Banner line on top, standard prompt + git below.
+PS1=$'${__agw_banner}\\n%F{green}%n@%m%f:%F{blue}%~%f%F{yellow}${vcs_info_msg_0_}%f %# '
 
 # Agentworks shell hooks (mise activate, etc.) -- written by reinit
 [ -f ~/.agentworks-rc.sh ] && . ~/.agentworks-rc.sh

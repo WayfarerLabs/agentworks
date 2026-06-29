@@ -65,82 +65,87 @@ def test_seeds_use_guarded_source_line() -> None:
     assert guarded in ZSHRC
 
 
-def test_seeds_identity_prompt_has_agw_prefix_and_mode_label() -> None:
-    """The identity bracket reads ``[AGW ADMIN@<vm>]`` or
-    ``[AGW AGENT <name>@<vm>]`` so it doesn't look like a stock
-    ``user@host`` pair. Both branches must be present in each seed:
-    the bash PROMPT_COMMAND / zsh precmd picks the right one at
-    runtime based on whether ``AGENTWORKS_AGENT`` is set."""
-    # Both seeds present both branches.
-    assert "[AGW ADMIN@" in BASHRC
-    assert "[AGW AGENT " in BASHRC
-    assert "[AGW ADMIN@" in ZSHRC
-    assert "[AGW AGENT " in ZSHRC
+def test_seeds_banner_has_agw_prefix_and_mode_label() -> None:
+    """The status banner reads ``[AGW ADMIN ...]`` or
+    ``[AGW AGENT ...]`` so it's unambiguously NOT a stock Unix
+    ``user@host`` pair. Both branches must be present in each
+    seed: the bash PROMPT_COMMAND / zsh precmd picks the right
+    one at runtime based on whether ``AGENTWORKS_AGENT`` is set."""
+    assert "[AGW ADMIN" in BASHRC
+    assert "[AGW AGENT" in BASHRC
+    assert "[AGW ADMIN" in ZSHRC
+    assert "[AGW AGENT" in ZSHRC
+
+
+def test_seeds_banner_uses_labeled_status_fields() -> None:
+    """Status fields in the banner are labeled (``ag:``, ``vm:``,
+    ``ws:``, ``se:``) so there's no ambiguity about what each
+    value means at a glance."""
+    for label in (" ag:", " vm:", " ws:", " se:"):
+        assert label in BASHRC, f"missing {label!r} field in bash banner"
+        assert label in ZSHRC, f"missing {label!r} field in zsh banner"
 
 
 def test_seeds_mode_coded_colors() -> None:
     """ADMIN and AGENT modes use visually distinct colors so an
     operator can tell at a glance which identity is driving the
-    shell. ADMIN uses cyan (\\e[36m / %F{cyan}); AGENT uses bold
-    yellow (\\e[1;33m / %F{yellow}%B)."""
+    shell. ADMIN uses cyan (``\\e[36m`` / ``%F{cyan}``); AGENT
+    uses bold yellow (``\\e[1;33m`` / ``%F{yellow}%B``)."""
     # bash: ANSI escape sequences in PS1.
     assert "\\e[36m" in BASHRC      # cyan for ADMIN
     assert "\\e[1;33m" in BASHRC    # bold yellow for AGENT
-    # zsh: zsh prompt-escape color names.
+    # zsh: prompt-escape color names.
     assert "%F{cyan}" in ZSHRC
     assert "%F{yellow}%B" in ZSHRC
 
 
 def test_seeds_vm_hostname_fallback() -> None:
-    """Both seeds fall back to the shell's hostname variable when
-    ``AGENTWORKS_VM`` isn't set (e.g. a shell opened before
-    identity profile population). bash uses ``$HOSTNAME``; zsh
-    uses ``$HOST``. Parameter expansion inside the prompt builder
-    isn't recursive, so we can't lean on bash's ``\\h`` /
-    zsh's ``%m`` escapes after a substitution -- a plain variable
-    reference works in both directions."""
+    """Both seeds fall back to the shell's hostname variable
+    when ``AGENTWORKS_VM`` isn't set. bash uses ``$HOSTNAME``;
+    zsh uses ``$HOST``. Parameter expansion inside the prompt
+    builder isn't recursive, so we can't lean on bash's ``\\h``
+    or zsh's ``%m`` escapes after a substitution -- a plain
+    variable reference works in both directions."""
     assert "${AGENTWORKS_VM:-$HOSTNAME}" in BASHRC
     assert "${AGENTWORKS_VM:-$HOST}" in ZSHRC
 
 
-def test_seeds_workspace_tail_only_when_set() -> None:
-    """When ``AGENTWORKS_WORKSPACE`` is set (e.g. an agent shell
-    opened with ``--workspace``), the identity bracket grows to
-    ``[AGW ADMIN@vm ws-name]``. When unset, the bracket is clean.
-    Both seeds use ``${VAR:+ $VAR}`` shape so the workspace name
-    is prefixed by a single space, no leading separator."""
-    assert "AGENTWORKS_WORKSPACE" in BASHRC
-    assert "AGENTWORKS_WORKSPACE" in ZSHRC
+def test_seeds_status_fields_render_conditionally() -> None:
+    """ag/ws/se fields only render when their env var is set --
+    a bare admin shell shows ``[AGW ADMIN vm:my-vm]``, not the
+    full four-field shape with empty placeholders."""
+    # Each conditional has the [ -n "${VAR-}" ] && pattern in
+    # both seeds.
+    for var in ("AGENTWORKS_AGENT", "AGENTWORKS_WORKSPACE", "AGENTWORKS_SESSION"):
+        assert f'[ -n "${{{var}-}}" ]' in BASHRC, f"missing conditional for {var} in BASHRC"
+        assert f'[ -n "${{{var}-}}" ]' in ZSHRC, f"missing conditional for {var} in ZSHRC"
 
 
 def test_seeds_have_git_branch_support() -> None:
     """Both shells emit a ``(branch)`` indicator when the cwd is
-    inside a git repo. bash sources git's contrib ``git-sh-prompt``
-    (silently no-ops if git isn't installed); zsh uses its
-    built-in ``vcs_info``."""
-    # bash: source __git_ps1 from git's contrib.
+    inside a git repo. bash sources git's contrib
+    ``git-sh-prompt`` (silently no-ops if git isn't installed);
+    zsh uses its built-in ``vcs_info``."""
     assert "__git_ps1" in BASHRC
     assert "/usr/lib/git-core/git-sh-prompt" in BASHRC
-    # zsh: vcs_info is built-in to zsh.
     assert "autoload -Uz vcs_info" in ZSHRC
     assert "vcs_info_msg_0_" in ZSHRC
 
 
-def test_seeds_have_exit_code_badge_on_failure() -> None:
-    """Both shells render a red ``✗N`` badge after the prompt
-    when the last command exited nonzero; nothing when zero. bash
-    captures ``$?`` in the prompt builder; zsh uses ``%(?..%?...)``
-    ternary."""
-    # bash: \[\e[31m\] + ✗ symbol in the prompt builder.
-    assert "\\e[31m" in BASHRC
-    assert "✗" in BASHRC
-    # zsh: %(?..%F{red}✗%?%f) ternary -- empty when $? = 0.
-    assert "%(?.. %F{red}✗%?%f)" in ZSHRC
+def test_seeds_two_line_prompt_with_banner_above() -> None:
+    """The layout is two-line: agentworks status banner on top,
+    standard prompt + git on the bottom. The seed needs an
+    embedded newline between them. bash uses ``$'\\n'``; zsh
+    uses a literal ``\\n`` inside ``$'...'``."""
+    # bash PS1 assembled with $'\n' between banner and command.
+    assert "$'\\n'" in BASHRC
+    # zsh PS1 declared as $'...\n...' (literal newline inside ANSI-C).
+    assert "\\n%F{green}" in ZSHRC
 
 
 def test_seeds_use_prompt_command_or_precmd_hooks() -> None:
-    """The dynamic parts of the prompt (mode-coded bracket,
-    exit-code badge) need to be recomputed before each prompt
+    """The dynamic parts of the prompt (mode-coded banner with
+    substituted fields) need to be recomputed before each prompt
     render. bash uses ``PROMPT_COMMAND``; zsh uses
     ``precmd_functions``."""
     assert "PROMPT_COMMAND='__agw_prompt_command'" in BASHRC
