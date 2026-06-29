@@ -1,6 +1,6 @@
 ---
 description: "CLI command shape and naming conventions"
-globs: ["**/cli.py", "**/completions/**/*.py", "**/agentworks/**/manager.py"]
+globs: ["**/agentworks/cli/**/*.py", "**/completions/**/*.py", "**/agentworks/**/manager.py"]
 ---
 
 # CLI Conventions
