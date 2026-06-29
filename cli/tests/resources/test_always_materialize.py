@@ -167,17 +167,29 @@ def test_polish_no_op_for_resources_without_description_field() -> None:
 
 def test_secret_kind_not_materialized_by_pre_step(tmp_path: Path) -> None:
     """``_SecretKind`` has ``auto_declare_names = None`` so the
-    always-materialize step skips it. No spurious ``secret:<anything>``
-    rows appear in a minimal config.
+    always-materialize step never synthesizes secrets directly. Any
+    secret rows that DO appear in the registry came from the
+    requirement-driven path (e.g., Phase 2a.1's always-materialized
+    ``vm_template:default`` emits a ``SecretRequirement`` for
+    ``tailscale-auth-key`` via its existing required_resources, which
+    is the legitimate auto-declare path -- not always-materialize).
+
+    The proof: every secret row in a minimal config has a non-empty
+    usage list (showing a requirement triggered the auto-declare). If
+    secrets WERE always-materialized, they'd have empty usage like
+    template-kind defaults do.
     """
     from agentworks.resources import Registry
 
     registry = Registry.empty()
     registry.finalize()
 
-    # iter_kind returns an empty iterator when the kind has no rows.
-    secrets = list(registry.iter_kind("secret"))
-    assert secrets == []
+    for secret in registry.iter_kind("secret"):
+        assert secret.usage, (
+            f"secret {secret.name!r} has empty usage; suggests "
+            f"always-materialize fired (which would be a contract "
+            f"violation for the secret kind)"
+        )
 
 
 def test_operator_declared_admin_is_not_overwritten(tmp_path: Path) -> None:

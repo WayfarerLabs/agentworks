@@ -12,4 +12,5 @@ from agentworks.resources.kinds import (  # noqa: F401
     git_credentials,
     named_console_template,
     secret,
+    vm_template,
 )

@@ -272,9 +272,26 @@ class VMTemplate:
     usage: tuple[UsageEntry, ...] = ()
 
     def required_resources(self) -> list[ResourceRequirement]:
+        from agentworks.resources.requirement import TemplateRequirement
+
         reqs: list[ResourceRequirement] = list(
             _env_requirements(self.env, ("vm_template", self.name))
         )
+        # Inherits: each parent template name in ``inherits = [...]`` is a
+        # TemplateRequirement targeting the same kind. The framework's
+        # VMTemplateKind miss policy auto-declares "default" when missing
+        # and errors on any other unknown name; framework cycle detection
+        # catches inheritance loops. Per-template field-merging stays in
+        # ``agentworks.vms.templates``.
+        for parent in self.inherits:
+            reqs.append(
+                TemplateRequirement(
+                    name=parent,
+                    kind="vm_template",
+                    usage="a parent template",
+                    source=("vm_template", self.name),
+                )
+            )
         # When the raw template doesn't set tailscale_auth_key, emit the
         # default secret name's requirement so the registry finalizes
         # cleanly even before any inheritance walk. ResolvedVMTemplate's
@@ -924,12 +941,11 @@ def _load_vm_templates(
             declared_at=decls.lookup("vm_templates", name),
         )
 
-    # Validate inherits references and cycles
-    for name, tmpl in templates.items():
-        for parent in tmpl.inherits:
-            if parent not in templates and parent != "default":
-                raise ConfigError(f"vm_templates.{name}.inherits references unknown template: {parent}")
-    _detect_template_cycles(templates, "vm_templates")
+    # Inherits-reference validation and cycle detection moved to the
+    # framework in Phase 2a.1: VMTemplate.required_resources() emits a
+    # TemplateRequirement for each name in inherits; VMTemplateKind's
+    # miss policy auto-declares "default" and errors on other typos;
+    # Registry.finalize's cycle detection catches inheritance loops.
 
     return templates
 

@@ -84,6 +84,14 @@ def test_finalize_twice_errors() -> None:
 
 
 def test_iter_kind_returns_published_resources(tmp_path: Path) -> None:
+    """Published secrets land in iter_kind output. Phase 2a.1's
+    always-materialized ``vm_template:default`` emits a
+    ``SecretRequirement`` for ``tailscale-auth-key`` via its
+    ``required_resources``, so the requirement-driven path adds
+    ``tailscale-auth-key`` alongside the published a/b/c. The test
+    filters to operator-declared rows to pin the published-name set
+    without coupling to which framework-auto-declared rows exist.
+    """
     r = Registry.empty()
     for n in ["a", "b", "c"]:
         r.add(
@@ -93,8 +101,11 @@ def test_iter_kind_returns_published_resources(tmp_path: Path) -> None:
             Origin.operator_declared(file=tmp_path / "c.toml", line=1),
         )
     r.finalize()
-    names = sorted(s.name for s in r.iter_kind("secret"))
-    assert names == ["a", "b", "c"]
+    operator_names = sorted(
+        s.name for s in r.iter_kind("secret")
+        if s.origin is not None and s.origin.variant == "operator-declared"
+    )
+    assert operator_names == ["a", "b", "c"]
 
 
 def test_iter_kind_empty_when_kind_absent() -> None:

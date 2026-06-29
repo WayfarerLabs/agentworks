@@ -32,6 +32,7 @@ from agentworks.resources.registry import Registry
 from agentworks.resources.requirement import (
     ResourceRequirement,
     SecretRequirement,
+    TemplateRequirement,
     UsageEntry,
 )
 from agentworks.resources.walk import collect_secrets_for
@@ -45,6 +46,7 @@ __all__ = [
     "ResourceKind",
     "ResourceRequirement",
     "SecretRequirement",
+    "TemplateRequirement",
     "UsageEntry",
     "collect_secrets_for",
 ]

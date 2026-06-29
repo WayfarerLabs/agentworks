@@ -60,6 +60,24 @@ class SecretRequirement(ResourceRequirement):
 
 
 @dataclass(frozen=True)
+class TemplateRequirement(ResourceRequirement):
+    """Requirement targeting a template-kind Resource (``vm_template``,
+    ``workspace_template``, ``agent_template``, ``session_template``).
+
+    Emitted by each template type's ``required_resources()`` for every name
+    in its ``inherits = [...]`` list. The framework's miss policy resolves
+    the name (auto-declaring ``default`` when reserved, erroring on other
+    typos) and cycle detection catches inheritance loops. Per-template
+    field-merging (the actual ``inherits`` semantics) stays in the existing
+    template resolvers; this class is purely the framework's handle on the
+    reference.
+
+    No extra fields beyond the base in Phase 2a -- the subclass exists so
+    producers and the framework agree on the target kind via the type.
+    """
+
+
+@dataclass(frozen=True)
 class UsageEntry:
     """A single entry on a Resource's ``usage`` list. The framework appends
     one per matching requirement during ``Registry.finalize()``.
