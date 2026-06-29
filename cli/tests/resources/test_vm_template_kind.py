@@ -169,7 +169,7 @@ def test_inherits_default_works_without_operator_declaration(tmp_path: Path) -> 
     assert child.origin.variant == "operator-declared"
 
 
-def test_inherits_cycle_caught_at_load(tmp_path: Path) -> None:
+def test_non_default_inherits_cycle_caught_by_framework(tmp_path: Path) -> None:
     """Mutually-inheriting templates form a cycle; the resolver's
     internal visited-set guard catches it during ``load_config``'s
     eager resolve of the default template. The framework's
@@ -197,7 +197,7 @@ def test_inherits_cycle_caught_at_load(tmp_path: Path) -> None:
         build_registry(cfg)
 
 
-def test_inherits_self_reference_caught_at_load(tmp_path: Path) -> None:
+def test_non_default_self_reference_caught_by_framework(tmp_path: Path) -> None:
     """``inherits = ["a"]`` where the template itself is ``a`` -- a
     self-loop is a one-node cycle. As with the mutual-inherits case,
     a non-default self-loop slips past the eager resolve (which

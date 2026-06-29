@@ -10,6 +10,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from agentworks.errors import ConfigError
+
 if TYPE_CHECKING:
     from agentworks.config import Config, VMTemplate
     from agentworks.env import EnvEntry
@@ -93,8 +95,6 @@ def _resolve_from_dict(
     guard.
     """
     if name in _visiting:
-        from agentworks.errors import ConfigError
-
         path = " -> ".join((*_visiting, name))
         raise ConfigError(
             f"vm_templates inheritance cycle detected: {path}"
