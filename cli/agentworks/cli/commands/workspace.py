@@ -101,11 +101,23 @@ def workspace_console(
 @workspace_app.command("list")
 def workspace_list(
     vm: Annotated[str | None, typer.Option("--vm", help="Filter by VM")] = None,
+    names_only: Annotated[
+        bool,
+        typer.Option(
+            "--names-only",
+            help="Emit one workspace name per line (no header, no formatting). "
+            "Used by shell completion; the order matches the table's row order.",
+        ),
+    ] = False,
 ) -> None:
     """List workspaces. --vm accepts comma-separated values for OR-within-filter."""
     from agentworks.workspaces.manager import list_workspaces
 
-    list_workspaces(get_db(), vm_name=parse_csv_filter(vm))
+    list_workspaces(
+        get_db(),
+        vm_name=parse_csv_filter(vm),
+        names_only=names_only,
+    )
 
 
 @workspace_app.command("describe")

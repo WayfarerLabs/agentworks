@@ -2610,11 +2610,17 @@ def list_sessions(
     agent_name: str | list[str] | None = None,
     admin_only: bool = False,
     no_status: bool = False,
+    names_only: bool = False,
 ) -> None:
     """List sessions with batched status checks (one SSH call per VM, parallel).
 
     Status resolution is has-session-first; PID/boot_id are only used as a
     follow-up when agent checks fail.
+
+    With ``names_only=True``, emit one session name per line and
+    skip both the SSH status batch and the table render. Used by
+    shell completion (see issue #147); the order matches the table's
+    workspace-grouped order so completion stays stable.
     """
     sessions = filter_sessions(
         db,
@@ -2623,6 +2629,20 @@ def list_sessions(
         agent_name=agent_name,
         admin_only=admin_only,
     )
+
+    if names_only:
+        # Empty / fully-filtered-out result prints nothing under
+        # names-only; the friendly "No sessions found" line below is
+        # for human readers only. Match the table's workspace-grouped
+        # order so completion stays stable across renderers.
+        names_by_ws: dict[str, list[SessionRow]] = {}
+        for session in sessions:
+            names_by_ws.setdefault(session.workspace_name, []).append(session)
+        for ws_name in sorted(names_by_ws):
+            for session in names_by_ws[ws_name]:
+                output.info(session.name)
+        return
+
     if not sessions:
         output.info("No sessions found.")
         return

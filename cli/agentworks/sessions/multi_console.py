@@ -957,18 +957,31 @@ def list_consoles(
     vm_name: str | list[str] | None = None,
     workspace_name: str | list[str] | None = None,
     agent_name: str | list[str] | None = None,
+    names_only: bool = False,
 ) -> None:
     """Print a table of consoles, optionally filtered by VM, workspace, or agent.
 
     Workspace/agent filters match a console if any of its member sessions
     match; see `Database.list_consoles_with_counts` for full semantics.
     Filters compose with AND.
+
+    With ``names_only=True``, emit one console name per line and skip
+    the table render. Used by shell completion (see issue #147).
     """
     consoles = db.list_consoles_with_counts(
         vm_name=vm_name,
         workspace_name=workspace_name,
         agent_name=agent_name,
     )
+
+    if names_only:
+        # Empty / fully-filtered-out result prints nothing under
+        # names-only; the friendly "No consoles found" line below is
+        # for human readers only.
+        for c, _ in consoles:
+            output.info(c.name)
+        return
+
     if not consoles:
         output.info("No consoles found.")
         return

@@ -29,11 +29,20 @@ def vm_host_add(
 
 
 @vm_host_app.command("list")
-def vm_host_list() -> None:
+def vm_host_list(
+    names_only: Annotated[
+        bool,
+        typer.Option(
+            "--names-only",
+            help="Emit one host name per line (no header, no formatting). "
+            "Used by shell completion; the order matches the table's row order.",
+        ),
+    ] = False,
+) -> None:
     """List registered VM hosts."""
     from agentworks.vm_hosts.manager import list_vm_hosts
 
-    list_vm_hosts(get_db())
+    list_vm_hosts(get_db(), names_only=names_only)
 
 
 @vm_host_app.command("remove")

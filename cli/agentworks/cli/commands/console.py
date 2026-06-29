@@ -111,6 +111,14 @@ def console_list(
     vm: Annotated[str | None, typer.Option("--vm", help="Filter by VM")] = None,
     workspace: Annotated[str | None, typer.Option("--workspace", help="Filter by workspace")] = None,
     agent: Annotated[str | None, typer.Option("--agent", help="Filter by agent")] = None,
+    names_only: Annotated[
+        bool,
+        typer.Option(
+            "--names-only",
+            help="Emit one console name per line (no header, no formatting). "
+            "Used by shell completion; the order matches the table's row order.",
+        ),
+    ] = False,
 ) -> None:
     """List consoles. Filters compose with AND; name filters accept comma-separated values for OR-within-filter.
 
@@ -124,6 +132,7 @@ def console_list(
         vm_name=parse_csv_filter(vm),
         workspace_name=parse_csv_filter(workspace),
         agent_name=parse_csv_filter(agent),
+        names_only=names_only,
     )
 
 

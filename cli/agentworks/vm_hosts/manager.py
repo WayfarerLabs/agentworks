@@ -60,9 +60,21 @@ def add_vm_host(db: Database, name: str, ssh_host: str, platform: str = "lima") 
     output.info(f"VM host '{name}' added ({ssh_host})")
 
 
-def list_vm_hosts(db: Database) -> None:
-    """List all registered VM hosts."""
+def list_vm_hosts(db: Database, *, names_only: bool = False) -> None:
+    """List all registered VM hosts.
+
+    With ``names_only=True``, emit one host name per line and skip the
+    table render. Used by shell completion (see issue #147).
+    """
     hosts = db.list_vm_hosts()
+
+    if names_only:
+        # Empty db prints nothing under names-only; the friendly
+        # "No hosts registered" line below is for human readers only.
+        for h in hosts:
+            output.info(h.name)
+        return
+
     if not hosts:
         output.info("No VM hosts registered.")
         return

@@ -13,19 +13,19 @@ DYNAMIC_FUNCTIONS: dict[str, str] = {
     "vms": """\
 _agentworks_vms() {
     local -a vms
-    vms=(${(f)"$(agw vm list 2>/dev/null | tail -n +3 | awk '{print $1}')"})
+    vms=(${(f)"$(agw vm list --names-only 2>/dev/null)"})
     _describe 'vm' vms
 }""",
     "vm_hosts": """\
 _agentworks_vm_hosts() {
     local -a hosts
-    hosts=(${(f)"$(agw vm-host list 2>/dev/null | tail -n +3 | awk '{print $1}')"})
+    hosts=(${(f)"$(agw vm-host list --names-only 2>/dev/null)"})
     _describe 'vm-host' hosts
 }""",
     "workspaces": """\
 _agentworks_workspaces() {
     local -a workspaces
-    workspaces=(${(f)"$(agw workspace list 2>/dev/null | tail -n +3 | awk '{print $1}')"})
+    workspaces=(${(f)"$(agw workspace list --names-only 2>/dev/null)"})
     _describe 'workspace' workspaces
 }""",
     "ws_templates": """\
@@ -53,19 +53,19 @@ _agentworks_catalog_entries() {
     "sessions": """\
 _agentworks_sessions() {
     local -a sessions
-    sessions=(${(f)"$(agw session list --no-status 2>/dev/null | tail -n +3 | awk '{print $1}')"})
+    sessions=(${(f)"$(agw session list --names-only 2>/dev/null)"})
     _describe 'session' sessions
 }""",
     "agents": """\
 _agentworks_agents() {
     local -a agents
-    agents=(${(f)"$(agw agent list 2>/dev/null | tail -n +3 | awk '{print $1}')"})
+    agents=(${(f)"$(agw agent list --names-only 2>/dev/null)"})
     _describe 'agent' agents
 }""",
     "consoles": """\
 _agentworks_consoles() {
     local -a consoles
-    consoles=(${(f)"$(agw console list 2>/dev/null | tail -n +3 | awk '{print $1}')"})
+    consoles=(${(f)"$(agw console list --names-only 2>/dev/null)"})
     _describe 'console' consoles
 }""",
     "session_templates": """\
