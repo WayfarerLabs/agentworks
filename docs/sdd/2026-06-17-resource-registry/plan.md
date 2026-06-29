@@ -594,12 +594,14 @@ code.
   Resolved in Phase 2c alongside the new `render_resource_description`: both renderers now delegate
   indent to `output.detail`, so the cross-kind and per-kind describe views share the same
   convention.
-- **`SecretDescription.kind = "secret"` hard-coded.** Use the kind registry constant so a
-  hypothetical rename can't drift the describe output silently.
-- **FRD R10 dedupe wording is ambiguous.** "Duplicate usage text is collapsed" doesn't pin whether
-  dedupe is by `(source, text)` (current implementation) or by `text` alone. Resolve in the FRD when
-  Phase 2c's `agw resource describe` reuses the same `usage` rendering. The current read is
-  `(source, text)`; the FRD edit can either confirm or flip and update the renderer.
+- **`SecretDescription.kind = "secret"` hard-coded.** ~~Use the kind registry constant so a
+  hypothetical rename can't drift the describe output silently.~~ Resolved in Phase 2c:
+  kinds/secret.py now exposes `SECRET_KIND_NAME` and every call site in `secrets/inspect.py` imports
+  it (lookup, `entity_kind`, `SecretDescription.kind`).
+- **FRD R10 dedupe wording is ambiguous.** ~~"Duplicate usage text is collapsed" doesn't pin whether
+  dedupe is by `(source, text)` (current implementation) or by `text` alone.~~ Resolved in Phase 2c:
+  FRD R10 now spells out the `(source, text)` semantics explicitly (same text from two sources stays
+  as two rows; same text twice from one source collapses to one).
 - **Auto-declared `description` polish is secret-specific.** `Registry.finalize`'s
   `_polish_auto_declared_description` does `isinstance(resource, SecretDecl)`. Phase 2a generalizes
   it to a structural check so any kind with a `description: str` field benefits automatically (FRD

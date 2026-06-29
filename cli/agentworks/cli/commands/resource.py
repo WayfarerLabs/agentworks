@@ -8,9 +8,14 @@ inheritance chains, etc.) lives in the per-kind commands
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, cast
+
 import typer
 
 from agentworks.cli._app import app
+
+if TYPE_CHECKING:
+    from agentworks.resources.inspect import OriginFilter
 
 resource_app = typer.Typer(
     name="resource",
@@ -20,16 +25,13 @@ resource_app = typer.Typer(
 app.add_typer(resource_app)
 
 
-_VALID_ORIGIN_FILTERS = ("operator", "auto", "code")
-
-
 @resource_app.command("list")
 def resource_list(
     kind: str | None = typer.Option(
         None,
         "--kind",
         help=(
-            "Filter to one or more kinds (CSV: ``--kind secret,vm_template``). "
+            "Filter to one or more kinds (CSV: --kind secret,vm_template). "
             "Default: all kinds in the registry."
         ),
     ),
@@ -37,7 +39,7 @@ def resource_list(
         None,
         "--origin",
         help=(
-            "Filter by origin variant: ``operator``, ``auto``, or ``code``. "
+            "Filter by origin variant: operator, auto, or code. "
             "Default: all origins."
         ),
     ),
@@ -45,7 +47,7 @@ def resource_list(
         False,
         "--names-only",
         help=(
-            "Emit one ``kind:name`` per line (no header, no formatting). "
+            "Emit one kind:name per line (no header, no formatting). "
             "Used by shell completion."
         ),
     ),
@@ -62,24 +64,32 @@ def resource_list(
     from agentworks.bootstrap import build_registry
     from agentworks.config import load_config
     from agentworks.errors import ValidationError
-    from agentworks.resources.inspect import list_resources, render_resource_table
-
-    if origin_filter is not None and origin_filter not in _VALID_ORIGIN_FILTERS:
-        raise ValidationError(
-            f"--origin must be one of {list(_VALID_ORIGIN_FILTERS)}; got {origin_filter!r}",
-            entity_kind="resource",
-        )
+    from agentworks.resources.inspect import (
+        list_resources,
+        render_resource_table,
+    )
 
     kinds: tuple[str, ...] | None = None
     if kind is not None:
         kinds = tuple(k.strip() for k in kind.split(",") if k.strip())
+        # An empty --kind (or "--kind ,, ,") parses to (); rejecting
+        # here is more honest than silently treating it as "all kinds".
+        if not kinds:
+            raise ValidationError(
+                "--kind requires at least one non-empty kind",
+                entity_kind="resource",
+            )
 
     config = load_config()
     registry = build_registry(config)
+    # ``list_resources`` validates ``origin_filter`` (typed
+    # ``ValidationError`` from the service layer; see inspect.py); the
+    # ``cast`` is purely a typing-layer bridge from typer's ``str | None``
+    # to the ``OriginFilter`` Literal.
     listing = list_resources(
         registry,
         kinds=kinds,
-        origin_filter=origin_filter,  # type: ignore[arg-type]
+        origin_filter=cast("OriginFilter | None", origin_filter),
     )
     if names_only:
         for row in listing.rows:
@@ -90,12 +100,12 @@ def resource_list(
 
 @resource_app.command("describe")
 def resource_describe(
-    kind: str = typer.Argument(..., help="Resource kind (e.g. ``secret``, ``vm_template``)."),
+    kind: str = typer.Argument(..., help="Resource kind (e.g. secret, vm_template)."),
     name: str = typer.Argument(..., help="Resource name within the kind."),
 ) -> None:
     """Show the full per-resource detail view.
 
-    Three sections: header (kind, name, description, origin), usages
+    Two sections: header (kind, name, description, origin), usages
     (one row per requirement). Stops at framework-uniform fields; reach
     for ``agw secret describe`` etc. for kind-specific detail (backend
     mappings, inheritance chains, resolution preview).

@@ -16,6 +16,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from agentworks import output
+from agentworks.resources.kinds.secret import SECRET_KIND_NAME
+from agentworks.resources.render import format_origin_line
 
 if TYPE_CHECKING:
     from agentworks.config import Config
@@ -91,7 +93,7 @@ def build_secret_table(config: Config, registry: Registry) -> SecretTable:
     operator_count = 0
     auto_count = 0
     rows: list[SecretRow] = []
-    for decl in sorted(registry.iter_kind("secret"), key=lambda d: d.name):
+    for decl in sorted(registry.iter_kind(SECRET_KIND_NAME), key=lambda d: d.name):
         # Variant-based counter; defensive on missing origin.
         variant = getattr(getattr(decl, "origin", None), "variant", None)
         if variant == "operator-declared":
@@ -257,50 +259,6 @@ class SecretDescription:
     resolution: ResolutionPreview
 
 
-def _format_origin_line(origin: Origin | None) -> str:
-    """Render an ``Origin`` as a single-line parenthetical:
-    ``"operator-declared (~/path:42)"``, ``"auto-declared (kind:name)"``,
-    ``"code-declared (source)"``. ``"unknown"`` when ``origin`` is None
-    (defensive for Resources constructed outside the framework path).
-    """
-    if origin is None:
-        return "unknown"
-    if origin.variant == "operator-declared":
-        if origin.file is not None and origin.line:
-            return f"operator-declared ({_format_file_path(origin.file)}:{origin.line})"
-        return "operator-declared"
-    if origin.variant == "auto-declared":
-        source = origin.source
-        if isinstance(source, tuple) and len(source) == 2:
-            return f"auto-declared ({source[0]}:{source[1]})"
-        return "auto-declared"
-    if origin.variant == "code-declared":
-        source = origin.source
-        return f"code-declared ({source})" if source else "code-declared"
-    raise AssertionError(f"unhandled Origin variant: {origin.variant!r}")
-
-
-def _format_file_path(file: object) -> str:
-    """Render a file path operator-friendly: ``~/path`` when under
-    ``$HOME``, else the bare absolute path. Falls back to ``str(file)``
-    on any unexpected shape (defensive; Origin's file field is typed
-    ``Path | None`` so this only fires on truly weird construction).
-    """
-    from pathlib import Path
-
-    try:
-        path = Path(str(file))
-        home = Path.home()
-        if path.is_absolute():
-            try:
-                return f"~/{path.relative_to(home)}"
-            except ValueError:
-                return str(path)
-        return str(path)
-    except Exception:
-        return str(file)
-
-
 def describe_secret(
     registry: Registry,
     config: Config,
@@ -318,11 +276,11 @@ def describe_secret(
     from agentworks.errors import NotFoundError
 
     try:
-        decl = registry.lookup("secret", name)
+        decl = registry.lookup(SECRET_KIND_NAME, name)
     except KeyError:
         raise NotFoundError(
             f"secret {name!r} is not in the resource registry",
-            entity_kind="secret",
+            entity_kind=SECRET_KIND_NAME,
             entity_name=name,
             hint="check `agw secret list` for declared and auto-declared names",
         ) from None
@@ -357,7 +315,7 @@ def describe_secret(
 
     return SecretDescription(
         name=name,
-        kind="secret",
+        kind=SECRET_KIND_NAME,
         origin=origin,
         description=description,
         hint=getattr(decl, "hint", None),
@@ -382,7 +340,7 @@ def render_secret_description(desc: SecretDescription) -> None:
         output.detail(f"Description: {desc.description}")
     else:
         output.detail("Description: (none)")
-    output.detail(f"Origin: {_format_origin_line(desc.origin)}")
+    output.detail(f"Origin: {format_origin_line(desc.origin)}")
     if desc.hint:
         output.detail(f"Hint: {desc.hint}")
 

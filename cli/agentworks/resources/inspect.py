@@ -18,6 +18,13 @@ auto-declared resources get a framework-synthesized
 ``"(auto) <usage> for <kind>:<name>"`` / ``"(auto) auto-declared default
 <kind>"``. Kinds whose Resource type has no ``description`` field
 render an empty cell -- that's the cross-kind cost the SDD accepts.
+
+The framework reads ``origin`` / ``description`` / ``usage`` off each
+Resource via ``getattr`` rather than a shared ``Resource`` base class:
+kind types share these fields by convention (every kind today declares
+all three), but Phase 2a deliberately kept the kinds free-form so a
+future kind can omit a field without breaking the registry. ``getattr``
+with a default keeps the cross-kind walk safe.
 """
 
 from __future__ import annotations
@@ -26,6 +33,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
 from agentworks import output
+from agentworks.resources.render import format_origin_line
 
 if TYPE_CHECKING:
     from agentworks.resources import Registry
@@ -73,7 +81,10 @@ class ResourceDescription:
 # -- Filter parsing ---------------------------------------------------------
 
 # Origin filter accepts the short forms operators are most likely to
-# type. Maps to ``Origin.variant`` strings.
+# type. Maps to ``Origin.variant`` strings. The keys are also the single
+# source of truth for the valid ``origin_filter`` values -- ``OriginFilter``
+# (the public Literal) and ``list_resources``'s argument validation both
+# derive from this map.
 _ORIGIN_FILTER_MAP: dict[str, str] = {
     "operator": "operator-declared",
     "auto": "auto-declared",
@@ -103,7 +114,19 @@ def list_resources(
 
     Filters narrow the rows; the summary counts are computed AFTER
     filtering so the header reflects what the operator actually sees.
+    Raises ``ValidationError`` when ``origin_filter`` isn't one of
+    ``operator`` / ``auto`` / ``code`` (the keys of ``_ORIGIN_FILTER_MAP``).
+    The CLI layer stays thin per the service-layer-is-the-authority rule.
     """
+    from agentworks.errors import ValidationError
+
+    if origin_filter is not None and origin_filter not in _ORIGIN_FILTER_MAP:
+        raise ValidationError(
+            "origin_filter must be one of "
+            f"{sorted(_ORIGIN_FILTER_MAP)}; got {origin_filter!r}",
+            entity_kind="resource",
+        )
+
     target_kinds = tuple(kinds) if kinds else tuple(sorted(registry.iter_kinds()))
 
     rows: list[ResourceSummary] = []
@@ -112,6 +135,9 @@ def list_resources(
     code_count = 0
 
     for kind in target_kinds:
+        # Sort by name within each kind so the output is stable across
+        # runs and easy to diff. Cross-kind ordering is alphabetized via
+        # ``sorted(registry.iter_kinds())`` above.
         items = sorted(registry.iter_kind_items(kind), key=lambda item: item[0])
         for name, resource in items:
             origin = getattr(resource, "origin", None)
@@ -171,11 +197,20 @@ def describe_resource(
     try:
         resource = registry.lookup(kind, name)
     except KeyError:
+        # Tailor the hint: if the kind has any published resources, point
+        # at the scoped list. If it's empty (a known kind with no current
+        # rows), tell the operator directly so they don't run a query
+        # that returns "No resources match.".
+        has_any = any(True for _ in registry.iter_kind_items(kind))
+        if has_any:
+            hint = f"check `agw resource list --kind {kind}` for available names"
+        else:
+            hint = f"no {kind} resources are currently published"
         raise NotFoundError(
             f"no {kind} named {name!r} in the registry",
             entity_kind=kind,
             entity_name=name,
-            hint=f"check `agw resource list --kind {kind}` for available names",
+            hint=hint,
         ) from None
 
     return ResourceDescription(
@@ -188,29 +223,6 @@ def describe_resource(
 
 
 # -- Renderers --------------------------------------------------------------
-
-
-def _format_origin_short(origin: Origin | None) -> str:
-    """Single-cell origin rendering for the list view (matches the
-    parenthetical form used by ``agw secret describe``'s header).
-    """
-    if origin is None:
-        return "unknown"
-    if origin.variant == "operator-declared":
-        if origin.file is not None and origin.line:
-            from agentworks.secrets.inspect import _format_file_path
-
-            return f"operator-declared ({_format_file_path(origin.file)}:{origin.line})"
-        return "operator-declared"
-    if origin.variant == "auto-declared":
-        src = origin.source
-        if isinstance(src, tuple) and len(src) == 2:
-            return f"auto-declared ({src[0]}:{src[1]})"
-        return "auto-declared"
-    if origin.variant == "code-declared":
-        src = origin.source
-        return f"code-declared ({src})" if src else "code-declared"
-    return origin.variant
 
 
 def render_resource_table(listing: ResourceListing) -> None:
@@ -243,7 +255,7 @@ def render_resource_table(listing: ResourceListing) -> None:
             (
                 row.kind,
                 row.name,
-                _format_origin_short(row.origin),
+                format_origin_line(row.origin),
                 str(row.usage_count),
                 row.description,
             )
@@ -273,7 +285,7 @@ def render_resource_description(desc: ResourceDescription) -> None:
         output.detail(f"Description: {desc.description}")
     else:
         output.detail("Description: (none)")
-    output.detail(f"Origin: {_format_origin_short(desc.origin)}")
+    output.detail(f"Origin: {format_origin_line(desc.origin)}")
 
     output.info("")
     output.info("Usages:")

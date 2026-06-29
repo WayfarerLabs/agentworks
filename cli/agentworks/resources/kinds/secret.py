@@ -23,13 +23,20 @@ if TYPE_CHECKING:
     from agentworks.resources.requirement import ResourceRequirement
 
 
+SECRET_KIND_NAME = "secret"
+"""Single source of truth for the ``"secret"`` kind identifier. Callers
+that need to render or compare against the kind name import this rather
+than re-typing the literal -- a hypothetical rename then flows through
+every site by construction."""
+
+
 @dataclass(frozen=True)
 class _SecretKind:
     """Implementation of ``ResourceKind`` for ``"secret"``. Module-private;
     callers reach this through ``KIND_REGISTRY["secret"]``.
     """
 
-    kind: str = "secret"
+    kind: str = SECRET_KIND_NAME
     miss_policy: Literal["auto-declare", "error"] = "auto-declare"
     auto_declare_names: frozenset[str] | None = None  # None = any name accepted
 
@@ -65,4 +72,4 @@ class _SecretKind:
         )
 
 
-KIND_REGISTRY["secret"] = _SecretKind()
+KIND_REGISTRY[SECRET_KIND_NAME] = _SecretKind()

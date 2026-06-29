@@ -440,8 +440,10 @@ summary; for detail, the operator runs describe.
   detail: file path and line for operator-declared; the triggering requirement's `(kind, name)` for
   auto-declared.
 - **All registered usages**: one row per requirement, showing the source `(kind, name)` and the
-  usage text. A resource referenced by three sources shows three rows. Duplicate usage text is
-  collapsed.
+  usage text. A resource referenced by three sources shows three rows. Duplicates are collapsed by
+  `(source, text)` -- the same text reported from two different sources stays as two rows (they
+  document the same need from independent places), but a single source emitting the same text twice
+  collapses to one row.
 - **Backend mappings**: per-backend status -- the operator-set value if declared, the backend's
   default convention (e.g. `AW_SECRET_<NAME>` for env-var) if it has one and no operator override,
   or "no mapping (skipped)" for backends that have no default convention. No framework merging; this

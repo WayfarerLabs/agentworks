@@ -14,10 +14,8 @@ from textwrap import dedent
 
 from agentworks.bootstrap import build_registry
 from agentworks.config import load_config
-from agentworks.resources.inspect import (
-    _format_origin_short,
-    list_resources,
-)
+from agentworks.resources.inspect import list_resources
+from agentworks.resources.render import format_origin_line
 
 
 def _write_base(config_path: Path, *, extras: str = "") -> None:
@@ -210,10 +208,11 @@ def test_origin_filter_code_only_shows_code_declared(tmp_path: Path) -> None:
 # -- Origin rendering --------------------------------------------------------
 
 
-def test_format_origin_short_for_each_variant(tmp_path: Path) -> None:
-    """``_format_origin_short`` returns a single-cell rendering for the
-    list view. We assert the variant string is present (and the
-    parenthetical detail when available) so the table stays scannable.
+def test_format_origin_line_renders_each_variant(tmp_path: Path) -> None:
+    """``format_origin_line`` is the framework-shared origin renderer
+    used by both the cross-kind list and per-kind describe views; the
+    list view emits it as a single cell, so we assert variant strings
+    are present and no unknown variants slip in.
     """
     cfg_file = tmp_path / "config.toml"
     _write_base(
@@ -229,7 +228,7 @@ def test_format_origin_short_for_each_variant(tmp_path: Path) -> None:
     registry = _load(cfg_file)
     listing = list_resources(registry)
 
-    rendered = [_format_origin_short(row.origin) for row in listing.rows]
+    rendered = [format_origin_line(row.origin) for row in listing.rows]
     assert any(s.startswith("operator-declared") for s in rendered)
     # auto- and code-declared lines may or may not have a source --
     # both shapes are valid; just assert no unknown variants slip in.
@@ -329,6 +328,56 @@ def test_cli_kind_csv_filter(tmp_path: Path, monkeypatch) -> None:
     lines = [line for line in result.stdout.splitlines() if line]
     seen_kinds = {line.split(":", 1)[0] for line in lines}
     assert seen_kinds == {"vm_template", "secret"}
+
+
+def test_cli_kind_csv_filter_tolerates_whitespace(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """``--kind vm_template, secret`` (with a space) parses the same as
+    ``--kind vm_template,secret``. Commas can't appear in kind
+    identifiers, so a forgiving parse is safe.
+    """
+    from typer.testing import CliRunner
+
+    from agentworks.cli import app
+
+    cfg_file = tmp_path / "config.toml"
+    _write_base(
+        cfg_file,
+        extras="""
+        [vm_templates.default]
+        apt = ["zsh"]
+        """,
+    )
+    monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg_file)
+
+    result = CliRunner().invoke(
+        app,
+        ["resource", "list", "--kind", "vm_template, secret", "--names-only"],
+    )
+    assert result.exit_code == 0, result.stdout
+    lines = [line for line in result.stdout.splitlines() if line]
+    seen_kinds = {line.split(":", 1)[0] for line in lines}
+    assert seen_kinds == {"vm_template", "secret"}
+
+
+def test_cli_empty_kind_csv_is_rejected(tmp_path: Path, monkeypatch) -> None:
+    """``--kind ""`` (or all-whitespace, or just commas) parses to zero
+    kinds; rejecting is more honest than silently treating it as
+    ``--kind <all>``.
+    """
+    from typer.testing import CliRunner
+
+    from agentworks.cli import app
+    from agentworks.errors import ValidationError
+
+    cfg_file = tmp_path / "config.toml"
+    _write_base(cfg_file)
+    monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg_file)
+
+    result = CliRunner().invoke(app, ["resource", "list", "--kind", ""])
+    assert result.exit_code != 0
+    assert isinstance(result.exception, ValidationError)
 
 
 def test_cli_invalid_origin_filter_is_rejected(

@@ -520,6 +520,24 @@ Browse and inspect the built-in catalog of installable tools.
 | `agw config sync-ssh-config`        | Rebuild SSH config entries for VMs + agents  |
 | `agw config sync-vscode-workspaces` | Regenerate .code-workspace files for all VMs |
 
+### Resource Registry
+
+Cross-kind inspection of the Resource Registry. The registry is the framework that owns every
+operator- and auto-declared resource the CLI knows about: secrets, VM templates, agent templates,
+workspace templates, catalog entries, git credential providers, secret backends, etc. The two
+commands below stop at the framework-uniform fields (`kind`, `name`, `origin`, `usage`,
+`description`). For kind-specific detail -- secret backend mappings, template inheritance chains,
+resolution previews -- reach for the per-kind command (e.g. `agw secret describe`).
+
+| Command                               | Description                                          |
+| ------------------------------------- | ---------------------------------------------------- |
+| `agw resource list`                   | List every resource in the registry across all kinds |
+| `agw resource describe <kind> <name>` | Show the per-resource detail view (header + usages)  |
+
+`resource list` accepts `--kind <csv>` (e.g. `--kind secret,vm_template`) and `--origin <variant>`
+where variant is `operator`, `auto`, or `code`. `--names-only` emits `kind:name` per line and backs
+shell completion.
+
 ## Configuration
 
 Config lives at `~/.config/agentworks/config.toml`. Run `agw config init` to generate a sample with
