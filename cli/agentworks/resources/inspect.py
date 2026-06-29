@@ -126,6 +126,11 @@ def list_resources(
             f"{sorted(_ORIGIN_FILTER_MAP)}; got {origin_filter!r}",
             entity_kind="resource",
         )
+    if kinds is not None and not kinds:
+        raise ValidationError(
+            "kinds= must contain at least one kind (or pass None for all)",
+            entity_kind="resource",
+        )
 
     target_kinds = tuple(kinds) if kinds else tuple(sorted(registry.iter_kinds()))
 

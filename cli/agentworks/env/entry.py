@@ -53,12 +53,13 @@ class EnvEntry:
         """
         if self.secret is None:
             return []
+        from agentworks.resources.kinds.secret import SECRET_KIND_NAME
         from agentworks.resources.requirement import SecretRequirement
 
         return [
             SecretRequirement(
                 name=self.secret,
-                kind="secret",
+                kind=SECRET_KIND_NAME,
                 usage=f"the {self.key} env var",
                 source=source,
             )

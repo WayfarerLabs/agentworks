@@ -1377,10 +1377,11 @@ def _lookup_or_synthesize_secret(registry: Registry, name: str) -> SecretDecl:
     template's requirements and make this fallback redundant for the
     common case.
     """
+    from agentworks.resources.kinds.secret import SECRET_KIND_NAME
     from agentworks.secrets.base import SecretDecl
 
     try:
-        found: SecretDecl = registry.lookup("secret", name)
+        found: SecretDecl = registry.lookup(SECRET_KIND_NAME, name)
         return found
     except KeyError:
         return SecretDecl(name=name, description="")

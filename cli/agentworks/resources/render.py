@@ -42,20 +42,13 @@ def format_origin_line(origin: Origin | None) -> str:
     raise AssertionError(f"unhandled Origin variant: {origin.variant!r}")
 
 
-def format_file_path(file: object) -> str:
+def format_file_path(file: Path) -> str:
     """Render a file path operator-friendly: ``~/path`` when under
-    ``$HOME``, else the bare absolute path. Falls back to ``str(file)``
-    on any unexpected shape (defensive; Origin's file field is typed
-    ``Path | None`` so this only fires on truly weird construction).
+    ``$HOME``, else the bare absolute path. Relative paths render as-is.
     """
-    try:
-        path = Path(str(file))
-        home = Path.home()
-        if path.is_absolute():
-            try:
-                return f"~/{path.relative_to(home)}"
-            except ValueError:
-                return str(path)
-        return str(path)
-    except Exception:
-        return str(file)
+    if file.is_absolute():
+        try:
+            return f"~/{file.relative_to(Path.home())}"
+        except ValueError:
+            return str(file)
+    return str(file)

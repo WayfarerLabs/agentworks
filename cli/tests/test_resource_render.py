@@ -72,5 +72,12 @@ def test_format_file_path_falls_back_to_absolute_outside_home(
     tmp_path: Path, monkeypatch
 ) -> None:
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path / "home"))
-    rendered = format_file_path("/etc/agentworks.toml")
+    rendered = format_file_path(Path("/etc/agentworks.toml"))
     assert rendered == "/etc/agentworks.toml"
+
+
+def test_format_file_path_relative_path_renders_as_is() -> None:
+    """Relative ``Path`` inputs render verbatim -- only absolute paths
+    are candidates for the ``~/`` rewrite.
+    """
+    assert format_file_path(Path("config.toml")) == "config.toml"

@@ -523,9 +523,9 @@ Browse and inspect the built-in catalog of installable tools.
 ### Resource Registry
 
 Cross-kind inspection of the Resource Registry. The registry is the framework that owns every
-operator- and auto-declared resource the CLI knows about: secrets, VM templates, agent templates,
-workspace templates, catalog entries, git credential providers, secret backends, etc. The two
-commands below stop at the framework-uniform fields (`kind`, `name`, `origin`, `usage`,
+operator-, auto-, and code-declared resource the CLI knows about: secrets, VM templates, agent
+templates, workspace templates, catalog entries, git credential providers, secret backends, etc. The
+two commands below stop at the framework-uniform fields (`kind`, `name`, `origin`, `usage`,
 `description`). For kind-specific detail -- secret backend mappings, template inheritance chains,
 resolution previews -- reach for the per-kind command (e.g. `agw secret describe`).
 

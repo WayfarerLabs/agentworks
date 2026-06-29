@@ -63,22 +63,17 @@ def resource_list(
     from agentworks import output
     from agentworks.bootstrap import build_registry
     from agentworks.config import load_config
-    from agentworks.errors import ValidationError
     from agentworks.resources.inspect import (
         list_resources,
         render_resource_table,
     )
 
+    # Parse --kind here (CLI's job: turn argv shape into the service's
+    # ``tuple[str, ...]``). ``list_resources`` then validates: empty tuple
+    # raises ``ValidationError``, bad ``origin_filter`` raises too.
     kinds: tuple[str, ...] | None = None
     if kind is not None:
         kinds = tuple(k.strip() for k in kind.split(",") if k.strip())
-        # An empty --kind (or "--kind ,, ,") parses to (); rejecting
-        # here is more honest than silently treating it as "all kinds".
-        if not kinds:
-            raise ValidationError(
-                "--kind requires at least one non-empty kind",
-                entity_kind="resource",
-            )
 
     config = load_config()
     registry = build_registry(config)
