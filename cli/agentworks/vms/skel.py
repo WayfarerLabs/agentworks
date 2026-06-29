@@ -86,31 +86,30 @@ GIT_PS1_SHOWDIRTYSTATE=1
 GIT_PS1_SHOWUNTRACKEDFILES=1
 
 # Build PS1 before each prompt render. Two-line layout:
-#   [AGW ADMIN vm:<vm> ws:<ws> se:<session>]    <- agentworks banner
+#   [agw admin vm:<vm> ws:<ws> se:<session>]    <- agentworks banner
 #   <user>@<host>:<cwd> (branch) $              <- Debian-stock prompt + git
-# The mode-coded banner (cyan for ADMIN, bold yellow for AGENT) is
+# The mode-coded banner (cyan for admin, bold yellow for agent) is
 # the visual signal an operator uses to tell at a glance which
-# identity is driving the shell. The ``AGW`` prefix makes clear
-# that the bracket is NOT a stock Unix ``user@host`` pair. The
-# status fields (ag/vm/ws/se) are labeled so there is no ambiguity
-# about what each value means; ag/ws/se render only when their env
-# var is set. The command line below is Debian's stock colored PS1
-# (green ``user@host``, blue ``path``) with a yellow git branch
-# segment appended -- the only non-Debian addition.
+# identity is driving the shell. The ``agw`` prefix makes clear
+# that the bracket is NOT a stock Unix ``user@host`` pair. Field
+# order is vm (background context) then the standard agentworks
+# triad workspace / agent / session; ws/ag/se render only when
+# their env var is set. The command line below is Debian's stock
+# colored PS1 (green ``user@host``, blue ``path``) with a yellow
+# git branch segment appended -- the only non-Debian addition.
 __agw_prompt_command() {
-    local fields=''
-    [ -n "${AGENTWORKS_AGENT-}" ] && fields+=" ag:$AGENTWORKS_AGENT"
-    fields+=" vm:${AGENTWORKS_VM:-$HOSTNAME}"
+    local fields=" vm:${AGENTWORKS_VM:-$HOSTNAME}"
     [ -n "${AGENTWORKS_WORKSPACE-}" ] && fields+=" ws:$AGENTWORKS_WORKSPACE"
+    [ -n "${AGENTWORKS_AGENT-}" ] && fields+=" ag:$AGENTWORKS_AGENT"
     [ -n "${AGENTWORKS_SESSION-}" ] && fields+=" se:$AGENTWORKS_SESSION"
 
     local banner
     if [ -n "${AGENTWORKS_AGENT-}" ]; then
         # Agent mode: bold yellow banner.
-        banner='\\[\\e[1;33m\\][AGW AGENT'"$fields"']\\[\\e[0m\\]'
+        banner='\\[\\e[1;33m\\][agw agent'"$fields"']\\[\\e[0m\\]'
     else
         # Admin mode: cyan banner.
-        banner='\\[\\e[36m\\][AGW ADMIN'"$fields"']\\[\\e[0m\\]'
+        banner='\\[\\e[36m\\][agw admin'"$fields"']\\[\\e[0m\\]'
     fi
 
     # Debian-stock colored prompt + git branch (the only addition).
@@ -160,33 +159,34 @@ zstyle ':vcs_info:git:*' actionformats ' (%b|%a)'
 setopt PROMPT_SUBST
 
 # precmd hook: build the banner line with concrete substitutions
-# for vm/workspace/session/agent. zsh parameter expansion isn't
+# for vm/workspace/agent/session. zsh parameter expansion isn't
 # recursive in prompts, so we pre-substitute here.
 #
 # Two-line layout:
-#   [AGW ADMIN vm:<vm> ws:<ws> se:<session>]    <- agentworks banner
+#   [agw admin vm:<vm> ws:<ws> se:<session>]    <- agentworks banner
 #   <user>@<host>:<cwd> (branch) %              <- standard prompt + git
 #
-# The mode-coded banner (cyan for ADMIN, bold yellow for AGENT) is
+# The mode-coded banner (cyan for admin, bold yellow for agent) is
 # the visual signal an operator uses to tell at a glance which
-# identity is driving the shell. The ``AGW`` prefix makes clear
-# that the bracket is NOT a stock Unix ``user@host`` pair. ag/ws/se
-# fields render only when their env var is set. The command line
-# below is a standard zsh prompt (green user@host, blue path) with
-# a yellow git branch segment -- the only non-standard addition.
+# identity is driving the shell. The ``agw`` prefix makes clear
+# that the bracket is NOT a stock Unix ``user@host`` pair. Field
+# order is vm (background context) then the standard agentworks
+# triad workspace / agent / session; ws/ag/se render only when
+# their env var is set. The command line below is a standard zsh
+# prompt (green user@host, blue path) with a yellow git branch
+# segment -- the only non-standard addition.
 __agw_precmd() {
-    local fields=''
-    [ -n "${AGENTWORKS_AGENT-}" ] && fields+=" ag:${AGENTWORKS_AGENT}"
-    fields+=" vm:${AGENTWORKS_VM:-$HOST}"
+    local fields=" vm:${AGENTWORKS_VM:-$HOST}"
     [ -n "${AGENTWORKS_WORKSPACE-}" ] && fields+=" ws:${AGENTWORKS_WORKSPACE}"
+    [ -n "${AGENTWORKS_AGENT-}" ] && fields+=" ag:${AGENTWORKS_AGENT}"
     [ -n "${AGENTWORKS_SESSION-}" ] && fields+=" se:${AGENTWORKS_SESSION}"
 
     if [ -n "${AGENTWORKS_AGENT-}" ]; then
         # Agent mode: bold yellow banner.
-        __agw_banner="%F{yellow}%B[AGW AGENT${fields}]%b%f"
+        __agw_banner="%F{yellow}%B[agw agent${fields}]%b%f"
     else
         # Admin mode: cyan banner.
-        __agw_banner="%F{cyan}[AGW ADMIN${fields}]%f"
+        __agw_banner="%F{cyan}[agw admin${fields}]%f"
     fi
 }
 precmd_functions+=(__agw_precmd vcs_info)

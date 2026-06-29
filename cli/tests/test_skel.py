@@ -71,19 +71,43 @@ def test_seeds_banner_has_agw_prefix_and_mode_label() -> None:
     ``user@host`` pair. Both branches must be present in each
     seed: the bash PROMPT_COMMAND / zsh precmd picks the right
     one at runtime based on whether ``AGENTWORKS_AGENT`` is set."""
-    assert "[AGW ADMIN" in BASHRC
-    assert "[AGW AGENT" in BASHRC
-    assert "[AGW ADMIN" in ZSHRC
-    assert "[AGW AGENT" in ZSHRC
+    assert "[agw admin" in BASHRC
+    assert "[agw agent" in BASHRC
+    assert "[agw admin" in ZSHRC
+    assert "[agw agent" in ZSHRC
 
 
 def test_seeds_banner_uses_labeled_status_fields() -> None:
-    """Status fields in the banner are labeled (``ag:``, ``vm:``,
-    ``ws:``, ``se:``) so there's no ambiguity about what each
+    """Status fields in the banner are labeled (``vm:``, ``ws:``,
+    ``ag:``, ``se:``) so there's no ambiguity about what each
     value means at a glance."""
-    for label in (" ag:", " vm:", " ws:", " se:"):
+    for label in (" vm:", " ws:", " ag:", " se:"):
         assert label in BASHRC, f"missing {label!r} field in bash banner"
         assert label in ZSHRC, f"missing {label!r} field in zsh banner"
+
+
+def test_seeds_banner_field_order_is_vm_ws_ag_se() -> None:
+    """Order in the banner is vm (background context) then the
+    standard agentworks triad workspace / agent / session. Pinning
+    via the order of the field-construction statements in the
+    prompt builder."""
+    # Each builder sets vm first (always present) then conditionally
+    # appends ws / ag / se. Look at the assign / append statements
+    # (not docstring text) so the test isn't fooled by example
+    # snippets in the comment block above each function.
+    for seed_name, seed in (("BASHRC", BASHRC), ("ZSHRC", ZSHRC)):
+        vm_idx = seed.find('fields=" vm:')
+        ws_idx = seed.find('fields+=" ws:')
+        ag_idx = seed.find('fields+=" ag:')
+        se_idx = seed.find('fields+=" se:')
+        assert vm_idx >= 0 and ws_idx >= 0 and ag_idx >= 0 and se_idx >= 0, (
+            f"{seed_name}: expected vm assign + ws/ag/se appends, got "
+            f"vm={vm_idx}, ws={ws_idx}, ag={ag_idx}, se={se_idx}"
+        )
+        assert vm_idx < ws_idx < ag_idx < se_idx, (
+            f"{seed_name}: builder order should be vm < ws < ag < se "
+            f"(got vm={vm_idx}, ws={ws_idx}, ag={ag_idx}, se={se_idx})"
+        )
 
 
 def test_seeds_mode_coded_colors() -> None:
