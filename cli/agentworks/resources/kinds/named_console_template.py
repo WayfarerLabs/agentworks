@@ -26,7 +26,7 @@ from agentworks.resources.origin import Origin
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from agentworks.resources.requirement import ResourceRequirement
+    from agentworks.resources.reference import ResourceReference
 
 
 @dataclass(frozen=True)
@@ -39,7 +39,7 @@ class _NamedConsoleTemplateKind:
 
     def synthesize(
         self,
-        requirements: Sequence[ResourceRequirement],
+        requirements: Sequence[ResourceReference],
     ) -> NamedConsoleConfig:
         """Build an empty-defaults ``NamedConsoleConfig`` for an
         auto-declared ``named_console_template:default``. Same shape as

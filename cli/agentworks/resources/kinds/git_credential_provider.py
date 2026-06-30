@@ -22,7 +22,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from agentworks.resources.origin import Origin
-    from agentworks.resources.requirement import ResourceRequirement, UsageEntry
+    from agentworks.resources.reference import ReferenceEntry, ResourceReference
 
 
 @dataclass(frozen=True)
@@ -39,7 +39,7 @@ class GitCredentialProviderEntry:
 
     name: str
     origin: Origin | None = None
-    usage: tuple[UsageEntry, ...] = ()
+    references: tuple[ReferenceEntry, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -50,7 +50,7 @@ class _GitCredentialProviderKind:
     miss_policy: Literal["auto-declare", "error"] = "error"
     auto_declare_names: frozenset[str] | None = None
 
-    def synthesize(self, requirements: Sequence[ResourceRequirement]) -> Any:
+    def synthesize(self, requirements: Sequence[ResourceReference]) -> Any:
         # Unreachable under the error miss policy; honors the Phase 2a
         # empty-requirements contract via the typed framework error so a
         # future change that gives the kind a reserved default has an

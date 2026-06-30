@@ -39,6 +39,7 @@
     "fifos",
     "frontmatter",
     "fstype",
+    "getattr",
     "getent",
     "githubcli",
     "hermeticity",

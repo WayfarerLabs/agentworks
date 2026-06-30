@@ -1138,7 +1138,7 @@ def create_session(
     )
 
     # build_registry runs first so framework miss-policies (e.g. typos
-    # in agent template's git_credentials list, future TemplateRequirement
+    # in agent template's git_credentials list, future TemplateReference
     # typos on inherits) surface as clean framework errors before any
     # flag validation, DB lookup, or ephemeral-resource creation. The
     # registry isn't yet consumed by create_session's flow (operator-env

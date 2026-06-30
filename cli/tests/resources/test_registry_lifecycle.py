@@ -86,7 +86,7 @@ def test_finalize_twice_errors() -> None:
 def test_iter_kind_returns_published_resources(tmp_path: Path) -> None:
     """Published secrets land in iter_kind output. Phase 2a.1's
     always-materialized ``vm_template:default`` emits a
-    ``SecretRequirement`` for ``tailscale-auth-key`` via its
+    ``SecretReference`` for ``tailscale-auth-key`` via its
     ``required_resources``, so the requirement-driven path adds
     ``tailscale-auth-key`` alongside the published a/b/c. The test
     filters to operator-declared rows to pin the published-name set
@@ -168,7 +168,7 @@ def test_unknown_kind_in_requirement_errors_clearly(tmp_path: Path) -> None:
     """A requirement for a kind that isn't in ``KIND_REGISTRY`` errors with
     the requirement's source so operators can find the offending Resource.
     """
-    from agentworks.resources.requirement import ResourceRequirement
+    from agentworks.resources.reference import ResourceReference
 
     class _ResourceWithBogusReq:
         """Stub Resource exposing a single requirement to an unregistered kind."""
@@ -176,9 +176,9 @@ def test_unknown_kind_in_requirement_errors_clearly(tmp_path: Path) -> None:
         origin = None
         usage = ()
 
-        def required_resources(self) -> list[ResourceRequirement]:
+        def referenced_resources(self) -> list[ResourceReference]:
             return [
-                ResourceRequirement(
+                ResourceReference(
                     name="anything",
                     kind="not-a-registered-kind",
                     usage="...",

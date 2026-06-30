@@ -12,7 +12,7 @@ What we pin:
 
 - ``AdminConfig`` carries its own ``name`` field (default ``"default"``)
   matching the other template kinds' shape.
-- ``AdminConfig.required_resources`` uses ``self.name`` as the source
+- ``AdminConfig.referenced_resources`` uses ``self.name`` as the source
   identity (not a hardcoded ``"default"``), so a hypothetical
   ``admin_template:work`` would emit requirements sourced at
   ``("admin_template", "work")``.
@@ -77,7 +77,7 @@ def test_admin_config_carries_its_own_name_field() -> None:
 
 
 def test_admin_required_resources_sources_from_self_name() -> None:
-    """``AdminConfig.required_resources`` emits requirements sourced at
+    """``AdminConfig.referenced_resources`` emits requirements sourced at
     ``("admin_template", self.name)``, not a hardcoded ``"default"``.
     Future-plurified named admin templates inherit the right source
     identity without further changes.
@@ -86,7 +86,7 @@ def test_admin_required_resources_sources_from_self_name() -> None:
         name="work",
         env={"API_KEY": EnvEntry(key="API_KEY", secret="api-key")},
     )
-    reqs = custom.required_resources()
+    reqs = custom.referenced_resources()
     assert reqs  # at least the API_KEY secret requirement
     assert all(r.source == ("admin_template", "work") for r in reqs)
 
@@ -150,7 +150,7 @@ def test_admin_template_kind_errors_on_unreserved_name_reference(
     """
     from dataclasses import dataclass
 
-    from agentworks.resources import ResourceRequirement
+    from agentworks.resources import ResourceReference
 
     @dataclass(frozen=True)
     class _Stub:
@@ -159,11 +159,11 @@ def test_admin_template_kind_errors_on_unreserved_name_reference(
         ``dataclasses.replace(resource, origin=...)`` stamp works."""
 
         origin: Origin | None = None
-        usage: tuple = ()
+        references: tuple = ()
 
-        def required_resources(self) -> list[ResourceRequirement]:
+        def referenced_resources(self) -> list[ResourceReference]:
             return [
-                ResourceRequirement(
+                ResourceReference(
                     name="custom",
                     kind="admin_template",
                     usage="something",

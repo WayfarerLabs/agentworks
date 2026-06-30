@@ -22,7 +22,7 @@ from agentworks.resources.origin import Origin
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from agentworks.resources.requirement import ResourceRequirement
+    from agentworks.resources.reference import ResourceReference
 
 
 @dataclass(frozen=True)
@@ -33,7 +33,7 @@ class _AgentTemplateKind:
     miss_policy: Literal["auto-declare", "error"] = "auto-declare"
     auto_declare_names: frozenset[str] | None = frozenset({"default"})
 
-    def synthesize(self, requirements: Sequence[ResourceRequirement]) -> AgentTemplate:
+    def synthesize(self, requirements: Sequence[ResourceReference]) -> AgentTemplate:
         """Build the code-defined default ``AgentTemplate``. See
         ``vm_template.py``'s ``synthesize`` for the rationale on why the
         non-empty-``requirements`` path is preserved even though the

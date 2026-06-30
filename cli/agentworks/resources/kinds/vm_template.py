@@ -26,7 +26,7 @@ from agentworks.resources.origin import Origin
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from agentworks.resources.requirement import ResourceRequirement
+    from agentworks.resources.reference import ResourceReference
 
 
 @dataclass(frozen=True)
@@ -37,7 +37,7 @@ class _VMTemplateKind:
     miss_policy: Literal["auto-declare", "error"] = "auto-declare"
     auto_declare_names: frozenset[str] | None = frozenset({"default"})
 
-    def synthesize(self, requirements: Sequence[ResourceRequirement]) -> VMTemplate:
+    def synthesize(self, requirements: Sequence[ResourceReference]) -> VMTemplate:
         """Build a code-defined default ``VMTemplate``.
 
         Returns the kind's baseline: ``VMTemplate(name="default")`` with

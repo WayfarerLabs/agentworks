@@ -38,7 +38,7 @@ from agentworks.resources.render import format_origin_line
 if TYPE_CHECKING:
     from agentworks.resources import Registry
     from agentworks.resources.origin import Origin
-    from agentworks.resources.requirement import UsageEntry
+    from agentworks.resources.reference import ReferenceEntry
 
 
 OriginFilter = Literal["operator", "auto", "code"]
@@ -48,12 +48,16 @@ OriginFilter = Literal["operator", "auto", "code"]
 class ResourceSummary:
     """One row in ``agw resource list``: the framework-uniform fields
     for one Registry-published Resource.
+
+    ``reference_count`` is the number of inbound ``ReferenceEntry``
+    instances on the Resource (how many config points name it). The list
+    view renders this as the REFS column.
     """
 
     kind: str
     name: str
     origin: Origin | None
-    usage_count: int
+    reference_count: int
     description: str
 
 
@@ -75,7 +79,7 @@ class ResourceDescription:
     name: str
     origin: Origin | None
     description: str
-    usage: tuple[UsageEntry, ...]
+    references: tuple[ReferenceEntry, ...]
 
 
 # -- Filter parsing ---------------------------------------------------------
@@ -148,14 +152,14 @@ def list_resources(
             origin = getattr(resource, "origin", None)
             if not _matches_origin(origin, origin_filter):
                 continue
-            usage: tuple[UsageEntry, ...] = tuple(getattr(resource, "usage", ()))
+            references: tuple[ReferenceEntry, ...] = tuple(getattr(resource, "references", ()))
             description = getattr(resource, "description", "") or ""
             rows.append(
                 ResourceSummary(
                     kind=kind,
                     name=name,
                     origin=origin,
-                    usage_count=len(usage),
+                    reference_count=len(references),
                     description=description,
                 )
             )
@@ -223,7 +227,7 @@ def describe_resource(
         name=name,
         origin=getattr(resource, "origin", None),
         description=getattr(resource, "description", "") or "",
-        usage=tuple(getattr(resource, "usage", ())),
+        references=tuple(getattr(resource, "references", ())),
     )
 
 
@@ -253,7 +257,7 @@ def render_resource_table(listing: ResourceListing) -> None:
     output.info(f"{total} resource{'s' if total != 1 else ''}{breakdown}")
     output.info("")
 
-    headers = ("KIND", "NAME", "ORIGIN", "USAGE", "DESCRIPTION")
+    headers = ("KIND", "NAME", "ORIGIN", "REFS", "DESCRIPTION")
     rendered: list[tuple[str, ...]] = []
     for row in listing.rows:
         rendered.append(
@@ -261,7 +265,7 @@ def render_resource_table(listing: ResourceListing) -> None:
                 row.kind,
                 row.name,
                 format_origin_line(row.origin),
-                str(row.usage_count),
+                str(row.reference_count),
                 row.description,
             )
         )
@@ -281,7 +285,7 @@ def render_resource_table(listing: ResourceListing) -> None:
 
 def render_resource_description(desc: ResourceDescription) -> None:
     """Emit a ``ResourceDescription`` as operator-friendly sections:
-    header (kind, name, description, origin), then the usage list.
+    header (kind, name, description, origin), then the references list.
     Mirrors the shape of ``agw secret describe`` minus the
     secret-specific sections (backend mappings, resolution preview).
     """
@@ -293,17 +297,17 @@ def render_resource_description(desc: ResourceDescription) -> None:
     output.detail(f"Origin: {format_origin_line(desc.origin)}")
 
     output.info("")
-    output.info("Usages:")
-    if not desc.usage:
+    output.info("Referenced by:")
+    if not desc.references:
         output.detail("(none recorded)")
         return
-    # Dedupe by (source, text) preserving first-encounter order --
+    # Dedupe by (source, usage) preserving first-encounter order --
     # same dedupe as agw secret describe (FRD R10).
     seen: set[tuple[tuple[str, str], str]] = set()
-    for entry in desc.usage:
-        key = (entry.source, entry.text)
+    for entry in desc.references:
+        key = (entry.source, entry.usage)
         if key in seen:
             continue
         seen.add(key)
         src = f"{entry.source[0]}:{entry.source[1]}"
-        output.detail(f"- {src} -- {entry.text}")
+        output.detail(f"- {src} -- {entry.usage}")

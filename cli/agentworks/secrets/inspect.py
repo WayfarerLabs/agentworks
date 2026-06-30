@@ -23,7 +23,7 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.resources import Registry
     from agentworks.resources.origin import Origin
-    from agentworks.resources.requirement import UsageEntry
+    from agentworks.resources.reference import ReferenceEntry
 
 
 @dataclass(frozen=True)
@@ -254,7 +254,7 @@ class SecretDescription:
     origin: Origin | None
     description: str
     hint: str | None
-    usages: tuple[UsageEntry, ...]
+    references: tuple[ReferenceEntry, ...]
     backend_mappings: tuple[BackendMapping, ...]
     resolution: ResolutionPreview
 
@@ -286,10 +286,10 @@ def describe_secret(
         ) from None
     origin = getattr(decl, "origin", None)
     description = getattr(decl, "description", "") or ""
-    # Usages come from the finalize pass's attachment (one entry per
-    # requirement that contributed). Defensive: a Resource constructed
+    # References come from the finalize pass's attachment (one entry per
+    # reference that resolved here). Defensive: a Resource constructed
     # outside the framework path may not have the field.
-    usages: tuple[UsageEntry, ...] = tuple(getattr(decl, "usage", ()))
+    references: tuple[ReferenceEntry, ...] = tuple(getattr(decl, "references", ()))
 
     # Backend mappings: walk the active source chain and ask each
     # source how it would handle this secret.
@@ -319,7 +319,7 @@ def describe_secret(
         origin=origin,
         description=description,
         hint=getattr(decl, "hint", None),
-        usages=usages,
+        references=references,
         backend_mappings=tuple(mappings),
         resolution=ResolutionPreview(
             resolved_by=resolved_by,
@@ -330,8 +330,8 @@ def describe_secret(
 
 def render_secret_description(desc: SecretDescription) -> None:
     """Emit a ``SecretDescription`` as four operator-friendly sections:
-    header, usages, backend mappings, resolution preview. Mirrors FRD
-    R10's documented shape.
+    header, references, backend mappings, resolution preview. Mirrors
+    FRD R10's documented shape.
     """
     # --- Header ---
     output.info(f"Secret: {desc.name}")
@@ -344,21 +344,21 @@ def render_secret_description(desc: SecretDescription) -> None:
     if desc.hint:
         output.detail(f"Hint: {desc.hint}")
 
-    # --- Usages ---
+    # --- Referenced by ---
     output.info("")
-    output.info("Usages:")
-    if not desc.usages:
+    output.info("Referenced by:")
+    if not desc.references:
         output.detail("(none recorded)")
     else:
-        # Dedupe by (source, text) preserving first-encounter order.
+        # Dedupe by (source, usage) preserving first-encounter order.
         seen: set[tuple[tuple[str, str], str]] = set()
-        for entry in desc.usages:
-            key = (entry.source, entry.text)
+        for entry in desc.references:
+            key = (entry.source, entry.usage)
             if key in seen:
                 continue
             seen.add(key)
             src = f"{entry.source[0]}:{entry.source[1]}"
-            output.detail(f"- {src} -- {entry.text}")
+            output.detail(f"- {src} -- {entry.usage}")
 
     # --- Backend mappings ---
     output.info("")

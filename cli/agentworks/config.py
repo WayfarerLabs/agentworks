@@ -29,12 +29,12 @@ if TYPE_CHECKING:
 
     from agentworks.agents.templates import ResolvedAgentTemplate
     from agentworks.resources.origin import Origin
-    from agentworks.resources.registry import Registry
-    from agentworks.resources.requirement import (
-        ResourceRequirement,
-        SecretRequirement,
-        UsageEntry,
+    from agentworks.resources.reference import (
+        ReferenceEntry,
+        ResourceReference,
+        SecretReference,
     )
+    from agentworks.resources.registry import Registry
     from agentworks.secrets import SecretResolver, SecretSource
     from agentworks.vms.templates import ResolvedVMTemplate
 
@@ -159,8 +159,8 @@ VALID_TMUX_LAYOUTS = (
 def _env_requirements(
     env: dict[str, EnvEntry] | None,
     source: tuple[str, str],
-) -> list[SecretRequirement]:
-    """Aggregate ``EnvEntry.required_resources(source)`` across an env table.
+) -> list[SecretReference]:
+    """Aggregate ``EnvEntry.referenced_resources(source)`` across an env table.
 
     Module-level helper shared by every env-bearing Resource type's
     ``required_resources()`` method so the per-type method body stays
@@ -169,29 +169,29 @@ def _env_requirements(
     """
     if not env:
         return []
-    out: list[SecretRequirement] = []
+    out: list[SecretReference] = []
     for entry in env.values():
-        out.extend(entry.required_resources(source))
+        out.extend(entry.referenced_resources(source))
     return out
 
 
 def _git_credential_requirements(
     git_credentials: list[str] | None,
     source: tuple[str, str],
-) -> list[ResourceRequirement]:
-    """Emit a ``ResourceRequirement`` of kind ``"git_credentials"`` per
-    name in ``git_credentials``. Used by ``AdminConfig.required_resources``
-    and ``AgentTemplate.required_resources`` to feed the
+) -> list[ResourceReference]:
+    """Emit a ``ResourceReference`` of kind ``"git_credentials"`` per
+    name in ``git_credentials``. Used by ``AdminConfig.referenced_resources``
+    and ``AgentTemplate.referenced_resources`` to feed the
     ``GitCredentialKind``'s error miss policy: a typo'd or undeclared
     name errors at finalize with the requirement source pointing at the
     declaring Resource.
     """
-    from agentworks.resources.requirement import ResourceRequirement
+    from agentworks.resources.reference import ResourceReference
 
     if not git_credentials:
         return []
     return [
-        ResourceRequirement(
+        ResourceReference(
             name=cred_name,
             kind="git_credentials",
             usage="the git credential",
@@ -204,16 +204,16 @@ def _git_credential_requirements(
 def _tailscale_secret_requirement(
     tailscale_auth_key: str,
     template_name: str,
-) -> SecretRequirement:
-    """Build the ``SecretRequirement`` a VMTemplate publishes for its
-    Tailscale auth key. Used by both ``VMTemplate.required_resources``
-    (raw, in this module) and ``ResolvedVMTemplate.required_resources``
+) -> SecretReference:
+    """Build the ``SecretReference`` a VMTemplate publishes for its
+    Tailscale auth key. Used by both ``VMTemplate.referenced_resources``
+    (raw, in this module) and ``ResolvedVMTemplate.referenced_resources``
     (resolved, in ``agentworks.vms.templates``) so the requirement shape
     is single-sourced.
     """
-    from agentworks.resources.requirement import SecretRequirement
+    from agentworks.resources.reference import SecretReference
 
-    return SecretRequirement(
+    return SecretReference(
         name=tailscale_auth_key,
         kind="secret",
         usage="the Tailscale auth key",
@@ -232,7 +232,7 @@ class NamedConsoleConfig:
     tmux_layout: str = AW_SESSION_VERTICAL_LAYOUT
     declared_at: SourceLocation = field(default_factory=synthesized)
     origin: Origin | None = None
-    usage: tuple[UsageEntry, ...] = ()
+    references: tuple[ReferenceEntry, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -271,27 +271,27 @@ class VMTemplate:
     tailscale_auth_key: str | None = None
     declared_at: SourceLocation = field(default_factory=synthesized)
     origin: Origin | None = None
-    usage: tuple[UsageEntry, ...] = ()
+    references: tuple[ReferenceEntry, ...] = ()
 
-    def required_resources(self) -> list[ResourceRequirement]:
-        from agentworks.resources.requirement import (
-            ResourceRequirement as _ResourceReq,
+    def referenced_resources(self) -> list[ResourceReference]:
+        from agentworks.resources.reference import (
+            ResourceReference as _ResourceReq,
         )
-        from agentworks.resources.requirement import (
-            TemplateRequirement,
+        from agentworks.resources.reference import (
+            TemplateReference,
         )
 
         source = ("vm_template", self.name)
-        reqs: list[ResourceRequirement] = list(_env_requirements(self.env, source))
+        reqs: list[ResourceReference] = list(_env_requirements(self.env, source))
         # Inherits: each parent template name in ``inherits = [...]`` is a
-        # TemplateRequirement targeting the same kind. The framework's
+        # TemplateReference targeting the same kind. The framework's
         # VMTemplateKind miss policy auto-declares "default" when missing
         # and errors on any other unknown name; framework cycle detection
         # catches inheritance loops. Per-template field-merging stays in
         # ``agentworks.vms.templates``.
         for parent in self.inherits:
             reqs.append(
-                TemplateRequirement(
+                TemplateReference(
                     name=parent,
                     kind="vm_template",
                     usage="a parent template",
@@ -367,15 +367,15 @@ class AdminConfig:
     env: dict[str, EnvEntry] = field(default_factory=dict)
     declared_at: SourceLocation = field(default_factory=synthesized)
     origin: Origin | None = None
-    usage: tuple[UsageEntry, ...] = ()
+    references: tuple[ReferenceEntry, ...] = ()
 
-    def required_resources(self) -> list[ResourceRequirement]:
-        from agentworks.resources.requirement import (
-            ResourceRequirement as _ResourceReq,
+    def referenced_resources(self) -> list[ResourceReference]:
+        from agentworks.resources.reference import (
+            ResourceReference as _ResourceReq,
         )
 
         source = ("admin_template", self.name)
-        reqs: list[ResourceRequirement] = list(
+        reqs: list[ResourceReference] = list(
             _env_requirements(self.env, source)
         )
         reqs.extend(_git_credential_requirements(self.git_credentials, source))
@@ -415,24 +415,24 @@ class AgentTemplate:
     env: dict[str, EnvEntry] = field(default_factory=dict)
     declared_at: SourceLocation = field(default_factory=synthesized)
     origin: Origin | None = None
-    usage: tuple[UsageEntry, ...] = ()
+    references: tuple[ReferenceEntry, ...] = ()
 
-    def required_resources(self) -> list[ResourceRequirement]:
-        from agentworks.resources.requirement import (
-            ResourceRequirement as _ResourceReq,
+    def referenced_resources(self) -> list[ResourceReference]:
+        from agentworks.resources.reference import (
+            ResourceReference as _ResourceReq,
         )
-        from agentworks.resources.requirement import (
-            TemplateRequirement,
+        from agentworks.resources.reference import (
+            TemplateReference,
         )
 
         source = ("agent_template", self.name)
-        reqs: list[ResourceRequirement] = list(
+        reqs: list[ResourceReference] = list(
             _env_requirements(self.env, source)
         )
         reqs.extend(_git_credential_requirements(self.git_credentials, source))
         for parent in self.inherits:
             reqs.append(
-                TemplateRequirement(
+                TemplateReference(
                     name=parent,
                     kind="agent_template",
                     usage="a parent template",
@@ -461,16 +461,16 @@ class WorkspaceTemplate:
     env: dict[str, EnvEntry] = field(default_factory=dict)
     declared_at: SourceLocation = field(default_factory=synthesized)
     origin: Origin | None = None
-    usage: tuple[UsageEntry, ...] = ()
+    references: tuple[ReferenceEntry, ...] = ()
 
-    def required_resources(self) -> list[ResourceRequirement]:
-        from agentworks.resources.requirement import TemplateRequirement
+    def referenced_resources(self) -> list[ResourceReference]:
+        from agentworks.resources.reference import TemplateReference
 
         source = ("workspace_template", self.name)
-        reqs: list[ResourceRequirement] = list(_env_requirements(self.env, source))
+        reqs: list[ResourceReference] = list(_env_requirements(self.env, source))
         for parent in self.inherits:
             reqs.append(
-                TemplateRequirement(
+                TemplateReference(
                     name=parent,
                     kind="workspace_template",
                     usage="a parent template",
@@ -496,7 +496,7 @@ class GitCredentialConfig:
     token: str = ""
     declared_at: SourceLocation = field(default_factory=synthesized)
     origin: Origin | None = None
-    usage: tuple[UsageEntry, ...] = ()
+    references: tuple[ReferenceEntry, ...] = ()
 
     def __post_init__(self) -> None:
         # Frozen dataclasses can still ``object.__setattr__`` during
@@ -506,15 +506,15 @@ class GitCredentialConfig:
         if not self.token:
             object.__setattr__(self, "token", f"git-token-{self.name}")
 
-    def required_resources(self) -> list[ResourceRequirement]:
-        from agentworks.resources.requirement import (
-            ResourceRequirement as _ResourceReq,
+    def referenced_resources(self) -> list[ResourceReference]:
+        from agentworks.resources.reference import (
+            ResourceReference as _ResourceReq,
         )
-        from agentworks.resources.requirement import SecretRequirement
+        from agentworks.resources.reference import SecretReference
 
         source = ("git_credentials", self.name)
         return [
-            SecretRequirement(
+            SecretReference(
                 name=self.token,
                 kind="secret",
                 usage="the auth token",
@@ -544,16 +544,16 @@ class SessionTemplate:
     env: dict[str, EnvEntry] | None = None
     declared_at: SourceLocation = field(default_factory=synthesized)
     origin: Origin | None = None
-    usage: tuple[UsageEntry, ...] = ()
+    references: tuple[ReferenceEntry, ...] = ()
 
-    def required_resources(self) -> list[ResourceRequirement]:
-        from agentworks.resources.requirement import TemplateRequirement
+    def referenced_resources(self) -> list[ResourceReference]:
+        from agentworks.resources.reference import TemplateReference
 
         source = ("session_template", self.name)
-        reqs: list[ResourceRequirement] = list(_env_requirements(self.env, source))
+        reqs: list[ResourceReference] = list(_env_requirements(self.env, source))
         for parent in self.inherits:
             reqs.append(
-                TemplateRequirement(
+                TemplateReference(
                     name=parent,
                     kind="session_template",
                     usage="a parent template",
@@ -1274,8 +1274,8 @@ def _load_git_credentials(
             raise ConfigError(f"git_credentials.{name} must be a table")
         # Phase 2b.1: the ``type`` field's reference-existence check
         # moves to the framework via
-        # ``GitCredentialConfig.required_resources`` emitting a
-        # ``ResourceRequirement(kind="git_credential_provider", ...)``;
+        # ``GitCredentialConfig.referenced_resources`` emitting a
+        # ``ResourceReference(kind="git_credential_provider", ...)``;
         # ``_GitCredentialProviderKind``'s error miss policy fires at
         # build_registry time with the framework's consistent error
         # shape if the type isn't a known provider.

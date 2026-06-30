@@ -28,13 +28,13 @@ from agentworks.resources.kind import (
     ResourceKind,
 )
 from agentworks.resources.origin import Origin
-from agentworks.resources.registry import Registry
-from agentworks.resources.requirement import (
-    ResourceRequirement,
-    SecretRequirement,
-    TemplateRequirement,
-    UsageEntry,
+from agentworks.resources.reference import (
+    ReferenceEntry,
+    ResourceReference,
+    SecretReference,
+    TemplateReference,
 )
+from agentworks.resources.registry import Registry
 from agentworks.resources.walk import collect_secrets_for
 
 __all__ = [
@@ -44,9 +44,9 @@ __all__ = [
     "Origin",
     "Registry",
     "ResourceKind",
-    "ResourceRequirement",
-    "SecretRequirement",
-    "TemplateRequirement",
-    "UsageEntry",
+    "ResourceReference",
+    "SecretReference",
+    "TemplateReference",
+    "ReferenceEntry",
     "collect_secrets_for",
 ]

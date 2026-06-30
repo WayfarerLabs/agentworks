@@ -1,4 +1,4 @@
-"""Tests for ``ResourceRequirement``, ``SecretRequirement``, ``UsageEntry``."""
+"""Tests for ``ResourceReference``, ``SecretReference``, ``ReferenceEntry``."""
 
 from __future__ import annotations
 
@@ -7,14 +7,14 @@ from dataclasses import FrozenInstanceError
 import pytest
 
 from agentworks.resources import (
-    ResourceRequirement,
-    SecretRequirement,
-    UsageEntry,
+    ReferenceEntry,
+    ResourceReference,
+    SecretReference,
 )
 
 
 def test_resource_requirement_fields() -> None:
-    req = ResourceRequirement(
+    req = ResourceReference(
         name="tailscale-auth-key",
         kind="secret",
         usage="the Tailscale auth key",
@@ -27,38 +27,38 @@ def test_resource_requirement_fields() -> None:
 
 
 def test_resource_requirement_is_immutable() -> None:
-    req = ResourceRequirement(name="x", kind="secret", usage="u", source=("k", "n"))
+    req = ResourceReference(name="x", kind="secret", usage="u", source=("k", "n"))
     with pytest.raises(FrozenInstanceError):
         req.name = "y"  # type: ignore[misc]
 
 
 def test_secret_requirement_is_a_resource_requirement() -> None:
-    sec = SecretRequirement(
+    sec = SecretReference(
         name="api-key",
         kind="secret",
         usage="the API key",
         source=("admin_template", "default"),
     )
-    assert isinstance(sec, ResourceRequirement)
+    assert isinstance(sec, ResourceReference)
     assert sec.kind == "secret"
 
 
 def test_usage_entry_fields() -> None:
-    entry = UsageEntry(source=("vm_template", "default"), text="the auth key")
+    entry = ReferenceEntry(source=("vm_template", "default"), usage="the auth key")
     assert entry.source == ("vm_template", "default")
-    assert entry.text == "the auth key"
+    assert entry.usage == "the auth key"
 
 
 def test_usage_entry_is_immutable() -> None:
-    entry = UsageEntry(source=("k", "n"), text="t")
+    entry = ReferenceEntry(source=("k", "n"), usage="t")
     with pytest.raises(FrozenInstanceError):
-        entry.text = "new"  # type: ignore[misc]
+        entry.usage = "new"  # type: ignore[misc]
 
 
 def test_usage_entry_equality_and_hashability() -> None:
-    a = UsageEntry(source=("k", "n"), text="t")
-    b = UsageEntry(source=("k", "n"), text="t")
-    c = UsageEntry(source=("k", "n"), text="other")
+    a = ReferenceEntry(source=("k", "n"), usage="t")
+    b = ReferenceEntry(source=("k", "n"), usage="t")
+    c = ReferenceEntry(source=("k", "n"), usage="other")
     assert a == b
     assert a != c
     assert hash(a) == hash(b)

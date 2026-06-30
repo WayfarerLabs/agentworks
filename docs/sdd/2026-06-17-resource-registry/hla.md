@@ -23,27 +23,28 @@ distinct responsibilities:
   Registry in one call.
 
 The framework operates on `Registry`. Manager-entry code consumes `Registry` where it needs
-framework queries (e.g., requirement subgraph walks for eager-resolve); other call sites continue
+framework queries (e.g., reference subgraph walks for eager-resolve); other call sites continue
 taking `config: Config` and migrate gradually as needed.
 
 Existing config types (`SecretDecl`, `VMTemplate`, `GitCredentialConfig`, ...) gain a
 `declared_at: SourceLocation` field at the Config layer; the Registry's copies gain `origin`
-(framework type, translated from `declared_at` at publish) and `usage` (populated during finalize).
-Each config type that references other resources by name implements a `required_resources()` method
-emitting one `ResourceRequirement` per reference; the Registry consumes them during finalize.
+(framework type, translated from `declared_at` at publish) and `references` (populated during
+finalize). Each config type that references other resources by name implements a
+`referenced_resources()` method emitting one `ResourceReference` per reference; the Registry
+consumes them during finalize.
 
 ```text
 +----------------------+          +-----------------------------+
 |  agentworks.config   |  publish |  agentworks.resources       |
-|  (operator-declared) |--------->|  - ResourceRequirement      |<-+
+|  (operator-declared) |--------->|  - ResourceReference        |<-+
 |  - parses TOML       |          |  - ResourceKind / Origin    |  |
 |  - composes Resources|          |  - Registry (empty)         |  | per-kind logic
 |  - declared_at       |          |    * .add(.., origin)       |  | SecretKind etc.
 +----------------------+          |    * .finalize() runs the   |  |
 +----------------------+ publish  |      framework pass:        |--+
-|  agentworks.catalog  |--------->|        - walks reqs         |
+|  agentworks.catalog  |--------->|        - walks refs         |
 |  (code-declared,     |          |        - auto-declares      |
-|   Phase 2b)          |          |        - attaches usage     |
+|   Phase 2b)          |          |        - attaches references     |
 +----------------------+          |        - detects cycles     |
    (future publishers:            +--------------+--------------+
    plugins, manifests, ...)                      |
@@ -58,7 +59,7 @@ emitting one `ResourceRequirement` per reference; the Registry consumes them dur
                                   |  - apt_packages[name]       |
                                   |  - system_install_commands  |
                                   |  - user_install_commands    |
-                                  |  ... each with origin+usage |
+                                  |  ... each with origin+references |
                                   +--------------+--------------+
                                                  |
                               +------------------+------------------+
@@ -84,7 +85,7 @@ existing `agentworks.secrets.orchestration` to resolve secrets per command.
 ```text
 cli/agentworks/resources/
   __init__.py            # public surface re-exports
-  requirement.py         # ResourceRequirement, kind-specific subclasses
+  reference.py           # ResourceReference, kind-specific subclasses
   origin.py              # Origin dataclass + factory helpers
   kind.py                # ResourceKind protocol; miss-policy machinery
   registry.py            # finalize pass: walk, dispatch, cycle-detect, attach metadata
@@ -135,7 +136,7 @@ layer) and **what the framework sees** (`Registry`, runtime layer).
   only the Registry-side modeling treats `admin` / `named_console` as first-class Resources so they
   appear in `agw resource list`, can be the source of auto-declared secrets (e.g.,
   `[admin.env] = { MY_VAR = { secret = "..." } }` emits
-  `SecretRequirement(source=("admin_template", "default"))`), and route through framework dispatch
+  `SecretReference(source=("admin_template", "default"))`), and route through framework dispatch
   uniformly. If a config omits all `[admin.*]` sections, Config still publishes an empty-defaults
   `admin_template:default`; same for `named_console_template:default`. There is no auto-decl OF
   admin or named_console themselves -- only their referenced secrets can auto-declare.
@@ -181,7 +182,7 @@ layer) and **what the framework sees** (`Registry`, runtime layer).
   Per-Resource, not per-kind-dict. Each publisher constructs the right `Origin` variant and passes
   it in; the Registry just stores. This keeps the Registry agnostic of publisher internals.
 - **Finalize phase**: after all publishers have contributed, `registry.finalize()` runs the
-  framework pass: walks the requirement graph, dispatches miss policies for references that don't
+  framework pass: walks the reference graph, dispatches miss policies for references that don't
   resolve to a published Resource, synthesizes auto-declared Resources (with
   `Origin.auto_declared(source=...)` from the kind's `synthesize`), attaches the `usage` list to
   each Resource, detects cycles, and freezes the Registry. The Registry is mutable during publish;
@@ -221,14 +222,14 @@ layer) and **what the framework sees** (`Registry`, runtime layer).
 - The framework's lookup surface lives here: `registry.lookup(kind, name)`, iter helpers, subgraph
   walks for eager-resolve, the data backing `agw doctor` / `agw secret describe` /
   `agw resource list|describe`. Surface sufficient for `collect_secrets_for(registry, root)`:
-  `lookup` resolves the root and each transitive target; each Resource's `required_resources()`
+  `lookup` resolves the root and each transitive target; each Resource's `referenced_resources()`
   provides the edges to walk.
 
 **Copy, not mutate (across layers).** Resources in `Registry` are distinct objects from their
 `Config` counterparts. The Registry's Resource has `origin: Origin` (framework type, translated from
-Config's `declared_at` at publish time) and `usage: list[UsageEntry]` (populated during `finalize`).
-The `Config` layer's instances stay pristine and carry only `declared_at`. The two layers hold
-distinct objects under the same name.
+Config's `declared_at` at publish time) and `usage: list[ReferenceEntry]` (populated during
+`finalize`). The `Config` layer's instances stay pristine and carry only `declared_at`. The two
+layers hold distinct objects under the same name.
 
 ### Naming follow-up
 
@@ -267,24 +268,23 @@ composition / `declared_at`-attachment from Phase 0):
 **Registry-layer validation** (in `Registry.finalize`, new with this SDD; runs after all publishers
 have contributed via `publish_to`):
 
-- Requirement walks via each Resource's `required_resources()` (a Resource may declare it depends on
-  others by `(kind, name)`).
+- Requirement walks via each Resource's `referenced_resources()` (a Resource may declare it depends
+  on others by `(kind, name)`).
 - Miss policy dispatch (auto-declare with optional reserved-name restriction; error).
-  Operator-declared Resources from publishers satisfy requirements directly; missing ones trigger
-  the kind's miss policy.
+  Operator-declared Resources from publishers satisfy references directly; missing ones trigger the
+  kind's miss policy.
 - Reserved-name restrictions per kind (e.g., template kinds accept auto-decl only for `default`).
 - **Origin attachment**: operator-declared Resources received
   `Origin(variant="operator-declared", file=..., line=...)` at publish time (Registry translated
   `declared_at` -> `Origin` then). Auto-declared Resources get
   `Origin(variant="auto-declared", source=...)` from the kind's `synthesize` during finalize.
-- Usage attachment: each Resource accumulates a `usage` list with one entry per matching
-  requirement.
-- Cycle detection across the requirement graph.
+- Usage attachment: each Resource accumulates a `usage` list with one entry per matching reference.
+- Cycle detection across the reference graph.
 - All semantic / cross-resource checks.
 
 `ConfigError` from the Config layer carries parse-time context (file/line, field name).
-`ConfigError` from the Registry layer carries framework context (kind, name, requirement source).
-Same exception type; consistent rendering at the CLI layer; the message body distinguishes.
+`ConfigError` from the Registry layer carries framework context (kind, name, reference source). Same
+exception type; consistent rendering at the CLI layer; the message body distinguishes.
 
 ### Why two layers, not a rename
 
@@ -320,26 +320,26 @@ variant. Implementation detail for a future SDD.
 
 ## Core types
 
-### `ResourceRequirement`
+### `ResourceReference`
 
-A base immutable dataclass with kind-specific concrete subclasses. Producers (`required_resources()`
-on each source type) return concrete subclasses (`SecretRequirement`, `TemplateRequirement`, ...);
-the framework consumes them through the base class. Fields on the base:
+A base immutable dataclass with kind-specific concrete subclasses. Producers
+(`referenced_resources()` on each source type) return concrete subclasses (`SecretReference`,
+`TemplateReference`, ...); the framework consumes them through the base class. Fields on the base:
 
 - `name: str` -- target resource name (operator-overridable or fixed per the source's field).
 - `kind: str` -- target resource kind identifier (`"secret"`, `"vm_template"`, ...). The same kind
   strings appear throughout the framework: `KIND_REGISTRY` keys, `Origin.source[0]`, error message
   kind labels. One canonical set.
-- `usage: str` -- system-defined role per the FRD's sentence template. Frozen at requirement
+- `usage: str` -- system-defined role per the FRD's sentence template. Frozen at reference
   construction time.
 - `source: tuple[str, str]` -- `(kind, name)` of the declaring resource. The `kind` matches the
   declaring resource's kind (`"vm_template"` for `vm_templates.azure-prod`, `"git_credentials"` for
   `git_credentials.github-prod`); the `name` is the declaring resource's name.
 
 Concrete subclasses add kind-specific fields the registry's auto-declare logic may use. Phase 1's
-`SecretRequirement` adds none; the subclass exists so producers and the framework agree on the
-target kind without dispatch on the `kind` string. Phase 2 subclasses (`TemplateRequirement`, etc.)
-carry per-kind defaults.
+`SecretReference` adds none; the subclass exists so producers and the framework agree on the target
+kind without dispatch on the `kind` string. Phase 2 subclasses (`TemplateReference`, etc.) carry
+per-kind defaults.
 
 Producers emit a flat list per call; the framework concatenates the lists.
 
@@ -348,14 +348,14 @@ Producers emit a flat list per call; the framework concatenates the lists.
 A protocol implemented per kind. One instance per kind, registered in a module-level dict the
 finalize pass consults:
 
-- `kind: str` -- the kind identifier matching `ResourceRequirement.kind`.
+- `kind: str` -- the kind identifier matching `ResourceReference.kind`.
 - `miss_policy: Literal["auto-declare", "error"]` -- which branch the finalize pass takes when a
-  requirement points at a missing name.
+  reference points at a missing name.
 - `auto_declare_names: AbstractSet[str] | None` -- when `miss_policy == "auto-declare"`, the set of
   names the kind accepts. `None` means "any name" (secrets). `{"default"}` means "only the reserved
   name `default`" (templates).
-- `synthesize(requirements) -> Resource` -- called when a missing name is being auto-declared.
-  Receives the full list of matching requirements (in config-load order). Produces the resource
+- `synthesize(references) -> Resource` -- called when a missing name is being auto-declared.
+  Receives the full list of matching references (in config-load order). Produces the resource
   instance with whatever defaults the kind wants (empty `backend_mappings` for secrets, the kind's
   code-defined defaults for templates, ...).
 
@@ -375,15 +375,15 @@ Carried on every Resource. One dataclass with a variant tag matching the publish
   Resources eagerly exist regardless of operator config; they're published by a code source. The
   string shape is sufficient for Phase 2b; future plugin sources may warrant a structured
   `(package, version)` form, deferred to that SDD.
-- For `auto-declared`: `source: tuple[str, str]` -- the first matching requirement's source, per
-  R1's config-load walk order.
+- For `auto-declared`: `source: tuple[str, str]` -- the first matching reference's source, per R1's
+  config-load walk order.
 
 Set once when the Resource is published into (or synthesized inside) the Registry; never mutated
 afterwards. Each publisher constructs the right variant; the Registry stores it.
 
-The full list of matching requirement sources (for `agw secret describe`'s "also required by ..."
+The full list of matching reference sources (for `agw secret describe`'s "also required by ..."
 display) is derived from the resource's `usage` list, not stored separately on `Origin`. Each usage
-entry carries the source of the requirement that contributed it (see Terminology in the FRD), so
+entry carries the source of the reference that contributed it (see Terminology in the FRD), so
 origin doesn't need to duplicate that data.
 
 The loader is responsible for capturing `file` / `line` during TOML parsing. Python's stdlib
@@ -465,17 +465,17 @@ class Registry:
 
     def finalize(self) -> None:
         """Run the framework pass over already-published Resources. Materializes
-        reserved-default names, walks the requirement graph (iteratively, since
-        synthesized resources can themselves emit requirements), dispatches miss
-        policies, attaches usage, detects cycles, and locks the Registry. After
+        reserved-default names, walks the reference graph (iteratively, since
+        synthesized resources can themselves emit references), dispatches miss
+        policies, attaches references, detects cycles, and locks the Registry. After
         return, the Registry is queryable but no longer accepts publishes."""
         # 0. Materialize reserved-default names. Kinds whose ``auto_declare_names``
         # is a non-None set guarantee those names exist in the registry after
         # finalize, regardless of whether anything referenced them. Synthesizes
-        # with ``requirements=()`` so the kind builds its code-defined default.
+        # with ``references=()`` so the kind builds its code-defined default.
         # Closes the gap where an unreferenced default would otherwise crash at
         # command time. Kinds with ``auto_declare_names = None`` (secrets) are
-        # untouched -- their resources remain requirement-driven. Done before
+        # untouched -- their resources remain reference-driven. Done before
         # the worklist loop so the first pass walks these resources alongside
         # the operator-published ones.
         for kind, kind_handler in KIND_REGISTRY.items():
@@ -485,21 +485,21 @@ class Registry:
                 if name in self._resources.get(kind, {}):
                     continue
                 self._resources.setdefault(kind, {})[name] = (
-                    kind_handler.synthesize(requirements=())
+                    kind_handler.synthesize(references=())
                 )
 
-        # 1. Worklist loop. Walk required_resources() on every resource not yet
+        # 1. Worklist loop. Walk referenced_resources() on every resource not yet
         # visited; for each newly-discovered (kind, name) target not in the
         # registry, dispatch the kind's miss policy. The miss handler may
-        # synthesize a new resource whose own required_resources() the next
+        # synthesize a new resource whose own referenced_resources() the next
         # iteration walks. Loop until a pass adds no new resources -- a single
         # pass would silently drop synthesized resources' unresolved edges.
-        # The accumulated requirement map is preserved across iterations so
+        # The accumulated reference map is preserved across iterations so
         # the post-loop usage-attachment pass (step 2) sees the complete graph.
-        all_reqs: dict[tuple[str, str], list[ResourceRequirement]] = {}
+        all_reqs: dict[tuple[str, str], list[ResourceReference]] = {}
         walked: set[tuple[str, str]] = set()
         while True:
-            new_walks = self._collect_new_requirements(all_reqs, walked)
+            new_walks = self._collect_new_references(all_reqs, walked)
             if not new_walks:
                 break
             # Dispatch miss policies for any targets not yet in the registry.
@@ -513,12 +513,12 @@ class Registry:
                     if allowed is not None and target_name not in allowed:
                         raise ConfigError(...)  # reserved-name restriction
                     self._resources.setdefault(target_kind, {})[target_name] = (
-                        kind_handler.synthesize(requirements=reqs)
+                        kind_handler.synthesize(references=reqs)
                     )
                 else:  # miss_policy == "error"
                     raise ConfigError(...)  # unknown name under error policy
 
-        # 2. Usage attachment. Every resource with incoming requirements gets
+        # 2. Usage attachment. Every resource with incoming references gets
         # its usage tuple set; the description-polish step (see Framework
         # metadata attachment) also runs here so auto-declared resources get
         # their synthesized descriptions before freeze.
@@ -528,17 +528,17 @@ class Registry:
             polished = _polish_auto_declared_description(polished, kind)
             self._resources[kind][name] = polished
 
-        # 3. Cycle detection across the now-complete requirement graph.
+        # 3. Cycle detection across the now-complete reference graph.
         _detect_cycles(self._resources)
         self._frozen = True
 
-    def _collect_new_requirements(
+    def _collect_new_references(
         self,
-        all_reqs: dict[tuple[str, str], list[ResourceRequirement]],
+        all_reqs: dict[tuple[str, str], list[ResourceReference]],
         walked: set[tuple[str, str]],
     ) -> bool:
-        """Walk required_resources() on every resource not yet in ``walked``,
-        appending discovered requirements into ``all_reqs`` (preserving first-
+        """Walk referenced_resources() on every resource not yet in ``walked``,
+        appending discovered references into ``all_reqs`` (preserving first-
         encountered order). Returns True if any resource was walked this pass.
         """
         any_walked = False
@@ -551,7 +551,7 @@ class Registry:
         for key, resource in snapshot:
             walked.add(key)
             any_walked = True
-            for req in resource.required_resources():
+            for req in resource.referenced_resources():
                 all_reqs.setdefault((req.kind, req.name), []).append(req)
         return any_walked
 
@@ -587,13 +587,13 @@ def build_registry(config: Config) -> Registry:
     return registry
 ```
 
-Walk order for `requirements` is config-load order: top-to-bottom in the TOML file, top-level
-sections in declaration order. Within each source's `required_resources()` call, requirements come
-back in whatever order the source returns them (typically the order of fields in the schema).
+Walk order for `references` is config-load order: top-to-bottom in the TOML file, top-level sections
+in declaration order. Within each source's `referenced_resources()` call, references come back in
+whatever order the source returns them (typically the order of fields in the schema).
 
 ### Cycle detection
 
-A directed graph where nodes are `(kind, name)` and edges are requirements (source -> target). DFS
+A directed graph where nodes are `(kind, name)` and edges are references (source -> target). DFS
 three-coloring (white = unvisited, gray = on stack, black = finished). Encountering a gray node
 mid-walk yields a cycle; the implementation collects the path and surfaces it in a single
 `ConfigError`.
@@ -623,22 +623,22 @@ either operator-declared (use what the operator wrote, verbatim) or auto-declare
 the kind's defaults). The framework's only job in either case is attaching framework metadata:
 
 - **`origin`**: set at registration time (operator-declared with file:line, or auto-declared with
-  first matching requirement source). Never mutated.
-- **`usage`**: a list of `UsageEntry(source, text)` pairs populated from all matching requirements,
-  accumulated by the finalize pass. Each entry carries both the requirement's source `(kind, name)`
-  and its usage text. Operator-declared resources get the same usage list attached as auto-declared
-  ones; it's framework-collected, not operator-settable.
+  first matching reference source). Never mutated.
+- **`usage`**: a list of `ReferenceEntry(source, text)` pairs populated from all matching
+  references, accumulated by the finalize pass. Each entry carries both the reference's source
+  `(kind, name)` and its usage text. Operator-declared resources get the same references list
+  attached as auto-declared ones; it's framework-collected, not operator-settable.
 - **`description`** (auto-declared only, kinds with a `description: str` field only): when the field
   is falsy after the publish phase, the finalize pass sets it. Format details (usage-driven vs
   empty-usage cases) are pinned in FRD R9; the HLA's responsibility is the dispatch shape: empty
   `usage` -> empty-usage fallback, non-empty `usage` -> usage-driven format. The polish runs after
-  `usage` attachment so it sees the complete requirement set (or knows it's empty).
-  Operator-declared descriptions are honored verbatim. Kinds without a `description` field skip the
-  polish (no-op). The framework checks structurally (`hasattr(resource, "description")` + falsy
-  test), not by kind, so any future kind that acquires a `description` field benefits automatically.
-  This is the mechanism that makes `agw resource list`'s `description` column reliably populated
-  across kinds (FRD R9 / R12). Producers carry the responsibility of writing good `usage` strings --
-  they're well-positioned to, because they know what the requirement will be used for.
+  `usage` attachment so it sees the complete reference set (or knows it's empty). Operator-declared
+  descriptions are honored verbatim. Kinds without a `description` field skip the polish (no-op).
+  The framework checks structurally (`hasattr(resource, "description")` + falsy test), not by kind,
+  so any future kind that acquires a `description` field benefits automatically. This is the
+  mechanism that makes `agw resource list`'s `description` column reliably populated across kinds
+  (FRD R9 / R12). Producers carry the responsibility of writing good `usage` strings -- they're
+  well-positioned to, because they know what the reference will be used for.
 
 If an operator wants a partial override of a default template, they don't get it through field-level
 merging on the `default` declaration. They declare a child template with `inherits = ["default"]`
@@ -651,44 +651,44 @@ the same path); the framework never sees them.
 
 ### Secret kind
 
-`SecretKind.synthesize(requirements)` builds a `SecretDecl` with:
+`SecretKind.synthesize(references)` builds a `SecretDecl` with:
 
-- `name = requirements[0].name`
+- `name = references[0].name`
 - `description = ""` initially; the finalize pass's description-polish step (see Framework metadata
-  attachment + FRD R9) populates it from the first requirement's `(usage, source)` before the
+  attachment + FRD R9) populates it from the first reference's \`(usage, source)\` before the
   registry freezes
 - `hint = None`
 - `backend_mappings = {}` (empty; the framework's default per-backend conventions (e.g.,
   `AW_SECRET_<NAME>`) apply at resolution time)
-- `usage = [UsageEntry(source=r.source, text=r.usage) for r in requirements]` -- a list where each
-  entry pairs the requirement's source with its usage text. Duplicate text from different sources is
+- `usage = [ReferenceEntry(source=r.source, text=r.usage) for r in references]` -- a list where each
+  entry pairs the reference's source with its usage text. Duplicate text from different sources is
   preserved (different sources are different rows in `agw secret describe`); dedup-by-text happens
   at render time only where summary display calls for it.
-- `origin = Origin(variant="auto-declared", source=requirements[0].source)`
+- `origin = Origin(variant="auto-declared", source=references[0].source)`
 
 `auto_declare_names = None` (any name accepted). Because `auto_declare_names` is None, secrets do
 **not** participate in finalize's always-materialize pre-step -- a secret only exists if something
 references it or the operator declared it. `SecretKind.synthesize` is therefore always called with
-`requirements` non-empty; the `requirements[0].name` / `requirements[0].source` accesses are safe.
+`references` non-empty; the `references[0].name` / `references[0].source` accesses are safe.
 
 For operator-declared secrets, the parser produces a `SecretDecl` with empty `usage`; the finalize
-pass then populates `usage` from the matching requirements using the same `UsageEntry` shape.
+pass then populates `usage` from the matching references using the same `ReferenceEntry` shape.
 `usage` is framework-set in both cases (operator declarations cannot specify it).
 
 ### Template kinds (Phase 2)
 
-`VMTemplateKind.synthesize(requirements)` builds a `VMTemplate` with the kind's code-defined
-defaults (the same defaults currently encoded in the resolver's "implicit default" fallback, hoisted
-into one place). When called with `requirements` non-empty (the incoming-reference path), the first
-requirement's source is recorded as origin. When called with `requirements=()` (the
-always-materialize pre-step for `default`), origin is `auto-declared` with the reserved synthetic
-source `("framework", "always-materialize")` so the breadcrumb shows where the row came from. The
-resulting `usage = ()`. The framework's description-polish (Framework metadata attachment + FRD R9)
-sets the empty-usage description on this row.
+`VMTemplateKind.synthesize(references)` builds a `VMTemplate` with the kind's code-defined defaults
+(the same defaults currently encoded in the resolver's "implicit default" fallback, hoisted into one
+place). When called with `references` non-empty (the incoming-reference path), the first reference.s
+source is recorded as origin. When called with `references=()` (the always-materialize pre-step for
+`default`), origin is `auto-declared` with the reserved synthetic source
+`("framework", "always-materialize")` so the breadcrumb shows where the row came from. The resulting
+`usage = ()`. The framework's description-polish (Framework metadata attachment + FRD R9) sets the
+empty-usage description on this row.
 
 `auto_declare_names = {"default"}` -- only the reserved name. The always-materialize pre-step in
 finalize uses this set to determine which names to guarantee; any other missing name surfaces from a
-`TemplateRequirement` and triggers an error.
+`TemplateReference` and triggers an error.
 
 Same shape applies for `WorkspaceTemplateKind`, `AgentTemplateKind`, `SessionTemplateKind`, plus
 `AdminTemplateKind` (plurified from singleton to named-multi-instance in Phase 2a per FRD R12).
@@ -700,29 +700,29 @@ the default itself).
 
 ## Requirement sources
 
-Each existing config type that references resources by name gets a `required_resources()` method.
+Each existing config type that references resources by name gets a `referenced_resources()` method.
 Phase 1 sources:
 
 - `SecretRefEnvEntry` (the `{ secret = "..." }` form of `EnvEntry`): emits one
-  `SecretRequirement(name=<ref>, usage=<...>, source=(<scope>, <scope-name>))` per reference. The
+  `SecretReference(name=<ref>, usage=<...>, source=(<scope>, <scope-name>))` per reference. The
   scope kind for env blocks on singleton-backed Resources is the singleton's kind name:
   `("admin_template", "default")` for `[admin.env]`, `("named_console_template", "default")` for
   `[named_console]` env entries. Multi-named templates use their natural source:
   `("vm_template", "<name>")`, `("agent_template", "<name>")`, etc. The `usage` text is derived from
   the env-block context (e.g., `"the ANTHROPIC_API_KEY env var"`).
-- `VMTemplate.tailscale_auth_key`: emits `SecretRequirement` with `source=("vm_template", <name>)`
-  and `usage="the Tailscale auth key"`.
-- `GitCredentialConfig.token`: emits `SecretRequirement` with `source=("git_credentials", <name>)`
-  and `usage="the auth token"` (or similar; usage phrasing follows the Terminology sentence-template
+- `VMTemplate.tailscale_auth_key`: emits `SecretReference` with `source=("vm_template", <name>)` and
+  `usage="the Tailscale auth key"`.
+- `GitCredentialConfig.token`: emits `SecretReference` with `source=("git_credentials", <name>)` and
+  `usage="the auth token"` (or similar; usage phrasing follows the Terminology sentence-template
   test).
 - `AdminConfig.git_credentials` / `AgentTemplate.git_credentials` lists: each named credential is a
   reference; emits a `GitCredentialRequirement` (Phase 2-shaped; Phase 1 still uses bespoke
-  validation for the list but the requirements are emitted so the orchestrator's transitive walk
+  validation for the list but the references are emitted so the orchestrator's transitive walk
   works).
 
 Phase 2 adds:
 
-- Template `inherits = [...]` references: emit `TemplateRequirement` per parent.
+- Template `inherits = [...]` references: emit `TemplateReference` per parent.
 - `apt_packages` / `system_install_commands` / `user_install_commands` references: emit
   `CatalogRequirement` per entry.
 - `git_credentials.*.type` references: emit `ProviderRequirement`.
@@ -731,10 +731,10 @@ Phase 2 adds:
 ## Per-command eager-resolve scope
 
 Registry construction is universal (config load builds the whole registry). Eager-resolve scope is
-per-command, driven by the requirement subgraph rooted at the resource being provisioned.
+per-command, driven by the reference subgraph rooted at the resource being provisioned.
 
 ```text
-manager-entry  -->  resource-being-provisioned  -->  transitively walk required_resources()
+manager-entry  -->  resource-being-provisioned  -->  transitively walk referenced_resources()
                                                      in the (already-built) registry
                                                   --> collect SecretDecls
                                                   --> pass as extra_decls to
@@ -747,7 +747,7 @@ migration hook. This SDD wires it up.
 ### Transitive walk
 
 A small helper in `resources/__init__.py`. Phase 1 ships the secret-specific form below; the
-underlying walk is kind-agnostic (DFS over `required_resources()`, dedupe by `(kind, name)`), so
+underlying walk is kind-agnostic (DFS over `referenced_resources()`, dedupe by `(kind, name)`), so
 Phase 2 can add sibling helpers (or a generic `collect_resources_for(..., target_kind=...)`)
 trivially. Choosing the more specific surface for Phase 1 keeps the call-site API obvious.
 
@@ -756,7 +756,7 @@ def collect_secrets_for(
     registry: Registry,
     root: tuple[str, str],
 ) -> list[SecretDecl]:
-    """Walk required_resources() depth-first from root; collect Secret resources."""
+    """Walk referenced_resources() depth-first from root; collect Secret resources."""
 ```
 
 Example: rooted at `("vm_template", "azure-prod")`. Walks `tailscale_auth_key` to
@@ -810,8 +810,8 @@ service-layer function directly.
 Output sections (per FRD R10):
 
 - Header: name, kind, origin, description.
-- Origin detail: file path and line for operator-declared, requirement source for auto-declared.
-- Usages: one row per matching requirement.
+- Origin detail: file path and line for operator-declared, reference source for auto-declared.
+- Usages: one row per matching reference.
 - Backend mappings: per-backend status table (operator-set value, backend convention default, or "no
   mapping; skipped"; no merging).
 - Resolution preview: `would resolve via <backend>` or `would prompt`.
@@ -839,7 +839,7 @@ deliberate carve-out for this command.
 ### Tailscale (Phase 1)
 
 Schema change: VM template gains `tailscale_auth_key: str` (default `"tailscale-auth-key"`).
-`required_resources()` on a resolved `VMTemplate` emits one `SecretRequirement`.
+`referenced_resources()` on a resolved `VMTemplate` emits one `SecretReference`.
 
 Flow at `vm create`:
 
@@ -856,7 +856,7 @@ Existing `tailscale_auth_key` handling code (the legacy env-var-or-prompt resolu
 ### Git credentials (Phase 1)
 
 Schema change: `git_credentials.<name>` entries gain `token: str` (default
-`"git-token-<credential-name>"`). `required_resources()` emits one `SecretRequirement` per entry.
+`"git-token-<credential-name>"`). `referenced_resources()` emits one `SecretReference` per entry.
 
 Reference flow at `vm create`:
 
@@ -879,14 +879,14 @@ The TOML loader captures `(file, line)` for each `[secrets.<name>]`, `[git_crede
 
 ### Auto-declared resources
 
-After the finalize pass synthesizes a resource, `Origin.source = requirements[0].source` -- the
-first matching requirement's `(kind, name)` per config-load walk order. The "first matching" rule is
+After the finalize pass synthesizes a resource, `Origin.source = references[0].source` -- the first
+matching reference's `(kind, name)` per config-load walk order. The "first matching" rule is
 deterministic given that walk order.
 
-The full set of matching requirement sources is not stored on `Origin`; the resource's `usage` list
-(one entry per matching requirement) carries that data via its per-entry `source`. For default
+The full set of matching reference sources is not stored on `Origin`; the resource's `usage` list
+(one entry per matching reference) carries that data via its per-entry `source`. For default
 templates that many things inherit from, the origin-display source is essentially
-load-order-arbitrary within the referencing set; the per-requirement detail in `usage` provides the
+load-order-arbitrary within the referencing set; the per-reference detail in `usage` provides the
 complete picture for `agw secret describe`.
 
 ### Display
@@ -902,20 +902,20 @@ complete picture for `agw secret describe`.
 
 The plan will phase the work; the full design above is the target. Anticipated shape:
 
-1. **Phase 1a: Framework foundations.** `resources/` package with `ResourceRequirement`,
+1. **Phase 1a: Framework foundations.** `resources/` package with `ResourceReference`,
    `ResourceKind`, `Origin`, finalize pass with cycle detection, kind registry. `SecretKind`,
    `AdminTemplateKind`, `NamedConsoleTemplateKind` implementations -- the two singleton-backed kinds
    ship in 1a because Phase 1b (env-block secret refs from `admin.env`) needs the
-   `admin_template:default` Resource present in the Registry to walk requirements from it. Config's
+   `admin_template:default` Resource present in the Registry to walk references from it. Config's
    `publish_to` translates each singleton into a one-row Registry entry (`(admin_template, default)`
    and `(named_console_template, default)`). Existing `SecretDecl`, `AdminConfig`,
    `NamedConsoleConfig` augmented with `origin` and `usage` fields. No env-block / system-secret
-   producers of `SecretRequirement` wired yet (those land in Phase 1b/1c/1d).
-2. **Phase 1b: Env-block migration.** `EnvEntry`'s secret-ref form emits `SecretRequirement` via
-   `required_resources()`. Finalize pass auto-declares missing secrets. Existing strict "must
+   producers of `SecretReference` wired yet (those land in Phase 1b/1c/1d).
+2. **Phase 1b: Env-block migration.** `EnvEntry`'s secret-ref form emits `SecretReference` via
+   `referenced_resources()`. Finalize pass auto-declares missing secrets. Existing strict "must
    declare" error behavior is removed; doctor surfaces auto-declared secrets so the visibility
    intent is preserved. **Lands before Tailscale/git-creds** so the framework has a real producer of
-   `SecretRequirement` exercised end-to-end before the system-secret migrations build on it.
+   `SecretReference` exercised end-to-end before the system-secret migrations build on it.
 3. **Phase 1c: Tailscale migration.** VM template schema gains `tailscale_auth_key`. Manager-entry
    at `vm create` / `vm reinit` walks the subgraph, resolves via the orchestrator, threads the value
    as a kwarg. Legacy resolution path removed.
@@ -953,7 +953,7 @@ Registry) so the Registry stays publisher-agnostic. Alternatives considered:
   differs by type in ways the framework wants to unify (auto-decl vs. error, cycle detection, error
   message shape).
 
-The package owns dispatch; existing types own their fields and `required_resources()` method.
+The package owns dispatch; existing types own their fields and `referenced_resources()` method.
 
 ### Kind-as-strategy, registered in a module-level dict
 
@@ -1005,13 +1005,13 @@ fields. The resolver, backend chain, prompt logic are untouched.
 
 ### `agentworks.env`
 
-`EnvEntry`'s secret-ref form emits a `SecretRequirement`. Existing env-block resolution logic (merge
+`EnvEntry`'s secret-ref form emits a `SecretReference`. Existing env-block resolution logic (merge
 across scopes, identity vars, SetEnv) is unchanged.
 
 ### Existing template inheritance resolution
 
 Today's inheritance resolver in `agentworks.config` (`_resolve_template`-style helpers) stays for
-Phase 1. Phase 2 hoists the inheritance walk into the framework via `TemplateRequirement`. The
+Phase 1. Phase 2 hoists the inheritance walk into the framework via `TemplateReference`. The
 per-type field-merging logic that today combines parent and child template fields stays at the
 template-inheritance layer; the framework does no field-level merging. The resolver shrinks to a
 walker that follows `inherits` chains validated by the framework and combines fields per the

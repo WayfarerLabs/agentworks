@@ -17,11 +17,11 @@ from agentworks.source_location import SourceLocation, synthesized
 if TYPE_CHECKING:
     # Type-only imports to avoid the cycle: agentworks.resources.kinds.secret
     # imports SecretDecl from this module to write its synthesize(); having
-    # this module import Origin / UsageEntry at runtime would loop.
+    # this module import Origin / ReferenceEntry at runtime would loop.
     # `from __future__ import annotations` keeps the field types as strings,
     # so the runtime imports are unnecessary.
     from agentworks.resources.origin import Origin
-    from agentworks.resources.requirement import UsageEntry
+    from agentworks.resources.reference import ReferenceEntry
 
 
 @dataclass(frozen=True)
@@ -52,7 +52,7 @@ class SecretDecl:
     # ``finalize`` (``usage``). Both default to "not yet attached" for
     # direct-construction call sites (tests, framework synthesize paths).
     origin: Origin | None = None
-    usage: tuple[UsageEntry, ...] = ()
+    references: tuple[ReferenceEntry, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -71,7 +71,7 @@ class SecretBackendConfig:
     kind: str
     declared_at: SourceLocation = field(default_factory=synthesized)
     origin: Origin | None = None
-    usage: tuple[UsageEntry, ...] = ()
+    references: tuple[ReferenceEntry, ...] = ()
 
 
 DEFAULT_BACKEND_CHAIN: tuple[str, ...] = ("env-var", "prompt")
@@ -101,7 +101,7 @@ class SecretConfig:
     backends: tuple[str, ...] = DEFAULT_BACKEND_CHAIN
     declared_at: SourceLocation = field(default_factory=synthesized)
     origin: Origin | None = None
-    usage: tuple[UsageEntry, ...] = ()
+    references: tuple[ReferenceEntry, ...] = ()
 
 
 class SecretSource(Protocol):

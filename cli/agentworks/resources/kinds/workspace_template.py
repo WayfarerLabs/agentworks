@@ -14,7 +14,7 @@ from agentworks.resources.origin import Origin
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from agentworks.resources.requirement import ResourceRequirement
+    from agentworks.resources.reference import ResourceReference
 
 
 @dataclass(frozen=True)
@@ -27,7 +27,7 @@ class _WorkspaceTemplateKind:
 
     def synthesize(
         self,
-        requirements: Sequence[ResourceRequirement],
+        requirements: Sequence[ResourceReference],
     ) -> WorkspaceTemplate:
         """Build the code-defined default ``WorkspaceTemplate``. See
         ``vm_template.py``'s ``synthesize`` for the rationale on why the

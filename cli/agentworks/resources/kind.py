@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Any, Literal, Protocol
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from agentworks.resources.requirement import ResourceRequirement
+    from agentworks.resources.reference import ResourceReference
 
 
 class ResourceKind(Protocol):
@@ -27,7 +27,7 @@ class ResourceKind(Protocol):
 
     Attribute contracts:
 
-    - ``kind``: the kind identifier matching ``ResourceRequirement.kind``,
+    - ``kind``: the kind identifier matching ``ResourceReference.kind``,
       ``Origin.source[0]`` (for auto-declared), and the Registry's per-kind
       dict key.
     - ``miss_policy``: which branch ``Registry.finalize()`` takes when a
@@ -80,7 +80,7 @@ class ResourceKind(Protocol):
     @property
     def auto_declare_names(self) -> frozenset[str] | None: ...
 
-    def synthesize(self, requirements: Sequence[ResourceRequirement]) -> Any: ...
+    def synthesize(self, requirements: Sequence[ResourceReference]) -> Any: ...
 
 
 class NoUnreferencedDefaultError(Exception):

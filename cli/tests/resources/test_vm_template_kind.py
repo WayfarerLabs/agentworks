@@ -9,7 +9,7 @@ Test coverage:
 - ``VMTemplateKind`` declares the right kind / miss_policy / auto_declare_names.
 - ``synthesize`` honors the empty-requirements contract (Phase 2a.0 work)
   and the worklist-driven path (non-empty requirements).
-- ``VMTemplate.required_resources`` emits ``TemplateRequirement`` for each
+- ``VMTemplate.referenced_resources`` emits ``TemplateReference`` for each
   entry in ``inherits``.
 - The framework's miss policy fires on typo'd ``inherits`` references
   (e.g. ``inherits = ["defualt"]``).
@@ -31,7 +31,7 @@ from agentworks.errors import ConfigError
 from agentworks.resources import (
     ALWAYS_MATERIALIZE_SOURCE,
     KIND_REGISTRY,
-    TemplateRequirement,
+    TemplateReference,
 )
 
 
@@ -87,7 +87,7 @@ def test_vm_template_kind_synthesize_with_requirement_uses_first_source() -> Non
     the requirement's source (the child template).
     """
     kind = KIND_REGISTRY["vm_template"]
-    req = TemplateRequirement(
+    req = TemplateReference(
         name="default",
         kind="vm_template",
         usage="a parent template",
@@ -99,17 +99,17 @@ def test_vm_template_kind_synthesize_with_requirement_uses_first_source() -> Non
     assert result.origin.source == ("vm_template", "child")
 
 
-# -- VMTemplate.required_resources ------------------------------------------
+# -- VMTemplate.referenced_resources ------------------------------------------
 
 
 def test_vm_template_required_resources_emits_template_requirement_for_inherits() -> None:
-    """Each name in ``inherits`` produces a TemplateRequirement with
+    """Each name in ``inherits`` produces a TemplateReference with
     kind=vm_template and the declaring template's source. Other
     requirements (env secrets, tailscale auth key) are unchanged.
     """
     tmpl = VMTemplate(name="child", inherits=["base", "extras"])
-    reqs = tmpl.required_resources()
-    template_reqs = [r for r in reqs if isinstance(r, TemplateRequirement)]
+    reqs = tmpl.referenced_resources()
+    template_reqs = [r for r in reqs if isinstance(r, TemplateReference)]
     assert len(template_reqs) == 2
     by_name = {r.name: r for r in template_reqs}
     assert by_name["base"].kind == "vm_template"
@@ -120,8 +120,8 @@ def test_vm_template_required_resources_emits_template_requirement_for_inherits(
 
 def test_vm_template_no_inherits_produces_no_template_requirements() -> None:
     tmpl = VMTemplate(name="alone")
-    reqs = tmpl.required_resources()
-    template_reqs = [r for r in reqs if isinstance(r, TemplateRequirement)]
+    reqs = tmpl.referenced_resources()
+    template_reqs = [r for r in reqs if isinstance(r, TemplateReference)]
     assert template_reqs == []
 
 

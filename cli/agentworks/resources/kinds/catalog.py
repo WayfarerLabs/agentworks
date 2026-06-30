@@ -25,10 +25,10 @@ from agentworks.resources.kind import KIND_REGISTRY, NoUnreferencedDefaultError
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from agentworks.resources.requirement import ResourceRequirement
+    from agentworks.resources.reference import ResourceReference
 
 
-def _synthesize_no_default(kind: str, requirements: Sequence[ResourceRequirement]) -> Any:
+def _synthesize_no_default(kind: str, requirements: Sequence[ResourceReference]) -> Any:
     """Shared synthesize body for the catalog kinds. Unreachable under
     the ``error`` miss policy (Registry.finalize raises ConfigError
     before dispatching to synthesize for error-policy kinds). Honors
@@ -55,7 +55,7 @@ class _AptPackageKind:
     miss_policy: Literal["auto-declare", "error"] = "error"
     auto_declare_names: frozenset[str] | None = None
 
-    def synthesize(self, requirements: Sequence[ResourceRequirement]) -> Any:
+    def synthesize(self, requirements: Sequence[ResourceReference]) -> Any:
         return _synthesize_no_default(self.kind, requirements)
 
 
@@ -67,7 +67,7 @@ class _SystemInstallCommandKind:
     miss_policy: Literal["auto-declare", "error"] = "error"
     auto_declare_names: frozenset[str] | None = None
 
-    def synthesize(self, requirements: Sequence[ResourceRequirement]) -> Any:
+    def synthesize(self, requirements: Sequence[ResourceReference]) -> Any:
         return _synthesize_no_default(self.kind, requirements)
 
 
@@ -79,7 +79,7 @@ class _UserInstallCommandKind:
     miss_policy: Literal["auto-declare", "error"] = "error"
     auto_declare_names: frozenset[str] | None = None
 
-    def synthesize(self, requirements: Sequence[ResourceRequirement]) -> Any:
+    def synthesize(self, requirements: Sequence[ResourceReference]) -> Any:
         return _synthesize_no_default(self.kind, requirements)
 
 

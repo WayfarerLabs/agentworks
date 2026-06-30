@@ -15,7 +15,7 @@ from agentworks.errors import ConfigError
 if TYPE_CHECKING:
     from agentworks.config import Config, VMTemplate
     from agentworks.env import EnvEntry
-    from agentworks.resources.requirement import ResourceRequirement
+    from agentworks.resources.reference import ResourceReference
 
 
 @dataclass
@@ -40,7 +40,7 @@ class ResolvedVMTemplate:
     # Inheritance applies like other scalar fields: child overrides parent.
     tailscale_auth_key: str = "tailscale-auth-key"
 
-    def required_resources(self) -> list[ResourceRequirement]:
+    def referenced_resources(self) -> list[ResourceReference]:
         """Emit the resolved template's requirements: env-block secret
         refs (with inheritance applied via the merged ``env`` dict) plus
         the Tailscale auth-key secret. Used by ``vm create`` / ``vm     reinit``
@@ -51,7 +51,7 @@ class ResolvedVMTemplate:
             _tailscale_secret_requirement,
         )
 
-        reqs: list[ResourceRequirement] = list(
+        reqs: list[ResourceReference] = list(
             _env_requirements(self.env, ("vm_template", self.name))
         )
         reqs.append(_tailscale_secret_requirement(self.tailscale_auth_key, self.name))

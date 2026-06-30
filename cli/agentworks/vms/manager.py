@@ -224,7 +224,7 @@ def create_vm(
     from agentworks.vms.templates import resolve_template
 
     # build_registry runs first so framework miss-policies (typo'd git
-    # credential, future TemplateRequirement typos on inherits, etc.)
+    # credential, future TemplateReference typos on inherits, etc.)
     # surface before any template / DB / VM business logic.
     registry = build_registry(config)
 
@@ -1332,7 +1332,7 @@ def _collect_git_tokens(
     Each credential's ``token`` field (default ``"git-token-<name>"``;
     operator-overridable per ``[git_credentials.<name>]``) names a
     secret; the registry's finalize pass auto-declared each one via
-    ``GitCredentialConfig.required_resources``. The resolver chain
+    ``GitCredentialConfig.referenced_resources``. The resolver chain
     resolves them all in one batched call so the cache picks up every
     token in one prompt (or one round-trip to a persistent store).
 

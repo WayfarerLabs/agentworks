@@ -22,7 +22,7 @@ from agentworks.errors import ConfigError
 from agentworks.resources import (
     ALWAYS_MATERIALIZE_SOURCE,
     KIND_REGISTRY,
-    TemplateRequirement,
+    TemplateReference,
 )
 
 
@@ -92,7 +92,7 @@ def test_synthesize_empty_builds_default(spec: _KindSpec) -> None:
 def test_no_inherits_produces_no_template_requirements(spec: _KindSpec) -> None:
     tmpl = spec.expected_type(name="alone")
     template_reqs = [
-        r for r in tmpl.required_resources() if isinstance(r, TemplateRequirement)
+        r for r in tmpl.referenced_resources() if isinstance(r, TemplateReference)
     ]
     assert template_reqs == []
 
@@ -104,7 +104,7 @@ def test_synthesize_with_requirement_uses_first_source(spec: _KindSpec) -> None:
     always-materialize pre-step short-circuits this in practice).
     """
     kind = KIND_REGISTRY[spec.kind]
-    req = TemplateRequirement(
+    req = TemplateReference(
         name="default",
         kind=spec.kind,
         usage="a parent template",
@@ -122,12 +122,12 @@ def test_synthesize_with_requirement_uses_first_source(spec: _KindSpec) -> None:
 def test_template_required_resources_emits_template_requirement(
     spec: _KindSpec,
 ) -> None:
-    """Each ``XxxTemplate.required_resources()`` emits a TemplateRequirement
+    """Each ``XxxTemplate.referenced_resources()`` emits a TemplateReference
     per name in ``inherits`` with the right kind and source.
     """
     tmpl = spec.expected_type(name="child", inherits=["base", "extras"])
-    reqs = tmpl.required_resources()
-    template_reqs = [r for r in reqs if isinstance(r, TemplateRequirement)]
+    reqs = tmpl.referenced_resources()
+    template_reqs = [r for r in reqs if isinstance(r, TemplateReference)]
     assert len(template_reqs) == 2
     by_name = {r.name: r for r in template_reqs}
     assert by_name["base"].kind == spec.kind

@@ -30,7 +30,7 @@ from agentworks.resources.origin import Origin
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from agentworks.resources.requirement import ResourceRequirement
+    from agentworks.resources.reference import ResourceReference
 
 
 @dataclass(frozen=True)
@@ -41,7 +41,7 @@ class _AdminTemplateKind:
     miss_policy: Literal["auto-declare", "error"] = "auto-declare"
     auto_declare_names: frozenset[str] | None = frozenset({"default"})
 
-    def synthesize(self, requirements: Sequence[ResourceRequirement]) -> AdminConfig:
+    def synthesize(self, requirements: Sequence[ResourceReference]) -> AdminConfig:
         """Build an empty-defaults ``AdminConfig`` for an auto-declared
         ``admin_template:default``.
 

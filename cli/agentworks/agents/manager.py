@@ -231,7 +231,7 @@ def create_agent(
 
     # build_registry runs first so framework miss-policies (e.g.
     # GitCredentialKind's error policy on agent template's
-    # git_credentials list, future TemplateRequirement typos on
+    # git_credentials list, future TemplateReference typos on
     # inherits) fire before any template / DB / VM business logic
     # surfaces its own NotFoundError.
     registry = build_registry(config)

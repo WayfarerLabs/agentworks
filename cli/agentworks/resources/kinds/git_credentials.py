@@ -9,7 +9,7 @@ the requirement source surfaced in the error message.
 
 The kind is intentionally minimal: validating "the name is published"
 is the whole job. Token resolution happens through the secret kind
-(each ``GitCredentialConfig`` emits a ``SecretRequirement`` for its
+(each ``GitCredentialConfig`` emits a ``SecretReference`` for its
 token at finalize time).
 """
 
@@ -23,7 +23,7 @@ from agentworks.resources.kind import KIND_REGISTRY, NoUnreferencedDefaultError
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from agentworks.resources.requirement import ResourceRequirement
+    from agentworks.resources.reference import ResourceReference
 
 
 @dataclass(frozen=True)
@@ -36,7 +36,7 @@ class _GitCredentialKind:
 
     def synthesize(
         self,
-        requirements: Sequence[ResourceRequirement],
+        requirements: Sequence[ResourceReference],
     ) -> None:
         # Unreachable under the "error" miss policy: the Registry's
         # finalize pass raises ConfigError before dispatching to

@@ -19,7 +19,7 @@ from agentworks.errors import ExternalError
 if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.resources import Origin, Registry
-    from agentworks.resources.requirement import UsageEntry
+    from agentworks.resources.reference import ReferenceEntry
 
 
 class CatalogError(ExternalError):
@@ -51,7 +51,7 @@ class AptPackageEntry:
     # agentworks.catalog`` for built-in entries); ``usage`` is attached
     # by the framework's finalize pass from incoming references.
     origin: Origin | None = None
-    usage: tuple[UsageEntry, ...] = ()
+    references: tuple[ReferenceEntry, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -64,7 +64,7 @@ class SystemInstallCommandEntry:
     test_file: str | None = None
     test_dir: str | None = None
     origin: Origin | None = None
-    usage: tuple[UsageEntry, ...] = ()
+    references: tuple[ReferenceEntry, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -77,7 +77,7 @@ class UserInstallCommandEntry:
     test_file: str | None = None
     test_dir: str | None = None
     origin: Origin | None = None
-    usage: tuple[UsageEntry, ...] = ()
+    references: tuple[ReferenceEntry, ...] = ()
 
 
 @dataclass(frozen=True)

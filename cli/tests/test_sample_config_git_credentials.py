@@ -47,7 +47,7 @@ def test_default_token_secret_auto_declares(
     """A bare ``[git_credentials.github]`` stanza (no ``token`` field)
     parses with the default ``token = "git-token-github"``; the
     framework's finalize pass auto-declares that secret via
-    ``GitCredentialConfig.required_resources``.
+    ``GitCredentialConfig.referenced_resources``.
     """
     cfg = _write_cfg(
         tmp_path,

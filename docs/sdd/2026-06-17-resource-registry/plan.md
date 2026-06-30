@@ -595,42 +595,36 @@ get to land in their final shape and the locked.md can describe the shipped surf
 Goal: rename the framework's outbound/inbound reference types so the code matches the UI vocabulary
 (REFS column, "Referenced by:" section). No operator-visible behavior change.
 
-- [ ] `cli/agentworks/resources/requirement.py`: rename `ResourceRequirement` ->
-      `ResourceReference`, `SecretRequirement` -> `SecretReference`, `TemplateRequirement` ->
-      `TemplateReference`. Rename the file itself to `reference.py`.
-- [ ] Rename `UsageEntry` -> `ReferenceEntry`. Rename its prose field `text` -> `usage` so the
+- [x] `cli/agentworks/resources/reference.py` (renamed from `requirement.py`): `ResourceRequirement`
+      -> `ResourceReference`, `SecretRequirement` -> `SecretReference`, `TemplateRequirement` ->
+      `TemplateReference`.
+- [x] Rename `UsageEntry` -> `ReferenceEntry`. Rename its prose field `text` -> `usage` so the
       outbound `ResourceReference.usage` (unchanged) and the inbound `ReferenceEntry.usage` carry
-      the same name for the same thing. The misleading-count problem only existed at the collection
-      level (`Resource.usage` -> `Resource.references` below); the per-reference `usage: str` field
-      describes how the source uses the target and is clearly prose, not a count, at the type level.
-- [ ] Rename `Resource.usage: tuple[UsageEntry, ...]` -> `references: tuple[ReferenceEntry, ...]` on
-      every Resource type that carries it (the kinds in `resources/kinds/`).
-- [ ] Rename `Registry.iter_requirements` -> `iter_references`, internal `_requirements` ->
-      `_references`, and every other method whose name carries the old vocabulary. Update
-      `Registry.finalize`'s docstring + variable names.
-- [ ] Producer-side method names that emit them on each Config dataclass: `required_resources()` ->
-      `referenced_resources()` everywhere.
-- [ ] CLI labels: `Usages:` -> `Referenced by:` in `render_resource_description` and
-      `render_secret_description`. List-view header `USAGE` -> `REFS`.
-- [ ] Update FRD R9 / R10 / R12 and HLA prose throughout to use the new vocabulary. The wording
-      changes are mechanical (`Requirement` -> `Reference`, `usage` -> `references` /
-      `Referenced by`).
-- [ ] **Document the `ResourceReference` <-> `ReferenceEntry` relationship explicitly.** Both types'
-      module/class docstrings must spell out: (a) the directional split (outbound: "I point at X" vs
-      inbound: "I am pointed at by Y"), (b) where `ReferenceEntry` instances are created (in
-      `Registry.finalize`, projected from the outbound `ResourceReference`s after they're resolved
-      to their target), (c) why `ReferenceEntry` drops the `kind`/`name` fields (implicit from the
-      container Resource), and (d) the `usage` field's prose semantics on **both** types -- the
-      outbound `ResourceReference.usage` and the attached `ReferenceEntry.usage` carry the same
-      ("the tailscale auth key for vm_template:default" style) prose describing how the source uses
-      the target. The HLA's framework metadata-attachment section should carry the same explanation
-      in prose. The generic name `ReferenceEntry` (vs. e.g. `InboundReference`) makes good docs
-      load-bearing.
-- [ ] **Tests**: every test that imports the renamed symbols compiles and passes; CLI snapshot-ish
-      tests for the renamed labels (`Referenced by:`, `REFS`) survive. Add a one-shot
-      `test_phase3_naming_consistency.py` that asserts the public surface no longer exposes any
-      symbol named `*Requirement` / `Usage*` from the framework (defensive against partial renames
-      slipping back in).
+      the same name for the same thing.
+- [x] Rename `Resource.usage: tuple[UsageEntry, ...]` -> `references: tuple[ReferenceEntry, ...]` on
+      every Resource type that carries it (kinds in `resources/kinds/`, plus `SecretDecl`,
+      `VMTemplate`, `AgentTemplate`, ... in `config.py` / `secrets/base.py` / `catalog.py`).
+- [x] Rename `Registry._collect_new_requirements` -> `_collect_new_references`,
+      `_required_resources` -> `_referenced_resources`. `_references_tuple` helper renamed from
+      `_usage_tuple`. `Registry.finalize`'s docstring + variable names updated.
+- [x] Producer-side method names: `required_resources()` -> `referenced_resources()` on every Config
+      dataclass, `EnvEntry`, and the `walk.py` / `registry.py` getattr lookups.
+- [x] CLI labels: `Usages:` -> `Referenced by:` in `render_resource_description` and
+      `render_secret_description`. List-view header `USAGE` -> `REFS`. `ResourceSummary.usage_count`
+      -> `reference_count`. `SecretDescription.usages` -> `references`.
+- [x] Update FRD R9 / R10 / R12 and HLA prose throughout to use the new vocabulary (`Requirement` ->
+      `Reference`, `usage list` -> `references list`, etc.).
+- [x] **Documented the `ResourceReference` <-> `ReferenceEntry` relationship explicitly** in
+      `reference.py`'s module docstring: directional split (outbound: "I point at X" vs inbound: "I
+      am pointed at by Y"), where `ReferenceEntry` instances are created (only in
+      `Registry.finalize`, projected from resolved outbound references), why `ReferenceEntry` drops
+      the `kind`/`name` fields (implicit from the container Resource), and the `usage` field's prose
+      semantics carrying the same string on both ends.
+- [x] **Tests**: every test that imports the renamed symbols compiles and passes; CLI snapshot tests
+      pinned the renamed labels (`Referenced by:`, `REFS`). Added
+      `cli/tests/resources/test_phase3_naming_consistency.py` asserting the framework's public
+      surface no longer exposes any symbol named `*Requirement` / `Usage*` (defensive against
+      partial renames slipping back in).
 
 ### Phase 3b: Per-kind dynamic-instance hook
 

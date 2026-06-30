@@ -1,7 +1,7 @@
 """``SecretKind``: the framework's strategy for the ``"secret"`` kind.
 
 Miss policy is ``auto-declare`` with no name restriction -- any name a
-``SecretRequirement`` references will be auto-synthesized when not
+``SecretReference`` references will be auto-synthesized when not
 operator-declared. The synthesized ``SecretDecl`` carries an empty
 ``description``; operators are warned (per FRD R9) that auto-declared
 secrets should be promoted to explicit ``[secrets.<name>]`` blocks so they
@@ -20,7 +20,7 @@ from agentworks.secrets.base import SecretDecl
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from agentworks.resources.requirement import ResourceRequirement
+    from agentworks.resources.reference import ResourceReference
 
 
 SECRET_KIND_NAME = "secret"
@@ -40,7 +40,7 @@ class _SecretKind:
     miss_policy: Literal["auto-declare", "error"] = "auto-declare"
     auto_declare_names: frozenset[str] | None = None  # None = any name accepted
 
-    def synthesize(self, requirements: Sequence[ResourceRequirement]) -> SecretDecl:
+    def synthesize(self, requirements: Sequence[ResourceReference]) -> SecretDecl:
         """Build a ``SecretDecl`` for an auto-declared secret. ``requirements``
         is non-empty in normal operation (the Registry calls ``synthesize``
         only when an incoming reference triggered the miss policy) and

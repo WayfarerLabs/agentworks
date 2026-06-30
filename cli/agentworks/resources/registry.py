@@ -28,7 +28,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
 
     from agentworks.resources.origin import Origin
-    from agentworks.resources.requirement import ResourceRequirement
+    from agentworks.resources.reference import ResourceReference
 
 
 class Registry:
@@ -147,11 +147,11 @@ class Registry:
 
         # 1: worklist loop. ``walked`` tracks which Resources have had
         # their required_resources() walked so we don't double-count.
-        all_reqs: dict[tuple[str, str], list[ResourceRequirement]] = {}
+        all_reqs: dict[tuple[str, str], list[ResourceReference]] = {}
         walked: set[tuple[str, str]] = set()
 
         while True:
-            new_walks = self._collect_new_requirements(all_reqs, walked)
+            new_walks = self._collect_new_references(all_reqs, walked)
             if not new_walks:
                 # No new Resources to walk. We're stable.
                 break
@@ -165,15 +165,17 @@ class Registry:
                 kind_handler = _lookup_kind(target_kind, reqs[0])
                 self._handle_miss(target_kind, target_name, kind_handler, reqs)
 
-        # 2: usage attachment + description polish for every Resource.
+        # 2: references attachment + description polish for every Resource.
         # Iterate all currently-published Resources (not just those with
-        # incoming requirements) so always-materialized rows get
-        # ``usage=()`` plus the empty-usage description fallback too.
+        # incoming references) so always-materialized rows get
+        # ``references=()`` plus the empty-references description fallback too.
         for kind in list(self._resources.keys()):
             for name in list(self._resources[kind].keys()):
                 existing = self._resources[kind][name]
                 reqs = all_reqs.get((kind, name), [])
-                polished = dataclasses.replace(existing, usage=_usage_tuple(reqs))
+                polished = dataclasses.replace(
+                    existing, references=_references_tuple(reqs)
+                )
                 polished = _polish_auto_declared_description(polished, kind)
                 self._resources[kind][name] = polished
 
@@ -217,9 +219,9 @@ class Registry:
                     kind_handler.synthesize(())
                 )
 
-    def _collect_new_requirements(
+    def _collect_new_references(
         self,
-        all_reqs: dict[tuple[str, str], list[ResourceRequirement]],
+        all_reqs: dict[tuple[str, str], list[ResourceReference]],
         walked: set[tuple[str, str]],
     ) -> bool:
         """Walk ``required_resources()`` on every Resource not yet in
@@ -240,7 +242,7 @@ class Registry:
         for key, resource in snapshot:
             walked.add(key)
             any_walked = True
-            for req in _required_resources(resource):
+            for req in _referenced_resources(resource):
                 all_reqs.setdefault((req.kind, req.name), []).append(req)
         return any_walked
 
@@ -249,7 +251,7 @@ class Registry:
         kind: str,
         name: str,
         kind_handler: Any,
-        reqs: list[ResourceRequirement],
+        reqs: list[ResourceReference],
     ) -> None:
         """Dispatch the kind's miss policy. Mutates ``self._resources``
         for the auto-declare branch; raises ``ConfigError`` otherwise.
@@ -320,19 +322,19 @@ class Registry:
 # -- Internal helpers --------------------------------------------------
 
 
-def _required_resources(resource: Any) -> Sequence[ResourceRequirement]:
-    """Return the Resource's ``required_resources()`` or an empty
+def _referenced_resources(resource: Any) -> Sequence[ResourceReference]:
+    """Return the Resource's ``referenced_resources()`` or an empty
     sequence if it doesn't define one. Phase 1a has no producers wired
     beyond what tests synthesize; Phase 1b adds the method to env-bearing
     Resources, Phase 1c/d to VMTemplate / GitCredentialConfig.
     """
-    method = getattr(resource, "required_resources", None)
+    method = getattr(resource, "referenced_resources", None)
     if method is None:
         return ()
     return tuple(method())
 
 
-def _lookup_kind(kind: str, req: ResourceRequirement) -> Any:
+def _lookup_kind(kind: str, req: ResourceReference) -> Any:
     """Look up the kind in ``KIND_REGISTRY``, raising a clear error if
     the requirement references a kind no one has registered. Includes
     the requirement's source in the error for traceability.
@@ -375,34 +377,39 @@ def _polish_auto_declared_description(resource: Any, kind: str) -> Any:
     origin = getattr(resource, "origin", None)
     if origin is None or origin.variant != "auto-declared":
         return resource
-    usage = getattr(resource, "usage", ())
-    if not usage:
+    references = getattr(resource, "references", ())
+    if not references:
         # Always-materialized default with no static incoming references.
         description = f"(auto) auto-declared default {kind}"
     else:
-        first = usage[0]
-        # UsageEntry.source is typed tuple[str, str]; the framework
+        first = references[0]
+        # ReferenceEntry.source is typed tuple[str, str]; the framework
         # guarantees the shape at finalize time. No runtime guard.
-        distinct_other = {u.source for u in usage} - {first.source}
+        distinct_other = {entry.source for entry in references} - {first.source}
         suffix = f" (and {len(distinct_other)} more)" if distinct_other else ""
         description = (
-            f"(auto) {first.text} for {first.source[0]}:{first.source[1]}{suffix}"
+            f"(auto) {first.usage} for {first.source[0]}:{first.source[1]}{suffix}"
         )
     return dataclasses.replace(resource, description=description)
 
 
-def _usage_tuple(
-    reqs: Sequence[ResourceRequirement],
+def _references_tuple(
+    refs: Sequence[ResourceReference],
 ) -> tuple[Any, ...]:
-    """Build the ``usage`` tuple a Resource carries on it after
-    ``finalize``. Lives here (rather than imported from requirement.py
+    """Build the ``references`` tuple a Resource carries on it after
+    ``finalize``. Lives here (rather than imported from reference.py
     at runtime) to keep the import graph minimal; the return tuple
-    holds ``UsageEntry`` instances but is typed loosely so this module
+    holds ``ReferenceEntry`` instances but is typed loosely so this module
     doesn't need a TYPE_CHECKING import for the static typing.
-    """
-    from agentworks.resources.requirement import UsageEntry
 
-    return tuple(UsageEntry(source=r.source, text=r.usage) for r in reqs)
+    Projects each outbound ``ResourceReference`` to an inbound
+    ``ReferenceEntry`` by keeping ``source`` and ``usage`` (the prose);
+    the ``kind``/``name`` fields drop because they're implicit from the
+    container Resource the entry attaches to.
+    """
+    from agentworks.resources.reference import ReferenceEntry
+
+    return tuple(ReferenceEntry(source=r.source, usage=r.usage) for r in refs)
 
 
 def _detect_cycles(resources: dict[str, dict[str, Any]]) -> None:
@@ -471,5 +478,5 @@ def _edges_from(
     resource = resources.get(kind, {}).get(name)
     if resource is None:
         return
-    for req in _required_resources(resource):
+    for req in _referenced_resources(resource):
         yield (req.kind, req.name)

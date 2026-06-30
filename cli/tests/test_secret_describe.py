@@ -190,14 +190,14 @@ def test_multiple_usages_render_one_row_each(
     registry = build_registry(config)
     desc = describe_secret(registry, config, "shared-key")
 
-    assert len(desc.usages) == 2
-    sources = sorted(u.source for u in desc.usages)
+    assert len(desc.references) == 2
+    sources = sorted(u.source for u in desc.references)
     assert sources == [
         ("admin_template", "default"),
         ("vm_template", "azure-prod"),
     ]
-    # Usage text reflects the env-var key.
-    texts = sorted(u.text for u in desc.usages)
+    # Usage prose reflects the env-var key.
+    texts = sorted(u.usage for u in desc.references)
     assert texts == ["the ADMIN_KEY env var", "the TEMPLATE_KEY env var"]
 
 
@@ -218,7 +218,7 @@ def test_no_usages_for_unreferenced_operator_declared_secret(
     config = load_config(cfg, warn_issues=False)
     registry = build_registry(config)
     desc = describe_secret(registry, config, "lonely-key")
-    assert desc.usages == ()
+    assert desc.references == ()
 
 
 # -- Backend mappings section ----------------------------------------------
@@ -483,8 +483,8 @@ def test_render_emits_header_usages_mappings_preview(
     assert "Origin: operator-declared (" in out
     # Description comes before Origin (Description is the primary info).
     assert out.index("Description:") < out.index("Origin:")
-    # Usages
-    assert "Usages:" in out
+    # References (inbound)
+    assert "Referenced by:" in out
     assert "admin_template:default" in out
     assert "the ADMIN_KEY env var" in out
     # Backend mappings

@@ -27,7 +27,7 @@ from agentworks.resources.kind import KIND_REGISTRY, NoUnreferencedDefaultError
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from agentworks.resources.requirement import ResourceRequirement
+    from agentworks.resources.reference import ResourceReference
 
 
 @dataclass(frozen=True)
@@ -38,7 +38,7 @@ class _SecretBackendKind:
     miss_policy: Literal["auto-declare", "error"] = "error"
     auto_declare_names: frozenset[str] | None = None
 
-    def synthesize(self, requirements: Sequence[ResourceRequirement]) -> Any:
+    def synthesize(self, requirements: Sequence[ResourceReference]) -> Any:
         raise NoUnreferencedDefaultError(
             "the secret_backend kind has miss_policy='error'; "
             "synthesize should never be invoked (the framework raises "

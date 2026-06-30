@@ -99,12 +99,12 @@ def test_describe_returns_usage_entries(tmp_path: Path) -> None:
     registry = _load(cfg_file)
 
     desc = describe_resource(registry, "secret", "tailscale-auth-key")
-    assert len(desc.usage) >= 1
+    assert len(desc.references) >= 1
     # Each entry carries (source, text) -- the renderer formats this
     # as ``<file:line> -- <text>``.
-    for entry in desc.usage:
+    for entry in desc.references:
         assert isinstance(entry.source, tuple) and len(entry.source) == 2
-        assert entry.text
+        assert entry.usage
 
 
 # -- Error handling ---------------------------------------------------------
@@ -174,7 +174,7 @@ def test_cli_describe_renders_header_and_usage_sections(
     assert "Resource: secret:tailscale-auth-key" in result.stdout
     assert "Origin:" in result.stdout
     assert "Description:" in result.stdout
-    assert "Usages:" in result.stdout
+    assert "Referenced by:" in result.stdout
 
 
 def test_cli_describe_unknown_name_exits_nonzero(

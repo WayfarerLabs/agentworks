@@ -154,9 +154,9 @@ def test_known_apt_package_reference_resolves(tmp_path: Path) -> None:
     gh = registry.lookup("apt_package", "gh")
     assert gh.name == "gh"
     # Cross-check: the catalog publisher attached code-declared origin
-    # and the framework's finalize attached usage from the
-    # vm_template:default reference.
+    # and the framework's finalize attached the inbound reference from
+    # vm_template:default.
     assert gh.origin.variant == "code-declared"
     assert any(
-        u.source == ("vm_template", "default") for u in gh.usage
-    ), "vm_template:default usage should be on the apt_package"
+        u.source == ("vm_template", "default") for u in gh.references
+    ), "vm_template:default reference should be on the apt_package"
