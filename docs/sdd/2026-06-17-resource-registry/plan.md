@@ -761,8 +761,8 @@ code.
   (USAGE column reads as "in use" but only counts static refs) and a missing dimension (no dynamic
   instance count). Shipping Phase 2 alone would land an operator-facing surface that immediately
   needs replacing; bundling Phase 3 lets the framework code use the final `Reference` vocabulary
-  throughout and lets the cross-kind list show both REFS and INSTANCES on first ship. The
-  terminology rename is mechanical but wide; doing it pre-merge means no public-API churn.
+  throughout and lets the cross-kind list show both REFS and USED BY on first ship. The terminology
+  rename is mechanical but wide; doing it pre-merge means no public-API churn.
 - **Interaction with PR #130 (polymorphic transports)**: PR #130 renamed `ExecTarget` to `Transport`
   and introduced the `transports/` package. Phase 1c / 1d wire kwargs into the Transport-shaped
   install runners. No conflict with this SDD's design; the function signatures are the integration

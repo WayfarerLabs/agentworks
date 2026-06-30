@@ -336,6 +336,132 @@ def test_secret_instances_empty_when_no_session_reaches_it(
     assert instances == []
 
 
+def test_secret_instances_finds_sessions_via_agent_template_env(
+    tmp_path: Path,
+) -> None:
+    """Agent-mode session whose agent_template references a secret in
+    its env block reaches that secret through the agent_template root
+    (not via admin_template). Mirror of the admin-env test.
+    """
+    cfg = tmp_path / "config.toml"
+    _write_base(
+        cfg,
+        extras="""
+        [agent_templates.claude]
+        shell = "bash"
+
+        [agent_templates.claude.env]
+        AGENT_KEY = { secret = "agent-secret" }
+        """,
+    )
+    config = load_config(cfg, warn_issues=False)
+    registry = build_registry(config)
+
+    db = Database(tmp_path / "test.db")
+    db.insert_vm("vm-1", platform="lima")
+    db.insert_workspace(
+        "ws-1", workspace_path="/tmp/ws-1", vm_name="vm-1", linux_group="ws-ws-1"
+    )
+    db.insert_agent("agent-claude", "vm-1", "agt-agent-claude", template="claude")
+    db.insert_session(
+        "sess-claude", "ws-1", template="default", mode=SessionMode.AGENT,
+        agent_name="agent-claude", socket_path="/tmp/sess-claude.sock",
+    )
+    db._conn.commit()
+
+    from agentworks.resources import KIND_REGISTRY
+
+    secret = registry.lookup("secret", "agent-secret")
+    instances = list(KIND_REGISTRY["secret"].instances(db, registry, secret))
+    assert [r.instance_name for r in instances] == ["sess-claude"]
+
+
+def test_secret_instances_admin_secret_not_attributed_to_agent_session(
+    tmp_path: Path,
+) -> None:
+    """A secret referenced only from ``[admin.env]`` is NOT counted as
+    "used by" an agent-mode session even though both sessions live on
+    the same VM. The projection answers "what does this session's shell
+    see?" not "what does this session's VM need provisioned?". The
+    admin secret surfaces under admin_template's own ``Used by:`` row.
+    """
+    cfg = tmp_path / "config.toml"
+    _write_base(
+        cfg,
+        extras="""
+        [admin.env]
+        ADMIN_KEY = { secret = "admin-only-secret" }
+        """,
+    )
+    config = load_config(cfg, warn_issues=False)
+    registry = build_registry(config)
+
+    db = Database(tmp_path / "test.db")
+    db.insert_vm("vm-1", platform="lima")
+    db.insert_workspace(
+        "ws-1", workspace_path="/tmp/ws-1", vm_name="vm-1", linux_group="ws-ws-1"
+    )
+    db.insert_agent("agent-1", "vm-1", "agt-agent-1")
+    db.insert_session(
+        "sess-admin", "ws-1", template="default", mode=SessionMode.ADMIN,
+        socket_path="/tmp/sess-admin.sock",
+    )
+    db.insert_session(
+        "sess-agent", "ws-1", template="default", mode=SessionMode.AGENT,
+        agent_name="agent-1", socket_path="/tmp/sess-agent.sock",
+    )
+    db._conn.commit()
+
+    from agentworks.resources import KIND_REGISTRY
+
+    secret = registry.lookup("secret", "admin-only-secret")
+    instances = list(KIND_REGISTRY["secret"].instances(db, registry, secret))
+    # Only the admin-mode session reaches admin_template's env.
+    assert [r.instance_name for r in instances] == ["sess-admin"]
+
+
+def test_secret_instances_finds_sessions_via_auto_declared_secret(
+    tmp_path: Path,
+) -> None:
+    """A secret that's never operator-declared (no ``[secrets.X]``
+    block) but referenced transitively (e.g. via a typo'd env value)
+    still surfaces in ``instances`` for the session whose subgraph
+    reaches it. The framework auto-declares the secret during finalize;
+    the projection sees it the same way as an operator-declared one.
+    """
+    cfg = tmp_path / "config.toml"
+    _write_base(
+        cfg,
+        extras="""
+        [admin.env]
+        TYPO_KEY = { secret = "anthropic-api-ky" }
+        """,
+    )
+    config = load_config(cfg, warn_issues=False)
+    registry = build_registry(config)
+
+    db = Database(tmp_path / "test.db")
+    db.insert_vm("vm-1", platform="lima")
+    db.insert_workspace(
+        "ws-1", workspace_path="/tmp/ws-1", vm_name="vm-1", linux_group="ws-ws-1"
+    )
+    db.insert_session(
+        "sess-1", "ws-1", template="default", mode=SessionMode.ADMIN,
+        socket_path="/tmp/sess-1.sock",
+    )
+    db._conn.commit()
+
+    from agentworks.resources import KIND_REGISTRY
+
+    auto_secret = registry.lookup("secret", "anthropic-api-ky")
+    assert auto_secret.origin is not None
+    assert auto_secret.origin.variant == "auto-declared"
+    instances = list(
+        KIND_REGISTRY["secret"].instances(db, registry, auto_secret)
+    )
+    assert [r.instance_name for r in instances] == ["sess-1"]
+
+
 # -- Kinds with no instance concept -----------------------------------------
 
 
@@ -380,24 +506,72 @@ def test_describe_resource_populates_used_by_when_db_provided(
     assert desc_no_db.used_by is None
 
 
-def test_describe_resource_returns_empty_used_by_for_no_instance_kinds(
+def test_describe_resource_returns_none_used_by_for_no_instance_kinds(
     tmp_path: Path,
 ) -> None:
-    """A kind without an `instances` hook (e.g. apt_package) yields
+    """A kind without an `instances` hook (e.g. secret_backend) yields
     ``used_by = None`` even with a db: the renderer treats None as
-    "kind has no instance concept" and omits the section.
+    "kind has no instance concept" and omits the section. Uses
+    ``secret_backend`` rather than ``apt_package`` because every config
+    publishes at least one secret_backend (the always-materialized
+    ``env-var`` and ``prompt`` defaults), so the assertion isn't
+    fixture-dependent.
     """
-    db, registry = _seed_basic(tmp_path)
+    cfg = tmp_path / "config.toml"
+    _write_base(cfg)
+    config = load_config(cfg, warn_issues=False)
+    registry = build_registry(config)
+    db = Database(tmp_path / "no_instance_test.db")
+
     from agentworks.resources.inspect import describe_resource
 
-    # Pick any apt_package the catalog publishes by default; if no
-    # builtins are registered we skip.
-    try:
-        any_apt = next(iter(registry.iter_kind_items("apt_package")))
-    except StopIteration:
-        return
-    desc = describe_resource(registry, "apt_package", any_apt[0], db=db)
-    assert desc.used_by is None
+    # secret_backend kinds (env-var, prompt) have no ``instances`` method;
+    # describe_resource must return ``used_by = None`` for them.
+    backend_names = [
+        name for name, _ in registry.iter_kind_items("secret_backend")
+    ]
+    assert backend_names, "expected at least one secret_backend in the registry"
+    for name in backend_names:
+        desc = describe_resource(registry, "secret_backend", name, db=db)
+        assert desc.used_by is None, (
+            f"secret_backend {name!r} should yield used_by=None "
+            f"(kind has no instance concept) but got {desc.used_by!r}"
+        )
+
+
+def test_list_view_renders_dash_for_no_instance_kinds(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """The list-view renderer turns ``used_by_count = None`` into ``-``
+    in the USED BY column. The contract is that ``-`` distinguishes
+    "this kind has no instance concept" from ``0`` ("there are zero
+    instances right now").
+    """
+    from unittest.mock import patch
+
+    from typer.testing import CliRunner
+
+    from agentworks.cli import app
+
+    cfg = tmp_path / "config.toml"
+    _write_base(cfg)
+    db = Database(tmp_path / "renderer_test.db")
+    monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg)
+
+    # Patch get_db so the CLI exercises the full path (including the
+    # renderer) against our empty db.
+    with patch(
+        "agentworks.cli.commands.resource.get_db", return_value=db
+    ):
+        result = CliRunner().invoke(
+            app, ["resource", "list", "--kind", "secret_backend"]
+        )
+    assert result.exit_code == 0, result.stdout
+    assert "USED BY" in result.stdout
+    # secret_backend rows render ``-`` in the USED BY column (kind has
+    # no instance concept). Conservative assertion: at least one ``-``
+    # appears in the rendered output.
+    assert "-" in result.stdout
 
 
 def test_kinds_without_instances_hook_inherit_dash(tmp_path: Path) -> None:

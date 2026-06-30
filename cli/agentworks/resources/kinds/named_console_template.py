@@ -71,6 +71,15 @@ class _NamedConsoleTemplateKind:
         ``NamedConsoleConfig`` (mirror the Phase 2a.3 admin change) and
         switch this filter to ``resource.name`` + a ``console.template``
         column.
+
+        Asymmetry with ``admin_template``: that kind guards with
+        ``if resource.name != "default": return`` because ``AdminConfig``
+        has a ``name`` field (Phase 2a.3 plurified it). ``NamedConsoleConfig``
+        doesn't have a ``name`` field yet, and the registry refuses any
+        non-``default`` named_console_template name via miss-policy
+        dispatch, so the guard isn't reachable today. When the plurified
+        surface lands and ``NamedConsoleConfig`` gains a ``name`` field,
+        mirror the ``admin_template`` shape exactly.
         """
         for console in db.list_consoles():
             yield InstanceRef(instance_kind="console", instance_name=console.name)

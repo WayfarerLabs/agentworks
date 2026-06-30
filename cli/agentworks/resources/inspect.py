@@ -206,15 +206,19 @@ def list_resources(
     )
 
 
-def _count_used_by(
+def _used_by_for(
     db: Database | None, registry: Registry, kind: str, resource: object
-) -> int | None:
-    """Project ``(kind, resource) -> int | None`` via the kind's
-    ``instances`` hook. ``None`` for kinds that don't implement the
-    hook (catalog, providers, backends) or when ``db`` isn't available
-    -- the list renderer treats ``None`` as ``-`` rather than ``0`` to
-    distinguish "kind has no instance concept" from "kind has zero
+) -> tuple[InstanceRef, ...] | None:
+    """Project ``(kind, resource) -> tuple[InstanceRef, ...] | None`` via
+    the kind's ``instances`` hook. ``None`` for kinds that don't
+    implement the hook (catalog, providers, backends) or when ``db``
+    isn't available -- callers treat ``None`` as ``-`` rather than ``0``
+    to distinguish "kind has no instance concept" from "kind has zero
     instances right now."
+
+    The ``instances`` method is intentionally NOT on the ``ResourceKind``
+    Protocol; absent-on-class IS the "no instance concept" signal (see
+    ``resources/kind.py``'s comment for the Liskov-based rationale).
     """
     if db is None:
         return None
@@ -226,11 +230,18 @@ def _count_used_by(
     method = getattr(handler, "instances", None)
     if method is None:
         return None
-    try:
-        return sum(1 for _ in method(db, registry, resource))
-    except NotImplementedError:
-        # Kind declares the method but signals "no instance concept."
-        return None
+    return tuple(method(db, registry, resource))
+
+
+def _count_used_by(
+    db: Database | None, registry: Registry, kind: str, resource: object
+) -> int | None:
+    """``len()`` variant of ``_used_by_for`` used by the list-row builder.
+    Returns ``None`` (renderer shows ``-``) when the kind has no
+    instance concept; otherwise the count of live instances.
+    """
+    refs = _used_by_for(db, registry, kind, resource)
+    return None if refs is None else len(refs)
 
 
 def describe_resource(
@@ -288,32 +299,14 @@ def describe_resource(
         origin=getattr(resource, "origin", None),
         description=getattr(resource, "description", "") or "",
         references=tuple(getattr(resource, "references", ())),
-        used_by=_collect_used_by(db, registry, kind, resource),
+        used_by=_used_by_for(db, registry, kind, resource),
     )
 
 
-def _collect_used_by(
-    db: Database | None, registry: Registry, kind: str, resource: object
-) -> tuple[InstanceRef, ...] | None:
-    """Project the kind's ``instances`` hook into a tuple of
-    ``InstanceRef`` for the describe view. ``None`` when ``db`` isn't
-    provided or the kind doesn't implement the hook (catalog,
-    providers, backends).
-    """
-    if db is None:
-        return None
-    from agentworks.resources import KIND_REGISTRY
-
-    handler = KIND_REGISTRY.get(kind)
-    if handler is None:
-        return None
-    method = getattr(handler, "instances", None)
-    if method is None:
-        return None
-    try:
-        return tuple(method(db, registry, resource))
-    except NotImplementedError:
-        return None
+# ``_collect_used_by`` previously duplicated ``_used_by_for``'s guard
+# structure with a near-identical body. Both call sites now go through
+# ``_used_by_for`` (the describe builder calls it directly; the list
+# builder wraps it in ``_count_used_by``).
 
 
 # -- Renderers --------------------------------------------------------------

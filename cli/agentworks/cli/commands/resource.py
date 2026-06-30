@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, cast
 import typer
 
 from agentworks.cli._app import app
+from agentworks.cli._helpers import get_db
 
 if TYPE_CHECKING:
     from agentworks.resources.inspect import OriginFilter
@@ -54,15 +55,17 @@ def resource_list(
 ) -> None:
     """List every Resource in the Registry across all kinds.
 
-    Columns: kind, name, origin (with detail), usage count, description.
-    Description is reliably populated -- operator-declared resources
-    carry the operator's text, auto-declared resources get a framework-
-    synthesized text (Phase 2a's polish), and kinds whose Resource type
-    has no description field show empty.
+    Columns: KIND, NAME, ORIGIN (with detail), REFS (static config
+    references count), USED BY (live DB instances depending on this
+    resource per current config; ``-`` for kinds with no instance
+    concept), DESCRIPTION. Description is reliably populated --
+    operator-declared resources carry the operator's text,
+    auto-declared resources get a framework-synthesized text (Phase
+    2a's polish), and kinds whose Resource type has no description
+    field show empty.
     """
     from agentworks import output
     from agentworks.bootstrap import build_registry
-    from agentworks.cli._helpers import get_db
     from agentworks.config import load_config
     from agentworks.resources.inspect import (
         list_resources,
@@ -113,13 +116,15 @@ def resource_describe(
 ) -> None:
     """Show the full per-resource detail view.
 
-    Two sections: header (kind, name, description, origin), usages
-    (one row per reference). Stops at framework-uniform fields; reach
-    for ``agw secret describe`` etc. for kind-specific detail (backend
+    Three sections: a header (kind, name, description, origin), a
+    ``Referenced by:`` list (one row per inbound config reference), and
+    a ``Used by (per current config):`` list (one row per live DB
+    instance whose subgraph reaches this resource, grouped by
+    ``instance_kind``). Stops at framework-uniform fields; reach for
+    ``agw secret describe`` etc. for kind-specific detail (backend
     mappings, inheritance chains, resolution preview).
     """
     from agentworks.bootstrap import build_registry
-    from agentworks.cli._helpers import get_db
     from agentworks.config import load_config
     from agentworks.resources.inspect import (
         describe_resource,

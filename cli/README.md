@@ -525,14 +525,14 @@ Browse and inspect the built-in catalog of installable tools.
 Cross-kind inspection of the Resource Registry. The registry is the framework that owns every
 operator-, auto-, and code-declared resource the CLI knows about: secrets, VM templates, agent
 templates, workspace templates, catalog entries, git credential providers, secret backends, etc. The
-two commands below stop at the framework-uniform fields (`kind`, `name`, `origin`, `usage`,
-`description`). For kind-specific detail -- secret backend mappings, template inheritance chains,
-resolution previews -- reach for the per-kind command (e.g. `agw secret describe`).
+two commands below stop at the framework-uniform fields (`kind`, `name`, `origin`, `references`,
+`used_by`, `description`). For kind-specific detail -- secret backend mappings, template inheritance
+chains, resolution previews -- reach for the per-kind command (e.g. `agw secret describe`).
 
-| Command                               | Description                                          |
-| ------------------------------------- | ---------------------------------------------------- |
-| `agw resource list`                   | List every resource in the registry across all kinds |
-| `agw resource describe <kind> <name>` | Show the per-resource detail view (header + usages)  |
+| Command                               | Description                                                          |
+| ------------------------------------- | -------------------------------------------------------------------- |
+| `agw resource list`                   | List every resource in the registry across all kinds                 |
+| `agw resource describe <kind> <name>` | Show the per-resource detail view (header + Referenced by + Used by) |
 
 `resource list` accepts `--kind <csv>` (e.g. `--kind secret,vm_template`) and `--origin <variant>`
 where variant is `operator`, `auto`, or `code`. `--names-only` emits `kind:name` per line and backs

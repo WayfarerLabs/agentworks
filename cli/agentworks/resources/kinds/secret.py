@@ -112,13 +112,27 @@ class _SecretKind:
     def _secrets_reachable_from_session(
         db: Database, registry: Registry, session: SessionRow
     ) -> set[str]:
+        """Build the set of secret names a session's shell would see in
+        its env per current config. Roots follow the env-and-secrets
+        layering: a session's shell sees ``vm + workspace + (admin |
+        agent) + session`` env -- mode picks exactly one of admin_template
+        or agent_template, not both.
+
+        Note: this answers "what would this session's shell env contain?"
+        not "what does this session's VM need to be provisioned with?".
+        A secret referenced only from ``[admin.env]`` is NOT counted as
+        "used by" an agent-mode session even though the VM's admin user
+        needs it for ``agw vm shell``. The projection is operator-facing
+        ("does my agent see this secret?"), and the admin user's own
+        dependencies surface via admin_template's own ``Used by:`` entry
+        (every VM).
+
+        ``vm_template`` is always included because the session's VM
+        bootstrap (apt packages, tailscale auth key, etc.) is a hard
+        dependency regardless of session mode.
+        """
         roots: list[tuple[str, str]] = []
         roots.append(("session_template", session.template))
-        # Every VM has an admin user that pulls from admin_template:default.
-        # Sessions running on that VM transitively reach admin's env-block
-        # references regardless of mode -- agent-mode sessions still log into
-        # an admin-provisioned VM. Conservative for the projection.
-        roots.append(("admin_template", "default"))
         workspace = db.get_workspace(session.workspace_name)
         if workspace is not None:
             roots.append(
@@ -127,7 +141,13 @@ class _SecretKind:
             vm = db.get_vm(workspace.vm_name)
             if vm is not None:
                 roots.append(("vm_template", vm.template or "default"))
-        if session.mode == "agent" and session.agent_name is not None:
+        # Mode picks exactly one of admin_template / agent_template.
+        # When/if a future SDD plurifies admin_template's operator
+        # surface, replace the hardcoded ``"default"`` here with a
+        # per-VM column read (e.g. ``vm.admin_template or "default"``).
+        if session.mode == "admin":
+            roots.append(("admin_template", "default"))
+        elif session.mode == "agent" and session.agent_name is not None:
             agent = db.get_agent(session.agent_name)
             if agent is not None:
                 roots.append(("agent_template", agent.template or "default"))
