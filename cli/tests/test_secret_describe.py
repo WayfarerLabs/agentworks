@@ -75,6 +75,7 @@ def test_operator_declared_secret_shows_file_and_line(
     assert desc.origin.variant == "operator-declared"
     assert desc.origin.file is not None
     assert str(desc.origin.file).endswith(cfg.name)
+    assert desc.origin.line is not None
     assert desc.origin.line > 0
 
 
