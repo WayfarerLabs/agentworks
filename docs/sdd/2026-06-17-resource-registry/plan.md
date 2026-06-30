@@ -651,21 +651,37 @@ schema; each kind defines its own projection.
 Goal: make both dimensions visible in the operator-facing surface.
 
 - [ ] `cli/agentworks/resources/inspect.py`: extend `list_resources` to also project per-row
-      instance counts via `kind.instances(db, resource)`. The new `ResourceSummary.instance_count`
+      instance counts via `kind.instances(db, resource)`. The new `ResourceSummary.used_by_count`
       sits next to `reference_count` (renamed from `usage_count` in Phase 3a). Service-layer
       function gains a `db: Database` parameter; CLI layer threads it through.
-- [ ] List view: rename header `USAGE` -> `REFS`; add new `INSTANCES` column populated from
-      `instance_count`. Kinds with no instance concept render `-`.
+- [ ] List view: add new `USED BY` column populated from `used_by_count`. Kinds with no
+      live-instance concept (catalog, providers, backends) render `-`. Header keeps `REFS` for the
+      static side (renamed from `USAGE` in Phase 3a).
 - [ ] Describe view: keep `Referenced by:` (config-source list, unchanged data, just renamed label);
-      add new `In use by:` section listing the projected `InstanceRef`s grouped by `instance_kind`.
-      Both sections carry a "(per current config)" annotation so the projection-vs-materialized
-      distinction is visible.
-- [ ] `agw secret describe`: gain the same `In use by:` section. FRD R10 documents both sections.
-- [ ] **Tests**: list view shows REFS + INSTANCES correctly per kind; describe view shows both
+      add new `Used by:` section listing the projected `InstanceRef`s grouped by `instance_kind`.
+      The `Used by:` section carries a "(per current config)" annotation so the
+      projection-vs-materialized distinction is visible until a sibling provisioned dimension lands
+      (see "Forward-compat" note below).
+- [ ] `agw secret describe`: gain the same `Used by:` section. FRD R10 documents both sections.
+- [ ] **Tests**: list view shows REFS + USED BY correctly per kind; describe view shows both
       sections; the per-current-config annotation appears.
 
-Definition of done: `agw resource list` shows REFS + INSTANCES; `agw resource describe` and
-`agw secret describe` show "Referenced by:" + "In use by:"; framework code uses Reference vocabulary
+**Naming choice -- "Used by" vs "Expected"**: today's dimension reads more naturally as "Used by"
+than the more clinical "Expected." The projection-vs-materialized distinction matters operationally
+only once both dimensions exist; until then the "(per current config)" annotation in describe
+carries that signal explicitly. If a future SDD adds provisioned-state tracking, the pair becomes
+`USED BY` / `PROVISIONED ON` (or similar) -- the asymmetry between the two columns directly signals
+drift, which is the operator-relevant signal.
+
+**Forward-compat note**: the framework hook stays generically named `instances(db, resource)` rather
+than `expected_instances(...)` so a future provisioned-tracking SDD can add
+`provisioned_instances(db, resource)` returning the same `InstanceRef` shape (one method per
+dimension; both consume the same dataclass). At that point today's `instances()` may rename to
+`expected_instances()` for internal clarity; the rename is internal-only (no operator surface, no
+public Python API for third parties) so the cost is low and isolated.
+
+Definition of done: `agw resource list` shows REFS + USED BY; `agw resource describe` and
+`agw secret describe` show "Referenced by:" + "Used by:"; framework code uses Reference vocabulary
 throughout; CI green; reviewer-approved.
 
 **Phases 2 and 3 ship together** in a single PR on `feat/resource-registry`. The Phase 2c-era
