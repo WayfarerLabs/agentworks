@@ -47,9 +47,9 @@ class _SecretKind:
         ordered by config-load walk order.
 
         Only ``origin`` (auto-declared, source = first matching
-        requirement's source) is attached here. ``usage`` is centralized
+        reference's source) is attached here. ``usage`` is centralized
         in ``Registry.finalize``'s post-stabilization pass so the kind
-        doesn't need to know the final requirement map -- a synthesized
+        doesn't need to know the final reference map -- a synthesized
         Resource that goes on to publish requirements of its own may
         gather later incoming edges that this initial call can't see.
 
@@ -62,7 +62,7 @@ class _SecretKind:
         if not requirements:
             raise NoUnreferencedDefaultError(
                 "the secret kind has no reserved default name; "
-                "synthesize requires at least one requirement"
+                "synthesize requires at least one reference"
             )
         first = requirements[0]
         return SecretDecl(

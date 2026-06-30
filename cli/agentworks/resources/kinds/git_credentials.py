@@ -5,7 +5,7 @@ explicitly declare every ``[git_credentials.<name>]`` they reference
 (from ``admin.git_credentials`` / ``agent_templates.*.git_credentials``).
 A typo'd reference like ``admin.git_credentials = ["githb-prod"]``
 errors at config load via the framework's miss-policy dispatch, with
-the requirement source surfaced in the error message.
+the reference source surfaced in the error message.
 
 The kind is intentionally minimal: validating "the name is published"
 is the whole job. Token resolution happens through the secret kind

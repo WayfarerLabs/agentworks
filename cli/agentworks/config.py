@@ -163,7 +163,7 @@ def _env_requirements(
     """Aggregate ``EnvEntry.referenced_resources(source)`` across an env table.
 
     Module-level helper shared by every env-bearing Resource type's
-    ``required_resources()`` method so the per-type method body stays
+    ``referenced_resources()`` method so the per-type method body stays
     one line. ``env`` may be ``None`` (``SessionTemplate.env`` is
     optional) or empty, in which case the result is an empty list.
     """
@@ -183,7 +183,7 @@ def _git_credential_requirements(
     name in ``git_credentials``. Used by ``AdminConfig.referenced_resources``
     and ``AgentTemplate.referenced_resources`` to feed the
     ``GitCredentialKind``'s error miss policy: a typo'd or undeclared
-    name errors at finalize with the requirement source pointing at the
+    name errors at finalize with the reference source pointing at the
     declaring Resource.
     """
     from agentworks.resources.reference import ResourceReference
@@ -208,7 +208,7 @@ def _tailscale_secret_requirement(
     """Build the ``SecretReference`` a VMTemplate publishes for its
     Tailscale auth key. Used by both ``VMTemplate.referenced_resources``
     (raw, in this module) and ``ResolvedVMTemplate.referenced_resources``
-    (resolved, in ``agentworks.vms.templates``) so the requirement shape
+    (resolved, in ``agentworks.vms.templates``) so the reference shape
     is single-sourced.
     """
     from agentworks.resources.reference import SecretReference
@@ -321,9 +321,9 @@ class VMTemplate:
                 )
             )
         # When the raw template doesn't set tailscale_auth_key, emit the
-        # default secret name's requirement so the registry finalizes
+        # default secret name's reference so the registry finalizes
         # cleanly even before any inheritance walk. ResolvedVMTemplate's
-        # required_resources emits the inherited value at manager-entry
+        # referenced_resources emits the inherited value at manager-entry
         # call time.
         ts_name = self.tailscale_auth_key or "tailscale-auth-key"
         reqs.append(_tailscale_secret_requirement(ts_name, self.name))

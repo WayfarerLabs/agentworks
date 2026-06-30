@@ -1413,7 +1413,7 @@ def _collect_secrets(
     Registry SDD: both flow through the framework now. ``build_registry``
     finalizes the Resource Registry (auto-declaring the auth-key secret
     and each git-credential's token secret via their
-    ``required_resources`` emissions); ``resolve_for_command`` batches
+    ``referenced_resources`` emissions); ``resolve_for_command`` batches
     them all in one call through the backend chain (or prompts).
     Provisioning stays hermetic per FRD R4: ``[admin.env]`` /
     ``[vm_templates.*.env]`` secrets are NOT eager-resolved here --

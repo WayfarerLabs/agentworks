@@ -48,7 +48,7 @@ class AptPackageEntry:
     apt_sources: list[str] = field(default_factory=list)
     # Phase 2b: catalog entries become first-class Registry citizens.
     # ``origin`` is set by the publisher (``code-declared by
-    # agentworks.catalog`` for built-in entries); ``usage`` is attached
+    # agentworks.catalog`` for built-in entries); ``references`` is attached
     # by the framework's finalize pass from incoming references.
     origin: Origin | None = None
     references: tuple[ReferenceEntry, ...] = ()
@@ -290,7 +290,7 @@ def publish_to(registry: Registry) -> None:
     ``user_install_command``) use the framework's error miss policy,
     so a typo'd reference from
     ``[vm_templates.*].apt_packages = ["..."]`` etc. surfaces as a
-    framework error citing the requirement's source.
+    framework error citing the reference's source.
 
     Called from ``agentworks.bootstrap.build_registry`` BEFORE
     ``Config.publish_to`` so any operator-declared override of a

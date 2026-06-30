@@ -53,14 +53,14 @@ def secret_describe(
     """Show the full per-secret detail view.
 
     Four sections per FRD R10: header (name, kind, origin,
-    description), usages (one row per matching requirement), backend
+    description), usages (one row per matching reference), backend
     mappings (per-active-backend disposition without merging),
     resolution preview (which active backend would resolve, or
     "not available"). Does not prompt, does not resolve values.
 
     The secret must be in the Resource Registry -- either
     operator-declared via ``[secrets.<name>]`` or auto-declared via a
-    requirement's miss policy (the framework auto-declares missing
+    reference's miss policy (the framework auto-declares missing
     names that something references; ``agw secret list`` shows every
     such name).
     """

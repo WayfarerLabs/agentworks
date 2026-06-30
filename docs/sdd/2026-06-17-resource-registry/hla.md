@@ -624,7 +624,7 @@ the kind's defaults). The framework's only job in either case is attaching frame
 
 - **`origin`**: set at registration time (operator-declared with file:line, or auto-declared with
   first matching reference source). Never mutated.
-- **`usage`**: a list of `ReferenceEntry(source, text)` pairs populated from all matching
+- **`references`**: a list of `ReferenceEntry(source, usage)` pairs populated from all matching
   references, accumulated by the finalize pass. Each entry carries both the reference's source
   `(kind, name)` and its usage text. Operator-declared resources get the same references list
   attached as auto-declared ones; it's framework-collected, not operator-settable.
@@ -660,10 +660,10 @@ the same path); the framework never sees them.
 - `hint = None`
 - `backend_mappings = {}` (empty; the framework's default per-backend conventions (e.g.,
   `AW_SECRET_<NAME>`) apply at resolution time)
-- `usage = [ReferenceEntry(source=r.source, text=r.usage) for r in references]` -- a list where each
-  entry pairs the reference's source with its usage text. Duplicate text from different sources is
-  preserved (different sources are different rows in `agw secret describe`); dedup-by-text happens
-  at render time only where summary display calls for it.
+- `references = [ReferenceEntry(source=r.source, usage=r.usage) for r in references]` -- a list
+  where each entry pairs the reference's source with its usage text. Duplicate text from different
+  sources is preserved (different sources are different rows in `agw secret describe`);
+  dedup-by-text happens at render time only where summary display calls for it.
 - `origin = Origin(variant="auto-declared", source=references[0].source)`
 
 `auto_declare_names = None` (any name accepted). Because `auto_declare_names` is None, secrets do
@@ -811,7 +811,7 @@ Output sections (per FRD R10):
 
 - Header: name, kind, origin, description.
 - Origin detail: file path and line for operator-declared, reference source for auto-declared.
-- Usages: one row per matching reference.
+- Referenced by: one row per matching reference.
 - Backend mappings: per-backend status table (operator-set value, backend convention default, or "no
   mapping; skipped"; no merging).
 - Resolution preview: `would resolve via <backend>` or `would prompt`.

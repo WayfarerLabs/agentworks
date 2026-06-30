@@ -4,7 +4,7 @@
 All three use the **error miss policy**: a typo in
 ``[vm_templates.*].apt_packages = ["..."]`` etc. surfaces as a
 framework miss-policy error at ``build_registry`` time, citing the
-requirement's source. There is no auto-declare path -- catalog
+reference's source. There is no auto-declare path -- catalog
 entries are operator-declared in code (the built-in catalog ships with
 the package) or operator-declared in the operator's TOML, and
 references must resolve to a known name.

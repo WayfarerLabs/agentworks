@@ -110,7 +110,7 @@ def resource_describe(
     """Show the full per-resource detail view.
 
     Two sections: header (kind, name, description, origin), usages
-    (one row per requirement). Stops at framework-uniform fields; reach
+    (one row per reference). Stops at framework-uniform fields; reach
     for ``agw secret describe`` etc. for kind-specific detail (backend
     mappings, inheritance chains, resolution preview).
     """

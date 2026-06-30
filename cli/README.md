@@ -654,7 +654,7 @@ agw secret describe tailscale-auth-key
 #   Description: (auto) the Tailscale auth key for vm_template:default (and 1 more)
 #   Origin: auto-declared (vm_template:default)
 #
-# Usages:
+# Referenced by:
 #   - vm_template:default -- the Tailscale auth key
 #   - vm_template:heavy -- the Tailscale auth key
 #

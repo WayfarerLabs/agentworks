@@ -4,7 +4,7 @@ The Registry is the framework's typed, queryable Resource store. Publishers
 (``agentworks.config``'s ``Config.publish_to``, ``agentworks.catalog``'s
 ``publish_to``, future plugins / YAML manifest publishers) push composed
 Resources into it; ``Registry.finalize()`` runs the framework pass that walks
-the requirement graph, dispatches miss policies (potentially synthesizing
+the reference graph, dispatches miss policies (potentially synthesizing
 auto-declared Resources), attaches ``usage`` lists, detects cycles, and
 freezes the Registry.
 

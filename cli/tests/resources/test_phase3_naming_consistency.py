@@ -22,10 +22,29 @@ import pytest
 
 import agentworks.resources as resources_pkg
 from agentworks.env.entry import EnvEntry
+from agentworks.resources import inspect as inspect_mod
 from agentworks.resources import reference as reference_mod
 from agentworks.resources import registry as registry_mod
 from agentworks.resources import walk as walk_mod
-
+from agentworks.resources.kinds import (
+    admin_template,
+    agent_template,
+    git_credential_provider,
+    named_console_template,
+    secret_backend,
+    session_template,
+    vm_template,
+    workspace_template,
+)
+from agentworks.resources.kinds import (
+    catalog as catalog_kind_mod,
+)
+from agentworks.resources.kinds import (
+    git_credentials as git_credentials_kind_mod,
+)
+from agentworks.resources.kinds import (
+    secret as secret_kind_mod,
+)
 
 _BANNED_SUBSTRINGS = ("Requirement", "UsageEntry")
 
@@ -41,6 +60,18 @@ def _public_names(module: object) -> list[str]:
         reference_mod,
         registry_mod,
         walk_mod,
+        inspect_mod,
+        admin_template,
+        agent_template,
+        catalog_kind_mod,
+        git_credential_provider,
+        git_credentials_kind_mod,
+        named_console_template,
+        secret_kind_mod,
+        secret_backend,
+        session_template,
+        vm_template,
+        workspace_template,
     ],
 )
 def test_framework_module_has_no_old_vocabulary(module: object) -> None:
@@ -139,3 +170,35 @@ def test_resource_kinds_have_references_field_not_usage() -> None:
         assert "usage" not in fields, (
             f"{cls.__name__} still carries pre-rename `usage` collection field"
         )
+
+
+def test_resources_package_has_no_old_vocabulary_in_source() -> None:
+    """Complementary guard against Phase 3a stragglers in *prose* (comments
+    and docstrings) -- the symbol-level test above catches type-name
+    regressions but not prose. Scans every .py file under
+    ``agentworks.resources`` for ``ResourceRequirement`` / ``SecretRequirement``
+    / ``UsageEntry`` / ``required_resources``. The Resource framework is
+    the area where vocabulary consistency matters most; broader scans live
+    closer to where they're useful (e.g. CLI / SDD docs are scanned by
+    lint-files.sh and reviewer passes).
+    """
+    import pathlib
+
+    pkg_root = pathlib.Path(resources_pkg.__file__).resolve().parent
+    banned = (
+        "ResourceRequirement",
+        "SecretRequirement",
+        "TemplateRequirement",
+        "UsageEntry",
+        "required_resources",
+    )
+    offenders: list[str] = []
+    for py_file in pkg_root.rglob("*.py"):
+        text = py_file.read_text(encoding="utf-8")
+        for bad in banned:
+            if bad in text:
+                offenders.append(f"{py_file.relative_to(pkg_root)}: {bad}")
+    assert offenders == [], (
+        f"agentworks.resources still carries pre-rename vocabulary in "
+        f"comments/docstrings: {offenders}"
+    )

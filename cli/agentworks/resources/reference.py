@@ -39,7 +39,10 @@ Concrete ``ResourceReference`` subclasses exist so producers and the
 framework agree on the target kind via the *type*, not via string-dispatch
 on the ``kind`` field. ``SecretReference`` (Phase 1) and
 ``TemplateReference`` (Phase 2) carry no extra fields beyond the base today;
-future kinds may.
+future kinds may. Producers always instantiate a concrete subclass --
+``ResourceReference`` itself is abstract-by-convention, not by ``ABC``;
+the framework consumes references through the base type but never builds
+one directly.
 """
 
 from __future__ import annotations

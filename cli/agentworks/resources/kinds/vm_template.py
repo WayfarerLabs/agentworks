@@ -4,7 +4,7 @@ Miss policy ``auto-declare`` with reserved name ``"default"`` -- the
 framework synthesizes ``vm_template:default`` (and only ``"default"``)
 when no operator declaration covers it. Any other missing name (a typo
 in ``inherits = ["defualt"]`` etc.) surfaces as a framework miss-policy
-error with the requirement source attached. Cycle detection across
+error with the reference source attached. Cycle detection across
 ``inherits`` chains runs uniformly via the registry's cycle pass.
 
 Per-template field-merging stays in ``agentworks.vms.templates``: the
@@ -52,7 +52,7 @@ class _VMTemplateKind:
         breadcrumb shows where the row came from. This is the only path
         the framework actually takes for VMTemplateKind today: the
         always-materialize pre-step seeds ``vm_template:default`` before
-        the worklist loop, so by the time any child requirement is
+        the worklist loop, so by the time any child reference is
         dispatched the target is a hit, not a miss. The non-empty path
         is kept for symmetry with other kinds and to keep the door open
         for future cases (e.g. operator-declared kinds whose default

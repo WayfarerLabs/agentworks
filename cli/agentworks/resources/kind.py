@@ -2,7 +2,7 @@
 
 A ``ResourceKind`` is the per-kind strategy the framework consults during
 ``Registry.finalize()``: it tells the Registry which miss policy to use when
-a requirement's ``(kind, name)`` doesn't resolve to a published Resource,
+a reference's ``(kind, name)`` doesn't resolve to a published Resource,
 which names auto-declare is allowed to synthesize, and how to build the
 synthesized Resource.
 
@@ -31,7 +31,7 @@ class ResourceKind(Protocol):
       ``Origin.source[0]`` (for auto-declared), and the Registry's per-kind
       dict key.
     - ``miss_policy``: which branch ``Registry.finalize()`` takes when a
-      requirement points at a name not in the Registry. ``"auto-declare"``
+      reference points at a name not in the Registry. ``"auto-declare"``
       synthesizes via this kind; ``"error"`` raises ``ConfigError``.
     - ``auto_declare_names``: when ``miss_policy == "auto-declare"``, the
       set of names the kind accepts auto-declaring. ``None`` means "any

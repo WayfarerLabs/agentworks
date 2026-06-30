@@ -13,26 +13,26 @@ from agentworks.resources import (
 )
 
 
-def test_resource_requirement_fields() -> None:
-    req = ResourceReference(
+def test_resource_reference_fields() -> None:
+    ref = ResourceReference(
         name="tailscale-auth-key",
         kind="secret",
         usage="the Tailscale auth key",
         source=("vm_template", "default"),
     )
-    assert req.name == "tailscale-auth-key"
-    assert req.kind == "secret"
-    assert req.usage == "the Tailscale auth key"
-    assert req.source == ("vm_template", "default")
+    assert ref.name == "tailscale-auth-key"
+    assert ref.kind == "secret"
+    assert ref.usage == "the Tailscale auth key"
+    assert ref.source == ("vm_template", "default")
 
 
-def test_resource_requirement_is_immutable() -> None:
-    req = ResourceReference(name="x", kind="secret", usage="u", source=("k", "n"))
+def test_resource_reference_is_immutable() -> None:
+    ref = ResourceReference(name="x", kind="secret", usage="u", source=("k", "n"))
     with pytest.raises(FrozenInstanceError):
-        req.name = "y"  # type: ignore[misc]
+        ref.name = "y"  # type: ignore[misc]
 
 
-def test_secret_requirement_is_a_resource_requirement() -> None:
+def test_secret_reference_is_a_resource_reference() -> None:
     sec = SecretReference(
         name="api-key",
         kind="secret",
@@ -43,19 +43,19 @@ def test_secret_requirement_is_a_resource_requirement() -> None:
     assert sec.kind == "secret"
 
 
-def test_usage_entry_fields() -> None:
+def test_reference_entry_fields() -> None:
     entry = ReferenceEntry(source=("vm_template", "default"), usage="the auth key")
     assert entry.source == ("vm_template", "default")
     assert entry.usage == "the auth key"
 
 
-def test_usage_entry_is_immutable() -> None:
+def test_reference_entry_is_immutable() -> None:
     entry = ReferenceEntry(source=("k", "n"), usage="t")
     with pytest.raises(FrozenInstanceError):
         entry.usage = "new"  # type: ignore[misc]
 
 
-def test_usage_entry_equality_and_hashability() -> None:
+def test_reference_entry_equality_and_hashability() -> None:
     a = ReferenceEntry(source=("k", "n"), usage="t")
     b = ReferenceEntry(source=("k", "n"), usage="t")
     c = ReferenceEntry(source=("k", "n"), usage="other")

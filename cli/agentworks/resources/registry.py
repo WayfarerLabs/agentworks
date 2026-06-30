@@ -5,7 +5,7 @@ The Registry is a publish destination, not a parser. Publishers
 manifest publishers) push composed Resources in via
 ``Registry.add(kind, name, resource, origin)``. After all publishers have
 contributed, ``Registry.finalize()`` runs the framework pass: walks the
-requirement graph, dispatches per-kind miss policies (auto-declare may
+reference graph, dispatches per-kind miss policies (auto-declare may
 synthesize new Resources; error raises ``ConfigError``), attaches
 ``usage`` lists, detects cycles, and freezes the Registry. After
 ``finalize`` returns, the Registry is read-only and queryable via
@@ -100,17 +100,17 @@ class Registry:
            worklist loop so the first pass walks these Resources
            alongside operator-published ones. Kinds with
            ``auto_declare_names = None`` (secrets) are unaffected --
-           they stay requirement-driven.
-        1. **Worklist loop**: walk ``required_resources()`` on every
-           Resource not yet visited, accumulating requirements by
+           they stay reference-driven.
+        1. **Worklist loop**: walk ``referenced_resources()`` on every
+           Resource not yet visited, accumulating references by
            ``(kind, name)`` target. For any target that resolves to no
            Resource currently in the Registry, dispatch the kind's miss
            policy: ``"auto-declare"`` (subject to ``auto_declare_names``)
            calls ``synthesize`` and inserts the result; ``"error"`` raises
            ``ConfigError``. Loop until a pass adds no new Resources --
-           synthesized Resources may themselves produce requirements, so
+           synthesized Resources may themselves produce references, so
            a single pass would silently drop their unresolved edges. The
-           accumulated requirement map is preserved across iterations so
+           accumulated reference map is preserved across iterations so
            the post-loop usage-attachment pass sees the complete graph.
         2. **Usage attachment + description polish**: every Resource
            (operator-declared, code-declared, auto-declared) gets a
@@ -119,18 +119,18 @@ class Registry:
            description-polish runs in the same pass: for any Resource
            with a ``description`` field that's empty and an
            auto-declared origin, the framework synthesizes a
-           description from the requirement graph (or, when ``usage``
+           description from the reference graph (or, when ``usage``
            is empty, falls back to ``"(auto) auto-declared default
            <kind>"``).
-        3. **Cycle detection** in the now-complete requirement graph via
+        3. **Cycle detection** in the now-complete reference graph via
            iterative DFS three-coloring; raises ``ConfigError`` on the
            first cycle with the offending path.
         4. **Freeze**.
 
-        First-encountered requirement order (for the
+        First-encountered reference order (for the
         ``Origin.auto_declared(source=...)`` rule) is preserved by
         ``dict``'s guaranteed insertion order in CPython 3.7+. The
-        worklist loop appends to the accumulated requirement map; the
+        worklist loop appends to the accumulated reference map; the
         order in which requirements first appear is the order the
         framework records.
 
@@ -146,7 +146,7 @@ class Registry:
         self._materialize_reserved_defaults()
 
         # 1: worklist loop. ``walked`` tracks which Resources have had
-        # their required_resources() walked so we don't double-count.
+        # their referenced_resources() walked so we don't double-count.
         all_reqs: dict[tuple[str, str], list[ResourceReference]] = {}
         walked: set[tuple[str, str]] = set()
 
@@ -157,7 +157,7 @@ class Registry:
                 break
             # Dispatch miss policies for any targets not yet in the
             # Registry. A miss-handler may add a Resource whose own
-            # required_resources() the next iteration will walk.
+            # referenced_resources() the next iteration will walk.
             for target, reqs in list(all_reqs.items()):
                 target_kind, target_name = target
                 if target_name in self._resources.get(target_kind, {}):
@@ -194,7 +194,7 @@ class Registry:
         published by another publisher), dispatch
         ``synthesize(requirements=())`` and add the result. Kinds with
         ``auto_declare_names = None`` are skipped -- their resources
-        stay requirement-driven.
+        stay reference-driven.
 
         Origin convention: the kind owns origin assignment for the
         empty-requirements path. By contract (FRD R3), kinds with
@@ -205,7 +205,7 @@ class Registry:
         already carries its origin when it reaches this method.
 
         Called at the start of ``finalize`` before the worklist loop so
-        the seeded Resources participate in the requirement walk
+        the seeded Resources participate in the reference walk
         alongside operator-published ones (FRD R3, HLA Publish-and-
         finalize section).
         """
@@ -224,7 +224,7 @@ class Registry:
         all_reqs: dict[tuple[str, str], list[ResourceReference]],
         walked: set[tuple[str, str]],
     ) -> bool:
-        """Walk ``required_resources()`` on every Resource not yet in
+        """Walk ``referenced_resources()`` on every Resource not yet in
         ``walked``, appending discovered requirements into ``all_reqs``
         (in first-encountered order). Returns True if any Resource was
         walked this pass; False means the worklist has stabilized.
@@ -336,8 +336,8 @@ def _referenced_resources(resource: Any) -> Sequence[ResourceReference]:
 
 def _lookup_kind(kind: str, req: ResourceReference) -> Any:
     """Look up the kind in ``KIND_REGISTRY``, raising a clear error if
-    the requirement references a kind no one has registered. Includes
-    the requirement's source in the error for traceability.
+    the reference references a kind no one has registered. Includes
+    the reference's source in the error for traceability.
     """
     try:
         return KIND_REGISTRY[kind]
@@ -356,8 +356,8 @@ def _polish_auto_declared_description(resource: Any, kind: str) -> Any:
 
     Two cases share this polish step:
 
-    - **Usage-driven** (auto-declared via incoming requirement): set
-      from the first matching requirement as
+    - **Usage-driven** (auto-declared via incoming reference): set
+      from the first matching reference as
       ``"(auto) <usage> for <kind>:<name>"`` plus ``" (and N more)"``
       when more than one distinct source matches.
     - **Empty-usage** (always-materialized reserved default; no incoming
@@ -413,7 +413,7 @@ def _references_tuple(
 
 
 def _detect_cycles(resources: dict[str, dict[str, Any]]) -> None:
-    """Detect cycles across the requirement graph via iterative DFS
+    """Detect cycles across the reference graph via iterative DFS
     three-coloring.
 
     Phase 1 has no producers that introduce cycles (secrets don't
@@ -470,7 +470,7 @@ def _edges_from(
     node: tuple[str, str],
 ) -> Iterator[tuple[str, str]]:
     """Yield outgoing edges from ``node`` (``(kind, name)`` -> target
-    ``(kind, name)``) via the Resource's ``required_resources()``.
+    ``(kind, name)``) via the Resource's ``referenced_resources()``.
     Empty iterator if the node isn't in the Registry (defensive; the
     finalize worklist ensures every reachable node has a Resource).
     """
