@@ -361,6 +361,30 @@ def test_cli_kind_csv_filter_tolerates_whitespace(
     assert seen_kinds == {"vm_template", "secret"}
 
 
+def test_cli_names_only_with_unknown_kind_emits_nothing(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """``--names-only`` against a filter that resolves to zero rows
+    emits no output -- no header, no "No resources match." message.
+    Required by the ``--names-only`` cli convention so completion
+    candidate sets stay clean when nothing matches.
+    """
+    from typer.testing import CliRunner
+
+    from agentworks.cli import app
+
+    cfg_file = tmp_path / "config.toml"
+    _write_base(cfg_file)
+    monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg_file)
+
+    result = CliRunner().invoke(
+        app,
+        ["resource", "list", "--kind", "does_not_exist", "--names-only"],
+    )
+    assert result.exit_code == 0, result.stdout
+    assert result.stdout.strip() == ""
+
+
 def test_cli_empty_kind_csv_is_rejected(tmp_path: Path, monkeypatch) -> None:
     """``--kind ""`` (or all-whitespace, or just commas) parses to zero
     kinds; rejecting is more honest than silently treating it as

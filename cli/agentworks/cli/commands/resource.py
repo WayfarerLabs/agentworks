@@ -86,6 +86,15 @@ def resource_list(
         kinds=kinds,
         origin_filter=cast("OriginFilter | None", origin_filter),
     )
+    # ``--names-only`` short-circuits the table render. Per the
+    # cli-conventions ``--names-only`` rule, render-only work is skipped:
+    # ``list_resources`` does no I/O (pure dict + attribute access over
+    # already-published Resources), so the cost up to here is negligible.
+    # The cross-kind divergence from the rule: we emit ``kind:name``
+    # rather than bare ``name`` because two kinds can publish resources
+    # with the same name; completion snippets ``awk -F:`` the prefix.
+    # Empty result emits nothing (no friendly "No resources" message),
+    # matching the rule so completion candidate sets stay clean.
     if names_only:
         for row in listing.rows:
             output.info(f"{row.kind}:{row.name}")
