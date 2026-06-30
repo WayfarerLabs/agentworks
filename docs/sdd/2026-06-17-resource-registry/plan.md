@@ -598,11 +598,11 @@ Goal: rename the framework's outbound/inbound reference types so the code matche
 - [ ] `cli/agentworks/resources/requirement.py`: rename `ResourceRequirement` ->
       `ResourceReference`, `SecretRequirement` -> `SecretReference`, `TemplateRequirement` ->
       `TemplateReference`. Rename the file itself to `reference.py`.
-- [ ] Rename `UsageEntry` -> `ReferenceEntry`. The `(source, text)` shape is unchanged.
-- [ ] Rename `ResourceReference.usage: str` (the prose like
-      `"the tailscale auth key for     vm_template:default"`) -> `ResourceReference.text: str`. This
-      makes the outbound `ResourceReference.text` and the attached `ReferenceEntry.text` carry the
-      same name for the same thing.
+- [ ] Rename `UsageEntry` -> `ReferenceEntry`. Rename its prose field `text` -> `usage` so the
+      outbound `ResourceReference.usage` (unchanged) and the inbound `ReferenceEntry.usage` carry
+      the same name for the same thing. The misleading-count problem only existed at the collection
+      level (`Resource.usage` -> `Resource.references` below); the per-reference `usage: str` field
+      describes how the source uses the target and is clearly prose, not a count, at the type level.
 - [ ] Rename `Resource.usage: tuple[UsageEntry, ...]` -> `references: tuple[ReferenceEntry, ...]` on
       every Resource type that carries it (the kinds in `resources/kinds/`).
 - [ ] Rename `Registry.iter_requirements` -> `iter_references`, internal `_requirements` ->
@@ -620,13 +620,12 @@ Goal: rename the framework's outbound/inbound reference types so the code matche
       inbound: "I am pointed at by Y"), (b) where `ReferenceEntry` instances are created (in
       `Registry.finalize`, projected from the outbound `ResourceReference`s after they're resolved
       to their target), (c) why `ReferenceEntry` drops the `kind`/`name` fields (implicit from the
-      container Resource), and (d) the `text` field's prose semantics on **both** types -- the
-      outbound `ResourceReference.text` and the attached `ReferenceEntry.text` carry the same ("the
-      tailscale auth key for vm_template:default" style) prose; the rename collapses two
-      previously-different field names (`usage` vs `text`) onto a single concept, so the symmetry
-      must be documented at both ends. The HLA's framework metadata-attachment section should carry
-      the same explanation in prose. The generic name `ReferenceEntry` (vs. e.g. `InboundReference`)
-      makes good docs load-bearing.
+      container Resource), and (d) the `usage` field's prose semantics on **both** types -- the
+      outbound `ResourceReference.usage` and the attached `ReferenceEntry.usage` carry the same
+      ("the tailscale auth key for vm_template:default" style) prose describing how the source uses
+      the target. The HLA's framework metadata-attachment section should carry the same explanation
+      in prose. The generic name `ReferenceEntry` (vs. e.g. `InboundReference`) makes good docs
+      load-bearing.
 - [ ] **Tests**: every test that imports the renamed symbols compiles and passes; CLI snapshot-ish
       tests for the renamed labels (`Referenced by:`, `REFS`) survive. Add a one-shot
       `test_phase3_naming_consistency.py` that asserts the public surface no longer exposes any
