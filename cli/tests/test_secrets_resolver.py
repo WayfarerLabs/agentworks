@@ -105,7 +105,9 @@ def test_hard_miss_halts_chain_via_secret_mapping_error() -> None:
 
     strict = _StrictMissSource()
     later = _FakeSource("prompt", values={"x": "would-prompt"})
-    r = SecretResolver([strict, later], _decls("x"))
+    # _StrictMissSource ducktypes SecretSource enough for this test (it
+    # raises before the missing ``describe_lookup`` is ever queried).
+    r = SecretResolver([strict, later], _decls("x"))  # type: ignore[list-item]
 
     with pytest.raises(SecretMappingError, match="strict backend has no item"):
         r.resolve_all([_decl("x")])

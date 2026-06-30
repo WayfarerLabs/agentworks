@@ -322,7 +322,7 @@ def test_delete_session_probes_before_confirm_prompt(
         "_ensure_pid",
         lambda session, **kwargs: session,
     )
-    from agentworks.sessions.manager import SessionStatus
+    from agentworks.db import SessionStatus
 
     monkeypatch.setattr(
         session_manager, "check_session_status", lambda *a, **k: SessionStatus.STOPPED

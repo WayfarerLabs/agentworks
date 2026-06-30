@@ -17,7 +17,6 @@ from agentworks.errors import (
     ValidationError,
 )
 from agentworks.sessions.multi_console import (
-    SHELL_INDEX_OPTION,
     SessionSpec,
     _validate_cwd,
     add_sessions,
@@ -33,6 +32,7 @@ from agentworks.sessions.multi_console import (
     reorder_sessions,
     tmux_session_name,
 )
+from agentworks.sessions.multi_console_layout import SHELL_INDEX_OPTION
 from tests.conftest import _FakeResult, _FakeTarget
 
 if TYPE_CHECKING:

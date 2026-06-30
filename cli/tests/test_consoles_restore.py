@@ -13,10 +13,10 @@ import pytest
 from agentworks.db import Database
 from agentworks.errors import ExternalError, NotFoundError, StateError
 from agentworks.sessions.multi_console import (
-    SHELL_INDEX_OPTION,
     create_console,
     restore_session,
 )
+from agentworks.sessions.multi_console_layout import SHELL_INDEX_OPTION
 from tests.conftest import _FakeResult, _FakeTarget
 from tests.test_consoles import (
     _seed_sessions,

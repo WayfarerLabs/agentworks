@@ -8,12 +8,17 @@ import pytest
 
 from agentworks.cli import app
 from agentworks.completions import generate
-from agentworks.completions.spec import DYNAMIC_COMPLETIONS, build_spec, completion_version
+from agentworks.completions.spec import (
+    DYNAMIC_COMPLETIONS,
+    CommandSpec,
+    build_spec,
+    completion_version,
+)
 
 
-def _walk_commands(spec, path: str = "") -> dict[str, object]:
+def _walk_commands(spec: CommandSpec, path: str = "") -> dict[str, CommandSpec]:
     """Walk the spec tree and return a map of dotted paths to specs."""
-    result = {}
+    result: dict[str, CommandSpec] = {}
     current = f"{path}.{spec.name}" if path else spec.name
     result[current] = spec
     for sub in spec.subcommands.values():
