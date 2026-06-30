@@ -92,6 +92,14 @@ def session_list(
     ] = None,
     admin: Annotated[bool, typer.Option("--admin", help="Only admin-mode sessions (no agent)")] = False,
     no_status: Annotated[bool, typer.Option("--no-status", help="Skip SSH status check (faster)")] = False,
+    names_only: Annotated[
+        bool,
+        typer.Option(
+            "--names-only",
+            help="Emit one session name per line (no header, no formatting). "
+            "Used by shell completion; the order matches the table's row order.",
+        ),
+    ] = False,
 ) -> None:
     """List sessions. Filters compose with AND; name filters accept comma-separated values for OR-within-filter."""
     from agentworks.config import load_config
@@ -112,6 +120,7 @@ def session_list(
         agent_name=parsed_agent,
         admin_only=admin,
         no_status=no_status,
+        names_only=names_only,
     )
 
 

@@ -16,6 +16,8 @@ from __future__ import annotations
 import shlex
 from dataclasses import dataclass, field
 
+from agentworks.vms.skel import BASHRC, ZSHRC
+
 # Canonical cloud-init drop-in that stops host-key regeneration on stop/start.
 # By default cloud-init may delete and regenerate /etc/ssh/ssh_host_* on some
 # boot events, which makes SSH clients reject the connection with a changed
@@ -47,6 +49,21 @@ else
 fi
 usermod -aG sudo "$VM_USER"
 echo "$VM_USER ALL=(ALL) NOPASSWD:ALL" > "/etc/sudoers.d/$VM_USER"
+HOME_DIR="/home/$VM_USER"
+
+# -- Step 1b: Default shell rc seeds for admin's home --
+# One-time copy. Init / reinit also writes the same seeds to
+# /etc/skel so future ``useradd -m`` (i.e. new agents) inherit them
+# automatically. Operators who later install their own dotfiles win:
+# agentworks never writes shell rc files into a user's home again.
+echo "##STEP## Default shell rc seeds"
+cat > "$HOME_DIR/.bashrc" <<'AGW_BASHRC_EOF'
+{bashrc_content}AGW_BASHRC_EOF
+cat > "$HOME_DIR/.zshrc" <<'AGW_ZSHRC_EOF'
+{zshrc_content}AGW_ZSHRC_EOF
+chown "$VM_USER:$VM_USER" "$HOME_DIR/.bashrc" "$HOME_DIR/.zshrc"
+chmod 644 "$HOME_DIR/.bashrc" "$HOME_DIR/.zshrc"
+echo "##SUCCESS## shell rc seeds installed"
 
 # -- Step 2: Provisioning packages --
 echo "##STEP## Provisioning packages"
@@ -156,6 +173,8 @@ def generate_bootstrap_script(
         swap=swap,
         ssh_preserve_path=SSH_PRESERVE_KEYS_PATH,
         ssh_preserve_content=SSH_PRESERVE_KEYS_CONTENT,
+        bashrc_content=BASHRC,
+        zshrc_content=ZSHRC,
     )
 
 

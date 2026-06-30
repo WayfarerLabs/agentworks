@@ -365,9 +365,23 @@ def list_workspaces(
     db: Database,
     *,
     vm_name: str | list[str] | None = None,
+    names_only: bool = False,
 ) -> None:
-    """List workspaces."""
+    """List workspaces.
+
+    With ``names_only=True``, emit one workspace name per line and
+    skip the table render. Used by shell completion (see issue #147).
+    """
     workspaces = db.list_workspaces(vm_name=vm_name)
+
+    if names_only:
+        # Empty / fully-filtered-out result prints nothing under
+        # names-only; the friendly "No workspaces found" line below
+        # is for human readers only.
+        for ws in workspaces:
+            output.info(ws.name)
+        return
+
     if not workspaces:
         output.info("No workspaces found.")
         return

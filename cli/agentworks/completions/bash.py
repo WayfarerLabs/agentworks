@@ -9,9 +9,9 @@ if TYPE_CHECKING:
 
 # Shell snippets that provide dynamic completions.
 DYNAMIC_SNIPPETS: dict[str, str] = {
-    "vms": ("$(agw vm list 2>/dev/null | tail -n +3 | awk '{print $1}')"),
-    "vm_hosts": ("$(agw vm-host list 2>/dev/null | tail -n +3 | awk '{print $1}')"),
-    "workspaces": ("$(agw workspace list 2>/dev/null | tail -n +3 | awk '{print $1}')"),
+    "vms": ("$(agw vm list --names-only 2>/dev/null)"),
+    "vm_hosts": ("$(agw vm-host list --names-only 2>/dev/null)"),
+    "workspaces": ("$(agw workspace list --names-only 2>/dev/null)"),
     "ws_templates": (
         "$(sed -n 's/^\\[workspace_templates\\.\\([^]]*\\)\\]/\\1/p'"
         ' "$HOME/.config/agentworks/config.toml" 2>/dev/null)'
@@ -20,9 +20,9 @@ DYNAMIC_SNIPPETS: dict[str, str] = {
         "$(sed -n 's/^\\[git_credentials\\.\\([^]]*\\)\\]/\\1/p' \"$HOME/.config/agentworks/config.toml\" 2>/dev/null)"
     ),
     "catalog_entries": ("$(agw catalog list 2>/dev/null | tail -n +3 | awk '{print $2}')"),
-    "sessions": ("$(agw session list --no-status 2>/dev/null | tail -n +3 | awk '{print $1}')"),
-    "agents": ("$(agw agent list 2>/dev/null | tail -n +3 | awk '{print $1}')"),
-    "consoles": ("$(agw console list 2>/dev/null | tail -n +3 | awk '{print $1}')"),
+    "sessions": ("$(agw session list --names-only 2>/dev/null)"),
+    "agents": ("$(agw agent list --names-only 2>/dev/null)"),
+    "consoles": ("$(agw console list --names-only 2>/dev/null)"),
     "session_templates": (
         "default $(sed -n 's/^\\[session_templates\\.\\([^]]*\\)\\]/\\1/p'"
         ' "$HOME/.config/agentworks/config.toml" 2>/dev/null)'

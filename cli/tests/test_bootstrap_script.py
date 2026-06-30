@@ -81,6 +81,60 @@ def test_generate_bootstrap_script_swap_disabled() -> None:
     assert "SWAP_GB=0" in script
 
 
+def test_generate_bootstrap_script_writes_shell_rc_seeds() -> None:
+    """Bootstrap inlines the shell rc seeds into admin's home so the
+    very first interactive login has a sane bash AND zsh setup (no
+    Debian /etc/skel/.zshrc means a fresh zsh user has no rc otherwise).
+
+    The seeds are written via a single-quoted heredoc so bash doesn't
+    expand ``${AGENTWORKS_AGENT:-admin}`` at provision time -- the
+    identity vars only get substituted when the operator opens an
+    interactive shell, after init populates /etc/profile.d/.
+    """
+    from agentworks.vms.skel import BASHRC, ZSHRC
+
+    script = generate_bootstrap_script(
+        admin_username="testuser",
+        ssh_public_key="ssh-ed25519 AAAA testkey",
+        provisioning_packages=["curl"],
+        tailscale_auth_key="tskey-auth-test123",
+        hostname="lima--myvm",
+    )
+
+    assert "##STEP## Default shell rc seeds" in script
+    # Single-quoted heredoc so bash leaves the AGENTWORKS_* refs literal.
+    assert "cat > \"$HOME_DIR/.bashrc\" <<'AGW_BASHRC_EOF'" in script
+    assert "cat > \"$HOME_DIR/.zshrc\" <<'AGW_ZSHRC_EOF'" in script
+    # Seed content is verbatim from the shared module.
+    assert BASHRC in script
+    assert ZSHRC in script
+    # Ownership flips back to admin after root writes the files.
+    assert 'chown "$VM_USER:$VM_USER" "$HOME_DIR/.bashrc" "$HOME_DIR/.zshrc"' in script
+
+
+def test_generate_bootstrap_script_passes_bash_syntax_check() -> None:
+    """End-to-end: the generated script must syntactically parse as
+    bash. Catches any future template change that leaks an unescaped
+    brace, an unterminated heredoc, etc."""
+    import subprocess
+
+    script = generate_bootstrap_script(
+        admin_username="testuser",
+        ssh_public_key="ssh-ed25519 AAAA testkey",
+        provisioning_packages=["curl", "tmux"],
+        tailscale_auth_key="tskey-auth-test123",
+        hostname="lima--myvm",
+        swap=2,
+    )
+    result = subprocess.run(
+        ["bash", "-n", "/dev/stdin"],
+        input=script,
+        text=True,
+        capture_output=True,
+    )
+    assert result.returncode == 0, result.stderr
+
+
 def test_generate_bootstrap_script_no_platform_specific_tailscale_config() -> None:
     """The bootstrap script must not carry platform-specific Tailscale flags.
 

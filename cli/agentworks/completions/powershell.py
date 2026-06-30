@@ -10,18 +10,15 @@ if TYPE_CHECKING:
 # PowerShell snippets that provide dynamic completions.
 DYNAMIC_SNIPPETS: dict[str, str] = {
     "vms": (
-        "(agw vm list 2>$null | Select-Object -Skip 2 |"
-        " ForEach-Object { ($_ -split '\\s+')[0] } |"
+        "(agw vm list --names-only 2>$null |"
         ' Where-Object { $_ -like "$wordToComplete*" })'
     ),
     "vm_hosts": (
-        "(agw vm-host list 2>$null | Select-Object -Skip 2 |"
-        " ForEach-Object { ($_ -split '\\s+')[0] } |"
+        "(agw vm-host list --names-only 2>$null |"
         ' Where-Object { $_ -like "$wordToComplete*" })'
     ),
     "workspaces": (
-        "(agw workspace list 2>$null | Select-Object -Skip 2 |"
-        " ForEach-Object { ($_ -split '\\s+')[0] } |"
+        "(agw workspace list --names-only 2>$null |"
         ' Where-Object { $_ -like "$wordToComplete*" })'
     ),
     "ws_templates": (
@@ -45,18 +42,15 @@ DYNAMIC_SNIPPETS: dict[str, str] = {
         ' | Where-Object { $_ -like "$wordToComplete*" } }'
     ),
     "sessions": (
-        "(agw session list --no-status 2>$null | Select-Object -Skip 2 |"
-        " ForEach-Object { ($_ -split '\\s+')[0] } |"
+        "(agw session list --names-only 2>$null |"
         ' Where-Object { $_ -like "$wordToComplete*" })'
     ),
     "agents": (
-        "(agw agent list 2>$null | Select-Object -Skip 2 |"
-        " ForEach-Object { ($_ -split '\\s+')[0] } |"
+        "(agw agent list --names-only 2>$null |"
         ' Where-Object { $_ -like "$wordToComplete*" })'
     ),
     "consoles": (
-        "(agw console list 2>$null | Select-Object -Skip 2 |"
-        " ForEach-Object { ($_ -split '\\s+')[0] } |"
+        "(agw console list --names-only 2>$null |"
         ' Where-Object { $_ -like "$wordToComplete*" })'
     ),
     "session_templates": (

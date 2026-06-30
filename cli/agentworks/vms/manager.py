@@ -465,24 +465,37 @@ def create_vm(
         output.info(f"VM '{vm_name}' is ready!")
 
 
-def list_vms(db: Database) -> None:
-    """List all VMs with their init and runtime status."""
+def list_vms(db: Database, *, names_only: bool = False) -> None:
+    """List all VMs with their init and runtime status.
+
+    With ``names_only=True``, emit one VM name per line and skip the
+    table render. Used by shell completion (see issue #147).
+    """
     vms = db.list_vms()
+
+    if names_only:
+        # Names-only short-circuits BEFORE the empty check so an
+        # empty db prints nothing (not the friendly "No VMs"
+        # message), keeping the completion candidate set clean.
+        for vm in vms:
+            output.info(vm.name)
+        return
+
     if not vms:
         output.info("No VMs registered.")
         return
 
     header = (
         f"{'NAME':<20} {'PLATFORM':<10} {'TEMPLATE':<12} {'HOST':<15} {'PROV':<12} {'INIT':<12} "
-        f"{'WS/AG/TS':<10} {'TAILSCALE':<20} {'CREATED'}"
+        f"{'WS/AG/SE':<10} {'TAILSCALE':<20} {'CREATED'}"
     )
     output.info(header)
     output.info("-" * len(header))
     for vm in vms:
         ws = db.count_workspaces_on_vm(vm.name)
         ag = db.count_agents_on_vm(vm.name)
-        ts = db.count_sessions_on_vm(vm.name)
-        counts = f"{ws}/{ag}/{ts}"
+        se = db.count_sessions_on_vm(vm.name)
+        counts = f"{ws}/{ag}/{se}"
         output.info(
             f"{vm.name:<20} {vm.platform:<10} {vm.template or '-':<12} {vm.vm_host_name or '-':<15} "
             f"{vm.provisioning_status:<12} {vm.init_status:<12} "

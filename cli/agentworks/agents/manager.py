@@ -565,9 +565,23 @@ def list_agents(
     db: Database,
     *,
     vm_name: str | list[str] | None = None,
+    names_only: bool = False,
 ) -> None:
-    """List agents."""
+    """List agents.
+
+    With ``names_only=True``, emit one agent name per line and skip
+    the table render. Used by shell completion (see issue #147).
+    """
     agents = db.list_agents(vm_name=vm_name)
+
+    if names_only:
+        # Empty / fully-filtered-out result prints nothing under
+        # names-only; the friendly "No agents found" line below is
+        # for human readers only.
+        for agent in agents:
+            output.info(agent.name)
+        return
+
     if not agents:
         output.info("No agents found.")
         return

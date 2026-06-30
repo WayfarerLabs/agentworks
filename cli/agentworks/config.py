@@ -347,7 +347,7 @@ class AdminConfig:
 
     name: str = "default"
     username: str = "agentworks"
-    shell: str = "zsh"
+    shell: str = "bash"
     git_credentials: list[str] = field(default_factory=list)
     user_install_commands: list[str] = field(default_factory=list)
     dotfiles_source: str | None = None
@@ -1118,7 +1118,7 @@ def _load_admin_config(
 
     return AdminConfig(
         username=str(raw.get("username", "agentworks")),
-        shell=str(raw.get("shell", "zsh")),
+        shell=str(raw.get("shell", "bash")),
         git_credentials=list(raw.get("git_credentials", [])),
         user_install_commands=list(raw.get("user_install_commands", [])),
         dotfiles_source=str(raw["dotfiles_source"]) if "dotfiles_source" in raw else None,

@@ -44,22 +44,29 @@ class CommandSpec:
 # knows how to render into shell-specific completion functions.
 #
 # The completer identifiers and their corresponding CLI commands:
-#   "vms"             -> agw vm list
-#   "vm_hosts"        -> agw vm-host list
-#   "workspaces"      -> agw workspace list
+#   "vms"             -> agw vm list --names-only
+#   "vm_hosts"        -> agw vm-host list --names-only
+#   "workspaces"      -> agw workspace list --names-only
 #   "ws_templates"    -> [workspace_templates.*] sections in config.toml
 #   "git_credentials" -> [git_credentials.*] sections in config.toml
 #   "catalog_entries" -> all entry names from built-in + custom catalog
-#   "sessions"        -> agw session list --no-status
+#                        (see "Not in scope" in issue #147 -- catalog
+#                        rows are typed, no clean "name per row" stream)
+#   "sessions"        -> agw session list --names-only
 #   "session_templates" -> [session_templates.*] sections in config.toml
-#   "agents"          -> agw agent list
+#   "agents"          -> agw agent list --names-only
 #   "vm_templates"    -> [vm_templates.*] sections in config.toml
 #   "agent_templates" -> [agent_templates.*] sections in config.toml
-#   "consoles"        -> agw console list
+#   "consoles"        -> agw console list --names-only
 #   "secrets"         -> agw secret list --names-only
 #                        (sources from the Resource Registry so
 #                        auto-declared names like tailscale-auth-key
 #                        complete the same as operator-declared ones)
+#
+# The ``--names-only`` flag is the explicit completion contract:
+# every list command that backs a completer emits one name per line
+# when the flag is passed, in the same order as its table rows.
+# See ``.claude/rules/cli-conventions.md`` for the broader convention.
 
 DYNAMIC_COMPLETIONS: dict[tuple[str, str], str] = {
     ("vm.start", "name"): "vms",
