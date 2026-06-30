@@ -84,11 +84,13 @@ class _SecretKind:
         """Sessions whose subgraph (per current config) reaches this
         secret. For each session row, we project its identity through
         the framework's reference walk: the session's session_template,
-        the workspace's workspace_template, the VM's vm_template, the
-        always-present admin_template, and (in agent mode) the agent's
-        agent_template. Each root's reachable-secret set is collected;
-        if this secret's name appears in the union for a given session,
-        that session is emitted.
+        the workspace's workspace_template, the VM's vm_template, and
+        -- mutually exclusive by session mode -- either admin_template
+        (admin-mode) or the agent's agent_template (agent-mode). Each
+        root's reachable-secret set is collected; if this secret's name
+        appears in the union for a given session, that session is
+        emitted. See ``_secrets_reachable_from_session`` for the full
+        env-and-secrets layering rationale.
 
         The walk uses ``collect_secrets_for`` (the same helper
         ``vm create`` / ``agent create`` etc. use for eager-resolve), so
