@@ -36,12 +36,12 @@ class _GitCredentialKind:
 
     def synthesize(
         self,
-        requirements: Sequence[ResourceReference],
+        references: Sequence[ResourceReference],
     ) -> None:
         # Unreachable under the "error" miss policy: the Registry's
         # finalize pass raises ConfigError before dispatching to
         # synthesize for error-policy kinds. The method exists to
-        # satisfy the Protocol; honors the Phase 2a empty-requirements
+        # satisfy the Protocol; honors the Phase 2a empty-references
         # contract (FRD R3) by raising the typed framework error so a
         # hypothetical future change that gives the kind a reserved
         # default has an obvious landing pad.

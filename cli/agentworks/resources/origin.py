@@ -80,7 +80,7 @@ class Origin:
         """Framework-synthesized Resource (auto-declared by a kind's miss
         policy during ``Registry.finalize()``). ``source`` is the first
         matching reference's ``(kind, name)`` per config-load walk
-        order; the full set of matching requirements is recorded in the
-        Resource's ``usage`` list, not here.
+        order; the full set of matching references is recorded in the
+        Resource's ``references`` tuple, not here.
         """
         return cls(variant="auto-declared", source=source)

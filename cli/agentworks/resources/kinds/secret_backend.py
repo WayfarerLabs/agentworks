@@ -38,7 +38,7 @@ class _SecretBackendKind:
     miss_policy: Literal["auto-declare", "error"] = "error"
     auto_declare_names: frozenset[str] | None = None
 
-    def synthesize(self, requirements: Sequence[ResourceReference]) -> Any:
+    def synthesize(self, references: Sequence[ResourceReference]) -> Any:
         raise NoUnreferencedDefaultError(
             "the secret_backend kind has miss_policy='error'; "
             "synthesize should never be invoked (the framework raises "

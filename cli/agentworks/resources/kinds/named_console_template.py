@@ -9,7 +9,7 @@ references rather than a routine occurrence. Phase 2a.3 plurified
 kinds) but deliberately scoped that change to admin only; this kind
 follows when there's an operator need to declare named console
 templates. The kind shape (``auto_declare_names = {"default"}``,
-synthesize tolerating ``requirements=()``) is already aligned with the
+synthesize tolerating ``references=()``) is already aligned with the
 named-multi-instance template kinds, so plurifying the operator surface
 later is a parser/loader change, not a framework change.
 """
@@ -39,18 +39,18 @@ class _NamedConsoleTemplateKind:
 
     def synthesize(
         self,
-        requirements: Sequence[ResourceReference],
+        references: Sequence[ResourceReference],
     ) -> NamedConsoleConfig:
         """Build an empty-defaults ``NamedConsoleConfig`` for an
         auto-declared ``named_console_template:default``. Same shape as
         the admin template kind: ``Config.publish_to`` always publishes
         a real one so the always-materialize pre-step short-circuits.
 
-        Tolerates ``requirements=()`` per the Phase 2a contract; uses
+        Tolerates ``references=()`` per the Phase 2a contract; uses
         the synthetic ``("framework", "always-materialize")`` source
         when called that way.
         """
-        source = requirements[0].source if requirements else ALWAYS_MATERIALIZE_SOURCE
+        source = references[0].source if references else ALWAYS_MATERIALIZE_SOURCE
         return NamedConsoleConfig(origin=Origin.auto_declared(source=source))
 
 

@@ -47,15 +47,15 @@ class ResolvedVMTemplate:
         for the eager-resolve subgraph walk.
         """
         from agentworks.config import (
-            _env_requirements,
-            _tailscale_secret_requirement,
+            _env_references,
+            _tailscale_secret_reference,
         )
 
-        reqs: list[ResourceReference] = list(
-            _env_requirements(self.env, ("vm_template", self.name))
+        refs: list[ResourceReference] = list(
+            _env_references(self.env, ("vm_template", self.name))
         )
-        reqs.append(_tailscale_secret_requirement(self.tailscale_auth_key, self.name))
-        return reqs
+        refs.append(_tailscale_secret_reference(self.tailscale_auth_key, self.name))
+        return refs
 
 
 def resolve_from_dict(

@@ -131,7 +131,7 @@ class Registry:
         ``Origin.auto_declared(source=...)`` rule) is preserved by
         ``dict``'s guaranteed insertion order in CPython 3.7+. The
         worklist loop appends to the accumulated reference map; the
-        order in which requirements first appear is the order the
+        order in which references first appear is the order the
         framework records.
 
         Raises ``RuntimeError`` if already finalized. Raises
@@ -147,23 +147,23 @@ class Registry:
 
         # 1: worklist loop. ``walked`` tracks which Resources have had
         # their referenced_resources() walked so we don't double-count.
-        all_reqs: dict[tuple[str, str], list[ResourceReference]] = {}
+        all_refs: dict[tuple[str, str], list[ResourceReference]] = {}
         walked: set[tuple[str, str]] = set()
 
         while True:
-            new_walks = self._collect_new_references(all_reqs, walked)
+            new_walks = self._collect_new_references(all_refs, walked)
             if not new_walks:
                 # No new Resources to walk. We're stable.
                 break
             # Dispatch miss policies for any targets not yet in the
             # Registry. A miss-handler may add a Resource whose own
             # referenced_resources() the next iteration will walk.
-            for target, reqs in list(all_reqs.items()):
+            for target, refs in list(all_refs.items()):
                 target_kind, target_name = target
                 if target_name in self._resources.get(target_kind, {}):
                     continue
-                kind_handler = _lookup_kind(target_kind, reqs[0])
-                self._handle_miss(target_kind, target_name, kind_handler, reqs)
+                kind_handler = _lookup_kind(target_kind, refs[0])
+                self._handle_miss(target_kind, target_name, kind_handler, refs)
 
         # 2: references attachment + description polish for every Resource.
         # Iterate all currently-published Resources (not just those with
@@ -172,9 +172,9 @@ class Registry:
         for kind in list(self._resources.keys()):
             for name in list(self._resources[kind].keys()):
                 existing = self._resources[kind][name]
-                reqs = all_reqs.get((kind, name), [])
+                refs = all_refs.get((kind, name), [])
                 polished = dataclasses.replace(
-                    existing, references=_references_tuple(reqs)
+                    existing, references=_references_tuple(refs)
                 )
                 polished = _polish_auto_declared_description(polished, kind)
                 self._resources[kind][name] = polished
@@ -192,12 +192,12 @@ class Registry:
         For each ``(kind, name)`` pair in a kind's reserved set, if the
         name isn't already in the registry (operator-declared or
         published by another publisher), dispatch
-        ``synthesize(requirements=())`` and add the result. Kinds with
+        ``synthesize(references=())`` and add the result. Kinds with
         ``auto_declare_names = None`` are skipped -- their resources
         stay reference-driven.
 
         Origin convention: the kind owns origin assignment for the
-        empty-requirements path. By contract (FRD R3), kinds with
+        empty-references path. By contract (FRD R3), kinds with
         ``auto_declare_names`` non-None synthesize with
         ``Origin.auto_declared(source=ALWAYS_MATERIALIZE_SOURCE)``
         themselves. The Registry does NOT stamp origin here, distinct
@@ -221,11 +221,11 @@ class Registry:
 
     def _collect_new_references(
         self,
-        all_reqs: dict[tuple[str, str], list[ResourceReference]],
+        all_refs: dict[tuple[str, str], list[ResourceReference]],
         walked: set[tuple[str, str]],
     ) -> bool:
         """Walk ``referenced_resources()`` on every Resource not yet in
-        ``walked``, appending discovered requirements into ``all_reqs``
+        ``walked``, appending discovered references into ``all_refs``
         (in first-encountered order). Returns True if any Resource was
         walked this pass; False means the worklist has stabilized.
         """
@@ -243,7 +243,7 @@ class Registry:
             walked.add(key)
             any_walked = True
             for req in _referenced_resources(resource):
-                all_reqs.setdefault((req.kind, req.name), []).append(req)
+                all_refs.setdefault((req.kind, req.name), []).append(req)
         return any_walked
 
     def _handle_miss(
@@ -251,12 +251,12 @@ class Registry:
         kind: str,
         name: str,
         kind_handler: Any,
-        reqs: list[ResourceReference],
+        refs: list[ResourceReference],
     ) -> None:
         """Dispatch the kind's miss policy. Mutates ``self._resources``
         for the auto-declare branch; raises ``ConfigError`` otherwise.
         """
-        first = reqs[0]
+        first = refs[0]
         if kind_handler.miss_policy == "auto-declare":
             allowed = kind_handler.auto_declare_names
             if allowed is not None and name not in allowed:
@@ -265,7 +265,7 @@ class Registry:
                     f"{sorted(allowed)!r}; got {name!r} "
                     f"(required by {first.source[0]}:{first.source[1]})"
                 )
-            synthesized = kind_handler.synthesize(reqs)
+            synthesized = kind_handler.synthesize(refs)
             self._resources.setdefault(kind, {})[name] = synthesized
             return
         if kind_handler.miss_policy == "error":

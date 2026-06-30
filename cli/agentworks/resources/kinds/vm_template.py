@@ -37,7 +37,7 @@ class _VMTemplateKind:
     miss_policy: Literal["auto-declare", "error"] = "auto-declare"
     auto_declare_names: frozenset[str] | None = frozenset({"default"})
 
-    def synthesize(self, requirements: Sequence[ResourceReference]) -> VMTemplate:
+    def synthesize(self, references: Sequence[ResourceReference]) -> VMTemplate:
         """Build a code-defined default ``VMTemplate``.
 
         Returns the kind's baseline: ``VMTemplate(name="default")`` with
@@ -46,7 +46,7 @@ class _VMTemplateKind:
         merges this with any inheriting templates and layers concrete
         defaults via ``ResolvedVMTemplate``.
 
-        Tolerates ``requirements=()`` (the always-materialize pre-step's
+        Tolerates ``references=()`` (the always-materialize pre-step's
         path): synthesizes with the reserved
         ``("framework", "always-materialize")`` source so the
         breadcrumb shows where the row came from. This is the only path
@@ -58,7 +58,7 @@ class _VMTemplateKind:
         for future cases (e.g. operator-declared kinds whose default
         isn't always-materialized).
         """
-        source = requirements[0].source if requirements else ALWAYS_MATERIALIZE_SOURCE
+        source = references[0].source if references else ALWAYS_MATERIALIZE_SOURCE
         return VMTemplate(name="default", origin=Origin.auto_declared(source=source))
 
 

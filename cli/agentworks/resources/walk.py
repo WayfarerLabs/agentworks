@@ -30,13 +30,13 @@ def collect_secrets_for(
 
     Order: first-encounter via DFS, deduplicated by secret name. The
     root itself isn't included (it's the publisher, not a target);
-    only secrets the root and its transitive requirements point at are
+    only secrets the root and its transitive references point at are
     returned.
 
     The Registry must be finalized (so synthesized auto-declares exist
     and ``Origin.auto_declared.source`` references are accurate). Calls
     against a non-finalized Registry are not guaranteed correct; the
-    finalize pass is what walks every Resource's requirements and
+    finalize pass is what walks every Resource's references and
     auto-declares missing names.
 
     Raises ``KeyError`` if ``root`` doesn't resolve to a Resource in the
@@ -67,7 +67,7 @@ def collect_secrets_for(
         if node[0] == "secret":
             secret_decls.append(resource)
 
-        # Walk this resource's requirements next.
+        # Walk this resource's references next.
         for req in _referenced_resources(resource):
             target = (req.kind, req.name)
             if target not in seen:

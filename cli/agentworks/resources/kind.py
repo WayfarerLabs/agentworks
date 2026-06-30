@@ -38,8 +38,8 @@ class ResourceKind(Protocol):
       name" (secrets). A non-empty set means "only these reserved names"
       (templates accept ``{"default"}``); requests for other missing names
       error.
-    - ``synthesize(requirements)``: called when an auto-declare-allowed
-      missing name is being synthesized. Receives all matching requirements
+    - ``synthesize(references)``: called when an auto-declare-allowed
+      missing name is being synthesized. Receives all matching references
       known so far (in config-load walk order). Returns the synthesized
       Resource with ``origin = Origin.auto_declared(...)`` attached.
       ``usage`` is NOT attached here -- ``Registry.finalize`` centralizes
@@ -47,9 +47,9 @@ class ResourceKind(Protocol):
       Resources can accrue later-discovered incoming edges from
       second-level dispatches uniformly with operator-declared ones.
 
-      **Empty-requirements contract** (Phase 2a): every kind's
+      **Empty-references contract** (Phase 2a): every kind's
       ``synthesize`` must have defined behavior when called with
-      ``requirements=()``. Kinds whose ``auto_declare_names`` is a
+      ``references=()``. Kinds whose ``auto_declare_names`` is a
       non-None set MUST build a code-defined default in this case (the
       framework's always-materialize pre-step calls them this way to
       guarantee reserved-default names exist in the registry); they use
@@ -80,16 +80,16 @@ class ResourceKind(Protocol):
     @property
     def auto_declare_names(self) -> frozenset[str] | None: ...
 
-    def synthesize(self, requirements: Sequence[ResourceReference]) -> Any: ...
+    def synthesize(self, references: Sequence[ResourceReference]) -> Any: ...
 
 
 class NoUnreferencedDefaultError(Exception):
     """Raised by a ``ResourceKind.synthesize`` when called with
-    ``requirements=()`` and the kind has no notion of an unreferenced
+    ``references=()`` and the kind has no notion of an unreferenced
     default (i.e., ``auto_declare_names is None``).
 
     The framework's always-materialize pre-step in ``Registry.finalize``
-    only calls ``synthesize(requirements=())`` for kinds whose
+    only calls ``synthesize(references=())`` for kinds whose
     ``auto_declare_names`` is a non-None set, so this error is never
     raised in normal operation. The error exists so a kind's contract
     stays well-defined under future changes: if a kind that today has

@@ -156,7 +156,7 @@ VALID_TMUX_LAYOUTS = (
 )
 
 
-def _env_requirements(
+def _env_references(
     env: dict[str, EnvEntry] | None,
     source: tuple[str, str],
 ) -> list[SecretReference]:
@@ -175,7 +175,7 @@ def _env_requirements(
     return out
 
 
-def _git_credential_requirements(
+def _git_credential_references(
     git_credentials: list[str] | None,
     source: tuple[str, str],
 ) -> list[ResourceReference]:
@@ -201,7 +201,7 @@ def _git_credential_requirements(
     ]
 
 
-def _tailscale_secret_requirement(
+def _tailscale_secret_reference(
     tailscale_auth_key: str,
     template_name: str,
 ) -> SecretReference:
@@ -282,7 +282,7 @@ class VMTemplate:
         )
 
         source = ("vm_template", self.name)
-        reqs: list[ResourceReference] = list(_env_requirements(self.env, source))
+        refs: list[ResourceReference] = list(_env_references(self.env, source))
         # Inherits: each parent template name in ``inherits = [...]`` is a
         # TemplateReference targeting the same kind. The framework's
         # VMTemplateKind miss policy auto-declares "default" when missing
@@ -290,7 +290,7 @@ class VMTemplate:
         # catches inheritance loops. Per-template field-merging stays in
         # ``agentworks.vms.templates``.
         for parent in self.inherits:
-            reqs.append(
+            refs.append(
                 TemplateReference(
                     name=parent,
                     kind="vm_template",
@@ -303,7 +303,7 @@ class VMTemplate:
         # Resource via the framework's miss policy (error on typo,
         # citing this template's source). Phase 2b.
         for pkg in self.apt_packages or []:
-            reqs.append(
+            refs.append(
                 _ResourceReq(
                     name=pkg,
                     kind="apt_package",
@@ -312,7 +312,7 @@ class VMTemplate:
                 )
             )
         for cmd in self.system_install_commands or []:
-            reqs.append(
+            refs.append(
                 _ResourceReq(
                     name=cmd,
                     kind="system_install_command",
@@ -326,8 +326,8 @@ class VMTemplate:
         # referenced_resources emits the inherited value at manager-entry
         # call time.
         ts_name = self.tailscale_auth_key or "tailscale-auth-key"
-        reqs.append(_tailscale_secret_requirement(ts_name, self.name))
-        return reqs
+        refs.append(_tailscale_secret_reference(ts_name, self.name))
+        return refs
 
 
 @dataclass(frozen=True)
@@ -375,13 +375,13 @@ class AdminConfig:
         )
 
         source = ("admin_template", self.name)
-        reqs: list[ResourceReference] = list(
-            _env_requirements(self.env, source)
+        refs: list[ResourceReference] = list(
+            _env_references(self.env, source)
         )
-        reqs.extend(_git_credential_requirements(self.git_credentials, source))
+        refs.extend(_git_credential_references(self.git_credentials, source))
         # Catalog references for user_install_commands (Phase 2b).
         for cmd in self.user_install_commands:
-            reqs.append(
+            refs.append(
                 _ResourceReq(
                     name=cmd,
                     kind="user_install_command",
@@ -389,7 +389,7 @@ class AdminConfig:
                     source=source,
                 )
             )
-        return reqs
+        return refs
 
 
 @dataclass(frozen=True)
@@ -426,12 +426,12 @@ class AgentTemplate:
         )
 
         source = ("agent_template", self.name)
-        reqs: list[ResourceReference] = list(
-            _env_requirements(self.env, source)
+        refs: list[ResourceReference] = list(
+            _env_references(self.env, source)
         )
-        reqs.extend(_git_credential_requirements(self.git_credentials, source))
+        refs.extend(_git_credential_references(self.git_credentials, source))
         for parent in self.inherits:
-            reqs.append(
+            refs.append(
                 TemplateReference(
                     name=parent,
                     kind="agent_template",
@@ -441,7 +441,7 @@ class AgentTemplate:
             )
         # Catalog references for user_install_commands (Phase 2b).
         for cmd in self.user_install_commands or []:
-            reqs.append(
+            refs.append(
                 _ResourceReq(
                     name=cmd,
                     kind="user_install_command",
@@ -449,7 +449,7 @@ class AgentTemplate:
                     source=source,
                 )
             )
-        return reqs
+        return refs
 
 
 @dataclass(frozen=True)
@@ -467,9 +467,9 @@ class WorkspaceTemplate:
         from agentworks.resources.reference import TemplateReference
 
         source = ("workspace_template", self.name)
-        reqs: list[ResourceReference] = list(_env_requirements(self.env, source))
+        refs: list[ResourceReference] = list(_env_references(self.env, source))
         for parent in self.inherits:
-            reqs.append(
+            refs.append(
                 TemplateReference(
                     name=parent,
                     kind="workspace_template",
@@ -477,7 +477,7 @@ class WorkspaceTemplate:
                     source=source,
                 )
             )
-        return reqs
+        return refs
 
 
 @dataclass(frozen=True)
@@ -550,9 +550,9 @@ class SessionTemplate:
         from agentworks.resources.reference import TemplateReference
 
         source = ("session_template", self.name)
-        reqs: list[ResourceReference] = list(_env_requirements(self.env, source))
+        refs: list[ResourceReference] = list(_env_references(self.env, source))
         for parent in self.inherits:
-            reqs.append(
+            refs.append(
                 TemplateReference(
                     name=parent,
                     kind="session_template",
@@ -560,7 +560,7 @@ class SessionTemplate:
                     source=source,
                 )
             )
-        return reqs
+        return refs
 
 
 @dataclass(frozen=True)

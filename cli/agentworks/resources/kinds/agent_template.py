@@ -33,13 +33,13 @@ class _AgentTemplateKind:
     miss_policy: Literal["auto-declare", "error"] = "auto-declare"
     auto_declare_names: frozenset[str] | None = frozenset({"default"})
 
-    def synthesize(self, requirements: Sequence[ResourceReference]) -> AgentTemplate:
+    def synthesize(self, references: Sequence[ResourceReference]) -> AgentTemplate:
         """Build the code-defined default ``AgentTemplate``. See
         ``vm_template.py``'s ``synthesize`` for the rationale on why the
-        non-empty-``requirements`` path is preserved even though the
+        non-empty-``references`` path is preserved even though the
         always-materialize pre-step makes it unreachable today.
         """
-        source = requirements[0].source if requirements else ALWAYS_MATERIALIZE_SOURCE
+        source = references[0].source if references else ALWAYS_MATERIALIZE_SOURCE
         return AgentTemplate(name="default", origin=Origin.auto_declared(source=source))
 
 

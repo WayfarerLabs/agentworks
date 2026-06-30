@@ -50,9 +50,9 @@ class _GitCredentialProviderKind:
     miss_policy: Literal["auto-declare", "error"] = "error"
     auto_declare_names: frozenset[str] | None = None
 
-    def synthesize(self, requirements: Sequence[ResourceReference]) -> Any:
+    def synthesize(self, references: Sequence[ResourceReference]) -> Any:
         # Unreachable under the error miss policy; honors the Phase 2a
-        # empty-requirements contract via the typed framework error so a
+        # empty-references contract via the typed framework error so a
         # future change that gives the kind a reserved default has an
         # obvious landing pad.
         raise NoUnreferencedDefaultError(

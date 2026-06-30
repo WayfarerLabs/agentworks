@@ -40,8 +40,8 @@ class _SecretKind:
     miss_policy: Literal["auto-declare", "error"] = "auto-declare"
     auto_declare_names: frozenset[str] | None = None  # None = any name accepted
 
-    def synthesize(self, requirements: Sequence[ResourceReference]) -> SecretDecl:
-        """Build a ``SecretDecl`` for an auto-declared secret. ``requirements``
+    def synthesize(self, references: Sequence[ResourceReference]) -> SecretDecl:
+        """Build a ``SecretDecl`` for an auto-declared secret. ``references``
         is non-empty in normal operation (the Registry calls ``synthesize``
         only when an incoming reference triggered the miss policy) and
         ordered by config-load walk order.
@@ -50,21 +50,21 @@ class _SecretKind:
         reference's source) is attached here. ``usage`` is centralized
         in ``Registry.finalize``'s post-stabilization pass so the kind
         doesn't need to know the final reference map -- a synthesized
-        Resource that goes on to publish requirements of its own may
+        Resource that goes on to publish references of its own may
         gather later incoming edges that this initial call can't see.
 
         Raises ``NoUnreferencedDefaultError`` if called with
-        ``requirements=()`` -- the secret kind has no concept of an
+        ``references=()`` -- the secret kind has no concept of an
         unreferenced default (``auto_declare_names = None``), so the
         framework never calls this path; the explicit error is defensive
         in case the kind's auto-declare configuration ever changes.
         """
-        if not requirements:
+        if not references:
             raise NoUnreferencedDefaultError(
                 "the secret kind has no reserved default name; "
                 "synthesize requires at least one reference"
             )
-        first = requirements[0]
+        first = references[0]
         return SecretDecl(
             name=first.name,
             description="",

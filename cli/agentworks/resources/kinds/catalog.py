@@ -28,15 +28,15 @@ if TYPE_CHECKING:
     from agentworks.resources.reference import ResourceReference
 
 
-def _synthesize_no_default(kind: str, requirements: Sequence[ResourceReference]) -> Any:
+def _synthesize_no_default(kind: str, references: Sequence[ResourceReference]) -> Any:
     """Shared synthesize body for the catalog kinds. Unreachable under
     the ``error`` miss policy (Registry.finalize raises ConfigError
     before dispatching to synthesize for error-policy kinds). Honors
-    the Phase 2a empty-requirements contract by raising the typed
+    the Phase 2a empty-references contract by raising the typed
     framework error so a hypothetical future change that gives a
     catalog kind a reserved default has an obvious landing pad.
     """
-    if not requirements:
+    if not references:
         raise NoUnreferencedDefaultError(
             f"the {kind} kind has no reserved default name; "
             f"synthesize is never invoked under the error miss policy"
@@ -55,8 +55,8 @@ class _AptPackageKind:
     miss_policy: Literal["auto-declare", "error"] = "error"
     auto_declare_names: frozenset[str] | None = None
 
-    def synthesize(self, requirements: Sequence[ResourceReference]) -> Any:
-        return _synthesize_no_default(self.kind, requirements)
+    def synthesize(self, references: Sequence[ResourceReference]) -> Any:
+        return _synthesize_no_default(self.kind, references)
 
 
 @dataclass(frozen=True)
@@ -67,8 +67,8 @@ class _SystemInstallCommandKind:
     miss_policy: Literal["auto-declare", "error"] = "error"
     auto_declare_names: frozenset[str] | None = None
 
-    def synthesize(self, requirements: Sequence[ResourceReference]) -> Any:
-        return _synthesize_no_default(self.kind, requirements)
+    def synthesize(self, references: Sequence[ResourceReference]) -> Any:
+        return _synthesize_no_default(self.kind, references)
 
 
 @dataclass(frozen=True)
@@ -79,8 +79,8 @@ class _UserInstallCommandKind:
     miss_policy: Literal["auto-declare", "error"] = "error"
     auto_declare_names: frozenset[str] | None = None
 
-    def synthesize(self, requirements: Sequence[ResourceReference]) -> Any:
-        return _synthesize_no_default(self.kind, requirements)
+    def synthesize(self, references: Sequence[ResourceReference]) -> Any:
+        return _synthesize_no_default(self.kind, references)
 
 
 KIND_REGISTRY["apt_package"] = _AptPackageKind()

@@ -191,6 +191,11 @@ def test_resources_package_has_no_old_vocabulary_in_source() -> None:
         "TemplateRequirement",
         "UsageEntry",
         "required_resources",
+        # Bare-word vocabulary that survived the type-name rename initially.
+        # Now that the synthesize() parameter is `references` and internal
+        # locals are `refs`/`all_refs`, `requirements` should not appear
+        # anywhere in resources/ source.
+        "requirements",
     )
     offenders: list[str] = []
     for py_file in pkg_root.rglob("*.py"):
