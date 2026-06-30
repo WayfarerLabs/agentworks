@@ -620,9 +620,12 @@ Goal: rename the framework's outbound/inbound reference types so the code matche
       inbound: "I am pointed at by Y"), (b) where `ReferenceEntry` instances are created (in
       `Registry.finalize`, projected from the outbound `ResourceReference`s after they're resolved
       to their target), (c) why `ReferenceEntry` drops the `kind`/`name` fields (implicit from the
-      container Resource), and (d) the `text` field's prose semantics ("the tailscale auth key for
-      vm_template:default" style). The HLA's framework metadata- attachment section should carry the
-      same explanation in prose. The generic name `ReferenceEntry` (vs. e.g. `InboundReference`)
+      container Resource), and (d) the `text` field's prose semantics on **both** types -- the
+      outbound `ResourceReference.text` and the attached `ReferenceEntry.text` carry the same ("the
+      tailscale auth key for vm_template:default" style) prose; the rename collapses two
+      previously-different field names (`usage` vs `text`) onto a single concept, so the symmetry
+      must be documented at both ends. The HLA's framework metadata-attachment section should carry
+      the same explanation in prose. The generic name `ReferenceEntry` (vs. e.g. `InboundReference`)
       makes good docs load-bearing.
 - [ ] **Tests**: every test that imports the renamed symbols compiles and passes; CLI snapshot-ish
       tests for the renamed labels (`Referenced by:`, `REFS`) survive. Add a one-shot
@@ -674,8 +677,10 @@ Definition of done: `agw resource list` shows REFS + INSTANCES; `agw resource de
 `agw secret describe` show "Referenced by:" + "In use by:"; framework code uses Reference vocabulary
 throughout; CI green; reviewer-approved.
 
-**Phases 2 and 3 ship together** in a single PR on `feat/resource-registry`. A single `locked.md`
-lands at the end of Phase 3c covering the whole SDD with final vocabulary.
+**Phases 2 and 3 ship together** in a single PR on `feat/resource-registry`. The Phase 2c-era
+`locked.md` was deleted when Phase 3 was folded in (it had never been consumed externally -- PR #152
+closed unmerged); a single `locked.md` re-lands at the end of Phase 3c covering the whole SDD with
+the final vocabulary.
 
 ## Phase 1 follow-ups (deferred at ship; non-blocking)
 
