@@ -569,9 +569,104 @@ Goal: add the cross-kind inspection commands.
 Definition of done: `agw resource list` and `agw resource describe <kind> <name>` work across all
 kinds; CI green; reviewer-approved.
 
-**Phase 2 ships at this point.** PR sequence on `feat/resource-registry-phase-2`, branched from
-`main` **after Phase 1 merges** (not from the Phase 1 branch tip). A single `locked.md` lands at the
-end of Phase 2c covering the whole SDD.
+Phase 2 lands on `feat/resource-registry` (branched from `main` after Phase 1 merges, not from the
+Phase 1 branch tip). It does **not** ship on its own -- the operator feedback on the cross-kind list
+view (USAGE column read as "is this in use?", but only counted static config references) surfaced
+two problems that Phase 3 fixes before any of this is operator-visible. See the Phase 3 section
+below for the rationale.
+
+## Phase 3: References vocabulary + dynamic instance usage
+
+Goal: complete the cross-kind list/describe surface so an operator can answer both "what config
+points at this resource?" (static references) and "what live instances depend on it?" (dynamic
+usage). The current Phase 2c view conflates them under a misleadingly-named USAGE column that only
+ever shows the static count; for templates that count is always ~0, so the column reads as "nothing
+uses this" when in fact 5 VMs may depend on the template. Phase 3 unbundles the two concepts and
+introduces both as first-class columns / describe sections, behind a clean vocabulary split.
+
+The framework-internal type name `ResourceRequirement` carried a leak of the auto-declare semantic
+(every kind with `miss_policy = "error"` has a "requirement" that's really just a reference). Phase
+3 renames it to match the operator-facing vocabulary so future readers don't have to do the mental
+swap. Because Phase 2 has not yet merged, this rename costs no public API churn -- the FRD/HLA/plan
+get to land in their final shape and the locked.md can describe the shipped surface accurately.
+
+### Phase 3a: Terminology rename
+
+Goal: rename the framework's outbound/inbound reference types so the code matches the UI vocabulary
+(REFS column, "Referenced by:" section). No operator-visible behavior change.
+
+- [ ] `cli/agentworks/resources/requirement.py`: rename `ResourceRequirement` ->
+      `ResourceReference`, `SecretRequirement` -> `SecretReference`, `TemplateRequirement` ->
+      `TemplateReference`. Rename the file itself to `reference.py`.
+- [ ] Rename `UsageEntry` -> `ReferenceEntry`. The `(source, text)` shape is unchanged.
+- [ ] Rename `ResourceReference.usage: str` (the prose like
+      `"the tailscale auth key for     vm_template:default"`) -> `ResourceReference.text: str`. This
+      makes the outbound `ResourceReference.text` and the attached `ReferenceEntry.text` carry the
+      same name for the same thing.
+- [ ] Rename `Resource.usage: tuple[UsageEntry, ...]` -> `references: tuple[ReferenceEntry, ...]` on
+      every Resource type that carries it (the kinds in `resources/kinds/`).
+- [ ] Rename `Registry.iter_requirements` -> `iter_references`, internal `_requirements` ->
+      `_references`, and every other method whose name carries the old vocabulary. Update
+      `Registry.finalize`'s docstring + variable names.
+- [ ] Producer-side method names that emit them on each Config dataclass: `required_resources()` ->
+      `referenced_resources()` everywhere.
+- [ ] CLI labels: `Usages:` -> `Referenced by:` in `render_resource_description` and
+      `render_secret_description`. List-view header `USAGE` -> `REFS`.
+- [ ] Update FRD R9 / R10 / R12 and HLA prose throughout to use the new vocabulary. The wording
+      changes are mechanical (`Requirement` -> `Reference`, `usage` -> `references` /
+      `Referenced by`).
+- [ ] **Tests**: every test that imports the renamed symbols compiles and passes; CLI snapshot-ish
+      tests for the renamed labels (`Referenced by:`, `REFS`) survive. Add a one-shot
+      `test_phase3_naming_consistency.py` that asserts the public surface no longer exposes any
+      symbol named `*Requirement` / `Usage*` from the framework (defensive against partial renames
+      slipping back in).
+
+### Phase 3b: Per-kind dynamic-instance hook
+
+Goal: give each `ResourceKind` a way to project "what live DB instances depend on this resource
+under the current config?". Keep the boundary clean -- the framework knows nothing about the DB
+schema; each kind defines its own projection.
+
+- [ ] `cli/agentworks/resources/kind.py`: add an optional method on `ResourceKind`:
+      `instances(db, resource) -> Iterable[InstanceRef]`. Default implementation returns `()` for
+      kinds with no live-instance concept (catalog kinds, providers, backends). `InstanceRef` is a
+      `(instance_kind: str, instance_name: str)` dataclass.
+- [ ] Template kinds (`vm_template`, `agent_template`, `workspace_template`, `session_template`,
+      `admin_template`): implement `instances` by querying the appropriate DB table for rows whose
+      `template = self.name`. Each kind's projection is straightforward and DB-bounded.
+- [ ] `secret`: implement `instances` by walking every session row, projecting the session's
+      `(mode, template, agent, workspace, vm)` through `referenced_resources()` (the renamed
+      producer method) under current config, and emitting an `InstanceRef` per session that yields a
+      `SecretReference` for this secret. This is the per-current-config projection discussed in the
+      design conversation -- the count answers "should be needed" rather than "is currently
+      materialized."
+- [ ] **Tests**: per-kind unit tests for `instances` (template kinds: trivial DB-count assertions;
+      secret: covers the env-block / git-credential / system-secret cross-section paths).
+
+### Phase 3c: List + describe surface
+
+Goal: make both dimensions visible in the operator-facing surface.
+
+- [ ] `cli/agentworks/resources/inspect.py`: extend `list_resources` to also project per-row
+      instance counts via `kind.instances(db, resource)`. The new `ResourceSummary.instance_count`
+      sits next to `reference_count` (renamed from `usage_count` in Phase 3a). Service-layer
+      function gains a `db: Database` parameter; CLI layer threads it through.
+- [ ] List view: rename header `USAGE` -> `REFS`; add new `INSTANCES` column populated from
+      `instance_count`. Kinds with no instance concept render `-`.
+- [ ] Describe view: keep `Referenced by:` (config-source list, unchanged data, just renamed label);
+      add new `In use by:` section listing the projected `InstanceRef`s grouped by `instance_kind`.
+      Both sections carry a "(per current config)" annotation so the projection-vs-materialized
+      distinction is visible.
+- [ ] `agw secret describe`: gain the same `In use by:` section. FRD R10 documents both sections.
+- [ ] **Tests**: list view shows REFS + INSTANCES correctly per kind; describe view shows both
+      sections; the per-current-config annotation appears.
+
+Definition of done: `agw resource list` shows REFS + INSTANCES; `agw resource describe` and
+`agw secret describe` show "Referenced by:" + "In use by:"; framework code uses Reference vocabulary
+throughout; CI green; reviewer-approved.
+
+**Phases 2 and 3 ship together** in a single PR on `feat/resource-registry`. A single `locked.md`
+lands at the end of Phase 3c covering the whole SDD with final vocabulary.
 
 ## Phase 1 follow-ups (deferred at ship; non-blocking)
 
@@ -618,14 +713,21 @@ code.
 
 ## Sequencing notes
 
-- **Phase order**: 0 -> 1a -> 1b -> 1c -> 1d -> 1e -> ship Phase 1 -> 2a -> 2b -> 2c -> ship
-  Phase 2. Each phase ends at a green CI and a usable intermediate state.
+- **Phase order**: 0 -> 1a -> 1b -> 1c -> 1d -> 1e -> ship Phase 1 -> 2a -> 2b -> 2c -> 3a -> 3b ->
+  3c -> ship Phases 2 + 3. Each phase ends at a green CI and a usable intermediate state.
 - **Why env-block migration before system secrets**: Phase 1b gives the framework a real producer of
-  `SecretRequirement` exercised end-to-end before Phase 1c / 1d wire in the system-secret producers.
+  `SecretReference` exercised end-to-end before Phase 1c / 1d wire in the system-secret producers.
   Bugs in the finalize pass surface against the larger surface area first.
-- **Why Phase 2 in a separate PR**: Phase 2 is primarily a refactor with no operator-facing config
-  changes; bundling it with Phase 1 would inflate the diff without adding feature value. Splitting
-  also lets Phase 1 reviewer feedback iterate without holding up the refactor work.
+- **Why Phase 2 in a separate PR from Phase 1**: Phase 2 is primarily a refactor with no
+  operator-facing config changes; bundling it with Phase 1 would inflate the diff without adding
+  feature value. Splitting also lets Phase 1 reviewer feedback iterate without holding up the
+  refactor work.
+- **Why Phases 2 and 3 ship together**: Phase 2c's cross-kind list view exposed a vocabulary problem
+  (USAGE column reads as "in use" but only counts static refs) and a missing dimension (no dynamic
+  instance count). Shipping Phase 2 alone would land an operator-facing surface that immediately
+  needs replacing; bundling Phase 3 lets the framework code use the final `Reference` vocabulary
+  throughout and lets the cross-kind list show both REFS and INSTANCES on first ship. The
+  terminology rename is mechanical but wide; doing it pre-merge means no public-API churn.
 - **Interaction with PR #130 (polymorphic transports)**: PR #130 renamed `ExecTarget` to `Transport`
   and introduced the `transports/` package. Phase 1c / 1d wire kwargs into the Transport-shaped
   install runners. No conflict with this SDD's design; the function signatures are the integration
@@ -633,9 +735,9 @@ code.
 - **Reviewer cadence**: `agentworks-reviewer` agent runs after each phase. Aim for "this is
   perfect"; iterate until findings are addressed before moving to the next phase. Capture per-phase
   findings as commits with descriptive messages so the lockfile can summarize the iteration trail.
-- **Lockfile**: a single `locked.md` lands once at the end of Phase 2c covering the whole SDD. The
-  plan itself is the running log across Phase 1 + Phase 2 (checkboxes mark progress; the Phase 1
-  follow-ups section above tracks items deferred at Phase 1 ship). No per-phase milestone files.
+- **Lockfile**: a single `locked.md` lands once at the end of Phase 3c covering the whole SDD. The
+  plan itself is the running log across all phases (checkboxes mark progress; the Phase 1 follow-ups
+  section above tracks items deferred at Phase 1 ship). No per-phase milestone files.
 - **Out-of-scope reminders**: no plugin source (future SDD); no DB-backed resources (future manifest
   SDD); no namespaces; no per-source miss policies; no per-field merge.
 
@@ -647,9 +749,9 @@ pin:
 - The exact regex grammar for the section-line scanner (bare keys are universal in agentworks
   configs today; quoted-segment support is a small extension worth getting right in the LLD).
 - Per-kind error message templates (string format) for the framework's `ConfigError`.
-- The exact subclass hierarchy of `ResourceRequirement` (frozen dataclasses with `kw_only`? what
-  about hashability when used as dict keys?).
-- The `UsageEntry` serialization shape for `agw secret describe` rendering.
-- The exact shape of `with_origin` / `with_usage` on Resource types: shared mixin / base class with
-  the framework-attached fields, or per-type `@dataclass(frozen=True)` + `dataclasses.replace`
+- The exact subclass hierarchy of `ResourceReference` (frozen dataclasses with `kw_only`? what about
+  hashability when used as dict keys?).
+- The `ReferenceEntry` serialization shape for `agw secret describe` rendering.
+- The exact shape of `with_origin` / `with_references` on Resource types: shared mixin / base class
+  with the framework-attached fields, or per-type `@dataclass(frozen=True)` + `dataclasses.replace`
   calls? Affects how invasive the Phase 1a edits to existing Resource types are.
