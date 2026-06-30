@@ -1387,7 +1387,7 @@ def _lookup_or_synthesize_secret(registry: Registry, name: str) -> SecretDecl:
     same shape ``_SecretKind.synthesize`` would produce, minus
     ``origin`` which resolution doesn't read) keeps the backend chain
     callable. The Phase 2a ``VMTemplateKind`` will publish the default
-    template's requirements and make this fallback redundant for the
+    template's references and make this fallback redundant for the
     common case.
     """
     from agentworks.resources.kinds.secret import SECRET_KIND_NAME

@@ -41,7 +41,7 @@ class ResolvedVMTemplate:
     tailscale_auth_key: str = "tailscale-auth-key"
 
     def referenced_resources(self) -> list[ResourceReference]:
-        """Emit the resolved template's requirements: env-block secret
+        """Emit the resolved template's references: env-block secret
         refs (with inheritance applied via the merged ``env`` dict) plus
         the Tailscale auth-key secret. Used by ``vm create`` / ``vm     reinit``
         for the eager-resolve subgraph walk.
