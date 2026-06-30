@@ -36,7 +36,9 @@ from agentworks import output
 from agentworks.resources.render import format_origin_line
 
 if TYPE_CHECKING:
+    from agentworks.db import Database
     from agentworks.resources import Registry
+    from agentworks.resources.kind import InstanceRef
     from agentworks.resources.origin import Origin
     from agentworks.resources.reference import ReferenceEntry
 
@@ -49,15 +51,21 @@ class ResourceSummary:
     """One row in ``agw resource list``: the framework-uniform fields
     for one Registry-published Resource.
 
-    ``reference_count`` is the number of inbound ``ReferenceEntry``
-    instances on the Resource (how many config points name it). The list
-    view renders this as the REFS column.
+    - ``reference_count`` is the number of inbound ``ReferenceEntry``
+      instances on the Resource (how many config points name it). The
+      list view renders this as the REFS column.
+    - ``used_by_count`` is the number of live DB instances that depend
+      on this Resource per the current config, computed via the kind's
+      ``instances(db, registry, resource)`` hook. ``None`` for kinds
+      with no instance concept (catalog, providers, backends); the
+      list view renders ``None`` as ``-`` in the USED BY column.
     """
 
     kind: str
     name: str
     origin: Origin | None
     reference_count: int
+    used_by_count: int | None
     description: str
 
 
@@ -73,13 +81,24 @@ class ResourceListing:
 
 @dataclass(frozen=True)
 class ResourceDescription:
-    """Per-resource detail view for ``agw resource describe``."""
+    """Per-resource detail view for ``agw resource describe``.
+
+    - ``references`` lists the inbound ``ReferenceEntry`` instances --
+      config points that name this Resource. Rendered as the
+      "Referenced by:" section.
+    - ``used_by`` lists the live DB instances that depend on this
+      Resource per the current config, projected via the kind's
+      ``instances`` hook. ``None`` for kinds with no instance concept;
+      rendered as the "Used by:" section (with a "(per current config)"
+      annotation when present).
+    """
 
     kind: str
     name: str
     origin: Origin | None
     description: str
     references: tuple[ReferenceEntry, ...]
+    used_by: tuple[InstanceRef, ...] | None
 
 
 # -- Filter parsing ---------------------------------------------------------
@@ -110,6 +129,7 @@ def _matches_origin(origin: Origin | None, origin_filter: OriginFilter | None) -
 
 def list_resources(
     registry: Registry,
+    db: Database | None = None,
     *,
     kinds: tuple[str, ...] | None = None,
     origin_filter: OriginFilter | None = None,
@@ -121,6 +141,11 @@ def list_resources(
     Raises ``ValidationError`` when ``origin_filter`` isn't one of
     ``operator`` / ``auto`` / ``code`` (the keys of ``_ORIGIN_FILTER_MAP``).
     The CLI layer stays thin per the service-layer-is-the-authority rule.
+
+    ``db`` is optional: when provided, each row's ``used_by_count`` is
+    populated via the kind's ``instances`` hook. When ``None`` (e.g.
+    tests that don't care about the dynamic dimension), every row's
+    ``used_by_count`` stays ``None`` -- the list renderer shows ``-``.
     """
     from agentworks.errors import ValidationError
 
@@ -154,12 +179,14 @@ def list_resources(
                 continue
             references: tuple[ReferenceEntry, ...] = tuple(getattr(resource, "references", ()))
             description = getattr(resource, "description", "") or ""
+            used_by_count = _count_used_by(db, registry, kind, resource)
             rows.append(
                 ResourceSummary(
                     kind=kind,
                     name=name,
                     origin=origin,
                     reference_count=len(references),
+                    used_by_count=used_by_count,
                     description=description,
                 )
             )
@@ -179,10 +206,38 @@ def list_resources(
     )
 
 
+def _count_used_by(
+    db: Database | None, registry: Registry, kind: str, resource: object
+) -> int | None:
+    """Project ``(kind, resource) -> int | None`` via the kind's
+    ``instances`` hook. ``None`` for kinds that don't implement the
+    hook (catalog, providers, backends) or when ``db`` isn't available
+    -- the list renderer treats ``None`` as ``-`` rather than ``0`` to
+    distinguish "kind has no instance concept" from "kind has zero
+    instances right now."
+    """
+    if db is None:
+        return None
+    from agentworks.resources import KIND_REGISTRY
+
+    handler = KIND_REGISTRY.get(kind)
+    if handler is None:
+        return None
+    method = getattr(handler, "instances", None)
+    if method is None:
+        return None
+    try:
+        return sum(1 for _ in method(db, registry, resource))
+    except NotImplementedError:
+        # Kind declares the method but signals "no instance concept."
+        return None
+
+
 def describe_resource(
     registry: Registry,
     kind: str,
     name: str,
+    db: Database | None = None,
 ) -> ResourceDescription:
     """Build a ``ResourceDescription`` for ``agw resource describe``.
 
@@ -190,6 +245,11 @@ def describe_resource(
     isn't in the registry. Service-layer-typed so CLI / future
     API surfaces render uniformly (project's
     service-layer-is-the-authority rule).
+
+    ``db`` is optional: when provided, the ``used_by`` field is
+    populated via the kind's ``instances`` hook. When ``None``,
+    ``used_by`` stays ``None`` and the describe view omits the
+    "Used by:" section.
     """
     from agentworks.errors import NotFoundError
     from agentworks.resources import KIND_REGISTRY
@@ -228,7 +288,32 @@ def describe_resource(
         origin=getattr(resource, "origin", None),
         description=getattr(resource, "description", "") or "",
         references=tuple(getattr(resource, "references", ())),
+        used_by=_collect_used_by(db, registry, kind, resource),
     )
+
+
+def _collect_used_by(
+    db: Database | None, registry: Registry, kind: str, resource: object
+) -> tuple[InstanceRef, ...] | None:
+    """Project the kind's ``instances`` hook into a tuple of
+    ``InstanceRef`` for the describe view. ``None`` when ``db`` isn't
+    provided or the kind doesn't implement the hook (catalog,
+    providers, backends).
+    """
+    if db is None:
+        return None
+    from agentworks.resources import KIND_REGISTRY
+
+    handler = KIND_REGISTRY.get(kind)
+    if handler is None:
+        return None
+    method = getattr(handler, "instances", None)
+    if method is None:
+        return None
+    try:
+        return tuple(method(db, registry, resource))
+    except NotImplementedError:
+        return None
 
 
 # -- Renderers --------------------------------------------------------------
@@ -257,15 +342,20 @@ def render_resource_table(listing: ResourceListing) -> None:
     output.info(f"{total} resource{'s' if total != 1 else ''}{breakdown}")
     output.info("")
 
-    headers = ("KIND", "NAME", "ORIGIN", "REFS", "DESCRIPTION")
+    headers = ("KIND", "NAME", "ORIGIN", "REFS", "USED BY", "DESCRIPTION")
     rendered: list[tuple[str, ...]] = []
     for row in listing.rows:
+        # ``used_by_count`` is None for kinds with no instance concept
+        # (catalog, providers, backends); render as ``-`` to distinguish
+        # "no instance concept" from "zero instances right now."
+        used_by_cell = "-" if row.used_by_count is None else str(row.used_by_count)
         rendered.append(
             (
                 row.kind,
                 row.name,
                 format_origin_line(row.origin),
                 str(row.reference_count),
+                used_by_cell,
                 row.description,
             )
         )
@@ -300,14 +390,29 @@ def render_resource_description(desc: ResourceDescription) -> None:
     output.info("Referenced by:")
     if not desc.references:
         output.detail("(none recorded)")
-        return
-    # Dedupe by (source, usage) preserving first-encounter order --
-    # same dedupe as agw secret describe (FRD R10).
-    seen: set[tuple[tuple[str, str], str]] = set()
-    for entry in desc.references:
-        key = (entry.source, entry.usage)
-        if key in seen:
-            continue
-        seen.add(key)
-        src = f"{entry.source[0]}:{entry.source[1]}"
-        output.detail(f"- {src} -- {entry.usage}")
+    else:
+        # Dedupe by (source, usage) preserving first-encounter order --
+        # same dedupe as agw secret describe (FRD R10).
+        seen: set[tuple[tuple[str, str], str]] = set()
+        for entry in desc.references:
+            key = (entry.source, entry.usage)
+            if key in seen:
+                continue
+            seen.add(key)
+            src = f"{entry.source[0]}:{entry.source[1]}"
+            output.detail(f"- {src} -- {entry.usage}")
+
+    if desc.used_by is not None:
+        output.info("")
+        output.info("Used by (per current config):")
+        if not desc.used_by:
+            output.detail("(no live instances)")
+        else:
+            # Group by instance_kind for readability; preserve
+            # first-encounter order within a kind.
+            grouped: dict[str, list[str]] = {}
+            for ref in desc.used_by:
+                grouped.setdefault(ref.instance_kind, []).append(ref.instance_name)
+            for instance_kind in grouped:
+                for instance_name in grouped[instance_kind]:
+                    output.detail(f"- {instance_kind}:{instance_name}")

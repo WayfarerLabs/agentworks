@@ -17,16 +17,22 @@ resolver layers concrete defaults from ``ResolvedVMTemplate`` on top).
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from agentworks.config import VMTemplate
-from agentworks.resources.kind import ALWAYS_MATERIALIZE_SOURCE, KIND_REGISTRY
+from agentworks.resources.kind import (
+    ALWAYS_MATERIALIZE_SOURCE,
+    KIND_REGISTRY,
+    InstanceRef,
+)
 from agentworks.resources.origin import Origin
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Iterable, Sequence
 
+    from agentworks.db import Database
     from agentworks.resources.reference import ResourceReference
+    from agentworks.resources.registry import Registry
 
 
 @dataclass(frozen=True)
@@ -60,6 +66,19 @@ class _VMTemplateKind:
         """
         source = references[0].source if references else ALWAYS_MATERIALIZE_SOURCE
         return VMTemplate(name="default", origin=Origin.auto_declared(source=source))
+
+    def instances(
+        self, db: Database, registry: Registry, resource: Any
+    ) -> Iterable[InstanceRef]:
+        """Every VM whose ``template`` column matches this VMTemplate's
+        name -- or whose ``template`` is NULL when the resource is the
+        reserved ``default`` (a NULL ``template`` column means "use the
+        framework's default template at provisioning time").
+        """
+        name = resource.name
+        for vm in db.list_vms():
+            if vm.template == name or (vm.template is None and name == "default"):
+                yield InstanceRef(instance_kind="vm", instance_name=vm.name)
 
 
 KIND_REGISTRY["vm_template"] = _VMTemplateKind()

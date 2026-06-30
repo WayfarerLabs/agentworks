@@ -64,6 +64,7 @@
     "libpam",
     "lifecycles",
     "limactl",
+    "Liskov",
     "lockfiles",
     "logind",
     "logname",

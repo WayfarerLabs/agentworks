@@ -14,12 +14,40 @@ populates the registry.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from agentworks.resources.reference import ResourceReference
+
+
+@dataclass(frozen=True)
+class InstanceRef:
+    """One live DB instance that depends on a Resource per current config.
+
+    Returned by ``ResourceKind.instances(...)``; rendered as the per-row
+    contribution to ``agw resource list``'s ``USED BY`` column count and to
+    ``agw resource describe``'s ``Used by:`` section.
+
+    Fields:
+
+    - ``instance_kind``: the DB row's kind identifier (``"vm"``, ``"agent"``,
+      ``"workspace"``, ``"session"``, ``"console"``). Used by the describe
+      view to group entries by instance type.
+    - ``instance_name``: the DB row's name (``vm.name``, ``session.name``,
+      etc.).
+
+    The shape is intentionally minimal so a future provisioned-state
+    SDD can return the same dataclass from a sibling
+    ``provisioned_instances(...)`` hook (today's projection is "per
+    current config"; a manifest-driven sibling would be "per provisioned
+    state"). See the Phase 3c "Forward-compat note" in the plan.
+    """
+
+    instance_kind: str
+    instance_name: str
 
 
 class ResourceKind(Protocol):
@@ -81,6 +109,28 @@ class ResourceKind(Protocol):
     def auto_declare_names(self) -> frozenset[str] | None: ...
 
     def synthesize(self, references: Sequence[ResourceReference]) -> Any: ...
+
+    # The optional ``instances(db, registry, resource) -> Iterable[InstanceRef]``
+    # method is intentionally NOT declared on this Protocol. Kinds with a
+    # per-instance lifecycle concept (the four named template kinds plus
+    # ``admin_template`` plus ``secret``) implement it; kinds without
+    # (catalog, ``git_credential_provider``, ``secret_backend``) omit it
+    # entirely. The framework's consumer (``agentworks.resources.inspect``)
+    # uses ``getattr(handler, "instances", None)`` to gate the call, so
+    # absent-on-class IS the "no instance concept" signal. Declaring the
+    # method on the Protocol would force every kind to either implement
+    # it (Liskov violation for kinds where it's meaningless) or use
+    # ``# type: ignore`` to opt out. Structural-duck-typing keeps the
+    # contract honest. The shape of the optional method is:
+    #
+    #     def instances(self, db: Database, registry: Registry,
+    #                   resource: Any) -> Iterable[InstanceRef]:
+    #         ...
+    #
+    # Per current config: a future SDD adding provisioned-state tracking
+    # would add a sibling ``provisioned_instances(...)`` hook returning
+    # the same ``InstanceRef`` shape from manifests; today's
+    # ``instances`` is the config-projected dimension.
 
 
 class NoUnreferencedDefaultError(Exception):

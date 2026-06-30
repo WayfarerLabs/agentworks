@@ -24,6 +24,7 @@ from agentworks.resources import kinds  # noqa: F401
 from agentworks.resources.kind import (
     ALWAYS_MATERIALIZE_SOURCE,
     KIND_REGISTRY,
+    InstanceRef,
     NoUnreferencedDefaultError,
     ResourceKind,
 )
@@ -40,6 +41,7 @@ from agentworks.resources.walk import collect_secrets_for
 __all__ = [
     "ALWAYS_MATERIALIZE_SOURCE",
     "KIND_REGISTRY",
+    "InstanceRef",
     "NoUnreferencedDefaultError",
     "Origin",
     "Registry",

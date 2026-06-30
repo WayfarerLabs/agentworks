@@ -11,16 +11,23 @@ can carry a description.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
-from agentworks.resources.kind import KIND_REGISTRY, NoUnreferencedDefaultError
+from agentworks.resources.kind import (
+    KIND_REGISTRY,
+    InstanceRef,
+    NoUnreferencedDefaultError,
+)
 from agentworks.resources.origin import Origin
+from agentworks.resources.walk import collect_secrets_for
 from agentworks.secrets.base import SecretDecl
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Iterable, Sequence
 
+    from agentworks.db import Database, SessionRow
     from agentworks.resources.reference import ResourceReference
+    from agentworks.resources.registry import Registry
 
 
 SECRET_KIND_NAME = "secret"
@@ -70,6 +77,73 @@ class _SecretKind:
             description="",
             origin=Origin.auto_declared(source=first.source),
         )
+
+    def instances(
+        self, db: Database, registry: Registry, resource: Any
+    ) -> Iterable[InstanceRef]:
+        """Sessions whose subgraph (per current config) reaches this
+        secret. For each session row, we project its identity through
+        the framework's reference walk: the session's session_template,
+        the workspace's workspace_template, the VM's vm_template, the
+        always-present admin_template, and (in agent mode) the agent's
+        agent_template. Each root's reachable-secret set is collected;
+        if this secret's name appears in the union for a given session,
+        that session is emitted.
+
+        The walk uses ``collect_secrets_for`` (the same helper
+        ``vm create`` / ``agent create`` etc. use for eager-resolve), so
+        the "what secrets would this session need?" answer is exactly
+        the answer the orchestrator would compute at runtime -- modulo
+        per-command scoping (e.g. ``vm reinit`` walks only the VM's
+        subgraph). The result is *per current config*: edits to config
+        change the projection immediately, even for sessions that were
+        provisioned against a different config. See the Phase 3c
+        "Forward-compat note" in the SDD plan.
+        """
+        target_name = resource.name
+        for session in db.list_sessions():
+            reachable = self._secrets_reachable_from_session(db, registry, session)
+            if target_name in reachable:
+                yield InstanceRef(
+                    instance_kind="session", instance_name=session.name
+                )
+
+    @staticmethod
+    def _secrets_reachable_from_session(
+        db: Database, registry: Registry, session: SessionRow
+    ) -> set[str]:
+        roots: list[tuple[str, str]] = []
+        roots.append(("session_template", session.template))
+        # Every VM has an admin user that pulls from admin_template:default.
+        # Sessions running on that VM transitively reach admin's env-block
+        # references regardless of mode -- agent-mode sessions still log into
+        # an admin-provisioned VM. Conservative for the projection.
+        roots.append(("admin_template", "default"))
+        workspace = db.get_workspace(session.workspace_name)
+        if workspace is not None:
+            roots.append(
+                ("workspace_template", workspace.template or "default")
+            )
+            vm = db.get_vm(workspace.vm_name)
+            if vm is not None:
+                roots.append(("vm_template", vm.template or "default"))
+        if session.mode == "agent" and session.agent_name is not None:
+            agent = db.get_agent(session.agent_name)
+            if agent is not None:
+                roots.append(("agent_template", agent.template or "default"))
+
+        names: set[str] = set()
+        for root in roots:
+            try:
+                for decl in collect_secrets_for(registry, root):
+                    names.add(decl.name)
+            except KeyError:
+                # Defensive: a root that doesn't resolve in the registry
+                # means the underlying template wasn't published (e.g. a
+                # session whose template was renamed in config). Skip the
+                # missing root rather than blowing up the entire inspection.
+                continue
+        return names
 
 
 KIND_REGISTRY[SECRET_KIND_NAME] = _SecretKind()

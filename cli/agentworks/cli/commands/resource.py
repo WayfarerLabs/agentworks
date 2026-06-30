@@ -62,6 +62,7 @@ def resource_list(
     """
     from agentworks import output
     from agentworks.bootstrap import build_registry
+    from agentworks.cli._helpers import get_db
     from agentworks.config import load_config
     from agentworks.resources.inspect import (
         list_resources,
@@ -77,12 +78,15 @@ def resource_list(
 
     config = load_config()
     registry = build_registry(config)
+    db = get_db()
     # ``list_resources`` validates ``origin_filter`` (typed
     # ``ValidationError`` from the service layer; see inspect.py); the
     # ``cast`` is purely a typing-layer bridge from typer's ``str | None``
-    # to the ``OriginFilter`` Literal.
+    # to the ``OriginFilter`` Literal. ``db`` lets the service populate
+    # each row's ``used_by_count`` via the kind's ``instances`` hook.
     listing = list_resources(
         registry,
+        db,
         kinds=kinds,
         origin_filter=cast("OriginFilter | None", origin_filter),
     )
@@ -115,6 +119,7 @@ def resource_describe(
     mappings, inheritance chains, resolution preview).
     """
     from agentworks.bootstrap import build_registry
+    from agentworks.cli._helpers import get_db
     from agentworks.config import load_config
     from agentworks.resources.inspect import (
         describe_resource,
@@ -123,5 +128,6 @@ def resource_describe(
 
     config = load_config()
     registry = build_registry(config)
-    desc = describe_resource(registry, kind, name)
+    db = get_db()
+    desc = describe_resource(registry, kind, name, db=db)
     render_resource_description(desc)

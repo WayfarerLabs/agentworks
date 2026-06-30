@@ -5,16 +5,22 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from agentworks.config import SessionTemplate
-from agentworks.resources.kind import ALWAYS_MATERIALIZE_SOURCE, KIND_REGISTRY
+from agentworks.resources.kind import (
+    ALWAYS_MATERIALIZE_SOURCE,
+    KIND_REGISTRY,
+    InstanceRef,
+)
 from agentworks.resources.origin import Origin
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Iterable, Sequence
 
+    from agentworks.db import Database
     from agentworks.resources.reference import ResourceReference
+    from agentworks.resources.registry import Registry
 
 
 @dataclass(frozen=True)
@@ -37,6 +43,20 @@ class _SessionTemplateKind:
         return SessionTemplate(
             name="default", origin=Origin.auto_declared(source=source)
         )
+
+    def instances(
+        self, db: Database, registry: Registry, resource: Any
+    ) -> Iterable[InstanceRef]:
+        """Every session whose ``template`` column matches this
+        SessionTemplate's name. ``SessionRow.template`` is non-optional,
+        so the NULL-as-default fallback used by other template kinds
+        doesn't apply here -- sessions are always created with an
+        explicit template value (``default`` when none is specified).
+        """
+        name = resource.name
+        for sess in db.list_sessions():
+            if sess.template == name:
+                yield InstanceRef(instance_kind="session", instance_name=sess.name)
 
 
 KIND_REGISTRY["session_template"] = _SessionTemplateKind()

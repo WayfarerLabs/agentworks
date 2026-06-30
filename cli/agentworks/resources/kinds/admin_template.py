@@ -21,16 +21,22 @@ from somewhere error via the framework's miss-policy dispatch.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from agentworks.config import AdminConfig
-from agentworks.resources.kind import ALWAYS_MATERIALIZE_SOURCE, KIND_REGISTRY
+from agentworks.resources.kind import (
+    ALWAYS_MATERIALIZE_SOURCE,
+    KIND_REGISTRY,
+    InstanceRef,
+)
 from agentworks.resources.origin import Origin
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Iterable, Sequence
 
+    from agentworks.db import Database
     from agentworks.resources.reference import ResourceReference
+    from agentworks.resources.registry import Registry
 
 
 @dataclass(frozen=True)
@@ -56,6 +62,24 @@ class _AdminTemplateKind:
         """
         source = references[0].source if references else ALWAYS_MATERIALIZE_SOURCE
         return AdminConfig(name="default", origin=Origin.auto_declared(source=source))
+
+    def instances(
+        self, db: Database, registry: Registry, resource: Any
+    ) -> Iterable[InstanceRef]:
+        """Every VM uses the singleton ``admin_template:default`` -- the
+        admin template defines the admin user on each VM, and there's one
+        admin user per VM. No DB column ties VMs to a non-default admin
+        template yet (Phase 2a.3 plurified the framework but the operator
+        surface still publishes only ``default``). When/if a future SDD
+        adds ``[admin_templates.<name>]`` parsing plus a ``vm.admin_template``
+        column, this method changes to filter by that column the same way
+        the other template kinds do.
+        """
+        name = resource.name
+        if name != "default":
+            return
+        for vm in db.list_vms():
+            yield InstanceRef(instance_kind="vm", instance_name=vm.name)
 
 
 KIND_REGISTRY["admin_template"] = _AdminTemplateKind()

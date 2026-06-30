@@ -17,16 +17,22 @@ later is a parser/loader change, not a framework change.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from agentworks.config import NamedConsoleConfig
-from agentworks.resources.kind import ALWAYS_MATERIALIZE_SOURCE, KIND_REGISTRY
+from agentworks.resources.kind import (
+    ALWAYS_MATERIALIZE_SOURCE,
+    KIND_REGISTRY,
+    InstanceRef,
+)
 from agentworks.resources.origin import Origin
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Iterable, Sequence
 
+    from agentworks.db import Database
     from agentworks.resources.reference import ResourceReference
+    from agentworks.resources.registry import Registry
 
 
 @dataclass(frozen=True)
@@ -52,6 +58,22 @@ class _NamedConsoleTemplateKind:
         """
         source = references[0].source if references else ALWAYS_MATERIALIZE_SOURCE
         return NamedConsoleConfig(origin=Origin.auto_declared(source=source))
+
+    def instances(
+        self, db: Database, registry: Registry, resource: Any
+    ) -> Iterable[InstanceRef]:
+        """Every console implicitly uses the singleton
+        ``named_console_template:default`` -- there's no per-console
+        template column on the operator surface yet, and Phase 2a.3
+        deferred plurifying ``NamedConsoleConfig`` (no ``name`` field),
+        so the kind is effectively a singleton today. When operator
+        demand for named console templates lands, plurify
+        ``NamedConsoleConfig`` (mirror the Phase 2a.3 admin change) and
+        switch this filter to ``resource.name`` + a ``console.template``
+        column.
+        """
+        for console in db.list_consoles():
+            yield InstanceRef(instance_kind="console", instance_name=console.name)
 
 
 KIND_REGISTRY["named_console_template"] = _NamedConsoleTemplateKind()

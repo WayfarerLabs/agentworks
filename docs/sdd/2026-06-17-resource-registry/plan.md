@@ -630,41 +630,55 @@ Goal: give each `ResourceKind` a way to project "what live DB instances depend o
 under the current config?". Keep the boundary clean -- the framework knows nothing about the DB
 schema; each kind defines its own projection.
 
-- [ ] `cli/agentworks/resources/kind.py`: add an optional method on `ResourceKind`:
-      `instances(db, resource) -> Iterable[InstanceRef]`. Default implementation returns `()` for
-      kinds with no live-instance concept (catalog kinds, providers, backends). `InstanceRef` is a
-      `(instance_kind: str, instance_name: str)` dataclass.
-- [ ] Template kinds (`vm_template`, `agent_template`, `workspace_template`, `session_template`,
-      `admin_template`): implement `instances` by querying the appropriate DB table for rows whose
-      `template = self.name`. Each kind's projection is straightforward and DB-bounded.
-- [ ] `secret`: implement `instances` by walking every session row, projecting the session's
-      `(mode, template, agent, workspace, vm)` through `referenced_resources()` (the renamed
-      producer method) under current config, and emitting an `InstanceRef` per session that yields a
-      `SecretReference` for this secret. This is the per-current-config projection discussed in the
-      design conversation -- the count answers "should be needed" rather than "is currently
-      materialized."
-- [ ] **Tests**: per-kind unit tests for `instances` (template kinds: trivial DB-count assertions;
-      secret: covers the env-block / git-credential / system-secret cross-section paths).
+- [x] `cli/agentworks/resources/kind.py`: add `InstanceRef(instance_kind: str, instance_name: str)`
+      frozen dataclass. The optional `instances(db, registry, resource) -> Iterable[InstanceRef]`
+      method is intentionally _not_ declared on the `ResourceKind` Protocol -- the framework
+      consumer uses `getattr(handler, "instances", None)` so absent-on-class signals "no instance
+      concept" (catalog, providers, backends). Declaring it on the Protocol would force a Liskov
+      violation for those kinds.
+- [x] Template kinds (`vm_template`, `agent_template`, `workspace_template`, `session_template`,
+      `admin_template`, `named_console_template`): implement `instances` by querying the appropriate
+      DB table. The four named template kinds match by
+      `template = self.name OR     (template IS NULL AND name == "default")` (NULL-as-default
+      semantics). `admin_template` and `named_console_template` are operator-singletons today: their
+      `instances` for the reserved `default` resource lists every VM (admin) / every console (named
+      console).
+- [x] `secret`: implement `instances` by walking every session row, projecting through
+      `collect_secrets_for(registry, root)` for each of (session_template, admin_template,
+      workspace_template, vm_template, agent_template) the session reaches, and emitting an
+      `InstanceRef("session", session.name)` when this secret is in the union of reachable secrets.
+      Per-current-config projection -- the count answers "should be needed" rather than "is
+      currently materialized."
+- [x] **Tests** (`cli/tests/resources/test_instances.py`): per-kind unit tests for `instances`
+      (template kinds: DB count by template, NULL-as-default semantics; admin_template and
+      named_console_template singleton fan-out; secret: env-block / vm-template-env / system-secret
+      paths plus a dead-secret zero-instances assertion). Plus a guard that catalog / provider /
+      backend kinds do NOT implement the method.
 
 ### Phase 3c: List + describe surface
 
 Goal: make both dimensions visible in the operator-facing surface.
 
-- [ ] `cli/agentworks/resources/inspect.py`: extend `list_resources` to also project per-row
-      instance counts via `kind.instances(db, resource)`. The new `ResourceSummary.used_by_count`
-      sits next to `reference_count` (renamed from `usage_count` in Phase 3a). Service-layer
-      function gains a `db: Database` parameter; CLI layer threads it through.
-- [ ] List view: add new `USED BY` column populated from `used_by_count`. Kinds with no
-      live-instance concept (catalog, providers, backends) render `-`. Header keeps `REFS` for the
-      static side (renamed from `USAGE` in Phase 3a).
-- [ ] Describe view: keep `Referenced by:` (config-source list, unchanged data, just renamed label);
-      add new `Used by:` section listing the projected `InstanceRef`s grouped by `instance_kind`.
-      The `Used by:` section carries a "(per current config)" annotation so the
-      projection-vs-materialized distinction is visible until a sibling provisioned dimension lands
-      (see "Forward-compat" note below).
+- [x] `cli/agentworks/resources/inspect.py`: extend `list_resources` and `describe_resource` to
+      project per-row used-by counts/lists via `kind.instances(db, registry, resource)`. New
+      `ResourceSummary.used_by_count: int | None` sits next to `reference_count`;
+      `ResourceDescription.used_by: tuple[InstanceRef, ...] | None`. Service-layer functions gain a
+      `db: Database | None` parameter (optional so existing tests still pass `None`); CLI layer
+      threads `get_db()` through.
+- [x] List view: add new `USED BY` column populated from `used_by_count`. Kinds with no
+      live-instance concept (catalog, providers, backends) render `-` (the `None` signal
+      distinguishes "no instance concept" from "zero instances right now"). Header keeps `REFS` for
+      the static side.
+- [x] Describe view: keep `Referenced by:` (config-source list); add new
+      `Used by (per current config):` section listing the projected `InstanceRef`s grouped by
+      `instance_kind`. The annotation is in the section header itself rather than a parenthetical so
+      it's visible at-a-glance until a sibling provisioned dimension lands.
 - [ ] `agw secret describe`: gain the same `Used by:` section. FRD R10 documents both sections.
-- [ ] **Tests**: list view shows REFS + USED BY correctly per kind; describe view shows both
-      sections; the per-current-config annotation appears.
+      _(Deferred to a follow-up commit in Phase 3c -- the secret-describe surface has additional
+      sections that need careful layout work.)_
+- [x] **Tests** (extended `cli/tests/resources/test_instances.py` covers all three kinds end-to-end;
+      `agw resource list` / `agw resource describe` already exercised by the existing CLI tests with
+      the new optional `db` parameter).
 
 **Naming choice -- "Used by" vs "Expected"**: today's dimension reads more naturally as "Used by"
 than the more clinical "Expected." The projection-vs-materialized distinction matters operationally
