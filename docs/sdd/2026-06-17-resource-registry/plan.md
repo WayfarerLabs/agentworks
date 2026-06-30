@@ -615,6 +615,15 @@ Goal: rename the framework's outbound/inbound reference types so the code matche
 - [ ] Update FRD R9 / R10 / R12 and HLA prose throughout to use the new vocabulary. The wording
       changes are mechanical (`Requirement` -> `Reference`, `usage` -> `references` /
       `Referenced by`).
+- [ ] **Document the `ResourceReference` <-> `ReferenceEntry` relationship explicitly.** Both types'
+      module/class docstrings must spell out: (a) the directional split (outbound: "I point at X" vs
+      inbound: "I am pointed at by Y"), (b) where `ReferenceEntry` instances are created (in
+      `Registry.finalize`, projected from the outbound `ResourceReference`s after they're resolved
+      to their target), (c) why `ReferenceEntry` drops the `kind`/`name` fields (implicit from the
+      container Resource), and (d) the `text` field's prose semantics ("the tailscale auth key for
+      vm_template:default" style). The HLA's framework metadata- attachment section should carry the
+      same explanation in prose. The generic name `ReferenceEntry` (vs. e.g. `InboundReference`)
+      makes good docs load-bearing.
 - [ ] **Tests**: every test that imports the renamed symbols compiles and passes; CLI snapshot-ish
       tests for the renamed labels (`Referenced by:`, `REFS`) survive. Add a one-shot
       `test_phase3_naming_consistency.py` that asserts the public surface no longer exposes any
