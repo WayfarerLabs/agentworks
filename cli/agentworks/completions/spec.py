@@ -79,6 +79,13 @@ class CommandSpec:
 # completion also picks up the framework's always-materialized defaults
 # and auto-declared entries the raw config text doesn't have.
 #
+# The per-kind Registry queries don't need `sort -u` on the shell side
+# because the Registry stores one row per `(kind, name)` and the CLI's
+# `--names-only` walks in insertion order -- names are already unique
+# per kind. `resource_kinds` uses `sort -u` because it aggregates the
+# kind prefix across ALL rows in the full listing, where duplicates
+# are the norm (one row per resource, many resources per kind).
+#
 # The ``--names-only`` flag is the explicit completion contract:
 # every list command that backs a completer emits one name per line
 # when the flag is passed, in the same order as its table rows.
