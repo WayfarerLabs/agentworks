@@ -457,8 +457,8 @@ summary; for detail, the operator runs describe.
   is a display of what each backend would see at resolution time. Computed identically whether the
   secret is operator-declared or auto-declared.
 - **Current resolution preview**: which active backend would resolve this secret right now
-  (`would resolve via env-var`, `would prompt`, or `not available in any backend`). Mirrors the
-  doctor preview but scoped to one secret.
+  (`would resolve via env-var`, `would resolve via prompt`, or
+  `not available in any active backend`). Mirrors the doctor preview but scoped to one secret.
 
 Describe does not prompt and does not resolve secret values; it reports state.
 

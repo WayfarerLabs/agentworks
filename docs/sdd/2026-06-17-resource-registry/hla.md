@@ -814,7 +814,7 @@ Output sections (per FRD R10):
 - Referenced by: one row per matching reference.
 - Backend mappings: per-backend status table (operator-set value, backend convention default, or "no
   mapping; skipped"; no merging).
-- Resolution preview: `would resolve via <backend>` or `would prompt`.
+- Resolution preview: `would resolve via <backend>` or `not available in any active backend`.
 
 Does not prompt, does not resolve values.
 
