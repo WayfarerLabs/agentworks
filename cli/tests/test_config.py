@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from textwrap import dedent
+from typing import Any
 
 import pytest
 
@@ -235,7 +236,7 @@ def test_extra_ssh_public_keys_defaults_empty(config_dir: Path) -> None:
 
 # -- Proxmox config tests (table-driven) --------------------------------------
 
-_PROXMOX_TEST_CASES = [
+_PROXMOX_TEST_CASES: list[dict[str, Any]] = [
     {
         "id": "valid_all_fields",
         "toml": """\

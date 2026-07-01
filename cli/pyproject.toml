@@ -67,6 +67,32 @@ strict = true
 warn_return_any = true
 warn_unused_configs = true
 
+# Tests: relax the noisy strict-mode + stub-pattern codes while still
+# catching the load-bearing checks (``[attr-defined]`` catches renamed
+# symbols, ``[func-returns-value]`` catches ``x = void_fn()``, etc.).
+# The disabled codes are dominated by:
+#   - ``[arg-type]``: hand-rolled ``_StubConfig`` classes passed where
+#     ``Config`` is expected. Legitimate ducktyping; the type system
+#     can't see through it without rewriting every test stub as a
+#     Protocol or casting at every call site.
+#   - ``[no-untyped-def]``: test functions returning ``None`` don't
+#     need an explicit ``-> None`` annotation.
+#   - ``[type-arg]``: bare ``dict`` / ``tuple`` in test fixtures.
+#   - ``[unused-ignore]``: stale ``# type: ignore`` markers in tests.
+#   - ``[func-returns-value]``: the tracking-lambda idiom
+#     ``lambda *a: log.append(*a) or 0`` -- ``append`` returns
+#     ``None`` but the ``or 0`` makes the whole expression a known
+#     value. Real bug class in production; idiomatic noise in tests.
+[[tool.mypy.overrides]]
+module = "tests.*"
+disable_error_code = [
+    "arg-type",
+    "no-untyped-def",
+    "type-arg",
+    "unused-ignore",
+    "func-returns-value",
+]
+
 [dependency-groups]
 dev = [
     "ruff>=0.15.5",

@@ -14,7 +14,7 @@ interactive SSH layer so the tests stay hermetic.
 from __future__ import annotations
 
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 from typing import TYPE_CHECKING
 
 import pytest
@@ -85,13 +85,13 @@ def _make_config() -> object:
 
 
 def _patch_common(
-    monkeypatch: pytest.MonkeyPatch, vm_manager: object, *, interactive_log: list[bool],
+    monkeypatch: pytest.MonkeyPatch, vm_manager: ModuleType, *, interactive_log: list[bool],
 ) -> None:
     """Monkeypatch the boilerplate every shell_vm test needs to stub:
     env resolution, secrets, interactive, keep_vm_active."""
     monkeypatch.setattr(
         vm_manager, "_resolve_vm_admin_env_scopes",
-        lambda *a, **k: vm_manager._VmAdminEnvScopes(vm={}, workspace=None, admin={}),
+        lambda *a, **k: vm_manager._VmAdminEnvScopes(vm={}, workspace=None, admin={}),  # type: ignore[attr-defined]
     )
     monkeypatch.setattr(vm_manager, "_vm_secret_target", lambda *a, **k: object())
     monkeypatch.setattr("agentworks.secrets.resolve_for_command", lambda *a, **k: None)
@@ -320,7 +320,7 @@ def test_provisioner_shell_target_attaches_and_registers_detach_for_azure(
     come down regardless of how shell_vm unwinds (success, SSH failure, ^C)."""
     import contextlib
 
-    from agentworks.transports import SSHTransport
+    from agentworks.transports import SSHTransport, Transport
     from agentworks.transports import provisioner_transport as _provisioner_transport
     from agentworks.vms import manager as vm_manager
     from agentworks.vms.provisioners.azure import AzureProvisioner
@@ -342,13 +342,13 @@ def test_provisioner_shell_target_attaches_and_registers_detach_for_azure(
         def detach_public_ip(self, vm: object) -> None:
             detach_calls.append(getattr(vm, "name", "?"))
 
-        def provisioner_transport(self, vm: object, *, config: object | None = None) -> object:
+        def provisioner_transport(self, vm: object, *, config: object | None = None) -> Transport:
             # The factory probes ``target.run('echo ok', ...)``; the real
             # SSHTransport.run would invoke a subprocess, so we wrap one
             # whose ``run`` is a stub. Subclass so isinstance(target,
             # SSHTransport) still narrows correctly.
             t = SSHTransport(host="203.0.113.42")
-            t.run = lambda *_a, **_k: SimpleNamespace(  # type: ignore[method-assign]
+            t.run = lambda *_a, **_k: SimpleNamespace(  # type: ignore[method-assign, assignment]
                 returncode=0, stdout="ok", stderr="", ok=True,
             )
             return t
@@ -387,6 +387,7 @@ def test_provisioner_shell_target_detaches_on_exception_for_azure(
     the surrounding ExitStack closes."""
     import contextlib
 
+    from agentworks.transports import Transport
     from agentworks.transports import provisioner_transport as _provisioner_transport
     from agentworks.vms import manager as vm_manager
     from agentworks.vms.provisioners.azure import AzureProvisioner
@@ -404,7 +405,7 @@ def test_provisioner_shell_target_detaches_on_exception_for_azure(
         def detach_public_ip(self, vm: object) -> None:
             detach_calls.append(getattr(vm, "name", "?"))
 
-        def provisioner_transport(self, vm: object, *, config: object | None = None) -> object:
+        def provisioner_transport(self, vm: object, *, config: object | None = None) -> Transport:
             raise RuntimeError("simulated post-attach failure")
 
     monkeypatch.setattr(
@@ -461,7 +462,7 @@ def test_provisioner_shell_target_retries_reachability_probe(
     class _FlakyProvisioner:
         def provisioner_transport(self, vm: object, *, config: object | None = None) -> object:
             t = SSHTransport(host="203.0.113.42")
-            t.run = flaky_run  # type: ignore[method-assign]
+            t.run = flaky_run  # type: ignore[method-assign, assignment]
             return t
 
         @contextlib.contextmanager  # type: ignore[arg-type]

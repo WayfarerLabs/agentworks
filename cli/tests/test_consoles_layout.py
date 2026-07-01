@@ -37,14 +37,18 @@ class _StubVerticalLayoutConfig(_StubConfig):
     class _NC:
         tmux_layout: str = "aw-session-vertical"
 
-    named_console = _NC()
+    # _NC mirrors _StubNamedConsoleConfig's surface (just ``tmux_layout``)
+    # but isn't structurally identical to mypy. Tests pass _StubConfig
+    # subclasses to the SUT via ducktyping; the real Config type isn't
+    # involved here.
+    named_console = _NC()  # type: ignore[assignment]
 
 
 def test_apply_layout_preset_emits_simple_select_layout(
     fake_target: _FakeTarget,
 ) -> None:
     """Tmux preset layout names go straight to `select-layout`."""
-    from agentworks.sessions.multi_console import _apply_layout
+    from agentworks.sessions.multi_console_layout import _apply_layout
 
     _apply_layout(fake_target, "aw-console-con", "alpha", "tiled")  # type: ignore[arg-type]
     assert fake_target.commands == [
@@ -58,7 +62,7 @@ def test_apply_layout_aw_session_vertical_queries_then_applies_string(
     """`aw-session-vertical` queries window geometry + pane IDs, builds a
     custom tmux layout string Python-side, and applies it via
     `select-layout`. Two SSH calls: query then apply."""
-    from agentworks.sessions.multi_console import _apply_layout
+    from agentworks.sessions.multi_console_layout import _apply_layout
 
     # First call returns geometry + pane ids; the helper builds a layout
     # string from this and applies it via the second call.
@@ -223,7 +227,7 @@ def test_apply_layout_aw_session_vertical_warns_on_genuine_failure(
 
 
 def test_focus_session_pane_emits_select_pane(fake_target: _FakeTarget) -> None:
-    from agentworks.sessions.multi_console import _focus_session_pane
+    from agentworks.sessions.multi_console_layout import _focus_session_pane
 
     _focus_session_pane(fake_target, "aw-console-con", "alpha")  # type: ignore[arg-type]
     assert fake_target.commands == [

@@ -274,7 +274,7 @@ def test_force_kill_escalates_to_sigkill(monkeypatch) -> None:
     call_count = 0
 
     class _EscalationTarget:
-        def __init__(self):
+        def __init__(self) -> None:
             self.commands: list[str] = []
 
         def run(self, command, *, check=True, sudo=False, tty=None, timeout=None):
