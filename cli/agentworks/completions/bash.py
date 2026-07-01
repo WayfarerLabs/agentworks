@@ -13,25 +13,28 @@ DYNAMIC_SNIPPETS: dict[str, str] = {
     "vm_hosts": ("$(agw vm-host list --names-only 2>/dev/null)"),
     "workspaces": ("$(agw workspace list --names-only 2>/dev/null)"),
     "ws_templates": (
-        "$(sed -n 's/^\\[workspace_templates\\.\\([^]]*\\)\\]/\\1/p'"
-        ' "$HOME/.config/agentworks/config.toml" 2>/dev/null)'
+        "$(agw resource list --kind workspace_template --names-only 2>/dev/null"
+        " | awk -F: '{print $2}')"
     ),
     "git_credentials": (
-        "$(sed -n 's/^\\[git_credentials\\.\\([^]]*\\)\\]/\\1/p' \"$HOME/.config/agentworks/config.toml\" 2>/dev/null)"
+        "$(agw resource list --kind git_credentials --names-only 2>/dev/null"
+        " | awk -F: '{print $2}')"
     ),
     "catalog_entries": ("$(agw catalog list 2>/dev/null | tail -n +3 | awk '{print $2}')"),
     "sessions": ("$(agw session list --names-only 2>/dev/null)"),
     "agents": ("$(agw agent list --names-only 2>/dev/null)"),
     "consoles": ("$(agw console list --names-only 2>/dev/null)"),
     "session_templates": (
-        "default $(sed -n 's/^\\[session_templates\\.\\([^]]*\\)\\]/\\1/p'"
-        ' "$HOME/.config/agentworks/config.toml" 2>/dev/null)'
+        "$(agw resource list --kind session_template --names-only 2>/dev/null"
+        " | awk -F: '{print $2}')"
     ),
     "vm_templates": (
-        "$(sed -n 's/^\\[vm_templates\\.\\([^]]*\\)\\]/\\1/p' \"$HOME/.config/agentworks/config.toml\" 2>/dev/null)"
+        "$(agw resource list --kind vm_template --names-only 2>/dev/null"
+        " | awk -F: '{print $2}')"
     ),
     "agent_templates": (
-        "$(sed -n 's/^\\[agent_templates\\.\\([^]]*\\)\\]/\\1/p' \"$HOME/.config/agentworks/config.toml\" 2>/dev/null)"
+        "$(agw resource list --kind agent_template --names-only 2>/dev/null"
+        " | awk -F: '{print $2}')"
     ),
     "secrets": ("$(agw secret list --names-only 2>/dev/null)"),
     "resource_kinds": (

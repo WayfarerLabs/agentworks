@@ -22,18 +22,14 @@ DYNAMIC_SNIPPETS: dict[str, str] = {
         ' Where-Object { $_ -like "$wordToComplete*" })'
     ),
     "ws_templates": (
-        "& { $f = Join-Path $env:USERPROFILE '.config/agentworks/config.toml';"
-        " if (Test-Path $f) {"
-        " Get-Content $f | Select-String '^\\[workspace_templates\\.([^\\]]+)\\]'"
-        " | ForEach-Object { $_.Matches[0].Groups[1].Value }"
-        ' | Where-Object { $_ -like "$wordToComplete*" } } }'
+        "(agw resource list --kind workspace_template --names-only 2>$null"
+        " | ForEach-Object { ($_ -split ':', 2)[1] }"
+        ' | Where-Object { $_ -like "$wordToComplete*" })'
     ),
     "git_credentials": (
-        "& { $f = Join-Path $env:USERPROFILE '.config/agentworks/config.toml';"
-        " if (Test-Path $f) {"
-        " Get-Content $f | Select-String '^\\[git_credentials\\.([^\\]]+)\\]'"
-        " | ForEach-Object { $_.Matches[0].Groups[1].Value }"
-        ' | Where-Object { $_ -like "$wordToComplete*" } } }'
+        "(agw resource list --kind git_credentials --names-only 2>$null"
+        " | ForEach-Object { ($_ -split ':', 2)[1] }"
+        ' | Where-Object { $_ -like "$wordToComplete*" })'
     ),
     "catalog_entries": (
         "& { agw catalog list 2>$null"
@@ -54,26 +50,19 @@ DYNAMIC_SNIPPETS: dict[str, str] = {
         ' Where-Object { $_ -like "$wordToComplete*" })'
     ),
     "session_templates": (
-        "& { $builtins = @('default');"
-        " $f = Join-Path $env:USERPROFILE '.config/agentworks/config.toml';"
-        " $user = @(); if (Test-Path $f) {"
-        " $user = Get-Content $f | Select-String '^\\[session_templates\\.([^\\]]+)\\]'"
-        " | ForEach-Object { $_.Matches[0].Groups[1].Value } }"
-        ' ($builtins + $user) | Where-Object { $_ -like "$wordToComplete*" } }'
+        "(agw resource list --kind session_template --names-only 2>$null"
+        " | ForEach-Object { ($_ -split ':', 2)[1] }"
+        ' | Where-Object { $_ -like "$wordToComplete*" })'
     ),
     "vm_templates": (
-        "& { $f = Join-Path $env:USERPROFILE '.config/agentworks/config.toml';"
-        " $t = @(); if (Test-Path $f) {"
-        " $t = Get-Content $f | Select-String '^\\[vm_templates\\.([^\\]]+)\\]'"
-        " | ForEach-Object { $_.Matches[0].Groups[1].Value } }"
-        ' $t | Where-Object { $_ -like "$wordToComplete*" } }'
+        "(agw resource list --kind vm_template --names-only 2>$null"
+        " | ForEach-Object { ($_ -split ':', 2)[1] }"
+        ' | Where-Object { $_ -like "$wordToComplete*" })'
     ),
     "agent_templates": (
-        "& { $f = Join-Path $env:USERPROFILE '.config/agentworks/config.toml';"
-        " $t = @(); if (Test-Path $f) {"
-        " $t = Get-Content $f | Select-String '^\\[agent_templates\\.([^\\]]+)\\]'"
-        " | ForEach-Object { $_.Matches[0].Groups[1].Value } }"
-        ' $t | Where-Object { $_ -like "$wordToComplete*" } }'
+        "(agw resource list --kind agent_template --names-only 2>$null"
+        " | ForEach-Object { ($_ -split ':', 2)[1] }"
+        ' | Where-Object { $_ -like "$wordToComplete*" })'
     ),
     "secrets": (
         "(agw secret list --names-only 2>$null |"

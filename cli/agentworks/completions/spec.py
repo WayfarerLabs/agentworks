@@ -47,16 +47,17 @@ class CommandSpec:
 #   "vms"             -> agw vm list --names-only
 #   "vm_hosts"        -> agw vm-host list --names-only
 #   "workspaces"      -> agw workspace list --names-only
-#   "ws_templates"    -> [workspace_templates.*] sections in config.toml
-#   "git_credentials" -> [git_credentials.*] sections in config.toml
+#   "ws_templates"    -> agw resource list --kind workspace_template --names-only
+#   "git_credentials" -> agw resource list --kind git_credentials --names-only
 #   "catalog_entries" -> all entry names from built-in + custom catalog
-#                        (see "Not in scope" in issue #147 -- catalog
-#                        rows are typed, no clean "name per row" stream)
+#                        (still parses `agw catalog list` table rows;
+#                        candidate to migrate to Registry-sourced once
+#                        catalog list gains --names-only)
 #   "sessions"        -> agw session list --names-only
-#   "session_templates" -> [session_templates.*] sections in config.toml
+#   "session_templates" -> agw resource list --kind session_template --names-only
 #   "agents"          -> agw agent list --names-only
-#   "vm_templates"    -> [vm_templates.*] sections in config.toml
-#   "agent_templates" -> [agent_templates.*] sections in config.toml
+#   "vm_templates"    -> agw resource list --kind vm_template --names-only
+#   "agent_templates" -> agw resource list --kind agent_template --names-only
 #   "consoles"        -> agw console list --names-only
 #   "secrets"         -> agw secret list --names-only
 #                        (sources from the Resource Registry so
@@ -68,6 +69,15 @@ class CommandSpec:
 #   "resource_names"  -> agw resource list --kind <prev> --names-only
 #                        (same kind:name stream, scoped by the typed kind;
 #                        the snippet awk-splits to get just the name)
+#
+# The template + git_credentials completers source from the Resource
+# Registry (via `agw resource list --kind X --names-only`) rather than
+# regex-scraping `[X.*]` sections out of config.toml. The old sed-based
+# approach had a subtle bug: the regex `\[X\.([^]]*)\]` greedy-matched
+# sub-section headers too, so `[vm_templates.default.env]` emitted
+# `default.env` as a bogus completion candidate. Registry-sourced
+# completion also picks up the framework's always-materialized defaults
+# and auto-declared entries the raw config text doesn't have.
 #
 # The ``--names-only`` flag is the explicit completion contract:
 # every list command that backs a completer emits one name per line
