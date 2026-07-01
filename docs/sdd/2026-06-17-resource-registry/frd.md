@@ -547,14 +547,36 @@ agw resource describe <kind> <name>
   reliably populated across all kinds; operators see "what this resource is for and who's asking"
   without the renderer needing kind-specific knowledge.
 - `agw resource describe <kind> <name>` shows the framework-level detail view: kind, name, origin
-  with full detail, all registered usages, and description. **Stops at framework-uniform fields** --
-  the set the framework knows how to render without semantic knowledge of the kind: name, kind,
-  origin, usage, and description (the operator-set or polish-synthesized text per R9). Kind-specific
-  detail (secret backend mappings, template inheritance chain, resolved fields, ...) belongs in the
-  kind's own `describe` command -- rendering them would require semantic knowledge of the kind that
-  the cross-kind command intentionally doesn't carry. The two-positional shape is required because
+  with full detail, all registered references, all live instances that use it per current config,
+  and description. **Stops at framework-uniform fields** -- the set the framework knows how to
+  render without semantic knowledge of the kind: name, kind, origin, references, used-by, and
+  description (the operator-set or polish-synthesized text per R9). Kind-specific detail (secret
+  backend mappings, template inheritance chain, resolved fields, ...) belongs in the kind's own
+  `describe` command -- rendering them would require semantic knowledge of the kind that the
+  cross-kind command intentionally doesn't carry. The two-positional shape is required because
   resource names are unique only _within_ a kind, not across kinds (a `default` secret and a
   `default` vm_template are different resources).
+
+### Cross-kind and per-kind describe: overlap is intentional
+
+Every per-kind describe command (`agw secret describe` today; hypothetical
+`agw vm-template describe`, `agw agent-template describe`, ... in future SDDs) shows the
+framework-uniform sections (Referenced by, Used by, header) **plus** its kind-specific extensions
+(secret backend mappings + resolution preview for secrets; resolved inheritance chain + effective
+fields for a future template describe; etc.). The overlap with `agw resource describe` is
+deliberate:
+
+- Per-kind describe is the _complete_ view for one kind. An operator running
+  `agw secret describe api-key` expects everything about that secret in one place -- including who
+  references it and who uses it. Making them bounce to `agw resource describe secret api-key` for
+  the framework fields and back for the kind-specific ones would be worse UX.
+- Cross-kind describe is the _truncated_ view usable across all kinds. It's the shortcut when an
+  operator wants a framework-level look at any resource without knowing (or typing) the kind's
+  specialized command.
+
+Kind-specific detail lives only in the per-kind describe. Framework-uniform fields live in both. The
+framework-uniform section labels (`Referenced by:`, `Used by (per current config):`) match verbatim
+between the two surfaces so operators reading either see the same shape for the same data.
 
 `agw resource` is gated to Phase 2 because the cross-kind view only earns its keep once multiple
 kinds are in the registry; with only secrets in Phase 1 it would be redundant with `agw secret list`
