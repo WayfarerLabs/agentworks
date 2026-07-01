@@ -1,18 +1,21 @@
-"""Framework strategies for the catalog kinds: ``apt_package``,
-``system_install_command``, ``user_install_command``.
+"""Framework strategies for the catalog kinds: ``apt_source``,
+``apt_package``, ``system_install_command``, ``user_install_command``.
 
-All three use the **error miss policy**: a typo in
-``[vm_templates.*].apt_packages = ["..."]`` etc. surfaces as a
-framework miss-policy error at ``build_registry`` time, citing the
-reference's source. There is no auto-declare path -- catalog
-entries are operator-declared in code (the built-in catalog ships with
-the package) or operator-declared in the operator's TOML, and
-references must resolve to a known name.
+All four use the **error miss policy**: a typo in
+``[vm_templates.*].apt_packages = ["..."]`` etc. -- or in an apt package's
+own ``apt_sources`` list -- surfaces as a framework miss-policy error at
+``build_registry`` time, citing the reference's source. There is no
+auto-declare path: catalog entries are code-declared (the built-in
+catalog ships with the framework) or operator-declared in the operator's
+TOML, and references must resolve to a known name.
 
-``apt_source`` is deliberately NOT a framework kind: it's an internal
-cross-reference inside the catalog (validated by
-``catalog._validate_references``), not directly referenced by any
-operator-facing config field.
+``apt_source`` was originally not a framework kind (only operator-facing
+config referenced by name got promoted in Phase 2b.0). It joined the
+framework later so the ``apt_package -> apt_source`` dependency graph
+becomes visible on ``agw resource describe apt_source <name>``'s
+``Referenced by:`` section, and so unknown-source errors flow through
+the same miss-policy pipeline as everything else instead of a
+catalog-specific validator.
 """
 
 from __future__ import annotations
@@ -45,6 +48,18 @@ def _synthesize_no_default(kind: str, references: Sequence[ResourceReference]) -
         f"the {kind} kind has miss_policy='error'; synthesize should "
         f"never be invoked (the framework raises ConfigError first)"
     )
+
+
+@dataclass(frozen=True)
+class _AptSourceKind:
+    """Implementation of ``ResourceKind`` for ``"apt_source"``."""
+
+    kind: str = "apt_source"
+    miss_policy: Literal["auto-declare", "error"] = "error"
+    auto_declare_names: frozenset[str] | None = None
+
+    def synthesize(self, references: Sequence[ResourceReference]) -> Any:
+        return _synthesize_no_default(self.kind, references)
 
 
 @dataclass(frozen=True)
@@ -83,6 +98,7 @@ class _UserInstallCommandKind:
         return _synthesize_no_default(self.kind, references)
 
 
+KIND_REGISTRY["apt_source"] = _AptSourceKind()
 KIND_REGISTRY["apt_package"] = _AptPackageKind()
 KIND_REGISTRY["system_install_command"] = _SystemInstallCommandKind()
 KIND_REGISTRY["user_install_command"] = _UserInstallCommandKind()

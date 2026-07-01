@@ -1,15 +1,19 @@
-"""Tests for Phase 2b's catalog kinds: ``apt_package``,
+"""Tests for Phase 2b's catalog kinds: ``apt_source``, ``apt_package``,
 ``system_install_command``, ``user_install_command``.
 
 Coverage:
 
 - Each kind's shape (``miss_policy == "error"``, no auto-declare names).
-- The error miss policy fires with the requirement's source on typo'd
+- The error miss policy fires with the reference's source on typo'd
   references from operator config.
 - Known catalog names resolve.
 - ``synthesize`` raises ``NoUnreferencedDefaultError`` per Phase 2a's
-  empty-requirements contract (the kinds never auto-declare; the
+  empty-references contract (the kinds never auto-declare; the
   contract is still defined).
+- ``apt_package -> apt_source`` edges: an unknown source name in a
+  package's ``apt_sources`` field surfaces via the framework's miss
+  policy; a known source shows up in the ``apt_source`` Resource's
+  inbound ``references`` after finalize.
 """
 
 from __future__ import annotations
@@ -24,7 +28,12 @@ from agentworks.config import load_config
 from agentworks.errors import ConfigError
 from agentworks.resources import KIND_REGISTRY, NoUnreferencedDefaultError
 
-CATALOG_KINDS = ("apt_package", "system_install_command", "user_install_command")
+CATALOG_KINDS = (
+    "apt_source",
+    "apt_package",
+    "system_install_command",
+    "user_install_command",
+)
 
 
 def _write_cfg(path: Path, body: str = "") -> Path:
@@ -160,3 +169,125 @@ def test_known_apt_package_reference_resolves(tmp_path: Path) -> None:
     assert any(
         u.source == ("vm_template", "default") for u in gh.references
     ), "vm_template:default reference should be on the apt_package"
+
+
+# -- apt_package -> apt_source edges ---------------------------------------
+
+
+def test_apt_source_kind_published_from_builtin_catalog(tmp_path: Path) -> None:
+    """The catalog publisher emits ``apt_source`` Resources with
+    ``code-declared`` origin, parallel to ``apt_package`` / the
+    install-command kinds. The built-in catalog ships at least one
+    apt_source (``github`` today), so the registry has it after
+    ``build_registry``.
+    """
+    cfg = load_config(
+        _write_cfg(tmp_path / "config.toml"),
+        warn_issues=False,
+    )
+    registry = build_registry(cfg)
+    names = [name for name, _ in registry.iter_kind_items("apt_source")]
+    assert names, "built-in catalog should publish at least one apt_source"
+    for name in names:
+        src = registry.lookup("apt_source", name)
+        assert src.origin.variant == "code-declared"
+
+
+def test_apt_package_references_flow_to_apt_source(tmp_path: Path) -> None:
+    """``AptPackageEntry.referenced_resources()`` emits one
+    ``ResourceReference(kind="apt_source", ...)`` per name in the
+    package's ``apt_sources`` field. After finalize, the apt_source's
+    ``references`` collection includes the referencing apt_package --
+    the dependency graph that was previously implicit in
+    ``_validate_references`` is now visible via
+    ``agw resource describe apt_source <name>``.
+    """
+    cfg = load_config(
+        _write_cfg(
+            tmp_path / "config.toml",
+            """
+            [vm_templates.default]
+            apt_packages = ["gh"]
+            """,
+        ),
+        warn_issues=False,
+    )
+    registry = build_registry(cfg)
+    # ``gh`` depends on the ``github-cli`` apt_source in the built-in
+    # catalog; check the inbound edge lands on the source.
+    github = registry.lookup("apt_source", "github-cli")
+    referencing_pkgs = [
+        entry.source for entry in github.references
+        if entry.source[0] == "apt_package"
+    ]
+    assert ("apt_package", "gh") in referencing_pkgs, (
+        f"expected apt_package:gh to reference apt_source:github-cli; got "
+        f"{referencing_pkgs}"
+    )
+
+
+def test_unknown_apt_source_reference_errors_via_framework(
+    tmp_path: Path,
+) -> None:
+    """An apt_package pointing at a non-existent apt_source used to
+    error at catalog load via ``_validate_references``. That validator
+    was retired; the framework's ``AptSourceKind.miss_policy = "error"``
+    now catches it at ``build_registry`` time. The error message names
+    the missing source; the offending package's identity flows through
+    the ``ResourceReference.source`` field on the reference.
+    """
+    cfg = load_config(
+        _write_cfg(
+            tmp_path / "config.toml",
+            """
+            [apt_packages.bad-pkg]
+            description = "Package with an unknown source"
+            apt = ["bad"]
+            apt_sources = ["nonexistent-source"]
+            """,
+        ),
+        warn_issues=False,
+    )
+    with pytest.raises(ConfigError, match="nonexistent-source"):
+        build_registry(cfg)
+
+
+def test_operator_declared_apt_source_layers_over_builtin(
+    tmp_path: Path,
+) -> None:
+    """Operator-declared ``[apt_sources.<name>]`` in config.toml
+    re-publishes the source with ``operator-declared`` origin (the
+    catalog publisher runs before ``Config.publish_to`` per the
+    build_registry publisher chain, so the operator's declaration
+    overrides the built-in for the same name). The same layering
+    pattern that already covers apt_packages.
+    """
+    cfg = load_config(
+        _write_cfg(
+            tmp_path / "config.toml",
+            """
+            [apt_sources.custom-src]
+            description = "Operator-defined source"
+            key_url = "https://example.com/key.gpg"
+            key_path = "/etc/apt/keyrings/custom-src.gpg"
+            source = "deb [signed-by=/etc/apt/keyrings/custom-src.gpg] https://example.com/apt stable main"
+            source_file = "custom-src.list"
+
+            [apt_packages.custom-pkg]
+            description = "Package using the operator source"
+            apt = ["custom-pkg"]
+            apt_sources = ["custom-src"]
+            """,
+        ),
+        warn_issues=False,
+    )
+    registry = build_registry(cfg)
+
+    custom_src = registry.lookup("apt_source", "custom-src")
+    assert custom_src.origin.variant == "operator-declared"
+    assert custom_src.name == "custom-src"
+    # The referencing package shows up on the source's inbound edges.
+    assert any(
+        entry.source == ("apt_package", "custom-pkg")
+        for entry in custom_src.references
+    )

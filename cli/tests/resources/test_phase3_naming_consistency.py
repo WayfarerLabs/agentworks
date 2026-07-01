@@ -132,6 +132,7 @@ def test_resource_kinds_have_references_field_not_usage() -> None:
     """
     from agentworks.catalog import (
         AptPackageEntry,
+        AptSourceEntry,
         SystemInstallCommandEntry,
         UserInstallCommandEntry,
     )
@@ -151,6 +152,7 @@ def test_resource_kinds_have_references_field_not_usage() -> None:
     )
 
     resource_types = [
+        AptSourceEntry,
         AptPackageEntry,
         SystemInstallCommandEntry,
         UserInstallCommandEntry,

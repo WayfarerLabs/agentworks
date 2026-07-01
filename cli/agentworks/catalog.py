@@ -19,7 +19,7 @@ from agentworks.errors import ExternalError
 if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.resources import Origin, Registry
-    from agentworks.resources.reference import ReferenceEntry
+    from agentworks.resources.reference import ReferenceEntry, ResourceReference
 
 
 class CatalogError(ExternalError):
@@ -31,6 +31,13 @@ class CatalogError(ExternalError):
 
 @dataclass(frozen=True)
 class AptSourceEntry:
+    """One apt repository source. Referenced by ``AptPackageEntry.apt_sources``
+    when a package requires a source's key + list stanza before it can be
+    installed. First-class Registry Resource -- ``origin`` set by the
+    catalog publisher, ``references`` attached by the framework's finalize
+    pass from the apt_packages that name it.
+    """
+
     name: str
     description: str
     key_url: str
@@ -38,6 +45,8 @@ class AptSourceEntry:
     source: str
     source_file: str
     key_dearmor: bool = False
+    origin: Origin | None = None
+    references: tuple[ReferenceEntry, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -52,6 +61,32 @@ class AptPackageEntry:
     # by the framework's finalize pass from incoming references.
     origin: Origin | None = None
     references: tuple[ReferenceEntry, ...] = ()
+
+    def referenced_resources(self) -> list[ResourceReference]:
+        """Emit one ``ResourceReference`` per name in ``apt_sources``. The
+        framework's ``apt_source`` kind uses an ``error`` miss policy, so
+        an unknown source name surfaces as a clean ``ConfigError`` at
+        ``build_registry`` time with the referencing package's identity
+        attached (rather than the pre-Phase-2b silent ordering assumption
+        that packages must appear after their sources in TOML).
+
+        The registry attaches the corresponding ``ReferenceEntry`` to
+        each ``AptSourceEntry`` during finalize, so
+        ``agw resource describe apt_source github`` shows every apt_package
+        that depends on it -- the dependency graph that was previously
+        implicit is now visible.
+        """
+        from agentworks.resources.reference import ResourceReference
+
+        return [
+            ResourceReference(
+                name=source_name,
+                kind="apt_source",
+                usage=f"the {source_name} apt source",
+                source=("apt_package", self.name),
+            )
+            for source_name in self.apt_sources
+        ]
 
 
 @dataclass(frozen=True)
@@ -261,58 +296,93 @@ def load_catalog(config: Config) -> ResolvedCatalog:
     system_cmds = {**builtin.system_install_commands, **custom_system_cmds}
     user_install_cmds = {**builtin.user_install_commands, **custom_user_install_cmds}
 
-    catalog = ResolvedCatalog(
+    return ResolvedCatalog(
         apt_sources=apt_sources,
         apt_packages=apt_packages,
         system_install_commands=system_cmds,
         user_install_commands=user_install_cmds,
     )
 
-    _validate_references(catalog)
-    return catalog
+
+# ``_validate_references`` retired: the framework validates
+# apt_package -> apt_source edges via ``AptSourceKind``'s ``error`` miss
+# policy at ``Registry.finalize`` time (the reference is emitted by
+# ``AptPackageEntry.referenced_resources()``). Same pattern as Phase 2b.0
+# dropping ``validate_selections``: single source of truth for
+# reference validation lives in the framework.
 
 
-def _validate_references(catalog: ResolvedCatalog) -> None:
-    """Validate cross-references within the catalog."""
-    for name, pkg in catalog.apt_packages.items():
-        for src_name in pkg.apt_sources:
-            if src_name not in catalog.apt_sources:
-                raise CatalogError(f"apt_packages.{name} references unknown apt source: {src_name}")
-
-
-def publish_to(registry: Registry) -> None:
-    """Publish the code-defined catalog entries into the registry as
-    first-class Resources.
+def publish_to(registry: Registry, config: Config | None = None) -> None:
+    """Publish catalog entries into the registry as first-class Resources.
 
     Phase 2b: built-in catalog entries become Registry citizens with
-    ``Origin.code_declared(source="agentworks.catalog")``. The three
-    catalog kinds (``apt_package``, ``system_install_command``,
-    ``user_install_command``) use the framework's error miss policy,
-    so a typo'd reference from
+    ``Origin.code_declared(source="agentworks.catalog")``. The four
+    catalog kinds (``apt_source``, ``apt_package``,
+    ``system_install_command``, ``user_install_command``) use the
+    framework's error miss policy, so a typo'd reference from
     ``[vm_templates.*].apt_packages = ["..."]`` etc. surfaces as a
     framework error citing the reference's source.
 
-    Called from ``agentworks.bootstrap.build_registry`` BEFORE
-    ``Config.publish_to`` so any operator-declared override of a
-    catalog entry (re-publishing the same ``(kind, name)`` with
-    operator-declared origin) layers on top of the code-declared base.
+    ``apt_source`` is published even though operators don't reference
+    sources directly from templates: apt_packages reference them via
+    their ``apt_sources`` field, so the framework needs the sources in
+    the registry to resolve the ``AptPackageEntry.referenced_resources()``
+    edges cleanly. The dependency graph
+    (apt_package -> apt_source) becomes visible in
+    ``agw resource describe`` via the ``Referenced by:`` section on
+    each apt_source.
 
-    ``apt_sources`` is intentionally not a framework kind: it's an
-    internal cross-reference inside the catalog (validated by
-    ``_validate_references``), not directly referenced by any
-    operator-facing config field.
+    When ``config`` is provided, operator-declared catalog entries
+    (``[apt_sources.<name>]``, ``[apt_packages.<name>]``,
+    ``[system_install_commands.<name>]``,
+    ``[user_install_commands.<name>]`` in the operator's TOML) are
+    published on top of the built-in entries with
+    ``Origin.operator_declared(...)``. Same last-writer-wins pattern
+    the other publishers use: catalog runs first, then Config, then
+    other publishers -- an operator's override lands on top of the
+    code-declared base. Config-side publishing lives here (rather than
+    in ``Config.publish_to``) because parsing operator catalog entries
+    is catalog's expertise; Config just stashes the raw TOML dicts.
     """
     from agentworks.resources import Origin
 
     builtin = load_builtin_catalog()
     code_origin = Origin.code_declared(source="agentworks.catalog")
 
+    for src_name, src in builtin.apt_sources.items():
+        registry.add("apt_source", src_name, src, code_origin)
     for pkg_name, pkg in builtin.apt_packages.items():
         registry.add("apt_package", pkg_name, pkg, code_origin)
     for sys_name, sys_cmd in builtin.system_install_commands.items():
         registry.add("system_install_command", sys_name, sys_cmd, code_origin)
     for user_name, user_cmd in builtin.user_install_commands.items():
         registry.add("user_install_command", user_name, user_cmd, code_origin)
+
+    if config is None:
+        return
+
+    # Operator-declared catalog entries. Parse the raw TOML dicts Config
+    # stashed at load-time, publish each with operator-declared origin.
+    # Line-level ``declared_at`` info isn't attached to catalog entries
+    # today (they predate Phase 0's section-line scanner integration for
+    # this kind); the operator-declared origin carries the config file
+    # path with ``line=0`` -- the renderer drops the parenthetical for
+    # that case, which is consistent with other sentinel-line origins.
+    from agentworks.config import CONFIG_PATH
+
+    op_origin = Origin.operator_declared(file=CONFIG_PATH, line=0)
+    for src_name, src in _load_apt_sources(config.apt_sources).items():
+        registry.add("apt_source", src_name, src, op_origin)
+    for pkg_name, pkg in _load_apt_packages(config.apt_packages).items():
+        registry.add("apt_package", pkg_name, pkg, op_origin)
+    for sys_name, sys_cmd in _load_system_commands(
+        config.system_install_commands
+    ).items():
+        registry.add("system_install_command", sys_name, sys_cmd, op_origin)
+    for user_name, user_cmd in _load_user_commands(
+        config.user_install_commands
+    ).items():
+        registry.add("user_install_command", user_name, user_cmd, op_origin)
 
 
 # validate_selections removed in Phase 2b.0: the framework's catalog

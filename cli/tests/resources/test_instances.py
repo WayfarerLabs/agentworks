@@ -586,6 +586,7 @@ def test_kinds_without_instances_hook_inherit_dash(tmp_path: Path) -> None:
     """
 
     expected_no_instances = (
+        "apt_source",
         "apt_package",
         "system_install_command",
         "user_install_command",

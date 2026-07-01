@@ -37,7 +37,7 @@ def build_registry(config: Config) -> Registry:
     from agentworks import catalog, git_credentials, secrets
 
     registry = Registry.empty()
-    catalog.publish_to(registry)
+    catalog.publish_to(registry, config)
     git_credentials.publish_to(registry)
     secrets.publish_to(registry)
     config.publish_to(registry)

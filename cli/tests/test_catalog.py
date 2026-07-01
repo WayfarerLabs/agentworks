@@ -142,7 +142,21 @@ def test_user_entries_extend_builtin() -> None:
     assert "bun" in catalog.user_install_commands
 
 
-def test_bad_apt_source_reference() -> None:
+def test_bad_apt_source_reference_defers_to_framework() -> None:
+    """The catalog loader used to raise ``CatalogError`` at load time
+    for an apt_package referencing an unknown apt_source. That validation
+    moved to the framework: ``AptPackageEntry.referenced_resources()``
+    emits a ``ResourceReference(kind="apt_source", ...)`` per source,
+    and ``AptSourceKind``'s ``error`` miss policy at finalize raises the
+    framework's ``ConfigError`` when the source doesn't resolve.
+
+    Load-time catalog parsing still succeeds; the framework catches the
+    typo at ``build_registry`` time. Same single-source-of-truth pattern
+    Phase 2b.0 established with ``validate_selections``.
+    """
+    from agentworks.bootstrap import build_registry
+    from agentworks.errors import ConfigError
+
     config = _make_config_with_overrides(
         apt_packages={
             "bad-pkg": {
@@ -152,8 +166,13 @@ def test_bad_apt_source_reference() -> None:
             },
         },
     )
-    with pytest.raises(CatalogError, match="unknown apt source.*nonexistent"):
-        load_catalog(config)
+    # Load-time: no error (parser stays permissive; framework validates).
+    catalog = load_catalog(config)
+    assert "bad-pkg" in catalog.apt_packages
+
+    # build_registry-time: framework's miss policy fires.
+    with pytest.raises(ConfigError, match="nonexistent"):
+        build_registry(config)
 
 
 # validate_selections coverage moved to the framework path (see
