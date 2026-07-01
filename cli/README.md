@@ -656,14 +656,21 @@ agw secret describe tailscale-auth-key
 
 `describe` reports state -- it does not prompt and does not resolve the secret's value.
 
-`agw doctor`'s Secrets group leads with one row naming the active backend chain
-(`Configured backends: env-var, prompt`). Then one row per declared secret showing whether the chain
-would resolve it (`would resolve via env-var`, `would resolve via prompt`, or
-`not available in any backend`). Per-secret config-validity findings round out the group: unused
-secret declarations and `backend_mappings.<kind>` entries pointing at undeclared or inactive
-backends. `AGENTWORKS_*` identity overrides surface in the Configuration group (they're a
-config-load warning). Broken `{ secret = "..." }` references are caught earlier as a hard
-config-load error before doctor runs.
+`agw doctor`'s Secrets group emits exactly one row per declared secret:
+
+- **OK** when at least one active backend would resolve the secret at runtime
+  (`would resolve via env-var`, `would resolve via prompt`, ...).
+- **WARN** when nothing in the chain would resolve it (config-valid but no path to a value, e.g.
+  env-var has no matching env var set and `prompt` is opted out via
+  `backend_mappings.prompt = false`).
+- **FAIL** when `backend_mappings` references an unknown backend kind (no `[secret_backends.<kind>]`
+  section and not a built-in like `env-var` / `prompt`).
+
+When no secrets are declared, a single info row states `Declared secrets: none`.
+Backend-applicability detail (per-backend soft-skip reasons, inactive mappings, per-secret
+references) lives in `agw secret list` and `agw secret describe`. `AGENTWORKS_*` identity overrides
+surface in the Configuration group (they're a config-load warning). Broken `{ secret = "..." }`
+references are caught earlier as a hard config-load error before doctor runs.
 
 ### Mise (Polyglot Tool Manager)
 

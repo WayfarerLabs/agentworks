@@ -668,12 +668,13 @@ agw env show [--vm NAME] [--workspace NAME] [--agent NAME] [--session NAME] [--r
 
 ### `agw doctor` additions
 
-- "Secrets" section: leads with one row naming the active backend chain
-  (`Configured backends: env-var, prompt`). Then one row per declared secret with the runtime
-  outcome (`would resolve via <kind>` or `not available in any backend`). Per-secret config-validity
-  findings follow: unused declarations, `backend_mappings.<kind>` pointing at undeclared or inactive
-  backends. See `locked.md`'s "Operator surface" section for the canonical shape; this section
-  captures intent.
+- "Secrets" section: exactly one row per declared secret. OK when the active chain would resolve it
+  (`would resolve via <kind>`); WARN when nothing in the chain would resolve it (config-valid but no
+  path to a value); FAIL when `backend_mappings` references an unknown backend kind. When no secrets
+  are declared, a single info row states `Declared secrets: none`. Backend-applicability detail
+  (per-backend soft-skip reasons, inactive mappings) lives in `agw secret list` and
+  `agw secret describe`. See `locked.md`'s "Operator surface" section for the canonical shape; this
+  section captures intent.
 - `AGENTWORKS_*` identity overrides surface in the Configuration group (config-load warning).
 - Broken `secret =` references are caught at config-load time as a hard error before doctor runs;
   nothing for doctor to report.

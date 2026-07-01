@@ -76,11 +76,13 @@ updates this lockfile with a dated entry.
 - **`agw env show`** (FRD R6, Phase 5). Inspect the merged env at any scope (`--vm` / `--workspace`
   / `--agent` / `--session`) with auto-resolve from any single context. Secrets render as
   `<from secret: NAME>` by default; `--reveal-secrets` resolves through the active backend chain.
-- **`agw doctor` Secrets health group** (FRD R6, Phase 5). Leads with one row naming the active
-  backend chain (`Configured backends: env-var, prompt`). For each declared secret, reports one row
-  showing whether and how the active chain would resolve it (`would resolve via env-var`,
-  `would resolve via prompt`, or `not available in any backend`). Also flags unused secret
-  declarations and `backend_mappings.<kind>` pointing at undeclared or inactive backends.
+- **`agw doctor` Secrets health group** (FRD R6, Phase 5). Emits exactly one row per declared
+  secret. OK when the active chain would resolve it (`would resolve via env-var`,
+  `would resolve via prompt`, ...); WARN when nothing in the chain would resolve it (config-valid
+  but no path to a value); FAIL when `backend_mappings` references an unknown backend kind. When no
+  secrets are declared, a single info row states `Declared secrets: none`. Backend-applicability
+  detail (per-backend soft-skip reasons, inactive mappings) lives in `agw secret list`; unused
+  declarations surface in `agw secret describe`'s `Referenced by: (none recorded)` line.
   `AGENTWORKS_*` identity overrides surface in the Configuration group (they're a config-load
   warning; doctor doesn't need a dedicated group for them).
 - **`agw secret list`** (Phase 5 / FRD R6 discoverability). Static (secrets x backends) table. Rows
