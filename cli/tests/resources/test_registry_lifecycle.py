@@ -149,6 +149,7 @@ def test_build_registry_publishes_catalog_before_config(
     r = build_registry(cfg)
 
     for catalog_kind in (
+        "apt_source",
         "apt_package",
         "system_install_command",
         "user_install_command",

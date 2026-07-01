@@ -363,11 +363,24 @@ def publish_to(registry: Registry, config: Config | None = None) -> None:
 
     # Operator-declared catalog entries. Parse the raw TOML dicts Config
     # stashed at load-time, publish each with operator-declared origin.
-    # Line-level ``declared_at`` info isn't attached to catalog entries
-    # today (they predate Phase 0's section-line scanner integration for
-    # this kind); the operator-declared origin carries the config file
-    # path with ``line=0`` -- the renderer drops the parenthetical for
-    # that case, which is consistent with other sentinel-line origins.
+    #
+    # Line-level ``declared_at`` isn't attached per-entry yet: catalog
+    # loaders don't consume Phase 0's ``_SectionLineMap`` and Config
+    # stores raw dicts (not typed entries) for these sections. Publishing
+    # here uses ``Origin.operator_declared(file=CONFIG_PATH, line=0)`` --
+    # matches the same sentinel Phase 0 uses for singleton-omitted-
+    # section defaults (``named_console_template:default`` when there's
+    # no ``[named_console]``). The renderer drops the parenthetical for
+    # ``line=0``, so operators see "operator-declared" without file:line
+    # for now.
+    #
+    # Plumbing declared_at through catalog entries properly is a small
+    # follow-up (add ``declared_at: SourceLocation`` to the four entry
+    # dataclasses, thread ``_SectionLineMap`` into the ``_load_*``
+    # helpers, either at load_config time or via a public
+    # ``config.declared_at_for(...)`` helper); tracked alongside the
+    # ``named_console_template`` singleton-omitted case in the SDD
+    # follow-ups.
     from agentworks.config import CONFIG_PATH
 
     op_origin = Origin.operator_declared(file=CONFIG_PATH, line=0)

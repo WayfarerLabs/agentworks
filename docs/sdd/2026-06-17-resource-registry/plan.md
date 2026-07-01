@@ -748,6 +748,15 @@ code.
   admin applies: add `name: str = "default"` to `NamedConsoleConfig`; update `Config.publish_to` to
   use `self.named_console.name` (currently hardcoded `"default"`); update the kind module's
   docstring to drop the singleton framing. No framework-side work needed.
+- **Catalog entries lack a declared_at field.** The apt_source follow-up wired operator-declared
+  catalog entries (apt_sources / apt_packages / system_install_commands / user_install_commands)
+  into the catalog publisher. Those entries publish today with a line=0 Origin (Phase 0's "no line
+  info available" sentinel) because the four catalog entry dataclasses don't carry a declared_at
+  SourceLocation field yet, and Config stores raw dicts (not typed entries) for these sections. To
+  give operators file:line traceability on catalog resources, add declared_at to the four
+  dataclasses, thread the section-line map into the load helpers, and populate at load_config time.
+  Same underlying gap the named_console_template:default line=0 case has; a single follow-up can
+  close both.
 
 ## Sequencing notes
 
