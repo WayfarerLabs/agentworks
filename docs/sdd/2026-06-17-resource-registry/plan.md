@@ -758,6 +758,57 @@ code.
   Same underlying gap the named_console_template:default line=0 case has; a single follow-up can
   close both.
 
+## Plugin SDD prep (deferred to future SDD; non-blocking)
+
+Items uncovered during Phases 1-3 that don't gate this SDD but represent the target shape for the
+plugin SDD's follow-on work. Recorded here so the plugin SDD picks them up rather than re-deriving.
+None is a bug in the current design; each is a "when the plugin work happens, here's the cleaner
+model we already convinced ourselves of."
+
+- **Add a provider layer alongside backends.** Today's `secret_backend` Registry kind IS the
+  backend/instance layer: each `[secret_backends.<kind>]` section is an instance keyed by kind
+  (today `<kind>` must equal a known kind -- the config loader hard-errors on any other value -- so
+  each kind has exactly one instance). Sections are optional altogether for env-var / prompt (the
+  resolver is built from `[secret_config].backends` and doesn't require the sections to exist),
+  which is what "keeps working" means below. What's missing is the provider layer: the code
+  capability that a backend names. Under the plugin future the split is:
+  - **Providers** are code-registered (built-in `env-var` / `prompt` from `agentworks.secrets`;
+    plugin providers from their respective plugin packages). NOT Registry citizens -- they're a
+    code-side registry of capabilities. No manifest, no origin, no references.
+  - **Backends** stay as they are: Registry-tracked instances declared in `[secret_backends.*]`.
+    `SecretBackendConfig` gains a `provider: str` field naming the code capability. Multiple
+    backends per provider becomes natural (`[secret_backends.personal] provider = "onepassword"` and
+    `[secret_backends.work] provider = "onepassword"` each with their own per-instance config).
+  - **Validation** is a plain lookup at `SecretBackendConfig` construction:
+    `if provider not in PROVIDER_REGISTRY: raise ConfigError(...)`. No framework miss policy, no
+    `synthesize`, because providers aren't resources.
+  - **Compat for env-var / prompt**: the shipped defaults default `provider = kind` so today's
+    `[secret_backends.env-var]` (empty section) keeps working; `provider = "env-var"` is inferred
+    from the section name.
+
+  No rename of the `secret_backend` Registry kind is needed -- it's already the backend/instance
+  layer.
+
+- **Rename `git_credentials.type` -> `git_credentials.provider` for cross-kind consistency.** The
+  `git_credential_provider` kind is already correctly named (github / azdo are code capabilities).
+  Renaming the `type` field on `git_credentials` to `provider` aligns vocabulary across
+  `secret_backend` and `git_credentials`: both kinds are instances whose provider field names a code
+  capability. Note that today's `git_credential_provider` kind IS a Registry citizen (with
+  restricted names) whereas the target-state secret provider layer is NOT -- an inconsistency worth
+  resolving when the plugin SDD does the pass: either both live in the Registry with restricted
+  names, or both live in the code-side capability registry only.
+
+- **First-class "built-in resource" concept via manifests.** With plugins shipping resources as data
+  (YAML/TOML manifests, not just code registrations), the framework gains a uniform "resources
+  shipped with the app / a plugin" surface. env-var and prompt backends move from the
+  always-materialize pre-step into an app-shipped manifest. Catalog entries (built-in apt packages,
+  install commands, apt sources) similarly move from `catalog.py`'s hardcoded publisher into a
+  manifest. Plugins ship their own manifest for provider + optional default backends when a
+  canonical single-instance case exists (rare -- 1password wouldn't; operators declare their own
+  vaults). The Registry framework doesn't care whether a `code-declared` resource came from a
+  hand-written publisher or a manifest loader; both use the same `Origin.code_declared(source=X)`
+  shape.
+
 ## Sequencing notes
 
 - **Phase order**: 0 -> 1a -> 1b -> 1c -> 1d -> 1e -> ship Phase 1 -> 2a -> 2b -> 2c -> 3a -> 3b ->

@@ -113,8 +113,10 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # time; agentworks never persists secret values to disk.
 #
 # Use `agw secret list` to see how each active backend would look up each
-# declared secret. Use `agw doctor` to surface unused declarations and
-# would-prompt previews.
+# declared secret. Use `agw secret describe <name>` for a full view including
+# which env entries reference the secret (or `Referenced by: (none recorded)`
+# for an unused declaration). `agw doctor` reports one row per secret with
+# the runtime resolution outcome (ok / warn / fail).
 
 # Secret declarations -- one per `{ secret = "<name>" }` reference used anywhere
 # in your config. `description` is required and shown in prompts and

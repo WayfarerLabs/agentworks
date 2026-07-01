@@ -399,23 +399,24 @@ user-defined env -- those are operator preferences that only reach runtime shell
 
 `agw doctor` reports:
 
-- Declared secrets that are not referenced by any env entry (unused declarations).
 - `{ secret = "..." }` references to undeclared secrets (broken references).
 - Effective env conflicts that arise from valid configurations (informational; show which scope wins
   per key).
-- For each declared secret: the first active backend whose `would_attempt(secret)` returns True, and
-  whether resolution would succeed without prompting (a "would I get prompted?" preview).
-- Soft-skip findings: secrets where one or more active backends return False from
-  `would_attempt(secret)` because the secret has no mapping and the backend has no default
-  convention. Helps surface typos in `backend_mappings.<backend>` keys and incomplete migrations
-  when an operator adds a new backend.
-- `backend_mappings.<kind>` keys referencing a backend that is not declared in
-  `[secret_backends.*]`: reported as an error (the kind does not exist in this config).
-- `backend_mappings.<kind>` keys referencing a backend that is declared in `[secret_backends.*]` but
-  not present in `[secret_config].backends`: reported as a warning. This shape is legitimate (an
-  operator may keep mappings authored for a backend they have temporarily disabled, ready to
-  re-enable later) but worth flagging because the mapping has no effect in the current
-  configuration.
+- Exactly one row per declared secret:
+  - **OK**: at least one active backend would resolve the secret at runtime
+    (`would resolve via <kind>`, naming the first backend in the chain whose `would_attempt(secret)`
+    returns True and that would produce a value).
+  - **WARN**: no active backend would resolve it (config is valid but no path to a value -- e.g.
+    env-var has no matching env var set and prompt is opted out via
+    `backend_mappings.prompt = false`).
+  - **FAIL**: the secret's `backend_mappings` references an unknown backend kind (no
+    `[secret_backends.<kind>]` section and not a built-in like env-var / prompt). Config error;
+    nothing to resolve against.
+
+Backend-applicability detail (per-backend soft-skip reasons, inactive mappings) lives in
+`agw secret list`; unused declarations surface in `agw secret describe`'s
+`Referenced by: (none recorded)` line. Doctor stays one row per secret so the summary line remains
+scannable.
 
 Doctor does not prompt for secrets; it only reports state.
 

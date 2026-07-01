@@ -16,7 +16,6 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from agentworks.config import Config
-    from agentworks.env.entry import EnvEntry
 
 
 class Status(Enum):
@@ -326,99 +325,53 @@ def _check_git_credentials(config: Config) -> HealthGroup:
 def _check_secrets(config: Config) -> HealthGroup:
     """Check declared secrets per env-and-secrets SDD FRD R6.
 
-    For each declared secret, reports one row showing whether and how
-    the active backend chain would resolve it. Backend-applicability
-    details (which backends would soft-skip this secret due to
-    ``backend_mappings.<kind> = false`` or a missing mapping) live in
-    ``agw secret list``; doctor stays focused on the runtime outcome.
+    Emits exactly one row per declared secret:
 
-    Also flags configuration-validity issues per secret: unused
-    declarations (secrets nobody references), ``backend_mappings.<kind>``
-    keys whose kind is unknown (no ``[secret_backends.<kind>]`` section),
-    and kinds that are declared but not active in
-    ``[secret_config].backends``. The active resolver chain is
-    ``config.secret_resolver``.
+    - OK: at least one active backend in the chain would resolve the
+      secret at runtime.
+    - WARN: no active backend would resolve it (config is valid but
+      there's no path to a value -- e.g. env-var has no matching env
+      var set and prompt is opted out).
+    - FAIL: the secret's ``backend_mappings`` references an unknown
+      backend kind (no ``[secret_backends.<kind>]`` section and not a
+      built-in like env-var / prompt). Config error; nothing to resolve
+      against. FAIL takes precedence over OK / WARN so the operator
+      fixes the typo before we tell them about resolution.
+
+    Backend-applicability detail (per-backend soft-skip reasons,
+    inactive mappings) lives in ``agw secret list``; unused declarations
+    surface in ``agw secret describe``'s ``Referenced by:`` section.
+    Doctor stays one row per secret so the summary line stays scannable.
     """
     g = HealthGroup("Secrets")
 
-    active_backends = config.secret_config_data.backends
-    has_secrets = bool(config.secrets)
-
-    if active_backends:
-        g.ok("Configured backends", ", ".join(active_backends))
-    elif has_secrets:
-        # Defensive: the loader normally rejects this at config-load time
-        # (unreachable secrets). Doctor surfaces it anyway in case the
-        # operator reaches this state via partial config edits.
-        g.fail("Configured backends", "none active but secrets are declared")
-    else:
-        g.warn("Configured backends", "none active")
-
-    if not has_secrets:
+    if not config.secrets:
         g.info("Declared secrets", "none")
         return g
 
-    # Build the set of secret names referenced by any env entry across all
-    # five scopes so we can flag unused declarations.
-    referenced: set[str] = set()
-
-    def _collect(env: dict[str, EnvEntry] | None) -> None:
-        if not env:
-            return
-        for entry in env.values():
-            if entry.secret is not None:
-                referenced.add(entry.secret)
-
-    _collect(config.admin.env)
-    for vt in config.vm_templates.values():
-        _collect(vt.env)
-    for wt in config.workspace_templates.values():
-        _collect(wt.env)
-    for at in config.agent_templates.values():
-        _collect(at.env)
-    for st in config.session_templates.values():
-        _collect(st.env)
-
-    # Set of backends declared in [secret_backends.*] (whether or not
-    # active in [secret_config].backends).
     declared_backend_kinds = set(config.secret_backends.keys())
-    active_backend_kinds = set(config.secret_config_data.backends)
-
-    resolver = config.secret_resolver
     builtin_kinds = {"env-var", "prompt"}
+    resolver = config.secret_resolver
+
     for name, decl in sorted(config.secrets.items()):
+        invalid_kinds = sorted(
+            kind
+            for kind in decl.backend_mappings
+            if kind not in declared_backend_kinds and kind not in builtin_kinds
+        )
+        if invalid_kinds:
+            noun = "backend" if len(invalid_kinds) == 1 else "backends"
+            g.fail(
+                f"Secret {name!r}",
+                f"references unknown {noun}: {', '.join(invalid_kinds)}",
+            )
+            continue
+
         kind = resolver.preview_resolution(decl)
         if kind is not None:
-            g.info(f"Secret {name!r}", f"would resolve via {kind}")
+            g.ok(f"Secret {name!r}", f"would resolve via {kind}")
         else:
-            g.fail(f"Secret {name!r}", "not available in any backend")
-
-        # Unused declaration warning.
-        if name not in referenced:
-            g.warn(
-                f"Secret {name!r}",
-                "declared but not referenced by any env entry",
-            )
-
-        # backend_mappings sanity:
-        # - kind not declared in [secret_backends.*] AND not a built-in
-        #   (env-var / prompt) -> error (kind does not exist in this config).
-        # - kind declared (or built-in) but not in [secret_config].backends
-        #   -> warning (mapping has no effect; operator may be staging a
-        #   disabled backend).
-        for kind in decl.backend_mappings:
-            if kind in declared_backend_kinds or kind in builtin_kinds:
-                if kind not in active_backend_kinds:
-                    g.warn(
-                        f"Secret {name!r} maps {kind}",
-                        "backend not active in [secret_config].backends; "
-                        "mapping has no effect in the current configuration",
-                    )
-            else:
-                g.fail(
-                    f"Secret {name!r} maps {kind}",
-                    f"no [secret_backends.{kind}] section declared",
-                )
+            g.warn(f"Secret {name!r}", "not available in any active backend")
 
     return g
 

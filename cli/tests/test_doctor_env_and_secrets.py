@@ -39,72 +39,16 @@ shell = "zsh"
 # ---------------------------------------------------------------------------
 
 
-def test_no_secrets_with_default_chain_shows_backends_then_none(
-    tmp_path: Path,
-) -> None:
-    """Default chain present, no secrets declared: an ok row naming the
-    backends, and an info row stating no secrets are declared."""
+def test_no_secrets_shows_declared_secrets_none(tmp_path: Path) -> None:
+    """No secrets declared: a single info row stating 'none'. Doctor does
+    not surface the backend chain -- that's per-secret detail, and there
+    are no secrets to report against."""
     cfg = _write_config(tmp_path)
     config = load_config(cfg, warn_issues=False)
     g = _check_secrets(config)
     assert g.name == "Secrets"
     statuses = [(c.name, c.status, c.message) for c in g.checks]
-    assert any(
-        name == "Configured backends"
-        and status == Status.OK
-        and "env-var" in (msg or "")
-        and "prompt" in (msg or "")
-        for name, status, msg in statuses
-    ), statuses
-    assert any(
-        name == "Declared secrets"
-        and status == Status.INFO
-        and "none" in (msg or "")
-        for name, status, msg in statuses
-    ), statuses
-
-
-def test_empty_backends_no_secrets_warns(tmp_path: Path) -> None:
-    """Empty backend chain with no declared secrets: warn (operator may
-    have intended to disable secret resolution; nothing to resolve
-    anyway, so it's not a hard error)."""
-    cfg = _write_config(
-        tmp_path,
-        extras="""
-[secret_config]
-backends = []
-""",
-    )
-    config = load_config(cfg, warn_issues=False)
-    g = _check_secrets(config)
-    warns = [c for c in g.checks if c.status == Status.WARN]
-    assert any(
-        c.name == "Configured backends" and "none active" in (c.message or "")
-        for c in warns
-    ), [(c.name, c.message) for c in warns]
-
-
-def test_backends_row_lists_chain_in_precedence_order(tmp_path: Path) -> None:
-    """The configured-backends row spells out the chain so operators can
-    see the resolution order at a glance, without running secret list."""
-    cfg = _write_config(
-        tmp_path,
-        extras="""
-[admin.env]
-TOKEN = { secret = "shared" }
-
-[secrets.shared]
-description = "..."
-
-[secret_config]
-backends = ["prompt", "env-var"]
-""",
-    )
-    config = load_config(cfg, warn_issues=False)
-    g = _check_secrets(config)
-    row = next(c for c in g.checks if c.name == "Configured backends")
-    assert row.status == Status.OK
-    assert row.message == "prompt, env-var"
+    assert statuses == [("Declared secrets", Status.INFO, "none")], statuses
 
 
 def test_secret_resolves_via_env_var_when_set(
@@ -130,7 +74,7 @@ backends = ["env-var", "prompt"]
     g = _check_secrets(config)
     msgs = [(c.status, c.name, c.message) for c in g.checks]
     assert any(
-        status == Status.INFO
+        status == Status.OK
         and "shared" in name
         and "would resolve via env-var" in (msg or "")
         for status, name, msg in msgs
@@ -158,20 +102,19 @@ backends = ["env-var", "prompt"]
     )
     config = load_config(cfg, warn_issues=False)
     g = _check_secrets(config)
-    infos = [c for c in g.checks if c.status == Status.INFO]
+    oks = [c for c in g.checks if c.status == Status.OK]
     assert any(
         "shared" in c.name and "would resolve via prompt" in (c.message or "")
-        for c in infos
-    ), [(c.name, c.message) for c in infos]
+        for c in oks
+    ), [(c.name, c.message) for c in oks]
 
 
 def test_secret_not_available_when_env_var_unset_and_prompt_opted_out(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Regression: when prompt is opted out via backend_mappings.prompt =
-    false AND env-var has no value, doctor must report 'not available'.
-    Previously preview_resolution short-circuited on prompt without
-    checking the opt-out and falsely reported 'would prompt'."""
+    """When prompt is opted out via backend_mappings.prompt = false AND
+    env-var has no value, doctor reports the secret as WARN (config is
+    valid but no backend in the chain would resolve it)."""
     monkeypatch.delenv("AW_SECRET_OPTED_OUT", raising=False)
     cfg = _write_config(
         tmp_path,
@@ -189,60 +132,19 @@ backends = ["env-var", "prompt"]
     )
     config = load_config(cfg, warn_issues=False)
     g = _check_secrets(config)
-    fails = [c for c in g.checks if c.status == Status.FAIL]
+    warns = [c for c in g.checks if c.status == Status.WARN]
     assert any(
         "opted-out" in c.name and "not available" in (c.message or "")
-        for c in fails
-    ), [(c.name, c.message) for c in fails]
-
-
-def test_unused_secret_declaration_warns(tmp_path: Path) -> None:
-    """A declared secret with no env entry referencing it gets a WARN."""
-    cfg = _write_config(
-        tmp_path,
-        extras="""
-[secrets.unused]
-description = "nobody references me"
-
-[secret_config]
-backends = ["env-var", "prompt"]
-""",
-    )
-    config = load_config(cfg, warn_issues=False)
-    g = _check_secrets(config)
-    warns = [c for c in g.checks if c.status == Status.WARN]
-    assert any("unused" in c.name and "not referenced" in (c.message or "") for c in warns)
-
-
-def test_mapping_to_active_backend_is_silent(tmp_path: Path) -> None:
-    """A backend_mappings entry that points at a backend currently in
-    [secret_config].backends produces NO warning."""
-    cfg = _write_config(
-        tmp_path,
-        extras="""
-[admin.env]
-TOKEN = { secret = "shared" }
-
-[secrets.shared]
-description = "shared token"
-backend_mappings.env-var = "CUSTOM_NAME"
-
-[secret_config]
-backends = ["env-var"]
-""",
-    )
-    config = load_config(cfg, warn_issues=False)
-    g = _check_secrets(config)
-    warns = [c for c in g.checks if c.status == Status.WARN]
-    # No warn about backend_mappings (the only WARN here would be about
-    # secret not declared, but it IS declared and referenced).
-    assert not any("maps env-var" in c.name for c in warns)
+        for c in warns
+    ), [(c.name, c.message) for c in warns]
 
 
 def test_mapping_to_undeclared_kind_fails(tmp_path: Path) -> None:
     """A backend_mappings entry referencing a kind that has no
     [secret_backends.<kind>] section AND is not a built-in (env-var /
-    prompt) is reported as an error (FRD R6)."""
+    prompt) fails the single per-secret row (FRD R6). Exactly one row
+    per secret, and FAIL takes precedence over the would-resolve preview
+    that env-var/prompt would otherwise emit."""
     cfg = _write_config(
         tmp_path,
         extras="""
@@ -259,23 +161,16 @@ backends = ["env-var", "prompt"]
     )
     config = load_config(cfg, warn_issues=False)
     g = _check_secrets(config)
-    fails = [c for c in g.checks if c.status == Status.FAIL]
-    assert any(
-        "maps bogusvault" in c.name and "no [secret_backends.bogusvault]" in (c.message or "")
-        for c in fails
-    ), [(c.name, c.message) for c in fails]
+    shared_rows = [c for c in g.checks if "shared" in c.name]
+    assert len(shared_rows) == 1, shared_rows
+    assert shared_rows[0].status == Status.FAIL
+    assert shared_rows[0].message == "references unknown backend: bogusvault"
 
 
-def test_mapping_to_declared_but_inactive_kind_warns(tmp_path: Path) -> None:
-    """A backend_mappings entry referencing a kind that IS declared in
-    [secret_backends.*] but NOT listed in [secret_config].backends is
-    reported as a warning (mapping has no effect).
-
-    Phase 2b.2 made unknown backend kinds in [secret_backends.*] a hard
-    error, so this test uses 'prompt' (a known kind) declared but
-    excluded from the active chain to keep exercising the
-    declared-but-inactive warning path.
-    """
+def test_mapping_to_multiple_undeclared_kinds_pluralizes(tmp_path: Path) -> None:
+    """When two or more backend_mappings entries reference unknown kinds,
+    the single per-secret row lists them sorted and uses the plural
+    'backends' in the message."""
     cfg = _write_config(
         tmp_path,
         extras="""
@@ -284,49 +179,19 @@ TOKEN = { secret = "shared" }
 
 [secrets.shared]
 description = "shared token"
-backend_mappings.prompt = false
-
-[secret_backends.prompt]
+backend_mappings.zeta-vault = "z"
+backend_mappings.alpha-vault = "a"
 
 [secret_config]
-backends = ["env-var"]
+backends = ["env-var", "prompt"]
 """,
     )
     config = load_config(cfg, warn_issues=False)
     g = _check_secrets(config)
-    warns = [c for c in g.checks if c.status == Status.WARN]
-    assert any(
-        "maps prompt" in c.name and "not active" in (c.message or "")
-        for c in warns
-    ), [(c.name, c.message) for c in warns]
-
-
-def test_builtin_mapping_warns_when_builtin_not_active(tmp_path: Path) -> None:
-    """env-var and prompt don't need a [secret_backends.*] section, but a
-    backend_mappings.env-var entry is still meaningless if env-var isn't
-    listed in [secret_config].backends. The exemption for built-ins must
-    not swallow the not-active warning."""
-    cfg = _write_config(
-        tmp_path,
-        extras="""
-[admin.env]
-TOKEN = { secret = "shared" }
-
-[secrets.shared]
-description = "shared token"
-backend_mappings.env-var = "CUSTOM_NAME"
-
-[secret_config]
-backends = ["prompt"]
-""",
-    )
-    config = load_config(cfg, warn_issues=False)
-    g = _check_secrets(config)
-    warns = [c for c in g.checks if c.status == Status.WARN]
-    assert any(
-        "maps env-var" in c.name and "not active" in (c.message or "")
-        for c in warns
-    ), [(c.name, c.message) for c in warns]
+    shared_rows = [c for c in g.checks if "shared" in c.name]
+    assert len(shared_rows) == 1, shared_rows
+    assert shared_rows[0].status == Status.FAIL
+    assert shared_rows[0].message == "references unknown backends: alpha-vault, zeta-vault"
 
 
 # ---------------------------------------------------------------------------
