@@ -13,6 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from textwrap import dedent
+from typing import Any
 
 import pytest
 
@@ -79,8 +80,11 @@ def test_synthesize_empty_builds_default(spec: _KindSpec) -> None:
     Resolved* type.
     """
     kind = KIND_REGISTRY[spec.kind]
-    result = kind.synthesize(())
-    assert isinstance(result, spec.expected_type)
+    raw = kind.synthesize(())
+    # Runtime guard; ``spec.expected_type`` is a dynamic ``type`` so mypy
+    # can't statically narrow, hence the explicit ``Any`` after.
+    assert isinstance(raw, spec.expected_type)
+    result: Any = raw
     assert result.name == "default"
     assert result.origin is not None
     assert result.origin.variant == "auto-declared"

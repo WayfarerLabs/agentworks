@@ -20,11 +20,29 @@ from __future__ import annotations
 
 from pathlib import Path
 from textwrap import dedent
+from typing import Any
 
 from agentworks.bootstrap import build_registry
 from agentworks.config import load_config
 from agentworks.db import Database, SessionMode
-from agentworks.resources import Registry
+from agentworks.resources import KIND_REGISTRY, InstanceRef, Registry
+
+
+def _instances(
+    kind: str, db: Database, registry: Registry, resource: object
+) -> list[InstanceRef]:
+    """Call the kind handler's ``instances`` method by structural
+    duck-typing -- mirrors what the framework consumer
+    (``resources/inspect.py``'s ``used_by_for``) does at runtime.
+
+    The Phase 3b Protocol intentionally does NOT declare ``instances``
+    (see ``resources/kind.py`` for the Liskov rationale). Tests that
+    call it directly on ``KIND_REGISTRY[...]`` would trip mypy's
+    ``attr-defined`` on ``ResourceKind``; this helper narrows to
+    ``Any`` at one place so the test bodies stay readable.
+    """
+    handler: Any = KIND_REGISTRY[kind]
+    return list(handler.instances(db, registry, resource))
 
 
 def _write_base(config_path: Path, *, extras: str = "") -> None:
@@ -86,16 +104,15 @@ def _seed_basic(tmp_path: Path) -> tuple[Database, Registry]:
 
 def test_vm_template_instances_counts_matching_vms(tmp_path: Path) -> None:
     db, registry = _seed_basic(tmp_path)
-    from agentworks.resources import KIND_REGISTRY
 
     vm_default = registry.lookup("vm_template", "default")
     vm_custom = registry.lookup("vm_template", "custom")
 
     default_instances = list(
-        KIND_REGISTRY["vm_template"].instances(db, registry, vm_default)
+        _instances("vm_template", db, registry, vm_default)
     )
     custom_instances = list(
-        KIND_REGISTRY["vm_template"].instances(db, registry, vm_custom)
+        _instances("vm_template", db, registry, vm_custom)
     )
 
     # vm-default has template=NULL (defaults to ``default``); vm-custom
@@ -110,11 +127,10 @@ def test_workspace_template_instances_counts_matching_workspaces(
     tmp_path: Path,
 ) -> None:
     db, registry = _seed_basic(tmp_path)
-    from agentworks.resources import KIND_REGISTRY
 
     ws_default = registry.lookup("workspace_template", "default")
     instances = list(
-        KIND_REGISTRY["workspace_template"].instances(db, registry, ws_default)
+        _instances("workspace_template", db, registry, ws_default)
     )
     # Both workspaces are NULL-template; both fall back to ``default``.
     assert {r.instance_name for r in instances} == {"ws-a", "ws-b"}
@@ -123,11 +139,10 @@ def test_workspace_template_instances_counts_matching_workspaces(
 
 def test_agent_template_instances_counts_matching_agents(tmp_path: Path) -> None:
     db, registry = _seed_basic(tmp_path)
-    from agentworks.resources import KIND_REGISTRY
 
     agent_default = registry.lookup("agent_template", "default")
     instances = list(
-        KIND_REGISTRY["agent_template"].instances(db, registry, agent_default)
+        _instances("agent_template", db, registry, agent_default)
     )
     # Both agents are NULL-template; both fall back to ``default``.
     assert {r.instance_name for r in instances} == {"agent-a", "agent-b"}
@@ -137,11 +152,10 @@ def test_session_template_instances_counts_matching_sessions(
     tmp_path: Path,
 ) -> None:
     db, registry = _seed_basic(tmp_path)
-    from agentworks.resources import KIND_REGISTRY
 
     sess_default = registry.lookup("session_template", "default")
     instances = list(
-        KIND_REGISTRY["session_template"].instances(db, registry, sess_default)
+        _instances("session_template", db, registry, sess_default)
     )
     # SessionRow.template is non-optional; both sessions explicitly use
     # ``default`` so the NULL-fallback path doesn't apply.
@@ -155,11 +169,10 @@ def test_admin_template_instances_counts_every_vm(tmp_path: Path) -> None:
     yields no instances.
     """
     db, registry = _seed_basic(tmp_path)
-    from agentworks.resources import KIND_REGISTRY
 
     admin = registry.lookup("admin_template", "default")
     instances = list(
-        KIND_REGISTRY["admin_template"].instances(db, registry, admin)
+        _instances("admin_template", db, registry, admin)
     )
     assert {r.instance_name for r in instances} == {"vm-default", "vm-custom"}
 
@@ -176,11 +189,10 @@ def test_named_console_template_instances_counts_every_console(
         "INSERT INTO consoles (name, vm_name) VALUES ('con-b', 'vm-custom')"
     )
     db._conn.commit()
-    from agentworks.resources import KIND_REGISTRY
 
     nc = registry.lookup("named_console_template", "default")
     instances = list(
-        KIND_REGISTRY["named_console_template"].instances(db, registry, nc)
+        _instances("named_console_template", db, registry, nc)
     )
     assert {r.instance_name for r in instances} == {"con-a", "con-b"}
 
@@ -215,10 +227,9 @@ def test_secret_instances_finds_sessions_via_admin_env(tmp_path: Path) -> None:
     )
     db._conn.commit()
 
-    from agentworks.resources import KIND_REGISTRY
 
     secret = registry.lookup("secret", "shared-key")
-    instances = list(KIND_REGISTRY["secret"].instances(db, registry, secret))
+    instances = list(_instances("secret", db, registry, secret))
     assert [r.instance_name for r in instances] == ["sess-1"]
     assert instances[0].instance_kind == "session"
 
@@ -260,10 +271,9 @@ def test_secret_instances_finds_sessions_via_vm_template_env(
     )
     db._conn.commit()
 
-    from agentworks.resources import KIND_REGISTRY
 
     secret = registry.lookup("secret", "prod-db-token")
-    instances = list(KIND_REGISTRY["secret"].instances(db, registry, secret))
+    instances = list(_instances("secret", db, registry, secret))
     # Only sess-prod's VM uses the prod template -> only it reaches this secret.
     assert {r.instance_name for r in instances} == {"sess-prod"}
 
@@ -291,10 +301,9 @@ def test_secret_instances_finds_sessions_via_tailscale_system_secret(
     )
     db._conn.commit()
 
-    from agentworks.resources import KIND_REGISTRY
 
     ts = registry.lookup("secret", "tailscale-auth-key")
-    instances = list(KIND_REGISTRY["secret"].instances(db, registry, ts))
+    instances = list(_instances("secret", db, registry, ts))
     assert [r.instance_name for r in instances] == ["sess-1"]
 
 
@@ -329,10 +338,9 @@ def test_secret_instances_empty_when_no_session_reaches_it(
     )
     db._conn.commit()
 
-    from agentworks.resources import KIND_REGISTRY
 
     dead = registry.lookup("secret", "dead-key")
-    instances = list(KIND_REGISTRY["secret"].instances(db, registry, dead))
+    instances = list(_instances("secret", db, registry, dead))
     assert instances == []
 
 
@@ -369,10 +377,9 @@ def test_secret_instances_finds_sessions_via_agent_template_env(
     )
     db._conn.commit()
 
-    from agentworks.resources import KIND_REGISTRY
 
     secret = registry.lookup("secret", "agent-secret")
-    instances = list(KIND_REGISTRY["secret"].instances(db, registry, secret))
+    instances = list(_instances("secret", db, registry, secret))
     assert [r.instance_name for r in instances] == ["sess-claude"]
 
 
@@ -412,10 +419,9 @@ def test_secret_instances_admin_secret_not_attributed_to_agent_session(
     )
     db._conn.commit()
 
-    from agentworks.resources import KIND_REGISTRY
 
     secret = registry.lookup("secret", "admin-only-secret")
-    instances = list(KIND_REGISTRY["secret"].instances(db, registry, secret))
+    instances = list(_instances("secret", db, registry, secret))
     # Only the admin-mode session reaches admin_template's env.
     assert [r.instance_name for r in instances] == ["sess-admin"]
 
@@ -451,13 +457,12 @@ def test_secret_instances_finds_sessions_via_auto_declared_secret(
     )
     db._conn.commit()
 
-    from agentworks.resources import KIND_REGISTRY
 
     auto_secret = registry.lookup("secret", "anthropic-api-ky")
     assert auto_secret.origin is not None
     assert auto_secret.origin.variant == "auto-declared"
     instances = list(
-        KIND_REGISTRY["secret"].instances(db, registry, auto_secret)
+        _instances("secret", db, registry, auto_secret)
     )
     assert [r.instance_name for r in instances] == ["sess-1"]
 
@@ -579,7 +584,6 @@ def test_kinds_without_instances_hook_inherit_dash(tmp_path: Path) -> None:
     implement ``instances`` -- ``inspect._count_used_by`` returns
     ``None`` for them, which the list view renders as ``-``.
     """
-    from agentworks.resources import KIND_REGISTRY
 
     expected_no_instances = (
         "apt_package",

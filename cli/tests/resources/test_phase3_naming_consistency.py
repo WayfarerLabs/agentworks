@@ -17,6 +17,7 @@ known producer module surface.
 from __future__ import annotations
 
 import inspect
+from types import ModuleType
 
 import pytest
 
@@ -49,7 +50,7 @@ from agentworks.resources.kinds import (
 _BANNED_SUBSTRINGS = ("Requirement", "UsageEntry")
 
 
-def _public_names(module: object) -> list[str]:
+def _public_names(module: ModuleType) -> list[str]:
     return [name for name in dir(module) if not name.startswith("_")]
 
 
@@ -74,7 +75,7 @@ def _public_names(module: object) -> list[str]:
         workspace_template,
     ],
 )
-def test_framework_module_has_no_old_vocabulary(module: object) -> None:
+def test_framework_module_has_no_old_vocabulary(module: ModuleType) -> None:
     """No public symbol on a framework module carries the old
     ``Requirement`` / ``UsageEntry`` vocabulary. Phase 3a's rename is
     a public-surface change; a future edit that re-introduces either
@@ -97,10 +98,12 @@ def test_resource_reference_carries_usage_field_not_text() -> None:
     pre-rename ``UsageEntry.text`` is gone; the symmetry is part of the
     documented contract (see reference.py module docstring).
     """
+    import dataclasses
+
     from agentworks.resources.reference import ReferenceEntry, ResourceReference
 
-    ref_fields = {f.name for f in ResourceReference.__dataclass_fields__.values()}
-    entry_fields = {f.name for f in ReferenceEntry.__dataclass_fields__.values()}
+    ref_fields = {f.name for f in dataclasses.fields(ResourceReference)}
+    entry_fields = {f.name for f in dataclasses.fields(ReferenceEntry)}
     assert "usage" in ref_fields
     assert "usage" in entry_fields
     assert "text" not in ref_fields
@@ -162,8 +165,10 @@ def test_resource_kinds_have_references_field_not_usage() -> None:
         SecretConfig,
         SecretDecl,
     ]
+    import dataclasses
+
     for cls in resource_types:
-        fields = {f.name for f in cls.__dataclass_fields__.values()}
+        fields = {f.name for f in dataclasses.fields(cls)}
         assert "references" in fields, (
             f"{cls.__name__} missing `references` field after Phase 3a rename"
         )
