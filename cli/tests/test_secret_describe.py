@@ -496,6 +496,188 @@ def test_render_emits_header_usages_mappings_preview(
     assert "would resolve via env-var" in out
 
 
+# -- Used-by (Phase 3c dynamic dimension) -----------------------------------
+
+
+def test_describe_secret_used_by_is_none_without_db(
+    tmp_path: Path, ssh_keys: tuple[Path, Path]
+) -> None:
+    """Without ``db``, ``describe_secret`` leaves ``used_by = None`` and
+    the renderer omits the ``Used by:`` section. Preserves the
+    pre-Phase-3c behavior for callers that don't care about the
+    dynamic dimension.
+    """
+    cfg = _write_cfg(
+        tmp_path,
+        """\
+        [secrets.api-key]
+        description = "k"
+
+        [secret_config]
+        backends = ["env-var"]
+        """,
+        ssh_keys,
+    )
+    config = load_config(cfg, warn_issues=False)
+    registry = build_registry(config)
+    desc = describe_secret(registry, config, "api-key")
+    assert desc.used_by is None
+
+
+def test_describe_secret_used_by_populated_with_db(
+    tmp_path: Path, ssh_keys: tuple[Path, Path]
+) -> None:
+    """With ``db``, ``used_by`` is a tuple of ``InstanceRef``. For an
+    admin-mode session referencing this secret via ``[admin.env]``,
+    the tuple has one entry pointing at the session.
+    """
+    from agentworks.db import Database, SessionMode
+
+    cfg = _write_cfg(
+        tmp_path,
+        """\
+        [admin.env]
+        API_KEY = { secret = "shared-key" }
+        """,
+        ssh_keys,
+    )
+    config = load_config(cfg, warn_issues=False)
+    registry = build_registry(config)
+
+    db = Database(tmp_path / "used_by_test.db")
+    db.insert_vm("vm-1", platform="lima")
+    db.insert_workspace(
+        "ws-1", workspace_path="/tmp/ws-1", vm_name="vm-1", linux_group="ws-ws-1"
+    )
+    db.insert_session(
+        "sess-1", "ws-1", template="default", mode=SessionMode.ADMIN,
+        socket_path="/tmp/sess-1.sock",
+    )
+    db._conn.commit()
+
+    desc = describe_secret(registry, config, "shared-key", db=db)
+    assert desc.used_by is not None
+    assert [(r.instance_kind, r.instance_name) for r in desc.used_by] == [
+        ("session", "sess-1")
+    ]
+
+
+def test_render_emits_used_by_section_when_populated(
+    tmp_path: Path,
+    ssh_keys: tuple[Path, Path],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The renderer emits ``Used by (per current config):`` between
+    ``Referenced by:`` and ``Backend mappings:`` when the description
+    carries a non-``None`` ``used_by`` tuple.
+    """
+    from agentworks.db import Database, SessionMode
+    from agentworks.secrets.inspect import render_secret_description
+
+    cfg = _write_cfg(
+        tmp_path,
+        """\
+        [admin.env]
+        API_KEY = { secret = "shared-key" }
+        """,
+        ssh_keys,
+    )
+    config = load_config(cfg, warn_issues=False)
+    registry = build_registry(config)
+
+    db = Database(tmp_path / "render_used_by.db")
+    db.insert_vm("vm-1", platform="lima")
+    db.insert_workspace(
+        "ws-1", workspace_path="/tmp/ws-1", vm_name="vm-1", linux_group="ws-ws-1"
+    )
+    db.insert_session(
+        "sess-1", "ws-1", template="default", mode=SessionMode.ADMIN,
+        socket_path="/tmp/sess-1.sock",
+    )
+    db._conn.commit()
+
+    desc = describe_secret(registry, config, "shared-key", db=db)
+    render_secret_description(desc)
+    out = capsys.readouterr().out
+
+    assert "Used by (per current config):" in out
+    assert "session:sess-1" in out
+    # Section ordering: Referenced by -> Used by -> Backend mappings.
+    assert out.index("Referenced by:") < out.index("Used by (per current config):")
+    assert out.index("Used by (per current config):") < out.index("Backend mappings:")
+
+
+def test_render_used_by_empty_shows_friendly_message(
+    tmp_path: Path,
+    ssh_keys: tuple[Path, Path],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """An empty ``used_by`` tuple (db provided but no sessions reach the
+    secret) renders as a friendly ``(no live sessions reach this
+    secret)`` line rather than an empty section.
+    """
+    from agentworks.db import Database
+    from agentworks.secrets.inspect import render_secret_description
+
+    cfg = _write_cfg(
+        tmp_path,
+        """\
+        [secrets.dead-key]
+        description = "Declared but no live session reaches it"
+
+        [secret_config]
+        backends = ["env-var"]
+        """,
+        ssh_keys,
+    )
+    config = load_config(cfg, warn_issues=False)
+    registry = build_registry(config)
+
+    # DB with no sessions -- dead-key's used_by is empty (but non-None).
+    db = Database(tmp_path / "no_sessions.db")
+
+    desc = describe_secret(registry, config, "dead-key", db=db)
+    assert desc.used_by == ()
+    render_secret_description(desc)
+    out = capsys.readouterr().out
+    assert "Used by (per current config):" in out
+    assert "(no live sessions reach this secret)" in out
+
+
+def test_render_omits_used_by_section_when_none(
+    tmp_path: Path,
+    ssh_keys: tuple[Path, Path],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """When ``used_by`` is ``None`` (no db passed), the renderer omits
+    the section entirely -- backend mappings follows the reference
+    list directly.
+    """
+    from agentworks.secrets.inspect import render_secret_description
+
+    cfg = _write_cfg(
+        tmp_path,
+        """\
+        [secrets.api-key]
+        description = "k"
+
+        [secret_config]
+        backends = ["env-var"]
+        """,
+        ssh_keys,
+    )
+    config = load_config(cfg, warn_issues=False)
+    registry = build_registry(config)
+
+    desc = describe_secret(registry, config, "api-key")
+    render_secret_description(desc)
+    out = capsys.readouterr().out
+
+    assert "Referenced by:" in out
+    assert "Used by" not in out
+    assert "Backend mappings:" in out
+
+
 # -- Missing-name behavior --------------------------------------------------
 
 

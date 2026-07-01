@@ -673,9 +673,12 @@ Goal: make both dimensions visible in the operator-facing surface.
       `Used by (per current config):` section listing the projected `InstanceRef`s grouped by
       `instance_kind`. The annotation is in the section header itself rather than a parenthetical so
       it's visible at-a-glance until a sibling provisioned dimension lands.
-- [ ] `agw secret describe`: gain the same `Used by:` section. FRD R10 documents both sections.
-      _(Deferred to a follow-up commit in Phase 3c -- the secret-describe surface has additional
-      sections that need careful layout work.)_
+- [x] `agw secret describe`: `Used by (per current config):` section lands between `Referenced by:`
+      and `Backend mappings:`. Same shape as the cross-kind describe section (grouped by
+      instance_kind, friendly empty-state, annotation in the section header). Reuses the framework
+      helper `used_by_for(db, registry, kind, resource)` -- lifted from module-private to public in
+      `resources/inspect.py` so per-kind describe commands share the single-source-of-truth guard
+      structure. FRD R10 documents both sections.
 - [x] **Tests** (extended `cli/tests/resources/test_instances.py` covers all three kinds end-to-end;
       `agw resource list` / `agw resource describe` already exercised by the existing CLI tests with
       the new optional `db` parameter).

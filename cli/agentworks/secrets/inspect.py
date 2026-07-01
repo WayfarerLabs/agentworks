@@ -21,7 +21,9 @@ from agentworks.resources.render import format_origin_line
 
 if TYPE_CHECKING:
     from agentworks.config import Config
+    from agentworks.db import Database
     from agentworks.resources import Registry
+    from agentworks.resources.kind import InstanceRef
     from agentworks.resources.origin import Origin
     from agentworks.resources.reference import ReferenceEntry
 
@@ -247,6 +249,13 @@ class SecretDescription:
     is the operator-set prompt hint (``[secrets.<name>].hint``),
     surfaced for debugging "why isn't my prompt showing the helpful
     hint" without triggering a prompt.
+
+    ``references`` is the inbound reference list (config points that
+    name this secret); ``used_by`` is the live DB instances that
+    depend on this secret per the current config (projected via the
+    secret kind's ``instances`` hook). ``used_by`` is ``None`` when
+    ``describe_secret`` was called without a ``db`` -- the renderer
+    omits the "Used by:" section in that case.
     """
 
     name: str
@@ -255,6 +264,7 @@ class SecretDescription:
     description: str
     hint: str | None
     references: tuple[ReferenceEntry, ...]
+    used_by: tuple[InstanceRef, ...] | None
     backend_mappings: tuple[BackendMapping, ...]
     resolution: ResolutionPreview
 
@@ -263,6 +273,7 @@ def describe_secret(
     registry: Registry,
     config: Config,
     name: str,
+    db: Database | None = None,
 ) -> SecretDescription:
     """Build a ``SecretDescription`` for one secret in the registry.
 
@@ -272,8 +283,15 @@ def describe_secret(
     web/API clients all see the same error shape (per the project's
     service-layer-is-the-authority rule). The ``hint`` attribute
     points operators at ``agw secret list``.
+
+    ``db`` is optional: when provided, the ``used_by`` field is
+    populated with the sessions whose subgraph reaches this secret
+    (via the secret kind's ``instances`` hook, shared with
+    ``agw resource describe``). When ``None``, ``used_by`` stays
+    ``None`` and the renderer omits the "Used by:" section.
     """
     from agentworks.errors import NotFoundError
+    from agentworks.resources.inspect import used_by_for
 
     try:
         decl = registry.lookup(SECRET_KIND_NAME, name)
@@ -320,6 +338,7 @@ def describe_secret(
         description=description,
         hint=getattr(decl, "hint", None),
         references=references,
+        used_by=used_by_for(db, registry, SECRET_KIND_NAME, decl),
         backend_mappings=tuple(mappings),
         resolution=ResolutionPreview(
             resolved_by=resolved_by,
@@ -329,9 +348,9 @@ def describe_secret(
 
 
 def render_secret_description(desc: SecretDescription) -> None:
-    """Emit a ``SecretDescription`` as four operator-friendly sections:
-    header, references, backend mappings, resolution preview. Mirrors
-    FRD R10's documented shape.
+    """Emit a ``SecretDescription`` as operator-friendly sections:
+    header, referenced by, used by (when db provided), backend
+    mappings, resolution preview. Mirrors FRD R10's documented shape.
     """
     # --- Header ---
     output.info(f"Secret: {desc.name}")
@@ -359,6 +378,30 @@ def render_secret_description(desc: SecretDescription) -> None:
             seen.add(key)
             src = f"{entry.source[0]}:{entry.source[1]}"
             output.detail(f"- {src} -- {entry.usage}")
+
+    # --- Used by (dynamic, per current config) ---
+    # Only rendered when describe_secret was called with a db. Same
+    # projection shape as agw resource describe's Used by section; the
+    # annotation is in the section header so the projection-vs-
+    # materialized signal is visible at-a-glance.
+    if desc.used_by is not None:
+        output.info("")
+        output.info("Used by (per current config):")
+        if not desc.used_by:
+            output.detail("(no live sessions reach this secret)")
+        else:
+            # Group by instance_kind for readability; preserve
+            # first-encounter order within a kind. Today the secret
+            # kind emits only session InstanceRefs, but grouping keeps
+            # the rendering identical to agw resource describe's shape
+            # so a future SDD that emits other instance kinds (agents,
+            # VMs) slots in without renderer changes.
+            grouped: dict[str, list[str]] = {}
+            for ref in desc.used_by:
+                grouped.setdefault(ref.instance_kind, []).append(ref.instance_name)
+            for instance_kind in grouped:
+                for instance_name in grouped[instance_kind]:
+                    output.detail(f"- {instance_kind}:{instance_name}")
 
     # --- Backend mappings ---
     output.info("")

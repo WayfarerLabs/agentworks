@@ -206,7 +206,7 @@ def list_resources(
     )
 
 
-def _used_by_for(
+def used_by_for(
     db: Database | None, registry: Registry, kind: str, resource: object
 ) -> tuple[InstanceRef, ...] | None:
     """Project ``(kind, resource) -> tuple[InstanceRef, ...] | None`` via
@@ -236,11 +236,11 @@ def _used_by_for(
 def _count_used_by(
     db: Database | None, registry: Registry, kind: str, resource: object
 ) -> int | None:
-    """``len()`` variant of ``_used_by_for`` used by the list-row builder.
+    """``len()`` variant of ``used_by_for`` used by the list-row builder.
     Returns ``None`` (renderer shows ``-``) when the kind has no
     instance concept; otherwise the count of live instances.
     """
-    refs = _used_by_for(db, registry, kind, resource)
+    refs = used_by_for(db, registry, kind, resource)
     return None if refs is None else len(refs)
 
 
@@ -299,13 +299,13 @@ def describe_resource(
         origin=getattr(resource, "origin", None),
         description=getattr(resource, "description", "") or "",
         references=tuple(getattr(resource, "references", ())),
-        used_by=_used_by_for(db, registry, kind, resource),
+        used_by=used_by_for(db, registry, kind, resource),
     )
 
 
-# ``_collect_used_by`` previously duplicated ``_used_by_for``'s guard
+# ``_collect_used_by`` previously duplicated ``used_by_for``'s guard
 # structure with a near-identical body. Both call sites now go through
-# ``_used_by_for`` (the describe builder calls it directly; the list
+# ``used_by_for`` (the describe builder calls it directly; the list
 # builder wraps it in ``_count_used_by``).
 
 

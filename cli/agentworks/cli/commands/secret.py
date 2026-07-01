@@ -5,6 +5,7 @@ from __future__ import annotations
 import typer
 
 from agentworks.cli._app import app
+from agentworks.cli._helpers import get_db
 
 secret_app = typer.Typer(
     name="secret",
@@ -52,11 +53,15 @@ def secret_describe(
 ) -> None:
     """Show the full per-secret detail view.
 
-    Four sections per FRD R10: header (name, kind, origin,
-    description), usages (one row per matching reference), backend
-    mappings (per-active-backend disposition without merging),
-    resolution preview (which active backend would resolve, or
-    "not available"). Does not prompt, does not resolve values.
+    Five sections per FRD R10 (extended in Phase 3c): header (name,
+    kind, origin, description, hint); ``Referenced by:`` (one row per
+    matching config reference); ``Used by (per current config):`` (one
+    row per live session whose subgraph reaches this secret, projected
+    via the secret kind's ``instances`` hook -- same shape as
+    ``agw resource describe``); ``Backend mappings:`` (per-active-backend
+    disposition without merging); ``Resolution preview:`` (which active
+    backend would resolve, or "not available"). Does not prompt, does
+    not resolve values.
 
     The secret must be in the Resource Registry -- either
     operator-declared via ``[secrets.<name>]`` or auto-declared via a
@@ -70,5 +75,6 @@ def secret_describe(
 
     config = load_config()
     registry = build_registry(config)
-    desc = describe_secret(registry, config, name)
+    db = get_db()
+    desc = describe_secret(registry, config, name, db=db)
     render_secret_description(desc)
