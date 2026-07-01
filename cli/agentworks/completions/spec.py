@@ -49,10 +49,6 @@ class CommandSpec:
 #   "workspaces"      -> agw workspace list --names-only
 #   "ws_templates"    -> agw resource list --kind workspace_template --names-only
 #   "git_credentials" -> agw resource list --kind git_credentials --names-only
-#   "catalog_entries" -> all entry names from built-in + custom catalog
-#                        (still parses `agw catalog list` table rows;
-#                        candidate to migrate to Registry-sourced once
-#                        catalog list gains --names-only)
 #   "sessions"        -> agw session list --names-only
 #   "session_templates" -> agw resource list --kind session_template --names-only
 #   "agents"          -> agw agent list --names-only
@@ -140,7 +136,6 @@ DYNAMIC_COMPLETIONS: dict[tuple[str, str], str] = {
     ("agent.shell", "workspace"): "workspaces",
     ("agent.delete", "name"): "agents",
     ("agent.list", "vm"): "vms",
-    ("catalog.describe", "name"): "catalog_entries",
     # Session commands
     ("session.create", "agent"): "agents",
     ("session.create", "workspace"): "workspaces",

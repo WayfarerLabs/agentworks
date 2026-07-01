@@ -39,7 +39,6 @@ class TestTopLevelGroups:
     EXPECTED_GROUPS = frozenset(
         {
             "agent",
-            "catalog",
             "completion",
             "config",
             "console",

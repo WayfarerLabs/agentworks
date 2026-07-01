@@ -498,18 +498,6 @@ so launching a `claude` session on an agent that doesn't have `claude` installed
 clear error instead of a cryptic downstream tmux failure. `required_commands` is merged (de-duped,
 order-preserving) across template inheritance.
 
-### Catalog
-
-Browse and inspect the built-in catalog of installable tools.
-
-| Command                       | Description                        |
-| ----------------------------- | ---------------------------------- |
-| `agw catalog list`            | List all available catalog entries |
-| `agw catalog describe <name>` | Show details of a catalog entry    |
-
-`catalog list` accepts `--type` (apt-source, apt-package, system-install-cmd, user-install-cmd) and
-`--source` (built-in, custom) filters.
-
 ### Config
 
 | Command                             | Description                                  |
@@ -699,9 +687,11 @@ claude_plugins = ["nerftools-default@nerftools"]
 ### Built-in Catalog
 
 Agentworks ships a built-in catalog of common tools (apt sources, apt packages, system install
-commands, and user install commands). Run `agw catalog list` to see what is available. Reference
-catalog entries by name in `vm_templates`, `admin.config`, and `agent_templates`. User-defined
-entries in your config override built-in entries with the same name.
+commands, and user install commands). Run
+`agw resource list --kind apt_package,system_install_command,user_install_command,apt_source` to see
+what is available (or filter to any single kind). Reference catalog entries by name in
+`vm_templates`, `admin.config`, and `agent_templates`. User-defined entries in your config override
+built-in entries with the same name.
 
 ## VM Initialization
 

@@ -31,12 +31,6 @@ DYNAMIC_SNIPPETS: dict[str, str] = {
         " | ForEach-Object { ($_ -split ':', 2)[1] }"
         ' | Where-Object { $_ -like "$wordToComplete*" })'
     ),
-    "catalog_entries": (
-        "& { agw catalog list 2>$null"
-        " | Select-Object -Skip 2"
-        " | ForEach-Object { ($_ -split '\\s+')[1] }"
-        ' | Where-Object { $_ -like "$wordToComplete*" } }'
-    ),
     "sessions": (
         "(agw session list --names-only 2>$null |"
         ' Where-Object { $_ -like "$wordToComplete*" })'

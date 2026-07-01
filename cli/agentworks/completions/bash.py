@@ -20,7 +20,6 @@ DYNAMIC_SNIPPETS: dict[str, str] = {
         "$(agw resource list --kind git_credentials --names-only 2>/dev/null"
         " | awk -F: '{print $2}')"
     ),
-    "catalog_entries": ("$(agw catalog list 2>/dev/null | tail -n +3 | awk '{print $2}')"),
     "sessions": ("$(agw session list --names-only 2>/dev/null)"),
     "agents": ("$(agw agent list --names-only 2>/dev/null)"),
     "consoles": ("$(agw console list --names-only 2>/dev/null)"),

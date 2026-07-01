@@ -40,12 +40,6 @@ _agentworks_git_credentials() {
     creds=(${(f)"$(agw resource list --kind git_credentials --names-only 2>/dev/null | awk -F: '{print $2}')"})
     _describe 'git-credential' creds
 }""",
-    "catalog_entries": """\
-_agentworks_catalog_entries() {
-    local -a entries
-    entries=(${(f)"$(agw catalog list 2>/dev/null | tail -n +3 | awk '{print $2}')"})
-    _describe 'catalog entry' entries
-}""",
     "sessions": """\
 _agentworks_sessions() {
     local -a sessions
@@ -111,7 +105,6 @@ COMPLETER_FUNC_NAMES: dict[str, str] = {
     "workspaces": "_agentworks_workspaces",
     "ws_templates": "_agentworks_templates",
     "git_credentials": "_agentworks_git_credentials",
-    "catalog_entries": "_agentworks_catalog_entries",
     "sessions": "_agentworks_sessions",
     "session_templates": "_agentworks_session_templates",
     "vm_templates": "_agentworks_vm_templates",
