@@ -1,7 +1,7 @@
 """Subgraph walks across the Resource Registry.
 
 ``collect_secrets_for(registry, root)`` walks a Resource's
-``required_resources()`` DFS from ``root``, dedupes targets by
+``referenced_resources()`` DFS from ``root``, dedupes targets by
 ``(kind, name)``, and returns the SecretDecls reachable from the walk.
 Used by manager-entry code (``vm create``, ``agent create``, etc.) to
 build the ``extra_decls`` list passed to
@@ -16,8 +16,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from agentworks.resources.reference import ResourceReference
     from agentworks.resources.registry import Registry
-    from agentworks.resources.requirement import ResourceRequirement
     from agentworks.secrets.base import SecretDecl
 
 
@@ -25,18 +25,18 @@ def collect_secrets_for(
     registry: Registry,
     root: tuple[str, str],
 ) -> list[SecretDecl]:
-    """Walk ``required_resources()`` depth-first from ``root``; collect
+    """Walk ``referenced_resources()`` depth-first from ``root``; collect
     ``SecretDecl`` Resources reachable from the walk.
 
     Order: first-encounter via DFS, deduplicated by secret name. The
     root itself isn't included (it's the publisher, not a target);
-    only secrets the root and its transitive requirements point at are
+    only secrets the root and its transitive references point at are
     returned.
 
     The Registry must be finalized (so synthesized auto-declares exist
     and ``Origin.auto_declared.source`` references are accurate). Calls
     against a non-finalized Registry are not guaranteed correct; the
-    finalize pass is what walks every Resource's requirements and
+    finalize pass is what walks every Resource's references and
     auto-declares missing names.
 
     Raises ``KeyError`` if ``root`` doesn't resolve to a Resource in the
@@ -67,8 +67,8 @@ def collect_secrets_for(
         if node[0] == "secret":
             secret_decls.append(resource)
 
-        # Walk this resource's requirements next.
-        for req in _required_resources(resource):
+        # Walk this resource's references next.
+        for req in _referenced_resources(resource):
             target = (req.kind, req.name)
             if target not in seen:
                 stack.append(target)
@@ -76,11 +76,11 @@ def collect_secrets_for(
     return secret_decls
 
 
-def _required_resources(resource: object) -> list[ResourceRequirement]:
-    """Mirror of ``Registry._required_resources``: duck-type via
-    ``getattr`` so resources without the method return no requirements.
+def _referenced_resources(resource: object) -> list[ResourceReference]:
+    """Mirror of ``Registry._referenced_resources``: duck-type via
+    ``getattr`` so resources without the method return no references.
     """
-    method = getattr(resource, "required_resources", None)
+    method = getattr(resource, "referenced_resources", None)
     if method is None:
         return []
     return list(method())

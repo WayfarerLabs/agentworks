@@ -15,7 +15,7 @@ import pytest
 
 from agentworks.errors import ConfigError
 from agentworks.resources import Origin, Registry
-from agentworks.resources.requirement import ResourceRequirement
+from agentworks.resources.reference import ResourceReference
 
 
 @dataclass(frozen=True)
@@ -28,13 +28,13 @@ class _NodeWithReq:
     self_name: str
     target_name: str | None = None
     origin: Origin | None = None
-    usage: tuple = ()
+    references: tuple = ()
 
-    def required_resources(self) -> tuple[ResourceRequirement, ...]:
+    def referenced_resources(self) -> tuple[ResourceReference, ...]:
         if self.target_name is None:
             return ()
         return (
-            ResourceRequirement(
+            ResourceReference(
                 name=self.target_name,
                 kind="node",
                 usage="next link",

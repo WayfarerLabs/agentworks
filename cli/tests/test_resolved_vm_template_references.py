@@ -1,4 +1,4 @@
-"""Tests for ``ResolvedVMTemplate.required_resources()`` (Phase 1c).
+"""Tests for ``ResolvedVMTemplate.referenced_resources()`` (Phase 1c).
 
 The resolved template emits the env-block requirements (with inheritance
 applied via the merged ``env`` dict) plus the Tailscale auth-key
@@ -8,17 +8,17 @@ requirement.
 from __future__ import annotations
 
 from agentworks.env.entry import EnvEntry
-from agentworks.resources.requirement import SecretRequirement
+from agentworks.resources.reference import SecretReference
 from agentworks.vms.templates import ResolvedVMTemplate
 
 
 def test_resolved_vm_template_emits_tailscale_requirement_by_default() -> None:
     tmpl = ResolvedVMTemplate(name="azure-prod")
-    reqs = tmpl.required_resources()
+    reqs = tmpl.referenced_resources()
     # Only the Tailscale requirement (no env block).
     assert len(reqs) == 1
     ts = reqs[0]
-    assert isinstance(ts, SecretRequirement)
+    assert isinstance(ts, SecretReference)
     assert ts.name == "tailscale-auth-key"
     assert ts.kind == "secret"
     assert ts.usage == "the Tailscale auth key"
@@ -30,7 +30,7 @@ def test_resolved_vm_template_emits_custom_tailscale_secret_name() -> None:
         name="azure-prod",
         tailscale_auth_key="custom-ts-key",
     )
-    reqs = tmpl.required_resources()
+    reqs = tmpl.referenced_resources()
     ts_reqs = [r for r in reqs if r.usage == "the Tailscale auth key"]
     assert len(ts_reqs) == 1
     assert ts_reqs[0].name == "custom-ts-key"
@@ -44,7 +44,7 @@ def test_resolved_vm_template_emits_env_requirements_alongside_tailscale() -> No
             "API_KEY": EnvEntry(key="API_KEY", secret="api-secret"),
         },
     )
-    reqs = tmpl.required_resources()
+    reqs = tmpl.referenced_resources()
     # 1 env-block secret + 1 Tailscale
     assert len(reqs) == 2
     names = sorted(r.name for r in reqs)

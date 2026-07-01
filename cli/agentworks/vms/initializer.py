@@ -1602,12 +1602,14 @@ def _phase_b_setup(
     ``git_tokens`` is required (Phase 1d): every provider listed in
     ``providers`` must have a pre-resolved token value in the dict.
     """
-    from agentworks.catalog import load_catalog, validate_selections
+    from agentworks.catalog import load_catalog
 
     output.info("Initializing VM...")
     db.update_vm_init_status(vm_name, InitStatus.IN_PROGRESS)
+    # Phase 2b: catalog reference validation moved to the framework
+    # (catalog kinds' error miss policy fires at build_registry time,
+    # which the manager-entry hoist runs before reaching this point).
     catalog = load_catalog(config)
-    validate_selections(config, catalog)
 
     # Non-fatal: ensure cloud-init won't regenerate SSH host keys on reboot.
     # Runs first so VMs predating the Phase A step are repaired on reinit

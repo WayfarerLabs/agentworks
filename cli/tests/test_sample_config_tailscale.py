@@ -59,6 +59,6 @@ def test_sample_config_parses_with_phase_1c_field(sample_config: Path) -> None:
     # In a sample config with no [secrets.tailscale-auth-key] block,
     # the auto-declare path produces it.
     assert ts_secret.origin.variant == "auto-declared"
-    # First-matching-source rule: VMTemplate.required_resources emits
+    # First-matching-source rule: VMTemplate.referenced_resources emits
     # the requirement; the source is the vm_template that published it.
     assert ts_secret.origin.source == ("vm_template", "default")

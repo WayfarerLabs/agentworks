@@ -1,7 +1,7 @@
 """Tests for the framework pass that ``Registry.finalize()`` runs: walking
 requirements, dispatching miss policies, attaching usage, detecting cycles.
 
-Phase 1a has no operator-side producers of ``SecretRequirement``; tests
+Phase 1a has no operator-side producers of ``SecretReference``; tests
 synthesize them by attaching ``required_resources()`` to stub Resources or
 directly populating ``Registry._resources``.
 """
@@ -14,8 +14,8 @@ from pathlib import Path
 import pytest
 
 from agentworks.errors import ConfigError
-from agentworks.resources import Origin, Registry, SecretRequirement
-from agentworks.resources.requirement import ResourceRequirement
+from agentworks.resources import Origin, Registry, SecretReference
+from agentworks.resources.reference import ResourceReference
 from agentworks.secrets.base import SecretDecl
 
 
@@ -26,11 +26,11 @@ class _PublisherStub:
     Registry stores it under whatever kind the test uses.
     """
 
-    reqs: tuple[ResourceRequirement, ...] = ()
+    reqs: tuple[ResourceReference, ...] = ()
     origin: Origin | None = None
-    usage: tuple = ()
+    references: tuple = ()
 
-    def required_resources(self) -> tuple[ResourceRequirement, ...]:
+    def referenced_resources(self) -> tuple[ResourceReference, ...]:
         return self.reqs
 
 
@@ -42,13 +42,13 @@ def _opdecl(line: int = 1) -> Origin:
 
 
 def test_secret_auto_declared_when_required_but_not_published() -> None:
-    """A SecretRequirement for an unpublished name triggers the
+    """A SecretReference for an unpublished name triggers the
     secret kind's auto-declare miss policy.
     """
     r = Registry.empty()
     stub = _PublisherStub(
         reqs=(
-            SecretRequirement(
+            SecretReference(
                 name="api-key", kind="secret", usage="the API key",
                 source=("admin_template", "default"),
             ),
@@ -74,7 +74,7 @@ def test_admin_template_rejects_non_default_name() -> None:
     r = Registry.empty()
     stub = _PublisherStub(
         reqs=(
-            ResourceRequirement(
+            ResourceReference(
                 name="custom",
                 kind="admin_template",
                 usage="ignored",
@@ -100,7 +100,7 @@ def test_operator_declared_secret_gets_usage_populated() -> None:
 
     stub_a = _PublisherStub(
         reqs=(
-            SecretRequirement(
+            SecretReference(
                 name="api-key", kind="secret", usage="the API env var",
                 source=("admin_template", "default"),
             ),
@@ -108,7 +108,7 @@ def test_operator_declared_secret_gets_usage_populated() -> None:
     )
     stub_b = _PublisherStub(
         reqs=(
-            SecretRequirement(
+            SecretReference(
                 name="api-key", kind="secret", usage="the agent's API env var",
                 source=("agent_template", "claude"),
             ),
@@ -124,8 +124,8 @@ def test_operator_declared_secret_gets_usage_populated() -> None:
     assert found.origin.variant == "operator-declared"
     assert found.origin.line == 5
     # Usage gets populated from BOTH requirements.
-    assert len(found.usage) == 2
-    sources = sorted(u.source for u in found.usage)
+    assert len(found.references) == 2
+    sources = sorted(u.source for u in found.references)
     assert sources == [("admin_template", "default"), ("agent_template", "claude")]
 
 
@@ -136,7 +136,7 @@ def test_auto_declared_secret_origin_uses_first_matching_requirement() -> None:
     r = Registry.empty()
     stub_a = _PublisherStub(
         reqs=(
-            SecretRequirement(
+            SecretReference(
                 name="shared-key", kind="secret", usage="A's use",
                 source=("admin_template", "default"),
             ),
@@ -144,7 +144,7 @@ def test_auto_declared_secret_origin_uses_first_matching_requirement() -> None:
     )
     stub_b = _PublisherStub(
         reqs=(
-            SecretRequirement(
+            SecretReference(
                 name="shared-key", kind="secret", usage="B's use",
                 source=("vm_template", "default"),
             ),
@@ -159,7 +159,7 @@ def test_auto_declared_secret_origin_uses_first_matching_requirement() -> None:
     assert found.origin is not None
     assert found.origin.source == ("admin_template", "default")
     # Usage records BOTH requirements.
-    assert len(found.usage) == 2
+    assert len(found.references) == 2
 
 
 def test_publish_order_determines_first_matching_origin_source() -> None:
@@ -171,7 +171,7 @@ def test_publish_order_determines_first_matching_origin_source() -> None:
     # SAME two stubs, opposite registration order.
     stub_a = _PublisherStub(
         reqs=(
-            SecretRequirement(
+            SecretReference(
                 name="shared-key", kind="secret", usage="A's use",
                 source=("admin_template", "default"),
             ),
@@ -179,7 +179,7 @@ def test_publish_order_determines_first_matching_origin_source() -> None:
     )
     stub_b = _PublisherStub(
         reqs=(
-            SecretRequirement(
+            SecretReference(
                 name="shared-key", kind="secret", usage="B's use",
                 source=("vm_template", "default"),
             ),
@@ -198,7 +198,7 @@ def test_publish_order_determines_first_matching_origin_source() -> None:
 
 @dataclass(frozen=True)
 class _ChainPublisher:
-    """Test-only Resource that publishes one ``SecretRequirement``. Used
+    """Test-only Resource that publishes one ``SecretReference``. Used
     to set up the multi-level synthesize scenario where synthesizing one
     Resource produces a second-level requirement.
     """
@@ -206,11 +206,11 @@ class _ChainPublisher:
     target_name: str
     source_name: str
     origin: Origin | None = None
-    usage: tuple = ()
+    references: tuple = ()
 
-    def required_resources(self) -> tuple[SecretRequirement, ...]:
+    def referenced_resources(self) -> tuple[SecretReference, ...]:
         return (
-            SecretRequirement(
+            SecretReference(
                 name=self.target_name, kind="secret",
                 usage="downstream", source=("publisher_kind", self.source_name),
             ),
@@ -249,8 +249,8 @@ def test_synthesize_path_walked_for_second_level_requirements() -> None:
 
     shared = r.lookup("secret", "shared")
     # Both incoming requirements attached to usage after finalize.
-    assert len(shared.usage) == 2
-    assert {u.source for u in shared.usage} == {
+    assert len(shared.references) == 2
+    assert {u.source for u in shared.references} == {
         ("publisher_kind", "p1"),
         ("publisher_kind", "p2"),
     }

@@ -10,10 +10,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from agentworks.errors import ConfigError
+
 if TYPE_CHECKING:
     from agentworks.config import Config, VMTemplate
     from agentworks.env import EnvEntry
-    from agentworks.resources.requirement import ResourceRequirement
+    from agentworks.resources.reference import ResourceReference
 
 
 @dataclass
@@ -38,22 +40,22 @@ class ResolvedVMTemplate:
     # Inheritance applies like other scalar fields: child overrides parent.
     tailscale_auth_key: str = "tailscale-auth-key"
 
-    def required_resources(self) -> list[ResourceRequirement]:
-        """Emit the resolved template's requirements: env-block secret
+    def referenced_resources(self) -> list[ResourceReference]:
+        """Emit the resolved template's references: env-block secret
         refs (with inheritance applied via the merged ``env`` dict) plus
         the Tailscale auth-key secret. Used by ``vm create`` / ``vm     reinit``
         for the eager-resolve subgraph walk.
         """
         from agentworks.config import (
-            _env_requirements,
-            _tailscale_secret_requirement,
+            _env_references,
+            _tailscale_secret_reference,
         )
 
-        reqs: list[ResourceRequirement] = list(
-            _env_requirements(self.env, ("vm_template", self.name))
+        refs: list[ResourceReference] = list(
+            _env_references(self.env, ("vm_template", self.name))
         )
-        reqs.append(_tailscale_secret_requirement(self.tailscale_auth_key, self.name))
-        return reqs
+        refs.append(_tailscale_secret_reference(self.tailscale_auth_key, self.name))
+        return refs
 
 
 def resolve_from_dict(
@@ -76,17 +78,38 @@ def resolve_from_dict(
     return ResolvedVMTemplate(name="default")
 
 
-def _resolve_from_dict(templates: dict[str, VMTemplate], name: str) -> ResolvedVMTemplate:
-    """Depth-first resolution using a templates dict."""
+def _resolve_from_dict(
+    templates: dict[str, VMTemplate],
+    name: str,
+    _visiting: tuple[str, ...] = (),
+) -> ResolvedVMTemplate:
+    """Depth-first resolution using a templates dict.
+
+    ``_visiting`` carries the chain of in-progress resolves so cycles
+    raise a clean ``ConfigError`` (matching the framework's cycle-pass
+    error shape) instead of crashing with ``RecursionError``. This is
+    the resolver's internal safety net -- the canonical cycle check
+    lives in ``Registry.finalize`` at build_registry time, but this
+    resolver is also called eagerly by ``load_config`` before any
+    registry is built (FRD R6 / Phase 2a.1), so it needs its own
+    guard.
+    """
+    if name in _visiting:
+        path = " -> ".join((*_visiting, name))
+        raise ConfigError(
+            f"vm_templates inheritance cycle detected: {path}"
+        )
+
     if name not in templates:
         # Implicit default: return built-in defaults
         return ResolvedVMTemplate(name=name)
 
     tmpl = templates[name]
     result = ResolvedVMTemplate(name=name)
+    next_visiting = (*_visiting, name)
 
     for parent_name in tmpl.inherits:
-        parent = _resolve_from_dict(templates, parent_name)
+        parent = _resolve_from_dict(templates, parent_name, next_visiting)
         _merge(result, parent)
 
     _merge_template(result, tmpl)

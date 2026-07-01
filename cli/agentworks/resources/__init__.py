@@ -4,7 +4,7 @@ The Registry is the framework's typed, queryable Resource store. Publishers
 (``agentworks.config``'s ``Config.publish_to``, ``agentworks.catalog``'s
 ``publish_to``, future plugins / YAML manifest publishers) push composed
 Resources into it; ``Registry.finalize()`` runs the framework pass that walks
-the requirement graph, dispatches miss policies (potentially synthesizing
+the reference graph, dispatches miss policies (potentially synthesizing
 auto-declared Resources), attaches ``usage`` lists, detects cycles, and
 freezes the Registry.
 
@@ -21,23 +21,34 @@ from __future__ import annotations
 # and NamedConsoleTemplateKind; Phase 2 kinds slot in by adding new files
 # under kinds/ and importing them from kinds/__init__.py.
 from agentworks.resources import kinds  # noqa: F401
-from agentworks.resources.kind import KIND_REGISTRY, ResourceKind
-from agentworks.resources.origin import Origin
-from agentworks.resources.registry import Registry
-from agentworks.resources.requirement import (
-    ResourceRequirement,
-    SecretRequirement,
-    UsageEntry,
+from agentworks.resources.kind import (
+    ALWAYS_MATERIALIZE_SOURCE,
+    KIND_REGISTRY,
+    InstanceRef,
+    NoUnreferencedDefaultError,
+    ResourceKind,
 )
+from agentworks.resources.origin import Origin
+from agentworks.resources.reference import (
+    ReferenceEntry,
+    ResourceReference,
+    SecretReference,
+    TemplateReference,
+)
+from agentworks.resources.registry import Registry
 from agentworks.resources.walk import collect_secrets_for
 
 __all__ = [
+    "ALWAYS_MATERIALIZE_SOURCE",
     "KIND_REGISTRY",
+    "InstanceRef",
+    "NoUnreferencedDefaultError",
     "Origin",
     "Registry",
     "ResourceKind",
-    "ResourceRequirement",
-    "SecretRequirement",
-    "UsageEntry",
+    "ResourceReference",
+    "SecretReference",
+    "TemplateReference",
+    "ReferenceEntry",
     "collect_secrets_for",
 ]

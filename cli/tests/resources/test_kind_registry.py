@@ -3,22 +3,22 @@
 from __future__ import annotations
 
 from agentworks.config import AdminConfig, NamedConsoleConfig
-from agentworks.resources import KIND_REGISTRY, SecretRequirement
+from agentworks.resources import KIND_REGISTRY, SecretReference
 from agentworks.secrets.base import SecretDecl
 
 
-def _secret_req(name: str, source: tuple[str, str], usage: str = "the X env var") -> SecretRequirement:
-    return SecretRequirement(name=name, kind="secret", usage=usage, source=source)
+def _secret_req(name: str, source: tuple[str, str], usage: str = "the X env var") -> SecretReference:
+    return SecretReference(name=name, kind="secret", usage=usage, source=source)
 
 
-def _admin_req() -> SecretRequirement:
-    return SecretRequirement(
+def _admin_req() -> SecretReference:
+    return SecretReference(
         name="default", kind="admin_template", usage="ignored", source=("test", "x")
     )
 
 
-def _named_console_req() -> SecretRequirement:
-    return SecretRequirement(
+def _named_console_req() -> SecretReference:
+    return SecretReference(
         name="default", kind="named_console_template", usage="ignored", source=("test", "x")
     )
 
@@ -67,7 +67,7 @@ def test_secret_kind_synthesize_builds_auto_declared_decl() -> None:
     assert decl.origin.variant == "auto-declared"
     assert decl.origin.source == ("vm_template", "default")  # first-matching
     # Usage attached at finalize, not at synthesize.
-    assert decl.usage == ()
+    assert decl.references == ()
 
 
 def test_admin_template_kind_synthesize_builds_empty_admin() -> None:

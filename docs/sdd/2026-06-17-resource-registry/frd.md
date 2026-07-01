@@ -23,10 +23,10 @@ block secrets, but explicitly deferred two adjacent concerns:
 
 This SDD addresses both, in one framework:
 
-- A **resource-requirement contract** where each resource type declares what other resources it
-  needs (by name, with a system-defined usage). One resource may be required by many; all usages are
+- A **resource-reference contract** where each resource type declares what other resources it needs
+  (by name, with a system-defined usage). One resource may be required by many; all usages are
   tracked and surfaced via the CLI.
-- A **resource-registry** finalize pass that walks all requirements, looks each up in the registry,
+- A **resource-registry** finalize pass that walks all references, looks each up in the registry,
   and dispatches missing-name policies per kind (auto-declare for secrets; auto-declare (restricted
   to `default`) for templates; error for catalogs; etc.).
 - A **migration of `tailscale_auth_key` and `git_credentials.*.token`** to first-class secret
@@ -51,99 +51,98 @@ reconciliation, but that move is deliberately not part of this design.
   resources (templates, secrets, backends, catalog entries) and lifecycle resources (VMs, agents,
   sessions, consoles). The framework in this SDD manages only the config-declared subset; lifecycle
   resources live in the DB and stay there. Resources carry their own fields (name, kind, origin,
-  description, usage list, kind-specific data); they are distinct from the **requirements** that
+  description, references list, kind-specific data); they are distinct from the **references** that
   reference them by name.
 - **Resource registry**: the framework's single container consolidating resource definitions. For
   this effort, it is constrained to just config-declared resources but it could be expanded to other
   resource sources in the future. Kind is the primary dimension; within a kind, resources are looked
   up by name, so cross-kind identity is the `(kind, name)` pair. Each kind contributes its own
-  **miss policy** (R3) which the registry applies when a requirement points at a `(kind, name)` not
+  **miss policy** (R3) which the registry applies when a reference points at a `(kind, name)` not
   yet in the registry. Resources arrive in the registry through two origin paths (R5): operator
-  declarations in config, and auto-declared synthesis from requirements. Queried by the finalize
-  pass and surfaced via `agw doctor`, `agw secret list`, and (Phase 2) `agw resource list`.
-- **Resource requirement**: a **reference declaration** -- one resource saying "I need this other
-  resource by name". Distinct from the resource itself: requirements point at resources but are not
+  declarations in config, and auto-declared synthesis from references. Queried by the finalize pass
+  and surfaced via `agw doctor`, `agw secret list`, and (Phase 2) `agw resource list`.
+- **Resource reference**: a **reference declaration** -- one resource saying "I need this other
+  resource by name". Distinct from the resource itself: references point at resources but are not
   resources. Carries the target's `name` and `kind`, a system-defined `usage`, the declaring
   resource's `source` as a `(kind, name)` pair, and (optionally) per-kind defaults the registry's
-  auto-declare policy may use. A resource may have many requirements pointing at it; the framework
+  auto-declare policy may use. A resource may have many references pointing at it; the framework
   collects them all.
-- **Usage**: the system-defined "role this resource plays for the requirement's source", set by the
-  requirement. Each requirement contributes one usage entry to its target's usage list; each entry
-  carries both the requirement's `source` `(kind, name)` and the usage text. A resource required by
-  multiple sources accumulates multiple entries. Surfaced in `agw doctor` and `agw secret describe`.
-  Distinct from the operator-set description. The text is phrased as a short noun phrase that
-  completes the sentence template `<target> is used by <source> as <usage>.` -- no capitalization
-  except for proper nouns or acronyms, no trailing period, under ~50 chars. Examples:
+- **Usage**: the system-defined "role this resource plays for the reference's source", set by the
+  reference. Each reference contributes one reference entry to its target's references list; each
+  entry carries both the reference's `source` `(kind, name)` and the usage text. A resource required
+  by multiple sources accumulates multiple entries. Surfaced in `agw doctor` and
+  `agw secret describe`. Distinct from the operator-set description. The text is phrased as a short
+  noun phrase that completes the sentence template `<target> is used by <source> as <usage>.` -- no
+  capitalization except for proper nouns or acronyms, no trailing period, under ~50 chars. Examples:
   `"the Tailscale auth key"`, `"the GitHub auth token"`, `"the ANTHROPIC_API_KEY env var"`,
   `"a parent template"`.
 - **Description**: the operator-defined free-form note about a resource (already exists today on
   secrets and `git_credentials`; this SDD formalizes the convention for new resource types).
-- **Miss policy**: what the registry does when a requirement's `(kind, name)` has no match in the
+- **Miss policy**: what the registry does when a reference's `(kind, name)` has no match in the
   registry. Declared per kind. Two options:
   - **Auto-declare**: synthesize the resource from the kind's defaults and add it to the registry.
     The resulting resource has `origin = auto-declared`. A kind may restrict which names it accepts
     (e.g., template kinds accept only the reserved name `default`); requests for other names error.
-  - **Error**: raise a config-load error citing the requirement source.
+  - **Error**: raise a config-load error citing the reference source.
 - **Origin**: the per-resource record of where the resource came from. Three values:
   `operator-declared` (from operator config; carries file path and line number for traceability),
   `code-declared` (from a code publisher like the catalog publisher introduced in Phase 2b; carries
   a code-source identifier such as `"agentworks.catalog"`), and `auto-declared` (synthesized to
-  satisfy a requirement; carries the first matching requirement's source `(kind, name)`, OR the
-  reserved sentinel `("framework", "always-materialize")` for reserved-default rows that the
-  framework guaranteed at finalize without any incoming reference -- see R3). The string
-  `"framework"` is reserved at the kind-identifier position of an Origin source tuple and must not
-  be used as a real kind name in `KIND_REGISTRY`. Origin is set once when the resource is added to
-  the registry; never mutated afterwards. Surfaced in `agw doctor`, `agw secret list`, and
-  `agw secret describe`.
+  satisfy a reference; carries the first matching reference's source `(kind, name)`, OR the reserved
+  sentinel `("framework", "always-materialize")` for reserved-default rows that the framework
+  guaranteed at finalize without any incoming reference -- see R3). The string `"framework"` is
+  reserved at the kind-identifier position of an Origin source tuple and must not be used as a real
+  kind name in `KIND_REGISTRY`. Origin is set once when the resource is added to the registry; never
+  mutated afterwards. Surfaced in `agw doctor`, `agw secret list`, and `agw secret describe`.
 
 ## Requirements
 
-### R1: Resource requirements as a generic contract
+### R1: Resource references as a generic contract
 
 Every resource type that references other resources by name declares those references as
-`ResourceRequirement` records. Each requirement carries:
+`ResourceReference` records. Each reference carries:
 
 - **`name`** (required): the referenced resource's name. Operator-overridable when the declaring
   resource exposes the name as a config field (e.g. `vm_templates.x.tailscale_auth_key`); otherwise
   fixed.
 - **`usage`** (required): one-line description of what the declaring resource needs the referenced
-  resource for. Each requirement contributes one usage.
+  resource for. Each reference contributes one usage.
 - **`source`** (required): the declaring resource's identity as a `(kind, name)` pair (e.g.
   `("vm_template", "default")`, `("git_credentials", "github-prod")`). Same `(kind, name)` shape
   used throughout the framework for resource identity. Surfaced in diagnostics and provenance.
 - **`kind`** (required): the kind of resource being referenced (`secret`, `vm_template`, etc.).
 - **Kind-specific extras** (optional): kind-defined defaults the auto-declare policy uses. For
-  `SecretRequirement`, none are defined; the framework's default backend conventions cover the
-  common case.
+  `SecretReference`, none are defined; the framework's default backend conventions cover the common
+  case.
 
-A resource's `required_resources()` method returns the full list (one per reference, no
-deduplication at the producer side). The finalize pass collects requirements across the entire
-config, keyed by `(kind, name)`, and feeds them into the registry.
+A resource's `referenced_resources()` method returns the full list (one per reference, no
+deduplication at the producer side). The finalize pass collects references across the entire config,
+keyed by `(kind, name)`, and feeds them into the registry.
 
-#### Multi-requirement resources
+#### Multi-reference resources
 
-A single resource may be the target of multiple requirements. The framework explicitly supports
-this:
+A single resource may be the target of multiple references. The framework explicitly supports this:
 
-- **Auto-declared resources** synthesize once per `(kind, name)`. When multiple requirements would
-  trigger auto-declaration of the same name, the **first-encountered requirement** supplies any
+- **Auto-declared resources** synthesize once per `(kind, name)`. When multiple references would
+  trigger auto-declaration of the same name, the **first-encountered reference** supplies any
   kind-specific extras and is recorded as the origin source (R5). Walk order is config-load order:
   top-to-bottom in the TOML file, top-level sections in their declaration order. The remaining
-  requirements contribute additional usages but do not re-synthesize the resource.
-- **Operator-declared resources** are unchanged by additional requirements pointing at them. The
-  resource keeps the operator's fields; the requirements just add to its usage list.
-- **All usages are retained**. The resource's accumulated usage list is what `agw secret describe`
-  (R10) renders. Duplicate usage strings from different requirements are deduplicated for display.
+  references contribute additional usages but do not re-synthesize the resource.
+- **Operator-declared resources** are unchanged by additional references pointing at them. The
+  resource keeps the operator's fields; the references just add to its references list.
+- **All usages are retained**. The resource's accumulated references list is what
+  `agw secret describe` (R10) renders. Duplicate usage strings from different references are
+  deduplicated for display.
 
 **Usage is static-only in this SDD.** The `usage` list captures only config-load-time references --
-one entry per `ResourceRequirement` emitted by a published resource. **Dynamic** uses (CLI args at
+one entry per `ResourceReference` emitted by a published resource. **Dynamic** uses (CLI args at
 command time like `agw vm create --template foo`, DB-level resource pointers like
 `workspaces.vm_name`, secrets actually consumed during a session run) are NOT captured. An
 always-materialized default with no operator references ends up with an empty `usage` list even if
 `agw vm create my-vm` (no `--template`, picking up `default` from the CLI) is the only way the
 operator ever provisions VMs. Operators reach for `agw vm list` etc. to answer "what's actually
 consuming this?" Closing this gap is a future direction (see Non-goals); the framework's static
-usage list is the foundation a future "observed usage" layer would build on.
+references list is the foundation a future "observed usage" layer would build on.
 
 ### R2: Resource boundaries are framework concepts, not TOML concepts
 
@@ -196,13 +195,13 @@ TOML-section recompose step goes away by construction.
 
 Each kind in the registry declares its miss policy:
 
-| Kind                                                              | Miss policy                             | Behavior                                                                                                                                                 |
-| ----------------------------------------------------------------- | --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Secret                                                            | Auto-declare (any name)                 | A `SecretRequirement` whose name is missing synthesizes a `SecretDecl`. Origin: `auto-declared`                                                          |
-| VM template, workspace template, agent template, session template | Auto-declare (reserved name: `default`) | A requirement for `default` synthesizes the kind's code-defined default template. Origin: `auto-declared`. Any other missing name is a config-load error |
-| Catalog command, git credential provider, secret backend kind     | Error                                   | Unknown names are config-load errors                                                                                                                     |
+| Kind                                                              | Miss policy                             | Behavior                                                                                                                                               |
+| ----------------------------------------------------------------- | --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Secret                                                            | Auto-declare (any name)                 | A `SecretReference` whose name is missing synthesizes a `SecretDecl`. Origin: `auto-declared`                                                          |
+| VM template, workspace template, agent template, session template | Auto-declare (reserved name: `default`) | A reference for `default` synthesizes the kind's code-defined default template. Origin: `auto-declared`. Any other missing name is a config-load error |
+| Catalog command, git credential provider, secret backend kind     | Error                                   | Unknown names are config-load errors                                                                                                                   |
 
-Error messages include the requirement's `source` so the operator sees, e.g.:
+Error messages include the reference's `source` so the operator sees, e.g.:
 
 ```text
 vm_template "azure-prod" references unknown vm_template "base"
@@ -212,14 +211,14 @@ The framework controls error shape; each kind only declares its policy. Migratin
 bespoke-validation kind into the framework changes the error wording but not the validation
 semantics.
 
-**Policy is per-kind, not per-source.** The same miss policy applies regardless of which requirement
-triggered the lookup. A secret requirement from an env-block reference is handled identically to one
+**Policy is per-kind, not per-source.** The same miss policy applies regardless of which reference
+triggered the lookup. A secret reference from an env-block reference is handled identically to one
 from `tailscale_auth_key` or a git credential `token`: if the name isn't operator-declared, the
 secret kind's auto-declare policy synthesizes it. Per-source policy divergence is intentionally not
 supported -- it would multiply the complexity and undermine the unified model.
 
 **Template default auto-declare is the only auto-declare path for template kinds.** When no operator
-declaration exists for `default` and a requirement references it, the kind synthesizes the
+declaration exists for `default` and a reference references it, the kind synthesizes the
 code-defined default template (origin: `auto-declared`). When the operator declares
 `[vm_templates.default]` (or the corresponding kind), that declaration is used verbatim (origin:
 `operator-declared`) -- no auto-decl, no merge. Partial overrides flow through normal template
@@ -231,28 +230,28 @@ mode.
 `auto_declare_names` is a non-None set (e.g., `{"default"}` for template kinds) guarantees those
 names exist in the registry after finalize, regardless of whether any resource referenced them. The
 framework's finalize pass adds a pre-step: for every kind, for every name in `auto_declare_names`,
-if no resource exists at `(kind, name)`, dispatch `synthesize(requirements=())` and add the result.
+if no resource exists at `(kind, name)`, dispatch `synthesize(references=())` and add the result.
 This closes the gap where a config with no `[vm_templates.*]` blocks (and no incoming references
 during config-load) would leave `vm_template:default` unmaterialized, then crash at command time
 when `agw vm create my-vm` (no `--template` flag, falling back to `default`) tries to look it up.
 Kinds with `auto_declare_names = None` (e.g., the secret kind) are unaffected by the
-always-materialize pre-step -- their resources remain requirement-driven and only exist when
-something declares or references them.
+always-materialize pre-step -- their resources remain reference-driven and only exist when something
+declares or references them.
 
-**The `synthesize(requirements=())` contract applies to every kind.** Defensive uniformity: the
-framework calls synthesize with empty requirements only for kinds whose `auto_declare_names` is a
+**The `synthesize(references=())` contract applies to every kind.** Defensive uniformity: the
+framework calls synthesize with empty references only for kinds whose `auto_declare_names` is a
 non-None set, but a kind's `auto_declare_names` declaration may change over the SDD's lifetime
 (e.g., a future need to materialize a secret kind's default), and the contract should hold so those
 changes are safe. Two acceptable handlings:
 
-- Kinds with `auto_declare_names` non-None set: build a code-defined default (no per-requirement
-  data needed). Template kinds and the singleton-shaped kinds (admin, named_console) do this.
+- Kinds with `auto_declare_names` non-None set: build a code-defined default (no per-reference data
+  needed). Template kinds and the singleton-shaped kinds (admin, named_console) do this.
 - Kinds with `auto_declare_names = None`: raise a typed error (e.g., `ValueError` or a small
   framework-defined `NoUnreferencedDefaultError`) that names the kind. Today's `SecretKind` falls
   here. The framework never calls this path under current config, but the kind's `synthesize` must
   still raise rather than crash on a missing index access.
 
-The "no `requirements`" case is internal-framework-only -- operator-typed code never invokes
+The "no `references`" case is internal-framework-only -- operator-typed code never invokes
 synthesize directly. Both handlings keep the framework's behavior defined.
 
 An always-materialized resource carries: `usage = ()` (no static reference asked for it at
@@ -271,9 +270,9 @@ operator-declared or auto-declared:
 
 - **`origin`** (R5): how the resource came to be in the registry, plus location detail. Set once at
   registration; never mutated.
-- **`usage`** (list of usage entries, system-collected): one entry per matching requirement; each
-  entry carries the requirement's `source` `(kind, name)` and the usage text (Terminology).
-  Operators do not set this; the finalize pass populates it from `required_resources()` walks.
+- **`usage`** (list of reference entries, system-collected): one entry per matching reference; each
+  entry carries the reference's `source` `(kind, name)` and the usage text (Terminology). Operators
+  do not set this; the finalize pass populates it from `referenced_resources()` walks.
 
 These are the only fields the framework adds. The rest of a resource's fields come either from the
 operator's declaration (verbatim) or from the kind's `synthesize()` (when auto-declared). There is
@@ -292,13 +291,13 @@ registry. Two origin types:
 - **`operator-declared`**: the resource is declared in operator config. The origin carries the
   **file path and line number** of the declaration's opening line, scoped to the loaded TOML config
   file (e.g., `~/.config/agentworks/config.toml:42`). If multi-file config (manifests, layering) is
-  added later, that SDD revisits this field. When the resource is also referenced by requirements,
-  the matching requirements still contribute to the usage list (R4) but the origin stays
+  added later, that SDD revisits this field. When the resource is also referenced by references, the
+  matching references still contribute to the references list (R4) but the origin stays
   `operator-declared`.
 - **`auto-declared`**: the resource was synthesized at config-load time to satisfy a missing
-  requirement. The origin carries the **first matching requirement in config-load order (R1)** --
-  its `source` `(kind, name)` is recorded. Subsequent requirements that match the same name
-  contribute additional usages (R1) but do not alter the origin field. Applies uniformly to
+  reference. The origin carries the **first matching reference in config-load order (R1)** -- its
+  `source` `(kind, name)` is recorded. Subsequent references that match the same name contribute
+  additional usages (R1) but do not alter the origin field. Applies uniformly to
   framework-synthesized resources, including default templates (the `source` is the first template
   that referenced `default`).
 
@@ -308,7 +307,7 @@ debugging unexpected declarations, locating an operator declaration in a sprawli
 confirming an auto-declared resource came from the source the operator expected.
 
 Origin is surfaced in `agw doctor`, `agw secret list` (origin column), and `agw secret describe`
-(full origin detail, including file:line or first-requirement source as appropriate). The Phase-2
+(full origin detail, including file:line or first-reference source as appropriate). The Phase-2
 `agw resource` commands surface origin generically (R12).
 
 ### R6: Cycle detection in the finalize pass
@@ -336,7 +335,7 @@ refs has a legitimate use.
 Resolution:
 
 1. `agw vm create vm1` triggers manager-entry eager-resolve.
-2. The resolved VM template emits a `SecretRequirement` with `name=<tailscale_auth_key>`,
+2. The resolved VM template emits a `SecretReference` with `name=<tailscale_auth_key>`,
    `usage="the Tailscale auth key"`, and `source=("vm_template", <name>)`.
 3. If the named secret isn't operator-declared, the auto-declare policy synthesizes it.
 4. The orchestrator resolves the secret through the configured backend chain (first wins).
@@ -347,8 +346,8 @@ There is no opt-out at the VM template level. Tailscale is foundational to the s
 don't want Tailscale auth at all don't configure agentworks at all.
 
 **Sharing semantics**: multiple VM templates with the default value
-`tailscale_auth_key = "tailscale-auth-key"` all emit `SecretRequirement` records targeting the same
-secret name. Per R1's multi-requirement handling, they share one auto-declared secret with multiple
+`tailscale_auth_key = "tailscale-auth-key"` all emit `SecretReference` records targeting the same
+secret name. Per R1's multi-reference handling, they share one auto-declared secret with multiple
 usages. This is intentional -- operators typically use one Tailscale tailnet across all their VMs.
 Operators wanting per-template isolation set a distinct `tailscale_auth_key` on each template (e.g.,
 `"tailscale-auth-key-prod"`, `"tailscale-auth-key-dev"`).
@@ -362,7 +361,7 @@ The git credential entry schema gains:
 
 Like `tailscale_auth_key`, the value is a bare string; no polymorphism, no inline value.
 
-Each git credential entry emits one `SecretRequirement` for its `token`. The default secret name
+Each git credential entry emits one `SecretReference` for its `token`. The default secret name
 follows the `git-token-<credential-name>` convention:
 
 ```toml
@@ -377,19 +376,19 @@ description = "Personal access"
 token = "shared-github-token"   # share a secret across credentials (uncommon but supported)
 ```
 
-Resolution mirrors R7: requirement collected, auto-declared if missing, eager-resolved via the
-backend chain, resolved value threaded to the git credential install runner that writes
-`~/.git-credentials` on the VM. The default secret name relies on git credential entry names being
-unique within `[git_credentials.*]`, which they already are by config-schema.
+Resolution mirrors R7: reference collected, auto-declared if missing, eager-resolved via the backend
+chain, resolved value threaded to the git credential install runner that writes `~/.git-credentials`
+on the VM. The default secret name relies on git credential entry names being unique within
+`[git_credentials.*]`, which they already are by config-schema.
 
 ### R9: Operator description as a distinct field
 
 Every resource type that supports operator declaration carries an optional `description` field that
 is separate from the system-collected `usage` list:
 
-- **`usage`** (list, system-collected) comes from the matching requirements; one entry per
-  requirement. Operators do not set it. Example entry: `"the Tailscale auth key"`. A resource
-  required by several sources has several usages.
+- **`usage`** (list, system-collected) comes from the matching references; one entry per reference.
+  Operators do not set it. Example entry: `"the Tailscale auth key"`. A resource required by several
+  sources has several usages.
 - **`description`** (string, operator-set) is the operator's free-form note. Example:
   `"Prod tailnet auth key, 90-day expiry, owner: SRE team"`.
 
@@ -404,11 +403,11 @@ one warning per CLI invocation.
 
 **Auto-declared resources get a synthesized `description`.** When the finalize pass auto-declares a
 resource of a kind that carries a `description` field, and the field is empty, the framework
-populates it from the first matching requirement's `usage` text and `source`:
+populates it from the first matching reference's `usage` text and `source`:
 `"(auto) <usage> for <kind>:<name>"`, plus `" (and N more)"` when more than one distinct source
 requires the resource. This is the generic version of the pattern (initially landed in Phase 1 for
 secrets, generalized in Phase 2). It works because producers write good `usage` strings -- they know
-what the requirement will be used for -- so the synthesized description reads as "what this resource
+what the reference will be used for -- so the synthesized description reads as "what this resource
 is for, and who's asking" without any kind-specific knowledge. Operator-set descriptions are honored
 verbatim; the polish only fires when the description is empty after the publish phase. Kinds without
 a `description` field skip the polish (no-op).
@@ -424,9 +423,9 @@ while still giving operators a meaningful row in `agw resource list`.
 
 - **Per-secret origin** (R5): the origin string with relevant detail. For `operator-declared`, shown
   as `operator-declared (config.toml:42)`. For `auto-declared`, shown as
-  `auto-declared by vm_template:default`. When the resource has additional matching requirements
-  beyond the one that determined the origin display, their sources (derived from the usage list) are
-  listed as supplemental "also required by ...".
+  `auto-declared by vm_template:default`. When the resource has additional matching references
+  beyond the one that determined the origin display, their sources (derived from the references
+  list) are listed as supplemental "also required by ...".
 - **Usages**: count and first entry; the full list is on `agw secret describe`.
 - **Description**: operator-set, when present.
 
@@ -437,11 +436,21 @@ summary; for detail, the operator runs describe.
 `agw secret describe <name>` (new in Phase 1) is the per-secret detail view:
 
 - **Name, kind, origin, description** (operator-set, when present). Origin is rendered with full
-  detail: file path and line for operator-declared; the triggering requirement's `(kind, name)` for
+  detail: file path and line for operator-declared; the triggering reference's `(kind, name)` for
   auto-declared.
-- **All registered usages**: one row per requirement, showing the source `(kind, name)` and the
-  usage text. A resource referenced by three sources shows three rows. Duplicate usage text is
-  collapsed.
+- **Referenced by**: one row per reference, showing the source `(kind, name)` and the usage text. A
+  resource referenced by three sources shows three rows. Duplicates are collapsed by
+  `(source, text)` -- the same text reported from two different sources stays as two rows (they
+  document the same need from independent places), but a single source emitting the same text twice
+  collapses to one row. This is the _static_ dimension: what config points at this secret.
+- **Used by (per current config)**: one row per live DB instance whose subgraph would need this
+  secret under current config, grouped by instance kind (sessions today; other kinds if future work
+  grows the projection). Projected via the secret kind's `instances` hook, which walks each
+  session's reference subgraph via `collect_secrets_for` and emits an `InstanceRef` when the target
+  secret appears in the reachable set. The "(per current config)" annotation in the section header
+  is load-bearing: the projection changes the moment config changes, even for sessions that were
+  provisioned against a different config. See the SDD plan's "Forward-compat note" for the
+  drift-tracking sibling this leaves room for.
 - **Backend mappings**: per-backend status -- the operator-set value if declared, the backend's
   default convention (e.g. `AW_SECRET_<NAME>` for env-var) if it has one and no operator override,
   or "no mapping (skipped)" for backends that have no default convention. No framework merging; this
@@ -457,9 +466,9 @@ Describe does not prompt and does not resolve secret values; it reports state.
 
 #### Registry construction: universal
 
-At every CLI invocation, regardless of command, the finalize pass walks the entire requirement graph
+At every CLI invocation, regardless of command, the finalize pass walks the entire reference graph
 and builds the registry. This is config-load-time work: cheap, deterministic, no backend calls.
-After the walk, the registry knows every declared resource and every requirement edge.
+After the walk, the registry knows every declared resource and every reference edge.
 
 The walk is not scoped by command. `agw vm list` builds the same registry as `agw vm create`.
 
@@ -474,14 +483,14 @@ Two kinds of secrets get eager-resolved per command:
 - **Env-block secrets** (existing): resolved at shell-opening commands per the env-and-secrets
   contract. Unchanged.
 - **Provisioning secrets** (new): resolved at provisioning commands. Scope is driven by the
-  requirement subgraph of the resource(s) being provisioned in this invocation. The framework walks
+  reference subgraph of the resource(s) being provisioned in this invocation. The framework walks
   that subgraph in the (already-built) registry, collects the secret `SecretDecl`s found, and passes
   them as `extra_decls` to the existing orchestrator.
 
 The subgraph scoping is the natural answer to "why doesn't `agent create` prompt for the Tailscale
-auth key?" -- the agent template's requirement subgraph doesn't reach `tailscale_auth_key` (that's
-on the VM template, which is not being provisioned at `agent create` time). Resource requirements
-are walked transitively (e.g., `admin.config.git_credentials = ["github-prod"]` -->
+auth key?" -- the agent template's reference subgraph doesn't reach `tailscale_auth_key` (that's on
+the VM template, which is not being provisioned at `agent create` time). Resource references are
+walked transitively (e.g., `admin.config.git_credentials = ["github-prod"]` -->
 `git_credentials:github-prod` --> `secret:git-token-github-prod`) so the manager picks up the right
 depth.
 
@@ -531,21 +540,43 @@ agw resource describe <kind> <name>
 ```
 
 - `agw resource list` shows one row per declared resource across all kinds in the registry. Columns:
-  kind, name, origin (with detail per R5: file:line for operator-declared, requirement source for
+  kind, name, origin (with detail per R5: file:line for operator-declared, reference source for
   auto-declared), usage count (or first usage when short), description (truncated). Filters:
   `--kind` (CSV per the cli-conventions filter pattern), `--origin` (one of `operator`, `auto`).
   Because R9's synthesis polish fills `description` for auto-declared resources, the column is
   reliably populated across all kinds; operators see "what this resource is for and who's asking"
   without the renderer needing kind-specific knowledge.
 - `agw resource describe <kind> <name>` shows the framework-level detail view: kind, name, origin
-  with full detail, all registered usages, and description. **Stops at framework-uniform fields** --
-  the set the framework knows how to render without semantic knowledge of the kind: name, kind,
-  origin, usage, and description (the operator-set or polish-synthesized text per R9). Kind-specific
-  detail (secret backend mappings, template inheritance chain, resolved fields, ...) belongs in the
-  kind's own `describe` command -- rendering them would require semantic knowledge of the kind that
-  the cross-kind command intentionally doesn't carry. The two-positional shape is required because
+  with full detail, all registered references, all live instances that use it per current config,
+  and description. **Stops at framework-uniform fields** -- the set the framework knows how to
+  render without semantic knowledge of the kind: name, kind, origin, references, used-by, and
+  description (the operator-set or polish-synthesized text per R9). Kind-specific detail (secret
+  backend mappings, template inheritance chain, resolved fields, ...) belongs in the kind's own
+  `describe` command -- rendering them would require semantic knowledge of the kind that the
+  cross-kind command intentionally doesn't carry. The two-positional shape is required because
   resource names are unique only _within_ a kind, not across kinds (a `default` secret and a
   `default` vm_template are different resources).
+
+### Cross-kind and per-kind describe: overlap is intentional
+
+Every per-kind describe command (`agw secret describe` today; hypothetical
+`agw vm-template describe`, `agw agent-template describe`, ... in future SDDs) shows the
+framework-uniform sections (Referenced by, Used by, header) **plus** its kind-specific extensions
+(secret backend mappings + resolution preview for secrets; resolved inheritance chain + effective
+fields for a future template describe; etc.). The overlap with `agw resource describe` is
+deliberate:
+
+- Per-kind describe is the _complete_ view for one kind. An operator running
+  `agw secret describe api-key` expects everything about that secret in one place -- including who
+  references it and who uses it. Making them bounce to `agw resource describe secret api-key` for
+  the framework fields and back for the kind-specific ones would be worse UX.
+- Cross-kind describe is the _truncated_ view usable across all kinds. It's the shortcut when an
+  operator wants a framework-level look at any resource without knowing (or typing) the kind's
+  specialized command.
+
+Kind-specific detail lives only in the per-kind describe. Framework-uniform fields live in both. The
+framework-uniform section labels (`Referenced by:`, `Used by (per current config):`) match verbatim
+between the two surfaces so operators reading either see the same shape for the same data.
 
 `agw resource` is gated to Phase 2 because the cross-kind view only earns its keep once multiple
 kinds are in the registry; with only secrets in Phase 1 it would be redundant with `agw secret list`
@@ -571,7 +602,7 @@ kinds are in the registry; with only secrets in Phase 1 it would be redundant wi
   fields accept secret names only. EnvEntry-style `{ secret = "..." }` polymorphism is intentionally
   not extended to these fields.
 - **Dynamic (observed) usage tracking on `usage`** (see R1). This SDD's `usage` list is
-  config-load-time only -- one entry per static `ResourceRequirement`. Dynamic uses (CLI args at
+  config-load-time only -- one entry per static `ResourceReference`. Dynamic uses (CLI args at
   command time, DB pointers like `workspaces.vm_name`, secrets resolved during a session run) are
   out of scope here but a clear future direction. A future enhancement could plumb DB-derived
   references and CLI-time references into a separate "observed usage" surface, layered alongside the
@@ -585,7 +616,7 @@ Operators upgrading across this SDD see three observable changes:
 
 - **Undeclared env-block secret references no longer error.** Under env-and-secrets, an env-block
   `{ secret = "foo" }` reference required an explicit `[secrets.foo]` block; an undeclared name was
-  a config-load error. Under this SDD, that reference becomes a requirement and the secret kind's
+  a config-load error. Under this SDD, that reference becomes a reference and the secret kind's
   auto-declare policy synthesizes the missing declaration. The strict-declaration intent of
   env-and-secrets is preserved through visibility instead: `agw doctor` and `agw secret list` show
   every auto-declared secret with its origin source, so operators retain a complete view of what the

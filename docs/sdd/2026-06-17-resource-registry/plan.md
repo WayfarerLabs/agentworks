@@ -72,14 +72,14 @@ operator-declared Resource (and every singleton-synthesized default) carries a
 Goal: stand up the `agentworks.resources` package with the core types and the new `Registry` class.
 The Registry exposes a **publish / finalize** API: starts empty, accepts Resources from any source
 (Config in Phase 1; future plugins / manifests later), then `finalize()` runs the framework pass
-(walk requirements, dispatch miss policies that may synthesize auto-declared Resources, attach
+(walk references, dispatch miss policies that may synthesize auto-declared Resources, attach
 `usage`, detect cycles, freeze). A small `build_registry(config)` free function in
 `agentworks/bootstrap.py` orchestrates the standard publishers. Plus `SecretKind`. Resource
 composition already lives at the Config layer per Phase 0; the Registry operates on already-composed
-Resources. No producers of `SecretRequirement` wired yet beyond what tests synthesize.
+Resources. No producers of `SecretReference` wired yet beyond what tests synthesize.
 
-- [x] `cli/agentworks/resources/__init__.py`: public surface re-exports (`ResourceRequirement`,
-      `SecretRequirement`, `ResourceKind`, `Origin`, `UsageEntry`, `Registry`,
+- [x] `cli/agentworks/resources/__init__.py`: public surface re-exports (`ResourceReference`,
+      `SecretReference`, `ResourceKind`, `Origin`, `ReferenceEntry`, `Registry`,
       `collect_secrets_for`). The lower-level `Registry.empty()` + `add` + `finalize` triad is
       exposed for tests and multi-source orchestration; the convenience `build_registry(config)`
       lives in `agentworks/bootstrap.py` (next bullet) so the Registry stays publisher-agnostic.
@@ -90,23 +90,22 @@ Resources. No producers of `SecretRequirement` wired yet beyond what tests synth
       isn't Config's (Config shouldn't know about catalog) and isn't Registry's (Registry shouldn't
       know about its publishers). Call sites use this for the common case; tests can either use this
       helper or assemble Registry by hand with `Registry.empty()` + explicit `publish_to` calls.
-- [x] `cli/agentworks/resources/requirement.py`:
-  - `ResourceRequirement` immutable dataclass (base): `name`, `kind`, `usage`, `source`.
-  - `SecretRequirement(ResourceRequirement)` concrete subclass (no extra fields in Phase 1; the
-    subclass exists so producers and the framework agree on the target kind without
-    string-dispatch).
-  - `UsageEntry(source, text)` immutable dataclass for per-resource usage list entries.
+- [x] `cli/agentworks/resources/reference.py`:
+  - `ResourceReference` immutable dataclass (base): `name`, `kind`, `usage`, `source`.
+  - `SecretReference(ResourceReference)` concrete subclass (no extra fields in Phase 1; the subclass
+    exists so producers and the framework agree on the target kind without string-dispatch).
+  - `ReferenceEntry(source, usage)` immutable dataclass for per-resource references-list entries.
 - [x] `cli/agentworks/resources/origin.py`:
   - `Origin` dataclass with
     `variant: Literal["operator-declared", "code-declared", "auto-declared"]` and variant-specific
     fields: `file: Path` + `line: int` for operator-declared; `source: str` (code-source identifier)
-    for code-declared; `source: tuple[str, str]` (first matching requirement) for auto-declared.
+    for code-declared; `source: tuple[str, str]` (first matching reference) for auto-declared.
     Factory classmethods: `Origin.operator_declared(file, line)`, `Origin.code_declared(source)`,
     `Origin.auto_declared(source)`. Set once at publish; never mutated. The `code-declared` variant
     supports Phase 2b's catalog publisher and any future code publishers (plugins, etc.).
 - [x] `cli/agentworks/resources/kind.py`:
   - `ResourceKind` Protocol: `kind`, `miss_policy`, `auto_declare_names`,
-    `synthesize(requirements) -> Resource`.
+    `synthesize(references) -> Resource`.
   - `KIND_REGISTRY: dict[str, ResourceKind]`. Each `kinds/*.py` module self-registers into the dict
     at import; `kinds/__init__.py` imports all kinds. `agentworks/resources/__init__.py` imports
     `.kinds` so that a single `import agentworks.resources` (or any
@@ -116,7 +115,7 @@ Resources. No producers of `SecretRequirement` wired yet beyond what tests synth
 - [x] `cli/agentworks/resources/kinds/__init__.py` + `kinds/secret.py`:
   - `SecretKind(ResourceKind)`: `kind="secret"`, `miss_policy="auto-declare"`,
     `auto_declare_names=None` (any name). `synthesize` builds a `SecretDecl` with framework-set
-    `usage` list (paired `UsageEntry`s) and `origin=auto-declared`.
+    `usage` list (paired `ReferenceEntry`s) and `origin=auto-declared`.
 - [x] `cli/agentworks/resources/kinds/admin_template.py`:
   - `AdminTemplateKind(ResourceKind)`: `kind="admin_template"`, `miss_policy="auto-declare"`,
     `auto_declare_names={"default"}`. `synthesize` builds an empty-defaults `AdminConfig` with
@@ -140,7 +139,7 @@ Resources. No producers of `SecretRequirement` wired yet beyond what tests synth
     Catalog's `publish_to` (Phase 2b) builds `Origin.code_declared(source="agentworks.catalog")`.
     Future publishers do the same with their own variants. The Registry stores; it doesn't care
     about publisher identity beyond the Origin carried.
-  - `Registry.finalize() -> None` -- the framework pass. Walks requirements via
+  - `Registry.finalize() -> None` -- the framework pass. Walks references via
     `required_resources()`, groups by `(kind, name)`, dispatches per `KIND_REGISTRY` miss policy
     (auto-declare synthesizes a Resource with `Origin(variant="auto-declared", ...)`; error raises
     `ConfigError`), attaches `usage` to each Resource, runs cycle detection (DFS three-coloring),
@@ -151,8 +150,8 @@ Resources. No producers of `SecretRequirement` wired yet beyond what tests synth
     `agentworks/bootstrap.py`'s `build_registry(config)` -- see the earlier bullet. The Registry
     class itself does not expose a `from_config` classmethod; doing so would make Registry import
     Config (the wrong direction; Registry should be publisher-agnostic).
-- [x] **Add `origin: Origin | None` and `usage: list[UsageEntry]` fields to every Resource type**:
-      `SecretDecl` in `agentworks/secrets/base.py`; `VMTemplate`, `WorkspaceTemplate`,
+- [x] **Add `origin: Origin | None` and `usage: list[ReferenceEntry]` fields to every Resource
+      type**: `SecretDecl` in `agentworks/secrets/base.py`; `VMTemplate`, `WorkspaceTemplate`,
       `AgentTemplate`, `SessionTemplate`, `AdminConfig`, `NamedConsoleConfig`, `SecretConfig`,
       `SecretBackendConfig`, `GitCredentialConfig` in `agentworks/config.py`. Both default to `None`
       / empty list at construction; the Registry populates them (origin at publish via
@@ -177,7 +176,7 @@ Resources. No producers of `SecretRequirement` wired yet beyond what tests synth
 - [x] `cli/agentworks/errors.py`: confirm `ConfigError` carries `entity_kind`, `entity_name`,
       `source` (a `(kind, name)` pair) fields if not already; existing shape is preserved.
 - [x] **Tests**:
-  - `cli/tests/resources/test_requirement.py`: dataclass invariants, base-vs-subclass shape.
+  - `cli/tests/resources/test_reference.py`: dataclass invariants, base-vs-subclass shape.
   - `cli/tests/resources/test_origin.py`: variant invariants and immutability across all three
     variants (`operator-declared`, `code-declared`, `auto-declared`); the `code-declared` factory is
     exercised here even though its first real producer (the catalog publisher) lands in Phase 2b --
@@ -206,25 +205,25 @@ Resources. No producers of `SecretRequirement` wired yet beyond what tests synth
     `build_registry(load_config(<config with [admin.env]>))`, the same single entry exists but its
     `env` block is populated.
 
-Definition of done: the public surface (`ResourceRequirement`, `ResourceKind`, `Origin`, `Registry`,
-`UsageEntry`, `collect_secrets_for`, etc.) is importable from `agentworks.resources`;
+Definition of done: the public surface (`ResourceReference`, `ResourceKind`, `Origin`, `Registry`,
+`ReferenceEntry`, `collect_secrets_for`, etc.) is importable from `agentworks.resources`;
 `build_registry(config)` from `agentworks.bootstrap` runs on every config load (no-op for current
 configs since no producers wired yet); `publish_to` / `finalize` lifecycle pinned by tests; CI
 green; reviewer-approved.
 
 ## Phase 1b: Env-block secret-reference migration
 
-Goal: env-block `{ secret = "..." }` references emit `SecretRequirement` via `required_resources()`.
+Goal: env-block `{ secret = "..." }` references emit `SecretReference` via `required_resources()`.
 Undeclared secrets auto-declare (per the new framework). The env-and-secrets SDD's strict "must
 declare" error path is removed; visibility is preserved via `agw doctor` and `agw secret list`
 showing every auto-declared secret with its origin source.
 
 - [x] `cli/agentworks/env/entry.py`: `EnvEntry`'s secret-ref form gains
-      `required_resources(source: tuple[str, str]) -> list[ResourceRequirement]`. Returns one
-      `SecretRequirement` per referenced secret. Usage text derived from the env-block context
-      (e.g., `"the ANTHROPIC_API_KEY env var"`).
+      `required_resources(source: tuple[str, str]) -> list[ResourceReference]`. Returns one
+      `SecretReference` per referenced secret. Usage text derived from the env-block context (e.g.,
+      `"the ANTHROPIC_API_KEY env var"`).
 - [x] `cli/agentworks/config.py`: env-block resources implement `required_resources()` by iterating
-      their `env` dict and aggregating per-entry requirements. Covers `AdminConfig` (source
+      their `env` dict and aggregating per-entry references. Covers `AdminConfig` (source
       `("admin_template", "default")`), `NamedConsoleConfig` (source
       `("named_console_template", "default")`), and the four multi-named template types `VMTemplate`
       / `WorkspaceTemplate` / `AgentTemplate` / `SessionTemplate` (source `("<kind>", "<name>")` per
@@ -238,7 +237,7 @@ showing every auto-declared secret with its origin source.
       FRD Migration notes, but operators upgrading should know to scan `agw secret list` for
       unexpected auto-declared names after the upgrade.
 - [x] **Tests**:
-  - `cli/tests/test_env_block_requirements.py`: an env block referencing an undeclared secret no
+  - `cli/tests/test_env_block_references.py`: an env block referencing an undeclared secret no
     longer errors; the secret auto-declares; doctor / secret-list display surfaces it with origin =
     `auto-declared by <scope>:<name>`.
   - Update `cli/tests/test_secrets_resolver.py` (or equivalent) to reflect the new "no config-load
@@ -259,13 +258,13 @@ Legacy resolution path removed.
       `{ secret = "..." }` polymorphism, no plaintext-literal heuristic). Sample config updated.
 - [x] `cli/agentworks/vms/templates.py` (`ResolvedVMTemplate`): same field; threaded through
       template-inheritance resolution like other fields.
-- [x] `ResolvedVMTemplate.required_resources()` emits a `SecretRequirement` for the configured
+- [x] `ResolvedVMTemplate.required_resources()` emits a `SecretReference` for the configured
       `tailscale_auth_key` (default `"tailscale-auth-key"`) with usage `"the Tailscale auth key"`
       and source `("vm_template", template.name)`.
 - [x] `cli/agentworks/vms/manager.py`: `create_vm` and `reinit_vm` walk the resolved VM template's
-      requirement subgraph via `collect_secrets_for(registry, ("vm_template", <name>))`,
-      eager-resolve the result via `resolve_for_command(extra_decls=...)`, and pass the resolved
-      Tailscale auth key as a function argument into the Tailscale install runner.
+      reference subgraph via `collect_secrets_for(registry, ("vm_template", <name>))`, eager-resolve
+      the result via `resolve_for_command(extra_decls=...)`, and pass the resolved Tailscale auth
+      key as a function argument into the Tailscale install runner.
 - [x] Tailscale install runner gains a `*, auth_key: str` keyword-only argument. The exact function
       path is **pinned at Phase 1c start** by grepping for the current `tailscale up --authkey` call
       site: pre-PR #130 this was `_install_tailscale` in `cli/agentworks/vms/initializer.py`;
@@ -282,11 +281,11 @@ Legacy resolution path removed.
     injection.
   - `cli/tests/test_sample_config_tailscale.py`: the updated `sample-config.toml` parses cleanly
     through the new finalize pass and the Tailscale secret auto-declares from the VM-template
-    requirement.
+    reference.
   - `cli/tests/test_tailscale_legacy_removed.py`: source-level tripwire that `AW_TAILSCALE_AUTH_KEY`
     is no longer referenced.
-  - `cli/tests/test_resolved_vm_template_requirements.py`: a resolved VM template emits the expected
-    `SecretRequirement` shape.
+  - `cli/tests/test_resolved_vm_template_references.py`: a resolved VM template emits the expected
+    `SecretReference` shape.
 
 Definition of done: `vm create` / `vm reinit` prompt for the Tailscale auth key via the framework
 (or pick it up from the configured backend chain) at command start; legacy resolution path removed;
@@ -295,26 +294,26 @@ existing env-block tests still pass; CI green; reviewer-approved.
 ## Phase 1d: Git credential token migration
 
 Goal: each `[git_credentials.<name>]` entry gains a `token` field referencing a secret; admin /
-agent provisioning walks the requirement subgraph; tokens reach the install runner as kwargs. Legacy
+agent provisioning walks the reference subgraph; tokens reach the install runner as kwargs. Legacy
 `obtain_token` path removed.
 
 - [x] `cli/agentworks/config.py` (`GitCredentialConfig`): add a `token: str` field defaulting to
       `git-token-<name>`. The default is computed (in `__post_init__` or by the parser; a dataclass
       literal default can't interpolate the entry's name), not hard-coded. Validate: bare string.
       Same shape rule as `tailscale_auth_key`.
-- [x] `GitCredentialConfig.required_resources()` emits a `SecretRequirement` for the configured
+- [x] `GitCredentialConfig.required_resources()` emits a `SecretReference` for the configured
       `token` with usage `"the auth token"` and source `("git_credentials", name)`.
 - [x] **Register `GitCredentialKind` in `KIND_REGISTRY`** with miss policy `error`. This lets the
-      framework recognize `git_credentials:<name>` requirements emitted from admin / agent
-      templates' `git_credentials = [...]` lists, look them up in the (already-populated) registry,
-      and surface a clean error when the name is undeclared. The kind doesn't synthesize (no
-      auto-decl); it just validates that the named credential exists.
+      framework recognize `git_credentials:<name>` references emitted from admin / agent templates'
+      `git_credentials = [...]` lists, look them up in the (already-populated) registry, and surface
+      a clean error when the name is undeclared. The kind doesn't synthesize (no auto-decl); it just
+      validates that the named credential exists.
 - [x] `AdminConfig.required_resources()` / `AgentTemplate.required_resources()`: when
-      `git_credentials = ["name1", "name2"]` is set, emit a `ResourceRequirement` of kind
+      `git_credentials = ["name1", "name2"]` is set, emit a `ResourceReference` of kind
       `git_credentials` per name. `GitCredentialKind`'s error miss policy catches typos that
       previously went through bespoke validation.
 - [x] `cli/agentworks/agents/manager.py` / `cli/agentworks/vms/manager.py`: at `agent create` /
-      `agent reinit` / `vm create` / `vm reinit`, walk the requirement subgraph transitively
+      `agent reinit` / `vm create` / `vm reinit`, walk the reference subgraph transitively
       (admin/agent_template -> git_credentials -> secret) and eager-resolve.
 - [x] The git-credentials install runner gains a `*, tokens: dict[str, str]` (name -> token)
       keyword-only argument; the function that writes `~/.git-credentials` reads from the passed
@@ -334,9 +333,9 @@ agent provisioning walks the requirement subgraph; tokens reach the install runn
     framework.
   - `cli/tests/test_git_credentials_typo_errors.py`: a typo in
     `admin.git_credentials = ["githb-prod"]` (undeclared name) errors at config load via
-    `GitCredentialKind`'s error miss policy, with the requirement source surfaced in the error
+    `GitCredentialKind`'s error miss policy, with the reference source surfaced in the error
     message.
-  - `cli/tests/test_git_credentials_subgraph_walk.py`: requirement walk traverses admin ->
+  - `cli/tests/test_git_credentials_subgraph_walk.py: reference walk traverses admin ->
     git_credentials -> secret transitively.
 
 Definition of done: git credential tokens flow through the framework end-to-end at provisioning
@@ -360,7 +359,7 @@ Service-layer logic lives in `agentworks.secrets`.
       automatically (or via the project's regen step).
 - [x] **Tests**:
   - `cli/tests/test_secret_describe.py`: per-section rendering; operator-declared shows file:line;
-    auto-declared shows the first requirement source; multiple usages render one row each; backend
+    auto-declared shows the first reference source; multiple usages render one row each; backend
     status shows the per-backend disposition without merging.
   - `cli/tests/test_secret_describe_no_prompt.py`: describe never calls the prompt source and never
     resolves a value.
@@ -378,30 +377,30 @@ reviewer pass covers the whole Phase 1 ship.
 
 Goal: bring template inheritance into the framework. Define `VMTemplateKind`,
 `WorkspaceTemplateKind`, `AgentTemplateKind`, `SessionTemplateKind`. `inherits = [...]` becomes
-`TemplateRequirement` emission. Built-in defaults migrate into `synthesize()`. Plurify
+`TemplateReference` emission. Built-in defaults migrate into `synthesize()`. Plurify
 `AdminTemplateKind` from singleton to named-multi-instance (framework-only; operator surface stays
 single `[admin]`-shaped). Add the always-materialize pre-step to finalize so reserved-default names
 exist in the registry even when nothing references them. Sweep manager entry points to hoist
 `build_registry`. Operator-facing behavior is unchanged.
 
-- [ ] `cli/agentworks/resources/requirement.py`: add `TemplateRequirement(ResourceRequirement)` with
-      no extra fields (the template kind handles its own defaults inside `synthesize`).
-- [ ] `cli/agentworks/resources/kinds/vm_template.py`, `workspace_template.py`, `agent_template.py`,
+- [x] `cli/agentworks/resources/reference.py`: add `TemplateReference(ResourceReference)` with no
+      extra fields (the template kind handles its own defaults inside `synthesize`).
+- [x] `cli/agentworks/resources/kinds/vm_template.py`, `workspace_template.py`, `agent_template.py`,
       `session_template.py`:
   - Each `XxxKind` declares `miss_policy="auto-declare"`, `auto_declare_names={"default"}`.
-  - `synthesize(requirements)` produces the kind's code-defined default template (the same defaults
+  - `synthesize(references)` produces the kind's code-defined default template (the same defaults
     today live in the existing resolver's "implicit default" fallback; move them here verbatim in
     Phase 2a).
-- [ ] Each `XxxTemplate.required_resources()` emits `TemplateRequirement` entries for each name in
+- [x] Each `XxxTemplate.required_resources()` emits `TemplateReference` entries for each name in
       `inherits = [...]`.
-- [ ] The existing inheritance resolver in `agentworks.config` / template modules shrinks:
-      requirement-emission now happens via `required_resources()`; the framework's cycle-detection
+- [x] The existing inheritance resolver in `agentworks.config` / template modules shrinks:
+      reference-emission now happens via `required_resources()`; the framework's cycle-detection
       runs uniformly; the resolver walks `inherits` with the framework having already validated
       names and reachability. Per-template field-merging logic stays where it is (it's
       template-inheritance behavior, not framework behavior).
-- [ ] Sweep existing template tests for any that asserted on the bespoke validation's error
+- [x] Sweep existing template tests for any that asserted on the bespoke validation's error
       messages; update to match the framework's consistent error shape.
-- [ ] **Generalize the auto-declared `description` polish.** The Phase 1 implementation in
+- [x] **Generalize the auto-declared `description` polish.** The Phase 1 implementation in
       `Registry.finalize` checks `isinstance(resource, SecretDecl)`; loosen to a structural check
       (`hasattr(resource, "description")` + empty-string test) so any kind that carries a
       `description: str` field benefits automatically. The format
@@ -410,7 +409,7 @@ exist in the registry even when nothing references them. Sweep manager entry poi
       no operator-visible change in Phase 2a itself; the change earns its keep when a future kind
       acquires a description (and avoids needing a second per-kind branch). See FRD R9 and HLA's
       Framework metadata attachment section for the generalized contract.
-- [ ] **Sweep command entry points so `build_registry(config)` runs before any business logic.**
+- [x] **Sweep command entry points so `build_registry(config)` runs before any business logic.**
       Phase 1c/1d hoisted `build_registry` to the top of `create_vm`, `reinit_vm`, and
       `add_git_credential` so the framework's per-kind miss-policies (e.g. `GitCredentialKind`'s
       `error` policy) fire before any other validation and the operator gets a clean typo error
@@ -418,21 +417,21 @@ exist in the registry even when nothing references them. Sweep manager entry poi
       post-PR-#146 owns ephemeral workspace/agent creation and the secret eager-resolve),
       `create_workspace`, `create_agent`, `reinit_agent`, and any new commands -- partially hoist:
       `create_agent` and `reinit_agent` call `build_registry` but only after `resolve_template`,
-      `_require_vm`, etc. With Phase 2a introducing `TemplateRequirement` and the kind handlers'
+      `_require_vm`, etc. With Phase 2a introducing `TemplateReference` and the kind handlers'
       default-only `auto_declare_names`, a typo on `inherits = ["defualt"]` should surface as a
       framework error before those calls, not after. Audit every manager-entry function and move
       `build_registry(config)` above the first non-cheap call (template resolution, DB lookups, VM
-      requirements) so framework miss-policies are the first thing that can fail. Scope is
+      references) so framework miss-policies are the first thing that can fail. Scope is
       intentionally `*/manager.py` only -- CLI command bodies delegate to managers per the
       service-layer-is-the-authority rule and don't need their own hoist. Trivial cost (one call
       that's already memoization-friendly inside `bootstrap.py`); high payoff in error-shape
       consistency across the surface.
-- [ ] **Update every kind's `synthesize` to tolerate `requirements=()`.** Today's
+- [x] **Update every kind's `synthesize` to tolerate `references=()`.** Today's
       `_SecretKind.synthesize`, `_AdminTemplateKind.synthesize`, and
-      `_NamedConsoleTemplateKind.synthesize` all index into `requirements[0]` and would crash on
-      empty input. Under the strengthened contract (FRD R3, "the `synthesize(requirements=())`
-      contract applies to every kind"), every kind's synthesize must have defined behavior in this
-      case: kinds with `auto_declare_names` non-None set produce a code-defined default; kinds with
+      `_NamedConsoleTemplateKind.synthesize` all index into `references[0]` and would crash on empty
+      input. Under the strengthened contract (FRD R3, "the `synthesize(references=())` contract
+      applies to every kind"), every kind's synthesize must have defined behavior in this case:
+      kinds with `auto_declare_names` non-None set produce a code-defined default; kinds with
       `auto_declare_names = None` raise a typed error naming the kind. Concretely in this phase:
       update `_AdminTemplateKind` and `_NamedConsoleTemplateKind` to build code-defined defaults
       when called empty
@@ -440,10 +439,10 @@ exist in the registry even when nothing references them. Sweep manager entry poi
       behavior to the four new template kinds being introduced; update `_SecretKind` to raise on
       empty (defensive even though the framework never calls it that way today). Tests in
       `cli/tests/resources/test_kind_synthesize_empty.py` pin both shapes.
-- [ ] **Always-materialize reserved-default names in `Registry.finalize`.** Today's finalize
-      auto-declares only when something emits an incoming `ResourceRequirement` for a missing name.
+- [x] **Always-materialize reserved-default names in `Registry.finalize`.** Today's finalize
+      auto-declares only when something emits an incoming `ResourceReference` for a missing name.
       That works for `secret` (which has `auto_declare_names = None` and is correctly
-      requirement-driven), but breaks for the template kinds Phase 2a introduces: a config with no
+      reference-driven), but breaks for the template kinds Phase 2a introduces: a config with no
       `[vm_templates.*]` blocks and nothing referencing `vm_template:default` would leave the
       default unmaterialized, then crash at `agw vm create my-vm` (no `--template`, falls back to
       `default`) when the manager calls `registry.lookup("vm_template", "default")`. Today's
@@ -451,16 +450,15 @@ exist in the registry even when nothing references them. Sweep manager entry poi
       fallback into `synthesize()` but tying it only to incoming-reference auto-declare opens the
       gap. Fix in finalize itself, not at every manager call site: add a pre-step that, for every
       kind whose `auto_declare_names` is a non-None set, materializes any reserved name not already
-      in the registry by calling `synthesize(requirements=())`. Kinds with
-      `auto_declare_names = None` (secrets) are unaffected. The kind's `synthesize` MUST tolerate
-      `requirements=()` -- template kinds build code-defined defaults so this is straightforward;
-      `SecretKind.synthesize` never gets called this way and stays requirement-driven. Resources
-      materialized this way carry `usage = ()`,
-      `origin = Origin.auto_declared(source=("framework", "always-materialize"))`, and the
-      description-polish (extended in this phase per the bullet above) gives them
+      in the registry by calling `synthesize(references=())`. Kinds with `auto_declare_names = None`
+      (secrets) are unaffected. The kind's `synthesize` MUST tolerate `references=()` -- template
+      kinds build code-defined defaults so this is straightforward; `SecretKind.synthesize` never
+      gets called this way and stays reference-driven. Resources materialized this way carry
+      `usage = ()`, `origin = Origin.auto_declared(source=("framework", "always-materialize"))`, and
+      the description-polish (extended in this phase per the bullet above) gives them
       `description = "(auto) auto-declared default <kind>"`. See FRD R3 / R9 and HLA's
       `Publish and finalize` and Framework-metadata-attachment sections.
-- [ ] **Plurify `AdminTemplateKind`** from singleton (today) to named-multi-instance, alongside the
+- [x] **Plurify `AdminTemplateKind`** from singleton (today) to named-multi-instance, alongside the
       four template kinds being formalized in this phase. `auto_declare_names = {"default"}` stays.
       No operator-facing change in Phase 2a: the Config parser still only accepts `[admin]`
       (singleton) and publishes it as `admin_template:default`; the CLI doesn't gain
@@ -470,18 +468,22 @@ exist in the registry even when nothing references them. Sweep manager entry poi
       framework. The always-materialize pre-step above subsumes Config's current synthesize-on-omit
       for admin (and named_console); optional Config cleanup to retire those paths -- not required
       for behavior, follows naturally with the YAML resource config SDD.
-- [ ] **Tests**:
-  - `cli/tests/resources/test_template_kinds.py`: each kind's `synthesize` produces the expected
-    defaults; reserved-name restriction errors on non-default missing names.
-  - `cli/tests/resources/test_template_cycle_detection.py`: inheritance cycles caught uniformly;
-    error messages match the framework's shape.
+- [x] **Tests**:
+  - `cli/tests/resources/test_vm_template_kind.py` (Phase 2a.1) and
+    `cli/tests/resources/test_template_kinds.py` (Phase 2a.2 parametrized across the other three):
+    each kind's `synthesize` produces the expected defaults; reserved-name restriction errors on
+    non-default missing names; framework miss-policy fires on typos; cycle detection caught either
+    by the framework's pass at build_registry time or by the resolver's internal visited-set guard
+    for the load-time eager-resolve path (kinds that have one). Note: the planned standalone
+    `test_template_cycle_detection.py` is folded into these two files since each kind's cycle
+    behavior tests cleanly alongside its other kind-level coverage.
   - `cli/tests/resources/test_always_materialize.py`: every reserved auto-declare name exists in the
     registry after `finalize` even when nothing references it. The row carries origin=auto-declared
     with synthetic source `("framework", "always-materialize")`, `usage=()`, and (for kinds with a
     description field) the polished `description="(auto) auto-declared default <kind>"`. Kinds with
     `auto_declare_names = None` (secrets) do not get spurious rows.
-  - Update `cli/tests/test_vm_templates.py` / `test_agent_templates.py` / etc. to reflect the new
-    error shape.
+  - Update `cli/tests/test_config.py` cycle-detection test to use build_registry (the only
+    pre-existing test that asserted on the bespoke load-time validation shape).
 
 Definition of done: template inheritance flows through the framework; built-in defaults are
 single-sourced (in `synthesize` per kind); cycle detection covers all four template kinds;
@@ -492,32 +494,32 @@ operator-facing behavior unchanged except for error message shape; CI green; rev
 Goal: bring the catalog into the framework as first-class Resources via a code publisher, plus add
 the remaining bespoke-validation kinds.
 
-- [ ] `cli/agentworks/resources/kinds/catalog.py`: `CatalogKind` for catalog commands -- three
+- [x] `cli/agentworks/resources/kinds/catalog.py`: `CatalogKind` for catalog commands -- three
       sub-kinds (`apt_package`, `system_install_command`, `user_install_command`) registered in
       `KIND_REGISTRY`. All three use the **error miss policy** (unknown names referenced from
       `apt_packages = ["..."]` etc. error with the referencing scope cited).
-- [ ] `cli/agentworks/catalog.py` (or wherever the code-defined catalog lives today): add a
+- [x] `cli/agentworks/catalog.py` (or wherever the code-defined catalog lives today): add a
       `publish_to(registry: Registry) -> None` function. Iterates the code-defined catalog entries
       and calls
       `registry.add(kind, name, resource, Origin.code_declared(source="agentworks.catalog"))` for
       each. Catalog Resources are now full Registry citizens:
       `agw resource list --kind apt_package,system_install_command,user_install_command` (Phase 2c)
       shows them with origin = `code-declared by agentworks.catalog`.
-- [ ] `agentworks/bootstrap.py` `build_registry(config)` is updated to invoke
+- [x] `agentworks/bootstrap.py` `build_registry(config)` is updated to invoke
       `catalog.publish_to(registry)` before `config.publish_to(registry)` (so any operator-declared
       override of catalog entries -- not supported today, but the order keeps the door open -- is
       layered on top of the code-declared base). The Phase 1a stub of the catalog publisher becomes
       a real publisher here.
-- [ ] `cli/agentworks/resources/kinds/git_credential_provider.py`: `GitCredentialProviderKind` for
+- [x] `cli/agentworks/resources/kinds/git_credential_provider.py`: `GitCredentialProviderKind` for
       the `type` field on `[git_credentials.<name>]`. Error miss policy. (The provider
       implementations in `agentworks.git_credentials/` stay; the kind validates the `type` field
       against the known set.)
-- [ ] `cli/agentworks/resources/kinds/secret_backend.py`: `SecretBackendKind` for
+- [x] `cli/agentworks/resources/kinds/secret_backend.py`: `SecretBackendKind` for
       `[secret_backends.<kind>]` and `secret_config.backends` references. Error miss policy.
-- [ ] Existing bespoke validation removed in favor of framework dispatch. Error messages get the
+- [x] Existing bespoke validation removed in favor of framework dispatch. Error messages get the
       framework's consistent shape.
-- [ ] **Tests**:
-  - `cli/tests/resources/test_catalog_kind.py`: unknown catalog command name errors with requirement
+- [x] **Tests**:
+  - `cli/tests/resources/test_catalog_kind.py`: unknown catalog command name errors with reference
     source; known names resolve. Catalog publisher publishes the expected set.
   - `cli/tests/resources/test_catalog_publisher.py`: `catalog.publish_to(registry)` populates the
     right kinds; published Resources carry `Origin.code_declared(...)`.
@@ -530,24 +532,34 @@ Definition of done: every kind in the registry uses framework dispatch; catalog 
 first-class Resources via the catalog publisher; bespoke validation removed from the loader; CI
 green; reviewer-approved.
 
+**Out of scope by design**: `claude_marketplaces` / `claude_plugins` on `AdminConfig` /
+`AgentTemplate` are string lists naming Claude Code marketplaces / plugins; validation is the Claude
+CLI's job at install time, so making them framework kinds would add an empty surface with no
+validation upside. `apt_sources` is also intentionally not a framework kind: it's an internal
+cross-reference inside the catalog (validated by `catalog._validate_references`), never directly
+referenced from operator-facing config fields.
+
 ## Phase 2c: `agw resource list` / `agw resource describe`
 
 Goal: add the cross-kind inspection commands.
 
-- [ ] `cli/agentworks/resources/inspect.py`: add
+- [x] `cli/agentworks/resources/inspect.py`: add
       `list_resources(registry, kinds=None, origin=None) -> list[ResourceSummary]` and
       `describe_resource(registry, kind, name) -> ResourceDescription`.
-- [ ] `cli/agentworks/cli/commands/resource.py` (new): typer command group with `list` and
+- [x] `cli/agentworks/cli/commands/resource.py` (new): typer command group with `list` and
       `describe` subcommands. Two-positional `describe <kind> <name>` (FRD R12 rationale).
-- [ ] Renderers cover columns per HLA: list shows kind, name, origin, usage count, description;
+- [x] Renderers cover columns per HLA: list shows kind, name, origin, usage count, description;
       describe shows kind, name, full origin detail, full usage list, description. **Stops at
       framework-uniform fields** -- no backend mappings, no inheritance chains, no resolved field
       lookups. Rendering those would require kind-specific knowledge that the cross-kind command
       intentionally doesn't carry; operators reach for `agw secret describe` etc. when they need it.
       The `description` column reads reliably across kinds because Phase 2a generalized the
       auto-declared description polish (see Phase 2a checkbox; FRD R9 / R12).
-- [ ] Update `cli/agentworks/completions/`.
-- [ ] **Tests**:
+- [x] Update `cli/agentworks/completions/`: bash / zsh / powershell pick up new `resource_kinds` and
+      `resource_names` completer ids (the latter scopes by the typed kind via shell context);
+      `agw resource list --names-only` emits `<kind>:<name>` per line so completion snippets can
+      slice with `awk -F:` consistently.
+- [x] **Tests**:
   - `cli/tests/test_resource_list.py`: kind filter (CSV), origin filter, header summary.
   - `cli/tests/test_resource_describe.py`: per-section rendering for each kind; two-positional
     parsing; useful error message when `<kind>` is unknown.
@@ -555,9 +567,144 @@ Goal: add the cross-kind inspection commands.
 Definition of done: `agw resource list` and `agw resource describe <kind> <name>` work across all
 kinds; CI green; reviewer-approved.
 
-**Phase 2 ships at this point.** PR sequence on `feat/resource-registry-phase-2`, branched from
-`main` **after Phase 1 merges** (not from the Phase 1 branch tip). A single `locked.md` lands at the
-end of Phase 2c covering the whole SDD.
+Phase 2 lands on `feat/resource-registry` (branched from `main` after Phase 1 merges, not from the
+Phase 1 branch tip). It does **not** ship on its own -- the operator feedback on the cross-kind list
+view (USAGE column read as "is this in use?", but only counted static config references) surfaced
+two problems that Phase 3 fixes before any of this is operator-visible. See the Phase 3 section
+below for the rationale.
+
+## Phase 3: References vocabulary + dynamic instance usage
+
+Goal: complete the cross-kind list/describe surface so an operator can answer both "what config
+points at this resource?" (static references) and "what live instances depend on it?" (dynamic
+usage). The current Phase 2c view conflates them under a misleadingly-named USAGE column that only
+ever shows the static count; for templates that count is always ~0, so the column reads as "nothing
+uses this" when in fact 5 VMs may depend on the template. Phase 3 unbundles the two concepts and
+introduces both as first-class columns / describe sections, behind a clean vocabulary split.
+
+The framework-internal type name `ResourceReference` carried a leak of the auto-declare semantic
+(every kind with `miss_policy = "error"` has a "requirement" that's really just a reference). Phase
+3 renames it to match the operator-facing vocabulary so future readers don't have to do the mental
+swap. Because Phase 2 has not yet merged, this rename costs no public API churn -- the FRD/HLA/plan
+get to land in their final shape and the locked.md can describe the shipped surface accurately.
+
+### Phase 3a: Terminology rename
+
+Goal: rename the framework's outbound/inbound reference types so the code matches the UI vocabulary
+(REFS column, "Referenced by:" section). No operator-visible behavior change.
+
+- [x] `cli/agentworks/resources/reference.py` (renamed from `requirement.py`): `ResourceRequirement`
+      -> `ResourceReference`, `SecretRequirement` -> `SecretReference`, `TemplateRequirement` ->
+      `TemplateReference`.
+- [x] Rename `UsageEntry` -> `ReferenceEntry`. Rename its prose field `text` -> `usage` so the
+      outbound `ResourceReference.usage` (unchanged) and the inbound `ReferenceEntry.usage` carry
+      the same name for the same thing.
+- [x] Rename `Resource.usage: tuple[UsageEntry, ...]` -> `references: tuple[ReferenceEntry, ...]` on
+      every Resource type that carries it (kinds in `resources/kinds/`, plus `SecretDecl`,
+      `VMTemplate`, `AgentTemplate`, ... in `config.py` / `secrets/base.py` / `catalog.py`).
+- [x] Rename `Registry._collect_new_requirements` -> `_collect_new_references`,
+      `_required_resources` -> `_referenced_resources`. `_references_tuple` helper renamed from
+      `_usage_tuple`. `Registry.finalize`'s docstring + variable names updated.
+- [x] Producer-side method names: `required_resources()` -> `referenced_resources()` on every Config
+      dataclass, `EnvEntry`, and the `walk.py` / `registry.py` getattr lookups.
+- [x] CLI labels: `Usages:` -> `Referenced by:` in `render_resource_description` and
+      `render_secret_description`. List-view header `USAGE` -> `REFS`. `ResourceSummary.usage_count`
+      -> `reference_count`. `SecretDescription.usages` -> `references`.
+- [x] Update FRD R9 / R10 / R12 and HLA prose throughout to use the new vocabulary (`Requirement` ->
+      `Reference`, `usage list` -> `references list`, etc.).
+- [x] **Documented the `ResourceReference` <-> `ReferenceEntry` relationship explicitly** in
+      `reference.py`'s module docstring: directional split (outbound: "I point at X" vs inbound: "I
+      am pointed at by Y"), where `ReferenceEntry` instances are created (only in
+      `Registry.finalize`, projected from resolved outbound references), why `ReferenceEntry` drops
+      the `kind`/`name` fields (implicit from the container Resource), and the `usage` field's prose
+      semantics carrying the same string on both ends.
+- [x] **Tests**: every test that imports the renamed symbols compiles and passes; CLI snapshot tests
+      pinned the renamed labels (`Referenced by:`, `REFS`). Added
+      `cli/tests/resources/test_phase3_naming_consistency.py` asserting the framework's public
+      surface no longer exposes any symbol named `*Requirement` / `Usage*` (defensive against
+      partial renames slipping back in).
+
+### Phase 3b: Per-kind dynamic-instance hook
+
+Goal: give each `ResourceKind` a way to project "what live DB instances depend on this resource
+under the current config?". Keep the boundary clean -- the framework knows nothing about the DB
+schema; each kind defines its own projection.
+
+- [x] `cli/agentworks/resources/kind.py`: add `InstanceRef(instance_kind: str, instance_name: str)`
+      frozen dataclass. The optional `instances(db, registry, resource) -> Iterable[InstanceRef]`
+      method is intentionally _not_ declared on the `ResourceKind` Protocol -- the framework
+      consumer uses `getattr(handler, "instances", None)` so absent-on-class signals "no instance
+      concept" (catalog, providers, backends). Declaring it on the Protocol would force a Liskov
+      violation for those kinds.
+- [x] Template kinds (`vm_template`, `agent_template`, `workspace_template`, `session_template`,
+      `admin_template`, `named_console_template`): implement `instances` by querying the appropriate
+      DB table. The four named template kinds match by
+      `template = self.name OR     (template IS NULL AND name == "default")` (NULL-as-default
+      semantics). `admin_template` and `named_console_template` are operator-singletons today: their
+      `instances` for the reserved `default` resource lists every VM (admin) / every console (named
+      console).
+- [x] `secret`: implement `instances` by walking every session row, projecting through
+      `collect_secrets_for(registry, root)` for each of (session_template, admin_template,
+      workspace_template, vm_template, agent_template) the session reaches, and emitting an
+      `InstanceRef("session", session.name)` when this secret is in the union of reachable secrets.
+      Per-current-config projection -- the count answers "should be needed" rather than "is
+      currently materialized."
+- [x] **Tests** (`cli/tests/resources/test_instances.py`): per-kind unit tests for `instances`
+      (template kinds: DB count by template, NULL-as-default semantics; admin_template and
+      named_console_template singleton fan-out; secret: env-block / vm-template-env / system-secret
+      paths plus a dead-secret zero-instances assertion). Plus a guard that catalog / provider /
+      backend kinds do NOT implement the method.
+
+### Phase 3c: List + describe surface
+
+Goal: make both dimensions visible in the operator-facing surface.
+
+- [x] `cli/agentworks/resources/inspect.py`: extend `list_resources` and `describe_resource` to
+      project per-row used-by counts/lists via `kind.instances(db, registry, resource)`. New
+      `ResourceSummary.used_by_count: int | None` sits next to `reference_count`;
+      `ResourceDescription.used_by: tuple[InstanceRef, ...] | None`. Service-layer functions gain a
+      `db: Database | None` parameter (optional so existing tests still pass `None`); CLI layer
+      threads `get_db()` through.
+- [x] List view: add new `USED BY` column populated from `used_by_count`. Kinds with no
+      live-instance concept (catalog, providers, backends) render `-` (the `None` signal
+      distinguishes "no instance concept" from "zero instances right now"). Header keeps `REFS` for
+      the static side.
+- [x] Describe view: keep `Referenced by:` (config-source list); add new
+      `Used by (per current config):` section listing the projected `InstanceRef`s grouped by
+      `instance_kind`. The annotation is in the section header itself rather than a parenthetical so
+      it's visible at-a-glance until a sibling provisioned dimension lands.
+- [x] `agw secret describe`: `Used by (per current config):` section lands between `Referenced by:`
+      and `Backend mappings:`. Same shape as the cross-kind describe section (grouped by
+      instance_kind, friendly empty-state, annotation in the section header). Reuses the framework
+      helper `used_by_for(db, registry, kind, resource)` -- lifted from module-private to public in
+      `resources/inspect.py` so per-kind describe commands share the single-source-of-truth guard
+      structure. FRD R10 documents both sections.
+- [x] **Tests** (extended `cli/tests/resources/test_instances.py` covers all three kinds end-to-end;
+      `agw resource list` / `agw resource describe` already exercised by the existing CLI tests with
+      the new optional `db` parameter).
+
+**Naming choice -- "Used by" vs "Expected"**: today's dimension reads more naturally as "Used by"
+than the more clinical "Expected." The projection-vs-materialized distinction matters operationally
+only once both dimensions exist; until then the "(per current config)" annotation in describe
+carries that signal explicitly. If a future SDD adds provisioned-state tracking, the pair becomes
+`USED BY` / `PROVISIONED ON` (or similar) -- the asymmetry between the two columns directly signals
+drift, which is the operator-relevant signal.
+
+**Forward-compat note**: the framework hook stays generically named `instances(db, resource)` rather
+than `expected_instances(...)` so a future provisioned-tracking SDD can add
+`provisioned_instances(db, resource)` returning the same `InstanceRef` shape (one method per
+dimension; both consume the same dataclass). At that point today's `instances()` may rename to
+`expected_instances()` for internal clarity; the rename is internal-only (no operator surface, no
+public Python API for third parties) so the cost is low and isolated.
+
+Definition of done: `agw resource list` shows REFS + USED BY; `agw resource describe` and
+`agw secret describe` show "Referenced by:" + "Used by:"; framework code uses Reference vocabulary
+throughout; CI green; reviewer-approved.
+
+**Phases 2 and 3 ship together** in a single PR on `feat/resource-registry`. The Phase 2c-era
+`locked.md` was deleted when Phase 3 was folded in (it had never been consumed externally -- PR #152
+closed unmerged); a single `locked.md` re-lands at the end of Phase 3c covering the whole SDD with
+the final vocabulary.
 
 ## Phase 1 follow-ups (deferred at ship; non-blocking)
 
@@ -575,31 +722,59 @@ code.
 - **`_collect_git_tokens` placement.** Lives in `vms/manager.py` today, cross-imported by
   `agents/manager.py`. A neutral location (e.g. `agentworks/git_credentials/resolve.py`) reads more
   naturally; move when Phase 2 touches the helper.
-- **`output.detail` vs `output.info` for nested sections.** `render_secret_description` uses
-  `output.info` with hand-indented strings; the rest of the codebase uses `output.detail`. Pure
-  style; do it when Phase 2c's `agw resource describe` lands the cross-kind renderer.
-- **`SecretDescription.kind = "secret"` hard-coded.** Use the kind registry constant so a
-  hypothetical rename can't drift the describe output silently.
-- **FRD R10 dedupe wording is ambiguous.** "Duplicate usage text is collapsed" doesn't pin whether
-  dedupe is by `(source, text)` (current implementation) or by `text` alone. Resolve in the FRD when
-  Phase 2c's `agw resource describe` reuses the same `usage` rendering. The current read is
-  `(source, text)`; the FRD edit can either confirm or flip and update the renderer.
+- **`output.detail` vs `output.info` for nested sections.** ~~`render_secret_description` uses
+  `output.info` with hand-indented strings; the rest of the codebase uses `output.detail`.~~
+  Resolved in Phase 2c alongside the new `render_resource_description`: both renderers now delegate
+  indent to `output.detail`, so the cross-kind and per-kind describe views share the same
+  convention.
+- **`SecretDescription.kind = "secret"` hard-coded.** ~~Use the kind registry constant so a
+  hypothetical rename can't drift the describe output silently.~~ Resolved in Phase 2c:
+  kinds/secret.py now exposes `SECRET_KIND_NAME` and every call site in `secrets/inspect.py` imports
+  it (lookup, `entity_kind`, `SecretDescription.kind`).
+- **FRD R10 dedupe wording is ambiguous.** ~~"Duplicate usage text is collapsed" doesn't pin whether
+  dedupe is by `(source, text)` (current implementation) or by `text` alone.~~ Resolved in Phase 2c:
+  FRD R10 now spells out the `(source, text)` semantics explicitly (same text from two sources stays
+  as two rows; same text twice from one source collapses to one).
 - **Auto-declared `description` polish is secret-specific.** `Registry.finalize`'s
   `_polish_auto_declared_description` does `isinstance(resource, SecretDecl)`. Phase 2a generalizes
   it to a structural check so any kind with a `description: str` field benefits automatically (FRD
   R9, HLA Framework metadata attachment). The Phase 2a plan carries the checkbox; no Phase 1 action
   needed.
+- **`NamedConsoleConfig` plurification is reserved for a future SDD.** Phase 2a.3 plurified
+  `AdminTemplateKind` at the framework level (matching the four named template kinds); the kind
+  shape for `NamedConsoleTemplateKind` is already aligned (`auto_declare_names = {"default"}`,
+  `synthesize` tolerating `references=()`), but `NamedConsoleConfig` itself wasn't given a `name`
+  field. When operator demand for named console templates lands, the same shape Phase 2a.3 used for
+  admin applies: add `name: str = "default"` to `NamedConsoleConfig`; update `Config.publish_to` to
+  use `self.named_console.name` (currently hardcoded `"default"`); update the kind module's
+  docstring to drop the singleton framing. No framework-side work needed.
+- **Catalog entries lack a declared_at field.** The apt_source follow-up wired operator-declared
+  catalog entries (apt_sources / apt_packages / system_install_commands / user_install_commands)
+  into the catalog publisher. Those entries publish today with a line=0 Origin (Phase 0's "no line
+  info available" sentinel) because the four catalog entry dataclasses don't carry a declared_at
+  SourceLocation field yet, and Config stores raw dicts (not typed entries) for these sections. To
+  give operators file:line traceability on catalog resources, add declared_at to the four
+  dataclasses, thread the section-line map into the load helpers, and populate at load_config time.
+  Same underlying gap the named_console_template:default line=0 case has; a single follow-up can
+  close both.
 
 ## Sequencing notes
 
-- **Phase order**: 0 -> 1a -> 1b -> 1c -> 1d -> 1e -> ship Phase 1 -> 2a -> 2b -> 2c -> ship
-  Phase 2. Each phase ends at a green CI and a usable intermediate state.
+- **Phase order**: 0 -> 1a -> 1b -> 1c -> 1d -> 1e -> ship Phase 1 -> 2a -> 2b -> 2c -> 3a -> 3b ->
+  3c -> ship Phases 2 + 3. Each phase ends at a green CI and a usable intermediate state.
 - **Why env-block migration before system secrets**: Phase 1b gives the framework a real producer of
-  `SecretRequirement` exercised end-to-end before Phase 1c / 1d wire in the system-secret producers.
+  `SecretReference` exercised end-to-end before Phase 1c / 1d wire in the system-secret producers.
   Bugs in the finalize pass surface against the larger surface area first.
-- **Why Phase 2 in a separate PR**: Phase 2 is primarily a refactor with no operator-facing config
-  changes; bundling it with Phase 1 would inflate the diff without adding feature value. Splitting
-  also lets Phase 1 reviewer feedback iterate without holding up the refactor work.
+- **Why Phase 2 in a separate PR from Phase 1**: Phase 2 is primarily a refactor with no
+  operator-facing config changes; bundling it with Phase 1 would inflate the diff without adding
+  feature value. Splitting also lets Phase 1 reviewer feedback iterate without holding up the
+  refactor work.
+- **Why Phases 2 and 3 ship together**: Phase 2c's cross-kind list view exposed a vocabulary problem
+  (USAGE column reads as "in use" but only counts static refs) and a missing dimension (no dynamic
+  instance count). Shipping Phase 2 alone would land an operator-facing surface that immediately
+  needs replacing; bundling Phase 3 lets the framework code use the final `Reference` vocabulary
+  throughout and lets the cross-kind list show both REFS and USED BY on first ship. The terminology
+  rename is mechanical but wide; doing it pre-merge means no public-API churn.
 - **Interaction with PR #130 (polymorphic transports)**: PR #130 renamed `ExecTarget` to `Transport`
   and introduced the `transports/` package. Phase 1c / 1d wire kwargs into the Transport-shaped
   install runners. No conflict with this SDD's design; the function signatures are the integration
@@ -607,9 +782,9 @@ code.
 - **Reviewer cadence**: `agentworks-reviewer` agent runs after each phase. Aim for "this is
   perfect"; iterate until findings are addressed before moving to the next phase. Capture per-phase
   findings as commits with descriptive messages so the lockfile can summarize the iteration trail.
-- **Lockfile**: a single `locked.md` lands once at the end of Phase 2c covering the whole SDD. The
-  plan itself is the running log across Phase 1 + Phase 2 (checkboxes mark progress; the Phase 1
-  follow-ups section above tracks items deferred at Phase 1 ship). No per-phase milestone files.
+- **Lockfile**: a single `locked.md` lands once at the end of Phase 3c covering the whole SDD. The
+  plan itself is the running log across all phases (checkboxes mark progress; the Phase 1 follow-ups
+  section above tracks items deferred at Phase 1 ship). No per-phase milestone files.
 - **Out-of-scope reminders**: no plugin source (future SDD); no DB-backed resources (future manifest
   SDD); no namespaces; no per-source miss policies; no per-field merge.
 
@@ -621,9 +796,9 @@ pin:
 - The exact regex grammar for the section-line scanner (bare keys are universal in agentworks
   configs today; quoted-segment support is a small extension worth getting right in the LLD).
 - Per-kind error message templates (string format) for the framework's `ConfigError`.
-- The exact subclass hierarchy of `ResourceRequirement` (frozen dataclasses with `kw_only`? what
-  about hashability when used as dict keys?).
-- The `UsageEntry` serialization shape for `agw secret describe` rendering.
-- The exact shape of `with_origin` / `with_usage` on Resource types: shared mixin / base class with
-  the framework-attached fields, or per-type `@dataclass(frozen=True)` + `dataclasses.replace`
+- The exact subclass hierarchy of `ResourceReference` (frozen dataclasses with `kw_only`? what about
+  hashability when used as dict keys?).
+- The `ReferenceEntry` serialization shape for `agw secret describe` rendering.
+- The exact shape of `with_origin` / `with_references` on Resource types: shared mixin / base class
+  with the framework-attached fields, or per-type `@dataclass(frozen=True)` + `dataclasses.replace`
   calls? Affects how invasive the Phase 1a edits to existing Resource types are.

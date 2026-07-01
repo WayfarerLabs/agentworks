@@ -10,6 +10,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from agentworks.errors import ConfigError
+
 if TYPE_CHECKING:
     from agentworks.config import AgentTemplate, Config
     from agentworks.env import EnvEntry
@@ -59,16 +61,35 @@ def resolve_template(config: Config, template_name: str | None = None) -> Resolv
     return resolve_from_dict(config.agent_templates, template_name)
 
 
-def _resolve(templates: dict[str, AgentTemplate], name: str) -> ResolvedAgentTemplate:
-    """Depth-first, left-to-right resolution."""
+def _resolve(
+    templates: dict[str, AgentTemplate],
+    name: str,
+    _visiting: tuple[str, ...] = (),
+) -> ResolvedAgentTemplate:
+    """Depth-first, left-to-right resolution.
+
+    ``_visiting`` carries the chain of in-progress resolves so cycles
+    raise a clean ``ConfigError`` instead of crashing with
+    ``RecursionError``. The framework's ``Registry.finalize`` cycle pass
+    is the canonical check at build_registry time; this resolver-internal
+    guard is the safety net for the load-time eager-resolve path (Phase
+    2a.2; mirrors the vm_template resolver guard).
+    """
+    if name in _visiting:
+        path = " -> ".join((*_visiting, name))
+        raise ConfigError(
+            f"agent_templates inheritance cycle detected: {path}"
+        )
+
     if name not in templates:
         return ResolvedAgentTemplate(name=name)
 
     tmpl = templates[name]
     result = ResolvedAgentTemplate(name=name)
+    next_visiting = (*_visiting, name)
 
     for parent_name in tmpl.inherits:
-        parent = _resolve(templates, parent_name)
+        parent = _resolve(templates, parent_name, next_visiting)
         _merge(result, parent)
 
     _merge_template(result, tmpl)

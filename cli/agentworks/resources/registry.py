@@ -5,7 +5,7 @@ The Registry is a publish destination, not a parser. Publishers
 manifest publishers) push composed Resources in via
 ``Registry.add(kind, name, resource, origin)``. After all publishers have
 contributed, ``Registry.finalize()`` runs the framework pass: walks the
-requirement graph, dispatches per-kind miss policies (auto-declare may
+reference graph, dispatches per-kind miss policies (auto-declare may
 synthesize new Resources; error raises ``ConfigError``), attaches
 ``usage`` lists, detects cycles, and freezes the Registry. After
 ``finalize`` returns, the Registry is read-only and queryable via
@@ -28,7 +28,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
 
     from agentworks.resources.origin import Origin
-    from agentworks.resources.requirement import ResourceRequirement
+    from agentworks.resources.reference import ResourceReference
 
 
 class Registry:
@@ -93,33 +93,45 @@ class Registry:
 
         Steps:
 
-        1. **Worklist loop**: walk ``required_resources()`` on every
-           Resource not yet visited, accumulating requirements by
+        0. **Always-materialize reserved-default names** (Phase 2a):
+           Kinds whose ``auto_declare_names`` is a non-None set guarantee
+           those names exist in the registry after finalize, regardless
+           of whether anything referenced them. Seeded before the
+           worklist loop so the first pass walks these Resources
+           alongside operator-published ones. Kinds with
+           ``auto_declare_names = None`` (secrets) are unaffected --
+           they stay reference-driven.
+        1. **Worklist loop**: walk ``referenced_resources()`` on every
+           Resource not yet visited, accumulating references by
            ``(kind, name)`` target. For any target that resolves to no
            Resource currently in the Registry, dispatch the kind's miss
            policy: ``"auto-declare"`` (subject to ``auto_declare_names``)
            calls ``synthesize`` and inserts the result; ``"error"`` raises
            ``ConfigError``. Loop until a pass adds no new Resources --
-           synthesized Resources may themselves produce requirements, so
+           synthesized Resources may themselves produce references, so
            a single pass would silently drop their unresolved edges. The
-           accumulated requirement map is preserved across iterations so
+           accumulated reference map is preserved across iterations so
            the post-loop usage-attachment pass sees the complete graph.
-        2. **Usage attachment**: every Resource (operator-declared,
-           code-declared, auto-declared) that has incoming requirements
-           gets a ``usage`` tuple attached via ``dataclasses.replace``.
-           Both publish-time Origin and synthesize-time Origin already
-           landed; usage is centralized here so the kind's ``synthesize``
-           doesn't have to know the final requirement map.
-        3. **Cycle detection** in the now-complete requirement graph via
+        2. **Usage attachment + description polish**: every Resource
+           (operator-declared, code-declared, auto-declared) gets a
+           ``usage`` tuple attached via ``dataclasses.replace`` -- empty
+           if nothing referenced it. The kind-agnostic
+           description-polish runs in the same pass: for any Resource
+           with a ``description`` field that's empty and an
+           auto-declared origin, the framework synthesizes a
+           description from the reference graph (or, when ``usage``
+           is empty, falls back to ``"(auto) auto-declared default
+           <kind>"``).
+        3. **Cycle detection** in the now-complete reference graph via
            iterative DFS three-coloring; raises ``ConfigError`` on the
            first cycle with the offending path.
         4. **Freeze**.
 
-        First-encountered requirement order (for the
+        First-encountered reference order (for the
         ``Origin.auto_declared(source=...)`` rule) is preserved by
         ``dict``'s guaranteed insertion order in CPython 3.7+. The
-        worklist loop appends to the accumulated requirement map; the
-        order in which requirements first appear is the order the
+        worklist loop appends to the accumulated reference map; the
+        order in which references first appear is the order the
         framework records.
 
         Raises ``RuntimeError`` if already finalized. Raises
@@ -129,37 +141,43 @@ class Registry:
         if self._frozen:
             raise RuntimeError("registry has already been finalized")
 
+        # 0: always-materialize reserved-default names. Seeds the worklist
+        # so unreferenced defaults still land in the registry (FRD R3).
+        self._materialize_reserved_defaults()
+
         # 1: worklist loop. ``walked`` tracks which Resources have had
-        # their required_resources() walked so we don't double-count.
-        all_reqs: dict[tuple[str, str], list[ResourceRequirement]] = {}
+        # their referenced_resources() walked so we don't double-count.
+        all_refs: dict[tuple[str, str], list[ResourceReference]] = {}
         walked: set[tuple[str, str]] = set()
 
         while True:
-            new_walks = self._collect_new_requirements(all_reqs, walked)
+            new_walks = self._collect_new_references(all_refs, walked)
             if not new_walks:
                 # No new Resources to walk. We're stable.
                 break
             # Dispatch miss policies for any targets not yet in the
             # Registry. A miss-handler may add a Resource whose own
-            # required_resources() the next iteration will walk.
-            for target, reqs in list(all_reqs.items()):
+            # referenced_resources() the next iteration will walk.
+            for target, refs in list(all_refs.items()):
                 target_kind, target_name = target
                 if target_name in self._resources.get(target_kind, {}):
                     continue
-                kind_handler = _lookup_kind(target_kind, reqs[0])
-                self._handle_miss(target_kind, target_name, kind_handler, reqs)
+                kind_handler = _lookup_kind(target_kind, refs[0])
+                self._handle_miss(target_kind, target_name, kind_handler, refs)
 
-        # 2: usage attachment. Every Resource with incoming requirements
-        # gets its usage tuple set via dataclasses.replace. Auto-declared
-        # secrets additionally get a synthesized description so the list
-        # view's Description column has meaningful text (the polish needs
-        # the final usage tuple, so it lands here rather than at the
-        # kind's synthesize-time call site).
-        for (kind, name), reqs in all_reqs.items():
-            existing = self._resources[kind][name]
-            polished = dataclasses.replace(existing, usage=_usage_tuple(reqs))
-            polished = _polish_auto_declared_description(polished)
-            self._resources[kind][name] = polished
+        # 2: references attachment + description polish for every Resource.
+        # Iterate all currently-published Resources (not just those with
+        # incoming references) so always-materialized rows get
+        # ``references=()`` plus the empty-references description fallback too.
+        for kind in list(self._resources.keys()):
+            for name in list(self._resources[kind].keys()):
+                existing = self._resources[kind][name]
+                refs = all_refs.get((kind, name), [])
+                polished = dataclasses.replace(
+                    existing, references=_references_tuple(refs)
+                )
+                polished = _polish_auto_declared_description(polished, kind)
+                self._resources[kind][name] = polished
 
         # 3: cycle detection across the now-complete graph.
         _detect_cycles(self._resources)
@@ -167,13 +185,47 @@ class Registry:
         # 4: freeze.
         self._frozen = True
 
-    def _collect_new_requirements(
+    def _materialize_reserved_defaults(self) -> None:
+        """Seed the registry with reserved-default rows for every kind
+        whose ``auto_declare_names`` is a non-None set.
+
+        For each ``(kind, name)`` pair in a kind's reserved set, if the
+        name isn't already in the registry (operator-declared or
+        published by another publisher), dispatch
+        ``synthesize(references=())`` and add the result. Kinds with
+        ``auto_declare_names = None`` are skipped -- their resources
+        stay reference-driven.
+
+        Origin convention: the kind owns origin assignment for the
+        empty-references path. By contract (FRD R3), kinds with
+        ``auto_declare_names`` non-None synthesize with
+        ``Origin.auto_declared(source=ALWAYS_MATERIALIZE_SOURCE)``
+        themselves. The Registry does NOT stamp origin here, distinct
+        from ``add``'s stamp-by-the-registry pattern -- the seeded row
+        already carries its origin when it reaches this method.
+
+        Called at the start of ``finalize`` before the worklist loop so
+        the seeded Resources participate in the reference walk
+        alongside operator-published ones (FRD R3, HLA Publish-and-
+        finalize section).
+        """
+        for kind, kind_handler in KIND_REGISTRY.items():
+            if kind_handler.auto_declare_names is None:
+                continue
+            for name in kind_handler.auto_declare_names:
+                if name in self._resources.get(kind, {}):
+                    continue
+                self._resources.setdefault(kind, {})[name] = (
+                    kind_handler.synthesize(())
+                )
+
+    def _collect_new_references(
         self,
-        all_reqs: dict[tuple[str, str], list[ResourceRequirement]],
+        all_refs: dict[tuple[str, str], list[ResourceReference]],
         walked: set[tuple[str, str]],
     ) -> bool:
-        """Walk ``required_resources()`` on every Resource not yet in
-        ``walked``, appending discovered requirements into ``all_reqs``
+        """Walk ``referenced_resources()`` on every Resource not yet in
+        ``walked``, appending discovered references into ``all_refs``
         (in first-encountered order). Returns True if any Resource was
         walked this pass; False means the worklist has stabilized.
         """
@@ -190,8 +242,8 @@ class Registry:
         for key, resource in snapshot:
             walked.add(key)
             any_walked = True
-            for req in _required_resources(resource):
-                all_reqs.setdefault((req.kind, req.name), []).append(req)
+            for req in _referenced_resources(resource):
+                all_refs.setdefault((req.kind, req.name), []).append(req)
         return any_walked
 
     def _handle_miss(
@@ -199,12 +251,12 @@ class Registry:
         kind: str,
         name: str,
         kind_handler: Any,
-        reqs: list[ResourceRequirement],
+        refs: list[ResourceReference],
     ) -> None:
         """Dispatch the kind's miss policy. Mutates ``self._resources``
         for the auto-declare branch; raises ``ConfigError`` otherwise.
         """
-        first = reqs[0]
+        first = refs[0]
         if kind_handler.miss_policy == "auto-declare":
             allowed = kind_handler.auto_declare_names
             if allowed is not None and name not in allowed:
@@ -213,7 +265,7 @@ class Registry:
                     f"{sorted(allowed)!r}; got {name!r} "
                     f"(required by {first.source[0]}:{first.source[1]})"
                 )
-            synthesized = kind_handler.synthesize(reqs)
+            synthesized = kind_handler.synthesize(refs)
             self._resources.setdefault(kind, {})[name] = synthesized
             return
         if kind_handler.miss_policy == "error":
@@ -243,6 +295,24 @@ class Registry:
         """
         return iter(self._resources.get(kind, {}).values())
 
+    def iter_kind_items(self, kind: str) -> Iterator[tuple[str, Any]]:
+        """Iterate ``(name, Resource)`` pairs under one ``kind``. Used by
+        the cross-kind ``agw resource list`` / ``describe`` commands which
+        need the framework's canonical name (the Registry's per-kind
+        dict key) regardless of whether the Resource type carries it on
+        a ``.name`` field (most do) or on a different field
+        (``SecretBackendConfig.kind``). Empty iterator if the kind has
+        no Resources.
+        """
+        return iter(self._resources.get(kind, {}).items())
+
+    def iter_kinds(self) -> Iterator[str]:
+        """Iterate the kind identifiers that currently have at least one
+        published Resource. Used by ``agw resource list`` to enumerate
+        all kinds when no ``--kind`` filter is given.
+        """
+        return iter(self._resources.keys())
+
     @property
     def is_finalized(self) -> bool:
         """True after ``finalize`` has run."""
@@ -252,22 +322,22 @@ class Registry:
 # -- Internal helpers --------------------------------------------------
 
 
-def _required_resources(resource: Any) -> Sequence[ResourceRequirement]:
-    """Return the Resource's ``required_resources()`` or an empty
+def _referenced_resources(resource: Any) -> Sequence[ResourceReference]:
+    """Return the Resource's ``referenced_resources()`` or an empty
     sequence if it doesn't define one. Phase 1a has no producers wired
     beyond what tests synthesize; Phase 1b adds the method to env-bearing
     Resources, Phase 1c/d to VMTemplate / GitCredentialConfig.
     """
-    method = getattr(resource, "required_resources", None)
+    method = getattr(resource, "referenced_resources", None)
     if method is None:
         return ()
     return tuple(method())
 
 
-def _lookup_kind(kind: str, req: ResourceRequirement) -> Any:
+def _lookup_kind(kind: str, req: ResourceReference) -> Any:
     """Look up the kind in ``KIND_REGISTRY``, raising a clear error if
-    the requirement references a kind no one has registered. Includes
-    the requirement's source in the error for traceability.
+    the reference references a kind no one has registered. Includes
+    the reference's source in the error for traceability.
     """
     try:
         return KIND_REGISTRY[kind]
@@ -278,58 +348,72 @@ def _lookup_kind(kind: str, req: ResourceRequirement) -> Any:
         ) from None
 
 
-def _polish_auto_declared_description(resource: Any) -> Any:
-    """Synthesize a description for an auto-declared SecretDecl when its
+def _polish_auto_declared_description(resource: Any, kind: str) -> Any:
+    """Synthesize a description for an auto-declared Resource when its
     description is empty. Operators rely on a non-empty Description in
-    ``agw secret list``; the framework derives one from the first
-    requirement's usage text + source so the row reads as "what this
-    secret is for and who's asking".
+    ``agw resource list`` / ``agw secret list``; the framework derives
+    one so the row reads as "what this resource is for and who's asking".
 
-    Format: ``"(auto) <usage> for <kind>:<name>"`` plus, when more than
-    one distinct source requires this secret, ``" (and N more)"`` (N
-    counts distinct sources other than the first one already named).
-    No-op for non-secrets, operator-declared resources, code-declared
-    resources, secrets with no recorded usage, or any SecretDecl whose
-    description is already set.
+    Two cases share this polish step:
+
+    - **Usage-driven** (auto-declared via incoming reference): set
+      from the first matching reference as
+      ``"(auto) <usage> for <kind>:<name>"`` plus ``" (and N more)"``
+      when more than one distinct source matches.
+    - **Empty-usage** (always-materialized reserved default; no incoming
+      references): set as ``"(auto) auto-declared default <kind>"``,
+      e.g. ``"(auto) auto-declared default vm_template"``.
+
+    Kind-agnostic by design: the framework checks structurally
+    (``hasattr(resource, "description")`` + falsy test), not by kind, so
+    any future kind that acquires a ``description`` field benefits
+    automatically. No-op for resources without a ``description`` field,
+    operator-set descriptions, or non-auto-declared origins.
     """
-    from agentworks.secrets.base import SecretDecl
-
-    if not isinstance(resource, SecretDecl):
+    if not hasattr(resource, "description"):
         return resource
-    if resource.description:
+    if resource.description:  # operator-set description honored verbatim
         return resource
-    origin = resource.origin
+    origin = getattr(resource, "origin", None)
     if origin is None or origin.variant != "auto-declared":
         return resource
-    if not resource.usage:
-        return resource
-    first = resource.usage[0]
-    if not (isinstance(first.source, tuple) and len(first.source) == 2):
-        return resource
-    distinct_other = {u.source for u in resource.usage} - {first.source}
-    suffix = f" (and {len(distinct_other)} more)" if distinct_other else ""
-    description = (
-        f"(auto) {first.text} for {first.source[0]}:{first.source[1]}{suffix}"
-    )
+    references = getattr(resource, "references", ())
+    if not references:
+        # Always-materialized default with no static incoming references.
+        description = f"(auto) auto-declared default {kind}"
+    else:
+        first = references[0]
+        # ReferenceEntry.source is typed tuple[str, str]; the framework
+        # guarantees the shape at finalize time. No runtime guard.
+        distinct_other = {entry.source for entry in references} - {first.source}
+        suffix = f" (and {len(distinct_other)} more)" if distinct_other else ""
+        description = (
+            f"(auto) {first.usage} for {first.source[0]}:{first.source[1]}{suffix}"
+        )
     return dataclasses.replace(resource, description=description)
 
 
-def _usage_tuple(
-    reqs: Sequence[ResourceRequirement],
+def _references_tuple(
+    refs: Sequence[ResourceReference],
 ) -> tuple[Any, ...]:
-    """Build the ``usage`` tuple a Resource carries on it after
-    ``finalize``. Lives here (rather than imported from requirement.py
+    """Build the ``references`` tuple a Resource carries on it after
+    ``finalize``. Lives here (rather than imported from reference.py
     at runtime) to keep the import graph minimal; the return tuple
-    holds ``UsageEntry`` instances but is typed loosely so this module
+    holds ``ReferenceEntry`` instances but is typed loosely so this module
     doesn't need a TYPE_CHECKING import for the static typing.
-    """
-    from agentworks.resources.requirement import UsageEntry
 
-    return tuple(UsageEntry(source=r.source, text=r.usage) for r in reqs)
+    Projects each outbound ``ResourceReference`` to an inbound
+    ``ReferenceEntry`` by keeping ``source`` and ``usage`` (the prose);
+    the ``kind``/``name`` fields drop because they're implicit from the
+    container Resource the entry attaches to.
+    """
+    from agentworks.resources.reference import ReferenceEntry
+
+    return tuple(ReferenceEntry(source=r.source, usage=r.usage) for r in refs)
 
 
 def _detect_cycles(resources: dict[str, dict[str, Any]]) -> None:
-    """Detect cycles across the requirement graph via iterative DFS
+    """Detect cycles across the reference graph via iterative DFS
     three-coloring.
 
     Phase 1 has no producers that introduce cycles (secrets don't
@@ -386,7 +470,7 @@ def _edges_from(
     node: tuple[str, str],
 ) -> Iterator[tuple[str, str]]:
     """Yield outgoing edges from ``node`` (``(kind, name)`` -> target
-    ``(kind, name)``) via the Resource's ``required_resources()``.
+    ``(kind, name)``) via the Resource's ``referenced_resources()``.
     Empty iterator if the node isn't in the Registry (defensive; the
     finalize worklist ensures every reachable node has a Resource).
     """
@@ -394,5 +478,5 @@ def _edges_from(
     resource = resources.get(kind, {}).get(name)
     if resource is None:
         return
-    for req in _required_resources(resource):
+    for req in _referenced_resources(resource):
         yield (req.kind, req.name)

@@ -39,11 +39,11 @@ class TestTopLevelGroups:
     EXPECTED_GROUPS = frozenset(
         {
             "agent",
-            "catalog",
             "completion",
             "config",
             "console",
             "env",
+            "resource",
             "secret",
             "session",
             "vm",
@@ -145,6 +145,68 @@ class TestCompleteness:
         output = generate("powershell")
         spec = build_spec(app)
         _assert_all_commands_present(spec, output)
+
+
+class TestRegistrySourcedCompleters:
+    """Every completer whose kind lives in the Resource Registry sources
+    from ``agw resource list --kind X --names-only`` (not from
+    regex-scraping ``[X.*]`` sections out of config.toml).
+
+    The old sed-based approach had a greedy-regex bug where
+    ``\\[X\\.([^]]*)\\]`` matched sub-section headers, so
+    ``[vm_templates.default.env]`` emitted ``default.env`` as a bogus
+    completion candidate. Registry-sourcing fixes it and picks up
+    always-materialized defaults + auto-declared entries the raw config
+    text doesn't have.
+    """
+
+    _REGISTRY_SOURCED = (
+        ("ws_templates", "workspace_template"),
+        ("git_credentials", "git_credentials"),
+        ("session_templates", "session_template"),
+        ("vm_templates", "vm_template"),
+        ("agent_templates", "agent_template"),
+    )
+
+    def test_bash_snippets_source_from_registry(self) -> None:
+        from agentworks.completions.bash import DYNAMIC_SNIPPETS
+
+        for completer_id, kind in self._REGISTRY_SOURCED:
+            snippet = DYNAMIC_SNIPPETS[completer_id]
+            assert f"--kind {kind}" in snippet, (
+                f"bash {completer_id!r} should source from Registry"
+                f" (--kind {kind}); got: {snippet!r}"
+            )
+            assert "sed " not in snippet, (
+                f"bash {completer_id!r} still uses sed-over-TOML: {snippet!r}"
+            )
+
+    def test_zsh_functions_source_from_registry(self) -> None:
+        from agentworks.completions.zsh import DYNAMIC_FUNCTIONS
+
+        for completer_id, kind in self._REGISTRY_SOURCED:
+            fn = DYNAMIC_FUNCTIONS[completer_id]
+            assert f"--kind {kind}" in fn, (
+                f"zsh {completer_id!r} should source from Registry"
+                f" (--kind {kind}); got: {fn!r}"
+            )
+            assert "sed " not in fn, (
+                f"zsh {completer_id!r} still uses sed-over-TOML: {fn!r}"
+            )
+
+    def test_powershell_snippets_source_from_registry(self) -> None:
+        from agentworks.completions.powershell import DYNAMIC_SNIPPETS
+
+        for completer_id, kind in self._REGISTRY_SOURCED:
+            snippet = DYNAMIC_SNIPPETS[completer_id]
+            assert f"--kind {kind}" in snippet, (
+                f"powershell {completer_id!r} should source from Registry"
+                f" (--kind {kind}); got: {snippet!r}"
+            )
+            assert "Select-String" not in snippet, (
+                f"powershell {completer_id!r} still uses Select-String"
+                f" regex over config.toml: {snippet!r}"
+            )
 
 
 def _assert_all_commands_present(spec, output: str) -> None:

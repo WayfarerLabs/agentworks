@@ -47,26 +47,50 @@ class CommandSpec:
 #   "vms"             -> agw vm list --names-only
 #   "vm_hosts"        -> agw vm-host list --names-only
 #   "workspaces"      -> agw workspace list --names-only
-#   "ws_templates"    -> [workspace_templates.*] sections in config.toml
-#   "git_credentials" -> [git_credentials.*] sections in config.toml
-#   "catalog_entries" -> all entry names from built-in + custom catalog
-#                        (see "Not in scope" in issue #147 -- catalog
-#                        rows are typed, no clean "name per row" stream)
+#   "ws_templates"    -> agw resource list --kind workspace_template --names-only
+#   "git_credentials" -> agw resource list --kind git_credentials --names-only
 #   "sessions"        -> agw session list --names-only
-#   "session_templates" -> [session_templates.*] sections in config.toml
+#   "session_templates" -> agw resource list --kind session_template --names-only
 #   "agents"          -> agw agent list --names-only
-#   "vm_templates"    -> [vm_templates.*] sections in config.toml
-#   "agent_templates" -> [agent_templates.*] sections in config.toml
+#   "vm_templates"    -> agw resource list --kind vm_template --names-only
+#   "agent_templates" -> agw resource list --kind agent_template --names-only
 #   "consoles"        -> agw console list --names-only
 #   "secrets"         -> agw secret list --names-only
 #                        (sources from the Resource Registry so
 #                        auto-declared names like tailscale-auth-key
 #                        complete the same as operator-declared ones)
+#   "resource_kinds"  -> agw resource list --names-only
+#                        (kind:name per line; the snippet awk-splits the
+#                        prefix and `sort -u`'s to get distinct kinds)
+#   "resource_names"  -> agw resource list --kind <prev> --names-only
+#                        (same kind:name stream, scoped by the typed kind;
+#                        the snippet awk-splits to get just the name)
+#
+# The template + git_credentials completers source from the Resource
+# Registry (via `agw resource list --kind X --names-only`) rather than
+# regex-scraping `[X.*]` sections out of config.toml. The old sed-based
+# approach had a subtle bug: the regex `\[X\.([^]]*)\]` greedy-matched
+# sub-section headers too, so `[vm_templates.default.env]` emitted
+# `default.env` as a bogus completion candidate. Registry-sourced
+# completion also picks up the framework's always-materialized defaults
+# and auto-declared entries the raw config text doesn't have.
+#
+# The per-kind Registry queries don't need `sort -u` on the shell side
+# because the Registry stores one row per `(kind, name)` and the CLI's
+# `--names-only` walks in insertion order -- names are already unique
+# per kind. `resource_kinds` uses `sort -u` because it aggregates the
+# kind prefix across ALL rows in the full listing, where duplicates
+# are the norm (one row per resource, many resources per kind).
 #
 # The ``--names-only`` flag is the explicit completion contract:
 # every list command that backs a completer emits one name per line
 # when the flag is passed, in the same order as its table rows.
 # See ``.claude/rules/cli-conventions.md`` for the broader convention.
+# ``agw resource list`` is the deliberate cross-kind divergence: it
+# emits ``kind:name`` per line (the prefix is load-bearing -- two kinds
+# can publish resources with the same name), and the completers slice
+# the prefix off shell-side. The convention's "one name per line"
+# spirit is preserved (one line per resource, no header or formatting).
 
 DYNAMIC_COMPLETIONS: dict[tuple[str, str], str] = {
     ("vm.start", "name"): "vms",
@@ -112,7 +136,6 @@ DYNAMIC_COMPLETIONS: dict[tuple[str, str], str] = {
     ("agent.shell", "workspace"): "workspaces",
     ("agent.delete", "name"): "agents",
     ("agent.list", "vm"): "vms",
-    ("catalog.describe", "name"): "catalog_entries",
     # Session commands
     ("session.create", "agent"): "agents",
     ("session.create", "workspace"): "workspaces",
@@ -168,6 +191,10 @@ DYNAMIC_COMPLETIONS: dict[tuple[str, str], str] = {
 
     # Secret inspection
     ("secret.describe", "name"): "secrets",
+    # Resource inspection (Phase 2c)
+    ("resource.list", "kind"): "resource_kinds",
+    ("resource.describe", "kind"): "resource_kinds",
+    ("resource.describe", "name"): "resource_names",
 }
 
 

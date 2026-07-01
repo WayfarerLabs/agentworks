@@ -27,17 +27,19 @@ if TYPE_CHECKING:
 def build_registry(config: Config) -> Registry:
     """Build a finalized ``Registry`` from the standard set of publishers.
 
-    Phase 1a runs only ``Config.publish_to``. Phase 2b extends this to
-    run ``catalog.publish_to(registry)`` first so any operator-declared
-    override of catalog entries (not supported today, but the order
-    keeps the door open) layers on top of the code-declared base.
-    Future publishers (plugins, YAML manifests, ...) join the
-    same sequence by being added here.
+    Publisher order: code-declared publishers first (``catalog``,
+    ``git_credentials``, ``secrets``), then ``Config.publish_to``
+    (operator-declared resources, which can re-publish any
+    code-declared ``(kind, name)`` with operator-declared Origin to
+    override). Future publishers (plugins, YAML manifests, ...) join
+    the same sequence by being added here.
     """
+    from agentworks import catalog, git_credentials, secrets
+
     registry = Registry.empty()
-    # Phase 2b: catalog.publish_to(registry) goes here, before
-    # config.publish_to, so config can override catalog-declared
-    # Resources by re-publishing with operator-declared Origin.
+    catalog.publish_to(registry, config)
+    git_credentials.publish_to(registry)
+    secrets.publish_to(registry)
     config.publish_to(registry)
     registry.finalize()
     return registry

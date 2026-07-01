@@ -10,13 +10,16 @@ from __future__ import annotations
 import re
 import tomllib
 from dataclasses import dataclass, field
+from functools import cache
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypedDict
 
 from agentworks.errors import ExternalError
 
 if TYPE_CHECKING:
     from agentworks.config import Config
+    from agentworks.resources import Origin, Registry
+    from agentworks.resources.reference import ReferenceEntry, ResourceReference
 
 
 class CatalogError(ExternalError):
@@ -28,6 +31,13 @@ class CatalogError(ExternalError):
 
 @dataclass(frozen=True)
 class AptSourceEntry:
+    """One apt repository source. Referenced by ``AptPackageEntry.apt_sources``
+    when a package requires a source's key + list stanza before it can be
+    installed. First-class Registry Resource -- ``origin`` set by the
+    catalog publisher, ``references`` attached by the framework's finalize
+    pass from the apt_packages that name it.
+    """
+
     name: str
     description: str
     key_url: str
@@ -35,6 +45,8 @@ class AptSourceEntry:
     source: str
     source_file: str
     key_dearmor: bool = False
+    origin: Origin | None = None
+    references: tuple[ReferenceEntry, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -43,6 +55,38 @@ class AptPackageEntry:
     description: str
     apt: list[str]
     apt_sources: list[str] = field(default_factory=list)
+    # Phase 2b: catalog entries become first-class Registry citizens.
+    # ``origin`` is set by the publisher (``code-declared by
+    # agentworks.catalog`` for built-in entries); ``references`` is attached
+    # by the framework's finalize pass from incoming references.
+    origin: Origin | None = None
+    references: tuple[ReferenceEntry, ...] = ()
+
+    def referenced_resources(self) -> list[ResourceReference]:
+        """Emit one ``ResourceReference`` per name in ``apt_sources``. The
+        framework's ``apt_source`` kind uses an ``error`` miss policy, so
+        an unknown source name surfaces as a clean ``ConfigError`` at
+        ``build_registry`` time with the referencing package's identity
+        attached (rather than the pre-Phase-2b silent ordering assumption
+        that packages must appear after their sources in TOML).
+
+        The registry attaches the corresponding ``ReferenceEntry`` to
+        each ``AptSourceEntry`` during finalize, so
+        ``agw resource describe apt_source github`` shows every apt_package
+        that depends on it -- the dependency graph that was previously
+        implicit is now visible.
+        """
+        from agentworks.resources.reference import ResourceReference
+
+        return [
+            ResourceReference(
+                name=source_name,
+                kind="apt_source",
+                usage=f"the {source_name} apt source",
+                source=("apt_package", self.name),
+            )
+            for source_name in self.apt_sources
+        ]
 
 
 @dataclass(frozen=True)
@@ -54,6 +98,8 @@ class SystemInstallCommandEntry:
     test_exec: str | None = None
     test_file: str | None = None
     test_dir: str | None = None
+    origin: Origin | None = None
+    references: tuple[ReferenceEntry, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -65,6 +111,8 @@ class UserInstallCommandEntry:
     test_exec: str | None = None
     test_file: str | None = None
     test_dir: str | None = None
+    origin: Origin | None = None
+    references: tuple[ReferenceEntry, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -132,14 +180,20 @@ def _load_apt_packages(raw: dict[str, object]) -> dict[str, AptPackageEntry]:
     return entries
 
 
-def _load_test_fields(data: dict[str, object], ctx: str) -> dict[str, str | None]:
+class _TestFields(TypedDict):
+    test_exec: str | None
+    test_file: str | None
+    test_dir: str | None
+
+
+def _load_test_fields(data: dict[str, object], ctx: str) -> _TestFields:
     """Load and validate test_exec/test_file/test_dir fields. At most one may be set."""
     if "test" in data:
         raise CatalogError(f"{ctx}: 'test' is not a valid field. Use 'test_exec', 'test_file', or 'test_dir'.")
-    fields: dict[str, str | None] = {}
+    fields: _TestFields = {"test_exec": None, "test_file": None, "test_dir": None}
     for key in ("test_exec", "test_file", "test_dir"):
         raw = str(data[key]).strip() if key in data else None
-        fields[key] = raw if raw else None
+        fields[key] = raw if raw else None  # type: ignore[literal-required,unused-ignore]
     set_count = sum(1 for v in fields.values() if v is not None)
     if set_count > 1:
         raise CatalogError(f"{ctx}: at most one of test_exec, test_file, test_dir may be set")
@@ -185,8 +239,19 @@ def _load_toml(path: Path) -> dict[str, object]:
         return tomllib.load(f)
 
 
+@cache
 def load_builtin_catalog() -> ResolvedCatalog:
-    """Load the built-in catalog bundled with the package."""
+    """Load the built-in catalog bundled with the package.
+
+    Memoized via ``@cache`` because every command path now parses it
+    twice: once via ``catalog.publish_to(registry)`` at
+    ``build_registry`` time and again via ``load_catalog(config)`` at
+    initializer time (which still needs the resolved entries' payloads
+    to drive installs). The built-in catalog is a ship-time artifact
+    so the cache holds for the process lifetime; the cache is
+    file-bound through ``_BUILTIN_CATALOG_PATH`` which is itself a
+    module-level constant.
+    """
     if not _BUILTIN_CATALOG_PATH.exists():
         raise CatalogError(f"Built-in catalog not found: {_BUILTIN_CATALOG_PATH}")
 
@@ -231,36 +296,110 @@ def load_catalog(config: Config) -> ResolvedCatalog:
     system_cmds = {**builtin.system_install_commands, **custom_system_cmds}
     user_install_cmds = {**builtin.user_install_commands, **custom_user_install_cmds}
 
-    catalog = ResolvedCatalog(
+    return ResolvedCatalog(
         apt_sources=apt_sources,
         apt_packages=apt_packages,
         system_install_commands=system_cmds,
         user_install_commands=user_install_cmds,
     )
 
-    _validate_references(catalog)
-    return catalog
+
+# ``_validate_references`` retired: the framework validates
+# apt_package -> apt_source edges via ``AptSourceKind``'s ``error`` miss
+# policy at ``Registry.finalize`` time (the reference is emitted by
+# ``AptPackageEntry.referenced_resources()``). Same pattern as Phase 2b.0
+# dropping ``validate_selections``: single source of truth for
+# reference validation lives in the framework.
 
 
-def _validate_references(catalog: ResolvedCatalog) -> None:
-    """Validate cross-references within the catalog."""
-    for name, pkg in catalog.apt_packages.items():
-        for src_name in pkg.apt_sources:
-            if src_name not in catalog.apt_sources:
-                raise CatalogError(f"apt_packages.{name} references unknown apt source: {src_name}")
+def publish_to(registry: Registry, config: Config | None = None) -> None:
+    """Publish catalog entries into the registry as first-class Resources.
+
+    Phase 2b: built-in catalog entries become Registry citizens with
+    ``Origin.code_declared(source="agentworks.catalog")``. The four
+    catalog kinds (``apt_source``, ``apt_package``,
+    ``system_install_command``, ``user_install_command``) use the
+    framework's error miss policy, so a typo'd reference from
+    ``[vm_templates.*].apt_packages = ["..."]`` etc. surfaces as a
+    framework error citing the reference's source.
+
+    ``apt_source`` is published even though operators don't reference
+    sources directly from templates: apt_packages reference them via
+    their ``apt_sources`` field, so the framework needs the sources in
+    the registry to resolve the ``AptPackageEntry.referenced_resources()``
+    edges cleanly. The dependency graph
+    (apt_package -> apt_source) becomes visible in
+    ``agw resource describe`` via the ``Referenced by:`` section on
+    each apt_source.
+
+    When ``config`` is provided, operator-declared catalog entries
+    (``[apt_sources.<name>]``, ``[apt_packages.<name>]``,
+    ``[system_install_commands.<name>]``,
+    ``[user_install_commands.<name>]`` in the operator's TOML) are
+    published on top of the built-in entries with
+    ``Origin.operator_declared(...)``. Same last-writer-wins pattern
+    the other publishers use: catalog runs first, then Config, then
+    other publishers -- an operator's override lands on top of the
+    code-declared base. Config-side publishing lives here (rather than
+    in ``Config.publish_to``) because parsing operator catalog entries
+    is catalog's expertise; Config just stashes the raw TOML dicts.
+    """
+    from agentworks.resources import Origin
+
+    builtin = load_builtin_catalog()
+    code_origin = Origin.code_declared(source="agentworks.catalog")
+
+    for src_name, src in builtin.apt_sources.items():
+        registry.add("apt_source", src_name, src, code_origin)
+    for pkg_name, pkg in builtin.apt_packages.items():
+        registry.add("apt_package", pkg_name, pkg, code_origin)
+    for sys_name, sys_cmd in builtin.system_install_commands.items():
+        registry.add("system_install_command", sys_name, sys_cmd, code_origin)
+    for user_name, user_cmd in builtin.user_install_commands.items():
+        registry.add("user_install_command", user_name, user_cmd, code_origin)
+
+    if config is None:
+        return
+
+    # Operator-declared catalog entries. Parse the raw TOML dicts Config
+    # stashed at load-time, publish each with operator-declared origin.
+    #
+    # Line-level ``declared_at`` isn't attached per-entry yet: catalog
+    # loaders don't consume Phase 0's ``_SectionLineMap`` and Config
+    # stores raw dicts (not typed entries) for these sections. Publishing
+    # here uses ``Origin.operator_declared(file=CONFIG_PATH, line=0)`` --
+    # matches the same sentinel Phase 0 uses for singleton-omitted-
+    # section defaults (``named_console_template:default`` when there's
+    # no ``[named_console]``). The renderer drops the parenthetical for
+    # ``line=0``, so operators see "operator-declared" without file:line
+    # for now.
+    #
+    # Plumbing declared_at through catalog entries properly is a small
+    # follow-up (add ``declared_at: SourceLocation`` to the four entry
+    # dataclasses, thread ``_SectionLineMap`` into the ``_load_*``
+    # helpers, either at load_config time or via a public
+    # ``config.declared_at_for(...)`` helper); tracked alongside the
+    # ``named_console_template`` singleton-omitted case in the SDD
+    # follow-ups.
+    from agentworks.config import CONFIG_PATH
+
+    op_origin = Origin.operator_declared(file=CONFIG_PATH, line=0)
+    for src_name, src in _load_apt_sources(config.apt_sources).items():
+        registry.add("apt_source", src_name, src, op_origin)
+    for pkg_name, pkg in _load_apt_packages(config.apt_packages).items():
+        registry.add("apt_package", pkg_name, pkg, op_origin)
+    for sys_name, sys_cmd in _load_system_commands(
+        config.system_install_commands
+    ).items():
+        registry.add("system_install_command", sys_name, sys_cmd, op_origin)
+    for user_name, user_cmd in _load_user_commands(
+        config.user_install_commands
+    ).items():
+        registry.add("user_install_command", user_name, user_cmd, op_origin)
 
 
-def validate_selections(config: Config, catalog: ResolvedCatalog) -> None:
-    """Validate that vm.config and agent.config selections resolve in the catalog."""
-    for ref in config.vm.apt_packages:
-        if ref not in catalog.apt_packages:
-            raise CatalogError(f"vm.config.apt_packages references unknown entry: {ref}")
-    for ref in config.vm.system_install_commands:
-        if ref not in catalog.system_install_commands:
-            raise CatalogError(f"vm.config.system_install_commands references unknown entry: {ref}")
-    for ref in config.admin.user_install_commands:
-        if ref not in catalog.user_install_commands:
-            raise CatalogError(f"admin.config.user_install_commands references unknown entry: {ref}")
-    for ref in config.agent.user_install_commands:
-        if ref not in catalog.user_install_commands:
-            raise CatalogError(f"agent.config.user_install_commands references unknown entry: {ref}")
+# validate_selections removed in Phase 2b.0: the framework's catalog
+# kinds + miss policy validate these references at build_registry time,
+# which every manager-entry function calls before any business logic
+# (per Phase 2a.0's hoist sweep). The function had no remaining
+# production callers; tests covering the old contract were also dropped.

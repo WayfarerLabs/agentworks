@@ -30,25 +30,15 @@ _agentworks_workspaces() {
 }""",
     "ws_templates": """\
 _agentworks_templates() {
-    local -a templates config_file
-    config_file="${HOME}/.config/agentworks/config.toml"
-    [[ -f "$config_file" ]] || return
-    templates=(${(f)"$(sed -n 's/^\\[workspace_templates\\.\\([^]]*\\)\\]/\\1/p' "$config_file" 2>/dev/null)"})
+    local -a templates
+    templates=(${(f)"$(agw resource list --kind workspace_template --names-only 2>/dev/null | awk -F: '{print $2}')"})
     _describe 'template' templates
 }""",
     "git_credentials": """\
 _agentworks_git_credentials() {
-    local -a creds config_file
-    config_file="${HOME}/.config/agentworks/config.toml"
-    [[ -f "$config_file" ]] || return
-    creds=(${(f)"$(sed -n 's/^\\[git_credentials\\.\\([^]]*\\)\\]/\\1/p' "$config_file" 2>/dev/null)"})
+    local -a creds
+    creds=(${(f)"$(agw resource list --kind git_credentials --names-only 2>/dev/null | awk -F: '{print $2}')"})
     _describe 'git-credential' creds
-}""",
-    "catalog_entries": """\
-_agentworks_catalog_entries() {
-    local -a entries
-    entries=(${(f)"$(agw catalog list 2>/dev/null | tail -n +3 | awk '{print $2}')"})
-    _describe 'catalog entry' entries
 }""",
     "sessions": """\
 _agentworks_sessions() {
@@ -70,32 +60,20 @@ _agentworks_consoles() {
 }""",
     "session_templates": """\
 _agentworks_session_templates() {
-    local -a templates config_file
-    config_file="${HOME}/.config/agentworks/config.toml"
-    templates=(default)
-    if [[ -f "$config_file" ]]; then
-        templates+=(${(f)"$(sed -n 's/^\\[session_templates\\.\\([^]]*\\)\\]/\\1/p' "$config_file" 2>/dev/null)"})
-    fi
+    local -a templates
+    templates=(${(f)"$(agw resource list --kind session_template --names-only 2>/dev/null | awk -F: '{print $2}')"})
     _describe 'session-template' templates
 }""",
     "vm_templates": """\
 _agentworks_vm_templates() {
-    local -a templates config_file
-    config_file="${HOME}/.config/agentworks/config.toml"
-    templates=()
-    if [[ -f "$config_file" ]]; then
-        templates+=(${(f)"$(sed -n 's/^\\[vm_templates\\.\\([^]]*\\)\\]/\\1/p' "$config_file" 2>/dev/null)"})
-    fi
+    local -a templates
+    templates=(${(f)"$(agw resource list --kind vm_template --names-only 2>/dev/null | awk -F: '{print $2}')"})
     _describe 'vm-template' templates
 }""",
     "agent_templates": """\
 _agentworks_agent_templates() {
-    local -a templates config_file
-    config_file="${HOME}/.config/agentworks/config.toml"
-    templates=()
-    if [[ -f "$config_file" ]]; then
-        templates+=(${(f)"$(sed -n 's/^\\[agent_templates\\.\\([^]]*\\)\\]/\\1/p' "$config_file" 2>/dev/null)"})
-    fi
+    local -a templates
+    templates=(${(f)"$(agw resource list --kind agent_template --names-only 2>/dev/null | awk -F: '{print $2}')"})
     _describe 'agent-template' templates
 }""",
     "secrets": """\
@@ -103,6 +81,20 @@ _agentworks_secrets() {
     local -a secrets
     secrets=(${(f)"$(agw secret list --names-only 2>/dev/null)"})
     _describe 'secret' secrets
+}""",
+    "resource_kinds": """\
+_agentworks_resource_kinds() {
+    local -a kinds
+    kinds=(${(f)"$(agw resource list --names-only 2>/dev/null | awk -F: '{print $1}' | sort -u)"})
+    _describe 'kind' kinds
+}""",
+    "resource_names": """\
+_agentworks_resource_names() {
+    local -a names kind
+    kind="${words[CURRENT-1]}"
+    [[ -z "$kind" ]] && return
+    names=(${(f)"$(agw resource list --kind "$kind" --names-only 2>/dev/null | awk -F: '{print $2}')"})
+    _describe 'name' names
 }""",
 }
 
@@ -113,7 +105,6 @@ COMPLETER_FUNC_NAMES: dict[str, str] = {
     "workspaces": "_agentworks_workspaces",
     "ws_templates": "_agentworks_templates",
     "git_credentials": "_agentworks_git_credentials",
-    "catalog_entries": "_agentworks_catalog_entries",
     "sessions": "_agentworks_sessions",
     "session_templates": "_agentworks_session_templates",
     "vm_templates": "_agentworks_vm_templates",
@@ -121,6 +112,8 @@ COMPLETER_FUNC_NAMES: dict[str, str] = {
     "agents": "_agentworks_agents",
     "consoles": "_agentworks_consoles",
     "secrets": "_agentworks_secrets",
+    "resource_kinds": "_agentworks_resource_kinds",
+    "resource_names": "_agentworks_resource_names",
 }
 
 

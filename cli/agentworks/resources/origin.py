@@ -14,9 +14,9 @@ Three variants:
   publisher today; future plugin publishers later). Carries ``source: str``
   -- a code-source identifier like ``"agentworks.catalog"``.
 - ``auto-declared``: synthesized by a kind's miss policy during
-  ``Registry.finalize()`` to satisfy a requirement that didn't resolve to
+  ``Registry.finalize()`` to satisfy a reference that didn't resolve to
   any published Resource. Carries ``source: tuple[str, str]`` -- the first
-  matching requirement's ``(kind, name)`` source per the config-load walk
+  matching reference's ``(kind, name)`` source per the config-load walk
   order.
 
 The framework's ``Origin`` is distinct from the Config layer's
@@ -79,8 +79,8 @@ class Origin:
     def auto_declared(cls, *, source: tuple[str, str]) -> Origin:
         """Framework-synthesized Resource (auto-declared by a kind's miss
         policy during ``Registry.finalize()``). ``source`` is the first
-        matching requirement's ``(kind, name)`` per config-load walk
-        order; the full set of matching requirements is recorded in the
-        Resource's ``usage`` list, not here.
+        matching reference's ``(kind, name)`` per config-load walk
+        order; the full set of matching references is recorded in the
+        Resource's ``references`` tuple, not here.
         """
         return cls(variant="auto-declared", source=source)

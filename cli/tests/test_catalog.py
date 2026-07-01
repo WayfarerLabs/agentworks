@@ -11,7 +11,6 @@ from agentworks.catalog import (
     ResolvedCatalog,
     load_builtin_catalog,
     load_catalog,
-    validate_selections,
 )
 
 
@@ -143,7 +142,21 @@ def test_user_entries_extend_builtin() -> None:
     assert "bun" in catalog.user_install_commands
 
 
-def test_bad_apt_source_reference() -> None:
+def test_bad_apt_source_reference_defers_to_framework() -> None:
+    """The catalog loader used to raise ``CatalogError`` at load time
+    for an apt_package referencing an unknown apt_source. That validation
+    moved to the framework: ``AptPackageEntry.referenced_resources()``
+    emits a ``ResourceReference(kind="apt_source", ...)`` per source,
+    and ``AptSourceKind``'s ``error`` miss policy at finalize raises the
+    framework's ``ConfigError`` when the source doesn't resolve.
+
+    Load-time catalog parsing still succeeds; the framework catches the
+    typo at ``build_registry`` time. Same single-source-of-truth pattern
+    Phase 2b.0 established with ``validate_selections``.
+    """
+    from agentworks.bootstrap import build_registry
+    from agentworks.errors import ConfigError
+
     config = _make_config_with_overrides(
         apt_packages={
             "bad-pkg": {
@@ -153,46 +166,19 @@ def test_bad_apt_source_reference() -> None:
             },
         },
     )
-    with pytest.raises(CatalogError, match="unknown apt source.*nonexistent"):
-        load_catalog(config)
+    # Load-time: no error (parser stays permissive; framework validates).
+    catalog = load_catalog(config)
+    assert "bad-pkg" in catalog.apt_packages
+
+    # build_registry-time: framework's miss policy fires.
+    with pytest.raises(ConfigError, match="nonexistent"):
+        build_registry(config)
 
 
-def test_validate_selections_bad_apt_package() -> None:
-    catalog = load_builtin_catalog()
-    config = _make_config_with_vm(apt_packages=["nonexistent"])
-    with pytest.raises(CatalogError, match="vm.config.apt_packages.*nonexistent"):
-        validate_selections(config, catalog)
-
-
-def test_validate_selections_bad_system_command() -> None:
-    catalog = load_builtin_catalog()
-    config = _make_config_with_vm(system_install_commands=["nonexistent"])
-    with pytest.raises(CatalogError, match="vm.config.system_install_commands.*nonexistent"):
-        validate_selections(config, catalog)
-
-
-def test_validate_selections_bad_admin_user_command() -> None:
-    catalog = load_builtin_catalog()
-    config = _make_config_with_vm(user_install_commands=["nonexistent"])
-    with pytest.raises(CatalogError, match="admin.config.user_install_commands.*nonexistent"):
-        validate_selections(config, catalog)
-
-
-def test_validate_selections_bad_agent_command() -> None:
-    catalog = load_builtin_catalog()
-    config = _make_config_with_agent(user_install_commands=["nonexistent"])
-    with pytest.raises(CatalogError, match="agent.config.user_install_commands.*nonexistent"):
-        validate_selections(config, catalog)
-
-
-def test_validate_selections_valid() -> None:
-    catalog = load_builtin_catalog()
-    config = _make_config_with_vm(
-        apt_packages=["gh"],
-        system_install_commands=["az-cli"],
-        user_install_commands=["bun"],
-    )
-    validate_selections(config, catalog)  # should not raise
+# validate_selections coverage moved to the framework path (see
+# cli/tests/resources/test_catalog_kind.py); the function itself was
+# removed in Phase 2b.0 after the manager-entry build_registry hoist
+# made it dead.
 
 
 # -- Helpers -------------------------------------------------------------------

@@ -1128,6 +1128,7 @@ def create_session(
             pins the VM; required when no other anchor does. When
             specified alongside other anchors, must agree with them.
     """
+    from agentworks.bootstrap import build_registry
     from agentworks.config import validate_name
     from agentworks.sessions.tmux import (
         create_session as create_tmux_session,
@@ -1135,6 +1136,16 @@ def create_session(
     from agentworks.sessions.tmux import (
         deploy_restricted_config,
     )
+
+    # build_registry runs first so framework miss-policies (e.g. typos
+    # in agent template's git_credentials list, future TemplateReference
+    # typos on inherits) surface as clean framework errors before any
+    # flag validation, DB lookup, or ephemeral-resource creation. The
+    # registry isn't yet consumed by create_session's flow (operator-env
+    # secrets resolve via resolve_for_command's SecretTarget shape later),
+    # but constructing it here makes the entry point's error-surface
+    # consistent with create_vm / create_agent / reinit_*.
+    build_registry(config)
 
     # ===== Flag-shape validation (mutexes + ephemeral-arg gating) ===========
 

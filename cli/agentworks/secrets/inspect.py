@@ -16,12 +16,17 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from agentworks import output
+from agentworks.resources.inspect import used_by_for
+from agentworks.resources.kinds.secret import SECRET_KIND_NAME
+from agentworks.resources.render import format_origin_line
 
 if TYPE_CHECKING:
     from agentworks.config import Config
+    from agentworks.db import Database
     from agentworks.resources import Registry
+    from agentworks.resources.kind import InstanceRef
     from agentworks.resources.origin import Origin
-    from agentworks.resources.requirement import UsageEntry
+    from agentworks.resources.reference import ReferenceEntry
 
 
 @dataclass(frozen=True)
@@ -91,7 +96,7 @@ def build_secret_table(config: Config, registry: Registry) -> SecretTable:
     operator_count = 0
     auto_count = 0
     rows: list[SecretRow] = []
-    for decl in sorted(registry.iter_kind("secret"), key=lambda d: d.name):
+    for decl in sorted(registry.iter_kind(SECRET_KIND_NAME), key=lambda d: d.name):
         # Variant-based counter; defensive on missing origin.
         variant = getattr(getattr(decl, "origin", None), "variant", None)
         if variant == "operator-declared":
@@ -245,6 +250,13 @@ class SecretDescription:
     is the operator-set prompt hint (``[secrets.<name>].hint``),
     surfaced for debugging "why isn't my prompt showing the helpful
     hint" without triggering a prompt.
+
+    ``references`` is the inbound reference list (config points that
+    name this secret); ``used_by`` is the live DB instances that
+    depend on this secret per the current config (projected via the
+    secret kind's ``instances`` hook). ``used_by`` is ``None`` when
+    ``describe_secret`` was called without a ``db`` -- the renderer
+    omits the "Used by:" section in that case.
     """
 
     name: str
@@ -252,59 +264,17 @@ class SecretDescription:
     origin: Origin | None
     description: str
     hint: str | None
-    usages: tuple[UsageEntry, ...]
+    references: tuple[ReferenceEntry, ...]
+    used_by: tuple[InstanceRef, ...] | None
     backend_mappings: tuple[BackendMapping, ...]
     resolution: ResolutionPreview
-
-
-def _format_origin_line(origin: Origin | None) -> str:
-    """Render an ``Origin`` as a single-line parenthetical:
-    ``"operator-declared (~/path:42)"``, ``"auto-declared (kind:name)"``,
-    ``"code-declared (source)"``. ``"unknown"`` when ``origin`` is None
-    (defensive for Resources constructed outside the framework path).
-    """
-    if origin is None:
-        return "unknown"
-    if origin.variant == "operator-declared":
-        if origin.file is not None and origin.line:
-            return f"operator-declared ({_format_file_path(origin.file)}:{origin.line})"
-        return "operator-declared"
-    if origin.variant == "auto-declared":
-        source = origin.source
-        if isinstance(source, tuple) and len(source) == 2:
-            return f"auto-declared ({source[0]}:{source[1]})"
-        return "auto-declared"
-    if origin.variant == "code-declared":
-        source = origin.source
-        return f"code-declared ({source})" if source else "code-declared"
-    raise AssertionError(f"unhandled Origin variant: {origin.variant!r}")
-
-
-def _format_file_path(file: object) -> str:
-    """Render a file path operator-friendly: ``~/path`` when under
-    ``$HOME``, else the bare absolute path. Falls back to ``str(file)``
-    on any unexpected shape (defensive; Origin's file field is typed
-    ``Path | None`` so this only fires on truly weird construction).
-    """
-    from pathlib import Path
-
-    try:
-        path = Path(str(file))
-        home = Path.home()
-        if path.is_absolute():
-            try:
-                return f"~/{path.relative_to(home)}"
-            except ValueError:
-                return str(path)
-        return str(path)
-    except Exception:
-        return str(file)
 
 
 def describe_secret(
     registry: Registry,
     config: Config,
     name: str,
+    db: Database | None = None,
 ) -> SecretDescription:
     """Build a ``SecretDescription`` for one secret in the registry.
 
@@ -314,24 +284,30 @@ def describe_secret(
     web/API clients all see the same error shape (per the project's
     service-layer-is-the-authority rule). The ``hint`` attribute
     points operators at ``agw secret list``.
+
+    ``db`` is optional: when provided, the ``used_by`` field is
+    populated with the sessions whose subgraph reaches this secret
+    (via the secret kind's ``instances`` hook, shared with
+    ``agw resource describe``). When ``None``, ``used_by`` stays
+    ``None`` and the renderer omits the "Used by:" section.
     """
     from agentworks.errors import NotFoundError
 
     try:
-        decl = registry.lookup("secret", name)
+        decl = registry.lookup(SECRET_KIND_NAME, name)
     except KeyError:
         raise NotFoundError(
             f"secret {name!r} is not in the resource registry",
-            entity_kind="secret",
+            entity_kind=SECRET_KIND_NAME,
             entity_name=name,
             hint="check `agw secret list` for declared and auto-declared names",
         ) from None
     origin = getattr(decl, "origin", None)
     description = getattr(decl, "description", "") or ""
-    # Usages come from the finalize pass's attachment (one entry per
-    # requirement that contributed). Defensive: a Resource constructed
+    # References come from the finalize pass's attachment (one entry per
+    # reference that resolved here). Defensive: a Resource constructed
     # outside the framework path may not have the field.
-    usages: tuple[UsageEntry, ...] = tuple(getattr(decl, "usage", ()))
+    references: tuple[ReferenceEntry, ...] = tuple(getattr(decl, "references", ()))
 
     # Backend mappings: walk the active source chain and ask each
     # source how it would handle this secret.
@@ -357,11 +333,12 @@ def describe_secret(
 
     return SecretDescription(
         name=name,
-        kind="secret",
+        kind=SECRET_KIND_NAME,
         origin=origin,
         description=description,
         hint=getattr(decl, "hint", None),
-        usages=usages,
+        references=references,
+        used_by=used_by_for(db, registry, SECRET_KIND_NAME, decl),
         backend_mappings=tuple(mappings),
         resolution=ResolutionPreview(
             resolved_by=resolved_by,
@@ -371,42 +348,66 @@ def describe_secret(
 
 
 def render_secret_description(desc: SecretDescription) -> None:
-    """Emit a ``SecretDescription`` as four operator-friendly sections:
-    header, usages, backend mappings, resolution preview. Mirrors FRD
-    R10's documented shape.
+    """Emit a ``SecretDescription`` as operator-friendly sections:
+    header, referenced by, used by (when db provided), backend
+    mappings, resolution preview. Mirrors FRD R10's documented shape.
     """
     # --- Header ---
     output.info(f"Secret: {desc.name}")
-    output.info(f"  Kind: {desc.kind}")
+    output.detail(f"Kind: {desc.kind}")
     if desc.description:
-        output.info(f"  Description: {desc.description}")
+        output.detail(f"Description: {desc.description}")
     else:
-        output.info("  Description: (none)")
-    output.info(f"  Origin: {_format_origin_line(desc.origin)}")
+        output.detail("Description: (none)")
+    output.detail(f"Origin: {format_origin_line(desc.origin)}")
     if desc.hint:
-        output.info(f"  Hint: {desc.hint}")
+        output.detail(f"Hint: {desc.hint}")
 
-    # --- Usages ---
+    # --- Referenced by ---
     output.info("")
-    output.info("Usages:")
-    if not desc.usages:
-        output.info("  (none recorded)")
+    output.info("Referenced by:")
+    if not desc.references:
+        output.detail("(none recorded)")
     else:
-        # Dedupe by (source, text) preserving first-encounter order.
+        # Dedupe by (source, usage) preserving first-encounter order.
         seen: set[tuple[tuple[str, str], str]] = set()
-        for entry in desc.usages:
-            key = (entry.source, entry.text)
+        for entry in desc.references:
+            key = (entry.source, entry.usage)
             if key in seen:
                 continue
             seen.add(key)
             src = f"{entry.source[0]}:{entry.source[1]}"
-            output.info(f"  - {src} -- {entry.text}")
+            output.detail(f"- {src} -- {entry.usage}")
+
+    # --- Used by (dynamic, per current config) ---
+    # Only rendered when describe_secret was called with a db. Same
+    # projection shape as agw resource describe's Used by section; the
+    # annotation is in the section header so the projection-vs-
+    # materialized signal is visible at-a-glance.
+    if desc.used_by is not None:
+        output.info("")
+        output.info("Used by (per current config):")
+        if not desc.used_by:
+            output.detail("(no live sessions reach this secret)")
+        else:
+            # Group by instance_kind for readability; preserve
+            # first-encounter order within a kind. Today the secret
+            # kind emits only session InstanceRefs, but grouping keeps
+            # the rendering identical to agw resource describe's shape
+            # so a future SDD that emits other instance kinds (agents,
+            # VMs) slots in without renderer changes.
+            grouped: dict[str, list[str]] = {}
+            for ref in desc.used_by:
+                grouped.setdefault(ref.instance_kind, []).append(ref.instance_name)
+            for instance_kind in grouped:
+                for instance_name in grouped[instance_kind]:
+                    output.detail(f"- {instance_kind}:{instance_name}")
 
     # --- Backend mappings ---
     output.info("")
     output.info("Backend mappings:")
     if not desc.backend_mappings:
-        output.info("  (no active backends in [secret_config].backends)")
+        output.detail("(no active backends in [secret_config].backends)")
     else:
         for mapping in desc.backend_mappings:
             if not mapping.would_attempt:
@@ -415,12 +416,12 @@ def render_secret_description(desc: SecretDescription) -> None:
                 status = mapping.identifier
             else:
                 status = "(prompt at resolution time)"
-            output.info(f"  - {mapping.backend_kind}: {status}")
+            output.detail(f"- {mapping.backend_kind}: {status}")
 
     # --- Resolution preview ---
     output.info("")
     output.info("Resolution preview:")
     if not desc.resolution.available:
-        output.info("  not available in any active backend")
+        output.detail("not available in any active backend")
     else:
-        output.info(f"  would resolve via {desc.resolution.resolved_by}")
+        output.detail(f"would resolve via {desc.resolution.resolved_by}")

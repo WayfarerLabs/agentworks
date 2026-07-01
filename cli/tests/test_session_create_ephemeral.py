@@ -37,6 +37,15 @@ from agentworks import output
 from agentworks.db import Database
 from agentworks.errors import ValidationError
 
+from .conftest import stub_build_registry
+
+
+@pytest.fixture(autouse=True)
+def _stub_build_registry(monkeypatch: pytest.MonkeyPatch) -> None:
+    """SimpleNamespace configs don't carry publish_to; Phase 2a's
+    manager-entry hoist is no-op'd via the shared helper."""
+    stub_build_registry(monkeypatch)
+
 
 def _seed_two_vms(tmp_path: Path) -> Database:
     """Two VMs each with one workspace and one agent.

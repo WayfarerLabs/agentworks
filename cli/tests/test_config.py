@@ -81,6 +81,13 @@ def test_missing_config_file(tmp_path: Path) -> None:
 
 
 def test_cycle_detection(tmp_path: Path) -> None:
+    """Workspace template inheritance cycles are caught by the
+    framework's cycle detector at build_registry time (Phase 2a.2).
+    The bespoke load-time pass is gone; load_config no longer does
+    inherits validation for any template kind.
+    """
+    from agentworks.bootstrap import build_registry
+
     pub = tmp_path / "id.pub"
     priv = tmp_path / "id"
     pub.write_text("key")
@@ -100,11 +107,18 @@ def test_cycle_detection(tmp_path: Path) -> None:
         inherits = ["a"]
     """)
     )
+    cfg = load_config(config_file)
     with pytest.raises(ConfigError, match="cycle"):
-        load_config(config_file)
+        build_registry(cfg)
 
 
 def test_invalid_git_credential_type(tmp_path: Path) -> None:
+    """Phase 2b.1: ``type`` validation moved to the framework. An
+    unknown provider type errors at ``build_registry`` time via
+    GitCredentialProviderKind's error miss policy.
+    """
+    from agentworks.bootstrap import build_registry
+
     pub = tmp_path / "id.pub"
     priv = tmp_path / "id"
     pub.write_text("key")
@@ -121,8 +135,9 @@ def test_invalid_git_credential_type(tmp_path: Path) -> None:
         type = "gitlab"
     """)
     )
-    with pytest.raises(ConfigError, match="git_credentials.bad.type"):
-        load_config(config_file)
+    cfg = load_config(config_file)
+    with pytest.raises(ConfigError, match="git_credential_provider 'gitlab'"):
+        build_registry(cfg)
 
 
 def test_unexpected_top_level_keys_warns(tmp_path: Path) -> None:

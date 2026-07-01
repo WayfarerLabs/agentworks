@@ -9,7 +9,14 @@ from __future__ import annotations
 
 from agentworks.resources.kinds import (  # noqa: F401
     admin_template,
+    agent_template,
+    catalog,
+    git_credential_provider,
     git_credentials,
     named_console_template,
     secret,
+    secret_backend,
+    session_template,
+    vm_template,
+    workspace_template,
 )

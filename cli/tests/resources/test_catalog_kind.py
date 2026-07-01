@@ -1,0 +1,293 @@
+"""Tests for Phase 2b's catalog kinds: ``apt_source``, ``apt_package``,
+``system_install_command``, ``user_install_command``.
+
+Coverage:
+
+- Each kind's shape (``miss_policy == "error"``, no auto-declare names).
+- The error miss policy fires with the reference's source on typo'd
+  references from operator config.
+- Known catalog names resolve.
+- ``synthesize`` raises ``NoUnreferencedDefaultError`` per Phase 2a's
+  empty-references contract (the kinds never auto-declare; the
+  contract is still defined).
+- ``apt_package -> apt_source`` edges: an unknown source name in a
+  package's ``apt_sources`` field surfaces via the framework's miss
+  policy; a known source shows up in the ``apt_source`` Resource's
+  inbound ``references`` after finalize.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+from textwrap import dedent
+
+import pytest
+
+from agentworks.bootstrap import build_registry
+from agentworks.config import load_config
+from agentworks.errors import ConfigError
+from agentworks.resources import KIND_REGISTRY, NoUnreferencedDefaultError
+
+CATALOG_KINDS = (
+    "apt_source",
+    "apt_package",
+    "system_install_command",
+    "user_install_command",
+)
+
+
+def _write_cfg(path: Path, body: str = "") -> Path:
+    pub = path.parent / "id.pub"
+    priv = path.parent / "id"
+    pub.write_text("ssh-ed25519 AAAA...")
+    priv.write_text("-----BEGIN OPENSSH PRIVATE KEY-----")
+    path.write_text(
+        dedent(f"""\
+        [operator]
+        ssh_public_key = "{pub.as_posix()}"
+        ssh_private_key = "{priv.as_posix()}"
+
+        """)
+        + dedent(body),
+    )
+    return path
+
+
+# -- Kind shape -------------------------------------------------------------
+
+
+@pytest.mark.parametrize("kind_name", CATALOG_KINDS)
+def test_catalog_kind_attributes(kind_name: str) -> None:
+    kind = KIND_REGISTRY[kind_name]
+    assert kind.kind == kind_name
+    assert kind.miss_policy == "error"
+    assert kind.auto_declare_names is None
+
+
+@pytest.mark.parametrize("kind_name", CATALOG_KINDS)
+def test_catalog_kind_synthesize_raises(kind_name: str) -> None:
+    """Catalog kinds have ``miss_policy == "error"``; ``synthesize`` is
+    never called by the framework in practice but the empty-requirements
+    contract still applies (Phase 2a). Raises ``NoUnreferencedDefaultError``.
+    """
+    kind = KIND_REGISTRY[kind_name]
+    with pytest.raises(NoUnreferencedDefaultError):
+        kind.synthesize(())
+
+
+# -- Framework miss-policy on typo'd references ---------------------------
+
+
+def test_apt_package_typo_errors_with_source(tmp_path: Path) -> None:
+    """A typo in ``vm_templates.*.apt_packages`` errors at
+    ``build_registry`` time with the framework's miss-policy shape, citing
+    the referencing template's ``(kind, name)`` source.
+    """
+    cfg = load_config(
+        _write_cfg(
+            tmp_path / "config.toml",
+            """
+            [vm_templates.default]
+            apt_packages = ["nonexistent-pkg"]
+            """,
+        ),
+        warn_issues=False,
+    )
+    with pytest.raises(ConfigError, match=r"references unknown apt_package 'nonexistent-pkg'"):
+        build_registry(cfg)
+
+
+def test_system_install_command_typo_errors_with_source(tmp_path: Path) -> None:
+    cfg = load_config(
+        _write_cfg(
+            tmp_path / "config.toml",
+            """
+            [vm_templates.default]
+            system_install_commands = ["totally-fake-cmd"]
+            """,
+        ),
+        warn_issues=False,
+    )
+    with pytest.raises(ConfigError, match="references unknown system_install_command"):
+        build_registry(cfg)
+
+
+def test_user_install_command_typo_in_admin_errors(tmp_path: Path) -> None:
+    cfg = load_config(
+        _write_cfg(
+            tmp_path / "config.toml",
+            """
+            [admin.config]
+            user_install_commands = ["bogus-installer"]
+            """,
+        ),
+        warn_issues=False,
+    )
+    with pytest.raises(ConfigError, match="references unknown user_install_command"):
+        build_registry(cfg)
+
+
+def test_user_install_command_typo_in_agent_errors(tmp_path: Path) -> None:
+    cfg = load_config(
+        _write_cfg(
+            tmp_path / "config.toml",
+            """
+            [agent_templates.default]
+            user_install_commands = ["bogus-installer"]
+            """,
+        ),
+        warn_issues=False,
+    )
+    with pytest.raises(ConfigError, match="references unknown user_install_command"):
+        build_registry(cfg)
+
+
+# -- Known references resolve ----------------------------------------------
+
+
+def test_known_apt_package_reference_resolves(tmp_path: Path) -> None:
+    """A reference to a known built-in catalog entry (``gh`` in the
+    built-in catalog today) finalizes cleanly.
+    """
+    cfg = load_config(
+        _write_cfg(
+            tmp_path / "config.toml",
+            """
+            [vm_templates.default]
+            apt_packages = ["gh"]
+            """,
+        ),
+        warn_issues=False,
+    )
+    registry = build_registry(cfg)
+    gh = registry.lookup("apt_package", "gh")
+    assert gh.name == "gh"
+    # Cross-check: the catalog publisher attached code-declared origin
+    # and the framework's finalize attached the inbound reference from
+    # vm_template:default.
+    assert gh.origin.variant == "code-declared"
+    assert any(
+        u.source == ("vm_template", "default") for u in gh.references
+    ), "vm_template:default reference should be on the apt_package"
+
+
+# -- apt_package -> apt_source edges ---------------------------------------
+
+
+def test_apt_source_kind_published_from_builtin_catalog(tmp_path: Path) -> None:
+    """The catalog publisher emits ``apt_source`` Resources with
+    ``code-declared`` origin, parallel to ``apt_package`` / the
+    install-command kinds. The built-in catalog ships at least one
+    apt_source (``github`` today), so the registry has it after
+    ``build_registry``.
+    """
+    cfg = load_config(
+        _write_cfg(tmp_path / "config.toml"),
+        warn_issues=False,
+    )
+    registry = build_registry(cfg)
+    names = [name for name, _ in registry.iter_kind_items("apt_source")]
+    assert names, "built-in catalog should publish at least one apt_source"
+    for name in names:
+        src = registry.lookup("apt_source", name)
+        assert src.origin.variant == "code-declared"
+
+
+def test_apt_package_references_flow_to_apt_source(tmp_path: Path) -> None:
+    """``AptPackageEntry.referenced_resources()`` emits one
+    ``ResourceReference(kind="apt_source", ...)`` per name in the
+    package's ``apt_sources`` field. After finalize, the apt_source's
+    ``references`` collection includes the referencing apt_package --
+    the dependency graph that was previously implicit in
+    ``_validate_references`` is now visible via
+    ``agw resource describe apt_source <name>``.
+    """
+    cfg = load_config(
+        _write_cfg(
+            tmp_path / "config.toml",
+            """
+            [vm_templates.default]
+            apt_packages = ["gh"]
+            """,
+        ),
+        warn_issues=False,
+    )
+    registry = build_registry(cfg)
+    # ``gh`` depends on the ``github-cli`` apt_source in the built-in
+    # catalog; check the inbound edge lands on the source.
+    github = registry.lookup("apt_source", "github-cli")
+    referencing_pkgs = [
+        entry.source for entry in github.references
+        if entry.source[0] == "apt_package"
+    ]
+    assert ("apt_package", "gh") in referencing_pkgs, (
+        f"expected apt_package:gh to reference apt_source:github-cli; got "
+        f"{referencing_pkgs}"
+    )
+
+
+def test_unknown_apt_source_reference_errors_via_framework(
+    tmp_path: Path,
+) -> None:
+    """An apt_package pointing at a non-existent apt_source used to
+    error at catalog load via ``_validate_references``. That validator
+    was retired; the framework's ``AptSourceKind.miss_policy = "error"``
+    now catches it at ``build_registry`` time. The error message names
+    the missing source; the offending package's identity flows through
+    the ``ResourceReference.source`` field on the reference.
+    """
+    cfg = load_config(
+        _write_cfg(
+            tmp_path / "config.toml",
+            """
+            [apt_packages.bad-pkg]
+            description = "Package with an unknown source"
+            apt = ["bad"]
+            apt_sources = ["nonexistent-source"]
+            """,
+        ),
+        warn_issues=False,
+    )
+    with pytest.raises(ConfigError, match="nonexistent-source"):
+        build_registry(cfg)
+
+
+def test_operator_declared_apt_source_layers_over_builtin(
+    tmp_path: Path,
+) -> None:
+    """Operator-declared ``[apt_sources.<name>]`` in config.toml
+    re-publishes the source with ``operator-declared`` origin (the
+    catalog publisher runs before ``Config.publish_to`` per the
+    build_registry publisher chain, so the operator's declaration
+    overrides the built-in for the same name). The same layering
+    pattern that already covers apt_packages.
+    """
+    cfg = load_config(
+        _write_cfg(
+            tmp_path / "config.toml",
+            """
+            [apt_sources.custom-src]
+            description = "Operator-defined source"
+            key_url = "https://example.com/key.gpg"
+            key_path = "/etc/apt/keyrings/custom-src.gpg"
+            source = "deb [signed-by=/etc/apt/keyrings/custom-src.gpg] https://example.com/apt stable main"
+            source_file = "custom-src.list"
+
+            [apt_packages.custom-pkg]
+            description = "Package using the operator source"
+            apt = ["custom-pkg"]
+            apt_sources = ["custom-src"]
+            """,
+        ),
+        warn_issues=False,
+    )
+    registry = build_registry(cfg)
+
+    custom_src = registry.lookup("apt_source", "custom-src")
+    assert custom_src.origin.variant == "operator-declared"
+    assert custom_src.name == "custom-src"
+    # The referencing package shows up on the source's inbound edges.
+    assert any(
+        entry.source == ("apt_package", "custom-pkg")
+        for entry in custom_src.references
+    )

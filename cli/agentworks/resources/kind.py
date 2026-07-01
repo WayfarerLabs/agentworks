@@ -2,7 +2,7 @@
 
 A ``ResourceKind`` is the per-kind strategy the framework consults during
 ``Registry.finalize()``: it tells the Registry which miss policy to use when
-a requirement's ``(kind, name)`` doesn't resolve to a published Resource,
+a reference's ``(kind, name)`` doesn't resolve to a published Resource,
 which names auto-declare is allowed to synthesize, and how to build the
 synthesized Resource.
 
@@ -14,12 +14,40 @@ populates the registry.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from agentworks.resources.requirement import ResourceRequirement
+    from agentworks.resources.reference import ResourceReference
+
+
+@dataclass(frozen=True)
+class InstanceRef:
+    """One live DB instance that depends on a Resource per current config.
+
+    Returned by ``ResourceKind.instances(...)``; rendered as the per-row
+    contribution to ``agw resource list``'s ``USED BY`` column count and to
+    ``agw resource describe``'s ``Used by:`` section.
+
+    Fields:
+
+    - ``instance_kind``: the DB row's kind identifier (``"vm"``, ``"agent"``,
+      ``"workspace"``, ``"session"``, ``"console"``). Used by the describe
+      view to group entries by instance type.
+    - ``instance_name``: the DB row's name (``vm.name``, ``session.name``,
+      etc.).
+
+    The shape is intentionally minimal so a future provisioned-state
+    SDD can return the same dataclass from a sibling
+    ``provisioned_instances(...)`` hook (today's projection is "per
+    current config"; a manifest-driven sibling would be "per provisioned
+    state"). See the Phase 3c "Forward-compat note" in the plan.
+    """
+
+    instance_kind: str
+    instance_name: str
 
 
 class ResourceKind(Protocol):
@@ -27,25 +55,38 @@ class ResourceKind(Protocol):
 
     Attribute contracts:
 
-    - ``kind``: the kind identifier matching ``ResourceRequirement.kind``,
+    - ``kind``: the kind identifier matching ``ResourceReference.kind``,
       ``Origin.source[0]`` (for auto-declared), and the Registry's per-kind
       dict key.
     - ``miss_policy``: which branch ``Registry.finalize()`` takes when a
-      requirement points at a name not in the Registry. ``"auto-declare"``
+      reference points at a name not in the Registry. ``"auto-declare"``
       synthesizes via this kind; ``"error"`` raises ``ConfigError``.
     - ``auto_declare_names``: when ``miss_policy == "auto-declare"``, the
       set of names the kind accepts auto-declaring. ``None`` means "any
       name" (secrets). A non-empty set means "only these reserved names"
       (templates accept ``{"default"}``); requests for other missing names
       error.
-    - ``synthesize(requirements)``: called when an auto-declare-allowed
-      missing name is being synthesized. Receives all matching requirements
+    - ``synthesize(references)``: called when an auto-declare-allowed
+      missing name is being synthesized. Receives all matching references
       known so far (in config-load walk order). Returns the synthesized
       Resource with ``origin = Origin.auto_declared(...)`` attached.
       ``usage`` is NOT attached here -- ``Registry.finalize`` centralizes
       usage attachment in a post-stabilization pass so synthesized
       Resources can accrue later-discovered incoming edges from
       second-level dispatches uniformly with operator-declared ones.
+
+      **Empty-references contract** (Phase 2a): every kind's
+      ``synthesize`` must have defined behavior when called with
+      ``references=()``. Kinds whose ``auto_declare_names`` is a
+      non-None set MUST build a code-defined default in this case (the
+      framework's always-materialize pre-step calls them this way to
+      guarantee reserved-default names exist in the registry); they use
+      the reserved sentinel ``Origin.auto_declared(source=("framework",
+      "always-materialize"))`` so the breadcrumb shows where the row came
+      from. Kinds with ``auto_declare_names = None`` raise
+      ``NoUnreferencedDefaultError`` -- the framework never calls them
+      that way, but the kind's contract must still be defined
+      (defensive against future ``auto_declare_names`` changes).
 
     The return type of ``synthesize`` is ``Any`` because Resources are
     diverse types from different modules (``SecretDecl`` from
@@ -67,7 +108,49 @@ class ResourceKind(Protocol):
     @property
     def auto_declare_names(self) -> frozenset[str] | None: ...
 
-    def synthesize(self, requirements: Sequence[ResourceRequirement]) -> Any: ...
+    def synthesize(self, references: Sequence[ResourceReference]) -> Any: ...
+
+    # The optional ``instances(db, registry, resource) -> Iterable[InstanceRef]``
+    # method is intentionally NOT declared on this Protocol. Kinds with a
+    # per-instance lifecycle concept (the four named template kinds plus
+    # ``admin_template`` plus ``secret``) implement it; kinds without
+    # (catalog, ``git_credential_provider``, ``secret_backend``) omit it
+    # entirely. The framework's consumer (``agentworks.resources.inspect``)
+    # uses ``getattr(handler, "instances", None)`` to gate the call, so
+    # absent-on-class IS the "no instance concept" signal. Declaring the
+    # method on the Protocol would force every kind to either implement
+    # it (Liskov violation for kinds where it's meaningless) or use
+    # ``# type: ignore`` to opt out. Structural-duck-typing keeps the
+    # contract honest. The shape of the optional method is:
+    #
+    #     def instances(self, db: Database, registry: Registry,
+    #                   resource: Any) -> Iterable[InstanceRef]:
+    #         ...
+    #
+    # Per current config: a future SDD adding provisioned-state tracking
+    # would add a sibling ``provisioned_instances(...)`` hook returning
+    # the same ``InstanceRef`` shape from manifests; today's
+    # ``instances`` is the config-projected dimension.
+
+
+class NoUnreferencedDefaultError(Exception):
+    """Raised by a ``ResourceKind.synthesize`` when called with
+    ``references=()`` and the kind has no notion of an unreferenced
+    default (i.e., ``auto_declare_names is None``).
+
+    The framework's always-materialize pre-step in ``Registry.finalize``
+    only calls ``synthesize(references=())`` for kinds whose
+    ``auto_declare_names`` is a non-None set, so this error is never
+    raised in normal operation. The error exists so a kind's contract
+    stays well-defined under future changes: if a kind that today has
+    ``auto_declare_names = None`` gains a reserved name, the kind's
+    ``synthesize`` already has an obvious "fix me" landing pad.
+    """
+
+
+# Reserved Origin source kind for always-materialized rows. The string
+# "framework" must not be used as a real kind name in ``KIND_REGISTRY``.
+ALWAYS_MATERIALIZE_SOURCE: tuple[str, str] = ("framework", "always-materialize")
 
 
 KIND_REGISTRY: dict[str, ResourceKind] = {}

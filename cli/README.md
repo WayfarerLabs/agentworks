@@ -498,18 +498,6 @@ so launching a `claude` session on an agent that doesn't have `claude` installed
 clear error instead of a cryptic downstream tmux failure. `required_commands` is merged (de-duped,
 order-preserving) across template inheritance.
 
-### Catalog
-
-Browse and inspect the built-in catalog of installable tools.
-
-| Command                       | Description                        |
-| ----------------------------- | ---------------------------------- |
-| `agw catalog list`            | List all available catalog entries |
-| `agw catalog describe <name>` | Show details of a catalog entry    |
-
-`catalog list` accepts `--type` (apt-source, apt-package, system-install-cmd, user-install-cmd) and
-`--source` (built-in, custom) filters.
-
 ### Config
 
 | Command                             | Description                                  |
@@ -519,6 +507,24 @@ Browse and inspect the built-in catalog of installable tools.
 | `agw config sample`                 | Print the sample config to stdout            |
 | `agw config sync-ssh-config`        | Rebuild SSH config entries for VMs + agents  |
 | `agw config sync-vscode-workspaces` | Regenerate .code-workspace files for all VMs |
+
+### Resource Registry
+
+Cross-kind inspection of the Resource Registry. The registry is the framework that owns every
+operator-, auto-, and code-declared resource the CLI knows about: secrets, VM templates, agent
+templates, workspace templates, catalog entries, git credential providers, secret backends, etc. The
+two commands below stop at the framework-uniform fields (`kind`, `name`, `origin`, `references`,
+`used_by`, `description`). For kind-specific detail -- secret backend mappings, template inheritance
+chains, resolution previews -- reach for the per-kind command (e.g. `agw secret describe`).
+
+| Command                               | Description                                                          |
+| ------------------------------------- | -------------------------------------------------------------------- |
+| `agw resource list`                   | List every resource in the registry across all kinds                 |
+| `agw resource describe <kind> <name>` | Show the per-resource detail view (header + Referenced by + Used by) |
+
+`resource list` accepts `--kind <csv>` (e.g. `--kind secret,vm_template`) and `--origin <variant>`
+where variant is `operator`, `auto`, or `code`. `--names-only` emits `kind:name` per line and backs
+shell completion.
 
 ## Configuration
 
@@ -636,7 +642,7 @@ agw secret describe tailscale-auth-key
 #   Description: (auto) the Tailscale auth key for vm_template:default (and 1 more)
 #   Origin: auto-declared (vm_template:default)
 #
-# Usages:
+# Referenced by:
 #   - vm_template:default -- the Tailscale auth key
 #   - vm_template:heavy -- the Tailscale auth key
 #
@@ -681,9 +687,11 @@ claude_plugins = ["nerftools-default@nerftools"]
 ### Built-in Catalog
 
 Agentworks ships a built-in catalog of common tools (apt sources, apt packages, system install
-commands, and user install commands). Run `agw catalog list` to see what is available. Reference
-catalog entries by name in `vm_templates`, `admin.config`, and `agent_templates`. User-defined
-entries in your config override built-in entries with the same name.
+commands, and user install commands). Run
+`agw resource list --kind apt_package,system_install_command,user_install_command,apt_source` to see
+what is available (or filter to any single kind). Reference catalog entries by name in
+`vm_templates`, `admin.config`, and `agent_templates`. User-defined entries in your config override
+built-in entries with the same name.
 
 ## VM Initialization
 

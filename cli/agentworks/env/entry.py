@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from agentworks.resources.requirement import SecretRequirement
+    from agentworks.resources.reference import SecretReference
 
 
 @dataclass(frozen=True)
@@ -35,10 +35,10 @@ class EnvEntry:
                 f"EnvEntry for {self.key!r} cannot set both value and secret",
             )
 
-    def required_resources(
+    def referenced_resources(
         self, source: tuple[str, str]
-    ) -> list[SecretRequirement]:
-        """Emit a ``SecretRequirement`` for this entry's secret reference,
+    ) -> list[SecretReference]:
+        """Emit a ``SecretReference`` for this entry's secret reference,
         or an empty list for plaintext entries.
 
         Called by the Resource that owns this env entry's table (admin,
@@ -47,18 +47,19 @@ class EnvEntry:
         derived from the env-var key, so a typo'd KEY surfaces in
         diagnostics with the actual variable name.
 
-        The import of ``SecretRequirement`` is ``TYPE_CHECKING``-only to
+        The import of ``SecretReference`` is ``TYPE_CHECKING``-only to
         keep ``EnvEntry`` framework-ignorant at runtime; constructed
         lazily inside the method.
         """
         if self.secret is None:
             return []
-        from agentworks.resources.requirement import SecretRequirement
+        from agentworks.resources.kinds.secret import SECRET_KIND_NAME
+        from agentworks.resources.reference import SecretReference
 
         return [
-            SecretRequirement(
+            SecretReference(
                 name=self.secret,
-                kind="secret",
+                kind=SECRET_KIND_NAME,
                 usage=f"the {self.key} env var",
                 source=source,
             )

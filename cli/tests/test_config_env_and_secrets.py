@@ -447,12 +447,14 @@ def test_unreachable_secret_error_message_and_hint(tmp_path: Path) -> None:
     assert "remove" in exc.value.hint
 
 
-def test_unknown_backend_kind_in_secret_backends_emits_warning(
+def test_unknown_backend_kind_in_secret_backends_errors(
     tmp_path: Path,
 ) -> None:
-    """A typo in [secret_backends.<kind>] (e.g. 'env_var' or 'envvar' for
-    'env-var') surfaces at load time as a warning, not at reach-for time
-    in [secret_config].backends."""
+    """A typo in [secret_backends.<kind>] (e.g. 'env_var' or 'envvar'
+    for 'env-var') errors at config-load time. Phase 2b.2 elevated this
+    from a soft warning to a hard error so it matches the framework's
+    treatment of [git_credentials.<name>].type typos.
+    """
     cfg_file = tmp_path / "config.toml"
     _write_base(
         cfg_file,
@@ -461,11 +463,8 @@ def test_unknown_backend_kind_in_secret_backends_emits_warning(
         # typo: kind is 'env-var' (kebab), not 'env_var' (snake)
         """,
     )
-    cfg = load_config(cfg_file, warn_issues=False)
-    assert any(
-        "env_var" in issue and "unknown backend kind" in issue
-        for issue in cfg.config_issues
-    ), cfg.config_issues
+    with pytest.raises(ConfigError, match="unknown backend kind"):
+        load_config(cfg_file, warn_issues=False)
 
 
 @pytest.mark.parametrize(

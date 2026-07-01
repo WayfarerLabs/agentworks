@@ -3,7 +3,7 @@
 Phase 1d of the Resource Registry SDD: providers now own only the
 type-specific formatting (``credential_lines``) and authn pre-flight
 (``verify_auth`` / ``auth_hint``). Token resolution moved to the
-framework -- each ``GitCredentialConfig`` emits a ``SecretRequirement``
+framework -- each ``GitCredentialConfig`` emits a ``SecretReference``
 for its ``token`` field; the resolver chain (env-var / 1Password /
 prompt / ...) handles the lookup. The previous provider-side env-var
 helpers and prompt method are gone.
