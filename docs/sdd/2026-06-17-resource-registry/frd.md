@@ -445,14 +445,12 @@ summary; for detail, the operator runs describe.
   collapses to one row. This is the _static_ dimension: what config points at this secret.
 - **Used by (per current config)**: one row per live DB instance whose subgraph would need this
   secret under current config, grouped by instance kind (sessions today; other kinds if future work
-  grows the projection). Projected via the secret kind's `instances` hook -- for each session row,
-  the framework walks the session's reference subgraph via `collect_secrets_for` from each of
-  (session_template, workspace_template, vm_template, and mode-exclusive admin_template |
-  agent_template) and emits an `InstanceRef` when the target secret appears in the reachable set.
-  The "(per current config)" annotation in the section header is load-bearing: the projection
-  changes the moment config changes, even for sessions that were provisioned against a different
-  config. See the SDD plan's "Forward-compat note" for the drift-tracking sibling this leaves room
-  for.
+  grows the projection). Projected via the secret kind's `instances` hook, which walks each
+  session's reference subgraph via `collect_secrets_for` and emits an `InstanceRef` when the target
+  secret appears in the reachable set. The "(per current config)" annotation in the section header
+  is load-bearing: the projection changes the moment config changes, even for sessions that were
+  provisioned against a different config. See the SDD plan's "Forward-compat note" for the
+  drift-tracking sibling this leaves room for.
 - **Backend mappings**: per-backend status -- the operator-set value if declared, the backend's
   default convention (e.g. `AW_SECRET_<NAME>` for env-var) if it has one and no operator override,
   or "no mapping (skipped)" for backends that have no default convention. No framework merging; this

@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from agentworks import output
+from agentworks.resources.inspect import used_by_for
 from agentworks.resources.kinds.secret import SECRET_KIND_NAME
 from agentworks.resources.render import format_origin_line
 
@@ -291,7 +292,6 @@ def describe_secret(
     ``None`` and the renderer omits the "Used by:" section.
     """
     from agentworks.errors import NotFoundError
-    from agentworks.resources.inspect import used_by_for
 
     try:
         decl = registry.lookup(SECRET_KIND_NAME, name)
