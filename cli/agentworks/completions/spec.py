@@ -1,13 +1,47 @@
-"""Introspect the Typer/Click command tree and build a completion spec."""
+"""Introspect the Typer/Click command tree and build a completion spec.
+
+typer 0.26 vendored click into ``typer._click``; ``typer.main.get_command()``
+now returns objects whose classes are ``typer._click.core.{Command,Group}``,
+not the real ``click.core.*``. isinstance-checks against real click classes
+therefore silently return ``False``, producing an empty spec tree.
+
+To avoid coupling to either variant we duck-type against the surface both
+provide (``.name`` / ``.params`` / ``.commands`` / ``.opts`` /
+``.param_type_name`` / etc.) via the Protocol types below.
+"""
 
 from __future__ import annotations
 
 import hashlib
 import json
 from dataclasses import dataclass, field
+from typing import Any, Protocol
 
-import click
 import typer
+
+# -- Structural types for click-like objects ------------------------------
+#
+# Both real click and typer's vendored ``typer._click`` conform to these.
+
+
+class _ClickParameter(Protocol):
+    name: str | None
+    opts: list[str]
+    multiple: bool
+    nargs: int
+    required: bool
+    type: Any  # click ParamType; Choice subtype exposes ``.choices``
+
+
+class _ClickCommand(Protocol):
+    name: str | None
+    help: str | None
+    params: list[Any]
+
+
+class _ClickGroup(_ClickCommand, Protocol):
+    commands: dict[str, _ClickCommand]
+
 
 # -- Data model ------------------------------------------------------------
 
@@ -180,8 +214,8 @@ def build_spec(app: typer.Typer) -> CommandSpec:
     return _build_command_spec(click_app, path="")
 
 
-def _build_command_spec(cmd: click.Command, path: str) -> CommandSpec:
-    """Recursively build a CommandSpec from a Click command."""
+def _build_command_spec(cmd: _ClickCommand, path: str) -> CommandSpec:
+    """Recursively build a CommandSpec from a Click-like command."""
     help_text = (cmd.help or "").split("\n")[0].strip()
     name = cmd.name or ""
 
@@ -194,27 +228,38 @@ def _build_command_spec(cmd: click.Command, path: str) -> CommandSpec:
             continue
         spec.params.append(_build_param_spec(param, current_path))
 
-    # Build subcommands for groups
-    if isinstance(cmd, click.Group):
-        ctx = click.Context(cmd, info_name=name)
-        for sub_name in cmd.list_commands(ctx):
-            sub_cmd = cmd.get_command(ctx, sub_name)
+    # Build subcommands for groups. Duck-type: Group has ``.commands``, plain
+    # Command doesn't. We iterate the dict directly rather than through
+    # ``list_commands(ctx) / get_command(ctx, name)`` because the ctx
+    # construction differs between real click and typer._click, and both
+    # default impls just walk this dict anyway.
+    commands = getattr(cmd, "commands", None)
+    if isinstance(commands, dict):
+        for sub_name in sorted(commands):
+            sub_cmd = commands[sub_name]
             if sub_cmd is not None:
                 spec.subcommands[sub_name] = _build_command_spec(sub_cmd, path=current_path)
 
     return spec
 
 
-def _build_param_spec(param: click.Parameter, command_path: str) -> ParamSpec:
-    """Build a ParamSpec from a Click parameter."""
-    is_argument = isinstance(param, click.Argument)
+def _build_param_spec(param: _ClickParameter, command_path: str) -> ParamSpec:
+    """Build a ParamSpec from a Click-like parameter."""
+    # ``param_type_name`` is a click class attribute set to "argument" /
+    # "option" on the respective subclasses -- stable across click versions
+    # and preserved by typer's vendored copy.
+    param_kind = getattr(param, "param_type_name", "")
+    is_argument = param_kind == "argument"
+    is_option = param_kind == "option"
 
     choices = None
-    if isinstance(param.type, click.Choice):
+    # ``Choice`` param types expose ``.choices``; other ParamType subclasses
+    # (STRING, INT, etc.) do not.
+    if hasattr(param.type, "choices"):
         choices = list(param.type.choices)
 
     opts: list[str] = []
-    if isinstance(param, click.Option):
+    if is_option:
         opts = list(param.opts)
 
     # DYNAMIC_COMPLETIONS keys use paths without the root app name

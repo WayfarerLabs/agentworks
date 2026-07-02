@@ -482,19 +482,21 @@ def _shell_command_params(resource: str, argv: list[str]) -> dict[str, object]:
     we're only asserting what Click produces from argv parsing, which
     is the only thing the test cares about.
     """
-    import click
     import typer
 
     from agentworks.cli import app
 
+    # ``typer.main.get_command()`` returns real click classes on typer < 0.26
+    # and typer-vendored ``typer._click`` classes on typer >= 0.26. Walk the
+    # ``.commands`` dict directly instead of isinstance-checking against
+    # ``click.Group``, which fails against the vendored classes. See
+    # ``agentworks.completions.spec`` for the same pattern.
     click_app = typer.main.get_command(app)
-    assert isinstance(click_app, click.Group)
-    group = click_app.get_command(click.Context(click_app), resource)
-    assert isinstance(group, click.Group)
-    shell_cmd = group.get_command(click.Context(group), "shell")
-    assert shell_cmd is not None
+    group = click_app.commands[resource]  # type: ignore[attr-defined]
+    shell_cmd = group.commands["shell"]
     ctx = shell_cmd.make_context(f"{resource} shell", list(argv))
-    return ctx.params
+    params: dict[str, object] = ctx.params
+    return params
 
 
 def test_vm_shell_accepts_workspace_flag_in_either_position() -> None:
