@@ -46,7 +46,7 @@ green; reviewer-approved.
 
 Pure refactor; TOML remains the source; behavior unchanged.
 
-- [ ] **LLD**: `consumer-repoint-lld.md` inventorying every read of `config.secrets`,
+- [x] **LLD**: [consumer-repoint-lld.md](consumer-repoint-lld.md) inventorying every read of `config.secrets`,
       `config.vm_templates`, `config.agent_templates`, `config.workspace_templates`,
       `config.session_templates`, `config.git_credentials`, `config.admin`, `config.named_console`,
       and catalog-extension fields, with the registry query each moves to, plus the
