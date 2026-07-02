@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from agentworks.config import Config
+    from agentworks.resources.registry import Registry
 
 
 class Status(Enum):
@@ -102,14 +103,15 @@ def run_checks(*, completion_version: str | None = None) -> HealthReport:
     report.groups.append(_check_vm_platforms())
     report.groups.append(_check_tailscale())
 
-    config_group, config = _check_config()
+    config_group, config, registry = _check_config()
     report.groups.append(config_group)
 
-    if config is not None and config.git_credentials:
-        report.groups.append(_check_git_credentials(config))
+    if config is not None and registry is not None:
+        from agentworks.resources.access import kind_dict
 
-    if config is not None:
-        report.groups.append(_check_secrets(config))
+        if kind_dict(registry, "git-credential"):
+            report.groups.append(_check_git_credentials(config, registry))
+        report.groups.append(_check_secrets(config, registry))
 
     report.groups.append(_check_database())
 
@@ -214,8 +216,8 @@ def _check_tailscale() -> HealthGroup:
     return g
 
 
-def _check_config() -> tuple[HealthGroup, Config | None]:
-    """Returns (group, config_or_none)."""
+def _check_config() -> tuple[HealthGroup, Config | None, Registry | None]:
+    """Returns (group, config_or_none, registry_or_none)."""
     from agentworks.config import CONFIG_PATH, ConfigError
 
     g = HealthGroup("Configuration")
@@ -223,7 +225,7 @@ def _check_config() -> tuple[HealthGroup, Config | None]:
 
     if not CONFIG_PATH.exists():
         g.fail("Config file", f"not found: {CONFIG_PATH}. Run 'agw config init' to create one.")
-        return g, None
+        return g, None, None
 
     g.ok("Config file", str(CONFIG_PATH))
 
@@ -233,10 +235,10 @@ def _check_config() -> tuple[HealthGroup, Config | None]:
         config = load_config(warn_issues=False)
     except ConfigError as e:
         g.fail("Config", str(e), hint=e.hint)
-        return g, None
+        return g, None, None
     except SystemExit:
         g.fail("Config", "failed to load")
-        return g, None
+        return g, None, None
 
     for issue in config.config_issues:
         g.warn("Config", issue)
@@ -247,17 +249,31 @@ def _check_config() -> tuple[HealthGroup, Config | None]:
     _check_ssh_key(g, config.operator.ssh_public_key, "public")
     _check_ssh_key(g, config.operator.ssh_private_key, "private")
 
+    # Resource registry (framework validation: references, miss
+    # policies, cycles). A failure here is a config problem, reported
+    # like any other; the resource-dependent checks below are skipped.
+    from agentworks.bootstrap import build_registry
+
+    try:
+        registry = build_registry(config)
+    except ConfigError as e:
+        g.fail("Resource registry", str(e), hint=e.hint)
+        return g, config, None
+
     # Dotfiles
-    if config.admin.dotfiles_source:
+    from agentworks.resources.access import admin_template
+
+    admin = admin_template(registry)
+    if admin.dotfiles_source:
         from agentworks.sources import parse_source_ref
 
-        ref = parse_source_ref(config.admin.dotfiles_source)
+        ref = parse_source_ref(admin.dotfiles_source)
         if ref.kind == "git" or Path(ref.path).expanduser().exists():
-            g.ok("Admin dotfiles", config.admin.dotfiles_source)
+            g.ok("Admin dotfiles", admin.dotfiles_source)
         else:
-            g.warn("Admin dotfiles", f"source missing: {config.admin.dotfiles_source}")
+            g.warn("Admin dotfiles", f"source missing: {admin.dotfiles_source}")
 
-    return g, config
+    return g, config, registry
 
 
 def _check_ssh_key(g: HealthGroup, path: object, label: str) -> None:
@@ -283,22 +299,23 @@ def _check_ssh_key(g: HealthGroup, path: object, label: str) -> None:
             g.warn("SSH private key permissions", f"{oct(mode)}, recommend 600")
 
 
-def _check_git_credentials(config: Config) -> HealthGroup:
+def _check_git_credentials(config: Config, registry: Registry) -> HealthGroup:
     """Check git credential providers."""
+    from agentworks.resources.access import admin_template, kind_dict
     from agentworks.vms.initializer import resolve_git_credential_providers
 
     g = HealthGroup("Git credentials")
 
     # Collect all credential names from admin and agent templates
-    all_cred_names: list[str] = list(config.admin.git_credentials)
-    for tmpl in config.agent_templates.values():
+    all_cred_names: list[str] = list(admin_template(registry).git_credentials)
+    for tmpl in kind_dict(registry, "agent-template").values():
         if tmpl.git_credentials is not None:
             for name in tmpl.git_credentials:
                 if name not in all_cred_names:
                     all_cred_names.append(name)
 
     try:
-        providers = resolve_git_credential_providers(config, all_cred_names)
+        providers = resolve_git_credential_providers(registry, all_cred_names)
     except Exception as e:
         g.warn("Git credentials", f"could not resolve providers: {e}")
         return g
@@ -322,7 +339,7 @@ def _check_git_credentials(config: Config) -> HealthGroup:
     return g
 
 
-def _check_secrets(config: Config) -> HealthGroup:
+def _check_secrets(config: Config, registry: Registry) -> HealthGroup:
     """Check declared secrets per env-and-secrets SDD FRD R6.
 
     Emits exactly one row per declared secret:
@@ -343,17 +360,27 @@ def _check_secrets(config: Config) -> HealthGroup:
     surface in ``agw secret describe``'s ``Referenced by:`` section.
     Doctor stays one row per secret so the summary line stays scannable.
     """
+    from agentworks.resources.access import kind_dict, secret_decls
+
     g = HealthGroup("Secrets")
 
-    if not config.secrets:
+    # Operator-declared rows only: doctor's Secrets group reports on
+    # what the operator wrote (matching the pre-registry behavior);
+    # auto-declared rows surface via `agw secret list` / `describe`.
+    secrets = {
+        name: decl
+        for name, decl in secret_decls(registry).items()
+        if getattr(decl.origin, "variant", None) == "operator-declared"
+    }
+    if not secrets:
         g.info("Declared secrets", "none")
         return g
 
-    declared_backend_kinds = set(config.secret_backends.keys())
+    declared_backend_kinds = set(kind_dict(registry, "secret-backend").keys())
     builtin_kinds = {"env-var", "prompt"}
     resolver = config.secret_resolver
 
-    for name, decl in sorted(config.secrets.items()):
+    for name, decl in sorted(secrets.items()):
         invalid_kinds = sorted(
             kind
             for kind in decl.backend_mappings

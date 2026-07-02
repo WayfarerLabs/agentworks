@@ -116,11 +116,11 @@ def _make_target(*, key_exists: bool = False) -> MagicMock:
     return target
 
 
-def _make_config(*, apt_packages: list[str] | None = None, apt: list[str] | None = None) -> MagicMock:
-    config = MagicMock()
-    config.vm.apt = apt or []
-    config.vm.apt_packages = apt_packages or []
-    return config
+def _make_vm_template(*, apt_packages: list[str] | None = None, apt: list[str] | None = None) -> MagicMock:
+    vm_template = MagicMock()
+    vm_template.apt = apt or []
+    vm_template.apt_packages = apt_packages or []
+    return vm_template
 
 
 # -- Apt source tests --
@@ -128,12 +128,12 @@ def _make_config(*, apt_packages: list[str] | None = None, apt: list[str] | None
 
 def test_configure_apt_sources_installs_key(tmp_path) -> None:
     target = _make_target(key_exists=False)
-    config = _make_config(apt_packages=["test-pkg"])
+    vm_template = _make_vm_template(apt_packages=["test-pkg"])
     catalog = _make_catalog()
     logger = MagicMock()
     logger.has_warnings = False
 
-    _configure_apt_sources(target, config, catalog, logger)
+    _configure_apt_sources(target, vm_template, catalog, logger)
 
     # Should have called curl to download the key (now via run with sudo=True)
     curl_calls = [c for c in target.run.call_args_list if "curl" in str(c)]
@@ -145,12 +145,12 @@ def test_configure_apt_sources_installs_key(tmp_path) -> None:
 
 def test_configure_apt_sources_skips_existing(tmp_path) -> None:
     target = _make_target(key_exists=True)
-    config = _make_config(apt_packages=["test-pkg"])
+    vm_template = _make_vm_template(apt_packages=["test-pkg"])
     catalog = _make_catalog()
     logger = MagicMock()
     logger.has_warnings = False
 
-    _configure_apt_sources(target, config, catalog, logger)
+    _configure_apt_sources(target, vm_template, catalog, logger)
 
     # Should not have run apt-get update (nothing new configured)
     update_calls = [c for c in target.run.call_args_list if "apt-get update" in str(c)]
@@ -159,11 +159,11 @@ def test_configure_apt_sources_skips_existing(tmp_path) -> None:
 
 def test_configure_apt_sources_no_packages() -> None:
     target = MagicMock()
-    config = _make_config(apt_packages=[])
+    vm_template = _make_vm_template(apt_packages=[])
     catalog = _make_catalog()
     logger = MagicMock()
 
-    _configure_apt_sources(target, config, catalog, logger)
+    _configure_apt_sources(target, vm_template, catalog, logger)
 
     # No calls at all
     target.run.assert_not_called()
@@ -171,12 +171,12 @@ def test_configure_apt_sources_no_packages() -> None:
 
 def test_configure_apt_sources_resolves_arch() -> None:
     target = _make_target(key_exists=False)
-    config = _make_config(apt_packages=["test-pkg"])
+    vm_template = _make_vm_template(apt_packages=["test-pkg"])
     catalog = _make_catalog()
     logger = MagicMock()
     logger.has_warnings = False
 
-    _configure_apt_sources(target, config, catalog, logger)
+    _configure_apt_sources(target, vm_template, catalog, logger)
 
     # The source line written should have arm64, not {arch}
     write_calls = [str(c) for c in target.run.call_args_list if "sources.list.d" in str(c)]
@@ -190,12 +190,12 @@ def test_configure_apt_sources_resolves_arch() -> None:
 def test_install_apt_packages_combines_sources() -> None:
     target = MagicMock()
     target.run.return_value = MagicMock(stdout="", stderr="", returncode=0, ok=True)
-    config = _make_config(apt=["vim", "curl"], apt_packages=["test-pkg"])
+    vm_template = _make_vm_template(apt=["vim", "curl"], apt_packages=["test-pkg"])
     catalog = _make_catalog()
     logger = MagicMock()
     logger.has_warnings = False
 
-    _install_apt_packages(target, config, catalog, logger)
+    _install_apt_packages(target, vm_template, catalog, logger)
 
     # Should have a single apt-get install with all packages
     install_calls = [str(c) for c in target.run.call_args_list if "apt-get install" in str(c)]
@@ -207,11 +207,11 @@ def test_install_apt_packages_combines_sources() -> None:
 
 def test_install_apt_packages_empty() -> None:
     target = MagicMock()
-    config = _make_config()
+    vm_template = _make_vm_template()
     catalog = _make_catalog()
     logger = MagicMock()
 
-    _install_apt_packages(target, config, catalog, logger)
+    _install_apt_packages(target, vm_template, catalog, logger)
 
     target.run.assert_not_called()
 

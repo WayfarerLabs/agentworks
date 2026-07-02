@@ -37,9 +37,11 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from agentworks.catalog import AptSourceEntry, SystemInstallCommandEntry, UserInstallCommandEntry
-    from agentworks.config import Config
+    from agentworks.config import AdminConfig, Config
     from agentworks.db import Database
     from agentworks.git_credentials.base import GitCredentialProvider
+    from agentworks.resources.registry import Registry
+    from agentworks.vms.templates import ResolvedVMTemplate
 
 
 AGENTWORKS_PROFILE = ".agentworks-profile.sh"
@@ -822,7 +824,7 @@ def _preserve_ssh_host_keys(
 
 def _configure_apt_sources(
     target: Transport,
-    config: Config,
+    vm_template: ResolvedVMTemplate,
     catalog: object,
     logger: SSHLogger,
 ) -> None:
@@ -833,7 +835,7 @@ def _configure_apt_sources(
 
     # Collect all apt sources needed by selected apt_packages
     required_sources: dict[str, AptSourceEntry] = {}
-    for pkg_name in config.vm.apt_packages:
+    for pkg_name in vm_template.apt_packages:
         pkg = catalog.apt_packages.get(pkg_name)
         if pkg is None:
             continue
@@ -971,7 +973,7 @@ def _install_system_packages(
 
 def _install_apt_packages(
     target: Transport,
-    config: Config,
+    vm_template: ResolvedVMTemplate,
     catalog: object,
     logger: SSHLogger,
 ) -> None:
@@ -981,8 +983,8 @@ def _install_apt_packages(
     assert isinstance(catalog, ResolvedCatalog)
 
     # Collect all apt packages: direct list + catalog entries
-    all_apt: list[str] = list(config.vm.apt)
-    for pkg_name in config.vm.apt_packages:
+    all_apt: list[str] = list(vm_template.apt)
+    for pkg_name in vm_template.apt_packages:
         pkg = catalog.apt_packages.get(pkg_name)
         if pkg is not None:
             all_apt.extend(pkg.apt)
@@ -1112,10 +1114,10 @@ def verify_tailscale_available() -> None:
 
 
 def resolve_git_credential_providers(
-    config: Config,
+    registry: Registry,
     names: list[str],
 ) -> dict[str, GitCredentialProvider]:
-    """Resolve git credential provider instances from config.
+    """Resolve git credential provider instances from the registry.
 
     Names are the credential names to resolve (from admin.config.git_credentials
     or agent.config.git_credentials).
@@ -1126,8 +1128,10 @@ def resolve_git_credential_providers(
     providers: dict[str, GitCredentialProvider] = {}
     if not names:
         return providers
+    from agentworks.resources.access import git_credential
+
     for name in names:
-        cred_config = config.git_credentials.get(name)
+        cred_config = git_credential(registry, name)
         if cred_config is None:
             raise NotFoundError(
                 f"git credential '{name}' not found in config",
@@ -1230,6 +1234,8 @@ def _join_tailscale(
 def initialize_vm(
     db: Database,
     config: Config,
+    vm_template: ResolvedVMTemplate,
+    admin: AdminConfig,
     vm_name: str,
     exec_target: Transport,
     providers: dict[str, GitCredentialProvider],
@@ -1279,6 +1285,7 @@ def initialize_vm(
             ts_target = _phase_a_bootstrap(
                 db,
                 config,
+                vm_template,
                 vm_name,
                 exec_target,
                 home,
@@ -1320,6 +1327,8 @@ def initialize_vm(
         run_initialization(
             db,
             config,
+            vm_template,
+            admin,
             vm_name,
             ts_target,
             providers,
@@ -1334,6 +1343,8 @@ def initialize_vm(
 def run_initialization(
     db: Database,
     config: Config,
+    vm_template: ResolvedVMTemplate,
+    admin: AdminConfig,
     vm_name: str,
     ts_target: Transport,
     providers: dict[str, GitCredentialProvider],
@@ -1359,6 +1370,8 @@ def run_initialization(
         _phase_b_setup(
             db,
             config,
+            vm_template,
+            admin,
             vm_name,
             ts_target,
             providers,
@@ -1387,6 +1400,7 @@ def run_initialization(
 def _phase_a_bootstrap(
     db: Database,
     config: Config,
+    vm_template: ResolvedVMTemplate,
     vm_name: str,
     exec_target: Transport,
     home: str,
@@ -1423,6 +1437,7 @@ def _phase_a_bootstrap(
         tailscale_ip = _run_bootstrap_script(
             db,
             config,
+            vm_template,
             vm_name,
             exec_target,
             admin_username,
@@ -1473,6 +1488,7 @@ def _phase_a_bootstrap(
 def _run_bootstrap_script(
     db: Database,
     config: Config,
+    vm_template: ResolvedVMTemplate,
     vm_name: str,
     exec_target: Transport,
     admin_username: str,
@@ -1503,7 +1519,7 @@ def _run_bootstrap_script(
         hostname=vm_hostname(platform, vm_name),
         # WSL2 provisioner handles swap natively before bootstrap; every other
         # platform lets the script create the swapfile.
-        swap=0 if platform == "wsl2" else config.vm.swap,
+        swap=0 if platform == "wsl2" else vm_template.swap,
     )
 
     # Copy script to VM and execute synchronously over the provisioning transport
@@ -1587,6 +1603,8 @@ def _run_bootstrap_script(
 def _phase_b_setup(
     db: Database,
     config: Config,
+    vm_template: ResolvedVMTemplate,
+    admin: AdminConfig,
     vm_name: str,
     ts_target: Transport,
     providers: dict[str, GitCredentialProvider],
@@ -1679,10 +1697,10 @@ def _phase_b_setup(
     _install_system_packages(ts_target, logger)
 
     # Non-fatal: apt sources required by selected apt_packages
-    _configure_apt_sources(ts_target, config, catalog, logger)
+    _configure_apt_sources(ts_target, vm_template, catalog, logger)
 
     # Non-fatal: apt packages (direct list + catalog entries)
-    _install_apt_packages(ts_target, config, catalog, logger)
+    _install_apt_packages(ts_target, vm_template, catalog, logger)
 
     # Identity profile fragments. Runs AFTER apt install because apt uses
     # `--force-confnew`, which would replace the agentworks block in
@@ -1703,10 +1721,10 @@ def _phase_b_setup(
     _write_skel_seeds(ts_target, logger)
 
     # Non-fatal: snap packages
-    if config.vm.snap:
+    if vm_template.snap:
         logger.step("Snap packages")
-        output.detail(f"Installing {len(config.vm.snap)} snap packages...")
-        for pkg in config.vm.snap:
+        output.detail(f"Installing {len(vm_template.snap)} snap packages...")
+        for pkg in vm_template.snap:
             try:
                 ts_target.run(f"snap install {shlex.quote(pkg)}", sudo=True, timeout=120)
             except SSHError as e:
@@ -1718,7 +1736,7 @@ def _phase_b_setup(
     # write to the correct rc file). The zsh ``zsh-newuser-install``
     # first-run wizard is pre-empted by the skel seed.
     logger.step("Shell configuration")
-    admin_shell = config.admin.shell
+    admin_shell = admin.shell
     output.detail(f"Setting shell to {admin_shell}...")
     try:
         ts_target.run(
@@ -1793,7 +1811,7 @@ def _phase_b_setup(
     # Non-fatal: system install commands
     system_path = _run_catalog_commands(
         ts_target,
-        config.vm.system_install_commands,
+        vm_template.system_install_commands,
         catalog.system_install_commands,
         admin_shell,
         home,
@@ -1803,12 +1821,12 @@ def _phase_b_setup(
 
     # Non-fatal: mise config (written before dotfiles so dotfiles can override)
     mise_path: list[str] = _mise_shims_path(home)
-    if config.admin.mise_packages:
-        _write_mise_config(ts_target, config.admin.mise_packages, config.admin.mise_install_before, home, logger)
+    if admin.mise_packages:
+        _write_mise_config(ts_target, admin.mise_packages, admin.mise_install_before, home, logger)
 
     # Non-fatal: git safe.directory wildcard (disables ownership checks for the
     # multi-user workspace model where agents access repos owned by admin)
-    if config.admin.git_force_safe_directory:
+    if admin.git_force_safe_directory:
         try:
             ts_target.run("git config --global --add safe.directory '*'")
             output.detail("Git safe.directory wildcard configured")
@@ -1822,19 +1840,19 @@ def _phase_b_setup(
         _configure_git_credentials(vm_name, ts_target, providers, logger, git_tokens=git_tokens)
 
     # Non-fatal: dotfiles (can override mise config, can provide lockfile)
-    if config.admin.dotfiles_source:
+    if admin.dotfiles_source:
         logger.step("Dotfiles")
-        dest = config.admin.dotfiles_destination.replace("~", home)
+        dest = admin.dotfiles_destination.replace("~", home)
         try:
             from agentworks.sources import SourceRefError, fetch_dir, parse_source_ref
 
-            ref = parse_source_ref(config.admin.dotfiles_source)
-            output.detail(f"Syncing dotfiles from {config.admin.dotfiles_source}...")
+            ref = parse_source_ref(admin.dotfiles_source)
+            output.detail(f"Syncing dotfiles from {admin.dotfiles_source}...")
             fetch_dir(ref, ts_target, dest, logger=logger)
 
-            output.detail(f"Running dotfiles install: {config.admin.dotfiles_install_cmd}")
+            output.detail(f"Running dotfiles install: {admin.dotfiles_install_cmd}")
             ts_target.run(
-                f"cd {dest} && {config.admin.dotfiles_install_cmd}",
+                f"cd {dest} && {admin.dotfiles_install_cmd}",
                 timeout=120,
             )
         except (SourceRefError, Exception) as e:
@@ -1843,14 +1861,14 @@ def _phase_b_setup(
             output.warn(msg)
 
     # Non-fatal: mise lockfile (after git creds and dotfiles; overrides dotfiles lockfile)
-    if config.admin.mise_lockfile:
-        _fetch_mise_lockfile(ts_target, config.admin.mise_lockfile, home, logger)
+    if admin.mise_lockfile:
+        _fetch_mise_lockfile(ts_target, admin.mise_lockfile, home, logger)
 
     # Non-fatal: mise install (after config + dotfiles + lockfile are all settled)
-    prune = config.admin.mise_prune_on_reinit
-    if config.admin.mise_packages or config.admin.mise_lockfile:
+    prune = admin.mise_prune_on_reinit
+    if admin.mise_packages or admin.mise_lockfile:
         _run_mise_install(
-            ts_target, admin_shell, home, config.admin.mise_allow_unlocked, logger,
+            ts_target, admin_shell, home, admin.mise_allow_unlocked, logger,
             prune=prune,
         )
     else:
@@ -1858,7 +1876,7 @@ def _phase_b_setup(
             check = ts_target.run(f"test -f {home}/.config/mise/config.toml", check=False)
             if check.ok:
                 _run_mise_install(
-                    ts_target, admin_shell, home, config.admin.mise_allow_unlocked, logger,
+                    ts_target, admin_shell, home, admin.mise_allow_unlocked, logger,
                     prune=prune,
                 )
         except SSHError:
@@ -1867,7 +1885,7 @@ def _phase_b_setup(
     # Non-fatal: user install commands for admin user (may depend on mise tools)
     user_path = _run_catalog_commands(
         ts_target,
-        config.admin.user_install_commands,
+        admin.user_install_commands,
         catalog.user_install_commands,
         admin_shell,
         home,
@@ -1880,7 +1898,7 @@ def _phase_b_setup(
     _write_agentworks_profile(ts_target, all_paths, logger)
 
     # Non-fatal: shell rc (interactive shell hooks like mise activate)
-    rc_snippets = [MISE_ACTIVATE_LINES] if config.admin.mise_activate else ["# mise activation disabled"]
+    rc_snippets = [MISE_ACTIVATE_LINES] if admin.mise_activate else ["# mise activation disabled"]
     _write_agentworks_rc(ts_target, rc_snippets, logger)
 
     # Non-fatal: Claude Code marketplaces and plugins for admin user
@@ -1888,7 +1906,7 @@ def _phase_b_setup(
         inner = shlex.quote(cmd)
         return ts_target.run(f"{admin_shell} -lc {inner}", timeout=timeout)
 
-    install_claude_plugins(_admin_run_cmd, config.admin.claude_marketplaces, config.admin.claude_plugins, logger)
+    install_claude_plugins(_admin_run_cmd, admin.claude_marketplaces, admin.claude_plugins, logger)
 
     # Defensive final step: re-ensure source lines in case any earlier
     # step (dotfiles install in particular) overwrote a shell rc file

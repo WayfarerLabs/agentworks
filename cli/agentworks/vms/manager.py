@@ -221,7 +221,6 @@ def create_vm(
     admin_username: str | None = None,
 ) -> None:
     """Create a new VM: provision + initialize."""
-    from dataclasses import replace as _replace
 
     from agentworks.bootstrap import build_registry
     from agentworks.vms.templates import resolve_template
@@ -232,11 +231,6 @@ def create_vm(
     registry = build_registry(config)
 
     vm_tmpl = resolve_template(registry, template)
-
-    # Replace config.vm with the resolved template so downstream code
-    # (initializer, provisioners) uses the right template values.
-    if template is not None:
-        config = _replace(config, vm=vm_tmpl)
 
     # Resolve defaults
     platform = platform or config.defaults.platform or "lima"
@@ -281,11 +275,14 @@ def create_vm(
     resolved_memory = memory if memory is not None else vm_tmpl.memory
     resolved_disk = disk if disk is not None else vm_tmpl.disk
     resolved_azure_size = azure_vm_size or vm_tmpl.azure_vm_size
-    resolved_admin_username = admin_username or config.admin.username
+    from agentworks.resources.access import admin_template
+
+    admin = admin_template(registry)
+    resolved_admin_username = admin_username or admin.username
     validate_admin_username(resolved_admin_username)
 
     verify_tailscale_available()
-    providers = resolve_git_credential_providers(config, config.admin.git_credentials)
+    providers = resolve_git_credential_providers(registry, admin.git_credentials)
     verify_git_credential_auth(providers)
 
     # Collect provisioning-time secrets upfront (tailscale auth, git creds).
@@ -409,6 +406,8 @@ def create_vm(
         initialize_vm(
             db,
             config,
+            vm_tmpl,
+            admin,
             vm_name,
             exec_target=result.provisioner_transport,
             providers=providers,
@@ -804,7 +803,9 @@ def add_git_credential(db: Database, config: Config, name: str, credential_name:
             hint="VM init may not be complete. Check 'vm describe' for status.",
         )
 
-    cred_config = config.git_credentials.get(credential_name)
+    from agentworks.resources.access import git_credential
+
+    cred_config = git_credential(registry, credential_name)
     if cred_config is None:
         raise NotFoundError(
             f"git credential '{credential_name}' not found in config",
@@ -812,7 +813,7 @@ def add_git_credential(db: Database, config: Config, name: str, credential_name:
             entity_name=credential_name,
         )
 
-    providers = resolve_git_credential_providers(config, [credential_name])
+    providers = resolve_git_credential_providers(registry, [credential_name])
     provider = providers[credential_name]
 
     # Phase 1d: resolve the token via the framework (the resolver chain
@@ -1127,12 +1128,10 @@ def reinit_vm(
     vm = _require_vm(db, name)
 
     # Resolve the VM's template so init uses the right values
-    if vm.template and vm.template != "default":
-        from dataclasses import replace as _replace
+    from agentworks.resources.access import admin_template
+    from agentworks.vms.templates import resolve_template
 
-        from agentworks.vms.templates import resolve_template
-
-        config = _replace(config, vm=resolve_template(registry, vm.template))
+    reinit_vm_tmpl = resolve_template(registry, vm.template)
 
     if vm.provisioning_status != ProvisioningStatus.COMPLETE.value:
         raise StateError(
@@ -1150,7 +1149,7 @@ def reinit_vm(
         )
 
     verify_tailscale_available()
-    providers = resolve_git_credential_providers(config, config.admin.git_credentials)
+    providers = resolve_git_credential_providers(registry, admin_template(registry).git_credentials)
     verify_git_credential_auth(providers)
 
     # Collect git tokens via the framework (Phase 1d).
@@ -1179,6 +1178,8 @@ def reinit_vm(
                 run_initialization(
                     db,
                     config,
+                    reinit_vm_tmpl,
+                    admin_template(registry),
                     name,
                     ts_target,
                     providers,

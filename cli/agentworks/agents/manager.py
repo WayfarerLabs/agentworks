@@ -225,7 +225,6 @@ def create_agent(
     grant_all_workspaces: bool = False,
 ) -> None:
     """Create an agent on a VM."""
-    from dataclasses import replace as _replace
 
     from agentworks.agents.templates import resolve_template
     from agentworks.bootstrap import build_registry
@@ -238,9 +237,6 @@ def create_agent(
     registry = build_registry(config)
 
     agent_tmpl = resolve_template(registry, template)
-
-    if template is not None:
-        config = _replace(config, agent=agent_tmpl)
 
     validate_name(name)
 
@@ -258,7 +254,7 @@ def create_agent(
     # the env-block system). Operator env secrets are NOT prompted at
     # agent create -- provisioning is hermetic. They get prompted at
     # the use site (agent shell, session create, etc.).
-    git_tokens = _collect_agent_credentials(config, registry)
+    git_tokens = _collect_agent_credentials(config, registry, agent_tmpl)
 
     from agentworks.ssh import SSHLogger
     ssh_logger = SSHLogger(vm.name, "agent-create")
@@ -285,7 +281,7 @@ def create_agent(
         try:
             try:
                 _create_agent_on_vm(
-                    vm, config, linux_user,
+                    vm, config, registry, agent_tmpl, linux_user,
                     agent_name=name,
                     git_tokens=git_tokens,
                     logger=ssh_logger,
@@ -449,7 +445,6 @@ def reinit_agent(
     name: str,
 ) -> None:
     """Re-run agent setup using the stored template."""
-    from dataclasses import replace as _replace
 
     from agentworks.agents.templates import resolve_template
     from agentworks.bootstrap import build_registry
@@ -467,13 +462,11 @@ def reinit_agent(
         )
 
     agent_tmpl = resolve_template(registry, agent.template)
-    if agent.template and agent.template != "default":
-        config = _replace(config, agent=agent_tmpl)
 
     vm = _require_vm(db, agent.vm_name)
 
     # Collect credentials up front before any SSH work.
-    git_tokens = _collect_agent_credentials(config, registry)
+    git_tokens = _collect_agent_credentials(config, registry, agent_tmpl)
 
     # Provisioning is hermetic: no operator-env secrets are prompted at
     # agent reinit. They get prompted at the use site (agent shell,
@@ -485,7 +478,7 @@ def reinit_agent(
         try:
             try:
                 _create_agent_on_vm(
-                    vm, config, agent.linux_user,
+                    vm, config, registry, agent_tmpl, agent.linux_user,
                     agent_name=agent.name,
                     git_tokens=git_tokens,
                     logger=ssh_logger,
@@ -974,6 +967,7 @@ def _remove_from_workspace_group(
 def _collect_agent_credentials(
     config: Config,
     registry: Registry,
+    agent_tmpl: ResolvedAgentTemplate,
 ) -> dict[str, str]:
     """Collect git credentials up front before any SSH work begins.
 
@@ -984,7 +978,7 @@ def _collect_agent_credentials(
     resolution path is gone. The registry is built upstream so its
     finalize-pass typo errors fire before any other precondition.
     """
-    agent_cfg = config.agent
+    agent_cfg = agent_tmpl
     if not agent_cfg.git_credentials:
         return {}
 
@@ -996,6 +990,8 @@ def _collect_agent_credentials(
 def _create_agent_on_vm(
     vm: VMRow,
     config: Config,
+    registry: Registry,
+    agent_tmpl: ResolvedAgentTemplate,
     linux_user: str,
     *,
     agent_name: str,
@@ -1039,7 +1035,7 @@ def _create_agent_on_vm(
     output.detail(f"Creating user '{linux_user}' on VM '{vm.name}'...")
     home = f"/home/{linux_user}"
 
-    agent_cfg = config.agent
+    agent_cfg = agent_tmpl
     agent_shell = agent_cfg.shell
 
     # -- Phase 1: bootstrap (admin) ---------------------------------------
@@ -1141,7 +1137,7 @@ def _create_agent_on_vm(
         from agentworks.vms.initializer import resolve_git_credential_providers
 
         output.detail("Configuring git credentials for agent...")
-        providers = resolve_git_credential_providers(config, agent_cfg.git_credentials)
+        providers = resolve_git_credential_providers(registry, agent_cfg.git_credentials)
         missing = [
             cred_name for cred_name in providers
             if not git_tokens or cred_name not in git_tokens
@@ -1169,6 +1165,7 @@ def _create_agent_on_vm(
     _run_agent_install_commands(
         agent_target=agent_target,
         config=config,
+        agent_tmpl=agent_tmpl,
         home=home,
         identity_env=agent_identity,
     )
@@ -1252,7 +1249,9 @@ def _create_agent_on_vm(
             output.warn(f"agent dotfiles failed: {e}")
 
     # Mise.
-    _run_agent_mise_setup(agent_target=agent_target, config=config, home=home)
+    _run_agent_mise_setup(
+        agent_target=agent_target, config=config, agent_tmpl=agent_tmpl, home=home,
+    )
 
     # Claude Code marketplaces and plugins. The probe (`command -v
     # claude`) and the actual `claude plugin ...` invocations need the
@@ -1271,8 +1270,8 @@ def _create_agent_on_vm(
 
     install_claude_plugins(
         _agent_run_cmd,
-        config.agent.claude_marketplaces,
-        config.agent.claude_plugins,
+        agent_cfg.claude_marketplaces,
+        agent_cfg.claude_plugins,
     )
 
     # Defensive final step: re-ensure source lines in case dotfiles
@@ -1309,6 +1308,7 @@ def _run_agent_install_commands(
     *,
     agent_target: Transport,
     config: Config,
+    agent_tmpl: ResolvedAgentTemplate,
     home: str,
     identity_env: dict[str, str],
 ) -> None:
@@ -1336,9 +1336,9 @@ def _run_agent_install_commands(
     from agentworks.ssh import SSHError
 
     catalog = load_catalog(config)
-    shell = config.agent.shell
+    shell = agent_tmpl.shell
     path_additions: list[str] = []
-    command_names = config.agent.user_install_commands
+    command_names = agent_tmpl.user_install_commands
     total = len(command_names)
 
     for i, name in enumerate(command_names, 1):
@@ -1469,6 +1469,7 @@ def _run_agent_mise_setup(
     *,
     agent_target: Transport,
     config: Config,
+    agent_tmpl: ResolvedAgentTemplate,
     home: str,
 ) -> None:
     """Set up mise for an agent: shims PATH, config, lockfile, install.
@@ -1488,7 +1489,7 @@ def _run_agent_mise_setup(
 
     from agentworks.ssh import SSHError
 
-    agent_cfg = config.agent
+    agent_cfg = agent_tmpl
     agent_shell = agent_cfg.shell
     has_packages = bool(agent_cfg.mise_packages)
     has_lockfile = bool(agent_cfg.mise_lockfile)
