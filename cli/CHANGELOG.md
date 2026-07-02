@@ -1,5 +1,85 @@
 # Changelog
 
+## [0.10.0](https://github.com/WayfarerLabs/agentworks/compare/v0.9.0...v0.10.0) (2026-07-02)
+
+
+### Features
+
+* **agents:** announce 'Creating agent...' before VM-side work ([d6d959b](https://github.com/WayfarerLabs/agentworks/commit/d6d959b4fe425bb874a5df7ccba9158d2d133e05))
+* **cli:** add --admin filter to session stop and session restart ([098f1f8](https://github.com/WayfarerLabs/agentworks/commit/098f1f892d24529beca3b5c7aeb03a6554245c73))
+* **cli:** add --agent filter to session stop and session restart ([c2857e5](https://github.com/WayfarerLabs/agentworks/commit/c2857e54d59d50c40996495c11e6a6811364fb58))
+* **cli:** add --agent filter to session stop and session restart ([cc16b60](https://github.com/WayfarerLabs/agentworks/commit/cc16b60d9c8abc35a2d3ab5f016ddbf4e5475925))
+* **cli:** add --names-only to remaining list commands ([57b1d5b](https://github.com/WayfarerLabs/agentworks/commit/57b1d5ba38068fa00bf62cf6d3319abeb4fe8fe3))
+* **cli:** add --names-only to remaining list commands ([727673f](https://github.com/WayfarerLabs/agentworks/commit/727673f9c80b172f2122723773085c8cc3eb6918))
+* **cli:** retire agw catalog commands (superseded by agw resource) ([fefb228](https://github.com/WayfarerLabs/agentworks/commit/fefb2286e2f309b2e3203160ce64cf1190805129))
+* **resources:** bring apt_source into the Registry ([df23e7f](https://github.com/WayfarerLabs/agentworks/commit/df23e7f809c66cc267e51318a8092af5e8620bf5))
+* **resources:** Phase 1d -- git credential tokens via framework ([9f18679](https://github.com/WayfarerLabs/agentworks/commit/9f1867994d5e08b5e914dfa59603e1d2db5378d2))
+* **resources:** Phase 2a.0 -- framework foundations ([c461a1d](https://github.com/WayfarerLabs/agentworks/commit/c461a1d324dad86c22c5776b33235fe0ff111367))
+* **resources:** Phase 2a.1 -- VMTemplateKind + TemplateRequirement ([ccef456](https://github.com/WayfarerLabs/agentworks/commit/ccef456ecd83e4221d0fe3c6ddc02c79b973c0cb))
+* **resources:** Phase 2a.2 -- agent/workspace/session template kinds ([c369313](https://github.com/WayfarerLabs/agentworks/commit/c369313a3dcf0acb27251fe79af6fb4521e0cb73))
+* **resources:** Phase 2a.3 -- plurify AdminTemplateKind ([4a9e620](https://github.com/WayfarerLabs/agentworks/commit/4a9e6203162a2cce2e511b8665949278862ba64b))
+* **resources:** Phase 2b.0 -- catalog kinds + publisher ([f8a4d1e](https://github.com/WayfarerLabs/agentworks/commit/f8a4d1e134052a22ccc3cf2f4438d6caa09e581e))
+* **resources:** Phase 2b.1+2b.2 -- provider + backend kinds ([b5af3d7](https://github.com/WayfarerLabs/agentworks/commit/b5af3d7231addbae3e106d08ecb6622b672353e8))
+* **resources:** Phase 2c -- agw resource list/describe ([57c45bb](https://github.com/WayfarerLabs/agentworks/commit/57c45bbb98df1f4cf9a72fdff78aa2ff87fc0700))
+* **resources:** Phase 3b+3c -- per-kind instances() hook + Used by ([7bd329b](https://github.com/WayfarerLabs/agentworks/commit/7bd329b9c7acf1b9d786750f1f683742a43e20f0))
+* **resources:** resource registry framework, Phase 1 ([e87cef9](https://github.com/WayfarerLabs/agentworks/commit/e87cef9ba4da4351e04cc0aa3c05027dfceb8428))
+* **resources:** Resource Registry Phases 2 + 3 ([5f9bd2e](https://github.com/WayfarerLabs/agentworks/commit/5f9bd2e972f5dbd995ea35273927a095b1ceb50f))
+* **secret:** add --names-only flag, wire to shell completion ([c30f694](https://github.com/WayfarerLabs/agentworks/commit/c30f69432a1ebb130c1ec852ea662eab676468a8))
+* **secret:** Phase 1e -- agw secret describe ([e130f24](https://github.com/WayfarerLabs/agentworks/commit/e130f24038d936ff1f9446f283d0f06dffa83803))
+* **secrets:** list shows Description; describe shows structured Origin ([0fc978c](https://github.com/WayfarerLabs/agentworks/commit/0fc978cf630c6202a275dd89eb31bb7c8a3012e8))
+* **secrets:** Phase 3c -- Used by section on agw secret describe ([bf20323](https://github.com/WayfarerLabs/agentworks/commit/bf2032362baaf77e7752ebe255a27d151107a750))
+* **sessions:** announce rollback reason before delete-* messages ([a54a28c](https://github.com/WayfarerLabs/agentworks/commit/a54a28c0a543a76b1c6e6220a10cae6386cd23a2))
+* **sessions:** announce start/restart before destructive work ([698ae1c](https://github.com/WayfarerLabs/agentworks/commit/698ae1c6ace665a96653350ccf0bb23e573edb8e))
+* **sessions:** narrow workspace/mode prompts by known VM anchors ([e4ff554](https://github.com/WayfarerLabs/agentworks/commit/e4ff5545e5f9adb128a7ee1d2348392bf4147895))
+* **sessions:** prompt for VM when no anchor pins it ([180254d](https://github.com/WayfarerLabs/agentworks/commit/180254d34616cf6b65df21a7f9713dd1c22ae035))
+* **sessions:** prompt for workspace/mode with [Create new] option ([dac1761](https://github.com/WayfarerLabs/agentworks/commit/dac17611c5377c03e8dff80282b4ea64edf9f54e))
+* **sessions:** require explicit mode flag (admin / agent / new-agent) ([46e763d](https://github.com/WayfarerLabs/agentworks/commit/46e763d6682c06c0eea93523174a51b72a83675f))
+* **vms:** polish skel prompts with AGW prefix and mode color ([7e3a599](https://github.com/WayfarerLabs/agentworks/commit/7e3a599017fb4fff4df2fb6c5b87cd4393c7887d))
+* **vms:** seed /etc/skel + admin home with bash/zsh defaults ([4bf9ca5](https://github.com/WayfarerLabs/agentworks/commit/4bf9ca5770f292579290fc5001060f6fac3b2885))
+* **vms:** two-line prompt with AGW banner above Debian-stock prompt ([7bcd288](https://github.com/WayfarerLabs/agentworks/commit/7bcd28873d30910de2c22c6480e51e0b23634990))
+
+
+### Bug Fixes
+
+* **cli:** allow --vm alongside existing --workspace ([2c82914](https://github.com/WayfarerLabs/agentworks/commit/2c82914e86e247ef888c7b444198b116060199f8))
+* **completions:** source template completers from Resource Registry ([bd10adf](https://github.com/WayfarerLabs/agentworks/commit/bd10adf552ae3d488dd6542e5303d07f148a4bdb))
+* **deps:** declare click as a direct dependency ([0a0ed72](https://github.com/WayfarerLabs/agentworks/commit/0a0ed72e9255be243539445ef44233df5f9a2e95))
+* **deps:** declare click as a direct dependency ([352c20b](https://github.com/WayfarerLabs/agentworks/commit/352c20b03e4107d6680ddb0b519c0c38523cb631))
+* **resources:** apt_source reviewer minors ([e15af17](https://github.com/WayfarerLabs/agentworks/commit/e15af174832d9846e7e1d159cc47e6132dc2a4bd))
+* **resources:** close last two vms/ prose stragglers from Phase 3a ([472c75a](https://github.com/WayfarerLabs/agentworks/commit/472c75a2bd613eceb66b2c2be7ba9cf962bf39f8))
+* **resources:** Phase 1d reviewer fixes ([3415d03](https://github.com/WayfarerLabs/agentworks/commit/3415d03dd76d39d9c6018662185285bee48c009a))
+* **resources:** Phase 2a.0 reviewer findings ([ef03f39](https://github.com/WayfarerLabs/agentworks/commit/ef03f393a585b57122606d5c9f91156e592300cd))
+* **resources:** Phase 2a.1 reviewer findings ([4ff7cec](https://github.com/WayfarerLabs/agentworks/commit/4ff7cecae9f6f5305ef29bfc76c2d3fd71283811))
+* **resources:** Phase 2a.2 reviewer minors ([640e895](https://github.com/WayfarerLabs/agentworks/commit/640e8955a011ff9c001b966e866786670678642a))
+* **resources:** Phase 2a.3 reviewer minors ([c6073b4](https://github.com/WayfarerLabs/agentworks/commit/c6073b4fed4b9ad4fe355ea972cdd52d5da5e508))
+* **resources:** Phase 2b reviewer findings ([1f4a571](https://github.com/WayfarerLabs/agentworks/commit/1f4a571c827964d1e1de26ab6dbf014a25d5b6ba))
+* **resources:** Phase 2c reviewer findings ([ccff7d0](https://github.com/WayfarerLabs/agentworks/commit/ccff7d010a57c45f4c5c45c67c6bd083e7b7b6ca))
+* **resources:** Phase 2c round-2 reviewer minors ([5db6527](https://github.com/WayfarerLabs/agentworks/commit/5db652745d723dd3d369d9ac7a172ca051c9f794))
+* **resources:** Phase 3a reviewer findings ([33e5ccf](https://github.com/WayfarerLabs/agentworks/commit/33e5ccf6571cb61abdaca4d9cb2c3b51c8550905))
+* **resources:** Phase 3a round-2 reviewer minors ([3aec6c0](https://github.com/WayfarerLabs/agentworks/commit/3aec6c00ee7be977e5b7a0cd1621ea557a74c6fd))
+* **resources:** Phase 3b+3c reviewer findings ([a67665c](https://github.com/WayfarerLabs/agentworks/commit/a67665c1d7640ca256401f0dd664aacae9d62868))
+* **secret:** Phase 1e reviewer fixes ([2f61d44](https://github.com/WayfarerLabs/agentworks/commit/2f61d4467760c1a56e8a209542796ff625e40c36))
+* **secrets:** describe preview reflects runtime, log resolutions ([3bed182](https://github.com/WayfarerLabs/agentworks/commit/3bed1823972ffb2c79eb4ad42030f631aa09f211))
+* **secrets:** Phase 3c reviewer minors ([29d9f99](https://github.com/WayfarerLabs/agentworks/commit/29d9f99cbf84877bcab2665c71c76aa863469823))
+* **sessions:** apply reviewer feedback on PR [#146](https://github.com/WayfarerLabs/agentworks/issues/146) ([3e81cce](https://github.com/WayfarerLabs/agentworks/commit/3e81cce91ced5e7455136e1cbc3c299dd4892751))
+* **sessions:** atomic create with ephemeral workspace/agent ([0951bed](https://github.com/WayfarerLabs/agentworks/commit/0951beda1af1a8be4333523b2ed2ad17a657c16e))
+* **sessions:** atomic create with ephemeral workspace/agent ([d86e40f](https://github.com/WayfarerLabs/agentworks/commit/d86e40f956ea983d27f5355d8df3b11acc29cf45))
+* **sessions:** drop bogus agent_name/new_agent mutex check ([94c6460](https://github.com/WayfarerLabs/agentworks/commit/94c6460c5bf8adaff1c2538cb4535d8f764973dd))
+* **sessions:** honor explicit admin=True in mode-prompt gate ([a3a8e09](https://github.com/WayfarerLabs/agentworks/commit/a3a8e09a51dcd164c6451554f95858b7b431fe3d))
+* **sessions:** make [Create new agent] prompt path actually work ([e2e1444](https://github.com/WayfarerLabs/agentworks/commit/e2e144496019ff991048ca1f6d9f9a292db201ed))
+* **vms:** write skel seeds after apt to avoid conffile clobber ([64a3ce1](https://github.com/WayfarerLabs/agentworks/commit/64a3ce16d64268ab107ed88497575225c606e975))
+
+
+### Documentation
+
+* **completions:** explain the per-kind vs kinds sort-u asymmetry ([ceeedb9](https://github.com/WayfarerLabs/agentworks/commit/ceeedb9b14d3a87df0bf5aca9cf090354c52a73d))
+* replace stale legacy env-var docs with framework convention ([ad7ee09](https://github.com/WayfarerLabs/agentworks/commit/ad7ee09ac0bbc0507d87d36c8d3c7bcdf6cc0dfd))
+* **resources:** align agw resource list with --names-only convention ([c26583a](https://github.com/WayfarerLabs/agentworks/commit/c26583a26434f7a8c1e6dff082fdb472feef8a00))
+* **resources:** align secret.instances() docstring with projection ([652e500](https://github.com/WayfarerLabs/agentworks/commit/652e500c616a6c5db747d6a3a528c033bc1a54b7))
+* **sdd:** generalize auto-declared description polish to all kinds ([f925679](https://github.com/WayfarerLabs/agentworks/commit/f925679d984aa76da939b67cc53f9144ed198fc5))
+* update _load_secret_backends docstring for Phase 2b.2 ([d82ef21](https://github.com/WayfarerLabs/agentworks/commit/d82ef2169be262916508cd0c5d51610434ca4317))
+* **vms:** refine skel docstrings and harden ordering test ([1a55c44](https://github.com/WayfarerLabs/agentworks/commit/1a55c44ebbe834a4dc2ed3ec624607a0f53d4d3f))
+
 ## [0.9.0](https://github.com/WayfarerLabs/agentworks/compare/v0.8.0...v0.9.0) (2026-06-26)
 
 
