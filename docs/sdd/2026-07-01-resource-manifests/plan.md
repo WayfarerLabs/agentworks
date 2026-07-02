@@ -46,16 +46,16 @@ green; reviewer-approved.
 
 Pure refactor; TOML remains the source; behavior unchanged.
 
-- [x] **LLD**: [consumer-repoint-lld.md](consumer-repoint-lld.md) inventorying every read of `config.secrets`,
-      `config.vm_templates`, `config.agent_templates`, `config.workspace_templates`,
-      `config.session_templates`, `config.git_credentials`, `config.admin`, `config.named_console`,
-      and catalog-extension fields, with the registry query each moves to, plus the
-      eager-template-resolution relocation out of `load_config`.
-- [ ] Repoint manager/CLI/service call sites to registry lookups per the LLD.
-- [ ] Relocate eager template resolution from `load_config` to the `build_registry` call path,
+- [x] **LLD**: [consumer-repoint-lld.md](consumer-repoint-lld.md) inventorying every read of
+      `config.secrets`, `config.vm_templates`, `config.agent_templates`,
+      `config.workspace_templates`, `config.session_templates`, `config.git_credentials`,
+      `config.admin`, `config.named_console`, and catalog-extension fields, with the registry query
+      each moves to, plus the eager-template-resolution relocation out of `load_config`.
+- [x] Repoint manager/CLI/service call sites to registry lookups per the LLD.
+- [x] Relocate eager template resolution from `load_config` to the `build_registry` call path,
       preserving the cycle-guard behavior in the template resolvers.
-- [ ] `Config` resource fields become internal to the publish path (no external readers).
-- [ ] **Tests**: existing suites pass unchanged (that is the point); add a guard test that `Config`
+- [x] `Config` resource fields become internal to the publish path (no external readers).
+- [x] **Tests**: existing suites pass unchanged (that is the point); add a guard test that `Config`
       resource attributes have no readers outside `config.py`'s publish path (import- or grep-level
       check, same spirit as the naming-consistency prose scan).
 

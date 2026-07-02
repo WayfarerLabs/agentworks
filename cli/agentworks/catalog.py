@@ -276,11 +276,31 @@ def _parse_catalog(data: dict[str, object]) -> ResolvedCatalog:
     )
 
 
+def catalog_from_registry(registry: Registry) -> ResolvedCatalog:
+    """Build the merged catalog view from the finalized registry.
+
+    Built-in and operator-declared entries are both registry rows (the
+    operator-over-built-in override happens at publish), so this is a
+    plain read. Consumers use this; ``load_catalog`` remains only as
+    the parse-and-merge reference used by the catalog parsing tests.
+    """
+    from agentworks.resources.access import kind_dict
+
+    return ResolvedCatalog(
+        apt_sources=kind_dict(registry, "apt-source"),
+        apt_packages=kind_dict(registry, "apt-package"),
+        system_install_commands=kind_dict(registry, "system-install-command"),
+        user_install_commands=kind_dict(registry, "user-install-command"),
+    )
+
+
 def load_catalog(config: Config) -> ResolvedCatalog:
     """Load and merge built-in + custom catalog entries.
 
     Custom entries override built-in entries with the same name.
     Cross-references (apt_sources in apt_packages) are validated.
+    Production consumers read ``catalog_from_registry`` instead; this
+    parse-level merge survives for the catalog parsing tests.
     """
     builtin = load_builtin_catalog()
 

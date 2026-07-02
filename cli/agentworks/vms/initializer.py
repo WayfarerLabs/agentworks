@@ -1119,8 +1119,8 @@ def resolve_git_credential_providers(
 ) -> dict[str, GitCredentialProvider]:
     """Resolve git credential provider instances from the registry.
 
-    Names are the credential names to resolve (from admin.config.git_credentials
-    or agent.config.git_credentials).
+    Names are the credential names to resolve (from the admin row's or
+    an agent template's ``git_credentials`` list).
     """
     from agentworks.git_credentials.azdo import AzDOCredentialProvider
     from agentworks.git_credentials.github import GitHubCredentialProvider
@@ -1234,6 +1234,7 @@ def _join_tailscale(
 def initialize_vm(
     db: Database,
     config: Config,
+    registry: Registry,
     vm_template: ResolvedVMTemplate,
     admin: AdminConfig,
     vm_name: str,
@@ -1327,6 +1328,7 @@ def initialize_vm(
         run_initialization(
             db,
             config,
+            registry,
             vm_template,
             admin,
             vm_name,
@@ -1343,6 +1345,7 @@ def initialize_vm(
 def run_initialization(
     db: Database,
     config: Config,
+    registry: Registry,
     vm_template: ResolvedVMTemplate,
     admin: AdminConfig,
     vm_name: str,
@@ -1370,6 +1373,7 @@ def run_initialization(
         _phase_b_setup(
             db,
             config,
+            registry,
             vm_template,
             admin,
             vm_name,
@@ -1603,6 +1607,7 @@ def _run_bootstrap_script(
 def _phase_b_setup(
     db: Database,
     config: Config,
+    registry: Registry,
     vm_template: ResolvedVMTemplate,
     admin: AdminConfig,
     vm_name: str,
@@ -1620,14 +1625,14 @@ def _phase_b_setup(
     ``git_tokens`` is required (Phase 1d): every provider listed in
     ``providers`` must have a pre-resolved token value in the dict.
     """
-    from agentworks.catalog import load_catalog
+    from agentworks.catalog import catalog_from_registry
 
     output.info("Initializing VM...")
     db.update_vm_init_status(vm_name, InitStatus.IN_PROGRESS)
     # Phase 2b: catalog reference validation moved to the framework
     # (catalog kinds' error miss policy fires at build_registry time,
     # which the manager-entry hoist runs before reaching this point).
-    catalog = load_catalog(config)
+    catalog = catalog_from_registry(registry)
 
     # Non-fatal: ensure cloud-init won't regenerate SSH host keys on reboot.
     # Runs first so VMs predating the Phase A step are repaired on reinit

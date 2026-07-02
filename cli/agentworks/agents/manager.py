@@ -1166,7 +1166,7 @@ def _create_agent_on_vm(
     # User install commands + login-shell PATH profile fragment.
     _run_agent_install_commands(
         agent_target=agent_target,
-        config=config,
+        registry=registry,
         agent_tmpl=agent_tmpl,
         home=home,
         identity_env=agent_identity,
@@ -1309,7 +1309,7 @@ def _delete_agent_on_vm(
 def _run_agent_install_commands(
     *,
     agent_target: Transport,
-    config: Config,
+    registry: Registry,
     agent_tmpl: ResolvedAgentTemplate,
     home: str,
     identity_env: dict[str, str],
@@ -1334,10 +1334,10 @@ def _run_agent_install_commands(
     """
     import shlex
 
-    from agentworks.catalog import load_catalog
+    from agentworks.catalog import catalog_from_registry
     from agentworks.ssh import SSHError
 
-    catalog = load_catalog(config)
+    catalog = catalog_from_registry(registry)
     shell = agent_tmpl.shell
     path_additions: list[str] = []
     command_names = agent_tmpl.user_install_commands

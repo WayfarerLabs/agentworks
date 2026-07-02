@@ -410,6 +410,7 @@ def create_vm(
         initialize_vm(
             db,
             config,
+            registry,
             vm_tmpl,
             admin,
             vm_name,
@@ -1182,6 +1183,7 @@ def reinit_vm(
                 run_initialization(
                     db,
                     config,
+                    registry,
                     reinit_vm_tmpl,
                     admin_template(registry),
                     name,
