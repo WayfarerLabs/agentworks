@@ -27,7 +27,6 @@ from agentworks.source_location import SourceLocation, scan_section_lines, synth
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from agentworks.agents.templates import ResolvedAgentTemplate
     from agentworks.resources.origin import Origin
     from agentworks.resources.reference import (
         ReferenceEntry,
@@ -36,7 +35,6 @@ if TYPE_CHECKING:
     )
     from agentworks.resources.registry import Registry
     from agentworks.secrets import SecretResolver, SecretSource
-    from agentworks.vms.templates import ResolvedVMTemplate
 
 CONFIG_DIR = Path.home() / ".config" / "agentworks"
 CONFIG_PATH = CONFIG_DIR / "config.toml"
@@ -595,10 +593,8 @@ class Config:
     defaults: DefaultsConfig
     named_console: NamedConsoleConfig
     vm_templates: dict[str, VMTemplate]
-    vm: ResolvedVMTemplate
     admin: AdminConfig
     agent_templates: dict[str, AgentTemplate]
-    agent: ResolvedAgentTemplate
     session: SessionConfig
     session_templates: dict[str, SessionTemplate]
     workspace_templates: dict[str, WorkspaceTemplate]
@@ -1191,9 +1187,8 @@ def _load_agent_templates(
     # Phase 2a.2: inherits-reference validation and cycle detection move
     # to the framework (AgentTemplateKind's miss policy +
     # Registry.finalize's cycle pass). The agents/templates.py resolver
-    # also has its own visited-set guard for the load-time eager-resolve
-    # path (load_config calls ``resolve_from_dict`` to populate
-    # ``config.agent`` before any registry is built).
+    # also has its own visited-set guard as a safety net for callers
+    # that resolve without going through build_registry.
     return templates
 
 
@@ -1730,14 +1725,6 @@ def load_config(path: Path | None = None, *, warn_issues: bool = True) -> Config
     loaded_vm_templates = _load_vm_templates(data, issues, decls)
     loaded_agent_templates = _load_agent_templates(data, issues, decls)
 
-    # Resolve default templates eagerly so config.vm / config.agent work everywhere
-    from agentworks.vms.templates import resolve_from_dict as _resolve_vm
-
-    resolved_vm = _resolve_vm(loaded_vm_templates)
-
-    from agentworks.agents.templates import resolve_from_dict as _resolve_agent
-
-    resolved_agent = _resolve_agent(loaded_agent_templates)
 
     admin = _load_admin_config(data, issues, decls)
     workspace_templates = _load_workspace_templates(data, issues, decls)
@@ -1764,10 +1751,8 @@ def load_config(path: Path | None = None, *, warn_issues: bool = True) -> Config
         defaults=_load_defaults(data, issues),
         named_console=_load_named_console(data, issues, decls),
         vm_templates=loaded_vm_templates,
-        vm=resolved_vm,
         admin=admin,
         agent_templates=loaded_agent_templates,
-        agent=resolved_agent,
         session=session_config,
         session_templates=session_templates,
         workspace_templates=workspace_templates,

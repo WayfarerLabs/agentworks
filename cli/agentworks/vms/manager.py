@@ -66,20 +66,19 @@ def _resolve_vm_admin_env_scopes(
     """Resolve per-scope env dicts for vm-level commands.
 
     When ``vm`` is provided (reinit / shell / exec), the vm-scope env
-    comes from the VM's actual template (``config.vm_templates[vm.template]``)
-    -- NOT ``config.vm``, which is the config-time default and may not
-    match the VM's actual template.
+    comes from the VM's actual template (the ``vm.template`` DB row),
+    NOT the config-time default, which may not match.
 
-    When ``vm`` is None (``create_vm``, where the VM doesn't exist in the
-    DB yet), the caller is expected to have already
-    ``_replace(config, vm=resolved_template)``'d from the operator's
-    ``--template`` flag, so ``config.vm`` is authoritative.
+    When ``vm`` is None, the default template resolved from the registry
+    is used.
 
     When ``ws`` is supplied (``vm shell --workspace`` / ``vm exec
     --workspace``), the workspace template's env enters the chain.
     """
     if vm is None:
-        vm_env = config.vm.env
+        from agentworks.vms.templates import resolve_template as _resolve_default
+
+        vm_env = _resolve_default(registry).env
     else:
         from agentworks.vms.templates import resolve_template as _resolve_vm_template
         vm_env = _resolve_vm_template(registry, vm.template).env
@@ -332,6 +331,8 @@ def create_vm(
                 cpus=resolved_cpus,
                 memory=resolved_memory,
                 disk=resolved_disk,
+                swap=vm_tmpl.swap,
+                admin_username=resolved_admin_username,
                 tailscale_auth_key=tailscale_auth_key,
             )
         elif platform == "azure":
@@ -343,6 +344,7 @@ def create_vm(
                 config,
                 azure_vm_size=resolved_azure_size,
                 disk=resolved_disk,
+                swap=vm_tmpl.swap,
                 admin_username=resolved_admin_username,
                 tailscale_auth_key=tailscale_auth_key,
             )
@@ -353,6 +355,7 @@ def create_vm(
             result = wsl2.create(
                 vm_name,
                 config,
+                swap=vm_tmpl.swap,
                 admin_username=resolved_admin_username,
             )
         elif platform == "proxmox":
@@ -365,6 +368,7 @@ def create_vm(
                 cpus=resolved_cpus,
                 memory=resolved_memory,
                 disk=resolved_disk,
+                swap=vm_tmpl.swap,
                 admin_username=resolved_admin_username,
                 tailscale_auth_key=tailscale_auth_key,
             )
@@ -661,7 +665,7 @@ def shell_vm(
     # the interactive session. The same scope dicts feed both the
     # SecretTarget (via _vm_secret_target) and compose_env so the two
     # consumers can't drift. Crucially the vm scope comes from
-    # vm.template (DB row), not config.vm (which is the config-default
+    # vm.template (DB row), not the config-default template (which
     # template and would silently route the wrong env into a shell on a
     # non-default-template VM).
     from agentworks.bootstrap import build_registry
@@ -751,7 +755,7 @@ def exec_vm(
     # secret referenced by the admin exec env chain BEFORE running the
     # remote command. The same scope dicts feed both the SecretTarget
     # and compose_env so the two consumers can't drift. The vm scope
-    # comes from vm.template (DB row), not config.vm.
+    # comes from vm.template (DB row), not the config-default template.
     from agentworks.bootstrap import build_registry
 
     scopes = _resolve_vm_admin_env_scopes(config, build_registry(config), vm, ws=ws)
@@ -1363,7 +1367,9 @@ def _collect_git_tokens(
     decls: list[SecretDecl] = []
     token_name_for: dict[str, str] = {}
     for cred_name in names:
-        cred = config.git_credentials.get(cred_name)
+        from agentworks.resources.access import git_credential
+
+        cred = git_credential(registry, cred_name)
         if cred is None:
             raise ConfigError(
                 f"git credential {cred_name!r} not declared; "

@@ -209,20 +209,13 @@ def test_inherits_cycle_caught_by_framework(spec: _KindSpec, tmp_path: Path) -> 
         build_registry(cfg)
 
 
-def test_agent_template_default_cycle_caught_at_load(tmp_path: Path) -> None:
-    """For agent_templates specifically, ``load_config`` eagerly resolves
-    the default via the per-template field-merging resolver. A cycle
-    through ``default`` therefore hits the resolver's internal
-    visited-set guard at load time, not the framework's pass at
-    build_registry time.
-
-    Non-parametrized because only ``agent-template`` (and
-    ``vm-template``, tested in ``test_vm_template_kind.py``) is
-    eagerly resolved at load time. ``workspace-template`` and
-    ``session-template`` resolve lazily; cycles in them slip past
-    load_config and are caught by the framework instead, which the
-    parametrized ``test_inherits_cycle_caught_by_framework`` above
-    covers for all three.
+def test_agent_template_default_cycle_caught_at_build_registry(tmp_path: Path) -> None:
+    """A cycle through ``default`` loads cleanly (Phase 1 of the
+    resource-manifests SDD removed load_config's eager default
+    resolve) and is caught by the framework's cycle pass at
+    build_registry time. The resolver's internal visited-set guard
+    remains as a safety net for callers that resolve without going
+    through build_registry.
     """
     cfg_file = _write_cfg(
         tmp_path / "config.toml",
@@ -234,5 +227,6 @@ def test_agent_template_default_cycle_caught_at_load(tmp_path: Path) -> None:
         inherits = ["default"]
         """,
     )
+    cfg = load_config(cfg_file, warn_issues=False)
     with pytest.raises(ConfigError, match="cycle"):
-        load_config(cfg_file, warn_issues=False)
+        build_registry(cfg)

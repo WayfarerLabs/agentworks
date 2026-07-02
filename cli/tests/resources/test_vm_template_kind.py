@@ -241,15 +241,12 @@ def test_framework_cycle_detector_catches_registry_cycles(tmp_path: Path) -> Non
         registry.finalize()
 
 
-def test_inherits_cycle_through_default_caught_at_load(tmp_path: Path) -> None:
-    """A cycle whose path goes through ``default`` (the always-materialized
-    reserved name) IS exercised by ``load_config``'s eager resolve --
-    ``resolve_from_dict`` descends from ``default`` recursively. The
-    resolver's internal visited-set guard catches it and raises
-    ``ConfigError`` instead of crashing with ``RecursionError``.
-    Regression test for Phase 2a.1's retirement of the load-time
-    ``_detect_template_cycles`` pass: the resolver guards itself; the
-    framework still owns the canonical check at build_registry time.
+def test_inherits_cycle_through_default_caught_at_build_registry(tmp_path: Path) -> None:
+    """A cycle whose path goes through ``default`` loads cleanly
+    (Phase 1 of the resource-manifests SDD removed load_config's eager
+    default resolve) and is caught by the framework's canonical cycle
+    pass at build_registry time. The resolver's internal visited-set
+    guard remains as a safety net for direct resolver callers.
     """
     cfg_file = _write_cfg(
         tmp_path / "config.toml",
@@ -261,8 +258,9 @@ def test_inherits_cycle_through_default_caught_at_load(tmp_path: Path) -> None:
         inherits = ["default"]
         """,
     )
+    cfg = load_config(cfg_file, warn_issues=False)
     with pytest.raises(ConfigError, match="cycle"):
-        load_config(cfg_file, warn_issues=False)
+        build_registry(cfg)
 
 
 def test_unreferenced_vm_template_default_lands_with_framework_source(

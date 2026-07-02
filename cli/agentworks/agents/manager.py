@@ -75,9 +75,9 @@ def _resolve_agent_direct_env_scopes(
 
     Scope sources mirror the FRD R2 precedence ladder:
 
-    - ``vm``: the VM's actual template env (DB row, not ``config.vm``).
+    - ``vm``: the VM's actual template env (from the ``vm.template`` DB row).
     - ``workspace``: when ``ws`` is supplied, the workspace template's env.
-    - ``agent``: the agent row's template env (DB row, not ``config.agent``).
+    - ``agent``: the agent row's template env (from the DB row).
       The agent pre-exists this call and may have been created under a
       different template than the operator's current ``--template``
       would resolve.
@@ -1119,7 +1119,9 @@ def _create_agent_on_vm(
     # via scp.
 
     # Git safe.directory wildcard (agents access repos owned by admin).
-    if config.admin.git_force_safe_directory:
+    from agentworks.resources.access import admin_template as _admin_template
+
+    if _admin_template(registry).git_force_safe_directory:
         try:
             agent_target.run("git config --global --add safe.directory '*'")
             output.detail("Git safe.directory configured for agent")

@@ -154,7 +154,9 @@ def test_vm_template_env(tmp_path: Path) -> None:
     cfg = load_config(cfg_file, warn_issues=False)
     assert cfg.vm_templates["default"].env["EDITOR"].value == "nvim"
     # Resolved VM also carries the env.
-    assert cfg.vm.env["EDITOR"].value == "nvim"
+    from agentworks.vms.templates import resolve_from_dict as _resolve_vm
+
+    assert _resolve_vm(cfg.vm_templates).env["EDITOR"].value == "nvim"
 
 
 def test_agent_template_env(tmp_path: Path) -> None:

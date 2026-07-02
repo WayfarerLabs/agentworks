@@ -14,7 +14,7 @@ Usage at a manager entry point:
         SecretTarget(
             vm=vm_template.env,
             workspace=workspace_template.env,
-            admin=config.admin.env,         # admin mode: only admin scope
+            admin=admin_template(registry).env,  # admin mode: only admin scope
             session=session_template.env,
         ),
     ]

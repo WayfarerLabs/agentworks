@@ -91,6 +91,8 @@ class LimaProvisioner(VMProvisioner):
         cpus: int = 4,
         memory: int = 8,
         disk: int = 50,
+        swap: int = 0,
+        admin_username: str = "agentworks",
         tailscale_auth_key: str | None = None,
     ) -> ProvisionResult:
         if not self.is_remote:
@@ -115,20 +117,20 @@ class LimaProvisioner(VMProvisioner):
             output.info(f"Connecting to VM host '{self._vm_host_ssh}'...")
         output.info(f"Creating Lima VM '{vm_name}' ({'remote' if self.is_remote else 'local'})...")
         output.detail(f"Resources: {cpus} CPUs, {memory} GiB memory, {disk} GiB disk")
-        if config.vm.swap > 0:
-            output.detail(f"Swap: {config.vm.swap} GiB")
+        if swap > 0:
+            output.detail(f"Swap: {swap} GiB")
 
         # Generate the full bootstrap script and embed in the Lima provision block.
         # This handles user creation, system packages, swap, SSH key, and Tailscale.
         if tailscale_auth_key:
             ssh_pub_key = config.operator.ssh_public_key.read_text().strip()
             provision_script = generate_bootstrap_script(
-                admin_username=config.admin.username,
+                admin_username=admin_username,
                 ssh_public_key=ssh_pub_key,
                 provisioning_packages=PROVISIONING_PACKAGES,
                 tailscale_auth_key=tailscale_auth_key,
                 hostname=vm_hostname("lima", vm_name),
-                swap=config.vm.swap,
+                swap=swap,
             )
         else:
             # No Tailscale key -- provision block is a no-op.

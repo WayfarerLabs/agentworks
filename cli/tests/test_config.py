@@ -63,7 +63,9 @@ def config_dir(tmp_path: Path) -> Path:
 def test_load_valid_config(config_dir: Path) -> None:
     cfg = load_config(config_dir)
     assert cfg.admin.shell == "zsh"
-    assert cfg.vm.apt == ["zsh", "tmux"]
+    from agentworks.vms.templates import resolve_from_dict as _resolve_vm
+
+    assert _resolve_vm(cfg.vm_templates).apt == ["zsh", "tmux"]
     assert cfg.admin.user_install_commands == ["hello"]
     assert "hello" in cfg.user_install_commands
     assert "default" in cfg.workspace_templates
