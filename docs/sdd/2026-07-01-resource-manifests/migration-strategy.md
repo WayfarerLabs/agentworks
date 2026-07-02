@@ -90,10 +90,13 @@ spec:
 ## Transition mechanics
 
 **In the repo**: phases 0 and 1 are behavior-preserving refactors. Phases 2 through 4 build the
-manifest path alongside the still-working TOML path (a resource may come from either source;
-declaring the same one in both is a duplicate error). Phase 5 removes the TOML path. The dual-source
-condition exists between merged phases for development, but never in a release: the cutover and the
-migration tool ship together.
+manifest path alongside the still-working TOML path: a resource may come from either source,
+declaring the same one in both errors at publish (the `Registry.add` collision handling introduced
+in Phase 2), and TOML resource semantics stay exactly today's (the `provider` alias is additive;
+legacy backend rows keep their existing construction path), so any config that loads today loads at
+every intermediate phase. Phase 5 removes the TOML path. The dual-source condition exists between
+merged phases for development, but never in a release: the cutover and the migration tool ship
+together.
 
 **For an operator**, the upgrade is:
 
@@ -148,8 +151,9 @@ choice, not something the tool does.
   exactly what is removed, and the backup keeps the original.
 - **Partially-applied migration** (tool interrupted): manifests are written before the TOML rewrite,
   and the TOML rewrite is atomic (write-new-then-rename). Worst case is manifests present plus the
-  original config, which fails at load as a cross-source duplicate set naming each collision;
-  re-running the tool or deleting one side resolves it. The backup makes every state recoverable.
+  original config; in the released (post-cutover) system that state fails at load with the
+  resource-sections-present error, which already points back at `agw config migrate`, and re-running
+  the tool (or deleting one side) resolves it. The backup makes every state recoverable.
 - **Operators on unreleased dual-source builds**: unsupported; the dual-source condition is a
   development state only.
 - **Third-party tooling reading `config.toml` for resource sections**: none known; release notes

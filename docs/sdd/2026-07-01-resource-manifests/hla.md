@@ -127,10 +127,31 @@ def build_registry(config: Config, manifests: ManifestSet) -> Registry:
 ```
 
 Publish order matters for the built-in override policy: built-ins publish first, operator documents
-second. At `registry.add` time, a collision between an operator row and an existing built-in row
-consults the kind's override flag: allowed (catalog kinds; operator row replaces the built-in row,
-exactly today's behavior) or reserved (`secret_backend`; `ConfigError` naming the reserved
-built-in). Operator-vs-operator collisions never reach here (the loader already errored).
+second. `Registry.add` today replaces duplicates silently by design; this SDD changes it to explicit
+collision handling. A collision between an operator row and an existing built-in row consults the
+kind's override flag: allowed (catalog kinds; operator row replaces the built-in row, exactly
+today's behavior) or reserved (`secret_backend`; `ConfigError` naming the reserved built-in). A
+collision between two operator rows is always a `ConfigError` citing both origins. The manifest
+loader already catches operator duplicates within the manifest set, so in the released system the
+publish-time check is a backstop; during the development-window dual-source phases it is what
+catches a resource declared in both TOML and a manifest.
+
+## Development-window dual source (Phases 2 through 4)
+
+Between the loader landing (Phase 2) and the cutover (Phase 5), TOML resource sections and manifests
+coexist at HEAD. The governing rule: TOML resource semantics stay exactly today's until Phase 5, so
+any config that loads today loads at every intermediate phase. Concretely:
+
+- Cross-source collisions (same `(kind, name)` from TOML and a manifest) error at `Registry.add` per
+  the collision handling above.
+- `git_credentials.<name>` TOML entries accept `provider` as an alias for `type` from Phase 3
+  (`provider` wins when both are present); `type` keeps working until the TOML resource path is
+  removed at Phase 5. Manifests accept only `provider`.
+- TOML-published `[secret_backends.<kind>]` rows keep today's shape, today's override-allowed
+  publish (they may replace the built-in backend rows), and the legacy resolver construction path.
+  The reserved-name policy applies to manifest-declared backends only until Phase 5.
+
+The window exists only between merged phases; no release ships it.
 
 ## Kind flags
 
@@ -194,8 +215,11 @@ resolver construction (orchestration):
   (`agw secret describe`, doctor) asks the instantiated source, so a custom prefix shows through
   automatically.
 - The existing `SecretBackendConfig` dataclass (per-backend config parsed from TOML today) is
-  subsumed by `SecretBackendDecl`; the orchestrator's construction path swaps from "kind-keyed
-  config sections" to "chain names looked up in the registry".
+  subsumed by `SecretBackendDecl` at the cutover; the orchestrator's construction path swaps from
+  "kind-keyed config sections" to "chain names looked up in the registry". During the development
+  window the orchestrator supports both row shapes (`SecretBackendDecl` via provider instantiation,
+  legacy TOML rows via the existing path); the legacy path is retired in Phase 5 with the rest of
+  the TOML resource surface.
 
 Git credentials need no structural change: `GitCredentialConfig.provider` (renamed from `type`)
 keeps referencing the `git_credential_provider` descriptor kind; the provider-name-to-class registry
@@ -209,7 +233,7 @@ agw config migrate [--yes] [--force] [--dry-run]
 
 config.toml --tomlkit parse--> section split per FRD R1 table
    config sections  --> config.toml rewritten in place (comments/format preserved,
-                        resource sections deleted; original backed up alongside)
+                        resource sections deleted; original backed up to paths.backups)
    resource sections --> resources/<kind-kebab>.yaml (multi-document, declaration order)
                         + renames: type->provider, [secret_backends.<kind>] -> secret_backend
                           documents (empty env-var/prompt sections dropped)

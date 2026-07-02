@@ -144,10 +144,11 @@ spec:
 - **`kind`** (required): the registry kind identifier, verbatim (`secret`, `vm_template`,
   `session_template`, ...). One canonical kind vocabulary across manifests, CLI (`--kind`), origins,
   and error messages. Unknown kinds are load errors listing the valid kinds.
-- **`metadata`** (required): the framework-uniform fields. `name` (required; kebab-case per the
-  existing identifier convention) and `description` (optional; the operator-set description per the
-  resource-registry SDD's R9, including the missing-description warning). No labels or annotations;
-  they can be added under `metadata` later without breaking anything.
+- **`metadata`** (required): the framework-uniform fields. `name` (required; validated by the
+  existing resource-name rule, which permits underscores; kebab-case remains the encouraged style)
+  and `description` (optional; the operator-set description per the resource-registry SDD's R9,
+  including the missing-description warning). No labels or annotations; they can be added under
+  `metadata` later without breaking anything.
 - **`spec`** (required, may be empty): the kind-specific fields, exactly the fields the kind's TOML
   section accepted, with nesting expressed natively (`env`, `backend_mappings` as nested maps).
   Kind-specific validation semantics are unchanged from today.
@@ -157,8 +158,11 @@ Not manifest-declarable, rejected with a specific error: kinds reserved to capab
 kind and explains that it is provided by the app (or a plugin).
 
 Singleton-shaped kinds (`admin_template`, `named_console_template`) accept only
-`metadata.name: default` until their plurification SDDs land; other names are load errors, same as
-the framework's reserved-name behavior today.
+`metadata.name: default`; other names are load errors. For `named_console_template` the Config-side
+plurification is still deferred to its own SDD. For `admin_template` the framework side is already
+plurified (resource-registry Phase 2a.3); restricting the envelope to `default` is a deliberate
+operator-surface parity choice, since multi-admin operational semantics (provisioning several admin
+users) are out of scope here.
 
 ### R4: One resource, one document
 
@@ -223,7 +227,8 @@ The origin model is cleaned up in anticipation of the plugin distribution tiers:
 - **`operator-declared`**: from an operator manifest. Carries `file:line` of the document.
 - **`built-in`**: shipped with the app, inseparable from it. Replaces today's `code-declared`
   variant; carries the same source identifier (e.g. `agentworks.catalog`, `agentworks.secrets`). All
-  current code-declared rows (catalog entries, provider descriptors) become `built-in`.
+  current code-declared rows (catalog entries, git credential provider descriptors, and the built-in
+  secret backend rows) become `built-in`.
 - **`auto-declared`**: unchanged (synthesized by miss policy or always-materialize).
 - **Reserved for the plugin SDD**: `system-plugin` (distributed with the app but separable, possibly
   requiring explicit enable) and `external-plugin` (installed from outside sources). This SDD
@@ -236,7 +241,12 @@ Surfaced everywhere origins appear today (`agw doctor`, `agw secret list/describ
 
 ### R8: Secret providers and backends
 
-The secret system splits into a capability layer and a resource layer:
+The secret system splits into a capability layer and a resource layer. The split rides this SDD
+rather than a future plugin or onepassword SDD for two concrete reasons: the migration rewrite is
+the one cheap moment to reshape `[secret_backends.<kind>]` (keyed by provider kind, exactly one
+instance each) into named backend resources without a second operator-facing migration later, and
+the built-in backends are the first real exerciser of the built-in-manifest mechanism this SDD ships
+anyway.
 
 - **`secret_provider`** (capability, registry descriptor): the code that produces secret values.
   Built-ins: `env-var`, `prompt`. Providers are registered code-side and mirrored into the registry
@@ -301,9 +311,10 @@ Git credentials already follow the capability/instance pattern; this SDD aligns 
   `[secret_backends.<kind>]` sections become `secret_backend` documents with `spec.provider: <kind>`
   (empty sections for `env-var` / `prompt` are dropped entirely since the built-in backends cover
   them).
-- **Safety**: prints a preview and asks for confirmation (`--yes` to skip); refuses to overwrite
-  existing manifest files without `--force`; backs up the original `config.toml` before rewriting;
-  idempotent on an already-migrated config (reports nothing to do).
+- **Safety**: prints a preview and asks for confirmation (`--yes` to skip); `--dry-run` shows the
+  preview and writes nothing; refuses to overwrite existing manifest files without `--force`; backs
+  up the original `config.toml` to the configured backups directory (`paths.backups`) before
+  rewriting; idempotent on an already-migrated config (reports nothing to do).
 
 ### R11: Hard cutover
 

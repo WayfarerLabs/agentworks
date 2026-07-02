@@ -54,7 +54,9 @@ reviewer-approved.
       (shared mapping used by loader and migrator), per-kind unknown-key strictness as currently
       implemented (pinned, not changed), error message catalog with `file:line` framing, and the
       YAML library / version decision (verify latest stable; document the mark plumbing).
-- [ ] Add the YAML dependency to `cli/pyproject.toml` (latest stable at implementation time).
+- [ ] Add the YAML dependency to `cli/pyproject.toml` (latest stable at implementation time);
+      promote the library's name from this SDD's local cspell dictionary to the root `.cspell.json`
+      once it appears in permanent code (skill promotion rule).
 - [ ] `agentworks/manifests/loader.py`: directory walk (sorted relative paths, dotfile skip,
       `.yaml`/`.yml`), YAML stream parse with document start-line capture, empty-document skip.
 - [ ] `agentworks/manifests/envelope.py`: apiVersion / kind / metadata / spec validation;
@@ -63,8 +65,11 @@ reviewer-approved.
       reusing existing per-kind validation; `declared_at` attachment.
 - [ ] Cross-document duplicate detection with both locations in the error.
 - [ ] `ManifestSet.publish_to(registry)`; bootstrap gains the manifests publisher alongside the
-      still-active config publisher (dual-source until Phase 5; duplicate across sources is an error
-      via the existing publish path).
+      still-active config publisher (dual-source until Phase 5).
+- [ ] `Registry.add` duplicate semantics: replace today's silent last-writer-wins with explicit
+      collision handling (operator-vs-operator collisions error citing both origins;
+      operator-vs-built-in consults the kind's `builtin_override` flag). This is what makes a
+      resource declared in both TOML and a manifest an error during the dual-source window.
 - [ ] `agentworks/manifests/builtin.py`: app-bundled manifest discovery via importlib.resources;
       published with `built-in` origin. Ship an empty-but-wired bundle (first content arrives in
       Phase 3).
@@ -89,16 +94,20 @@ TOML; both sources coexist correctly; CI green; reviewer-approved.
       manifest-declarable).
 - [ ] `SecretBackendDecl` resource (name, description, provider, provider config mapping);
       `referenced_resources()` emits the `secret_provider` reference; `secret_backend` kind becomes
-      manifest-declarable with `builtin_override = "reserved"`.
+      manifest-declarable with `builtin_override = "reserved"` (enforced for manifest-declared rows
+      only; legacy TOML `[secret_backends.*]` rows keep today's override-allowed publish until Phase
+      5).
 - [ ] Built-in `secret-backends.yaml` bundled manifest (env-var backend with default prefix, prompt
       backend).
 - [ ] env-var provider `prefix` config; `env_var_name_for` parameterized; prompt provider rejects
       non-empty config.
 - [ ] Resolver construction from the chain: `secret_config.backends` names looked up in the
-      registry, provider instantiated per backend config; retire the kind-keyed
-      `SecretBackendConfig` construction path.
-- [ ] `git_credentials.<name>.type` renamed to `provider` (TOML parse accepts only `provider` from
-      here; the migration tool handles old configs).
+      registry; `SecretBackendDecl` rows instantiate via their provider, legacy TOML rows continue
+      through the existing construction path (retired in Phase 5 with the TOML resource surface).
+- [ ] `git_credentials.<name>` entries gain `provider`: TOML parse accepts it as an alias for `type`
+      (`provider` wins when both are present), so every today-valid config still loads at this
+      phase; manifests accept only `provider`; `type` is removed with the TOML resource surface in
+      Phase 5.
 - [ ] Registry kind `git_credentials` renamed to `git_credential` (kind literals, source tuples,
       `--kind` values, completions, naming-consistency test).
 - [ ] Inspection follow-through: `agw secret describe` backend mappings / resolution preview and
@@ -107,8 +116,13 @@ TOML; both sources coexist correctly; CI green; reviewer-approved.
 - [ ] **Tests**: provider registry lookup and instantiation; prefix-parameterized resolution end to
       end; custom backend in chain; reserved-name rejection for `env-var`/`prompt` operator
       manifests; multiple backends sharing a provider; chain naming an unknown backend;
-      git_credential rename sweep; describe/doctor rendering.
-- [ ] **Docs**: none yet beyond docstrings (operator surface changes announced at cutover).
+      git_credential rename sweep; describe/doctor rendering; regression: the shipped sample config
+      and a maximal today-valid TOML config (including `type =` and `[secret_backends.*]` sections)
+      load unchanged at this phase's HEAD.
+- [ ] **Docs** (lockstep with what becomes true at this phase's HEAD): `cli/README.md` configuration
+      schema and command reference for `--kind git_credential`, the new `secret_provider` /
+      `secret_backend` rows, describe/doctor rendering, and the `provider` alias on
+      `[git_credentials.*]`; `sample-config.toml` comments where they mention `type`.
 
 Definition of done: chain-driven resolution runs entirely through provider-instantiated backends;
 built-in backends ship as bundled manifests; git credential vocabulary aligned; CI green;
@@ -121,16 +135,16 @@ reviewer-approved.
       files, multi-document, declaration order) through the shared field mapping from
       `manifest-schema-lld.md`; renames (`type` to `provider`, `[secret_backends.<kind>]` to
       `secret_backend` documents, empty env-var/prompt sections dropped).
-- [ ] Comment-preserving `config.toml` rewrite via tomlkit; timestamped backup of the original
-      alongside.
+- [ ] Comment-preserving `config.toml` rewrite via tomlkit; timestamped backup of the original to
+      the configured backups directory (`paths.backups`).
 - [ ] `agw config migrate` command: preview + confirm, `--yes`, `--force`, `--dry-run`; idempotent
       no-op on an already-migrated config.
 - [ ] Completions updated for the new subcommand.
 - [ ] **Tests**: golden-file migration of a maximal config (every section type, comments in
       surviving sections preserved); rename coverage; refusal without `--force` when manifests
       exist; idempotency; backup creation; dry-run writes nothing.
-- [ ] **Docs**: command reference material staged for Phase 5 (ships with the cutover so docs match
-      HEAD reality).
+- [ ] **Docs**: `cli/README.md` command reference entry for `agw config migrate` rides this phase
+      (the command is real at this HEAD); cutover-dependent doc changes wait for Phase 5.
 
 Definition of done: a representative real config migrates to a loadable manifest set plus a
 config-only TOML with zero behavior change (verified by comparing finalized registries before and
@@ -140,7 +154,8 @@ after); CI green; reviewer-approved.
 
 - [ ] `load_config()` rejects resource sections with a `ConfigError` listing the sections found and
       pointing at `agw config migrate`; config publisher removed from bootstrap; TOML resource
-      parsing survives only inside the migration tool.
+      parsing survives only inside the migration tool. The `type` alias and the legacy TOML backend
+      construction path are deleted with it.
 - [ ] Rewrite `cli/agentworks/sample-config.toml` to config-only, with a pointer to the sample
       manifests; update `cli/tests/test_sample_config.py` conventions accordingly.
 - [ ] Ship sample manifests (envelope examples for the commonly-used kinds) and wire
@@ -152,8 +167,10 @@ after); CI green; reviewer-approved.
   - [ ] ADR `docs/adrs/0016-yaml-resource-manifests.md` (number confirmed at write time): auto-load
         YAML manifests with k8s envelope over TOML sections; config/resource split; hard cutover
         rationale.
-  - [ ] Sweep existing guides (`mise.md`, `source-refs.md`, `proxmox.md`, `idempotency.md`) and
-        README for TOML-section references to resource kinds; update to manifest examples.
+  - [ ] Sweep existing guides (`mise.md`, `source-refs.md`, `proxmox.md`, `idempotency.md`),
+        `cli/README.md` (configuration schema and command reference; the largest doc blast radius of
+        the cutover), and the top-level README for TOML-section references to resource kinds; update
+        to manifest examples.
 - [ ] Release notes: the cutover, the one-command migration, the rename list from FRD "Migration
       notes".
 - [ ] Completions: verify the full command tree still round-trips (kind values, new subcommand).

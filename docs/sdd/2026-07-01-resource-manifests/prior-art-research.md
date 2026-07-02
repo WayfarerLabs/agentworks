@@ -71,8 +71,9 @@ implementation.
 The provider/backend split follows a widely-used two-layer pattern: a named code capability plus
 named configured instances referencing it. Nearest analogues: Kubernetes `StorageClass.provisioner`
 (many classes per provisioner, each with parameters), Terraform provider blocks with aliased
-configurations. The design predates this SDD in-repo: the resource-registry lockfile's plugin-prep
-notes already sketched providers-as-code plus backends-as-registry-instances.
+configurations. The design predates this SDD in-repo: the resource-registry plan's plugin-SDD prep
+notes (its follow-ups section) already sketched providers-as-code plus
+backends-as-registry-instances.
 
 - **Adopted**: `secret_backend.spec.provider` naming a code capability; multiple backends per
   provider; provider validates instance config. Decision: FRD R8.
@@ -100,13 +101,13 @@ notes already sketched providers-as-code plus backends-as-registry-instances.
 
 ## Sources
 
-| Source                                                             | Quality                     | Angle                     |
-| ------------------------------------------------------------------ | --------------------------- | ------------------------- |
-| kubernetes.io object/declarative-management docs                   | high (primary)              | envelope, apply model     |
-| YAML 1.2 spec (yaml.org)                                           | high (primary)              | multi-document streams    |
-| man systemd.unit; Debian apt sources.list(5); nginx include docs   | high (primary)              | conf.d auto-load order    |
-| pyyaml.org documentation                                           | high (primary)              | safe loading, marks       |
-| ruamel.yaml docs (yaml.readthedocs.io)                             | medium (primary, sprawling) | round-trip alternative    |
-| python-poetry/tomlkit README                                       | high (primary)              | comment-preserving TOML   |
-| Kubernetes StorageClass docs; Terraform provider-alias docs        | high (primary)              | capability/instance split |
-| docs/sdd/2026-06-17-resource-registry (lockfile plugin-prep notes) | high (in-repo)              | provider/backend design   |
+| Source                                                                | Quality                     | Angle                     |
+| --------------------------------------------------------------------- | --------------------------- | ------------------------- |
+| kubernetes.io object/declarative-management docs                      | high (primary)              | envelope, apply model     |
+| YAML 1.2 spec (yaml.org)                                              | high (primary)              | multi-document streams    |
+| man systemd.unit; Debian apt sources.list(5); nginx include docs      | high (primary)              | conf.d auto-load order    |
+| pyyaml.org documentation                                              | high (primary)              | safe loading, marks       |
+| ruamel.yaml docs (yaml.readthedocs.io)                                | medium (primary, sprawling) | round-trip alternative    |
+| python-poetry/tomlkit README                                          | high (primary)              | comment-preserving TOML   |
+| Kubernetes StorageClass docs; Terraform provider-alias docs           | high (primary)              | capability/instance split |
+| docs/sdd/2026-06-17-resource-registry (plan.md plugin-SDD prep notes) | high (in-repo)              | provider/backend design   |
