@@ -87,8 +87,9 @@ TOML; both sources coexist correctly; CI green; reviewer-approved.
 ## Phase 3: Secret provider/backend split and git credential alignment
 
 - [ ] **LLD**: `provider-config-lld.md` covering the `SecretProvider` protocol (`config_schema`,
-      `instantiate`), the env-var `prefix` semantics, error framing for provider-config violations
-      (must carry manifest `file:line`), and the resolver construction swap.
+      `instantiate`), the test-only provider that exercises config validation, error framing for
+      provider-config violations (must carry manifest `file:line`), and the resolver construction
+      swap.
 - [ ] `agentworks/secrets/providers.py`: code-side `PROVIDER_REGISTRY` (env-var, prompt) and the
       `secret_provider` descriptor kind + publisher (built-in origin, error miss policy, not
       manifest-declarable).
@@ -97,10 +98,12 @@ TOML; both sources coexist correctly; CI green; reviewer-approved.
       manifest-declarable with `builtin_override = "reserved"` (enforced for manifest-declared rows
       only; legacy TOML `[secret_backends.*]` rows keep today's override-allowed publish until Phase
       5).
-- [ ] Built-in `secret-backends.yaml` bundled manifest (env-var backend with default prefix, prompt
-      backend).
-- [ ] env-var provider `prefix` config; `env_var_name_for` parameterized; prompt provider rejects
-      non-empty config.
+- [ ] Built-in `secret-backends.yaml` bundled manifest (env-var and prompt backends, no
+      configuration).
+- [ ] Built-in providers accept no configuration (non-empty backend config is a schema validation
+      error for both); the provider-config plumbing (schema validation, defaults, `file:line` error
+      framing, config reaching `instantiate`) is exercised end to end by a test-only provider
+      registered only in the test suite, never shipped in the app.
 - [ ] Resolver construction from the chain: `secret_config.backends` names looked up in the
       registry; `SecretBackendDecl` rows instantiate via their provider, legacy TOML rows continue
       through the existing construction path (retired in Phase 5 with the TOML resource surface).
@@ -111,14 +114,14 @@ TOML; both sources coexist correctly; CI green; reviewer-approved.
 - [ ] Registry kind `git_credentials` renamed to `git_credential` (kind literals, source tuples,
       `--kind` values, completions, naming-consistency test).
 - [ ] Inspection follow-through: `agw secret describe` backend mappings / resolution preview and
-      doctor rows compute conventions via instantiated sources (custom prefix shows through);
-      `agw resource list` shows `secret_provider` and `secret_backend` rows with references.
-- [ ] **Tests**: provider registry lookup and instantiation; prefix-parameterized resolution end to
-      end; custom backend in chain; reserved-name rejection for `env-var`/`prompt` operator
-      manifests; multiple backends sharing a provider; chain naming an unknown backend;
-      git_credential rename sweep; describe/doctor rendering; regression: the shipped sample config
-      and a maximal today-valid TOML config (including `type =` and `[secret_backends.*]` sections)
-      load unchanged at this phase's HEAD.
+      doctor rows compute conventions via instantiated sources; `agw resource list` shows
+      `secret_provider` and `secret_backend` rows with references.
+- [ ] **Tests**: provider registry lookup and instantiation; test-only-provider config validation
+      and resolution end to end; custom backend in chain; reserved-name rejection for
+      `env-var`/`prompt` operator manifests; multiple backends sharing a provider; chain naming an
+      unknown backend; git_credential rename sweep; describe/doctor rendering; regression: the
+      shipped sample config and a maximal today-valid TOML config (including `type =` and
+      `[secret_backends.*]` sections) load unchanged at this phase's HEAD.
 - [ ] **Docs** (lockstep with what becomes true at this phase's HEAD): `cli/README.md` configuration
       schema and command reference for `--kind git_credential`, the new `secret_provider` /
       `secret_backend` rows, describe/doctor rendering, and the `provider` alias on

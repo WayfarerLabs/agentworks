@@ -260,19 +260,25 @@ anyway.
 apiVersion: agentworks/v1
 kind: secret_backend
 metadata:
-  name: myco-env
-  description: Environment variables with the MYCO_ prefix
+  name: work-vault
+  description: Work 1Password vault
 spec:
-  provider: env-var
-  prefix: MYCO_
+  provider: onepassword
+  vault: Work
 ```
 
-- **Built-in backends**: `env-var` (provider `env-var`, default prefix `AW_SECRET_`) and `prompt`
-  (provider `prompt`, no configuration) ship as built-in resources. Their names are reserved (R6).
-  The zero-config default chain (`env-var`, then `prompt`) is unchanged.
-- **Provider configuration exists from day one**: the `env-var` provider accepts `prefix` (default
-  `AW_SECRET_`), so "universally change the env var prefix" is served by declaring a custom backend
-  and putting it in the chain. The `prompt` provider accepts no configuration.
+(Illustrative: the `onepassword` provider is future work. Today's built-in providers accept no
+configuration, so this shape earns its keep when the first config-bearing provider lands.)
+
+- **Built-in backends**: `env-var` (provider `env-var`, convention `AW_SECRET_<NAME>`) and `prompt`
+  (provider `prompt`) ship as built-in resources. Their names are reserved (R6). The zero-config
+  default chain (`env-var`, then `prompt`) is unchanged.
+- **Built-in providers accept no configuration**: a backend spec with anything beyond `provider` is
+  a validation error from their schemas. Customizing env var identifiers stays per-secret via
+  `backend_mappings`, exactly as today; a provider-level option (an env var prefix, say) would be a
+  purely additive schema field if a real ask ever lands. The provider-config plumbing itself (schema
+  validation, defaults, error framing, config reaching instantiation) is exercised by a test-only
+  provider in the test suite, not by shipping artificial configuration on the built-ins.
 - **Multiple backends per provider** is fully supported and is the point of the split (two
   `onepassword` backends with different vaults, later).
 - **Unchanged semantics**: `backend_mappings` on secrets are keyed by backend name (now including
@@ -280,8 +286,9 @@ spec:
   names are load errors. Per-secret resolution, prompting, batching, and the never-persist-values
   guarantee are untouched.
 - Inspection surfaces (`agw secret describe` backend mappings and resolution preview, doctor rows)
-  enumerate the active chain's backends and compute each backend's default convention via its
-  provider and instance configuration (a backend with `prefix: MYCO_` shows `MYCO_NPM_TOKEN`).
+  enumerate the active chain's backends and compute each backend's default convention by asking the
+  provider-instantiated source, so future config-bearing providers render correctly with no
+  display-layer changes.
 
 ### R9: Git credential provider alignment
 
@@ -353,6 +360,9 @@ now mention manifest locations; the shapes stay the same.
   deferred to their own SDDs; the envelope accepts only `default` for them meanwhile.
 - **New secret providers** (`onepassword`, vaults): the split makes room; implementations are future
   work.
+- **Configuration on the built-in providers** (e.g. an env var prefix option): no known operator
+  ask; per-secret `backend_mappings` covers identifier customization. Would be a purely additive
+  provider schema field later.
 
 ## Migration notes
 
@@ -361,9 +371,7 @@ file moves:
 
 - `git_credentials.*.type` becomes `provider` (rewritten by the tool).
 - Explicit empty `[secret_backends.env-var]` / `[secret_backends.prompt]` sections disappear; the
-  built-in backends cover them. Operators with custom env var conventions can now declare a custom
-  backend with a `prefix` instead of per-secret `backend_mappings` overrides (per-secret overrides
-  keep working).
+  built-in backends cover them. Per-secret `backend_mappings` overrides keep working unchanged.
 - `agw resource list` origin values change: `code-declared` reads `built-in`; the `--origin` filter
   accepts `builtin`.
 - `--kind git_credentials` becomes `--kind git_credential`.

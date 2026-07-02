@@ -112,7 +112,7 @@ together.
 Fresh installs never see TOML resources: `agw config init` produces the config-only TOML and the
 sample manifests document the envelope.
 
-## Worked example: an operator with a custom env var convention
+## Worked example: an operator with custom env var names
 
 Pre-migration, an operator who kept legacy env var names had per-secret overrides:
 
@@ -122,22 +122,10 @@ description = "npm registry token"
 backend_mappings.env-var = "NPM_TOKEN"
 ```
 
-Migration carries this over verbatim (per-secret `backend_mappings` keep working). Post-migration
-they can optionally consolidate with a custom backend:
-
-```yaml
-apiVersion: agentworks/v1
-kind: secret_backend
-metadata:
-  name: bare-env
-  description: Unprefixed environment variables
-spec:
-  provider: env-var
-  prefix: ""
-```
-
-plus `backends = ["bare-env", "prompt"]` in `[secret_config]`. That consolidation is a manual
-choice, not something the tool does.
+Migration carries this over verbatim; per-secret `backend_mappings` remain the mechanism for
+customizing identifiers (the built-in providers accept no per-backend configuration).
+Operator-declared backends earn their keep when the first config-bearing provider (a future
+`onepassword`, say) lands; nothing about this migration needs them.
 
 ## Risks and safeguards
 

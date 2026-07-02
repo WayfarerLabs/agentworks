@@ -54,7 +54,7 @@ cli/agentworks/manifests/
 cli/agentworks/resources/   # unchanged framework; Origin variant rename only
 cli/agentworks/secrets/
   providers.py        # NEW: code-side provider registry + descriptor publisher
-  env_var.py          # gains per-instance config (prefix)
+  env_var.py          # unchanged behavior; instantiated via provider registry
   prompt.py           # unchanged behavior; instantiated via provider registry
 cli/agentworks/cli/commands/config.py   # gains `agw config migrate`
 cli/agentworks/migrate/                  # NEW: TOML -> manifests migration tool
@@ -205,15 +205,17 @@ resolver construction (orchestration):
 - `SecretBackendDecl` (the `secret_backend` Resource) carries `name`, `description`, `provider`, and
   the provider-specific config mapping. Its `referenced_resources()` emits one reference to
   `("secret_provider", provider)`.
-- The **env-var provider** grows `prefix` config (default `AW_SECRET_`); `env_var_name_for` becomes
-  prefix-parameterized. The **prompt provider** accepts no config (non-empty config is a validation
-  error from its schema).
+- **Neither built-in provider accepts configuration** (non-empty backend config is a validation
+  error from each schema); `env_var_name_for` keeps its fixed `AW_SECRET_` convention. The
+  `config_schema` / `instantiate(config)` contract is exercised end to end by a test-only provider
+  registered only in the test suite, so the plumbing is verified without shipping artificial
+  operator surface on the built-ins.
 - **Built-in backends** `env-var` and `prompt` ship as an app-bundled manifest
   (`agentworks/manifests/builtin/secret-backends.yaml`), exercising the built-in-manifest path end
   to end. Their names are reserved via `builtin_override = "reserved"`.
 - `backend_mappings` on secrets stay keyed by backend name. Default-convention display
-  (`agw secret describe`, doctor) asks the instantiated source, so a custom prefix shows through
-  automatically.
+  (`agw secret describe`, doctor) asks the instantiated source, so a future config-bearing
+  provider's conventions show through with no display-layer changes.
 - The existing `SecretBackendConfig` dataclass (per-backend config parsed from TOML today) is
   subsumed by `SecretBackendDecl` at the cutover; the orchestrator's construction path swaps from
   "kind-keyed config sections" to "chain names looked up in the registry". During the development
@@ -310,8 +312,9 @@ ambiguous-precedence questions for no lasting benefit.
 Deliberately per-kind rather than uniform. For catalog kinds, the name is the interface (templates
 reference `gh` by name), so same-name override is the only way to customize what a name installs;
 that behavior exists and is documented today. For backends, the name is not load-bearing (the chain
-selects backends), so "customize a built-in" is served by a sibling backend plus the chain, and
-reserving the names keeps built-in behavior trustworthy.
+selects backends): identifier customization is per-secret `backend_mappings` today, and once
+config-bearing providers exist, a sibling backend plus the chain covers instance-level
+customization. Reserving the names keeps built-in behavior trustworthy.
 
 ### Consumer repoint before source swap
 
