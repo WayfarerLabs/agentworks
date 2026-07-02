@@ -40,7 +40,7 @@ def test_admin_and_named_console_defaults_present_in_minimal_config(
     tmp_path: Path,
 ) -> None:
     """A config with no ``[admin.*]`` or ``[named_console]`` blocks still
-    produces ``admin_template:default`` and ``named_console_template:default``
+    produces ``admin-template:default`` and ``named-console-template:default``
     in the registry. Today Config publishes synthesize-on-omit instances
     with operator-declared origins, so the always-materialize pre-step
     short-circuits; the rows are present either way.
@@ -48,18 +48,18 @@ def test_admin_and_named_console_defaults_present_in_minimal_config(
     cfg = load_config(_write_minimal(tmp_path / "config.toml"), warn_issues=False)
     registry = build_registry(cfg)
 
-    admin = registry.lookup("admin_template", "default")
+    admin = registry.lookup("admin-template", "default")
     assert isinstance(admin, AdminConfig)
     assert admin.origin is not None
 
-    nc = registry.lookup("named_console_template", "default")
+    nc = registry.lookup("named-console-template", "default")
     assert isinstance(nc, NamedConsoleConfig)
     assert nc.origin is not None
 
 
 def test_unreferenced_default_lands_with_framework_source(tmp_path: Path) -> None:
     """Direct Registry.empty() + finalize, no publisher contributing
-    admin_template:default. The always-materialize step lands the row
+    admin-template:default. The always-materialize step lands the row
     with ``auto-declared`` origin and the synthetic
     ``("framework", "always-materialize")`` source.
     """
@@ -68,7 +68,7 @@ def test_unreferenced_default_lands_with_framework_source(tmp_path: Path) -> Non
     registry = Registry.empty()
     registry.finalize()
 
-    admin = registry.lookup("admin_template", "default")
+    admin = registry.lookup("admin-template", "default")
     assert admin.origin.variant == "auto-declared"
     assert admin.origin.source == ALWAYS_MATERIALIZE_SOURCE
 
@@ -87,7 +87,7 @@ def test_always_materialized_row_gets_empty_usage_tuple_in_finalize(
     registry = Registry.empty()
     registry.finalize()
 
-    admin = registry.lookup("admin_template", "default")
+    admin = registry.lookup("admin-template", "default")
     assert admin.references == ()
 
 
@@ -115,8 +115,8 @@ def test_polish_empty_usage_format() -> None:
         origin=Origin.auto_declared(source=ALWAYS_MATERIALIZE_SOURCE),
         references=(),
     )
-    polished = _polish_auto_declared_description(stub, "vm_template")
-    assert polished.description == "(auto) auto-declared default vm_template"
+    polished = _polish_auto_declared_description(stub, "vm-template")
+    assert polished.description == "(auto) auto-declared default vm-template"
 
 
 def test_polish_skips_operator_set_description() -> None:
@@ -136,10 +136,10 @@ def test_polish_skips_operator_set_description() -> None:
 
     stub = _Stub(
         description="operator's own text",
-        origin=Origin.auto_declared(source=("vm_template", "default")),
+        origin=Origin.auto_declared(source=("vm-template", "default")),
         references=(),
     )
-    polished = _polish_auto_declared_description(stub, "vm_template")
+    polished = _polish_auto_declared_description(stub, "vm-template")
     assert polished.description == "operator's own text"
 
 
@@ -158,10 +158,10 @@ def test_polish_no_op_for_resources_without_description_field() -> None:
         references: tuple = ()
 
     stub = _NoDesc(
-        origin=Origin.auto_declared(source=("vm_template", "default")),
+        origin=Origin.auto_declared(source=("vm-template", "default")),
         references=(),
     )
-    polished = _polish_auto_declared_description(stub, "vm_template")
+    polished = _polish_auto_declared_description(stub, "vm-template")
     assert polished is stub
 
 
@@ -170,7 +170,7 @@ def test_secret_kind_not_materialized_by_pre_step(tmp_path: Path) -> None:
     always-materialize step never synthesizes secrets directly. Any
     secret rows that DO appear in the registry came from the
     requirement-driven path (e.g., Phase 2a.1's always-materialized
-    ``vm_template:default`` emits a ``SecretReference`` for
+    ``vm-template:default`` emits a ``SecretReference`` for
     ``tailscale-auth-key`` via its existing required_resources, which
     is the legitimate auto-declare path -- not always-materialize).
 
@@ -186,7 +186,7 @@ def test_secret_kind_not_materialized_by_pre_step(tmp_path: Path) -> None:
 
     secrets = list(registry.iter_kind("secret"))
     # Positive assertion: Phase 2a.1's always-materialized
-    # vm_template:default emits a SecretReference for
+    # vm-template:default emits a SecretReference for
     # tailscale-auth-key via its required_resources, so the cascade
     # produces at least one secret row. Pinning this defends against a
     # future regression where the materialize-then-walk interaction
@@ -194,7 +194,7 @@ def test_secret_kind_not_materialized_by_pre_step(tmp_path: Path) -> None:
     # required_resources doesn't run).
     secret_names = {s.name for s in secrets}
     assert "tailscale-auth-key" in secret_names, (
-        "expected vm_template:default's tailscale requirement to "
+        "expected vm-template:default's tailscale requirement to "
         "auto-declare 'tailscale-auth-key' via the cascade"
     )
     for secret in secrets:
@@ -229,6 +229,6 @@ def test_operator_declared_admin_is_not_overwritten(tmp_path: Path) -> None:
     cfg = load_config(cfg_file, warn_issues=False)
     registry = build_registry(cfg)
 
-    admin = registry.lookup("admin_template", "default")
+    admin = registry.lookup("admin-template", "default")
     assert admin.origin.variant == "operator-declared"
     assert admin.shell == "zsh"

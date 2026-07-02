@@ -1,7 +1,7 @@
 """Parametrized tests for the three template kinds Phase 2a.2 adds:
-``agent_template``, ``workspace_template``, ``session_template``.
+``agent-template``, ``workspace-template``, ``session-template``.
 
-Each kind has the same shape as ``vm_template`` (covered separately in
+Each kind has the same shape as ``vm-template`` (covered separately in
 ``test_vm_template_kind.py``). This file pins the parallel behavior:
 kind shape, ``synthesize`` empty + non-empty paths, framework miss-
 policy on typo'd ``inherits``, cycle detection at build_registry, and
@@ -37,9 +37,9 @@ class _KindSpec:
 
 
 SPECS: tuple[_KindSpec, ...] = (
-    _KindSpec("agent_template", "agent_templates", AgentTemplate),
-    _KindSpec("workspace_template", "workspace_templates", WorkspaceTemplate),
-    _KindSpec("session_template", "session_templates", SessionTemplate),
+    _KindSpec("agent-template", "agent_templates", AgentTemplate),
+    _KindSpec("workspace-template", "workspace_templates", WorkspaceTemplate),
+    _KindSpec("session-template", "session_templates", SessionTemplate),
 )
 
 
@@ -216,10 +216,10 @@ def test_agent_template_default_cycle_caught_at_load(tmp_path: Path) -> None:
     visited-set guard at load time, not the framework's pass at
     build_registry time.
 
-    Non-parametrized because only ``agent_template`` (and
-    ``vm_template``, tested in ``test_vm_template_kind.py``) is
-    eagerly resolved at load time. ``workspace_template`` and
-    ``session_template`` resolve lazily; cycles in them slip past
+    Non-parametrized because only ``agent-template`` (and
+    ``vm-template``, tested in ``test_vm_template_kind.py``) is
+    eagerly resolved at load time. ``workspace-template`` and
+    ``session-template`` resolve lazily; cycles in them slip past
     load_config and are caught by the framework instead, which the
     parametrized ``test_inherits_cycle_caught_by_framework`` above
     covers for all three.

@@ -11,7 +11,7 @@
 #
 # Agentworks ships a built-in catalog of common tools (apt sources, apt
 # packages, system install commands, user install commands). Run
-# `agw resource list --kind apt_package,system_install_command,user_install_command,apt_source`
+# `agw resource list --kind apt-package,system-install-command,user-install-command,apt-source`
 # to see what is available (or filter to any single kind). You can
 # reference catalog entries by name in templates and define your own
 # entries below to extend or override the catalog.
@@ -374,8 +374,8 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # =============================================================================
 #
 # Operator-defined entries extend the built-in catalog. Entries with the same name
-# as a built-in entry override it. Run `agw resource list --kind apt_package` (or
-# apt_source / system_install_command / user_install_command) to see all available
+# as a built-in entry override it. Run `agw resource list --kind apt-package` (or
+# apt-source / system-install-command / user-install-command) to see all available
 # entries (built-in and operator-defined).
 
 # --- Custom apt sources ---

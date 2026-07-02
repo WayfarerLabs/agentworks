@@ -47,13 +47,13 @@ class CommandSpec:
 #   "vms"             -> agw vm list --names-only
 #   "vm_hosts"        -> agw vm-host list --names-only
 #   "workspaces"      -> agw workspace list --names-only
-#   "ws_templates"    -> agw resource list --kind workspace_template --names-only
-#   "git_credentials" -> agw resource list --kind git_credentials --names-only
+#   "ws_templates"    -> agw resource list --kind workspace-template --names-only
+#   "git_credentials" -> agw resource list --kind git-credential --names-only
 #   "sessions"        -> agw session list --names-only
-#   "session_templates" -> agw resource list --kind session_template --names-only
+#   "session_templates" -> agw resource list --kind session-template --names-only
 #   "agents"          -> agw agent list --names-only
-#   "vm_templates"    -> agw resource list --kind vm_template --names-only
-#   "agent_templates" -> agw resource list --kind agent_template --names-only
+#   "vm_templates"    -> agw resource list --kind vm-template --names-only
+#   "agent_templates" -> agw resource list --kind agent-template --names-only
 #   "consoles"        -> agw console list --names-only
 #   "secrets"         -> agw secret list --names-only
 #                        (sources from the Resource Registry so

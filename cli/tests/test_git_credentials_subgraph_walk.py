@@ -67,7 +67,7 @@ def test_admin_to_git_credentials_to_secret_walk(
     registry = build_registry(config)
 
     # The intermediate Resource is in the registry.
-    cred = registry.lookup("git_credentials", "github")
+    cred = registry.lookup("git-credential", "github")
     assert cred.token == "git-token-github"
 
     # The downstream secret is auto-declared; its source is the
@@ -76,7 +76,7 @@ def test_admin_to_git_credentials_to_secret_walk(
     decl = registry.lookup("secret", "git-token-github")
     assert decl.origin is not None
     assert decl.origin.variant == "auto-declared"
-    assert decl.origin.source == ("git_credentials", "github")
+    assert decl.origin.source == ("git-credential", "github")
 
 
 def test_agent_template_to_git_credentials_to_secret_walk(
@@ -97,18 +97,18 @@ def test_agent_template_to_git_credentials_to_secret_walk(
     config = load_config(cfg, warn_issues=False)
     registry = build_registry(config)
 
-    cred = registry.lookup("git_credentials", "azdo")
+    cred = registry.lookup("git-credential", "azdo")
     assert cred.org == "my-org"
 
     decl = registry.lookup("secret", "git-token-azdo")
     assert decl.origin is not None
-    assert decl.origin.source == ("git_credentials", "azdo")
+    assert decl.origin.source == ("git-credential", "azdo")
 
 
 def test_collect_secrets_for_walks_admin_subgraph(
     tmp_path: Path, ssh_keys: tuple[Path, Path]
 ) -> None:
-    """The ``collect_secrets_for`` helper walks the admin_template
+    """The ``collect_secrets_for`` helper walks the admin-template
     subgraph transitively (admin -> git_credentials -> secret) and
     returns the SecretDecls reachable along the way. Each token
     secret shows up in the walk's result; no duplicates.
@@ -135,6 +135,6 @@ def test_collect_secrets_for_walks_admin_subgraph(
     config = load_config(cfg, warn_issues=False)
     registry = build_registry(config)
 
-    secrets = collect_secrets_for(registry, ("admin_template", "default"))
+    secrets = collect_secrets_for(registry, ("admin-template", "default"))
     names = sorted(d.name for d in secrets)
     assert names == ["git-token-azdo", "git-token-github"]

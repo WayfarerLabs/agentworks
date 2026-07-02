@@ -64,7 +64,7 @@ class AptPackageEntry:
 
     def referenced_resources(self) -> list[ResourceReference]:
         """Emit one ``ResourceReference`` per name in ``apt_sources``. The
-        framework's ``apt_source`` kind uses an ``error`` miss policy, so
+        framework's ``apt-source`` kind uses an ``error`` miss policy, so
         an unknown source name surfaces as a clean ``ConfigError`` at
         ``build_registry`` time with the referencing package's identity
         attached (rather than the pre-Phase-2b silent ordering assumption
@@ -72,7 +72,7 @@ class AptPackageEntry:
 
         The registry attaches the corresponding ``ReferenceEntry`` to
         each ``AptSourceEntry`` during finalize, so
-        ``agw resource describe apt_source github`` shows every apt_package
+        ``agw resource describe apt-source github`` shows every apt-package
         that depends on it -- the dependency graph that was previously
         implicit is now visible.
         """
@@ -81,9 +81,9 @@ class AptPackageEntry:
         return [
             ResourceReference(
                 name=source_name,
-                kind="apt_source",
+                kind="apt-source",
                 usage=f"the {source_name} apt source",
-                source=("apt_package", self.name),
+                source=("apt-package", self.name),
             )
             for source_name in self.apt_sources
         ]
@@ -305,7 +305,7 @@ def load_catalog(config: Config) -> ResolvedCatalog:
 
 
 # ``_validate_references`` retired: the framework validates
-# apt_package -> apt_source edges via ``AptSourceKind``'s ``error`` miss
+# apt-package -> apt-source edges via ``AptSourceKind``'s ``error`` miss
 # policy at ``Registry.finalize`` time (the reference is emitted by
 # ``AptPackageEntry.referenced_resources()``). Same pattern as Phase 2b.0
 # dropping ``validate_selections``: single source of truth for
@@ -317,13 +317,13 @@ def publish_to(registry: Registry, config: Config | None = None) -> None:
 
     Phase 2b: built-in catalog entries become Registry citizens with
     ``Origin.built_in(source="agentworks.catalog")``. The four
-    catalog kinds (``apt_source``, ``apt_package``,
-    ``system_install_command``, ``user_install_command``) use the
+    catalog kinds (``apt-source``, ``apt-package``,
+    ``system-install-command``, ``user-install-command``) use the
     framework's error miss policy, so a typo'd reference from
     ``[vm_templates.*].apt_packages = ["..."]`` etc. surfaces as a
     framework error citing the reference's source.
 
-    ``apt_source`` is published even though operators don't reference
+    ``apt-source`` is published even though operators don't reference
     sources directly from templates: apt_packages reference them via
     their ``apt_sources`` field, so the framework needs the sources in
     the registry to resolve the ``AptPackageEntry.referenced_resources()``
@@ -350,13 +350,13 @@ def publish_to(registry: Registry, config: Config | None = None) -> None:
     code_origin = Origin.built_in(source="agentworks.catalog")
 
     for src_name, src in builtin.apt_sources.items():
-        registry.add("apt_source", src_name, src, code_origin)
+        registry.add("apt-source", src_name, src, code_origin)
     for pkg_name, pkg in builtin.apt_packages.items():
-        registry.add("apt_package", pkg_name, pkg, code_origin)
+        registry.add("apt-package", pkg_name, pkg, code_origin)
     for sys_name, sys_cmd in builtin.system_install_commands.items():
-        registry.add("system_install_command", sys_name, sys_cmd, code_origin)
+        registry.add("system-install-command", sys_name, sys_cmd, code_origin)
     for user_name, user_cmd in builtin.user_install_commands.items():
-        registry.add("user_install_command", user_name, user_cmd, code_origin)
+        registry.add("user-install-command", user_name, user_cmd, code_origin)
 
     if config is None:
         return
@@ -369,7 +369,7 @@ def publish_to(registry: Registry, config: Config | None = None) -> None:
     # stores raw dicts (not typed entries) for these sections. Publishing
     # here uses ``Origin.operator_declared(file=CONFIG_PATH, line=0)`` --
     # matches the same sentinel Phase 0 uses for singleton-omitted-
-    # section defaults (``named_console_template:default`` when there's
+    # section defaults (``named-console-template:default`` when there's
     # no ``[named_console]``). The renderer drops the parenthetical for
     # ``line=0``, so operators see "operator-declared" without file:line
     # for now.
@@ -379,23 +379,23 @@ def publish_to(registry: Registry, config: Config | None = None) -> None:
     # dataclasses, thread ``_SectionLineMap`` into the ``_load_*``
     # helpers, either at load_config time or via a public
     # ``config.declared_at_for(...)`` helper); tracked alongside the
-    # ``named_console_template`` singleton-omitted case in the SDD
+    # ``named-console-template`` singleton-omitted case in the SDD
     # follow-ups.
     from agentworks.config import CONFIG_PATH
 
     op_origin = Origin.operator_declared(file=CONFIG_PATH, line=0)
     for src_name, src in _load_apt_sources(config.apt_sources).items():
-        registry.add("apt_source", src_name, src, op_origin)
+        registry.add("apt-source", src_name, src, op_origin)
     for pkg_name, pkg in _load_apt_packages(config.apt_packages).items():
-        registry.add("apt_package", pkg_name, pkg, op_origin)
+        registry.add("apt-package", pkg_name, pkg, op_origin)
     for sys_name, sys_cmd in _load_system_commands(
         config.system_install_commands
     ).items():
-        registry.add("system_install_command", sys_name, sys_cmd, op_origin)
+        registry.add("system-install-command", sys_name, sys_cmd, op_origin)
     for user_name, user_cmd in _load_user_commands(
         config.user_install_commands
     ).items():
-        registry.add("user_install_command", user_name, user_cmd, op_origin)
+        registry.add("user-install-command", user_name, user_cmd, op_origin)
 
 
 # validate_selections removed in Phase 2b.0: the framework's catalog

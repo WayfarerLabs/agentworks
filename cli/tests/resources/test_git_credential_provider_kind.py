@@ -1,4 +1,4 @@
-"""Tests for Phase 2b.1's ``git_credential_provider`` kind."""
+"""Tests for Phase 2b.1's ``git-credential-provider`` kind."""
 
 from __future__ import annotations
 
@@ -32,14 +32,14 @@ def _write_cfg(path: Path, body: str = "") -> Path:
 
 
 def test_kind_attributes() -> None:
-    kind = KIND_REGISTRY["git_credential_provider"]
-    assert kind.kind == "git_credential_provider"
+    kind = KIND_REGISTRY["git-credential-provider"]
+    assert kind.kind == "git-credential-provider"
     assert kind.miss_policy == "error"
     assert kind.auto_declare_names is None
 
 
 def test_synthesize_raises() -> None:
-    kind = KIND_REGISTRY["git_credential_provider"]
+    kind = KIND_REGISTRY["git-credential-provider"]
     with pytest.raises(NoUnreferencedDefaultError):
         kind.synthesize(())
 
@@ -60,7 +60,7 @@ def test_known_providers_resolve(tmp_path: Path) -> None:
         warn_issues=False,
     )
     registry = build_registry(cfg)
-    github = registry.lookup("git_credential_provider", "github")
+    github = registry.lookup("git-credential-provider", "github")
     assert github.name == "github"
     assert github.origin.variant == "built-in"
     assert github.origin.source == "agentworks.git_credentials"
@@ -77,7 +77,7 @@ def test_unknown_provider_errors_with_framework_shape(tmp_path: Path) -> None:
         ),
         warn_issues=False,
     )
-    with pytest.raises(ConfigError, match=r"references unknown git_credential_provider 'gitlab'"):
+    with pytest.raises(ConfigError, match=r"references unknown git-credential-provider 'gitlab'"):
         build_registry(cfg)
 
 
@@ -87,5 +87,5 @@ def test_publisher_publishes_full_known_set(tmp_path: Path) -> None:
     """
     cfg = load_config(_write_cfg(tmp_path / "config.toml"), warn_issues=False)
     registry = build_registry(cfg)
-    names = {r.name for r in registry.iter_kind("git_credential_provider")}
+    names = {r.name for r in registry.iter_kind("git-credential-provider")}
     assert names == set(PROVIDER_TYPES)

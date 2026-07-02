@@ -50,7 +50,7 @@ def test_secret_auto_declared_when_required_but_not_published() -> None:
         reqs=(
             SecretReference(
                 name="api-key", kind="secret", usage="the API key",
-                source=("admin_template", "default"),
+                source=("admin-template", "default"),
             ),
         ),
     )
@@ -61,14 +61,14 @@ def test_secret_auto_declared_when_required_but_not_published() -> None:
     assert isinstance(found, SecretDecl)
     assert found.origin is not None
     assert found.origin.variant == "auto-declared"
-    assert found.origin.source == ("admin_template", "default")
+    assert found.origin.source == ("admin-template", "default")
 
 
 # -- Reserved-name restriction -----------------------------------------------
 
 
 def test_admin_template_rejects_non_default_name() -> None:
-    """``admin_template`` kind only auto-declares ``default``. A
+    """``admin-template`` kind only auto-declares ``default``. A
     requirement for any other name errors at finalize.
     """
     r = Registry.empty()
@@ -76,7 +76,7 @@ def test_admin_template_rejects_non_default_name() -> None:
         reqs=(
             ResourceReference(
                 name="custom",
-                kind="admin_template",
+                kind="admin-template",
                 usage="ignored",
                 source=("test", "x"),
             ),
@@ -102,7 +102,7 @@ def test_operator_declared_secret_gets_usage_populated() -> None:
         reqs=(
             SecretReference(
                 name="api-key", kind="secret", usage="the API env var",
-                source=("admin_template", "default"),
+                source=("admin-template", "default"),
             ),
         ),
     )
@@ -110,7 +110,7 @@ def test_operator_declared_secret_gets_usage_populated() -> None:
         reqs=(
             SecretReference(
                 name="api-key", kind="secret", usage="the agent's API env var",
-                source=("agent_template", "claude"),
+                source=("agent-template", "claude"),
             ),
         ),
     )
@@ -126,7 +126,7 @@ def test_operator_declared_secret_gets_usage_populated() -> None:
     # Usage gets populated from BOTH requirements.
     assert len(found.references) == 2
     sources = sorted(u.source for u in found.references)
-    assert sources == [("admin_template", "default"), ("agent_template", "claude")]
+    assert sources == [("admin-template", "default"), ("agent-template", "claude")]
 
 
 # -- Multiple requirements -> auto-declare uses first source -----------------
@@ -138,7 +138,7 @@ def test_auto_declared_secret_origin_uses_first_matching_requirement() -> None:
         reqs=(
             SecretReference(
                 name="shared-key", kind="secret", usage="A's use",
-                source=("admin_template", "default"),
+                source=("admin-template", "default"),
             ),
         ),
     )
@@ -146,7 +146,7 @@ def test_auto_declared_secret_origin_uses_first_matching_requirement() -> None:
         reqs=(
             SecretReference(
                 name="shared-key", kind="secret", usage="B's use",
-                source=("vm_template", "default"),
+                source=("vm-template", "default"),
             ),
         ),
     )
@@ -157,7 +157,7 @@ def test_auto_declared_secret_origin_uses_first_matching_requirement() -> None:
     found = r.lookup("secret", "shared-key")
     # First publisher wins for Origin source.
     assert found.origin is not None
-    assert found.origin.source == ("admin_template", "default")
+    assert found.origin.source == ("admin-template", "default")
     # Usage records BOTH requirements.
     assert len(found.references) == 2
 
@@ -173,7 +173,7 @@ def test_publish_order_determines_first_matching_origin_source() -> None:
         reqs=(
             SecretReference(
                 name="shared-key", kind="secret", usage="A's use",
-                source=("admin_template", "default"),
+                source=("admin-template", "default"),
             ),
         ),
     )
@@ -181,7 +181,7 @@ def test_publish_order_determines_first_matching_origin_source() -> None:
         reqs=(
             SecretReference(
                 name="shared-key", kind="secret", usage="B's use",
-                source=("vm_template", "default"),
+                source=("vm-template", "default"),
             ),
         ),
     )
@@ -191,9 +191,9 @@ def test_publish_order_determines_first_matching_origin_source() -> None:
     r.finalize()
 
     found = r.lookup("secret", "shared-key")
-    # vm_template's req now wins because B was added first.
+    # vm-template's req now wins because B was added first.
     assert found.origin is not None
-    assert found.origin.source == ("vm_template", "default")
+    assert found.origin.source == ("vm-template", "default")
 
 
 @dataclass(frozen=True)

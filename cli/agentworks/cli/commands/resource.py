@@ -32,7 +32,7 @@ def resource_list(
         None,
         "--kind",
         help=(
-            "Filter to one or more kinds (CSV: --kind secret,vm_template). "
+            "Filter to one or more kinds (CSV: --kind secret,vm-template). "
             "Default: all kinds in the registry."
         ),
     ),
@@ -111,7 +111,7 @@ def resource_list(
 
 @resource_app.command("describe")
 def resource_describe(
-    kind: str = typer.Argument(..., help="Resource kind (e.g. secret, vm_template)."),
+    kind: str = typer.Argument(..., help="Resource kind (e.g. secret, vm-template)."),
     name: str = typer.Argument(..., help="Resource name within the kind."),
 ) -> None:
     """Show the full per-resource detail view.

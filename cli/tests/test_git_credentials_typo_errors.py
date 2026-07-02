@@ -60,10 +60,10 @@ def test_admin_referencing_undeclared_git_credential_errors_at_finalize(
     with pytest.raises(ConfigError) as exc:
         build_registry(config)
     # The error must name the typo'd credential and the source
-    # (admin_template:default) so operators can find the offending line.
+    # (admin-template:default) so operators can find the offending line.
     assert "githb-prod" in str(exc.value)
-    assert "git_credentials" in str(exc.value)
-    assert "admin_template" in str(exc.value)
+    assert "git-credential" in str(exc.value)
+    assert "admin-template" in str(exc.value)
 
 
 def test_agent_template_referencing_undeclared_git_credential_errors(
@@ -81,7 +81,7 @@ def test_agent_template_referencing_undeclared_git_credential_errors(
     with pytest.raises(ConfigError) as exc:
         build_registry(config)
     assert "github-typo" in str(exc.value)
-    assert "agent_template" in str(exc.value)
+    assert "agent-template" in str(exc.value)
 
 
 def test_declared_git_credential_does_not_error(
@@ -106,5 +106,5 @@ def test_declared_git_credential_does_not_error(
     config = load_config(cfg, warn_issues=False)
     registry = build_registry(config)
     # The git_credentials Resource is published and reachable.
-    cred = registry.lookup("git_credentials", "github")
+    cred = registry.lookup("git-credential", "github")
     assert cred.name == "github"

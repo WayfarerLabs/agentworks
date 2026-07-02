@@ -63,7 +63,7 @@ class SecretBackendConfig:
     fields (account, vault, etc.). The ``kind`` field matches the
     ``[secret_backends.<kind>]`` key. This field is also the Resource's
     framework-registry name (the Registry stores rows under
-    ``("secret_backend", kind)``), so SecretBackendConfig is keyed by
+    ``("secret-backend", kind)``), so SecretBackendConfig is keyed by
     ``kind`` rather than a separate ``name`` field unlike other Resource
     types.
     """

@@ -44,9 +44,9 @@ class GitCredentialProviderEntry:
 
 @dataclass(frozen=True)
 class _GitCredentialProviderKind:
-    """Implementation of ``ResourceKind`` for ``"git_credential_provider"``."""
+    """Implementation of ``ResourceKind`` for ``"git-credential-provider"``."""
 
-    kind: str = "git_credential_provider"
+    kind: str = "git-credential-provider"
     miss_policy: Literal["auto-declare", "error"] = "error"
     auto_declare_names: frozenset[str] | None = None
 
@@ -62,4 +62,4 @@ class _GitCredentialProviderKind:
         )
 
 
-KIND_REGISTRY["git_credential_provider"] = _GitCredentialProviderKind()
+KIND_REGISTRY["git-credential-provider"] = _GitCredentialProviderKind()

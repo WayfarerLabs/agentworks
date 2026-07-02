@@ -104,12 +104,12 @@ def test_auto_declared_secret_shows_first_requirement_source(
 
     assert desc.origin is not None
     assert desc.origin.variant == "auto-declared"
-    assert desc.origin.source == ("admin_template", "default")
+    assert desc.origin.source == ("admin-template", "default")
     # Description synthesized at finalize time from the first
     # requirement's usage text + source. Reads as "what this is for,
     # who's asking". No "(and N more)" suffix when there's only one
     # source.
-    assert desc.description == "(auto) the API_KEY env var for admin_template:default"
+    assert desc.description == "(auto) the API_KEY env var for admin-template:default"
 
 
 def test_auto_declared_description_suffix_counts_other_sources(
@@ -144,8 +144,8 @@ def test_auto_declared_description_suffix_counts_other_sources(
     registry = build_registry(config)
     desc = describe_secret(registry, config, "shared")
 
-    # Two distinct sources require this secret: admin_template:default
-    # and vm_template:azure-prod. Whichever the framework walks first
+    # Two distinct sources require this secret: admin-template:default
+    # and vm-template:azure-prod. Whichever the framework walks first
     # is named in the description (publish order, not asserted here);
     # the second contributes to "(and 1 more)". The two references
     # inside azure-prod's env block share a source and do not inflate
@@ -156,8 +156,8 @@ def test_auto_declared_description_suffix_counts_other_sources(
     assert desc.description.endswith("(and 1 more)")
     # First-named source is one of the two requiring templates.
     assert (
-        " for admin_template:default " in desc.description
-        or " for vm_template:azure-prod " in desc.description
+        " for admin-template:default " in desc.description
+        or " for vm-template:azure-prod " in desc.description
     )
 
 
@@ -194,8 +194,8 @@ def test_multiple_usages_render_one_row_each(
     assert len(desc.references) == 2
     sources = sorted(u.source for u in desc.references)
     assert sources == [
-        ("admin_template", "default"),
-        ("vm_template", "azure-prod"),
+        ("admin-template", "default"),
+        ("vm-template", "azure-prod"),
     ]
     # Usage prose reflects the env-var key.
     texts = sorted(u.usage for u in desc.references)
@@ -486,7 +486,7 @@ def test_render_emits_header_usages_mappings_preview(
     assert out.index("Description:") < out.index("Origin:")
     # References (inbound)
     assert "Referenced by:" in out
-    assert "admin_template:default" in out
+    assert "admin-template:default" in out
     assert "the ADMIN_KEY env var" in out
     # Backend mappings
     assert "Backend mappings:" in out

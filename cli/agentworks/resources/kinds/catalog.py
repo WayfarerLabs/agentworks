@@ -1,5 +1,5 @@
-"""Framework strategies for the catalog kinds: ``apt_source``,
-``apt_package``, ``system_install_command``, ``user_install_command``.
+"""Framework strategies for the catalog kinds: ``apt-source``,
+``apt-package``, ``system-install-command``, ``user-install-command``.
 
 All four use the **error miss policy**: a typo in
 ``[vm_templates.*].apt_packages = ["..."]`` etc. -- or in an apt package's
@@ -9,10 +9,10 @@ auto-declare path: catalog entries are built-in (the built-in
 catalog ships with the framework) or operator-declared in the operator's
 TOML, and references must resolve to a known name.
 
-``apt_source`` was originally not a framework kind (only operator-facing
+``apt-source`` was originally not a framework kind (only operator-facing
 config referenced by name got promoted in Phase 2b.0). It joined the
-framework later so the ``apt_package -> apt_source`` dependency graph
-becomes visible on ``agw resource describe apt_source <name>``'s
+framework later so the ``apt-package -> apt-source`` dependency graph
+becomes visible on ``agw resource describe apt-source <name>``'s
 ``Referenced by:`` section, and so unknown-source errors flow through
 the same miss-policy pipeline as everything else instead of a
 catalog-specific validator.
@@ -52,9 +52,9 @@ def _synthesize_no_default(kind: str, references: Sequence[ResourceReference]) -
 
 @dataclass(frozen=True)
 class _AptSourceKind:
-    """Implementation of ``ResourceKind`` for ``"apt_source"``."""
+    """Implementation of ``ResourceKind`` for ``"apt-source"``."""
 
-    kind: str = "apt_source"
+    kind: str = "apt-source"
     miss_policy: Literal["auto-declare", "error"] = "error"
     auto_declare_names: frozenset[str] | None = None
 
@@ -64,9 +64,9 @@ class _AptSourceKind:
 
 @dataclass(frozen=True)
 class _AptPackageKind:
-    """Implementation of ``ResourceKind`` for ``"apt_package"``."""
+    """Implementation of ``ResourceKind`` for ``"apt-package"``."""
 
-    kind: str = "apt_package"
+    kind: str = "apt-package"
     miss_policy: Literal["auto-declare", "error"] = "error"
     auto_declare_names: frozenset[str] | None = None
 
@@ -76,9 +76,9 @@ class _AptPackageKind:
 
 @dataclass(frozen=True)
 class _SystemInstallCommandKind:
-    """Implementation of ``ResourceKind`` for ``"system_install_command"``."""
+    """Implementation of ``ResourceKind`` for ``"system-install-command"``."""
 
-    kind: str = "system_install_command"
+    kind: str = "system-install-command"
     miss_policy: Literal["auto-declare", "error"] = "error"
     auto_declare_names: frozenset[str] | None = None
 
@@ -88,9 +88,9 @@ class _SystemInstallCommandKind:
 
 @dataclass(frozen=True)
 class _UserInstallCommandKind:
-    """Implementation of ``ResourceKind`` for ``"user_install_command"``."""
+    """Implementation of ``ResourceKind`` for ``"user-install-command"``."""
 
-    kind: str = "user_install_command"
+    kind: str = "user-install-command"
     miss_policy: Literal["auto-declare", "error"] = "error"
     auto_declare_names: frozenset[str] | None = None
 
@@ -98,7 +98,7 @@ class _UserInstallCommandKind:
         return _synthesize_no_default(self.kind, references)
 
 
-KIND_REGISTRY["apt_source"] = _AptSourceKind()
-KIND_REGISTRY["apt_package"] = _AptPackageKind()
-KIND_REGISTRY["system_install_command"] = _SystemInstallCommandKind()
-KIND_REGISTRY["user_install_command"] = _UserInstallCommandKind()
+KIND_REGISTRY["apt-source"] = _AptSourceKind()
+KIND_REGISTRY["apt-package"] = _AptPackageKind()
+KIND_REGISTRY["system-install-command"] = _SystemInstallCommandKind()
+KIND_REGISTRY["user-install-command"] = _UserInstallCommandKind()

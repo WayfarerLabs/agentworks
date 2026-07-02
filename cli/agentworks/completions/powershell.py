@@ -22,12 +22,12 @@ DYNAMIC_SNIPPETS: dict[str, str] = {
         ' Where-Object { $_ -like "$wordToComplete*" })'
     ),
     "ws_templates": (
-        "(agw resource list --kind workspace_template --names-only 2>$null"
+        "(agw resource list --kind workspace-template --names-only 2>$null"
         " | ForEach-Object { ($_ -split ':', 2)[1] }"
         ' | Where-Object { $_ -like "$wordToComplete*" })'
     ),
     "git_credentials": (
-        "(agw resource list --kind git_credentials --names-only 2>$null"
+        "(agw resource list --kind git-credential --names-only 2>$null"
         " | ForEach-Object { ($_ -split ':', 2)[1] }"
         ' | Where-Object { $_ -like "$wordToComplete*" })'
     ),
@@ -44,17 +44,17 @@ DYNAMIC_SNIPPETS: dict[str, str] = {
         ' Where-Object { $_ -like "$wordToComplete*" })'
     ),
     "session_templates": (
-        "(agw resource list --kind session_template --names-only 2>$null"
+        "(agw resource list --kind session-template --names-only 2>$null"
         " | ForEach-Object { ($_ -split ':', 2)[1] }"
         ' | Where-Object { $_ -like "$wordToComplete*" })'
     ),
     "vm_templates": (
-        "(agw resource list --kind vm_template --names-only 2>$null"
+        "(agw resource list --kind vm-template --names-only 2>$null"
         " | ForEach-Object { ($_ -split ':', 2)[1] }"
         ' | Where-Object { $_ -like "$wordToComplete*" })'
     ),
     "agent_templates": (
-        "(agw resource list --kind agent_template --names-only 2>$null"
+        "(agw resource list --kind agent-template --names-only 2>$null"
         " | ForEach-Object { ($_ -split ':', 2)[1] }"
         ' | Where-Object { $_ -like "$wordToComplete*" })'
     ),

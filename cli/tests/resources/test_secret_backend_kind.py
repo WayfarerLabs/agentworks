@@ -1,4 +1,4 @@
-"""Tests for Phase 2b.2's ``secret_backend`` kind.
+"""Tests for Phase 2b.2's ``secret-backend`` kind.
 
 The kind makes per-backend config a framework citizen and lets
 operator-declared ``[secret_backends.<kind>]`` blocks land as overrides
@@ -39,14 +39,14 @@ def _write_cfg(path: Path, body: str = "") -> Path:
 
 
 def test_kind_attributes() -> None:
-    kind = KIND_REGISTRY["secret_backend"]
-    assert kind.kind == "secret_backend"
+    kind = KIND_REGISTRY["secret-backend"]
+    assert kind.kind == "secret-backend"
     assert kind.miss_policy == "error"
     assert kind.auto_declare_names is None
 
 
 def test_synthesize_raises() -> None:
-    kind = KIND_REGISTRY["secret_backend"]
+    kind = KIND_REGISTRY["secret-backend"]
     with pytest.raises(NoUnreferencedDefaultError):
         kind.synthesize(())
 
@@ -62,7 +62,7 @@ def test_known_backends_published(tmp_path: Path) -> None:
     # ``name`` like other Resources); the Registry's per-kind dict uses
     # that as the lookup name. Pin via lookup directly.
     for backend_name in KNOWN_BACKEND_KINDS:
-        row = registry.lookup("secret_backend", backend_name)
+        row = registry.lookup("secret-backend", backend_name)
         assert row.kind == backend_name
         assert row.origin.variant == "built-in"
         assert row.origin.source == "agentworks.secrets"
@@ -84,5 +84,5 @@ def test_operator_declared_backend_overrides_built_in(tmp_path: Path) -> None:
         warn_issues=False,
     )
     registry = build_registry(cfg)
-    env_var = registry.lookup("secret_backend", "env-var")
+    env_var = registry.lookup("secret-backend", "env-var")
     assert env_var.origin.variant == "operator-declared"

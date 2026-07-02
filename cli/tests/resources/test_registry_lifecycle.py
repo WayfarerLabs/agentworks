@@ -85,7 +85,7 @@ def test_finalize_twice_errors() -> None:
 
 def test_iter_kind_returns_published_resources(tmp_path: Path) -> None:
     """Published secrets land in iter_kind output. Phase 2a.1's
-    always-materialized ``vm_template:default`` emits a
+    always-materialized ``vm-template:default`` emits a
     ``SecretReference`` for ``tailscale-auth-key`` via its
     ``required_resources``, so the requirement-driven path adds
     ``tailscale-auth-key`` alongside the published a/b/c. The test
@@ -149,10 +149,10 @@ def test_build_registry_publishes_catalog_before_config(
     r = build_registry(cfg)
 
     for catalog_kind in (
-        "apt_source",
-        "apt_package",
-        "system_install_command",
-        "user_install_command",
+        "apt-source",
+        "apt-package",
+        "system-install-command",
+        "user-install-command",
     ):
         rows = list(r.iter_kind(catalog_kind))
         assert rows, f"expected at least one {catalog_kind} row from the catalog publisher"

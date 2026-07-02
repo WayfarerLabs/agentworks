@@ -1,5 +1,5 @@
 """``WorkspaceTemplateKind``: framework strategy for the
-``"workspace_template"`` kind. Same shape as the other template kinds.
+``"workspace-template"`` kind. Same shape as the other template kinds.
 """
 
 from __future__ import annotations
@@ -25,9 +25,9 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class _WorkspaceTemplateKind:
-    """Implementation of ``ResourceKind`` for ``"workspace_template"``."""
+    """Implementation of ``ResourceKind`` for ``"workspace-template"``."""
 
-    kind: str = "workspace_template"
+    kind: str = "workspace-template"
     miss_policy: Literal["auto-declare", "error"] = "auto-declare"
     auto_declare_names: frozenset[str] | None = frozenset({"default"})
 
@@ -57,4 +57,4 @@ class _WorkspaceTemplateKind:
                 yield InstanceRef(instance_kind="workspace", instance_name=ws.name)
 
 
-KIND_REGISTRY["workspace_template"] = _WorkspaceTemplateKind()
+KIND_REGISTRY["workspace-template"] = _WorkspaceTemplateKind()

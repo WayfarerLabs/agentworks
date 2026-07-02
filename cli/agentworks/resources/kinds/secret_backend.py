@@ -1,4 +1,4 @@
-"""Framework strategy for the ``secret_backend`` kind: the backend
+"""Framework strategy for the ``secret-backend`` kind: the backend
 kinds referenced by ``[secret_backends.<kind>]`` and
 ``[secret_config].backends``.
 
@@ -9,7 +9,7 @@ The kind uses the error miss policy. Known backend implementations
 operator-declared origin (same pattern as catalog overrides).
 
 Phase 2b.2 partial migration: this kind landing makes the per-backend
-config queryable via ``agw resource list --kind secret_backend`` and
+config queryable via ``agw resource list --kind secret-backend`` and
 restricts what names land via the operator-declared publish path. The
 ``[secret_config].backends`` active-chain validation (config.py's
 ``_build_secret_resolver``) keeps its bespoke check for now because
@@ -32,9 +32,9 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class _SecretBackendKind:
-    """Implementation of ``ResourceKind`` for ``"secret_backend"``."""
+    """Implementation of ``ResourceKind`` for ``"secret-backend"``."""
 
-    kind: str = "secret_backend"
+    kind: str = "secret-backend"
     miss_policy: Literal["auto-declare", "error"] = "error"
     auto_declare_names: frozenset[str] | None = None
 
@@ -46,4 +46,4 @@ class _SecretBackendKind:
         )
 
 
-KIND_REGISTRY["secret_backend"] = _SecretBackendKind()
+KIND_REGISTRY["secret-backend"] = _SecretBackendKind()

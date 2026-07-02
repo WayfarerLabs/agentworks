@@ -117,7 +117,7 @@ class _SecretKind:
         """Build the set of secret names a session's shell would see in
         its env per current config. Roots follow the env-and-secrets
         layering: a session's shell sees ``vm + workspace + (admin |
-        agent) + session`` env -- mode picks exactly one of admin_template
+        agent) + session`` env -- mode picks exactly one of admin-template
         or agent_template, not both.
 
         Note: this answers "what would this session's shell env contain?"
@@ -126,33 +126,33 @@ class _SecretKind:
         "used by" an agent-mode session even though the VM's admin user
         needs it for ``agw vm shell``. The projection is operator-facing
         ("does my agent see this secret?"), and the admin user's own
-        dependencies surface via admin_template's own ``Used by:`` entry
+        dependencies surface via admin-template's own ``Used by:`` entry
         (every VM).
 
-        ``vm_template`` is always included because the session's VM
+        ``vm-template`` is always included because the session's VM
         bootstrap (apt packages, tailscale auth key, etc.) is a hard
         dependency regardless of session mode.
         """
         roots: list[tuple[str, str]] = []
-        roots.append(("session_template", session.template))
+        roots.append(("session-template", session.template))
         workspace = db.get_workspace(session.workspace_name)
         if workspace is not None:
             roots.append(
-                ("workspace_template", workspace.template or "default")
+                ("workspace-template", workspace.template or "default")
             )
             vm = db.get_vm(workspace.vm_name)
             if vm is not None:
-                roots.append(("vm_template", vm.template or "default"))
-        # Mode picks exactly one of admin_template / agent_template.
-        # When/if a future SDD plurifies admin_template's operator
+                roots.append(("vm-template", vm.template or "default"))
+        # Mode picks exactly one of admin-template / agent-template.
+        # When/if a future SDD plurifies admin-template's operator
         # surface, replace the hardcoded ``"default"`` here with a
-        # per-VM column read (e.g. ``vm.admin_template or "default"``).
+        # per-VM column read (e.g. ``vm.admin-template or "default"``).
         if session.mode == "admin":
-            roots.append(("admin_template", "default"))
+            roots.append(("admin-template", "default"))
         elif session.mode == "agent" and session.agent_name is not None:
             agent = db.get_agent(session.agent_name)
             if agent is not None:
-                roots.append(("agent_template", agent.template or "default"))
+                roots.append(("agent-template", agent.template or "default"))
 
         names: set[str] = set()
         for root in roots:

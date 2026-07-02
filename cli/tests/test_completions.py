@@ -161,11 +161,11 @@ class TestRegistrySourcedCompleters:
     """
 
     _REGISTRY_SOURCED = (
-        ("ws_templates", "workspace_template"),
-        ("git_credentials", "git_credentials"),
-        ("session_templates", "session_template"),
-        ("vm_templates", "vm_template"),
-        ("agent_templates", "agent_template"),
+        ("ws_templates", "workspace-template"),
+        ("git_credentials", "git-credential"),
+        ("session_templates", "session-template"),
+        ("vm_templates", "vm-template"),
+        ("agent_templates", "agent-template"),
     )
 
     def test_bash_snippets_source_from_registry(self) -> None:

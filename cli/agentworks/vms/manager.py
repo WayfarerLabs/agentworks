@@ -1424,7 +1424,7 @@ def _collect_secrets(
     rather than ``collect_secrets_for`` (registry walk). This matters
     when the operator omits ``[vm_templates.default]`` entirely: the
     raw default template isn't published to the registry, so a
-    registry-rooted walk from ``("vm_template", "default")`` would
+    registry-rooted walk from ``("vm-template", "default")`` would
     error. The resolved template always exists (built-in defaults
     apply); a direct secret lookup with fallback is the right shape.
     Phase 2a's ``VMTemplateKind`` will move the auto-decl plumbing

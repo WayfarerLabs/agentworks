@@ -1,5 +1,5 @@
-"""Tests for Phase 2b's catalog kinds: ``apt_source``, ``apt_package``,
-``system_install_command``, ``user_install_command``.
+"""Tests for Phase 2b's catalog kinds: ``apt-source``, ``apt-package``,
+``system-install-command``, ``user-install-command``.
 
 Coverage:
 
@@ -10,9 +10,9 @@ Coverage:
 - ``synthesize`` raises ``NoUnreferencedDefaultError`` per Phase 2a's
   empty-references contract (the kinds never auto-declare; the
   contract is still defined).
-- ``apt_package -> apt_source`` edges: an unknown source name in a
+- ``apt-package -> apt-source`` edges: an unknown source name in a
   package's ``apt_sources`` field surfaces via the framework's miss
-  policy; a known source shows up in the ``apt_source`` Resource's
+  policy; a known source shows up in the ``apt-source`` Resource's
   inbound ``references`` after finalize.
 """
 
@@ -29,10 +29,10 @@ from agentworks.errors import ConfigError
 from agentworks.resources import KIND_REGISTRY, NoUnreferencedDefaultError
 
 CATALOG_KINDS = (
-    "apt_source",
-    "apt_package",
-    "system_install_command",
-    "user_install_command",
+    "apt-source",
+    "apt-package",
+    "system-install-command",
+    "user-install-command",
 )
 
 
@@ -93,7 +93,7 @@ def test_apt_package_typo_errors_with_source(tmp_path: Path) -> None:
         ),
         warn_issues=False,
     )
-    with pytest.raises(ConfigError, match=r"references unknown apt_package 'nonexistent-pkg'"):
+    with pytest.raises(ConfigError, match=r"references unknown apt-package 'nonexistent-pkg'"):
         build_registry(cfg)
 
 
@@ -108,7 +108,7 @@ def test_system_install_command_typo_errors_with_source(tmp_path: Path) -> None:
         ),
         warn_issues=False,
     )
-    with pytest.raises(ConfigError, match="references unknown system_install_command"):
+    with pytest.raises(ConfigError, match="references unknown system-install-command"):
         build_registry(cfg)
 
 
@@ -123,7 +123,7 @@ def test_user_install_command_typo_in_admin_errors(tmp_path: Path) -> None:
         ),
         warn_issues=False,
     )
-    with pytest.raises(ConfigError, match="references unknown user_install_command"):
+    with pytest.raises(ConfigError, match="references unknown user-install-command"):
         build_registry(cfg)
 
 
@@ -138,7 +138,7 @@ def test_user_install_command_typo_in_agent_errors(tmp_path: Path) -> None:
         ),
         warn_issues=False,
     )
-    with pytest.raises(ConfigError, match="references unknown user_install_command"):
+    with pytest.raises(ConfigError, match="references unknown user-install-command"):
         build_registry(cfg)
 
 
@@ -160,25 +160,25 @@ def test_known_apt_package_reference_resolves(tmp_path: Path) -> None:
         warn_issues=False,
     )
     registry = build_registry(cfg)
-    gh = registry.lookup("apt_package", "gh")
+    gh = registry.lookup("apt-package", "gh")
     assert gh.name == "gh"
     # Cross-check: the catalog publisher attached built-in origin
     # and the framework's finalize attached the inbound reference from
-    # vm_template:default.
+    # vm-template:default.
     assert gh.origin.variant == "built-in"
     assert any(
-        u.source == ("vm_template", "default") for u in gh.references
-    ), "vm_template:default reference should be on the apt_package"
+        u.source == ("vm-template", "default") for u in gh.references
+    ), "vm-template:default reference should be on the apt_package"
 
 
-# -- apt_package -> apt_source edges ---------------------------------------
+# -- apt-package -> apt-source edges ---------------------------------------
 
 
 def test_apt_source_kind_published_from_builtin_catalog(tmp_path: Path) -> None:
-    """The catalog publisher emits ``apt_source`` Resources with
-    ``built-in`` origin, parallel to ``apt_package`` / the
+    """The catalog publisher emits ``apt-source`` Resources with
+    ``built-in`` origin, parallel to ``apt-package`` / the
     install-command kinds. The built-in catalog ships at least one
-    apt_source (``github`` today), so the registry has it after
+    apt-source (``github`` today), so the registry has it after
     ``build_registry``.
     """
     cfg = load_config(
@@ -186,21 +186,21 @@ def test_apt_source_kind_published_from_builtin_catalog(tmp_path: Path) -> None:
         warn_issues=False,
     )
     registry = build_registry(cfg)
-    names = [name for name, _ in registry.iter_kind_items("apt_source")]
+    names = [name for name, _ in registry.iter_kind_items("apt-source")]
     assert names, "built-in catalog should publish at least one apt_source"
     for name in names:
-        src = registry.lookup("apt_source", name)
+        src = registry.lookup("apt-source", name)
         assert src.origin.variant == "built-in"
 
 
 def test_apt_package_references_flow_to_apt_source(tmp_path: Path) -> None:
     """``AptPackageEntry.referenced_resources()`` emits one
-    ``ResourceReference(kind="apt_source", ...)`` per name in the
-    package's ``apt_sources`` field. After finalize, the apt_source's
-    ``references`` collection includes the referencing apt_package --
+    ``ResourceReference(kind="apt-source", ...)`` per name in the
+    package's ``apt_sources`` field. After finalize, the apt-source's
+    ``references`` collection includes the referencing apt-package --
     the dependency graph that was previously implicit in
     ``_validate_references`` is now visible via
-    ``agw resource describe apt_source <name>``.
+    ``agw resource describe apt-source <name>``.
     """
     cfg = load_config(
         _write_cfg(
@@ -213,14 +213,14 @@ def test_apt_package_references_flow_to_apt_source(tmp_path: Path) -> None:
         warn_issues=False,
     )
     registry = build_registry(cfg)
-    # ``gh`` depends on the ``github-cli`` apt_source in the built-in
+    # ``gh`` depends on the ``github-cli`` apt-source in the built-in
     # catalog; check the inbound edge lands on the source.
-    github = registry.lookup("apt_source", "github-cli")
+    github = registry.lookup("apt-source", "github-cli")
     referencing_pkgs = [
         entry.source for entry in github.references
-        if entry.source[0] == "apt_package"
+        if entry.source[0] == "apt-package"
     ]
-    assert ("apt_package", "gh") in referencing_pkgs, (
+    assert ("apt-package", "gh") in referencing_pkgs, (
         f"expected apt_package:gh to reference apt_source:github-cli; got "
         f"{referencing_pkgs}"
     )
@@ -283,11 +283,11 @@ def test_operator_declared_apt_source_layers_over_builtin(
     )
     registry = build_registry(cfg)
 
-    custom_src = registry.lookup("apt_source", "custom-src")
+    custom_src = registry.lookup("apt-source", "custom-src")
     assert custom_src.origin.variant == "operator-declared"
     assert custom_src.name == "custom-src"
     # The referencing package shows up on the source's inbound edges.
     assert any(
-        entry.source == ("apt_package", "custom-pkg")
+        entry.source == ("apt-package", "custom-pkg")
         for entry in custom_src.references
     )

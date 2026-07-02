@@ -41,7 +41,7 @@ from agentworks.resources.kinds import (
     catalog as catalog_kind_mod,
 )
 from agentworks.resources.kinds import (
-    git_credentials as git_credentials_kind_mod,
+    git_credential as git_credential_kind_mod,
 )
 from agentworks.resources.kinds import (
     secret as secret_kind_mod,
@@ -66,7 +66,7 @@ def _public_names(module: ModuleType) -> list[str]:
         agent_template,
         catalog_kind_mod,
         git_credential_provider,
-        git_credentials_kind_mod,
+        git_credential_kind_mod,
         named_console_template,
         secret_kind_mod,
         secret_backend,

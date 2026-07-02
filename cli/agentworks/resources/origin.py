@@ -29,7 +29,7 @@ them to the ``Literal`` and gives them factory classmethods.
 The framework's ``Origin`` is distinct from the Config layer's
 ``SourceLocation`` so the two layers can evolve independently. Operators see
 ``Origin`` (rendered as e.g., ``"operator-declared (config.toml:42)"`` or
-``"auto-declared by vm_template:azure-prod"``) in ``agw doctor``,
+``"auto-declared by vm-template:azure-prod"``) in ``agw doctor``,
 ``agw secret list``, and ``agw secret describe``.
 """
 

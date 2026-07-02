@@ -63,15 +63,15 @@ def test_lists_every_kind_present_when_no_kind_filter(tmp_path: Path) -> None:
     listing = list_resources(registry)
 
     kinds_seen = {row.kind for row in listing.rows}
-    # vm_template (operator-declared default), secret (operator + auto),
-    # secret_backend (active env-var), agent_template (default built-in),
-    # apt_package (catalog publisher), git_credential_provider (catalog),
+    # vm-template (operator-declared default), secret (operator + auto),
+    # secret-backend (active env-var), agent-template (default built-in),
+    # apt-package (catalog publisher), git-credential-provider (catalog),
     # etc. We assert presence of the key cross-kind expectations rather
     # than the full set, since publishers may add more.
-    assert "vm_template" in kinds_seen
+    assert "vm-template" in kinds_seen
     assert "secret" in kinds_seen
-    assert "secret_backend" in kinds_seen
-    assert "agent_template" in kinds_seen
+    assert "secret-backend" in kinds_seen
+    assert "agent-template" in kinds_seen
 
 
 def test_kind_filter_narrows_rows_and_summary(tmp_path: Path) -> None:
@@ -116,10 +116,10 @@ def test_kind_filter_accepts_multiple_kinds(tmp_path: Path) -> None:
         """,
     )
     registry = _load(cfg_file)
-    listing = list_resources(registry, kinds=("vm_template", "secret_backend"))
+    listing = list_resources(registry, kinds=("vm-template", "secret-backend"))
 
     kinds_seen = {row.kind for row in listing.rows}
-    assert kinds_seen == {"vm_template", "secret_backend"}
+    assert kinds_seen == {"vm-template", "secret-backend"}
 
 
 def test_unknown_kind_filter_yields_empty_listing(tmp_path: Path) -> None:
@@ -190,7 +190,7 @@ def test_origin_filter_auto_only_shows_auto_declared(tmp_path: Path) -> None:
 
 
 def test_origin_filter_code_only_shows_built_in(tmp_path: Path) -> None:
-    """Code-declared resources include the default ``agent_template``
+    """Code-declared resources include the default ``agent-template``
     (and other framework defaults). The filter narrows to just those.
     """
     cfg_file = tmp_path / "config.toml"
@@ -299,9 +299,9 @@ def test_cli_names_only_emits_kind_colon_name_per_line(
     assert lines, "expected at least one resource row"
     for line in lines:
         assert ":" in line
-    # Spot-check known framework defaults appear (vm_template:default
+    # Spot-check known framework defaults appear (vm-template:default
     # operator-declared; tailscale-auth-key auto-declared).
-    assert "vm_template:default" in lines
+    assert "vm-template:default" in lines
     assert "secret:tailscale-auth-key" in lines
 
 
@@ -322,19 +322,19 @@ def test_cli_kind_csv_filter(tmp_path: Path, monkeypatch) -> None:
 
     result = CliRunner().invoke(
         app,
-        ["resource", "list", "--kind", "vm_template,secret", "--names-only"],
+        ["resource", "list", "--kind", "vm-template,secret", "--names-only"],
     )
     assert result.exit_code == 0, result.stdout
     lines = [line for line in result.stdout.splitlines() if line]
     seen_kinds = {line.split(":", 1)[0] for line in lines}
-    assert seen_kinds == {"vm_template", "secret"}
+    assert seen_kinds == {"vm-template", "secret"}
 
 
 def test_cli_kind_csv_filter_tolerates_whitespace(
     tmp_path: Path, monkeypatch
 ) -> None:
-    """``--kind vm_template, secret`` (with a space) parses the same as
-    ``--kind vm_template,secret``. Commas can't appear in kind
+    """``--kind vm-template, secret`` (with a space) parses the same as
+    ``--kind vm-template,secret``. Commas can't appear in kind
     identifiers, so a forgiving parse is safe.
     """
     from typer.testing import CliRunner
@@ -353,12 +353,12 @@ def test_cli_kind_csv_filter_tolerates_whitespace(
 
     result = CliRunner().invoke(
         app,
-        ["resource", "list", "--kind", "vm_template, secret", "--names-only"],
+        ["resource", "list", "--kind", "vm-template, secret", "--names-only"],
     )
     assert result.exit_code == 0, result.stdout
     lines = [line for line in result.stdout.splitlines() if line]
     seen_kinds = {line.split(":", 1)[0] for line in lines}
-    assert seen_kinds == {"vm_template", "secret"}
+    assert seen_kinds == {"vm-template", "secret"}
 
 
 def test_cli_names_only_with_unknown_kind_emits_nothing(

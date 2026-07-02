@@ -362,7 +362,7 @@ def _polish_auto_declared_description(resource: Any, kind: str) -> Any:
       when more than one distinct source matches.
     - **Empty-usage** (always-materialized reserved default; no incoming
       references): set as ``"(auto) auto-declared default <kind>"``,
-      e.g. ``"(auto) auto-declared default vm_template"``.
+      e.g. ``"(auto) auto-declared default vm-template"``.
 
     Kind-agnostic by design: the framework checks structurally
     (``hasattr(resource, "description")`` + falsy test), not by kind, so

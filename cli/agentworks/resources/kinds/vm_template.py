@@ -1,7 +1,7 @@
-"""``VMTemplateKind``: framework strategy for the ``"vm_template"`` kind.
+"""``VMTemplateKind``: framework strategy for the ``"vm-template"`` kind.
 
 Miss policy ``auto-declare`` with reserved name ``"default"`` -- the
-framework synthesizes ``vm_template:default`` (and only ``"default"``)
+framework synthesizes ``vm-template:default`` (and only ``"default"``)
 when no operator declaration covers it. Any other missing name (a typo
 in ``inherits = ["defualt"]`` etc.) surfaces as a framework miss-policy
 error with the reference source attached. Cycle detection across
@@ -37,9 +37,9 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class _VMTemplateKind:
-    """Implementation of ``ResourceKind`` for ``"vm_template"``."""
+    """Implementation of ``ResourceKind`` for ``"vm-template"``."""
 
-    kind: str = "vm_template"
+    kind: str = "vm-template"
     miss_policy: Literal["auto-declare", "error"] = "auto-declare"
     auto_declare_names: frozenset[str] | None = frozenset({"default"})
 
@@ -57,7 +57,7 @@ class _VMTemplateKind:
         ``("framework", "always-materialize")`` source so the
         breadcrumb shows where the row came from. This is the only path
         the framework actually takes for VMTemplateKind today: the
-        always-materialize pre-step seeds ``vm_template:default`` before
+        always-materialize pre-step seeds ``vm-template:default`` before
         the worklist loop, so by the time any child reference is
         dispatched the target is a hit, not a miss. The non-empty path
         is kept for symmetry with other kinds and to keep the door open
@@ -81,4 +81,4 @@ class _VMTemplateKind:
                 yield InstanceRef(instance_kind="vm", instance_name=vm.name)
 
 
-KIND_REGISTRY["vm_template"] = _VMTemplateKind()
+KIND_REGISTRY["vm-template"] = _VMTemplateKind()

@@ -113,8 +113,8 @@ class ResourceKind(Protocol):
     # The optional ``instances(db, registry, resource) -> Iterable[InstanceRef]``
     # method is intentionally NOT declared on this Protocol. Kinds with a
     # per-instance lifecycle concept (the four named template kinds plus
-    # ``admin_template`` plus ``secret``) implement it; kinds without
-    # (catalog, ``git_credential_provider``, ``secret_backend``) omit it
+    # ``admin-template`` plus ``secret``) implement it; kinds without
+    # (catalog, ``git-credential-provider``, ``secret-backend``) omit it
     # entirely. The framework's consumer (``agentworks.resources.inspect``)
     # uses ``getattr(handler, "instances", None)`` to gate the call, so
     # absent-on-class IS the "no instance concept" signal. Declaring the

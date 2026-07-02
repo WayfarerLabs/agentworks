@@ -52,7 +52,7 @@ class ResolvedVMTemplate:
         )
 
         refs: list[ResourceReference] = list(
-            _env_references(self.env, ("vm_template", self.name))
+            _env_references(self.env, ("vm-template", self.name))
         )
         refs.append(_tailscale_secret_reference(self.tailscale_auth_key, self.name))
         return refs

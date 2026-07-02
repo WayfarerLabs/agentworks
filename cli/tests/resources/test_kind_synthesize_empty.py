@@ -42,7 +42,7 @@ def test_admin_template_kind_builds_default_on_empty_requirements() -> None:
     ``("framework", "always-materialize")`` source so the breadcrumb
     shows the row's provenance.
     """
-    admin_kind = KIND_REGISTRY["admin_template"]
+    admin_kind = KIND_REGISTRY["admin-template"]
     result = admin_kind.synthesize(())
     assert isinstance(result, AdminConfig)
     assert result.origin is not None
@@ -51,10 +51,10 @@ def test_admin_template_kind_builds_default_on_empty_requirements() -> None:
 
 
 def test_named_console_template_kind_builds_default_on_empty_requirements() -> None:
-    """Same shape as ``admin_template``: code-defined default + synthetic
+    """Same shape as ``admin-template``: code-defined default + synthetic
     source.
     """
-    nc_kind = KIND_REGISTRY["named_console_template"]
+    nc_kind = KIND_REGISTRY["named-console-template"]
     result = nc_kind.synthesize(())
     assert isinstance(result, NamedConsoleConfig)
     assert result.origin is not None

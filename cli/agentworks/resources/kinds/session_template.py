@@ -1,5 +1,5 @@
 """``SessionTemplateKind``: framework strategy for the
-``"session_template"`` kind. Same shape as the other template kinds.
+``"session-template"`` kind. Same shape as the other template kinds.
 """
 
 from __future__ import annotations
@@ -25,9 +25,9 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class _SessionTemplateKind:
-    """Implementation of ``ResourceKind`` for ``"session_template"``."""
+    """Implementation of ``ResourceKind`` for ``"session-template"``."""
 
-    kind: str = "session_template"
+    kind: str = "session-template"
     miss_policy: Literal["auto-declare", "error"] = "auto-declare"
     auto_declare_names: frozenset[str] | None = frozenset({"default"})
 
@@ -59,4 +59,4 @@ class _SessionTemplateKind:
                 yield InstanceRef(instance_kind="session", instance_name=sess.name)
 
 
-KIND_REGISTRY["session_template"] = _SessionTemplateKind()
+KIND_REGISTRY["session-template"] = _SessionTemplateKind()

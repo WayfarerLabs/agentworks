@@ -511,20 +511,21 @@ order-preserving) across template inheritance.
 ### Resource Registry
 
 Cross-kind inspection of the Resource Registry. The registry is the framework that owns every
-operator-declared, auto-declared, and built-in resource the CLI knows about: secrets, VM templates, agent
-templates, workspace templates, catalog entries, git credential providers, secret backends, etc. The
-two commands below stop at the framework-uniform fields (`kind`, `name`, `origin`, `references`,
-`used_by`, `description`). For kind-specific detail -- secret backend mappings, template inheritance
-chains, resolution previews -- reach for the per-kind command (e.g. `agw secret describe`).
+operator-declared, auto-declared, and built-in resource the CLI knows about: secrets, VM templates,
+agent templates, workspace templates, catalog entries, git credential providers, secret backends,
+etc. The two commands below stop at the framework-uniform fields (`kind`, `name`, `origin`,
+`references`, `used_by`, `description`). For kind-specific detail -- secret backend mappings,
+template inheritance chains, resolution previews -- reach for the per-kind command (e.g.
+`agw secret describe`).
 
 | Command                               | Description                                                          |
 | ------------------------------------- | -------------------------------------------------------------------- |
 | `agw resource list`                   | List every resource in the registry across all kinds                 |
 | `agw resource describe <kind> <name>` | Show the per-resource detail view (header + Referenced by + Used by) |
 
-`resource list` accepts `--kind <csv>` (e.g. `--kind secret,vm_template`) and `--origin <variant>`
-where variant is `operator`, `auto`, or `builtin`. `--names-only` emits `kind:name` per line and backs
-shell completion.
+`resource list` accepts `--kind <csv>` (e.g. `--kind secret,vm-template`) and `--origin <variant>`
+where variant is `operator`, `auto`, or `builtin`. `--names-only` emits `kind:name` per line and
+backs shell completion.
 
 ## Configuration
 
@@ -621,7 +622,7 @@ agw secret list
 # api-key              OpenAI key for the operator's service                                      OPENAI_API_KEY                enabled
 # force-prompt         Always prompted at command time                                            disabled                      enabled
 # git-token-github     (auto) the auth token for git_credentials:github                           AW_SECRET_GIT_TOKEN_GITHUB    enabled
-# tailscale-auth-key   (auto) the Tailscale auth key for vm_template:default (and 1 more)   AW_SECRET_TAILSCALE_AUTH_KEY  enabled
+# tailscale-auth-key   (auto) the Tailscale auth key for vm-template:default (and 1 more)   AW_SECRET_TAILSCALE_AUTH_KEY  enabled
 ```
 
 Columns are the active backends in `[secret_config].backends` precedence order. Cells show each
@@ -639,12 +640,12 @@ this secret), per-backend mapping table, and a resolution preview, use `agw secr
 agw secret describe tailscale-auth-key
 # Secret: tailscale-auth-key
 #   Kind: secret
-#   Description: (auto) the Tailscale auth key for vm_template:default (and 1 more)
-#   Origin: auto-declared (vm_template:default)
+#   Description: (auto) the Tailscale auth key for vm-template:default (and 1 more)
+#   Origin: auto-declared (vm-template:default)
 #
 # Referenced by:
-#   - vm_template:default -- the Tailscale auth key
-#   - vm_template:heavy -- the Tailscale auth key
+#   - vm-template:default -- the Tailscale auth key
+#   - vm-template:heavy -- the Tailscale auth key
 #
 # Backend mappings:
 #   - env-var: AW_SECRET_TAILSCALE_AUTH_KEY
@@ -695,7 +696,7 @@ claude_plugins = ["nerftools-default@nerftools"]
 
 Agentworks ships a built-in catalog of common tools (apt sources, apt packages, system install
 commands, and user install commands). Run
-`agw resource list --kind apt_package,system_install_command,user_install_command,apt_source` to see
+`agw resource list --kind apt-package,system-install-command,user-install-command,apt-source` to see
 what is available (or filter to any single kind). Reference catalog entries by name in
 `vm_templates`, `admin.config`, and `agent_templates`. User-defined entries in your config override
 built-in entries with the same name.

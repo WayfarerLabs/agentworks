@@ -27,7 +27,7 @@ from agentworks.secrets.orchestration import (
 from agentworks.secrets.prompt import PromptSource
 from agentworks.secrets.resolver import SecretResolver
 
-# Known backend kind identifiers. The framework's secret_backend kind
+# Known backend kind identifiers. The framework's secret-backend kind
 # is the registry-side handle; the publisher below adds one row per
 # entry as built-in so operator-declared [secret_backends.<kind>]
 # blocks land as overrides (same pattern as catalog).
@@ -48,7 +48,7 @@ def publish_to(registry: Registry) -> None:
     code_origin = Origin.built_in(source="agentworks.secrets")
     for kind_name in KNOWN_BACKEND_KINDS:
         registry.add(
-            "secret_backend",
+            "secret-backend",
             kind_name,
             SecretBackendConfig(kind=kind_name),
             code_origin,

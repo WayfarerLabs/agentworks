@@ -31,9 +31,9 @@ def test_built_in_factory_populates_source_str() -> None:
 
 
 def test_auto_declared_factory_populates_source_tuple() -> None:
-    o = Origin.auto_declared(source=("vm_template", "azure-prod"))
+    o = Origin.auto_declared(source=("vm-template", "azure-prod"))
     assert o.variant == "auto-declared"
-    assert o.source == ("vm_template", "azure-prod")
+    assert o.source == ("vm-template", "azure-prod")
     assert o.file is None
     assert o.line is None
 
@@ -57,9 +57,9 @@ def test_origin_equality_per_variant() -> None:
     assert d == e
     assert d != f
 
-    g = Origin.auto_declared(source=("vm_template", "default"))
-    h = Origin.auto_declared(source=("vm_template", "default"))
-    i = Origin.auto_declared(source=("vm_template", "other"))
+    g = Origin.auto_declared(source=("vm-template", "default"))
+    h = Origin.auto_declared(source=("vm-template", "default"))
+    i = Origin.auto_declared(source=("vm-template", "other"))
     assert g == h
     assert g != i
 
@@ -69,7 +69,7 @@ def test_variants_do_not_cross_compare_equal() -> None:
     # data still differ by variant.
     op = Origin.operator_declared(file=Path("/x"), line=1)
     code = Origin.built_in(source="agentworks.catalog")
-    auto = Origin.auto_declared(source=("vm_template", "default"))
+    auto = Origin.auto_declared(source=("vm-template", "default"))
     assert op != code
     assert op != auto
     assert code != auto

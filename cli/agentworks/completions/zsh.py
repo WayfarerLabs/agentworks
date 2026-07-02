@@ -31,13 +31,13 @@ _agentworks_workspaces() {
     "ws_templates": """\
 _agentworks_templates() {
     local -a templates
-    templates=(${(f)"$(agw resource list --kind workspace_template --names-only 2>/dev/null | awk -F: '{print $2}')"})
+    templates=(${(f)"$(agw resource list --kind workspace-template --names-only 2>/dev/null | awk -F: '{print $2}')"})
     _describe 'template' templates
 }""",
     "git_credentials": """\
 _agentworks_git_credentials() {
     local -a creds
-    creds=(${(f)"$(agw resource list --kind git_credentials --names-only 2>/dev/null | awk -F: '{print $2}')"})
+    creds=(${(f)"$(agw resource list --kind git-credential --names-only 2>/dev/null | awk -F: '{print $2}')"})
     _describe 'git-credential' creds
 }""",
     "sessions": """\
@@ -61,19 +61,19 @@ _agentworks_consoles() {
     "session_templates": """\
 _agentworks_session_templates() {
     local -a templates
-    templates=(${(f)"$(agw resource list --kind session_template --names-only 2>/dev/null | awk -F: '{print $2}')"})
+    templates=(${(f)"$(agw resource list --kind session-template --names-only 2>/dev/null | awk -F: '{print $2}')"})
     _describe 'session-template' templates
 }""",
     "vm_templates": """\
 _agentworks_vm_templates() {
     local -a templates
-    templates=(${(f)"$(agw resource list --kind vm_template --names-only 2>/dev/null | awk -F: '{print $2}')"})
+    templates=(${(f)"$(agw resource list --kind vm-template --names-only 2>/dev/null | awk -F: '{print $2}')"})
     _describe 'vm-template' templates
 }""",
     "agent_templates": """\
 _agentworks_agent_templates() {
     local -a templates
-    templates=(${(f)"$(agw resource list --kind agent_template --names-only 2>/dev/null | awk -F: '{print $2}')"})
+    templates=(${(f)"$(agw resource list --kind agent-template --names-only 2>/dev/null | awk -F: '{print $2}')"})
     _describe 'agent-template' templates
 }""",
     "secrets": """\

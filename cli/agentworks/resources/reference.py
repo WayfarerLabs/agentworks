@@ -61,19 +61,19 @@ class ResourceReference:
       declaring resource exposes the name as a config field; otherwise
       fixed per the framework's defaults).
     - ``kind``: target Resource's kind identifier (``"secret"``,
-      ``"vm_template"``, ...). The same kind strings appear throughout the
+      ``"vm-template"``, ...). The same kind strings appear throughout the
       framework: ``KIND_REGISTRY`` keys, ``Origin.source[0]``, error
       messages.
     - ``usage``: prose describing what the declaring Resource needs the
       target for. The framework propagates this verbatim to the
       ``ReferenceEntry`` it attaches to the target during finalize, so the
       same string appears in ``agw resource describe``'s "Referenced by:"
-      section. Example: ``"the tailscale auth key for vm_template:default"``.
+      section. Example: ``"the tailscale auth key for vm-template:default"``.
     - ``source``: ``(kind, name)`` pair identifying the declaring
       Resource. ``kind`` matches the declaring Resource's kind (e.g.,
-      ``"vm_template"`` for ``vm_templates.azure-prod``); ``name`` is the
+      ``"vm-template"`` for ``vm_templates.azure-prod``); ``name`` is the
       declaring Resource's name. Kinds whose operator surface is still
-      a singleton today (``admin_template``, ``named_console_template``)
+      a singleton today (``admin-template``, ``named-console-template``)
       always source from ``"default"``; the framework treats those kinds
       as named-multi-instance under the hood, so a future plurified
       operator surface flows through the same shape unchanged.
@@ -97,8 +97,8 @@ class SecretReference(ResourceReference):
 
 @dataclass(frozen=True)
 class TemplateReference(ResourceReference):
-    """Outbound reference targeting a template-kind Resource (``vm_template``,
-    ``workspace_template``, ``agent_template``, ``session_template``).
+    """Outbound reference targeting a template-kind Resource (``vm-template``,
+    ``workspace-template``, ``agent-template``, ``session-template``).
 
     Emitted by each template type's ``referenced_resources()`` for every
     name in its ``inherits = [...]`` list. The framework's miss policy
@@ -137,7 +137,7 @@ class ReferenceEntry:
     been resolved to its target. ``kind`` and ``name`` from the outbound
     side are dropped here because they are implicit from the container
     Resource -- there is no ambiguity about which Resource an entry on
-    ``vm_template:default.references`` is attached to.
+    ``vm-template:default.references`` is attached to.
     """
 
     source: tuple[str, str]

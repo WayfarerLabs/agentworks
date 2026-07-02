@@ -1,9 +1,10 @@
 # Resource manifests: plan
 
-Phases are sequenced so each ends at green CI and a usable intermediate state. Phases 0 and 1 are
-pure refactors with unchanged behavior. TOML resource sections keep working through Phase 4 and are
-cut over in Phase 5; the dual-source condition exists only between merged phases, never in a release
-(Phase 5 ships in the same release train as the tool it points at).
+Delivery is a single branch and PR (`feat/resource-manifests-sdd`); phases are sequencing milestones
+within it (each ends at a green test suite and a coherent commit series), not separately-merged PRs.
+Phases 0 and 1 are pure refactors with unchanged behavior. TOML resource sections keep working
+through the Phase 4 commits and are cut over in Phase 5; the dual-source condition exists only
+inside the branch and never reaches main or a release.
 
 See [frd.md](frd.md), [hla.md](hla.md), [migration-strategy.md](migration-strategy.md), and
 [prior-art-research.md](prior-art-research.md).
@@ -12,28 +13,28 @@ See [frd.md](frd.md), [hla.md](hla.md), [migration-strategy.md](migration-strate
 
 Standalone, mergeable independently of everything else.
 
-- [ ] Rename `Origin` variant `code-declared` to `built-in`; `code_declared()` factory becomes
+- [x] Rename `Origin` variant `code-declared` to `built-in`; `code_declared()` factory becomes
       `built_in()`. Document `system-plugin` / `external-plugin` as reserved variants in the module
       docstring (not constructible until the plugin SDD).
-- [ ] Update all origin rendering (`resources/render.py`, doctor, secret list/describe, resource
+- [x] Update all origin rendering (`resources/render.py`, doctor, secret list/describe, resource
       list/describe) to the `built-in (<source>)` display shape.
-- [ ] Update `agw resource list --origin` filter vocabulary to `operator | builtin | auto` (confirm
+- [x] Update `agw resource list --origin` filter vocabulary to `operator | builtin | auto` (confirm
       current accepted values first; keep the filter's CSV/enum style consistent with
       cli-conventions).
-- [ ] Kind identifiers move to lower-kebab per FRD R9 (`vm_template` to `vm-template`,
+- [x] Kind identifiers move to lower-kebab per FRD R9 (`vm_template` to `vm-template`,
       `secret_backend` to `secret-backend`, ...): `KIND_REGISTRY` keys, reference/origin source
       tuples, `--kind` filter and `agw resource describe` positional values, error message
       templates. TOML section names (`[vm_templates.*]`, `[secret_backends.*]`, ...) are keys, not
       kind identifiers, and are untouched; today-valid configs load unchanged.
-- [ ] Registry kind `git_credentials` renamed to `git-credential` (singular plus kebab) as part of
+- [x] Registry kind `git_credentials` renamed to `git-credential` (singular plus kebab) as part of
       the same sweep.
-- [ ] Update completions for the new `--origin` and `--kind` vocabularies (confirm whether either is
+- [x] Update completions for the new `--origin` and `--kind` vocabularies (confirm whether either is
       enumerated in the completion tree).
-- [ ] **Tests**: rename-sweep over existing origin and kind tests; prose-scan test
+- [x] **Tests**: rename-sweep over existing origin and kind tests; prose-scan test
       (naming-consistency style) asserting `code-declared` and the old snake_case kind spellings no
       longer appear in operator-facing strings; regression that the shipped sample config loads
       unchanged.
-- [ ] **Docs**: update guide/README text that mentions `code-declared` or spells kind identifiers
+- [x] **Docs**: update guide/README text that mentions `code-declared` or spells kind identifiers
       (e.g. `agw resource list --kind` examples in `sample-config.toml` comments and
       `cli/README.md`).
 
@@ -202,3 +203,8 @@ reviewer-approved.
 
 (Recorded as they happen, per SDD convention. Deviations from FRD/HLA get an entry here and an
 artifact update.)
+
+- **2026-07-02: single-branch delivery.** At the maintainer's direction, all phases land on one
+  branch and PR instead of PR-per-phase. Per-phase "reviewer-approved" in the definitions of done
+  reads as "commit series complete and suite green"; review happens once on the full PR. Side
+  effect: the dual-source window never exists on main.

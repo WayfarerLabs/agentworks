@@ -13,18 +13,18 @@ def _secret_req(name: str, source: tuple[str, str], usage: str = "the X env var"
 
 def _admin_req() -> SecretReference:
     return SecretReference(
-        name="default", kind="admin_template", usage="ignored", source=("test", "x")
+        name="default", kind="admin-template", usage="ignored", source=("test", "x")
     )
 
 
 def _named_console_req() -> SecretReference:
     return SecretReference(
-        name="default", kind="named_console_template", usage="ignored", source=("test", "x")
+        name="default", kind="named-console-template", usage="ignored", source=("test", "x")
     )
 
 
 def test_phase_1a_kinds_registered() -> None:
-    assert set(KIND_REGISTRY) >= {"secret", "admin_template", "named_console_template"}
+    assert set(KIND_REGISTRY) >= {"secret", "admin-template", "named-console-template"}
 
 
 def test_secret_kind_attributes() -> None:
@@ -35,15 +35,15 @@ def test_secret_kind_attributes() -> None:
 
 
 def test_admin_template_kind_attributes() -> None:
-    k = KIND_REGISTRY["admin_template"]
-    assert k.kind == "admin_template"
+    k = KIND_REGISTRY["admin-template"]
+    assert k.kind == "admin-template"
     assert k.miss_policy == "auto-declare"
     assert k.auto_declare_names == frozenset({"default"})
 
 
 def test_named_console_template_kind_attributes() -> None:
-    k = KIND_REGISTRY["named_console_template"]
-    assert k.kind == "named_console_template"
+    k = KIND_REGISTRY["named-console-template"]
+    assert k.kind == "named-console-template"
     assert k.miss_policy == "auto-declare"
     assert k.auto_declare_names == frozenset({"default"})
 
@@ -56,8 +56,8 @@ def test_secret_kind_synthesize_builds_auto_declared_decl() -> None:
     ``test_finalize_pass.py`` covers the end-to-end usage attachment.
     """
     reqs = [
-        _secret_req("api-key", ("vm_template", "default"), "the auth key"),
-        _secret_req("api-key", ("admin_template", "default"), "the admin env var"),
+        _secret_req("api-key", ("vm-template", "default"), "the auth key"),
+        _secret_req("api-key", ("admin-template", "default"), "the admin env var"),
     ]
     decl = KIND_REGISTRY["secret"].synthesize(reqs)
     assert isinstance(decl, SecretDecl)
@@ -65,13 +65,13 @@ def test_secret_kind_synthesize_builds_auto_declared_decl() -> None:
     assert decl.description == ""
     assert decl.origin is not None
     assert decl.origin.variant == "auto-declared"
-    assert decl.origin.source == ("vm_template", "default")  # first-matching
+    assert decl.origin.source == ("vm-template", "default")  # first-matching
     # Usage attached at finalize, not at synthesize.
     assert decl.references == ()
 
 
 def test_admin_template_kind_synthesize_builds_empty_admin() -> None:
-    admin = KIND_REGISTRY["admin_template"].synthesize([_admin_req()])
+    admin = KIND_REGISTRY["admin-template"].synthesize([_admin_req()])
     assert isinstance(admin, AdminConfig)
     assert admin.origin is not None
     assert admin.origin.variant == "auto-declared"
@@ -81,7 +81,7 @@ def test_admin_template_kind_synthesize_builds_empty_admin() -> None:
 
 
 def test_named_console_template_kind_synthesize_builds_empty_named_console() -> None:
-    nc = KIND_REGISTRY["named_console_template"].synthesize([_named_console_req()])
+    nc = KIND_REGISTRY["named-console-template"].synthesize([_named_console_req()])
     assert isinstance(nc, NamedConsoleConfig)
     assert nc.origin is not None
     assert nc.origin.variant == "auto-declared"

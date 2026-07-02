@@ -64,7 +64,7 @@ def test_default_token_secret_auto_declares(
     decl = registry.lookup("secret", "git-token-github")
     assert decl.origin is not None
     assert decl.origin.variant == "auto-declared"
-    assert decl.origin.source == ("git_credentials", "github")
+    assert decl.origin.source == ("git-credential", "github")
 
 
 def test_custom_token_secret_auto_declares(

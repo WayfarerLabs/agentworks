@@ -1,4 +1,4 @@
-"""``GitCredentialKind``: framework strategy for the ``"git_credentials"`` kind.
+"""``GitCredentialKind``: framework strategy for the ``"git-credential"`` kind.
 
 Miss policy ``error`` -- the kind does NOT synthesize. Operators must
 explicitly declare every ``[git_credentials.<name>]`` they reference
@@ -28,9 +28,9 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class _GitCredentialKind:
-    """Implementation of ``ResourceKind`` for ``"git_credentials"``."""
+    """Implementation of ``ResourceKind`` for ``"git-credential"``."""
 
-    kind: str = "git_credentials"
+    kind: str = "git-credential"
     miss_policy: Literal["auto-declare", "error"] = "error"
     auto_declare_names: frozenset[str] | None = None  # ignored under "error"
 
@@ -51,4 +51,4 @@ class _GitCredentialKind:
         )
 
 
-KIND_REGISTRY["git_credentials"] = _GitCredentialKind()
+KIND_REGISTRY["git-credential"] = _GitCredentialKind()

@@ -136,7 +136,7 @@ def test_invalid_git_credential_type(tmp_path: Path) -> None:
     """)
     )
     cfg = load_config(config_file)
-    with pytest.raises(ConfigError, match="git_credential_provider 'gitlab'"):
+    with pytest.raises(ConfigError, match="git-credential-provider 'gitlab'"):
         build_registry(cfg)
 
 

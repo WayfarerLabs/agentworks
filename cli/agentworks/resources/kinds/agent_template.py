@@ -1,4 +1,4 @@
-"""``AgentTemplateKind``: framework strategy for the ``"agent_template"`` kind.
+"""``AgentTemplateKind``: framework strategy for the ``"agent-template"`` kind.
 
 Same shape as ``VMTemplateKind``: ``auto-declare`` miss policy with
 reserved name ``"default"``. ``synthesize`` returns a code-defined
@@ -33,9 +33,9 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class _AgentTemplateKind:
-    """Implementation of ``ResourceKind`` for ``"agent_template"``."""
+    """Implementation of ``ResourceKind`` for ``"agent-template"``."""
 
-    kind: str = "agent_template"
+    kind: str = "agent-template"
     miss_policy: Literal["auto-declare", "error"] = "auto-declare"
     auto_declare_names: frozenset[str] | None = frozenset({"default"})
 
@@ -63,4 +63,4 @@ class _AgentTemplateKind:
                 yield InstanceRef(instance_kind="agent", instance_name=agent.name)
 
 
-KIND_REGISTRY["agent_template"] = _AgentTemplateKind()
+KIND_REGISTRY["agent-template"] = _AgentTemplateKind()

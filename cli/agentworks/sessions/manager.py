@@ -1181,10 +1181,10 @@ def create_session(
     #   workspace_name : str | None   -- the workspace's name (None until
     #                                    DB lookup / default-to-session-name)
     #   new_workspace  : bool         -- True iff we're creating it
-    #   workspace_template : str | None
+    #   workspace-template : str | None
     #   agent_name : str | None       -- the agent's name (None == admin mode)
     #   new_agent  : bool
-    #   agent_template : str | None
+    #   agent-template : str | None
     #
     # ``workspace`` / ``agent`` / ``admin`` are consumed here and unused below.
 

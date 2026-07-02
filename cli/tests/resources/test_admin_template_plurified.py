@@ -1,9 +1,9 @@
-"""Tests for Phase 2a.3's plurification of ``admin_template``.
+"""Tests for Phase 2a.3's plurification of ``admin-template``.
 
 The kind moves from singleton-conceptual to named-multi-instance,
 matching the shape of the other template kinds. The operator surface is
 unchanged in Phase 2a -- ``Config`` still parses only ``[admin]`` and
-publishes one ``admin_template:default`` row. These tests verify the
+publishes one ``admin-template:default`` row. These tests verify the
 *framework* is plurified: a hypothetical future operator surface
 (e.g., ``[admin_templates.work]`` parsing landing in a follow-up SDD)
 would Just Work without re-touching the framework.
@@ -14,11 +14,11 @@ What we pin:
   matching the other template kinds' shape.
 - ``AdminConfig.referenced_resources`` uses ``self.name`` as the source
   identity (not a hardcoded ``"default"``), so a hypothetical
-  ``admin_template:work`` would emit requirements sourced at
-  ``("admin_template", "work")``.
+  ``admin-template:work`` would emit requirements sourced at
+  ``("admin-template", "work")``.
 - The framework's miss policy still restricts auto-declare to
   ``"default"`` -- typo'd or unreserved names still error.
-- The Registry can hold multiple ``admin_template`` rows; one
+- The Registry can hold multiple ``admin-template`` rows; one
   operator-declared default coexists with a hypothetical second name
   added via a future publisher.
 """
@@ -78,7 +78,7 @@ def test_admin_config_carries_its_own_name_field() -> None:
 
 def test_admin_required_resources_sources_from_self_name() -> None:
     """``AdminConfig.referenced_resources`` emits requirements sourced at
-    ``("admin_template", self.name)``, not a hardcoded ``"default"``.
+    ``("admin-template", self.name)``, not a hardcoded ``"default"``.
     Future-plurified named admin templates inherit the right source
     identity without further changes.
     """
@@ -88,7 +88,7 @@ def test_admin_required_resources_sources_from_self_name() -> None:
     )
     reqs = custom.referenced_resources()
     assert reqs  # at least the API_KEY secret requirement
-    assert all(r.source == ("admin_template", "work") for r in reqs)
+    assert all(r.source == ("admin-template", "work") for r in reqs)
 
 
 # -- Framework kind shape ---------------------------------------------------
@@ -104,7 +104,7 @@ def test_admin_template_kind_synthesize_returns_admin_config_with_name() -> None
     Phase 2a.3 added the field; a future change that drops it would
     silently regress the named-multi-instance shape.
     """
-    kind = KIND_REGISTRY["admin_template"]
+    kind = KIND_REGISTRY["admin-template"]
     result = kind.synthesize(())
     assert isinstance(result, AdminConfig)
     assert result.name == "default"
@@ -116,7 +116,7 @@ def test_admin_template_kind_synthesize_returns_admin_config_with_name() -> None
 
 
 def test_registry_can_hold_multiple_admin_template_rows(tmp_path: Path) -> None:
-    """The framework treats ``admin_template`` as named-multi-instance.
+    """The framework treats ``admin-template`` as named-multi-instance.
     Verify the Registry can hold a default + an additional row, both
     operator-declared, finalize without errors, and look up
     independently. (Operator surface stays singleton in Phase 2a; this
@@ -127,14 +127,14 @@ def test_registry_can_hold_multiple_admin_template_rows(tmp_path: Path) -> None:
     default = AdminConfig(name="default", shell="bash")
     work = AdminConfig(name="work", shell="zsh")
     origin = Origin.operator_declared(file=tmp_path / "c.toml", line=1)
-    registry.add("admin_template", "default", default, origin)
-    registry.add("admin_template", "work", work, origin)
+    registry.add("admin-template", "default", default, origin)
+    registry.add("admin-template", "work", work, origin)
     registry.finalize()
 
-    assert registry.lookup("admin_template", "default").shell == "bash"
-    assert registry.lookup("admin_template", "work").shell == "zsh"
+    assert registry.lookup("admin-template", "default").shell == "bash"
+    assert registry.lookup("admin-template", "work").shell == "zsh"
 
-    names = sorted(r.name for r in registry.iter_kind("admin_template"))
+    names = sorted(r.name for r in registry.iter_kind("admin-template"))
     assert names == ["default", "work"]
 
 
@@ -143,7 +143,7 @@ def test_admin_template_kind_errors_on_unreserved_name_reference(
 ) -> None:
     """The reserved-name restriction still applies after plurification:
     a downstream Resource whose ``required_resources()`` points at
-    ``admin_template:custom`` (without a matching publisher) errors
+    ``admin-template:custom`` (without a matching publisher) errors
     via the framework's miss policy. Proves the plurification doesn't
     loosen the auto-declare guard -- ``"default"`` is still the only
     name the framework will synthesize on demand.
@@ -165,15 +165,15 @@ def test_admin_template_kind_errors_on_unreserved_name_reference(
             return [
                 ResourceReference(
                     name="custom",
-                    kind="admin_template",
+                    kind="admin-template",
                     usage="something",
-                    source=("vm_template", "test"),
+                    source=("vm-template", "test"),
                 )
             ]
 
     registry = Registry.empty()
     origin = Origin.operator_declared(file=tmp_path / "c.toml", line=1)
-    registry.add("vm_template", "test", _Stub(), origin)
+    registry.add("vm-template", "test", _Stub(), origin)
 
     with pytest.raises(ConfigError, match="only auto-declares"):
         registry.finalize()
@@ -184,14 +184,14 @@ def test_admin_template_kind_errors_on_unreserved_name_reference(
 
 def test_loader_produces_admin_template_default_unchanged(tmp_path: Path) -> None:
     """A config with no ``[admin.*]`` sections still loads and produces
-    an operator-declared (sentinel-line=0) ``admin_template:default``
+    an operator-declared (sentinel-line=0) ``admin-template:default``
     row at the Registry level. The plurification didn't change the
     operator-facing behavior.
     """
     cfg = load_config(_write_cfg(tmp_path / "config.toml"), warn_issues=False)
     registry = build_registry(cfg)
 
-    admin = registry.lookup("admin_template", "default")
+    admin = registry.lookup("admin-template", "default")
     assert isinstance(admin, AdminConfig)
     assert admin.name == "default"
     assert admin.origin is not None
@@ -235,7 +235,7 @@ def test_plurified_operator_surface_not_yet_parsed(tmp_path: Path) -> None:
     assert cfg.admin.name == "default"
     assert cfg.admin.shell == "zsh"
     # The unrecognized [admin_templates.*] block doesn't produce
-    # additional admin_template Resources today.
+    # additional admin-template Resources today.
     registry = build_registry(cfg)
-    names = sorted(r.name for r in registry.iter_kind("admin_template"))
+    names = sorted(r.name for r in registry.iter_kind("admin-template"))
     assert names == ["default"]

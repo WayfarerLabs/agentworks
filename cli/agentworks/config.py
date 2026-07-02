@@ -97,7 +97,7 @@ def validate_admin_username(admin_username: str) -> None:
 
 
 # Valid values for enum-like fields. Git credential ``type`` validation
-# moved to the framework's ``git_credential_provider`` kind in Phase 2b.1
+# moved to the framework's ``git-credential-provider`` kind in Phase 2b.1
 # (see ``agentworks.git_credentials.PROVIDER_TYPES`` for the canonical
 # list).
 VALID_PLATFORMS = ("lima", "azure", "wsl2", "proxmox")
@@ -179,7 +179,7 @@ def _git_credential_references(
     git_credentials: list[str] | None,
     source: tuple[str, str],
 ) -> list[ResourceReference]:
-    """Emit a ``ResourceReference`` of kind ``"git_credentials"`` per
+    """Emit a ``ResourceReference`` of kind ``"git-credential"`` per
     name in ``git_credentials``. Used by ``AdminConfig.referenced_resources``
     and ``AgentTemplate.referenced_resources`` to feed the
     ``GitCredentialKind``'s error miss policy: a typo'd or undeclared
@@ -193,7 +193,7 @@ def _git_credential_references(
     return [
         ResourceReference(
             name=cred_name,
-            kind="git_credentials",
+            kind="git-credential",
             usage="the git credential",
             source=source,
         )
@@ -217,7 +217,7 @@ def _tailscale_secret_reference(
         name=tailscale_auth_key,
         kind="secret",
         usage="the Tailscale auth key",
-        source=("vm_template", template_name),
+        source=("vm-template", template_name),
     )
 
 
@@ -281,7 +281,7 @@ class VMTemplate:
             TemplateReference,
         )
 
-        source = ("vm_template", self.name)
+        source = ("vm-template", self.name)
         refs: list[ResourceReference] = list(_env_references(self.env, source))
         # Inherits: each parent template name in ``inherits = [...]`` is a
         # TemplateReference targeting the same kind. The framework's
@@ -293,7 +293,7 @@ class VMTemplate:
             refs.append(
                 TemplateReference(
                     name=parent,
-                    kind="vm_template",
+                    kind="vm-template",
                     usage="a parent template",
                     source=source,
                 )
@@ -306,7 +306,7 @@ class VMTemplate:
             refs.append(
                 _ResourceReq(
                     name=pkg,
-                    kind="apt_package",
+                    kind="apt-package",
                     usage="an apt package",
                     source=source,
                 )
@@ -315,7 +315,7 @@ class VMTemplate:
             refs.append(
                 _ResourceReq(
                     name=cmd,
-                    kind="system_install_command",
+                    kind="system-install-command",
                     usage="a system install command",
                     source=source,
                 )
@@ -334,7 +334,7 @@ class VMTemplate:
 class AdminConfig:
     """Per-user config for the admin user on VMs.
 
-    Phase 2a.3 plurified the underlying ``admin_template`` kind from
+    Phase 2a.3 plurified the underlying ``admin-template`` kind from
     singleton-conceptual to named-multi-instance: ``AdminConfig`` now
     carries its own ``name`` (default ``"default"``) just like the other
     template kinds. The operator-facing surface is unchanged in this
@@ -374,7 +374,7 @@ class AdminConfig:
             ResourceReference as _ResourceReq,
         )
 
-        source = ("admin_template", self.name)
+        source = ("admin-template", self.name)
         refs: list[ResourceReference] = list(
             _env_references(self.env, source)
         )
@@ -384,7 +384,7 @@ class AdminConfig:
             refs.append(
                 _ResourceReq(
                     name=cmd,
-                    kind="user_install_command",
+                    kind="user-install-command",
                     usage="a user install command",
                     source=source,
                 )
@@ -425,7 +425,7 @@ class AgentTemplate:
             TemplateReference,
         )
 
-        source = ("agent_template", self.name)
+        source = ("agent-template", self.name)
         refs: list[ResourceReference] = list(
             _env_references(self.env, source)
         )
@@ -434,7 +434,7 @@ class AgentTemplate:
             refs.append(
                 TemplateReference(
                     name=parent,
-                    kind="agent_template",
+                    kind="agent-template",
                     usage="a parent template",
                     source=source,
                 )
@@ -444,7 +444,7 @@ class AgentTemplate:
             refs.append(
                 _ResourceReq(
                     name=cmd,
-                    kind="user_install_command",
+                    kind="user-install-command",
                     usage="a user install command",
                     source=source,
                 )
@@ -466,13 +466,13 @@ class WorkspaceTemplate:
     def referenced_resources(self) -> list[ResourceReference]:
         from agentworks.resources.reference import TemplateReference
 
-        source = ("workspace_template", self.name)
+        source = ("workspace-template", self.name)
         refs: list[ResourceReference] = list(_env_references(self.env, source))
         for parent in self.inherits:
             refs.append(
                 TemplateReference(
                     name=parent,
-                    kind="workspace_template",
+                    kind="workspace-template",
                     usage="a parent template",
                     source=source,
                 )
@@ -512,7 +512,7 @@ class GitCredentialConfig:
         )
         from agentworks.resources.reference import SecretReference
 
-        source = ("git_credentials", self.name)
+        source = ("git-credential", self.name)
         return [
             SecretReference(
                 name=self.token,
@@ -524,7 +524,7 @@ class GitCredentialConfig:
             # kind; framework miss policy catches typos.
             _ResourceReq(
                 name=self.type,
-                kind="git_credential_provider",
+                kind="git-credential-provider",
                 usage="the provider type",
                 source=source,
             ),
@@ -549,13 +549,13 @@ class SessionTemplate:
     def referenced_resources(self) -> list[ResourceReference]:
         from agentworks.resources.reference import TemplateReference
 
-        source = ("session_template", self.name)
+        source = ("session-template", self.name)
         refs: list[ResourceReference] = list(_env_references(self.env, source))
         for parent in self.inherits:
             refs.append(
                 TemplateReference(
                     name=parent,
-                    kind="session_template",
+                    kind="session-template",
                     usage="a parent template",
                     source=source,
                 )
@@ -634,8 +634,8 @@ class Config:
         ``Origin.operator_declared(file=..., line=...)`` built from its
         ``declared_at: SourceLocation``. ``Config.admin`` and
         ``Config.named_console`` are operator-surface singletons today
-        (one TOML block, one row published as ``admin_template:default``
-        / ``named_console_template:default``), but their kinds are
+        (one TOML block, one row published as ``admin-template:default``
+        / ``named-console-template:default``), but their kinds are
         named-multi-instance in the framework: a future SDD can grow the
         operator surface to ``[admin_templates.<name>]`` /
         ``[named_console_templates.<name>]`` without re-touching the
@@ -646,7 +646,7 @@ class Config:
         ``secret_config`` is the secret-system policy envelope consumed
         directly by ``agentworks.secrets``; it is NOT published as a
         Registry kind. Its individual ``secret_backends`` entries are
-        published under the ``"secret_backend"`` kind.
+        published under the ``"secret-backend"`` kind.
 
         Imports ``Registry`` and ``Origin`` from ``agentworks.resources``
         -- the explicit layer handoff. Config's data structures (parsed
@@ -667,31 +667,31 @@ class Config:
         # Multi-named kinds: one Resource per (container, name) pair.
         for kind, kind_dict in (
             ("secret", self.secrets),
-            ("vm_template", self.vm_templates),
-            ("agent_template", self.agent_templates),
-            ("workspace_template", self.workspace_templates),
-            ("session_template", self.session_templates),
-            ("git_credentials", self.git_credentials),
-            ("secret_backend", self.secret_backends),
+            ("vm-template", self.vm_templates),
+            ("agent-template", self.agent_templates),
+            ("workspace-template", self.workspace_templates),
+            ("session-template", self.session_templates),
+            ("git-credential", self.git_credentials),
+            ("secret-backend", self.secret_backends),
         ):
             for name, resource in kind_dict.items():
                 registry.add(kind, name, resource, op_origin(resource.declared_at))
 
         # Operator-surface-singleton kinds: framework treats them as
         # named-multi-instance per Phase 2a.3, but today's loader only
-        # produces one row each (``admin_template:default`` /
-        # ``named_console_template:default``). admin_template's name is
+        # produces one row each (``admin-template:default`` /
+        # ``named-console-template:default``). admin-template's name is
         # carried on the AdminConfig itself now -- still defaults to
         # "default" -- so the future plurified surface can land without
         # changing this publish line.
         registry.add(
-            "admin_template",
+            "admin-template",
             self.admin.name,
             self.admin,
             op_origin(self.admin.declared_at),
         )
         registry.add(
-            "named_console_template",
+            "named-console-template",
             "default",
             self.named_console,
             op_origin(self.named_console.declared_at),
@@ -1275,7 +1275,7 @@ def _load_git_credentials(
         # Phase 2b.1: the ``type`` field's reference-existence check
         # moves to the framework via
         # ``GitCredentialConfig.referenced_resources`` emitting a
-        # ``ResourceReference(kind="git_credential_provider", ...)``;
+        # ``ResourceReference(kind="git-credential-provider", ...)``;
         # ``_GitCredentialProviderKind``'s error miss policy fires at
         # build_registry time with the framework's consistent error
         # shape if the type isn't a known provider.
