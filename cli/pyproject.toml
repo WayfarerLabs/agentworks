@@ -10,6 +10,12 @@ authors = [
 ]
 dependencies = [
     "typer>=0.24.1",
+    # click is a direct dep because agentworks/completions/spec.py and
+    # agentworks/cli/{_entry,_typer_output}.py import from click to
+    # introspect typer's command tree and handle typer's underlying
+    # click.exceptions. Older typer pulled click in transitively; typer
+    # 0.26 dropped that, so declaring it here keeps our imports valid.
+    "click>=8.3",
     "azure-identity>=1.25.1",
     "azure-mgmt-compute>=37.0.1",
     "azure-mgmt-network>=29.0.0",
