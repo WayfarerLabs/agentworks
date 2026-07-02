@@ -30,6 +30,7 @@ from agentworks.errors import (
     UserAbort,
     ValidationError,
 )
+from agentworks.resources.access import admin_template, named_console_template
 from agentworks.sessions.multi_console_layout import (
     SHELL_INDEX_OPTION,
     _apply_layout,
@@ -53,6 +54,7 @@ if TYPE_CHECKING:
         ShellEntry,
         VMRow,
     )
+    from agentworks.resources.registry import Registry
     from agentworks.secrets import SecretTarget
     from agentworks.transports import Transport
 
@@ -351,7 +353,10 @@ def add_sessions(
     """Append sessions to an existing console in argument order. Atomic at the
     DB layer; if the console's tmux session is live, also adds the windows
     immediately (best-effort)."""
+    from agentworks.bootstrap import build_registry
+
     console = _require_console(db, console_name)
+    registry = build_registry(config)
     specs = [parse_session_spec(s) for s in session_specs]
     _dedupe_specs(specs)
 
@@ -392,7 +397,7 @@ def add_sessions(
                 # use_admin promotion only fires for admin-mode sessions.
                 use_admin = session_user == vm_row.admin_username
                 pane = _pane_secret_target(
-                    config, db,
+                    config, db, registry,
                     vm=vm_row, session=session, is_admin_pane=use_admin,
                 )
                 if pane is None:
@@ -425,10 +430,11 @@ def add_sessions(
                 target,
                 db,
                 config,
+                registry,
                 console_name=console_name,
                 member=member,
                 vm=vm,
-                layout=config.named_console.tmux_layout,
+                layout=named_console_template(registry).tmux_layout,
             )
 
 
@@ -596,8 +602,11 @@ def add_shell(
 ) -> None:
     """Append a single shell entry to a session's window in a console. If the
     console is live, also splits the pane immediately (best-effort)."""
+    from agentworks.bootstrap import build_registry
+
     _validate_cwd(cwd)
     console = _require_console(db, console_name)
+    registry = build_registry(config)
     cs = db.get_console_session(console_name, session_name)
     if cs is None:
         raise NotFoundError(
@@ -625,6 +634,7 @@ def add_shell(
         pane_target = _pane_secret_target(
             config,
             db,
+            registry,
             vm=vm_row,
             session=session_row,
             is_admin_pane=use_admin,
@@ -663,6 +673,7 @@ def add_shell(
             target,
             db,
             config,
+            registry,
             console_name=console_name,
             window_name=session_name,
             workspace_path=workspace_path,
@@ -681,7 +692,7 @@ def add_shell(
         # run `add-shell`; pulling focus off their current pane would be
         # jarring. The layout still re-applies so geometry reflects the new
         # pane count.
-        _apply_layout(target, q_con, q_win, config.named_console.tmux_layout)
+        _apply_layout(target, q_con, q_win, named_console_template(registry).tmux_layout)
 
 
 def restore_session(
@@ -700,7 +711,10 @@ def restore_session(
     no way to determine which configured shell is missing, so we refuse and
     direct the operator to `attach --recreate`.
     """
+    from agentworks.bootstrap import build_registry
+
     console = _require_console(db, console_name)
+    registry = build_registry(config)
     member = db.get_console_session(console_name, session_name)
     if member is None:
         raise NotFoundError(
@@ -730,7 +744,7 @@ def restore_session(
 
         q_con = shlex.quote(tmux_session_name(console_name))
         q_win = shlex.quote(session_name)
-        layout = config.named_console.tmux_layout
+        layout = named_console_template(registry).tmux_layout
         configured_count = len(member.shells)
 
         # Window present?
@@ -762,7 +776,7 @@ def restore_session(
             if all_indices:
                 resolve_for_command(
                     _restore_session_secret_targets(
-                        db, config, vm=vm, member=member, indices=all_indices,
+                        db, config, registry, vm=vm, member=member, indices=all_indices,
                     ),
                     config,
                 )
@@ -770,6 +784,7 @@ def restore_session(
                 target,
                 db,
                 config,
+                registry,
                 console_name=console_name,
                 member=member,
                 vm=vm,
@@ -895,7 +910,7 @@ def restore_session(
 
         resolve_for_command(
             _restore_session_secret_targets(
-                db, config, vm=vm, member=member, indices=missing,
+                db, config, registry, vm=vm, member=member, indices=missing,
             ),
             config,
         )
@@ -912,6 +927,7 @@ def restore_session(
                 target,
                 db,
                 config,
+                registry,
                 console_name=console_name,
                 window_name=session_name,
                 workspace_path=workspace_path,
@@ -1150,6 +1166,7 @@ def kill_session_windows(
 def _pane_secret_target(
     config: Config,
     db: Database,
+    registry: Registry,
     *,
     vm: VMRow,
     session: SessionRow,
@@ -1177,23 +1194,23 @@ def _pane_secret_target(
     and silently return ``None``, breaking the eager-resolve guarantee
     for that shape.
     """
-    from agentworks.agents.templates import resolve_from_dict as _resolve_agent_template
+    from agentworks.agents.templates import resolve_template as _resolve_agent_template
     from agentworks.secrets import SecretTarget
-    from agentworks.vms.templates import resolve_from_dict as _resolve_vm_template
+    from agentworks.vms.templates import resolve_template as _resolve_vm_template
     from agentworks.workspaces.templates import resolve_template as _resolve_ws_template
 
     workspace = db.get_workspace(session.workspace_name)
     if workspace is None:
         return None
 
-    vm_tmpl = _resolve_vm_template(config.vm_templates, vm.template)
-    ws_tmpl = _resolve_ws_template(config, workspace.template)
+    vm_tmpl = _resolve_vm_template(registry, vm.template)
+    ws_tmpl = _resolve_ws_template(registry, workspace.template)
 
     if is_admin_pane:
         return SecretTarget(
             vm=vm_tmpl.env,
             workspace=ws_tmpl.env,
-            admin=config.admin.env,
+            admin=admin_template(registry).env,
             label=f"console-pane:{session.name}/admin",
         )
 
@@ -1202,7 +1219,7 @@ def _pane_secret_target(
     agent = db.get_agent(session.agent_name)
     if agent is None:
         return None
-    agent_tmpl = _resolve_agent_template(config.agent_templates, agent.template)
+    agent_tmpl = _resolve_agent_template(registry, agent.template)
     return SecretTarget(
         vm=vm_tmpl.env,
         workspace=ws_tmpl.env,
@@ -1212,7 +1229,7 @@ def _pane_secret_target(
 
 
 def _admin_only_secret_target(
-    config: Config, vm: VMRow, *, label: str,
+    config: Config, registry: Registry, vm: VMRow, *, label: str,
 ) -> SecretTarget:
     """SecretTarget for an admin-only console pane (no workspace context).
 
@@ -1229,12 +1246,12 @@ def _admin_only_secret_target(
     lands as a follow-up.
     """
     from agentworks.secrets import SecretTarget
-    from agentworks.vms.templates import resolve_from_dict as _resolve_vm_template
+    from agentworks.vms.templates import resolve_template as _resolve_vm_template
 
-    vm_tmpl = _resolve_vm_template(config.vm_templates, vm.template)
+    vm_tmpl = _resolve_vm_template(registry, vm.template)
     return SecretTarget(
         vm=vm_tmpl.env,
-        admin=config.admin.env,
+        admin=admin_template(registry).env,
         label=label,
     )
 
@@ -1242,6 +1259,7 @@ def _admin_only_secret_target(
 def _console_build_secret_targets(
     db: Database,
     config: Config,
+    registry: Registry,
     *,
     console: ConsoleRow,
     vm: VMRow,
@@ -1269,7 +1287,7 @@ def _console_build_secret_targets(
     if console.admin_shell:
         targets.append(
             _admin_only_secret_target(
-                config, vm,
+                config, registry, vm,
                 label=f"console={console.name}/admin-shell",
             ),
         )
@@ -1284,7 +1302,7 @@ def _console_build_secret_targets(
         for shell in member.shells:
             use_admin = shell["admin"] or session_user == vm.admin_username
             pane = _pane_secret_target(
-                config, db, vm=vm, session=session, is_admin_pane=use_admin,
+                config, db, registry, vm=vm, session=session, is_admin_pane=use_admin,
             )
             if pane is not None:
                 targets.append(pane)
@@ -1294,6 +1312,7 @@ def _console_build_secret_targets(
 def _restore_session_secret_targets(
     db: Database,
     config: Config,
+    registry: Registry,
     *,
     vm: VMRow,
     member: ConsoleSessionRow,
@@ -1322,7 +1341,7 @@ def _restore_session_secret_targets(
         shell = member.shells[idx]
         use_admin = shell["admin"] or session_user == vm.admin_username
         pane = _pane_secret_target(
-            config, db, vm=vm, session=session, is_admin_pane=use_admin,
+            config, db, registry, vm=vm, session=session, is_admin_pane=use_admin,
         )
         if pane is not None:
             targets.append(pane)
@@ -1332,6 +1351,7 @@ def _restore_session_secret_targets(
 def _resolve_pane_env(
     config: Config,
     db: Database,
+    registry: Registry,
     *,
     vm: VMRow,
     session: SessionRow,
@@ -1360,17 +1380,17 @@ def _resolve_pane_env(
     resolution needs (e.g. workspace lookup fails); the caller proceeds
     without env injection rather than raising mid-pane-split.
     """
-    from agentworks.agents.templates import resolve_from_dict as _resolve_agent_template
+    from agentworks.agents.templates import resolve_template as _resolve_agent_template
     from agentworks.env import ResourceContext, compose_env
-    from agentworks.vms.templates import resolve_from_dict as _resolve_vm_template
+    from agentworks.vms.templates import resolve_template as _resolve_vm_template
     from agentworks.workspaces.templates import resolve_template as _resolve_ws_template
 
     workspace = db.get_workspace(session.workspace_name)
     if workspace is None:
         return {}
 
-    vm_tmpl = _resolve_vm_template(config.vm_templates, vm.template)
-    ws_tmpl = _resolve_ws_template(config, workspace.template)
+    vm_tmpl = _resolve_vm_template(registry, vm.template)
+    ws_tmpl = _resolve_ws_template(registry, workspace.template)
 
     # No session context: add-shell panes are sidecar shells, not part of
     # the session itself. No agent_name in the ctx either -- the agent
@@ -1391,7 +1411,7 @@ def _resolve_pane_env(
             ctx=ctx,
             vm=vm_tmpl.env,
             workspace=ws_tmpl.env,
-            admin=config.admin.env,
+            admin=admin_template(registry).env,
         )
 
     if session.agent_name is None:
@@ -1405,7 +1425,7 @@ def _resolve_pane_env(
     agent = db.get_agent(session.agent_name)
     if agent is None:
         return {}
-    agent_tmpl = _resolve_agent_template(config.agent_templates, agent.template)
+    agent_tmpl = _resolve_agent_template(registry, agent.template)
     return compose_env(
         resolver=config.secret_resolver,
         ctx=ctx,
@@ -1424,6 +1444,7 @@ def _split_shell_pane(
     target: Transport,
     db: Database,
     config: Config,
+    registry: Registry,
     *,
     console_name: str,
     window_name: str,
@@ -1475,6 +1496,7 @@ def _split_shell_pane(
     pane_env = _resolve_pane_env(
         config,
         db,
+        registry,
         vm=vm,
         session=session,
         pane_user=admin_user if use_admin else session_user,
@@ -1558,6 +1580,7 @@ def _add_session_window(
     target: Transport,
     db: Database,
     config: Config,
+    registry: Registry,
     *,
     console_name: str,
     member: ConsoleSessionRow,
@@ -1618,6 +1641,7 @@ def _add_session_window(
                 target,
                 db,
                 config,
+                registry,
                 console_name=console_name,
                 window_name=session.name,
                 workspace_path=workspace_path,
@@ -1639,6 +1663,7 @@ def _build_console_tmux(
     target: Transport,
     db: Database,
     config: Config,
+    registry: Registry,
     console: ConsoleRow,
     vm: VMRow,
     *,
@@ -1690,6 +1715,7 @@ def _build_console_tmux(
             target,
             db,
             config,
+            registry,
             console_name=console.name,
             member=member,
             vm=vm,
@@ -1811,12 +1837,15 @@ def attach_console(
             hint="Pass --allow-nesting to override.",
         )
 
+    from agentworks.bootstrap import build_registry
+
     console = _require_console(db, name)
+    registry = build_registry(config)
     vm, target = _prepare_vm_target_for_attach(db, config, console.vm_name)
 
     with keep_vm_active(db, config, vm):
         exists = _console_tmux_exists(target, name)
-        layout = config.named_console.tmux_layout
+        layout = named_console_template(registry).tmux_layout
 
         # Eager-prompting orchestration (FRD R4 / Phase 6): the
         # build path opens new shells (admin shell + helper shell panes
@@ -1829,16 +1858,16 @@ def attach_console(
             from agentworks.secrets import resolve_for_command
 
             resolve_for_command(
-                _console_build_secret_targets(db, config, console=console, vm=vm),
+                _console_build_secret_targets(db, config, registry, console=console, vm=vm),
                 config,
             )
 
         if recreate and exists:
             output.info(f"Rebuilding console '{name}' (--recreate)...")
-            _build_console_tmux(target, db, config, console, vm, layout=layout)
+            _build_console_tmux(target, db, config, registry, console, vm, layout=layout)
         elif not exists:
             output.info(f"Building console '{name}' on first attach...")
-            _build_console_tmux(target, db, config, console, vm, layout=layout)
+            _build_console_tmux(target, db, config, registry, console, vm, layout=layout)
         else:
             output.info(f"Attaching to running console '{name}'.")
 

@@ -70,7 +70,7 @@ def test_collect_secrets_resolves_tailscale_from_env_var(
     from agentworks.vms.templates import resolve_template
 
     registry = build_registry(config)
-    vm_tmpl = resolve_template(config, "default")
+    vm_tmpl = resolve_template(registry, "default")
     ts_auth_key, git_tokens = _collect_secrets(
         config, registry, {}, "test-vm", vm_tmpl
     )
@@ -106,7 +106,7 @@ def test_collect_secrets_uses_custom_tailscale_secret_name(
     from agentworks.vms.templates import resolve_template
 
     registry = build_registry(config)
-    vm_tmpl = resolve_template(config, "azure-prod")
+    vm_tmpl = resolve_template(registry, "azure-prod")
     ts_auth_key, _ = _collect_secrets(
         config, registry, {}, "test-vm", vm_tmpl
     )
@@ -137,7 +137,7 @@ def test_collect_secrets_signature_is_keyword_safe(
     from agentworks.vms.templates import resolve_template
 
     registry = build_registry(config)
-    vm_tmpl = resolve_template(config, "default")
+    vm_tmpl = resolve_template(registry, "default")
     ts_auth_key, _ = _collect_secrets(
         config, registry, {}, "test-vm", vm_tmpl
     )

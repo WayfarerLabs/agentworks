@@ -21,9 +21,16 @@ import pytest
 
 from agentworks.db import Database
 from agentworks.errors import StateError
+from tests.conftest import stub_build_registry
 
 if TYPE_CHECKING:
     pass
+
+
+@pytest.fixture(autouse=True)
+def _stub_build_registry(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Serve Registry reads from the module's namespace configs."""
+    stub_build_registry(monkeypatch)
 
 
 def _seed_db(

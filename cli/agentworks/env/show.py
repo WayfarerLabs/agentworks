@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import AgentRow, Database, SessionRow, VMRow, WorkspaceRow
     from agentworks.env.entry import EnvEntry
+    from agentworks.resources.registry import Registry
     from agentworks.secrets import SecretResolver
     from agentworks.sessions.templates import ResolvedSessionTemplate
     from agentworks.vms.templates import ResolvedVMTemplate
@@ -96,8 +97,10 @@ def show_env(
 
     # Per-scope env dicts (each scope contributes only its own EnvEntry map;
     # template inheritance is already merged into the resolved templates).
+    from agentworks.bootstrap import build_registry
+
     vm_env, workspace_env, admin_env, agent_env, session_env = _resolve_scope_envs(
-        config, ctx
+        build_registry(config), ctx
     )
 
     # Build the resource context for identity vars.
@@ -241,7 +244,7 @@ def _resolve_context(
 
 
 def _resolve_scope_envs(
-    config: Config,
+    registry: Registry,
     ctx: _ResolvedContext,
 ) -> tuple[
     dict[str, EnvEntry],
@@ -256,20 +259,21 @@ def _resolve_scope_envs(
     are mutually exclusive: a context with an agent uses the agent scope,
     otherwise the admin scope.
     """
-    from agentworks.agents.templates import resolve_from_dict as _resolve_agent_template
-    from agentworks.sessions.templates import resolve_from_dict as _resolve_session_template
-    from agentworks.vms.templates import resolve_from_dict as _resolve_vm_template
+    from agentworks.agents.templates import resolve_template as _resolve_agent_template
+    from agentworks.resources.access import admin_template as _admin_template
+    from agentworks.sessions.templates import resolve_template as _resolve_session_template
+    from agentworks.vms.templates import resolve_template as _resolve_vm_template
     from agentworks.workspaces.templates import resolve_template as _resolve_ws_template
 
     vm_template: ResolvedVMTemplate = _resolve_vm_template(
-        config.vm_templates, ctx.vm.template,
+        registry, ctx.vm.template,
     )
     vm_env = vm_template.env
 
     workspace_env: dict[str, EnvEntry] | None = None
     if ctx.workspace is not None:
         ws_template: ResolvedWorkspaceTemplate = _resolve_ws_template(
-            config, ctx.workspace.template,
+            registry, ctx.workspace.template,
         )
         workspace_env = ws_template.env
 
@@ -277,16 +281,16 @@ def _resolve_scope_envs(
     agent_env: dict[str, EnvEntry] | None = None
     if ctx.agent is not None:
         agent_template: ResolvedAgentTemplate = _resolve_agent_template(
-            config.agent_templates, ctx.agent.template,
+            registry, ctx.agent.template,
         )
         agent_env = agent_template.env
     else:
-        admin_env = config.admin.env
+        admin_env = _admin_template(registry).env
 
     session_env: dict[str, EnvEntry] | None = None
     if ctx.session is not None:
         session_template: ResolvedSessionTemplate = _resolve_session_template(
-            config.session_templates, ctx.session.template,
+            registry, ctx.session.template,
         )
         session_env = session_template.env
 

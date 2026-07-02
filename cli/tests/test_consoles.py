@@ -33,13 +33,19 @@ from agentworks.sessions.multi_console import (
     tmux_session_name,
 )
 from agentworks.sessions.multi_console_layout import SHELL_INDEX_OPTION
-from tests.conftest import _FakeResult, _FakeTarget
+from tests.conftest import _FakeResult, _FakeTarget, stub_build_registry
 
 if TYPE_CHECKING:
     from tests.conftest import CapturedOutput
 
 
 # -- Helpers ---------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _stub_build_registry(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Serve Registry reads from the module's namespace configs."""
+    stub_build_registry(monkeypatch)
 
 
 def _seed_vm(db: Database, vm_name: str = "vm1", *, with_tailscale: bool = False) -> None:

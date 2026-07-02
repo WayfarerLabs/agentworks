@@ -233,18 +233,70 @@ def stub_session_resolvers(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
-def stub_build_registry(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Stub ``agentworks.bootstrap.build_registry`` to a no-op.
+class _StubRegistry:
+    """Registry test double serving the consumer read surface from a
+    (possibly ``SimpleNamespace``) config.
 
-    Phase 2a's manager-entry hoist (Phase 2a.0) calls
-    ``build_registry(config)`` at the top of ``create_session``,
-    ``create_agent``, ``reinit_agent``, ``create_workspace``,
-    ``reinit_workspace``, ``create_vm``, ``reinit_vm``, and
-    ``add_git_credential`` before any business logic. Tests that pass
-    ``SimpleNamespace`` configs (which don't carry ``publish_to``) need
-    this stub so the hoist doesn't crash on the mock config. Real
-    ``Config`` flows still exercise the hoist's framework-error
-    guarantee via ``tests/resources/``.
+    The Phase 1 consumer repoint (resource-manifests SDD) routed all
+    resource reads through Registry queries (``lookup`` /
+    ``iter_kind`` / ``iter_kind_items``, usually via
+    ``agentworks.resources.access``). Tests that fabricate minimal
+    namespace configs can't feed the real ``build_registry`` (no
+    ``publish_to``, rows aren't dataclasses), so this double answers
+    the same queries straight off the config's attributes, falling
+    back to real code-default singletons where the fake omits them.
+    """
+
+    _KIND_ATTRS = {
+        "secret": "secrets",
+        "vm-template": "vm_templates",
+        "agent-template": "agent_templates",
+        "workspace-template": "workspace_templates",
+        "session-template": "session_templates",
+        "git-credential": "git_credentials",
+        "secret-backend": "secret_backends",
+    }
+
+    def __init__(self, config: object) -> None:
+        self._config = config
+
+    def _kind_dict(self, kind: str) -> dict[str, object]:
+        attr = self._KIND_ATTRS.get(kind)
+        if attr is None:
+            return {}
+        return dict(getattr(self._config, attr, None) or {})
+
+    def lookup(self, kind: str, name: str) -> object | None:
+        if kind == "admin-template":
+            from agentworks.config import AdminConfig
+
+            admin = getattr(self._config, "admin", None)
+            return admin if admin is not None else AdminConfig()
+        if kind == "named-console-template":
+            from agentworks.config import NamedConsoleConfig
+
+            console = getattr(self._config, "named_console", None)
+            return console if console is not None else NamedConsoleConfig()
+        return self._kind_dict(kind).get(name)
+
+    def iter_kind(self, kind: str):  # noqa: ANN201 - mirrors Registry
+        return iter(self._kind_dict(kind).values())
+
+    def iter_kind_items(self, kind: str):  # noqa: ANN201 - mirrors Registry
+        return iter(self._kind_dict(kind).items())
+
+
+def stub_build_registry(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Stub ``agentworks.bootstrap.build_registry`` with ``_StubRegistry``.
+
+    Manager entries call ``build_registry(config)`` before business
+    logic and thread the result to every resource read (Phase 1 of the
+    resource-manifests SDD). Tests that pass ``SimpleNamespace`` configs
+    (which don't carry ``publish_to``) need this stub so those entries
+    get a Registry-shaped object that answers reads from the fake
+    config. Real ``Config`` flows still exercise the real
+    ``build_registry`` via ``tests/resources/`` and the integration
+    suites.
 
     Usage: bind to an autouse fixture in each test module that uses
     mock configs::
@@ -254,5 +306,5 @@ def stub_build_registry(monkeypatch: pytest.MonkeyPatch) -> None:
             stub_build_registry(monkeypatch)
     """
     monkeypatch.setattr(
-        "agentworks.bootstrap.build_registry", lambda config: None
+        "agentworks.bootstrap.build_registry", _StubRegistry
     )

@@ -1337,10 +1337,14 @@ def test_secret_target_pre_create_parity_with_session_secret_target(
     assert vm is not None
     assert ws is not None
     agent = db.get_agent("agt1") if mode == "agent" else None
-    session_template = _resolve_template(config, None)
+    from agentworks.bootstrap import build_registry
+
+    registry = build_registry(config)
+    session_template = _resolve_template(registry, None)
 
     post = _session_secret_target(
         config,
+        registry,
         db=db,
         vm=vm,
         ws=ws,
@@ -1351,6 +1355,7 @@ def test_secret_target_pre_create_parity_with_session_secret_target(
     )
     pre = _session_secret_target_pre_create(
         config,
+        registry,
         name="s1",
         workspace_name="ws1",
         vm=vm,

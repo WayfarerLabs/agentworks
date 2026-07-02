@@ -60,6 +60,7 @@ class _AgentDirectEnvScopes(NamedTuple):
 
 def _resolve_agent_direct_env_scopes(
     config: Config,
+    registry: Registry,
     vm: VMRow,
     agent: AgentRow,
     *,
@@ -81,15 +82,15 @@ def _resolve_agent_direct_env_scopes(
       different template than the operator's current ``--template``
       would resolve.
     """
-    from agentworks.agents.templates import resolve_from_dict as _resolve_agent_template
-    from agentworks.vms.templates import resolve_from_dict as _resolve_vm_template
+    from agentworks.agents.templates import resolve_template as _resolve_agent_template
+    from agentworks.vms.templates import resolve_template as _resolve_vm_template
     from agentworks.workspaces.templates import resolve_template as _resolve_ws_template
 
-    vm_tmpl = _resolve_vm_template(config.vm_templates, vm.template)
-    agent_tmpl = _resolve_agent_template(config.agent_templates, agent.template)
+    vm_tmpl = _resolve_vm_template(registry, vm.template)
+    agent_tmpl = _resolve_agent_template(registry, agent.template)
     ws_env: dict[str, EnvEntry] | None = None
     if ws is not None:
-        ws_env = _resolve_ws_template(config, ws.template).env
+        ws_env = _resolve_ws_template(registry, ws.template).env
     return _AgentDirectEnvScopes(
         vm=vm_tmpl.env,
         workspace=ws_env,
@@ -236,7 +237,7 @@ def create_agent(
     # surfaces its own NotFoundError.
     registry = build_registry(config)
 
-    agent_tmpl = resolve_template(config, template)
+    agent_tmpl = resolve_template(registry, template)
 
     if template is not None:
         config = _replace(config, agent=agent_tmpl)
@@ -465,7 +466,7 @@ def reinit_agent(
             entity_name=name,
         )
 
-    agent_tmpl = resolve_template(config, agent.template)
+    agent_tmpl = resolve_template(registry, agent.template)
     if agent.template and agent.template != "default":
         config = _replace(config, agent=agent_tmpl)
 
@@ -673,7 +674,9 @@ def shell_agent(
     # the interactive SSH session. The same scope dicts feed both the
     # SecretTarget (for resolve_for_command) and compose_env below so
     # the two consumers can't drift.
-    scopes = _resolve_agent_direct_env_scopes(config, vm, agent, ws=ws)
+    from agentworks.bootstrap import build_registry as _build_registry
+
+    scopes = _resolve_agent_direct_env_scopes(config, _build_registry(config), vm, agent, ws=ws)
     resolve_for_command(
         [_agent_direct_secret_target(scopes, label=f"agent-shell={agent.name}")],
         config,
@@ -768,7 +771,9 @@ def exec_agent(
     # secret referenced by the agent exec env chain BEFORE running the
     # remote command. The same scope dicts feed both the SecretTarget
     # and compose_env below so the two consumers can't drift.
-    scopes = _resolve_agent_direct_env_scopes(config, vm, agent, ws=ws)
+    from agentworks.bootstrap import build_registry as _build_registry
+
+    scopes = _resolve_agent_direct_env_scopes(config, _build_registry(config), vm, agent, ws=ws)
     resolve_for_command(
         [_agent_direct_secret_target(scopes, label=f"agent-exec={agent.name}")],
         config,

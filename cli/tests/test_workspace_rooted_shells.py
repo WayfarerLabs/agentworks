@@ -23,10 +23,17 @@ import pytest
 
 from agentworks.db import Database
 from agentworks.errors import AuthorizationError, NotFoundError, ValidationError
+from tests.conftest import stub_build_registry
 
 # ---------------------------------------------------------------------------
 # Fixtures / helpers
 # ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _stub_build_registry(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Serve Registry reads from the module's namespace configs."""
+    stub_build_registry(monkeypatch)
 
 
 class _NullCM:
@@ -538,7 +545,7 @@ def test_shell_vm_passes_workspace_scope_to_secret_target(
     captured_scopes: dict[str, object] = {}
 
     def _spy_scopes(
-        config: object, vm: object, *, ws: object = None,
+        config: object, registry: object, vm: object, *, ws: object = None,
     ) -> object:
         captured_scopes["ws"] = ws
         return vm_manager._VmAdminEnvScopes(vm={}, workspace=None, admin={})

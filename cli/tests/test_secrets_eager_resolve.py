@@ -640,7 +640,7 @@ def test_shell_agent_passes_workspace_scope_to_secret_target(
     captured_scopes: dict[str, object] = {}
 
     def _spy_scopes(
-        config: object, vm: object, agent: object, *, ws: object = None,
+        config: object, registry: object, vm: object, agent: object, *, ws: object = None,
     ) -> object:
         # Record the ws arg so the test can pin "shell_agent passes the
         # workspace row through to the scope resolver."
@@ -787,8 +787,11 @@ def test_console_build_secret_targets_excludes_session_attach_panes(
     console = db.get_console("c1")
     assert vm is not None
     assert console is not None
+    from tests.conftest import _StubRegistry
+
+    fake_config = SimpleNamespace()
     targets = multi_console._console_build_secret_targets(
-        db, SimpleNamespace(), console=console, vm=vm,  # type: ignore[arg-type]
+        db, fake_config, _StubRegistry(fake_config), console=console, vm=vm,  # type: ignore[arg-type]
     )
 
     # Expected: 1 admin-shell + 2 shell panes (one per configured shell).
@@ -1384,6 +1387,7 @@ def test_console_add_shell_promotes_admin_for_admin_mode_session(
     def _spy_target(
         config: object,
         db: object,
+        registry: object,
         *,
         vm: object,
         session: object,

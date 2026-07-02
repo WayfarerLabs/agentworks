@@ -15,7 +15,7 @@ from agentworks.sessions.multi_console import (
     create_console,
     restore_session,
 )
-from tests.conftest import _FakeResult, _FakeTarget
+from tests.conftest import _FakeResult, _FakeTarget, stub_build_registry
 from tests.test_consoles import (
     _seed_sessions,
     _seed_vm,
@@ -24,6 +24,12 @@ from tests.test_consoles import (
 
 if TYPE_CHECKING:
     from tests.conftest import CapturedOutput
+
+
+@pytest.fixture(autouse=True)
+def _stub_build_registry(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Serve Registry reads from the module's namespace configs."""
+    stub_build_registry(monkeypatch)
 
 
 class _StubVerticalLayoutConfig(_StubConfig):

@@ -58,6 +58,7 @@ class _VmAdminEnvScopes(NamedTuple):
 
 def _resolve_vm_admin_env_scopes(
     config: Config,
+    registry: Registry,
     vm: VMRow | None = None,
     *,
     ws: WorkspaceRow | None = None,
@@ -80,15 +81,17 @@ def _resolve_vm_admin_env_scopes(
     if vm is None:
         vm_env = config.vm.env
     else:
-        from agentworks.vms.templates import resolve_from_dict as _resolve_vm_template
-        vm_env = _resolve_vm_template(config.vm_templates, vm.template).env
+        from agentworks.vms.templates import resolve_template as _resolve_vm_template
+        vm_env = _resolve_vm_template(registry, vm.template).env
 
     ws_env: dict[str, EnvEntry] | None = None
     if ws is not None:
         from agentworks.workspaces.templates import resolve_template as _resolve_ws_template
-        ws_env = _resolve_ws_template(config, ws.template).env
+        ws_env = _resolve_ws_template(registry, ws.template).env
 
-    return _VmAdminEnvScopes(vm=vm_env, workspace=ws_env, admin=config.admin.env)
+    from agentworks.resources.access import admin_template
+
+    return _VmAdminEnvScopes(vm=vm_env, workspace=ws_env, admin=admin_template(registry).env)
 
 
 def _vm_secret_target(
@@ -228,7 +231,7 @@ def create_vm(
     # surface before any template / DB / VM business logic.
     registry = build_registry(config)
 
-    vm_tmpl = resolve_template(config, template)
+    vm_tmpl = resolve_template(registry, template)
 
     # Replace config.vm with the resolved template so downstream code
     # (initializer, provisioners) uses the right template values.
@@ -662,7 +665,9 @@ def shell_vm(
     # vm.template (DB row), not config.vm (which is the config-default
     # template and would silently route the wrong env into a shell on a
     # non-default-template VM).
-    scopes = _resolve_vm_admin_env_scopes(config, vm, ws=ws)
+    from agentworks.bootstrap import build_registry
+
+    scopes = _resolve_vm_admin_env_scopes(config, build_registry(config), vm, ws=ws)
     resolve_for_command(
         [_vm_secret_target(scopes, label=f"vm-shell={vm.name}")], config,
     )
@@ -748,7 +753,9 @@ def exec_vm(
     # remote command. The same scope dicts feed both the SecretTarget
     # and compose_env so the two consumers can't drift. The vm scope
     # comes from vm.template (DB row), not config.vm.
-    scopes = _resolve_vm_admin_env_scopes(config, vm, ws=ws)
+    from agentworks.bootstrap import build_registry
+
+    scopes = _resolve_vm_admin_env_scopes(config, build_registry(config), vm, ws=ws)
     resolve_for_command(
         [_vm_secret_target(scopes, label=f"vm-exec={vm.name}")], config,
     )
@@ -927,8 +934,8 @@ def rekey_vm(
     from agentworks.secrets import resolve_for_command
     from agentworks.vms.templates import resolve_template
 
-    rekey_vm_tmpl = resolve_template(config, vm.template)
     registry = build_registry(config)
+    rekey_vm_tmpl = resolve_template(registry, vm.template)
     ts_decl = _lookup_or_synthesize_secret(
         registry, rekey_vm_tmpl.tailscale_auth_key
     )
@@ -1125,7 +1132,7 @@ def reinit_vm(
 
         from agentworks.vms.templates import resolve_template
 
-        config = _replace(config, vm=resolve_template(config, vm.template))
+        config = _replace(config, vm=resolve_template(registry, vm.template))
 
     if vm.provisioning_status != ProvisioningStatus.COMPLETE.value:
         raise StateError(
@@ -1704,8 +1711,8 @@ def _ensure_tailscale(
     from agentworks.secrets import resolve_for_command
     from agentworks.vms.templates import resolve_template
 
-    rejoin_vm_tmpl = resolve_template(config, vm.template)
     registry = build_registry(config)
+    rejoin_vm_tmpl = resolve_template(registry, vm.template)
     ts_decl = _lookup_or_synthesize_secret(
         registry, rejoin_vm_tmpl.tailscale_auth_key
     )

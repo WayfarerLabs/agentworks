@@ -12,8 +12,9 @@ from typing import TYPE_CHECKING
 from agentworks.errors import ConfigError
 
 if TYPE_CHECKING:
-    from agentworks.config import Config, WorkspaceTemplate
+    from agentworks.config import WorkspaceTemplate
     from agentworks.env import EnvEntry
+    from agentworks.resources.registry import Registry
 
 
 @dataclass
@@ -26,8 +27,11 @@ class ResolvedTemplate:
     env: dict[str, EnvEntry] = field(default_factory=dict)
 
 
-def resolve_template(config: Config, template_name: str | None = None) -> ResolvedTemplate:
-    """Resolve a workspace template by name, applying inheritance.
+def resolve_from_dict(
+    templates: dict[str, WorkspaceTemplate],
+    template_name: str | None = None,
+) -> ResolvedTemplate:
+    """Resolve a workspace template from a templates dict.
 
     Selection order:
     1. Explicit template_name
@@ -35,19 +39,26 @@ def resolve_template(config: Config, template_name: str | None = None) -> Resolv
     3. Built-in empty template (tmuxinator=True, no repo)
     """
     if template_name is not None and template_name != "default":
-        if template_name not in config.workspace_templates:
+        if template_name not in templates:
             msg = f"Unknown workspace template: {template_name}"
             raise ValueError(msg)
-        return _resolve(config, template_name)
+        return _resolve(templates, template_name)
 
-    if "default" in config.workspace_templates:
-        return _resolve(config, "default")
+    if "default" in templates:
+        return _resolve(templates, "default")
 
     return ResolvedTemplate(name="default")
 
 
+def resolve_template(registry: Registry, template_name: str | None = None) -> ResolvedTemplate:
+    """Resolve a workspace template by name from the Registry."""
+    from agentworks.resources.access import kind_dict
+
+    return resolve_from_dict(kind_dict(registry, "workspace-template"), template_name)
+
+
 def _resolve(
-    config: Config,
+    templates: dict[str, WorkspaceTemplate],
     name: str,
     _visiting: tuple[str, ...] = (),
 ) -> ResolvedTemplate:
@@ -65,16 +76,16 @@ def _resolve(
             f"workspace_templates inheritance cycle detected: {path}"
         )
 
-    if name not in config.workspace_templates:
+    if name not in templates:
         return ResolvedTemplate(name=name)
 
-    tmpl = config.workspace_templates[name]
+    tmpl = templates[name]
     result = ResolvedTemplate(name=name)
     next_visiting = (*_visiting, name)
 
     # Walk parents first
     for parent_name in tmpl.inherits:
-        parent = _resolve(config, parent_name, next_visiting)
+        parent = _resolve(templates, parent_name, next_visiting)
         _merge(result, parent)
 
     # Apply this template's own values (last-one-wins)

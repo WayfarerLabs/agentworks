@@ -17,7 +17,7 @@ from agentworks.sessions.multi_console import (
     restore_session,
 )
 from agentworks.sessions.multi_console_layout import SHELL_INDEX_OPTION
-from tests.conftest import _FakeResult, _FakeTarget
+from tests.conftest import _FakeResult, _FakeTarget, stub_build_registry
 from tests.test_consoles import (
     _seed_sessions,
     _seed_vm,
@@ -29,6 +29,12 @@ if TYPE_CHECKING:
 
 
 # -- restore-session: argument and live-state validation -------------------
+
+
+@pytest.fixture(autouse=True)
+def _stub_build_registry(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Serve Registry reads from the module's namespace configs."""
+    stub_build_registry(monkeypatch)
 
 
 def test_restore_session_errors_when_console_missing(db: Database) -> None:
