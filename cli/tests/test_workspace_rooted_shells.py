@@ -482,19 +482,31 @@ def _shell_command_params(resource: str, argv: list[str]) -> dict[str, object]:
     we're only asserting what Click produces from argv parsing, which
     is the only thing the test cares about.
     """
-    import click
     import typer
 
     from agentworks.cli import app
 
+    # ``typer.main.get_command()`` returns real click classes on typer < 0.26
+    # and typer-vendored ``typer._click`` classes on typer >= 0.26. Walk the
+    # ``.commands`` dict directly instead of isinstance-checking against
+    # ``click.Group``, which fails against the vendored classes. Duck-type
+    # guard mirrors the ``.commands`` check in ``agentworks.completions.spec``
+    # so a shape drift (e.g. typer returning something other than a group)
+    # fails with a diagnostic instead of a bare AttributeError.
     click_app = typer.main.get_command(app)
-    assert isinstance(click_app, click.Group)
-    group = click_app.get_command(click.Context(click_app), resource)
-    assert isinstance(group, click.Group)
-    shell_cmd = group.get_command(click.Context(group), "shell")
-    assert shell_cmd is not None
+    app_commands = getattr(click_app, "commands", None)
+    assert isinstance(app_commands, dict), (
+        f"expected typer.main.get_command() to return a group, got {type(click_app).__name__}"
+    )
+    group = app_commands[resource]
+    group_commands = getattr(group, "commands", None)
+    assert isinstance(group_commands, dict), (
+        f"expected {resource!r} to be a subgroup, got {type(group).__name__}"
+    )
+    shell_cmd = group_commands["shell"]
     ctx = shell_cmd.make_context(f"{resource} shell", list(argv))
-    return ctx.params
+    params: dict[str, object] = ctx.params
+    return params
 
 
 def test_vm_shell_accepts_workspace_flag_in_either_position() -> None:
