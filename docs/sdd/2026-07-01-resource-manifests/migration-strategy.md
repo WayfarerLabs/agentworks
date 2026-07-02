@@ -64,7 +64,7 @@ spec:
 
 ```yaml
 apiVersion: agentworks/v1
-kind: session_template
+kind: session-template
 metadata:
   name: claude
   description: Claude Code interactive session
@@ -79,7 +79,7 @@ spec:
 
 ```yaml
 apiVersion: agentworks/v1
-kind: git_credential
+kind: git-credential
 metadata:
   name: github
   description: GitHub full access
@@ -105,7 +105,7 @@ together.
 2. Run `agw config migrate`. The tool previews, backs up `config.toml`, writes by-kind manifest
    files, rewrites `config.toml` without the resource sections (comments on surviving sections
    preserved), and applies the renames (`type` to `provider`; `[secret_backends.<kind>]` sections to
-   `secret_backend` documents; empty `env-var` / `prompt` backend sections dropped).
+   `secret-backend` documents; empty `env-var` / `prompt` backend sections dropped).
 3. Done. No behavior change: the finalized registry from the migrated layout is identical to the
    pre-upgrade one (this equivalence is a Phase 4 test).
 

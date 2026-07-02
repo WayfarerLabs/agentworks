@@ -130,7 +130,7 @@ Publish order matters for the built-in override policy: built-ins publish first,
 second. `Registry.add` today replaces duplicates silently by design; this SDD changes it to explicit
 collision handling. A collision between an operator row and an existing built-in row consults the
 kind's override flag: allowed (catalog kinds; operator row replaces the built-in row, exactly
-today's behavior) or reserved (`secret_backend`; `ConfigError` naming the reserved built-in). A
+today's behavior) or reserved (`secret-backend`; `ConfigError` naming the reserved built-in). A
 collision between two operator rows is always a `ConfigError` citing both origins. The manifest
 loader already catches operator duplicates within the manifest set, so in the released system the
 publish-time check is a backstop; during the development-window dual-source phases it is what
@@ -158,9 +158,9 @@ The window exists only between merged phases; no release ships it.
 `ResourceKind` gains two declarative flags consumed by the envelope layer and `Registry.add`:
 
 - `manifest_declarable: bool`. True for every operator kind; False for descriptor kinds
-  (`secret_provider`, `git_credential_provider`) and any future code-only kind.
+  (`secret-provider`, `git-credential-provider`) and any future code-only kind.
 - `builtin_override: Literal["allow", "reserved"]`. `allow` for catalog kinds; `reserved` for
-  `secret_backend` (and `secret_provider` / `git_credential_provider` trivially, since they are not
+  `secret-backend` (and `secret-provider` / `git-credential-provider` trivially, since they are not
   declarable at all). Template kinds are unaffected (their defaults are synthesized, not built-in
   rows, so no collision arises).
 
@@ -192,19 +192,19 @@ PROVIDER_REGISTRY: dict[str, SecretProvider]     # code-side; built-ins env-var,
     instantiate(backend_name, config) -> SecretSource
 
 registry rows:
-  secret_provider:<name>       # descriptor, built-in, error miss policy, not declarable
-  secret_backend:<name>        # resource; spec.provider references secret_provider
+  secret-provider:<name>       # descriptor, built-in, error miss policy, not declarable
+  secret-backend:<name>        # resource; spec.provider references secret-provider
 
 resolver construction (orchestration):
   for name in secret_config.backends:            # chain, config-side
-      backend = registry.lookup("secret_backend", name)     # miss -> ConfigError
+      backend = registry.lookup("secret-backend", name)     # miss -> ConfigError
       provider = PROVIDER_REGISTRY[backend.provider]        # ref already validated
       sources.append(provider.instantiate(name, backend.config))
 ```
 
-- `SecretBackendDecl` (the `secret_backend` Resource) carries `name`, `description`, `provider`, and
+- `SecretBackendDecl` (the `secret-backend` Resource) carries `name`, `description`, `provider`, and
   the provider-specific config mapping. Its `referenced_resources()` emits one reference to
-  `("secret_provider", provider)`.
+  `("secret-provider", provider)`.
 - **Neither built-in provider accepts configuration** (non-empty backend config is a validation
   error from each schema); `env_var_name_for` keeps its fixed `AW_SECRET_` convention. The
   `config_schema` / `instantiate(config)` contract is exercised end to end by a test-only provider
@@ -224,7 +224,7 @@ resolver construction (orchestration):
   the TOML resource surface.
 
 Git credentials need no structural change: `GitCredentialConfig.provider` (renamed from `type`)
-keeps referencing the `git_credential_provider` descriptor kind; the provider-name-to-class registry
+keeps referencing the `git-credential-provider` descriptor kind; the provider-name-to-class registry
 in `agentworks.git_credentials` is already the code-side capability registry. The two sides now tell
 the same story, which is the point of R9.
 
@@ -237,7 +237,7 @@ config.toml --tomlkit parse--> section split per FRD R1 table
    config sections  --> config.toml rewritten in place (comments/format preserved,
                         resource sections deleted; original backed up to paths.backups)
    resource sections --> resources/<kind-kebab>.yaml (multi-document, declaration order)
-                        + renames: type->provider, [secret_backends.<kind>] -> secret_backend
+                        + renames: type->provider, [secret_backends.<kind>] -> secret-backend
                           documents (empty env-var/prompt sections dropped)
 ```
 
@@ -271,7 +271,7 @@ All raise `ConfigError`; the layer determines the framing, as today.
   (exact flag shape at LLD; the sample-manifest content ships with the app like `sample-config.toml`
   does).
 - `agw resource list/describe`, `agw secret list/describe`, `agw doctor`: display-only changes
-  (origin strings, `--origin builtin`, `--kind git_credential`, backend rows showing provider and
+  (origin strings, `--origin builtin`, `--kind git-credential`, backend rows showing provider and
   effective convention).
 - No new top-level command groups.
 
@@ -288,9 +288,10 @@ resource-registry lockfile is where reconciliation thinking would land, unchange
 
 `apiVersion` / `kind` / `metadata` / `spec` verbatim for familiarity (including `apiVersion`'s
 camelCase). Inside the envelope, agentworks keeps its own conventions: `kind` values are the
-existing snake_case registry identifiers rather than PascalCase Kubernetes style, because the kind
-vocabulary is already load-bearing across the CLI, origins, and error messages, and a second casing
-would force a mapping layer with no functional payoff. `metadata` carries exactly the
+registry kind identifiers, lower-kebab per FRD R9 (`vm-template`, not the PascalCase `VmTemplate` of
+Kubernetes), matching every other operator-typed value in the project. The vocabulary stays one
+canonical set across manifests, CLI, origins, and error messages; PascalCase in manifests would
+force a permanent mapping layer with no functional payoff. `metadata` carries exactly the
 framework-uniform fields (`name`, `description`), mirroring the framework-uniform vs kind-specific
 split the registry already draws.
 
@@ -336,5 +337,6 @@ silently depended on Config-layer quirks before the format changes underneath it
 - **Provider `config_schema` shape**: a small dataclass-based schema vs plain validate-callable.
   Whatever is chosen must produce field-level `ConfigError`s naming the manifest location.
 - **Sample manifest delivery**: flag shape on `agw config sample` and packaging of the sample files.
-- **`git_credential` rename blast radius**: enumerate the kind-string literals, completions entries,
-  and naming-consistency test updates.
+- **Kind vocabulary sweep blast radius (Phase 0)**: enumerate the kind-string literals, completions
+  entries, and naming-consistency test updates for the lower-kebab casing change plus the
+  `git-credential` singularization.

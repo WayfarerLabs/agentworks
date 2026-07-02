@@ -8,7 +8,7 @@ cut over in Phase 5; the dual-source condition exists only between merged phases
 See [frd.md](frd.md), [hla.md](hla.md), [migration-strategy.md](migration-strategy.md), and
 [prior-art-research.md](prior-art-research.md).
 
-## Phase 0: Origin taxonomy cleanup
+## Phase 0: Origin and kind vocabulary cleanup
 
 Standalone, mergeable independently of everything else.
 
@@ -20,13 +20,26 @@ Standalone, mergeable independently of everything else.
 - [ ] Update `agw resource list --origin` filter vocabulary to `operator | builtin | auto` (confirm
       current accepted values first; keep the filter's CSV/enum style consistent with
       cli-conventions).
-- [ ] Update completions if origin filter values are enumerated in the completion tree.
-- [ ] **Tests**: rename-sweep over existing origin tests; prose-scan test (naming-consistency style)
-      asserting `code-declared` no longer appears in operator-facing strings.
-- [ ] **Docs**: update any guide/README text that mentions `code-declared`.
+- [ ] Kind identifiers move to lower-kebab per FRD R9 (`vm_template` to `vm-template`,
+      `secret_backend` to `secret-backend`, ...): `KIND_REGISTRY` keys, reference/origin source
+      tuples, `--kind` filter and `agw resource describe` positional values, error message
+      templates. TOML section names (`[vm_templates.*]`, `[secret_backends.*]`, ...) are keys, not
+      kind identifiers, and are untouched; today-valid configs load unchanged.
+- [ ] Registry kind `git_credentials` renamed to `git-credential` (singular plus kebab) as part of
+      the same sweep.
+- [ ] Update completions for the new `--origin` and `--kind` vocabularies (confirm whether either is
+      enumerated in the completion tree).
+- [ ] **Tests**: rename-sweep over existing origin and kind tests; prose-scan test
+      (naming-consistency style) asserting `code-declared` and the old snake_case kind spellings no
+      longer appear in operator-facing strings; regression that the shipped sample config loads
+      unchanged.
+- [ ] **Docs**: update guide/README text that mentions `code-declared` or spells kind identifiers
+      (e.g. `agw resource list --kind` examples in `sample-config.toml` comments and
+      `cli/README.md`).
 
-Definition of done: no behavior change beyond display strings; `code-declared` absent from the
-codebase except migration-tool comments if needed; CI green; reviewer-approved.
+Definition of done: no behavior change beyond display strings and CLI vocabulary (`--origin` and
+`--kind` values); `code-declared` and old kind spellings absent from operator-facing surfaces; CI
+green; reviewer-approved.
 
 ## Phase 1: Consumer repoint (Config reads move to Registry)
 
@@ -91,10 +104,10 @@ TOML; both sources coexist correctly; CI green; reviewer-approved.
       provider-config violations (must carry manifest `file:line`), and the resolver construction
       swap.
 - [ ] `agentworks/secrets/providers.py`: code-side `PROVIDER_REGISTRY` (env-var, prompt) and the
-      `secret_provider` descriptor kind + publisher (built-in origin, error miss policy, not
+      `secret-provider` descriptor kind + publisher (built-in origin, error miss policy, not
       manifest-declarable).
 - [ ] `SecretBackendDecl` resource (name, description, provider, provider config mapping);
-      `referenced_resources()` emits the `secret_provider` reference; `secret_backend` kind becomes
+      `referenced_resources()` emits the `secret-provider` reference; `secret-backend` kind becomes
       manifest-declarable with `builtin_override = "reserved"` (enforced for manifest-declared rows
       only; legacy TOML `[secret_backends.*]` rows keep today's override-allowed publish until Phase
       5).
@@ -111,24 +124,22 @@ TOML; both sources coexist correctly; CI green; reviewer-approved.
       (`provider` wins when both are present), so every today-valid config still loads at this
       phase; manifests accept only `provider`; `type` is removed with the TOML resource surface in
       Phase 5.
-- [ ] Registry kind `git_credentials` renamed to `git_credential` (kind literals, source tuples,
-      `--kind` values, completions, naming-consistency test).
 - [ ] Inspection follow-through: `agw secret describe` backend mappings / resolution preview and
       doctor rows compute conventions via instantiated sources; `agw resource list` shows
-      `secret_provider` and `secret_backend` rows with references.
+      `secret-provider` and `secret-backend` rows with references.
 - [ ] **Tests**: provider registry lookup and instantiation; test-only-provider config validation
       and resolution end to end; custom backend in chain; reserved-name rejection for
       `env-var`/`prompt` operator manifests; multiple backends sharing a provider; chain naming an
-      unknown backend; git_credential rename sweep; describe/doctor rendering; regression: the
-      shipped sample config and a maximal today-valid TOML config (including `type =` and
-      `[secret_backends.*]` sections) load unchanged at this phase's HEAD.
+      unknown backend; describe/doctor rendering; regression: the shipped sample config and a
+      maximal today-valid TOML config (including `type =` and `[secret_backends.*]` sections) load
+      unchanged at this phase's HEAD.
 - [ ] **Docs** (lockstep with what becomes true at this phase's HEAD): `cli/README.md` configuration
-      schema and command reference for `--kind git_credential`, the new `secret_provider` /
-      `secret_backend` rows, describe/doctor rendering, and the `provider` alias on
-      `[git_credentials.*]`; `sample-config.toml` comments where they mention `type`.
+      schema and command reference for the new `secret-provider` / `secret-backend` rows,
+      describe/doctor rendering, and the `provider` alias on `[git_credentials.*]`;
+      `sample-config.toml` comments where they mention `type`.
 
 Definition of done: chain-driven resolution runs entirely through provider-instantiated backends;
-built-in backends ship as bundled manifests; git credential vocabulary aligned; CI green;
+built-in backends ship as bundled manifests; git credential `provider` field aligned; CI green;
 reviewer-approved.
 
 ## Phase 4: Migration tool
@@ -137,7 +148,7 @@ reviewer-approved.
 - [ ] `agentworks/migrate/`: TOML section split per the FRD R1 table; manifest emission (by-kind
       files, multi-document, declaration order) through the shared field mapping from
       `manifest-schema-lld.md`; renames (`type` to `provider`, `[secret_backends.<kind>]` to
-      `secret_backend` documents, empty env-var/prompt sections dropped).
+      `secret-backend` documents, empty env-var/prompt sections dropped).
 - [ ] Comment-preserving `config.toml` rewrite via tomlkit; timestamped backup of the original to
       the configured backups directory (`paths.backups`).
 - [ ] `agw config migrate` command: preview + confirm, `--yes`, `--force`, `--dry-run`; idempotent

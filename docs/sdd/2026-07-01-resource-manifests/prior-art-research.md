@@ -19,9 +19,10 @@ identity field (Kubernetes docs, "Objects In Kubernetes",
 
 - **Adopted**: the four-field envelope verbatim, including `apiVersion`'s camelCase, and `metadata`
   as the home of framework-uniform fields. Decision: FRD R3.
-- **Deviated**: `kind` values stay snake_case registry identifiers rather than PascalCase
-  (`vm_template`, not `VmTemplate`), because the kind vocabulary is already load-bearing across the
-  CLI and error surfaces. Decision: HLA "Kubernetes envelope, agentworks vocabulary".
+- **Deviated**: `kind` values are the registry identifiers in lower-kebab (`vm-template`, not the
+  PascalCase `VmTemplate`), per the project's own snake-keys / kebab-values convention; the
+  vocabulary stays one canonical set so no mapping layer is needed. Decision: FRD R9, HLA
+  "Kubernetes envelope, agentworks vocabulary".
 - **Deferred, room left**: `metadata.labels` / `metadata.annotations`, `status` subresource
   (relevant only if drift tracking ever wants it).
 
@@ -75,11 +76,11 @@ configurations. The design predates this SDD in-repo: the resource-registry plan
 notes (its follow-ups section) already sketched providers-as-code plus
 backends-as-registry-instances.
 
-- **Adopted**: `secret_backend.spec.provider` naming a code capability; multiple backends per
+- **Adopted**: `secret-backend.spec.provider` naming a code capability; multiple backends per
   provider; provider validates instance config. Decision: FRD R8.
 - **Deviated from the in-repo note**: providers are mirrored into the registry as read-only
   descriptor rows (the note left this open, flagging the inconsistency with
-  `git_credential_provider`); this SDD resolves it toward registry citizenship for uniform reference
+  `git-credential-provider`); this SDD resolves it toward registry citizenship for uniform reference
   validation and inspectability.
 
 ## Refuted / do-not-rely-on

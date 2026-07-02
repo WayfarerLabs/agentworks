@@ -84,18 +84,18 @@ Every section of today's `config.toml` gets exactly one destination:
 | `[session.config]`                        | config (TOML)                                       | non-template session settings                           |
 | `[secret_config]`                         | config (TOML)                                       | active backend chain; references backends by name       |
 | `[secrets.<name>]`                        | manifest (`secret`)                                 |                                                         |
-| `[secret_backends.<kind>]`                | manifest (`secret_backend`)                         | reshaped per R8                                         |
-| `[git_credentials.<name>]`                | manifest (`git_credential`)                         | `type` renamed to `provider` per R9                     |
-| `[vm_templates.<name>]` (+ `.env`)        | manifest (`vm_template`)                            |                                                         |
-| `[agent_templates.<name>]` (+ `.env`)     | manifest (`agent_template`)                         |                                                         |
-| `[workspace_templates.<name>]` (+ `.env`) | manifest (`workspace_template`)                     |                                                         |
-| `[session_templates.<name>]` (+ `.env`)   | manifest (`session_template`)                       |                                                         |
-| `[admin.config]`, `[admin.env]`, ...      | manifest (`admin_template`, name `default`)         | flattened into one document                             |
-| `[named_console]`                         | manifest (`named_console_template`, name `default`) |                                                         |
-| `[apt_sources.<name>]`                    | manifest (`apt_source`)                             | operator catalog extension                              |
-| `[apt_packages.<name>]`                   | manifest (`apt_package`)                            | operator catalog extension                              |
-| `[system_install_commands.<name>]`        | manifest (`system_install_command`)                 | operator catalog extension                              |
-| `[user_install_commands.<name>]`          | manifest (`user_install_command`)                   | operator catalog extension                              |
+| `[secret_backends.<kind>]`                | manifest (`secret-backend`)                         | reshaped per R8                                         |
+| `[git_credentials.<name>]`                | manifest (`git-credential`)                         | `type` renamed to `provider` per R9                     |
+| `[vm_templates.<name>]` (+ `.env`)        | manifest (`vm-template`)                            |                                                         |
+| `[agent_templates.<name>]` (+ `.env`)     | manifest (`agent-template`)                         |                                                         |
+| `[workspace_templates.<name>]` (+ `.env`) | manifest (`workspace-template`)                     |                                                         |
+| `[session_templates.<name>]` (+ `.env`)   | manifest (`session-template`)                       |                                                         |
+| `[admin.config]`, `[admin.env]`, ...      | manifest (`admin-template`, name `default`)         | flattened into one document                             |
+| `[named_console]`                         | manifest (`named-console-template`, name `default`) |                                                         |
+| `[apt_sources.<name>]`                    | manifest (`apt-source`)                             | operator catalog extension                              |
+| `[apt_packages.<name>]`                   | manifest (`apt-package`)                            | operator catalog extension                              |
+| `[system_install_commands.<name>]`        | manifest (`system-install-command`)                 | operator catalog extension                              |
+| `[user_install_commands.<name>]`          | manifest (`user-install-command`)                   | operator catalog extension                              |
 
 After the cutover, a resource section in `config.toml` is a config-load error naming the section and
 pointing at `agw config migrate` (R11).
@@ -125,7 +125,7 @@ Each document uses the Kubernetes envelope shape, with agentworks vocabulary ins
 
 ```yaml
 apiVersion: agentworks/v1
-kind: session_template
+kind: session-template
 metadata:
   name: claude
   description: Claude Code interactive session
@@ -141,9 +141,9 @@ spec:
 - **`apiVersion`** (required): `agentworks/v1`. Any other value is a load error. The field exists so
   future schema evolution has a lever; no other version is defined by this SDD. The camelCase
   spelling is kept verbatim for Kubernetes familiarity.
-- **`kind`** (required): the registry kind identifier, verbatim (`secret`, `vm_template`,
-  `session_template`, ...). One canonical kind vocabulary across manifests, CLI (`--kind`), origins,
-  and error messages. Unknown kinds are load errors listing the valid kinds.
+- **`kind`** (required): the registry kind identifier, verbatim (`secret`, `vm-template`,
+  `session-template`, ...), lower-kebab per R9. One canonical kind vocabulary across manifests, CLI
+  (`--kind`), origins, and error messages. Unknown kinds are load errors listing the valid kinds.
 - **`metadata`** (required): the framework-uniform fields. `name` (required; validated by the
   existing resource-name rule, which permits underscores; kebab-case remains the encouraged style)
   and `description` (optional; the operator-set description per the resource-registry SDD's R9,
@@ -154,12 +154,12 @@ spec:
   Kind-specific validation semantics are unchanged from today.
 
 Not manifest-declarable, rejected with a specific error: kinds reserved to capabilities
-(`secret_provider`, `git_credential_provider`) and any future code-only kind. The error names the
+(`secret-provider`, `git-credential-provider`) and any future code-only kind. The error names the
 kind and explains that it is provided by the app (or a plugin).
 
-Singleton-shaped kinds (`admin_template`, `named_console_template`) accept only
-`metadata.name: default`; other names are load errors. For `named_console_template` the Config-side
-plurification is still deferred to its own SDD. For `admin_template` the framework side is already
+Singleton-shaped kinds (`admin-template`, `named-console-template`) accept only
+`metadata.name: default`; other names are load errors. For `named-console-template` the Config-side
+plurification is still deferred to its own SDD. For `admin-template` the framework side is already
 plurified (resource-registry Phase 2a.3); restricting the envelope to `default` is a deliberate
 operator-surface parity choice, since multi-admin operational semantics (provisioning several admin
 users) are out of scope here.
@@ -168,12 +168,12 @@ users) are out of scope here.
 
 TOML's section-splitting workarounds are gone. Everything that belongs to a resource lives in its
 one document: env tables, backend mappings, dotfiles settings, mise settings. The admin resource,
-today spread across `[admin.config]`, `[admin.env]`, and friends, becomes a single `admin_template`
+today spread across `[admin.config]`, `[admin.env]`, and friends, becomes a single `admin-template`
 document with a flat spec:
 
 ```yaml
 apiVersion: agentworks/v1
-kind: admin_template
+kind: admin-template
 metadata:
   name: default
 spec:
@@ -212,7 +212,7 @@ The app ships resources of its own through the same framework:
 - **Override policy is per kind**:
   - Catalog kinds keep today's documented behavior: an operator manifest with the same name as a
     built-in entry overrides it.
-  - `secret_backend` built-in names (`env-var`, `prompt`) are reserved: an operator manifest
+  - `secret-backend` built-in names (`env-var`, `prompt`) are reserved: an operator manifest
     redeclaring one is a load error. Customization is by declaring a sibling backend with the same
     provider and adjusting `[secret_config].backends`; there is no field-level merge or shadowing,
     consistent with the framework's declare-a-sibling philosophy.
@@ -248,17 +248,17 @@ instance each) into named backend resources without a second operator-facing mig
 the built-in backends are the first real exerciser of the built-in-manifest mechanism this SDD ships
 anyway.
 
-- **`secret_provider`** (capability, registry descriptor): the code that produces secret values.
+- **`secret-provider`** (capability, registry descriptor): the code that produces secret values.
   Built-ins: `env-var`, `prompt`. Providers are registered code-side and mirrored into the registry
   as read-only `built-in` rows (error miss policy, not manifest-declarable) so references to them
   validate uniformly and they are visible in `agw resource list`.
-- **`secret_backend`** (resource, manifest-declarable): a named instantiation of a provider.
-  `spec.provider` (required) references a `secret_provider` by name; the rest of `spec` is
+- **`secret-backend`** (resource, manifest-declarable): a named instantiation of a provider.
+  `spec.provider` (required) references a `secret-provider` by name; the rest of `spec` is
   provider-specific configuration validated by the provider capability, not the framework.
 
 ```yaml
 apiVersion: agentworks/v1
-kind: secret_backend
+kind: secret-backend
 metadata:
   name: work-vault
   description: Work 1Password vault
@@ -290,16 +290,27 @@ configuration, so this shape earns its keep when the first config-bearing provid
   provider-instantiated source, so future config-bearing providers render correctly with no
   display-layer changes.
 
-### R9: Git credential provider alignment
+### R9: Kind vocabulary and git credential alignment
 
-Git credentials already follow the capability/instance pattern; this SDD aligns the vocabulary:
+Two vocabulary alignments ride this SDD's release train:
+
+- **Kind identifiers move to lower-kebab** (`vm-template`, `session-template`, `secret-backend`,
+  ...), everywhere the vocabulary appears: manifest `kind:` values, `--kind` filter values,
+  `agw resource describe` positionals, origin and reference source tuples, and error messages.
+  Rationale: the project convention is snake_case for framework keys and kebab-case for
+  operator-typed values, and after the cutover kind identifiers appear exclusively in value position
+  (`kind:`, `--kind`); their snake_case spelling was inherited from the TOML section keys this SDD
+  retires (TOML section names themselves are keys and stay snake_case until the cutover removes
+  them). The rename lands in Phase 0 so every new surface (manifests, migration output) is born
+  kebab.
+
+Git credentials already follow the capability/instance pattern; this SDD aligns their vocabulary:
 
 - The `type` field on git credential entries is renamed to **`provider`** (`github`, `azdo`),
-  matching `secret_backend.spec.provider`. The migration tool rewrites it.
-- The registry kind for entries is renamed from `git_credentials` to **`git_credential`** (singular,
-  consistent with every other kind identifier). Affects `--kind` filter values, origin/reference
-  source tuples, and error messages; the migration moment is when this rename is cheapest.
-- The `git_credential_provider` descriptor kind is unchanged in behavior (read-only rows, error miss
+  matching `secret-backend.spec.provider`. The migration tool rewrites it.
+- The registry kind for entries is renamed from `git_credentials` to **`git-credential`** (singular,
+  consistent with every other kind identifier), riding the same Phase 0 sweep as the casing change.
+- The `git-credential-provider` descriptor kind is unchanged in behavior (read-only rows, error miss
   policy); its rows report origin `built-in` per R7. The provider classes keep owning behavior
   (credential line formatting, auth hints, provider-specific fields like `org`).
 
@@ -315,7 +326,7 @@ Git credentials already follow the capability/instance pattern; this SDD aligns 
 - **Rewrites `config.toml`** with the resource sections removed and everything else (including
   comments and formatting of the surviving sections) preserved.
 - **Applies the renames**: `git_credentials.<name>.type` becomes `provider`;
-  `[secret_backends.<kind>]` sections become `secret_backend` documents with `spec.provider: <kind>`
+  `[secret_backends.<kind>]` sections become `secret-backend` documents with `spec.provider: <kind>`
   (empty sections for `env-var` / `prompt` are dropped entirely since the built-in backends cover
   them).
 - **Safety**: prints a preview and asks for confirmation (`--yes` to skip); `--dry-run` shows the
@@ -356,7 +367,7 @@ now mention manifest locations; the shapes stay the same.
 - **`metadata.labels` / `metadata.annotations`**: not defined; the envelope leaves room.
 - **Moving the built-in catalog to bundled manifests or a system plugin**: the code publisher stays;
   only its origin display changes. Candidate for the plugin SDD.
-- **Plurifying `named_console_template` / relaxing `admin_template` to multiple names**: still
+- **Plurifying `named-console-template` / relaxing `admin-template` to multiple names**: still
   deferred to their own SDDs; the envelope accepts only `default` for them meanwhile.
 - **New secret providers** (`onepassword`, vaults): the split makes room; implementations are future
   work.
@@ -374,6 +385,8 @@ file moves:
   built-in backends cover them. Per-secret `backend_mappings` overrides keep working unchanged.
 - `agw resource list` origin values change: `code-declared` reads `built-in`; the `--origin` filter
   accepts `builtin`.
-- `--kind git_credentials` becomes `--kind git_credential`.
+- Kind identifiers are lower-kebab: `--kind vm_template` becomes `--kind vm-template`,
+  `--kind git_credentials` becomes `--kind git-credential` (also singularized), and error messages
+  use the new spellings.
 - Everything else (secret resolution, template inheritance, auto-declaration, eager-resolve
   prompting) behaves identically.
