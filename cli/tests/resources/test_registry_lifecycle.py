@@ -139,9 +139,9 @@ def test_build_registry_publishes_catalog_before_config(
     """Phase 2b invariant: ``build_registry`` invokes
     ``catalog.publish_to`` before ``Config.publish_to`` so any
     operator-declared catalog override layers on top of the
-    code-declared base. Verified end-to-end: every catalog kind has
+    built-in base. Verified end-to-end: every catalog kind has
     at least one row after build_registry, and those rows carry
-    ``Origin.code_declared(source="agentworks.catalog")``.
+    ``Origin.built_in(source="agentworks.catalog")``.
     """
     from agentworks.bootstrap import build_registry
 
@@ -156,12 +156,12 @@ def test_build_registry_publishes_catalog_before_config(
     ):
         rows = list(r.iter_kind(catalog_kind))
         assert rows, f"expected at least one {catalog_kind} row from the catalog publisher"
-        # The built-in catalog rows are code-declared. Operator overrides
+        # The built-in catalog rows are built-in. Operator overrides
         # (if any) would re-publish the same name with operator-declared
         # origin; the test's example_config doesn't exercise that path.
         for row in rows:
             assert row.origin is not None
-            assert row.origin.variant == "code-declared"
+            assert row.origin.variant == "built-in"
             assert row.origin.source == "agentworks.catalog"
 
 

@@ -3,7 +3,7 @@ kinds referenced by ``[secret_backends.<kind>]`` and
 ``[secret_config].backends``.
 
 The kind uses the error miss policy. Known backend implementations
-(``env-var``, ``prompt``) are published as code-declared rows by the
+(``env-var``, ``prompt``) are published as built-in rows by the
 ``agentworks.secrets`` publisher; operator-declared
 ``[secret_backends.<kind>]`` blocks re-publish the same row with
 operator-declared origin (same pattern as catalog overrides).

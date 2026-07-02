@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 def format_origin_line(origin: Origin | None) -> str:
     """Render an ``Origin`` as a single-line parenthetical:
     ``"operator-declared (~/path:42)"``, ``"auto-declared (kind:name)"``,
-    ``"code-declared (source)"``. ``"unknown"`` when ``origin`` is None
+    ``"built-in (source)"``. ``"unknown"`` when ``origin`` is None
     (defensive for Resources constructed outside the framework path).
 
     Raises ``AssertionError`` on an unknown ``Origin`` variant -- a loud
@@ -36,9 +36,9 @@ def format_origin_line(origin: Origin | None) -> str:
         if isinstance(source, tuple) and len(source) == 2:
             return f"auto-declared ({source[0]}:{source[1]})"
         return "auto-declared"
-    if origin.variant == "code-declared":
+    if origin.variant == "built-in":
         source = origin.source
-        return f"code-declared ({source})" if source else "code-declared"
+        return f"built-in ({source})" if source else "built-in"
     raise AssertionError(f"unhandled Origin variant: {origin.variant!r}")
 
 

@@ -43,7 +43,7 @@ if TYPE_CHECKING:
     from agentworks.resources.reference import ReferenceEntry
 
 
-OriginFilter = Literal["operator", "auto", "code"]
+OriginFilter = Literal["operator", "auto", "builtin"]
 
 
 @dataclass(frozen=True)
@@ -111,7 +111,7 @@ class ResourceDescription:
 _ORIGIN_FILTER_MAP: dict[str, str] = {
     "operator": "operator-declared",
     "auto": "auto-declared",
-    "code": "code-declared",
+    "builtin": "built-in",
 }
 
 
@@ -195,7 +195,7 @@ def list_resources(
                 operator_count += 1
             elif variant == "auto-declared":
                 auto_count += 1
-            elif variant == "code-declared":
+            elif variant == "built-in":
                 code_count += 1
 
     return ResourceListing(
@@ -330,7 +330,7 @@ def render_resource_table(listing: ResourceListing) -> None:
     if listing.auto_count:
         parts.append(f"{listing.auto_count} auto-declared")
     if listing.code_count:
-        parts.append(f"{listing.code_count} code-declared")
+        parts.append(f"{listing.code_count} built-in")
     breakdown = f" ({', '.join(parts)})" if parts else ""
     output.info(f"{total} resource{'s' if total != 1 else ''}{breakdown}")
     output.info("")

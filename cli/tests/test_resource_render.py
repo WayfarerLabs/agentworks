@@ -41,11 +41,11 @@ def test_format_origin_line_auto_declared_with_source() -> None:
     assert format_origin_line(origin) == "auto-declared (vm_template:default)"
 
 
-def test_format_origin_line_code_declared_with_source() -> None:
-    origin = Origin.code_declared(source="framework:always-materialize")
+def test_format_origin_line_built_in_with_source() -> None:
+    origin = Origin.built_in(source="framework:always-materialize")
     assert (
         format_origin_line(origin)
-        == "code-declared (framework:always-materialize)"
+        == "built-in (framework:always-materialize)"
     )
 
 

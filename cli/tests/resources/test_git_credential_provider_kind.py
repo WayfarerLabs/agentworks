@@ -62,7 +62,7 @@ def test_known_providers_resolve(tmp_path: Path) -> None:
     registry = build_registry(cfg)
     github = registry.lookup("git_credential_provider", "github")
     assert github.name == "github"
-    assert github.origin.variant == "code-declared"
+    assert github.origin.variant == "built-in"
     assert github.origin.source == "agentworks.git_credentials"
 
 

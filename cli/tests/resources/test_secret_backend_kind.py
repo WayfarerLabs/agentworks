@@ -2,7 +2,7 @@
 
 The kind makes per-backend config a framework citizen and lets
 operator-declared ``[secret_backends.<kind>]`` blocks land as overrides
-on top of the code-declared known-backend rows. Partial migration: the
+on top of the built-in known-backend rows. Partial migration: the
 ``[secret_config].backends`` active-chain validation stays as a bespoke
 check in ``_build_secret_resolver`` because ``SecretConfig`` isn't a
 framework Resource today (deferred).
@@ -64,11 +64,11 @@ def test_known_backends_published(tmp_path: Path) -> None:
     for backend_name in KNOWN_BACKEND_KINDS:
         row = registry.lookup("secret_backend", backend_name)
         assert row.kind == backend_name
-        assert row.origin.variant == "code-declared"
+        assert row.origin.variant == "built-in"
         assert row.origin.source == "agentworks.secrets"
 
 
-def test_operator_declared_backend_overrides_code_declared(tmp_path: Path) -> None:
+def test_operator_declared_backend_overrides_built_in(tmp_path: Path) -> None:
     """An operator who writes ``[secret_backends.env-var]`` re-publishes
     the row with operator-declared origin via Config.publish_to (which
     runs after the secrets publisher). Same publish-order pattern as

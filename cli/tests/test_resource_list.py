@@ -64,7 +64,7 @@ def test_lists_every_kind_present_when_no_kind_filter(tmp_path: Path) -> None:
 
     kinds_seen = {row.kind for row in listing.rows}
     # vm_template (operator-declared default), secret (operator + auto),
-    # secret_backend (active env-var), agent_template (default code-declared),
+    # secret_backend (active env-var), agent_template (default built-in),
     # apt_package (catalog publisher), git_credential_provider (catalog),
     # etc. We assert presence of the key cross-kind expectations rather
     # than the full set, since publishers may add more.
@@ -189,17 +189,17 @@ def test_origin_filter_auto_only_shows_auto_declared(tmp_path: Path) -> None:
     assert listing.auto_count == len(listing.rows)
 
 
-def test_origin_filter_code_only_shows_code_declared(tmp_path: Path) -> None:
+def test_origin_filter_code_only_shows_built_in(tmp_path: Path) -> None:
     """Code-declared resources include the default ``agent_template``
     (and other framework defaults). The filter narrows to just those.
     """
     cfg_file = tmp_path / "config.toml"
     _write_base(cfg_file)
     registry = _load(cfg_file)
-    listing = list_resources(registry, origin_filter="code")
+    listing = list_resources(registry, origin_filter="builtin")
 
     assert all(
-        row.origin is not None and row.origin.variant == "code-declared"
+        row.origin is not None and row.origin.variant == "built-in"
         for row in listing.rows
     )
     assert listing.code_count == len(listing.rows)
@@ -230,10 +230,10 @@ def test_format_origin_line_renders_each_variant(tmp_path: Path) -> None:
 
     rendered = [format_origin_line(row.origin) for row in listing.rows]
     assert any(s.startswith("operator-declared") for s in rendered)
-    # auto- and code-declared lines may or may not have a source --
+    # auto- and built-in lines may or may not have a source --
     # both shapes are valid; just assert no unknown variants slip in.
     for s in rendered:
-        assert s.startswith(("operator-declared", "auto-declared", "code-declared"))
+        assert s.startswith(("operator-declared", "auto-declared", "built-in"))
 
 
 # -- Description coverage ----------------------------------------------------

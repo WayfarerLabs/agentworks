@@ -40,7 +40,7 @@ def resource_list(
         None,
         "--origin",
         help=(
-            "Filter by origin variant: operator, auto, or code. "
+            "Filter by origin variant: operator, auto, or builtin. "
             "Default: all origins."
         ),
     ),

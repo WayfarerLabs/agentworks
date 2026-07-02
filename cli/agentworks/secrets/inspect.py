@@ -103,8 +103,8 @@ def build_secret_table(config: Config, registry: Registry) -> SecretTable:
             operator_count += 1
         elif variant == "auto-declared":
             auto_count += 1
-        # code-declared not yet a path for secrets; Phase 2b's catalog
-        # publisher emits code-declared but for non-secret kinds.
+        # built-in not yet a path for secrets; Phase 2b's catalog
+        # publisher emits built-in but for non-secret kinds.
 
         cells = tuple(
             SecretCell(

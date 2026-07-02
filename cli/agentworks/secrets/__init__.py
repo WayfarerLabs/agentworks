@@ -29,7 +29,7 @@ from agentworks.secrets.resolver import SecretResolver
 
 # Known backend kind identifiers. The framework's secret_backend kind
 # is the registry-side handle; the publisher below adds one row per
-# entry as code-declared so operator-declared [secret_backends.<kind>]
+# entry as built-in so operator-declared [secret_backends.<kind>]
 # blocks land as overrides (same pattern as catalog).
 KNOWN_BACKEND_KINDS: tuple[str, ...] = ("env-var", "prompt")
 
@@ -37,15 +37,15 @@ KNOWN_BACKEND_KINDS: tuple[str, ...] = ("env-var", "prompt")
 def publish_to(registry: Registry) -> None:
     """Publish the known secret backend kinds into the registry.
 
-    Each entry lands as a ``SecretBackendConfig`` row, code-declared
+    Each entry lands as a ``SecretBackendConfig`` row, built-in
     with source ``"agentworks.secrets"``. Operator-declared
     ``[secret_backends.<kind>]`` blocks land via ``Config.publish_to``
-    after this publisher runs and override the code-declared rows
+    after this publisher runs and override the built-in rows
     (same name -> registry.add replaces). Phase 2b.2.
     """
     from agentworks.resources import Origin
 
-    code_origin = Origin.code_declared(source="agentworks.secrets")
+    code_origin = Origin.built_in(source="agentworks.secrets")
     for kind_name in KNOWN_BACKEND_KINDS:
         registry.add(
             "secret_backend",

@@ -56,7 +56,7 @@ class AptPackageEntry:
     apt: list[str]
     apt_sources: list[str] = field(default_factory=list)
     # Phase 2b: catalog entries become first-class Registry citizens.
-    # ``origin`` is set by the publisher (``code-declared by
+    # ``origin`` is set by the publisher (``built-in by
     # agentworks.catalog`` for built-in entries); ``references`` is attached
     # by the framework's finalize pass from incoming references.
     origin: Origin | None = None
@@ -316,7 +316,7 @@ def publish_to(registry: Registry, config: Config | None = None) -> None:
     """Publish catalog entries into the registry as first-class Resources.
 
     Phase 2b: built-in catalog entries become Registry citizens with
-    ``Origin.code_declared(source="agentworks.catalog")``. The four
+    ``Origin.built_in(source="agentworks.catalog")``. The four
     catalog kinds (``apt_source``, ``apt_package``,
     ``system_install_command``, ``user_install_command``) use the
     framework's error miss policy, so a typo'd reference from
@@ -340,14 +340,14 @@ def publish_to(registry: Registry, config: Config | None = None) -> None:
     ``Origin.operator_declared(...)``. Same last-writer-wins pattern
     the other publishers use: catalog runs first, then Config, then
     other publishers -- an operator's override lands on top of the
-    code-declared base. Config-side publishing lives here (rather than
+    built-in base. Config-side publishing lives here (rather than
     in ``Config.publish_to``) because parsing operator catalog entries
     is catalog's expertise; Config just stashes the raw TOML dicts.
     """
     from agentworks.resources import Origin
 
     builtin = load_builtin_catalog()
-    code_origin = Origin.code_declared(source="agentworks.catalog")
+    code_origin = Origin.built_in(source="agentworks.catalog")
 
     for src_name, src in builtin.apt_sources.items():
         registry.add("apt_source", src_name, src, code_origin)

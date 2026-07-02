@@ -162,10 +162,10 @@ def test_known_apt_package_reference_resolves(tmp_path: Path) -> None:
     registry = build_registry(cfg)
     gh = registry.lookup("apt_package", "gh")
     assert gh.name == "gh"
-    # Cross-check: the catalog publisher attached code-declared origin
+    # Cross-check: the catalog publisher attached built-in origin
     # and the framework's finalize attached the inbound reference from
     # vm_template:default.
-    assert gh.origin.variant == "code-declared"
+    assert gh.origin.variant == "built-in"
     assert any(
         u.source == ("vm_template", "default") for u in gh.references
     ), "vm_template:default reference should be on the apt_package"
@@ -176,7 +176,7 @@ def test_known_apt_package_reference_resolves(tmp_path: Path) -> None:
 
 def test_apt_source_kind_published_from_builtin_catalog(tmp_path: Path) -> None:
     """The catalog publisher emits ``apt_source`` Resources with
-    ``code-declared`` origin, parallel to ``apt_package`` / the
+    ``built-in`` origin, parallel to ``apt_package`` / the
     install-command kinds. The built-in catalog ships at least one
     apt_source (``github`` today), so the registry has it after
     ``build_registry``.
@@ -190,7 +190,7 @@ def test_apt_source_kind_published_from_builtin_catalog(tmp_path: Path) -> None:
     assert names, "built-in catalog should publish at least one apt_source"
     for name in names:
         src = registry.lookup("apt_source", name)
-        assert src.origin.variant == "code-declared"
+        assert src.origin.variant == "built-in"
 
 
 def test_apt_package_references_flow_to_apt_source(tmp_path: Path) -> None:

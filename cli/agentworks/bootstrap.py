@@ -27,10 +27,10 @@ if TYPE_CHECKING:
 def build_registry(config: Config) -> Registry:
     """Build a finalized ``Registry`` from the standard set of publishers.
 
-    Publisher order: code-declared publishers first (``catalog``,
+    Publisher order: built-in publishers first (``catalog``,
     ``git_credentials``, ``secrets``), then ``Config.publish_to``
     (operator-declared resources, which can re-publish any
-    code-declared ``(kind, name)`` with operator-declared Origin to
+    built-in ``(kind, name)`` with operator-declared Origin to
     override). Future publishers (plugins, YAML manifests, ...) join
     the same sequence by being added here.
     """

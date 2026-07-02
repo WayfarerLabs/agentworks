@@ -24,7 +24,7 @@ PROVIDER_TYPES: tuple[str, ...] = ("azdo", "github")
 def publish_to(registry: Registry) -> None:
     """Publish the known git credential provider types into the registry.
 
-    Each entry lands as a ``GitCredentialProviderEntry`` row, code-declared
+    Each entry lands as a ``GitCredentialProviderEntry`` row, built-in
     with source ``"agentworks.git_credentials"``. Phase 2b.1.
 
     Unlike the catalog and secret_backend publishers, this kind has no
@@ -39,7 +39,7 @@ def publish_to(registry: Registry) -> None:
         GitCredentialProviderEntry,
     )
 
-    code_origin = Origin.code_declared(source="agentworks.git_credentials")
+    code_origin = Origin.built_in(source="agentworks.git_credentials")
     for type_name in PROVIDER_TYPES:
         registry.add(
             "git_credential_provider",

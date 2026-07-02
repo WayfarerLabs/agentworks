@@ -7,7 +7,7 @@ themselves live in ``agentworks.git_credentials`` -- this module just
 gives the framework a name-keyed marker so typos surface uniformly.
 
 The companion publisher in ``agentworks.git_credentials`` adds one row
-per known provider, code-declared with source
+per known provider, built-in with source
 ``"agentworks.git_credentials"``.
 """
 

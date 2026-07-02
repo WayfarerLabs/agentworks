@@ -72,7 +72,7 @@ class Registry:
     ) -> None:
         """Add a Resource from any publisher. The publisher constructs
         the appropriate ``Origin`` variant (``operator_declared`` /
-        ``code_declared`` / future variants) and passes it in; the
+        ``built_in`` / future variants) and passes it in; the
         Registry attaches it to the Resource via ``dataclasses.replace``
         and stores the result keyed by ``(kind, name)``.
 
@@ -113,7 +113,7 @@ class Registry:
            accumulated reference map is preserved across iterations so
            the post-loop usage-attachment pass sees the complete graph.
         2. **Usage attachment + description polish**: every Resource
-           (operator-declared, code-declared, auto-declared) gets a
+           (operator-declared, built-in, auto-declared) gets a
            ``usage`` tuple attached via ``dataclasses.replace`` -- empty
            if nothing referenced it. The kind-agnostic
            description-polish runs in the same pass: for any Resource
