@@ -17,19 +17,23 @@ assemble Registry by hand with ``Registry.empty()`` + explicit
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import weakref
+from typing import TYPE_CHECKING, Any
 
 from agentworks.resources import Registry
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from agentworks.config import Config
     from agentworks.manifests import ManifestSet
 
-# Resources directories whose manifest issues were already warned this
-# process (build_registry may run several times per command).
-_WARNED_MANIFEST_DIRS: set[Path] = set()
+# One STANDARD registry per Config object. Commands may reach
+# build_registry from several code paths; they all get the same
+# finalized (frozen, read-only) instance, so once-per-command work
+# hangs off registry identity (e.g. the secret resolver) and the
+# manifest issues warn exactly once. Keyed by id() with a weakref
+# guard against id reuse after garbage collection; explicit-manifests
+# calls (tests, custom orchestration) always build fresh.
+_STANDARD_REGISTRIES: dict[int, tuple[weakref.ref[Any], Registry]] = {}
 
 
 def build_registry(config: Config, manifests: ManifestSet | None = None) -> Registry:
@@ -43,27 +47,30 @@ def build_registry(config: Config, manifests: ManifestSet | None = None) -> Regi
     collisions (including TOML-vs-manifest during the in-branch
     dual-source window) error at ``Registry.add``.
 
-    When ``manifests`` is None, the resources directory next to the
-    loaded config file (``<config-dir>/resources/``) is auto-loaded and
-    its spec-level warnings are surfaced, mirroring ``load_config``'s
-    ``config_issues`` behavior. Pass an explicit ``ManifestSet`` (e.g.
-    ``ManifestSet.empty()``) to skip the auto-load.
+    When ``manifests`` is None (the standard path), the resources
+    directory next to the loaded config file (``<config-dir>/resources/``)
+    is auto-loaded, its spec-level warnings are surfaced (mirroring
+    ``load_config``'s ``config_issues`` behavior), and the finalized
+    Registry is memoized per Config object: every standard-path call
+    with the same config returns the same frozen instance. Pass an
+    explicit ``ManifestSet`` (e.g. ``ManifestSet.empty()``) to skip the
+    auto-load and always build fresh.
     """
     from agentworks import catalog, git_credentials, output, secrets
     from agentworks.manifests import RESOURCES_DIRNAME, load_manifests
     from agentworks.manifests import builtin as builtin_manifests
 
-    if manifests is None:
+    standard = manifests is None
+    if standard:
+        cached = _STANDARD_REGISTRIES.get(id(config))
+        if cached is not None and cached[0]() is config:
+            return cached[1]
         resources_dir = config.source_path.parent / RESOURCES_DIRNAME
         manifests = load_manifests(resources_dir)
-        # Some commands build more than one registry; warn each
-        # manifest issue once per directory per process, mirroring
-        # load_config's one-shot config_issues warning.
-        if resources_dir not in _WARNED_MANIFEST_DIRS:
-            _WARNED_MANIFEST_DIRS.add(resources_dir)
-            for issue in manifests.issues:
-                output.warn(f"Manifest: {issue}")
+        for issue in manifests.issues:
+            output.warn(f"Manifest: {issue}")
 
+    assert manifests is not None
     registry = Registry.empty()
     # Built-in publishers first. The bundled manifests precede the
     # catalog publisher because catalog.publish_to also publishes the
@@ -76,4 +83,6 @@ def build_registry(config: Config, manifests: ManifestSet | None = None) -> Regi
     config.publish_to(registry)
     manifests.publish_to(registry)
     registry.finalize()
+    if standard:
+        _STANDARD_REGISTRIES[id(config)] = (weakref.ref(config), registry)
     return registry

@@ -10,10 +10,10 @@ miss policy and providers show up in ``agw resource list``.
 This module also owns ``resolver_for``: the registry-derived resolver
 assembly that replaced ``Config.secret_resolver`` (resource-manifests
 SDD, Phase 3). The resolver instance carries the per-command
-resolved-value cache (prompt-once), so ``resolver_for`` memoizes per
-Config object: every call with the same Config returns the same
-resolver regardless of which ``build_registry`` result accompanies it
-(all builds of one config produce equal backend rows).
+resolved-value cache (prompt-once); it is assembled once per Registry,
+and the standard registry is itself a per-Config singleton (see
+``bootstrap.build_registry``), so every default-path caller in a
+command shares one resolver.
 """
 
 from __future__ import annotations
@@ -105,10 +105,14 @@ def publish_to(registry: Registry) -> None:
         )
 
 
-# id(config) -> (weakref to the config, its resolver). The weakref guards
-# against id reuse after garbage collection handing a stale resolver to
-# an unrelated Config (matters in long test sessions).
-_RESOLVERS: dict[int, tuple[weakref.ref[Any], SecretResolver]] = {}
+# One resolver per Registry instance. The standard registry is itself a
+# per-Config singleton (see bootstrap.build_registry), so all default
+# call paths in a command share one resolver -- the prompt-once cache
+# identity -- while explicitly-built registries (tests, custom
+# orchestration) get their own resolver matching their own rows.
+_RESOLVERS: weakref.WeakKeyDictionary[Any, SecretResolver] = (
+    weakref.WeakKeyDictionary()
+)
 
 
 def _source_for(row: Any, name: str) -> SecretSource:
@@ -149,19 +153,21 @@ def resolver_for(config: Config, registry: Registry | None = None) -> SecretReso
     which could not survive manifest-declared backends.
 
     ``registry`` is optional: deep call paths (orchestration, render)
-    pass only the config and the standard registry is built on the
-    first miss. The per-config memo makes that a one-time cost and, more
-    importantly, guarantees every caller in a command shares ONE
-    resolver instance, preserving the prompt-once cache semantics.
+    pass only the config and get the standard registry, which
+    ``build_registry`` memoizes per Config object. The resolver is then
+    memoized per Registry instance, so every default-path caller in a
+    command shares ONE resolver -- the prompt-once cache identity --
+    while an explicitly-built registry gets a resolver matching its own
+    rows.
     """
-    cached = _RESOLVERS.get(id(config))
-    if cached is not None and cached[0]() is config:
-        return cached[1]
-
     if registry is None:
         from agentworks.bootstrap import build_registry
 
         registry = build_registry(config)
+
+    cached = _RESOLVERS.get(registry)
+    if cached is not None:
+        return cached
 
     from agentworks.resources.access import secret_decls
 
@@ -219,5 +225,5 @@ def resolver_for(config: Config, registry: Registry | None = None) -> SecretReso
             ),
         )
 
-    _RESOLVERS[id(config)] = (weakref.ref(config), resolver)
+    _RESOLVERS[registry] = resolver
     return resolver

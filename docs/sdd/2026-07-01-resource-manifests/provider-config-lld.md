@@ -83,9 +83,12 @@ manifest-declared backends (unknowable at `load_config`). The swap:
   here.
 - **Prompt-once identity**: the resolver instance carries the per-command resolved-value cache
   (eager-resolve fills it; later renders hit it without re-prompting). Today that identity comes
-  from Config carrying ONE resolver. `resolver_for` preserves it with an `id(config)`-keyed memo:
-  every call with the same Config object returns the same resolver instance, regardless of which
-  `build_registry` result accompanies it (all builds of one config produce equal rows).
+  from Config carrying ONE resolver. As-built (refined at the maintainer's suggestion): the
+  gathering happens once after finalize -- `build_registry`'s standard path (`manifests=None`) is
+  memoized per Config object, so every default caller shares one frozen Registry, and the resolver
+  is memoized per Registry instance. Prompt-once follows from registry identity with no "equal rows
+  across builds" assumption, redundant registry rebuilds disappear, and an explicitly built registry
+  (tests, custom orchestration) gets its own resolver matching its own rows.
 - `Config.secret_resolver` is removed along with `_build_secret_resolver` and the parse-time
   chain-kind validation in `_load_secret_config` (the relocation is the same sanctioned pattern as
   the Phase 1 cycle-detection move: config-only commands no longer validate the chain; every

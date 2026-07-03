@@ -310,6 +310,19 @@ def test_legacy_toml_backend_rows_still_resolve(tmp_path: Path) -> None:
     assert [s.kind for s in resolver.sources] == ["env-var"]
 
 
+def test_standard_registry_is_per_config_singleton(tmp_path: Path) -> None:
+    """build_registry memoizes the standard path per Config object;
+    explicit-manifests calls always build fresh."""
+    from agentworks.manifests import ManifestSet
+
+    config = _config(tmp_path)
+    first = build_registry(config)
+    second = build_registry(config)
+    assert first is second
+    fresh = build_registry(config, ManifestSet.empty())
+    assert fresh is not first
+
+
 def test_prompt_once_identity(tmp_path: Path) -> None:
     config = _config(tmp_path)
     registry = build_registry(config)

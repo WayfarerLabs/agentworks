@@ -228,6 +228,11 @@ artifact update.)
   branch and PR instead of PR-per-phase. Per-phase "reviewer-approved" in the definitions of done
   reads as "commit series complete and suite green"; review happens once on the full PR. Side
   effect: the dual-source window never exists on main.
+- **2026-07-03: standard registry becomes a per-config singleton.** Refined at the maintainer's
+  suggestion during Phase 3 review: instead of a resolver-only `id(config)` memo assuming all builds
+  of one config produce equal rows, `build_registry`'s standard path is memoized per Config object
+  and the resolver is memoized per Registry. Prompt-once identity follows from registry identity;
+  explicit-`ManifestSet` calls always build fresh (pinned by test).
 - **2026-07-03: resolver leaves Config (Phase 3 LLD).** `Config.secret_resolver` cannot survive
   manifest-declared backends (unknowable at `load_config`), so the resolver becomes registry-derived
   (`providers.resolver_for(config, registry)`) with an `id(config)`-keyed memo preserving the
