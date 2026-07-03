@@ -22,7 +22,7 @@ import dataclasses
 from typing import TYPE_CHECKING, Any
 
 from agentworks.errors import ConfigError
-from agentworks.resources.kind import KIND_REGISTRY
+from agentworks.resources.kind import KIND_REGISTRY, SYNTHESIZED_SINGLETON_KINDS
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
@@ -93,7 +93,8 @@ class Registry:
         - built-in row over built-in row: replaces (idempotent
           republish).
         - anything else (built-in over operator) is a publisher
-          ordering bug and raises ``AssertionError``.
+          ordering conflict and raises ``ConfigError`` (operator data
+          can reach it, so it must not be an assert).
         """
         if self._frozen:
             raise RuntimeError("registry is frozen; add must precede finalize")
@@ -107,8 +108,12 @@ class Registry:
     def _check_collision(
         kind: str, name: str, existing: Any, incoming: Origin
     ) -> None:
-        """Raise unless the incoming publish may replace ``existing``."""
-        from agentworks.errors import ConfigError
+        """Raise unless the incoming publish may replace ``existing``.
+
+        Built-in over built-in replaces unconditionally: republish is
+        idempotent, and a future app publisher shadowing another's row
+        is accepted (the surviving origin's source says who won).
+        """
         from agentworks.resources.render import format_origin_line
 
         existing_origin: Origin | None = getattr(existing, "origin", None)
@@ -127,23 +132,27 @@ class Registry:
             existing_variant == "operator-declared"
             and incoming.variant == "operator-declared"
         ):
-            # line == 0 is the SourceLocation sentinel for rows the TOML
-            # publisher synthesized rather than the operator declaring
-            # them (omitted-singleton defaults for admin-template /
-            # named-console-template, and the legacy line-unknown catalog
-            # publisher). Those are replaceable by a real operator
-            # declaration; the looseness disappears with the TOML
+            # The TOML publisher always publishes the two singleton rows,
+            # synthesizing empty defaults (SourceLocation line == 0) when
+            # the operator omitted the sections. Only those synthesized
+            # singletons are replaceable by a real operator declaration;
+            # every other operator-vs-operator collision (including
+            # TOML-vs-manifest catalog extensions during the dual-source
+            # window) is a duplicate. The exemption dies with the TOML
             # publisher at the cutover.
-            if getattr(existing_origin, "line", None) == 0:
+            if (
+                kind in SYNTHESIZED_SINGLETON_KINDS
+                and getattr(existing_origin, "line", None) == 0
+            ):
                 return
             raise ConfigError(
                 f'duplicate {kind} "{name}": declared at '
                 f"{format_origin_line(existing_origin)} and "
                 f"{format_origin_line(incoming)}",
             )
-        raise AssertionError(
-            f"publisher ordering bug: {incoming.variant} row published over "
-            f"{existing_variant} row for {kind}:{name}"
+        raise ConfigError(
+            f"publisher ordering conflict: {incoming.variant} row published "
+            f"over {existing_variant} row for {kind}:{name}"
         )
 
     # -- Finalize phase ------------------------------------------------

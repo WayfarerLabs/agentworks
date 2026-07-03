@@ -31,6 +31,30 @@ RESOURCES_DIRNAME = "resources"
 _MANIFEST_SUFFIXES = {".yaml", ".yml"}
 
 
+class _StrictLoader(yaml.SafeLoader):
+    """SafeLoader that rejects duplicate mapping keys.
+
+    tomllib errors on duplicate keys, so silent last-write-wins here
+    would be a parity loosening on the new surface.
+    """
+
+    def construct_mapping(self, node: yaml.MappingNode, deep: bool = False) -> dict[Any, Any]:
+        seen: set[object] = set()
+        for key_node, _value_node in node.value:
+            key = self.construct_object(key_node, deep=True)
+            if isinstance(key, dict | list):
+                continue  # unhashable; base class raises its own error
+            if key in seen:
+                raise yaml.constructor.ConstructorError(
+                    None,
+                    None,
+                    f"duplicate mapping key {key!r}",
+                    key_node.start_mark,
+                )
+            seen.add(key)
+        return super().construct_mapping(node, deep=deep)
+
+
 @dataclass(frozen=True)
 class ManifestEntry:
     """One decoded resource plus where it came from."""
@@ -76,17 +100,27 @@ class ManifestSet:
 
 
 def _iter_manifest_files(resources_dir: Path) -> Iterator[Path]:
+    """Walk manifest files in component-wise lexicographic order.
+
+    A hand-rolled walk (rather than ``rglob``) so dot-directories are
+    pruned without descending into them, and so ordering is defined per
+    path component (``a/x.yaml`` before ``a-b/x.yaml``) rather than by
+    raw string comparison of relative paths.
+    """
     if not resources_dir.is_dir():
         return
-    for path in sorted(
-        resources_dir.rglob("*"), key=lambda p: str(p.relative_to(resources_dir))
-    ):
-        if not path.is_file() or path.suffix not in _MANIFEST_SUFFIXES:
-            continue
-        rel = path.relative_to(resources_dir)
-        if any(part.startswith(".") for part in rel.parts):
-            continue
-        yield path
+    stack = [resources_dir]
+    while stack:
+        directory = stack.pop()
+        subdirs: list[Path] = []
+        for child in sorted(directory.iterdir(), key=lambda p: p.name):
+            if child.name.startswith("."):
+                continue
+            if child.is_dir():
+                subdirs.append(child)
+            elif child.is_file() and child.suffix in _MANIFEST_SUFFIXES:
+                yield child
+        stack.extend(reversed(subdirs))
 
 
 def _iter_documents(path: Path) -> Iterator[tuple[object, SourceLocation]]:
@@ -100,12 +134,14 @@ def _iter_documents(path: Path) -> Iterator[tuple[object, SourceLocation]]:
         text = path.read_text(encoding="utf-8")
     except UnicodeDecodeError as exc:
         raise ConfigError(f"{path}: not valid UTF-8: {exc}") from exc
+    except OSError as exc:
+        raise ConfigError(f"{path}: cannot read manifest: {exc}") from exc
     try:
-        for node in yaml.compose_all(text, Loader=yaml.SafeLoader):
+        for node in yaml.compose_all(text, Loader=_StrictLoader):
             if node is None:
                 continue
             location = SourceLocation(file=path, line=node.start_mark.line + 1)
-            constructor = yaml.SafeLoader("")
+            constructor = _StrictLoader("")
             # construct_document is untyped in types-PyYAML; the call is
             # the documented node-to-value path for composed documents.
             value = constructor.construct_document(node)  # type: ignore[no-untyped-call]

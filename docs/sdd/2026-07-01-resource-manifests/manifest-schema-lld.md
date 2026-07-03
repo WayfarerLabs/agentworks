@@ -39,6 +39,11 @@ Envelope rules (all violations are `ConfigError` with `file:line` of the documen
 - `spec` (required mapping, may be empty `{}`).
 - Unknown top-level keys are errors (the envelope is new surface; strict from day one).
 - Documents must be mappings; empty documents are skipped; non-mapping documents error.
+- Duplicate mapping keys within a document are errors (tomllib parity; PyYAML's default
+  last-write-wins would be a strictness loosening on the new surface).
+- `metadata.description` on a kind whose schema has no description field is a warning and the value
+  is dropped (not an error: the FRD wants description to become framework-uniform, so a declared
+  description should not block loading a kind that simply hasn't grown the field yet).
 - Singleton kinds (`admin-template`, `named-console-template`) accept only `metadata.name: default`.
 
 `metadata.description` maps to the kind's `description` field where one exists (`secret`,
@@ -60,11 +65,14 @@ warnings.
 
 ## Per-kind spec schemas (parity-pinned)
 
-The table module `agentworks/manifests/schema.py` declares, per kind: the TOML section name (for the
-migrator), the spec keys with types/required/defaults, the unknown-key mode, and the decode
-function. The decode functions reuse the existing per-field validation helpers from `config.py` /
-`catalog.py` (`_parse_env_table`, `_require_string_list`, backend-mapping shape checks, ...) so
-manifest and TOML semantics cannot drift while both exist.
+As-built, the shared mapping is leaner than the field-table module originally sketched here: the
+decoders in `agentworks/manifests/decode.py` do not carry per-field tables at all. Each one
+reassembles the shape the corresponding TOML loader consumes and calls THAT loader through a
+fixed-location `decls` shim, so every type check, enum, env rule, and unknown-key warning is shared
+verbatim (zero drift by construction). The migrator's shared table is `decode.KIND_SECTIONS` (kind
+identifier to legacy TOML section name); the migrator's field-level correctness comes from
+round-tripping its emitted manifests through `load_manifests` itself rather than from a parallel
+schema table.
 
 Unknown-key modes (pinned from the loader survey; "warn" = allowlist diff appended to issues,
 "silent" = extra keys ignored):
@@ -141,5 +149,6 @@ All loader errors are `ConfigError` with the document location prefix:
 
 `agentworks/manifests/builtin/` ships inside the package; `builtin.py` discovers `*.yaml` there via
 `importlib.resources`, parses with the same loader, and publishes with
-`Origin.built_in(source="agentworks.manifests.builtin/<filename>")`. Phase 2 ships the mechanism
-wired with an empty bundle; Phase 3 adds `secret-backends.yaml`.
+`Origin.built_in(source="agentworks.manifests.builtin/<filename>")`. Warn-level issues in bundled
+manifests are app bugs and assert (CI catches a dirty bundle when content is added). Phase 2 ships
+the mechanism wired with an empty bundle; Phase 3 adds `secret-backends.yaml`.

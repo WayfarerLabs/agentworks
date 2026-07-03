@@ -144,11 +144,12 @@ spec:
 - **`kind`** (required): the registry kind identifier, verbatim (`secret`, `vm-template`,
   `session-template`, ...), lower-kebab per R9. One canonical kind vocabulary across manifests, CLI
   (`--kind`), origins, and error messages. Unknown kinds are load errors listing the valid kinds.
-- **`metadata`** (required): the framework-uniform fields. `name` (required; validated by the
-  existing resource-name rule, which permits underscores; kebab-case remains the encouraged style)
-  and `description` (optional; the operator-set description per the resource-registry SDD's R9,
-  including the missing-description warning). No labels or annotations; they can be added under
-  `metadata` later without breaking anything.
+- **`metadata`** (required): the framework-uniform fields. `name` (required; name validation matches
+  the TOML loader exactly: the resource-name rule applies where TOML applied it, i.e. to `secret`
+  names, with other kinds pass-through; uniform tightening is deferred past the
+  migration-equivalence window) and `description` (optional; the operator-set description per the
+  resource-registry SDD's R9, including the missing-description warning). No labels or annotations;
+  they can be added under `metadata` later without breaking anything.
 - **`spec`** (required, may be empty): the kind-specific fields, exactly the fields the kind's TOML
   section accepted, with nesting expressed natively (`env`, `backend_mappings` as nested maps).
   Kind-specific validation semantics are unchanged from today.

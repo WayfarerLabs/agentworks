@@ -1,12 +1,13 @@
 """Application-level glue: assemble a finalized ``Registry`` from the
 standard set of publishers.
 
-The "standard set of publishers" -- today, just ``Config``; from Phase 2b,
-also ``agentworks.catalog`` -- is application knowledge, not Registry
-knowledge and not Config knowledge. This module is its legitimate home: it
-imports both ``Config`` and ``Registry`` (and, when Phase 2b lands, the
-catalog publisher) and orchestrates them. Registry stays publisher-
-agnostic; Config stays unaware of catalog.
+The "standard set of publishers" -- the bundled built-in manifests, the
+catalog, the git-credential and secret-backend descriptors, the TOML
+``Config``, and the operator's YAML ``ManifestSet`` -- is application
+knowledge, not Registry knowledge and not Config knowledge. This module
+is its legitimate home: it imports the publishers and orchestrates
+them. Registry stays publisher-agnostic; Config stays unaware of the
+others.
 
 Call sites that need a finalized Registry for the common Config case use
 ``build_registry(config)``. Tests and multi-source orchestration can
@@ -21,8 +22,14 @@ from typing import TYPE_CHECKING
 from agentworks.resources import Registry
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from agentworks.config import Config
     from agentworks.manifests import ManifestSet
+
+# Resources directories whose manifest issues were already warned this
+# process (build_registry may run several times per command).
+_WARNED_MANIFEST_DIRS: set[Path] = set()
 
 
 def build_registry(config: Config, manifests: ManifestSet | None = None) -> Registry:
@@ -47,15 +54,25 @@ def build_registry(config: Config, manifests: ManifestSet | None = None) -> Regi
     from agentworks.manifests import builtin as builtin_manifests
 
     if manifests is None:
-        manifests = load_manifests(config.source_path.parent / RESOURCES_DIRNAME)
-        for issue in manifests.issues:
-            output.warn(f"Manifest issue: {issue}")
+        resources_dir = config.source_path.parent / RESOURCES_DIRNAME
+        manifests = load_manifests(resources_dir)
+        # Some commands build more than one registry; warn each
+        # manifest issue once per directory per process, mirroring
+        # load_config's one-shot config_issues warning.
+        if resources_dir not in _WARNED_MANIFEST_DIRS:
+            _WARNED_MANIFEST_DIRS.add(resources_dir)
+            for issue in manifests.issues:
+                output.warn(f"Manifest: {issue}")
 
     registry = Registry.empty()
+    # Built-in publishers first. The bundled manifests precede the
+    # catalog publisher because catalog.publish_to also publishes the
+    # operator's TOML catalog extensions (operator-declared rows), and
+    # built-in rows must never land on top of operator rows.
+    builtin_manifests.publish_to(registry)
     catalog.publish_to(registry, config)
     git_credentials.publish_to(registry)
     secrets.publish_to(registry)
-    builtin_manifests.publish_to(registry)
     config.publish_to(registry)
     manifests.publish_to(registry)
     registry.finalize()

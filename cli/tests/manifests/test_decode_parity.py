@@ -306,6 +306,97 @@ def test_description_on_descriptionless_kind_warns(tmp_path: Path) -> None:
     assert "not yet stored" in manifests.issues[0]
 
 
+def test_catalog_kind_decode_error_carries_location(tmp_path: Path) -> None:
+    """Catalog loaders raise CatalogError; from a manifest it must
+    surface as ConfigError with the document's file:line."""
+    _manifest(
+        tmp_path,
+        """
+        apiVersion: agentworks/v1
+        kind: system-install-command
+        metadata:
+          name: my-tool
+        spec:
+          command: install.sh
+          test: my-tool
+        """,
+    )
+    with pytest.raises(ConfigError) as exc:
+        load_manifests(tmp_path / "resources")
+    assert "res.yaml:2" in str(exc.value)
+    assert "test" in str(exc.value)
+
+
+def test_manifest_admin_replaces_omitted_toml_singleton(tmp_path: Path) -> None:
+    """Dual-window semantics: TOML omitted [admin.*] entirely, so its
+    synthesized default yields to the manifest declaration."""
+    _manifest(
+        tmp_path,
+        """
+        apiVersion: agentworks/v1
+        kind: admin-template
+        metadata:
+          name: default
+        spec:
+          username: ops
+        """,
+    )
+    registry = build_registry(_config(tmp_path))
+    assert registry.lookup("admin-template", "default").username == "ops"
+
+
+def test_manifest_admin_collides_with_declared_toml_admin(tmp_path: Path) -> None:
+    """Dual-window semantics: a real [admin.config] in TOML plus an
+    admin manifest is a duplicate."""
+    _manifest(
+        tmp_path,
+        """
+        apiVersion: agentworks/v1
+        kind: admin-template
+        metadata:
+          name: default
+        spec:
+          username: ops
+        """,
+    )
+    config = _config(
+        tmp_path,
+        """
+        [admin.config]
+        username = "other"
+        """,
+    )
+    with pytest.raises(ConfigError, match="duplicate admin-template"):
+        build_registry(config)
+
+
+def test_toml_catalog_extension_vs_manifest_is_duplicate(tmp_path: Path) -> None:
+    """The line-0 exemption is singleton-only: a TOML catalog extension
+    colliding with a manifest errors like any operator duplicate."""
+    _manifest(
+        tmp_path,
+        """
+        apiVersion: agentworks/v1
+        kind: apt-package
+        metadata:
+          name: my-tool
+          description: from manifest
+        spec:
+          apt: [my-tool]
+        """,
+    )
+    config = _config(
+        tmp_path,
+        """
+        [apt_packages.my-tool]
+        description = "from TOML"
+        apt = ["my-tool"]
+        """,
+    )
+    with pytest.raises(ConfigError, match="duplicate apt-package"):
+        build_registry(config)
+
+
 def test_cross_source_duplicate_errors_at_build(tmp_path: Path) -> None:
     config = _config(
         tmp_path,

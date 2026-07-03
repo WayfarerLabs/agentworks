@@ -222,6 +222,52 @@ def test_unknown_metadata_key_rejected(tmp_path: Path) -> None:
         load_manifests(root)
 
 
+def test_missing_spec_key_rejected(tmp_path: Path) -> None:
+    root = tmp_path / "resources"
+    _write(
+        root,
+        "a.yaml",
+        """
+        apiVersion: agentworks/v1
+        kind: secret
+        metadata:
+          name: s1
+          description: d
+        """,
+    )
+    with pytest.raises(ConfigError, match="spec is required"):
+        load_manifests(root)
+
+
+def test_duplicate_mapping_key_rejected(tmp_path: Path) -> None:
+    root = tmp_path / "resources"
+    _write(
+        root,
+        "a.yaml",
+        """
+        apiVersion: agentworks/v1
+        kind: secret
+        metadata:
+          name: s1
+          description: first
+          description: second
+        spec: {}
+        """,
+    )
+    with pytest.raises(ConfigError, match="duplicate mapping key"):
+        load_manifests(root)
+
+
+def test_nested_dir_order_is_component_wise(tmp_path: Path) -> None:
+    """Ordering is per path component: ``a/`` sorts before ``a-b/`` even
+    though the raw relative-path strings compare the other way."""
+    root = tmp_path / "resources"
+    _write(root, "a/x.yaml", _secret_doc("from-a-dir"))
+    _write(root, "a-b/x.yaml", _secret_doc("from-a-dash-b"))
+    manifests = load_manifests(root)
+    assert [e.name for e in manifests.entries] == ["from-a-dir", "from-a-dash-b"]
+
+
 def test_spec_unknown_key_warns_with_location_for_warn_kinds(tmp_path: Path) -> None:
     root = tmp_path / "resources"
     _write(

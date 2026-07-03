@@ -245,8 +245,10 @@ config.toml --tomlkit parse--> section split per FRD R1 table
 - Uses **tomlkit** for the comment-preserving rewrite (new dependency, migration path only; verify
   latest stable at implementation). The read side uses the same parse the legacy loader used, so
   field interpretation cannot drift from what the config actually meant.
-- Emission is envelope-shaped through the same `decode.py` field tables in reverse; the kind list
-  and field names come from one shared mapping so the loader and the migrator cannot disagree.
+- Emission is envelope-shaped: the kind-to-section mapping comes from `decode.KIND_SECTIONS` (shared
+  with the loader), and field-level correctness is verified by round-tripping the migrator's emitted
+  manifests through `load_manifests` itself (whose decoders call the same TOML loaders), so the
+  loader and the migrator cannot disagree.
 - The pre-cutover TOML resource-section parser survives only inside the migration tool (it needs to
   read old configs); the live config loader rejects resource sections outright.
 

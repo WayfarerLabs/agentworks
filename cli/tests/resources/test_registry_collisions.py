@@ -65,8 +65,27 @@ def test_builtin_republish_is_idempotent() -> None:
     assert registry.lookup("secret", "s1").origin.variant == "built-in"
 
 
-def test_builtin_over_operator_is_a_publisher_bug() -> None:
+def test_builtin_over_operator_is_an_ordering_conflict() -> None:
     registry = Registry.empty()
     registry.add("secret", "s1", _decl("s1"), _operator(1))
-    with pytest.raises(AssertionError, match="publisher ordering"):
+    with pytest.raises(ConfigError, match="publisher ordering"):
         registry.add("secret", "s1", _decl("s1"), Origin.built_in(source="app"))
+
+
+def test_synthesized_singleton_is_replaceable_by_operator_row() -> None:
+    """The TOML publisher's omitted-singleton rows (line == 0) yield to a
+    real operator declaration; the same sentinel on any other kind does
+    NOT exempt the collision."""
+    registry = Registry.empty()
+    synthesized = Origin.operator_declared(file=Path("config.toml"), line=0)
+    registry.add("admin-template", "default", _decl("default"), synthesized)
+    registry.add("admin-template", "default", _decl("default"), _operator(7))
+    assert registry.lookup("admin-template", "default").origin.line == 7
+
+
+def test_line_zero_on_non_singleton_kind_still_collides() -> None:
+    registry = Registry.empty()
+    line_zero = Origin.operator_declared(file=Path("config.toml"), line=0)
+    registry.add("apt-package", "tool", _decl("tool"), line_zero)
+    with pytest.raises(ConfigError, match="duplicate apt-package"):
+        registry.add("apt-package", "tool", _decl("tool"), _operator(3))

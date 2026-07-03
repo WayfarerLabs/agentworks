@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, cast
 
-from agentworks.errors import ConfigError
+from agentworks.errors import AgentworksError, ConfigError
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -95,6 +95,9 @@ def decode_document(doc: Document, issues: list[str]) -> Any:
         if doc.description is not None:
             spec["description"] = doc.description
     elif doc.description is not None:
+        # Warn-and-ignore rather than error: the FRD wants description to
+        # become framework-uniform, so a declared description should not
+        # block loading a kind that simply hasn't grown the field yet.
         issues.append(
             f"{doc.where}: metadata.description is not yet stored for "
             f"{doc.kind} (the kind's schema has no description field); ignored"
@@ -103,7 +106,11 @@ def decode_document(doc: Document, issues: list[str]) -> Any:
     local_issues: list[str] = []
     try:
         resource = decoder(doc, spec, local_issues)
-    except ConfigError as exc:
+    except AgentworksError as exc:
+        # Catalog loaders raise CatalogError (an ExternalError subclass);
+        # from a manifest that is an operator-config mistake, so every
+        # spec-level failure re-raises as ConfigError with the document
+        # location, per the LLD's error catalog.
         raise ConfigError(f"{doc.where}: {exc}", hint=exc.hint) from exc
     issues.extend(f"{doc.where}: {issue}" for issue in local_issues)
     return resource

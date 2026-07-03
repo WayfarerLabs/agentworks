@@ -197,6 +197,9 @@ after); CI green; reviewer-approved.
         `cli/README.md` (configuration schema and command reference; the largest doc blast radius of
         the cutover), and the top-level README for TOML-section references to resource kinds; update
         to manifest examples.
+- [ ] Re-vocabulary the shared loader messages: once the TOML resource surface is gone, spec-level
+      errors and warnings must speak manifest vocabulary (field paths, not `secrets.<name>.*` TOML
+      section paths) since the loaders become manifest-only.
 - [ ] Release notes: the cutover, the one-command migration, the rename list from FRD "Migration
       notes".
 - [ ] Completions: verify the full command tree still round-trips (kind values, new subcommand).
@@ -219,6 +222,11 @@ artifact update.)
   branch and PR instead of PR-per-phase. Per-phase "reviewer-approved" in the definitions of done
   reads as "commit series complete and suite green"; review happens once on the full PR. Side
   effect: the dual-source window never exists on main.
+- **2026-07-03: name-validation parity, not the FRD's uniform rule.** FRD R3 originally implied the
+  resource-name rule applies to every manifest `metadata.name`; the implementation pins TOML parity
+  instead (`validate_name` for `secret` only, pass-through elsewhere) so the Phase 4
+  registry-equivalence test cannot trip on legitimately-named existing resources. The FRD was
+  amended; uniform tightening is a post-cutover follow-up.
 - **2026-07-03: secret-backend not manifest-declarable in Phase 2.** The manifest-schema LLD defers
   `secret-backend` manifest declarability to Phase 3: its Phase 2 manifest shape (the bare
   kind-keyed TOML form) would be broken by Phase 3's provider/backend reshape inside the same PR, so

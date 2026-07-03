@@ -21,7 +21,14 @@ _BUILTIN_SOURCE = "agentworks.manifests.builtin"
 
 
 def publish_to(registry: Registry) -> None:
-    """Publish every bundled manifest with a ``built-in`` origin."""
+    """Publish every bundled manifest with a ``built-in`` origin.
+
+    The origin's source carries the bundled filename
+    (``agentworks.manifests.builtin/<filename>``) so ``agw resource
+    describe`` points at the actual shipped file. Bundled manifests are
+    app data: warn-level issues in them are app bugs, asserted here so
+    CI catches a dirty bundle the moment content is added.
+    """
     from agentworks.manifests.loader import load_manifests
     from agentworks.resources import Origin
 
@@ -31,6 +38,15 @@ def publish_to(registry: Registry) -> None:
     with importlib_resources.as_file(bundle) as bundle_dir:
         manifests = load_manifests(Path(bundle_dir))
 
-    origin = Origin.built_in(source=_BUILTIN_SOURCE)
+    assert not manifests.issues, (
+        f"bundled manifests must be issue-free: {manifests.issues}"
+    )
     for entry in manifests.entries:
-        registry.add(entry.kind, entry.name, entry.resource, origin)
+        registry.add(
+            entry.kind,
+            entry.name,
+            entry.resource,
+            Origin.built_in(
+                source=f"{_BUILTIN_SOURCE}/{entry.location.file.name}"
+            ),
+        )

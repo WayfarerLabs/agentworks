@@ -123,6 +123,8 @@ def validate_envelope(raw: object, location: SourceLocation) -> Document:
             f'{kind} accepts only metadata.name "default"; got {name!r}',
         )
 
+    if "spec" not in raw:
+        raise _err(location, "spec is required (an empty mapping {} is fine)")
     spec = raw.get("spec")
     if spec is None:
         spec = {}
