@@ -64,10 +64,11 @@ reviewer-approved.
 
 ## Phase 2: Manifest loader and built-in manifest mechanism
 
-- [ ] **LLD**: `manifest-schema-lld.md` covering the envelope grammar, per-kind spec field tables
-      (shared mapping used by loader and migrator), per-kind unknown-key strictness as currently
-      implemented (pinned, not changed), error message catalog with `file:line` framing, and the
-      YAML library / version decision (verify latest stable; document the mark plumbing).
+- [x] **LLD**: [manifest-schema-lld.md](manifest-schema-lld.md) covering the envelope grammar,
+      per-kind spec field tables (shared mapping used by loader and migrator), per-kind unknown-key
+      strictness as currently implemented (pinned from a full loader survey), error message catalog
+      with `file:line` framing, and the YAML library decision (PyYAML 6.0.3, latest stable verified
+      via the uv resolver; compose_all mark plumbing).
 - [ ] Add the YAML dependency to `cli/pyproject.toml` (latest stable at implementation time);
       promote the library's name from this SDD's local cspell dictionary to the root `.cspell.json`
       once it appears in permanent code (skill promotion rule).
@@ -208,6 +209,11 @@ artifact update.)
   branch and PR instead of PR-per-phase. Per-phase "reviewer-approved" in the definitions of done
   reads as "commit series complete and suite green"; review happens once on the full PR. Side
   effect: the dual-source window never exists on main.
+- **2026-07-03: secret-backend not manifest-declarable in Phase 2.** The manifest-schema LLD defers
+  `secret-backend` manifest declarability to Phase 3: its Phase 2 manifest shape (the bare
+  kind-keyed TOML form) would be broken by Phase 3's provider/backend reshape inside the same PR, so
+  the kind errors with a pointer until the reshaped spec (`spec.provider` + provider config) lands.
+  TOML `[secret_backends.*]` sections are unaffected until the cutover.
 - **2026-07-02: Phase 1 fail-fast expansion.** The consumer repoint gives shell-opening and console
   commands (`vm shell/exec`, `agent shell/exec`, `session restart`, the console add/restore/attach
   family, `env show`) a `build_registry` call they previously lacked, because their env-scope
