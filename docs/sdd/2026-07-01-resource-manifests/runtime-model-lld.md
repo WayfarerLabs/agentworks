@@ -1,8 +1,12 @@
 # Runtime model LLD: backends are the door
 
-Status: DRAFT for maintainer review. Nothing below is implemented; this replaces the secrets runtime
-layer (which predates this SDD) and supersedes the interim resolver plumbing built during Phases
-3-3.5 (memos, registry-purity threading, the secret-config row experiment).
+Status: IMPLEMENTED (Phase 3.6, 2026-07-03), as reviewed by the maintainer. This replaced the
+secrets runtime layer (which predated this SDD) and superseded the interim resolver plumbing built
+during Phases 3-3.5 (memos, registry-purity threading, the secret-config row experiment). One
+addition made during implementation: the provider API carries
+`would_attempt(config, secret, mapping)` alongside `describe_lookup` -- the backend door handles the
+generic `False` opt-out and delegates the has-convention-or-mapping decision to the provider
+(required by FRD R4's soft-skip semantics for providers without default conventions).
 
 ## Part 1: the general pattern (all capability-backed domains)
 

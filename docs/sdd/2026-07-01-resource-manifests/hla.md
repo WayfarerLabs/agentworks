@@ -72,18 +72,14 @@ and is not required by this design.
 
 - Keeps: `[operator]`, `[paths]`, `[defaults]`, `[azure]`, `[proxmox]`, `[session.config]`,
   `[secret_config]`. Parsing, validation, and types for these are untouched.
-- Loses: all resource sections, the resource-composition step, and the TOML section-line regex
-  scanner (the YAML loader captures locations natively). `Config.publish_to` shrinks to exactly one
-  row -- the `secret-config` singleton -- rather than disappearing: pure config that names resources
-  keeps publishing its edges.
-- Post-cutover, `load_config()` raises `ConfigError` if any resource section is present, listing the
-  sections and pointing at `agw config migrate`.
-- `[secret_config]` stays TOML-parsed here, but because its `backends` chain names resources,
-  `Config.publish_to` publishes it as the singleton `secret-config:default` row (revised at the
-  maintainer's design revisit; originally "a lookup, not a published reference"). The chain becomes
-  `secret-backend` reference edges the framework validates at finalize; the kind is not
-  manifest-declarable, so TOML remains its only home. Publishing is not moving: the section is still
-  pure config, it just declares its edges to the graph.
+- Keeps (dual-path, revised 2026-07-03): the TOML resource sections and their loaders, deprecated
+  but fully supported; each present section warns at load with a pointer at `agw config migrate`.
+  Removal (and the loader-ownership inversion that follows it) waits for a future major release.
+- `[secret_config]` is pure config and is NEVER published (final ruling, reversing the interim
+  secret-config-row experiment): settings that name resources -- the chain today, active plugins
+  tomorrow -- are consumed by their owning subsystem in normal operation. The secrets subsystem
+  validates the chain against the finalized registry at the composition boundary
+  (`secrets.validate_chain`, run by `build_registry`), with config vocabulary in every error.
 
 ### `agentworks.manifests` (new): the operator publisher
 
@@ -142,11 +138,11 @@ loader already catches operator duplicates within the manifest set, so in the re
 publish-time check is a backstop; during the development-window dual-source phases it is what
 catches a resource declared in both TOML and a manifest.
 
-## Development-window dual source (Phases 2 through 4)
+## Dual source (permanent, revised 2026-07-03)
 
-Between the loader landing (Phase 2) and the cutover (Phase 5), TOML resource sections and manifests
-coexist at HEAD. The governing rule: TOML resource semantics stay exactly today's until Phase 5, so
-any config that loads today loads at every intermediate phase. Concretely:
+TOML resource sections and manifests coexist indefinitely -- different publishers, single registry,
+as a shipped architecture rather than a development window. The governing rule: any config that
+loads today keeps loading (with deprecation warnings on TOML resource sections). Concretely:
 
 - Cross-source collisions (same `(kind, name)` from TOML and a manifest) error at `Registry.add` per
   the collision handling above.
@@ -191,23 +187,22 @@ Today's `SecretSource` protocol (`would_attempt` / `get` / `batch_get` / `descri
 already the capability contract. The split adds instantiation-by-name with config:
 
 ```text
-PROVIDER_REGISTRY: dict[str, SecretProvider]     # code-side; built-ins env-var, prompt
-  SecretProvider (protocol):
-    name: str
-    config_schema        # validates + defaults a backend document's spec (minus `provider`)
-    instantiate(backend_name, config) -> SecretSource
+PROVIDER_REGISTRY: dict[str, SecretProvider]     # raw capabilities; built-ins env-var, prompt
+  SecretProvider (protocol, stateless; visible only to the backend door):
+    name, interactive
+    validate_config(backend_name, config)        # decode-time schema (spec minus `provider`)
+    would_attempt(config, secret, mapping)
+    describe_lookup(config, secret, mapping)
+    batch_get(config, wants)
 
 registry rows:
   secret-provider:<name>       # descriptor, built-in, error miss policy, not declarable
-  secret-backend:<name>        # resource; spec.provider references secret-provider
-  secret-config:default        # singleton, published by Config; backends chain as edges
+  secret-backend:<name>        # THE DOOR; spec.provider references secret-provider
 
-resolver construction (a projection; all validation already ran at finalize):
-  chain = registry.lookup("secret-config", "default").backends
-  for name in chain:
-      backend = registry.lookup("secret-backend", name)     # existence guaranteed by edges
-      provider = PROVIDER_REGISTRY[backend.provider]        # ref already validated
-      sources.append(provider.instantiate(name, backend.config))
+resolution (a loop; validate_chain already ran at build_registry):
+  backends = active_backends(config, registry)   # [secret_config].backends -> rows, in order
+  for backend in backends:
+      resolved |= backend.resolve(still_missing_and_would_attempt)
 ```
 
 - `SecretBackendDecl` (the `secret-backend` Resource) carries `name`, `description`, `provider`, and
@@ -221,15 +216,17 @@ resolver construction (a projection; all validation already ran at finalize):
 - **Built-in backends** `env-var` and `prompt` ship as an app-bundled manifest
   (`agentworks/manifests/builtin/secret-backends.yaml`), exercising the built-in-manifest path end
   to end. Their names are reserved via `builtin_override = "reserved"`.
-- `backend_mappings` on secrets stay keyed by backend name. Default-convention display
-  (`agw secret describe`, doctor) asks the instantiated source, so a future config-bearing
+- `backend_mappings` on secrets are keyed by BACKEND NAME (never by provider): two backends sharing
+  one provider get independent mappings and opt-outs. Default-convention display
+  (`agw secret describe`, doctor) asks the backend's door methods, so a future config-bearing
   provider's conventions show through with no display-layer changes.
-- The existing `SecretBackendConfig` dataclass (per-backend config parsed from TOML today) is
-  subsumed by `SecretBackendDecl` at the cutover; the orchestrator's construction path swaps from
-  "kind-keyed config sections" to "chain names looked up in the registry". During the development
-  window the orchestrator supports both row shapes (`SecretBackendDecl` via provider instantiation,
-  legacy TOML rows via the existing path); the legacy path is retired in Phase 5 with the rest of
-  the TOML resource surface.
+- The legacy `SecretBackendConfig` dataclass is gone: `[secret_backends.<kind>]` TOML sections were
+  semantically empty (the kind was the only field) and are warned deprecated no-ops; the built-in
+  backends ship as bundled manifests, and `SecretBackendDecl` is the one row shape.
+- The runtime is the backends-are-the-door model (see runtime-model-lld.md, which supersedes this
+  section's original resolver design): resolution is a loop over
+  `active_backends(config, registry)`; a command resolves once at its composition root and threads
+  the VALUES to its `compose_env(values=...)` sites; no resolver object, no cache, no memos.
 
 Git credentials need no structural change: `GitCredentialConfig.provider` (renamed from `type`)
 keeps referencing the `git-credential-provider` descriptor kind; the provider-name-to-class registry
@@ -257,19 +254,21 @@ config.toml --tomlkit parse--> section split per FRD R1 table
   with the loader), and field-level correctness is verified by round-tripping the migrator's emitted
   manifests through `load_manifests` itself (whose decoders call the same TOML loaders), so the
   loader and the migrator cannot disagree.
-- The pre-cutover TOML resource-section parser survives only inside the migration tool (it needs to
-  read old configs); the live config loader rejects resource sections outright.
+- The live config loader keeps reading TOML resource sections (dual-path, with deprecation
+  warnings); the migration tool's own tomlkit read side is what a future major's retirement phase
+  keeps when the live loaders drop the sections.
 
 ## Validation responsibilities (updated)
 
-| Layer                      | Owns                                                                                                                                                                                                               |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Config (TOML)              | config-section parse, field types, `secret_config` chain shape                                                                                                                                                     |
-| Manifest loader (envelope) | YAML parse, apiVersion, kind known + declarable, metadata shape, operator duplicate detection                                                                                                                      |
-| Manifest loader (spec)     | kind-specific field types / required fields / value validation (unchanged semantics)                                                                                                                               |
-| Provider capability        | provider-specific backend config (schema + defaults)                                                                                                                                                               |
-| Registry publish           | built-in override policy per kind                                                                                                                                                                                  |
-| Registry finalize          | references, miss policies, reserved names, cycles, description polish; kind `validate` hooks (chain names via the `secret-config` row's edges; secret reachability and provider instantiation via the kind's hook) |
+| Layer                      | Owns                                                                                                                                  |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| Config (TOML)              | config-section parse, field types, `secret_config` chain shape                                                                        |
+| Manifest loader (envelope) | YAML parse, apiVersion, kind known + declarable, metadata shape, operator duplicate detection                                         |
+| Manifest loader (spec)     | kind-specific field types / required fields / value validation (unchanged semantics)                                                  |
+| Provider capability        | provider-specific backend config (schema + defaults)                                                                                  |
+| Registry publish           | built-in override policy per kind                                                                                                     |
+| Registry finalize          | references, miss policies, reserved names, cycles, description polish (unchanged)                                                     |
+| Composition boundary       | `build_registry` runs `secrets.validate_chain(config, registry)`: chain names, backend configs, operator-declared secret reachability |
 
 All raise `ConfigError`; the layer determines the framing, as today.
 
@@ -310,12 +309,14 @@ One file per kind, multi-document. Typical configs are small; per-resource files
 directory of five-line files. The loader is layout-agnostic, so operators can split further at will.
 The tool's grouping is a default, not a contract.
 
-### Hard cutover
+### Dual-path (revised from "hard cutover", 2026-07-03)
 
-Consistent with the project's migration precedent (env-and-secrets, resource-registry). The
-migration tool plus a load error that names the offending sections and the command to run makes the
-cutover a one-command event. A dual-source window would double the loader surface and create
-ambiguous-precedence questions for no lasting benefit.
+The maintainer reversed the original hard-cutover call: keeping both paths fully supported forces
+the "different publishers, single registry" architecture to be real rather than transitional, and
+frees operators to migrate on their own schedule. The original concern (double loader surface,
+ambiguous precedence) is answered by what actually shipped: both sources decode through the same
+loaders, and there is no precedence -- a cross-source duplicate is an error citing both locations.
+TOML resource sections warn as deprecated; removal waits for a future major.
 
 ### Reserved built-in backend names, overridable catalog names
 

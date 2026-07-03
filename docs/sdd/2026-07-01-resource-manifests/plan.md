@@ -198,6 +198,57 @@ Definition of done: the runtime never reads resource-graph data from Config afte
 exists (`secret_config_data` has no readers outside `config.py`); all secret-system validation fires
 at `Registry.finalize`; CI green; reviewer-approved.
 
+> Superseded 2026-07-03 by Phase 3.6: the maintainer's config-is-config ruling reversed the
+> secret-config reification (settings are not resources), and the runtime-model LLD replaced the
+> resolver machinery entirely. The completed boxes above stand as history; the `validate` /
+> `miss_hint` framework hooks, the `secret-config` kind/row/sentinel, and `resolver_for` were all
+> deleted in 3.6.
+
+## Phase 3.6: Runtime model -- backends are the door (maintainer-directed)
+
+Two maintainer rulings landed together (see [runtime-model-lld.md](runtime-model-lld.md), which this
+phase implements):
+
+1. **Config is config.** Settings that name resources (`[secret_config].backends`, future active
+   plugins) do NOT become pseudo-resources; the owning subsystem consumes them in normal operation
+   and validates them against the finalized registry at the composition boundary.
+2. **Backends are the door.** All runtime access to a capability goes through its exposed resource;
+   providers are raw capabilities in a per-domain registry, invoked only by the door.
+
+- [x] `SecretBackendDecl` gains the door methods (`mapping_for`, `would_attempt`, `describe_lookup`,
+      `resolve`, `interactive`); `backend_mappings` keyed by BACKEND NAME (built-ins unaffected by
+      name coincidence, documented, never relied on); operator surfaces display backend names
+      everywhere.
+- [x] Provider API reshaped to stateless capability calls (`validate_config`, `would_attempt`,
+      `describe_lookup`, `batch_get`, `interactive`), consumed only by the door; `EnvVarProvider` /
+      `PromptProvider` replace the source classes.
+- [x] Resolution is a loop (`secrets/resolve.py`): `active_backends(config, registry)` +
+      `resolve_secrets(secrets, backends)`; hard-miss halt, SetEnv control-character guard,
+      per-secret backends-tried errors, `preview_resolution` for inspection surfaces.
+- [x] NO caching: `resolve_for_command(targets, config, registry)` is the command's one resolve
+      call; the returned VALUES thread down to `compose_env(values=...)`, which raises loudly on
+      eager/render drift. Prompt-once is structural. Both weakref memos deleted; `build_registry` is
+      a pure function called once per command.
+- [x] `validate_chain(config, registry)` runs in `build_registry` after finalize (config vocabulary;
+      reachability restricted to operator-declared secrets).
+- [x] Unwind of the Phase 3.5 reification: `secret-config` kind/row/sentinel deleted; `validate` /
+      `miss_hint` framework hooks deleted (the miss message keeps the reference-usage suffix);
+      `Config.publish_to` publishes no settings.
+- [x] Legacy TOML `[secret_backends.<kind>]` sections become warned no-ops (typo protection
+      retained); `SecretBackendConfig` and the `Config.secret_backends` field deleted;
+      `builtin_override` flips to "reserved" and the `ManifestSet.publish_to` reserved-name shim is
+      deleted in the same change (`Registry.add` is the sole enforcement; publishers know nothing
+      about kinds).
+- [x] **Tests**: door-method suites for both built-in providers (mapping-by-name, per-backend
+      opt-out, name/provider split end to end); resolve-loop suite (precedence, hard-miss, dedupe,
+      hint content); two-backends-one-provider through real manifests (the old conflation test
+      inverted: `sibling-env` presents as `sibling-env`); compose drift error; purity pin for
+      `build_registry`; deprecated-section warn + built-in-survives pins.
+
+Definition of done: no resolver object, no cache, no memo anywhere in the secrets runtime; every
+operator surface speaks backend names; provider API unreachable outside the door; CI green;
+reviewer-approved.
+
 ## Phase 4: Migration tool
 
 - [ ] Add tomlkit dependency (latest stable at implementation time; used only by the migrate path).
@@ -208,32 +259,32 @@ at `Registry.finalize`; CI green; reviewer-approved.
 - [ ] Comment-preserving `config.toml` rewrite via tomlkit; timestamped backup of the original to
       the configured backups directory (`paths.backups`).
 - [ ] `agw config migrate` command: preview + confirm, `--yes`, `--force`, `--dry-run`; idempotent
-      no-op on an already-migrated config.
+      no-op on an already-migrated config. A CONVENIENCE, not a gate: the dual-path decision (below)
+      means TOML keeps working; operators migrate on their own schedule.
 - [ ] Completions updated for the new subcommand.
 - [ ] **Tests**: golden-file migration of a maximal config (every section type, comments in
       surviving sections preserved); rename coverage; refusal without `--force` when manifests
       exist; idempotency; backup creation; dry-run writes nothing.
 - [ ] **Docs**: `cli/README.md` command reference entry for `agw config migrate` rides this phase
-      (the command is real at this HEAD); cutover-dependent doc changes wait for Phase 5.
+      (the command is real at this HEAD); the broader doc repoint waits for Phase 5.
 
 Definition of done: a representative real config migrates to a loadable manifest set plus a
 config-only TOML with zero behavior change (verified by comparing finalized registries before and
 after); CI green; reviewer-approved.
 
-## Phase 5: Cutover, samples, and doc promotions
+## Phase 5: Dual-path steady state -- deprecation and docs
 
-- [ ] `load_config()` rejects resource sections with a `ConfigError` listing the sections found and
-      pointing at `agw config migrate`; `Config.publish_to` shrinks to exactly the `secret-config`
-      singleton row (pure config that names resources keeps publishing its edges); TOML resource
-      parsing survives only inside the migration tool. The `type` alias and the legacy TOML backend
-      construction path are deleted with it.
-- [ ] Flip `secret-backend`'s `builtin_override` to `reserved` AND delete the reserved-name shim in
-      `ManifestSet.publish_to` in the same commit. The shim exists only because origin variants
-      cannot distinguish TOML rows from manifest rows during the dual-source window; with the TOML
-      surface gone, `Registry.add`'s collision policy is the sole enforcement -- publishers know
-      nothing about kinds (registry-purity revisit).
-- [ ] Rewrite `cli/agentworks/sample-config.toml` to config-only, with a pointer to the sample
-      manifests; update `cli/tests/test_sample_config.py` conventions accordingly.
+Maintainer decision (2026-07-03): NO hard cutover. YAML manifests and TOML resource sections both
+publish into the one registry indefinitely (different publishers, single registry -- the shipped
+architecture, not a transitional window). Mixing is supported; cross-source duplicates error with
+both locations. TOML resource sections are deprecated, not removed.
+
+- [ ] `load_config()` emits a deprecation issue for each TOML resource section present, naming the
+      section and pointing at `agw config migrate` (same shape as the `[secret_backends.*]` warning
+      that already ships).
+- [ ] Sample config leads with YAML: `cli/agentworks/sample-config.toml` keeps a minimal
+      commented-out resource example with a deprecation pointer; sample manifests become the primary
+      teaching surface. Update `cli/tests/test_sample_config.py` conventions accordingly.
 - [ ] Ship sample manifests (envelope examples for the commonly-used kinds) and wire
       `agw config sample` to emit them (flag shape per LLD).
 - [ ] **Docs (permanent-home promotions, per SDD-not-permanent rule)**:
@@ -241,44 +292,37 @@ after); CI green; reviewer-approved.
         directory, the envelope, built-in resources and override rules, the provider/backend model,
         worked examples. Standalone; no SDD references.
   - [ ] ADR `docs/adrs/0016-yaml-resource-manifests.md` (number confirmed at write time): auto-load
-        YAML manifests with k8s envelope over TOML sections; config/resource split; hard cutover
-        rationale.
+        YAML manifests with k8s envelope; config/resource/capability split; dual-path (deprecate,
+        don't break) rationale; backends-are-the-door runtime model.
   - [ ] Sweep existing guides (`mise.md`, `source-refs.md`, `proxmox.md`, `idempotency.md`),
-        `cli/README.md` (configuration schema and command reference; the largest doc blast radius of
-        the cutover), and the top-level README for TOML-section references to resource kinds; update
-        to manifest examples.
-- [ ] Re-vocabulary the shared loader messages: once the TOML resource surface is gone, spec-level
-      errors and warnings must speak manifest vocabulary (field paths, not `secrets.<name>.*` TOML
-      section paths) since the loaders become manifest-only.
-- [ ] Release notes: the cutover, the one-command migration, the rename list from FRD "Migration
-      notes".
+        `cli/README.md` (configuration schema and command reference; the largest doc blast radius),
+        and the top-level README for TOML-section references to resource kinds; lead with manifest
+        examples (TOML noted as deprecated-but-supported).
+- [ ] Release notes: the dual-path model, the deprecation, the one-command migration, the rename
+      list from FRD "Migration notes".
 - [ ] Completions: verify the full command tree still round-trips (kind values, new subcommand).
-- [ ] **Tests**: resource-section rejection message; sample manifests load clean through the real
+- [ ] **Tests**: per-section deprecation issue content; sample manifests load clean through the real
       loader; guide/sample examples lint.
 - [ ] Housekeeping: confirm the resource-registry SDD's locked docs need no drift note beyond
       "superseded source format; framework unchanged" (its lockfile anticipated this SDD; add a
       dated note there only if reviewers want one).
 
-Definition of done: fresh install and migrated install both work end to end with TOML resource
-sections rejected; samples, docs, completions, release notes shipped in the same release; CI green;
+Definition of done: fresh installs learn YAML first; existing TOML configs keep working with a
+deprecation nudge; samples, docs, completions, release notes shipped in the same release; CI green;
 reviewer-approved.
 
-## Phase 6: Loader-ownership inversion (post-cutover follow-through)
+## Phase 6: TOML resource-path retirement (future major; unscheduled)
 
-The dual-source window forced manifests to decode through `config.py`'s TOML loaders (the zero-drift
-shim). With the TOML resource surface gone that dependency points the wrong way; this phase inverts
-ownership so `config.py` is pure config (registry-purity revisit, leak 4).
+Deferred until a future major release, on operator telemetry/feedback -- not part of this SDD's
+delivery. Recorded so the end state is explicit:
 
-- [ ] Manifest decoders (or the kinds) own resource field validation natively; the `_load_*`
-      resource loaders and the decode-through-TOML shim are deleted from `config.py`.
-- [ ] The migration tool validates by routing raw TOML tables through the manifest decode path
-      rather than `config.py`'s resource loaders.
-- [ ] `config.py` retains pure-config parsing plus `Config.publish_to` publishing exactly the
-      `secret-config` singleton; nothing else resource-shaped remains.
-- [ ] Loader messages speak manifest vocabulary natively (subsumes Phase 5's re-vocabulary item if
-      that landed as a shim over shared loaders).
-- [ ] **Tests**: the decode-parity suite retires with the shim; kind-level validation coverage moves
-      to the decoders' own tests.
+- [ ] `load_config()` rejects TOML resource sections with a `ConfigError` pointing at
+      `agw config migrate`; the `type` alias on `[git_credentials.*]` and the deprecated
+      `[secret_backends.*]` acceptance are deleted with it.
+- [ ] Loader-ownership inversion: manifest decoders (or the kinds) own resource field validation
+      natively; the `_load_*` resource loaders and the decode-through-TOML shim are deleted from
+      `config.py` (pure config remains); the migration tool keeps its own TOML reader; loader
+      messages speak manifest vocabulary natively; the decode-parity suite retires with the shim.
 
 Definition of done: `config.py` contains no resource-section knowledge; the migration tool is the
 only TOML-resource reader in the tree; CI green; reviewer-approved.
@@ -304,6 +348,22 @@ artifact update.)
   relocates to the first `resolver_for` call, the same sanctioned pattern as the Phase 1
   cycle-detection move. `GitCredentialConfig.type` keeps its field name this phase; only the TOML
   alias ships (the operator-surface vocabulary is what R9 requires).
+- **2026-07-03: dual-path replaces the hard cutover.** Maintainer decision: open the YAML path while
+  fully supporting TOML resource sections (with deprecation warnings), including mixing -- "this
+  would really force the 'different publishers, single registry' concept," and operators migrate on
+  their own schedule. Phase 5 re-planned from cutover to deprecation-and-docs; TOML removal deferred
+  to an unscheduled future major (Phase 6). The FRD's R1/R11 hard-cutover language is superseded
+  accordingly.
+- **2026-07-03: config is config; backends are the door (maintainer-directed; Phase 3.6).** Two
+  rulings that replaced the Phase 3/3.5 runtime machinery wholesale (see runtime-model-lld.md):
+  settings that name resources stay config (the secret-config reification was unwound the same day
+  it landed -- its sentinel/skip special cases were the model saying "I don't fit"); and all runtime
+  capability access goes through the exposed resource (SecretSource/SecretResolver/ resolver_for and
+  both weakref memos deleted; resolution is a loop; values thread from one resolve per command;
+  prompt-once is structural, not cached). The maintainer also fixed a provider/backend identity
+  conflation the interim runtime had inherited from the env-and-secrets-era source layer: sources
+  carried provider identity, so mappings and operator surfaces couldn't distinguish two backends on
+  one provider. backend_mappings are keyed by backend name as of 3.6.
 - **2026-07-03: registry-purity revisit (maintainer-directed; Phase 3.5).** The maintainer
   re-examined the whole design against the registry invariant ("these new yaml resource files really
   should just be another way of publishing resources to the registry -- anything more complex

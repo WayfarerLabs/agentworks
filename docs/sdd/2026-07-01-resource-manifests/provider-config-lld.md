@@ -72,6 +72,11 @@ operator-over-builtin "allow") until the cutover deletes that path.
 
 ## Resolver construction swap
 
+> Superseded 2026-07-03 by [runtime-model-lld.md](runtime-model-lld.md) (Phase 3.6): there is no
+> resolver at all -- backends are the door, resolution is a loop, values thread from one resolve per
+> command, and the memos described below were deleted. This section stands as the historical record
+> of the interim design.
+
 Today `load_config` builds `Config.secret_resolver` from `[secret_config].backends` chain names via
 zero-arg source factories, and hard-errors at PARSE time on unknown chain names. That cannot survive
 manifest-declared backends (unknowable at `load_config`). The swap:

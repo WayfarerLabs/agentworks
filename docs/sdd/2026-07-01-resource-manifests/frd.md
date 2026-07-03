@@ -32,14 +32,18 @@ auto-loaded YAML manifest files using a Kubernetes-style envelope. The motivatio
    read-only descriptor rows; backends are the named, configured, manifest-declarable instantiations
    of a provider.
 
-The move is a hard cutover with a migration tool (`agw config migrate`) that converts an existing
-`config.toml` in place: resource sections become manifests, config sections stay.
+The move is dual-path (revised 2026-07-03 from the original hard cutover): YAML manifests and TOML
+resource sections are both fully supported publishers into the one registry, mixing included; TOML
+resource sections are deprecated with load-time warnings, and a migration tool
+(`agw config migrate`) converts an existing `config.toml` in place on the operator's schedule
+(resource sections become manifests, config sections stay).
 
 ### Scope
 
 In scope: the manifest loader and envelope schema, the config/resource split of the current TOML
 surface, built-in resource manifests, the origin taxonomy cleanup, the secret provider/backend
-split, the git-credential provider field alignment, the migration tool, and the cutover.
+split, the git-credential provider field alignment, the migration tool, and the deprecation of the
+TOML resource surface (its removal is deferred to a future major release).
 
 Out of scope: the plugin system (system and external plugins), apply-style reconciliation against
 provisioned state, lifecycle resources (VMs, agents, sessions, consoles stay in the DB), and moving
@@ -75,35 +79,35 @@ config itself to YAML.
 
 Every section of today's `config.toml` gets exactly one destination:
 
-| Current TOML section                      | Destination                                         | Notes                                                                                                         |
-| ----------------------------------------- | --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `[operator]`                              | config (TOML)                                       | SSH keys, host prefixes                                                                                       |
-| `[paths]`                                 | config (TOML)                                       |                                                                                                               |
-| `[defaults]`                              | config (TOML)                                       | CLI flag defaults                                                                                             |
-| `[azure]`, `[proxmox]`                    | config (TOML)                                       | provisioner capability settings; plugin SDD may revisit                                                       |
-| `[session.config]`                        | config (TOML)                                       | non-template session settings                                                                                 |
-| `[secret_config]`                         | config (TOML)                                       | active backend chain; publishes as the `secret-config` registry row so its backend references are graph edges |
-| `[secrets.<name>]`                        | manifest (`secret`)                                 |                                                                                                               |
-| `[secret_backends.<kind>]`                | manifest (`secret-backend`)                         | reshaped per R8                                                                                               |
-| `[git_credentials.<name>]`                | manifest (`git-credential`)                         | `type` renamed to `provider` per R9                                                                           |
-| `[vm_templates.<name>]` (+ `.env`)        | manifest (`vm-template`)                            |                                                                                                               |
-| `[agent_templates.<name>]` (+ `.env`)     | manifest (`agent-template`)                         |                                                                                                               |
-| `[workspace_templates.<name>]` (+ `.env`) | manifest (`workspace-template`)                     |                                                                                                               |
-| `[session_templates.<name>]` (+ `.env`)   | manifest (`session-template`)                       |                                                                                                               |
-| `[admin.config]`, `[admin.env]`, ...      | manifest (`admin-template`, name `default`)         | flattened into one document                                                                                   |
-| `[named_console]`                         | manifest (`named-console-template`, name `default`) |                                                                                                               |
-| `[apt_sources.<name>]`                    | manifest (`apt-source`)                             | operator catalog extension                                                                                    |
-| `[apt_packages.<name>]`                   | manifest (`apt-package`)                            | operator catalog extension                                                                                    |
-| `[system_install_commands.<name>]`        | manifest (`system-install-command`)                 | operator catalog extension                                                                                    |
-| `[user_install_commands.<name>]`          | manifest (`user-install-command`)                   | operator catalog extension                                                                                    |
+| Current TOML section                      | Destination                                         | Notes                                                                                                          |
+| ----------------------------------------- | --------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `[operator]`                              | config (TOML)                                       | SSH keys, host prefixes                                                                                        |
+| `[paths]`                                 | config (TOML)                                       |                                                                                                                |
+| `[defaults]`                              | config (TOML)                                       | CLI flag defaults                                                                                              |
+| `[azure]`, `[proxmox]`                    | config (TOML)                                       | provisioner capability settings; plugin SDD may revisit                                                        |
+| `[session.config]`                        | config (TOML)                                       | non-template session settings                                                                                  |
+| `[secret_config]`                         | config (TOML)                                       | active backend chain; a setting, never published -- validated against the registry at the composition boundary |
+| `[secrets.<name>]`                        | manifest (`secret`)                                 |                                                                                                                |
+| `[secret_backends.<kind>]`                | manifest (`secret-backend`)                         | reshaped per R8                                                                                                |
+| `[git_credentials.<name>]`                | manifest (`git-credential`)                         | `type` renamed to `provider` per R9                                                                            |
+| `[vm_templates.<name>]` (+ `.env`)        | manifest (`vm-template`)                            |                                                                                                                |
+| `[agent_templates.<name>]` (+ `.env`)     | manifest (`agent-template`)                         |                                                                                                                |
+| `[workspace_templates.<name>]` (+ `.env`) | manifest (`workspace-template`)                     |                                                                                                                |
+| `[session_templates.<name>]` (+ `.env`)   | manifest (`session-template`)                       |                                                                                                                |
+| `[admin.config]`, `[admin.env]`, ...      | manifest (`admin-template`, name `default`)         | flattened into one document                                                                                    |
+| `[named_console]`                         | manifest (`named-console-template`, name `default`) |                                                                                                                |
+| `[apt_sources.<name>]`                    | manifest (`apt-source`)                             | operator catalog extension                                                                                     |
+| `[apt_packages.<name>]`                   | manifest (`apt-package`)                            | operator catalog extension                                                                                     |
+| `[system_install_commands.<name>]`        | manifest (`system-install-command`)                 | operator catalog extension                                                                                     |
+| `[user_install_commands.<name>]`          | manifest (`user-install-command`)                   | operator catalog extension                                                                                     |
 
-After the cutover, a resource section in `config.toml` is a config-load error naming the section and
-pointing at `agw config migrate` (R11).
+TOML resource sections keep loading, with a per-section deprecation warning pointing at
+`agw config migrate` (R11). They become load errors only in a future major release.
 
 Config sections that reference resources by name (`[secret_config].backends` referencing backend
-names) keep doing so; the section publishes into the registry (as the `secret-config` singleton row)
-so the names are reference edges validated by the framework at finalize, like every other
-cross-resource reference.
+names) keep doing so; the owning subsystem validates the names against the finalized registry at the
+composition boundary (`build_registry`), with config vocabulary in the errors. Settings do not
+become pseudo-resources.
 
 ### R2: Manifest directory and auto-loading
 
@@ -338,14 +342,17 @@ Git credentials already follow the capability/instance pattern; this SDD aligns 
   up the original `config.toml` to the configured backups directory (`paths.backups`) before
   rewriting; idempotent on an already-migrated config (reports nothing to do).
 
-### R11: Hard cutover
+### R11: Dual-path with deprecation (revised from "hard cutover", 2026-07-03)
 
-- One release contains both the migration tool and the cutover. There is no dual-source support
-  window: after upgrade, resource sections in `config.toml` are load errors listing the offending
-  sections and pointing at `agw config migrate`.
+- YAML manifests and TOML resource sections both publish into the single registry indefinitely --
+  different publishers, one registry. Mixing is supported; the same resource declared in both is a
+  duplicate error citing both locations.
+- TOML resource sections emit a per-section deprecation warning at load, naming the section and
+  pointing at `agw config migrate`. Operators migrate on their own schedule; the TOML resource
+  path's removal waits for a future major release.
 - Release notes carry the change and the one-command migration path.
-- `agw config sample` output is rewritten: a config-only `config.toml` sample plus sample manifests
-  demonstrating the envelope for each commonly-used kind.
+- `agw config sample` output leads with YAML: sample manifests demonstrating the envelope for each
+  commonly-used kind, plus a config-only `config.toml` sample.
 
 ### R12: Framework invariance
 
