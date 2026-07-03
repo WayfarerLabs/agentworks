@@ -108,10 +108,12 @@ TOML; both sources coexist correctly; CI green; reviewer-approved.
 
 ## Phase 3: Secret provider/backend split and git credential alignment
 
-- [ ] **LLD**: `provider-config-lld.md` covering the `SecretProvider` protocol (`config_schema`,
-      `instantiate`), the test-only provider that exercises config validation, error framing for
-      provider-config violations (must carry manifest `file:line`), and the resolver construction
-      swap.
+- [x] **LLD**: [provider-config-lld.md](provider-config-lld.md) covering the `SecretProvider`
+      protocol (`validate_config`, `instantiate`), the test-only provider that exercises config
+      validation, error framing for provider-config violations (manifest `file:line`), and the
+      resolver construction swap (registry-derived `resolver_for` with `id(config)`-keyed
+      prompt-once identity; parse-time chain validation relocates to first `resolver_for`,
+      Config.secret_resolver retired).
 - [ ] `agentworks/secrets/providers.py`: code-side `PROVIDER_REGISTRY` (env-var, prompt) and the
       `secret-provider` descriptor kind + publisher (built-in origin, error miss policy, not
       manifest-declarable).
@@ -222,6 +224,13 @@ artifact update.)
   branch and PR instead of PR-per-phase. Per-phase "reviewer-approved" in the definitions of done
   reads as "commit series complete and suite green"; review happens once on the full PR. Side
   effect: the dual-source window never exists on main.
+- **2026-07-03: resolver leaves Config (Phase 3 LLD).** `Config.secret_resolver` cannot survive
+  manifest-declared backends (unknowable at `load_config`), so the resolver becomes registry-derived
+  (`providers.resolver_for(config, registry)`) with an `id(config)`-keyed memo preserving the
+  prompt-once per-command cache identity. Parse-time `[secret_config].backends` chain validation
+  relocates to the first `resolver_for` call, the same sanctioned pattern as the Phase 1
+  cycle-detection move. `GitCredentialConfig.type` keeps its field name this phase; only the TOML
+  alias ships (the operator-surface vocabulary is what R9 requires).
 - **2026-07-03: name-validation parity, not the FRD's uniform rule.** FRD R3 originally implied the
   resource-name rule applies to every manifest `metadata.name`; the implementation pins TOML parity
   instead (`validate_name` for `secret` only, pass-through elsewhere) so the Phase 4

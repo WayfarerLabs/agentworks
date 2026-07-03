@@ -1,0 +1,126 @@
+# Phase 3 LLD: secret providers, backends, and the resolver swap
+
+The capability/resource split for secrets: providers are code, backends are resources. This LLD pins
+the provider protocol, the registry surfaces, the manifest shape, the resolver construction swap
+(including the prompt-once identity semantics that constrain it), and the consumer repoint.
+
+## Provider protocol and registry
+
+`agentworks/secrets/providers.py`:
+
+```python
+class SecretProvider(Protocol):
+    name: str
+    def validate_config(self, backend_name: str, config: Mapping[str, object]) -> Mapping[str, object]:
+        """Validate and normalize a backend's provider-specific config.
+        Raises ConfigError naming the offending field. Built-ins accept
+        only an empty config."""
+    def instantiate(self, backend_name: str, config: Mapping[str, object]) -> SecretSource:
+        """Build the SecretSource for one configured backend instance."""
+
+PROVIDER_REGISTRY: dict[str, SecretProvider]  # built-ins: env-var, prompt
+```
+
+- Built-in providers accept no configuration (`validate_config` rejects any key). The
+  `config_schema`-style plumbing is exercised end to end by a TEST-ONLY provider registered via a
+  fixture (never shipped): it accepts a small schema (one required str field, one optional int) so
+  validation, defaults, error framing, and config-reaches-instantiate are all covered.
+- Descriptor rows: new kind module `resources/kinds/secret_provider.py` (`secret-provider`, error
+  miss policy, `manifest_declarable = False`, reserved). `providers.publish_to(registry)` adds one
+  row per registered provider with `Origin.built_in(source="agentworks.secrets")`. The envelope's
+  existing "provided by the app" rejection covers manifest attempts.
+
+## SecretBackendDecl (the resource)
+
+New dataclass in `secrets/base.py`: `name`, `description` (metadata.description; the kind joins
+`_DESCRIPTION_KINDS`), `provider` (str), `config` (mapping of provider-specific fields),
+`declared_at` / `origin` / `references`. `referenced_resources()` emits one `ResourceReference`
+(kind `secret-provider`, name = the provider field, usage "the secret provider", source
+`("secret-backend", <name>)`), so a typo'd provider fails through the framework's uniform miss
+policy at finalize.
+
+Manifest shape (`secret-backend` becomes `manifest_declarable = True`):
+
+```yaml
+apiVersion: agentworks/v1
+kind: secret-backend
+metadata:
+  name: work-vault
+  description: Work 1Password vault
+spec:
+  provider: onepassword
+  vault: Work # provider-specific; validated by the provider
+```
+
+Decode: `spec.provider` required; remaining spec keys form `config`. When the provider is
+registered, `validate_config` runs at decode (errors carry the document `file:line`); when it isn't,
+decode defers so the framework's reference miss policy reports the unknown provider uniformly at
+finalize.
+
+**Reserved names**: `ManifestSet.publish_to` rejects operator manifests redeclaring a built-in
+backend name (`env-var`, `prompt`) with a declare-a-sibling hint. The check lives at the OPERATOR
+publisher (not decode, which the bundle also flows through; not `Registry.add`, whose
+`builtin_override` stays `"allow"` for the TOML dual-source window and flips at Phase 5).
+
+## Built-in backends move to the bundle
+
+`agentworks/manifests/builtin/secret-backends.yaml` declares the `env-var` and `prompt` backends
+(`spec.provider` matching, no config). `secrets.publish_to` stops publishing backend rows and
+becomes the provider-descriptor publisher; the legacy `SecretBackendConfig` rows survive only via
+operator TOML `[secret_backends.*]` sections (which still override the bundled rows,
+operator-over-builtin "allow") until the cutover deletes that path.
+
+## Resolver construction swap
+
+Today `load_config` builds `Config.secret_resolver` from `[secret_config].backends` chain names via
+zero-arg source factories, and hard-errors at PARSE time on unknown chain names. That cannot survive
+manifest-declared backends (unknowable at `load_config`). The swap:
+
+- `providers.resolver_for(config, registry) -> SecretResolver`: walks the chain; for each name,
+  looks up the `secret-backend` row; `SecretBackendDecl` rows instantiate via
+  `PROVIDER_REGISTRY[row.provider]`; legacy `SecretBackendConfig` rows instantiate via the provider
+  matching `row.kind` (their kind IS the provider name). Unknown chain names raise `ConfigError`
+  here.
+- **Prompt-once identity**: the resolver instance carries the per-command resolved-value cache
+  (eager-resolve fills it; later renders hit it without re-prompting). Today that identity comes
+  from Config carrying ONE resolver. `resolver_for` preserves it with an `id(config)`-keyed memo:
+  every call with the same Config object returns the same resolver instance, regardless of which
+  `build_registry` result accompanies it (all builds of one config produce equal rows).
+- `Config.secret_resolver` is removed along with `_build_secret_resolver` and the parse-time
+  chain-kind validation in `_load_secret_config` (the relocation is the same sanctioned pattern as
+  the Phase 1 cycle-detection move: config-only commands no longer validate the chain; every
+  resource-touching command does, at first `resolver_for`). Tests pinning the parse-time error
+  relocate accordingly.
+- Consumer repoint (~15 sites): doctor, `secrets/orchestration.py` (`resolve_for_command` gains a
+  registry parameter or resolves via its existing config+registry callers), `secrets/inspect.py`,
+  `env/show.py`, and the manager `compose_env(resolver=...)` sites switch from
+  `config.secret_resolver` to `resolver_for(config, registry)`; all already have a registry in scope
+  post-Phase 1.
+
+## Git credential provider alias (TOML side)
+
+`[git_credentials.<name>]` accepts `provider` as an alias for `type` (`provider` wins when both
+present) so every today-valid config still loads; manifests already accept only `provider`. `type`
+dies with the TOML surface in Phase 5. The `GitCredentialConfig.type` field itself is NOT renamed in
+this phase (blast radius belongs to the field's consumers; the vocabulary alignment on the operator
+surface is what R9 requires now).
+
+## Inspection follow-through
+
+- `agw resource list` shows `secret-provider` rows (built-in) and `secret-backend` rows with their
+  provider references counted; `agw resource describe secret-provider env-var` lists the backends
+  referencing it.
+- `agw secret describe` / doctor compute per-backend conventions by asking the provider-instantiated
+  sources from `resolver_for`, so future config-bearing providers render with no display changes.
+
+## Tests
+
+Provider registry lookup and instantiation; test-only-provider config validation (good config, bad
+field, missing required, defaults) and resolution end to end; custom backend (provider env-var)
+declared via manifest and placed in the chain; reserved-name rejection for `env-var`/`prompt`
+operator manifests; multiple backends sharing a provider; chain naming an unknown backend (error
+relocated from parse time); legacy TOML `[secret_backends.*]` rows still resolving through the
+existing path; prompt-once identity (two `resolver_for` calls, one config, same instance); bundle
+publishes the two built-in backends with per-file built-in origins; git-credential TOML `provider`
+alias (alias works, both-present precedence, `type` still works); describe/doctor rendering;
+regression: the shipped sample config and a maximal today-valid TOML config load unchanged.
