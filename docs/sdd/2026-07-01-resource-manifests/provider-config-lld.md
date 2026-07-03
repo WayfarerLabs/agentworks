@@ -97,7 +97,7 @@ manifest-declared backends (unknowable at `load_config`). The swap:
 - Consumer repoint (~15 sites, as built): doctor and `secrets/inspect.py` pass their in-scope
   registry to `resolver_for(config, registry)`; the deep call paths (`secrets/orchestration.py`,
   `env/show.py`, the manager `compose_env(resolver=...)` sites) call `resolver_for(config)` bare and
-  get the standard per-config registry singleton. Every consumer imports the function
+  get the standard per-config registry singleton. Every consumer imports `resolver_for`
   function-locally from `agentworks.secrets.providers`, giving the test stub a single seam.
 
 ## Git credential provider alias (TOML side)

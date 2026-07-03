@@ -65,13 +65,13 @@ def build_registry(config: Config, manifests: ManifestSet | None = None) -> Regi
     from agentworks.manifests import builtin as builtin_manifests
 
     standard = manifests is None
+    # Single-threaded CLI assumption: both this memo and the resolver
+    # memo are unsynchronized check-then-set; a future SDD introducing a
+    # long-lived multi-client (web, daemon) must revisit.
     if standard:
         cached = _STANDARD_REGISTRIES.get(id(config))
         if cached is not None and cached[0]() is config:
             return cached[1]
-    # Single-threaded CLI assumption: both this memo and the resolver
-    # memo are unsynchronized check-then-set; a future SDD introducing a
-    # long-lived multi-client (web, daemon) must revisit.
         resources_dir = config.source_path.parent / RESOURCES_DIRNAME
         manifests = load_manifests(resources_dir)
         for issue in manifests.issues:
