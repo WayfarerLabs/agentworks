@@ -1,58 +1,83 @@
-"""Prompt SecretSource: interactive last-resort.
+"""The ``prompt`` secret provider: interactive last-resort. A raw
+capability -- invoked only through a ``secret-backend`` resource's door
+methods.
 
-Just another SecretSource. Returns None when stdin is not a TTY or the CLI
-was invoked with --non-interactive; the resolver then raises
-SecretUnavailableError. A future controller-process caller omits this
-source entirely from its backends list.
+Resolves nothing when stdin is not a TTY or the CLI was invoked with
+--non-interactive; the resolve loop then raises SecretUnavailableError.
+A future controller-process caller omits the prompt backend from its
+chain entirely.
 """
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from agentworks import output
-from agentworks.secrets.base import SecretDecl, SecretSourceBase
+from agentworks.errors import ConfigError
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+
+    from agentworks.secrets.base import MappingValue, SecretDecl
 
 
-class PromptSource(SecretSourceBase):
-    """Interactive prompt source.
+class PromptProvider:
+    """Interactive prompt provider.
 
-    ``would_attempt`` returns True for any secret unless the operator opted
-    out via ``backend_mappings.prompt = false``. That opt-out matches the
-    contract on ``SecretDecl.backend_mappings``. It's most useful for testing
-    in an interactive shell -- the operator wants to verify the env-var path
-    resolves cleanly without quietly falling through to a prompt when the
-    env var happens to be unset. Non-interactive mode (no TTY /
-    ``--non-interactive``) already makes prompt a no-op via ``get``'s TTY
-    check, so the opt-out is not needed there.
+    Always attempts (the opt-out ``backend_mappings.<backend> = false``
+    is handled generically at the backend door). The opt-out is most
+    useful for testing in an interactive shell -- the operator wants to
+    verify the env-var path resolves cleanly without quietly falling
+    through to a prompt. Non-interactive mode (no TTY /
+    ``--non-interactive``) already makes prompt a no-op via the
+    ``batch_get`` TTY check.
 
-    The runtime decision to actually prompt or return None is made inside
-    ``get`` / ``batch_get`` based on ``output.is_interactive()``.
-
-    ``batch_get`` emits all prompts in one operator interaction so the
-    "prompt once at the start" UX is preserved even though prompt is just
-    another source in the chain.
+    ``interactive = True``: inspection previews must not probe this
+    provider -- calling ``batch_get`` IS the operator interaction.
     """
 
-    kind = "prompt"
+    name = "prompt"
+    interactive = True
 
-    def would_attempt(self, secret: SecretDecl) -> bool:
-        return secret.backend_mappings.get(self.kind) is not False
+    def validate_config(
+        self, backend_name: str, config: Mapping[str, object]
+    ) -> Mapping[str, object]:
+        if config:
+            raise ConfigError(
+                f'secret-backend "{backend_name}": the {self.name} provider '
+                f"accepts no configuration; got {sorted(config)}"
+            )
+        return {}
 
-    def _should_prompt(self, secret: SecretDecl) -> bool:
-        """Both gates rolled into one check: the operator hasn't opted
-        the secret out, and the runtime is interactive."""
-        return self.would_attempt(secret) and output.is_interactive()
+    def would_attempt(
+        self,
+        config: Mapping[str, object],
+        secret: SecretDecl,
+        mapping: MappingValue | None,
+    ) -> bool:
+        return True
 
-    def get(self, secret: SecretDecl) -> str | None:
-        if not self._should_prompt(secret):
-            return None
-        return self._prompt_one(secret)
+    def describe_lookup(
+        self,
+        config: Mapping[str, object],
+        secret: SecretDecl,
+        mapping: MappingValue | None,
+    ) -> str | None:
+        # No static identifier: the "lookup" is the operator typing at
+        # command time.
+        return None
 
-    def batch_get(self, secrets: list[SecretDecl]) -> dict[str, str]:
-        return {
-            s.name: self._prompt_one(s)
-            for s in secrets
-            if self._should_prompt(s)
-        }
+    def batch_get(
+        self,
+        config: Mapping[str, object],
+        wants: list[tuple[SecretDecl, MappingValue | None]],
+    ) -> dict[str, str]:
+        if not output.is_interactive():
+            return {}
+        # All prompts in one operator interaction: the "prompt once at
+        # the start" UX, preserved even though prompt is just another
+        # backend in the chain.
+        return {secret.name: self._prompt_one(secret) for secret, _ in wants}
 
     @staticmethod
     def _prompt_one(secret: SecretDecl) -> str:

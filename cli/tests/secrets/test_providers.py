@@ -18,8 +18,8 @@ from agentworks.bootstrap import build_registry
 from agentworks.config import load_config
 from agentworks.errors import ConfigError
 from agentworks.manifests import load_manifests
-from agentworks.secrets import PROVIDER_REGISTRY, resolver_for
-from agentworks.secrets.base import SecretBackendDecl
+from agentworks.secrets import PROVIDER_REGISTRY, active_backends, resolve_secrets
+from agentworks.secrets.base import SecretBackendDecl, SecretDecl
 
 _BASE_TOML = """
 [operator]
@@ -45,32 +45,19 @@ def _manifest(tmp_path: Path, text: str, rel: str = "res.yaml") -> None:
     path.write_text(dedent(text))
 
 
-class _FakeSource:
-    """Minimal SecretSource capturing the config it was built from."""
-
-    kind = "fake"
-
-    def __init__(self, backend_name: str, config: dict[str, object]) -> None:
-        self.backend_name = backend_name
-        self.config = config
-
-    def would_attempt(self, secret: Any) -> bool:
-        return True
-
-    def get(self, secret: Any) -> str | None:
-        return f"fake-{secret.name}"
-
-    def batch_get(self, secrets: list[Any]) -> dict[str, str]:
-        return {s.name: f"fake-{s.name}" for s in secrets}
-
-    def describe_lookup(self, secret: Any) -> str | None:
-        return f"fake://{secret.name}"
-
-
 class _TestOnlyProvider:
-    """Config-bearing provider: one required str field, one optional int."""
+    """Config-bearing provider: one required str field, one optional int.
+
+    Stateless per the provider contract; every call receives the
+    backend's config, and ``batch_get`` records what it saw so tests
+    can pin that the backend threaded ITS OWN config through.
+    """
 
     name = "test-only"
+    interactive = False
+
+    def __init__(self) -> None:
+        self.batch_get_configs: list[dict[str, object]] = []
 
     def validate_config(
         self, backend_name: str, config: dict[str, object]
@@ -93,10 +80,18 @@ class _TestOnlyProvider:
             )
         return {"endpoint": endpoint, "timeout": timeout}
 
-    def instantiate(
-        self, backend_name: str, config: dict[str, object]
-    ) -> _FakeSource:
-        return _FakeSource(backend_name, dict(self.validate_config(backend_name, config)))
+    def would_attempt(self, config: Any, secret: Any, mapping: Any) -> bool:
+        return True
+
+    def describe_lookup(self, config: Any, secret: Any, mapping: Any) -> str | None:
+        return f"{config['endpoint']}/{secret.name}"
+
+    def batch_get(self, config: Any, wants: list[Any]) -> dict[str, str]:
+        self.batch_get_configs.append(dict(config))
+        return {
+            secret.name: f"{config['endpoint']}::{secret.name}"
+            for secret, _mapping in wants
+        }
 
 
 @pytest.fixture
@@ -129,6 +124,9 @@ def test_builtin_provider_rejects_config(tmp_path: Path) -> None:
 
 
 def test_reserved_builtin_backend_names(tmp_path: Path) -> None:
+    """An operator manifest colliding with a bundled built-in backend
+    errors at Registry.add via the kind's builtin_override="reserved" --
+    the sole enforcement; no publisher-side special case."""
     _manifest(
         tmp_path,
         """
@@ -141,10 +139,9 @@ def test_reserved_builtin_backend_names(tmp_path: Path) -> None:
         """,
     )
     config = _config(tmp_path)
-    with pytest.raises(ConfigError, match="reserved name") as exc:
+    with pytest.raises(ConfigError, match="reserved") as exc:
         build_registry(config)
-    assert exc.value.hint is not None
-    assert "differently-named" in exc.value.hint
+    assert "differently-named" in str(exc.value)
 
 
 def test_config_validation_at_decode(
@@ -195,11 +192,15 @@ def test_config_defaults_and_instantiation(
     assert isinstance(row, SecretBackendDecl)
     assert row.config == {"endpoint": "https://example.test", "timeout": 30}
 
-    resolver = resolver_for(registry)
-    source = resolver.sources[0]
-    assert isinstance(source, _FakeSource)
-    assert source.backend_name == "fake-store"
-    assert source.config["endpoint"] == "https://example.test"
+    # End-to-end through the door: the backend threads its validated
+    # config into the provider on resolve.
+    backends = active_backends(config, registry)
+    assert [b.name for b in backends] == ["fake-store", "prompt"]
+    values = resolve_secrets([SecretDecl(name="s", description="s")], backends)
+    assert values == {"s": "https://example.test::s"}
+    assert test_only_provider.batch_get_configs == [
+        {"endpoint": "https://example.test", "timeout": 30}
+    ]
 
 
 def test_custom_backend_with_builtin_provider_in_chain(tmp_path: Path) -> None:
@@ -223,8 +224,10 @@ def test_custom_backend_with_builtin_provider_in_chain(tmp_path: Path) -> None:
         """,
     )
     registry = build_registry(config)
-    resolver = resolver_for(registry)
-    assert [s.kind for s in resolver.sources] == ["env-var", "prompt"]
+    backends = active_backends(config, registry)
+    # Backends present as THEIR OWN names; the provider is a field.
+    assert [b.name for b in backends] == ["sibling-env", "prompt"]
+    assert [b.provider for b in backends] == ["env-var", "prompt"]
 
 
 def test_multiple_backends_share_a_provider(
@@ -257,9 +260,21 @@ def test_multiple_backends_share_a_provider(
         backends = ["store-a", "store-b"]
         """,
     )
-    resolver = resolver_for(build_registry(config))
-    endpoints = [s.config["endpoint"] for s in resolver.sources]  # type: ignore[attr-defined]
-    assert endpoints == ["https://a.test", "https://b.test"]
+    backends = active_backends(config, build_registry(config))
+    assert [b.name for b in backends] == ["store-a", "store-b"]
+    # Independent configs per backend, one shared provider.
+    assert [b.config["endpoint"] for b in backends] == [
+        "https://a.test",
+        "https://b.test",
+    ]
+    # Independent mappings per backend name: opt out of store-a only.
+    decl = SecretDecl(
+        name="s", description="s", backend_mappings={"store-a": False}
+    )
+    assert backends[0].would_attempt(decl) is False
+    assert backends[1].would_attempt(decl) is True
+    values = resolve_secrets([decl], backends)
+    assert values == {"s": "https://b.test::s"}
 
 
 def test_unknown_provider_fails_via_framework_miss_policy(tmp_path: Path) -> None:
@@ -279,10 +294,10 @@ def test_unknown_provider_fails_via_framework_miss_policy(tmp_path: Path) -> Non
         build_registry(config)
 
 
-def test_chain_naming_unknown_backend_errors_at_finalize(tmp_path: Path) -> None:
-    """The chain is reference edges on the secret-config row, so an
-    unknown name hits the secret-backend kind's error miss policy at
-    build_registry -- the runtime never sees the invalid graph."""
+def test_chain_naming_unknown_backend_errors_at_build_registry(tmp_path: Path) -> None:
+    """The chain is config; validate_chain (run by build_registry right
+    after finalize) rejects unknown names with the operator's vocabulary
+    -- the runtime never sees the invalid chain."""
     config = _config(
         tmp_path,
         """
@@ -291,16 +306,18 @@ def test_chain_naming_unknown_backend_errors_at_finalize(tmp_path: Path) -> None
         """,
     )
     with pytest.raises(
-        ConfigError, match="unknown secret-backend 'no-such-backend'"
+        ConfigError,
+        match=r"\[secret_config\].backends names unknown backend 'no-such-backend'",
     ) as exc:
         build_registry(config)
-    # The kind's miss_hint restores the operator vocabulary the generic
-    # framework message lacks.
     assert exc.value.hint is not None
-    assert "[secret_config].backends" in exc.value.hint
+    assert "secret-backend manifest" in exc.value.hint
 
 
-def test_legacy_toml_backend_rows_still_resolve(tmp_path: Path) -> None:
+def test_legacy_toml_backend_section_is_warned_noop(tmp_path: Path) -> None:
+    """[secret_backends.<kind>] sections are deprecated no-ops: they warn,
+    publish nothing, and the bundled built-in row keeps serving the
+    chain."""
     config = _config(
         tmp_path,
         """
@@ -310,35 +327,36 @@ def test_legacy_toml_backend_rows_still_resolve(tmp_path: Path) -> None:
         backends = ["env-var"]
         """,
     )
+    assert any(
+        "[secret_backends.env-var] is deprecated" in issue
+        for issue in config.config_issues
+    )
     registry = build_registry(config)
     row = registry.lookup("secret-backend", "env-var")
-    assert row.origin.variant == "operator-declared"
-    resolver = resolver_for(registry)
-    assert [s.kind for s in resolver.sources] == ["env-var"]
+    assert row.origin.variant == "built-in"
+    backends = active_backends(config, registry)
+    assert [b.name for b in backends] == ["env-var"]
 
 
-def test_standard_registry_is_per_config_singleton(tmp_path: Path) -> None:
-    """build_registry memoizes the standard path per Config object;
-    explicit-manifests calls always build fresh."""
-    from agentworks.manifests import ManifestSet
+def test_legacy_toml_backend_unknown_kind_still_errors(tmp_path: Path) -> None:
+    """Typo protection survives the deprecation: an unknown kind in a
+    legacy section is a hard ConfigError, not a silent no-op."""
+    with pytest.raises(ConfigError, match="unknown backend kind"):
+        _config(
+            tmp_path,
+            """
+            [secret_backends.envvar]
+            """,
+        )
 
+
+def test_build_registry_is_pure(tmp_path: Path) -> None:
+    """No memo: every call builds fresh (a command's composition root
+    calls it once and threads the result)."""
     config = _config(tmp_path)
     first = build_registry(config)
     second = build_registry(config)
-    assert first is second
-    fresh = build_registry(config, ManifestSet.empty())
-    assert fresh is not first
-
-
-def test_prompt_once_identity(tmp_path: Path) -> None:
-    """Resolver identity follows registry identity: the standard
-    registry is a per-config singleton, so every default-path caller
-    shares one resolver (the prompt-once cache)."""
-    config = _config(tmp_path)
-    registry = build_registry(config)
-    first = resolver_for(registry)
-    second = resolver_for(build_registry(config))
-    assert first is second
+    assert first is not second
 
 
 def test_backend_references_provider_in_registry(tmp_path: Path) -> None:

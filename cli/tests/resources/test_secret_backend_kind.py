@@ -80,11 +80,10 @@ def test_secret_providers_published(tmp_path: Path) -> None:
         assert row.origin.variant == "built-in"
 
 
-def test_operator_declared_backend_overrides_built_in(tmp_path: Path) -> None:
-    """An operator who writes ``[secret_backends.env-var]`` re-publishes
-    the row with operator-declared origin via Config.publish_to (which
-    runs after the secrets publisher). Same publish-order pattern as
-    the catalog kinds.
+def test_legacy_toml_backend_section_does_not_override_built_in(tmp_path: Path) -> None:
+    """``[secret_backends.env-var]`` is a deprecated no-op: it publishes
+    nothing (it warns at load), and the bundled built-in row survives
+    untouched. Built-in names are reserved via builtin_override.
     """
     cfg = load_config(
         _write_cfg(
@@ -97,4 +96,4 @@ def test_operator_declared_backend_overrides_built_in(tmp_path: Path) -> None:
     )
     registry = build_registry(cfg)
     env_var = registry.lookup("secret-backend", "env-var")
-    assert env_var.origin.variant == "operator-declared"
+    assert env_var.origin.variant == "built-in"

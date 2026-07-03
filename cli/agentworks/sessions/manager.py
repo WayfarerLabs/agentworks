@@ -35,6 +35,8 @@ _TEMPLATE_VAR_RE = re.compile(r"\{\{(\w+)\}\}")
 _KNOWN_TEMPLATE_VARS = {"session_name", "workspace_name"}
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from agentworks.config import Config
     from agentworks.db import AgentRow, Database, SessionRow, VMRow, WorkspaceRow
     from agentworks.env import EnvEntry
@@ -626,6 +628,7 @@ def _session_secret_target(
 def _resolve_session_env(
     registry: Registry,
     *,
+    values: Mapping[str, str],
     db: Database,
     vm: VMRow,
     ws: WorkspaceRow,
@@ -644,7 +647,6 @@ def _resolve_session_env(
     resolver and overlays per-context identity vars).
     """
     from agentworks.env import ResourceContext, compose_env
-    from agentworks.secrets.providers import resolver_for
 
     scopes = _resolve_session_env_scopes(
         registry,
@@ -670,7 +672,7 @@ def _resolve_session_env(
     )
 
     return compose_env(
-        resolver=resolver_for(registry),
+        values=values,
         ctx=ctx,
         vm=scopes.vm,
         workspace=scopes.workspace,
@@ -1419,7 +1421,7 @@ def create_session(
 
     from agentworks.secrets import resolve_for_command
 
-    resolve_for_command(
+    secret_values = resolve_for_command(
         [
             _session_secret_target_pre_create(
                 registry,
@@ -1436,6 +1438,7 @@ def create_session(
                 is_admin_mode=(agent_name is None),
             ),
         ],
+        config,
         registry,
     )
     # If we reach here, every secret prompt is done and the resolver cache
@@ -1659,6 +1662,7 @@ def create_session(
                 )
                 session_env = _resolve_session_env(
                     registry,
+                    values=secret_values,
                     db=db,
                     vm=vm_check,
                     ws=ws,
@@ -2022,7 +2026,7 @@ def restart_session(
 
         from agentworks.secrets import resolve_for_command
 
-        resolve_for_command(
+        secret_values = resolve_for_command(
             [
                 _session_secret_target(
                     registry,
@@ -2035,6 +2039,7 @@ def restart_session(
                     agent_name=session.agent_name,
                 ),
             ],
+            config,
             registry,
         )
 
@@ -2093,6 +2098,7 @@ def restart_session(
         linux_user = _resolve_session_linux_user(db, session, vm)
         session_env = _resolve_session_env(
             registry,
+            values=secret_values,
             db=db,
             vm=vm,
             ws=ws,

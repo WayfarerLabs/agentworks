@@ -194,14 +194,14 @@ class Registry:
         3. **Cycle detection** in the now-complete reference graph via
            iterative DFS three-coloring; raises ``ConfigError`` on the
            first cycle with the offending path.
-        3.5. **Kind-level semantic validation**: each kind's optional
-           ``validate(registry)`` hook (getattr-gated, like
-           ``instances``) runs over the complete acyclic graph. This is
-           where cross-resource semantics that referential integrity
-           can't express live (e.g. secret reachability against the
-           active backend chain). Hooks read and raise; they never
-           mutate.
         4. **Freeze**.
+
+        Semantic checks that need CONFIG alongside the finalized graph
+        (e.g. the secret chain's names and reachability) are not the
+        Registry's job -- config isn't published here. They run at the
+        boundary that holds both worlds: ``bootstrap.build_registry``
+        invokes the owning subsystem's check
+        (``secrets.validate_chain``) right after finalize returns.
 
         First-encountered reference order (for the
         ``Origin.auto_declared(source=...)`` rule) is preserved by
@@ -257,17 +257,6 @@ class Registry:
 
         # 3: cycle detection across the now-complete graph.
         _detect_cycles(self._resources)
-
-        # 3.5: kind-level semantic validation over the complete, acyclic
-        # graph. The optional ``validate(registry)`` hook is
-        # getattr-gated exactly like ``instances`` -- kinds without
-        # cross-resource semantics simply don't define it. Runs before
-        # freeze so the registry a hook sees is complete but hooks
-        # themselves never mutate (contract: read + raise only).
-        for kind_handler in KIND_REGISTRY.values():
-            hook = getattr(kind_handler, "validate", None)
-            if hook is not None:
-                hook(self)
 
         # 4: freeze.
         self._frozen = True
@@ -356,15 +345,9 @@ class Registry:
             self._resources.setdefault(kind, {})[name] = synthesized
             return
         if kind_handler.miss_policy == "error":
-            # A kind may define an optional miss_hint(name, references)
-            # to speak the operator's vocabulary (e.g. which config
-            # surface names this kind) -- the framework message alone
-            # only has registry vocabulary.
-            hint_fn = getattr(kind_handler, "miss_hint", None)
             raise ConfigError(
                 f"{first.source[0]} {first.source[1]!r} references "
-                f"unknown {kind} {name!r} ({first.usage})",
-                hint=hint_fn(name, refs) if hint_fn is not None else None,
+                f"unknown {kind} {name!r} ({first.usage})"
             )
         raise RuntimeError(
             f"unexpected miss_policy {kind_handler.miss_policy!r} on "

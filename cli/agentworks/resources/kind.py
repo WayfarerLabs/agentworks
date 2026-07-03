@@ -146,24 +146,11 @@ class ResourceKind(Protocol):
     # the same ``InstanceRef`` shape from manifests; today's
     # ``instances`` is the config-projected dimension.
     #
-    # The optional ``validate(registry) -> None`` method is gated the
-    # same way. ``Registry.finalize`` calls it (when present) after the
-    # reference graph is complete and cycle-checked, immediately before
-    # freeze. It is the home for cross-resource SEMANTIC validation that
-    # referential integrity cannot express -- e.g. the ``secret-config``
-    # kind checks that every operator-declared secret is reachable via
-    # the active backend chain. Contract: read the registry and raise
-    # ``ConfigError``; never mutate; tolerate registries with no rows of
-    # the kind (``_SecretConfigKind.validate`` only gets away with a
-    # bare ``lookup`` because always-materialize guarantees its row).
-    # Kinds without cross-resource semantics simply omit the method.
-    #
-    # The optional ``miss_hint(name, references) -> str`` method (same
-    # gating) supplies the ``hint`` for the error-miss-policy
-    # ``ConfigError``: the framework message speaks registry vocabulary
-    # ("secret-config 'default' references unknown secret-backend ...");
-    # the kind knows the operator surface that names it and the
-    # remediation ("the active chain is [secret_config].backends ...").
+    # Deliberately ABSENT: a kind-level semantic-validation hook.
+    # Checks that need config alongside the finalized graph (the secret
+    # chain's names and reachability) are the owning subsystem's job,
+    # run from ``bootstrap.build_registry`` after finalize -- config is
+    # a setting, not a resource, and the Registry never sees it.
 
 
 class NoUnreferencedDefaultError(Exception):

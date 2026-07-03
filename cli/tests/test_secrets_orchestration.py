@@ -26,7 +26,6 @@ from agentworks.secrets import (
     SecretTarget,
     compute_needed_secrets,
     resolve_for_command,
-    resolver_for,
 )
 
 # ---------------------------------------------------------------------------
@@ -297,9 +296,8 @@ backends = ["env-var", "prompt"]
 def test_resolve_for_command_returns_resolved_values(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The return value mirrors what SecretResolver.resolve_all
-    produced -- useful for callers that want to log "resolved N
-    secrets" without re-deriving state from the cache."""
+    """The returned values dict IS the channel: the command threads it
+    down to its compose_env sites (there is no cache)."""
     monkeypatch.setenv("AW_SECRET_API_KEY", "from-env")
     cfg = _write_config(
         tmp_path,
@@ -313,19 +311,16 @@ backends = ["env-var"]
     )
     config = load_config(cfg, warn_issues=False)
     target = SecretTarget(vm={"K": EnvEntry(key="K", secret="api-key")})
-    resolved = resolve_for_command([target], build_registry(config))
+    resolved = resolve_for_command([target], config, build_registry(config))
     assert resolved == {"api-key": "from-env"}
 
 
-def test_resolve_for_command_cache_wins_over_late_env_changes(
+def test_resolved_values_are_plain_data(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Behavior pin for the cache contract: once resolve_for_command
-    has captured a value, subsequent renders inside the same command
-    use the cached value even if the backing source value changes.
-    This is the operator-facing guarantee that "we don't re-prompt /
-    re-read mid-command" -- testable via the resolver's public API
-    without reaching into private source lists."""
+    """The one resolve call captures values at that moment; later
+    environment mutation cannot change what the command threads down.
+    (The prompt-once guarantee is structural: one resolve per command.)"""
     monkeypatch.setenv("AW_SECRET_API_KEY", "first")
     cfg = _write_config(
         tmp_path,
@@ -340,50 +335,54 @@ backends = ["env-var"]
     config = load_config(cfg, warn_issues=False)
     registry = build_registry(config)
     target = SecretTarget(vm={"K": EnvEntry(key="K", secret="api-key")})
-    resolved = resolve_for_command([target], registry)
-    assert resolved == {"api-key": "first"}
+    values = resolve_for_command([target], config, registry)
+    assert values == {"api-key": "first"}
 
-    # Mutate the env after eager-resolve. A naive (uncached)
-    # resolution would pick up "second"; the cache guarantees we
-    # still see "first".
     monkeypatch.setenv("AW_SECRET_API_KEY", "second")
-    rendered = resolver_for(registry).render(
-        {"K": EnvEntry(key="K", secret="api-key")}
+    from agentworks.env import compose_env
+    from agentworks.env.identity import ResourceContext
+
+    env = compose_env(
+        values=values,
+        ctx=ResourceContext(
+            vm_name="v", vm_host="h", platform="lima", user="u"
+        ),
+        vm={"K": EnvEntry(key="K", secret="api-key")},
     )
-    assert rendered == {"K": "first"}
+    assert env["K"] == "first"
 
 
-def test_resolve_for_command_skips_resolver_when_no_secrets(
+def test_resolve_for_command_skips_loop_when_no_secrets(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """An empty target list (or targets whose envs reference no secrets)
-    must not call resolve_all -- avoids spinning up prompt machinery for
-    commands that need nothing."""
+    must not run the resolve loop -- avoids spinning up prompt machinery
+    for commands that need nothing."""
     cfg = _write_config(tmp_path)
     config = load_config(cfg, warn_issues=False)
     registry = build_registry(config)
 
     called = {"count": 0}
 
-    def _spy(decls: list[SecretDecl]) -> dict[str, str]:
+    def _spy(*args: object, **kwargs: object) -> dict[str, str]:
         called["count"] += 1
         return {}
 
-    monkeypatch.setattr(resolver_for(registry), "resolve_all", _spy)
+    monkeypatch.setattr("agentworks.secrets.resolve.resolve_secrets", _spy)
 
-    resolve_for_command([], registry)
+    resolve_for_command([], config, registry)
     assert called["count"] == 0
 
     plaintext_target = SecretTarget(vm={"K": EnvEntry(key="K", value="plain")})
-    resolve_for_command([plaintext_target], registry)
+    resolve_for_command([plaintext_target], config, registry)
     assert called["count"] == 0
 
 
 def test_resolve_for_command_passes_extra_decls_through(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """extra_decls reach resolve_all even when no target references any
-    secret -- pinning the legacy-migration hook."""
+    """extra_decls reach the resolve loop even when no target references
+    any secret -- pinning the legacy-migration hook."""
     monkeypatch.setenv("AW_SECRET_EXTERNAL", "x")
     cfg = _write_config(
         tmp_path,
@@ -398,17 +397,18 @@ backends = ["env-var"]
     config = load_config(cfg, warn_issues=False)
     registry = build_registry(config)
 
+    from agentworks.secrets.resolve import resolve_secrets as _real
+
     calls: list[list[str]] = []
-    original = resolver_for(registry).resolve_all
 
-    def _spy(decls: list[SecretDecl]) -> dict[str, str]:
+    def _spy(decls: list[SecretDecl], backends: list[object]) -> dict[str, str]:
         calls.append([d.name for d in decls])
-        return original(decls)
+        return _real(decls, backends)  # type: ignore[arg-type]
 
-    monkeypatch.setattr(resolver_for(registry), "resolve_all", _spy)
+    monkeypatch.setattr("agentworks.secrets.resolve.resolve_secrets", _spy)
 
     resolve_for_command(
-        [], registry, extra_decls=[config.secrets["external"]]
+        [], config, registry, extra_decls=[config.secrets["external"]]
     )
     assert calls == [["external"]]
 

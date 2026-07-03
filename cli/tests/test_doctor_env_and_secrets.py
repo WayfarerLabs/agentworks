@@ -46,7 +46,7 @@ def test_no_secrets_shows_declared_secrets_none(tmp_path: Path) -> None:
     are no secrets to report against."""
     cfg = _write_config(tmp_path)
     config = load_config(cfg, warn_issues=False)
-    g = _check_secrets(build_registry(config))
+    g = _check_secrets(config, build_registry(config))
     assert g.name == "Secrets"
     statuses = [(c.name, c.status, c.message) for c in g.checks]
     assert statuses == [("Declared secrets", Status.INFO, "none")], statuses
@@ -72,7 +72,7 @@ backends = ["env-var", "prompt"]
 """,
     )
     config = load_config(cfg, warn_issues=False)
-    g = _check_secrets(build_registry(config))
+    g = _check_secrets(config, build_registry(config))
     msgs = [(c.status, c.name, c.message) for c in g.checks]
     assert any(
         status == Status.OK
@@ -102,7 +102,7 @@ backends = ["env-var", "prompt"]
 """,
     )
     config = load_config(cfg, warn_issues=False)
-    g = _check_secrets(build_registry(config))
+    g = _check_secrets(config, build_registry(config))
     oks = [c for c in g.checks if c.status == Status.OK]
     assert any(
         "shared" in c.name and "would resolve via prompt" in (c.message or "")
@@ -132,7 +132,7 @@ backends = ["env-var", "prompt"]
 """,
     )
     config = load_config(cfg, warn_issues=False)
-    g = _check_secrets(build_registry(config))
+    g = _check_secrets(config, build_registry(config))
     warns = [c for c in g.checks if c.status == Status.WARN]
     assert any(
         "opted-out" in c.name and "not available" in (c.message or "")
@@ -161,7 +161,7 @@ backends = ["env-var", "prompt"]
 """,
     )
     config = load_config(cfg, warn_issues=False)
-    g = _check_secrets(build_registry(config))
+    g = _check_secrets(config, build_registry(config))
     shared_rows = [c for c in g.checks if "shared" in c.name]
     assert len(shared_rows) == 1, shared_rows
     assert shared_rows[0].status == Status.FAIL
@@ -188,7 +188,7 @@ backends = ["env-var", "prompt"]
 """,
     )
     config = load_config(cfg, warn_issues=False)
-    g = _check_secrets(build_registry(config))
+    g = _check_secrets(config, build_registry(config))
     shared_rows = [c for c in g.checks if "shared" in c.name]
     assert len(shared_rows) == 1, shared_rows
     assert shared_rows[0].status == Status.FAIL

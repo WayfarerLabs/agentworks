@@ -146,8 +146,7 @@ def test_resource_kinds_have_references_field_not_usage() -> None:
         WorkspaceTemplate,
     )
     from agentworks.secrets.base import (
-        SecretBackendConfig,
-        SecretConfig,
+        SecretBackendDecl,
         SecretDecl,
     )
 
@@ -163,8 +162,7 @@ def test_resource_kinds_have_references_field_not_usage() -> None:
         SessionTemplate,
         VMTemplate,
         WorkspaceTemplate,
-        SecretBackendConfig,
-        SecretConfig,
+        SecretBackendDecl,
         SecretDecl,
     ]
     import dataclasses

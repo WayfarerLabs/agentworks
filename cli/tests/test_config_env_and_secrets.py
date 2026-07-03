@@ -29,7 +29,7 @@ import pytest
 
 from agentworks.bootstrap import build_registry
 from agentworks.config import ConfigError, load_config
-from agentworks.secrets import resolver_for
+from agentworks.secrets import active_backends, resolve_secrets
 
 
 def _write_base(config_path: Path, *, extras: str = "") -> None:
@@ -66,13 +66,13 @@ def test_no_secrets_section_loads_with_empty_resolver(tmp_path: Path) -> None:
     _write_base(cfg_file)
     cfg = load_config(cfg_file, warn_issues=False)
     assert cfg.secrets == {}
-    assert cfg.secret_backends == {}
     # Absence of [secret_config] defaults to the standard chain.
     assert cfg.secret_config_data.backends == ("env-var", "prompt")
     registry = build_registry(cfg)
-    assert resolver_for(registry) is not None
-    # No declared secrets => empty resolver, renders {} -> {} without raising.
-    assert resolver_for(registry).render({}) == {}
+    backends = active_backends(cfg, registry)
+    assert [b.name for b in backends] == ["env-var", "prompt"]
+    # No declared secrets => nothing to resolve; the loop is a no-op.
+    assert resolve_secrets([], backends) == {}
 
 
 def test_secret_config_absent_uses_default_chain(tmp_path: Path) -> None:
@@ -381,11 +381,13 @@ def test_secret_resolver_assembled_when_backends_configured(tmp_path: Path) -> N
     )
     cfg = load_config(cfg_file, warn_issues=False)
     registry = build_registry(cfg)
-    assert resolver_for(registry) is not None
-    # Smoke-check the chain by asking for the first attempting source.
-    first = resolver_for(registry).first_attempting_source(cfg.secrets["shared"])
+    backends = active_backends(cfg, registry)
+    # Smoke-check the chain: the first attempting backend is env-var.
+    first = next(
+        (b for b in backends if b.would_attempt(cfg.secrets["shared"])), None
+    )
     assert first is not None
-    assert first.kind == "env-var"
+    assert first.name == "env-var"
 
 
 def test_unknown_backend_kind_raises(tmp_path: Path) -> None:

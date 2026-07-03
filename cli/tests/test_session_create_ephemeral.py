@@ -1368,6 +1368,11 @@ def test_secret_target_pre_create_parity_with_session_secret_target(
     )
 
     assert pre == post
-    assert compute_needed_secrets([pre], config) == compute_needed_secrets([post], config)
+    from agentworks.bootstrap import build_registry
+
+    registry = build_registry(config)
+    assert compute_needed_secrets([pre], registry) == compute_needed_secrets(
+        [post], registry
+    )
 
     db.close()

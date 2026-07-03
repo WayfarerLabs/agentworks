@@ -22,11 +22,10 @@ from agentworks.errors import ValidationError
 
 if TYPE_CHECKING:
     from agentworks.agents.templates import ResolvedAgentTemplate
-    from agentworks.config import Config
+    from agentworks.config import Config  # noqa: F401 - used in signatures
     from agentworks.db import AgentRow, Database, SessionRow, VMRow, WorkspaceRow
     from agentworks.env.entry import EnvEntry
     from agentworks.resources.registry import Registry
-    from agentworks.secrets import SecretResolver
     from agentworks.sessions.templates import ResolvedSessionTemplate
     from agentworks.vms.templates import ResolvedVMTemplate
     from agentworks.workspaces.templates import ResolvedTemplate as ResolvedWorkspaceTemplate
@@ -126,7 +125,12 @@ def show_env(
         session=session_env,
     )
 
-    from agentworks.secrets.providers import resolver_for
+    # Reveal mode resolves each referenced secret exactly once (deduped
+    # by name; several keys may reference one secret), per-secret so one
+    # failure renders inline as <error: ...> without aborting the table.
+    values, errors = _reveal_values(
+        config, registry, user_env_merged, reveal=reveal_secrets
+    )
 
     rows: list[ResolvedEnvRow] = []
     for key in sorted(user_env_merged.keys() | identity_env.keys()):
@@ -143,7 +147,7 @@ def show_env(
             continue
         entry = user_env_merged[key]
         scope = user_provenance[key]
-        rendered, is_secret = _render_value(entry, resolver_for(registry), reveal_secrets)
+        rendered, is_secret = _render_value(entry, values, errors, reveal_secrets)
         rows.append(
             ResolvedEnvRow(
                 key=key,
@@ -364,31 +368,65 @@ def _per_key_provenance(
 # ---------------------------------------------------------------------------
 
 
+def _reveal_values(
+    config: Config,
+    registry: Registry,
+    merged: dict[str, EnvEntry],
+    *,
+    reveal: bool,
+) -> tuple[dict[str, str], dict[str, str]]:
+    """Resolve every secret referenced by ``merged`` when revealing.
+
+    Returns ``(values, errors)`` keyed by secret name. Each unique
+    secret resolves exactly once through the active backends (several
+    env keys may reference one secret); a failure lands in ``errors``
+    so the table renders it inline instead of aborting. That includes
+    the resolve loop's transport-safety guard: a backend value
+    containing newline / CR / NUL bytes raises ``ConfigError`` (the
+    same guard that protects SSH SetEnv from corruption) and the
+    operator sees it as ``<error: secret 'X': resolved value contains
+    a control character...>``.
+    """
+    if not reveal:
+        return {}, {}
+    from agentworks.resources.access import secret_decls
+    from agentworks.secrets import SecretDecl, active_backends, resolve_secrets
+
+    decls = secret_decls(registry)
+    backends = active_backends(config, registry)
+    values: dict[str, str] = {}
+    errors: dict[str, str] = {}
+    for entry in merged.values():
+        name = entry.secret
+        if name is None or name in values or name in errors:
+            continue
+        decl = decls.get(name) or SecretDecl(name=name, description="")
+        try:
+            values.update(resolve_secrets([decl], backends))
+        except Exception as exc:  # noqa: BLE001 - render any failure inline
+            errors[name] = str(exc)
+    return values, errors
+
+
 def _render_value(
     entry: EnvEntry,
-    resolver: SecretResolver,
+    values: dict[str, str],
+    errors: dict[str, str],
     reveal_secrets: bool,
 ) -> tuple[str, bool]:
     """Return ``(rendered_value, is_secret)`` for one EnvEntry.
 
     Plaintext entries render as their value verbatim. Secret entries
     render as ``<from secret: NAME>`` by default; ``reveal_secrets``
-    pulls the value through the resolver. Resolution failures surface
-    inline as ``<error: ...>`` so the table still completes. That
-    includes the resolver's transport-safety guard: a backend value
-    containing newline / CR / NUL bytes raises ``ConfigError`` (the
-    same guard that protects SSH SetEnv from corruption) and the
-    operator sees it here as ``<error: secret 'X': resolved value
-    contains a control character...>``.
+    shows the pre-resolved value (or its inline error) from
+    ``_reveal_values``.
     """
     if entry.secret is not None:
         if not reveal_secrets:
             return f"<from secret: {entry.secret}>", True
-        try:
-            resolved = resolver.render({entry.key: entry})
-            return resolved[entry.key], True
-        except Exception as exc:  # noqa: BLE001 - render any failure inline
-            return f"<error: {exc}>", True
+        if entry.secret in errors:
+            return f"<error: {errors[entry.secret]}>", True
+        return values[entry.secret], True
     assert entry.value is not None  # EnvEntry invariant
     return entry.value, False
 

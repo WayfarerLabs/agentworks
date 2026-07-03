@@ -324,25 +324,18 @@ def stub_build_registry(monkeypatch: pytest.MonkeyPatch) -> None:
         "agentworks.bootstrap.build_registry", _StubRegistry
     )
 
-    # resolver_for is registry-pure (it reads the secret-config row);
-    # _StubRegistry carries no such row, so serve a per-registry no-op
-    # resolver with the same memo semantics (one instance per registry).
-    from agentworks.secrets.resolver import SecretResolver
+    # Namespace configs lack secret_config_data (and the stub registry
+    # carries no backend rows), so stub the orchestration seam: eager
+    # resolution returns no values, and compose_env sites receive {}
+    # (namespace-config tests carry no secret-referencing env entries).
+    def _stub_resolve_for_command(*args: object, **kwargs: object) -> dict[str, str]:
+        return {}
 
-    stub_resolvers: dict[int, SecretResolver] = {}
-
-    def _stub_resolver_for(registry: object) -> SecretResolver:
-        resolver = stub_resolvers.get(id(registry))
-        if resolver is None:
-            resolver = SecretResolver([], {})
-            stub_resolvers[id(registry)] = resolver
-        return resolver
-
-    # Every production consumer imports resolver_for function-locally
-    # from the defining module, so this single seam covers them all;
-    # the agentworks.secrets re-export is patched for test callers.
+    # Production consumers import resolve_for_command function-locally
+    # from agentworks.secrets; patch the defining module and the
+    # re-export so both binding shapes see the stub.
     for site in (
-        "agentworks.secrets.providers.resolver_for",
-        "agentworks.secrets.resolver_for",
+        "agentworks.secrets.orchestration.resolve_for_command",
+        "agentworks.secrets.resolve_for_command",
     ):
-        monkeypatch.setattr(site, _stub_resolver_for)
+        monkeypatch.setattr(site, _stub_resolve_for_command)

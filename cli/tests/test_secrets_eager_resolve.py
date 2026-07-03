@@ -175,7 +175,7 @@ def test_session_create_calls_resolve_with_session_target(
 
     calls: list[list[object]] = []
 
-    def _spy(targets: list[object], config: object, **kwargs: object) -> dict[str, str]:
+    def _spy(targets: list[object], *args: object, **kwargs: object) -> dict[str, str]:
         calls.append(targets)
         raise _Sentinel
 

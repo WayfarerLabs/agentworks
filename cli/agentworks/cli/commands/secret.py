@@ -39,7 +39,7 @@ def secret_list(
 
     config = load_config()
     registry = build_registry(config)
-    table = build_secret_table(registry)
+    table = build_secret_table(config, registry)
     if names_only:
         for row in table.rows:
             output.info(row.name)
@@ -76,5 +76,5 @@ def secret_describe(
     config = load_config()
     registry = build_registry(config)
     db = get_db()
-    desc = describe_secret(registry, name, db=db)
+    desc = describe_secret(config, registry, name, db=db)
     render_secret_description(desc)

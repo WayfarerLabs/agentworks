@@ -69,7 +69,7 @@ def test_collect_git_tokens_resolves_default_secret_name(
     from agentworks.vms.manager import _collect_git_tokens
 
     registry = build_registry(config)
-    tokens = _collect_git_tokens(registry, ["github"])
+    tokens = _collect_git_tokens(config, registry, ["github"])
     assert tokens == {"github": "ghp_abc"}
 
 
@@ -100,7 +100,7 @@ def test_collect_git_tokens_resolves_custom_secret_name(
     from agentworks.vms.manager import _collect_git_tokens
 
     registry = build_registry(config)
-    tokens = _collect_git_tokens(registry, ["github"])
+    tokens = _collect_git_tokens(config, registry, ["github"])
     assert tokens["github"] == "ghp_custom"
 
 
@@ -135,7 +135,7 @@ def test_collect_git_tokens_batches_multiple_credentials(
     from agentworks.vms.manager import _collect_git_tokens
 
     registry = build_registry(config)
-    tokens = _collect_git_tokens(registry, ["github", "azdo"])
+    tokens = _collect_git_tokens(config, registry, ["github", "azdo"])
     assert tokens == {"github": "ghp_aaa", "azdo": "azdo_bbb"}
 
 
@@ -149,7 +149,7 @@ def test_collect_git_tokens_empty_list_returns_empty_dict(
     from agentworks.vms.manager import _collect_git_tokens
 
     registry = build_registry(config)
-    assert _collect_git_tokens(registry, []) == {}
+    assert _collect_git_tokens(config, registry, []) == {}
 
 
 def test_collect_git_tokens_credential_lines_use_resolved_value(
@@ -179,7 +179,7 @@ def test_collect_git_tokens_credential_lines_use_resolved_value(
     from agentworks.vms.manager import _collect_git_tokens
 
     registry = build_registry(config)
-    tokens = _collect_git_tokens(registry, ["github"])
+    tokens = _collect_git_tokens(config, registry, ["github"])
 
     provider = GitHubCredentialProvider("github")
     lines = provider.credential_lines(tokens["github"])

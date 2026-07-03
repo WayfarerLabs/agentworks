@@ -46,71 +46,17 @@ def test_empty_registry_is_not_finalized() -> None:
     assert not r.is_finalized
 
 
-class _HookProbeKind:
-    """Minimal kind whose ``validate`` records what it observed."""
+class _MissProbeKind:
+    """Minimal error-miss-policy kind for the message-shape test."""
 
-    kind = "hook-probe"
+    kind = "miss-probe"
     miss_policy = "error"
     auto_declare_names = None
     manifest_declarable = False
     builtin_override = "reserved"
 
-    def __init__(self) -> None:
-        self.observed: list[tuple[bool, bool]] = []
-        self.raise_error: ConfigError | None = None
-
     def synthesize(self, references: object) -> object:
         raise AssertionError("never dispatched: miss_policy='error'")
-
-    def validate(self, registry: Registry) -> None:
-        # (frozen-at-hook-time, graph-complete): the hook contract is a
-        # complete-but-unfrozen registry -- always-materialize rows must
-        # already be visible.
-        try:
-            registry.lookup("admin-template", "default")
-            complete = True
-        except KeyError:
-            complete = False
-        self.observed.append((registry.is_finalized, complete))
-        if self.raise_error is not None:
-            raise self.raise_error
-
-    def miss_hint(self, name: str, references: object) -> str:
-        return f"probe hint for {name!r}"
-
-
-def test_finalize_runs_kind_validate_hooks(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Framework contract for the optional ``validate(registry)`` hook:
-    finalize invokes it exactly once, over a complete (always-materialize
-    rows present) but not-yet-frozen registry."""
-    from agentworks.resources.kind import KIND_REGISTRY
-
-    probe = _HookProbeKind()
-    monkeypatch.setitem(KIND_REGISTRY, "hook-probe", probe)
-
-    r = Registry.empty()
-    r.finalize()
-
-    assert probe.observed == [(False, True)]
-    assert r.is_finalized
-
-
-def test_finalize_propagates_validate_hook_errors(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A hook's ConfigError aborts finalize; the registry never freezes."""
-    from agentworks.resources.kind import KIND_REGISTRY
-
-    probe = _HookProbeKind()
-    probe.raise_error = ConfigError("hook-probe rejects this graph")
-    monkeypatch.setitem(KIND_REGISTRY, "hook-probe", probe)
-
-    r = Registry.empty()
-    with pytest.raises(ConfigError, match="hook-probe rejects"):
-        r.finalize()
-    assert not r.is_finalized
 
 
 @dataclass(frozen=True)
@@ -127,36 +73,34 @@ class _RefEmitter:
         return [
             ResourceReference(
                 name="missing",
-                kind="hook-probe",
+                kind="miss-probe",
                 usage="the probe dependency",
-                source=("hook-probe", self.name),
+                source=("miss-probe", self.name),
             )
         ]
 
 
-def test_error_miss_policy_includes_usage_and_kind_miss_hint(
+def test_error_miss_policy_includes_reference_usage(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
 ) -> None:
-    """Framework contract for the optional ``miss_hint`` hook: the
-    error-miss ConfigError carries the reference's usage in the message
-    and the kind-supplied operator-vocabulary hint."""
+    """The error-miss ConfigError carries the reference's usage in the
+    message so the operator sees what needed the missing resource."""
     from agentworks.resources.kind import KIND_REGISTRY
 
-    probe = _HookProbeKind()
-    monkeypatch.setitem(KIND_REGISTRY, "hook-probe", probe)
+    probe = _MissProbeKind()
+    monkeypatch.setitem(KIND_REGISTRY, "miss-probe", probe)
 
     r = Registry.empty()
     r.add(
-        "hook-probe",
+        "miss-probe",
         "seed",
         _RefEmitter(name="seed"),
         Origin.operator_declared(file=tmp_path / "c.toml", line=1),
     )
     with pytest.raises(ConfigError) as exc:
         r.finalize()
-    assert "references unknown hook-probe 'missing'" in str(exc.value)
+    assert "references unknown miss-probe 'missing'" in str(exc.value)
     assert "(the probe dependency)" in str(exc.value)
-    assert exc.value.hint == "probe hint for 'missing'"
 
 
 def test_add_then_finalize_makes_queryable(tmp_path: Path) -> None:

@@ -12,7 +12,6 @@ import pytest
 
 from agentworks.bootstrap import build_registry
 from agentworks.config import load_config
-from agentworks.secrets import resolver_for
 from agentworks.secrets.inspect import describe_secret
 
 
@@ -42,15 +41,16 @@ def _write_cfg(tmp_path: Path, body: str, ssh_keys: tuple[Path, Path]) -> Path:
     return p
 
 
-def test_describe_secret_does_not_invoke_resolve_all(
+def test_describe_secret_never_resolves_through_interactive_backends(
     tmp_path: Path,
     ssh_keys: tuple[Path, Path],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Monkeypatch ``resolve_all`` on the resolver to fail loudly if
-    anything calls it during describe. The describe path must report
-    state via ``would_attempt`` / ``describe_lookup`` only, never
-    actually resolve.
+    """Monkeypatch the prompt provider's ``batch_get`` to fail loudly if
+    anything calls it during describe. The resolution PREVIEW may probe
+    non-interactive backends (env-var); an interactive backend must be
+    reported on ``would_attempt`` alone -- probing it would BE the
+    prompt.
     """
     cfg = _write_cfg(
         tmp_path,
@@ -65,52 +65,57 @@ def test_describe_secret_does_not_invoke_resolve_all(
     )
     config = load_config(cfg, warn_issues=False)
 
-    def _fail_resolve_all(*args: object, **kwargs: object) -> None:
+    def _fail_batch_get(*args: object, **kwargs: object) -> None:
         raise AssertionError(
-            "describe_secret called resolve_all; the function must "
-            "report state without resolving values per FRD R10"
+            "describe_secret invoked the prompt provider; interactive "
+            "backends must be previewed via would_attempt alone (FRD R10)"
+        )
+
+    from agentworks.secrets import PROVIDER_REGISTRY
+
+    registry = build_registry(config)
+    monkeypatch.setattr(
+        PROVIDER_REGISTRY["prompt"], "batch_get", _fail_batch_get
+    )
+
+    # Should complete without invoking the prompt provider.
+    describe_secret(config, registry, "api-key")
+
+
+def test_describe_secret_does_not_run_the_resolve_loop(
+    tmp_path: Path,
+    ssh_keys: tuple[Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``resolve_secrets`` is the command resolution path. Describe must
+    never route through it (its per-backend probe calls the door's
+    ``resolve`` directly, one non-interactive backend at a time).
+    """
+    cfg = _write_cfg(
+        tmp_path,
+        """\
+        [secrets.api-key]
+        description = "API key"
+
+        [secret_config]
+        backends = ["env-var", "prompt"]
+        """,
+        ssh_keys,
+    )
+    config = load_config(cfg, warn_issues=False)
+
+    def _fail_resolve_secrets(*args: object, **kwargs: object) -> None:
+        raise AssertionError(
+            "describe_secret ran the resolve loop; inspection must ask "
+            "the backends directly"
         )
 
     registry = build_registry(config)
     monkeypatch.setattr(
-        resolver_for(registry), "resolve_all", _fail_resolve_all
+        "agentworks.secrets.resolve.resolve_secrets", _fail_resolve_secrets
     )
 
-    # Should complete without invoking resolve_all.
-    describe_secret(registry, "api-key")
-
-
-def test_describe_secret_does_not_invoke_render(
-    tmp_path: Path,
-    ssh_keys: tuple[Path, Path],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """``render`` is the env-block resolution path. Describe must not
-    consume the env table.
-    """
-    cfg = _write_cfg(
-        tmp_path,
-        """\
-        [secrets.api-key]
-        description = "API key"
-
-        [secret_config]
-        backends = ["env-var", "prompt"]
-        """,
-        ssh_keys,
-    )
-    config = load_config(cfg, warn_issues=False)
-
-    def _fail_render(*args: object, **kwargs: object) -> None:
-        raise AssertionError(
-            "describe_secret called render; the function must not "
-            "resolve env-table values"
-        )
-
-    registry = build_registry(config)
-    monkeypatch.setattr(resolver_for(registry), "render", _fail_render)
-
-    describe_secret(registry, "api-key")
+    describe_secret(config, registry, "api-key")
 
 
 def test_describe_secret_does_not_invoke_prompt_backend(
@@ -118,8 +123,9 @@ def test_describe_secret_does_not_invoke_prompt_backend(
     ssh_keys: tuple[Path, Path],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The prompt backend's ``get`` / ``batch_get`` methods are the
-    interactive surfaces; ``describe`` must call neither.
+    """``output.prompt_secret`` is the actual operator-interaction
+    surface; ``describe`` must never reach it (belt to the provider
+    batch_get guard's suspenders).
     """
     cfg = _write_cfg(
         tmp_path,
@@ -134,23 +140,16 @@ def test_describe_secret_does_not_invoke_prompt_backend(
     )
     config = load_config(cfg, warn_issues=False)
 
-    # Find the prompt source in the active chain.
-    registry = build_registry(config)
-    prompt_source = None
-    for source in resolver_for(registry).sources:
-        if source.kind == "prompt":
-            prompt_source = source
-            break
-    assert prompt_source is not None
-
     def _fail(*args: object, **kwargs: object) -> None:
         raise AssertionError(
-            "describe_secret invoked the prompt backend; the function "
-            "must report state via would_attempt / describe_lookup only"
+            "describe_secret prompted the operator; the function must "
+            "report state via would_attempt / describe_lookup only"
         )
 
-    monkeypatch.setattr(prompt_source, "get", _fail)
-    monkeypatch.setattr(prompt_source, "batch_get", _fail)
+    from agentworks import output
+
+    monkeypatch.setattr(output, "prompt_secret", _fail)
+    monkeypatch.setattr(output, "is_interactive", lambda: True)
 
     registry = build_registry(config)
-    describe_secret(registry, "api-key")
+    describe_secret(config, registry, "api-key")

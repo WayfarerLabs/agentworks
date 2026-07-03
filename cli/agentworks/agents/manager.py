@@ -253,7 +253,7 @@ def create_agent(
     # the env-block system). Operator env secrets are NOT prompted at
     # agent create -- provisioning is hermetic. They get prompted at
     # the use site (agent shell, session create, etc.).
-    git_tokens = _collect_agent_credentials(registry, agent_tmpl)
+    git_tokens = _collect_agent_credentials(config, registry, agent_tmpl)
 
     from agentworks.ssh import SSHLogger
     ssh_logger = SSHLogger(vm.name, "agent-create")
@@ -465,7 +465,7 @@ def reinit_agent(
     vm = _require_vm(db, agent.vm_name)
 
     # Collect credentials up front before any SSH work.
-    git_tokens = _collect_agent_credentials(registry, agent_tmpl)
+    git_tokens = _collect_agent_credentials(config, registry, agent_tmpl)
 
     # Provisioning is hermetic: no operator-env secrets are prompted at
     # agent reinit. They get prompted at the use site (agent shell,
@@ -654,7 +654,6 @@ def shell_agent(
 
     from agentworks.env import ResourceContext, compose_env
     from agentworks.secrets import resolve_for_command
-    from agentworks.secrets.providers import resolver_for
     from agentworks.transports import agent_transport
 
     # Resolve workspace upfront (needed for authz check, env scope, AND
@@ -671,8 +670,9 @@ def shell_agent(
 
     registry = build_registry(config)
     scopes = _resolve_agent_direct_env_scopes(registry, vm, agent, ws=ws)
-    resolve_for_command(
+    values = resolve_for_command(
         [_agent_direct_secret_target(scopes, label=f"agent-shell={agent.name}")],
+        config,
         registry,
     )
 
@@ -686,7 +686,7 @@ def shell_agent(
         agent_name=agent.name,
     )
     env = compose_env(
-        resolver=resolver_for(registry),
+        values=values,
         ctx=ctx,
         vm=scopes.vm,
         workspace=scopes.workspace,
@@ -742,7 +742,6 @@ def exec_agent(
     from agentworks.env import ResourceContext, compose_env
     from agentworks.exec_validation import reject_dash_prefixed_command
     from agentworks.secrets import resolve_for_command
-    from agentworks.secrets.providers import resolver_for
     from agentworks.transports import agent_transport
 
     reject_dash_prefixed_command(command, kind="agent", name=name)
@@ -770,8 +769,9 @@ def exec_agent(
 
     registry = build_registry(config)
     scopes = _resolve_agent_direct_env_scopes(registry, vm, agent, ws=ws)
-    resolve_for_command(
+    values = resolve_for_command(
         [_agent_direct_secret_target(scopes, label=f"agent-exec={agent.name}")],
+        config,
         registry,
     )
 
@@ -785,7 +785,7 @@ def exec_agent(
         agent_name=agent.name,
     )
     env = compose_env(
-        resolver=resolver_for(registry),
+        values=values,
         ctx=ctx,
         vm=scopes.vm,
         workspace=scopes.workspace,
@@ -968,6 +968,7 @@ def _remove_from_workspace_group(
 
 
 def _collect_agent_credentials(
+    config: Config,
     registry: Registry,
     agent_tmpl: ResolvedAgentTemplate,
 ) -> dict[str, str]:
@@ -986,7 +987,7 @@ def _collect_agent_credentials(
 
     from agentworks.vms.manager import _collect_git_tokens
 
-    return _collect_git_tokens(registry, agent_cfg.git_credentials)
+    return _collect_git_tokens(config, registry, agent_cfg.git_credentials)
 
 
 def _create_agent_on_vm(

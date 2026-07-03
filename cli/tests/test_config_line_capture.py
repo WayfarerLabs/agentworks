@@ -184,23 +184,6 @@ def test_secret_decl_declared_at(
     assert decl.declared_at.line == 5
 
 
-def test_secret_backend_config_declared_at(
-    tmp_path: Path, ssh_keys: tuple[Path, Path]
-) -> None:
-    config_file = _write_config(
-        tmp_path,
-        """\
-        [secret_backends.env-var]
-        """,
-        ssh_keys,
-    )
-
-    cfg = load_config(config_file, warn_issues=False)
-    backend = cfg.secret_backends["env-var"]
-    assert backend.declared_at.file == config_file
-    assert backend.declared_at.line == 5
-
-
 def test_secret_config_declared_at(
     tmp_path: Path, ssh_keys: tuple[Path, Path]
 ) -> None:

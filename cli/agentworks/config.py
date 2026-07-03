@@ -18,7 +18,6 @@ from typing import TYPE_CHECKING, Literal
 from agentworks.env import EnvEntry
 from agentworks.errors import ConfigError as ConfigError
 from agentworks.secrets import (
-    SecretBackendConfig,
     SecretConfig,
     SecretDecl,
 )
@@ -611,7 +610,7 @@ class Config:
     # Declared secrets, keyed by name. Empty when [secrets.*] is absent.
     secrets: dict[str, SecretDecl] = field(default_factory=dict)
     # Per-backend connection config keyed by kind ("env-var", "onepassword", ...).
-    secret_backends: dict[str, SecretBackendConfig] = field(default_factory=dict)
+
     # Top-level [secret_config] table; carries the enabled-backends precedence list.
     secret_config_data: SecretConfig = field(default_factory=SecretConfig)
     config_issues: tuple[str, ...] = ()
@@ -632,14 +631,12 @@ class Config:
         when the operator's TOML omits all sections; Config.publish_to
         always publishes it.
 
-        ``secret_config`` is pure config (TOML is its only home; the
-        kind is not manifest-declarable) but its ``backends`` chain
-        names resources, so it publishes as the singleton
-        ``secret-config:default`` row -- the chain becomes reference
-        edges the framework validates at finalize, and the runtime
-        (resolver assembly) reads the chain from the registry rather
-        than from Config. Individual ``secret_backends`` entries publish
-        under the ``"secret-backend"`` kind.
+        ``secret_config`` is pure config and is NOT published: the
+        chain is a setting that names resources, consumed by the
+        secrets subsystem directly (validated against the finalized
+        registry by ``secrets.validate_chain`` in ``build_registry``,
+        read again at resolver assembly). Settings don't become
+        pseudo-resources just because they point at resources.
 
         Imports ``Registry`` and ``Origin`` from ``agentworks.resources``
         -- the explicit layer handoff. Config's data structures (parsed
@@ -658,6 +655,9 @@ class Config:
             )
 
         # Multi-named kinds: one Resource per (container, name) pair.
+        # secret_backends is deliberately absent: the TOML sections are
+        # deprecated no-ops (built-in backends ship as bundled
+        # manifests; new backends are manifest-declared).
         for kind, kind_dict in (
             ("secret", self.secrets),
             ("vm-template", self.vm_templates),
@@ -665,7 +665,6 @@ class Config:
             ("workspace-template", self.workspace_templates),
             ("session-template", self.session_templates),
             ("git-credential", self.git_credentials),
-            ("secret-backend", self.secret_backends),
         ):
             for name, resource in kind_dict.items():
                 registry.add(kind, name, resource, op_origin(resource.declared_at))
@@ -688,12 +687,6 @@ class Config:
             "default",
             self.named_console,
             op_origin(self.named_console.declared_at),
-        )
-        registry.add(
-            "secret-config",
-            "default",
-            self.secret_config_data,
-            op_origin(self.secret_config_data.declared_at),
         )
 
 
@@ -1492,19 +1485,16 @@ def _load_secrets(
 
 def _load_secret_backends(
     data: dict[str, object],
-    issues: list[str],  # noqa: ARG001 - kept for caller-symmetry with _load_secret_config
-    decls: _SectionLineMap,
-) -> dict[str, SecretBackendConfig]:
-    """Load [secret_backends.*] sections into SecretBackendConfig entries.
+    issues: list[str],
+) -> None:
+    """Warn ``[secret_backends.*]`` sections as deprecated no-ops.
 
-    v1 only carries the ``kind`` field; per-backend subclasses (with account /
-    vault / etc.) arrive when those backends ship. Extra fields in v1
-    sections are accepted but ignored.
-
-    A declared kind not in the known-factory map (e.g. typo ``envvar`` for
-    ``env-var``) is a load-time ``ConfigError`` -- Phase 2b.2 elevated
-    this from a soft warning to a hard error so the surface treats it
-    the same as ``[git_credentials.<name>].type`` typos.
+    The kind-keyed TOML sections never carried configuration (only the
+    kind itself), and the built-in backends now ship as bundled
+    manifests -- so a section here is semantically empty. Known kinds
+    warn as deprecated; unknown kinds (typo ``envvar`` for ``env-var``)
+    stay a hard ``ConfigError`` for typo protection. Nothing is stored
+    and nothing publishes.
     """
     raw = data.get("secret_backends", {})
     if not isinstance(raw, dict):
@@ -1513,27 +1503,21 @@ def _load_secret_backends(
     from agentworks.secrets.providers import PROVIDER_REGISTRY
 
     known_kinds = set(PROVIDER_REGISTRY)
-    backends: dict[str, SecretBackendConfig] = {}
     for kind, bdata in raw.items():
         kind_str = str(kind)
         if not isinstance(bdata, dict):
             raise ConfigError(f"secret_backends.{kind_str} must be a table")
-        # Phase 2b.2: unknown backend kinds in [secret_backends.<kind>]
-        # are a hard error (matching git_credentials.<name>.type's
-        # treatment). Previously a soft config-load warning; the
-        # asymmetry between "operator typo'd a provider type" (error)
-        # and "operator typo'd a backend kind" (warn) wasn't earning
-        # its keep.
         if kind_str not in known_kinds:
             raise ConfigError(
                 f"[secret_backends.{kind_str}] declares an unknown backend kind; "
-                f"v1 supports {sorted(known_kinds)}"
+                f"supported: {sorted(known_kinds)}"
             )
-        backends[kind_str] = SecretBackendConfig(
-            kind=kind_str,
-            declared_at=decls.lookup("secret_backends", kind_str),
+        issues.append(
+            f"[secret_backends.{kind_str}] is deprecated and has no effect: "
+            f"the built-in backends ship with agentworks, and activation is "
+            f"[secret_config].backends. Remove the section (or run "
+            f"`agw config migrate`)."
         )
-    return backends
 
 
 def _load_secret_config(
@@ -1565,7 +1549,7 @@ def _load_secret_config(
     return SecretConfig(backends=tuple(backends_raw), declared_at=declared_at)
 
 
-# Resolver construction moved to ``agentworks.secrets.providers.resolver_for``
+# Secret resolution moved to ``agentworks.secrets.resolve``
 # (resource-manifests SDD, Phase 3): the chain can name manifest-declared
 # backends, which are unknowable at config-load time. The chain-name and
 # unreachable-secret checks relocated with it.
@@ -1667,12 +1651,12 @@ def load_config(path: Path | None = None, *, warn_issues: bool = True) -> Config
     workspace_templates = _load_workspace_templates(data, issues, decls)
 
     secrets = _load_secrets(data, issues, decls)
-    secret_backends = _load_secret_backends(data, issues, decls)
+    _load_secret_backends(data, issues)
     secret_config_data = _load_secret_config(data, issues, decls)
     # Phase 1b: env-block secret references no longer error at config load
     # when they don't match a [secrets.<name>] block; the framework
-    # auto-declares them at finalize. The resolver itself is assembled
-    # registry-aware in ``agentworks.secrets.providers.resolver_for``.
+    # auto-declares them at finalize. Resolution runs through the active
+    # backends (``agentworks.secrets.resolve``).
 
     config = Config(
         operator=_load_operator(data, issues),
@@ -1694,7 +1678,7 @@ def load_config(path: Path | None = None, *, warn_issues: bool = True) -> Config
         azure=_load_azure(data),
         proxmox=_load_proxmox(data),
         secrets=secrets,
-        secret_backends=secret_backends,
+
         secret_config_data=secret_config_data,
         config_issues=tuple(issues),
     )

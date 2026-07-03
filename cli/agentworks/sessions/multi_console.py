@@ -43,7 +43,7 @@ from agentworks.sessions.tmux import tmux_cmd
 from agentworks.vms.manager import keep_vm_active
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Iterator, Mapping
 
     from agentworks.config import Config
     from agentworks.db import (
@@ -407,8 +407,11 @@ def add_sessions(
                 # secret name; the resolver cache makes additional copies
                 # redundant.
                 new_shell_targets.append(pane)
+        secret_values: dict[str, str] = {}
         if new_shell_targets:
-            resolve_for_command(new_shell_targets, registry)
+            secret_values = resolve_for_command(
+                new_shell_targets, config, registry
+            )
 
     with db.transaction():
         for spec in specs:
@@ -429,8 +432,8 @@ def add_sessions(
             _add_session_window(
                 target,
                 db,
-                config,
                 registry,
+                values=secret_values,
                 console_name=console_name,
                 member=member,
                 vm=vm,
@@ -628,6 +631,7 @@ def add_shell(
     # _resolve_pane_env will produce at pane-split time.
     session_row = db.get_session(session_name)
     vm_row = db.get_vm(console.vm_name)
+    secret_values: dict[str, str] = {}
     if session_row is not None and vm_row is not None:
         session_user = _session_linux_user(db, session_row, vm_row)
         use_admin = admin or session_user == vm_row.admin_username
@@ -641,7 +645,9 @@ def add_shell(
         if pane_target is not None:
             from agentworks.secrets import resolve_for_command
 
-            resolve_for_command([pane_target], registry)
+            secret_values = resolve_for_command(
+                [pane_target], config, registry
+            )
 
     new_shell: ShellEntry = {"cwd": cwd, "admin": admin}
     new_shells = [*cs.shells, new_shell]
@@ -672,6 +678,7 @@ def add_shell(
             target,
             db,
             registry,
+            values=secret_values,
             console_name=console_name,
             window_name=session_name,
             workspace_path=workspace_path,
@@ -771,18 +778,20 @@ def restore_session(
             from agentworks.secrets import resolve_for_command
 
             all_indices = list(range(configured_count))
+            secret_values: dict[str, str] = {}
             if all_indices:
-                resolve_for_command(
+                secret_values = resolve_for_command(
                     _restore_session_secret_targets(
                         db, registry, vm=vm, member=member, indices=all_indices,
                     ),
+                    config,
                     registry,
                 )
             _add_session_window(
                 target,
                 db,
-                config,
                 registry,
+                values=secret_values,
                 console_name=console_name,
                 member=member,
                 vm=vm,
@@ -906,10 +915,11 @@ def restore_session(
         # consumed.
         from agentworks.secrets import resolve_for_command
 
-        resolve_for_command(
+        secret_values = resolve_for_command(
             _restore_session_secret_targets(
                 db, registry, vm=vm, member=member, indices=missing,
             ),
+            config,
             registry,
         )
 
@@ -925,6 +935,7 @@ def restore_session(
                 target,
                 db,
                 registry,
+                values=secret_values,
                 console_name=console_name,
                 window_name=session_name,
                 workspace_path=workspace_path,
@@ -1346,6 +1357,7 @@ def _resolve_pane_env(
     db: Database,
     registry: Registry,
     *,
+    values: Mapping[str, str],
     vm: VMRow,
     session: SessionRow,
     pane_user: str,
@@ -1375,7 +1387,6 @@ def _resolve_pane_env(
     """
     from agentworks.agents.templates import resolve_template as _resolve_agent_template
     from agentworks.env import ResourceContext, compose_env
-    from agentworks.secrets.providers import resolver_for
     from agentworks.vms.templates import resolve_template as _resolve_vm_template
     from agentworks.workspaces.templates import resolve_template as _resolve_ws_template
 
@@ -1401,7 +1412,7 @@ def _resolve_pane_env(
 
     if is_admin_pane:
         return compose_env(
-            resolver=resolver_for(registry),
+            values=values,
             ctx=ctx,
             vm=vm_tmpl.env,
             workspace=ws_tmpl.env,
@@ -1421,7 +1432,7 @@ def _resolve_pane_env(
         return {}
     agent_tmpl = _resolve_agent_template(registry, agent.template)
     return compose_env(
-        resolver=resolver_for(registry),
+        values=values,
         ctx=ctx,
         vm=vm_tmpl.env,
         workspace=ws_tmpl.env,
@@ -1439,6 +1450,7 @@ def _split_shell_pane(
     db: Database,
     registry: Registry,
     *,
+    values: Mapping[str, str],
     console_name: str,
     window_name: str,
     workspace_path: str,
@@ -1489,6 +1501,7 @@ def _split_shell_pane(
     pane_env = _resolve_pane_env(
         db,
         registry,
+        values=values,
         vm=vm,
         session=session,
         pane_user=admin_user if use_admin else session_user,
@@ -1571,9 +1584,9 @@ def _split_shell_pane(
 def _add_session_window(
     target: Transport,
     db: Database,
-    config: Config,
     registry: Registry,
     *,
+    values: Mapping[str, str],
     console_name: str,
     member: ConsoleSessionRow,
     vm: VMRow,
@@ -1633,6 +1646,7 @@ def _add_session_window(
                 target,
                 db,
                 registry,
+                values=values,
                 console_name=console_name,
                 window_name=session.name,
                 workspace_path=workspace_path,
@@ -1653,11 +1667,11 @@ def _add_session_window(
 def _build_console_tmux(
     target: Transport,
     db: Database,
-    config: Config,
     registry: Registry,
     console: ConsoleRow,
     vm: VMRow,
     *,
+    values: Mapping[str, str],
     layout: str,
 ) -> None:
     """Kill any existing tmux session, then rebuild it from current DB state."""
@@ -1705,8 +1719,8 @@ def _build_console_tmux(
         _add_session_window(
             target,
             db,
-            config,
             registry,
+            values=values,
             console_name=console.name,
             member=member,
             vm=vm,
@@ -1848,17 +1862,24 @@ def attach_console(
         if recreate or not exists:
             from agentworks.secrets import resolve_for_command
 
-            resolve_for_command(
+            secret_values = resolve_for_command(
                 _console_build_secret_targets(db, registry, console=console, vm=vm),
+                config,
                 registry,
             )
 
         if recreate and exists:
             output.info(f"Rebuilding console '{name}' (--recreate)...")
-            _build_console_tmux(target, db, config, registry, console, vm, layout=layout)
+            _build_console_tmux(
+                target, db, registry, console, vm,
+                values=secret_values, layout=layout,
+            )
         elif not exists:
             output.info(f"Building console '{name}' on first attach...")
-            _build_console_tmux(target, db, config, registry, console, vm, layout=layout)
+            _build_console_tmux(
+                target, db, registry, console, vm,
+                values=secret_values, layout=layout,
+            )
         else:
             output.info(f"Attaching to running console '{name}'.")
 

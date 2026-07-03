@@ -1,16 +1,17 @@
 """Framework strategy for the ``secret-backend`` kind: named
-instantiations of secret providers, referenced by
-``[secret_config].backends``.
+instantiations of secret providers, activated by the
+``[secret_config].backends`` chain (which is config, not a resource --
+the chain's names are validated by ``secrets.validate_chain`` at
+``build_registry``, not by this kind's miss policy).
 
 The kind uses the error miss policy. The built-in backends (``env-var``,
 ``prompt``) ship as bundled manifests (``agentworks/manifests/builtin/
 secret-backends.yaml``) as ``SecretBackendDecl`` rows; operator-declared
-backends arrive as manifests too, while legacy TOML
-``[secret_backends.<kind>]`` blocks (``SecretBackendConfig`` rows)
-override the bundled rows until the cutover deletes that path. The
-``[secret_config].backends`` chain is reference edges on the published
-``secret-config:default`` row, so unknown chain names hit this kind's
-error miss policy at finalize.
+backends arrive as manifests too. Their names are reserved via
+``builtin_override = "reserved"``: an operator manifest colliding with a
+bundled row is a ``ConfigError`` at ``Registry.add``. Legacy TOML
+``[secret_backends.<kind>]`` sections stopped publishing entirely (they
+were semantically empty; the loader warns them as deprecated no-ops).
 """
 
 from __future__ import annotations
@@ -34,32 +35,13 @@ class _SecretBackendKind:
     miss_policy: Literal["auto-declare", "error"] = "error"
     auto_declare_names: frozenset[str] | None = None
     manifest_declarable: bool = True
-    # "allow" preserves today's TOML behavior ([secret_backends.env-var]
-    # replaces the built-in row) through the dual-source window. Phase 3
-    # enforces reserved names for manifest-declared backends at the
-    # manifest publisher (origin variants can't distinguish TOML from
-    # manifest rows); this flag flips to "reserved" at the Phase 5
-    # cutover when the TOML surface is deleted.
-    builtin_override: Literal["allow", "reserved"] = "allow"
+    builtin_override: Literal["allow", "reserved"] = "reserved"
 
     def synthesize(self, references: Sequence[ResourceReference]) -> Any:
         raise NoUnreferencedDefaultError(
             "the secret_backend kind has miss_policy='error'; "
             "synthesize should never be invoked (the framework raises "
             "ConfigError first)"
-        )
-
-    def miss_hint(self, name: str, references: Sequence[ResourceReference]) -> str:
-        """Operator vocabulary for the miss error: the usual source of a
-        dangling secret-backend reference is a typo'd chain entry in
-        ``[secret_config].backends``.
-        """
-        from agentworks.secrets.providers import PROVIDER_REGISTRY
-
-        return (
-            f"declare {name!r} as a secret-backend manifest, or use a "
-            f"built-in backend: {sorted(PROVIDER_REGISTRY)}. The active "
-            "chain is [secret_config].backends in config.toml"
         )
 
 

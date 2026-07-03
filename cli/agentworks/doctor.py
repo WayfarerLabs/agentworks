@@ -111,7 +111,7 @@ def run_checks(*, completion_version: str | None = None) -> HealthReport:
 
         if kind_dict(registry, "git-credential"):
             report.groups.append(_check_git_credentials(registry))
-        report.groups.append(_check_secrets(registry))
+        report.groups.append(_check_secrets(config, registry))
 
     report.groups.append(_check_database())
 
@@ -339,7 +339,7 @@ def _check_git_credentials(registry: Registry) -> HealthGroup:
     return g
 
 
-def _check_secrets(registry: Registry) -> HealthGroup:
+def _check_secrets(config: Config, registry: Registry) -> HealthGroup:
     """Check declared secrets per env-and-secrets SDD FRD R6.
 
     Emits exactly one row per declared secret:
@@ -377,29 +377,29 @@ def _check_secrets(registry: Registry) -> HealthGroup:
         return g
 
     # The registry always carries the built-in env-var / prompt backend
-    # rows, so this set covers built-ins and operator declarations both.
-    known_backend_kinds = set(kind_dict(registry, "secret-backend").keys())
-    from agentworks.secrets.providers import resolver_for
+    # rows, so this set covers built-ins and manifest declarations both.
+    known_backends = set(kind_dict(registry, "secret-backend").keys())
+    from agentworks.secrets.resolve import active_backends, preview_resolution
 
-    resolver = resolver_for(registry)
+    backends = active_backends(config, registry)
 
     for name, decl in sorted(secrets.items()):
-        invalid_kinds = sorted(
-            kind
-            for kind in decl.backend_mappings
-            if kind not in known_backend_kinds
+        invalid = sorted(
+            backend
+            for backend in decl.backend_mappings
+            if backend not in known_backends
         )
-        if invalid_kinds:
-            noun = "backend" if len(invalid_kinds) == 1 else "backends"
+        if invalid:
+            noun = "backend" if len(invalid) == 1 else "backends"
             g.fail(
                 f"Secret {name!r}",
-                f"references unknown {noun}: {', '.join(invalid_kinds)}",
+                f"references unknown {noun}: {', '.join(invalid)}",
             )
             continue
 
-        kind = resolver.preview_resolution(decl)
-        if kind is not None:
-            g.ok(f"Secret {name!r}", f"would resolve via {kind}")
+        resolved_by = preview_resolution(decl, backends)
+        if resolved_by is not None:
+            g.ok(f"Secret {name!r}", f"would resolve via {resolved_by}")
         else:
             g.warn(f"Secret {name!r}", "not available in any active backend")
 
