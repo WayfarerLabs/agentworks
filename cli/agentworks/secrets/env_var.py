@@ -55,6 +55,15 @@ class EnvVarProvider:
     def _resolved_name(self, secret: SecretDecl, mapping: MappingValue | None) -> str:
         if isinstance(mapping, str):
             return mapping
+        if mapping is not None:
+            # A structured (dict) mapping has no meaning for env-var;
+            # silently applying the default convention would resolve
+            # from a different identifier than the operator wrote.
+            raise ConfigError(
+                f"secret {secret.name!r}: backend_mappings for the "
+                f"env-var provider must be a string (an env var name) "
+                f"or false; got a table"
+            )
         return env_var_name_for(secret.name)
 
     def would_attempt(

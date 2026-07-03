@@ -4,7 +4,7 @@ Phase 1d of the Resource Registry SDD: providers now own only the
 type-specific formatting (``credential_lines``) and authn pre-flight
 (``verify_auth`` / ``auth_hint``). Token resolution moved to the
 framework -- each ``GitCredentialConfig`` emits a ``SecretReference``
-for its ``token`` field; the resolver chain (env-var / 1Password /
+for its ``token`` field; the active backend chain (env-var / 1Password /
 prompt / ...) handles the lookup. The previous provider-side env-var
 helpers and prompt method are gone.
 """
@@ -21,7 +21,7 @@ class GitCredentialProvider(ABC):
     ``~/.git-credentials`` and how to pre-flight authn (e.g., warn
     the operator before provisioning if their CLI / browser state
     isn't ready to mint a token). Tokens themselves come from the
-    framework's resolver chain, not from this class.
+    framework's backend chain, not from this class.
     """
 
     def __init__(self, config_name: str, description: str | None = None) -> None:

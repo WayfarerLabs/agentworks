@@ -133,26 +133,24 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 #description = "OpenAI API key"
 #backend_mappings.env-var = "OPENAI_API_KEY"    # override default convention
 
-# Backend declarations. Backends are activated by listing them in
-# `[secret_config].backends` in precedence order. The built-in backends
-# (`env-var`, `prompt`) ship with agentworks; additional backends are
-# declared as `secret-backend` resources (YAML manifests) and their
-# names are valid chain entries here.
-
-#[secret_backends.env-var]
-# Reads from process env. Default convention is AW_SECRET_<UPPER_SNAKE_CASE>,
-# so secret "npm-token" reads from AW_SECRET_NPM_TOKEN unless overridden via
-# `[secrets.<name>].backend_mappings.env-var`.
-
-#[secret_backends.prompt]
-# Interactive prompt. Always applies; the operator is asked once per missing
-# secret per CLI invocation (batched at the start where possible).
+# Backends are activated by listing them in `[secret_config].backends` in
+# precedence order. The built-in backends ship with agentworks:
+#   env-var -- reads from process env. Default convention is
+#              AW_SECRET_<UPPER_SNAKE_CASE>, so secret "npm-token" reads from
+#              AW_SECRET_NPM_TOKEN unless overridden via
+#              `[secrets.<name>].backend_mappings.env-var`.
+#   prompt  -- interactive prompt. Always applies; the operator is asked once
+#              per missing secret per CLI invocation (batched up front).
+# Additional backends are declared as `secret-backend` resources (YAML
+# manifests in the resources/ directory) and their names are valid chain
+# entries here. (The old `[secret_backends.*]` TOML sections are deprecated
+# no-ops.)
 
 #[secret_config]
 #backends = ["env-var", "prompt"]    # the default chain; explicit configuration overrides.
-# Backends declared above but absent from this list are dormant. Order is
-# resolution precedence: the first backend that produces a value wins. An
-# explicit empty list `backends = []` disables resolution entirely.
+# Declared backends absent from this list are dormant. Order is resolution
+# precedence: the first backend that produces a value wins. An explicit
+# empty list `backends = []` disables resolution entirely.
 
 # --- Azure settings (only needed for --platform azure) ---
 

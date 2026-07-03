@@ -53,9 +53,7 @@ class SecretDecl:
     name: str
     description: str
     hint: str | None = None
-    backend_mappings: dict[str, str | dict[str, object] | Literal[False]] = field(
-        default_factory=dict
-    )
+    backend_mappings: dict[str, MappingValue] = field(default_factory=dict)
     declared_at: SourceLocation = field(default_factory=synthesized)
     # Registry-layer fields: framework attaches at publish (``origin``) and
     # ``finalize`` (``usage``). Both default to "not yet attached" for
@@ -149,12 +147,28 @@ class SecretBackendDecl:
 
     def resolve(self, secrets: list[SecretDecl]) -> dict[str, str]:
         """Batch-resolve through the provider. Callers pre-filter by
-        ``would_attempt``; secrets the provider has no value for are
-        simply absent from the result (soft miss). A persistent-store
-        provider raises ``SecretMappingError`` when an explicit mapping
-        definitively has no value (hard miss; halts the chain)."""
-        wants = [(s, self.mapping_for(s)) for s in secrets]
+        ``would_attempt``, and the door enforces the opt-out
+        structurally: a ``False`` mapping never reaches the provider,
+        so a forgotten pre-filter cannot resolve an opted-out secret.
+        Secrets the provider has no value for are simply absent from
+        the result (soft miss). A persistent-store provider raises
+        ``SecretMappingError`` when an explicit mapping definitively
+        has no value (hard miss; halts the chain)."""
+        wants: list[tuple[SecretDecl, MappingValue | None]] = [
+            (s, mapping)
+            for s in secrets
+            if (mapping := self.mapping_for(s)) is not False
+        ]
+        if not wants:
+            return {}
         return self._capability().batch_get(self.config, wants)
+
+    def validate_config(self) -> None:
+        """Re-run the provider's config schema over this backend's
+        config (decode already ran it for manifest-declared backends;
+        this covers hand-published rows and future non-manifest
+        publishers). Raises ``ConfigError`` on schema violations."""
+        self._capability().validate_config(self.name, self.config)
 
 
 DEFAULT_BACKEND_CHAIN: tuple[str, ...] = ("env-var", "prompt")

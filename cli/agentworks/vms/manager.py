@@ -282,8 +282,7 @@ def create_vm(
     # Collect provisioning-time secrets upfront (tailscale auth, git creds).
     # Provisioning is hermetic: operator [admin.env] / [vm_templates.*.env]
     # secrets are NOT prompted here -- they're not used until runtime
-    # shells, and the resolver caches them when the shell-opening code
-    # invokes resolve_for_command later.
+    # shells, which perform their own resolve at their composition root.
     tailscale_auth_key, git_tokens = _collect_secrets(
         config, registry, providers, vm_name, vm_tmpl
     )
@@ -818,7 +817,7 @@ def add_git_credential(db: Database, config: Config, name: str, credential_name:
     providers = resolve_git_credential_providers(registry, [credential_name])
     provider = providers[credential_name]
 
-    # Phase 1d: resolve the token via the framework (the resolver chain
+    # Phase 1d: resolve the token via the framework (the backend chain
     # handles env-var lookup + prompt fallback uniformly across every
     # site that needs a token).
     tokens = _collect_git_tokens(config, registry, [credential_name])
@@ -928,7 +927,7 @@ def rekey_vm(
         )
 
     # Collect the new auth key via the framework (Phase 1c). The
-    # resolver chain handles env-var lookup, then falls through to the
+    # backend chain handles env-var lookup, then falls through to the
     # prompt backend. ``ignore_env`` is preserved by temporarily
     # masking the env-var (the env-var source reads ``os.environ`` at
     # ``would_attempt`` time, so removing the var skips it cleanly and
@@ -1296,7 +1295,7 @@ def _mask_env_var_backend_for(
     """Mask the env-var backend's view of ``decl`` for the duration of
     the block when ``masked`` is True; pass-through otherwise.
 
-    Used by ``vm rekey --ignore-env`` to force the resolver chain to
+    Used by ``vm rekey --ignore-env`` to force the backend chain to
     skip the env-var backend and fall through to the prompt backend.
     The env-var source reads ``os.environ`` at ``would_attempt`` time,
     so popping the matching env vars during the resolve call makes the
@@ -1344,7 +1343,7 @@ def _collect_git_tokens(
     Each credential's ``token`` field (default ``"git-token-<name>"``;
     operator-overridable per ``[git_credentials.<name>]``) names a
     secret; the registry's finalize pass auto-declared each one via
-    ``GitCredentialConfig.referenced_resources``. The resolver chain
+    ``GitCredentialConfig.referenced_resources``. The backend chain
     resolves them all in one batched call so the cache picks up every
     token in one prompt (or one round-trip to a persistent store).
 
@@ -1711,7 +1710,7 @@ def _ensure_tailscale(
         db.clear_vm_tailscale(vm.name)
 
     # Resolve a fresh Tailscale auth key via the framework before
-    # entering the provisioner-transport block; the resolver handles
+    # entering the provisioner-transport block; the backend chain handles
     # backend chain + prompt fallback. Phase 1c plumbed this through
     # the kwarg path so initializer.py has no env-var fallback.
     from agentworks.bootstrap import build_registry

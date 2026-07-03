@@ -15,7 +15,7 @@ class EnvEntry:
 
     Exactly one of ``value`` or ``secret`` is set. ``value`` carries a plaintext
     value to export; ``secret`` carries the name of a declared secret
-    (``[secrets.<name>]``) that the resolver looks up at command time.
+    (``[secrets.<name>]``) resolved through the active backends at command time.
 
     ``key`` is the env var name; validation lives in the config loader so this
     type can stay pure data with no regex coupling.

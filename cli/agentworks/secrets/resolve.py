@@ -13,7 +13,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from agentworks import output
-from agentworks.errors import ConfigError, SecretUnavailableError
+from agentworks.errors import AgentworksError, ConfigError, SecretUnavailableError
 
 if TYPE_CHECKING:
     from agentworks.config import Config
@@ -73,7 +73,7 @@ def validate_chain(config: Config, registry: Registry) -> None:
         # Defensive re-validation: manifest decode already ran this, but
         # hand-built registries and future non-manifest publishers get
         # the same guarantee here.
-        backend._capability().validate_config(backend.name, backend.config)  # noqa: SLF001
+        backend.validate_config()
 
     operator_decls = [
         decl
@@ -202,6 +202,14 @@ def preview_resolution(
             continue
         if backend.interactive:
             return backend.name
-        if secret.name in backend.resolve([secret]):
+        try:
+            resolved = backend.resolve([secret])
+        except AgentworksError:
+            # A probe failure (store hard-miss, connectivity) must not
+            # abort an inspection surface (doctor, describe); the
+            # backend simply doesn't preview as resolving. The real
+            # resolve path keeps its hard-miss halt semantics.
+            continue
+        if secret.name in resolved:
             return backend.name
     return None

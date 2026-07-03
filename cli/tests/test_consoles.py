@@ -1432,6 +1432,34 @@ def test_add_session_live_sync_adds_window_when_alive(
     assert len(splits) == 1
 
 
+def test_add_session_live_sync_adds_window_for_bare_spec(
+    db: Database, fake_target: _FakeTarget, captured_output: CapturedOutput
+) -> None:
+    """Regression: a bare spec (``add-sessions con b`` -- shells=0) on a
+    live console must still add the window. The eager-resolve block is
+    skipped entirely for bare specs, and the values dict it would have
+    produced must not be left undefined for the live-attach path
+    (previously an UnboundLocalError swallowed into a live-sync
+    warning)."""
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["a", "b"])
+    create_console(db, name="con", vm_name="vm1", session_specs=["a"])
+
+    fake_target.commands.clear()
+    fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
+    add_sessions(db, _StubConfig(), console_name="con", session_specs=["b"])
+
+    assert not any(
+        "live console sync failed" in w for w in captured_output.warnings
+    )
+    new_window = [c for c in fake_target.commands if "new-window -t aw-console-con" in c]
+    assert len(new_window) == 1
+    assert "-n b" in new_window[0]
+    # Bare spec: a window but no shell panes.
+    splits = [c for c in fake_target.commands if "split-window -t aw-console-con:b" in c]
+    assert splits == []
+
+
 def test_remove_session_live_sync_kills_window(
     db: Database, fake_target: _FakeTarget
 ) -> None:

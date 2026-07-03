@@ -73,8 +73,10 @@ and is not required by this design.
 - Keeps: `[operator]`, `[paths]`, `[defaults]`, `[azure]`, `[proxmox]`, `[session.config]`,
   `[secret_config]`. Parsing, validation, and types for these are untouched.
 - Keeps (dual-path, revised 2026-07-03): the TOML resource sections and their loaders, deprecated
-  but fully supported; each present section warns at load with a pointer at `agw config migrate`.
-  Removal (and the loader-ownership inversion that follows it) waits for a future major release.
+  but fully supported. End state (Phase 5): each present section warns at load with a pointer at
+  `agw config migrate` (at HEAD only `[secret_backends.*]` warns, and the migrate command arrives in
+  Phase 4 -- the warning gains its pointer then). Removal (and the loader-ownership inversion that
+  follows it) waits for a future major release.
 - `[secret_config]` is pure config and is NEVER published (final ruling, reversing the interim
   secret-config-row experiment): settings that name resources -- the chain today, active plugins
   tomorrow -- are consumed by their owning subsystem in normal operation. The secrets subsystem

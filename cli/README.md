@@ -549,7 +549,9 @@ Key sections:
   a legacy alias)
 - `[<scope>.env]` -- env vars at vm / workspace / admin / agent / session scope
 - `[secrets.*]` -- secret declarations referenced by `{ secret = "name" }` env entries
-- `[secret_backends.*]` / `[secret_config]` -- active secret backend chain
+- `[secret_config]` -- active secret backend chain (`[secret_backends.*]` sections are deprecated
+  no-ops; the built-in backends ship with agentworks, and new backends are declared as
+  `secret-backend` YAML manifests)
 - `[apt_sources.*]` -- user-defined third-party apt repositories
 - `[apt_packages.*]` -- user-defined named apt package sets
 - `[system_install_commands.*]` -- user-defined system-level install commands
@@ -665,8 +667,8 @@ agw secret describe tailscale-auth-key
 - **WARN** when nothing in the chain would resolve it (config-valid but no path to a value, e.g.
   env-var has no matching env var set and `prompt` is opted out via
   `backend_mappings.prompt = false`).
-- **FAIL** when `backend_mappings` references an unknown backend kind (no `[secret_backends.<kind>]`
-  section and not a built-in like `env-var` / `prompt`).
+- **FAIL** when `backend_mappings` references an unknown backend name (not a built-in like `env-var`
+  / `prompt` and not a declared `secret-backend` manifest).
 
 When no secrets are declared, a single info row states `Declared secrets: none`.
 Backend-applicability detail (per-backend soft-skip reasons, inactive mappings, per-secret

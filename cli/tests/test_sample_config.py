@@ -71,9 +71,11 @@ def test_sample_config_examples_uncomment_cleanly() -> None:
         ) from e
 
     # Spot-check the major sections all exist after uncommenting.
+    # (secret_backends is deliberately absent: those sections are
+    # deprecated no-ops and the sample no longer teaches them.)
     expected_top = {
         "operator", "paths", "defaults", "named_console",
-        "git_credentials", "secrets", "secret_backends", "secret_config",
+        "git_credentials", "secrets", "secret_config",
         "azure", "proxmox",
         "vm_templates", "admin", "agent_templates",
         "workspace_templates", "session_templates", "session",

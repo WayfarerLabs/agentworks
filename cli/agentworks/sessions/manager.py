@@ -1441,9 +1441,11 @@ def create_session(
         config,
         registry,
     )
-    # If we reach here, every secret prompt is done and the resolver cache
-    # is warm. The downstream create_workspace / create_agent / inner
-    # session-internal block will not re-prompt the operator.
+    # If we reach here, every secret the SESSION ENV references is
+    # resolved into secret_values (threaded to the compose site below).
+    # A downstream create_agent still performs its own git-token
+    # resolve; those secrets are disjoint from env references in
+    # practice (token names default to git-token-<name>).
 
     # ===== Atomic state mutations with rollback =============================
 

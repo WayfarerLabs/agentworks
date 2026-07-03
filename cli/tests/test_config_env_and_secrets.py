@@ -9,15 +9,15 @@ These cover:
 - AGENTWORKS_* override emits a load-time warning.
 - [secrets.*] parses into SecretDecls including all backend_mappings value forms
   (string, dict, false). ``true`` is rejected.
-- [secret_config].backends drives resolver assembly; precedence preserved.
+- [secret_config].backends drives the active backend chain; precedence preserved.
 - Unknown backend kinds in [secret_config].backends raise ConfigError.
 - Unreachable secrets raise ConfigError at load time.
 - Env entries referencing undeclared secrets load cleanly (Phase 1b of the
   Resource Registry SDD removed the strict-error path; auto-decl coverage
   lives in tests/test_env_block_requirements.py, runtime-failure coverage
-  in tests/test_secrets_resolver.py).
+  in tests/test_secrets_resolve.py).
 - Mid-config without any [secrets] / [secret_config] still loads cleanly;
-  the assembled resolver simply has no active sources.
+  the default chain applies with nothing to resolve.
 """
 
 from __future__ import annotations
@@ -56,12 +56,12 @@ def _write_base(config_path: Path, *, extras: str = "") -> None:
     )
 
 
-def test_no_secrets_section_loads_with_empty_resolver(tmp_path: Path) -> None:
-    """When no secrets are configured, the resolver is a no-op resolver
-    rather than None: call sites can render env unconditionally. With no
+def test_no_secrets_section_loads_with_default_chain(tmp_path: Path) -> None:
+    """When no secrets are configured, the default chain still stands
+    up: call sites can run the resolve loop unconditionally. With no
     [secret_config] in the TOML, SecretConfig defaults to the standard
-    env-var + prompt chain, but with no declared secrets the resolver is
-    still empty in practice (no sources are consulted)."""
+    env-var + prompt chain; with no declared secrets there is nothing
+    to resolve (no backend is consulted)."""
     cfg_file = tmp_path / "config.toml"
     _write_base(cfg_file)
     cfg = load_config(cfg_file, warn_issues=False)
@@ -367,7 +367,7 @@ def test_secret_config_backends_preserves_precedence(tmp_path: Path) -> None:
     assert cfg.secret_config_data.backends == ("env-var", "prompt")
 
 
-def test_secret_resolver_assembled_when_backends_configured(tmp_path: Path) -> None:
+def test_active_backends_stand_up_when_configured(tmp_path: Path) -> None:
     cfg_file = tmp_path / "config.toml"
     _write_base(
         cfg_file,
@@ -409,8 +409,8 @@ def test_unknown_backend_kind_raises(tmp_path: Path) -> None:
 
 def test_unreachable_secret_raises(tmp_path: Path) -> None:
     """A secret with env-var = false and a backend chain with no other
-    attempting source is unreachable; the secret-config kind's validate
-    hook rejects it at build_registry finalize."""
+    attempting backend is unreachable; ``validate_chain`` rejects it at
+    ``build_registry``."""
     cfg_file = tmp_path / "config.toml"
     _write_base(
         cfg_file,

@@ -36,7 +36,7 @@ only rewrites ``EnvEntry.value`` (plaintext), never ``EnvEntry.secret``
 which builds targets from un-substituted template env dicts.
 
 **Non-interactive errors:** ``resolve_for_command`` raises
-``SecretUnavailableError`` if the resolver's chain can't satisfy a
+``SecretUnavailableError`` if the active backends can't satisfy a
 secret (e.g. ``--non-interactive`` + no ``AW_SECRET_<NAME>`` set). The
 error carries a per-secret hint listing the backends tried. Manager-
 layer callers may catch and re-raise with command-level context
@@ -102,7 +102,7 @@ def compute_needed_secrets(
     """Union of ``SecretDecl``s referenced across the candidate target set.
 
     For each target, merges the per-scope env dicts via ``effective_env``
-    (preserving the FRD R2 precedence ladder), asks the resolver which
+    (preserving the FRD R2 precedence ladder), collects which
     declared secrets that merged env references, and unions the results
     across all targets. ``extra_decls`` adds decls that aren't referenced
     by any target's env chain -- a hook for legacy-prompt migrations

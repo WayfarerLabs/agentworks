@@ -17,7 +17,8 @@ import pytest
 from agentworks.bootstrap import build_registry
 from agentworks.config import load_config
 from agentworks.resources import KIND_REGISTRY, NoUnreferencedDefaultError
-from agentworks.secrets import KNOWN_BACKEND_KINDS
+
+BUILTIN_BACKENDS = ("env-var", "prompt")
 
 
 def _write_cfg(path: Path, body: str = "") -> Path:
@@ -59,7 +60,7 @@ def test_known_backends_published(tmp_path: Path) -> None:
     """
     cfg = load_config(_write_cfg(tmp_path / "config.toml"), warn_issues=False)
     registry = build_registry(cfg)
-    for backend_name in KNOWN_BACKEND_KINDS:
+    for backend_name in BUILTIN_BACKENDS:
         row = registry.lookup("secret-backend", backend_name)
         assert row.name == backend_name
         assert row.provider == backend_name
@@ -74,7 +75,7 @@ def test_secret_providers_published(tmp_path: Path) -> None:
     backend ``provider`` references resolve against."""
     cfg = load_config(_write_cfg(tmp_path / "config.toml"), warn_issues=False)
     registry = build_registry(cfg)
-    for provider_name in KNOWN_BACKEND_KINDS:
+    for provider_name in BUILTIN_BACKENDS:
         row = registry.lookup("secret-provider", provider_name)
         assert row.name == provider_name
         assert row.origin.variant == "built-in"

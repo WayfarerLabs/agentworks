@@ -88,7 +88,7 @@ Every section of today's `config.toml` gets exactly one destination:
 | `[session.config]`                        | config (TOML)                                       | non-template session settings                                                                                  |
 | `[secret_config]`                         | config (TOML)                                       | active backend chain; a setting, never published -- validated against the registry at the composition boundary |
 | `[secrets.<name>]`                        | manifest (`secret`)                                 |                                                                                                                |
-| `[secret_backends.<kind>]`                | manifest (`secret-backend`)                         | reshaped per R8                                                                                                |
+| `[secret_backends.<kind>]`                | dropped by the migrator (with a note)               | semantically empty; built-ins ship bundled, names reserved                                                     |
 | `[git_credentials.<name>]`                | manifest (`git-credential`)                         | `type` renamed to `provider` per R9                                                                            |
 | `[vm_templates.<name>]` (+ `.env`)        | manifest (`vm-template`)                            |                                                                                                                |
 | `[agent_templates.<name>]` (+ `.env`)     | manifest (`agent-template`)                         |                                                                                                                |
@@ -333,10 +333,10 @@ Git credentials already follow the capability/instance pattern; this SDD aligns 
   a loader requirement; operators are free to reorganize afterwards.
 - **Rewrites `config.toml`** with the resource sections removed and everything else (including
   comments and formatting of the surviving sections) preserved.
-- **Applies the renames**: `git_credentials.<name>.type` becomes `provider`;
-  `[secret_backends.<kind>]` sections become `secret-backend` documents with `spec.provider: <kind>`
-  (empty sections for `env-var` / `prompt` are dropped entirely since the built-in backends cover
-  them).
+- **Applies the renames**: `git_credentials.<name>.type` becomes `provider`.
+  `[secret_backends.<kind>]` sections are dropped entirely, with a note in the migration summary:
+  they were semantically empty (the kind was the only field), the built-in backends ship bundled,
+  and their names are reserved -- converting them to manifests would collide.
 - **Safety**: prints a preview and asks for confirmation (`--yes` to skip); `--dry-run` shows the
   preview and writes nothing; refuses to overwrite existing manifest files without `--force`; backs
   up the original `config.toml` to the configured backups directory (`paths.backups`) before

@@ -254,8 +254,9 @@ reviewer-approved.
 - [ ] Add tomlkit dependency (latest stable at implementation time; used only by the migrate path).
 - [ ] `agentworks/migrate/`: TOML section split per the FRD R1 table; manifest emission (by-kind
       files, multi-document, declaration order) through the shared field mapping from
-      `manifest-schema-lld.md`; renames (`type` to `provider`, `[secret_backends.<kind>]` to
-      `secret-backend` documents, empty env-var/prompt sections dropped).
+      `manifest-schema-lld.md`; renames (`type` to `provider`); `[secret_backends.<kind>]` sections
+      are DROPPED with a note (semantically empty; converting them to manifests would collide with
+      the reserved built-in rows).
 - [ ] Comment-preserving `config.toml` rewrite via tomlkit; timestamped backup of the original to
       the configured backups directory (`paths.backups`).
 - [ ] `agw config migrate` command: preview + confirm, `--yes`, `--force`, `--dry-run`; idempotent

@@ -31,13 +31,6 @@ from agentworks.secrets.resolve import (
     validate_chain,
 )
 
-# The built-in backend (and provider) names. Their rows ship as bundled
-# manifests and their names are reserved via the secret-backend kind's
-# builtin_override="reserved" (enforced at Registry.add); legacy TOML
-# [secret_backends.<kind>] sections accept only these kinds (as
-# deprecated no-ops).
-KNOWN_BACKEND_KINDS: tuple[str, ...] = ("env-var", "prompt")
-
 
 def publish_to(registry: Registry) -> None:
     """Publish the ``secret-provider`` descriptor rows.
@@ -55,7 +48,6 @@ def publish_to(registry: Registry) -> None:
 
 
 __all__ = [
-    "KNOWN_BACKEND_KINDS",
     "PROVIDER_REGISTRY",
     "SecretBackendDecl",
     "SecretConfig",

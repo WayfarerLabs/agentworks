@@ -1515,8 +1515,7 @@ def _load_secret_backends(
         issues.append(
             f"[secret_backends.{kind_str}] is deprecated and has no effect: "
             f"the built-in backends ship with agentworks, and activation is "
-            f"[secret_config].backends. Remove the section (or run "
-            f"`agw config migrate`)."
+            f"[secret_config].backends. Remove the section."
         )
 
 
@@ -1678,7 +1677,6 @@ def load_config(path: Path | None = None, *, warn_issues: bool = True) -> Config
         azure=_load_azure(data),
         proxmox=_load_proxmox(data),
         secrets=secrets,
-
         secret_config_data=secret_config_data,
         config_issues=tuple(issues),
     )

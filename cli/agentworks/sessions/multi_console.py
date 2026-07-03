@@ -375,8 +375,11 @@ def add_sessions(
     # secret BEFORE the DB write so a failure leaves no partial state.
     # default_shells produces {cwd: None, admin: False} entries, so the
     # only admin-promotion path is session_user == admin_user (an
-    # admin-mode session). Skip entirely if no specs carry shells (the
-    # bare ``add-sessions s1 s2`` shape).
+    # admin-mode session). The resolve is skipped when no specs carry
+    # shells (the bare ``add-sessions s1 s2`` shape) -- the empty values
+    # dict below still feeds the live-attach path, whose windows then
+    # have no panes to compose env for.
+    secret_values: dict[str, str] = {}
     if any(spec.shells > 0 for spec in specs):
         from agentworks.secrets import resolve_for_command
 
@@ -402,12 +405,10 @@ def add_sessions(
                 )
                 if pane is None:
                     continue
-                # Every new shell on this session has the same scope chain,
-                # so one target covers them all. Eager-resolve unions per
-                # secret name; the resolver cache makes additional copies
-                # redundant.
+                # Every new shell on this session has the same scope
+                # chain, so one target covers them all (eager-resolve
+                # unions per secret name).
                 new_shell_targets.append(pane)
-        secret_values: dict[str, str] = {}
         if new_shell_targets:
             secret_values = resolve_for_command(
                 new_shell_targets, config, registry
@@ -1248,9 +1249,9 @@ def _admin_only_secret_target(
     via ``tmux new-session -d ... 'exec $SHELL -l'`` with no SetEnv /
     ``tmux new-session -e`` flags, so the resolved env doesn't yet
     reach the admin shell. The eager-resolve here still produces the
-    right operator-facing UX (prompt up front, before any tmux work)
-    and warms the cache for when the admin-shell env-injection wiring
-    lands as a follow-up.
+    right operator-facing UX (prompt up front, before any tmux work);
+    the admin-shell env-injection wiring consumes the same values dict
+    when it lands as a follow-up.
     """
     from agentworks.secrets import SecretTarget
     from agentworks.vms.templates import resolve_template as _resolve_vm_template
