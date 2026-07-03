@@ -4,25 +4,41 @@ Status: DRAFT for maintainer review. Nothing below is implemented; this replaces
 layer (which predates this SDD) and supersedes the interim resolver plumbing built during Phases
 3-3.5 (memos, registry-purity threading, the secret-config row experiment).
 
-## The three layers, and the vocabulary law
+## Part 1: the general pattern (all capability-backed domains)
 
-| Layer        | What it is                                                                        | Where it lives                                                   | Identity vocabulary  |
-| ------------ | --------------------------------------------------------------------------------- | ---------------------------------------------------------------- | -------------------- |
-| Config       | Settings: ssh keys, prefs, the active backend chain, (future) active plugins      | TOML, `Config`                                                   | section/field names  |
-| Resources    | Declared things: secrets, backends, templates, credentials                        | the resource Registry, fed by publishers                         | `kind` + `name`      |
-| Capabilities | Code implementations: secret providers, VM provisioners, git credential providers | capability registries (static today, plugin-registered tomorrow) | bare capability name |
+| Layer        | What it is                                                                        | Where it lives                                                            | Identity vocabulary  |
+| ------------ | --------------------------------------------------------------------------------- | ------------------------------------------------------------------------- | -------------------- |
+| Config       | Settings: ssh keys, prefs, the active backend chain, (future) active plugins      | TOML, `Config`                                                            | section/field names  |
+| Resources    | Declared things: secrets, backends, templates, credentials                        | the resource Registry, fed by publishers                                  | `kind` + `name`      |
+| Capabilities | Code implementations: secret providers, VM provisioners, git credential providers | per-domain provider registries (static today, plugin-registered tomorrow) | bare capability name |
 
 **The vocabulary law: `kind` is a resource-registry concept, full stop.** Providers are not
-resources and have no kind. Backends are resources whose kind is `secret-backend`; `provider` is a
-field on that resource naming a capability. Nothing outside the resource registry may use the word
-"kind" for its identity.
+resources and have no kind. The resource that instantiates a capability has its own kind (for
+secrets: `secret-backend`), and `provider` is a field on that resource naming the capability.
+Nothing outside the resource registry may use the word "kind" for its identity.
 
-Capability registries have their own API surfaces: a registration side (today a static dict,
-tomorrow `register_provider(...)` for plugins) and an invocation side. **The invocation side is
-exposed only to the resource objects that instantiate the capability** -- backends call their
-provider; nothing else touches the provider API.
+The general pattern, stated once:
 
-## Backends are the door
+- **Capability**: raw code, registered in a provider registry. A plugin brings the code and
+  registers it.
+- **Instantiation resource**: a declared resource that exposes the capability as a usable thing,
+  optionally with config. A plugin (or operator) declares these like any other resource; the
+  resource's kind delegates its provider-specific spec tail to the named capability's
+  `validate_config` at decode. One capability may back many instantiation resources.
+- **Domain terminology varies**: secrets say provider -> backend; VMs will likely say provider ->
+  platform; git credentials will get their own words when their turn comes. "Provider" is likely the
+  stable half; the instantiation noun belongs to the domain.
+- **Registries are per-domain**: secret providers, VM provisioners, and git credential providers
+  each have their own registry today. The registration _shape_ should stay common so plugin wiring
+  is uniform, but what the capabilities DO is wildly different, so their invocation APIs are
+  domain-owned and exposed only to their instantiation resources. Whether a universal provider
+  registry ever earns its keep is deliberately undecided and out of scope here.
+
+Everything past this line is **secrets only**. The pattern above is the template; the rest of this
+document is its secrets instantiation, and nothing below should be read as prescribing VM or git
+credential design.
+
+## Part 2: secrets -- backends are the door
 
 All secret operations are methods on the backend resource (`SecretBackendDecl`). A backend owns its
 mapping resolution and invokes its provider through the provider API:
@@ -69,10 +85,8 @@ practice because each one's name coincides with its provider's name (`env-var`, 
 documented as a naming choice, never relied on in code. Two onepassword backends (`op-work`,
 `op-personal`) get independent mappings, opt-outs, and describe rows.
 
-This also names the reusable pattern for the schema wrinkle: **a capability-instantiating resource
-kind delegates its provider-specific spec tail to the named capability's `validate_config`.**
-`secret-backend` does this at manifest decode today; VM provisioner-flavored resources adopt the
-same shape when their time comes.
+Schema delegation follows Part 1's pattern: `secret-backend` decode pops `provider` and hands the
+spec tail to the named capability's `validate_config` (already implemented; unchanged here).
 
 ## Resolution is a loop, not an object
 
