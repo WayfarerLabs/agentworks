@@ -87,7 +87,6 @@ def _make_config() -> object:
     return SimpleNamespace(
         vm=SimpleNamespace(env={}),
         admin=SimpleNamespace(env={}),
-        secret_resolver=None,
     )
 
 

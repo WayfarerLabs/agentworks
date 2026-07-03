@@ -19,7 +19,6 @@ from agentworks import output
 from agentworks.env.identity import ResourceContext, per_context_identity_env
 from agentworks.env.merge import effective_env
 from agentworks.errors import ValidationError
-from agentworks.secrets.providers import resolver_for
 
 if TYPE_CHECKING:
     from agentworks.agents.templates import ResolvedAgentTemplate
@@ -125,6 +124,8 @@ def show_env(
         agent=agent_env,
         session=session_env,
     )
+
+    from agentworks.secrets.providers import resolver_for
 
     rows: list[ResolvedEnvRow] = []
     for key in sorted(user_env_merged.keys() | identity_env.keys()):

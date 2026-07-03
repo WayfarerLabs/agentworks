@@ -28,10 +28,11 @@ from agentworks.secrets.prompt import PromptSource
 from agentworks.secrets.providers import PROVIDER_REGISTRY, resolver_for
 from agentworks.secrets.resolver import SecretResolver
 
-# Known backend kind identifiers. The framework's secret-backend kind
-# is the registry-side handle; the publisher below adds one row per
-# entry as built-in so operator-declared [secret_backends.<kind>]
-# blocks land as overrides (same pattern as catalog).
+# The RESERVED built-in backend names: operator manifests may not
+# redeclare them (enforced at ManifestSet.publish_to), and legacy TOML
+# [secret_backends.<kind>] sections accept only these kinds. The rows
+# themselves ship as bundled manifests; the publisher below contributes
+# the provider descriptors.
 KNOWN_BACKEND_KINDS: tuple[str, ...] = ("env-var", "prompt")
 
 

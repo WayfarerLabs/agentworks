@@ -83,7 +83,7 @@ def build_secret_table(config: Config, registry: Registry) -> SecretTable:
     Each row carries an Origin string so operators can tell which
     secret came from where; the header summary reports the counts.
 
-    Walks ``config.secret_resolver``'s active source chain in
+    Walks the resolver's active source chain (``resolver_for``) in
     precedence order; for each Registry-published secret asks each
     source whether it would attempt and what identifier it would use.
     Pure config + registry derived; never probes the backend or
@@ -316,7 +316,7 @@ def describe_secret(
     from agentworks.secrets.providers import resolver_for
 
     mappings: list[BackendMapping] = []
-    for source in resolver_for(config).sources:
+    for source in resolver_for(config, registry).sources:
         mappings.append(
             BackendMapping(
                 backend_kind=source.kind,
@@ -331,7 +331,7 @@ def describe_secret(
     # not just whether the backend is configured. The local
     # ``backend_mappings`` list above already covers configuration shape;
     # this layer is the live probe.
-    preview_kind = resolver_for(config).preview_resolution(decl)
+    preview_kind = resolver_for(config, registry).preview_resolution(decl)
     resolved_by = preview_kind
     available = preview_kind is not None
 

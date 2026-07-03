@@ -179,7 +179,7 @@ def _decode_git_credential(doc: Document, spec: dict[str, object], issues: list[
     # rename; manifests are born with the ``provider`` vocabulary.
     spec["type"] = provider
     result = _load_git_credentials(
-        {"git_credentials": {doc.name: spec}}, _decls(doc.location)
+        {"git_credentials": {doc.name: spec}}, issues, _decls(doc.location)
     )
     return result[doc.name]
 

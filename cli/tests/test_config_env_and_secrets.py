@@ -16,8 +16,8 @@ These cover:
   Resource Registry SDD removed the strict-error path; auto-decl coverage
   lives in tests/test_env_block_requirements.py, runtime-failure coverage
   in tests/test_secrets_resolver.py).
-- Mid-config without any [secrets] / [secret_config] still loads cleanly with
-  ``secret_resolver is None``.
+- Mid-config without any [secrets] / [secret_config] still loads cleanly;
+  the assembled resolver simply has no active sources.
 """
 
 from __future__ import annotations

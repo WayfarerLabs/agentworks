@@ -518,7 +518,6 @@ def test_vm_shell_eager_resolve_fires_before_ssh(
     config = SimpleNamespace(
         vm=SimpleNamespace(env={}),
         admin=SimpleNamespace(env={}),
-        secret_resolver=None,
     )
 
     with pytest.raises(SecretUnavailableError, match="api-key"):
@@ -565,7 +564,6 @@ def test_vm_exec_eager_resolve_fires_before_ssh(
     config = SimpleNamespace(
         vm=SimpleNamespace(env={}),
         admin=SimpleNamespace(env={}),
-        secret_resolver=None,
     )
 
     with pytest.raises(SecretUnavailableError, match="api-key"):

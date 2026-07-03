@@ -101,10 +101,10 @@ class _StubConfig:
     extend here as new fields are added to NamedConsoleConfig.
 
     ``vm_templates``, ``agent_templates``, ``workspace_templates``,
-    ``session_templates``, ``admin``, and ``secret_resolver`` carry empty
-    defaults so ``_resolve_pane_env`` and related env-resolution helpers
-    in multi_console don't crash on stub inputs; tests that probe env
-    flow should use real Config rather than this stub.
+    ``session_templates``, and ``admin`` carry empty defaults so
+    ``_resolve_pane_env`` and related env-resolution helpers in
+    multi_console don't crash on stub inputs; tests that probe env flow
+    should use real Config rather than this stub.
     """
 
     named_console = _StubNamedConsoleConfig()
@@ -113,12 +113,6 @@ class _StubConfig:
     workspace_templates: dict[str, object] = {}  # noqa: RUF012
     session_templates: dict[str, object] = {}  # noqa: RUF012
     admin: _StubAdminConfig = _StubAdminConfig()
-
-    @property
-    def secret_resolver(self) -> object:
-        from agentworks.secrets import SecretResolver
-
-        return SecretResolver([], {})
 
 
 # -- parse_session_spec ----------------------------------------------------

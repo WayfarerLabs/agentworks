@@ -13,7 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
-from agentworks.resources.kind import KIND_REGISTRY
+from agentworks.resources.kind import KIND_REGISTRY, NoUnreferencedDefaultError
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -48,7 +48,7 @@ class _SecretProviderKind:
     builtin_override: Literal["allow", "reserved"] = "reserved"
 
     def synthesize(self, references: Sequence[ResourceReference]) -> SecretProviderEntry:
-        raise AssertionError(
+        raise NoUnreferencedDefaultError(
             "the secret-provider kind has miss_policy='error'; synthesize "
             "should never be dispatched"
         )

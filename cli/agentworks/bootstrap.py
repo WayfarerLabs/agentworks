@@ -52,9 +52,13 @@ def build_registry(config: Config, manifests: ManifestSet | None = None) -> Regi
     is auto-loaded, its spec-level warnings are surfaced (mirroring
     ``load_config``'s ``config_issues`` behavior), and the finalized
     Registry is memoized per Config object: every standard-path call
-    with the same config returns the same frozen instance. Pass an
-    explicit ``ManifestSet`` (e.g. ``ManifestSet.empty()``) to skip the
-    auto-load and always build fresh.
+    with the same config returns the same frozen instance. That means
+    on-disk changes (manifests, TOML) are observed by RELOADING the
+    config -- a new Config object gets a new registry; anything
+    rewriting config or manifests mid-process (e.g. the migration tool)
+    must reload before rebuilding. Pass an explicit ``ManifestSet``
+    (e.g. ``ManifestSet.empty()``) to skip the auto-load and always
+    build fresh.
     """
     from agentworks import catalog, git_credentials, output, secrets
     from agentworks.manifests import RESOURCES_DIRNAME, load_manifests
@@ -65,6 +69,9 @@ def build_registry(config: Config, manifests: ManifestSet | None = None) -> Regi
         cached = _STANDARD_REGISTRIES.get(id(config))
         if cached is not None and cached[0]() is config:
             return cached[1]
+    # Single-threaded CLI assumption: both this memo and the resolver
+    # memo are unsynchronized check-then-set; a future SDD introducing a
+    # long-lived multi-client (web, daemon) must revisit.
         resources_dir = config.source_path.parent / RESOURCES_DIRNAME
         manifests = load_manifests(resources_dir)
         for issue in manifests.issues:
@@ -84,5 +91,14 @@ def build_registry(config: Config, manifests: ManifestSet | None = None) -> Regi
     manifests.publish_to(registry)
     registry.finalize()
     if standard:
-        _STANDARD_REGISTRIES[id(config)] = (weakref.ref(config), registry)
+        # The eviction callback keeps dead configs from pinning their
+        # registries (and, transitively, resolvers with cached secret
+        # values) for process lifetime; the identity check guards
+        # against evicting a NEW entry that reused the id.
+        def _evict(dead_ref: weakref.ref[Any], config_id: int = id(config)) -> None:
+            entry = _STANDARD_REGISTRIES.get(config_id)
+            if entry is not None and entry[0] is dead_ref:
+                del _STANDARD_REGISTRIES[config_id]
+
+        _STANDARD_REGISTRIES[id(config)] = (weakref.ref(config, _evict), registry)
     return registry

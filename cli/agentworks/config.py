@@ -1250,6 +1250,7 @@ def _load_workspace_templates(
 
 def _load_git_credentials(
     data: dict[str, object],
+    issues: list[str],
     decls: _SectionLineMap,
 ) -> dict[str, GitCredentialConfig]:
     raw = data.get("git_credentials", {})
@@ -1273,6 +1274,12 @@ def _load_git_credentials(
         # wins when both are present.
         if "provider" in cdata:
             cred_type = str(cdata["provider"])
+            if "type" in cdata and str(cdata["type"]) != cred_type:
+                issues.append(
+                    f"git_credentials.{name}: both provider ({cred_type!r}) "
+                    f"and type ({cdata['type']!r}) are set and disagree; "
+                    "provider wins"
+                )
         elif "type" in cdata:
             cred_type = str(cdata["type"])
         else:
@@ -1636,7 +1643,7 @@ def load_config(path: Path | None = None, *, warn_issues: bool = True) -> Config
             "[admin.config] (dotfiles_source, dotfiles_destination, dotfiles_install_cmd)."
         )
 
-    git_credentials = _load_git_credentials(data, decls)
+    git_credentials = _load_git_credentials(data, issues, decls)
     apt_sources, apt_packages, system_cmds, user_cmds = _load_catalog_sections(data)
 
     session_config = _load_session_config(data, issues)
@@ -1679,7 +1686,6 @@ def load_config(path: Path | None = None, *, warn_issues: bool = True) -> Config
         secrets=secrets,
         secret_backends=secret_backends,
         secret_config_data=secret_config_data,
-
         config_issues=tuple(issues),
     )
 

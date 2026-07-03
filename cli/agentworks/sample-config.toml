@@ -134,8 +134,10 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 #backend_mappings.env-var = "OPENAI_API_KEY"    # override default convention
 
 # Backend declarations. Backends are activated by listing them in
-# `[secret_config].backends` in precedence order. Currently implemented kinds:
-# `env-var`, `prompt`.
+# `[secret_config].backends` in precedence order. The built-in backends
+# (`env-var`, `prompt`) ship with agentworks; additional backends are
+# declared as `secret-backend` resources (YAML manifests) and their
+# names are valid chain entries here.
 
 #[secret_backends.env-var]
 # Reads from process env. Default convention is AW_SECRET_<UPPER_SNAKE_CASE>,

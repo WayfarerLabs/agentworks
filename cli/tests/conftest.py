@@ -201,8 +201,8 @@ def stub_session_resolvers(monkeypatch: pytest.MonkeyPatch) -> None:
     ``sessions.manager``.
 
     Several tests construct a ``SimpleNamespace`` config that omits the
-    ``vm_templates`` / ``agent_templates`` / ``secret_resolver`` attributes
-    the real Phase 3+ resolvers read. Patching the resolvers themselves
+    ``vm_templates`` / ``agent_templates`` / ``secret_config_data``
+    attributes the real resolvers read. Patching the resolvers themselves
     keeps those tests scope-correct (they exercise rollback / transport
     plumbing, not env composition) without expanding the fake config.
 
@@ -340,10 +340,11 @@ def stub_build_registry(monkeypatch: pytest.MonkeyPatch) -> None:
             stub_resolvers[id(config)] = resolver
         return resolver
 
+    # Every production consumer imports resolver_for function-locally
+    # from the defining module, so this single seam covers them all;
+    # the agentworks.secrets re-export is patched for test callers.
     for site in (
         "agentworks.secrets.providers.resolver_for",
         "agentworks.secrets.resolver_for",
-        "agentworks.secrets.orchestration.resolver_for",
-        "agentworks.env.show.resolver_for",
     ):
         monkeypatch.setattr(site, _stub_resolver_for)

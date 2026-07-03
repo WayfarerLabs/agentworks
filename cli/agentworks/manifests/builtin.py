@@ -2,10 +2,9 @@
 
 Resources the app ships as data (rather than as code publishers) live in
 ``agentworks/manifests/builtin/`` and go through the exact same loader
-as operator manifests, landing with ``Origin.built_in``. The bundle is
-wired but empty until the provider/backend split ships the built-in
-secret backends; future plugins reuse this mechanism with their own
-origin variants.
+as operator manifests, landing with ``Origin.built_in``. The bundle
+carries the built-in secret backends (``secret-backends.yaml``); future
+plugins reuse this mechanism with their own origin variants.
 """
 
 from __future__ import annotations

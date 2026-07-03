@@ -48,7 +48,7 @@ def _manifest(tmp_path: Path, text: str, rel: str = "res.yaml") -> None:
 def _strip(resource: Any) -> Any:
     """Drop the source-dependent fields so TOML- and manifest-decoded
     Resources compare equal."""
-    kwargs = {}
+    kwargs: dict[str, Any] = {}
     for field in ("origin", "declared_at"):
         if hasattr(resource, field):
             kwargs[field] = None

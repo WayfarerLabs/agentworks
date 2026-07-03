@@ -406,12 +406,13 @@ def test_resolution_preview_not_available_when_no_backend_attempts(
 
     Construction: a chain with only ``env-var`` (no prompt fallback)
     and an explicit ``backend_mappings.env-var = false`` opt-out.
-    The env-and-secrets SDD's config-load reachability check would
-    error on this combo, so this test exercises the describe layer
-    against a hand-built registry rather than a loaded Config.
+    Resolver assembly hard-errors when an OPERATOR-declared secret is
+    unreachable, so the decl is hand-published as auto-declared (the
+    origin the check exempts) into a hand-built registry.
     """
     from agentworks.resources import Origin, Registry
-    from agentworks.secrets.base import SecretDecl
+    from agentworks.secrets.base import SecretBackendDecl, SecretDecl
+    from agentworks.secrets.providers import publish_to as publish_providers
 
     cfg = _write_cfg(
         tmp_path,
@@ -423,9 +424,12 @@ def test_resolution_preview_not_available_when_no_backend_attempts(
     )
     config = load_config(cfg, warn_issues=False)
 
-    # Hand-publish an opt-out SecretDecl into a fresh registry so the
-    # config-load reachability check doesn't fire.
+    # Hand-publish an opt-out SecretDecl as auto-declared so the
+    # resolver-assembly reachability check doesn't fire, plus the
+    # backend row the [secret_config].backends chain names (and the
+    # provider descriptors that row references).
     registry = Registry.empty()
+    publish_providers(registry)
     decl = SecretDecl(
         name="api-key",
         description="API key",
@@ -433,7 +437,12 @@ def test_resolution_preview_not_available_when_no_backend_attempts(
     )
     registry.add(
         "secret", "api-key", decl,
-        Origin.operator_declared(file=cfg, line=1),
+        Origin.auto_declared(source=("test", "api-key")),
+    )
+    registry.add(
+        "secret-backend", "env-var",
+        SecretBackendDecl(name="env-var", provider="env-var"),
+        Origin.built_in(source="test"),
     )
     registry.finalize()
 

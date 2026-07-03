@@ -100,11 +100,10 @@ class _TestOnlyProvider:
 
 
 @pytest.fixture
-def test_only_provider() -> Any:
+def test_only_provider(monkeypatch: pytest.MonkeyPatch) -> Any:
     provider = _TestOnlyProvider()
-    PROVIDER_REGISTRY["test-only"] = provider  # type: ignore[assignment]
-    yield provider
-    del PROVIDER_REGISTRY["test-only"]
+    monkeypatch.setitem(PROVIDER_REGISTRY, "test-only", provider)  # type: ignore[misc]
+    return provider
 
 
 def test_builtin_providers_registered() -> None:
@@ -259,7 +258,7 @@ def test_multiple_backends_share_a_provider(
         """,
     )
     resolver = resolver_for(config, build_registry(config))
-    endpoints = [s.config["endpoint"] for s in resolver.sources]
+    endpoints = [s.config["endpoint"] for s in resolver.sources]  # type: ignore[attr-defined]
     assert endpoints == ["https://a.test", "https://b.test"]
 
 

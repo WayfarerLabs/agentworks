@@ -94,11 +94,11 @@ manifest-declared backends (unknowable at `load_config`). The swap:
   the Phase 1 cycle-detection move: config-only commands no longer validate the chain; every
   resource-touching command does, at first `resolver_for`). Tests pinning the parse-time error
   relocate accordingly.
-- Consumer repoint (~15 sites): doctor, `secrets/orchestration.py` (`resolve_for_command` gains a
-  registry parameter or resolves via its existing config+registry callers), `secrets/inspect.py`,
-  `env/show.py`, and the manager `compose_env(resolver=...)` sites switch from
-  `config.secret_resolver` to `resolver_for(config, registry)`; all already have a registry in scope
-  post-Phase 1.
+- Consumer repoint (~15 sites, as built): doctor and `secrets/inspect.py` pass their in-scope
+  registry to `resolver_for(config, registry)`; the deep call paths (`secrets/orchestration.py`,
+  `env/show.py`, the manager `compose_env(resolver=...)` sites) call `resolver_for(config)` bare and
+  get the standard per-config registry singleton. Every consumer imports the function
+  function-locally from `agentworks.secrets.providers`, giving the test stub a single seam.
 
 ## Git credential provider alias (TOML side)
 

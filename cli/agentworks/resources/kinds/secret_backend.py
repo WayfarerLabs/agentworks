@@ -1,20 +1,16 @@
-"""Framework strategy for the ``secret-backend`` kind: the backend
-kinds referenced by ``[secret_backends.<kind>]`` and
+"""Framework strategy for the ``secret-backend`` kind: named
+instantiations of secret providers, referenced by
 ``[secret_config].backends``.
 
-The kind uses the error miss policy. Known backend implementations
-(``env-var``, ``prompt``) are published as built-in rows by the
-``agentworks.secrets`` publisher; operator-declared
-``[secret_backends.<kind>]`` blocks re-publish the same row with
-operator-declared origin (same pattern as catalog overrides).
-
-Phase 2b.2 partial migration: this kind landing makes the per-backend
-config queryable via ``agw resource list --kind secret-backend`` and
-restricts what names land via the operator-declared publish path. The
-``[secret_config].backends`` active-chain validation (config.py's
-``_build_secret_resolver``) keeps its bespoke check for now because
-``SecretConfig`` isn't a Resource today; promoting it to a framework
-kind is a follow-up.
+The kind uses the error miss policy. The built-in backends (``env-var``,
+``prompt``) ship as bundled manifests (``agentworks/manifests/builtin/
+secret-backends.yaml``) as ``SecretBackendDecl`` rows; operator-declared
+backends arrive as manifests too, while legacy TOML
+``[secret_backends.<kind>]`` blocks (``SecretBackendConfig`` rows)
+override the bundled rows until the cutover deletes that path. The
+``[secret_config].backends`` chain is validated at resolver assembly
+(``agentworks.secrets.providers.resolver_for``); promoting
+``SecretConfig`` itself to a framework kind remains a follow-up.
 """
 
 from __future__ import annotations

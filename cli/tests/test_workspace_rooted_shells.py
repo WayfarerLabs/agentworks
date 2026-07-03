@@ -127,7 +127,7 @@ def test_shell_vm_workspace_unknown_raises_not_found(
 
     db = _seed_db(tmp_path)
     _patch_vm_common(monkeypatch)
-    config = SimpleNamespace(secret_resolver=None)
+    config = SimpleNamespace()
 
     with pytest.raises(NotFoundError, match="nope"):
         vm_manager.shell_vm(  # type: ignore[arg-type]
@@ -145,7 +145,7 @@ def test_shell_vm_workspace_cross_vm_raises_validation(
 
     db = _seed_db(tmp_path)
     _patch_vm_common(monkeypatch)
-    config = SimpleNamespace(secret_resolver=None)
+    config = SimpleNamespace()
 
     interactive_calls: list[str] = []
 
@@ -176,7 +176,7 @@ def test_shell_vm_workspace_cds_into_workspace_path(
 
     db = _seed_db(tmp_path)
     _patch_vm_common(monkeypatch)
-    config = SimpleNamespace(secret_resolver=None)
+    config = SimpleNamespace()
 
     captured_cmd: list[str] = []
 
@@ -206,7 +206,7 @@ def test_shell_vm_no_workspace_keeps_empty_command(
 
     db = _seed_db(tmp_path)
     _patch_vm_common(monkeypatch)
-    config = SimpleNamespace(secret_resolver=None)
+    config = SimpleNamespace()
 
     captured_cmd: list[str] = []
 
@@ -236,7 +236,7 @@ def test_exec_vm_workspace_cross_vm_raises_validation(
 
     db = _seed_db(tmp_path)
     _patch_vm_common(monkeypatch)
-    config = SimpleNamespace(secret_resolver=None)
+    config = SimpleNamespace()
 
     streaming_calls: list[str] = []
 
@@ -263,7 +263,7 @@ def test_exec_vm_workspace_prefixes_cd(
 
     db = _seed_db(tmp_path)
     _patch_vm_common(monkeypatch)
-    config = SimpleNamespace(secret_resolver=None)
+    config = SimpleNamespace()
 
     captured: list[str] = []
 
@@ -291,7 +291,7 @@ def test_exec_vm_no_workspace_unchanged(
 
     db = _seed_db(tmp_path)
     _patch_vm_common(monkeypatch)
-    config = SimpleNamespace(secret_resolver=None)
+    config = SimpleNamespace()
 
     captured: list[str] = []
 
@@ -325,7 +325,7 @@ def test_exec_agent_workspace_cross_vm_raises_validation(
     db.insert_agent_grant("a1", "ws2", "explicit")
 
     _patch_agent_common(monkeypatch)
-    config = SimpleNamespace(secret_resolver=None)
+    config = SimpleNamespace()
 
     streaming_calls: list[str] = []
 
@@ -356,7 +356,7 @@ def test_exec_agent_workspace_missing_grant_raises_authz(
     # Intentionally no grant for ws1.
 
     _patch_agent_common(monkeypatch)
-    config = SimpleNamespace(secret_resolver=None)
+    config = SimpleNamespace()
 
     streaming_calls: list[str] = []
 
@@ -387,7 +387,7 @@ def test_exec_agent_workspace_prefixes_cd(
     db.insert_agent_grant("a1", "ws1", "explicit")
 
     _patch_agent_common(monkeypatch)
-    config = SimpleNamespace(secret_resolver=None)
+    config = SimpleNamespace()
 
     captured: list[str] = []
 
@@ -442,7 +442,7 @@ def test_exec_vm_rejects_dash_prefixed_command(
 
     db = _seed_db(tmp_path)
     _patch_vm_common(monkeypatch)
-    config = SimpleNamespace(secret_resolver=None)
+    config = SimpleNamespace()
 
     with pytest.raises(ValidationError, match="cannot start with '-'") as exc_info:
         vm_manager.exec_vm(db, config, "vm1", command)  # type: ignore[arg-type]
@@ -459,7 +459,7 @@ def test_exec_agent_rejects_dash_prefixed_command(
 
     db = _seed_db(tmp_path)
     _patch_agent_common(monkeypatch)
-    config = SimpleNamespace(secret_resolver=None)
+    config = SimpleNamespace()
 
     with pytest.raises(ValidationError, match="cannot start with '-'") as exc_info:
         agent_manager.exec_agent(  # type: ignore[arg-type]
@@ -561,7 +561,7 @@ def test_shell_vm_passes_workspace_scope_to_secret_target(
 
     monkeypatch.setattr("agentworks.transports.transport", _factory)
 
-    config = SimpleNamespace(secret_resolver=None)
+    config = SimpleNamespace()
 
     with pytest.raises(SystemExit):
         vm_manager.shell_vm(  # type: ignore[arg-type]

@@ -1378,7 +1378,7 @@ def _resolve_pane_env(
     """
     from agentworks.agents.templates import resolve_template as _resolve_agent_template
     from agentworks.env import ResourceContext, compose_env
-    from agentworks.secrets import resolver_for
+    from agentworks.secrets.providers import resolver_for
     from agentworks.vms.templates import resolve_template as _resolve_vm_template
     from agentworks.workspaces.templates import resolve_template as _resolve_ws_template
 

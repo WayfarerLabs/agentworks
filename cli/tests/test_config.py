@@ -142,6 +142,62 @@ def test_invalid_git_credential_type(tmp_path: Path) -> None:
         build_registry(cfg)
 
 
+def _git_credential_config(tmp_path: Path, section: str) -> Path:
+    pub = tmp_path / "id.pub"
+    priv = tmp_path / "id"
+    pub.write_text("key")
+    priv.write_text("key")
+
+    config_file = tmp_path / "config.toml"
+    config_file.write_text(
+        dedent(f"""\
+        [operator]
+        ssh_public_key = "{pub.as_posix()}"
+        ssh_private_key = "{priv.as_posix()}"
+
+        {section}
+    """)
+    )
+    return config_file
+
+
+def test_git_credential_provider_key(tmp_path: Path) -> None:
+    """``provider`` is the going-forward vocabulary for the credential
+    provider, matching secret-backend manifests."""
+    config_file = _git_credential_config(
+        tmp_path,
+        '[git_credentials.gh]\nprovider = "github"',
+    )
+    cfg = load_config(config_file)
+    assert cfg.git_credentials["gh"].type == "github"
+
+
+def test_git_credential_type_still_accepted(tmp_path: Path) -> None:
+    """Legacy ``type`` keeps working until the TOML cutover deletes it."""
+    config_file = _git_credential_config(
+        tmp_path,
+        '[git_credentials.gh]\ntype = "github"',
+    )
+    cfg = load_config(config_file)
+    assert cfg.git_credentials["gh"].type == "github"
+    assert not cfg.config_issues
+
+
+def test_git_credential_provider_wins_over_type(tmp_path: Path) -> None:
+    """When both keys are present, ``provider`` wins; a disagreement is
+    surfaced as a config issue rather than silently swallowed."""
+    config_file = _git_credential_config(
+        tmp_path,
+        '[git_credentials.ado]\nprovider = "azdo"\ntype = "github"\norg = "my-org"',
+    )
+    cfg = load_config(config_file, warn_issues=False)
+    assert cfg.git_credentials["ado"].type == "azdo"
+    assert any(
+        "git_credentials.ado" in issue and "provider wins" in issue
+        for issue in cfg.config_issues
+    )
+
+
 def test_unexpected_top_level_keys_warns(tmp_path: Path) -> None:
     """Bare keys before any section header land at top level."""
     pub = tmp_path / "id.pub"
