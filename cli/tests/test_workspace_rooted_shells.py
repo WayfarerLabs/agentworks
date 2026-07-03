@@ -545,7 +545,7 @@ def test_shell_vm_passes_workspace_scope_to_secret_target(
     captured_scopes: dict[str, object] = {}
 
     def _spy_scopes(
-        config: object, registry: object, vm: object, *, ws: object = None,
+        registry: object, vm: object, *, ws: object = None,
     ) -> object:
         captured_scopes["ws"] = ws
         return vm_manager._VmAdminEnvScopes(vm={}, workspace=None, admin={})

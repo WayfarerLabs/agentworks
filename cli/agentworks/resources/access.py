@@ -37,24 +37,34 @@ def kind_dict(registry: Registry, kind: str) -> dict[str, Any]:
 def admin_template(registry: Registry) -> AdminConfig:
     """The single ``admin-template`` row (reserved name ``default``).
 
-    Always present after ``finalize`` (always-materialize guarantees the
-    reserved name), so this never returns None.
+    ``lookup`` raises ``KeyError`` on a miss; the always-materialize
+    pre-step guarantees this row exists after ``finalize``, so a miss
+    here means the registry didn't come from ``build_registry``.
     """
-    row = registry.lookup("admin-template", "default")
-    assert row is not None, "admin-template:default missing after finalize"
-    return cast("AdminConfig", row)
+    return cast("AdminConfig", registry.lookup("admin-template", "default"))
 
 
 def named_console_template(registry: Registry) -> NamedConsoleConfig:
-    """The single ``named-console-template`` row (reserved name ``default``)."""
-    row = registry.lookup("named-console-template", "default")
-    assert row is not None, "named-console-template:default missing after finalize"
-    return cast("NamedConsoleConfig", row)
+    """The single ``named-console-template`` row (reserved name
+    ``default``). Same always-materialize guarantee as
+    ``admin_template``.
+    """
+    return cast(
+        "NamedConsoleConfig", registry.lookup("named-console-template", "default")
+    )
 
 
 def git_credential(registry: Registry, name: str) -> GitCredentialConfig | None:
-    """One git credential entry by name, or None when undeclared."""
-    return cast("GitCredentialConfig | None", registry.lookup("git-credential", name))
+    """One git credential entry by name, or None when undeclared.
+
+    ``Registry.lookup`` raises ``KeyError`` on a miss; this accessor is
+    the None-returning form so callers can raise their own typed errors
+    (``NotFoundError`` / ``ConfigError``) for operator-typed names.
+    """
+    try:
+        return cast("GitCredentialConfig", registry.lookup("git-credential", name))
+    except KeyError:
+        return None
 
 
 def secret_decls(registry: Registry) -> dict[str, SecretDecl]:

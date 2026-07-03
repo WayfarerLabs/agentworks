@@ -59,7 +59,6 @@ class _AgentDirectEnvScopes(NamedTuple):
 
 
 def _resolve_agent_direct_env_scopes(
-    config: Config,
     registry: Registry,
     vm: VMRow,
     agent: AgentRow,
@@ -669,7 +668,7 @@ def shell_agent(
     # the two consumers can't drift.
     from agentworks.bootstrap import build_registry as _build_registry
 
-    scopes = _resolve_agent_direct_env_scopes(config, _build_registry(config), vm, agent, ws=ws)
+    scopes = _resolve_agent_direct_env_scopes(_build_registry(config), vm, agent, ws=ws)
     resolve_for_command(
         [_agent_direct_secret_target(scopes, label=f"agent-shell={agent.name}")],
         config,
@@ -766,7 +765,7 @@ def exec_agent(
     # and compose_env below so the two consumers can't drift.
     from agentworks.bootstrap import build_registry as _build_registry
 
-    scopes = _resolve_agent_direct_env_scopes(config, _build_registry(config), vm, agent, ws=ws)
+    scopes = _resolve_agent_direct_env_scopes(_build_registry(config), vm, agent, ws=ws)
     resolve_for_command(
         [_agent_direct_secret_target(scopes, label=f"agent-exec={agent.name}")],
         config,
@@ -1251,9 +1250,7 @@ def _create_agent_on_vm(
             output.warn(f"agent dotfiles failed: {e}")
 
     # Mise.
-    _run_agent_mise_setup(
-        agent_target=agent_target, config=config, agent_tmpl=agent_tmpl, home=home,
-    )
+    _run_agent_mise_setup(agent_target=agent_target, agent_tmpl=agent_tmpl, home=home)
 
     # Claude Code marketplaces and plugins. The probe (`command -v
     # claude`) and the actual `claude plugin ...` invocations need the
@@ -1470,7 +1467,6 @@ def _write_agent_shell_rc(
 def _run_agent_mise_setup(
     *,
     agent_target: Transport,
-    config: Config,
     agent_tmpl: ResolvedAgentTemplate,
     home: str,
 ) -> None:

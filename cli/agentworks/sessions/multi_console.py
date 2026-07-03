@@ -397,7 +397,7 @@ def add_sessions(
                 # use_admin promotion only fires for admin-mode sessions.
                 use_admin = session_user == vm_row.admin_username
                 pane = _pane_secret_target(
-                    config, db, registry,
+                    db, registry,
                     vm=vm_row, session=session, is_admin_pane=use_admin,
                 )
                 if pane is None:
@@ -632,7 +632,6 @@ def add_shell(
         session_user = _session_linux_user(db, session_row, vm_row)
         use_admin = admin or session_user == vm_row.admin_username
         pane_target = _pane_secret_target(
-            config,
             db,
             registry,
             vm=vm_row,
@@ -776,7 +775,7 @@ def restore_session(
             if all_indices:
                 resolve_for_command(
                     _restore_session_secret_targets(
-                        db, config, registry, vm=vm, member=member, indices=all_indices,
+                        db, registry, vm=vm, member=member, indices=all_indices,
                     ),
                     config,
                 )
@@ -910,7 +909,7 @@ def restore_session(
 
         resolve_for_command(
             _restore_session_secret_targets(
-                db, config, registry, vm=vm, member=member, indices=missing,
+                db, registry, vm=vm, member=member, indices=missing,
             ),
             config,
         )
@@ -1164,7 +1163,6 @@ def kill_session_windows(
 
 
 def _pane_secret_target(
-    config: Config,
     db: Database,
     registry: Registry,
     *,
@@ -1229,7 +1227,7 @@ def _pane_secret_target(
 
 
 def _admin_only_secret_target(
-    config: Config, registry: Registry, vm: VMRow, *, label: str,
+    registry: Registry, vm: VMRow, *, label: str,
 ) -> SecretTarget:
     """SecretTarget for an admin-only console pane (no workspace context).
 
@@ -1258,7 +1256,6 @@ def _admin_only_secret_target(
 
 def _console_build_secret_targets(
     db: Database,
-    config: Config,
     registry: Registry,
     *,
     console: ConsoleRow,
@@ -1287,7 +1284,7 @@ def _console_build_secret_targets(
     if console.admin_shell:
         targets.append(
             _admin_only_secret_target(
-                config, registry, vm,
+                registry, vm,
                 label=f"console={console.name}/admin-shell",
             ),
         )
@@ -1302,7 +1299,7 @@ def _console_build_secret_targets(
         for shell in member.shells:
             use_admin = shell["admin"] or session_user == vm.admin_username
             pane = _pane_secret_target(
-                config, db, registry, vm=vm, session=session, is_admin_pane=use_admin,
+                db, registry, vm=vm, session=session, is_admin_pane=use_admin,
             )
             if pane is not None:
                 targets.append(pane)
@@ -1311,7 +1308,6 @@ def _console_build_secret_targets(
 
 def _restore_session_secret_targets(
     db: Database,
-    config: Config,
     registry: Registry,
     *,
     vm: VMRow,
@@ -1341,7 +1337,7 @@ def _restore_session_secret_targets(
         shell = member.shells[idx]
         use_admin = shell["admin"] or session_user == vm.admin_username
         pane = _pane_secret_target(
-            config, db, registry, vm=vm, session=session, is_admin_pane=use_admin,
+            db, registry, vm=vm, session=session, is_admin_pane=use_admin,
         )
         if pane is not None:
             targets.append(pane)
@@ -1858,7 +1854,7 @@ def attach_console(
             from agentworks.secrets import resolve_for_command
 
             resolve_for_command(
-                _console_build_secret_targets(db, config, registry, console=console, vm=vm),
+                _console_build_secret_targets(db, registry, console=console, vm=vm),
                 config,
             )
 

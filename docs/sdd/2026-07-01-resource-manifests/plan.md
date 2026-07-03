@@ -208,3 +208,12 @@ artifact update.)
   branch and PR instead of PR-per-phase. Per-phase "reviewer-approved" in the definitions of done
   reads as "commit series complete and suite green"; review happens once on the full PR. Side
   effect: the dual-source window never exists on main.
+- **2026-07-02: Phase 1 fail-fast expansion.** The consumer repoint gives shell-opening and console
+  commands (`vm shell/exec`, `agent shell/exec`, `session restart`, the console add/restore/attach
+  family, `env show`) a `build_registry` call they previously lacked, because their env-scope
+  resolution now reads the registry. Two observable consequences, both accepted: these commands now
+  fail fast on any framework config error (previously only resource-provisioning commands did),
+  realizing the original resource-registry SDD's "registry construction is universal" intent; and
+  each invocation pays one registry build (config-load-scale work, no backend calls). Recorded here
+  alongside the cycle-detection relocation as the two sanctioned behavior deltas of the "behavior
+  unchanged" phase.

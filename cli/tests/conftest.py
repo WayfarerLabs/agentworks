@@ -255,6 +255,10 @@ class _StubRegistry:
         "session-template": "session_templates",
         "git-credential": "git_credentials",
         "secret-backend": "secret_backends",
+        "apt-source": "apt_sources",
+        "apt-package": "apt_packages",
+        "system-install-command": "system_install_commands",
+        "user-install-command": "user_install_commands",
     }
 
     def __init__(self, config: object) -> None:
@@ -266,18 +270,28 @@ class _StubRegistry:
             return {}
         return dict(getattr(self._config, attr, None) or {})
 
-    def lookup(self, kind: str, name: str) -> object | None:
+    def lookup(self, kind: str, name: str) -> object:
+        # Mirrors the real Registry's miss semantics: ``lookup`` raises
+        # KeyError on unknown kinds and names so stubbed tests fail the
+        # same way production does. The singleton kinds fall back to
+        # code-default rows only for the reserved name.
         if kind == "admin-template":
             from agentworks.config import AdminConfig
 
+            if name != "default":
+                raise KeyError(name)
             admin = getattr(self._config, "admin", None)
             return admin if admin is not None else AdminConfig()
         if kind == "named-console-template":
             from agentworks.config import NamedConsoleConfig
 
+            if name != "default":
+                raise KeyError(name)
             console = getattr(self._config, "named_console", None)
             return console if console is not None else NamedConsoleConfig()
-        return self._kind_dict(kind).get(name)
+        if kind not in self._KIND_ATTRS:
+            raise KeyError(kind)
+        return self._kind_dict(kind)[name]
 
     def iter_kind(self, kind: str):  # noqa: ANN201 - mirrors Registry
         return iter(self._kind_dict(kind).values())

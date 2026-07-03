@@ -449,7 +449,7 @@ class WSL2Provisioner(VMProvisioner):
         vm_name: str,
         config: Config,
         *,
-        swap: int = 0,
+        swap: int = 4,
         admin_username: str = "agentworks",
     ) -> ProvisionResult:
         output.info(f"Provisioning WSL2 VM '{vm_name}'...")

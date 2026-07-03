@@ -46,7 +46,7 @@ class ProxmoxProvisioner(VMProvisioner):
         cpus: int | None = None,
         memory: int | None = None,
         disk: int | None = None,
-        swap: int = 0,
+        swap: int = 4,
         admin_username: str = "agentworks",
         tailscale_auth_key: str | None = None,
     ) -> ProvisionResult:

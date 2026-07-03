@@ -57,9 +57,8 @@ class _VmAdminEnvScopes(NamedTuple):
 
 
 def _resolve_vm_admin_env_scopes(
-    config: Config,
     registry: Registry,
-    vm: VMRow | None = None,
+    vm: VMRow,
     *,
     ws: WorkspaceRow | None = None,
 ) -> _VmAdminEnvScopes:
@@ -75,13 +74,9 @@ def _resolve_vm_admin_env_scopes(
     When ``ws`` is supplied (``vm shell --workspace`` / ``vm exec
     --workspace``), the workspace template's env enters the chain.
     """
-    if vm is None:
-        from agentworks.vms.templates import resolve_template as _resolve_default
+    from agentworks.vms.templates import resolve_template as _resolve_vm_template
 
-        vm_env = _resolve_default(registry).env
-    else:
-        from agentworks.vms.templates import resolve_template as _resolve_vm_template
-        vm_env = _resolve_vm_template(registry, vm.template).env
+    vm_env = _resolve_vm_template(registry, vm.template).env
 
     ws_env: dict[str, EnvEntry] | None = None
     if ws is not None:
@@ -666,12 +661,12 @@ def shell_vm(
     # the interactive session. The same scope dicts feed both the
     # SecretTarget (via _vm_secret_target) and compose_env so the two
     # consumers can't drift. Crucially the vm scope comes from
-    # vm.template (DB row), not the config-default template (which
-    # template and would silently route the wrong env into a shell on a
-    # non-default-template VM).
+    # vm.template (DB row), not the config-default template, which may
+    # not match and would silently route the wrong env into a shell on
+    # a non-default-template VM.
     from agentworks.bootstrap import build_registry
 
-    scopes = _resolve_vm_admin_env_scopes(config, build_registry(config), vm, ws=ws)
+    scopes = _resolve_vm_admin_env_scopes(build_registry(config), vm, ws=ws)
     resolve_for_command(
         [_vm_secret_target(scopes, label=f"vm-shell={vm.name}")], config,
     )
@@ -759,7 +754,7 @@ def exec_vm(
     # comes from vm.template (DB row), not the config-default template.
     from agentworks.bootstrap import build_registry
 
-    scopes = _resolve_vm_admin_env_scopes(config, build_registry(config), vm, ws=ws)
+    scopes = _resolve_vm_admin_env_scopes(build_registry(config), vm, ws=ws)
     resolve_for_command(
         [_vm_secret_target(scopes, label=f"vm-exec={vm.name}")], config,
     )
@@ -1154,7 +1149,8 @@ def reinit_vm(
         )
 
     verify_tailscale_available()
-    providers = resolve_git_credential_providers(registry, admin_template(registry).git_credentials)
+    admin = admin_template(registry)
+    providers = resolve_git_credential_providers(registry, admin.git_credentials)
     verify_git_credential_auth(providers)
 
     # Collect git tokens via the framework (Phase 1d).
@@ -1185,7 +1181,7 @@ def reinit_vm(
                     config,
                     registry,
                     reinit_vm_tmpl,
-                    admin_template(registry),
+                    admin,
                     name,
                     ts_target,
                     providers,
@@ -1368,9 +1364,9 @@ def _collect_git_tokens(
 
     decls: list[SecretDecl] = []
     token_name_for: dict[str, str] = {}
-    for cred_name in names:
-        from agentworks.resources.access import git_credential
+    from agentworks.resources.access import git_credential
 
+    for cred_name in names:
         cred = git_credential(registry, cred_name)
         if cred is None:
             raise ConfigError(

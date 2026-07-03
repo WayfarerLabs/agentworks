@@ -300,7 +300,9 @@ def load_catalog(config: Config) -> ResolvedCatalog:
     Custom entries override built-in entries with the same name.
     Cross-references (apt_sources in apt_packages) are validated.
     Production consumers read ``catalog_from_registry`` instead; this
-    parse-level merge survives for the catalog parsing tests.
+    parse-level merge survives for the catalog parsing tests and is
+    slated for deletion in Phase 5 of the resource-manifests SDD along
+    with the rest of the TOML resource surface.
     """
     builtin = load_builtin_catalog()
 

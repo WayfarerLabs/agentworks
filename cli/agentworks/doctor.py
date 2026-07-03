@@ -110,7 +110,7 @@ def run_checks(*, completion_version: str | None = None) -> HealthReport:
         from agentworks.resources.access import kind_dict
 
         if kind_dict(registry, "git-credential"):
-            report.groups.append(_check_git_credentials(config, registry))
+            report.groups.append(_check_git_credentials(registry))
         report.groups.append(_check_secrets(config, registry))
 
     report.groups.append(_check_database())
@@ -299,7 +299,7 @@ def _check_ssh_key(g: HealthGroup, path: object, label: str) -> None:
             g.warn("SSH private key permissions", f"{oct(mode)}, recommend 600")
 
 
-def _check_git_credentials(config: Config, registry: Registry) -> HealthGroup:
+def _check_git_credentials(registry: Registry) -> HealthGroup:
     """Check git credential providers."""
     from agentworks.resources.access import admin_template, kind_dict
     from agentworks.vms.initializer import resolve_git_credential_providers
@@ -376,15 +376,16 @@ def _check_secrets(config: Config, registry: Registry) -> HealthGroup:
         g.info("Declared secrets", "none")
         return g
 
-    declared_backend_kinds = set(kind_dict(registry, "secret-backend").keys())
-    builtin_kinds = {"env-var", "prompt"}
+    # The registry always carries the built-in env-var / prompt backend
+    # rows, so this set covers built-ins and operator declarations both.
+    known_backend_kinds = set(kind_dict(registry, "secret-backend").keys())
     resolver = config.secret_resolver
 
     for name, decl in sorted(secrets.items()):
         invalid_kinds = sorted(
             kind
             for kind in decl.backend_mappings
-            if kind not in declared_backend_kinds and kind not in builtin_kinds
+            if kind not in known_backend_kinds
         )
         if invalid_kinds:
             noun = "backend" if len(invalid_kinds) == 1 else "backends"

@@ -1343,7 +1343,6 @@ def test_secret_target_pre_create_parity_with_session_secret_target(
     session_template = _resolve_template(registry, None)
 
     post = _session_secret_target(
-        config,
         registry,
         db=db,
         vm=vm,
@@ -1354,7 +1353,6 @@ def test_secret_target_pre_create_parity_with_session_secret_target(
         agent_name="agt1" if mode == "agent" else None,
     )
     pre = _session_secret_target_pre_create(
-        config,
         registry,
         name="s1",
         workspace_name="ws1",

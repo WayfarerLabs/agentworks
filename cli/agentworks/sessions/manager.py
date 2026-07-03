@@ -461,7 +461,6 @@ class _SessionEnvScopes(NamedTuple):
 
 
 def _resolve_session_env_scopes(
-    config: Config,
     registry: Registry,
     *,
     db: Database,
@@ -526,7 +525,6 @@ def _resolve_session_env_scopes(
 
 
 def _session_secret_target_pre_create(
-    config: Config,
     registry: Registry,
     *,
     name: str,
@@ -587,7 +585,6 @@ def _session_secret_target_pre_create(
 
 
 def _session_secret_target(
-    config: Config,
     registry: Registry,
     *,
     db: Database,
@@ -607,7 +604,6 @@ def _session_secret_target(
     from agentworks.secrets import SecretTarget
 
     scopes = _resolve_session_env_scopes(
-        config,
         registry,
         db=db,
         vm=vm,
@@ -651,7 +647,6 @@ def _resolve_session_env(
     from agentworks.env import ResourceContext, compose_env
 
     scopes = _resolve_session_env_scopes(
-        config,
         registry,
         db=db,
         vm=vm,
@@ -1190,10 +1185,10 @@ def create_session(
     #   workspace_name : str | None   -- the workspace's name (None until
     #                                    DB lookup / default-to-session-name)
     #   new_workspace  : bool         -- True iff we're creating it
-    #   workspace-template : str | None
+    #   workspace_template : str | None
     #   agent_name : str | None       -- the agent's name (None == admin mode)
     #   new_agent  : bool
-    #   agent-template : str | None
+    #   agent_template : str | None
     #
     # ``workspace`` / ``agent`` / ``admin`` are consumed here and unused below.
 
@@ -1427,7 +1422,6 @@ def create_session(
     resolve_for_command(
         [
             _session_secret_target_pre_create(
-                config,
                 registry,
                 name=name,
                 workspace_name=workspace_name,
@@ -2032,7 +2026,6 @@ def restart_session(
         resolve_for_command(
             [
                 _session_secret_target(
-                    config,
                     registry,
                     db=db,
                     vm=vm,

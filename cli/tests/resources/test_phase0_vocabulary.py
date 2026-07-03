@@ -44,10 +44,9 @@ def test_kind_handlers_match_their_registry_key() -> None:
 
 
 def test_code_declared_vocabulary_is_gone() -> None:
-    offenders = [
-        path.relative_to(_AGENTWORKS_ROOT)
-        for path in _iter_source_files()
-        if "code-declared" in path.read_text(encoding="utf-8")
-        or "code_declared" in path.read_text(encoding="utf-8")
-    ]
+    offenders = []
+    for path in _iter_source_files():
+        text = path.read_text(encoding="utf-8")
+        if "code-declared" in text or "code_declared" in text:
+            offenders.append(path.relative_to(_AGENTWORKS_ROOT))
     assert not offenders, f"old origin vocabulary found in: {offenders}"

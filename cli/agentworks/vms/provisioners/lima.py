@@ -91,7 +91,7 @@ class LimaProvisioner(VMProvisioner):
         cpus: int = 4,
         memory: int = 8,
         disk: int = 50,
-        swap: int = 0,
+        swap: int = 4,
         admin_username: str = "agentworks",
         tailscale_auth_key: str | None = None,
     ) -> ProvisionResult:

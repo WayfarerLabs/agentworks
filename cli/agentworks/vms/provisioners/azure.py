@@ -126,7 +126,7 @@ class AzureProvisioner(VMProvisioner):
         *,
         azure_vm_size: str = "Standard_B2s",
         disk: int = 50,
-        swap: int = 0,
+        swap: int = 4,
         admin_username: str = "agentworks",
         tailscale_auth_key: str | None = None,
     ) -> ProvisionResult:
