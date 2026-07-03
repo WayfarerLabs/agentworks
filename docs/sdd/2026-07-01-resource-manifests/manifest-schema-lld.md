@@ -40,7 +40,10 @@ Envelope rules (all violations are `ConfigError` with `file:line` of the documen
 - Unknown top-level keys are errors (the envelope is new surface; strict from day one).
 - Documents must be mappings; empty documents are skipped; non-mapping documents error.
 - Duplicate mapping keys within a document are errors (tomllib parity; PyYAML's default
-  last-write-wins would be a strictness loosening on the new surface).
+  last-write-wins would be a strictness loosening on the new surface). YAML merge keys (`<<`) are
+  rejected with a clear error: dropped by YAML 1.2, and manifests stay literal (Kubernetes
+  precedent). An explicit `spec:` with a null value is treated as an empty mapping; only a MISSING
+  `spec` key errors.
 - `metadata.description` on a kind whose schema has no description field is a warning and the value
   is dropped (not an error: the FRD wants description to become framework-uniform, so a declared
   description should not block loading a kind that simply hasn't grown the field yet).
@@ -138,9 +141,9 @@ All loader errors are `ConfigError` with the document location prefix:
 
 ## Duplicate detection and ordering
 
-- Walk: `**/*.yaml` + `**/*.yml` under the resources directory, lexicographic by relative path,
-  dot-prefixed files and directories skipped; documents in file order. This order IS config-load
-  order for the framework.
+- Walk: `*.yaml` + `*.yml` under the resources directory, recursively; per directory, files sort by
+  name and precede subdirectories. Dot-prefixed files and directories are skipped (pruned without
+  descent); documents load in file order. This order IS config-load order for the framework.
 - Duplicate `(kind, name)` across the manifest set errors citing both `file:line` locations.
 - Cross-source duplicates (manifest vs TOML during the in-branch dual-source window, manifest vs
   built-in rows) are `Registry.add`'s job per the HLA collision rules, not the loader's.

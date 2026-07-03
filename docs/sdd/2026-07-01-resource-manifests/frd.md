@@ -111,9 +111,10 @@ names) keep doing so; the names are validated against the finalized registry.
   directory, recursively. Subdirectory structure is operator-organizational only; it carries no
   semantics.
 - Dotfiles and dot-directories (`.git/`, `.backup.yaml`) are skipped.
-- Load order is deterministic: files sorted by path (lexicographic, relative to the resources
-  directory), documents within a file in file order. This order defines "config-load order" wherever
-  the framework depends on it (first-matching-reference origin attribution, auto-declare extras).
+- Load order is deterministic: per directory, files sort by name and precede subdirectories (which
+  sort by name and recurse the same way); documents within a file load in file order. This order
+  defines "config-load order" wherever the framework depends on it (first-matching-reference origin
+  attribution, auto-declare extras).
 - A missing resources directory is valid (equivalent to empty). Zero manifests is valid; built-in
   resources and auto-declaration cover the zero-config experience exactly as today.
 - There is no `apply` step and no watch mode. The registry is rebuilt from the full manifest set on

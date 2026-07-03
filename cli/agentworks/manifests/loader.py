@@ -41,6 +41,17 @@ class _StrictLoader(yaml.SafeLoader):
     def construct_mapping(self, node: yaml.MappingNode, deep: bool = False) -> dict[Any, Any]:
         seen: set[object] = set()
         for key_node, _value_node in node.value:
+            if key_node.tag == "tag:yaml.org,2002:merge":
+                # Deliberate rejection, not an accident: merge keys were
+                # dropped by YAML 1.2 and (like Kubernetes manifests) we
+                # keep documents literal. Repeat the fields instead.
+                raise yaml.constructor.ConstructorError(
+                    None,
+                    None,
+                    "YAML merge keys (<<) are not supported in manifests; "
+                    "repeat the fields instead",
+                    key_node.start_mark,
+                )
             key = self.construct_object(key_node, deep=True)
             if isinstance(key, dict | list):
                 continue  # unhashable; base class raises its own error
@@ -100,12 +111,14 @@ class ManifestSet:
 
 
 def _iter_manifest_files(resources_dir: Path) -> Iterator[Path]:
-    """Walk manifest files in component-wise lexicographic order.
+    """Walk manifest files: per directory, files first (sorted by name),
+    then subdirectories (sorted by name), recursively.
 
     A hand-rolled walk (rather than ``rglob``) so dot-directories are
-    pruned without descending into them, and so ordering is defined per
-    path component (``a/x.yaml`` before ``a-b/x.yaml``) rather than by
-    raw string comparison of relative paths.
+    pruned without descending into them. Files-first-per-directory is
+    the deliberate ordering (root manifests precede anything nested;
+    ``a/`` sorts before ``a-b/`` component-wise); FRD R2 documents the
+    same rule.
     """
     if not resources_dir.is_dir():
         return

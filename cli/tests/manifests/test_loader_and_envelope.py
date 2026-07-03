@@ -258,14 +258,42 @@ def test_duplicate_mapping_key_rejected(tmp_path: Path) -> None:
         load_manifests(root)
 
 
-def test_nested_dir_order_is_component_wise(tmp_path: Path) -> None:
-    """Ordering is per path component: ``a/`` sorts before ``a-b/`` even
-    though the raw relative-path strings compare the other way."""
+def test_walk_order_is_files_first_per_directory(tmp_path: Path) -> None:
+    """Per directory: files by name, then subdirectories by name
+    (recursively). Root files precede nested ones, and ``a/`` sorts
+    before ``a-b/`` component-wise."""
     root = tmp_path / "resources"
+    _write(root, "z.yaml", _secret_doc("root-z"))
+    _write(root, "a.yaml", _secret_doc("root-a"))
     _write(root, "a/x.yaml", _secret_doc("from-a-dir"))
     _write(root, "a-b/x.yaml", _secret_doc("from-a-dash-b"))
     manifests = load_manifests(root)
-    assert [e.name for e in manifests.entries] == ["from-a-dir", "from-a-dash-b"]
+    assert [e.name for e in manifests.entries] == [
+        "root-a",
+        "root-z",
+        "from-a-dir",
+        "from-a-dash-b",
+    ]
+
+
+def test_merge_keys_rejected(tmp_path: Path) -> None:
+    root = tmp_path / "resources"
+    _write(
+        root,
+        "a.yaml",
+        """
+        apiVersion: agentworks/v1
+        kind: vm-template
+        metadata:
+          name: dev
+        spec:
+          env:
+            <<: {A: "1"}
+            B: "2"
+        """,
+    )
+    with pytest.raises(ConfigError, match="merge keys"):
+        load_manifests(root)
 
 
 def test_spec_unknown_key_warns_with_location_for_warn_kinds(tmp_path: Path) -> None:
