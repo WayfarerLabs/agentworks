@@ -14,7 +14,7 @@ from agentworks.secrets.inspect import build_secret_table
 def _build_table(cfg_file: Path):
     cfg = load_config(cfg_file, warn_issues=False)
     registry = build_registry(cfg)
-    return build_secret_table(cfg, registry)
+    return build_secret_table(registry)
 
 
 def _write_base(config_path: Path, *, extras: str = "") -> None:

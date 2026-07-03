@@ -77,7 +77,7 @@ def test_describe_secret_does_not_invoke_resolve_all(
     )
 
     # Should complete without invoking resolve_all.
-    describe_secret(registry, config, "api-key")
+    describe_secret(registry, "api-key")
 
 
 def test_describe_secret_does_not_invoke_render(
@@ -110,7 +110,7 @@ def test_describe_secret_does_not_invoke_render(
     registry = build_registry(config)
     monkeypatch.setattr(resolver_for(registry), "render", _fail_render)
 
-    describe_secret(registry, config, "api-key")
+    describe_secret(registry, "api-key")
 
 
 def test_describe_secret_does_not_invoke_prompt_backend(
@@ -153,4 +153,4 @@ def test_describe_secret_does_not_invoke_prompt_backend(
     monkeypatch.setattr(prompt_source, "batch_get", _fail)
 
     registry = build_registry(config)
-    describe_secret(registry, config, "api-key")
+    describe_secret(registry, "api-key")

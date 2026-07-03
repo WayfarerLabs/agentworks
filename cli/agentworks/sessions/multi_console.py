@@ -671,7 +671,6 @@ def add_shell(
         _split_shell_pane(
             target,
             db,
-            config,
             registry,
             console_name=console_name,
             window_name=session_name,
@@ -925,7 +924,6 @@ def restore_session(
             pane_id = _split_shell_pane(
                 target,
                 db,
-                config,
                 registry,
                 console_name=console_name,
                 window_name=session_name,
@@ -1439,7 +1437,6 @@ def _resolve_workspace_path(db: Database, session: SessionRow) -> str | None:
 def _split_shell_pane(
     target: Transport,
     db: Database,
-    config: Config,
     registry: Registry,
     *,
     console_name: str,
@@ -1635,7 +1632,6 @@ def _add_session_window(
             _split_shell_pane(
                 target,
                 db,
-                config,
                 registry,
                 console_name=console_name,
                 window_name=session.name,

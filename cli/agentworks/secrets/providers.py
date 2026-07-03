@@ -43,10 +43,15 @@ class SecretProvider(Protocol):
     """The code capability a ``secret-backend`` resource instantiates.
 
     ``validate_config`` runs at manifest decode (errors are wrapped with
-    the document's ``file:line``); ``instantiate`` runs at resolver
-    assembly. Built-in providers accept no configuration; the
-    config-bearing contract is exercised by a test-only provider until a
-    real one (onepassword, ...) ships.
+    the document's ``file:line``). ``instantiate`` runs at every
+    ``Registry.finalize`` (the ``validate_chain`` probe) AND at resolver
+    assembly, on every registry-building command whether or not secrets
+    are consumed -- so it MUST be cheap and side-effect-free
+    (construct-only). Expensive work (opening a store session, spawning
+    a CLI subprocess) belongs in the source's ``get`` / ``batch_get``,
+    which only run when a value is actually resolved. Built-in providers
+    accept no configuration; the config-bearing contract is exercised by
+    a test-only provider until a real one (onepassword, ...) ships.
     """
 
     @property
@@ -133,8 +138,11 @@ def _chain_sources(registry: Registry) -> tuple[tuple[str, ...], list[SecretSour
             row = registry.lookup("secret-backend", name)
         except KeyError:
             # Unreachable through finalize (the secret-config row's
-            # references force the miss policy first); backstop for
-            # hand-built registries that skipped publishing the row.
+            # references force the miss policy first); backstop for a
+            # registry holding a published chain row that was never
+            # finalized. (A registry with NO chain row raises KeyError
+            # at the lookup above -- an internal invariant violation,
+            # since finalize always materializes the sentinel.)
             raise ConfigError(
                 f"secret-config references unknown secret-backend {name!r}"
             ) from None

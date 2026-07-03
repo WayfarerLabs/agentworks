@@ -45,6 +45,70 @@ def test_empty_registry_is_not_finalized() -> None:
     assert not r.is_finalized
 
 
+class _HookProbeKind:
+    """Minimal kind whose ``validate`` records what it observed."""
+
+    kind = "hook-probe"
+    miss_policy = "error"
+    auto_declare_names = None
+    manifest_declarable = False
+    builtin_override = "reserved"
+
+    def __init__(self) -> None:
+        self.observed: list[tuple[bool, bool]] = []
+        self.raise_error: ConfigError | None = None
+
+    def synthesize(self, references: object) -> object:
+        raise AssertionError("never dispatched: miss_policy='error'")
+
+    def validate(self, registry: Registry) -> None:
+        # (frozen-at-hook-time, graph-complete): the hook contract is a
+        # complete-but-unfrozen registry -- always-materialize rows must
+        # already be visible.
+        try:
+            registry.lookup("admin-template", "default")
+            complete = True
+        except KeyError:
+            complete = False
+        self.observed.append((registry.is_finalized, complete))
+        if self.raise_error is not None:
+            raise self.raise_error
+
+
+def test_finalize_runs_kind_validate_hooks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Framework contract for the optional ``validate(registry)`` hook:
+    finalize invokes it exactly once, over a complete (always-materialize
+    rows present) but not-yet-frozen registry."""
+    from agentworks.resources.kind import KIND_REGISTRY
+
+    probe = _HookProbeKind()
+    monkeypatch.setitem(KIND_REGISTRY, "hook-probe", probe)
+
+    r = Registry.empty()
+    r.finalize()
+
+    assert probe.observed == [(False, True)]
+    assert r.is_finalized
+
+
+def test_finalize_propagates_validate_hook_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A hook's ConfigError aborts finalize; the registry never freezes."""
+    from agentworks.resources.kind import KIND_REGISTRY
+
+    probe = _HookProbeKind()
+    probe.raise_error = ConfigError("hook-probe rejects this graph")
+    monkeypatch.setitem(KIND_REGISTRY, "hook-probe", probe)
+
+    r = Registry.empty()
+    with pytest.raises(ConfigError, match="hook-probe rejects"):
+        r.finalize()
+    assert not r.is_finalized
+
+
 def test_add_then_finalize_makes_queryable(tmp_path: Path) -> None:
     r = Registry.empty()
     decl = SecretDecl(name="x", description="X")

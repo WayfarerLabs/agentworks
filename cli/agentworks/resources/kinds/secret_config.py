@@ -20,6 +20,13 @@ The ``validate(registry)`` hook is where the secret system's semantic
 check lives: every operator-declared secret must be reachable via the
 active chain. Delegated to ``agentworks.secrets.providers``, which owns
 the provider/source knowledge.
+
+The sentinel skip is a deliberate contract for registry compositions
+built without ``Config.publish_to`` (today: test scaffolding; tomorrow:
+plugin-assembled registries): such a composition opts back into chain
+validation by publishing its own ``secret-config`` row. No row means an
+empty chain and use-time ``SecretUnavailableError``, never silent
+misvalidation against somebody else's chain.
 """
 
 from __future__ import annotations

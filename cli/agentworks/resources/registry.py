@@ -356,9 +356,15 @@ class Registry:
             self._resources.setdefault(kind, {})[name] = synthesized
             return
         if kind_handler.miss_policy == "error":
+            # A kind may define an optional miss_hint(name, references)
+            # to speak the operator's vocabulary (e.g. which config
+            # surface names this kind) -- the framework message alone
+            # only has registry vocabulary.
+            hint_fn = getattr(kind_handler, "miss_hint", None)
             raise ConfigError(
                 f"{first.source[0]} {first.source[1]!r} references "
-                f"unknown {kind} {name!r}"
+                f"unknown {kind} {name!r} ({first.usage})",
+                hint=hint_fn(name, refs) if hint_fn is not None else None,
             )
         raise RuntimeError(
             f"unexpected miss_policy {kind_handler.miss_policy!r} on "

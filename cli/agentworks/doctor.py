@@ -111,7 +111,7 @@ def run_checks(*, completion_version: str | None = None) -> HealthReport:
 
         if kind_dict(registry, "git-credential"):
             report.groups.append(_check_git_credentials(registry))
-        report.groups.append(_check_secrets(config, registry))
+        report.groups.append(_check_secrets(registry))
 
     report.groups.append(_check_database())
 
@@ -339,7 +339,7 @@ def _check_git_credentials(registry: Registry) -> HealthGroup:
     return g
 
 
-def _check_secrets(config: Config, registry: Registry) -> HealthGroup:
+def _check_secrets(registry: Registry) -> HealthGroup:
     """Check declared secrets per env-and-secrets SDD FRD R6.
 
     Emits exactly one row per declared secret:

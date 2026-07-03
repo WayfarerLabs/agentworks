@@ -49,5 +49,18 @@ class _SecretBackendKind:
             "ConfigError first)"
         )
 
+    def miss_hint(self, name: str, references: Sequence[ResourceReference]) -> str:
+        """Operator vocabulary for the miss error: the usual source of a
+        dangling secret-backend reference is a typo'd chain entry in
+        ``[secret_config].backends``.
+        """
+        from agentworks.secrets.providers import PROVIDER_REGISTRY
+
+        return (
+            f"declare {name!r} as a secret-backend manifest, or use a "
+            f"built-in backend: {sorted(PROVIDER_REGISTRY)}. The active "
+            "chain is [secret_config].backends in config.toml"
+        )
+
 
 KIND_REGISTRY["secret-backend"] = _SecretBackendKind()

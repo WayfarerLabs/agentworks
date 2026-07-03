@@ -142,6 +142,11 @@ class SecretConfig:
         reference per entry, in precedence order. The secret-backend
         kind's error miss policy turns an unknown chain name into a
         uniform finalize-time ``ConfigError`` -- no bespoke check.
+
+        The hardcoded ``("secret-config", "default")`` source matches
+        the kind's singleton shape (SecretConfig carries no name field);
+        if the kind ever plurifies, add a name field and derive the
+        source from it (the admin-template pattern).
         """
         from agentworks.resources.reference import ResourceReference
 

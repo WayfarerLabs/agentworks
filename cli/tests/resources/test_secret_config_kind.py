@@ -52,10 +52,12 @@ def test_config_publishes_secret_config_row(tmp_path: Path) -> None:
 def test_default_chain_publishes_and_references_builtins(tmp_path: Path) -> None:
     """No [secret_config] table: the loader-defaulted chain publishes
     and its edges land as usage on the built-in backend rows."""
+    from agentworks.secrets.base import DEFAULT_BACKEND_CHAIN
+
     config = _config(tmp_path)
     registry = build_registry(config)
     row = registry.lookup("secret-config", "default")
-    assert row.backends == ("env-var", "prompt")
+    assert row.backends == DEFAULT_BACKEND_CHAIN
     env_var_row = registry.lookup("secret-backend", "env-var")
     assert any(
         ref.source == ("secret-config", "default")

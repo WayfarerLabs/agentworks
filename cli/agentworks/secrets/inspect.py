@@ -21,7 +21,6 @@ from agentworks.resources.kinds.secret import SECRET_KIND_NAME
 from agentworks.resources.render import format_origin_line
 
 if TYPE_CHECKING:
-    from agentworks.config import Config
     from agentworks.db import Database
     from agentworks.resources import Registry
     from agentworks.resources.kind import InstanceRef
@@ -74,7 +73,7 @@ class SecretTable:
     auto_count: int
 
 
-def build_secret_table(config: Config, registry: Registry) -> SecretTable:
+def build_secret_table(registry: Registry) -> SecretTable:
     """Build a (secrets x backends) table from the Registry.
 
     Phase 1e of the Resource Registry SDD: the table iterates the
@@ -274,13 +273,12 @@ class SecretDescription:
 
 def describe_secret(
     registry: Registry,
-    config: Config,
     name: str,
     db: Database | None = None,
 ) -> SecretDescription:
     """Build a ``SecretDescription`` for one secret in the registry.
 
-    Per FRD R10. Pure config + registry derived; no I/O, no prompting,
+    Per FRD R10. Pure registry derived; no I/O, no prompting,
     no resolution. Raises ``NotFoundError`` if ``name`` isn't a
     published secret -- typed at the service layer so CLI / future
     web/API clients all see the same error shape (per the project's

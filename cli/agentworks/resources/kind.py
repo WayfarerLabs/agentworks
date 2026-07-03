@@ -153,8 +153,17 @@ class ResourceKind(Protocol):
     # referential integrity cannot express -- e.g. the ``secret-config``
     # kind checks that every operator-declared secret is reachable via
     # the active backend chain. Contract: read the registry and raise
-    # ``ConfigError``; never mutate. Kinds without cross-resource
-    # semantics simply omit the method.
+    # ``ConfigError``; never mutate; tolerate registries with no rows of
+    # the kind (``_SecretConfigKind.validate`` only gets away with a
+    # bare ``lookup`` because always-materialize guarantees its row).
+    # Kinds without cross-resource semantics simply omit the method.
+    #
+    # The optional ``miss_hint(name, references) -> str`` method (same
+    # gating) supplies the ``hint`` for the error-miss-policy
+    # ``ConfigError``: the framework message speaks registry vocabulary
+    # ("secret-config 'default' references unknown secret-backend ...");
+    # the kind knows the operator surface that names it and the
+    # remediation ("the active chain is [secret_config].backends ...").
 
 
 class NoUnreferencedDefaultError(Exception):
